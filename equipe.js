@@ -98,6 +98,11 @@ function enter() {
     const el = $('#sync-indicator');
     el.className = 'sync-indicator ' + status;
     el.textContent = status === 'ok' ? '✅' : (status === 'pending' ? `⏳ ${pending}` : '⚠️');
+    el.title = status === 'ok' ? 'Tudo salvo na nuvem.'
+      : status === 'pending' ? `${pending} alteração(ões) aguardando envio. Some sozinho ao reconectar.`
+      : 'Sem conexão — pode continuar; envia ao reconectar.';
+    el.style.cursor = 'pointer';
+    el.onclick = () => { if (el.title) toast(el.title); };
   });
   initConflict();
   if (typeof iniciarFraseBar === 'function') iniciarFraseBar();
@@ -144,6 +149,26 @@ function notasDaEquipe(equipe) {
   });
 }
 
+// Geolocalização automática no check‑in: comprova que a equipe esteve no
+// endereço, sem o instalador precisar informar nada. Registra só uma vez.
+function capturarLocalCheckin() {
+  if (!_draft || _draft.checkinGPS || !navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      _draft.checkinGPS = {
+        lat: +pos.coords.latitude.toFixed(6),
+        lng: +pos.coords.longitude.toFixed(6),
+        precisao: Math.round(pos.coords.accuracy || 0),
+        ts: nowISO()
+      };
+      save();
+      toast('📍 Localização do check‑in registrada', 'success');
+    },
+    () => {}, // sem permissão/sinal: segue o fluxo sem travar
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+  );
+}
+
 /* ── Lista de O.S do instalador ──────────────────────────────────────────── */
 function minhasOS() {
   // Comercial vê todas as O.S liberadas; instalador vê só as suas.
@@ -155,13 +180,36 @@ function minhasOS() {
 function renderList() {
   const el = $('#eq-list');
   const list = minhasOS();
+  // Próxima instalação = primeira ainda não finalizada (lista já ordenada por data).
+  const proxima = EQ.comercial ? null : list.find(o => !o.finalizadaEm);
+  const heroId = proxima ? proxima.id : null;
+
+  let heroHtml = '';
+  if (proxima) {
+    const naRua = (proxima.carroLiberado || proxima.horaSaida) && !proxima.horaRetorno;
+    const maps = proxima.endereco ? `https://maps.google.com/?q=${encodeURIComponent(proxima.endereco)}` : '';
+    heroHtml = `
+      <div class="proxima-card" data-hero-id="${esc(proxima.id)}">
+        <div class="proxima-tag">${naRua ? '🚗 Em rota' : '📍 Sua próxima instalação'}</div>
+        <div class="proxima-os">O.S ${esc(proxima.numero || '—')}</div>
+        <div class="proxima-cliente">${esc(proxima.cliente || 'Sem cliente')}</div>
+        <div class="proxima-end">${esc(proxima.endereco || 'Endereço não informado')}</div>
+        <div class="proxima-data">📅 ${esc(fmtInstalacao(proxima.instalacao))}</div>
+        <div class="proxima-acoes">
+          <button class="btn-primary" data-hero-abrir="${esc(proxima.id)}">Abrir O.S ▶</button>
+          ${maps ? `<a class="btn-ghost" href="${maps}" target="_blank">🗺️ Rota</a>` : ''}
+        </div>
+      </div>`;
+  }
+
   el.innerHTML = `
-    <h2 style="margin-bottom:12px;font-size:1.1rem">${EQ.comercial ? 'Instalações (visão comercial)' : 'Minhas instalações'}</h2>
+    ${heroHtml}
+    <h2 style="margin:14px 0 12px;font-size:1.1rem">${EQ.comercial ? 'Instalações (visão comercial)' : 'Todas as minhas O.S'}</h2>
     <div class="os-list">
       ${list.map(os => {
         const st = calcStatus(os);
         const naRua = !os.finalizadaEm && (os.carroLiberado || os.horaSaida) && !os.horaRetorno;
-        return `<div class="os-list-item st-${st}" data-os-id="${esc(os.id)}">
+        return `<div class="os-list-item st-${st}${os.id===heroId?' is-hero':''}" data-os-id="${esc(os.id)}">
           <div class="list-info">
             <div class="list-numero">O.S ${esc(os.numero||'—')} ${naRua?'🚗':''} ${os.finalizadaEm?'✓':''}</div>
             <div class="list-cliente">${esc(os.cliente)} · ${esc(os.endereco||'')}</div>
@@ -171,10 +219,11 @@ function renderList() {
         </div>`;
       }).join('') || '<p class="text-muted">Nenhuma O.S atribuída a você ainda.</p>'}
     </div>`;
-  $$('[data-os-id]', el).forEach(c => c.onclick = () => {
-    const os = STORE.getOS(c.dataset.osId);
-    if (os) openModal(os);
-  });
+  const abrir = id => { const os = STORE.getOS(id); if (os) openModal(os); };
+  $$('[data-hero-abrir]', el).forEach(b => b.onclick = e => { e.stopPropagation(); abrir(b.dataset.heroAbrir); });
+  const heroCard = $('[data-hero-id]', el);
+  if (heroCard) heroCard.onclick = () => abrir(heroCard.dataset.heroId);
+  $$('[data-os-id]', el).forEach(c => c.onclick = () => abrir(c.dataset.osId));
 }
 
 /* ── Modal (só execução) ─────────────────────────────────────────────────── */
@@ -502,6 +551,7 @@ function bindModal(os) {
       const id = await STORE.pushPhoto(file);
       if (id) _draft.fotosCheckinIds.push(id);
     }
+    capturarLocalCheckin();
     save(); reRender();
   };
   $$('[data-rm]', root).forEach(b => b.onclick = () => {

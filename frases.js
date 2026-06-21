@@ -638,7 +638,7 @@ function iniciarFraseBar(intervaloMs) {
   _fraseTimer = setInterval(function () {
     bar.classList.add('fade');
     setTimeout(function () { pintar(fraseAleatoria()); bar.classList.remove('fade'); }, 400);
-  }, intervaloMs || 30000);
+  }, intervaloMs || 600000); // 10 minutos
 }
 
 // Classe de cor conforme a nota (0–10).

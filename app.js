@@ -120,6 +120,24 @@ const STATUS_LABEL = {
   finalizada:          'Finalizada'
 };
 
+// Atrasada: agendada para data passada e ainda não finalizada.
+function estaAtrasada(os) {
+  if (!os || os.finalizadaEm) return false;
+  const d = os.instalacao && os.instalacao.data;
+  if (!d) return false;
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  return new Date(d + 'T00:00:00') < hoje;
+}
+
+// Camada de cor semântica vermelha (alerta) sobre o status normal:
+// vermelho = retrabalho ou atrasada. Devolve classe extra (ou vazio).
+function alertaOS(os) {
+  if (!os || os.finalizadaEm) return '';
+  if (os.retrabalho) return 'alerta-retrab';
+  if (estaAtrasada(os)) return 'alerta-atraso';
+  return '';
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    CHECKLIST DE PRONTIDÃO
    ══════════════════════════════════════════════════════════════════════════ */
@@ -257,6 +275,7 @@ function enterApp() {
   initTopbar();
   initSyncIndicator();
   initConflictDialog();
+  initPicker();
   if (typeof iniciarFraseBar === 'function') iniciarFraseBar();
 
   // Pull inicial + CFG, depois render
@@ -328,6 +347,9 @@ function initTopbar() {
 
 function initSyncIndicator() {
   const el = $('#sync-indicator');
+  // Tocar mostra a legenda (no celular o "title" não aparece).
+  el.style.cursor = 'pointer';
+  el.onclick = () => { if (el.title) toast(el.title); };
   STORE.onSync((status, pending) => {
     el.className = 'sync-indicator ' + status;
     if (status === 'ok') {
@@ -392,7 +414,7 @@ function novaOS() {
     responsavelPCP: '', obsPCP: '', layoutFotoId: '', liberadoPCP: false, aptoPor: '', aptoEm: '',
     acesso: '', fixacao: '', ferramentas: [], suprimentos: [], itens: [],
     instalacao: { data: '', periodo: '', hora: '', duracaoDias: 1 },
-    equipe: [], veiculo: '', responsavelAgenda: '', obsAgenda: '',
+    equipe: [], veiculo: '', responsavelAgenda: [], obsAgenda: '',
     confirmacao: '', confCanal: '', confHora: '', confPor: '', confObs: '',
     confAcompanha: '', confAcompanhaContato: '',
     embarqueConferidoPor: '', produtosConferidosPor: '',
@@ -400,7 +422,7 @@ function novaOS() {
     carroLiberado: false, carroLiberadoPor: '', carroLiberadoEm: '',
     horaSaida: '', horaRetorno: '', kmSaida: '', kmRetorno: '', instalacaoOK: false, conferidoPor: '',
     retrabalho: false, problema: '', causa: '', resolvidoPor: '', dataResolvido: '',
-    obsTecnicas: '', fotosCheckinIds: [],
+    obsTecnicas: '', fotosCheckinIds: [], checkinGPS: null,
     checkout: { situacao: '', hora: '', por: '', obs: '', confirmado: false },
     finalizadaEm: '', finalizadoPor: ''
   };
@@ -531,7 +553,9 @@ function blocoPCP(os, ro, done) {
     <div class="fs-body">
       <div class="field-row">
         <div class="field"><label>Nº O.S</label><input data-f="numero" value="${esc(os.numero)}"></div>
-        <div class="field"><label>Serviço (Ref.)</label><input data-f="servico" value="${esc(os.servico)}"></div>
+        <div class="field"><label>Serviço (Ref.)</label><input data-f="servico" list="dl-servicos" value="${esc(os.servico)}" placeholder="tipo de instalação">
+          <datalist id="dl-servicos">${tiposServicoHist().map(s=>`<option value="${esc(s)}">`).join('')}</datalist>
+        </div>
       </div>
       <div class="field"><label>Cliente</label><input data-f="cliente" value="${esc(os.cliente)}"></div>
       <div class="field-row">
@@ -638,7 +662,7 @@ function blocoAgenda(os, ro, done) {
       </div>
       <div class="field-row3">
         <div class="field"><label>Duração (dias)</label><input type="number" min="1" data-f="instalacao.duracaoDias" value="${esc(inst.duracaoDias || 1)}"></div>
-        <div class="field"><label>Responsável agenda</label><input data-f="responsavelAgenda" value="${esc(os.responsavelAgenda)}"></div>
+        <div class="field"><label>Responsável pelo agendamento</label>${chipsField('responsavelAgenda', os.responsavelAgenda || [], cfg.responsaveis, ro)}</div>
         <div class="field"><label>Veículo</label>
           <select data-f="veiculo"><option value=""></option>${(cfg.veiculos||[]).map(v=>`<option ${os.veiculo===v?'selected':''}>${esc(v)}</option>`).join('')}</select>
         </div>
@@ -696,12 +720,10 @@ function blocoExec(os, ro, done) {
           <select data-f="produtosConferidosPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.produtosConferidosPor)}</select>
         </div>
       </div>
-      <div class="field-row">
-        <div class="field"><label><input type="checkbox" data-f-check="ferramentasConferidas" ${os.ferramentasConferidas?'checked':''}> Ferramentas conferidas</label></div>
-        <div class="field"><label>Ferramentas conferidas por</label>
-          <input data-f="ferramentasConferidasPor" list="dl-conferentes" value="${esc(os.ferramentasConferidasPor)}" placeholder="Nome de quem conferiu">
-          <datalist id="dl-conferentes">${peopleList(cfg).map(p=>`<option value="${esc(p)}">`).join('')}</datalist>
-        </div>
+      <label class="check-toggle"><input type="checkbox" data-f-check="ferramentasConferidas" ${os.ferramentasConferidas?'checked':''}> 🧰 Ferramentas conferidas</label>
+      <div class="field"><label>Ferramentas conferidas por</label>
+        <input data-f="ferramentasConferidasPor" list="dl-conferentes" value="${esc(os.ferramentasConferidasPor)}" placeholder="Nome de quem conferiu">
+        <datalist id="dl-conferentes">${peopleList(cfg).map(p=>`<option value="${esc(p)}">`).join('')}</datalist>
       </div>
       <div class="field">
         <label>Foto de embarque</label>
@@ -727,12 +749,10 @@ function blocoExec(os, ro, done) {
         <div class="field"><label>Hora retorno</label><input type="time" data-f="horaRetorno" value="${esc(os.horaRetorno)}"></div>
         <div class="field"><label>KM retorno (check‑out)</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>
       </div>
-      <div class="field-row">
-        <div class="field" style="justify-content:flex-end"><label><input type="checkbox" data-f-check="instalacaoOK" ${os.instalacaoOK?'checked':''}> Instalação OK</label></div>
-        <div class="field"><label>Conferido por</label><input data-f="conferidoPor" value="${esc(os.conferidoPor)}"></div>
-      </div>
+      <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" ${os.instalacaoOK?'checked':''}> ✅ Instalação OK</label>
+      <div class="field"><label>Conferido por</label><input data-f="conferidoPor" value="${esc(os.conferidoPor)}"></div>
 
-      <div class="field"><label><input type="checkbox" data-f-check="retrabalho" ${os.retrabalho?'checked':''}> Retrabalho?</label></div>
+      <label class="check-toggle retrab"><input type="checkbox" data-f-check="retrabalho" ${os.retrabalho?'checked':''}> 🔴 Retrabalho?</label>
       <div data-retrabalho-fields style="${os.retrabalho?'':'display:none'}">
         <div class="field"><label>Problema</label><input data-f="problema" value="${esc(os.problema)}"></div>
         <div class="field-row">
@@ -753,6 +773,7 @@ function blocoExec(os, ro, done) {
           <span class="foto-hint">📷 Adicionar foto de check‑in</span>
           <input type="file" accept="image/*" capture="environment" multiple data-foto-checkin-input ${ro?'disabled':''}>
         </div>
+        ${os.checkinGPS ? `<div class="gps-tag">📍 Local confirmado no check‑in · <a href="https://maps.google.com/?q=${os.checkinGPS.lat},${os.checkinGPS.lng}" target="_blank">ver no mapa</a> (±${os.checkinGPS.precisao||'?'}m)</div>` : ''}
       </div>
 
       <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
@@ -776,15 +797,113 @@ function blocoExec(os, ro, done) {
 }
 
 /* ── Campo de chips (autocomplete simples) ───────────────────────────────── */
+// Campo de múltipla escolha via pop-up (ferramentas, suprimentos, equipe, etc.)
 function chipsField(field, values, options, ro) {
-  const chips = values.map(v => `<span class="chip">${esc(v)}<button class="chip-rm edit-only" data-chip-rm="${field}|${esc(v)}">×</button></span>`).join('');
-  const datalistId = `dl-${field}`;
+  const arr = Array.isArray(values) ? values : (values ? [values] : []);
+  const chips = arr.length
+    ? arr.map(v => `<span class="chip">${esc(v)}<button class="chip-rm edit-only" data-chip-rm="${field}|${esc(v)}">×</button></span>`).join('')
+    : '<span class="foto-hint">Nenhum selecionado</span>';
   return `
     <div class="chips-wrap" data-chips="${field}">
       ${chips}
-      <input class="chips-input edit-only" data-chip-input="${field}" list="${datalistId}" placeholder="+ adicionar" ${ro?'disabled':''}>
-      <datalist id="${datalistId}">${(options||[]).map(o=>`<option value="${esc(o)}">`).join('')}</datalist>
+      ${ro ? '' : `<button type="button" class="chip-add edit-only" data-picker-open="${field}">＋ Selecionar</button>`}
     </div>`;
+}
+
+// Configuração de cada pop-up: rótulo + opções vindas do CFG.
+function pickerConfig(field) {
+  const cfg = STORE.getCFG();
+  switch (field) {
+    case 'ferramentas':       return { label: 'Ferramentas',                opcoes: cfg.ferramentas || [] };
+    case 'suprimentos':       return { label: 'Suprimentos',                opcoes: cfg.suprimentos || [] };
+    case 'equipe':            return { label: 'Equipe',                     opcoes: cfg.instaladores || [] };
+    case 'responsavelAgenda': return { label: 'Responsável pelo agendamento', opcoes: cfg.responsaveis || [] };
+    default:                  return { label: field, opcoes: [] };
+  }
+}
+
+// Ordena as opções do pop-up com os mais usados da empresa no topo (histórico).
+function ordenarMaisUsados(field, opcoes) {
+  const freq = {};
+  STORE.getAllOS().forEach(o => {
+    const v = o[field];
+    (Array.isArray(v) ? v : (v ? [v] : [])).forEach(x => { freq[x] = (freq[x] || 0) + 1; });
+  });
+  return (opcoes || []).slice().sort((a, b) => (freq[b] || 0) - (freq[a] || 0) || a.localeCompare(b))
+    .map(o => ({ nome: o, n: freq[o] || 0 }));
+}
+
+// Tipos de instalação (serviço) que já apareceram nas O.S, mais usados primeiro,
+// para seleção rápida via datalist — "pré-cadastrados" a partir do histórico.
+function tiposServicoHist() {
+  const freq = {};
+  STORE.getAllOS().forEach(o => {
+    const s = (o.servico || '').trim();
+    if (s) freq[s] = (freq[s] || 0) + 1;
+  });
+  return Object.keys(freq).sort((a, b) => freq[b] - freq[a] || a.localeCompare(b));
+}
+
+let _pickerField = null;
+function abrirPicker(field) {
+  _pickerField = field;
+  const { label, opcoes } = pickerConfig(field);
+  const atuais = (() => { const v = _modalDraft[field]; return Array.isArray(v) ? v.slice() : (v ? [v] : []); })();
+  const ranked = ordenarMaisUsados(field, opcoes);
+  // Inclui valores já marcados que não estão na lista do CFG.
+  atuais.forEach(v => { if (!ranked.some(r => r.nome === v)) ranked.push({ nome: v, n: 0 }); });
+
+  $('#picker-title').textContent = label;
+  $('#picker-list').innerHTML = ranked.map((r, i) => `
+    <label class="picker-opt${i < 5 && r.n > 0 ? ' top' : ''}">
+      <input type="checkbox" value="${esc(r.nome)}" ${atuais.includes(r.nome) ? 'checked' : ''}>
+      <span>${esc(r.nome)}</span>
+      ${r.n > 0 ? `<span class="picker-n">${r.n}×</span>` : ''}
+    </label>`).join('') || '<p class="text-muted">Cadastre opções no Painel de Controle.</p>';
+  $('#picker-novo').value = '';
+  $('#picker-overlay').classList.remove('hidden');
+}
+
+// Em qual chave do CFG persistir uma nova opção criada no pop-up.
+function pickerCfgKey(field) {
+  return { ferramentas: 'ferramentas', suprimentos: 'suprimentos', equipe: 'instaladores', responsavelAgenda: 'responsaveis' }[field];
+}
+
+function fecharPicker() { $('#picker-overlay').classList.add('hidden'); _pickerField = null; }
+
+function initPicker() {
+  $('#picker-close').onclick = fecharPicker;
+  $('#picker-overlay').onclick = e => { if (e.target.id === 'picker-overlay') fecharPicker(); };
+
+  $('#picker-add-btn').onclick = () => {
+    const inp = $('#picker-novo');
+    const val = inp.value.trim();
+    if (!val) return;
+    // Já existe na lista? apenas marca.
+    const existente = $$('#picker-list input[type=checkbox]').find(c => c.value === val);
+    if (existente) { existente.checked = true; inp.value = ''; return; }
+    const label = document.createElement('label');
+    label.className = 'picker-opt';
+    label.innerHTML = `<input type="checkbox" value="${esc(val)}" checked><span>${esc(val)}</span>`;
+    $('#picker-list').appendChild(label);
+    // Persiste no CFG para reaproveitar depois.
+    const key = pickerCfgKey(_pickerField);
+    if (key) {
+      const cfg = STORE.getCFG();
+      if (!Array.isArray(cfg[key])) cfg[key] = [];
+      if (!cfg[key].includes(val)) { cfg[key].push(val); STORE.saveCFG(cfg); }
+    }
+    inp.value = '';
+  };
+
+  $('#picker-ok').onclick = () => {
+    if (!_pickerField || !_modalDraft) { fecharPicker(); return; }
+    const vals = $$('#picker-list input[type=checkbox]').filter(c => c.checked).map(c => c.value);
+    _modalDraft[_pickerField] = vals;
+    saveDraft();
+    fecharPicker();
+    reRenderModalKeepOpen();
+  };
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -868,17 +987,9 @@ function bindModalEvents(os, ro) {
   const impItens = $('#btn-import-itens');
   if (impItens) impItens.onclick = () => importarItensPDF(_modalDraft);
 
-  // Chips
-  $$('[data-chip-input]', root).forEach(inp => {
-    inp.onkeydown = e => {
-      if (e.key === 'Enter' && inp.value.trim()) {
-        e.preventDefault();
-        const f = inp.dataset.chipInput;
-        if (!_modalDraft[f]) _modalDraft[f] = [];
-        if (!_modalDraft[f].includes(inp.value.trim())) _modalDraft[f].push(inp.value.trim());
-        saveDraft(); reRenderModalKeepOpen();
-      }
-    };
+  // Pop-up de múltipla escolha
+  $$('[data-picker-open]', root).forEach(btn => {
+    btn.onclick = () => abrirPicker(btn.dataset.pickerOpen);
   });
   $$('[data-chip-rm]', root).forEach(btn => {
     btn.onclick = () => {
@@ -974,6 +1085,7 @@ function bindModalEvents(os, ro) {
       const fileId = await STORE.pushPhoto(f);
       if (fileId) _modalDraft.fotosCheckinIds.push(fileId);
     }
+    capturarLocalCheckin();
     saveDraft(); reRenderModalKeepOpen();
   };
   $$('[data-foto-rm]', root).forEach(btn => {
@@ -990,6 +1102,25 @@ function bindModalEvents(os, ro) {
     const b64 = await STORE.pullPhoto(img.dataset.fotoImg);
     if (b64) img.src = b64;
   });
+}
+
+// Geolocalização automática no check‑in (espelho de gestão). Registra só uma vez.
+function capturarLocalCheckin() {
+  if (!_modalDraft || _modalDraft.checkinGPS || !navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      _modalDraft.checkinGPS = {
+        lat: +pos.coords.latitude.toFixed(6),
+        lng: +pos.coords.longitude.toFixed(6),
+        precisao: Math.round(pos.coords.accuracy || 0),
+        ts: nowISO()
+      };
+      saveDraft();
+      toast('📍 Localização do check‑in registrada', 'success');
+    },
+    () => {},
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+  );
 }
 
 function reRenderModalKeepOpen() {
@@ -1023,10 +1154,10 @@ function osCardHTML(os) {
   const pct = fichaPercent(os);
   const resp = os.atualizadoPor || os.responsavelPCP || os.criadoPor || '—';
   return `
-    <div class="os-card st-${st}" data-os-id="${esc(os.id)}">
+    <div class="os-card st-${st} ${alertaOS(os)}" data-os-id="${esc(os.id)}">
       <div class="card-header">
         <div>
-          <div class="card-numero">O.S ${esc(os.numero || '—')}</div>
+          <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${os.retrabalho && !os.finalizadaEm ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}</div>
           <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
         </div>
         <span class="badge st-${st}" style="margin-left:auto">${STATUS_LABEL[st]}</span>
@@ -1375,7 +1506,7 @@ function renderPainelKPIs() {
 function osMiniList(list) {
   if (!list.length) return '<p class="text-muted">Nenhuma O.S.</p>';
   return `<div class="os-list">${list.map(os => `
-    <div class="os-list-item st-${calcStatus(os)}" data-os-id="${esc(os.id)}">
+    <div class="os-list-item st-${calcStatus(os)} ${alertaOS(os)}" data-os-id="${esc(os.id)}">
       <div class="list-info">
         <div class="list-numero">O.S ${esc(os.numero||'—')} <span class="badge st-${calcStatus(os)}">${STATUS_LABEL[calcStatus(os)]}</span></div>
         <div class="list-cliente">${esc(os.cliente||'Sem cliente')}${os.servico?' — '+esc(os.servico):''}</div>
@@ -1454,10 +1585,17 @@ function renderProgramacao() {
         <button id="vt-cal" class="${STATE.calView==='cal'?'active':''}">📋 Kanban</button>
         <button id="vt-lista" class="${STATE.calView==='lista'?'active':''}">☰ Lista</button>
       </div>
+      <div class="rel-dia">
+        <input type="date" id="rel-data" value="${hojeISO()}">
+        <button class="btn-ghost btn-sm" id="rel-pdf" title="Lista de serviços do dia em PDF">📄 Serviços do dia</button>
+        <button class="btn-ghost btn-sm" id="rel-wpp" title="Enviar a lista do dia por WhatsApp">💬 Enviar dia</button>
+      </div>
     </div>
     <div id="prog-content"></div>`;
   $('#vt-cal').onclick = () => { STATE.calView = 'cal'; renderProgramacao(); };
   $('#vt-lista').onclick = () => { STATE.calView = 'lista'; renderProgramacao(); };
+  $('#rel-pdf').onclick = () => relatorioServicosDia($('#rel-data').value);
+  $('#rel-wpp').onclick = () => whatsappServicosDia($('#rel-data').value);
   if (STATE.calView === 'cal') renderKanban();
   else renderProgLista();
 }
@@ -1517,7 +1655,7 @@ function renderKanban() {
     const lista = porDia[key].slice().sort((a, b) => ordemHora(a).localeCompare(ordemHora(b)));
     const cards = lista.map(os => {
       const st = calcStatus(os);
-      return `<div class="kanban-card st-${st}" data-kan-os="${esc(os.id)}">
+      return `<div class="kanban-card st-${st} ${alertaOS(os)}" data-kan-os="${esc(os.id)}">
         <div class="kanban-hora">⏰ ${esc(rotuloHora(os))}</div>
         <div class="kanban-os">O.S ${esc(os.numero || '—')}</div>
         <div class="kanban-cliente">${esc(os.cliente || 'Sem cliente')}</div>
@@ -1616,7 +1754,7 @@ function execItemHTML(os) {
   const st = calcStatus(os);
   const naRua = !os.finalizadaEm && (os.carroLiberado || os.horaSaida) && !os.horaRetorno;
   return `
-    <div class="os-list-item st-${st}" data-os-id="${esc(os.id)}">
+    <div class="os-list-item st-${st} ${alertaOS(os)}" data-os-id="${esc(os.id)}">
       <div class="list-info">
         <div class="list-numero">O.S ${esc(os.numero || '—')} ${naRua ? '🚗 na rua' : ''}</div>
         <div class="list-cliente">${esc(os.cliente)} · ${esc(os.endereco || '')}</div>
@@ -1640,7 +1778,7 @@ function renderRetrabalho() {
     <div class="os-list">
       ${list.map(os => {
         const resolvido = !!os.dataResolvido;
-        return `<div class="os-list-item st-${calcStatus(os)}" data-os-id="${esc(os.id)}">
+        return `<div class="os-list-item st-${calcStatus(os)} ${alertaOS(os)}" data-os-id="${esc(os.id)}">
           <div class="list-info">
             <div class="list-numero">O.S ${esc(os.numero||'—')} ${resolvido?'✓ resolvido':'⚠ pendente'}</div>
             <div class="list-cliente">${esc(os.cliente)} — ${esc(os.problema || 'sem descrição')}</div>
@@ -2067,7 +2205,7 @@ async function exportarFichaPDF(os) {
 
     <h2>3 · Agendamento &amp; Confirmação</h2><table>
       ${kv('Data', fmtInstalacao(os.instalacao))}${kv('Equipe', (os.equipe||[]).join(', '))}
-      ${kv('Veículo', os.veiculo)}${kv('Responsável agenda', os.responsavelAgenda)}${kv('Obs', os.obsAgenda)}
+      ${kv('Veículo', os.veiculo)}${kv('Responsável pelo agendamento', Array.isArray(os.responsavelAgenda) ? os.responsavelAgenda.join(', ') : os.responsavelAgenda)}${kv('Obs', os.obsAgenda)}
       ${kv('Confirmação', os.confirmacao)}${kv('Canal', os.confCanal)}${kv('Confirmado por', os.confPor)}
       ${kv('Acompanha (cliente)', os.confAcompanha)}${kv('Contato acompanhante', os.confAcompanhaContato)}
     </table>
@@ -2081,12 +2219,29 @@ async function exportarFichaPDF(os) {
       ${kv('Instalação OK', os.instalacaoOK?'Sim':'Não')}
       ${kv('Conferido por', os.conferidoPor)}${kv('Situação', os.checkout && os.checkout.situacao)}${kv('Retrabalho', os.retrabalho?'Sim':'')}${kv('Problema', os.problema)}${kv('Causa', os.causa)}
       ${kv('Obs técnicas', os.obsTecnicas)}${kv('Fotos check‑in', (os.fotosCheckinIds||[]).length+' foto(s)')}
+      ${os.checkinGPS ? kv('Local do check‑in', `${os.checkinGPS.lat}, ${os.checkinGPS.lng} (±${os.checkinGPS.precisao||'?'}m) — maps.google.com/?q=${os.checkinGPS.lat},${os.checkinGPS.lng}`) : ''}
       ${kv('Finalizada', os.finalizadaEm?`${new Date(os.finalizadaEm).toLocaleString('pt-BR')} — ${os.finalizadoPor||''}`:'')}
     </table>
 
     ${galeria}
 
-    <script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script>
+    <script>
+    // Só imprime depois que TODAS as imagens (base64) terminarem de carregar,
+    // senão o PDF sai com a foto em branco (bug do JPG que não aparecia).
+    (function(){
+      function imprimir(){ setTimeout(function(){ window.print(); }, 250); }
+      function aguardar(){
+        var imgs = [].slice.call(document.images);
+        var faltam = imgs.filter(function(i){ return !i.complete || i.naturalWidth === 0; });
+        if (!faltam.length) { imprimir(); return; }
+        var resta = faltam.length;
+        function ok(){ if (--resta <= 0) imprimir(); }
+        faltam.forEach(function(i){ i.addEventListener('load', ok); i.addEventListener('error', ok); });
+        setTimeout(imprimir, 4000); // rede de segurança
+      }
+      window.onload = aguardar;
+    })();
+    <\/script>
     </body></html>`);
   w.document.close();
 }
@@ -2192,6 +2347,61 @@ function exportarDiaPDF(dia, lista) {
     <h2>Espelho do instalador — equipamentos &amp; suprimentos</h2>
     ${espelho || '<p style="color:#999">Sem O.S neste dia.</p>'}
     <script>window.onload=function(){window.print()}<\/script></body></html>`);
+  w.document.close();
+}
+
+// Data de hoje em formato YYYY-MM-DD (local).
+function hojeISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// O.S agendadas para um dia, ordenadas por horário.
+function servicosDoDia(dataISO) {
+  return STORE.getAllOS()
+    .filter(o => (o.instalacao && o.instalacao.data) === dataISO)
+    .sort((a, b) => ordemHora(a).localeCompare(ordemHora(b)));
+}
+
+// Lista de serviços do dia via WhatsApp (link de compartilhamento).
+function whatsappServicosDia(dataISO) {
+  const lista = servicosDoDia(dataISO);
+  if (!lista.length) { toast('Nenhum serviço agendado nesse dia', 'error'); return; }
+  abrirWhatsAppDia(dataISO, lista);
+}
+
+// Relatório dos serviços do dia em PDF (impressão).
+function relatorioServicosDia(dataISO) {
+  const lista = servicosDoDia(dataISO);
+  if (!lista.length) { toast('Nenhum serviço agendado nesse dia', 'error'); return; }
+  const d = parseLocalDate(dataISO);
+  const titulo = d
+    ? `${DIAS_SEMANA[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+    : dataISO;
+  const linhas = lista.map(os => {
+    const st = calcStatus(os);
+    const alerta = estaAtrasada(os) ? ' style="background:#fff5f5"' : (os.retrabalho ? ' style="background:#fff5f5"' : '');
+    return `<tr${alerta}>
+      <td>${esc(rotuloHora(os))}</td>
+      <td>${esc(os.numero || '—')}</td>
+      <td>${esc(os.cliente || '')}</td>
+      <td>${esc(os.endereco || '')}</td>
+      <td>${esc((os.equipe || []).join(', '))}</td>
+      <td>${esc(os.veiculo || '')}</td>
+      <td>${esc(STATUS_LABEL[st])}</td>
+    </tr>`;
+  }).join('');
+  const w = window.open('', '_blank');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Serviços ${esc(titulo)}</title>
+    <style>body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}h1{font-size:20px;margin:0 0 4px}.date{font-size:15px;color:#0d9488;font-weight:700;margin-bottom:12px}
+    table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;background:#f0f4fa;padding:6px;border-bottom:2px solid #ccc}td{padding:5px 6px;border-bottom:1px solid #eee}</style>
+    </head><body>
+    <h1>Impresilk — Serviços do dia</h1>
+    <div class="date">📅 ${esc(titulo)} · ${lista.length} serviço(s)</div>
+    <table><thead><tr><th>Hora</th><th>O.S</th><th>Cliente</th><th>Endereço</th><th>Equipe</th><th>Veículo</th><th>Status</th></tr></thead>
+    <tbody>${linhas}</tbody></table>
+    <script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script>
+    </body></html>`);
   w.document.close();
 }
 

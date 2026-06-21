@@ -84,6 +84,22 @@
     <div class="modal" id="modal-os"></div>
   </div>
 
+  <!-- Pop-up de múltipla escolha (ferramentas, equipe, etc.) -->
+  <div id="picker-overlay" class="picker-overlay hidden">
+    <div class="picker-box">
+      <div class="picker-head">
+        <h3 id="picker-title">Selecionar</h3>
+        <button class="modal-close" id="picker-close">×</button>
+      </div>
+      <div class="picker-list" id="picker-list"></div>
+      <div class="picker-add">
+        <input id="picker-novo" placeholder="+ adicionar novo">
+        <button class="btn-ghost btn-sm" id="picker-add-btn">Adicionar</button>
+      </div>
+      <button class="btn-primary w-100 mt-12" id="picker-ok">Confirmar</button>
+    </div>
+  </div>
+
   <!-- Conflito -->
   <div id="conflict-dialog" class="conflict-dialog hidden">
     <div class="conflict-box">

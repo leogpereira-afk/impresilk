@@ -823,3 +823,97 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 @keyframes celebra-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes celebra-pop { from { transform: scale(.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @keyframes confetti-fall { to { transform: translateY(360px) rotate(540deg); opacity: 0; } }
+
+/* ── Pop-up de múltipla escolha ────────────────────────────────────── */
+.chip-add {
+  border: 1px dashed var(--blue); color: var(--blue); background: #f5f9ff;
+  border-radius: 20px; padding: 4px 12px; font-size: .8rem; font-weight: 600;
+  cursor: pointer;
+}
+.picker-overlay {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(15,23,42,.5); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.picker-overlay.hidden { display: none; }
+.picker-box {
+  background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-m);
+  width: 100%; max-width: 420px; max-height: 80vh; display: flex; flex-direction: column;
+  padding: 16px;
+}
+.picker-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.picker-head h3 { margin: 0; font-size: 1.05rem; flex: 1; }
+.picker-list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.picker-opt {
+  display: flex; align-items: center; gap: 10px; padding: 10px 8px;
+  border-radius: var(--radius-s); cursor: pointer; font-size: .92rem;
+}
+.picker-opt:hover { background: var(--bg); }
+.picker-opt input { width: 18px; height: 18px; flex-shrink: 0; }
+.picker-opt span { flex: 1; }
+.picker-opt.top { background: #f5f9ff; }
+.picker-opt.top span::after { content: ' ★'; color: var(--amber); font-size: .8rem; }
+.picker-n { font-size: .72rem; color: var(--muted); font-weight: 600; }
+.picker-add { display: flex; gap: 6px; margin-top: 10px; }
+.picker-add input { flex: 1; }
+
+/* ── Toggle prominente (Ferramentas conferidas / Instalação OK / Retrabalho) ── */
+.check-toggle {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; margin: 8px 0; padding: 12px 14px;
+  border: 2px solid var(--border); border-radius: var(--radius-s);
+  background: var(--surface); font-weight: 600; font-size: .95rem; cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.check-toggle input { width: 20px; height: 20px; flex-shrink: 0; }
+.check-toggle:has(input:checked)        { border-color: var(--blue);  background: #eff6ff; color: var(--blue); }
+.check-toggle.ok:has(input:checked)     { border-color: var(--green); background: #ecfdf5; color: var(--green); }
+.check-toggle.retrab:has(input:checked) { border-color: var(--red);   background: #fef2f2; color: var(--red); }
+
+/* ── Cor semântica de alerta: vermelho = retrabalho ou atrasada ─────── */
+.os-card.alerta-retrab, .os-card.alerta-atraso,
+.os-list-item.alerta-retrab, .os-list-item.alerta-atraso,
+.kanban-card.alerta-retrab, .kanban-card.alerta-atraso {
+  border-color: var(--red) !important;
+  border-left-color: var(--red) !important;
+  background: #fff5f5;
+}
+.tag-atraso, .tag-retrab {
+  display: inline-block; font-size: .64rem; font-weight: 700;
+  padding: 1px 6px; border-radius: 10px; vertical-align: middle; margin-left: 4px;
+  background: #fee2e2; color: var(--red);
+}
+
+/* ── Tag de geolocalização do check‑in ─────────────────────────────── */
+.gps-tag {
+  margin-top: 8px; font-size: .78rem; color: var(--teal); font-weight: 600;
+  background: #ecfeff; border-radius: var(--radius-s); padding: 8px 10px;
+}
+.gps-tag a { color: var(--blue); }
+
+/* ── Card "Minha próxima instalação" (espelho do instalador) ───────── */
+.proxima-card {
+  background: linear-gradient(135deg, var(--blue), var(--purple));
+  color: #fff; border-radius: var(--radius); padding: 18px 18px 16px;
+  box-shadow: var(--shadow-m); cursor: pointer;
+}
+.proxima-tag { font-size: .78rem; font-weight: 700; opacity: .9; letter-spacing: .3px; }
+.proxima-os { font-size: 1.5rem; font-weight: 800; margin-top: 4px; }
+.proxima-cliente { font-size: 1.05rem; font-weight: 600; margin-top: 2px; }
+.proxima-end { font-size: .9rem; opacity: .92; margin-top: 4px; }
+.proxima-data { font-size: .9rem; font-weight: 600; margin-top: 8px; }
+.proxima-acoes { display: flex; gap: 10px; margin-top: 14px; }
+.proxima-acoes .btn-primary {
+  background: #fff; color: var(--blue); font-weight: 700; flex: 1;
+  padding: 12px; font-size: 1rem; border: none; border-radius: var(--radius-s);
+}
+.proxima-acoes .btn-ghost {
+  background: rgba(255,255,255,.18); color: #fff; border: 1px solid rgba(255,255,255,.5);
+  padding: 12px 16px; border-radius: var(--radius-s); font-weight: 700; text-decoration: none;
+  display: flex; align-items: center;
+}
+.os-list-item.is-hero { opacity: .55; }
+
+/* ── Relatório de serviços do dia (barra) ──────────────────────────── */
+.rel-dia { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.rel-dia input[type=date] { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: .82rem; }
