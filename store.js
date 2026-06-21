@@ -272,26 +272,38 @@ const STORE = (() => {
   async function pull(onRefresh) {
     if (!navigator.onLine) return;
     try {
-      const res = await api({ action: 'list' });
-      if (!Array.isArray(res.os)) return;
-
       const local = getAllOS();
+      const byId = new Map(local.map(o => [o.id, o]));
       let changed = false;
 
-      for (const remote of res.os) {
-        if (!remote || !remote.id) continue;
-        const localOS = local.find(o => o.id === remote.id);
-        if (!localOS) {
-          local.push(remote);
-          changed = true;
-        } else {
-          const tsRemote = remote.atualizadoEm ? new Date(remote.atualizadoEm).getTime() : 0;
-          const tsLocal  = localOS.atualizadoEm ? new Date(localOS.atualizadoEm).getTime() : 0;
-          if (tsRemote > tsLocal) {
-            Object.assign(localOS, remote);
+      // O endpoint "list" é paginado (resposta limitada para não estourar o
+      // teto de ~6 MB das Netlify Functions). Percorremos as páginas pelo
+      // cursor "nextOffset" até não haver mais.
+      let offset = 0;
+      let guard = 0; // trava de segurança contra loop infinito
+      while (true) {
+        const res = await api({ action: 'list', offset });
+        if (!Array.isArray(res.os)) return;
+
+        for (const remote of res.os) {
+          if (!remote || !remote.id) continue;
+          const localOS = byId.get(remote.id);
+          if (!localOS) {
+            local.push(remote);
+            byId.set(remote.id, remote);
             changed = true;
+          } else {
+            const tsRemote = remote.atualizadoEm ? new Date(remote.atualizadoEm).getTime() : 0;
+            const tsLocal  = localOS.atualizadoEm ? new Date(localOS.atualizadoEm).getTime() : 0;
+            if (tsRemote > tsLocal) {
+              Object.assign(localOS, remote);
+              changed = true;
+            }
           }
         }
+
+        if (res.nextOffset == null || ++guard > 1000) break;
+        offset = res.nextOffset;
       }
 
       if (changed) {

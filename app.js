@@ -269,7 +269,6 @@ const STATE = {
   activeTab: 'painel',
   calRef: new Date(),   // mês de referência do calendário
   calView: 'cal',       // 'cal' | 'lista'
-  selectedDay: null,    // YYYY-MM-DD
   modalOSId: null,
   painelModo: 'dia',
   filtroBusca: ''
@@ -1911,34 +1910,6 @@ function renderKanban() {
   });
 }
 
-function renderDiaDetalhe(items) {
-  const el = $('#cal-day-detail');
-  const d = parseLocalDate(STATE.selectedDay);
-  const titulo = d ? `${DIAS_SEMANA[d.getDay()]} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}` : '';
-  const cards = items.map(({ os }) => osCardHTML(os)).join('');
-  el.innerHTML = `
-    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
-      <div class="flex gap-8" style="align-items:center;flex-wrap:wrap;margin-bottom:10px">
-        <strong>${titulo}</strong>
-        ${podeEditar() ? '<button class="btn-primary btn-sm" id="btn-agendar-data">+ Agendar nesta data</button>' : ''}
-        <button class="btn-ghost btn-sm" id="btn-pdf-dia">🖨 PDF do dia</button>
-        <button class="btn-ghost btn-sm" id="btn-wpp-dia">💬 WhatsApp do dia</button>
-      </div>
-      <div class="cards-grid">${cards || '<p class="text-muted">Nenhuma O.S neste dia.</p>'}</div>
-    </div>`;
-  bindCardClicks(el);
-  const ag = $('#btn-agendar-data');
-  if (ag) ag.onclick = () => {
-    const os = novaOS();
-    os.instalacao.data = STATE.selectedDay;
-    os.instalacao.periodo = 'Manhã';
-    os.liberadoPCP = true; os.aptoPor = STATE.user.nome; os.aptoEm = nowISO();
-    openModal(os);
-  };
-  $('#btn-pdf-dia').onclick = () => exportarDiaPDF(STATE.selectedDay, items.map(i => i.os));
-  $('#btn-wpp-dia').onclick = () => abrirWhatsAppDia(STATE.selectedDay, items.map(i => i.os));
-}
-
 /* ══════════════════════════════════════════════════════════════════════════
    ABA: EXECUÇÃO ("na rua")
    ══════════════════════════════════════════════════════════════════════════ */
@@ -2086,13 +2057,14 @@ function finRenderLista() {
   const periodo = finFinalizadasPeriodo();
   const list = applyFilter(periodo, STATE.filtroFinalizados || '');
   const cards = list.map(os => {
-    const sit = (os.checkout && os.checkout.situacao) || (os.retrabalho ? 'Retrabalho' : 'Finalizado');
+    // Toda O.S aqui já está finalizada (filtrada por finalizadaEm). O status
+    // principal é sempre "Finalizado"; retrabalho vira apenas uma tag secundária.
+    const teveRetrabalho = os.retrabalho || (os.checkout && os.checkout.situacao === 'Retrabalho');
     const dF = parseLocalDate((os.finalizadaEm || '').slice(0, 10));
     const dataF = dF ? `${String(dF.getDate()).padStart(2,'0')}/${String(dF.getMonth()+1).padStart(2,'0')}/${dF.getFullYear()}` : '—';
-    const sitCls = sit === 'Retrabalho' ? 'st-retrabalho' : 'st-finalizada';
-    return `<div class="os-list-item ${sitCls}" data-os-id="${esc(os.id)}">
+    return `<div class="os-list-item st-finalizada" data-os-id="${esc(os.id)}">
       <div class="list-info">
-        <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge ${sitCls}">${esc(sit)}</span></div>
+        <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge st-finalizada">Finalizado</span>${teveRetrabalho ? ' <span class="badge st-retrabalho" title="Houve retrabalho neste serviço">↻ Retrabalho</span>' : ''}</div>
         <div class="list-cliente">${esc(os.cliente || 'Sem cliente')}${os.servico ? ' — ' + esc(os.servico) : ''}</div>
         <div class="list-date">🏁 Finalizada em ${esc(dataF)}${(os.equipe||[]).length ? ' · 👷 ' + esc(os.equipe.join(', ')) : ''}</div>
       </div>
@@ -2246,7 +2218,9 @@ function exportarFinalizadosPDF(list) {
   const linhasOS = list.map(os => {
     const dF = parseLocalDate((os.finalizadaEm || '').slice(0, 10));
     const dataF = dF ? `${String(dF.getDate()).padStart(2,'0')}/${String(dF.getMonth()+1).padStart(2,'0')}/${dF.getFullYear()}` : '—';
-    const sit = (os.checkout && os.checkout.situacao) || (os.retrabalho ? 'Retrabalho' : 'Finalizado');
+    // Toda O.S listada aqui está finalizada; retrabalho é apenas observação.
+    const teveRetrabalho = os.retrabalho || (os.checkout && os.checkout.situacao === 'Retrabalho');
+    const sit = teveRetrabalho ? 'Finalizado (c/ retrabalho)' : 'Finalizado';
     return `<tr>
       <td>${esc(dataF)}</td><td><strong>${esc(os.numero||'—')}</strong></td>
       <td>${esc(os.cliente||'')}</td><td>${esc(os.servico||'')}</td>

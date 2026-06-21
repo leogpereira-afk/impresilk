@@ -40,14 +40,27 @@ exports.handler = async (event, context) => {
       case 'ping':
         return resp({ ok: true });
 
-      // ── list: retorna todas as O.S ──────────────────────────────────────────
+      // ── list: retorna as O.S em páginas ─────────────────────────────────────
+      // Paginado para a resposta nunca passar do limite de ~6 MB das Netlify
+      // Functions. O cliente percorre as páginas usando "offset"/"nextOffset".
+      // A lista de chaves (só ids) é leve mesmo com milhares de O.S; o que pesa
+      // é o conteúdo, então limitamos quantas O.S completas vão em cada resposta.
       case 'list': {
         const store = blobStore('os');
-        const { blobs } = await store.list();
+        const PAGE = 150; // O.S completas por resposta (margem folgada vs. 6 MB)
+        const offset = Math.max(0, Number(body.offset) || 0);
+
+        const keys = (await allKeys(store)).sort();
+        const slice = keys.slice(offset, offset + PAGE);
         const items = await Promise.all(
-          blobs.map(b => store.get(b.key, { type: 'json' }).catch(() => null))
+          slice.map(k => store.get(k, { type: 'json' }).catch(() => null))
         );
-        return resp({ os: items.filter(Boolean) });
+        const nextOffset = offset + PAGE;
+        return resp({
+          os: items.filter(Boolean),
+          total: keys.length,
+          nextOffset: nextOffset < keys.length ? nextOffset : null
+        });
       }
 
       // ── upsert: grava/atualiza uma O.S (com detecção de conflito) ───────────
@@ -134,6 +147,19 @@ exports.handler = async (event, context) => {
     return resp({ error: e.message || 'Erro interno' }, 500);
   }
 };
+
+// Coleta TODAS as chaves do store percorrendo o cursor de paginação do Netlify
+// Blobs. Retorna só os ids (leve), sem baixar o conteúdo de cada O.S.
+async function allKeys(store) {
+  const keys = [];
+  let cursor;
+  do {
+    const page = await store.list(cursor ? { cursor } : undefined);
+    for (const b of page.blobs) keys.push(b.key);
+    cursor = page.cursor;
+  } while (cursor);
+  return keys;
+}
 
 function resp(data, status = 200) {
   return {
