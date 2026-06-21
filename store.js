@@ -150,8 +150,25 @@ const STORE = (() => {
     lsSet(K.FILA, q);
   }
 
+  // Assinatura estável de um item da fila (independe da referência do objeto).
+  // Necessária porque getQueue() re-parseia o localStorage e cria objetos novos,
+  // então comparar por referência (x !== item) nunca removeria nada.
+  function _sigFila(item) {
+    if (!item) return '';
+    if (item.action === 'upsert')   return 'upsert:'  + (item.os && item.os.id);
+    if (item.action === 'delete')   return 'delete:'  + item.id;
+    if (item.action === 'putPhoto') return 'putPhoto:' + item.fileId;
+    if (item.action === 'setCfg')   return 'setCfg';
+    return JSON.stringify(item);
+  }
+
   function _removeFromQueue(item) {
-    const q = getQueue().filter(x => x !== item);
+    const sig = _sigFila(item);
+    let removido = false;
+    const q = getQueue().filter(x => {
+      if (!removido && _sigFila(x) === sig) { removido = true; return false; }
+      return true;
+    });
     lsSet(K.FILA, q);
   }
 
