@@ -111,7 +111,9 @@ const STORE = (() => {
     instaladores: [],
     veiculos: [],
     responsaveis: [],
+    gerentes_montagem: [],
     ferramentas: [],
+    suprimentos: ['Álcool', 'Flanela', 'Estopa', 'Fita crepe', 'Silicone', 'Luvas', 'Sacos de lixo'],
     causas_retrabalho: ['Erro de medida', 'Erro de produção', 'Falha de fixação', 'Material danificado', 'Mudança do cliente', 'Local inadequado'],
     usuarios: [
       { nome: 'Admin',     papel: 'admin',     senha: 'admin'      },

@@ -312,11 +312,12 @@ function novaOS() {
     atualizadoPor: STATE.user.nome,
     cliente: '', contato: '', whatsapp: '', cnpjCpf: '', endereco: '',
     servico: '', vendedor: '', dataEntrada: '',
-    responsavelPCP: '', layoutFotoId: '', liberadoPCP: false, aptoPor: '', aptoEm: '',
-    acesso: '', fixacao: '', ferramentas: [], itens: [],
+    responsavelPCP: '', obsPCP: '', layoutFotoId: '', liberadoPCP: false, aptoPor: '', aptoEm: '',
+    acesso: '', fixacao: '', ferramentas: [], suprimentos: [], itens: [],
     instalacao: { data: '', periodo: '', hora: '', duracaoDias: 1 },
     equipe: [], veiculo: '', responsavelAgenda: '', obsAgenda: '',
     confirmacao: '', confCanal: '', confHora: '', confPor: '', confObs: '',
+    confAcompanha: '', confAcompanhaContato: '',
     gerenteMontagem: '', ferramentasConferidas: false, fotoEmbarqueId: '',
     carroLiberado: false, carroLiberadoPor: '', carroLiberadoEm: '',
     horaSaida: '', horaRetorno: '', instalacaoOK: false, conferidoPor: '',
@@ -420,6 +421,11 @@ function renderModal() {
 /* ── Bloco 1: PCP & Cliente ──────────────────────────────────────────────── */
 function blocoPCP(os, ro) {
   const lib = os.liberadoPCP;
+  const cfg = STORE.getCFG();
+  const respOpts = (cfg.responsaveis || []).map(r => `<option ${os.responsavelPCP === r ? 'selected' : ''}>${esc(r)}</option>`).join('');
+  // se o valor atual não está na lista (ex.: importado), mantém como opção
+  const respExtra = os.responsavelPCP && !(cfg.responsaveis || []).includes(os.responsavelPCP)
+    ? `<option selected>${esc(os.responsavelPCP)}</option>` : '';
   return `
   <details class="card-fs" open data-bloco="pcp">
     <summary>1 · PCP &amp; Cliente</summary>
@@ -441,9 +447,12 @@ function blocoPCP(os, ro) {
       </div>
       <div class="field-row3">
         <div class="field"><label>Data entrada</label><input type="date" data-f="dataEntrada" value="${esc(os.dataEntrada)}"></div>
-        <div class="field"><label>Responsável PCP *</label><input data-f="responsavelPCP" value="${esc(os.responsavelPCP)}" placeholder="obrigatório"></div>
+        <div class="field"><label>Responsável PCP *</label>
+          <select data-f="responsavelPCP"><option value="">— selecionar —</option>${respOpts}${respExtra}</select>
+        </div>
         <div class="field"><label>Vendedor</label><input data-f="vendedor" value="${esc(os.vendedor)}"></div>
       </div>
+      <div class="field"><label>Observação (PCP)</label><textarea data-f="obsPCP">${esc(os.obsPCP)}</textarea></div>
       <div class="field">
         <label>Layout (JPG)</label>
         <div class="foto-box" data-foto-single="layoutFotoId">
@@ -492,6 +501,10 @@ function blocoItens(os, ro) {
       <div class="field">
         <label>Ferramentas</label>
         ${chipsField('ferramentas', os.ferramentas || [], cfg.ferramentas, ro)}
+      </div>
+      <div class="field">
+        <label>Suprimentos (ex.: álcool, flanela)</label>
+        ${chipsField('suprimentos', os.suprimentos || [], cfg.suprimentos, ro)}
       </div>
       <table class="items-table">
         <thead><tr><th>Item</th><th>Descrição</th><th>Medidas</th><th>Qtde</th><th>V.Unit</th><th>OK</th><th></th></tr></thead>
@@ -551,6 +564,10 @@ function blocoAgenda(os, ro) {
           <div class="field"><label>Confirmado por</label><input data-f="confPor" value="${esc(os.confPor)}"></div>
           <div class="field"><label>Obs</label><input data-f="confObs" value="${esc(os.confObs)}"></div>
         </div>
+        <div class="field-row">
+          <div class="field"><label>Quem do cliente acompanha</label><input data-f="confAcompanha" value="${esc(os.confAcompanha)}"></div>
+          <div class="field"><label>Contato do acompanhante</label><input data-f="confAcompanhaContato" value="${esc(os.confAcompanhaContato)}"></div>
+        </div>
         <button class="btn-success btn-sm edit-only mt-8" id="btn-confirmei">✓ Confirmei agora</button>
       </div>
     </div>
@@ -563,6 +580,9 @@ function blocoExec(os, ro) {
   const confirmado = os.confirmacao === 'Confirmado';
   const fotos = (os.fotosCheckinIds || []);
   const causaOpts = (cfg.causas_retrabalho || []).map(c => `<option ${os.causa === c ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  const gmOpts = (cfg.gerentes_montagem || []).map(g => `<option ${os.gerenteMontagem === g ? 'selected' : ''}>${esc(g)}</option>`).join('');
+  const gmExtra = os.gerenteMontagem && !(cfg.gerentes_montagem || []).includes(os.gerenteMontagem)
+    ? `<option selected>${esc(os.gerenteMontagem)}</option>` : '';
   const co = os.checkout || {};
 
   return `
@@ -570,7 +590,9 @@ function blocoExec(os, ro) {
     <summary>4 · Embarque &amp; Execução</summary>
     <div class="fs-body">
       <div class="field-row">
-        <div class="field"><label>Gerente de montagem</label><input data-f="gerenteMontagem" value="${esc(os.gerenteMontagem)}"></div>
+        <div class="field"><label>Gerente de montagem</label>
+          <select data-f="gerenteMontagem"><option value="">— selecionar —</option>${gmOpts}${gmExtra}</select>
+        </div>
         <div class="field" style="justify-content:flex-end"><label><input type="checkbox" data-f-check="ferramentasConferidas" ${os.ferramentasConferidas?'checked':''}> Ferramentas conferidas</label></div>
       </div>
       <div class="field">
@@ -1271,8 +1293,10 @@ function renderRetrabalho() {
 const CFG_LISTAS = [
   { key: 'instaladores',      label: 'Instaladores' },
   { key: 'veiculos',          label: 'Veículos' },
-  { key: 'responsaveis',      label: 'Responsáveis' },
+  { key: 'responsaveis',      label: 'Responsáveis (PCP)' },
+  { key: 'gerentes_montagem', label: 'Gerentes de Montagem' },
   { key: 'ferramentas',       label: 'Ferramentas' },
+  { key: 'suprimentos',       label: 'Suprimentos' },
   { key: 'causas_retrabalho', label: 'Causas de Retrabalho' }
 ];
 
@@ -1440,10 +1464,34 @@ function kv(label, val) {
   return `<tr><td style="padding:3px 8px;color:#666;font-weight:600;width:38%">${esc(label)}</td><td style="padding:3px 8px">${esc(val)}</td></tr>`;
 }
 
-function exportarFichaPDF(os) {
+async function exportarFichaPDF(os) {
   const itens = (os.itens || []).map(i =>
     `<tr><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.item)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.descricao)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.medidas)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.qtde)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${i.pronto?'✓':''}</td></tr>`
   ).join('');
+
+  // Carrega as imagens anexadas (layout, embarque e check‑in) como base64
+  async function imgTag(id, legenda) {
+    if (!id) return '';
+    try {
+      const b64 = await STORE.pullPhoto(id);
+      if (!b64) return '';
+      const src = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
+      return `<figure style="margin:0 8px 12px 0;display:inline-block;vertical-align:top">
+        <img src="${src}" style="max-width:240px;max-height:240px;border:1px solid #ddd;border-radius:6px">
+        ${legenda ? `<figcaption style="font-size:11px;color:#666;text-align:center;margin-top:2px">${esc(legenda)}</figcaption>` : ''}
+      </figure>`;
+    } catch { return ''; }
+  }
+
+  const layoutImg = await imgTag(os.layoutFotoId, 'Layout');
+  const embarqueImg = await imgTag(os.fotoEmbarqueId, 'Embarque');
+  const checkinImgs = (await Promise.all(
+    (os.fotosCheckinIds || []).map((id, i) => imgTag(id, `Check‑in ${i + 1}`))
+  )).join('');
+
+  const galeria = (layoutImg || embarqueImg || checkinImgs)
+    ? `<h2>5 · Anexos &amp; Fotos</h2><div style="margin-top:6px">${layoutImg}${embarqueImg}${checkinImgs}</div>`
+    : '';
 
   const w = window.open('', '_blank');
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>O.S ${esc(os.numero)}</title>
@@ -1455,17 +1503,18 @@ function exportarFichaPDF(os) {
     <h2>1 · PCP &amp; Cliente</h2><table>
       ${kv('Cliente', os.cliente)}${kv('Contato', os.contato)}${kv('WhatsApp', os.whatsapp)}
       ${kv('CNPJ/CPF', os.cnpjCpf)}${kv('Endereço', os.endereco)}${kv('Serviço', os.servico)}
-      ${kv('Data entrada', os.dataEntrada)}${kv('Responsável PCP', os.responsavelPCP)}${kv('Vendedor', os.vendedor)}
+      ${kv('Data entrada', os.dataEntrada)}${kv('Responsável PCP', os.responsavelPCP)}${kv('Obs PCP', os.obsPCP)}${kv('Vendedor', os.vendedor)}
       ${kv('Liberado p/ instalação', os.liberadoPCP ? `Sim — ${os.aptoPor||''}` : 'Não')}
     </table>
 
-    <h2>2 · Serviço &amp; Itens</h2><table>${kv('Acesso', os.acesso)}${kv('Fixação', os.fixacao)}${kv('Ferramentas', (os.ferramentas||[]).join(', '))}</table>
+    <h2>2 · Serviço &amp; Itens</h2><table>${kv('Acesso', os.acesso)}${kv('Fixação', os.fixacao)}${kv('Ferramentas', (os.ferramentas||[]).join(', '))}${kv('Suprimentos', (os.suprimentos||[]).join(', '))}</table>
     <table style="margin-top:6px"><thead><tr><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">Item</th><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">Descrição</th><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">Medidas</th><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">Qtde</th><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">OK</th></tr></thead><tbody>${itens}</tbody></table>
 
     <h2>3 · Agendamento &amp; Confirmação</h2><table>
       ${kv('Data', fmtInstalacao(os.instalacao))}${kv('Equipe', (os.equipe||[]).join(', '))}
       ${kv('Veículo', os.veiculo)}${kv('Responsável agenda', os.responsavelAgenda)}${kv('Obs', os.obsAgenda)}
       ${kv('Confirmação', os.confirmacao)}${kv('Canal', os.confCanal)}${kv('Confirmado por', os.confPor)}
+      ${kv('Acompanha (cliente)', os.confAcompanha)}${kv('Contato acompanhante', os.confAcompanhaContato)}
     </table>
 
     <h2>4 · Embarque &amp; Execução</h2><table>
@@ -1476,7 +1525,9 @@ function exportarFichaPDF(os) {
       ${kv('Finalizada', os.finalizadaEm?`${new Date(os.finalizadaEm).toLocaleString('pt-BR')} — ${os.finalizadoPor||''}`:'')}
     </table>
 
-    <script>window.onload=function(){window.print()}<\/script>
+    ${galeria}
+
+    <script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script>
     </body></html>`);
   w.document.close();
 }
@@ -1526,7 +1577,8 @@ function abrirWhatsAppDia(dia, lista) {
 /* ══════════════════════════════════════════════════════════════════════════
    IMPORTAR O.S DO PDF DO ERP (pdf.js)
    ══════════════════════════════════════════════════════════════════════════ */
-async function lerTextoPDF(file) {
+// Lê o PDF retornando texto por linhas E itens com posição (x,y,página)
+async function lerPDF(file) {
   if (typeof pdfjsLib === 'undefined') {
     throw new Error('pdf.js indisponível (sem internet) — use o cadastro manual.');
   }
@@ -1534,10 +1586,15 @@ async function lerTextoPDF(file) {
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
   let texto = '';
+  const itensPos = [];
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
-    // Reconstrói por linhas usando a posição Y
+    content.items.forEach(it => {
+      if (!it.str.trim()) return;
+      itensPos.push({ str: it.str, x: it.transform[4], y: Math.round(it.transform[5]), page: p });
+    });
+    // texto reconstruído por linha (posição Y)
     const linhas = {};
     content.items.forEach(it => {
       const y = Math.round(it.transform[5]);
@@ -1545,32 +1602,89 @@ async function lerTextoPDF(file) {
     });
     Object.keys(linhas).sort((a, b) => b - a).forEach(y => { texto += linhas[y].join(' ') + '\n'; });
   }
-  return texto;
+  return { texto, itensPos };
 }
 
-function parsePDF(texto) {
+function nearestCol(x, cols) {
+  let best = cols[0], bd = Infinity;
+  for (const c of cols) { const d = Math.abs(x - c.x); if (d < bd) { bd = d; best = c; } }
+  return best.k;
+}
+
+// Cabeçalho em 3 colunas (Cliente | Contato | Telefone) e 2 colunas (CNPJ | Endereço)
+// usando a posição X de cada rótulo. Mais robusto que regex por linha.
+function parseCabecalho(itensPos, os) {
+  if (!itensPos || !itensPos.length) return false;
+  const norm = s => s.replace(/\s+/g, ' ').trim();
+  const lbl = re => itensPos.find(i => re.test(norm(i.str)));
+
+  const Lcli  = lbl(/^Cliente$/i);
+  const Lcon  = lbl(/^Contato$/i);
+  const Ltel  = lbl(/^Telefone$|^Fone$|^WhatsApp$|^Celular$/i);
+  const Lcnpj = lbl(/^CNPJ\/CPF$/i) || lbl(/^CNPJ/i);
+  const Lend  = lbl(/^Endere[çc]o$/i);
+  const Lentr = lbl(/^Entrega/i);
+  if (!Lcli) return false;
+
+  const pg = Lcli.page;
+  const join = arr => arr.sort((a, b) => b.y - a.y || a.x - b.x).map(i => i.str.trim()).join(' ').replace(/\s+/g, ' ').trim();
+  const within = (i, yTop, yBot) => i.page === pg && i.y < yTop - 3 && i.y > yBot + 3;
+
+  // Bloco 1: Cliente / Contato / Telefone
+  const cols1 = [{ k: 'cliente', x: Lcli.x }];
+  if (Lcon) cols1.push({ k: 'contato', x: Lcon.x });
+  if (Ltel) cols1.push({ k: 'telefone', x: Ltel.x });
+  const yBot1 = Lcnpj ? Lcnpj.y : (Lentr ? Lentr.y : -Infinity);
+  const b1 = { cliente: [], contato: [], telefone: [] };
+  itensPos.filter(i => within(i, Lcli.y, yBot1)).forEach(i => b1[nearestCol(i.x, cols1)].push(i));
+
+  os.cliente  = join(b1.cliente);
+  os.contato  = join(b1.contato);
+  os.whatsapp = join(b1.telefone);   // Telefone → WhatsApp
+
+  // Bloco 2: CNPJ / Endereço
+  if (Lcnpj) {
+    const cols2 = [{ k: 'cnpj', x: Lcnpj.x }];
+    if (Lend) cols2.push({ k: 'endereco', x: Lend.x });
+    const yBot2 = Lentr ? Lentr.y : -Infinity;
+    const b2 = { cnpj: [], endereco: [] };
+    itensPos.filter(i => within(i, Lcnpj.y, yBot2)).forEach(i => b2[nearestCol(i.x, cols2)].push(i));
+    const cnpjTxt = join(b2.cnpj);
+    const m = cnpjTxt.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}|\d{3}\.\d{3}\.\d{3}-\d{2}/);
+    os.cnpjCpf = m ? m[0] : cnpjTxt;
+    os.endereco = join(b2.endereco);
+  }
+  return true;
+}
+
+function parsePDF(texto, itensPos) {
   const os = novaOS();
   const find = (re) => { const m = texto.match(re); return m ? m[1].trim() : ''; };
 
   os.numero  = find(/Ordem de servi[çc]o[:\s]*([0-9]+)/i) || find(/O\.?S[:\s]*([0-9]+)/i);
   os.servico = find(/Ref\.?[:\s]*(.+)/i);
-  os.cliente = find(/Cliente[:\s]*(.+)/i);
-  os.contato = find(/Contato[:\s]*(.+)/i);
-  os.whatsapp= find(/(?:WhatsApp|Telefone|Fone|Celular)[:\s]*([\d()\-\s]+)/i);
-  os.cnpjCpf = find(/(?:CNPJ|CPF)[:\s]*([\d./\-]+)/i);
-  os.endereco= find(/Endere[çc]o[:\s]*(.+)/i);
-  os.vendedor= find(/Vendedor[:\s]*(.+)/i);
+  os.vendedor = find(/Vendedor[:\s]*(.+?)(?:\s{2,}|$)/i);
   os.dataEntrada = converterDataBR(find(/Aprova[çc][ãa]o[:\s]*([\d/]+)/i));
 
-  // Entrega: data + hora de instalação
-  const entrega = texto.match(/Entrega[:\s]*([\d]{2}\/[\d]{2}\/[\d]{4})\s*([\d]{2}:[\d]{2})?/i);
+  // Cabeçalho por colunas (cliente/contato/telefone/cnpj/endereço)
+  const ok = parseCabecalho(itensPos, os);
+  if (!ok) {
+    // fallback por regex de linha
+    os.cliente  = find(/Cliente[:\s]*(.+)/i);
+    os.contato  = find(/Contato[:\s]*(.+)/i);
+    os.whatsapp = find(/(?:WhatsApp|Telefone|Fone|Celular)[:\s]*([\d()+\-\s]+)/i);
+    os.cnpjCpf  = find(/(?:CNPJ|CPF)[:\s]*([\d./\-]+)/i);
+    os.endereco = find(/Endere[çc]o[:\s]*(.+)/i);
+  }
+
+  // Entrega: "29/06/2026 às 14:00" → data + hora de instalação
+  const entrega = texto.match(/Entrega[:\s]*([\d]{2}\/[\d]{2}\/[\d]{4})(?:\s*(?:às|as)?\s*([\d]{2}:[\d]{2}))?/i);
   if (entrega) {
     os.instalacao.data = converterDataBR(entrega[1]);
     if (entrega[2]) {
       os.instalacao.hora = entrega[2];
       const h = parseInt(entrega[2].split(':')[0], 10);
       os.instalacao.periodo = h >= 12 ? 'Tarde' : 'Manhã';
-      if (os.instalacao.periodo === 'Tarde' || h !== 0) os.instalacao.periodo = h >= 12 ? 'Tarde' : 'Manhã';
     } else {
       os.instalacao.periodo = 'Manhã';
     }
@@ -1588,29 +1702,37 @@ function converterDataBR(str) {
 }
 
 function parseItensPDF(texto) {
+  const linhas = texto.split('\n').map(l => l.trim()).filter(Boolean);
   const itens = [];
-  const linhas = texto.split('\n');
-  let n = 1;
+  let n = 1, started = false, descBuf = [];
+  const VAL = /R?\$?\s*\d{1,3}(?:\.\d{3})*,\d{2}/g;
+
   for (const linha of linhas) {
-    // ignora linhas de totais
-    if (/(Descontos?|Total|Sinal|Saldo|Subtotal)/i.test(linha)) continue;
-    // procura: medida NxN ... qtde ... R$ valor ... R$ subtotal
-    const medida = linha.match(/(\d+[.,]?\d*)\s*[xX]\s*(\d+[.,]?\d*)/);
-    const valores = linha.match(/R\$\s*[\d.]+,\d{2}/g);
-    const qtdeM = linha.match(/\b(\d{1,3})\s*(?:un|und|pç|pc|x)?\b/i);
-    if (medida && valores && valores.length >= 1) {
-      const valorUnit = parseBRNumber(valores[0]);
-      const subtotal = valores.length >= 2 ? parseBRNumber(valores[1]) : valorUnit;
-      const qtde = qtdeM ? qtdeM[1] : '1';
-      // descrição = trecho antes da medida
-      const desc = linha.slice(0, medida.index).replace(/^\s*\d+\s*/, '').trim();
+    if (/^Item\b.*Descri/i.test(linha)) { started = true; descBuf = []; continue; }
+    if (!started) continue;
+    if (/^(Descontos?|Total|Sinal|Saldo|Subtotal|Faturamento|Log[íi]stica|Parcela|Vencimento)/i.test(linha)) { started = false; continue; }
+
+    const medida = linha.match(/(\d+[.,]\d+)\s*[xX]\s*(\d+[.,]\d+)/);
+    const valores = linha.match(VAL);
+    if (medida && valores && valores.length) {
+      const aposMedida = linha.slice(medida.index + medida[0].length);
+      const qm = aposMedida.match(/\b(\d{1,4})\b/);
+      const valorUnit = parseBRNumber(valores.length >= 2 ? valores[valores.length - 2] : valores[0]);
+      const subtotal  = parseBRNumber(valores[valores.length - 1]);
+      let desc = descBuf.join(' ').replace(/^\d+\s*/, '').replace(/\.\.\./g, '').replace(/\s+/g, ' ').trim();
+      const pre = linha.slice(0, medida.index).replace(/^\d+\s*/, '').replace(/\.\.\./g, '').trim();
+      if (pre) desc = (desc + ' ' + pre).trim();
       itens.push({
         item: String(n++),
         descricao: desc || 'Item',
         medidas: `${medida[1]}x${medida[2]}`,
-        qtde, valorUnit: String(valorUnit),
+        qtde: qm ? qm[1] : '1',
+        valorUnit: String(valorUnit),
         subtotal, pronto: false
       });
+      descBuf = [];
+    } else {
+      descBuf.push(linha);
     }
   }
   return itens;
@@ -1624,8 +1746,8 @@ function importarPDF() {
     if (!file) return;
     try {
       toast('Lendo PDF…');
-      const texto = await lerTextoPDF(file);
-      const os = parsePDF(texto);
+      const { texto, itensPos } = await lerPDF(file);
+      const os = parsePDF(texto, itensPos);
       if (!os.instalacao.periodo) os.instalacao.periodo = 'Manhã';
       openModal(os);
       toast('O.S importada — confira os campos', 'success');
@@ -1645,7 +1767,7 @@ function importarItensPDF(draft) {
     if (!file) return;
     try {
       toast('Lendo itens…');
-      const texto = await lerTextoPDF(file);
+      const { texto } = await lerPDF(file);
       const itens = parseItensPDF(texto);
       if (!itens.length) { toast('Nenhum item reconhecido', 'warn'); return; }
       draft.itens = (draft.itens || []).concat(itens);
