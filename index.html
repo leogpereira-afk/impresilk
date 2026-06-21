@@ -17,19 +17,43 @@
   <!-- ── Login ─────────────────────────────────────────────────────────── -->
   <div id="login-screen" class="login-wrap">
     <div class="login-card">
+      <img class="login-logo" id="login-logo" alt="Impresilk">
       <h2>Impresilk</h2>
       <p class="subtitle">Controle de Instalação</p>
-      <div class="field">
-        <label for="login-user">Usuário</label>
-        <select id="login-user"></select>
+
+      <!-- Passo 1: escolher a área -->
+      <div id="login-choose" class="login-choose">
+        <button class="login-big-btn lb-gestao" id="choose-gestao">
+          <span class="lb-ico">🏢</span>
+          <span class="lb-txt"><strong>Gestão</strong><small>Administradores</small></span>
+        </button>
+        <button class="login-big-btn lb-montagem" id="choose-montagem">
+          <span class="lb-ico">🔧</span>
+          <span class="lb-txt"><strong>Montagem</strong><small>Equipe de instalação</small></span>
+        </button>
       </div>
-      <div class="field mt-12">
-        <label for="login-pass">Senha</label>
-        <input type="password" id="login-pass" placeholder="Senha do papel" autocomplete="current-password">
+
+      <!-- Passo 2a: login da gestão -->
+      <div id="login-gestao" class="hidden">
+        <div class="field">
+          <label for="login-user">Usuário</label>
+          <select id="login-user"></select>
+        </div>
+        <div class="field mt-12">
+          <label for="login-pass">Senha</label>
+          <input type="password" id="login-pass" placeholder="Senha do papel" autocomplete="current-password">
+        </div>
+        <button class="btn-primary w-100 mt-12" id="login-btn">Entrar</button>
+        <div id="login-error" class="login-error hidden"></div>
+        <button class="login-voltar" data-login-voltar>← Voltar</button>
       </div>
-      <button class="btn-primary w-100 mt-12" id="login-btn">Entrar</button>
-      <div id="login-error" class="login-error hidden"></div>
-      <p class="text-muted mt-12">Espelho do instalador: <a href="equipe.html" class="inline-link">abrir equipe.html</a></p>
+
+      <!-- Passo 2b: escolher o nome do funcionário -->
+      <div id="login-montagem" class="hidden">
+        <p class="login-montagem-hint">Toque no seu nome:</p>
+        <div id="montagem-nomes" class="montagem-nomes"></div>
+        <button class="login-voltar" data-login-voltar>← Voltar</button>
+      </div>
     </div>
   </div>
 

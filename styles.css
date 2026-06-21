@@ -719,6 +719,45 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .login-card .subtitle { font-size: .82rem; color: var(--muted); margin-bottom: 24px; }
 .login-error { background: #fef2f2; color: var(--red); border-radius: var(--radius-s); padding: 8px 12px; font-size: .82rem; margin-top: 8px; }
 
+.login-logo { display: block; height: 48px; width: auto; object-fit: contain; margin-bottom: 14px; }
+
+/* Seletor de área: Gestão × Montagem */
+.login-choose { display: grid; gap: 12px; }
+.login-big-btn {
+  display: flex; align-items: center; gap: 14px; text-align: left;
+  width: 100%; padding: 16px 18px; border-radius: var(--radius);
+  border: 2px solid var(--border); background: #fff; cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, transform .1s;
+}
+.login-big-btn:hover { box-shadow: var(--shadow); }
+.login-big-btn:active { transform: scale(.98); }
+.login-big-btn .lb-ico { font-size: 1.7rem; line-height: 1; }
+.login-big-btn .lb-txt { display: flex; flex-direction: column; line-height: 1.25; }
+.login-big-btn .lb-txt strong { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+.login-big-btn .lb-txt small  { font-size: .78rem; color: var(--muted); }
+.login-big-btn.lb-gestao:hover   { border-color: var(--blue); }
+.login-big-btn.lb-montagem:hover { border-color: var(--teal); }
+
+/* Lista de nomes dos funcionários (Montagem) */
+.login-montagem-hint { font-size: .85rem; color: var(--muted); margin-bottom: 10px; }
+.montagem-nomes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.montagem-nome {
+  padding: 14px 12px; border-radius: var(--radius-s);
+  border: 1px solid var(--border); background: #fff; color: var(--text);
+  font-size: .95rem; font-weight: 600; cursor: pointer; min-height: 52px;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  transition: border-color .15s, background .15s, transform .1s;
+}
+.montagem-nome:hover  { border-color: var(--teal); background: #f0fdfa; }
+.montagem-nome:active { transform: scale(.97); }
+.montagem-nomes p { grid-column: 1 / -1; }
+
+.login-voltar {
+  background: none; border: none; color: var(--muted);
+  font-size: .85rem; cursor: pointer; margin-top: 16px; padding: 6px 4px;
+}
+.login-voltar:hover { color: var(--text); }
+
 /* ── Dialog de conflito ──────────────────────────────────────────────────── */
 .conflict-dialog {
   position: fixed; inset: 0; z-index: 600;

@@ -294,12 +294,56 @@ function initLogin() {
   sel.innerHTML = opts.map((o, i) => `<option value="${i}">${esc(o.nome)} (${esc(o.papel)})</option>`).join('');
   sel._opts = opts;
 
+  // Logo no card de login
+  const logoEl = $('#login-logo');
+  if (logoEl && typeof LOGO_IMPRESILK !== 'undefined') logoEl.src = LOGO_IMPRESILK;
+
   $('#login-btn').onclick = doLogin;
   $('#login-pass').onkeydown = e => { if (e.key === 'Enter') doLogin(); };
+
+  wireLoginChooser();
 
   // Auto-login se já tinha sessão
   const saved = STORE.getUser();
   if (saved) { STATE.user = saved; enterApp(); }
+}
+
+// Seletor inicial: Gestão (admin/usuário+senha) × Montagem (clicar no nome)
+function wireLoginChooser() {
+  const elChoose   = $('#login-choose');
+  const elGestao   = $('#login-gestao');
+  const elMontagem = $('#login-montagem');
+
+  const mostrar = qual => {
+    elChoose.classList.toggle('hidden',   qual !== 'choose');
+    elGestao.classList.toggle('hidden',   qual !== 'gestao');
+    elMontagem.classList.toggle('hidden', qual !== 'montagem');
+  };
+
+  $('#choose-gestao').onclick = () => { mostrar('gestao'); $('#login-pass').focus(); };
+  $('#choose-montagem').onclick = () => { mostrar('montagem'); renderMontagemNomes(); };
+  $$('[data-login-voltar]').forEach(b => b.onclick = () => mostrar('choose'));
+}
+
+// Mostra todos os funcionários cadastrados como botões; clicar abre o espelho.
+function renderMontagemNomes() {
+  const box = $('#montagem-nomes');
+  const pintar = lista => {
+    if (!lista.length) {
+      box.innerHTML = '<p class="text-muted">Nenhum instalador cadastrado. Peça à gestão para cadastrar em Painel de Controle.</p>';
+      return;
+    }
+    box.innerHTML = lista.map(n =>
+      `<button class="montagem-nome" data-nome="${esc(n)}">${esc(n)}</button>`
+    ).join('');
+    $$('[data-nome]', box).forEach(b => b.onclick = () => {
+      STORE.setInstalador(b.dataset.nome);
+      location.href = 'equipe.html';
+    });
+  };
+  pintar(STORE.getCFG().instaladores || []);
+  // Atualiza a lista com o que estiver no servidor
+  STORE.pullCFG().then(() => pintar(STORE.getCFG().instaladores || [])).catch(() => {});
 }
 
 function doLogin() {
