@@ -37,6 +37,29 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// Estado vazio padronizado (ícone + título + dica opcional).
+function emptyState(icon, titulo, dica) {
+  return `<div class="empty-state">
+    <div class="empty-ico">${icon || '📭'}</div>
+    <p class="empty-title">${esc(titulo)}</p>
+    ${dica ? `<p class="empty-hint">${esc(dica)}</p>` : ''}
+  </div>`;
+}
+
+// Indicador persistente do período ativo (abas com filtro de data).
+// Mostra "Hoje", "DD/MM" ou "DD/MM – DD/MM" conforme o intervalo.
+function periodoIndicador(deISO, ateISO) {
+  const fmt = iso => {
+    const d = parseLocalDate(iso);
+    return d ? `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}` : '';
+  };
+  let txt;
+  if (!deISO && !ateISO) txt = 'Todos os períodos';
+  else if (deISO === ateISO) txt = (deISO === hojeISO()) ? 'Hoje' : fmt(deISO);
+  else txt = `${fmt(deISO) || '…'} – ${fmt(ateISO) || '…'}`;
+  return `<span class="periodo-indicador"><span class="pi-ico">🗓</span>${esc(txt)}</span>`;
+}
+
 function nowISO() { return new Date().toISOString(); }
 
 // Parse local de YYYY-MM-DD (evita o bug de fuso "volta 1 dia")
@@ -418,6 +441,7 @@ function renderActiveTab() {
     case 'retrabalho':  renderRetrabalho(); break;
     case 'finalizados': renderFinalizados(); break;
     case 'controle':    renderControle(); break;
+    case 'pops':        renderPops(); break;
   }
 }
 
@@ -553,9 +577,9 @@ function renderModal() {
 
     <div class="fs-body" style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-ghost btn-sm" id="modal-pdf">🖨 PDF da ficha</button>
-      <button class="btn-ghost btn-sm" id="modal-wpp">💬 WhatsApp</button>
+      <button class="btn-ghost btn-sm" id="modal-wpp">💬 Enviar via WhatsApp</button>
       <button class="btn-danger btn-sm edit-only" id="modal-delete">🗑 Excluir O.S</button>
-      <button class="btn-primary btn-sm" id="modal-save" style="margin-left:auto">Salvar e fechar</button>
+      <button class="btn-primary btn-sm" id="modal-save" style="margin-left:auto">💾 Salvar O.S.</button>
     </div>
   `;
 
@@ -1235,7 +1259,7 @@ function renderPCP() {
       ${podeEditar() ? '<button class="btn-primary btn-sm" id="pcp-nova">+ Nova O.S</button>' : ''}
     </div>
     <div class="cards-grid">
-      ${list.map(osCardHTML).join('') || '<p class="text-muted">Nenhuma O.S. Crie uma nova ou importe um PDF.</p>'}
+      ${list.map(osCardHTML).join('') || emptyState('📋', 'Nenhuma O.S por aqui', 'Crie uma nova O.S ou importe um PDF do ERP.')}
     </div>`;
   bindCardClicks(el);
   const busca = $('#busca-pcp');
@@ -1461,7 +1485,7 @@ function renderPainelKPIs() {
     ${prevTxt ? `<div style="margin:-6px 0 10px">${prevTxt}</div>` : ''}
 
     <h3 class="painel-h">🚗 Trabalhos em execução agora</h3>
-    <div class="exec-now-grid">${execCards || '<p class="text-muted">Nenhum trabalho na rua no momento.</p>'}</div>
+    <div class="exec-now-grid">${execCards || emptyState('🚗', 'Ninguém na rua agora', 'Quando uma equipe iniciar uma instalação ela aparece aqui.')}</div>
 
     <h3 class="painel-h">📈 Tendências</h3>
     <div class="trend-grid">${trendHTML}</div>
@@ -1643,7 +1667,7 @@ function renderProgLista() {
   const list = STORE.getAllOS()
     .filter(o => o.instalacao && o.instalacao.data)
     .sort((a, b) => a.instalacao.data.localeCompare(b.instalacao.data));
-  el.innerHTML = `<div class="cards-grid">${list.map(osCardHTML).join('') || '<p class="text-muted">Nenhuma O.S agendada.</p>'}</div>`;
+  el.innerHTML = `<div class="cards-grid">${list.map(osCardHTML).join('') || emptyState('📅', 'Nenhuma O.S agendada', 'Confirme datas na aba PCP para vê-las aqui.')}</div>`;
   bindCardClicks(el);
 }
 
@@ -1750,7 +1774,7 @@ function renderExecucao() {
     return (a.instalacao?.data || '').localeCompare(b.instalacao?.data || '');
   });
 
-  el.innerHTML = `<div class="os-list">${list.map(execItemHTML).join('') || '<p class="text-muted">Nenhuma O.S apta em execução.</p>'}</div>`;
+  el.innerHTML = `<div class="os-list">${list.map(execItemHTML).join('') || emptyState('🛠', 'Nenhuma O.S em execução', 'As O.S confirmadas e em andamento aparecem aqui.')}</div>`;
 
   $$('[data-os-id]', el).forEach(item => {
     item.onclick = e => {
@@ -1808,7 +1832,7 @@ function renderRetrabalho() {
             <div class="list-date">Causa: ${esc(os.causa || '—')}${os.resolvidoPor?` · por ${esc(os.resolvidoPor)}`:''}</div>
           </div>
         </div>`;
-      }).join('') || '<p class="text-muted">Nenhum retrabalho registrado.</p>'}
+      }).join('') || emptyState('✅', 'Nenhum retrabalho', 'Que bom! Nenhuma O.S precisou voltar para correção.')}
     </div>`;
   bindCardClicks(el);
 }
@@ -1842,7 +1866,7 @@ function renderFinalizados() {
       <input type="search" id="busca-fin" placeholder="Buscar O.S, cliente, serviço…" value="${esc(STATE.filtroFinalizados || '')}">
       <span class="text-muted" style="margin-left:auto">${all.length} arquivada(s)</span>
     </div>
-    <div class="os-list">${cards || '<p class="text-muted">Nenhuma O.S finalizada ainda.</p>'}</div>`;
+    <div class="os-list">${cards || emptyState('🏁', 'Nenhuma O.S finalizada ainda', 'Conclua instalações para acompanhar o histórico aqui.')}</div>`;
 
   bindCardClicks(el);
   const busca = $('#busca-fin');

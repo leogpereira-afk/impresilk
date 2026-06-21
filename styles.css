@@ -161,7 +161,7 @@ button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .os-card.st-apto                { border-color: var(--purple); }
 .os-card.st-agendada            { border-color: var(--teal); }
 .os-card.st-confirmada          { border-color: var(--blue); }
-.os-card.st-em_andamento        { border-color: var(--amber); }
+.os-card.st-em_andamento        { border-color: var(--blue); }
 .os-card.st-finalizada          { border-color: var(--green); }
 
 .card-header { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
@@ -189,7 +189,7 @@ button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .badge.st-apto                { background: #ede9fe; color: var(--purple); }
 .badge.st-agendada            { background: #ccfbf1; color: var(--teal); }
 .badge.st-confirmada          { background: #dbeafe; color: var(--blue); }
-.badge.st-em_andamento        { background: #fef3c7; color: var(--amber); }
+.badge.st-em_andamento        { background: #dbeafe; color: var(--blue); }
 .badge.st-finalizada          { background: #dcfce7; color: var(--green); }
 .badge.st-retrabalho          { background: #fef3c7; color: var(--amber); }
 
@@ -482,7 +482,7 @@ button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .cal-chip.st-apto                { background: #ede9fe; color: var(--purple); }
 .cal-chip.st-agendada            { background: #ccfbf1; color: var(--teal); }
 .cal-chip.st-confirmada          { background: #dbeafe; color: var(--blue); }
-.cal-chip.st-em_andamento        { background: #fef3c7; color: var(--amber); }
+.cal-chip.st-em_andamento        { background: #dbeafe; color: var(--blue); }
 .cal-chip.st-finalizada          { background: #dcfce7; color: var(--green); }
 
 .cal-chip.multi-start { border-radius: 4px 0 0 4px; margin-right: 0; }
@@ -518,7 +518,7 @@ button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .kanban-card.st-apto         { border-left-color: var(--purple); }
 .kanban-card.st-agendada     { border-left-color: var(--teal); }
 .kanban-card.st-confirmada   { border-left-color: var(--blue); }
-.kanban-card.st-em_andamento { border-left-color: var(--amber); }
+.kanban-card.st-em_andamento { border-left-color: var(--blue); }
 .kanban-card.st-finalizada   { border-left-color: var(--green); }
 .kanban-hora { font-weight: 800; font-size: .95rem; color: var(--blue); }
 .kanban-os   { font-size: .75rem; font-weight: 700; color: var(--muted); }
@@ -560,8 +560,8 @@ button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 }
 .kpi-val  { font-size: 1.7rem; font-weight: 800; color: var(--blue); }
 .kpi-lbl  { font-size: .72rem; color: var(--muted); font-weight: 600; margin-top: 2px; }
-.kpi-card.live { background: #fff7ed; box-shadow: 0 0 0 2px var(--amber) inset; }
-.kpi-card.live .kpi-val { color: var(--amber); }
+.kpi-card.live { background: #eff6ff; box-shadow: 0 0 0 2px var(--blue) inset; }
+.kpi-card.live .kpi-val { color: var(--blue); }
 
 /* ── Painel: trabalhos em execução agora ─────────────────────────────────── */
 .exec-now-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-bottom: 12px; }
@@ -642,7 +642,7 @@ button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
   transition: box-shadow .15s;
 }
 .os-list-item:hover { box-shadow: var(--shadow-m); }
-.os-list-item.st-em_andamento { border-left-color: var(--amber); }
+.os-list-item.st-em_andamento { border-left-color: var(--blue); }
 .os-list-item.st-confirmada   { border-left-color: var(--blue); }
 .os-list-item.st-agendada     { border-left-color: var(--teal); }
 .os-list-item.st-finalizada   { border-left-color: var(--green); }
@@ -927,3 +927,107 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 
 /* ── Relatório mensal de produtividade (Painel de Controle) ───────── */
 #rel-mes { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: .82rem; }
+
+/* ── Estados vazios padronizados ──────────────────────────────────── */
+.empty-state {
+  grid-column: 1 / -1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: 4px; padding: 32px 16px; color: var(--muted);
+}
+.empty-ico { font-size: 2.2rem; line-height: 1; opacity: .85; }
+.empty-title { margin: 4px 0 0; font-weight: 600; font-size: .95rem; color: var(--text); }
+.empty-hint { margin: 0; font-size: .8rem; color: var(--muted); max-width: 320px; }
+
+/* ── Indicador de período ativo (abas com filtro de data) ─────────── */
+.periodo-indicador {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 999px;
+  background: #eff6ff; color: var(--blue);
+  font-size: .78rem; font-weight: 600; border: 1px solid #bfdbfe;
+}
+.periodo-indicador .pi-ico { font-size: .9rem; }
+
+/* ── Aba POPs (Procedimentos Operacionais Padrão) ─────────────────── */
+.pops-topo { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 12px 0 8px; }
+.pops-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.pops-cab h2 { font-size: 1.1rem; }
+.pops-total { font-size: .76rem; color: var(--muted); font-weight: 600; }
+.pop-busca {
+  width: 100%; margin: 10px 0; padding: 10px 12px; font-size: .9rem;
+  border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface);
+}
+.pop-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pop-chip {
+  padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--muted); font-size: .8rem; font-weight: 600; cursor: pointer;
+  transition: all .15s;
+}
+.pop-chip:hover { border-color: var(--blue); color: var(--blue); }
+.pop-chip.ativo { background: var(--blue); border-color: var(--blue); color: #fff; }
+
+.pops-lista { padding-top: 8px; }
+.pop-categoria { margin-bottom: 18px; }
+.pop-cat-titulo {
+  font-size: .95rem; font-weight: 700; color: var(--text); margin: 8px 0;
+  display: flex; align-items: center; gap: 8px;
+  padding-bottom: 6px; border-bottom: 2px solid var(--border);
+}
+.pop-cat-count {
+  font-size: .72rem; background: var(--border); color: var(--muted);
+  padding: 1px 8px; border-radius: 999px; font-weight: 700;
+}
+
+.pop-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-s);
+  margin-bottom: 8px; overflow: hidden; transition: box-shadow .15s;
+}
+.pop-card.aberto { box-shadow: var(--shadow); border-color: var(--blue); }
+.pop-head { display: flex; align-items: center; gap: 10px; padding: 12px; cursor: pointer; }
+.pop-head:hover { background: #f8fafc; }
+.pop-num {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
+  background: var(--blue); color: #fff; font-weight: 800; font-size: .82rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.pop-info { flex: 1; min-width: 0; }
+.pop-titulo { font-size: .9rem; font-weight: 600; color: var(--text); }
+.pop-meta { font-size: .74rem; color: var(--muted); margin-top: 2px; }
+.pop-nivel { flex: 0 0 auto; font-size: .68rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: .3px; }
+.pop-nivel.st-basico   { background: #dcfce7; color: var(--green); }
+.pop-nivel.st-medio    { background: #fef3c7; color: var(--amber); }
+.pop-nivel.st-avancado { background: #fee2e2; color: var(--red); }
+.pop-chevron { flex: 0 0 auto; color: var(--muted); font-size: .7rem; }
+
+.pop-detalhe { padding: 0 14px 14px; border-top: 1px solid var(--border); }
+.pop-bloco { margin-top: 12px; }
+.pop-bloco h4 { font-size: .82rem; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.pop-bloco ul, .pop-bloco ol { margin: 0; padding-left: 20px; }
+.pop-bloco li { font-size: .84rem; color: var(--text); margin-bottom: 4px; line-height: 1.45; }
+.pop-bloco.pop-atencao { background: #fffbeb; border-left: 3px solid var(--amber); border-radius: 4px; padding: 8px 8px 8px 0; }
+.pop-bloco.pop-atencao h4 { color: var(--amber); padding-left: 12px; }
+.pop-bloco.pop-atencao ul { padding-left: 30px; }
+.pop-bloco.pop-dicas { background: #f0fdf4; border-left: 3px solid var(--green); border-radius: 4px; padding: 8px 8px 8px 0; }
+.pop-bloco.pop-dicas h4 { color: var(--green); padding-left: 12px; }
+.pop-bloco.pop-dicas ul { padding-left: 30px; }
+.pop-card .pop-enviar { margin-top: 12px; }
+.pop-head .pop-enviar { margin: 0; }
+
+/* Modal de envio de POP */
+.pop-envio-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1000;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.pop-envio-box {
+  background: var(--surface); border-radius: var(--radius); padding: 16px;
+  width: 100%; max-width: 380px; box-shadow: var(--shadow-m);
+}
+.pop-envio-head { display: flex; align-items: center; justify-content: space-between; }
+.pop-envio-sub { font-size: .82rem; color: var(--muted); margin: 4px 0 12px; }
+.pop-contatos { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.pop-contato {
+  text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-s);
+  background: var(--surface); font-size: .85rem; cursor: pointer; transition: all .15s;
+}
+.pop-contato:hover { border-color: var(--green); background: #f0fdf4; }
+.pop-envio-manual { display: flex; gap: 6px; margin-top: 12px; }
+.pop-envio-manual input { flex: 1; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: .85rem; }
