@@ -84,30 +84,31 @@ exports.handler = async (event) => {
     }
     const headers = { 'Access-Token': creds.accessToken, 'Accept': 'application/json' };
     const status  = body.status || creds.status;
+    // A API exige um período. filtrodata: CADASTRO, PREV_ENTREGA, APROVACAO, ENTREGA, FATURAMENTO, CANCELAMENTO.
+    const filtrodata = body.filtrodata || creds.filtrodata || 'CADASTRO';
+    const { datainicial, datafinal } = janelaDatas(body);
+    const urlOS = urlListaOS(creds, { status, filtrodata, datainicial, datafinal });
 
     switch (action) {
 
       // ── ping: confere se as credenciais batem ───────────────────────────────
       case 'ping': {
-        const url = `${creds.base}/${creds.publicKey}/ordem-servico?status=${encodeURIComponent(status)}`;
-        const r = await fetch(url, { headers });
+        const r = await fetch(urlOS, { headers });
         return resp({ ok: r.ok, http: r.status });
       }
 
       // ── preview: devolve uma amostra CRUA do Mubisys (para mapear os campos) ─
       case 'preview': {
-        const url = `${creds.base}/${creds.publicKey}/ordem-servico?status=${encodeURIComponent(status)}`;
-        const r = await fetch(url, { headers });
+        const r = await fetch(urlOS, { headers });
         const data = await r.json().catch(() => null);
         if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
         const lista = extrairLista(data);
-        return resp({ total: lista.length, amostra: lista.slice(0, 2) });
+        return resp({ total: lista.length, periodo: { datainicial, datafinal, filtrodata }, amostra: lista.slice(0, 2) });
       }
 
       // ── listarOS: busca e já mapeia para o formato Impresilk ─────────────────
       case 'listarOS': {
-        const url = `${creds.base}/${creds.publicKey}/ordem-servico?status=${encodeURIComponent(status)}`;
-        const r = await fetch(url, { headers });
+        const r = await fetch(urlOS, { headers });
         const data = await r.json().catch(() => null);
         if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
         const lista = extrairLista(data);
@@ -131,6 +132,24 @@ exports.handler = async (event) => {
     return resp({ error: e.message || 'Erro interno' }, 500);
   }
 };
+
+// ── Período / URL da lista de O.S ────────────────────────────────────────────
+// A API exige datainicial/datafinal (AAAA-MM-DD). Sem janela explícita do app,
+// usamos ±180 dias em torno de hoje para pegar O.S recentes e próximas.
+function ymd(d) { return d.toISOString().slice(0, 10); }
+function janelaDatas(body) {
+  if (body.datainicial && body.datafinal) {
+    return { datainicial: body.datainicial, datafinal: body.datafinal };
+  }
+  const hoje = new Date();
+  const ini = new Date(hoje); ini.setDate(ini.getDate() - 180);
+  const fim = new Date(hoje); fim.setDate(fim.getDate() + 180);
+  return { datainicial: ymd(ini), datafinal: ymd(fim) };
+}
+function urlListaOS(creds, { status, filtrodata, datainicial, datafinal }) {
+  const q = new URLSearchParams({ status, filtrodata, datainicial, datafinal });
+  return `${creds.base}/${creds.publicKey}/ordem-servico?${q.toString()}`;
+}
 
 // ── Helpers de extração ──────────────────────────────────────────────────────
 // A API pode devolver { data: [...] }, { items: [...] } ou um array direto.
