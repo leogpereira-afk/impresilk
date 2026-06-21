@@ -4,6 +4,16 @@
 
 const { getStore } = require('@netlify/blobs');
 
+// Abre um store do Netlify Blobs. Em produção o Netlify normalmente injeta o
+// contexto sozinho; se isso falhar, usamos a configuração manual com as
+// variáveis de ambiente BLOBS_SITE_ID e BLOBS_TOKEN.
+function blobStore(name) {
+  const siteID = process.env.BLOBS_SITE_ID;
+  const token  = process.env.BLOBS_TOKEN;
+  if (siteID && token) return getStore({ name, siteID, token });
+  return getStore(name);
+}
+
 exports.handler = async (event, context) => {
   if (event.httpMethod !== 'POST') {
     return resp({ error: 'Method not allowed' }, 405);
@@ -32,7 +42,7 @@ exports.handler = async (event, context) => {
 
       // ── list: retorna todas as O.S ──────────────────────────────────────────
       case 'list': {
-        const store = getStore('os');
+        const store = blobStore('os');
         const { blobs } = await store.list();
         const items = await Promise.all(
           blobs.map(b => store.get(b.key, { type: 'json' }).catch(() => null))
@@ -42,7 +52,7 @@ exports.handler = async (event, context) => {
 
       // ── upsert: grava/atualiza uma O.S (com detecção de conflito) ───────────
       case 'upsert': {
-        const store = getStore('os');
+        const store = blobStore('os');
         const { os } = body;
         if (!os || !os.id) return resp({ error: 'O.S sem id' }, 400);
 
@@ -62,8 +72,8 @@ exports.handler = async (event, context) => {
 
       // ── delete: remove O.S e suas fotos ────────────────────────────────────
       case 'delete': {
-        const store = getStore('os');
-        const fotosStore = getStore('fotos');
+        const store = blobStore('os');
+        const fotosStore = blobStore('fotos');
         const { id } = body;
         if (!id) return resp({ error: 'id ausente' }, 400);
 
@@ -84,13 +94,13 @@ exports.handler = async (event, context) => {
 
       // ── getCfg / setCfg ─────────────────────────────────────────────────────
       case 'getCfg': {
-        const store = getStore('cfg');
+        const store = blobStore('cfg');
         const cfg = await store.get('cfg', { type: 'json' }).catch(() => null);
         return resp({ cfg: cfg || {} });
       }
 
       case 'setCfg': {
-        const store = getStore('cfg');
+        const store = blobStore('cfg');
         if (!body.cfg) return resp({ error: 'cfg ausente' }, 400);
         await store.setJSON('cfg', body.cfg);
         return resp({ ok: true });
@@ -98,7 +108,7 @@ exports.handler = async (event, context) => {
 
       // ── putPhoto: grava foto (base64) ───────────────────────────────────────
       case 'putPhoto': {
-        const store = getStore('fotos');
+        const store = blobStore('fotos');
         const { base64, mime, fileId } = body;
         if (!base64) return resp({ error: 'base64 ausente' }, 400);
         const id = fileId || ('foto_' + Date.now() + '_' + Math.random().toString(36).slice(2));
@@ -108,7 +118,7 @@ exports.handler = async (event, context) => {
 
       // ── getPhoto: recupera foto ─────────────────────────────────────────────
       case 'getPhoto': {
-        const store = getStore('fotos');
+        const store = blobStore('fotos');
         const { fileId } = body;
         if (!fileId) return resp({ error: 'fileId ausente' }, 400);
         const foto = await store.get(fileId, { type: 'json' }).catch(() => null);
