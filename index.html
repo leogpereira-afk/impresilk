@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1877f2">
   <title>Impresilk — Controle de Instalação</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Impresilk">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -33,15 +38,23 @@
 
     <!-- Topbar -->
     <header class="topbar">
-      <span class="logo">Impresilk</span>
-      <div class="topbar-actions">
-        <button class="btn-ghost btn-sm edit-only" id="btn-import-pdf" title="Importar O.S do PDF">📄 PDF</button>
-        <button class="btn-primary btn-sm edit-only" id="btn-nova-os">+ Nova O.S</button>
-        <span id="sync-indicator" class="sync-indicator ok">✅</span>
+      <img class="logo-img" id="topbar-logo" alt="Impresilk">
+      <div class="topbar-user">
         <span id="user-badge"></span>
+        <span id="topbar-date" class="topbar-date"></span>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn-ghost btn-sm admin-only" id="btn-espelhos" title="Espelhos somente-leitura para instaladores e comercial">🪞 Espelhos</button>
+        <button class="btn-ghost btn-sm edit-only" id="btn-import-pdf" title="Importar O.S a partir do PDF do ERP">📄 Importar PDF</button>
+        <button class="btn-primary btn-sm edit-only" id="btn-nova-os">+ Nova O.S</button>
+        <button class="btn-ghost btn-sm" id="btn-instrucoes" title="Como usar o sistema">❔ Instruções</button>
+        <span id="sync-indicator" class="sync-indicator ok" title="Status de sincronização">✅</span>
         <button class="btn-ghost btn-sm" id="btn-logout" title="Sair">⏻</button>
       </div>
     </header>
+
+    <!-- Frase motivacional -->
+    <div id="frase-bar" class="frase-bar"></div>
 
     <!-- Tabs -->
     <nav class="tabs" id="tabs">
@@ -50,8 +63,8 @@
       <button class="tab" data-tab="programacao">Instalação</button>
       <button class="tab" data-tab="execucao">Execução</button>
       <button class="tab" data-tab="retrabalho">Retrabalho</button>
+      <button class="tab" data-tab="finalizados">Finalizados</button>
       <button class="tab" data-tab="controle">Painel de Controle</button>
-      <button class="tab" data-tab="instrucoes">Instruções</button>
     </nav>
 
     <!-- Panels -->
@@ -61,8 +74,8 @@
       <section class="tab-panel" data-panel="programacao" id="panel-programacao"></section>
       <section class="tab-panel" data-panel="execucao" id="panel-execucao"></section>
       <section class="tab-panel" data-panel="retrabalho" id="panel-retrabalho"></section>
+      <section class="tab-panel" data-panel="finalizados" id="panel-finalizados"></section>
       <section class="tab-panel" data-panel="controle" id="panel-controle"></section>
-      <section class="tab-panel" data-panel="instrucoes" id="panel-instrucoes"></section>
     </main>
   </div>
 
@@ -86,11 +99,19 @@
   <!-- Toasts -->
   <div id="toast-container"></div>
 
+  <!-- Celebração -->
+  <div id="celebra-overlay" class="celebra-overlay hidden">
+    <div class="celebra-box" id="celebra-box"></div>
+  </div>
+
   <!-- pdf.js via CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
   <script src="config.js"></script>
+  <script src="logo.js"></script>
+  <script src="frases.js"></script>
   <script src="store.js"></script>
   <script src="app.js"></script>
+  <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
 </body>
 </html>

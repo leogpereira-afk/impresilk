@@ -1,0 +1,14 @@
+{
+  "name": "Impresilk — Controle de Instalação",
+  "short_name": "Impresilk",
+  "description": "Controle de instalação e execução de O.S — funciona offline.",
+  "start_url": ".",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1877f2",
+  "theme_color": "#1877f2",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

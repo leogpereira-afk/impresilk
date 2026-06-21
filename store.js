@@ -116,9 +116,14 @@ const STORE = (() => {
     suprimentos: ['Álcool', 'Flanela', 'Estopa', 'Fita crepe', 'Silicone', 'Luvas', 'Sacos de lixo'],
     causas_retrabalho: ['Erro de medida', 'Erro de produção', 'Falha de fixação', 'Material danificado', 'Mudança do cliente', 'Local inadequado'],
     usuarios: [
+      { nome: 'Leonardo',  papel: 'admin',     senha: 'admin'      },
       { nome: 'Admin',     papel: 'admin',     senha: 'admin'      },
       { nome: 'Comercial', papel: 'comercial',  senha: 'comercial'  }
-    ]
+    ],
+    // Agenda de contatos/funcionários para envio rápido via WhatsApp
+    funcionarios: [],   // { nome, departamento, numero }
+    // Níveis de acesso configuráveis pelo admin (sobrepõem o padrão do app)
+    niveis: null        // { papel: { abas:[...]|'*', editar:bool, cadastrar:bool } }
   };
 
   function getCFG() {
@@ -152,15 +157,24 @@ const STORE = (() => {
 
   // ── Chamada à API ─────────────────────────────────────────────────────────
   async function api(body) {
-    const res = await fetch('/.netlify/functions/os', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'x-token': TOKEN },
-      body:    JSON.stringify(body)
-    });
-    if (!res.ok && res.status !== 409) {
-      throw new Error('HTTP ' + res.status);
+    // Timeout: em sinal fraco, navigator.onLine pode ser true mas o fetch trava.
+    // Abortamos em 15s para não pendurar a sincronização.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    try {
+      const res = await fetch('/.netlify/functions/os', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'x-token': TOKEN },
+        body:    JSON.stringify(body),
+        signal:  ctrl.signal
+      });
+      if (!res.ok && res.status !== 409) {
+        throw new Error('HTTP ' + res.status);
+      }
+      return res.json();
+    } finally {
+      clearTimeout(timer);
     }
-    return res.json();
   }
 
   // ── Sync state ────────────────────────────────────────────────────────────
@@ -204,7 +218,12 @@ const STORE = (() => {
     for (const item of [...q]) {
       try {
         if (item.action === 'putPhoto') {
-          const res = await api({ action: 'putPhoto', base64: item.base64, mime: item.mime, fileId: item.fileId });
+          // A foto fica no IndexedDB; a fila guarda só o fileId (evita estourar
+          // a quota do localStorage). Lê o base64 do IndexedDB na hora de enviar.
+          let base64 = item.base64;
+          if (!base64) { const f = await getFoto(item.fileId); base64 = f && f.base64; }
+          if (!base64) { _removeFromQueue(item); continue; } // foto sumiu → descarta
+          const res = await api({ action: 'putPhoto', base64, mime: item.mime, fileId: item.fileId });
           if (res.fileId) _removeFromQueue(item);
         } else {
           const res = await api(item);
@@ -327,8 +346,8 @@ const STORE = (() => {
       } catch {}
     }
 
-    // Falhou → enfileira
-    _enqueue({ action: 'putPhoto', base64, mime, fileId });
+    // Falhou → enfileira só o fileId (o base64 já está no IndexedDB)
+    _enqueue({ action: 'putPhoto', mime, fileId });
     return fileId;
   }
 

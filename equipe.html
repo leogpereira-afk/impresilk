@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1877f2">
   <title>Impresilk — Espelho do Instalador</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Impresilk">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -26,13 +31,14 @@
   <!-- App -->
   <div id="eq-app" class="hidden">
     <header class="topbar">
-      <span class="logo">Impresilk</span>
+      <img class="logo-img" id="topbar-logo" alt="Impresilk">
       <div class="topbar-actions">
         <span id="sync-indicator" class="sync-indicator ok">✅</span>
         <span id="user-badge"></span>
         <button class="btn-ghost btn-sm" id="eq-trocar" title="Trocar instalador">⇄</button>
       </div>
     </header>
+    <div id="frase-bar" class="frase-bar"></div>
     <main class="tab-panel active" id="eq-list" style="display:block"></main>
   </div>
 
@@ -55,8 +61,16 @@
 
   <div id="toast-container"></div>
 
+  <!-- Celebração -->
+  <div id="celebra-overlay" class="celebra-overlay hidden">
+    <div class="celebra-box" id="celebra-box"></div>
+  </div>
+
   <script src="config.js"></script>
+  <script src="logo.js"></script>
+  <script src="frases.js"></script>
   <script src="store.js"></script>
   <script src="equipe.js"></script>
+  <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
 </body>
 </html>

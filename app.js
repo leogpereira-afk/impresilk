@@ -4,15 +4,26 @@
 /* ══════════════════════════════════════════════════════════════════════════
    PERMISSÕES POR PAPEL (identificação, não segurança)
    ══════════════════════════════════════════════════════════════════════════ */
-const PERMISSOES = {
+const PERMISSOES_PADRAO = {
   admin:     { abas: '*', editar: true,  cadastrar: true  },
-  pcp:       { abas: ['painel','pcp','programacao','execucao','retrabalho','controle','instrucoes'], editar: true, cadastrar: false },
-  montagem:  { abas: ['painel','pcp','programacao','execucao','retrabalho','instrucoes'], editar: true, cadastrar: false },
-  operacao:  { abas: ['painel','pcp','programacao','execucao','retrabalho','instrucoes'], editar: true, cadastrar: false },
-  comercial: { abas: ['painel','pcp','programacao','instrucoes'], editar: false, cadastrar: false }
+  pcp:       { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle'], editar: true, cadastrar: false },
+  montagem:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados'], editar: true, cadastrar: false },
+  operacao:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados'], editar: true, cadastrar: false },
+  comercial: { abas: ['painel','pcp','programacao','finalizados'], editar: false, cadastrar: false }
 };
 
+// Permissões efetivas = padrão sobrescrito pelos níveis configurados pelo admin (CFG.niveis)
+function getPermissoes() {
+  const niveis = (STORE.getCFG().niveis) || {};
+  const out = {};
+  Object.keys(PERMISSOES_PADRAO).forEach(papel => {
+    out[papel] = Object.assign({}, PERMISSOES_PADRAO[papel], niveis[papel] || {});
+  });
+  return out;
+}
+
 const SENHAS = { admin: 'admin', comercial: 'comercial', pcp: '', montagem: '', operacao: '' };
+const ABAS_DISPONIVEIS = ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle'];
 
 /* ══════════════════════════════════════════════════════════════════════════
    UTILITÁRIOS
@@ -124,6 +135,49 @@ function checklist(os) {
   ];
 }
 
+// Conclusão de cada bloco do modal (para colorir de verde quando completo)
+function blocosCompletos(os) {
+  const inst = os.instalacao || {};
+  const itens = os.itens || [];
+  return {
+    pcp:    !!(os.numero && os.cliente && os.responsavelPCP && os.liberadoPCP),
+    itens:  itens.length >= 1 && itens.every(i => i.pronto),
+    agenda: !!(inst.data && inst.periodo && (os.equipe || []).length && os.confirmacao === 'Confirmado'),
+    exec:   !!(os.finalizadaEm || (os.instalacaoOK && os.conferidoPor && (os.fotosCheckinIds || []).length))
+  };
+}
+
+// % de preenchimento da ficha da O.S
+function fichaPercent(os) {
+  const inst = os.instalacao || {};
+  const checks = [
+    os.numero, os.cliente, os.contato, os.whatsapp, os.cnpjCpf, os.endereco,
+    os.servico, os.responsavelPCP, os.dataEntrada, os.liberadoPCP,
+    (os.itens || []).length, os.acesso, os.fixacao, (os.ferramentas || []).length,
+    inst.data, inst.periodo, (os.equipe || []).length, os.veiculo,
+    os.confirmacao === 'Confirmado', (os.embarqueConferidoPor || os.produtosConferidosPor),
+    os.kmSaida, os.kmRetorno,
+    os.instalacaoOK, os.conferidoPor, (os.fotosCheckinIds || []).length
+  ];
+  const done = checks.filter(Boolean).length;
+  return Math.round(done / checks.length * 100);
+}
+
+// Lista combinada de pessoas (instaladores + responsáveis + gerentes) para <select>
+function peopleList(cfg) {
+  const c = cfg || STORE.getCFG();
+  const set = [];
+  [].concat(c.gerentes_montagem || [], c.responsaveis || [], c.instaladores || [])
+    .forEach(p => { if (p && !set.includes(p)) set.push(p); });
+  return set;
+}
+function peopleOptions(cfg, selected) {
+  const list = peopleList(cfg);
+  let html = list.map(p => `<option ${selected === p ? 'selected' : ''}>${esc(p)}</option>`).join('');
+  if (selected && !list.includes(selected)) html += `<option selected>${esc(selected)}</option>`;
+  return html;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    ESTADO GLOBAL
    ══════════════════════════════════════════════════════════════════════════ */
@@ -191,11 +245,19 @@ function enterApp() {
   $('#login-screen').classList.add('hidden');
   $('#app').classList.remove('hidden');
   $('#user-badge').textContent = STATE.user.nome;
+  const logo = $('#topbar-logo');
+  if (logo && typeof LOGO_IMPRESILK !== 'undefined') logo.src = LOGO_IMPRESILK;
+  const dataEl = $('#topbar-date');
+  if (dataEl) {
+    const d = new Date();
+    dataEl.textContent = `${DIAS_SEMANA[d.getDay()]}, ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+  }
   aplicarPermissoes();
   initTabs();
   initTopbar();
   initSyncIndicator();
   initConflictDialog();
+  if (typeof iniciarFraseBar === 'function') iniciarFraseBar();
 
   // Pull inicial + CFG, depois render
   STORE.pullCFG();
@@ -208,8 +270,10 @@ function enterApp() {
 }
 
 function aplicarPermissoes() {
-  const perm = PERMISSOES[STATE.user.papel] || PERMISSOES.comercial;
+  const PERM = getPermissoes();
+  const perm = PERM[STATE.user.papel] || PERM.comercial;
   document.body.classList.toggle('somente-leitura', !perm.editar);
+  document.body.classList.toggle('nao-admin', STATE.user.papel !== 'admin');
 
   $$('.tab').forEach(t => {
     const tab = t.dataset.tab;
@@ -219,11 +283,13 @@ function aplicarPermissoes() {
 }
 
 function podeEditar() {
-  const perm = PERMISSOES[STATE.user.papel] || PERMISSOES.comercial;
+  const PERM = getPermissoes();
+  const perm = PERM[STATE.user.papel] || PERM.comercial;
   return !!perm.editar;
 }
 function podeCadastrar() {
-  const perm = PERMISSOES[STATE.user.papel] || PERMISSOES.comercial;
+  const PERM = getPermissoes();
+  const perm = PERM[STATE.user.papel] || PERM.comercial;
   return !!perm.cadastrar;
 }
 
@@ -250,6 +316,10 @@ function initTopbar() {
   const pdfBtn  = $('#btn-import-pdf');
   if (novaBtn) novaBtn.onclick = () => openModal(novaOS());
   if (pdfBtn)  pdfBtn.onclick  = importarPDF;
+  const espBtn = $('#btn-espelhos');
+  if (espBtn) espBtn.onclick = abrirEspelhos;
+  const instrBtn = $('#btn-instrucoes');
+  if (instrBtn) instrBtn.onclick = abrirInstrucoes;
   $('#btn-logout').onclick = () => {
     STORE.setUser(null);
     location.reload();
@@ -260,9 +330,16 @@ function initSyncIndicator() {
   const el = $('#sync-indicator');
   STORE.onSync((status, pending) => {
     el.className = 'sync-indicator ' + status;
-    if (status === 'ok')      el.textContent = '✅';
-    else if (status === 'pending') el.textContent = `⏳ ${pending}`;
-    else                      el.textContent = '⚠️';
+    if (status === 'ok') {
+      el.textContent = '✅ Sincronizado';
+      el.title = 'Tudo salvo na nuvem.';
+    } else if (status === 'pending') {
+      el.textContent = `⏳ ${pending} pendente${pending === 1 ? '' : 's'}`;
+      el.title = `${pending} alteração(ões) aguardando envio. Some sozinho quando reconectar.`;
+    } else {
+      el.textContent = '⚠️ Offline';
+      el.title = 'Sem conexão — você pode continuar trabalhando; o envio acontece ao reconectar.';
+    }
   });
   STORE.on('quota', () => toast('Armazenamento local cheio — limpe fotos antigas', 'error'));
 }
@@ -294,8 +371,8 @@ function renderActiveTab() {
     case 'programacao': renderProgramacao(); break;
     case 'execucao':    renderExecucao(); break;
     case 'retrabalho':  renderRetrabalho(); break;
+    case 'finalizados': renderFinalizados(); break;
     case 'controle':    renderControle(); break;
-    case 'instrucoes':  renderInstrucoes(); break;
   }
 }
 
@@ -318,9 +395,10 @@ function novaOS() {
     equipe: [], veiculo: '', responsavelAgenda: '', obsAgenda: '',
     confirmacao: '', confCanal: '', confHora: '', confPor: '', confObs: '',
     confAcompanha: '', confAcompanhaContato: '',
-    gerenteMontagem: '', ferramentasConferidas: false, fotoEmbarqueId: '',
+    embarqueConferidoPor: '', produtosConferidosPor: '',
+    ferramentasConferidas: false, ferramentasConferidasPor: '', fotoEmbarqueId: '',
     carroLiberado: false, carroLiberadoPor: '', carroLiberadoEm: '',
-    horaSaida: '', horaRetorno: '', instalacaoOK: false, conferidoPor: '',
+    horaSaida: '', horaRetorno: '', kmSaida: '', kmRetorno: '', instalacaoOK: false, conferidoPor: '',
     retrabalho: false, problema: '', causa: '', resolvidoPor: '', dataResolvido: '',
     obsTecnicas: '', fotosCheckinIds: [],
     checkout: { situacao: '', hora: '', por: '', obs: '', confirmado: false },
@@ -338,10 +416,12 @@ const CONF_OPTS    = ['', 'Confirmado', 'Pendente', 'Recusado'];
 
 let _modalDraft = null;   // cópia de trabalho da O.S
 let _modalDirty = false;
+let _modalPrevPct = 0;    // % de preenchimento ao abrir (para celebrar ao chegar a 100%)
 
 function openModal(os) {
   _modalDraft = JSON.parse(JSON.stringify(os));
   _modalDirty = false;
+  _modalPrevPct = fichaPercent(_modalDraft);
   STATE.modalOSId = os.id;
   renderModal();
   $('#modal-overlay').classList.remove('hidden');
@@ -364,6 +444,17 @@ function saveDraft() {
   _modalDraft.atualizadoPor = STATE.user.nome;
   STORE.saveOS(_modalDraft);
   _modalDirty = false;
+
+  // Motivação ao PCP: parabeniza quando o preenchimento chega a 100%.
+  const pct = fichaPercent(_modalDraft);
+  if (pct >= 100 && _modalPrevPct < 100 && typeof mostrarCelebracao === 'function') {
+    mostrarCelebracao({
+      emoji: '🏆',
+      titulo: 'Ficha 100% preenchida!',
+      frase: fraseAleatoria(),
+    });
+  }
+  _modalPrevPct = pct;
 }
 
 // Atualiza um campo do draft (caminho com pontos)
@@ -390,6 +481,9 @@ function renderModal() {
     return `<span class="check-item ${cls}">${icon} ${esc(c.label)}</span>`;
   }).join('');
 
+  const done = blocosCompletos(os);
+  const pct = fichaPercent(os);
+
   $('#modal-os').innerHTML = `
     <div class="modal-header">
       <div style="flex:1">
@@ -400,12 +494,17 @@ function renderModal() {
       <button class="modal-close" id="modal-close-btn">×</button>
     </div>
 
+    <div class="ficha-pct">
+      <div class="ficha-pct-bar"><div class="ficha-pct-fill" style="width:${pct}%"></div></div>
+      <span class="ficha-pct-num">${pct}% preenchida</span>
+    </div>
+
     <div class="checklist-bar">${checklistBar}</div>
 
-    ${blocoPCP(os, ro)}
-    ${blocoItens(os, ro)}
-    ${blocoAgenda(os, ro)}
-    ${blocoExec(os, ro)}
+    ${blocoPCP(os, ro, done.pcp)}
+    ${blocoItens(os, ro, done.itens)}
+    ${blocoAgenda(os, ro, done.agenda)}
+    ${blocoExec(os, ro, done.exec)}
 
     <div class="fs-body" style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-ghost btn-sm" id="modal-pdf">🖨 PDF da ficha</button>
@@ -419,7 +518,7 @@ function renderModal() {
 }
 
 /* ── Bloco 1: PCP & Cliente ──────────────────────────────────────────────── */
-function blocoPCP(os, ro) {
+function blocoPCP(os, ro, done) {
   const lib = os.liberadoPCP;
   const cfg = STORE.getCFG();
   const respOpts = (cfg.responsaveis || []).map(r => `<option ${os.responsavelPCP === r ? 'selected' : ''}>${esc(r)}</option>`).join('');
@@ -427,8 +526,8 @@ function blocoPCP(os, ro) {
   const respExtra = os.responsavelPCP && !(cfg.responsaveis || []).includes(os.responsavelPCP)
     ? `<option selected>${esc(os.responsavelPCP)}</option>` : '';
   return `
-  <details class="card-fs" open data-bloco="pcp">
-    <summary>1 · PCP &amp; Cliente</summary>
+  <details class="card-fs ${done ? 'done' : ''}" open data-bloco="pcp">
+    <summary>1 · PCP &amp; Cliente ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
     <div class="fs-body">
       <div class="field-row">
         <div class="field"><label>Nº O.S</label><input data-f="numero" value="${esc(os.numero)}"></div>
@@ -471,7 +570,7 @@ function blocoPCP(os, ro) {
 }
 
 /* ── Bloco 2: Serviço & Itens ────────────────────────────────────────────── */
-function blocoItens(os, ro) {
+function blocoItens(os, ro, done) {
   const cfg = STORE.getCFG();
   const itens = os.itens || [];
   const prontos = itens.filter(i => i.pronto).length;
@@ -491,8 +590,8 @@ function blocoItens(os, ro) {
     </tr>`).join('');
 
   return `
-  <details class="card-fs" data-bloco="itens">
-    <summary>2 · Serviço &amp; Itens <span class="item-progress" style="margin-left:auto">${prontos}/${itens.length} prontos</span></summary>
+  <details class="card-fs ${done ? 'done' : ''}" data-bloco="itens">
+    <summary>2 · Serviço &amp; Itens ${done ? '<span class="sum-check">✓</span>' : ''}<span class="item-progress" style="margin-left:auto">${prontos}/${itens.length} prontos</span></summary>
     <div class="fs-body">
       <div class="field-row">
         <div class="field"><label>Acesso</label><select data-f="acesso"><option value=""></option>${acessoOpts}</select></div>
@@ -519,7 +618,7 @@ function blocoItens(os, ro) {
 }
 
 /* ── Bloco 3: Agendamento & Confirmação ──────────────────────────────────── */
-function blocoAgenda(os, ro) {
+function blocoAgenda(os, ro, done) {
   const cfg = STORE.getCFG();
   const inst = os.instalacao || {};
   const periodoOpts = PERIODO_OPTS.map(o => `<option ${inst.periodo === o ? 'selected' : ''}>${o}</option>`).join('');
@@ -529,8 +628,8 @@ function blocoAgenda(os, ro) {
   const confOpts = CONF_OPTS.map(o => `<option value="${o}" ${os.confirmacao === o ? 'selected' : ''}>${o || '— selecionar —'}</option>`).join('');
 
   return `
-  <details class="card-fs" data-bloco="agenda">
-    <summary>3 · Agendamento &amp; Confirmação</summary>
+  <details class="card-fs ${done ? 'done' : ''}" data-bloco="agenda">
+    <summary>3 · Agendamento &amp; Confirmação ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
     <div class="fs-body">
       <div class="field-row3">
         <div class="field"><label>Data instalação</label><input type="date" data-f="instalacao.data" value="${esc(inst.data)}"></div>
@@ -575,31 +674,40 @@ function blocoAgenda(os, ro) {
 }
 
 /* ── Bloco 4: Embarque & Execução ────────────────────────────────────────── */
-function blocoExec(os, ro) {
+function blocoExec(os, ro, done) {
   const cfg = STORE.getCFG();
   const confirmado = os.confirmacao === 'Confirmado';
   const fotos = (os.fotosCheckinIds || []);
   const causaOpts = (cfg.causas_retrabalho || []).map(c => `<option ${os.causa === c ? 'selected' : ''}>${esc(c)}</option>`).join('');
-  const gmOpts = (cfg.gerentes_montagem || []).map(g => `<option ${os.gerenteMontagem === g ? 'selected' : ''}>${esc(g)}</option>`).join('');
-  const gmExtra = os.gerenteMontagem && !(cfg.gerentes_montagem || []).includes(os.gerenteMontagem)
-    ? `<option selected>${esc(os.gerenteMontagem)}</option>` : '';
   const co = os.checkout || {};
+  const SIT_OPTS = ['Finalizado', 'Retrabalho', 'Mais um dia de trabalho'];
+  const sitOpts = SIT_OPTS.map(s => `<option ${co.situacao === s ? 'selected' : ''}>${esc(s)}</option>`).join('');
+  const sitExtra = co.situacao && !SIT_OPTS.includes(co.situacao) ? `<option selected>${esc(co.situacao)}</option>` : '';
 
   return `
-  <details class="card-fs" data-bloco="exec">
-    <summary>4 · Embarque &amp; Execução</summary>
+  <details class="card-fs ${done ? 'done' : ''}" data-bloco="exec">
+    <summary>4 · Embarque &amp; Execução ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
     <div class="fs-body">
       <div class="field-row">
-        <div class="field"><label>Gerente de montagem</label>
-          <select data-f="gerenteMontagem"><option value="">— selecionar —</option>${gmOpts}${gmExtra}</select>
+        <div class="field"><label>Embarque conferido por</label>
+          <select data-f="embarqueConferidoPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.embarqueConferidoPor)}</select>
         </div>
-        <div class="field" style="justify-content:flex-end"><label><input type="checkbox" data-f-check="ferramentasConferidas" ${os.ferramentasConferidas?'checked':''}> Ferramentas conferidas</label></div>
+        <div class="field"><label>Produtos conferidos por</label>
+          <select data-f="produtosConferidosPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.produtosConferidosPor)}</select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label><input type="checkbox" data-f-check="ferramentasConferidas" ${os.ferramentasConferidas?'checked':''}> Ferramentas conferidas</label></div>
+        <div class="field"><label>Ferramentas conferidas por</label>
+          <input data-f="ferramentasConferidasPor" list="dl-conferentes" value="${esc(os.ferramentasConferidasPor)}" placeholder="Nome de quem conferiu">
+          <datalist id="dl-conferentes">${peopleList(cfg).map(p=>`<option value="${esc(p)}">`).join('')}</datalist>
+        </div>
       </div>
       <div class="field">
         <label>Foto de embarque</label>
         <div class="foto-box" data-foto-single="fotoEmbarqueId">
           ${os.fotoEmbarqueId ? `<img data-foto-img="${esc(os.fotoEmbarqueId)}" alt="embarque">` : '<span class="foto-hint">📎 Anexar foto de embarque</span>'}
-          <input type="file" accept="image/*" data-foto-input="fotoEmbarqueId" ${ro?'disabled':''}>
+          <input type="file" accept="image/*" capture="environment" data-foto-input="fotoEmbarqueId" ${ro?'disabled':''}>
         </div>
       </div>
 
@@ -613,7 +721,11 @@ function blocoExec(os, ro) {
 
       <div class="field-row">
         <div class="field"><label>Hora saída</label><input type="time" data-f="horaSaida" value="${esc(os.horaSaida)}"></div>
+        <div class="field"><label>KM saída (embarque)</label><input type="number" inputmode="numeric" data-f="kmSaida" value="${esc(os.kmSaida)}" placeholder="km do veículo"></div>
+      </div>
+      <div class="field-row">
         <div class="field"><label>Hora retorno</label><input type="time" data-f="horaRetorno" value="${esc(os.horaRetorno)}"></div>
+        <div class="field"><label>KM retorno (check‑out)</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>
       </div>
       <div class="field-row">
         <div class="field" style="justify-content:flex-end"><label><input type="checkbox" data-f-check="instalacaoOK" ${os.instalacaoOK?'checked':''}> Instalação OK</label></div>
@@ -639,16 +751,16 @@ function blocoExec(os, ro) {
         </div>
         <div class="foto-box edit-only" style="margin-top:6px">
           <span class="foto-hint">📷 Adicionar foto de check‑in</span>
-          <input type="file" accept="image/*" multiple data-foto-checkin-input ${ro?'disabled':''}>
+          <input type="file" accept="image/*" capture="environment" multiple data-foto-checkin-input ${ro?'disabled':''}>
         </div>
       </div>
 
       <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
         <strong style="font-size:.85rem">Check‑out</strong>
         <div class="field-row3 mt-8">
-          <div class="field"><label>Situação</label><input data-f="checkout.situacao" value="${esc(co.situacao)}"></div>
+          <div class="field"><label>Situação</label><select data-f="checkout.situacao"><option value="">— selecionar —</option>${sitOpts}${sitExtra}</select></div>
           <div class="field"><label>Hora</label><input type="time" data-f="checkout.hora" value="${esc(co.hora)}"></div>
-          <div class="field"><label>Por</label><input data-f="checkout.por" value="${esc(co.por)}"></div>
+          <div class="field"><label>Conferido por</label><input data-f="checkout.por" value="${esc(co.por)}"></div>
         </div>
         <div class="field"><label>Obs</label><input data-f="checkout.obs" value="${esc(co.obs)}"></div>
         <div class="field"><label><input type="checkbox" data-f-check="checkout.confirmado" ${co.confirmado?'checked':''}> Check‑out confirmado</label></div>
@@ -908,6 +1020,8 @@ function osCardHTML(os) {
   const chkStr = chk.map(c => (c.ok ? '✓' : '⬜')).join(' ');
   const itens = os.itens || [];
   const prontos = itens.filter(i => i.pronto).length;
+  const pct = fichaPercent(os);
+  const resp = os.atualizadoPor || os.responsavelPCP || os.criadoPor || '—';
   return `
     <div class="os-card st-${st}" data-os-id="${esc(os.id)}">
       <div class="card-header">
@@ -919,6 +1033,11 @@ function osCardHTML(os) {
       </div>
       <div class="card-date">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
       ${(os.equipe||[]).length ? `<div class="card-equipe">👷 ${esc(os.equipe.join(', '))}</div>` : ''}
+      <div class="card-pct" title="${pct}% da ficha preenchida">
+        <div class="card-pct-bar"><div class="card-pct-fill" style="width:${pct}%"></div></div>
+        <span class="card-pct-num">${pct}%</span>
+      </div>
+      <div class="card-resp">✍ ${esc(resp)}</div>
       <div class="card-checklist">${chkStr}${itens.length?` · ${prontos}/${itens.length} itens`:''}</div>
     </div>`;
 }
@@ -948,7 +1067,13 @@ function applyFilter(list, busca) {
    ══════════════════════════════════════════════════════════════════════════ */
 function renderPCP() {
   const el = $('#panel-pcp');
-  const all = STORE.getAllOS().slice().sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || ''));
+  // Ordena por data de entrega (instalação); sem data vai para o fim
+  const all = STORE.getAllOS().slice().sort((a, b) => {
+    const da = (a.instalacao && a.instalacao.data) || '9999-12-31';
+    const db = (b.instalacao && b.instalacao.data) || '9999-12-31';
+    if (da !== db) return da.localeCompare(db);
+    return (b.criadoEm || '').localeCompare(a.criadoEm || '');
+  });
   const list = applyFilter(all, STATE.filtroBusca);
   el.innerHTML = `
     <div class="filter-bar">
@@ -1040,15 +1165,8 @@ function horasExec(os) {
   return diff / 60;
 }
 
-function renderPainelKPIs() {
-  const el = $('#painel-content');
-  const todas = STORE.getAllOS().filter(osNoRange);
-  const finalizadas = todas.filter(o => o.finalizadaEm);
-  const comRetrab = finalizadas.filter(o => o.retrabalho).length;
-  const horas = finalizadas.map(horasExec).filter(h => h != null);
-  const mediaH = horas.length ? (horas.reduce((a, b) => a + b, 0) / horas.length) : 0;
-
-  // Tabela por instalador
+// Estatísticas de um conjunto de O.S finalizadas, por pessoa da equipe
+function statsPorInstalador(finalizadas) {
   const porInst = {};
   finalizadas.forEach(os => {
     (os.equipe || []).forEach(nome => {
@@ -1060,22 +1178,268 @@ function renderPainelKPIs() {
       if (h != null) porInst[nome].horas.push(h);
     });
   });
+  return porInst;
+}
+
+// Nota 0–10 do instalador: prioriza menos retrabalho, com bônus de check‑in.
+// Sem entregas → nota neutra 0. %retrab pesa 70%, check‑in 30%.
+function notaInstalador(d) {
+  if (!d || !d.entregas) return 0;
+  const semRetrab = 1 - (d.retrab / d.entregas);   // 0..1 (quanto menos retrab, maior)
+  const comCheckin = d.checkin / d.entregas;         // 0..1
+  return Math.max(0, Math.min(10, (semRetrab * 0.7 + comCheckin * 0.3) * 10));
+}
+
+// Contagem de ocorrências para tendências (campo simples ou array)
+function contar(list, getter) {
+  const m = {};
+  list.forEach(os => {
+    const v = getter(os);
+    (Array.isArray(v) ? v : [v]).forEach(x => { if (x) m[x] = (m[x] || 0) + 1; });
+  });
+  return Object.entries(m).sort((a, b) => b[1] - a[1]);
+}
+
+function trendBlock(titulo, tipo, pares) {
+  const top = pares.slice(0, 6);
+  const max = top.length ? top[0][1] : 1;
+  return `<div class="trend-card">
+    <div class="trend-titulo">${titulo}</div>
+    ${top.length ? top.map(([nome, n]) => `
+      <div class="trend-row" data-detail="trend:${esc(tipo)}:${esc(nome)}">
+        <span class="trend-nome">${esc(nome)}</span>
+        <span class="trend-bar"><span style="width:${Math.round(n/max*100)}%"></span></span>
+        <span class="trend-n">${n}</span>
+      </div>`).join('') : '<p class="text-muted" style="font-size:.78rem">Sem dados</p>'}
+  </div>`;
+}
+
+function renderPainelKPIs() {
+  const el = $('#painel-content');
+  const todas = STORE.getAllOS().filter(osNoRange);
+  const finalizadas = todas.filter(o => o.finalizadaEm);
+  const comRetrab = finalizadas.filter(o => o.retrabalho).length;
+  const horas = finalizadas.map(horasExec).filter(h => h != null);
+  const mediaH = horas.length ? (horas.reduce((a, b) => a + b, 0) / horas.length) : 0;
+
+  const porInst = statsPorInstalador(finalizadas);
   const linhas = Object.entries(porInst).sort((a, b) => b[1].entregas - a[1].entregas).map(([nome, d]) => {
     const mh = d.horas.length ? (d.horas.reduce((a, b) => a + b, 0) / d.horas.length).toFixed(1) : '—';
-    return `<tr><td>${esc(nome)}</td><td>${d.entregas}</td><td>${d.entregas?Math.round(d.retrab/d.entregas*100):0}%</td><td>${d.entregas?Math.round(d.checkin/d.entregas*100):0}%</td><td>${mh}h</td></tr>`;
+    return `<tr class="row-click" data-detail="inst:${esc(nome)}"><td>${esc(nome)}</td><td>${d.entregas}</td><td>${d.entregas?Math.round(d.retrab/d.entregas*100):0}%</td><td>${d.entregas?Math.round(d.checkin/d.entregas*100):0}%</td><td>${mh}h</td></tr>`;
   }).join('');
+
+  // ── Ranking de notas (favorece menos retrabalho) ─────────────────────────
+  const rankNota = Object.entries(porInst)
+    .map(([nome, d]) => [nome, notaInstalador(d), d])
+    .sort((a, b) => b[1] - a[1] || b[2].entregas - a[2].entregas)
+    .map(([nome, nota, d], i) => {
+      const medalha = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}º`;
+      const pctR = d.entregas ? Math.round(d.retrab / d.entregas * 100) : 0;
+      const cor = nota >= 9 ? 'var(--green)' : (nota >= 7 ? 'var(--amber)' : 'var(--red)');
+      return `<tr class="row-click" data-detail="inst:${esc(nome)}"><td>${medalha} ${esc(nome)}</td><td><strong style="color:${cor}">${nota.toFixed(1)}</strong></td><td>${d.entregas}</td><td>${d.retrab} (${pctR}%)</td></tr>`;
+    }).join('');
+
+  // ── Em execução AGORA + indicadores ao vivo (independe do período) ───────
+  const todasOS = STORE.getAllOS();
+  const emRua = todasOS.filter(o => !o.finalizadaEm && o.liberadoPCP && (o.carroLiberado || o.horaSaida) && !o.horaRetorno)
+    .sort((a, b) => (a.horaSaida || '').localeCompare(b.horaSaida || ''));
+  const agendadasHoje = todasOS.filter(o => o.instalacao && o.instalacao.data === ymdLocal(new Date()) && !o.finalizadaEm).length;
+  const aptas = todasOS.filter(o => calcStatus(o) === 'apto').length;
+
+  const execCards = emRua.map(os => `
+    <div class="exec-now-card st-em_andamento" data-os-id="${esc(os.id)}">
+      <div class="enc-top"><strong>O.S ${esc(os.numero||'—')}</strong> · ${esc(os.cliente||'')}</div>
+      <div class="enc-sub">👷 ${esc((os.equipe||[]).join(', ')||'—')}${os.horaSaida?` · 🚗 saída ${esc(os.horaSaida)}`:''}</div>
+    </div>`).join('');
+
+  // ── Ranking de operadores (preenchimento do sistema) ─────────────────────
+  const porOper = {};
+  todasOS.forEach(os => {
+    const nome = os.atualizadoPor || os.aptoPor || os.criadoPor;
+    if (!nome) return;
+    if (!porOper[nome]) porOper[nome] = { os: 0, soma: 0 };
+    porOper[nome].os++;
+    porOper[nome].soma += fichaPercent(os);
+  });
+  const rankOper = Object.entries(porOper).sort((a, b) => b[1].soma - a[1].soma).map(([nome, d], i) => {
+    const medalha = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}º`;
+    const media = d.os ? Math.round(d.soma / d.os) : 0;
+    return `<tr class="row-click" data-detail="oper:${esc(nome)}"><td>${medalha} ${esc(nome)}</td><td>${d.os}</td><td>${media}%</td></tr>`;
+  }).join('');
+
+  // ── Comparativo com período anterior (mesmo tamanho) ─────────────────────
+  let prevTxt = '';
+  if (STATE.painelModo === 'periodo' && STATE._painelDe && STATE._painelAte) {
+    const de = parseLocalDate(STATE._painelDe), ate = parseLocalDate(STATE._painelAte);
+    const dias = Math.round((ate - de) / 86400000) + 1;
+    const pAte = new Date(de); pAte.setDate(de.getDate() - 1);
+    const pDe = new Date(pAte); pDe.setDate(pAte.getDate() - (dias - 1));
+    const pDeS = ymdLocal(pDe), pAteS = ymdLocal(pAte);
+    const prev = todasOS.filter(o => o.instalacao && o.instalacao.data >= pDeS && o.instalacao.data <= pAteS);
+    const delta = todas.length - prev.length;
+    const seta = delta > 0 ? '▲' : (delta < 0 ? '▼' : '▬');
+    const cor = delta > 0 ? 'var(--green)' : (delta < 0 ? 'var(--red)' : 'var(--muted)');
+    prevTxt = `<span class="prev-cmp" style="color:${cor}">${seta} ${Math.abs(delta)} vs período anterior (${prev.length})</span>`;
+  }
+
+  // ── Tendências ────────────────────────────────────────────────────────────
+  const trendHTML = `
+    ${trendBlock('🚚 Carro mais utilizado', 'veiculo', contar(todas, o => o.veiculo))}
+    ${trendBlock('🛠 Ferramentas mais usadas', 'ferramenta', contar(todas, o => o.ferramentas))}
+    ${trendBlock('📐 Tipo de instalação mais frequente', 'periodo', contar(todas, o => (o.instalacao && o.instalacao.periodo)))}
+    ${trendBlock('📦 Insumos mais utilizados', 'suprimento', contar(todas, o => o.suprimentos))}`;
+
+  // ── Serviços por funcionário ─────────────────────────────────────────────
+  const pessoas = peopleList();
+  const selFunc = STATE._painelFunc || '';
+  const funcOpts = pessoas.map(p => `<option ${selFunc===p?'selected':''}>${esc(p)}</option>`).join('');
 
   el.innerHTML = `
     <div class="kpi-grid">
-      <div class="kpi-card"><div class="kpi-val">${todas.length}</div><div class="kpi-lbl">O.S no período</div></div>
-      <div class="kpi-card"><div class="kpi-val">${finalizadas.length}</div><div class="kpi-lbl">Finalizadas</div></div>
-      <div class="kpi-card"><div class="kpi-val">${comRetrab}</div><div class="kpi-lbl">Com retrabalho</div></div>
+      <div class="kpi-card clickable" data-detail="todas"><div class="kpi-val">${todas.length}</div><div class="kpi-lbl">O.S no período</div></div>
+      <div class="kpi-card clickable" data-detail="finalizadas"><div class="kpi-val">${finalizadas.length}</div><div class="kpi-lbl">Finalizadas</div></div>
+      <div class="kpi-card clickable" data-detail="retrab"><div class="kpi-val">${comRetrab}</div><div class="kpi-lbl">Com retrabalho</div></div>
       <div class="kpi-card"><div class="kpi-val">${mediaH.toFixed(1)}h</div><div class="kpi-lbl">Média execução</div></div>
+      <div class="kpi-card clickable live" data-detail="emrua"><div class="kpi-val">${emRua.length}</div><div class="kpi-lbl">Em execução agora</div></div>
+      <div class="kpi-card clickable" data-detail="hoje"><div class="kpi-val">${agendadasHoje}</div><div class="kpi-lbl">Agendadas hoje</div></div>
+      <div class="kpi-card clickable" data-detail="aptas"><div class="kpi-val">${aptas}</div><div class="kpi-lbl">Aptas (aguardando)</div></div>
     </div>
-    <h3 style="margin:8px 0;font-size:.9rem;color:var(--muted)">Desempenho por instalador</h3>
+    ${prevTxt ? `<div style="margin:-6px 0 10px">${prevTxt}</div>` : ''}
+
+    <h3 class="painel-h">🚗 Trabalhos em execução agora</h3>
+    <div class="exec-now-grid">${execCards || '<p class="text-muted">Nenhum trabalho na rua no momento.</p>'}</div>
+
+    <h3 class="painel-h">📈 Tendências</h3>
+    <div class="trend-grid">${trendHTML}</div>
+
+    <h3 class="painel-h">🔎 Serviços por funcionário</h3>
+    <div class="filter-bar">
+      <select id="painel-func"><option value="">— selecionar funcionário —</option>${funcOpts}</select>
+    </div>
+
+    <h3 class="painel-h">🏆 Ranking de preenchimento (operadores)</h3>
+    <table class="control-table">
+      <thead><tr><th>Operador</th><th>O.S preenchidas</th><th>Média preenchimento</th></tr></thead>
+      <tbody>${rankOper || '<tr><td colspan="3" class="text-muted" style="text-align:center;padding:12px">Sem dados</td></tr>'}</tbody>
+    </table>
+
+    <h3 class="painel-h">🌟 Ranking de notas <span class="text-muted" style="font-weight:400;font-size:.75rem">(quem tem menos retrabalho pontua mais — clique para ver os serviços)</span></h3>
+    <table class="control-table">
+      <thead><tr><th>Instalador</th><th>Nota</th><th>Entregas</th><th>Retrabalhos</th></tr></thead>
+      <tbody>${rankNota || '<tr><td colspan="4" class="text-muted" style="text-align:center;padding:12px">Sem dados no período</td></tr>'}</tbody>
+    </table>
+
+    <h3 class="painel-h">👷 Desempenho por instalador <span class="text-muted" style="font-weight:400;font-size:.75rem">(clique para ver os serviços)</span></h3>
     <table class="control-table">
       <thead><tr><th>Instalador</th><th>Entregas</th><th>%Retrab</th><th>%Check‑in</th><th>Média h</th></tr></thead>
       <tbody>${linhas || '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:12px">Sem dados no período</td></tr>'}</tbody>
+    </table>
+
+    <h3 class="painel-h">⚖️ Comparar colaboradores</h3>
+    <div class="filter-bar">
+      <select id="cmp-a"><option value="">Colaborador A</option>${pessoas.map(p=>`<option ${STATE._cmpA===p?'selected':''}>${esc(p)}</option>`).join('')}</select>
+      <select id="cmp-b"><option value="">Colaborador B</option>${pessoas.map(p=>`<option ${STATE._cmpB===p?'selected':''}>${esc(p)}</option>`).join('')}</select>
+    </div>
+    <div id="cmp-out"></div>
+
+    <div id="painel-detail"></div>`;
+
+  bindCardClicks(el);
+
+  // Cliques em itens (cards KPI, linhas, tendências)
+  $$('[data-detail]', el).forEach(node => node.onclick = () => {
+    STATE._painelDetail = node.dataset.detail;
+    renderPainelDetalhe(todas, todasOS, finalizadas, porInst);
+  });
+
+  // Serviços por funcionário
+  $('#painel-func').onchange = e => {
+    STATE._painelFunc = e.target.value;
+    STATE._painelDetail = e.target.value ? ('func:' + e.target.value) : null;
+    renderPainelDetalhe(todas, todasOS, finalizadas, porInst);
+  };
+
+  // Comparativo de colaboradores
+  const cmpA = $('#cmp-a'), cmpB = $('#cmp-b');
+  const doCmp = () => {
+    STATE._cmpA = cmpA.value; STATE._cmpB = cmpB.value;
+    renderComparativo(finalizadas);
+  };
+  cmpA.onchange = doCmp; cmpB.onchange = doCmp;
+
+  if (STATE._cmpA || STATE._cmpB) renderComparativo(finalizadas);
+  if (STATE._painelDetail) renderPainelDetalhe(todas, todasOS, finalizadas, porInst);
+}
+
+// Lista compacta clicável de O.S
+function osMiniList(list) {
+  if (!list.length) return '<p class="text-muted">Nenhuma O.S.</p>';
+  return `<div class="os-list">${list.map(os => `
+    <div class="os-list-item st-${calcStatus(os)}" data-os-id="${esc(os.id)}">
+      <div class="list-info">
+        <div class="list-numero">O.S ${esc(os.numero||'—')} <span class="badge st-${calcStatus(os)}">${STATUS_LABEL[calcStatus(os)]}</span></div>
+        <div class="list-cliente">${esc(os.cliente||'Sem cliente')}${os.servico?' — '+esc(os.servico):''}</div>
+        <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))}${(os.equipe||[]).length?' · 👷 '+esc(os.equipe.join(', ')):''}</div>
+      </div>
+    </div>`).join('')}</div>`;
+}
+
+function renderPainelDetalhe(todas, todasOS, finalizadas, porInst) {
+  const box = $('#painel-detail');
+  if (!box) return;
+  const d = STATE._painelDetail;
+  if (!d) { box.innerHTML = ''; return; }
+
+  let titulo = '', list = [];
+  if (d === 'todas')            { titulo = 'O.S no período'; list = todas; }
+  else if (d === 'finalizadas') { titulo = 'Finalizadas no período'; list = finalizadas; }
+  else if (d === 'retrab')      { titulo = 'Com retrabalho'; list = finalizadas.filter(o => o.retrabalho); }
+  else if (d === 'emrua')       { titulo = 'Em execução agora'; list = todasOS.filter(o => !o.finalizadaEm && o.liberadoPCP && (o.carroLiberado || o.horaSaida) && !o.horaRetorno); }
+  else if (d === 'hoje')        { titulo = 'Agendadas hoje'; list = todasOS.filter(o => o.instalacao && o.instalacao.data === ymdLocal(new Date()) && !o.finalizadaEm); }
+  else if (d === 'aptas')       { titulo = 'Aptas (aguardando)'; list = todasOS.filter(o => calcStatus(o) === 'apto'); }
+  else if (d.startsWith('inst:')) { const n = d.slice(5); titulo = 'Serviços de ' + n; list = finalizadas.filter(o => (o.equipe||[]).includes(n)); }
+  else if (d.startsWith('oper:')) { const n = d.slice(5); titulo = 'O.S preenchidas por ' + n; list = todasOS.filter(o => (o.atualizadoPor||o.aptoPor||o.criadoPor) === n); }
+  else if (d.startsWith('func:')) { const n = d.slice(5); titulo = 'Todos os serviços de ' + n; list = todasOS.filter(o => (o.equipe||[]).includes(n) || (o.atualizadoPor||o.criadoPor) === n); }
+  else if (d.startsWith('trend:')) {
+    const [, tipo, ...rest] = d.split(':'); const val = rest.join(':');
+    titulo = `${val}`;
+    const has = { veiculo: o => o.veiculo === val, ferramenta: o => (o.ferramentas||[]).includes(val), periodo: o => (o.instalacao&&o.instalacao.periodo) === val, suprimento: o => (o.suprimentos||[]).includes(val) }[tipo];
+    list = has ? todas.filter(has) : [];
+  }
+
+  box.innerHTML = `
+    <div class="painel-detail-head">
+      <h3 class="painel-h" style="margin:0">📋 ${esc(titulo)} <span class="text-muted" style="font-weight:400">(${list.length})</span></h3>
+      <button class="btn-ghost btn-xs" id="detail-close">✕ fechar</button>
+    </div>
+    ${osMiniList(list)}`;
+  bindCardClicks(box);
+  $('#detail-close').onclick = () => { STATE._painelDetail = null; STATE._painelFunc = ''; box.innerHTML = ''; const sf = $('#painel-func'); if (sf) sf.value = ''; };
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function renderComparativo(finalizadas) {
+  const out = $('#cmp-out');
+  if (!out) return;
+  const a = STATE._cmpA, b = STATE._cmpB;
+  if (!a && !b) { out.innerHTML = ''; return; }
+  const stats = statsPorInstalador(finalizadas);
+  const col = nome => {
+    const d = stats[nome] || { entregas: 0, retrab: 0, checkin: 0, horas: [] };
+    const mh = d.horas.length ? (d.horas.reduce((x, y) => x + y, 0) / d.horas.length).toFixed(1) + 'h' : '—';
+    return { entregas: d.entregas, retrab: d.entregas ? Math.round(d.retrab / d.entregas * 100) + '%' : '0%', checkin: d.entregas ? Math.round(d.checkin / d.entregas * 100) + '%' : '0%', mh };
+  };
+  const ca = col(a), cb = col(b);
+  const linha = (lbl, va, vb) => `<tr><td>${lbl}</td><td>${va}</td><td>${vb}</td></tr>`;
+  out.innerHTML = `
+    <table class="control-table" style="margin-top:8px">
+      <thead><tr><th>Métrica</th><th>${esc(a||'A')}</th><th>${esc(b||'B')}</th></tr></thead>
+      <tbody>
+        ${linha('Entregas', ca.entregas, cb.entregas)}
+        ${linha('% Retrabalho', ca.retrab, cb.retrab)}
+        ${linha('% Check‑in', ca.checkin, cb.checkin)}
+        ${linha('Média execução', ca.mh, cb.mh)}
+      </tbody>
     </table>`;
 }
 
@@ -1087,15 +1451,30 @@ function renderProgramacao() {
   el.innerHTML = `
     <div class="filter-bar">
       <div class="view-toggle">
-        <button id="vt-cal" class="${STATE.calView==='cal'?'active':''}">📅 Calendário</button>
+        <button id="vt-cal" class="${STATE.calView==='cal'?'active':''}">📋 Kanban</button>
         <button id="vt-lista" class="${STATE.calView==='lista'?'active':''}">☰ Lista</button>
       </div>
     </div>
     <div id="prog-content"></div>`;
   $('#vt-cal').onclick = () => { STATE.calView = 'cal'; renderProgramacao(); };
   $('#vt-lista').onclick = () => { STATE.calView = 'lista'; renderProgramacao(); };
-  if (STATE.calView === 'cal') renderCalendario();
+  if (STATE.calView === 'cal') renderKanban();
   else renderProgLista();
+}
+
+// Ordena por horário dentro do dia: Manhã < Tarde < Dia inteiro; "Horário" usa a hora.
+function ordemHora(os) {
+  const inst = os.instalacao || {};
+  if (inst.periodo === 'Horário' && inst.hora) return inst.hora;
+  if (inst.periodo === 'Manhã') return '08:00';
+  if (inst.periodo === 'Tarde') return '13:00';
+  if (inst.periodo === 'Dia inteiro') return '00:00';
+  return '23:59';
+}
+function rotuloHora(os) {
+  const inst = os.instalacao || {};
+  if (inst.periodo === 'Horário' && inst.hora) return inst.hora;
+  return inst.periodo || '—';
 }
 
 function renderProgLista() {
@@ -1107,18 +1486,10 @@ function renderProgLista() {
   bindCardClicks(el);
 }
 
-function renderCalendario() {
+function renderKanban() {
   const el = $('#prog-content');
-  const ref = STATE.calRef;
-  const ano = ref.getFullYear(), mes = ref.getMonth();
-
-  // início no domingo da 1ª semana
-  const primeiro = new Date(ano, mes, 1);
-  const inicio = new Date(primeiro);
-  inicio.setDate(1 - primeiro.getDay());
-
   const hojeStr = ymdLocal(new Date());
-  const all = STORE.getAllOS().filter(o => o.instalacao && o.instalacao.data);
+  const all = STORE.getAllOS().filter(o => o.instalacao && o.instalacao.data && !o.finalizadaEm);
 
   // indexa O.S por dia (considerando duracaoDias)
   const porDia = {};
@@ -1128,58 +1499,52 @@ function renderCalendario() {
     const dur = Math.max(1, os.instalacao.duracaoDias || 1);
     for (let i = 0; i < dur; i++) {
       const d = new Date(d0); d.setDate(d0.getDate() + i);
-      const key = ymdLocal(d);
-      (porDia[key] = porDia[key] || []).push({ os, pos: dur === 1 ? 'single' : (i === 0 ? 'start' : (i === dur - 1 ? 'end' : 'mid')) });
+      (porDia[ymdLocal(d)] = porDia[ymdLocal(d)] || []).push(os);
     }
   });
 
-  let html = `
-    <div class="cal-toolbar">
-      <button class="btn-ghost btn-sm" id="cal-prev">‹</button>
-      <span class="cal-title">${MESES[mes]} ${ano}</span>
-      <button class="btn-ghost btn-sm" id="cal-next">›</button>
-      <button class="btn-ghost btn-sm" id="cal-hoje">Hoje</button>
-    </div>
-    <table class="cal-grid"><thead><tr>${DIAS_SEMANA.map(d => `<th>${d}</th>`).join('')}</tr></thead><tbody>`;
+  // só dias de hoje em diante (board de programação)
+  const dias = Object.keys(porDia).filter(k => k >= hojeStr).sort();
 
-  const cur = new Date(inicio);
-  for (let w = 0; w < 6; w++) {
-    html += '<tr>';
-    for (let d = 0; d < 7; d++) {
-      const key = ymdLocal(cur);
-      const isOther = cur.getMonth() !== mes;
-      const isToday = key === hojeStr;
-      const isSel = key === STATE.selectedDay;
-      const chips = (porDia[key] || []).slice(0, 4).map(({ os, pos }) => {
-        const st = calcStatus(os);
-        const cls = pos === 'single' ? '' : `multi-${pos}`;
-        return `<span class="cal-chip st-${st} ${cls}" data-cal-os="${esc(os.id)}">${esc(os.numero || os.cliente || 'O.S')}</span>`;
-      }).join('');
-      const extra = (porDia[key] || []).length > 4 ? `<span class="cal-chip" style="background:#eee">+${(porDia[key].length - 4)}</span>` : '';
-      html += `<td class="${isOther?'other-month':''} ${isToday?'today':''} ${isSel?'selected':''}" data-cal-day="${key}">
-        <div class="cal-day-num">${cur.getDate()}</div>${chips}${extra}</td>`;
-      cur.setDate(cur.getDate() + 1);
-    }
-    html += '</tr>';
+  if (!dias.length) {
+    el.innerHTML = '<p class="text-muted">Nenhuma instalação agendada de hoje em diante.</p>';
+    return;
   }
-  html += '</tbody></table><div id="cal-day-detail"></div>';
-  el.innerHTML = html;
 
-  $('#cal-prev').onclick = () => { STATE.calRef = new Date(ano, mes - 1, 1); renderCalendario(); };
-  $('#cal-next').onclick = () => { STATE.calRef = new Date(ano, mes + 1, 1); renderCalendario(); };
-  $('#cal-hoje').onclick = () => { STATE.calRef = new Date(); STATE.selectedDay = hojeStr; renderCalendario(); };
+  const colunas = dias.map(key => {
+    const d = parseLocalDate(key);
+    const titulo = `${DIAS_SEMANA[d.getDay()]} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+    const lista = porDia[key].slice().sort((a, b) => ordemHora(a).localeCompare(ordemHora(b)));
+    const cards = lista.map(os => {
+      const st = calcStatus(os);
+      return `<div class="kanban-card st-${st}" data-kan-os="${esc(os.id)}">
+        <div class="kanban-hora">⏰ ${esc(rotuloHora(os))}</div>
+        <div class="kanban-os">O.S ${esc(os.numero || '—')}</div>
+        <div class="kanban-cliente">${esc(os.cliente || 'Sem cliente')}</div>
+        ${(os.equipe||[]).length ? `<div class="kanban-equipe">👷 ${esc(os.equipe.join(', '))}</div>` : ''}
+      </div>`;
+    }).join('');
+    return `<div class="kanban-col ${key===hojeStr?'today':''}">
+      <div class="kanban-col-head">
+        ${esc(titulo)}${key===hojeStr?' · Hoje':''}
+        <span class="kanban-count">${lista.length}</span>
+        <button class="btn-xs btn-ghost" data-kan-pdf="${key}" title="Espelho do dia">🖨</button>
+      </div>
+      <div class="kanban-col-body">${cards}</div>
+    </div>`;
+  }).join('');
 
-  $$('[data-cal-os]', el).forEach(c => c.onclick = e => {
-    e.stopPropagation();
-    const os = STORE.getOS(c.dataset.calOs);
+  el.innerHTML = `<div class="kanban">${colunas}</div>`;
+
+  $$('[data-kan-os]', el).forEach(c => c.onclick = () => {
+    const os = STORE.getOS(c.dataset.kanOs);
     if (os) openModal(os);
   });
-  $$('[data-cal-day]', el).forEach(td => td.onclick = () => {
-    STATE.selectedDay = td.dataset.calDay;
-    renderCalendario();
+  $$('[data-kan-pdf]', el).forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    const key = b.dataset.kanPdf;
+    exportarDiaPDF(key, (porDia[key] || []));
   });
-
-  if (STATE.selectedDay) renderDiaDetalhe(porDia[STATE.selectedDay] || []);
 }
 
 function renderDiaDetalhe(items) {
@@ -1288,6 +1653,69 @@ function renderRetrabalho() {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   ABA: FINALIZADOS (arquivo das O.S concluídas)
+   ══════════════════════════════════════════════════════════════════════════ */
+function renderFinalizados() {
+  const el = $('#panel-finalizados');
+  const all = STORE.getAllOS()
+    .filter(o => o.finalizadaEm)
+    .sort((a, b) => (b.finalizadaEm || '').localeCompare(a.finalizadaEm || ''));
+  const list = applyFilter(all, STATE.filtroFinalizados || '');
+
+  const cards = list.map(os => {
+    const sit = (os.checkout && os.checkout.situacao) || (os.retrabalho ? 'Retrabalho' : 'Finalizado');
+    const dF = parseLocalDate((os.finalizadaEm || '').slice(0, 10));
+    const dataF = dF ? `${String(dF.getDate()).padStart(2,'0')}/${String(dF.getMonth()+1).padStart(2,'0')}/${dF.getFullYear()}` : '—';
+    const sitCls = sit === 'Retrabalho' ? 'st-retrabalho' : 'st-finalizada';
+    return `<div class="os-list-item ${sitCls}" data-os-id="${esc(os.id)}">
+      <div class="list-info">
+        <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge ${sitCls}">${esc(sit)}</span></div>
+        <div class="list-cliente">${esc(os.cliente || 'Sem cliente')}${os.servico ? ' — ' + esc(os.servico) : ''}</div>
+        <div class="list-date">🏁 Finalizada em ${esc(dataF)}${(os.equipe||[]).length ? ' · 👷 ' + esc(os.equipe.join(', ')) : ''}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="filter-bar">
+      <input type="search" id="busca-fin" placeholder="Buscar O.S, cliente, serviço…" value="${esc(STATE.filtroFinalizados || '')}">
+      <span class="text-muted" style="margin-left:auto">${all.length} arquivada(s)</span>
+    </div>
+    <div class="os-list">${cards || '<p class="text-muted">Nenhuma O.S finalizada ainda.</p>'}</div>`;
+
+  bindCardClicks(el);
+  const busca = $('#busca-fin');
+  busca.oninput = () => {
+    STATE.filtroFinalizados = busca.value;
+    renderFinalizados();
+    busca.focus();
+    busca.setSelectionRange(busca.value.length, busca.value.length);
+  };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ESPELHOS (admin) — gera espelhos para instaladores e comercial
+   ══════════════════════════════════════════════════════════════════════════ */
+function abrirEspelhos() {
+  const overlay = $('#modal-overlay');
+  const modal = $('#modal-os');
+  modal.innerHTML = `
+    <div class="modal-header">
+      <div style="flex:1"><div class="modal-title">🪞 Espelhos</div></div>
+      <button class="modal-close" id="esp-fechar">×</button>
+    </div>
+    <div class="espelhos-box">
+      <p class="text-muted">Abra um espelho somente‑leitura para compartilhar com a equipe.</p>
+      <div class="espelhos-opts">
+        <a class="btn-primary w-100" href="equipe.html" target="_blank" rel="noopener">👷 Espelho dos Instaladores</a>
+        <a class="btn-ghost w-100 mt-8" href="equipe.html#comercial" target="_blank" rel="noopener">💼 Espelho Comercial</a>
+      </div>
+    </div>`;
+  overlay.classList.remove('hidden');
+  $('#esp-fechar').onclick = () => overlay.classList.add('hidden');
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    ABA: PAINEL DE CONTROLE (gerencia o CFG)
    ══════════════════════════════════════════════════════════════════════════ */
 const CFG_LISTAS = [
@@ -1343,9 +1771,113 @@ function renderControle() {
       </div>
     </div>`;
 
-  el.innerHTML = (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') + listasHTML + usuariosHTML;
+  // ── Contatos / Funcionários (envio rápido via WhatsApp) ──────────────────
+  const contatos = cfg.funcionarios || [];
+  const contatosHTML = `
+    <div class="cfg-section">
+      <h3>📇 Contatos / Funcionários (WhatsApp)</h3>
+      <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">Cadastre nome, departamento e número para enviar O.S e programações rapidamente.</p>
+      <div class="cfg-list">
+        ${contatos.map((c, i) => `
+          <div class="cfg-item">
+            <span>${esc(c.nome)} <span class="text-muted">(${esc(c.departamento||'—')})</span> · ${esc(c.numero||'')}</span>
+            <span class="flex gap-6">
+              <a class="btn-xs btn-success" href="https://wa.me/55${String(c.numero||'').replace(/\D/g,'')}" target="_blank" rel="noopener" title="Abrir conversa">💬</a>
+              ${ro ? '' : `<button class="btn-xs btn-danger" data-cont-del="${i}">🗑</button>`}
+            </span>
+          </div>`).join('') || '<p class="text-muted">Nenhum contato cadastrado</p>'}
+        ${ro ? '' : `<div class="field-row3 mt-8">
+          <input data-cont-nome placeholder="Nome">
+          <input data-cont-dep placeholder="Departamento">
+          <input data-cont-num placeholder="Número (DDD+nº)" inputmode="tel">
+        </div>
+        <button class="btn-primary btn-sm mt-8" data-cont-add>+ Adicionar contato</button>`}
+      </div>
+    </div>`;
+
+  // ── Níveis de acesso configuráveis (somente admin) ───────────────────────
+  const isAdmin = STATE.user.papel === 'admin';
+  const PERM = getPermissoes();
+  const PAPEIS = ['pcp', 'montagem', 'operacao', 'comercial'];
+  const niveisHTML = isAdmin ? `
+    <div class="cfg-section">
+      <h3>🔐 Níveis de acesso</h3>
+      <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">Defina o que cada nível pode ver/editar. Admin tem acesso total (não editável).</p>
+      <table class="control-table niveis-table">
+        <thead><tr><th>Nível</th>${ABAS_DISPONIVEIS.map(a=>`<th>${esc(a)}</th>`).join('')}<th>Editar</th><th>Cadastrar</th></tr></thead>
+        <tbody>
+          ${PAPEIS.map(papel => {
+            const p = PERM[papel];
+            const abas = p.abas === '*' ? ABAS_DISPONIVEIS : p.abas;
+            return `<tr><td><strong>${esc(papel)}</strong></td>
+              ${ABAS_DISPONIVEIS.map(a => `<td><input type="checkbox" data-nivel-aba="${papel}|${a}" ${abas.includes(a)?'checked':''}></td>`).join('')}
+              <td><input type="checkbox" data-nivel-flag="${papel}|editar" ${p.editar?'checked':''}></td>
+              <td><input type="checkbox" data-nivel-flag="${papel}|cadastrar" ${p.cadastrar?'checked':''}></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <button class="btn-ghost btn-sm mt-8" data-nivel-reset>↺ Restaurar padrão</button>
+    </div>` : '';
+
+  el.innerHTML = (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') + listasHTML + contatosHTML + usuariosHTML + niveisHTML;
+
+  // Handlers de níveis (admin) — funcionam mesmo quando ro é false
+  if (isAdmin) {
+    function salvarNivel(mutator) {
+      const c = STORE.getCFG();
+      const base = getPermissoes();
+      c.niveis = c.niveis || {};
+      PAPEIS.forEach(papel => {
+        const p = base[papel];
+        c.niveis[papel] = c.niveis[papel] || { abas: p.abas === '*' ? ABAS_DISPONIVEIS.slice() : p.abas.slice(), editar: p.editar, cadastrar: p.cadastrar };
+        if (Array.isArray(c.niveis[papel].abas) === false) c.niveis[papel].abas = ABAS_DISPONIVEIS.slice();
+      });
+      mutator(c.niveis);
+      STORE.saveCFG(c);
+    }
+    $$('[data-nivel-aba]', el).forEach(cb => cb.onchange = () => {
+      const [papel, aba] = cb.dataset.nivelAba.split('|');
+      salvarNivel(niveis => {
+        const set = new Set(niveis[papel].abas);
+        if (cb.checked) set.add(aba); else set.delete(aba);
+        set.add('painel'); // painel sempre disponível
+        niveis[papel].abas = ABAS_DISPONIVEIS.filter(a => set.has(a));
+      });
+      aplicarPermissoes(); // reflete a visibilidade das abas na hora
+      toast('Nível atualizado', 'success');
+    });
+    $$('[data-nivel-flag]', el).forEach(cb => cb.onchange = () => {
+      const [papel, flag] = cb.dataset.nivelFlag.split('|');
+      salvarNivel(niveis => { niveis[papel][flag] = cb.checked; });
+      aplicarPermissoes();
+      toast('Nível atualizado', 'success');
+    });
+    const resetBtn = $('[data-nivel-reset]', el);
+    if (resetBtn) resetBtn.onclick = () => {
+      const c = STORE.getCFG(); c.niveis = null; STORE.saveCFG(c);
+      renderControle(); toast('Níveis restaurados ao padrão', 'success');
+    };
+  }
 
   if (ro) return;
+
+  // Handlers de contatos
+  $$('[data-cont-del]', el).forEach(b => b.onclick = () => {
+    const c = STORE.getCFG();
+    (c.funcionarios || []).splice(+b.dataset.contDel, 1);
+    STORE.saveCFG(c); renderControle();
+  });
+  const addCont = $('[data-cont-add]', el);
+  if (addCont) addCont.onclick = () => {
+    const nome = $('[data-cont-nome]', el).value.trim();
+    const numero = $('[data-cont-num]', el).value.trim();
+    if (!nome || !numero) { toast('Informe nome e número', 'error'); return; }
+    const c = STORE.getCFG();
+    c.funcionarios = c.funcionarios || [];
+    c.funcionarios.push({ nome, departamento: $('[data-cont-dep]', el).value.trim(), numero });
+    STORE.saveCFG(c); renderControle(); toast('Contato adicionado', 'success');
+  };
 
   function addToList(key, val) {
     if (!val.trim()) return;
@@ -1384,37 +1916,60 @@ function renderControle() {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   ABA: INSTRUÇÕES
+   INSTRUÇÕES (modal acessível pelo topo)
    ══════════════════════════════════════════════════════════════════════════ */
-function renderInstrucoes() {
-  $('#panel-instrucoes').innerHTML = `
-    <div class="instrucoes">
-      <h2>Como usar</h2>
-      <p>App offline‑first. Trabalha sem internet e sincroniza sozinho quando reconecta. O indicador no topo mostra: ✅ sincronizado · ⏳ pendente · ⚠️ offline.</p>
+function abrirInstrucoes() {
+  const overlay = $('#modal-overlay');
+  $('#modal-os').innerHTML = `
+    <div class="modal-header">
+      <div style="flex:1"><div class="modal-title">❔ Como usar o sistema</div></div>
+      <button class="modal-close" id="instr-fechar">×</button>
+    </div>
+    <div class="instrucoes fs-body" style="max-height:70vh;overflow:auto">
+      <h2>Visão geral</h2>
+      <p>App <strong>offline‑first</strong>: funciona sem internet e sincroniza sozinho ao reconectar. O indicador no topo mostra o estado da sincronização:</p>
+      <ul>
+        <li><strong>✅ Sincronizado</strong> — tudo salvo na nuvem.</li>
+        <li><strong>⏳ N pendente(s)</strong> — N alterações suas aguardando envio (passe o mouse para ver o detalhe). Some sozinho quando reconecta.</li>
+        <li><strong>⚠️ Offline</strong> — sem conexão; pode trabalhar normalmente que envia depois.</li>
+      </ul>
 
-      <h3>As 2 únicas travas</h3>
+      <h2>As 2 únicas travas</h2>
       <ul>
         <li><strong>🔒 Saída / liberar carro:</strong> só após <em>Confirmação = Confirmado</em> (POP EXI‑002).</li>
         <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + Instalação OK + conferido por + ≥1 foto de check‑in (+ problema, se retrabalho).</li>
       </ul>
-      <p>Todo o resto é guia — nenhum campo trava por ordem. Você preenche na ordem que quiser.</p>
+      <p>Todo o resto é guia — nenhum campo trava por ordem. Preencha na ordem que quiser; a barra de <strong>% preenchida</strong> no topo da ficha mostra o quanto falta.</p>
 
-      <h3>Fluxo típico</h3>
-      <ul>
-        <li><strong>PCP:</strong> cria/importa O.S, define itens, clica <em>"✓ Liberar para instalação"</em>.</li>
+      <h2>Fluxo típico</h2>
+      <ol>
+        <li><strong>PCP:</strong> cria/importa a O.S, define itens, clica <em>"✓ Liberar para instalação"</em>.</li>
         <li><strong>Agendamento:</strong> data + período (obrigatório) + equipe → confirma com o cliente.</li>
-        <li><strong>Execução:</strong> libera o carro (após confirmar), tira fotos de check‑in, finaliza.</li>
+        <li><strong>Embarque:</strong> confere embarque/produtos/ferramentas e registra o <strong>KM de saída</strong>.</li>
+        <li><strong>Execução:</strong> libera o carro (após confirmar), tira fotos de check‑in.</li>
+        <li><strong>Check‑out:</strong> registra situação, <strong>KM de retorno</strong> e finaliza. A O.S vai para <em>Finalizados</em>.</li>
+      </ol>
+
+      <h2>Abas</h2>
+      <ul>
+        <li><strong>Painel:</strong> indicadores, trabalhos em execução agora, ranking e tendências. Clique nos números para ver os detalhes.</li>
+        <li><strong>PCP:</strong> todas as O.S ordenadas por data de entrega, com % preenchido e responsável.</li>
+        <li><strong>Instalação:</strong> quadro <em>Kanban</em> por dia (horário, cliente, O.S). Botão 🖨 gera o espelho do dia.</li>
+        <li><strong>Execução / Retrabalho / Finalizados:</strong> acompanhamento na rua, pendências e arquivo.</li>
+        <li><strong>Painel de Controle</strong> (admin): listas, usuários, contatos e níveis de acesso.</li>
       </ul>
 
-      <h3>Importar do PDF do ERP</h3>
-      <p>Botão <code>📄 PDF</code> na barra de topo cria uma O.S já preenchida (puxa a data de "Entrega"). Dentro de uma O.S aberta dá para importar <em>só os itens</em>.</p>
+      <h2>Importar do PDF do ERP</h2>
+      <p>Botão <code>📄 Importar PDF</code> no topo cria uma O.S já preenchida (puxa a data de "Entrega"). Dentro de uma O.S aberta dá para importar <em>só os itens</em>.</p>
 
-      <h3>Espelho do instalador</h3>
-      <p>Os instaladores usam <a href="equipe.html" class="inline-link">equipe.html</a> — veem só as O.S aptas atribuídas a eles e editam apenas a execução.</p>
+      <h2>Espelhos &amp; WhatsApp</h2>
+      <p>O botão <strong>🪞 Espelhos</strong> (admin) abre as visões somente‑leitura para instaladores e comercial. Na ficha e no PDF do dia há envio rápido via WhatsApp para contatos cadastrados (nome · departamento · número) no Painel de Controle.</p>
 
-      <h3>Backup</h3>
-      <p>No <em>Painel</em> há <code>⬇ Backup</code> (baixa um .json) e <code>⬆ Restaurar</code>. A nuvem (Netlify Blobs) já é a fonte da verdade; o backup é rede de segurança extra.</p>
+      <h2>Backup</h2>
+      <p>No <em>Painel</em> há <code>⬇ Backup</code> (baixa um .json) e <code>⬆ Restaurar</code>. A nuvem (Netlify Blobs) é a fonte da verdade; o backup é rede de segurança extra.</p>
     </div>`;
+  overlay.classList.remove('hidden');
+  $('#instr-fechar').onclick = () => overlay.classList.add('hidden');
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1518,9 +2073,13 @@ async function exportarFichaPDF(os) {
     </table>
 
     <h2>4 · Embarque &amp; Execução</h2><table>
-      ${kv('Gerente montagem', os.gerenteMontagem)}${kv('Carro liberado', os.carroLiberado?`Sim — ${os.carroLiberadoPor||''}`:'Não')}
-      ${kv('Hora saída', os.horaSaida)}${kv('Hora retorno', os.horaRetorno)}${kv('Instalação OK', os.instalacaoOK?'Sim':'Não')}
-      ${kv('Conferido por', os.conferidoPor)}${kv('Retrabalho', os.retrabalho?'Sim':'')}${kv('Problema', os.problema)}${kv('Causa', os.causa)}
+      ${kv('Embarque conferido por', os.embarqueConferidoPor)}${kv('Produtos conferidos por', os.produtosConferidosPor)}
+      ${kv('Ferramentas conferidas', os.ferramentasConferidas ? `Sim — ${os.ferramentasConferidasPor||''}` : '')}
+      ${kv('Carro liberado', os.carroLiberado?`Sim — ${os.carroLiberadoPor||''}`:'Não')}
+      ${kv('Hora saída', os.horaSaida)}${kv('KM saída', os.kmSaida)}${kv('Hora retorno', os.horaRetorno)}${kv('KM retorno', os.kmRetorno)}
+      ${kv('KM rodado', (os.kmSaida && os.kmRetorno && (+os.kmRetorno - +os.kmSaida) >= 0) ? (+os.kmRetorno - +os.kmSaida) + ' km' : '')}
+      ${kv('Instalação OK', os.instalacaoOK?'Sim':'Não')}
+      ${kv('Conferido por', os.conferidoPor)}${kv('Situação', os.checkout && os.checkout.situacao)}${kv('Retrabalho', os.retrabalho?'Sim':'')}${kv('Problema', os.problema)}${kv('Causa', os.causa)}
       ${kv('Obs técnicas', os.obsTecnicas)}${kv('Fotos check‑in', (os.fotosCheckinIds||[]).length+' foto(s)')}
       ${kv('Finalizada', os.finalizadaEm?`${new Date(os.finalizadaEm).toLocaleString('pt-BR')} — ${os.finalizadoPor||''}`:'')}
     </table>
@@ -1532,32 +2091,106 @@ async function exportarFichaPDF(os) {
   w.document.close();
 }
 
-function abrirWhatsApp(os) {
-  const txt = `*O.S ${os.numero || '—'}* — ${os.cliente || ''}\n` +
+function montarTextoWhatsApp(os) {
+  const co = os.checkout || {};
+  return `*O.S ${os.numero || '—'}* — ${os.cliente || ''}\n` +
     `📅 ${fmtInstalacao(os.instalacao)}\n` +
     `📍 ${os.endereco || ''}\n` +
     `👷 ${(os.equipe || []).join(', ') || '—'}\n` +
-    (os.confirmacao ? `✅ ${os.confirmacao}` : '');
-  const num = String(os.whatsapp || '').replace(/\D/g, '');
-  const url = num ? `https://wa.me/55${num}?text=${encodeURIComponent(txt)}` : `https://wa.me/?text=${encodeURIComponent(txt)}`;
-  window.open(url, '_blank');
+    (os.confirmacao ? `✅ ${os.confirmacao}\n` : '') +
+    (os.finalizadaEm ? `🏁 Finalizada${co.situacao ? ' — ' + co.situacao : ''}\n` : '') +
+    `\n_Obs: gere o PDF (🖨) e anexe na conversa, se precisar do documento completo._`;
+}
+
+function abrirWhatsApp(os) {
+  const txt = montarTextoWhatsApp(os);
+  const contatos = (STORE.getCFG().funcionarios || []);
+  const numCliente = String(os.whatsapp || '').replace(/\D/g, '');
+
+  // Sem contatos cadastrados e sem número do cliente → compartilhamento genérico
+  if (!contatos.length && !numCliente) {
+    window.open(`https://wa.me/?text=${encodeURIComponent(txt)}`, '_blank');
+    return;
+  }
+
+  // Picker de destino
+  const old = $('#wpp-picker'); if (old) old.remove();
+  const box = document.createElement('div');
+  box.id = 'wpp-picker';
+  box.className = 'wpp-picker-overlay';
+  const abrir = num => window.open(num ? `https://wa.me/55${num}?text=${encodeURIComponent(txt)}` : `https://wa.me/?text=${encodeURIComponent(txt)}`, '_blank');
+  box.innerHTML = `
+    <div class="wpp-picker">
+      <div class="wpp-picker-head"><strong>💬 Enviar O.S por WhatsApp</strong><button class="modal-close" id="wpp-x">×</button></div>
+      <div class="wpp-picker-body">
+        <button class="btn-ghost w-100" id="wpp-pdf">🖨 Gerar PDF para anexar</button>
+        <p class="text-muted" style="font-size:.78rem;margin:6px 0 8px">Gere o PDF, salve, e anexe na conversa após escolher o contato.</p>
+        ${numCliente ? `<button class="btn-success w-100" data-wpp-num="${esc(numCliente)}">📱 Cliente — ${esc(os.cliente||'')}</button>` : ''}
+        ${contatos.map((c, i) => `<button class="btn-ghost w-100 mt-6" data-wpp-num="${esc(String(c.numero||'').replace(/\D/g,''))}">👤 ${esc(c.nome)} <span class="text-muted">(${esc(c.departamento||'—')})</span></button>`).join('')}
+        <button class="btn-ghost w-100 mt-6" data-wpp-num="">🔗 Escolher na hora (sem número)</button>
+      </div>
+    </div>`;
+  document.body.appendChild(box);
+  const fechar = () => box.remove();
+  $('#wpp-x', box).onclick = fechar;
+  box.onclick = e => { if (e.target === box) fechar(); };
+  $('#wpp-pdf', box).onclick = () => exportarFichaPDF(os);
+  $$('[data-wpp-num]', box).forEach(b => b.onclick = () => { abrir(b.dataset.wppNum); fechar(); });
 }
 
 function exportarDiaPDF(dia, lista) {
   const d = parseLocalDate(dia);
   const titulo = d ? `${DIAS_SEMANA[d.getDay()]} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}` : dia;
-  const linhas = lista.map(os => `<tr>
+  const ordenada = lista.slice().sort((a, b) => ordemHora(a).localeCompare(ordemHora(b)));
+  const logo = (typeof LOGO_IMPRESILK !== 'undefined') ? `<img src="${LOGO_IMPRESILK}" style="height:34px">` : '';
+
+  // Tabela-resumo com Horário
+  const linhas = ordenada.map(os => `<tr>
+    <td style="padding:5px 8px;border-bottom:1px solid #eee;white-space:nowrap"><strong>${esc(rotuloHora(os))}</strong></td>
     <td style="padding:5px 8px;border-bottom:1px solid #eee"><strong>${esc(os.numero||'—')}</strong></td>
     <td style="padding:5px 8px;border-bottom:1px solid #eee">${esc(os.cliente)}</td>
     <td style="padding:5px 8px;border-bottom:1px solid #eee">${esc(os.endereco||'')}</td>
-    <td style="padding:5px 8px;border-bottom:1px solid #eee">${esc(os.instalacao?.periodo||'')}</td>
     <td style="padding:5px 8px;border-bottom:1px solid #eee">${esc((os.equipe||[]).join(', '))}</td>
   </tr>`).join('');
+
+  // Espelho do instalador: equipamentos (ferramentas) + suprimentos por O.S
+  const espelho = ordenada.map(os => {
+    const ferr = (os.ferramentas || []);
+    const sup  = (os.suprimentos || []);
+    return `<div class="esp-os">
+      <div class="esp-head"><strong>⏰ ${esc(rotuloHora(os))}</strong> · O.S ${esc(os.numero||'—')} — ${esc(os.cliente||'')}</div>
+      <div class="esp-end">📍 ${esc(os.endereco||'—')}</div>
+      <div class="esp-eq">👷 ${esc((os.equipe||[]).join(', ')||'—')}${os.veiculo?` · 🚚 ${esc(os.veiculo)}`:''}</div>
+      <div class="esp-cols">
+        <div><span class="esp-lbl">🛠 Equipamentos</span>${ferr.length?`<ul>${ferr.map(f=>`<li>${esc(f)}</li>`).join('')}</ul>`:'<p class="esp-vazio">—</p>'}</div>
+        <div><span class="esp-lbl">📦 Suprimentos</span>${sup.length?`<ul>${sup.map(s=>`<li>${esc(s)}</li>`).join('')}</ul>`:'<p class="esp-vazio">—</p>'}</div>
+      </div>
+    </div>`;
+  }).join('');
+
   const w = window.open('', '_blank');
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Programação ${esc(titulo)}</title>
-    <style>body{font-family:-apple-system,Arial,sans-serif;padding:24px}h1{font-size:18px}th{text-align:left;padding:5px 8px;border-bottom:2px solid #ccc;font-size:12px;color:#666}</style></head><body>
-    <h1>Programação — ${esc(titulo)}</h1>
-    <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th>O.S</th><th>Cliente</th><th>Endereço</th><th>Período</th><th>Equipe</th></tr></thead><tbody>${linhas}</tbody></table>
+    <style>
+      body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}
+      .top{display:flex;align-items:center;gap:12px;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:14px}
+      h1{font-size:18px;margin:0}
+      th{text-align:left;padding:5px 8px;border-bottom:2px solid #ccc;font-size:12px;color:#666}
+      table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px}
+      h2{font-size:14px;margin:18px 0 8px}
+      .esp-os{border:1px solid #ddd;border-radius:8px;padding:10px 12px;margin-bottom:10px;page-break-inside:avoid}
+      .esp-head{font-size:14px;margin-bottom:2px}
+      .esp-end,.esp-eq{font-size:12px;color:#444;margin-bottom:2px}
+      .esp-cols{display:flex;gap:24px;margin-top:8px}
+      .esp-cols>div{flex:1}
+      .esp-lbl{display:block;font-size:11px;font-weight:bold;color:#666;text-transform:uppercase;margin-bottom:2px}
+      .esp-cols ul{margin:0;padding-left:18px;font-size:13px}
+      .esp-vazio{margin:0;color:#999;font-size:13px}
+      @media print{.esp-os{border-color:#bbb}}
+    </style></head><body>
+    <div class="top">${logo}<h1>Programação — ${esc(titulo)}</h1></div>
+    <table><thead><tr><th>Horário</th><th>O.S</th><th>Cliente</th><th>Endereço</th><th>Equipe</th></tr></thead><tbody>${linhas}</tbody></table>
+    <h2>Espelho do instalador — equipamentos &amp; suprimentos</h2>
+    ${espelho || '<p style="color:#999">Sem O.S neste dia.</p>'}
     <script>window.onload=function(){window.print()}<\/script></body></html>`);
   w.document.close();
 }
@@ -1638,8 +2271,16 @@ function parseCabecalho(itensPos, os) {
   const b1 = { cliente: [], contato: [], telefone: [] };
   itensPos.filter(i => within(i, Lcli.y, yBot1)).forEach(i => b1[nearestCol(i.x, cols1)].push(i));
 
+  // Contato: somente o nome (primeira linha = maior Y), sem cargo/e-mail/etc.
+  const primeiraLinha = arr => {
+    if (!arr.length) return '';
+    const yTop = Math.max(...arr.map(i => i.y));
+    return arr.filter(i => Math.abs(i.y - yTop) <= 3)
+      .sort((a, b) => a.x - b.x).map(i => i.str.trim()).join(' ').replace(/\s+/g, ' ').trim();
+  };
+
   os.cliente  = join(b1.cliente);
-  os.contato  = join(b1.contato);
+  os.contato  = primeiraLinha(b1.contato);   // apenas o nome
   os.whatsapp = join(b1.telefone);   // Telefone → WhatsApp
 
   // Bloco 2: CNPJ / Endereço
