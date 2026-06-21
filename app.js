@@ -524,6 +524,7 @@ const ACESSO_OPTS  = ['No baixo', 'Escada', 'Andaime', 'Plataforma elevatória',
 const FIXACAO_OPTS = ['Parafuso', 'Fita Hellerman', 'Fita dupla face', 'Cola', 'Rebite', 'Outro'];
 const PERIODO_OPTS = ['Manhã', 'Tarde', 'Dia inteiro', 'Horário'];
 const CONF_OPTS    = ['', 'Confirmado', 'Pendente', 'Recusado'];
+const CANAL_OPTS   = ['WhatsApp', 'Telefone', 'E-mail', 'Presencial', 'Outro'];
 
 let _modalDraft = null;   // cópia de trabalho da O.S
 let _modalDirty = false;
@@ -739,6 +740,8 @@ function blocoAgenda(os, ro, done) {
     : os.confirmacao === 'Pendente' ? 'pendente'
     : os.confirmacao === 'Recusado' ? 'recusado' : 'nenhum';
   const confOpts = CONF_OPTS.map(o => `<option value="${o}" ${os.confirmacao === o ? 'selected' : ''}>${o || '— selecionar —'}</option>`).join('');
+  const canalSel = os.confCanal && !CANAL_OPTS.includes(os.confCanal) ? `<option selected>${esc(os.confCanal)}</option>` : '';
+  const canalOpts = CANAL_OPTS.map(o => `<option ${os.confCanal === o ? 'selected' : ''}>${o}</option>`).join('');
 
   return `
   <details class="card-fs ${done ? 'done' : ''}" data-bloco="agenda">
@@ -769,16 +772,16 @@ function blocoAgenda(os, ro, done) {
         </div>
         <div class="field-row3">
           <div class="field"><label>Situação</label><select data-f="confirmacao">${confOpts}</select></div>
-          <div class="field"><label>Canal</label><input data-f="confCanal" value="${esc(os.confCanal)}" placeholder="WhatsApp/Telefone"></div>
+          <div class="field"><label>Canal</label><select data-f="confCanal"><option value="">— selecionar —</option>${canalOpts}${canalSel}</select></div>
           <div class="field"><label>Hora</label><input type="time" data-f="confHora" value="${esc(os.confHora)}"></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Confirmado por</label><input data-f="confPor" value="${esc(os.confPor)}"></div>
+          <div class="field"><label>Confirmado por</label><select data-f="confPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.confPor)}</select></div>
           <div class="field"><label>Obs</label><input data-f="confObs" value="${esc(os.confObs)}"></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Quem do cliente acompanha</label><input data-f="confAcompanha" value="${esc(os.confAcompanha)}"></div>
-          <div class="field"><label>Contato do acompanhante</label><input data-f="confAcompanhaContato" value="${esc(os.confAcompanhaContato)}"></div>
+          <div class="field"><label>Acompanhante da Empresa</label><input data-f="confAcompanha" value="${esc(os.confAcompanha)}"></div>
+          <div class="field"><label>Contato do acompanhante</label><input type="tel" inputmode="tel" data-f="confAcompanhaContato" value="${esc(os.confAcompanhaContato)}" placeholder="(00) 00000-0000"></div>
         </div>
         <button class="btn-success btn-sm edit-only mt-8" id="btn-confirmei">✓ Confirmei agora</button>
       </div>
@@ -839,7 +842,9 @@ function blocoExec(os, ro, done) {
         <div class="field"><label>KM retorno (check‑out)</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>
       </div>
       <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" ${os.instalacaoOK?'checked':''}> ✅ Instalação OK</label>
-      <div class="field"><label>Conferido por</label><input data-f="conferidoPor" value="${esc(os.conferidoPor)}"></div>
+      <div class="field"><label>Conferido por</label>
+        <select data-f="conferidoPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.conferidoPor)}</select>
+      </div>
 
       <label class="check-toggle retrab"><input type="checkbox" data-f-check="retrabalho" ${os.retrabalho?'checked':''}> 🔴 Retrabalho?</label>
       <div data-retrabalho-fields style="${os.retrabalho?'':'display:none'}">
@@ -870,7 +875,7 @@ function blocoExec(os, ro, done) {
         <div class="field-row3 mt-8">
           <div class="field"><label>Situação</label><select data-f="checkout.situacao"><option value="">— selecionar —</option>${sitOpts}${sitExtra}</select></div>
           <div class="field"><label>Hora</label><input type="time" data-f="checkout.hora" value="${esc(co.hora)}"></div>
-          <div class="field"><label>Conferido por</label><input data-f="checkout.por" value="${esc(co.por)}"></div>
+          <div class="field"><label>Conferido por</label><select data-f="checkout.por"><option value="">— selecionar —</option>${peopleOptions(cfg, co.por)}</select></div>
         </div>
         <div class="field"><label>Obs</label><input data-f="checkout.obs" value="${esc(co.obs)}"></div>
         <div class="field"><label><input type="checkbox" data-f-check="checkout.confirmado" ${co.confirmado?'checked':''}> Check‑out confirmado</label></div>
@@ -1141,8 +1146,7 @@ function bindModalEvents(os, ro) {
       toast('Falta: ' + faltas.join(', '), 'error');
       return;
     }
-    _modalDraft.finalizadaEm = nowISO();
-    _modalDraft.finalizadoPor = STATE.user.nome;
+    aplicarFinalizacao(_modalDraft);
     saveDraft(); reRenderModalKeepOpen();
     toast('Instalação finalizada 🏁', 'success');
   };
@@ -1230,6 +1234,16 @@ function validarFinalizacao(os) {
   return f;
 }
 
+// Marca a O.S como finalizada e atualiza o status para "Finalizado" (item 1).
+// Usado pelo botão do modal e pelo botão "Finalizar Serviço" do card (item 6).
+function aplicarFinalizacao(os) {
+  os.finalizadaEm = nowISO();
+  os.finalizadoPor = STATE.user.nome;
+  os.checkout = os.checkout || {};
+  if (!os.checkout.situacao) os.checkout.situacao = 'Finalizado';
+  if (!os.checkout.confirmado) os.checkout.confirmado = true;
+}
+
 
 /* ══════════════════════════════════════════════════════════════════════════
    CARD DE O.S (reutilizável)
@@ -1259,7 +1273,12 @@ function osCardHTML(os) {
       </div>
       <div class="card-resp">✍ ${esc(resp)}</div>
       <div class="card-checklist">${chkStr}${itens.length?` · ${prontos}/${itens.length} itens`:''}</div>
-      <div class="card-acoes"><button class="btn-ghost btn-sm card-pop" data-pop-os="${esc(os.id)}" title="Enviar POP para a equipe">📚 Enviar POP</button></div>
+      <div class="card-acoes">
+        <button class="btn-ghost btn-sm card-pop" data-pop-os="${esc(os.id)}" title="Enviar POP para a equipe">📚 Enviar POP</button>
+        ${os.finalizadaEm
+          ? `<span class="card-fin-tag" title="Serviço finalizado">✓ Finalizado</span>`
+          : `<button class="btn-success btn-sm edit-only card-finalizar" data-finalizar-os="${esc(os.id)}" title="Finalizar serviço">🏁 Finalizar Serviço</button>`}
+      </div>
     </div>`;
 }
 
@@ -1278,6 +1297,32 @@ function bindCardClicks(container) {
       if (os && typeof abrirSeletorPOPparaOS === 'function') abrirSeletorPOPparaOS(os);
     };
   });
+  // Item 6: botão "Finalizar Serviço" direto no card.
+  $$('[data-finalizar-os]', container).forEach(b => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      finalizarServicoDoCard(b.dataset.finalizarOs);
+    };
+  });
+}
+
+// Finaliza a O.S a partir do card. Se faltar algum requisito, abre o modal
+// para o usuário completar (foto de check‑in, confirmação, etc.).
+function finalizarServicoDoCard(osId) {
+  const os = STORE.getOS(osId);
+  if (!os) return;
+  const faltas = validarFinalizacao(os);
+  if (faltas.length) {
+    toast('Para finalizar, falta: ' + faltas.join(', '), 'error');
+    openModal(os);
+    return;
+  }
+  aplicarFinalizacao(os);
+  os.atualizadoEm = nowISO();
+  os.atualizadoPor = STATE.user.nome;
+  STORE.saveOS(os);
+  toast('Serviço finalizado 🏁', 'success');
+  renderActiveTab();
 }
 
 function applyFilter(list, busca) {
@@ -1343,10 +1388,26 @@ function salvarPainelVista() {
   } catch { toast('Não foi possível salvar a visão', 'error'); }
 }
 // Bloco recolhível do Painel (item 5) com título padrão (item 4).
+// Ícones Tabler (SVG inline, traço branco) por bloco do Painel — item 2.
+const TABLER_ICOS = {
+  exec:    '<path d="M7 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M17 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M5 17h-2v-11a1 1 0 0 1 1 -1h9v12m-4 0h6m4 0h2v-6h-8m0 -5h5l3 5"/>',
+  tend:    '<path d="M3 17l6 -6l4 4l8 -8"/><path d="M14 7l7 0l0 7"/>',
+  func:    '<path d="M10 13a3 3 0 1 0 0 -6a3 3 0 0 0 0 6z"/><path d="M21 21l-2.35 -2.35"/><path d="M3 19a4 4 0 0 1 4 -4h2"/>',
+  oper:    '<path d="M8 21l8 0"/><path d="M12 17l0 4"/><path d="M7 4l10 0"/><path d="M17 4v8a5 5 0 0 1 -10 0v-8"/><path d="M5 9a2 2 0 0 1 -2 -2v-1a1 1 0 0 1 1 -1h3"/><path d="M19 9a2 2 0 0 0 2 -2v-1a1 1 0 0 0 -1 -1h-3"/>',
+  nota:    '<path d="M12 17.75l-6.172 3.245l1.179 -6.873l-5 -4.867l6.9 -1l3.086 -6.253l3.086 6.253l6.9 1l-5 4.867l1.179 6.873z"/>',
+  desemp:  '<path d="M9 7m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/><path d="M3 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M21 21v-2a4 4 0 0 0 -3 -3.85"/>',
+  prodfunc:'<path d="M3 3v18h18"/><path d="M9 17v-5"/><path d="M13 17v-3"/><path d="M17 17v-7"/>',
+  cmp:     '<path d="M3 6l4 0"/><path d="M3 12l4 0"/><path d="M3 18l4 0"/><path d="M11 5l10 0"/><path d="M11 12l10 0"/><path d="M11 19l10 0"/>'
+};
+function tablerIco(id) {
+  const p = TABLER_ICOS[id];
+  if (!p) return '';
+  return `<span class="bloco-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg></span>`;
+}
 function painelBloco(id, titulo, corpo) {
   const aberto = painelVistaAberta(id);
   return `<div class="painel-bloco ${aberto ? 'aberto' : ''}" data-bloco="${id}">
-    <h3 class="bloco-titulo painel-h" data-bloco-tog="${id}">${titulo}<span class="bloco-chevron">${aberto ? '▾' : '▸'}</span></h3>
+    <h3 class="bloco-titulo painel-h" data-bloco-tog="${id}">${tablerIco(id)}${titulo}<span class="bloco-chevron">${aberto ? '▾' : '▸'}</span></h3>
     <div class="painel-bloco-corpo"${aberto ? '' : ' hidden'}>${corpo}</div>
   </div>`;
 }
@@ -1555,6 +1616,9 @@ function renderPainelKPIs() {
   const selFunc = STATE._painelFunc || '';
   const funcOpts = pessoas.map(p => `<option ${selFunc===p?'selected':''}>${esc(p)}</option>`).join('');
 
+  // ── Produtividade por funcionário (relatório mensal — movido do Painel de Controle, item 7) ──
+  const prodMes = STATE._prodMes || hojeISO().slice(0, 7);
+
   el.innerHTML = `
     <div class="kpi-grid">
       <div class="kpi-card clickable" data-detail="todas"><div class="kpi-val">${todas.length}</div><div class="kpi-lbl">O.S no período</div></div>
@@ -1567,34 +1631,38 @@ function renderPainelKPIs() {
     </div>
     ${prevTxt ? `<div style="margin:-6px 0 10px">${prevTxt}</div>` : ''}
 
-    ${painelBloco('exec', '🚗 Trabalhos em execução agora',
+    ${painelBloco('exec', 'Trabalhos em execução agora',
       `<div class="exec-now-grid">${execCards || emptyState('🚗', 'Ninguém na rua agora', 'Quando uma equipe iniciar uma instalação ela aparece aqui.')}</div>`)}
 
-    ${painelBloco('tend', '📈 Tendências',
+    ${painelBloco('tend', 'Tendências',
       `<div class="trend-grid">${trendHTML}</div>`)}
 
-    ${painelBloco('func', '🔎 Serviços por funcionário',
+    ${painelBloco('func', 'Serviços por funcionário',
       `<div class="filter-bar"><select id="painel-func"><option value="">— selecionar funcionário —</option>${funcOpts}</select></div>`)}
 
-    ${painelBloco('oper', '🏆 Ranking de preenchimento (operadores)',
+    ${painelBloco('oper', 'Ranking de preenchimento (operadores)',
       `<table class="control-table">
         <thead><tr><th>Operador</th><th>O.S preenchidas</th><th>Média preenchimento</th></tr></thead>
         <tbody>${rankOper || '<tr><td colspan="3" class="text-muted" style="text-align:center;padding:12px">Sem dados</td></tr>'}</tbody>
       </table>`)}
 
-    ${painelBloco('nota', '🌟 Ranking de notas <span class="text-muted" style="font-weight:400;font-size:.75rem">(quem tem menos retrabalho pontua mais — clique para ver os serviços)</span>',
+    ${painelBloco('nota', 'Ranking de notas <span class="text-muted" style="font-weight:400;font-size:.75rem">(quem tem menos retrabalho pontua mais — clique para ver os serviços)</span>',
       `<table class="control-table">
         <thead><tr><th>Instalador</th><th>Nota</th><th>Entregas</th><th>Retrabalhos</th></tr></thead>
         <tbody>${rankNota || '<tr><td colspan="4" class="text-muted" style="text-align:center;padding:12px">Sem dados no período</td></tr>'}</tbody>
       </table>`)}
 
-    ${painelBloco('desemp', '👷 Desempenho por instalador <span class="text-muted" style="font-weight:400;font-size:.75rem">(clique para ver os serviços)</span>',
+    ${painelBloco('desemp', 'Desempenho por instalador <span class="text-muted" style="font-weight:400;font-size:.75rem">(clique para ver os serviços)</span>',
       `<table class="control-table">
         <thead><tr><th>Instalador</th><th>Entregas</th><th>%Retrab</th><th>%Check‑in</th><th>Média h</th></tr></thead>
         <tbody>${linhas || '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:12px">Sem dados no período</td></tr>'}</tbody>
       </table>`)}
 
-    ${painelBloco('cmp', '⚖️ Comparar colaboradores',
+    ${painelBloco('prodfunc', 'Produtividade por Funcionário <span class="text-muted" style="font-weight:400;font-size:.75rem">(quantas O.S cada pessoa finalizou no mês)</span>',
+      `<div class="flex gap-6"><input type="month" id="prod-mes" value="${prodMes}"><button class="btn-primary btn-sm" id="prod-mes-pdf">📄 PDF</button></div>
+       <div id="prod-mes-out" style="margin-top:8px"></div>`)}
+
+    ${painelBloco('cmp', 'Comparar colaboradores',
       `<div class="filter-bar">
         <select id="cmp-a"><option value="">Colaborador A</option>${pessoas.map(p=>`<option ${STATE._cmpA===p?'selected':''}>${esc(p)}</option>`).join('')}</select>
         <select id="cmp-b"><option value="">Colaborador B</option>${pessoas.map(p=>`<option ${STATE._cmpB===p?'selected':''}>${esc(p)}</option>`).join('')}</select>
@@ -1637,6 +1705,16 @@ function renderPainelKPIs() {
     renderComparativo(finalizadas);
   };
   cmpA.onchange = doCmp; cmpB.onchange = doCmp;
+
+  // Produtividade por funcionário (relatório mensal — item 7)
+  const prodMesInp = $('#prod-mes', el);
+  const renderProdMes = () => { const out = $('#prod-mes-out', el); if (out) out.innerHTML = tabelaProdutividadeMes(prodMesInp.value); };
+  if (prodMesInp) {
+    prodMesInp.onchange = () => { STATE._prodMes = prodMesInp.value; renderProdMes(); };
+    renderProdMes();
+  }
+  const prodMesPdf = $('#prod-mes-pdf', el);
+  if (prodMesPdf) prodMesPdf.onclick = () => relatorioMensalPorPessoa($('#prod-mes', el).value);
 
   if (STATE._cmpA || STATE._cmpB) renderComparativo(finalizadas);
   if (STATE._painelDetail) renderPainelDetalhe(todas, todasOS, finalizadas, porInst);
@@ -2345,27 +2423,7 @@ function renderControle() {
       <button class="btn-ghost btn-sm mt-8" data-nivel-reset>↺ Restaurar padrão</button>
     </div>` : '';
 
-  // ── Relatório de produtividade mensal por instalador ─────────────────────
-  const mesAtual = hojeISO().slice(0, 7);
-  const relatorioHTML = `
-    <div class="cfg-section">
-      <h3>📊 Produtividade por instalador</h3>
-      <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">Quantas O.S cada pessoa entregou (finalizou) no mês escolhido.</p>
-      <div class="flex gap-6 mt-8">
-        <input type="month" id="rel-mes" value="${mesAtual}">
-        <button class="btn-primary btn-sm" id="rel-mes-pdf">📄 PDF</button>
-      </div>
-      <div id="rel-mes-out"></div>
-    </div>`;
-
-  el.innerHTML = (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') + relatorioHTML + listasHTML + contatosHTML + usuariosHTML + niveisHTML;
-
-  // Handlers do relatório mensal (disponível mesmo em somente-leitura)
-  const relMes = $('#rel-mes', el);
-  const renderRelMes = () => { const out = $('#rel-mes-out', el); if (out) out.innerHTML = tabelaProdutividadeMes(relMes.value); };
-  if (relMes) { relMes.onchange = renderRelMes; renderRelMes(); }
-  const relMesPdf = $('#rel-mes-pdf', el);
-  if (relMesPdf) relMesPdf.onclick = () => relatorioMensalPorPessoa($('#rel-mes', el).value);
+  el.innerHTML = (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') + listasHTML + contatosHTML + usuariosHTML + niveisHTML;
 
   // Handlers de níveis (admin) — funcionam mesmo quando ro é false
   if (isAdmin) {

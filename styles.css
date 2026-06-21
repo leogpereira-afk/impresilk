@@ -577,11 +577,22 @@ button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 /* ── Painel: cabeçalhos, cliques, tendências, comparativo ────────────────── */
 .painel-h { margin: 16px 0 8px; font-size: .9rem; color: var(--muted); }
 
-/* Fase 4 — blocos do Painel: título padrão (item 4) + recolher inline (item 5) */
+/* Fase 4 — blocos do Painel: título em destaque (item 2) + recolher inline (item 3) */
 .painel-bloco { margin: 12px 0; }
-.bloco-titulo.painel-h { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 500; color: var(--text); padding-bottom: 8px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
-.bloco-chevron { margin-left: auto; color: var(--muted); font-size: .9rem; }
-.painel-bloco-corpo { padding-top: 10px; }
+.bloco-titulo, .bloco-titulo.painel-h {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 16px; font-weight: 500; color: #fff;
+  background: var(--blue);
+  margin: 16px 0 0; padding: 9px 12px;
+  border-radius: 8px; border-bottom: 3px solid var(--blue-d);
+  cursor: pointer; user-select: none;
+}
+.painel-bloco.aberto .bloco-titulo { border-radius: 8px 8px 0 0; }
+.bloco-titulo .bloco-ico { display: inline-flex; align-items: center; }
+.bloco-titulo .bloco-ico svg { width: 20px; height: 20px; }
+.bloco-titulo .text-muted { color: rgba(255,255,255,.82) !important; }
+.bloco-chevron { margin-left: auto; color: rgba(255,255,255,.9); font-size: .9rem; }
+.painel-bloco-corpo { padding: 12px 4px 4px; }
 .kpi-card.clickable { cursor: pointer; transition: box-shadow .15s, transform .1s; }
 .kpi-card.clickable:hover { box-shadow: var(--shadow-m); transform: translateY(-1px); }
 .control-table tr.row-click { cursor: pointer; }
@@ -887,8 +898,10 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .tag-atraso, .tag-retrab {
   display: inline-block; font-size: .64rem; font-weight: 700;
   padding: 1px 6px; border-radius: 10px; vertical-align: middle; margin-left: 4px;
-  background: #fee2e2; color: var(--red);
 }
+/* Padrão de cores de status (item 14): Atrasado = vermelho · Retrabalho = âmbar */
+.tag-atraso { background: #fee2e2; color: var(--red); }
+.tag-retrab { background: #fef3c7; color: var(--amber); }
 
 /* ── Tag de geolocalização do check‑in ─────────────────────────────── */
 .gps-tag {
@@ -1039,8 +1052,10 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .pop-envio-manual input { flex: 1; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: .85rem; }
 
 /* Item 25 — botão Enviar POP no card da O.S */
-.card-acoes { margin-top: 8px; display: flex; justify-content: flex-end; }
+.card-acoes { margin-top: 8px; display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .card-pop { font-size: .78rem; }
+.card-finalizar { font-size: .78rem; }
+.card-fin-tag { font-size: .78rem; font-weight: 600; color: var(--green); align-self: center; }
 .os-list-item .card-pop { margin-left: auto; align-self: center; }
 .pop-envio-grupo { font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 10px 0 4px; }
 .pop-os-box { max-width: 460px; }
