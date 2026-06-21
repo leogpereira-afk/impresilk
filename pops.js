@@ -921,7 +921,7 @@ function montarTextoPOP(pop) {
   pop.ferramentas.forEach(f => linhas.push(`• ${f}`));
   linhas.push('');
   linhas.push('*📋 Passo a passo:*');
-  pop.passos.forEach((p, i) => linhas.push(`${i + 1}. ${p}`));
+  pop.passos.forEach((p, i) => linhas.push(`${i + 1}. ${popPassoTexto(p)}`));
   linhas.push('');
   linhas.push('*⚠️ Pontos de atenção:*');
   pop.atencao.forEach(a => linhas.push(`• ${a}`));
@@ -934,6 +934,7 @@ function montarTextoPOP(pop) {
 }
 
 function enviarPOPWhatsApp(pop, numero) {
+  try { popRegistrarEnvio(pop.id, numero); } catch {}
   const txt = encodeURIComponent(montarTextoPOP(pop));
   const num = String(numero || '').replace(/\D/g, '');
   const url = num
@@ -942,16 +943,70 @@ function enviarPOPWhatsApp(pop, numero) {
   window.open(url, '_blank');
 }
 
+/* ── Itens 28-30: armazenamento de POPs personalizados + métricas ─────────
+   Os 33 POPs base ficam no código (POPS). O admin pode criar/editar/publicar
+   POPs adicionais, guardados em localStorage. A lista efetiva é a mescla das
+   duas fontes (custom com mesmo id sobrescreve a base). */
+const POP_LS_CUSTOM  = 'impresilk_pops_custom';
+const POP_LS_METRICS = 'impresilk_pops_metrics';
+
+function popLoadCustom() {
+  try { return JSON.parse(localStorage.getItem(POP_LS_CUSTOM)) || []; } catch { return []; }
+}
+function popSaveCustom(arr) {
+  try { localStorage.setItem(POP_LS_CUSTOM, JSON.stringify(arr)); } catch {}
+}
+
+// Lista mesclada base + personalizados.
+function popsTodos() {
+  const custom = popLoadCustom();
+  const byId = {};
+  POPS.forEach(p => { byId[p.id] = p; });
+  custom.forEach(p => { byId[p.id] = Object.assign({}, byId[p.id] || {}, p); });
+  return Object.keys(byId).map(k => byId[k]).sort((a, b) => a.id - b.id);
+}
+// Só publicados (esconde rascunhos) — usado nas telas de consulta/envio.
+function popsPublicados() { return popsTodos().filter(p => !p.rascunho); }
+function popById(id) { return popsTodos().find(p => p.id === +id) || null; }
+function popProximoId() {
+  const ids = popsTodos().map(p => p.id);
+  return Math.max(999, ...ids) + 1;
+}
+
+// Passo pode ser string (base) ou {texto, foto} (custom com foto).
+function popPassoTexto(p) { return (p && typeof p === 'object') ? (p.texto || '') : String(p || ''); }
+function popPassoFoto(p)  { return (p && typeof p === 'object') ? (p.foto || '') : ''; }
+
+/* ── Métricas de uso (item 30) ───────────────────────────────────────────── */
+function popLoadMetrics() {
+  try {
+    const m = JSON.parse(localStorage.getItem(POP_LS_METRICS));
+    return m && typeof m === 'object' ? Object.assign({ acessos: {}, envios: {}, catDuvidas: {} }, m) : { acessos: {}, envios: {}, catDuvidas: {} };
+  } catch { return { acessos: {}, envios: {}, catDuvidas: {} }; }
+}
+function popSaveMetrics(m) { try { localStorage.setItem(POP_LS_METRICS, JSON.stringify(m)); } catch {} }
+function popRegistrarAcesso(id) {
+  const m = popLoadMetrics(); m.acessos[id] = (m.acessos[id] || 0) + 1; popSaveMetrics(m);
+}
+function popRegistrarEnvio(id, destino) {
+  const m = popLoadMetrics();
+  (m.envios[id] = m.envios[id] || []).push({ destino: String(destino || ''), quando: new Date().toISOString() });
+  const pop = popById(id);
+  if (pop) m.catDuvidas[pop.cat] = (m.catDuvidas[pop.cat] || 0) + 1;
+  popSaveMetrics(m);
+}
+
 /* ── Estado local da aba POPs ───────────────────────────────────────────── */
 const POP_STATE = { cat: 'todos', busca: '', abertos: {} };
 
 function popsFiltrados() {
   const q = POP_STATE.busca.trim().toLowerCase();
-  return POPS.filter(p => {
+  return popsPublicados().filter(p => {
     if (POP_STATE.cat !== 'todos' && p.cat !== POP_STATE.cat) return false;
     if (!q) return true;
     const alvo = [p.titulo, popCatLabel(p.cat), p.nivel,
-      ...p.materiais, ...p.ferramentas, ...p.passos, ...p.atencao, ...p.dicas
+      ...(p.materiais || []), ...(p.ferramentas || []),
+      ...(p.passos || []).map(popPassoTexto), ...(p.atencao || []), ...(p.dicas || [])
     ].join(' ').toLowerCase();
     return alvo.includes(q);
   });
@@ -964,23 +1019,23 @@ function popCardHTML(pop) {
     <div class="pop-detalhe">
       <div class="pop-bloco">
         <h4>🧰 Materiais</h4>
-        <ul>${pop.materiais.map(m => `<li>${popEsc(m)}</li>`).join('')}</ul>
+        <ul>${(pop.materiais || []).map(m => `<li>${popEsc(m)}</li>`).join('')}</ul>
       </div>
       <div class="pop-bloco">
         <h4>🔧 Ferramentas</h4>
-        <ul>${pop.ferramentas.map(f => `<li>${popEsc(f)}</li>`).join('')}</ul>
+        <ul>${(pop.ferramentas || []).map(f => `<li>${popEsc(f)}</li>`).join('')}</ul>
       </div>
       <div class="pop-bloco">
         <h4>📋 Passo a passo</h4>
-        <ol>${pop.passos.map(p => `<li>${popEsc(p)}</li>`).join('')}</ol>
+        <ol>${(pop.passos || []).map(p => `<li>${popEsc(popPassoTexto(p))}${popPassoFoto(p) ? `<br><img class="pop-passo-foto" src="${popEsc(popPassoFoto(p))}" alt="foto do passo">` : ''}</li>`).join('')}</ol>
       </div>
       <div class="pop-bloco pop-atencao">
         <h4>⚠️ Pontos de atenção</h4>
-        <ul>${pop.atencao.map(a => `<li>${popEsc(a)}</li>`).join('')}</ul>
+        <ul>${(pop.atencao || []).map(a => `<li>${popEsc(a)}</li>`).join('')}</ul>
       </div>
       <div class="pop-bloco pop-dicas">
         <h4>✅ Dicas de qualidade</h4>
-        <ul>${pop.dicas.map(d => `<li>${popEsc(d)}</li>`).join('')}</ul>
+        <ul>${(pop.dicas || []).map(d => `<li>${popEsc(d)}</li>`).join('')}</ul>
       </div>
       <button class="btn-primary btn-sm pop-enviar" data-pop="${pop.id}">💬 Enviar este POP</button>
     </div>`;
@@ -1028,16 +1083,21 @@ function renderPops() {
     });
   }
 
+  const admin = popEhAdmin();
   el.innerHTML = `
     <div class="pops-topo">
       <div class="pops-cab">
         <h2>📚 Procedimentos Operacionais Padrão</h2>
-        <span class="pops-total">${POPS.length} POPs · ${POP_CATS.length} categorias</span>
+        <span class="pops-total">${popsPublicados().length} POPs · ${POP_CATS.length} categorias</span>
+        ${admin ? '<button class="btn-ghost btn-sm" id="pop-gerenciar" style="margin-left:auto">⚙️ Gerenciar</button>' : ''}
       </div>
       <input id="pop-busca" class="pop-busca" type="search" placeholder="🔍 Buscar POP (ex.: bolha, letra caixa, vidro…)" value="${popEsc(POP_STATE.busca)}">
       <div class="pop-chips">${chips}</div>
     </div>
     <div class="pops-lista">${corpo}</div>`;
+
+  const ger = $('#pop-gerenciar');
+  if (ger) ger.onclick = () => abrirGerenciadorPOPs();
 
   // Busca (mantém foco e cursor).
   const busca = $('#pop-busca');
@@ -1059,7 +1119,9 @@ function renderPops() {
     h.onclick = (e) => {
       if (e.target.closest('.pop-enviar')) return; // não recolhe ao clicar em enviar
       const id = +h.dataset.toggle;
-      POP_STATE.abertos[id] = !POP_STATE.abertos[id];
+      const abrindo = !POP_STATE.abertos[id];
+      POP_STATE.abertos[id] = abrindo;
+      if (abrindo) { try { popRegistrarAcesso(id); } catch {} } // item 30: conta acesso
       renderPops();
     };
   });
@@ -1068,10 +1130,16 @@ function renderPops() {
   $$('.pop-enviar').forEach(b => {
     b.onclick = (e) => {
       e.stopPropagation();
-      const pop = POPS.find(p => p.id === +b.dataset.pop);
+      const pop = popById(b.dataset.pop);
       if (pop) abrirEnvioPOP(pop);
     };
   });
+}
+
+// Admin? (usado para liberar o gerenciador de POPs)
+function popEhAdmin() {
+  try { return typeof STATE !== 'undefined' && STATE.user && STATE.user.papel === 'admin'; }
+  catch { return false; }
 }
 
 // Seletor de contato para envio (usa contatos cadastrados em CFG, se houver).
@@ -1116,4 +1184,387 @@ function abrirEnvioPOP(pop) {
     enviarPOPWhatsApp(pop, n); fechar();
   };
   overlay.querySelector('#pop-env-sem').onclick = () => { enviarPOPWhatsApp(pop, ''); fechar(); };
+}
+
+/* ── Item 25: enviar POP a partir do card da O.S (pré-filtrado por categoria) ──
+   Deriva a categoria provável a partir do serviço/itens da O.S e abre um
+   seletor já filtrado. O usuário ainda pode trocar de categoria ou buscar. */
+const POP_CAT_KEYWORDS = {
+  adesivos:      ['adesiv', 'vinil', 'vidro', 'jatead', 'recorte', 'parede', 'piso'],
+  envelopamento: ['envelop', 'wrap', 'frota', 'veicul', 'carro', 'ônibus', 'onibus', 'van', 'moto'],
+  acm:           ['acm', 'fachada', 'revestiment', 'alucobond', 'painel'],
+  letras:        ['letra', 'caixa', 'luminos', 'led', 'neon', 'backlight', 'frontlight', 'channel'],
+  banners:       ['banner', 'lona', 'tensionad', 'wind', 'faixa', 'backdrop'],
+  sinalizacao:   ['sinaliz', 'placa', 'totem', 'pictograma', 'wayfind', 'evacua'],
+  altura:        ['altura', 'andaime', 'rapel', 'cordas', 'plataforma', 'içament', 'icament'],
+  acabamento:    ['acabament', 'plotage', 'plotagem', 'laminaç', 'lamina', 'corte', 'refile']
+};
+
+function popCategoriaSugerida(os) {
+  if (!os) return null;
+  const itens = (os.itens || []).map(i => i && i.descricao || '').join(' ');
+  const alvo = `${os.servico || ''} ${itens}`.toLowerCase();
+  if (!alvo.trim()) return null;
+  let melhor = null, melhorScore = 0;
+  for (const cat in POP_CAT_KEYWORDS) {
+    let score = 0;
+    POP_CAT_KEYWORDS[cat].forEach(kw => { if (alvo.includes(kw)) score++; });
+    if (score > melhorScore) { melhorScore = score; melhor = cat; }
+  }
+  return melhor;
+}
+
+// Contatos da equipe da O.S têm prioridade no envio.
+function popContatosDaOS(os) {
+  let cfg = null;
+  try { cfg = (typeof STORE !== 'undefined' && STORE.getCFG) ? STORE.getCFG() : null; } catch { cfg = null; }
+  const funcs = (cfg && Array.isArray(cfg.funcionarios)) ? cfg.funcionarios.filter(c => c && c.numero) : [];
+  const equipe = (os && os.equipe || []).map(n => String(n).toLowerCase());
+  const naEquipe = funcs.filter(c => equipe.includes(String(c.nome || '').toLowerCase()));
+  const resto = funcs.filter(c => !naEquipe.includes(c));
+  return { naEquipe, resto };
+}
+
+function abrirSeletorPOPparaOS(os) {
+  const catSugerida = popCategoriaSugerida(os);
+  const estado = { cat: catSugerida || 'todos', busca: '' };
+
+  const overlay = document.createElement('div');
+  overlay.className = 'pop-envio-overlay';
+  document.body.appendChild(overlay);
+  const fechar = () => overlay.remove();
+
+  function lista() {
+    const q = estado.busca.trim().toLowerCase();
+    return popsPublicados().filter(p => {
+      if (estado.cat !== 'todos' && p.cat !== estado.cat) return false;
+      if (!q) return true;
+      const alvo = [p.titulo, popCatLabel(p.cat), p.nivel].join(' ').toLowerCase();
+      return alvo.includes(q);
+    });
+  }
+
+  function render() {
+    const chips = [{ id: 'todos', label: 'Todas', ico: '📚' }, ...POP_CATS]
+      .map(c => `<button class="pop-chip ${estado.cat === c.id ? 'ativo' : ''}" data-cat="${c.id}">${c.ico} ${popEsc(c.label)}</button>`)
+      .join('');
+    const itens = lista().map(p => {
+      const nc = popNivelClasse(p.nivel);
+      return `<button class="pop-os-item" data-pop="${p.id}">
+        <span class="pop-num">${p.id}</span>
+        <span class="pop-os-tit">${popEsc(p.titulo)}</span>
+        <span class="pop-nivel st-${nc}">${popEsc(p.nivel)}</span>
+      </button>`;
+    }).join('') || '<p class="text-muted" style="padding:12px">Nenhum POP nesta categoria.</p>';
+
+    overlay.innerHTML = `
+      <div class="pop-envio-box pop-os-box">
+        <div class="pop-envio-head">
+          <strong>📚 Enviar POP — O.S ${popEsc(os.numero || '—')}</strong>
+          <button class="modal-close" id="pop-os-x">×</button>
+        </div>
+        ${catSugerida ? `<p class="pop-os-sug">Sugestão: <strong>${popEsc(popCatLabel(catSugerida))}</strong> (pelo serviço da O.S)</p>` : ''}
+        <input id="pop-os-busca" class="pop-busca" type="search" placeholder="🔍 Buscar POP…" value="${popEsc(estado.busca)}">
+        <div class="pop-chips">${chips}</div>
+        <div class="pop-os-lista">${itens}</div>
+      </div>`;
+
+    overlay.querySelector('#pop-os-x').onclick = fechar;
+    const busca = overlay.querySelector('#pop-os-busca');
+    busca.oninput = () => {
+      estado.busca = busca.value; render();
+      const b = overlay.querySelector('#pop-os-busca'); b.focus();
+      b.setSelectionRange(b.value.length, b.value.length);
+    };
+    overlay.querySelectorAll('.pop-chip').forEach(ch => {
+      ch.onclick = () => { estado.cat = ch.dataset.cat; render(); };
+    });
+    overlay.querySelectorAll('.pop-os-item').forEach(b => {
+      b.onclick = () => {
+        const pop = popById(b.dataset.pop);
+        if (pop) { fechar(); abrirEnvioPOPparaOS(pop, os); }
+      };
+    });
+  }
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
+  render();
+}
+
+// Igual ao abrirEnvioPOP, mas prioriza a equipe da O.S na lista de contatos.
+function abrirEnvioPOPparaOS(pop, os) {
+  const { naEquipe, resto } = popContatosDaOS(os);
+  const linha = c => `<button class="pop-contato" data-num="${popEsc(c.numero)}">👤 ${popEsc(c.nome || c.numero)}${c.departamento ? ` · ${popEsc(c.departamento)}` : ''}</button>`;
+  const blocoEquipe = naEquipe.length ? `<p class="pop-envio-grupo">Equipe da O.S</p>${naEquipe.map(linha).join('')}` : '';
+  const blocoResto  = resto.length ? `<p class="pop-envio-grupo">Outros contatos</p>${resto.map(linha).join('')}` : '';
+  const opts = blocoEquipe + blocoResto;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'pop-envio-overlay';
+  overlay.innerHTML = `
+    <div class="pop-envio-box">
+      <div class="pop-envio-head">
+        <strong>💬 Enviar POP ${pop.id}</strong>
+        <button class="modal-close" id="pop-envio-x">×</button>
+      </div>
+      <p class="pop-envio-sub">${popEsc(pop.titulo)}</p>
+      ${opts ? `<div class="pop-contatos">${opts}</div>` : '<p class="text-muted">Nenhum contato cadastrado no Painel de Controle.</p>'}
+      <div class="pop-envio-manual">
+        <input id="pop-num-manual" type="tel" placeholder="ou digite o número (DDD + número)">
+        <button class="btn-primary btn-sm" id="pop-env-manual">Enviar</button>
+      </div>
+      <button class="btn-ghost w-100 mt-12" id="pop-env-sem">Abrir WhatsApp sem destinatário</button>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const fechar = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
+  overlay.querySelector('#pop-envio-x').onclick = fechar;
+  overlay.querySelectorAll('.pop-contato').forEach(b => {
+    b.onclick = () => { enviarPOPWhatsApp(pop, b.dataset.num); fechar(); };
+  });
+  overlay.querySelector('#pop-env-manual').onclick = () => {
+    enviarPOPWhatsApp(pop, overlay.querySelector('#pop-num-manual').value); fechar();
+  };
+  overlay.querySelector('#pop-env-sem').onclick = () => { enviarPOPWhatsApp(pop, ''); fechar(); };
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   ITENS 28-30 — Gerenciador de POPs (admin): CRUD, rascunho/publicar e métricas
+   ════════════════════════════════════════════════════════════════════════════ */
+const POP_NIVEIS = ['Básico', 'Médio', 'Avançado'];
+
+function popEhCustom(id) { return popLoadCustom().some(p => p.id === +id); }
+function popEhBase(id)   { return POPS.some(p => p.id === +id); }
+function popUpsertCustom(pop) {
+  const arr = popLoadCustom();
+  const i = arr.findIndex(p => p.id === pop.id);
+  if (i >= 0) arr[i] = pop; else arr.push(pop);
+  popSaveCustom(arr);
+}
+function popRemoverCustom(id) { popSaveCustom(popLoadCustom().filter(p => p.id !== +id)); }
+function linhas(txt) { return String(txt || '').split('\n').map(s => s.trim()).filter(Boolean); }
+
+function abrirGerenciadorPOPs() {
+  if (!popEhAdmin()) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'pop-envio-overlay';
+  document.body.appendChild(overlay);
+  const fechar = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
+  overlay.addEventListener('click', e => {
+    if (e.target && e.target.id === 'pop-met-reset') {
+      if (confirm('Zerar todas as métricas de uso dos POPs?')) {
+        popSaveMetrics({ acessos: {}, envios: {}, catDuvidas: {} }); render();
+      }
+    }
+  });
+
+  let view = 'lista';
+
+  function render() {
+    overlay.innerHTML = `
+      <div class="pop-envio-box pop-ger-box">
+        <div class="pop-envio-head">
+          <strong>⚙️ Gerenciar POPs</strong>
+          <button class="modal-close" id="pop-ger-x">×</button>
+        </div>
+        <div class="pop-ger-tabs">
+          <button class="pop-ger-tab ${view === 'lista' ? 'ativo' : ''}" data-v="lista">📋 POPs</button>
+          <button class="pop-ger-tab ${view === 'metricas' ? 'ativo' : ''}" data-v="metricas">📊 Métricas</button>
+        </div>
+        <div class="pop-ger-corpo">${view === 'lista' ? viewLista() : viewMetricas()}</div>
+      </div>`;
+    overlay.querySelector('#pop-ger-x').onclick = fechar;
+    overlay.querySelectorAll('.pop-ger-tab').forEach(t => { t.onclick = () => { view = t.dataset.v; render(); }; });
+    if (view === 'lista') wireLista();
+  }
+
+  function viewLista() {
+    const todos = popsTodos();
+    const linhasHtml = todos.map(p => {
+      const nc = popNivelClasse(p.nivel);
+      const tags = [];
+      if (p.rascunho) tags.push('<span class="pop-tag-rasc">Rascunho</span>');
+      if (popEhCustom(p.id) && !popEhBase(p.id)) tags.push('<span class="pop-tag-novo">Novo</span>');
+      else if (popEhCustom(p.id)) tags.push('<span class="pop-tag-edit">Editado</span>');
+      return `<div class="pop-ger-linha">
+        <span class="pop-num">${p.id}</span>
+        <div class="pop-ger-info">
+          <p class="pop-ger-tit">${popEsc(p.titulo)} ${tags.join(' ')}</p>
+          <p class="pop-ger-sub">${popEsc(popCatLabel(p.cat))} · <span class="pop-nivel st-${nc}">${popEsc(p.nivel)}</span></p>
+        </div>
+        <div class="pop-ger-acoes">
+          ${p.rascunho ? `<button class="btn-ghost btn-sm" data-pub="${p.id}" title="Publicar">⬆️</button>` : (popEhCustom(p.id) ? `<button class="btn-ghost btn-sm" data-unpub="${p.id}" title="Voltar a rascunho">⬇️</button>` : '')}
+          <button class="btn-ghost btn-sm" data-edit="${p.id}" title="Editar">✏️</button>
+          ${popEhCustom(p.id) && !popEhBase(p.id) ? `<button class="btn-ghost btn-sm" data-del="${p.id}" title="Excluir">🗑</button>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+    return `<button class="btn-primary btn-sm w-100" id="pop-novo">+ Novo POP</button>
+      <div class="pop-ger-lista">${linhasHtml}</div>`;
+  }
+
+  function wireLista() {
+    overlay.querySelector('#pop-novo').onclick = () => abrirEditorPOP(null, render);
+    overlay.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => abrirEditorPOP(popById(b.dataset.edit), render));
+    overlay.querySelectorAll('[data-pub]').forEach(b => b.onclick = () => {
+      const p = Object.assign({}, popById(b.dataset.pub)); p.rascunho = false; popUpsertCustom(p); render();
+      if (typeof toast === 'function') toast('POP publicado', 'success');
+    });
+    overlay.querySelectorAll('[data-unpub]').forEach(b => b.onclick = () => {
+      const p = Object.assign({}, popById(b.dataset.unpub)); p.rascunho = true; popUpsertCustom(p); render();
+    });
+    overlay.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+      if (confirm('Excluir este POP personalizado?')) { popRemoverCustom(b.dataset.del); render(); }
+    });
+  }
+
+  function viewMetricas() {
+    const m = popLoadMetrics();
+    const acessos = Object.keys(m.acessos).map(id => ({ id: +id, n: m.acessos[id], pop: popById(id) }))
+      .filter(x => x.pop).sort((a, b) => b.n - a.n).slice(0, 10);
+    const rankAcessos = acessos.length ? acessos.map((x, i) => `
+      <div class="pop-met-linha"><span class="pop-met-pos">${i + 1}º</span>
+        <span class="pop-met-tit">${popEsc(x.pop.titulo)}</span>
+        <span class="pop-met-num">${x.n}</span></div>`).join('')
+      : '<p class="text-muted" style="padding:8px">Sem acessos registrados ainda.</p>';
+
+    let envios = [];
+    Object.keys(m.envios).forEach(id => (m.envios[id] || []).forEach(e => {
+      const pop = popById(id); if (pop) envios.push({ pop, destino: e.destino, quando: e.quando });
+    }));
+    envios.sort((a, b) => (b.quando || '').localeCompare(a.quando || ''));
+    const totalEnvios = envios.length;
+    const ultimos = envios.slice(0, 12).map(e => {
+      const d = e.quando ? new Date(e.quando) : null;
+      const data = d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '';
+      return `<div class="pop-met-linha">
+        <span class="pop-met-tit">${popEsc(e.pop.titulo)}</span>
+        <span class="pop-met-dest">${e.destino ? '📱 ' + popEsc(e.destino) : 'sem destino'}</span>
+        <span class="pop-met-num">${data}</span></div>`;
+    }).join('') || '<p class="text-muted" style="padding:8px">Nenhum envio registrado ainda.</p>';
+
+    const cats = Object.keys(m.catDuvidas).map(cat => ({ cat, n: m.catDuvidas[cat] })).sort((a, b) => b.n - a.n);
+    const maxCat = cats.reduce((mx, c) => Math.max(mx, c.n), 0) || 1;
+    const barras = cats.length ? cats.map(c => {
+      const meta = POP_CATS.find(x => x.id === c.cat);
+      return `<div class="pop-met-bar">
+        <span class="pop-met-barlab">${meta ? meta.ico : ''} ${popEsc(meta ? meta.label : c.cat)}</span>
+        <span class="pop-met-bartrack"><span class="pop-met-barfill" style="width:${Math.round(c.n / maxCat * 100)}%"></span></span>
+        <span class="pop-met-num">${c.n}</span></div>`;
+    }).join('') : '<p class="text-muted" style="padding:8px">Sem dados de categoria ainda.</p>';
+
+    return `
+      <div class="pop-met-bloco"><h4>🔥 POPs mais acessados</h4>${rankAcessos}</div>
+      <div class="pop-met-bloco"><h4>📤 Quem recebeu (${totalEnvios} envio${totalEnvios === 1 ? '' : 's'})</h4>${ultimos}</div>
+      <div class="pop-met-bloco"><h4>❓ Categorias com mais dúvidas</h4>${barras}</div>
+      <button class="btn-ghost btn-sm w-100 mt-12" id="pop-met-reset">Zerar métricas</button>`;
+  }
+
+  render();
+}
+
+/* Editor de um POP (item 29): cria/edita, passos dinâmicos com foto, rascunho. */
+function abrirEditorPOP(popOrig, onSalvo) {
+  const base = popOrig ? JSON.parse(JSON.stringify(popOrig)) : {
+    id: popProximoId(), cat: POP_CATS[0].id, titulo: '', nivel: 'Básico', tempo: '',
+    materiais: [], ferramentas: [], passos: [], atencao: [], dicas: [], rascunho: true
+  };
+  base.passos = (base.passos || []).map(p => ({ texto: popPassoTexto(p), foto: popPassoFoto(p) }));
+
+  const overlay = document.createElement('div');
+  overlay.className = 'pop-envio-overlay';
+  document.body.appendChild(overlay);
+  const fechar = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
+
+  function passosHTML() {
+    return base.passos.map((p, i) => `
+      <div class="pop-ed-passo" data-pi="${i}">
+        <span class="pop-num">${i + 1}</span>
+        <textarea class="pop-ed-passo-txt" data-pi="${i}" rows="2" placeholder="Descreva o passo…">${popEsc(p.texto)}</textarea>
+        <div class="pop-ed-passo-foto">
+          ${p.foto ? `<img src="${popEsc(p.foto)}" alt="foto"><button class="btn-ghost btn-sm" data-rmfoto="${i}" title="Remover foto">✕</button>` : `<label class="btn-ghost btn-sm">📷<input type="file" accept="image/*" data-foto="${i}" hidden></label>`}
+          <button class="btn-ghost btn-sm" data-rmpasso="${i}" title="Remover passo">🗑</button>
+        </div>
+      </div>`).join('');
+  }
+
+  function coletaCampos() {
+    base.titulo = overlay.querySelector('#ed-titulo').value.trim();
+    base.cat = overlay.querySelector('#ed-cat').value;
+    base.nivel = overlay.querySelector('#ed-nivel').value;
+    base.tempo = overlay.querySelector('#ed-tempo').value.trim();
+    base.materiais = linhas(overlay.querySelector('#ed-materiais').value);
+    base.ferramentas = linhas(overlay.querySelector('#ed-ferramentas').value);
+    base.atencao = linhas(overlay.querySelector('#ed-atencao').value);
+    base.dicas = linhas(overlay.querySelector('#ed-dicas').value);
+    base.rascunho = overlay.querySelector('#ed-rascunho').checked;
+    overlay.querySelectorAll('.pop-ed-passo-txt').forEach(t => {
+      const i = +t.dataset.pi; if (base.passos[i]) base.passos[i].texto = t.value;
+    });
+  }
+
+  function render() {
+    const catOpts = POP_CATS.map(c => `<option value="${c.id}" ${base.cat === c.id ? 'selected' : ''}>${popEsc(c.label)}</option>`).join('');
+    const nivOpts = POP_NIVEIS.map(n => `<option ${base.nivel === n ? 'selected' : ''}>${n}</option>`).join('');
+    overlay.innerHTML = `
+      <div class="pop-envio-box pop-ed-box">
+        <div class="pop-envio-head">
+          <strong>${popOrig ? '✏️ Editar' : '➕ Novo'} POP ${base.id}</strong>
+          <button class="modal-close" id="pop-ed-x">×</button>
+        </div>
+        <div class="pop-ed-corpo">
+          <label class="pop-ed-lbl">Título</label>
+          <input id="ed-titulo" value="${popEsc(base.titulo)}" placeholder="Ex.: Aplicação de adesivo em vidro">
+          <div class="pop-ed-row">
+            <div><label class="pop-ed-lbl">Categoria</label><select id="ed-cat">${catOpts}</select></div>
+            <div><label class="pop-ed-lbl">Nível</label><select id="ed-nivel">${nivOpts}</select></div>
+            <div><label class="pop-ed-lbl">Tempo</label><input id="ed-tempo" value="${popEsc(base.tempo)}" placeholder="30 a 60 min"></div>
+          </div>
+          <label class="pop-ed-lbl">Materiais (um por linha)</label>
+          <textarea id="ed-materiais" rows="3">${popEsc((base.materiais || []).join('\n'))}</textarea>
+          <label class="pop-ed-lbl">Ferramentas (uma por linha)</label>
+          <textarea id="ed-ferramentas" rows="3">${popEsc((base.ferramentas || []).join('\n'))}</textarea>
+          <label class="pop-ed-lbl">Passo a passo</label>
+          <div class="pop-ed-passos">${passosHTML()}</div>
+          <button class="btn-ghost btn-sm" id="ed-add-passo">+ Adicionar passo</button>
+          <label class="pop-ed-lbl">Pontos de atenção (um por linha)</label>
+          <textarea id="ed-atencao" rows="2">${popEsc((base.atencao || []).join('\n'))}</textarea>
+          <label class="pop-ed-lbl">Dicas de qualidade (uma por linha)</label>
+          <textarea id="ed-dicas" rows="2">${popEsc((base.dicas || []).join('\n'))}</textarea>
+          <label class="pop-ed-check"><input type="checkbox" id="ed-rascunho" ${base.rascunho ? 'checked' : ''}> Salvar como rascunho (não aparece para a equipe)</label>
+        </div>
+        <div class="pop-ed-foot">
+          <button class="btn-ghost" id="ed-cancelar">Cancelar</button>
+          <button class="btn-primary" id="ed-salvar">Salvar POP</button>
+        </div>
+      </div>`;
+
+    overlay.querySelector('#pop-ed-x').onclick = fechar;
+    overlay.querySelector('#ed-cancelar').onclick = fechar;
+    overlay.querySelector('#ed-add-passo').onclick = () => { coletaCampos(); base.passos.push({ texto: '', foto: '' }); render(); };
+    overlay.querySelectorAll('[data-rmpasso]').forEach(b => b.onclick = () => { coletaCampos(); base.passos.splice(+b.dataset.rmpasso, 1); render(); });
+    overlay.querySelectorAll('[data-rmfoto]').forEach(b => b.onclick = () => { coletaCampos(); base.passos[+b.dataset.rmfoto].foto = ''; render(); });
+    overlay.querySelectorAll('[data-foto]').forEach(inp => inp.onchange = () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      const i = +inp.dataset.foto;
+      const reader = new FileReader();
+      reader.onload = () => { coletaCampos(); base.passos[i].foto = reader.result; render(); };
+      reader.readAsDataURL(f);
+    });
+    overlay.querySelector('#ed-salvar').onclick = () => {
+      coletaCampos();
+      if (!base.titulo) { if (typeof toast === 'function') toast('Dê um título ao POP', 'warn'); return; }
+      base.passos = base.passos.filter(p => (p.texto && p.texto.trim()) || p.foto);
+      popUpsertCustom(JSON.parse(JSON.stringify(base)));
+      fechar();
+      if (typeof toast === 'function') toast(base.rascunho ? 'Rascunho salvo' : 'POP publicado', 'success');
+      if (typeof onSalvo === 'function') onSalvo();
+      if (typeof renderPops === 'function' && typeof STATE !== 'undefined' && STATE.activeTab === 'pops') renderPops();
+    };
+  }
+
+  render();
 }

@@ -6,10 +6,10 @@
    ══════════════════════════════════════════════════════════════════════════ */
 const PERMISSOES_PADRAO = {
   admin:     { abas: '*', editar: true,  cadastrar: true  },
-  pcp:       { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle'], editar: true, cadastrar: false },
-  montagem:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados'], editar: true, cadastrar: false },
-  operacao:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados'], editar: true, cadastrar: false },
-  comercial: { abas: ['painel','pcp','programacao','finalizados'], editar: false, cadastrar: false }
+  pcp:       { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle','pops'], editar: true, cadastrar: false },
+  montagem:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','pops'], editar: true, cadastrar: false },
+  operacao:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','pops'], editar: true, cadastrar: false },
+  comercial: { abas: ['painel','pcp','programacao','finalizados','pops'], editar: false, cadastrar: false }
 };
 
 // Permissões efetivas = padrão sobrescrito pelos níveis configurados pelo admin (CFG.niveis)
@@ -23,7 +23,7 @@ function getPermissoes() {
 }
 
 const SENHAS = { admin: 'admin', comercial: 'comercial', pcp: '', montagem: '', operacao: '' };
-const ABAS_DISPONIVEIS = ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle'];
+const ABAS_DISPONIVEIS = ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle','pops'];
 
 /* ══════════════════════════════════════════════════════════════════════════
    UTILITÁRIOS
@@ -61,6 +61,48 @@ function periodoIndicador(deISO, ateISO) {
 }
 
 function nowISO() { return new Date().toISOString(); }
+
+/* ── Fase 2: filtro de período reutilizável ───────────────────────────────
+   Estado por aba em STATE[key] = {de, ate} (vazio = todos os períodos). */
+function periodoQuickToRange(id) {
+  const now = new Date();
+  if (id === 'todos') return { de: '', ate: '' };
+  if (id === 'hoje') { const s = ymdLocal(now); return { de: s, ate: s }; }
+  if (id === 'mes') return { de: ymdLocal(new Date(now.getFullYear(), now.getMonth(), 1)), ate: ymdLocal(now) };
+  const de = new Date(); de.setDate(now.getDate() - (+id));
+  return { de: ymdLocal(de), ate: ymdLocal(now) };
+}
+function filtroPeriodoHTML(key) {
+  const f = STATE[key] || { de: '', ate: '' };
+  return `<div class="periodo-filtro" data-pf="${key}">
+    <input type="date" class="pf-de" value="${f.de || ''}">
+    <span class="text-muted">até</span>
+    <input type="date" class="pf-ate" value="${f.ate || ''}">
+    <button class="btn-ghost btn-xs" data-pq="hoje">Hoje</button>
+    <button class="btn-ghost btn-xs" data-pq="7">7d</button>
+    <button class="btn-ghost btn-xs" data-pq="30">30d</button>
+    <button class="btn-ghost btn-xs" data-pq="mes">Mês</button>
+    <button class="btn-ghost btn-xs" data-pq="todos">Todos</button>
+    ${periodoIndicador(f.de, f.ate)}
+  </div>`;
+}
+function wireFiltroPeriodo(container, key, onChange) {
+  const box = container.querySelector(`.periodo-filtro[data-pf="${key}"]`);
+  if (!box) return;
+  const get = () => (STATE[key] = STATE[key] || { de: '', ate: '' });
+  box.querySelector('.pf-de').onchange = e => { get().de = e.target.value; onChange(); };
+  box.querySelector('.pf-ate').onchange = e => { get().ate = e.target.value; onChange(); };
+  $$('[data-pq]', box).forEach(b => b.onclick = () => { STATE[key] = periodoQuickToRange(b.dataset.pq); onChange(); });
+}
+function dentroPeriodo(dataISO, key) {
+  const f = STATE[key];
+  if (!f || (!f.de && !f.ate)) return true;
+  if (!dataISO) return false;
+  const d = String(dataISO).slice(0, 10);
+  if (f.de && d < f.de) return false;
+  if (f.ate && d > f.ate) return false;
+  return true;
+}
 
 // Parse local de YYYY-MM-DD (evita o bug de fuso "volta 1 dia")
 function parseLocalDate(str) {
@@ -1217,6 +1259,7 @@ function osCardHTML(os) {
       </div>
       <div class="card-resp">✍ ${esc(resp)}</div>
       <div class="card-checklist">${chkStr}${itens.length?` · ${prontos}/${itens.length} itens`:''}</div>
+      <div class="card-acoes"><button class="btn-ghost btn-sm card-pop" data-pop-os="${esc(os.id)}" title="Enviar POP para a equipe">📚 Enviar POP</button></div>
     </div>`;
 }
 
@@ -1225,6 +1268,14 @@ function bindCardClicks(container) {
     c.onclick = () => {
       const os = STORE.getOS(c.dataset.osId);
       if (os) openModal(os);
+    };
+  });
+  // Item 25: botão "Enviar POP" no card, sem abrir o modal da O.S.
+  $$('[data-pop-os]', container).forEach(b => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const os = STORE.getOS(b.dataset.popOs);
+      if (os && typeof abrirSeletorPOPparaOS === 'function') abrirSeletorPOPparaOS(os);
     };
   });
 }
@@ -1271,8 +1322,38 @@ function renderPCP() {
 /* ══════════════════════════════════════════════════════════════════════════
    ABA: PAINEL (KPIs)
    ══════════════════════════════════════════════════════════════════════════ */
+/* Fase 4 — item 5: visão salva (blocos abertos/fechados + modo) em localStorage. */
+const PAINEL_VISTA_LS = 'impresilk_painel_vista';
+function painelVistaGet() { STATE._painelVista = STATE._painelVista || {}; return STATE._painelVista; }
+function painelVistaAberta(id) { const v = painelVistaGet(); return id in v ? !!v[id] : true; }
+function painelVistaToggle(id) { const v = painelVistaGet(); v[id] = !painelVistaAberta(id); }
+function carregarPainelVista() {
+  try {
+    const o = JSON.parse(localStorage.getItem(PAINEL_VISTA_LS));
+    if (o && typeof o === 'object') {
+      STATE._painelVista = o.vista || {};
+      if (o.modo) STATE.painelModo = o.modo;
+    }
+  } catch {}
+}
+function salvarPainelVista() {
+  try {
+    localStorage.setItem(PAINEL_VISTA_LS, JSON.stringify({ vista: painelVistaGet(), modo: STATE.painelModo }));
+    toast('Visão salva neste aparelho', 'success');
+  } catch { toast('Não foi possível salvar a visão', 'error'); }
+}
+// Bloco recolhível do Painel (item 5) com título padrão (item 4).
+function painelBloco(id, titulo, corpo) {
+  const aberto = painelVistaAberta(id);
+  return `<div class="painel-bloco ${aberto ? 'aberto' : ''}" data-bloco="${id}">
+    <h3 class="bloco-titulo painel-h" data-bloco-tog="${id}">${titulo}<span class="bloco-chevron">${aberto ? '▾' : '▸'}</span></h3>
+    <div class="painel-bloco-corpo"${aberto ? '' : ' hidden'}>${corpo}</div>
+  </div>`;
+}
+
 function renderPainel() {
   const el = $('#panel-painel');
+  if (!STATE._vistaCarregada) { carregarPainelVista(); STATE._vistaCarregada = true; }
   el.innerHTML = `
     <div class="filter-bar">
       <div class="view-toggle">
@@ -1280,13 +1361,15 @@ function renderPainel() {
         <button id="modo-periodo" class="${STATE.painelModo==='periodo'?'active':''}">Período</button>
       </div>
       <div id="painel-range" class="flex gap-8"></div>
-      <button class="btn-ghost btn-sm" id="btn-export-backup" style="margin-left:auto">⬇ Backup</button>
+      <button class="btn-ghost btn-sm" id="btn-salvar-vista" title="Memorizar quais blocos ficam abertos e o modo de período" style="margin-left:auto">💾 Salvar visão</button>
+      <button class="btn-ghost btn-sm" id="btn-export-backup">⬇ Backup</button>
       <button class="btn-ghost btn-sm" id="btn-import-backup">⬆ Restaurar</button>
     </div>
     <div id="painel-content"></div>`;
 
   $('#modo-dia').onclick = () => { STATE.painelModo = 'dia'; renderPainel(); };
   $('#modo-periodo').onclick = () => { STATE.painelModo = 'periodo'; renderPainel(); };
+  $('#btn-salvar-vista').onclick = salvarPainelVista;
   $('#btn-export-backup').onclick = exportarBackup;
   $('#btn-import-backup').onclick = importarBackup;
 
@@ -1484,45 +1567,55 @@ function renderPainelKPIs() {
     </div>
     ${prevTxt ? `<div style="margin:-6px 0 10px">${prevTxt}</div>` : ''}
 
-    <h3 class="painel-h">🚗 Trabalhos em execução agora</h3>
-    <div class="exec-now-grid">${execCards || emptyState('🚗', 'Ninguém na rua agora', 'Quando uma equipe iniciar uma instalação ela aparece aqui.')}</div>
+    ${painelBloco('exec', '🚗 Trabalhos em execução agora',
+      `<div class="exec-now-grid">${execCards || emptyState('🚗', 'Ninguém na rua agora', 'Quando uma equipe iniciar uma instalação ela aparece aqui.')}</div>`)}
 
-    <h3 class="painel-h">📈 Tendências</h3>
-    <div class="trend-grid">${trendHTML}</div>
+    ${painelBloco('tend', '📈 Tendências',
+      `<div class="trend-grid">${trendHTML}</div>`)}
 
-    <h3 class="painel-h">🔎 Serviços por funcionário</h3>
-    <div class="filter-bar">
-      <select id="painel-func"><option value="">— selecionar funcionário —</option>${funcOpts}</select>
-    </div>
+    ${painelBloco('func', '🔎 Serviços por funcionário',
+      `<div class="filter-bar"><select id="painel-func"><option value="">— selecionar funcionário —</option>${funcOpts}</select></div>`)}
 
-    <h3 class="painel-h">🏆 Ranking de preenchimento (operadores)</h3>
-    <table class="control-table">
-      <thead><tr><th>Operador</th><th>O.S preenchidas</th><th>Média preenchimento</th></tr></thead>
-      <tbody>${rankOper || '<tr><td colspan="3" class="text-muted" style="text-align:center;padding:12px">Sem dados</td></tr>'}</tbody>
-    </table>
+    ${painelBloco('oper', '🏆 Ranking de preenchimento (operadores)',
+      `<table class="control-table">
+        <thead><tr><th>Operador</th><th>O.S preenchidas</th><th>Média preenchimento</th></tr></thead>
+        <tbody>${rankOper || '<tr><td colspan="3" class="text-muted" style="text-align:center;padding:12px">Sem dados</td></tr>'}</tbody>
+      </table>`)}
 
-    <h3 class="painel-h">🌟 Ranking de notas <span class="text-muted" style="font-weight:400;font-size:.75rem">(quem tem menos retrabalho pontua mais — clique para ver os serviços)</span></h3>
-    <table class="control-table">
-      <thead><tr><th>Instalador</th><th>Nota</th><th>Entregas</th><th>Retrabalhos</th></tr></thead>
-      <tbody>${rankNota || '<tr><td colspan="4" class="text-muted" style="text-align:center;padding:12px">Sem dados no período</td></tr>'}</tbody>
-    </table>
+    ${painelBloco('nota', '🌟 Ranking de notas <span class="text-muted" style="font-weight:400;font-size:.75rem">(quem tem menos retrabalho pontua mais — clique para ver os serviços)</span>',
+      `<table class="control-table">
+        <thead><tr><th>Instalador</th><th>Nota</th><th>Entregas</th><th>Retrabalhos</th></tr></thead>
+        <tbody>${rankNota || '<tr><td colspan="4" class="text-muted" style="text-align:center;padding:12px">Sem dados no período</td></tr>'}</tbody>
+      </table>`)}
 
-    <h3 class="painel-h">👷 Desempenho por instalador <span class="text-muted" style="font-weight:400;font-size:.75rem">(clique para ver os serviços)</span></h3>
-    <table class="control-table">
-      <thead><tr><th>Instalador</th><th>Entregas</th><th>%Retrab</th><th>%Check‑in</th><th>Média h</th></tr></thead>
-      <tbody>${linhas || '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:12px">Sem dados no período</td></tr>'}</tbody>
-    </table>
+    ${painelBloco('desemp', '👷 Desempenho por instalador <span class="text-muted" style="font-weight:400;font-size:.75rem">(clique para ver os serviços)</span>',
+      `<table class="control-table">
+        <thead><tr><th>Instalador</th><th>Entregas</th><th>%Retrab</th><th>%Check‑in</th><th>Média h</th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:12px">Sem dados no período</td></tr>'}</tbody>
+      </table>`)}
 
-    <h3 class="painel-h">⚖️ Comparar colaboradores</h3>
-    <div class="filter-bar">
-      <select id="cmp-a"><option value="">Colaborador A</option>${pessoas.map(p=>`<option ${STATE._cmpA===p?'selected':''}>${esc(p)}</option>`).join('')}</select>
-      <select id="cmp-b"><option value="">Colaborador B</option>${pessoas.map(p=>`<option ${STATE._cmpB===p?'selected':''}>${esc(p)}</option>`).join('')}</select>
-    </div>
-    <div id="cmp-out"></div>
+    ${painelBloco('cmp', '⚖️ Comparar colaboradores',
+      `<div class="filter-bar">
+        <select id="cmp-a"><option value="">Colaborador A</option>${pessoas.map(p=>`<option ${STATE._cmpA===p?'selected':''}>${esc(p)}</option>`).join('')}</select>
+        <select id="cmp-b"><option value="">Colaborador B</option>${pessoas.map(p=>`<option ${STATE._cmpB===p?'selected':''}>${esc(p)}</option>`).join('')}</select>
+      </div>
+      <div id="cmp-out"></div>`)}
 
     <div id="painel-detail"></div>`;
 
   bindCardClicks(el);
+
+  // Recolher/expandir blocos do Painel (item 5)
+  $$('[data-bloco-tog]', el).forEach(h => h.onclick = () => {
+    painelVistaToggle(h.dataset.blocoTog);
+    const bloco = h.closest('.painel-bloco');
+    const corpo = bloco.querySelector('.painel-bloco-corpo');
+    const aberto = painelVistaAberta(h.dataset.blocoTog);
+    corpo.hidden = !aberto;
+    bloco.classList.toggle('aberto', aberto);
+    const chev = h.querySelector('.bloco-chevron');
+    if (chev) chev.textContent = aberto ? '▾' : '▸';
+  });
 
   // Cliques em itens (cards KPI, linhas, tendências)
   $$('[data-detail]', el).forEach(node => node.onclick = () => {
@@ -1638,11 +1731,13 @@ function renderProgramacao() {
         <button class="btn-ghost btn-sm" id="rel-wpp" title="Enviar a lista do dia por WhatsApp">💬 Enviar dia</button>
       </div>
     </div>
+    <div class="filter-bar">${filtroPeriodoHTML('_fProg')}</div>
     <div id="prog-content"></div>`;
   $('#vt-cal').onclick = () => { STATE.calView = 'cal'; renderProgramacao(); };
   $('#vt-lista').onclick = () => { STATE.calView = 'lista'; renderProgramacao(); };
   $('#rel-pdf').onclick = () => relatorioServicosDia($('#rel-data').value);
   $('#rel-wpp').onclick = () => whatsappServicosDia($('#rel-data').value);
+  wireFiltroPeriodo(el, '_fProg', () => renderProgramacao());
   if (STATE.calView === 'cal') renderKanban();
   else renderProgLista();
 }
@@ -1666,8 +1761,9 @@ function renderProgLista() {
   const el = $('#prog-content');
   const list = STORE.getAllOS()
     .filter(o => o.instalacao && o.instalacao.data)
+    .filter(o => dentroPeriodo(o.instalacao.data, '_fProg'))
     .sort((a, b) => a.instalacao.data.localeCompare(b.instalacao.data));
-  el.innerHTML = `<div class="cards-grid">${list.map(osCardHTML).join('') || emptyState('📅', 'Nenhuma O.S agendada', 'Confirme datas na aba PCP para vê-las aqui.')}</div>`;
+  el.innerHTML = `<div class="cards-grid">${list.map(osCardHTML).join('') || emptyState('📅', 'Nenhuma O.S no período', 'Ajuste o filtro de datas ou confirme datas na aba PCP.')}</div>`;
   bindCardClicks(el);
 }
 
@@ -1688,11 +1784,15 @@ function renderKanban() {
     }
   });
 
-  // só dias de hoje em diante (board de programação)
-  const dias = Object.keys(porDia).filter(k => k >= hojeStr).sort();
+  // Com filtro de período ativo, usa o intervalo; senão, de hoje em diante.
+  const f = STATE._fProg;
+  const temFiltro = f && (f.de || f.ate);
+  const dias = Object.keys(porDia)
+    .filter(k => temFiltro ? dentroPeriodo(k, '_fProg') : k >= hojeStr)
+    .sort();
 
   if (!dias.length) {
-    el.innerHTML = '<p class="text-muted">Nenhuma instalação agendada de hoje em diante.</p>';
+    el.innerHTML = `<p class="text-muted">${temFiltro ? 'Nenhuma instalação no período selecionado.' : 'Nenhuma instalação agendada de hoje em diante.'}</p>`;
     return;
   }
 
@@ -1765,7 +1865,8 @@ function renderDiaDetalhe(items) {
    ══════════════════════════════════════════════════════════════════════════ */
 function renderExecucao() {
   const el = $('#panel-execucao');
-  const list = STORE.getAllOS().filter(o => o.liberadoPCP && !o.finalizadaEm);
+  const list = STORE.getAllOS().filter(o => o.liberadoPCP && !o.finalizadaEm)
+    .filter(o => dentroPeriodo(o.instalacao && o.instalacao.data, '_fExec'));
   // na-rua primeiro
   list.sort((a, b) => {
     const ra = (!a.finalizadaEm && (a.carroLiberado || a.horaSaida) && !a.horaRetorno) ? 0 : 1;
@@ -1774,7 +1875,18 @@ function renderExecucao() {
     return (a.instalacao?.data || '').localeCompare(b.instalacao?.data || '');
   });
 
-  el.innerHTML = `<div class="os-list">${list.map(execItemHTML).join('') || emptyState('🛠', 'Nenhuma O.S em execução', 'As O.S confirmadas e em andamento aparecem aqui.')}</div>`;
+  const naRua = list.filter(o => (o.carroLiberado || o.horaSaida) && !o.horaRetorno).length;
+  const atrasadas = list.filter(estaAtrasada).length;
+
+  el.innerHTML = `
+    <div class="filter-bar">${filtroPeriodoHTML('_fExec')}</div>
+    <div class="exec-resumo">
+      <span class="exec-chip">🛠 ${list.length} em execução</span>
+      <span class="exec-chip">🚗 ${naRua} na rua</span>
+      ${atrasadas ? `<span class="exec-chip exec-chip-atraso">⏰ ${atrasadas} atrasada${atrasadas === 1 ? '' : 's'}</span>` : ''}
+    </div>
+    <div class="os-list">${list.map(execItemHTML).join('') || emptyState('🛠', 'Nenhuma O.S em execução', 'As O.S confirmadas e em andamento aparecem aqui.')}</div>`;
+  wireFiltroPeriodo(el, '_fExec', () => renderExecucao());
 
   $$('[data-os-id]', el).forEach(item => {
     item.onclick = e => {
@@ -1803,7 +1915,7 @@ function execItemHTML(os) {
   return `
     <div class="os-list-item st-${st} ${alertaOS(os)}" data-os-id="${esc(os.id)}">
       <div class="list-info">
-        <div class="list-numero">O.S ${esc(os.numero || '—')} ${naRua ? '🚗 na rua' : ''}</div>
+        <div class="list-numero">O.S ${esc(os.numero || '—')} ${naRua ? '🚗 na rua' : ''}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}</div>
         <div class="list-cliente">${esc(os.cliente)} · ${esc(os.endereco || '')}</div>
         <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))} · 👷 ${esc((os.equipe||[]).join(', ') || '—')}</div>
       </div>
@@ -1819,9 +1931,21 @@ function execItemHTML(os) {
    ══════════════════════════════════════════════════════════════════════════ */
 function renderRetrabalho() {
   const el = $('#panel-retrabalho');
+  // Filtra pela data de abertura do retrabalho (atualizadoEm) ou de resolução.
   const list = STORE.getAllOS().filter(o => o.retrabalho)
+    .filter(o => dentroPeriodo((o.dataResolvido || o.atualizadoEm || ''), '_fRetra'))
     .sort((a, b) => (b.atualizadoEm || '').localeCompare(a.atualizadoEm || ''));
+
+  const resolvidos = list.filter(o => o.dataResolvido).length;
+  const pendentes = list.length - resolvidos;
+
   el.innerHTML = `
+    <div class="filter-bar">${filtroPeriodoHTML('_fRetra')}</div>
+    <div class="exec-resumo">
+      <span class="exec-chip">🔧 ${list.length} no período</span>
+      ${pendentes ? `<span class="exec-chip exec-chip-atraso">⚠ ${pendentes} pendente${pendentes === 1 ? '' : 's'}</span>` : ''}
+      <span class="exec-chip">✓ ${resolvidos} resolvido${resolvidos === 1 ? '' : 's'}</span>
+    </div>
     <div class="os-list">
       ${list.map(os => {
         const resolvido = !!os.dataResolvido;
@@ -1832,21 +1956,55 @@ function renderRetrabalho() {
             <div class="list-date">Causa: ${esc(os.causa || '—')}${os.resolvidoPor?` · por ${esc(os.resolvidoPor)}`:''}</div>
           </div>
         </div>`;
-      }).join('') || emptyState('✅', 'Nenhum retrabalho', 'Que bom! Nenhuma O.S precisou voltar para correção.')}
+      }).join('') || emptyState('✅', 'Nenhum retrabalho no período', 'Ajuste o filtro de datas ou comemore: nada voltou para correção.')}
     </div>`;
+  wireFiltroPeriodo(el, '_fRetra', () => renderRetrabalho());
   bindCardClicks(el);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
    ABA: FINALIZADOS (arquivo das O.S concluídas)
    ══════════════════════════════════════════════════════════════════════════ */
+// Iniciais para avatar (ex.: "João Silva" → "JS")
+function iniciais(nome) {
+  const ps = String(nome || '').trim().split(/\s+/).filter(Boolean);
+  if (!ps.length) return '—';
+  return (ps[0][0] + (ps.length > 1 ? ps[ps.length - 1][0] : '')).toUpperCase();
+}
+
+// Finalizadas dentro do período do filtro (_fFin), mais recentes primeiro.
+function finFinalizadasPeriodo() {
+  return STORE.getAllOS()
+    .filter(o => o.finalizadaEm)
+    .filter(o => dentroPeriodo((o.finalizadaEm || '').slice(0, 10), '_fFin'))
+    .sort((a, b) => (b.finalizadaEm || '').localeCompare(a.finalizadaEm || ''));
+}
+
 function renderFinalizados() {
   const el = $('#panel-finalizados');
-  const all = STORE.getAllOS()
-    .filter(o => o.finalizadaEm)
-    .sort((a, b) => (b.finalizadaEm || '').localeCompare(a.finalizadaEm || ''));
-  const list = applyFilter(all, STATE.filtroFinalizados || '');
+  if (!STATE.finView) STATE.finView = 'lista';
+  el.innerHTML = `
+    <div class="filter-bar">
+      <div class="view-toggle">
+        <button id="fv-lista" class="${STATE.finView==='lista'?'active':''}">☰ Lista</button>
+        <button id="fv-dash" class="${STATE.finView==='dash'?'active':''}">📊 Painel</button>
+      </div>
+      ${filtroPeriodoHTML('_fFin')}
+      <button class="btn-ghost btn-sm" id="fin-pdf" title="Exportar relatório do período em PDF" style="margin-left:auto">📄 Relatório PDF</button>
+    </div>
+    <div id="fin-content"></div>`;
+  wireFiltroPeriodo(el, '_fFin', () => renderFinalizados());
+  $('#fv-lista').onclick = () => { STATE.finView = 'lista'; renderFinalizados(); };
+  $('#fv-dash').onclick = () => { STATE.finView = 'dash'; renderFinalizados(); };
+  $('#fin-pdf').onclick = () => exportarFinalizadosPDF(finFinalizadasPeriodo());
+  if (STATE.finView === 'dash') finRenderDash();
+  else finRenderLista();
+}
 
+function finRenderLista() {
+  const el = $('#fin-content');
+  const periodo = finFinalizadasPeriodo();
+  const list = applyFilter(periodo, STATE.filtroFinalizados || '');
   const cards = list.map(os => {
     const sit = (os.checkout && os.checkout.situacao) || (os.retrabalho ? 'Retrabalho' : 'Finalizado');
     const dF = parseLocalDate((os.finalizadaEm || '').slice(0, 10));
@@ -1858,24 +2016,198 @@ function renderFinalizados() {
         <div class="list-cliente">${esc(os.cliente || 'Sem cliente')}${os.servico ? ' — ' + esc(os.servico) : ''}</div>
         <div class="list-date">🏁 Finalizada em ${esc(dataF)}${(os.equipe||[]).length ? ' · 👷 ' + esc(os.equipe.join(', ')) : ''}</div>
       </div>
+      <button class="btn-ghost btn-sm card-pop" data-pop-os="${esc(os.id)}" title="Enviar POP para a equipe">📚</button>
     </div>`;
   }).join('');
 
   el.innerHTML = `
     <div class="filter-bar">
       <input type="search" id="busca-fin" placeholder="Buscar O.S, cliente, serviço…" value="${esc(STATE.filtroFinalizados || '')}">
-      <span class="text-muted" style="margin-left:auto">${all.length} arquivada(s)</span>
+      <span class="text-muted" style="margin-left:auto">${periodo.length} no período</span>
     </div>
-    <div class="os-list">${cards || emptyState('🏁', 'Nenhuma O.S finalizada ainda', 'Conclua instalações para acompanhar o histórico aqui.')}</div>`;
+    <div class="os-list">${cards || emptyState('🏁', 'Nenhuma O.S no período', 'Ajuste o filtro de datas para ver o histórico.')}</div>`;
 
   bindCardClicks(el);
   const busca = $('#busca-fin');
   busca.oninput = () => {
     STATE.filtroFinalizados = busca.value;
-    renderFinalizados();
-    busca.focus();
-    busca.setSelectionRange(busca.value.length, busca.value.length);
+    finRenderLista();
+    const b = $('#busca-fin'); b.focus(); b.setSelectionRange(b.value.length, b.value.length);
   };
+}
+
+/* ── Fase 3: dashboards de Finalizados ─────────────────────────────────────
+   item 12: serviços do mês + gráfico + comparação; item 13: ranking de
+   retrabalho por colaborador; item 14: produtividade por colaborador. */
+function finRenderDash() {
+  const el = $('#fin-content');
+  const list = finFinalizadasPeriodo();
+  if (!list.length) {
+    el.innerHTML = emptyState('📊', 'Sem dados no período', 'Ajuste o filtro para ver os indicadores.');
+    return;
+  }
+
+  // — item 12: serviços por mês (últimos 6 meses, de TODAS as finalizadas) —
+  const todasFin = STORE.getAllOS().filter(o => o.finalizadaEm);
+  const porMes = {};
+  todasFin.forEach(o => { const k = (o.finalizadaEm || '').slice(0, 7); if (k) porMes[k] = (porMes[k] || 0) + 1; });
+  const mesesOrd = Object.keys(porMes).sort().slice(-6);
+  const maxMes = mesesOrd.reduce((m, k) => Math.max(m, porMes[k]), 0) || 1;
+  const agora = new Date();
+  const kAtual = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+  const dPrev = new Date(agora.getFullYear(), agora.getMonth() - 1, 1);
+  const kPrev = `${dPrev.getFullYear()}-${String(dPrev.getMonth() + 1).padStart(2, '0')}`;
+  const nAtual = porMes[kAtual] || 0, nPrev = porMes[kPrev] || 0;
+  const delta = nPrev ? Math.round((nAtual - nPrev) / nPrev * 100) : (nAtual ? 100 : 0);
+  const deltaCls = delta > 0 ? 'pos' : (delta < 0 ? 'neg' : '');
+  const barras = mesesOrd.map(k => {
+    const [y, m] = k.split('-');
+    const lbl = `${MESES[+m - 1].slice(0, 3)}/${y.slice(2)}`;
+    return `<div class="fin-mes-bar" title="${porMes[k]} serviço(s)">
+      <span class="fin-mes-val">${porMes[k]}</span>
+      <span class="fin-mes-track"><span class="fin-mes-fill ${k===kAtual?'atual':''}" style="height:${Math.round(porMes[k]/maxMes*100)}%"></span></span>
+      <span class="fin-mes-lbl">${lbl}</span>
+    </div>`;
+  }).join('');
+
+  // — item 13 e 14: estatísticas por colaborador (no período filtrado) —
+  const porInst = statsPorInstalador(list);
+  const nomes = Object.keys(porInst);
+
+  // Ranking de retrabalho (mais retrabalhos primeiro; só quem tem >0)
+  const rankRetrab = nomes.map(n => ({ nome: n, ...porInst[n] }))
+    .filter(x => x.retrab > 0)
+    .sort((a, b) => b.retrab - a.retrab);
+  const retrabHTML = rankRetrab.length ? rankRetrab.map(x => {
+    const pct = Math.round(x.retrab / x.entregas * 100);
+    return `<div class="fin-colab">
+      <span class="fin-avatar">${esc(iniciais(x.nome))}</span>
+      <span class="fin-colab-nome">${esc(x.nome)}</span>
+      <span class="fin-colab-bar"><span style="width:${pct}%"></span></span>
+      <span class="fin-colab-num">${x.retrab} <span class="fin-colab-pct">(${pct}%)</span></span>
+    </div>`;
+  }).join('') : '<p class="text-muted" style="padding:8px">Nenhum retrabalho no período. 🎉</p>';
+
+  // Produtividade (ordenável: entregas | tempo | nota)
+  const sort = STATE._finSort || 'entregas';
+  const prod = nomes.map(n => {
+    const d = porInst[n];
+    const horas = d.horas || [];
+    const media = horas.length ? horas.reduce((a, b) => a + b, 0) / horas.length : 0;
+    return { nome: n, entregas: d.entregas, retrab: d.retrab, media, nota: notaInstalador(d), horas };
+  }).sort((a, b) => {
+    if (sort === 'tempo') return a.media - b.media;
+    if (sort === 'nota') return b.nota - a.nota;
+    return b.entregas - a.entregas;
+  });
+  const maxH = prod.reduce((m, p) => Math.max(m, ...(p.horas.length ? p.horas : [0])), 0) || 1;
+  const spark = horas => horas.length
+    ? `<span class="fin-spark">${horas.slice(-8).map(h => `<span style="height:${Math.max(8, Math.round(h / maxH * 100))}%"></span>`).join('')}</span>`
+    : '<span class="text-muted" style="font-size:.7rem">—</span>';
+  const prodHTML = prod.map(p => `
+    <div class="fin-prod-linha">
+      <span class="fin-avatar">${esc(iniciais(p.nome))}</span>
+      <span class="fin-prod-nome">${esc(p.nome)}</span>
+      <span class="fin-prod-col">${p.entregas}</span>
+      <span class="fin-prod-col">${p.media ? p.media.toFixed(1) + 'h' : '—'}</span>
+      <span class="fin-prod-col">${p.nota.toFixed(1)}</span>
+      <span class="fin-prod-spark">${spark(p.horas)}</span>
+    </div>`).join('');
+
+  const totalRetrab = list.filter(o => o.retrabalho).length;
+  const taxa = list.length ? Math.round(totalRetrab / list.length * 100) : 0;
+
+  el.innerHTML = `
+    <div class="fin-kpis">
+      <div class="fin-kpi"><span class="fin-kpi-num">${list.length}</span><span class="fin-kpi-lbl">finalizadas no período</span></div>
+      <div class="fin-kpi"><span class="fin-kpi-num">${nAtual}</span><span class="fin-kpi-lbl">${MESES[agora.getMonth()]} <span class="fin-delta ${deltaCls}">${delta>0?'▲':delta<0?'▼':''} ${Math.abs(delta)}%</span> vs ${MESES[dPrev.getMonth()].slice(0,3)}</span></div>
+      <div class="fin-kpi"><span class="fin-kpi-num">${totalRetrab}</span><span class="fin-kpi-lbl">retrabalhos (${taxa}%)</span></div>
+    </div>
+
+    <div class="fin-bloco">
+      <h3 class="bloco-titulo">📅 Serviços por mês</h3>
+      <div class="fin-mes-chart">${barras}</div>
+    </div>
+
+    <div class="fin-bloco">
+      <h3 class="bloco-titulo">🔁 Ranking de retrabalho por colaborador</h3>
+      <div class="fin-colab-lista">${retrabHTML}</div>
+    </div>
+
+    <div class="fin-bloco">
+      <h3 class="bloco-titulo">⚡ Produtividade por colaborador</h3>
+      <div class="fin-prod-head">
+        <span class="fin-avatar" style="visibility:hidden">··</span>
+        <span class="fin-prod-nome">Colaborador</span>
+        <button class="fin-prod-col fin-sort ${sort==='entregas'?'ativo':''}" data-sort="entregas">Entregas</button>
+        <button class="fin-prod-col fin-sort ${sort==='tempo'?'ativo':''}" data-sort="tempo">Tempo méd.</button>
+        <button class="fin-prod-col fin-sort ${sort==='nota'?'ativo':''}" data-sort="nota">Nota</button>
+        <span class="fin-prod-spark">Tempos</span>
+      </div>
+      <div class="fin-prod-lista">${prodHTML}</div>
+    </div>`;
+
+  $$('[data-sort]', el).forEach(b => b.onclick = () => { STATE._finSort = b.dataset.sort; finRenderDash(); });
+}
+
+// item 16: relatório do período em PDF (impressão do navegador).
+function exportarFinalizadosPDF(list) {
+  if (!list.length) { toast('Nenhuma O.S finalizada no período', 'error'); return; }
+  const f = STATE._fFin || {};
+  const periodoTxt = (!f.de && !f.ate) ? 'Todos os períodos'
+    : `${f.de ? f.de.split('-').reverse().join('/') : '…'} a ${f.ate ? f.ate.split('-').reverse().join('/') : '…'}`;
+  const logo = (typeof LOGO_IMPRESILK !== 'undefined') ? `<img src="${LOGO_IMPRESILK}" style="height:34px">` : '';
+
+  const porInst = statsPorInstalador(list);
+  const totalRetrab = list.filter(o => o.retrabalho).length;
+  const horas = list.map(horasExec).filter(h => h != null);
+  const mediaH = horas.length ? (horas.reduce((a, b) => a + b, 0) / horas.length) : 0;
+
+  const linhasOS = list.map(os => {
+    const dF = parseLocalDate((os.finalizadaEm || '').slice(0, 10));
+    const dataF = dF ? `${String(dF.getDate()).padStart(2,'0')}/${String(dF.getMonth()+1).padStart(2,'0')}/${dF.getFullYear()}` : '—';
+    const sit = (os.checkout && os.checkout.situacao) || (os.retrabalho ? 'Retrabalho' : 'Finalizado');
+    return `<tr>
+      <td>${esc(dataF)}</td><td><strong>${esc(os.numero||'—')}</strong></td>
+      <td>${esc(os.cliente||'')}</td><td>${esc(os.servico||'')}</td>
+      <td>${esc((os.equipe||[]).join(', '))}</td><td>${esc(sit)}</td>
+    </tr>`;
+  }).join('');
+
+  const linhasInst = Object.keys(porInst).sort((a, b) => porInst[b].entregas - porInst[a].entregas).map(n => {
+    const d = porInst[n];
+    const h = (d.horas || []);
+    const media = h.length ? (h.reduce((a, b) => a + b, 0) / h.length).toFixed(1) + 'h' : '—';
+    return `<tr><td>${esc(n)}</td><td>${d.entregas}</td><td>${d.retrab}</td><td>${media}</td><td>${notaInstalador(d).toFixed(1)}</td></tr>`;
+  }).join('');
+
+  const w = window.open('', '_blank');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Relatório de finalizados</title>
+    <style>
+      body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}
+      .top{display:flex;align-items:center;gap:12px;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:14px}
+      h1{font-size:18px;margin:0}.sub{color:#666;font-size:13px;margin:2px 0 16px}
+      .kpis{display:flex;gap:16px;margin-bottom:18px}
+      .kpi{border:1px solid #ddd;border-radius:8px;padding:8px 14px}
+      .kpi b{display:block;font-size:20px}.kpi span{font-size:12px;color:#666}
+      h2{font-size:14px;margin:18px 0 8px}
+      table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:18px}
+      th{text-align:left;padding:5px 8px;border-bottom:2px solid #ccc;color:#666;font-size:11px}
+      td{padding:5px 8px;border-bottom:1px solid #eee}
+    </style></head><body>
+    <div class="top">${logo}<h1>Relatório de O.S finalizadas</h1></div>
+    <p class="sub">Período: ${esc(periodoTxt)} · Gerado em ${new Date().toLocaleString('pt-BR')}</p>
+    <div class="kpis">
+      <div class="kpi"><b>${list.length}</b><span>finalizadas</span></div>
+      <div class="kpi"><b>${totalRetrab}</b><span>retrabalhos</span></div>
+      <div class="kpi"><b>${mediaH ? mediaH.toFixed(1) + 'h' : '—'}</b><span>tempo médio</span></div>
+    </div>
+    <h2>Produtividade por colaborador</h2>
+    <table><thead><tr><th>Colaborador</th><th>Entregas</th><th>Retrab.</th><th>Tempo méd.</th><th>Nota</th></tr></thead><tbody>${linhasInst || '<tr><td colspan="5">—</td></tr>'}</tbody></table>
+    <h2>Detalhe das O.S</h2>
+    <table><thead><tr><th>Data</th><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Equipe</th><th>Situação</th></tr></thead><tbody>${linhasOS}</tbody></table>
+    <script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script></body></html>`);
+  w.document.close();
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
