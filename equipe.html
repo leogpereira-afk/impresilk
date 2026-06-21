@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1877f2">
+  <title>Impresilk — Espelho do Instalador</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Seleção do instalador -->
+  <div id="select-screen" class="login-wrap">
+    <div class="login-card">
+      <h2>Impresilk</h2>
+      <p class="subtitle">Espelho do Instalador</p>
+      <div class="field">
+        <label for="sel-instalador">Quem é você?</label>
+        <select id="sel-instalador"></select>
+      </div>
+      <button class="btn-primary w-100 mt-12" id="sel-btn">Ver minhas O.S</button>
+      <p class="text-muted mt-12"><a href="index.html" class="inline-link">Voltar à gestão</a></p>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="eq-app" class="hidden">
+    <header class="topbar">
+      <span class="logo">Impresilk</span>
+      <div class="topbar-actions">
+        <span id="sync-indicator" class="sync-indicator ok">✅</span>
+        <span id="user-badge"></span>
+        <button class="btn-ghost btn-sm" id="eq-trocar" title="Trocar instalador">⇄</button>
+      </div>
+    </header>
+    <main class="tab-panel active" id="eq-list" style="display:block"></main>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal" id="modal-os"></div>
+  </div>
+
+  <!-- Conflito -->
+  <div id="conflict-dialog" class="conflict-dialog hidden">
+    <div class="conflict-box">
+      <h3>⚠️ Conflito de edição</h3>
+      <p id="conflict-msg">Esta O.S foi alterada em outro aparelho.</p>
+      <div class="conflict-actions">
+        <button class="btn-primary" id="conflict-reload">Recarregar (servidor)</button>
+        <button class="btn-danger" id="conflict-overwrite">Sobrescrever (meu)</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script src="config.js"></script>
+  <script src="store.js"></script>
+  <script src="equipe.js"></script>
+</body>
+</html>

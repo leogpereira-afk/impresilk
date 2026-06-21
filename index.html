@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1877f2">
+  <title>Impresilk — Controle de Instalação</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ── Login ─────────────────────────────────────────────────────────── -->
+  <div id="login-screen" class="login-wrap">
+    <div class="login-card">
+      <h2>Impresilk</h2>
+      <p class="subtitle">Controle de Instalação</p>
+      <div class="field">
+        <label for="login-user">Usuário</label>
+        <select id="login-user"></select>
+      </div>
+      <div class="field mt-12">
+        <label for="login-pass">Senha</label>
+        <input type="password" id="login-pass" placeholder="Senha do papel" autocomplete="current-password">
+      </div>
+      <button class="btn-primary w-100 mt-12" id="login-btn">Entrar</button>
+      <div id="login-error" class="login-error hidden"></div>
+      <p class="text-muted mt-12">Espelho do instalador: <a href="equipe.html" class="inline-link">abrir equipe.html</a></p>
+    </div>
+  </div>
+
+  <!-- ── App ───────────────────────────────────────────────────────────── -->
+  <div id="app" class="hidden">
+
+    <!-- Topbar -->
+    <header class="topbar">
+      <span class="logo">Impresilk</span>
+      <div class="topbar-actions">
+        <button class="btn-ghost btn-sm edit-only" id="btn-import-pdf" title="Importar O.S do PDF">📄 PDF</button>
+        <button class="btn-primary btn-sm edit-only" id="btn-nova-os">+ Nova O.S</button>
+        <span id="sync-indicator" class="sync-indicator ok">✅</span>
+        <span id="user-badge"></span>
+        <button class="btn-ghost btn-sm" id="btn-logout" title="Sair">⏻</button>
+      </div>
+    </header>
+
+    <!-- Tabs -->
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="painel">Painel</button>
+      <button class="tab" data-tab="pcp">PCP</button>
+      <button class="tab" data-tab="programacao">Instalação</button>
+      <button class="tab" data-tab="execucao">Execução</button>
+      <button class="tab" data-tab="retrabalho">Retrabalho</button>
+      <button class="tab" data-tab="controle">Painel de Controle</button>
+      <button class="tab" data-tab="instrucoes">Instruções</button>
+    </nav>
+
+    <!-- Panels -->
+    <main>
+      <section class="tab-panel active" data-panel="painel" id="panel-painel"></section>
+      <section class="tab-panel" data-panel="pcp" id="panel-pcp"></section>
+      <section class="tab-panel" data-panel="programacao" id="panel-programacao"></section>
+      <section class="tab-panel" data-panel="execucao" id="panel-execucao"></section>
+      <section class="tab-panel" data-panel="retrabalho" id="panel-retrabalho"></section>
+      <section class="tab-panel" data-panel="controle" id="panel-controle"></section>
+      <section class="tab-panel" data-panel="instrucoes" id="panel-instrucoes"></section>
+    </main>
+  </div>
+
+  <!-- Modal da O.S -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal" id="modal-os"></div>
+  </div>
+
+  <!-- Conflito -->
+  <div id="conflict-dialog" class="conflict-dialog hidden">
+    <div class="conflict-box">
+      <h3>⚠️ Conflito de edição</h3>
+      <p id="conflict-msg">Esta O.S foi alterada em outro aparelho.</p>
+      <div class="conflict-actions">
+        <button class="btn-primary" id="conflict-reload">Recarregar (servidor)</button>
+        <button class="btn-danger" id="conflict-overwrite">Sobrescrever (meu)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div id="toast-container"></div>
+
+  <!-- pdf.js via CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+  <script src="config.js"></script>
+  <script src="store.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
