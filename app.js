@@ -2443,7 +2443,30 @@ function renderControle() {
       <button class="btn-ghost btn-sm mt-8" data-nivel-reset>↺ Restaurar padrão</button>
     </div>` : '';
 
-  el.innerHTML = (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') + listasHTML + contatosHTML + usuariosHTML + niveisHTML;
+  // ── Integração Mubisys (importar O.S) — somente admin ────────────────────
+  const mubisysHTML = isAdmin ? `
+    <div class="cfg-section">
+      <h3>🔌 Integração Mubisys (Importar O.S)</h3>
+      <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">Cadastre a chave da API para puxar as O.S automaticamente. O <strong>Access-Token fica guardado só no servidor</strong> — nunca é enviado aos aparelhos da equipe.</p>
+      <div id="mubisys-status" class="text-muted" style="font-size:.78rem;margin-bottom:10px">Verificando configuração…</div>
+      <div class="field"><label>publicKey (chave da empresa)</label><input data-mub-pk placeholder="publicKey"></div>
+      <div class="field mt-8"><label>Access-Token</label><input type="password" data-mub-token placeholder="cole o token (em branco mantém o atual)" autocomplete="off"></div>
+      <div class="field mt-8"><label>Status das O.S a importar</label>
+        <select data-mub-status>
+          ${['PRODUCAO','PENDENTE','PAUSADO','CONCLUIDO','ENTREGUE','TODOS'].map(s=>`<option value="${s}">${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="flex gap-6 mt-8" style="flex-wrap:wrap">
+        <button class="btn-primary btn-sm" data-mub-salvar>💾 Salvar credenciais</button>
+        <button class="btn-ghost btn-sm" data-mub-testar>🔌 Testar conexão</button>
+        <button class="btn-success btn-sm" data-mub-importar>⬇ Importar O.S agora</button>
+      </div>
+    </div>` : '';
+
+  el.innerHTML = (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') + listasHTML + contatosHTML + usuariosHTML + niveisHTML + mubisysHTML;
+
+  // Handlers da Integração Mubisys (admin)
+  if (isAdmin) wireMubisys(el);
 
   // Handlers de níveis (admin) — funcionam mesmo quando ro é false
   if (isAdmin) {
@@ -2536,6 +2559,87 @@ function renderControle() {
     c.usuarios.push({ nome, papel: $('[data-user-papel]', el).value, senha: $('[data-user-senha]', el).value });
     STORE.saveCFG(c); renderControle(); toast('Usuário adicionado', 'success');
   };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   INTEGRAÇÃO MUBISYS — cadastro da chave + importação de O.S
+   ══════════════════════════════════════════════════════════════════════════ */
+function wireMubisys(el) {
+  const statusEl = $('#mubisys-status', el);
+  const pkEl     = $('[data-mub-pk]', el);
+  const tokenEl  = $('[data-mub-token]', el);
+  const statEl   = $('[data-mub-status]', el);
+
+  // Carrega o estado atual (sem expor o token)
+  STORE.apiFn('mubisys', { action: 'statusConfig' }).then(s => {
+    if (s.error) { statusEl.textContent = '⚠️ ' + s.error; return; }
+    if (s.configurado) {
+      statusEl.innerHTML = `✅ Configurado — publicKey <code>${esc(s.publicKey)}</code>, token <code>${esc(s.tokenMascarado)}</code>`;
+    } else {
+      statusEl.textContent = '➖ Ainda não configurado.';
+    }
+    if (s.publicKey) pkEl.value = s.publicKey;
+    if (s.status) statEl.value = s.status;
+  }).catch(() => { statusEl.textContent = '⚠️ Não foi possível verificar (servidor offline?).'; });
+
+  $('[data-mub-salvar]', el).onclick = async () => {
+    const publicKey = pkEl.value.trim();
+    const accessToken = tokenEl.value.trim();
+    if (!publicKey) { toast('Informe a publicKey', 'error'); return; }
+    try {
+      const r = await STORE.apiFn('mubisys', { action: 'salvarConfig', publicKey, accessToken, status: statEl.value });
+      if (r.error) throw new Error(r.error);
+      tokenEl.value = '';
+      toast('Credenciais salvas', 'success');
+      renderControle();
+    } catch (e) { toast('Falha ao salvar: ' + (e.message || ''), 'error'); }
+  };
+
+  $('[data-mub-testar]', el).onclick = async () => {
+    toast('Testando conexão…');
+    try {
+      const r = await STORE.apiFn('mubisys', { action: 'ping', status: statEl.value });
+      if (r.error) throw new Error(r.error);
+      toast(r.ok ? '✅ Conexão OK com o Mubisys' : `⚠️ Mubisys respondeu HTTP ${r.http}`, r.ok ? 'success' : 'error');
+    } catch (e) { toast('Falha na conexão: ' + (e.message || ''), 'error'); }
+  };
+
+  const impBtn = $('[data-mub-importar]', el);
+  impBtn.onclick = async () => {
+    if (!confirm('Importar as O.S do Mubisys? As que já existirem (mesmo número) não serão alteradas.')) return;
+    impBtn.disabled = true; const txt = impBtn.textContent; impBtn.textContent = '⏳ Importando…';
+    try {
+      const r = await STORE.apiFn('mubisys', { action: 'listarOS', status: statEl.value }, 30000);
+      if (r.error) throw new Error(r.error);
+      const lista = r.os || [];
+      const existentes = new Set(STORE.getAllOS().map(o => String(o.numero)));
+      let novas = 0;
+      lista.forEach(remoto => {
+        if (!remoto.numero || existentes.has(String(remoto.numero))) return;
+        STORE.saveOS(montarOSImportada(remoto));
+        existentes.add(String(remoto.numero));
+        novas++;
+      });
+      toast(`${novas} O.S nova(s) importada(s) de ${lista.length} encontrada(s).`, novas ? 'success' : 'warn');
+      renderActiveTab();
+    } catch (e) {
+      toast('Falha ao importar: ' + (e.message || ''), 'error');
+    } finally {
+      impBtn.disabled = false; impBtn.textContent = txt;
+    }
+  };
+}
+
+// Funde os campos vindos do Mubisys numa O.S nova e válida do Impresilk.
+function montarOSImportada(remoto) {
+  const os = novaOS();
+  ['numero', 'servico', 'vendedor', 'dataEntrada', 'cliente', 'contato', 'whatsapp', 'cnpjCpf', 'endereco']
+    .forEach(k => { if (remoto[k]) os[k] = remoto[k]; });
+  if (remoto.instalacao) os.instalacao = Object.assign(os.instalacao, remoto.instalacao);
+  if (Array.isArray(remoto.itens) && remoto.itens.length) os.itens = remoto.itens;
+  if (!os.instalacao.periodo) os.instalacao.periodo = 'Manhã';
+  os.origemMubisys = true;
+  return os;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

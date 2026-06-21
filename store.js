@@ -174,12 +174,16 @@ const STORE = (() => {
 
   // ── Chamada à API ─────────────────────────────────────────────────────────
   async function api(body) {
+    return apiFn('os', body);
+  }
+
+  // Chama qualquer Netlify Function do projeto (os, mubisys, …) com timeout.
+  async function apiFn(fn, body, timeoutMs = 15000) {
     // Timeout: em sinal fraco, navigator.onLine pode ser true mas o fetch trava.
-    // Abortamos em 15s para não pendurar a sincronização.
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15000);
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const res = await fetch('/.netlify/functions/os', {
+      const res = await fetch('/.netlify/functions/' + fn, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', 'x-token': TOKEN },
         body:    JSON.stringify(body),
@@ -475,6 +479,6 @@ const STORE = (() => {
     // Backup
     exportarBackup, importarBackup,
     // Utilitários
-    uuid, api
+    uuid, api, apiFn
   };
 })();

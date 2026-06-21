@@ -1,14 +1,37 @@
 // Netlify Function — endpoint /.netlify/functions/mubisys
 // Integra com a API do Mubisys para importar Ordens de Serviço automaticamente.
 //
-// As credenciais ficam em variáveis de ambiente (NUNCA no código do cliente):
-//   MUBISYS_PUBLIC_KEY  — a publicKey da empresa (vai no caminho da URL)
-//   MUBISYS_TOKEN       — o Access-Token do usuário (vai no header Access-Token)
-//   MUBISYS_BASE        — (opcional) base da API; padrão https://api.mubisys.com/api
+// As credenciais são cadastradas DENTRO do app (Painel de Controle → Integração
+// Mubisys) e ficam guardadas num store separado do Netlify Blobs ("integracoes"),
+// que NUNCA é enviado para os clientes — assim o Access-Token não vaza para os
+// celulares dos funcionários. Também aceita variáveis de ambiente como fallback:
+//   MUBISYS_PUBLIC_KEY, MUBISYS_TOKEN, MUBISYS_BASE
 //
 // A chamada do próprio app é protegida pelo mesmo TOKEN já usado em os.js.
 
+const { getStore } = require('@netlify/blobs');
+
 const DEFAULT_BASE = 'https://api.mubisys.com/api';
+
+function blobStore(name) {
+  const siteID = process.env.BLOBS_SITE_ID;
+  const token  = process.env.BLOBS_TOKEN;
+  if (siteID && token) return getStore({ name, siteID, token });
+  return getStore(name);
+}
+
+// Resolve as credenciais: primeiro o cadastro feito no app, depois env vars.
+async function getCreds() {
+  let cfg = null;
+  try { cfg = await blobStore('integracoes').get('mubisys', { type: 'json' }); } catch {}
+  cfg = cfg || {};
+  return {
+    publicKey:   cfg.publicKey   || process.env.MUBISYS_PUBLIC_KEY || '',
+    accessToken: cfg.accessToken || process.env.MUBISYS_TOKEN || '',
+    base:        ((cfg.base || process.env.MUBISYS_BASE || DEFAULT_BASE)).replace(/\/+$/, ''),
+    status:      cfg.status || 'PRODUCAO'
+  };
+}
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return resp({ error: 'Method not allowed' }, 405);
@@ -23,41 +46,67 @@ exports.handler = async (event) => {
     return resp({ error: 'Não autorizado' }, 401);
   }
 
-  const publicKey   = process.env.MUBISYS_PUBLIC_KEY;
-  const accessToken = process.env.MUBISYS_TOKEN;
-  const base        = (process.env.MUBISYS_BASE || DEFAULT_BASE).replace(/\/+$/, '');
-  if (!publicKey || !accessToken) {
-    return resp({ error: 'Credenciais do Mubisys não configuradas (defina MUBISYS_PUBLIC_KEY e MUBISYS_TOKEN nas variáveis de ambiente do Netlify).' }, 500);
-  }
-
-  const headers = { 'Access-Token': accessToken, 'Accept': 'application/json' };
-  const status  = body.status || 'PRODUCAO';
   const { action } = body;
 
   try {
+    // ── salvarConfig: cadastra/atualiza as credenciais (vindas do app) ────────
+    if (action === 'salvarConfig') {
+      const store = blobStore('integracoes');
+      const atual = (await store.get('mubisys', { type: 'json' }).catch(() => null)) || {};
+      const novo = {
+        publicKey: (body.publicKey != null ? String(body.publicKey).trim() : atual.publicKey) || '',
+        // Se o token vier vazio, mantém o que já estava (permite editar só a publicKey)
+        accessToken: (body.accessToken ? String(body.accessToken).trim() : atual.accessToken) || '',
+        base: (body.base ? String(body.base).trim() : atual.base) || '',
+        status: body.status || atual.status || 'PRODUCAO'
+      };
+      await store.setJSON('mubisys', novo);
+      return resp({ ok: true });
+    }
+
+    // ── statusConfig: diz se está configurado (sem expor o token) ─────────────
+    if (action === 'statusConfig') {
+      const c = await getCreds();
+      const t = c.accessToken || '';
+      return resp({
+        configurado: !!(c.publicKey && c.accessToken),
+        publicKey: c.publicKey,
+        base: c.base,
+        status: c.status,
+        tokenMascarado: t ? ('•'.repeat(Math.max(0, t.length - 4)) + t.slice(-4)) : ''
+      });
+    }
+
+    // As demais ações exigem credenciais válidas
+    const creds = await getCreds();
+    if (!creds.publicKey || !creds.accessToken) {
+      return resp({ error: 'Credenciais do Mubisys não cadastradas. Vá em Painel de Controle → Integração Mubisys.' }, 400);
+    }
+    const headers = { 'Access-Token': creds.accessToken, 'Accept': 'application/json' };
+    const status  = body.status || creds.status;
+
     switch (action) {
 
       // ── ping: confere se as credenciais batem ───────────────────────────────
       case 'ping': {
-        const url = `${base}/${publicKey}/ordem-servico?status=${encodeURIComponent(status)}`;
+        const url = `${creds.base}/${creds.publicKey}/ordem-servico?status=${encodeURIComponent(status)}`;
         const r = await fetch(url, { headers });
         return resp({ ok: r.ok, http: r.status });
       }
 
-      // ── preview: devolve o JSON CRU do Mubisys (para descobrir os campos) ────
+      // ── preview: devolve uma amostra CRUA do Mubisys (para mapear os campos) ─
       case 'preview': {
-        const url = `${base}/${publicKey}/ordem-servico?status=${encodeURIComponent(status)}`;
+        const url = `${creds.base}/${creds.publicKey}/ordem-servico?status=${encodeURIComponent(status)}`;
         const r = await fetch(url, { headers });
         const data = await r.json().catch(() => null);
         if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
-        // Recorta para não estourar a resposta: só os 2 primeiros registros crus.
         const lista = extrairLista(data);
         return resp({ total: lista.length, amostra: lista.slice(0, 2) });
       }
 
       // ── listarOS: busca e já mapeia para o formato Impresilk ─────────────────
       case 'listarOS': {
-        const url = `${base}/${publicKey}/ordem-servico?status=${encodeURIComponent(status)}`;
+        const url = `${creds.base}/${creds.publicKey}/ordem-servico?status=${encodeURIComponent(status)}`;
         const r = await fetch(url, { headers });
         const data = await r.json().catch(() => null);
         if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
@@ -68,7 +117,7 @@ exports.handler = async (event) => {
       // ── getOS: busca uma O.S pelo número e mapeia ────────────────────────────
       case 'getOS': {
         if (!body.numero) return resp({ error: 'numero ausente' }, 400);
-        const url = `${base}/${publicKey}/ordem-servico/numero/${encodeURIComponent(body.numero)}`;
+        const url = `${creds.base}/${creds.publicKey}/ordem-servico/numero/${encodeURIComponent(body.numero)}`;
         const r = await fetch(url, { headers });
         const data = await r.json().catch(() => null);
         if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
