@@ -364,6 +364,29 @@ function initSyncIndicator() {
     }
   });
   STORE.on('quota', () => toast('Armazenamento local cheio — limpe fotos antigas', 'error'));
+
+  const vBtn = $('#btn-verificar');
+  if (vBtn) vBtn.onclick = verificarNuvem;
+}
+
+// Confirma de fato com o servidor: força o envio da fila e consulta quantas O.S
+// estão salvas na nuvem. Responde a "será que salvou mesmo no Netlify?".
+async function verificarNuvem() {
+  const vBtn = $('#btn-verificar');
+  if (vBtn) { vBtn.disabled = true; vBtn.textContent = '☁️ …'; }
+  toast('Verificando a nuvem…');
+  try {
+    await STORE.trySync();
+    const res = await STORE.api({ action: 'list' });
+    const n = Array.isArray(res.os) ? res.os.length : 0;
+    const fila = STORE.getQueue().length;
+    if (fila) toast(`☁️ ${n} O.S na nuvem · ⏳ ${fila} ainda na fila deste aparelho`, 'error');
+    else      toast(`✅ Tudo salvo na nuvem: ${n} O.S confirmada(s)`, 'success');
+  } catch {
+    toast('❌ Sem resposta da nuvem — offline ou backend não publicado/TOKEN ausente', 'error');
+  } finally {
+    if (vBtn) { vBtn.disabled = false; vBtn.textContent = '☁️ Verificar'; }
+  }
 }
 
 function initConflictDialog() {
@@ -1837,6 +1860,13 @@ function renderFinalizados() {
 function abrirEspelhos() {
   const overlay = $('#modal-overlay');
   const modal = $('#modal-os');
+  const instaladores = STORE.getCFG().instaladores || [];
+  const porPessoa = instaladores.length
+    ? `<p class="text-muted mt-12" style="font-size:.8rem">Ver exatamente o que cada instalador vê (para testar):</p>
+       <div class="espelhos-pessoas">
+         ${instaladores.map(n => `<a class="btn-ghost btn-sm" href="equipe.html#i=${encodeURIComponent(n)}" target="_blank" rel="noopener">👤 ${esc(n)}</a>`).join('')}
+       </div>`
+    : '<p class="text-muted mt-12" style="font-size:.8rem">Cadastre instaladores no Painel de Controle para abrir a visão individual.</p>';
   modal.innerHTML = `
     <div class="modal-header">
       <div style="flex:1"><div class="modal-title">🪞 Espelhos</div></div>
@@ -1846,8 +1876,9 @@ function abrirEspelhos() {
       <p class="text-muted">Abra um espelho somente‑leitura para compartilhar com a equipe.</p>
       <div class="espelhos-opts">
         <a class="btn-primary w-100" href="equipe.html" target="_blank" rel="noopener">👷 Espelho dos Instaladores</a>
-        <a class="btn-ghost w-100 mt-8" href="equipe.html#comercial" target="_blank" rel="noopener">💼 Espelho Comercial</a>
+        <a class="btn-ghost w-100 mt-8" href="equipe.html#comercial" target="_blank" rel="noopener">💼 Espelho Comercial (vê todas)</a>
       </div>
+      ${porPessoa}
     </div>`;
   overlay.classList.remove('hidden');
   $('#esp-fechar').onclick = () => overlay.classList.add('hidden');
@@ -1958,7 +1989,27 @@ function renderControle() {
       <button class="btn-ghost btn-sm mt-8" data-nivel-reset>↺ Restaurar padrão</button>
     </div>` : '';
 
-  el.innerHTML = (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') + listasHTML + contatosHTML + usuariosHTML + niveisHTML;
+  // ── Relatório de produtividade mensal por instalador ─────────────────────
+  const mesAtual = hojeISO().slice(0, 7);
+  const relatorioHTML = `
+    <div class="cfg-section">
+      <h3>📊 Produtividade por instalador</h3>
+      <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">Quantas O.S cada pessoa entregou (finalizou) no mês escolhido.</p>
+      <div class="flex gap-6 mt-8">
+        <input type="month" id="rel-mes" value="${mesAtual}">
+        <button class="btn-primary btn-sm" id="rel-mes-pdf">📄 PDF</button>
+      </div>
+      <div id="rel-mes-out"></div>
+    </div>`;
+
+  el.innerHTML = (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') + relatorioHTML + listasHTML + contatosHTML + usuariosHTML + niveisHTML;
+
+  // Handlers do relatório mensal (disponível mesmo em somente-leitura)
+  const relMes = $('#rel-mes', el);
+  const renderRelMes = () => { const out = $('#rel-mes-out', el); if (out) out.innerHTML = tabelaProdutividadeMes(relMes.value); };
+  if (relMes) { relMes.onchange = renderRelMes; renderRelMes(); }
+  const relMesPdf = $('#rel-mes-pdf', el);
+  if (relMesPdf) relMesPdf.onclick = () => relatorioMensalPorPessoa($('#rel-mes', el).value);
 
   // Handlers de níveis (admin) — funcionam mesmo quando ro é false
   if (isAdmin) {
@@ -2400,6 +2451,57 @@ function relatorioServicosDia(dataISO) {
     <div class="date">📅 ${esc(titulo)} · ${lista.length} serviço(s)</div>
     <table><thead><tr><th>Hora</th><th>O.S</th><th>Cliente</th><th>Endereço</th><th>Equipe</th><th>Veículo</th><th>Status</th></tr></thead>
     <tbody>${linhas}</tbody></table>
+    <script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script>
+    </body></html>`);
+  w.document.close();
+}
+
+// Conta quantas O.S cada instalador entregou (finalizou) no mês. mesISO = 'YYYY-MM'.
+// Uma O.S com 2 pessoas na equipe conta +1 para cada uma.
+function produtividadeMes(mesISO) {
+  if (!mesISO) return [];
+  const fins = STORE.getAllOS().filter(o => o.finalizadaEm && String(o.finalizadaEm).slice(0, 7) === mesISO);
+  const mapa = {};
+  fins.forEach(os => {
+    const eq = (os.equipe || []);
+    const pessoas = eq.length ? eq : ['(sem equipe)'];
+    pessoas.forEach(nome => {
+      const m = mapa[nome] = mapa[nome] || { nome, entregas: 0, retrab: 0 };
+      m.entregas++;
+      if (os.retrabalho) m.retrab++;
+    });
+  });
+  return Object.values(mapa).sort((a, b) => b.entregas - a.entregas);
+}
+
+function tabelaProdutividadeMes(mesISO) {
+  const dados = produtividadeMes(mesISO);
+  if (!dados.length) return '<p class="text-muted mt-8">Nenhuma O.S finalizada nesse mês.</p>';
+  const total = dados.reduce((s, d) => s + d.entregas, 0);
+  return `<table class="control-table" style="margin-top:8px">
+    <thead><tr><th>Instalador</th><th>Entregas</th><th>Retrabalho</th></tr></thead>
+    <tbody>${dados.map(d => `<tr><td>${esc(d.nome)}</td><td>${d.entregas}</td><td>${d.retrab}</td></tr>`).join('')}
+      <tr style="font-weight:700;border-top:2px solid #ccc"><td>Total de entregas</td><td>${total}</td><td>${dados.reduce((s, d) => s + d.retrab, 0)}</td></tr>
+    </tbody></table>`;
+}
+
+function relatorioMensalPorPessoa(mesISO) {
+  const dados = produtividadeMes(mesISO);
+  if (!dados.length) { toast('Nenhuma O.S finalizada nesse mês', 'error'); return; }
+  const [y, m] = String(mesISO).split('-');
+  const titulo = `${m}/${y}`;
+  const total = dados.reduce((s, d) => s + d.entregas, 0);
+  const linhas = dados.map(d => `<tr><td>${esc(d.nome)}</td><td>${d.entregas}</td><td>${d.retrab}</td></tr>`).join('');
+  const w = window.open('', '_blank');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Produtividade ${esc(titulo)}</title>
+    <style>body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}h1{font-size:20px;margin:0 0 4px}.date{font-size:15px;color:#0d9488;font-weight:700;margin-bottom:12px}
+    table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;background:#f0f4fa;padding:6px;border-bottom:2px solid #ccc}td{padding:6px;border-bottom:1px solid #eee}tfoot td{font-weight:700;border-top:2px solid #ccc}</style>
+    </head><body>
+    <h1>Impresilk — Produtividade por instalador</h1>
+    <div class="date">📅 ${esc(titulo)} · ${total} entrega(s)</div>
+    <table><thead><tr><th>Instalador</th><th>Entregas (O.S)</th><th>Com retrabalho</th></tr></thead>
+    <tbody>${linhas}</tbody>
+    <tfoot><tr><td>Total</td><td>${total}</td><td>${dados.reduce((s, d) => s + d.retrab, 0)}</td></tr></tfoot></table>
     <script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script>
     </body></html>`);
   w.document.close();

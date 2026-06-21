@@ -917,3 +917,13 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 /* ── Relatório de serviços do dia (barra) ──────────────────────────── */
 .rel-dia { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
 .rel-dia input[type=date] { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: .82rem; }
+
+/* ── Espelhos: abrir a visão de cada instalador (admin) ────────────── */
+.espelhos-pessoas { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.espelhos-pessoas .btn-ghost { text-decoration: none; }
+
+/* ── Botão "Verificar nuvem" ──────────────────────────────────────── */
+#btn-verificar[disabled] { opacity: .6; cursor: progress; }
+
+/* ── Relatório mensal de produtividade (Painel de Controle) ───────── */
+#rel-mes { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: .82rem; }

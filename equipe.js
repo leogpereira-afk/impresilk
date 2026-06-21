@@ -58,6 +58,16 @@ function initSelect() {
     enter();
     return;
   }
+  // Deep link do admin: equipe.html#i=NOME abre direto a visão daquele instalador.
+  if (location.hash.startsWith('#i=')) {
+    const nome = decodeURIComponent(location.hash.slice(3));
+    if (nome) {
+      EQ.instalador = nome;
+      STORE.setInstalador(nome);
+      enter();
+      return;
+    }
+  }
   const sel = $('#sel-instalador');
   const cfg = STORE.getCFG();
   const lista = cfg.instaladores || [];
@@ -105,6 +115,8 @@ function enter() {
     el.onclick = () => { if (el.title) toast(el.title); };
   });
   initConflict();
+  const vBtn = $('#btn-verificar');
+  if (vBtn) vBtn.onclick = verificarNuvem;
   if (typeof iniciarFraseBar === 'function') iniciarFraseBar();
 
   STORE.pull(() => renderList());
@@ -167,6 +179,25 @@ function capturarLocalCheckin() {
     () => {}, // sem permissão/sinal: segue o fluxo sem travar
     { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
   );
+}
+
+// Confirma com o servidor se as O.S foram realmente salvas na nuvem.
+async function verificarNuvem() {
+  const vBtn = $('#btn-verificar');
+  if (vBtn) vBtn.disabled = true;
+  toast('Verificando a nuvem…');
+  try {
+    await STORE.trySync();
+    const res = await STORE.api({ action: 'list' });
+    const n = Array.isArray(res.os) ? res.os.length : 0;
+    const fila = STORE.getQueue().length;
+    if (fila) toast(`☁️ ${n} na nuvem · ⏳ ${fila} ainda neste aparelho`, 'error');
+    else      toast(`✅ Tudo salvo na nuvem (${n} O.S)`, 'success');
+  } catch {
+    toast('❌ Sem resposta da nuvem — você está offline?', 'error');
+  } finally {
+    if (vBtn) vBtn.disabled = false;
+  }
 }
 
 /* ── Lista de O.S do instalador ──────────────────────────────────────────── */
