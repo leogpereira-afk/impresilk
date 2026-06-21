@@ -259,6 +259,7 @@ function renderList() {
 
 /* ── Modal (só execução) ─────────────────────────────────────────────────── */
 function openModal(os) {
+  if (!os) { toast('O.S não encontrada.', 'error'); return; }
   _draft = JSON.parse(JSON.stringify(os));
   _dirty = false; EQ.modalId = os.id;
   renderModal();

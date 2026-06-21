@@ -311,6 +311,10 @@ const STORE = (() => {
   // ── pullCFG ───────────────────────────────────────────────────────────────
   async function pullCFG() {
     if (!navigator.onLine) return;
+    // Se há um setCfg pendente na fila, a config local é mais nova que a do
+    // servidor — não sobrescrever (evita perder níveis/usuários/funcionários
+    // editados offline). O trySync envia a versão local em seguida.
+    if (getQueue().some(x => x.action === 'setCfg')) return;
     try {
       const res = await api({ action: 'getCfg' });
       if (res.cfg && Object.keys(res.cfg).length) {

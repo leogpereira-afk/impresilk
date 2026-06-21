@@ -531,6 +531,7 @@ let _modalDirty = false;
 let _modalPrevPct = 0;    // % de preenchimento ao abrir (para celebrar ao chegar a 100%)
 
 function openModal(os) {
+  if (!os) { toast('O.S não encontrada.', 'error'); return; }
   _modalDraft = JSON.parse(JSON.stringify(os));
   _modalDirty = false;
   _modalPrevPct = fichaPercent(_modalDraft);
@@ -1976,6 +1977,7 @@ function renderExecucao() {
   // botões inline
   $$('[data-inline="carro"]', el).forEach(b => b.onclick = () => {
     const os = STORE.getOS(b.dataset.id);
+    if (!os) { toast('O.S não encontrada (pode ter sido removida em outro aparelho).', 'error'); renderExecucao(); return; }
     if (os.confirmacao !== 'Confirmado') { toast('Confirme o cliente (POP EXI‑002) antes de liberar o carro / sair.', 'error'); return; }
     os.carroLiberado = true; os.carroLiberadoPor = STATE.user.nome; os.carroLiberadoEm = nowISO();
     os.atualizadoEm = nowISO(); os.atualizadoPor = STATE.user.nome;
