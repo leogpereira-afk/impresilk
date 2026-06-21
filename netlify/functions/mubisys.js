@@ -194,36 +194,38 @@ function isoHora(str) {
 }
 
 // ── Mapeamento Mubisys → O.S do Impresilk ────────────────────────────────────
-// OBS: os nomes de campo abaixo são a melhor estimativa pelos rótulos do PDF.
-// Serão confirmados/ajustados após o primeiro "preview" com dados reais.
+// Nomes de campo confirmados via "preview" com dados reais da API.
 function mapearOS(o) {
   o = o || {};
-  const cliente = o.cliente || o.client || {};
-  const entrega = pick(o, 'dataEntrega', 'entrega', 'previsaoEntrega', 'data_entrega');
+  const contato  = (Array.isArray(o.cliente_contato)  && o.cliente_contato[0])  || {};
+  const endereco = (Array.isArray(o.cliente_endereco) && o.cliente_endereco[0]) || {};
+  const entregaData = pick(o, 'data_entrega', 'dataEntrega');
+  const entregaHora = pick(o, 'hora_entrega', 'horaEntrega');
 
   return {
-    numero:      String(pick(o, 'numero', 'numeroOS', 'codigo', 'sequencial', 'id') || ''),
-    servico:     pick(o, 'referencia', 'ref', 'titulo', 'descricao', 'assunto'),
-    vendedor:    pick(o, 'vendedor', 'vendedorNome') || pick(o.vendedor || {}, 'nome'),
-    dataEntrada: isoData(pick(o, 'dataAprovacao', 'aprovacao', 'dataCadastro', 'data')),
-    cliente:     pick(cliente, 'nome', 'razaoSocial', 'nomeFantasia') || pick(o, 'clienteNome'),
-    contato:     pick(cliente, 'contato', 'responsavel') || pick(o, 'contato'),
-    whatsapp:    pick(cliente, 'telefone', 'celular', 'whatsapp', 'fone') || pick(o, 'telefone'),
-    cnpjCpf:     pick(cliente, 'cpfcnpj', 'cnpj', 'cpf', 'documento') || pick(o, 'cpfcnpj'),
-    endereco:    montarEndereco(cliente, o),
+    numero:      String(pick(o, 'sequencial_ordem', 'numero', 'numeroOS', 'codigo') || ''),
+    servico:     pick(o, 'nome_trabalho', 'referencia', 'titulo', 'descricao'),
+    vendedor:    pick(o, 'vendedor', 'atendente', 'vendedorNome'),
+    dataEntrada: isoData(pick(o, 'data_aprovacao', 'data_cadastro')),
+    cliente:     typeof o.cliente === 'string' ? o.cliente : pick(o.cliente || {}, 'nome', 'razaoSocial'),
+    contato:     pick(contato, 'nome_contato', 'nome', 'contato', 'responsavel'),
+    whatsapp:    pick(contato, 'celular', 'telefone', 'whatsapp', 'fone'),
+    cnpjCpf:     pick(o, 'cpf_cnpj', 'cpfcnpj', 'cnpj', 'cpf') || pick(contato, 'cpf_cnpj', 'cpfcnpj'),
+    endereco:    montarEndereco(endereco),
+    observacao:  pick(o, 'observacao_geral', 'observacao_producao'),
     instalacao: {
-      data:    isoData(entrega),
-      hora:    isoHora(entrega),
-      periodo: definirPeriodo(isoHora(entrega))
+      data:    isoData(entregaData),
+      hora:    isoHora(entregaHora),
+      periodo: definirPeriodo(isoHora(entregaHora))
     },
     itens: (o.itens || o.produtos || o.items || []).map(mapearItem),
     _origemMubisys: true
   };
 }
 
-function montarEndereco(cliente, o) {
-  const c = cliente || {};
-  const direto = pick(c, 'enderecoCompleto', 'endereco') || pick(o, 'endereco');
+function montarEndereco(c) {
+  c = c || {};
+  const direto = pick(c, 'enderecoCompleto', 'endereco');
   if (direto && typeof direto === 'string') return direto;
   const partes = [
     pick(c, 'logradouro', 'rua'),
@@ -231,7 +233,7 @@ function montarEndereco(cliente, o) {
     pick(c, 'complemento'),
     pick(c, 'bairro'),
     pick(c, 'cep') ? 'CEP: ' + pick(c, 'cep') : '',
-    [pick(c, 'cidade', 'municipio'), pick(c, 'uf', 'estado')].filter(Boolean).join(' - ')
+    [pick(c, 'cidade', 'municipio'), pick(c, 'estado', 'uf')].filter(Boolean).join(' - ')
   ].filter(Boolean);
   return partes.join(' - ');
 }
@@ -245,14 +247,14 @@ function definirPeriodo(hora) {
 function mapearItem(it, i) {
   it = it || {};
   const med = pick(it, 'medidas', 'medida', 'dimensoes');
-  const larg = pick(it, 'largura'), alt = pick(it, 'altura');
+  const larg = pick(it, 'largura', 'pcp_largura'), alt = pick(it, 'altura', 'pcp_altura');
   return {
-    item:      String(i + 1),
-    descricao: pick(it, 'descricao', 'produto', 'nome', 'item') || 'Item',
+    item:      String(pick(it, 'posicao') || (i + 1)),
+    descricao: pick(it, 'descricao', 'item', 'produto', 'nome') || 'Item',
     medidas:   med || (larg && alt ? `${larg}x${alt}` : ''),
     qtde:      String(pick(it, 'quantidade', 'qtde', 'qtd') || '1'),
-    valorUnit: String(pick(it, 'valorUnitario', 'valorUnit', 'preco', 'valor') || ''),
-    subtotal:  pick(it, 'subtotal', 'total', 'valorTotal'),
+    valorUnit: String(pick(it, 'valor_unitario', 'valorUnitario', 'preco', 'valor') || ''),
+    subtotal:  String(pick(it, 'sub_total', 'subtotal', 'valor_final', 'total') || ''),
     pronto:    false
   };
 }
