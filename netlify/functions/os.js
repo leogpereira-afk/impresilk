@@ -144,7 +144,8 @@ exports.handler = async (event, context) => {
     }
   } catch (e) {
     console.error('[os.js] erro:', e);
-    return resp({ error: e.message || 'Erro interno' }, 500);
+    const msg = (e && (e.message || e.name)) || 'Erro interno';
+    return resp({ error: msg, tipo: e && e.name }, 500);
   }
 };
 
@@ -153,10 +154,14 @@ exports.handler = async (event, context) => {
 async function allKeys(store) {
   const keys = [];
   let cursor;
+  let guard = 0;
   do {
     const page = await store.list(cursor ? { cursor } : undefined);
-    for (const b of page.blobs) keys.push(b.key);
-    cursor = page.cursor;
+    if (page && Array.isArray(page.blobs)) {
+      for (const b of page.blobs) keys.push(b.key);
+    }
+    cursor = page && page.cursor;
+    if (++guard > 5000) { console.warn('[os.js] allKeys: guard atingido'); break; }
   } while (cursor);
   return keys;
 }

@@ -197,7 +197,12 @@ const STATUS_LABEL = {
 };
 
 // ── Datas / prazos (PCP) ─────────────────────────────────────────────────────
-function todayISO() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString().slice(0, 10); }
+// Data de hoje em YYYY-MM-DD no fuso LOCAL (toISOString convertia pra UTC e
+// quebrava perto da meia-noite). Espelha o hojeISO() usado em outros lugares.
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 // Diferença em dias (bISO − aISO). null se faltar alguma data.
 function diasEntre(aISO, bISO) {
   if (!aISO || !bISO) return null;
@@ -434,8 +439,10 @@ function enterApp() {
   STORE.trySync();
   renderActiveTab();
 
-  // Pull periódico a cada 30s
-  setInterval(() => { STORE.pull(() => renderActiveTab()); STORE.trySync(); }, 30000);
+  // Pull periódico a cada 30s. Guardamos o id para evitar timers duplicados
+  // se enterApp() rodar mais de uma vez (auto-login + login manual, etc.).
+  if (window._pullTimer) clearInterval(window._pullTimer);
+  window._pullTimer = setInterval(() => { STORE.pull(() => renderActiveTab()); STORE.trySync(); }, 30000);
 }
 
 function aplicarPermissoes() {
@@ -614,6 +621,7 @@ const CANAL_OPTS   = ['WhatsApp', 'Telefone', 'E-mail', 'Presencial', 'Outro'];
 let _modalDraft = null;   // cópia de trabalho da O.S
 let _modalDirty = false;
 let _modalPrevPct = 0;    // % de preenchimento ao abrir (para celebrar ao chegar a 100%)
+let _modalReturnFocus = null; // elemento focado antes de abrir (restaurado no close)
 
 function openModal(os) {
   if (!os) { toast('O.S não encontrada.', 'error'); return; }
@@ -621,6 +629,8 @@ function openModal(os) {
   _modalDirty = false;
   _modalPrevPct = fichaPercent(_modalDraft);
   STATE.modalOSId = os.id;
+  // Guarda o elemento que abriu o modal pra restaurar o foco depois.
+  _modalReturnFocus = document.activeElement;
   renderModal();
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -631,9 +641,25 @@ function closeModal() {
   STATE.modalOSId = null;
   _modalDraft = null;
   renderActiveTab();
+  // Restaura o foco para o card/elemento que originou o modal (acessibilidade).
+  if (_modalReturnFocus && document.body.contains(_modalReturnFocus)) {
+    try { _modalReturnFocus.focus({ preventScroll: false }); } catch {}
+  }
+  _modalReturnFocus = null;
 }
 
 function markDirty() { _modalDirty = true; }
+
+// Salva o draft com um pequeno atraso (700 ms). Usado em campos onde o usuário
+// está digitando rápido (itens) — evita perder edição se ele fechar o modal.
+let _saveDraftTimer = null;
+function _debouncedSaveDraft() {
+  if (_saveDraftTimer) clearTimeout(_saveDraftTimer);
+  _saveDraftTimer = setTimeout(() => {
+    _saveDraftTimer = null;
+    if (_modalDirty) saveDraft();
+  }, 700);
+}
 
 // Autosave: grava draft no store
 function saveDraft() {
@@ -737,7 +763,13 @@ function blocoPCP(os, ro, done) {
       <div class="field-row">
         <div class="field"><label>Contato</label><input data-f="contato" value="${esc(os.contato)}"></div>
         <div class="field"><label>WhatsApp</label><input data-f="whatsapp" value="${esc(os.whatsapp)}">
-          ${os.whatsapp ? `<a class="inline-link" target="_blank" href="https://wa.me/55${esc(String(os.whatsapp).replace(/\D/g,''))}">Abrir Zap ↗</a>` : ''}
+          ${(() => {
+            const dig = String(os.whatsapp || '').replace(/\D/g,'');
+            // BR: 10 (fixo) ou 11 (celular). Aceita também 12-13 se já vier com DDI.
+            if (dig.length < 10) return os.whatsapp ? '<span class="foto-hint" title="WhatsApp incompleto">⚠ número curto</span>' : '';
+            const sem55 = dig.startsWith('55') ? dig : '55' + dig;
+            return `<a class="inline-link" target="_blank" href="https://wa.me/${esc(sem55)}">Abrir Zap ↗</a>`;
+          })()}
         </div>
       </div>
       <div class="field"><label>Endereço</label><input data-f="endereco" value="${esc(os.endereco)}">
@@ -980,7 +1012,7 @@ function blocoExec(os, ro, done) {
 function chipsField(field, values, options, ro) {
   const arr = Array.isArray(values) ? values : (values ? [values] : []);
   const chips = arr.length
-    ? arr.map(v => `<span class="chip">${esc(v)}<button class="chip-rm edit-only" data-chip-rm="${field}|${esc(v)}">×</button></span>`).join('')
+    ? arr.map((v, i) => `<span class="chip">${esc(v)}<button class="chip-rm edit-only" data-chip-field="${esc(field)}" data-chip-idx="${i}">×</button></span>`).join('')
     : '<span class="foto-hint">Nenhum selecionado</span>';
   return `
     <div class="chips-wrap" data-chips="${field}">
@@ -1134,7 +1166,8 @@ function bindModalEvents(os, ro) {
     };
   });
 
-  // Itens — edição inline
+  // Itens — edição inline (salva no blur OU debounced para não perder edição
+  // se o usuário fechar o modal sem trocar de campo).
   $$('[data-item]', root).forEach(el => {
     el.oninput = () => {
       const [idx, key] = el.dataset.item.split('.');
@@ -1144,7 +1177,9 @@ function bindModalEvents(os, ro) {
         it.subtotal = (parseBRNumber(it.qtde) * parseBRNumber(it.valorUnit));
       }
       markDirty();
+      _debouncedSaveDraft();
     };
+    el.onblur = () => { if (_modalDirty) saveDraft(); };
   });
   $$('[data-item-pronto]', root).forEach(el => {
     el.onchange = () => {
@@ -1170,10 +1205,13 @@ function bindModalEvents(os, ro) {
   $$('[data-picker-open]', root).forEach(btn => {
     btn.onclick = () => abrirPicker(btn.dataset.pickerOpen);
   });
-  $$('[data-chip-rm]', root).forEach(btn => {
+  $$('[data-chip-field]', root).forEach(btn => {
     btn.onclick = () => {
-      const [f, val] = btn.dataset.chipRm.split('|');
-      _modalDraft[f] = (_modalDraft[f] || []).filter(x => x !== val);
+      const f = btn.dataset.chipField;
+      const idx = +btn.dataset.chipIdx;
+      const arr = Array.isArray(_modalDraft[f]) ? _modalDraft[f] : [];
+      if (Number.isInteger(idx) && idx >= 0 && idx < arr.length) arr.splice(idx, 1);
+      _modalDraft[f] = arr;
       saveDraft(); reRenderModalKeepOpen();
     };
   });

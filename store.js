@@ -140,11 +140,21 @@ const STORE = (() => {
   function getQueue() { return lsGet(K.FILA, []); }
 
   function _enqueue(item) {
-    const q = getQueue();
+    let q = getQueue();
     // Deduplica upserts da mesma O.S
     if (item.action === 'upsert') {
       const i = q.findIndex(x => x.action === 'upsert' && x.os.id === item.os.id);
       if (i >= 0) { q[i] = item; lsSet(K.FILA, q); return; }
+    }
+    // Quando deleta uma O.S, descarta upserts pendentes dela (não faz sentido
+    // mandar uma versão "atualizada" de algo que vai ser apagado em seguida).
+    if (item.action === 'delete') {
+      q = q.filter(x => !(x.action === 'upsert' && x.os && x.os.id === item.id));
+      // Se já existe um delete pra mesma id na fila, evita duplicar.
+      if (q.some(x => x.action === 'delete' && x.id === item.id)) {
+        lsSet(K.FILA, q);
+        return;
+      }
     }
     q.push(item);
     lsSet(K.FILA, q);
@@ -225,45 +235,69 @@ const STORE = (() => {
   }
 
   // ── trySync: envia fila pendente ──────────────────────────────────────────
-  let _backoffMs = 5000;
+  // _flagged: chaves de itens com conflito não-resolvido (pulamos no próximo
+  // ciclo pra não travar a fila inteira atrás de um item esperando o usuário).
+  const _flagged = new Set();
+  // Contagem de falhas por item (chave = _sigFila). Item que falha N vezes
+  // sai da fila pra não inchar o localStorage indefinidamente.
+  const _failCount = new Map();
+  const MAX_FAILS = 25;
 
   async function trySync() {
     if (_syncing) return;
     const q = getQueue();
-    if (!q.length) { _notifySync('ok', 0); return; }
+    if (!q.length) { _flagged.clear(); _notifySync('ok', 0); return; }
     if (!navigator.onLine) { _notifySync('offline', q.length); return; }
 
     _syncing = true;
     _notifySync('pending', q.length);
 
+    let consecutiveNetFails = 0;
     for (const item of [...q]) {
+      const sig = _sigFila(item);
+      // Pula itens em conflito até o usuário resolver.
+      if (_flagged.has(sig)) continue;
       try {
         if (item.action === 'putPhoto') {
-          // A foto fica no IndexedDB; a fila guarda só o fileId (evita estourar
-          // a quota do localStorage). Lê o base64 do IndexedDB na hora de enviar.
           let base64 = item.base64;
           if (!base64) { const f = await getFoto(item.fileId); base64 = f && f.base64; }
-          if (!base64) { _removeFromQueue(item); continue; } // foto sumiu → descarta
+          if (!base64) { _removeFromQueue(item); _failCount.delete(sig); continue; }
           const res = await api({ action: 'putPhoto', base64, mime: item.mime, fileId: item.fileId });
-          if (res.fileId) _removeFromQueue(item);
+          if (res && res.fileId) { _removeFromQueue(item); _failCount.delete(sig); }
         } else {
           const res = await api(item);
-          if (res.conflito) {
+          if (res && res.conflito) {
+            _flagged.add(sig);                 // não retentar até resolução
             _notifyConflict(item.os, res.servidor);
-            // Não remove da fila — usuário decide
-          } else {
-            _removeFromQueue(item);
-            // Atualiza cache com atualizadoEm do servidor
-            if (item.action === 'upsert' && res.os) {
-              const all = getAllOS();
-              const idx = all.findIndex(o => o.id === res.os.id);
-              if (idx >= 0) { all[idx].atualizadoEm = res.os.atualizadoEm; _setAllOS(all); }
-            }
+            continue;                          // segue para o próximo item
+          }
+          _removeFromQueue(item);
+          _failCount.delete(sig);
+          if (item.action === 'upsert' && res && res.os) {
+            const all = getAllOS();
+            const idx = all.findIndex(o => o.id === res.os.id);
+            if (idx >= 0) { all[idx].atualizadoEm = res.os.atualizadoEm; _setAllOS(all); }
           }
         }
-        _backoffMs = 5000;
-      } catch {
-        break; // Para na primeira falha, tenta depois
+        consecutiveNetFails = 0;
+      } catch (e) {
+        // Distingue falha de rede (parar o ciclo) de erro permanente do item
+        // (incrementa contador; quando estourar, descarta o item pra não travar).
+        const msg = (e && e.message) || '';
+        const isNetwork = !msg.startsWith('HTTP ') || /HTTP 5\d\d/.test(msg);
+        if (isNetwork) {
+          consecutiveNetFails++;
+          if (consecutiveNetFails >= 1) break; // sai do loop, tenta no próximo trySync
+        } else {
+          const n = (_failCount.get(sig) || 0) + 1;
+          _failCount.set(sig, n);
+          if (n >= MAX_FAILS) {
+            console.warn('[store] descartando item após', n, 'falhas:', sig, msg);
+            _removeFromQueue(item);
+            _failCount.delete(sig);
+            _notifyListeners('item-descartado', { item, motivo: msg });
+          }
+        }
       }
     }
 
@@ -308,7 +342,13 @@ const STORE = (() => {
           }
         }
 
-        if (res.nextOffset == null || ++guard > 1000) break;
+        if (res.nextOffset == null) break;
+        if (++guard > 1000) {
+          // Atingiu o teto de segurança (>150k O.S). Avisa em vez de truncar silenciosamente.
+          console.warn('[store] pull abortado: mais de 1000 páginas. Lista pode estar truncada.');
+          _notifyListeners('pull-truncado', { paginas: guard });
+          break;
+        }
         offset = res.nextOffset;
       }
 
@@ -434,15 +474,17 @@ const STORE = (() => {
     const idx = all.findIndex(o => o.id === remoteOS.id);
     if (idx >= 0) all[idx] = remoteOS; else all.push(remoteOS);
     _setAllOS(all);
-    // Remove item da fila para esta O.S
+    // Remove item da fila para esta O.S e libera a flag de conflito.
     const q = getQueue().filter(x => !(x.action === 'upsert' && x.os.id === remoteOS.id));
     lsSet(K.FILA, q);
+    _flagged.delete('upsert:' + remoteOS.id);
   }
 
   // Força sobrescrita: grava o local e re-enfileira
   function sobrescreverServidor(localOS) {
     // Atualiza timestamp para ser mais novo
     localOS.atualizadoEm = new Date().toISOString();
+    _flagged.delete('upsert:' + localOS.id);
     saveOS(localOS);
   }
 
@@ -464,10 +506,28 @@ const STORE = (() => {
     if (!data || !Array.isArray(data.os)) throw new Error('Arquivo inválido');
     _setAllOS(data.os);
     if (data.cfg) lsSet(K.CFG, data.cfg);
+    // Limpa a fila pendente — referências a IDs que sumiram no backup virariam
+    // erros eternos no servidor; o pull seguinte re-sincroniza o que faltar.
+    lsSet(K.FILA, []);
+    _flagged.clear();
+    _failCount.clear();
   }
 
-  // ── UUID simples ──────────────────────────────────────────────────────────
+  // ── UUID v4 cripto-seguro (fallback p/ Math.random em ambientes antigos) ──
   function uuid() {
+    try {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        const b = new Uint8Array(16);
+        crypto.getRandomValues(b);
+        b[6] = (b[6] & 0x0f) | 0x40; // version 4
+        b[8] = (b[8] & 0x3f) | 0x80; // variant 10
+        const h = [...b].map(x => x.toString(16).padStart(2, '0'));
+        return `${h.slice(0,4).join('')}-${h.slice(4,6).join('')}-${h.slice(6,8).join('')}-${h.slice(8,10).join('')}-${h.slice(10,16).join('')}`;
+      }
+    } catch {}
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
       const r = Math.random() * 16 | 0;
       return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);

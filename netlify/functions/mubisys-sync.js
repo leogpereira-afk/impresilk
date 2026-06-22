@@ -45,13 +45,17 @@ exports.handler = async () => {
 
     // 3) Grava as novas
     let novas = 0;
+    let semNumero = 0;
     for (const remoto of remotas) {
-      if (!remoto.numero || existentes.has(String(remoto.numero))) continue;
+      const num = remoto && remoto.numero ? String(remoto.numero).trim() : '';
+      if (!num) { semNumero++; continue; } // sem número não dá pra deduplicar com segurança
+      if (existentes.has(num)) continue;
       const os = montarOSImportada(remoto);
       await store.setJSON(os.id, os);
-      existentes.add(String(remoto.numero));
+      existentes.add(num);
       novas++;
     }
+    if (semNumero) console.warn(`[mubisys-sync] ${semNumero} O.S sem número foram ignoradas.`);
 
     console.log(`[mubisys-sync] ${novas} O.S nova(s) de ${remotas.length} encontradas.`);
     return resp({ ok: true, novas, total: remotas.length });
@@ -109,10 +113,14 @@ function uuid() {
 async function allKeys(store) {
   const keys = [];
   let cursor;
+  let guard = 0;
   do {
     const page = await store.list(cursor ? { cursor } : undefined);
-    for (const b of page.blobs) keys.push(b.key);
-    cursor = page.cursor;
+    if (page && Array.isArray(page.blobs)) {
+      for (const b of page.blobs) keys.push(b.key);
+    }
+    cursor = page && page.cursor;
+    if (++guard > 5000) { console.warn('[mubisys-sync] allKeys: guard atingido'); break; }
   } while (cursor);
   return keys;
 }
