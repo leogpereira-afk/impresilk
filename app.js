@@ -177,9 +177,18 @@ function toast(msg, type = '') {
 /* ══════════════════════════════════════════════════════════════════════════
    STATUS DERIVADO
    ══════════════════════════════════════════════════════════════════════════ */
+// Tipo do pedido: 'interno' (fluxo curto: PCP + Itens) ou 'externo' (completo).
+// O.S antigas/importadas sem o campo são tratadas como 'externo'.
+function osTipo(os) { return (os && os.tipo === 'interno') ? 'interno' : 'externo'; }
+function isInterno(os) { return osTipo(os) === 'interno'; }
+
 function calcStatus(os) {
   if (!os) return 'aguardando_producao';
   if (os.finalizadaEm) return 'finalizada';
+  // Pedido interno: só passa por PCP & Itens; não tem agenda/execução.
+  if (isInterno(os)) {
+    return os.liberadoPCP ? 'apto' : 'aguardando_producao';
+  }
   if (os.horaSaida) return 'em_andamento';
   if (os.confirmacao === 'Confirmado') return 'confirmada';
   if (os.instalacao && os.instalacao.data && os.instalacao.periodo && (os.equipe || []).length) return 'agendada';
@@ -255,6 +264,13 @@ function urgenciaOS(os) {
    ══════════════════════════════════════════════════════════════════════════ */
 function checklist(os) {
   const inst = os.instalacao || {};
+  // Interno: checklist enxuto (só as duas etapas).
+  if (isInterno(os)) {
+    return [
+      { k: 'pcp',   label: 'PCP liberou',     ok: !!os.liberadoPCP },
+      { k: 'itens', label: 'Itens definidos', ok: (os.itens || []).length >= 1 }
+    ];
+  }
   return [
     { k: 'pcp',     label: 'PCP liberou',        ok: !!os.liberadoPCP },
     { k: 'itens',   label: 'Itens definidos',    ok: (os.itens || []).length >= 1 },
@@ -269,9 +285,14 @@ function checklist(os) {
 function blocosCompletos(os) {
   const inst = os.instalacao || {};
   const itens = os.itens || [];
+  const pcp   = !!(os.numero && os.cliente && os.responsavelPCP && os.liberadoPCP);
+  const itensOk = itens.length >= 1 && itens.every(i => i.pronto);
+  if (isInterno(os)) {
+    return { pcp, itens: itensOk };
+  }
   return {
-    pcp:    !!(os.numero && os.cliente && os.responsavelPCP && os.liberadoPCP),
-    itens:  itens.length >= 1 && itens.every(i => i.pronto),
+    pcp,
+    itens:  itensOk,
     agenda: !!(inst.data && inst.periodo && (os.equipe || []).length && os.confirmacao === 'Confirmado'),
     exec:   !!(os.finalizadaEm || (os.instalacaoOK && os.conferidoPor && (os.fotosCheckinIds || []).length))
   };
@@ -280,15 +301,25 @@ function blocosCompletos(os) {
 // % de preenchimento da ficha da O.S
 function fichaPercent(os) {
   const inst = os.instalacao || {};
-  const checks = [
-    os.numero, os.cliente, os.contato, os.whatsapp, os.endereco,
-    os.servico, os.responsavelPCP, os.dataEntrada, os.liberadoPCP,
-    (os.itens || []).length, os.acesso, os.fixacao, (os.ferramentas || []).length,
-    inst.data, inst.periodo, (os.equipe || []).length, os.veiculo,
-    os.confirmacao === 'Confirmado', (os.embarqueConferidoPor || os.produtosConferidosPor),
-    os.kmSaida, os.kmRetorno,
-    os.instalacaoOK, os.conferidoPor, (os.fotosCheckinIds || []).length
-  ];
+  let checks;
+  if (isInterno(os)) {
+    // Pedido interno só tem PCP & Cliente + Serviços & Itens
+    checks = [
+      os.numero, os.cliente, os.contato, os.whatsapp, os.endereco,
+      os.servico, os.responsavelPCP, os.dataEntrada, os.liberadoPCP,
+      (os.itens || []).length
+    ];
+  } else {
+    checks = [
+      os.numero, os.cliente, os.contato, os.whatsapp, os.endereco,
+      os.servico, os.responsavelPCP, os.dataEntrada, os.liberadoPCP,
+      (os.itens || []).length, os.acesso, os.fixacao, (os.ferramentas || []).length,
+      inst.data, inst.periodo, (os.equipe || []).length, os.veiculo,
+      os.confirmacao === 'Confirmado', (os.embarqueConferidoPor || os.produtosConferidosPor),
+      os.kmSaida, os.kmRetorno,
+      os.instalacaoOK, os.conferidoPor, (os.fotosCheckinIds || []).length
+    ];
+  }
   const done = checks.filter(Boolean).length;
   return Math.round(done / checks.length * 100);
 }
@@ -582,7 +613,7 @@ function renderActiveTab() {
 /* ══════════════════════════════════════════════════════════════════════════
    NOVA O.S
    ══════════════════════════════════════════════════════════════════════════ */
-function novaOS() {
+function novaOS(tipo) {
   return {
     id: STORE.uuid(),
     numero: '',
@@ -590,6 +621,7 @@ function novaOS() {
     criadoPor: STATE.user.nome,
     atualizadoEm: nowISO(),
     atualizadoPor: STATE.user.nome,
+    tipo: tipo === 'interno' ? 'interno' : 'externo',
     cliente: '', contato: '', whatsapp: '', cnpjCpf: '', endereco: '',
     servico: '', vendedor: '', dataEntrada: '', previsaoEntrega: '',
     responsavelPCP: '', obsPCP: '', layoutFotoId: '', liberadoPCP: false, aptoPor: '', aptoEm: '',
@@ -707,16 +739,41 @@ function renderModal() {
 
   const done = blocosCompletos(os);
   const pct = fichaPercent(os);
+  const interno = isInterno(os);
+
+  // Seletor de tipo do pedido (Interno / Externo)
+  const tipoSelector = `
+    <div class="tipo-selector edit-only" role="group" aria-label="Tipo de pedido">
+      <button type="button" class="tipo-opt ${!interno ? 'active' : ''}" data-set-tipo="externo">🚚 Externo</button>
+      <button type="button" class="tipo-opt ${interno ? 'active' : ''}" data-set-tipo="interno">🏭 Interno</button>
+    </div>`;
+
+  // Para pedido interno, só os dois primeiros blocos. Finalização direta.
+  const blocosHTML = interno
+    ? `${blocoPCP(os, ro, done.pcp)}
+       ${blocoItens(os, ro, done.itens)}
+       <div class="fs-body interno-finalizar edit-only" style="padding:14px 16px">
+         ${os.finalizadaEm
+           ? `<div class="liberar-status">🏁 Finalizado por ${esc(os.finalizadoPor || '—')}${os.finalizadaEm ? ' · ' + new Date(os.finalizadaEm).toLocaleDateString('pt-BR') : ''}
+                <button class="btn-xs btn-ghost" id="btn-reabrir-interno" style="margin-left:auto">Reabrir</button></div>`
+           : `<button class="btn-success" id="btn-finalizar-interno" style="width:100%">🏁 Finalizar pedido interno</button>`}
+       </div>`
+    : `${blocoPCP(os, ro, done.pcp)}
+       ${blocoItens(os, ro, done.itens)}
+       ${blocoAgenda(os, ro, done.agenda)}
+       ${blocoExec(os, ro, done.exec)}`;
 
   $('#modal-os').innerHTML = `
     <div class="modal-header">
       <div style="flex:1">
-        <div class="modal-title">O.S ${esc(os.numero || '(nova)')}</div>
+        <div class="modal-title">O.S ${esc(os.numero || '(nova)')} <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏭 Interno' : '🚚 Externo'}</span></div>
         <div class="modal-meta">Atualizado por ${esc(os.atualizadoPor || '—')}${os.atualizadoEm ? ' · ' + new Date(os.atualizadoEm).toLocaleString('pt-BR') : ''}</div>
       </div>
       <span class="modal-status badge st-${st}">${STATUS_LABEL[st]}</span>
       <button class="modal-close" id="modal-close-btn">×</button>
     </div>
+
+    ${tipoSelector}
 
     <div class="ficha-pct">
       <div class="ficha-pct-bar"><div class="ficha-pct-fill" style="width:${pct}%"></div></div>
@@ -725,10 +782,7 @@ function renderModal() {
 
     <div class="checklist-bar">${checklistBar}</div>
 
-    ${blocoPCP(os, ro, done.pcp)}
-    ${blocoItens(os, ro, done.itens)}
-    ${blocoAgenda(os, ro, done.agenda)}
-    ${blocoExec(os, ro, done.exec)}
+    ${blocosHTML}
 
     <div class="fs-body" style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-ghost btn-sm" id="modal-pdf">🖨 PDF da ficha</button>
@@ -1274,6 +1328,35 @@ function bindModalEvents(os, ro) {
     toast('Instalação finalizada 🏁', 'success');
   };
 
+  // Seletor de tipo (Interno / Externo)
+  $$('[data-set-tipo]', root).forEach(btn => {
+    btn.onclick = () => {
+      const novo = btn.dataset.setTipo === 'interno' ? 'interno' : 'externo';
+      if (osTipo(_modalDraft) === novo) return;
+      _modalDraft.tipo = novo;
+      saveDraft(); reRenderModalKeepOpen();
+    };
+  });
+
+  // Finalizar pedido interno (vai direto para "Finalizado")
+  const finInterno = $('#btn-finalizar-interno');
+  if (finInterno) finInterno.onclick = () => {
+    const faltas = validarFinalizacao(_modalDraft);
+    if (faltas.length) {
+      toast('Falta: ' + faltas.join(', '), 'error');
+      return;
+    }
+    aplicarFinalizacao(_modalDraft);
+    saveDraft(); reRenderModalKeepOpen();
+    toast('Pedido interno finalizado 🏁', 'success');
+  };
+  const reabrirInterno = $('#btn-reabrir-interno');
+  if (reabrirInterno) reabrirInterno.onclick = () => {
+    _modalDraft.finalizadaEm = ''; _modalDraft.finalizadoPor = '';
+    if (_modalDraft.checkout) { _modalDraft.checkout.situacao = ''; _modalDraft.checkout.confirmado = false; }
+    saveDraft(); reRenderModalKeepOpen();
+  };
+
   // Fotos single (layout, embarque)
   $$('[data-foto-input]', root).forEach(inp => {
     inp.onchange = async () => {
@@ -1349,6 +1432,11 @@ function reRenderModalKeepOpen() {
 function validarFinalizacao(os) {
   const f = [];
   if (!os.liberadoPCP) f.push('PCP liberar');
+  // Pedido interno só precisa de PCP liberado + ≥1 item
+  if (isInterno(os)) {
+    if (!(os.itens || []).length) f.push('≥1 item');
+    return f;
+  }
   if (os.confirmacao !== 'Confirmado') f.push('confirmação do cliente');
   if (!os.instalacaoOK) f.push('Instalação OK');
   if (!os.conferidoPor) f.push('conferido por');
@@ -1379,14 +1467,19 @@ function osCardHTML(os) {
   const prontos = itens.filter(i => i.pronto).length;
   const pct = fichaPercent(os);
   const resp = os.atualizadoPor || os.responsavelPCP || os.criadoPor || '—';
+  const interno = isInterno(os);
   return `
-    <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)}" data-os-id="${esc(os.id)}">
+    <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
       <div class="card-header">
         <div>
           <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${os.retrabalho && !os.finalizadaEm ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}</div>
           <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
         </div>
         <span class="badge st-${st}" style="margin-left:auto">${STATUS_LABEL[st]}</span>
+      </div>
+      <div class="card-tipo-row">
+        <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏭 Interno' : '🚚 Externo'}</span>
+        <button class="btn-xs btn-ghost edit-only card-toggle-tipo" data-toggle-tipo="${esc(os.id)}" title="Alternar entre Interno e Externo">⇄ ${interno ? 'Tornar Externo' : 'Tornar Interno'}</button>
       </div>
       ${cardTempoHTML(os)}
       ${(os.equipe||[]).length ? `<div class="card-equipe">👷 ${esc(os.equipe.join(', '))}</div>` : ''}
@@ -1470,6 +1563,21 @@ function bindCardClicks(container) {
       finalizarServicoDoCard(b.dataset.finalizarOs);
     };
   });
+  // Alternar tipo Interno/Externo direto no card (triagem rápida).
+  $$('[data-toggle-tipo]', container).forEach(b => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const os = STORE.getOS(b.dataset.toggleTipo);
+      if (!os) return;
+      const novo = isInterno(os) ? 'externo' : 'interno';
+      os.tipo = novo;
+      os.atualizadoEm = nowISO();
+      os.atualizadoPor = STATE.user.nome;
+      STORE.saveOS(os);
+      toast(`Pedido marcado como ${novo === 'interno' ? 'Interno 🏭' : 'Externo 🚚'}`, 'success');
+      renderActiveTab();
+    };
+  });
 }
 
 // Finaliza a O.S a partir do card. Se faltar algum requisito, abre o modal
@@ -1516,6 +1624,7 @@ function renderPCP() {
   const el = $('#panel-pcp');
   STATE.pcpStatus = STATE.pcpStatus || 'todos';
   STATE.pcpSort   = STATE.pcpSort   || 'entrega';
+  STATE.pcpTipo   = STATE.pcpTipo   || 'todos';
 
   const all = STORE.getAllOS().slice();
 
@@ -1524,14 +1633,23 @@ function renderPCP() {
   Object.keys(STATUS_LABEL).forEach(k => cont[k] = 0);
   all.forEach(o => { const s = calcStatus(o); cont[s] = (cont[s] || 0) + 1; });
 
-  // Aplica: status → busca → ordenação.
+  // Contagem por tipo (para os chips de triagem).
+  const contTipo = { todos: all.length, interno: 0, externo: 0 };
+  all.forEach(o => { contTipo[osTipo(o)]++; });
+
+  // Aplica: tipo → status → busca → ordenação.
   let list = all;
+  if (STATE.pcpTipo !== 'todos') list = list.filter(o => osTipo(o) === STATE.pcpTipo);
   if (STATE.pcpStatus !== 'todos') list = list.filter(o => calcStatus(o) === STATE.pcpStatus);
   list = applyFilter(list, STATE.filtroBusca);
   list = list.slice().sort((PCP_SORTS[STATE.pcpSort] || PCP_SORTS.entrega).fn);
 
   const chips = [['todos', 'Todos'], ...Object.entries(STATUS_LABEL)]
     .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" data-pcp-status="${k}">${esc(lbl)} <span class="pcp-chip-n">${cont[k] || 0}</span></button>`).join('');
+
+  const tipoChips = [
+    ['todos', 'Todos'], ['externo', '🚚 Externo'], ['interno', '🏭 Interno']
+  ].map(([k, lbl]) => `<button class="pcp-chip pcp-chip-tipo tipo-${k} ${STATE.pcpTipo === k ? 'active' : ''}" data-pcp-tipo="${k}">${esc(lbl)} <span class="pcp-chip-n">${contTipo[k] || 0}</span></button>`).join('');
 
   const sorts = Object.entries(PCP_SORTS)
     .map(([k, v]) => `<option value="${k}" ${STATE.pcpSort === k ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
@@ -1540,11 +1658,12 @@ function renderPCP() {
     <div class="filter-bar">
       <input type="search" id="busca-pcp" placeholder="Buscar O.S, cliente, endereço…" value="${esc(STATE.filtroBusca)}">
       <label class="pcp-sort-wrap">Ordenar: <select id="pcp-sort">${sorts}</select></label>
-      ${podeEditar() ? '<button class="btn-primary btn-sm" id="pcp-nova">+ Nova O.S</button>' : ''}
+      ${podeEditar() ? '<button class="btn-primary btn-sm" id="pcp-nova-ext">+ O.S Externa</button><button class="btn-primary btn-sm" id="pcp-nova-int">+ O.S Interna</button>' : ''}
     </div>
+    <div class="pcp-chips pcp-chips-tipo">${tipoChips}</div>
     <div class="pcp-chips">${chips}</div>
     <div class="cards-grid">
-      ${list.map(osCardHTML).join('') || emptyState('📋', 'Nenhuma O.S neste filtro', 'Troque o status, limpe a busca ou crie uma nova O.S.')}
+      ${list.map(osCardHTML).join('') || emptyState('📋', 'Nenhuma O.S neste filtro', 'Troque o filtro, limpe a busca ou crie uma nova O.S.')}
     </div>`;
 
   bindCardClicks(el);
@@ -1554,8 +1673,13 @@ function renderPCP() {
   $$('[data-pcp-status]', el).forEach(b => {
     b.onclick = () => { STATE.pcpStatus = b.dataset.pcpStatus; renderPCP(); };
   });
-  const nova = $('#pcp-nova');
-  if (nova) nova.onclick = () => openModal(novaOS());
+  $$('[data-pcp-tipo]', el).forEach(b => {
+    b.onclick = () => { STATE.pcpTipo = b.dataset.pcpTipo; renderPCP(); };
+  });
+  const novaExt = $('#pcp-nova-ext');
+  if (novaExt) novaExt.onclick = () => openModal(novaOS('externo'));
+  const novaInt = $('#pcp-nova-int');
+  if (novaInt) novaInt.onclick = () => openModal(novaOS('interno'));
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -2782,7 +2906,7 @@ function wireMubisys(el) {
 
 // Funde os campos vindos do Mubisys numa O.S nova e válida do Impresilk.
 function montarOSImportada(remoto) {
-  const os = novaOS();
+  const os = novaOS('externo'); // O.S vinda do Mubisys entra sempre como Externa
   ['numero', 'servico', 'vendedor', 'dataEntrada', 'previsaoEntrega', 'cliente', 'contato', 'whatsapp', 'cnpjCpf', 'endereco']
     .forEach(k => { if (remoto[k]) os[k] = remoto[k]; });
   if (remoto.instalacao) os.instalacao = Object.assign(os.instalacao, remoto.instalacao);

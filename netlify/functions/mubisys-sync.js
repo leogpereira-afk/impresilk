@@ -71,6 +71,7 @@ function montarOSImportada(remoto) {
   const os = {
     id: uuid(),
     numero: '',
+    tipo: 'externo', // O.S importada do Mubisys entra sempre como Externa
     criadoEm: agora,
     criadoPor: 'Mubisys (auto)',
     atualizadoEm: agora,

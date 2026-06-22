@@ -985,6 +985,35 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .os-card.urg-5 { background: #fecaca; }
 .os-card.urg-6 { background: #fca5a5; }
 /* nos níveis fortes, a borda já fica vermelha pela alerta-atraso */
+
+/* ── Tipo de pedido: Interno / Externo ───────────────────────────── */
+.tipo-badge {
+  display: inline-flex; align-items: center; gap: 4px; font-size: .66rem;
+  font-weight: 700; padding: 2px 8px; border-radius: 10px; vertical-align: middle;
+  letter-spacing: .2px;
+}
+.tipo-badge.tipo-externo { background: #dbeafe; color: #1e40af; }
+.tipo-badge.tipo-interno { background: #ede9fe; color: #6d28d9; }
+/* faixa lateral colorida no card para triagem visual rápida */
+.os-card.tipo-externo { border-left: 4px solid #3b82f6; }
+.os-card.tipo-interno { border-left: 4px solid #8b5cf6; }
+.card-tipo-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.card-tipo-row .card-toggle-tipo { margin-left: auto; }
+/* chips de filtro por tipo no PCP */
+.pcp-chips-tipo { margin-bottom: 8px; }
+.pcp-chip-tipo.tipo-externo.active { background: #3b82f6; border-color: #3b82f6; }
+.pcp-chip-tipo.tipo-interno.active { background: #8b5cf6; border-color: #8b5cf6; }
+/* seletor de tipo no modal */
+.tipo-selector {
+  display: flex; gap: 6px; padding: 12px 16px 0; }
+.tipo-selector .tipo-opt {
+  flex: 1; font-size: .82rem; font-weight: 600; padding: 8px 10px; cursor: pointer;
+  border: 1px solid #e2e8f0; background: #fff; color: var(--muted); border-radius: 8px;
+  transition: all .12s;
+}
+.tipo-selector .tipo-opt:hover { border-color: var(--blue); }
+.tipo-selector .tipo-opt.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+
 .tag-atraso, .tag-retrab {
   display: inline-block; font-size: .64rem; font-weight: 700;
   padding: 1px 6px; border-radius: 10px; vertical-align: middle; margin-left: 4px;
