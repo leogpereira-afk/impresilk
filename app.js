@@ -156,6 +156,18 @@ function brMoney(n) {
   return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Máscara de telefone BR: (00) 00000-0000 (celular) ou (00) 0000-0000 (fixo).
+// Mantém só os dígitos e formata progressivamente conforme digita.
+function maskTel(v) {
+  let d = String(v || '').replace(/\D/g, '');
+  if (d.startsWith('55') && d.length > 11) d = d.slice(2); // remove DDI se colado
+  d = d.slice(0, 11);
+  if (d.length <= 2) return d.length ? `(${d}` : '';
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+
 // Converte número BR "1.234,56" → 1234.56
 function parseBRNumber(str) {
   if (typeof str === 'number') return str;
@@ -725,6 +737,20 @@ function setField(path, value) {
   markDirty();
 }
 
+// Decide qual bloco do modal abrir por padrão conforme a etapa da O.S.
+function blocoRelevante(os, st, interno) {
+  if (interno) return os.liberadoPCP ? 'itens' : 'pcp';
+  switch (st) {
+    case 'aguardando_producao': return 'pcp';
+    case 'apto':                return 'agenda';
+    case 'agendada':            return 'agenda';
+    case 'confirmada':          return 'exec';
+    case 'em_andamento':        return 'exec';
+    case 'finalizada':          return 'exec';
+    default:                    return 'pcp';
+  }
+}
+
 function renderModal() {
   const os = _modalDraft;
   const st = calcStatus(os);
@@ -800,6 +826,12 @@ function renderModal() {
   // Trava visual de edição quando finalizada (esconde .edit-only e bloqueia inputs).
   $('#modal-os').classList.toggle('os-locked', finalizada);
 
+  // Abre por padrão o bloco mais relevante para a etapa atual (quem está na rua
+  // quase sempre quer "Execução"; quem está no PCP quer "PCP"). reRenderModalKeepOpen
+  // preserva o que o usuário abrir/fechar depois.
+  const blocoAlvo = blocoRelevante(os, st, interno);
+  $$('#modal-os .card-fs').forEach(d => { d.open = (d.dataset.bloco === blocoAlvo); });
+
   bindModalEvents(os, ro);
 }
 
@@ -812,7 +844,7 @@ function blocoPCP(os, ro, done) {
   const respExtra = os.responsavelPCP && !(cfg.responsaveis || []).includes(os.responsavelPCP)
     ? `<option selected>${esc(os.responsavelPCP)}</option>` : '';
   return `
-  <details class="card-fs ${done ? 'done' : ''}" open data-bloco="pcp">
+  <details class="card-fs ${done ? 'done' : ''}" data-bloco="pcp">
     <summary>1 · PCP &amp; Cliente ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
     <div class="fs-body">
       <div class="field-row">
@@ -823,8 +855,8 @@ function blocoPCP(os, ro, done) {
       </div>
       <div class="field"><label>Cliente</label><input data-f="cliente" value="${esc(os.cliente)}"></div>
       <div class="field-row">
-        <div class="field"><label>Contato</label><input data-f="contato" value="${esc(os.contato)}"></div>
-        <div class="field"><label>WhatsApp</label><input data-f="whatsapp" value="${esc(os.whatsapp)}">
+        <div class="field"><label>Contato</label><input type="text" data-f="contato" value="${esc(os.contato)}"></div>
+        <div class="field"><label>WhatsApp</label><input type="tel" inputmode="tel" data-f="whatsapp" data-mask="tel" value="${esc(maskTel(os.whatsapp))}" placeholder="(00) 00000-0000">
           ${(() => {
             const dig = String(os.whatsapp || '').replace(/\D/g,'');
             // BR: 10 (fixo) ou 11 (celular). Aceita também 12-13 se já vier com DDI.
@@ -848,7 +880,7 @@ function blocoPCP(os, ro, done) {
       <div class="field">
         <label>Layout (JPG)</label>
         <div class="foto-box" data-foto-single="layoutFotoId">
-          ${os.layoutFotoId ? `<img data-foto-img="${esc(os.layoutFotoId)}" alt="layout">` : '<span class="foto-hint">📎 Toque para anexar layout</span>'}
+          ${os.layoutFotoId ? `<img data-foto-img="${esc(os.layoutFotoId)}" alt="layout">` : '<span class="foto-hint">📎 Toque para anexar ou 📷 fotografar o layout</span>'}
           <input type="file" accept="image/*" data-foto-input="layoutFotoId" ${ro ? 'disabled' : ''}>
         </div>
       </div>
@@ -872,15 +904,17 @@ function blocoItens(os, ro, done) {
   const fixOpts    = FIXACAO_OPTS.map(o => `<option ${os.fixacao === o ? 'selected' : ''}>${o}</option>`).join('');
 
   const rows = itens.map((it, i) => `
-    <tr data-item-row="${i}">
-      <td><input data-item="${i}.item" value="${esc(it.item)}" style="width:48px"></td>
-      <td><input data-item="${i}.descricao" value="${esc(it.descricao)}"></td>
-      <td><input data-item="${i}.medidas" value="${esc(it.medidas)}" style="width:80px"></td>
-      <td><input data-item="${i}.qtde" value="${esc(it.qtde)}" style="width:48px"></td>
-      <td><input data-item="${i}.valorUnit" value="${esc(it.valorUnit)}" style="width:80px"></td>
-      <td class="pronto-check"><input type="checkbox" data-item-pronto="${i}" ${it.pronto ? 'checked' : ''}></td>
-      <td><button class="btn-xs btn-danger edit-only" data-item-del="${i}">×</button></td>
+    <tr data-item-row="${i}" class="${it.pronto ? 'item-ok' : ''}">
+      <td data-label="Item"><input data-item="${i}.item" value="${esc(it.item)}"></td>
+      <td data-label="Descrição"><input data-item="${i}.descricao" value="${esc(it.descricao)}"></td>
+      <td data-label="Medidas"><input data-item="${i}.medidas" value="${esc(it.medidas)}"></td>
+      <td data-label="Qtde"><input data-item="${i}.qtde" value="${esc(it.qtde)}" inputmode="numeric"></td>
+      <td data-label="V.Unit"><input data-item="${i}.valorUnit" value="${esc(it.valorUnit)}" inputmode="decimal"></td>
+      <td class="pronto-check" data-label="Pronto?"><label class="item-ok-toggle"><input type="checkbox" data-item-pronto="${i}" ${it.pronto ? 'checked' : ''}> <span>OK</span></label></td>
+      <td class="item-del-cell"><button class="btn-xs btn-danger edit-only" data-item-del="${i}" title="Remover item">× remover</button></td>
     </tr>`).join('');
+
+  const total = itens.reduce((s, it) => s + parseBRNumber(it.qtde) * parseBRNumber(it.valorUnit), 0);
 
   return `
   <details class="card-fs ${done ? 'done' : ''}" data-bloco="itens">
@@ -898,10 +932,11 @@ function blocoItens(os, ro, done) {
         <label>Suprimentos (ex.: álcool, flanela)</label>
         ${chipsField('suprimentos', os.suprimentos || [], cfg.suprimentos, ro)}
       </div>
-      <table class="items-table">
+      <table class="items-table items-cards">
         <thead><tr><th>Item</th><th>Descrição</th><th>Medidas</th><th>Qtde</th><th>V.Unit</th><th>OK</th><th></th></tr></thead>
         <tbody id="itens-tbody">${rows || '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:12px">Nenhum item</td></tr>'}</tbody>
       </table>
+      ${itens.length ? `<div class="items-total">Total: <strong>${brMoney(total)}</strong> · ${itens.length} ${itens.length === 1 ? 'item' : 'itens'}</div>` : ''}
       <div class="flex gap-8 edit-only">
         <button class="btn-ghost btn-sm" id="btn-add-item">+ Item manual</button>
         <button class="btn-ghost btn-sm" id="btn-import-itens">📄 Importar itens do PDF</button>
@@ -960,7 +995,7 @@ function blocoAgenda(os, ro, done) {
         </div>
         <div class="field-row">
           <div class="field"><label>Acompanhante da Empresa</label><input data-f="confAcompanha" value="${esc(os.confAcompanha)}"></div>
-          <div class="field"><label>Contato do acompanhante</label><input type="tel" inputmode="tel" data-f="confAcompanhaContato" value="${esc(os.confAcompanhaContato)}" placeholder="(00) 00000-0000"></div>
+          <div class="field"><label>Contato do acompanhante</label><input type="tel" inputmode="tel" data-f="confAcompanhaContato" data-mask="tel" value="${esc(maskTel(os.confAcompanhaContato))}" placeholder="(00) 00000-0000"></div>
         </div>
         <button class="btn-success btn-sm edit-only mt-8" id="btn-confirmei">✓ Confirmei agora</button>
       </div>
@@ -1004,6 +1039,8 @@ function blocoExec(os, ro, done) {
         </div>
       </div>
 
+      <!-- ── Saída ─────────────────────────────────────────────── -->
+      <div class="exec-step"><span class="exec-step-tit">🚗 Saída</span></div>
       ${!confirmado ? `<div class="trava-msg">🔒 Confirme o horário com o cliente (POP EXI‑002) antes de liberar o carro / sair.</div>` : ''}
       <div class="edit-only">
         ${os.carroLiberado
@@ -1011,32 +1048,13 @@ function blocoExec(os, ro, done) {
                <button class="btn-xs btn-ghost" id="btn-cancelar-carro" style="margin-left:auto">Cancelar</button></div>`
           : `<button class="btn-primary btn-sm" id="btn-liberar-carro" ${!confirmado?'disabled style="opacity:.5"':''}>🚗 Liberar carro / Saída</button>`}
       </div>
-
       <div class="field-row">
         <div class="field"><label>Hora saída</label><input type="time" data-f="horaSaida" value="${esc(os.horaSaida)}"></div>
         <div class="field"><label>KM saída (embarque)</label><input type="number" inputmode="numeric" data-f="kmSaida" value="${esc(os.kmSaida)}" placeholder="km do veículo"></div>
       </div>
-      <div class="field-row">
-        <div class="field"><label>Hora retorno</label><input type="time" data-f="horaRetorno" value="${esc(os.horaRetorno)}"></div>
-        <div class="field"><label>KM retorno (check‑out)</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>
-      </div>
-      <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" ${os.instalacaoOK?'checked':''}> ✅ Instalação OK</label>
-      <div class="field"><label>Conferido por</label>
-        <select data-f="conferidoPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.conferidoPor)}</select>
-      </div>
 
-      <label class="check-toggle retrab"><input type="checkbox" data-f-check="retrabalho" ${os.retrabalho?'checked':''}> 🔴 Retrabalho?</label>
-      <div data-retrabalho-fields style="${os.retrabalho?'':'display:none'}">
-        <div class="field"><label>Problema</label><input data-f="problema" value="${esc(os.problema)}"></div>
-        <div class="field-row">
-          <div class="field"><label>Causa</label><select data-f="causa"><option value=""></option>${causaOpts}</select></div>
-          <div class="field"><label>Quem resolveu</label><input data-f="resolvidoPor" value="${esc(os.resolvidoPor)}"></div>
-        </div>
-        <div class="field"><label>Data resolvido</label><input type="date" data-f="dataResolvido" value="${esc(os.dataResolvido)}"></div>
-      </div>
-
-      <div class="field"><label>Obs técnicas</label><textarea data-f="obsTecnicas">${esc(os.obsTecnicas)}</textarea></div>
-
+      <!-- ── Chegada / check‑in (primeira coisa ao chegar) ─────── -->
+      <div class="exec-step"><span class="exec-step-tit">📍 Chegada · Check‑in</span></div>
       <div class="field">
         <label>Fotos de check‑in (≥1 p/ finalizar)</label>
         <div class="fotos-grid" id="fotos-checkin">
@@ -1049,16 +1067,36 @@ function blocoExec(os, ro, done) {
         ${os.checkinGPS ? `<div class="gps-tag">📍 Local confirmado no check‑in · <a href="https://maps.google.com/?q=${os.checkinGPS.lat},${os.checkinGPS.lng}" target="_blank">ver no mapa</a> (±${os.checkinGPS.precisao||'?'}m)</div>` : ''}
       </div>
 
-      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
-        <strong style="font-size:.85rem">Check‑out</strong>
-        <div class="field-row3 mt-8">
-          <div class="field"><label>Situação</label><select data-f="checkout.situacao"><option value="">— selecionar —</option>${sitOpts}${sitExtra}</select></div>
-          <div class="field"><label>Hora</label><input type="time" data-f="checkout.hora" value="${esc(co.hora)}"></div>
-          <div class="field"><label>Conferido por</label><select data-f="checkout.por"><option value="">— selecionar —</option>${peopleOptions(cfg, co.por)}</select></div>
-        </div>
-        <div class="field"><label>Obs</label><input data-f="checkout.obs" value="${esc(co.obs)}"></div>
-        <div class="field"><label><input type="checkbox" data-f-check="checkout.confirmado" ${co.confirmado?'checked':''}> Check‑out confirmado</label></div>
+      <!-- ── Execução do serviço ───────────────────────────────── -->
+      <div class="exec-step"><span class="exec-step-tit">🔧 Execução</span></div>
+      <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" ${os.instalacaoOK?'checked':''}> ✅ Instalação OK</label>
+      <div class="field"><label>Conferido por</label>
+        <select data-f="conferidoPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.conferidoPor)}</select>
       </div>
+      <div class="field"><label>Obs técnicas</label><textarea data-f="obsTecnicas">${esc(os.obsTecnicas)}</textarea></div>
+
+      <label class="check-toggle retrab"><input type="checkbox" data-f-check="retrabalho" ${os.retrabalho?'checked':''}> 🔴 Retrabalho?</label>
+      <div data-retrabalho-fields style="${os.retrabalho?'':'display:none'}">
+        <div class="field"><label>Problema</label><input data-f="problema" value="${esc(os.problema)}"></div>
+        <div class="field-row">
+          <div class="field"><label>Causa</label><select data-f="causa"><option value=""></option>${causaOpts}</select></div>
+          <div class="field"><label>Quem resolveu</label><input data-f="resolvidoPor" value="${esc(os.resolvidoPor)}"></div>
+        </div>
+        <div class="field"><label>Data resolvido</label><input type="date" data-f="dataResolvido" value="${esc(os.dataResolvido)}"></div>
+      </div>
+
+      <!-- ── Retorno / check‑out ───────────────────────────────── -->
+      <div class="exec-step"><span class="exec-step-tit">🏁 Retorno · Check‑out</span></div>
+      <div class="field-row">
+        <div class="field"><label>Hora retorno</label><input type="time" data-f="horaRetorno" value="${esc(os.horaRetorno)}"></div>
+        <div class="field"><label>KM retorno (check‑out)</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>
+      </div>
+      <div class="field-row3">
+        <div class="field"><label>Situação</label><select data-f="checkout.situacao"><option value="">— selecionar —</option>${sitOpts}${sitExtra}</select></div>
+        <div class="field"><label>Hora check‑out</label><input type="time" data-f="checkout.hora" value="${esc(co.hora)}"></div>
+        <div class="field"><label>Conferido por</label><select data-f="checkout.por"><option value="">— selecionar —</option>${peopleOptions(cfg, co.por)}</select></div>
+      </div>
+      <div class="field"><label>Obs check‑out</label><input data-f="checkout.obs" value="${esc(co.obs)}"></div>
 
       <div class="edit-only mt-12">
         ${os.finalizadaEm
@@ -1208,12 +1246,25 @@ function bindModalEvents(os, ro) {
   $$('[data-f]', root).forEach(el => {
     el.oninput = el.onchange = () => {
       let v = el.value;
+      // Máscara de telefone enquanto digita (mantém o cursor no fim).
+      if (el.dataset.mask === 'tel') { v = maskTel(v); el.value = v; }
       if (el.dataset.f === 'instalacao.duracaoDias') v = Math.max(1, +v || 1);
       setField(el.dataset.f, v);
       // Re-render leve em campos que afetam status/checklist/travas
       if (['confirmacao','instalacao.periodo','instalacao.data','liberadoPCP'].includes(el.dataset.f)) {
         saveDraft(); reRenderModalKeepOpen();
       }
+    };
+  });
+
+  // Tocar no rótulo foca o campo correspondente (aumenta a área de toque no
+  // celular). Vale para os <label> simples dentro de .field (sem for/control).
+  $$('.field > label', root).forEach(lb => {
+    if (lb.querySelector('input,select,textarea')) return; // label que já envolve o controle
+    lb.style.cursor = 'pointer';
+    lb.onclick = () => {
+      const ctrl = lb.parentElement && lb.parentElement.querySelector('input,select,textarea');
+      if (ctrl) ctrl.focus();
     };
   });
 

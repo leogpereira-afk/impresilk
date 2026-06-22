@@ -387,9 +387,45 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .items-table td { padding: 6px 8px; border-bottom: 1px solid #f0f4fa; vertical-align: middle; }
 .items-table tr:last-child td { border-bottom: none; }
 .items-table input { border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px; width: 100%; font-size: .8rem; }
-.items-table .pronto-check { width: 36px; text-align: center; }
+.items-table .pronto-check { width: 56px; text-align: center; }
 .item-progress {
   font-size: .78rem; font-weight: 600; color: var(--blue); text-align: right;
+}
+.items-total {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+  background: #f1f5f9; font-size: .82rem; color: var(--text); text-align: right;
+}
+.item-ok-toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: .72rem; font-weight: 600; color: var(--muted); }
+.item-del-cell { text-align: right; white-space: nowrap; }
+
+/* ── Itens viram cards empilhados no celular (tabela é ruim de tocar) ─────── */
+@media (max-width: 600px) {
+  .items-cards thead { display: none; }
+  .items-cards, .items-cards tbody, .items-cards tr, .items-cards td { display: block; width: 100%; }
+  .items-cards tr {
+    border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px;
+    margin-bottom: 10px; background: #fff;
+  }
+  .items-cards tr.item-ok { background: #f0fdf4; border-color: #bbf7d0; }
+  .items-cards td { border: none; padding: 4px 0; display: flex; align-items: center; gap: 8px; }
+  .items-cards td::before {
+    content: attr(data-label); flex: 0 0 84px; font-size: .72rem;
+    font-weight: 700; color: var(--muted);
+  }
+  .items-cards td input { flex: 1; width: auto; font-size: .9rem; padding: 7px 8px; }
+  .items-cards .pronto-check { width: 100%; }
+  .items-cards .pronto-check::before { content: ''; flex: 0 0 84px; }
+  .items-cards .item-del-cell::before { content: ''; flex: 0 0 84px; }
+  .items-cards .item-del-cell { justify-content: flex-start; }
+}
+
+/* ── Subtítulos de etapa no bloco de Execução (orienta o fluxo da rua) ───── */
+.exec-step { margin: 14px 0 6px; }
+.exec-step:first-child { margin-top: 0; }
+.exec-step-tit {
+  display: inline-block; font-size: .76rem; font-weight: 700; letter-spacing: .3px;
+  color: var(--blue); text-transform: uppercase;
+  border-bottom: 2px solid var(--blue); padding-bottom: 2px;
 }
 
 /* ── Itens como cards (equipe de rua) ────────────────────────────────────── */
