@@ -283,6 +283,7 @@ const STORE = (() => {
       // O endpoint "list" é paginado (resposta limitada para não estourar o
       // teto de ~6 MB das Netlify Functions). Percorremos as páginas pelo
       // cursor "nextOffset" até não haver mais.
+      const remoteIds = new Set();
       let offset = 0;
       let guard = 0; // trava de segurança contra loop infinito
       while (true) {
@@ -291,6 +292,7 @@ const STORE = (() => {
 
         for (const remote of res.os) {
           if (!remote || !remote.id) continue;
+          remoteIds.add(remote.id);
           const localOS = byId.get(remote.id);
           if (!localOS) {
             local.push(remote);
@@ -308,6 +310,20 @@ const STORE = (() => {
 
         if (res.nextOffset == null || ++guard > 1000) break;
         offset = res.nextOffset;
+      }
+
+      // Após varrer TODAS as páginas: remove do local as O.S que sumiram do
+      // servidor (foram apagadas em outro aparelho ou via limpeza administrativa),
+      // mas preserva as que ainda estão na fila aguardando envio (criadas offline).
+      const queue = getQueue();
+      const pendingIds = new Set(
+        queue.filter(q => q.action === 'upsert' && q.os && q.os.id).map(q => q.os.id)
+      );
+      const sobreviventes = local.filter(o => remoteIds.has(o.id) || pendingIds.has(o.id));
+      if (sobreviventes.length !== local.length) {
+        changed = true;
+        local.length = 0;
+        for (const o of sobreviventes) local.push(o);
       }
 
       if (changed) {
