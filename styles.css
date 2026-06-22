@@ -186,11 +186,6 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .card-numero { font-size: 1rem; font-weight: 700; }
 .card-cliente{ font-size: .8rem; color: var(--muted); flex: 1; }
 .card-checklist { font-size: .72rem; color: var(--muted); margin-top: 4px; }
-.card-date {
-  font-size: .78rem; font-weight: 600;
-  color: var(--teal); margin-top: 6px;
-  display: flex; align-items: center; gap: 4px;
-}
 .card-equipe { font-size: .75rem; color: var(--muted); margin-top: 2px; }
 
 /* ── Contador de prazo no card (PCP) ─────────────────────────────────────── */
@@ -200,6 +195,7 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   white-space: nowrap; border: 1px solid transparent;
 }
 .prazo-empresa { background: #f1f5f9; color: #475569; }
+.prazo-info    { background: #e0f2fe; color: #075985; }
 .prazo-ok      { background: #dcfce7; color: #166534; }
 .prazo-urgente { background: #fef3c7; color: #92400e; }
 .prazo-atraso  { background: #fee2e2; color: #b91c1c; }

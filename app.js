@@ -123,6 +123,17 @@ function ymdLocal(d) {
 const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
+// "29/06/26" (curto, para tags compactas no card)
+function fmtDataBR(iso) {
+  if (!iso) return '';
+  const d = parseLocalDate(String(iso).slice(0, 10));
+  if (!d) return '';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${dd}/${mm}/${yy}`;
+}
+
 // "Seg 29/06 · Tarde (14:00)"
 function fmtInstalacao(inst) {
   if (!inst || !inst.data) return 'Sem data';
@@ -247,7 +258,7 @@ function blocosCompletos(os) {
 function fichaPercent(os) {
   const inst = os.instalacao || {};
   const checks = [
-    os.numero, os.cliente, os.contato, os.whatsapp, os.cnpjCpf, os.endereco,
+    os.numero, os.cliente, os.contato, os.whatsapp, os.endereco,
     os.servico, os.responsavelPCP, os.dataEntrada, os.liberadoPCP,
     (os.itens || []).length, os.acesso, os.fixacao, (os.ferramentas || []).length,
     inst.data, inst.periodo, (os.equipe || []).length, os.veiculo,
@@ -711,7 +722,6 @@ function blocoPCP(os, ro, done) {
           ${os.whatsapp ? `<a class="inline-link" target="_blank" href="https://wa.me/55${esc(String(os.whatsapp).replace(/\D/g,''))}">Abrir Zap ↗</a>` : ''}
         </div>
       </div>
-      <div class="field"><label>CNPJ/CPF</label><input data-f="cnpjCpf" value="${esc(os.cnpjCpf)}"></div>
       <div class="field"><label>Endereço</label><input data-f="endereco" value="${esc(os.endereco)}">
         ${os.endereco ? `<a class="inline-link" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(os.endereco)}">Ver no Mapa ↗</a>` : ''}
       </div>
@@ -1322,8 +1332,7 @@ function osCardHTML(os) {
         </div>
         <span class="badge st-${st}" style="margin-left:auto">${STATUS_LABEL[st]}</span>
       </div>
-      <div class="card-date">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
-      ${contadorPrazoHTML(os)}
+      ${cardTempoHTML(os)}
       ${(os.equipe||[]).length ? `<div class="card-equipe">👷 ${esc(os.equipe.join(', '))}</div>` : ''}
       <div class="card-pct" title="${pct}% da ficha preenchida">
         <div class="card-pct-bar"><div class="card-pct-fill" style="width:${pct}%"></div></div>
@@ -1340,25 +1349,47 @@ function osCardHTML(os) {
     </div>`;
 }
 
-// Contador de prazo no card: dias na empresa (desde a entrada) e dias para a
-// entrega (ou atraso). Some quando a O.S já foi finalizada.
-function contadorPrazoHTML(os) {
-  if (os.finalizadaEm) return '';
-  const naEmpresa = os.dataEntrada ? diasDesde(os.dataEntrada) : null;
-  const entrega = dataEntregaOS(os);
-  const paraEntrega = entrega ? diasEntre(todayISO(), entrega) : null;
-  if (naEmpresa == null && paraEntrega == null) return '';
+// Bloco compacto de tempo/datas no card. Junta tudo num só lugar para evitar
+// duplicidade: data do pedido, dias na empresa, contador de entrega, data
+// agendada e — se finalizada — data de conclusão.
+function cardTempoHTML(os) {
+  const tags = [];
 
-  const partes = [];
-  if (naEmpresa != null && naEmpresa >= 0) {
-    partes.push(`<span class="prazo-tag prazo-empresa" title="Dias desde a entrada do pedido">🏭 ${naEmpresa}d na empresa</span>`);
+  // Data do pedido (data de entrada)
+  if (os.dataEntrada) {
+    tags.push(`<span class="prazo-tag prazo-info" title="Data do pedido">📋 ${fmtDataBR(os.dataEntrada)}</span>`);
   }
-  if (paraEntrega != null) {
-    const cls = paraEntrega < 0 ? 'prazo-atraso' : (paraEntrega <= 2 ? 'prazo-urgente' : 'prazo-ok');
-    const txt = paraEntrega < 0 ? `atrasada ${-paraEntrega}d` : (paraEntrega === 0 ? 'entrega hoje' : `entrega em ${paraEntrega}d`);
-    partes.push(`<span class="prazo-tag ${cls}" title="Entrega prevista: ${esc(entrega)}">📦 ${txt}</span>`);
+
+  if (os.finalizadaEm) {
+    // Quando finalizada: mostra agenda (se existiu) + data da conclusão.
+    if (os.instalacao && os.instalacao.data) {
+      tags.push(`<span class="prazo-tag prazo-info" title="Agendada">📅 ${fmtDataBR(os.instalacao.data)}</span>`);
+    }
+    tags.push(`<span class="prazo-tag prazo-ok" title="Finalizada em">✅ ${fmtDataBR(os.finalizadaEm)}</span>`);
+  } else {
+    // Em aberto: dias na empresa
+    const naEmpresa = os.dataEntrada ? diasDesde(os.dataEntrada) : null;
+    if (naEmpresa != null && naEmpresa >= 0) {
+      tags.push(`<span class="prazo-tag prazo-empresa" title="Dias desde o pedido">🏭 ${naEmpresa}d</span>`);
+    }
+
+    // Contador de entrega
+    const entrega = dataEntregaOS(os);
+    const paraEntrega = entrega ? diasEntre(todayISO(), entrega) : null;
+    if (paraEntrega != null) {
+      const cls = paraEntrega < 0 ? 'prazo-atraso' : (paraEntrega <= 2 ? 'prazo-urgente' : 'prazo-ok');
+      const txt = paraEntrega < 0 ? `atrasada ${-paraEntrega}d` : (paraEntrega === 0 ? 'entrega hoje' : `entrega em ${paraEntrega}d`);
+      tags.push(`<span class="prazo-tag ${cls}" title="Entrega prevista: ${esc(entrega)}">📦 ${txt}</span>`);
+    }
+
+    // Data agendada (instalação) — só se houver
+    if (os.instalacao && os.instalacao.data) {
+      const ag = fmtDataBR(os.instalacao.data) + (os.instalacao.periodo ? ' · ' + os.instalacao.periodo : '');
+      tags.push(`<span class="prazo-tag prazo-info" title="Agendada">📅 ${ag}</span>`);
+    }
   }
-  return `<div class="card-prazo">${partes.join('')}</div>`;
+
+  return tags.length ? `<div class="card-prazo">${tags.join('')}</div>` : '';
 }
 
 function bindCardClicks(container) {
