@@ -728,7 +728,9 @@ function setField(path, value) {
 function renderModal() {
   const os = _modalDraft;
   const st = calcStatus(os);
-  const ro = !podeEditar();
+  // O.S finalizada fica em somente-leitura: só permite reabrir (voltar status).
+  const finalizada = !!os.finalizadaEm;
+  const ro = !podeEditar() || finalizada;
   const chk = checklist(os);
 
   const checklistBar = chk.map(c => {
@@ -752,12 +754,9 @@ function renderModal() {
   const blocosHTML = interno
     ? `${blocoPCP(os, ro, done.pcp)}
        ${blocoItens(os, ro, done.itens)}
-       <div class="fs-body interno-finalizar edit-only" style="padding:14px 16px">
-         ${os.finalizadaEm
-           ? `<div class="liberar-status">🏁 Finalizado por ${esc(os.finalizadoPor || '—')}${os.finalizadaEm ? ' · ' + new Date(os.finalizadaEm).toLocaleDateString('pt-BR') : ''}
-                <button class="btn-xs btn-ghost" id="btn-reabrir-interno" style="margin-left:auto">Reabrir</button></div>`
-           : `<button class="btn-success" id="btn-finalizar-interno" style="width:100%">🏁 Finalizar pedido interno</button>`}
-       </div>`
+       ${finalizada ? '' : `<div class="fs-body interno-finalizar edit-only" style="padding:14px 16px">
+         <button class="btn-success" id="btn-finalizar-interno" style="width:100%">🏁 Finalizar pedido interno</button>
+       </div>`}`
     : `${blocoPCP(os, ro, done.pcp)}
        ${blocoItens(os, ro, done.itens)}
        ${blocoAgenda(os, ro, done.agenda)}
@@ -773,7 +772,13 @@ function renderModal() {
       <button class="modal-close" id="modal-close-btn">×</button>
     </div>
 
-    ${tipoSelector}
+    ${finalizada ? `
+    <div class="finalizada-lock lock-allow">
+      <span>🔒 O.S finalizada por <strong>${esc(os.finalizadoPor || '—')}</strong>${os.finalizadaEm ? ' · ' + new Date(os.finalizadaEm).toLocaleString('pt-BR') : ''} — somente leitura.</span>
+      <button class="btn-ghost btn-sm" id="btn-reabrir-os">↩ Reabrir / voltar status</button>
+    </div>` : ''}
+
+    ${finalizada ? '' : tipoSelector}
 
     <div class="ficha-pct">
       <div class="ficha-pct-bar"><div class="ficha-pct-fill" style="width:${pct}%"></div></div>
@@ -791,6 +796,9 @@ function renderModal() {
       <button class="btn-primary btn-sm" id="modal-save" style="margin-left:auto">💾 Salvar O.S.</button>
     </div>
   `;
+
+  // Trava visual de edição quando finalizada (esconde .edit-only e bloqueia inputs).
+  $('#modal-os').classList.toggle('os-locked', finalizada);
 
   bindModalEvents(os, ro);
 }
@@ -1350,11 +1358,15 @@ function bindModalEvents(os, ro) {
     saveDraft(); reRenderModalKeepOpen();
     toast('Pedido interno finalizado 🏁', 'success');
   };
-  const reabrirInterno = $('#btn-reabrir-interno');
-  if (reabrirInterno) reabrirInterno.onclick = () => {
+  // Reabrir O.S finalizada (interno e externo): limpa a finalização e deixa o
+  // status voltar sozinho para a etapa anterior (calcStatus recalcula).
+  const reabrirOS = $('#btn-reabrir-os');
+  if (reabrirOS) reabrirOS.onclick = () => {
+    if (!confirm('Reabrir esta O.S? Ela volta para o status anterior e fica editável novamente.')) return;
     _modalDraft.finalizadaEm = ''; _modalDraft.finalizadoPor = '';
     if (_modalDraft.checkout) { _modalDraft.checkout.situacao = ''; _modalDraft.checkout.confirmado = false; }
     saveDraft(); reRenderModalKeepOpen();
+    toast('O.S reaberta', 'success');
   };
 
   // Fotos single (layout, embarque)
@@ -1479,7 +1491,7 @@ function osCardHTML(os) {
       </div>
       <div class="card-tipo-row">
         <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏭 Interno' : '🚚 Externo'}</span>
-        <button class="btn-xs btn-ghost edit-only card-toggle-tipo" data-toggle-tipo="${esc(os.id)}" title="Alternar entre Interno e Externo">⇄ ${interno ? 'Tornar Externo' : 'Tornar Interno'}</button>
+        ${os.finalizadaEm ? '' : `<button class="btn-xs btn-ghost edit-only card-toggle-tipo" data-toggle-tipo="${esc(os.id)}" title="Alternar entre Interno e Externo">⇄ ${interno ? 'Tornar Externo' : 'Tornar Interno'}</button>`}
       </div>
       ${cardTempoHTML(os)}
       ${(os.equipe||[]).length ? `<div class="card-equipe">👷 ${esc(os.equipe.join(', '))}</div>` : ''}
