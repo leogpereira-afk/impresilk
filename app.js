@@ -227,6 +227,24 @@ function alertaOS(os) {
   return '';
 }
 
+// Gradiente de urgência pelo prazo de entrega. Quanto mais perto/passou,
+// mais o card "esquenta": branco → creme → amarelo → laranja → vermelho.
+// Retorna '' (sem cor) quando finalizada ou sem data de entrega.
+function urgenciaOS(os) {
+  if (!os || os.finalizadaEm) return '';
+  const entrega = dataEntregaOS(os);
+  if (!entrega) return '';
+  const d = diasEntre(todayISO(), entrega);
+  if (d == null) return '';
+  if (d >= 8)  return '';            // tranquilo
+  if (d >= 6)  return 'urg-1';       // bem leve
+  if (d >= 4)  return 'urg-2';       // creme
+  if (d >= 2)  return 'urg-3';       // amarelo
+  if (d >= 0)  return 'urg-4';       // laranja
+  if (d >= -3) return 'urg-5';       // vermelho claro
+  return 'urg-6';                    // vermelho forte
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    CHECKLIST DE PRONTIDÃO
    ══════════════════════════════════════════════════════════════════════════ */
@@ -1324,7 +1342,7 @@ function osCardHTML(os) {
   const pct = fichaPercent(os);
   const resp = os.atualizadoPor || os.responsavelPCP || os.criadoPor || '—';
   return `
-    <div class="os-card st-${st} ${alertaOS(os)}" data-os-id="${esc(os.id)}">
+    <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)}" data-os-id="${esc(os.id)}">
       <div class="card-header">
         <div>
           <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${os.retrabalho && !os.finalizadaEm ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}</div>

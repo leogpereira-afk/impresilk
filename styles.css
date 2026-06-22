@@ -976,6 +976,15 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
   border-left-color: var(--red) !important;
   background: #fff5f5;
 }
+
+/* ── Gradiente de urgência pelo prazo: vai esquentando o card ─────── */
+.os-card.urg-1 { background: #fffdf5; }
+.os-card.urg-2 { background: #fef9e7; }
+.os-card.urg-3 { background: #fef3c7; }
+.os-card.urg-4 { background: #fed7aa; }
+.os-card.urg-5 { background: #fecaca; }
+.os-card.urg-6 { background: #fca5a5; }
+/* nos níveis fortes, a borda já fica vermelha pela alerta-atraso */
 .tag-atraso, .tag-retrab {
   display: inline-block; font-size: .64rem; font-weight: 700;
   padding: 1px 6px; border-radius: 10px; vertical-align: middle; margin-left: 4px;
