@@ -72,7 +72,7 @@ function montarOSImportada(remoto) {
     atualizadoEm: agora,
     atualizadoPor: 'Mubisys (auto)',
     cliente: '', contato: '', whatsapp: '', cnpjCpf: '', endereco: '',
-    servico: '', vendedor: '', dataEntrada: '',
+    servico: '', vendedor: '', dataEntrada: '', previsaoEntrega: '',
     responsavelPCP: '', obsPCP: '', layoutFotoId: '', liberadoPCP: false, aptoPor: '', aptoEm: '',
     acesso: '', fixacao: '', ferramentas: [], suprimentos: [], itens: [],
     instalacao: { data: '', periodo: '', hora: '', duracaoDias: 1 },
@@ -89,7 +89,7 @@ function montarOSImportada(remoto) {
     finalizadaEm: '', finalizadoPor: ''
   };
 
-  ['numero', 'servico', 'vendedor', 'dataEntrada', 'cliente', 'contato', 'whatsapp', 'cnpjCpf', 'endereco']
+  ['numero', 'servico', 'vendedor', 'dataEntrada', 'previsaoEntrega', 'cliente', 'contato', 'whatsapp', 'cnpjCpf', 'endereco']
     .forEach(k => { if (remoto[k]) os[k] = remoto[k]; });
   if (remoto.observacao) os.obsPCP = remoto.observacao;
   if (remoto.instalacao) os.instalacao = Object.assign(os.instalacao, remoto.instalacao);

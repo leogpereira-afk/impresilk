@@ -185,6 +185,19 @@ const STATUS_LABEL = {
   finalizada:          'Finalizada'
 };
 
+// ── Datas / prazos (PCP) ─────────────────────────────────────────────────────
+function todayISO() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString().slice(0, 10); }
+// Diferença em dias (bISO − aISO). null se faltar alguma data.
+function diasEntre(aISO, bISO) {
+  if (!aISO || !bISO) return null;
+  const a = new Date(aISO + 'T00:00:00'), b = new Date(bISO + 'T00:00:00');
+  if (isNaN(a) || isNaN(b)) return null;
+  return Math.round((b - a) / 86400000);
+}
+function diasDesde(aISO) { return diasEntre(aISO, todayISO()); }   // quanto já passou
+// Data de entrega da O.S: a agendada (instalação) tem prioridade; senão a previsão importada.
+function dataEntregaOS(os) { return (os && os.instalacao && os.instalacao.data) || (os && os.previsaoEntrega) || ''; }
+
 // Atrasada: agendada para data passada e ainda não finalizada.
 function estaAtrasada(os) {
   if (!os || os.finalizadaEm) return false;
@@ -542,7 +555,7 @@ function novaOS() {
     atualizadoEm: nowISO(),
     atualizadoPor: STATE.user.nome,
     cliente: '', contato: '', whatsapp: '', cnpjCpf: '', endereco: '',
-    servico: '', vendedor: '', dataEntrada: '',
+    servico: '', vendedor: '', dataEntrada: '', previsaoEntrega: '',
     responsavelPCP: '', obsPCP: '', layoutFotoId: '', liberadoPCP: false, aptoPor: '', aptoEm: '',
     acesso: '', fixacao: '', ferramentas: [], suprimentos: [], itens: [],
     instalacao: { data: '', periodo: '', hora: '', duracaoDias: 1 },
@@ -1310,6 +1323,7 @@ function osCardHTML(os) {
         <span class="badge st-${st}" style="margin-left:auto">${STATUS_LABEL[st]}</span>
       </div>
       <div class="card-date">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
+      ${contadorPrazoHTML(os)}
       ${(os.equipe||[]).length ? `<div class="card-equipe">👷 ${esc(os.equipe.join(', '))}</div>` : ''}
       <div class="card-pct" title="${pct}% da ficha preenchida">
         <div class="card-pct-bar"><div class="card-pct-fill" style="width:${pct}%"></div></div>
@@ -1324,6 +1338,27 @@ function osCardHTML(os) {
           : `<button class="btn-success btn-sm edit-only card-finalizar" data-finalizar-os="${esc(os.id)}" title="Finalizar serviço">🏁 Finalizar Serviço</button>`}
       </div>
     </div>`;
+}
+
+// Contador de prazo no card: dias na empresa (desde a entrada) e dias para a
+// entrega (ou atraso). Some quando a O.S já foi finalizada.
+function contadorPrazoHTML(os) {
+  if (os.finalizadaEm) return '';
+  const naEmpresa = os.dataEntrada ? diasDesde(os.dataEntrada) : null;
+  const entrega = dataEntregaOS(os);
+  const paraEntrega = entrega ? diasEntre(todayISO(), entrega) : null;
+  if (naEmpresa == null && paraEntrega == null) return '';
+
+  const partes = [];
+  if (naEmpresa != null && naEmpresa >= 0) {
+    partes.push(`<span class="prazo-tag prazo-empresa" title="Dias desde a entrada do pedido">🏭 ${naEmpresa}d na empresa</span>`);
+  }
+  if (paraEntrega != null) {
+    const cls = paraEntrega < 0 ? 'prazo-atraso' : (paraEntrega <= 2 ? 'prazo-urgente' : 'prazo-ok');
+    const txt = paraEntrega < 0 ? `atrasada ${-paraEntrega}d` : (paraEntrega === 0 ? 'entrega hoje' : `entrega em ${paraEntrega}d`);
+    partes.push(`<span class="prazo-tag ${cls}" title="Entrega prevista: ${esc(entrega)}">📦 ${txt}</span>`);
+  }
+  return `<div class="card-prazo">${partes.join('')}</div>`;
 }
 
 function bindCardClicks(container) {
@@ -1383,27 +1418,55 @@ function applyFilter(list, busca) {
 /* ══════════════════════════════════════════════════════════════════════════
    ABA: PCP
    ══════════════════════════════════════════════════════════════════════════ */
+// Ordenações do PCP.
+const PCP_SORTS = {
+  entrega: { label: 'Entrega (mais próxima)', fn: (a, b) => (dataEntregaOS(a) || '9999-12-31').localeCompare(dataEntregaOS(b) || '9999-12-31') },
+  pedido:  { label: 'Pedido (mais recente)',  fn: (a, b) => (b.dataEntrada || '0000-00-00').localeCompare(a.dataEntrada || '0000-00-00') },
+  empresa: { label: 'Tempo na empresa',        fn: (a, b) => (a.dataEntrada || '9999-12-31').localeCompare(b.dataEntrada || '9999-12-31') }
+};
+
 function renderPCP() {
   const el = $('#panel-pcp');
-  // Ordena por data de entrega (instalação); sem data vai para o fim
-  const all = STORE.getAllOS().slice().sort((a, b) => {
-    const da = (a.instalacao && a.instalacao.data) || '9999-12-31';
-    const db = (b.instalacao && b.instalacao.data) || '9999-12-31';
-    if (da !== db) return da.localeCompare(db);
-    return (b.criadoEm || '').localeCompare(a.criadoEm || '');
-  });
-  const list = applyFilter(all, STATE.filtroBusca);
+  STATE.pcpStatus = STATE.pcpStatus || 'todos';
+  STATE.pcpSort   = STATE.pcpSort   || 'entrega';
+
+  const all = STORE.getAllOS().slice();
+
+  // Contagem por status (para os chips), antes de qualquer filtro.
+  const cont = { todos: all.length };
+  Object.keys(STATUS_LABEL).forEach(k => cont[k] = 0);
+  all.forEach(o => { const s = calcStatus(o); cont[s] = (cont[s] || 0) + 1; });
+
+  // Aplica: status → busca → ordenação.
+  let list = all;
+  if (STATE.pcpStatus !== 'todos') list = list.filter(o => calcStatus(o) === STATE.pcpStatus);
+  list = applyFilter(list, STATE.filtroBusca);
+  list = list.slice().sort((PCP_SORTS[STATE.pcpSort] || PCP_SORTS.entrega).fn);
+
+  const chips = [['todos', 'Todos'], ...Object.entries(STATUS_LABEL)]
+    .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" data-pcp-status="${k}">${esc(lbl)} <span class="pcp-chip-n">${cont[k] || 0}</span></button>`).join('');
+
+  const sorts = Object.entries(PCP_SORTS)
+    .map(([k, v]) => `<option value="${k}" ${STATE.pcpSort === k ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
+
   el.innerHTML = `
     <div class="filter-bar">
       <input type="search" id="busca-pcp" placeholder="Buscar O.S, cliente, endereço…" value="${esc(STATE.filtroBusca)}">
+      <label class="pcp-sort-wrap">Ordenar: <select id="pcp-sort">${sorts}</select></label>
       ${podeEditar() ? '<button class="btn-primary btn-sm" id="pcp-nova">+ Nova O.S</button>' : ''}
     </div>
+    <div class="pcp-chips">${chips}</div>
     <div class="cards-grid">
-      ${list.map(osCardHTML).join('') || emptyState('📋', 'Nenhuma O.S por aqui', 'Crie uma nova O.S ou importe um PDF do ERP.')}
+      ${list.map(osCardHTML).join('') || emptyState('📋', 'Nenhuma O.S neste filtro', 'Troque o status, limpe a busca ou crie uma nova O.S.')}
     </div>`;
+
   bindCardClicks(el);
   const busca = $('#busca-pcp');
   busca.oninput = () => { STATE.filtroBusca = busca.value; renderPCP(); busca.focus(); busca.setSelectionRange(busca.value.length, busca.value.length); };
+  $('#pcp-sort').onchange = (e) => { STATE.pcpSort = e.target.value; renderPCP(); };
+  $$('[data-pcp-status]', el).forEach(b => {
+    b.onclick = () => { STATE.pcpStatus = b.dataset.pcpStatus; renderPCP(); };
+  });
   const nova = $('#pcp-nova');
   if (nova) nova.onclick = () => openModal(novaOS());
 }
@@ -2633,7 +2696,7 @@ function wireMubisys(el) {
 // Funde os campos vindos do Mubisys numa O.S nova e válida do Impresilk.
 function montarOSImportada(remoto) {
   const os = novaOS();
-  ['numero', 'servico', 'vendedor', 'dataEntrada', 'cliente', 'contato', 'whatsapp', 'cnpjCpf', 'endereco']
+  ['numero', 'servico', 'vendedor', 'dataEntrada', 'previsaoEntrega', 'cliente', 'contato', 'whatsapp', 'cnpjCpf', 'endereco']
     .forEach(k => { if (remoto[k]) os[k] = remoto[k]; });
   if (remoto.instalacao) os.instalacao = Object.assign(os.instalacao, remoto.instalacao);
   if (Array.isArray(remoto.itens) && remoto.itens.length) os.itens = remoto.itens;

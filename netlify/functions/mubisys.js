@@ -202,11 +202,19 @@ function mapearOS(o) {
   const entregaData = pick(o, 'data_entrega', 'dataEntrega');
   const entregaHora = pick(o, 'hora_entrega', 'horaEntrega');
 
+  // Data de pedido/entrada = cadastro da O.S. Previsão de entrega: a API costuma
+  // vir sem data_entrega, então calculamos a partir da aprovação + prazo (dias).
+  const dataPedido = isoData(pick(o, 'data_cadastro', 'data_aprovacao'));
+  const dataAprov  = isoData(pick(o, 'data_aprovacao', 'data_cadastro'));
+  const prazoDias  = parsePrazoDias(pick(o, 'prazo'));
+  const previsao   = isoData(entregaData) || addDias(dataAprov, prazoDias);
+
   return {
     numero:      String(pick(o, 'sequencial_ordem', 'numero', 'numeroOS', 'codigo') || ''),
     servico:     pick(o, 'nome_trabalho', 'referencia', 'titulo', 'descricao'),
     vendedor:    pick(o, 'vendedor', 'atendente', 'vendedorNome'),
-    dataEntrada: isoData(pick(o, 'data_aprovacao', 'data_cadastro')),
+    dataEntrada: dataPedido,
+    previsaoEntrega: previsao,
     cliente:     typeof o.cliente === 'string' ? o.cliente : pick(o.cliente || {}, 'nome', 'razaoSocial'),
     contato:     pick(contato, 'nome_contato', 'nome', 'contato', 'responsavel'),
     whatsapp:    pick(contato, 'celular', 'telefone', 'whatsapp', 'fone'),
@@ -221,6 +229,20 @@ function mapearOS(o) {
     itens: (o.itens || o.produtos || o.items || []).map(mapearItem),
     _origemMubisys: true
   };
+}
+
+// "5", "7 dias", "10 dias úteis" → 5, 7, 10. Sem número → null.
+function parsePrazoDias(p) {
+  if (!p) return null;
+  const m = String(p).match(/\d+/);
+  return m ? parseInt(m[0], 10) : null;
+}
+// Soma n dias a uma data ISO (yyyy-mm-dd). Retorna '' se faltar algo.
+function addDias(iso, n) {
+  if (!iso || n == null) return '';
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 function montarEndereco(c) {
