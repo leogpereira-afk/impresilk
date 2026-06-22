@@ -1620,6 +1620,22 @@ const PCP_SORTS = {
   empresa: { label: 'Tempo na empresa',        fn: (a, b) => (a.dataEntrada || '9999-12-31').localeCompare(b.dataEntrada || '9999-12-31') }
 };
 
+// Recalcula a lista filtrada do PCP e atualiza SÓ a grade de cards.
+// Usada na busca em tempo real para não reconstruir o painel (o que destruía
+// o próprio <input> em digitação e fazia o filtro só "pegar" depois do clique).
+function pcpRenderCards() {
+  const grid = $('#panel-pcp .cards-grid');
+  if (!grid) return;
+  let list = STORE.getAllOS().slice();
+  if (STATE.pcpTipo !== 'todos') list = list.filter(o => osTipo(o) === STATE.pcpTipo);
+  if (STATE.pcpStatus !== 'todos') list = list.filter(o => calcStatus(o) === STATE.pcpStatus);
+  list = applyFilter(list, STATE.filtroBusca);
+  list = list.sort((PCP_SORTS[STATE.pcpSort] || PCP_SORTS.entrega).fn);
+  grid.innerHTML = list.map(osCardHTML).join('') ||
+    emptyState('📋', 'Nenhuma O.S neste filtro', 'Troque o filtro, limpe a busca ou crie uma nova O.S.');
+  bindCardClicks(grid);
+}
+
 function renderPCP() {
   const el = $('#panel-pcp');
   STATE.pcpStatus = STATE.pcpStatus || 'todos';
@@ -1636,13 +1652,6 @@ function renderPCP() {
   // Contagem por tipo (para os chips de triagem).
   const contTipo = { todos: all.length, interno: 0, externo: 0 };
   all.forEach(o => { contTipo[osTipo(o)]++; });
-
-  // Aplica: tipo → status → busca → ordenação.
-  let list = all;
-  if (STATE.pcpTipo !== 'todos') list = list.filter(o => osTipo(o) === STATE.pcpTipo);
-  if (STATE.pcpStatus !== 'todos') list = list.filter(o => calcStatus(o) === STATE.pcpStatus);
-  list = applyFilter(list, STATE.filtroBusca);
-  list = list.slice().sort((PCP_SORTS[STATE.pcpSort] || PCP_SORTS.entrega).fn);
 
   const chips = [['todos', 'Todos'], ...Object.entries(STATUS_LABEL)]
     .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" data-pcp-status="${k}">${esc(lbl)} <span class="pcp-chip-n">${cont[k] || 0}</span></button>`).join('');
@@ -1662,14 +1671,14 @@ function renderPCP() {
     </div>
     <div class="pcp-chips pcp-chips-tipo">${tipoChips}</div>
     <div class="pcp-chips">${chips}</div>
-    <div class="cards-grid">
-      ${list.map(osCardHTML).join('') || emptyState('📋', 'Nenhuma O.S neste filtro', 'Troque o filtro, limpe a busca ou crie uma nova O.S.')}
-    </div>`;
+    <div class="cards-grid"></div>`;
 
-  bindCardClicks(el);
+  pcpRenderCards(); // preenche a grade conforme os filtros atuais
+
   const busca = $('#busca-pcp');
-  busca.oninput = () => { STATE.filtroBusca = busca.value; renderPCP(); busca.focus(); busca.setSelectionRange(busca.value.length, busca.value.length); };
-  $('#pcp-sort').onchange = (e) => { STATE.pcpSort = e.target.value; renderPCP(); };
+  // Busca em tempo real: atualiza só a grade, sem reconstruir o input.
+  busca.oninput = () => { STATE.filtroBusca = busca.value; pcpRenderCards(); };
+  $('#pcp-sort').onchange = (e) => { STATE.pcpSort = e.target.value; pcpRenderCards(); };
   $$('[data-pcp-status]', el).forEach(b => {
     b.onclick = () => { STATE.pcpStatus = b.dataset.pcpStatus; renderPCP(); };
   });
@@ -2370,8 +2379,11 @@ function renderFinalizados() {
   else finRenderLista();
 }
 
-function finRenderLista() {
-  const el = $('#fin-content');
+// Atualiza SÓ a lista de finalizados (usada pela busca em tempo real, para não
+// reconstruir o painel e perder o foco do <input> durante a digitação).
+function finRenderCards() {
+  const lista = $('#fin-content .os-list');
+  if (!lista) return;
   const periodo = finFinalizadasPeriodo();
   const list = applyFilter(periodo, STATE.filtroFinalizados || '');
   const cards = list.map(os => {
@@ -2389,21 +2401,25 @@ function finRenderLista() {
       <button class="btn-ghost btn-sm card-pop" data-pop-os="${esc(os.id)}" title="Enviar POP para a equipe">📚</button>
     </div>`;
   }).join('');
+  lista.innerHTML = cards || emptyState('🏁', 'Nenhuma O.S no período', 'Ajuste o filtro de datas para ver o histórico.');
+  bindCardClicks(lista);
+}
+
+function finRenderLista() {
+  const el = $('#fin-content');
+  const periodo = finFinalizadasPeriodo();
 
   el.innerHTML = `
     <div class="filter-bar">
       <input type="search" id="busca-fin" placeholder="Buscar O.S, cliente, serviço…" value="${esc(STATE.filtroFinalizados || '')}">
       <span class="text-muted" style="margin-left:auto">${periodo.length} no período</span>
     </div>
-    <div class="os-list">${cards || emptyState('🏁', 'Nenhuma O.S no período', 'Ajuste o filtro de datas para ver o histórico.')}</div>`;
+    <div class="os-list"></div>`;
 
-  bindCardClicks(el);
+  finRenderCards();
   const busca = $('#busca-fin');
-  busca.oninput = () => {
-    STATE.filtroFinalizados = busca.value;
-    finRenderLista();
-    const b = $('#busca-fin'); b.focus(); b.setSelectionRange(b.value.length, b.value.length);
-  };
+  // Busca em tempo real: atualiza só a lista, mantendo o input intacto.
+  busca.oninput = () => { STATE.filtroFinalizados = busca.value; finRenderCards(); };
 }
 
 /* ── Fase 3: dashboards de Finalizados ─────────────────────────────────────
