@@ -4,6 +4,10 @@
 [functions]
   directory = "netlify/functions"
 
+# Importação automática das O.S do Mubisys, de hora em hora.
+[functions."mubisys-sync"]
+  schedule = "@hourly"
+
 [[headers]]
   for = "/*"
   [headers.values]
