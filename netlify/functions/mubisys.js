@@ -199,17 +199,29 @@ function mapearOS(o) {
   o = o || {};
   const contato  = (Array.isArray(o.cliente_contato)  && o.cliente_contato[0])  || {};
   const endereco = (Array.isArray(o.cliente_endereco) && o.cliente_endereco[0]) || {};
-  const entregaData = pick(o, 'data_entrega', 'dataEntrega');
-  const entregaHora = pick(o, 'hora_entrega', 'horaEntrega');
+  // A entrega do pedido pode vir em campos separados (data + hora) ou num único
+  // campo datetime ("2026-06-24 19:30" / "24/06/2026 19:30"). isoData/isoHora
+  // sabem extrair de qualquer um dos formatos.
+  const entregaData = pick(o, 'data_entrega', 'dataEntrega', 'entrega', 'data_instalacao', 'dataInstalacao');
+  const entregaHora = pick(o, 'hora_entrega', 'horaEntrega', 'entrega', 'hora_instalacao', 'horaInstalacao');
+  const entregaIso  = isoData(entregaData);
+  const entregaHr   = isoHora(entregaHora);
 
-  // Data de pedido/entrada = cadastro da O.S. Previsão de entrega: a API costuma
-  // vir sem data_entrega, então calculamos a partir da aprovação + prazo (dias).
+  // Logística do pedido define o tipo da O.S:
+  //   "Instalado"/entrega própria → externo  ·  "Cliente retira" → interno
+  const logistica = String(pick(o, 'logistica', 'tipo_logistica', 'tipo_entrega',
+                                   'modalidade_entrega', 'entrega_tipo') || '');
+  const tipo = /retir/i.test(logistica) ? 'interno' : 'externo';
+
+  // Data de pedido/entrada = cadastro da O.S. Previsão de entrega: usa a entrega
+  // do pedido quando existir, senão calcula a partir da aprovação + prazo (dias).
   const dataPedido = isoData(pick(o, 'data_cadastro', 'data_aprovacao'));
   const dataAprov  = isoData(pick(o, 'data_aprovacao', 'data_cadastro'));
   const prazoDias  = parsePrazoDias(pick(o, 'prazo'));
-  const previsao   = isoData(entregaData) || addDias(dataAprov, prazoDias);
+  const previsao   = entregaIso || addDias(dataAprov, prazoDias);
 
   return {
+    tipo,
     numero:      String(pick(o, 'sequencial_ordem', 'numero', 'numeroOS', 'codigo') || ''),
     servico:     pick(o, 'nome_trabalho', 'referencia', 'titulo', 'descricao'),
     vendedor:    pick(o, 'vendedor', 'atendente', 'vendedorNome'),
@@ -222,9 +234,9 @@ function mapearOS(o) {
     endereco:    montarEndereco(endereco),
     observacao:  pick(o, 'observacao_geral', 'observacao_producao'),
     instalacao: {
-      data:    isoData(entregaData),
-      hora:    isoHora(entregaHora),
-      periodo: definirPeriodo(isoHora(entregaHora))
+      data:    entregaIso,
+      hora:    entregaHr,
+      periodo: definirPeriodo(entregaHr)
     },
     itens: (o.itens || o.produtos || o.items || []).map(mapearItem),
     _origemMubisys: true

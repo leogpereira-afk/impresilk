@@ -71,7 +71,7 @@ function montarOSImportada(remoto) {
   const os = {
     id: uuid(),
     numero: '',
-    tipo: 'externo', // O.S importada do Mubisys entra sempre como Externa
+    tipo: 'externo', // sobrescrito abaixo pela logística do pedido, quando houver
     criadoEm: agora,
     criadoPor: 'Mubisys (auto)',
     atualizadoEm: agora,
@@ -85,7 +85,7 @@ function montarOSImportada(remoto) {
     confirmacao: '', confCanal: '', confHora: '', confPor: '', confObs: '',
     confAcompanha: '', confAcompanhaContato: '',
     embarqueConferidoPor: '', produtosConferidosPor: '',
-    ferramentasConferidas: false, ferramentasConferidasPor: '', fotoEmbarqueId: '',
+    ferramentasConferidas: false, ferramentasConferidasPor: '',
     carroLiberado: false, carroLiberadoPor: '', carroLiberadoEm: '',
     horaSaida: '', horaRetorno: '', kmSaida: '', kmRetorno: '', instalacaoOK: false, conferidoPor: '',
     retrabalho: false, problema: '', causa: '', resolvidoPor: '', dataResolvido: '',
@@ -96,6 +96,7 @@ function montarOSImportada(remoto) {
 
   ['numero', 'servico', 'vendedor', 'dataEntrada', 'previsaoEntrega', 'cliente', 'contato', 'whatsapp', 'cnpjCpf', 'endereco']
     .forEach(k => { if (remoto[k]) os[k] = remoto[k]; });
+  if (remoto.tipo === 'interno' || remoto.tipo === 'externo') os.tipo = remoto.tipo;
   if (remoto.observacao) os.obsPCP = remoto.observacao;
   if (remoto.instalacao) os.instalacao = Object.assign(os.instalacao, remoto.instalacao);
   if (Array.isArray(remoto.itens) && remoto.itens.length) os.itens = remoto.itens;

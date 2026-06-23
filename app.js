@@ -713,7 +713,7 @@ function novaOS(tipo) {
     confirmacao: '', confCanal: '', confHora: '', confPor: '', confObs: '',
     confAcompanha: '', confAcompanhaContato: '',
     embarqueConferidoPor: '', produtosConferidosPor: '',
-    ferramentasConferidas: false, ferramentasConferidasPor: '', fotoEmbarqueId: '',
+    ferramentasConferidas: false, ferramentasConferidasPor: '',
     carroLiberado: false, carroLiberadoPor: '', carroLiberadoEm: '',
     horaSaida: '', horaRetorno: '', kmSaida: '', kmRetorno: '', instalacaoOK: false, conferidoPor: '',
     retrabalho: false, problema: '', causa: '', resolvidoPor: '', dataResolvido: '',
@@ -854,7 +854,7 @@ function renderModal() {
   const tipoSelector = `
     <div class="tipo-selector edit-only" role="group" aria-label="Tipo de pedido">
       <button type="button" class="tipo-opt ${!interno ? 'active' : ''}" data-set-tipo="externo">🚚 Externo</button>
-      <button type="button" class="tipo-opt ${interno ? 'active' : ''}" data-set-tipo="interno">🏭 Interno</button>
+      <button type="button" class="tipo-opt ${interno ? 'active' : ''}" data-set-tipo="interno">🏬 Cliente retira</button>
     </div>`;
 
   // Para pedido interno, só os dois primeiros blocos. Finalização direta.
@@ -872,7 +872,7 @@ function renderModal() {
   $('#modal-os').innerHTML = `
     <div class="modal-header">
       <div style="flex:1">
-        <div class="modal-title">O.S ${esc(os.numero || '(nova)')} <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏭 Interno' : '🚚 Externo'}</span></div>
+        <div class="modal-title">O.S ${esc(os.numero || '(nova)')} <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏬 Cliente retira' : '🚚 Externo'}</span></div>
         <div class="modal-meta">Atualizado por ${esc(os.atualizadoPor || '—')}${os.atualizadoEm ? ' · ' + new Date(os.atualizadoEm).toLocaleString('pt-BR') : ''}</div>
       </div>
       <span class="modal-status badge st-${st}">${STATUS_LABEL[st]}</span>
@@ -1130,13 +1130,6 @@ function blocoExec(os, ro, done) {
         <input data-f="ferramentasConferidasPor" list="dl-conferentes" value="${esc(os.ferramentasConferidasPor)}" placeholder="Nome de quem conferiu">
         <datalist id="dl-conferentes">${peopleList(cfg).map(p=>`<option value="${esc(p)}">`).join('')}</datalist>
       </div>
-      <div class="field">
-        <label>Foto de embarque</label>
-        <div class="foto-box" data-foto-single="fotoEmbarqueId">
-          ${os.fotoEmbarqueId ? `<img data-foto-img="${esc(os.fotoEmbarqueId)}" alt="embarque">` : '<span class="foto-hint">📎 Anexar foto de embarque</span>'}
-          <input type="file" accept="image/*" capture="environment" data-foto-input="fotoEmbarqueId" ${ro?'disabled':''}>
-        </div>
-      </div>
 
       <!-- ── Saída ─────────────────────────────────────────────── -->
       <div class="exec-step"><span class="exec-step-tit">🚗 Saída</span></div>
@@ -1152,10 +1145,10 @@ function blocoExec(os, ro, done) {
         <div class="field"><label>KM saída (embarque)</label><input type="number" inputmode="numeric" data-f="kmSaida" value="${esc(os.kmSaida)}" placeholder="km do veículo"></div>
       </div>
 
-      <!-- ── Chegada / check‑in (primeira coisa ao chegar) ─────── -->
-      <div class="exec-step"><span class="exec-step-tit">📍 Chegada · Check‑in</span></div>
+      <!-- ── Saída · check‑in (foto registra a saída e preenche a hora) ─ -->
+      <div class="exec-step"><span class="exec-step-tit">📍 Saída · Check‑in</span></div>
       <div class="field">
-        <label>Fotos de check‑in (≥1 p/ finalizar)</label>
+        <label>Fotos de check‑in (≥1 p/ finalizar · preenche a hora de saída)</label>
         <div class="fotos-grid" id="fotos-checkin">
           ${fotos.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}" data-foto-checkin="${esc(fid)}"><button class="foto-rm edit-only" data-foto-rm="${esc(fid)}">×</button></div>`).join('')}
         </div>
@@ -1166,8 +1159,8 @@ function blocoExec(os, ro, done) {
         ${os.checkinGPS ? `<div class="gps-tag">📍 Local confirmado no check‑in · <a href="https://maps.google.com/?q=${os.checkinGPS.lat},${os.checkinGPS.lng}" target="_blank">ver no mapa</a> (±${os.checkinGPS.precisao||'?'}m)</div>` : ''}
       </div>
 
-      <!-- ── Execução do serviço ───────────────────────────────── -->
-      <div class="exec-step"><span class="exec-step-tit">🔧 Execução</span></div>
+      <!-- ── Execução & Retorno (resultado → volta → fechamento) ─── -->
+      <div class="exec-step"><span class="exec-step-tit">🔧 Execução &amp; Retorno</span></div>
       <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" ${os.instalacaoOK?'checked':''}> ✅ Instalação OK</label>
       <div class="field"><label>Conferido por</label>
         <select data-f="conferidoPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.conferidoPor)}</select>
@@ -1184,18 +1177,14 @@ function blocoExec(os, ro, done) {
         <div class="field"><label>Data resolvido</label><input type="date" data-f="dataResolvido" value="${esc(os.dataResolvido)}"></div>
       </div>
 
-      <!-- ── Retorno / check‑out ───────────────────────────────── -->
-      <div class="exec-step"><span class="exec-step-tit">🏁 Retorno · Check‑out</span></div>
       <div class="field-row">
         <div class="field"><label>Hora retorno</label><input type="time" data-f="horaRetorno" value="${esc(os.horaRetorno)}"></div>
-        <div class="field"><label>KM retorno (check‑out)</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>
+        <div class="field"><label>KM retorno</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>
       </div>
-      <div class="field-row3">
+      <div class="field-row">
         <div class="field"><label>Situação</label><select data-f="checkout.situacao"><option value="">— selecionar —</option>${sitOpts}${sitExtra}</select></div>
-        <div class="field"><label>Hora check‑out</label><input type="time" data-f="checkout.hora" value="${esc(co.hora)}"></div>
-        <div class="field"><label>Conferido por</label><select data-f="checkout.por"><option value="">— selecionar —</option>${peopleOptions(cfg, co.por)}</select></div>
+        <div class="field"><label>Obs de fechamento</label><input data-f="checkout.obs" value="${esc(co.obs)}"></div>
       </div>
-      <div class="field"><label>Obs check‑out</label><input data-f="checkout.obs" value="${esc(co.obs)}"></div>
 
       <div class="edit-only mt-12">
         ${os.finalizadaEm
@@ -1332,7 +1321,6 @@ function bindModalEvents(os, ro) {
     if (confirm('Excluir esta O.S e suas fotos? Não há como desfazer.')) {
       (os.fotosCheckinIds || []).forEach(f => STORE.delFoto(f));
       if (os.layoutFotoId) STORE.delFoto(os.layoutFotoId);
-      if (os.fotoEmbarqueId) STORE.delFoto(os.fotoEmbarqueId);
       STORE.deleteOS(os.id);
       $('#modal-overlay').classList.add('hidden');
       STATE.modalOSId = null; _modalDraft = null;
@@ -1546,6 +1534,11 @@ function bindModalEvents(os, ro) {
       const fileId = await STORE.pushPhoto(f);
       if (fileId) _modalDraft.fotosCheckinIds.push(fileId);
     }
+    // A foto de check‑in registra a saída: preenche a hora se ainda estiver vazia.
+    if (!_modalDraft.horaSaida) {
+      const agora = new Date();
+      _modalDraft.horaSaida = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
+    }
     capturarLocalCheckin();
     saveDraft(); reRenderModalKeepOpen();
   };
@@ -1646,8 +1639,8 @@ function osCardHTML(os) {
         <span class="badge st-${st}" style="margin-left:auto">${STATUS_LABEL[st]}</span>
       </div>
       <div class="card-tipo-row">
-        <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏭 Interno' : '🚚 Externo'}</span>
-        ${os.finalizadaEm ? '' : `<button class="btn-xs btn-ghost edit-only card-toggle-tipo" data-toggle-tipo="${esc(os.id)}" title="Alternar entre Interno e Externo">⇄ ${interno ? 'Tornar Externo' : 'Tornar Interno'}</button>`}
+        <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏬 Cliente retira' : '🚚 Externo'}</span>
+        ${os.finalizadaEm ? '' : `<button class="btn-xs btn-ghost edit-only card-toggle-tipo" data-toggle-tipo="${esc(os.id)}" title="Alternar entre Cliente retira e Externo">⇄ ${interno ? 'Tornar Externo' : 'Tornar Cliente retira'}</button>`}
       </div>
       ${stepperHTML(os, true)}
       ${cardTempoHTML(os)}
@@ -1750,7 +1743,7 @@ function bindCardClicks(container) {
       os.atualizadoPor = STATE.user.nome;
       registrarEtapa(os);
       STORE.saveOS(os);
-      toast(`Pedido marcado como ${novo === 'interno' ? 'Interno 🏭' : 'Externo 🚚'}`, 'success');
+      toast(`Pedido marcado como ${novo === 'interno' ? 'Cliente retira 🏬' : 'Externo 🚚'}`, 'success');
       renderActiveTab();
     };
   });
@@ -1834,7 +1827,7 @@ function renderPCP() {
     .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" data-pcp-status="${k}">${esc(lbl)} <span class="pcp-chip-n">${cont[k] || 0}</span></button>`).join('');
 
   const tipoChips = [
-    ['todos', 'Todos'], ['externo', '🚚 Externo'], ['interno', '🏭 Interno']
+    ['todos', 'Todos'], ['externo', '🚚 Externo'], ['interno', '🏬 Cliente retira']
   ].map(([k, lbl]) => `<button class="pcp-chip pcp-chip-tipo tipo-${k} ${STATE.pcpTipo === k ? 'active' : ''}" data-pcp-tipo="${k}">${esc(lbl)} <span class="pcp-chip-n">${contTipo[k] || 0}</span></button>`).join('');
 
   const sorts = Object.entries(PCP_SORTS)
@@ -3233,13 +3226,12 @@ async function exportarFichaPDF(os) {
   }
 
   const layoutImg = await imgTag(os.layoutFotoId, 'Layout');
-  const embarqueImg = await imgTag(os.fotoEmbarqueId, 'Embarque');
   const checkinImgs = (await Promise.all(
     (os.fotosCheckinIds || []).map((id, i) => imgTag(id, `Check‑in ${i + 1}`))
   )).join('');
 
-  const galeria = (layoutImg || embarqueImg || checkinImgs)
-    ? `<h2>5 · Anexos &amp; Fotos</h2><div style="margin-top:6px">${layoutImg}${embarqueImg}${checkinImgs}</div>`
+  const galeria = (layoutImg || checkinImgs)
+    ? `<h2>5 · Anexos &amp; Fotos</h2><div style="margin-top:6px">${layoutImg}${checkinImgs}</div>`
     : '';
 
   const w = window.open('', '_blank');
