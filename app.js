@@ -994,12 +994,9 @@ function blocoItens(os, ro, done) {
       <td data-label="Descrição"><input data-item="${i}.descricao" value="${esc(it.descricao)}"></td>
       <td data-label="Medidas"><input data-item="${i}.medidas" value="${esc(it.medidas)}"></td>
       <td data-label="Qtde"><input data-item="${i}.qtde" value="${esc(it.qtde)}" inputmode="numeric"></td>
-      <td data-label="V.Unit"><input data-item="${i}.valorUnit" value="${esc(it.valorUnit)}" inputmode="decimal"></td>
       <td class="pronto-check" data-label="Pronto?"><label class="item-ok-toggle"><input type="checkbox" data-item-pronto="${i}" ${it.pronto ? 'checked' : ''}> <span>OK</span></label></td>
       <td class="item-del-cell"><button class="btn-xs btn-danger edit-only" data-item-del="${i}" title="Remover item">× remover</button></td>
     </tr>`).join('');
-
-  const total = itens.reduce((s, it) => s + parseBRNumber(it.qtde) * parseBRNumber(it.valorUnit), 0);
 
   return `
   <details class="card-fs ${done ? 'done' : ''}" data-bloco="itens">
@@ -1018,10 +1015,10 @@ function blocoItens(os, ro, done) {
         ${chipsField('suprimentos', os.suprimentos || [], cfg.suprimentos, ro)}
       </div>
       <table class="items-table items-cards">
-        <thead><tr><th>Item</th><th>Descrição</th><th>Medidas</th><th>Qtde</th><th>V.Unit</th><th>OK</th><th></th></tr></thead>
-        <tbody id="itens-tbody">${rows || '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:12px">Nenhum item</td></tr>'}</tbody>
+        <thead><tr><th>Item</th><th>Descrição</th><th>Medidas</th><th>Qtde</th><th>OK</th><th></th></tr></thead>
+        <tbody id="itens-tbody">${rows || '<tr><td colspan="6" class="text-muted" style="text-align:center;padding:12px">Nenhum item</td></tr>'}</tbody>
       </table>
-      ${itens.length ? `<div class="items-total">Total: <strong>${brMoney(total)}</strong> · ${itens.length} ${itens.length === 1 ? 'item' : 'itens'}</div>` : ''}
+      ${itens.length ? `<div class="items-total">${itens.length} ${itens.length === 1 ? 'item' : 'itens'}</div>` : ''}
       <div class="flex gap-8 edit-only">
         <button class="btn-ghost btn-sm" id="btn-add-item">+ Item manual</button>
         <button class="btn-ghost btn-sm" id="btn-import-itens">📄 Importar itens do PDF</button>
