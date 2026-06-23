@@ -398,7 +398,7 @@ function renderModal() {
     ['Obs agenda',   os.obsAgenda]
   ].filter(([, v]) => v && String(v).trim());
   const infoEstatica = (infoRows.length || os.layoutFotoId) ? `
-    <details class="card-fs" data-bloco="info">
+    <details class="card-fs" data-bloco="info" open>
       <summary>📋 Informações da O.S <span class="item-progress" style="margin-left:auto;font-weight:600">somente leitura</span></summary>
       <div class="fs-body eq-info">
         ${infoRows.map(([k, v]) => `<div class="eq-info-row"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}
