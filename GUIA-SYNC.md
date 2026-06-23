@@ -209,6 +209,42 @@ curl -s -X POST https://SEUSITE.netlify.app/.netlify/functions/os \
   -d '{"action":"ping"}'                                                          # espera {"ok":true}
 
 ═══════════════════════════════════════════════════════════════════════
+CONFIGURAÇÃO DO BANCO (NETLIFY BLOBS)  — leia, isto QUEBRA na prática
+═══════════════════════════════════════════════════════════════════════
+O helper blobStore(name) tem DOIS modos (ver ARQUIVO 2):
+  • MANUAL    → usa env BLOBS_SITE_ID + BLOBS_TOKEN (se ambas existirem).
+  • AUTOMÁTICO→ getStore(name) sem args; o Netlify injeta credencial sozinho.
+
+QUAL usar?
+  - O modo automático SÓ funciona se o site tiver o contexto de Blobs provisionado.
+    Em muitos sites ele NÃO está → getStore(name) lança "MissingBlobsEnvironmentError".
+  - Se você apagar as env vars esperando o automático e der MissingBlobsEnvironmentError,
+    significa que ESTE site precisa do modo MANUAL. Recrie as duas variáveis.
+
+COMO CONFIGURAR O MODO MANUAL (passo a passo):
+  1. Gerar token: avatar (canto sup. dir.) → User settings → Applications →
+     Personal access tokens → New access token → copiar (só aparece uma vez).
+  2. Pegar o Site ID: Site configuration → General → Site details → Site ID.
+  3. Site configuration → Environment variables → Add a single variable:
+       • Key BLOBS_SITE_ID  → Value = o Site ID
+       • Key BLOBS_TOKEN    → Value = o token gerado (pode marcar "secret")
+     Scopes: garantir pelo menos Functions + Runtime.
+  4. NÃO apagar a variável TOKEN (senha do app, é outra coisa).
+  5. Deploys → Trigger deploy → Deploy site (env var só vale após novo deploy).
+
+DIAGNÓSTICO RÁPIDO PELO ERRO (teste com curl action:list):
+  • "BlobsInternalError ... 401"        → BLOBS_TOKEN VENCIDO/inválido → gerar token
+                                            novo e atualizar a variável → redeploy.
+  • "MissingBlobsEnvironmentError"      → faltam as env vars → criar BLOBS_SITE_ID +
+                                            BLOBS_TOKEN (modo manual) → redeploy.
+  • "Não autorizado"                    → senha TOKEN do app errada/ausente, OU deploy
+                                            ainda em andamento (espere terminar).
+  • {"ok":true} no ping mas erro no list→ app/auth ok, problema é SÓ no Blobs.
+
+LEMBRE: tokens manuais EXPIRAM. Quando a sync parar do nada (celular vazio, PC
+"ok" por causa do cache local), suspeite primeiro de BLOBS_TOKEN vencido.
+
+═══════════════════════════════════════════════════════════════════════
 ARMADILHAS A DESTACAR NO FINAL  (custaram tempo na prática)
 ═══════════════════════════════════════════════════════════════════════
 1. URL/base directory errados → 404 no site inteiro. Confirme o subdomínio
@@ -217,6 +253,14 @@ ARMADILHAS A DESTACAR NO FINAL  (custaram tempo na prática)
 3. Esquecer de subir o número do CACHE → usuários presos numa versão antiga em cache.
 4. Limite de ~6 MB por resposta da função → por isso 'list' é paginado; nunca devolva
    tudo de uma vez.
+5. BLOBS_TOKEN vencido → erro 401 do Blobs; a sync para silenciosamente. O app
+   continua "funcionando" no aparelho que já tem cache local (offline-first),
+   mascarando o problema — só um aparelho limpo (celular) denuncia. Gere token novo.
+6. Apagar BLOBS_SITE_ID/BLOBS_TOKEN achando que há contexto automático, quando NÃO
+   há → MissingBlobsEnvironmentError. Recrie-as no modo manual.
+7. Alterar env var sem redeployar → a mudança não vale; sempre Trigger deploy depois.
+8. Dado criado offline fica preso na fila local. Antes de limpar cache de um aparelho,
+   garanta que ele sincronizou (abra online e espere a fila esvaziar), senão perde dados.
 
 ═══════════════════════════════════════════════════════════════════════
 ENTREGA
