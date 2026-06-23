@@ -1017,6 +1017,7 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .check-toggle:has(input:checked)        { border-color: var(--blue);  background: #eff6ff; color: var(--blue); }
 .check-toggle.ok:has(input:checked)     { border-color: var(--green); background: #ecfdf5; color: var(--green); }
 .check-toggle.retrab:has(input:checked) { border-color: var(--red);   background: #fef2f2; color: var(--red); }
+.conf-por { font-size: .8rem; color: var(--green); font-weight: 600; margin: -4px 0 8px 32px; }
 
 /* ── Cor semântica de alerta: vermelho = retrabalho ou atrasada ─────── */
 .os-card.alerta-retrab, .os-card.alerta-atraso,

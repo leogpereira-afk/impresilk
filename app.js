@@ -717,7 +717,7 @@ function novaOS(tipo) {
     carroLiberado: false, carroLiberadoPor: '', carroLiberadoEm: '',
     horaSaida: '', horaRetorno: '', kmSaida: '', kmRetorno: '', instalacaoOK: false, conferidoPor: '',
     retrabalho: false, problema: '', causa: '', resolvidoPor: '', dataResolvido: '',
-    obsTecnicas: '', fotosCheckinIds: [], checkinGPS: null,
+    obsTecnicas: '', fotosCheckinIds: [], fotosRetornoIds: [], checkinGPS: null,
     checkout: { situacao: '', hora: '', por: '', obs: '', confirmado: false },
     finalizadaEm: '', finalizadoPor: ''
   };
@@ -1107,6 +1107,7 @@ function blocoExec(os, ro, done) {
   const cfg = STORE.getCFG();
   const confirmado = os.confirmacao === 'Confirmado';
   const fotos = (os.fotosCheckinIds || []);
+  const fotosRet = (os.fotosRetornoIds || []);
   const causaOpts = (cfg.causas_retrabalho || []).map(c => `<option ${os.causa === c ? 'selected' : ''}>${esc(c)}</option>`).join('');
   const co = os.checkout || {};
   const SIT_OPTS = ['Finalizado', 'Retrabalho', 'Mais um dia de trabalho'];
@@ -1117,22 +1118,15 @@ function blocoExec(os, ro, done) {
   <details class="card-fs ${done ? 'done' : ''}" data-bloco="exec">
     <summary>4 · Embarque &amp; Execução ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
     <div class="fs-body">
-      <div class="field-row">
-        <div class="field"><label>Embarque conferido por</label>
-          <select data-f="embarqueConferidoPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.embarqueConferidoPor)}</select>
-        </div>
-        <div class="field"><label>Produtos conferidos por</label>
-          <select data-f="produtosConferidosPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.produtosConferidosPor)}</select>
-        </div>
-      </div>
-      <label class="check-toggle"><input type="checkbox" data-f-check="ferramentasConferidas" ${os.ferramentasConferidas?'checked':''}> 🧰 Ferramentas conferidas</label>
-      <div class="field"><label>Ferramentas conferidas por</label>
-        <input data-f="ferramentasConferidasPor" list="dl-conferentes" value="${esc(os.ferramentasConferidasPor)}" placeholder="Nome de quem conferiu">
-        <datalist id="dl-conferentes">${peopleList(cfg).map(p=>`<option value="${esc(p)}">`).join('')}</datalist>
-      </div>
+      <!-- ── Processo 1: Embarque · Saída ───────────────────────── -->
+      <div class="exec-step"><span class="exec-step-tit">📦 Embarque · Saída</span></div>
+      <label class="check-toggle"><input type="checkbox" data-conf-por="embarqueConferidoPor" ${os.embarqueConferidoPor?'checked':''}> 📦 Embarque conferido</label>
+      ${os.embarqueConferidoPor?`<div class="conf-por">✓ por ${esc(os.embarqueConferidoPor)}</div>`:''}
+      <label class="check-toggle"><input type="checkbox" data-conf-por="produtosConferidosPor" ${os.produtosConferidosPor?'checked':''}> 📋 Produtos conferidos</label>
+      ${os.produtosConferidosPor?`<div class="conf-por">✓ por ${esc(os.produtosConferidosPor)}</div>`:''}
+      <label class="check-toggle"><input type="checkbox" data-f-check="ferramentasConferidas" data-conf-por="ferramentasConferidasPor" ${os.ferramentasConferidas?'checked':''}> 🧰 Ferramentas conferidas</label>
+      ${os.ferramentasConferidasPor?`<div class="conf-por">✓ por ${esc(os.ferramentasConferidasPor)}</div>`:''}
 
-      <!-- ── Saída ─────────────────────────────────────────────── -->
-      <div class="exec-step"><span class="exec-step-tit">🚗 Saída</span></div>
       ${!confirmado ? `<div class="trava-msg">🔒 Confirme o horário com o cliente (POP EXI‑002) antes de liberar o carro / sair.</div>` : ''}
       <div class="edit-only">
         ${os.carroLiberado
@@ -1140,31 +1134,26 @@ function blocoExec(os, ro, done) {
                <button class="btn-xs btn-ghost" id="btn-cancelar-carro" style="margin-left:auto">Cancelar</button></div>`
           : `<button class="btn-primary btn-sm" id="btn-liberar-carro" ${!confirmado?'disabled style="opacity:.5"':''}>🚗 Liberar carro / Saída</button>`}
       </div>
-      <div class="field-row">
-        <div class="field"><label>Hora saída</label><input type="time" data-f="horaSaida" value="${esc(os.horaSaida)}"></div>
-        <div class="field"><label>KM saída (embarque)</label><input type="number" inputmode="numeric" data-f="kmSaida" value="${esc(os.kmSaida)}" placeholder="km do veículo"></div>
-      </div>
-
-      <!-- ── Saída · check‑in (foto registra a saída e preenche a hora) ─ -->
-      <div class="exec-step"><span class="exec-step-tit">📍 Saída · Check‑in</span></div>
       <div class="field">
-        <label>Fotos de check‑in (≥1 p/ finalizar · preenche a hora de saída)</label>
+        <label>Fotos de saída (≥1 p/ finalizar · carimba a hora de saída)</label>
         <div class="fotos-grid" id="fotos-checkin">
           ${fotos.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}" data-foto-checkin="${esc(fid)}"><button class="foto-rm edit-only" data-foto-rm="${esc(fid)}">×</button></div>`).join('')}
         </div>
         <div class="foto-box edit-only" style="margin-top:6px">
-          <span class="foto-hint">📷 Adicionar foto de check‑in</span>
+          <span class="foto-hint">📷 Adicionar foto de saída</span>
           <input type="file" accept="image/*" capture="environment" multiple data-foto-checkin-input ${ro?'disabled':''}>
         </div>
-        ${os.checkinGPS ? `<div class="gps-tag">📍 Local confirmado no check‑in · <a href="https://maps.google.com/?q=${os.checkinGPS.lat},${os.checkinGPS.lng}" target="_blank">ver no mapa</a> (±${os.checkinGPS.precisao||'?'}m)</div>` : ''}
+        ${os.checkinGPS ? `<div class="gps-tag">📍 Local confirmado na saída · <a href="https://maps.google.com/?q=${os.checkinGPS.lat},${os.checkinGPS.lng}" target="_blank">ver no mapa</a> (±${os.checkinGPS.precisao||'?'}m)</div>` : ''}
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Hora saída</label><input type="time" data-f="horaSaida" value="${esc(os.horaSaida)}"></div>
+        <div class="field"><label>KM saída</label><input type="number" inputmode="numeric" data-f="kmSaida" value="${esc(os.kmSaida)}" placeholder="km do veículo"></div>
       </div>
 
-      <!-- ── Execução & Retorno (resultado → volta → fechamento) ─── -->
-      <div class="exec-step"><span class="exec-step-tit">🔧 Execução &amp; Retorno</span></div>
-      <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" ${os.instalacaoOK?'checked':''}> ✅ Instalação OK</label>
-      <div class="field"><label>Conferido por</label>
-        <select data-f="conferidoPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.conferidoPor)}</select>
-      </div>
+      <!-- ── Processo 2: Retorno · Execução ─────────────────────── -->
+      <div class="exec-step"><span class="exec-step-tit">🔧 Retorno · Execução</span></div>
+      <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" data-conf-por="conferidoPor" ${os.instalacaoOK?'checked':''}> ✅ Instalação OK</label>
+      ${os.conferidoPor?`<div class="conf-por">✓ conferido por ${esc(os.conferidoPor)}</div>`:''}
       <div class="field"><label>Obs técnicas</label><textarea data-f="obsTecnicas">${esc(os.obsTecnicas)}</textarea></div>
 
       <label class="check-toggle retrab"><input type="checkbox" data-f-check="retrabalho" ${os.retrabalho?'checked':''}> 🔴 Retrabalho?</label>
@@ -1177,6 +1166,16 @@ function blocoExec(os, ro, done) {
         <div class="field"><label>Data resolvido</label><input type="date" data-f="dataResolvido" value="${esc(os.dataResolvido)}"></div>
       </div>
 
+      <div class="field">
+        <label>Fotos de retorno (carimba a hora de retorno)</label>
+        <div class="fotos-grid" id="fotos-retorno">
+          ${fotosRet.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}"><button class="foto-rm edit-only" data-foto-rm-retorno="${esc(fid)}">×</button></div>`).join('')}
+        </div>
+        <div class="foto-box edit-only" style="margin-top:6px">
+          <span class="foto-hint">📷 Adicionar foto de retorno</span>
+          <input type="file" accept="image/*" capture="environment" multiple data-foto-retorno-input ${ro?'disabled':''}>
+        </div>
+      </div>
       <div class="field-row">
         <div class="field"><label>Hora retorno</label><input type="time" data-f="horaRetorno" value="${esc(os.horaRetorno)}"></div>
         <div class="field"><label>KM retorno</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>
@@ -1320,6 +1319,7 @@ function bindModalEvents(os, ro) {
   if (delBtn) delBtn.onclick = () => {
     if (confirm('Excluir esta O.S e suas fotos? Não há como desfazer.')) {
       (os.fotosCheckinIds || []).forEach(f => STORE.delFoto(f));
+      (os.fotosRetornoIds || []).forEach(f => STORE.delFoto(f));
       if (os.layoutFotoId) STORE.delFoto(os.layoutFotoId);
       STORE.deleteOS(os.id);
       $('#modal-overlay').classList.add('hidden');
@@ -1355,14 +1355,18 @@ function bindModalEvents(os, ro) {
     };
   });
 
-  // Checkboxes
-  $$('[data-f-check]', root).forEach(el => {
+  // Checkboxes. Quando o checkbox tem data-conf-por, quem marca é o usuário
+  // logado (registra o nome no campo correspondente) — sem seleção manual.
+  $$('[data-f-check],[data-conf-por]', root).forEach(el => {
     el.onchange = () => {
-      setField(el.dataset.fCheck, el.checked);
+      if (el.dataset.fCheck) setField(el.dataset.fCheck, el.checked);
+      if (el.dataset.confPor) setField(el.dataset.confPor, el.checked ? STATE.user.nome : '');
       if (el.dataset.fCheck === 'retrabalho') {
         const box = $('[data-retrabalho-fields]', root);
         if (box) box.style.display = el.checked ? '' : 'none';
+        return;
       }
+      if (el.dataset.confPor) { saveDraft(); reRenderModalKeepOpen(); }
     };
   });
 
@@ -1547,6 +1551,32 @@ function bindModalEvents(os, ro) {
       const fid = btn.dataset.fotoRm;
       STORE.delFoto(fid);
       _modalDraft.fotosCheckinIds = (_modalDraft.fotosCheckinIds || []).filter(x => x !== fid);
+      saveDraft(); reRenderModalKeepOpen();
+    };
+  });
+
+  // Fotos de retorno (múltiplas) — a foto carimba a hora de retorno.
+  const retInput = $('[data-foto-retorno-input]', root);
+  if (retInput) retInput.onchange = async () => {
+    const files = Array.from(retInput.files || []);
+    if (!files.length) return;
+    if (!_modalDraft.fotosRetornoIds) _modalDraft.fotosRetornoIds = [];
+    toast(`Enviando ${files.length} foto(s)…`);
+    for (const f of files) {
+      const fileId = await STORE.pushPhoto(f);
+      if (fileId) _modalDraft.fotosRetornoIds.push(fileId);
+    }
+    if (!_modalDraft.horaRetorno) {
+      const agora = new Date();
+      _modalDraft.horaRetorno = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
+    }
+    saveDraft(); reRenderModalKeepOpen();
+  };
+  $$('[data-foto-rm-retorno]', root).forEach(btn => {
+    btn.onclick = () => {
+      const fid = btn.dataset.fotoRmRetorno;
+      STORE.delFoto(fid);
+      _modalDraft.fotosRetornoIds = (_modalDraft.fotosRetornoIds || []).filter(x => x !== fid);
       saveDraft(); reRenderModalKeepOpen();
     };
   });
@@ -3227,11 +3257,14 @@ async function exportarFichaPDF(os) {
 
   const layoutImg = await imgTag(os.layoutFotoId, 'Layout');
   const checkinImgs = (await Promise.all(
-    (os.fotosCheckinIds || []).map((id, i) => imgTag(id, `Check‑in ${i + 1}`))
+    (os.fotosCheckinIds || []).map((id, i) => imgTag(id, `Saída ${i + 1}`))
+  )).join('');
+  const retornoImgs = (await Promise.all(
+    (os.fotosRetornoIds || []).map((id, i) => imgTag(id, `Retorno ${i + 1}`))
   )).join('');
 
-  const galeria = (layoutImg || checkinImgs)
-    ? `<h2>5 · Anexos &amp; Fotos</h2><div style="margin-top:6px">${layoutImg}${checkinImgs}</div>`
+  const galeria = (layoutImg || checkinImgs || retornoImgs)
+    ? `<h2>5 · Anexos &amp; Fotos</h2><div style="margin-top:6px">${layoutImg}${checkinImgs}${retornoImgs}</div>`
     : '';
 
   const w = window.open('', '_blank');

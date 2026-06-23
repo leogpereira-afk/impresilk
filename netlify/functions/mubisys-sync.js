@@ -89,7 +89,7 @@ function montarOSImportada(remoto) {
     carroLiberado: false, carroLiberadoPor: '', carroLiberadoEm: '',
     horaSaida: '', horaRetorno: '', kmSaida: '', kmRetorno: '', instalacaoOK: false, conferidoPor: '',
     retrabalho: false, problema: '', causa: '', resolvidoPor: '', dataResolvido: '',
-    obsTecnicas: '', fotosCheckinIds: [], checkinGPS: null,
+    obsTecnicas: '', fotosCheckinIds: [], fotosRetornoIds: [], checkinGPS: null,
     checkout: { situacao: '', hora: '', por: '', obs: '', confirmado: false },
     finalizadaEm: '', finalizadoPor: ''
   };
