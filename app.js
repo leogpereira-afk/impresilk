@@ -1117,12 +1117,9 @@ function blocoExec(os, ro, done) {
     <div class="fs-body">
       <!-- ── Processo 1: Embarque · Saída ───────────────────────── -->
       <div class="exec-step"><span class="exec-step-tit">📦 Embarque · Saída</span></div>
-      <label class="check-toggle"><input type="checkbox" data-conf-por="embarqueConferidoPor" ${os.embarqueConferidoPor?'checked':''}> 📦 Embarque conferido</label>
-      ${os.embarqueConferidoPor?`<div class="conf-por">✓ por ${esc(os.embarqueConferidoPor)}</div>`:''}
-      <label class="check-toggle"><input type="checkbox" data-conf-por="produtosConferidosPor" ${os.produtosConferidosPor?'checked':''}> 📋 Produtos conferidos</label>
-      ${os.produtosConferidosPor?`<div class="conf-por">✓ por ${esc(os.produtosConferidosPor)}</div>`:''}
-      <label class="check-toggle"><input type="checkbox" data-f-check="ferramentasConferidas" data-conf-por="ferramentasConferidasPor" ${os.ferramentasConferidas?'checked':''}> 🧰 Ferramentas conferidas</label>
-      ${os.ferramentasConferidasPor?`<div class="conf-por">✓ por ${esc(os.ferramentasConferidasPor)}</div>`:''}
+      <label class="check-toggle"><input type="checkbox" data-conf-por="embarqueConferidoPor" ${os.embarqueConferidoPor?'checked':''}> 📦 Embarque conferido${os.embarqueConferidoPor?`<span class="conf-por">✓ por ${esc(os.embarqueConferidoPor)}</span>`:''}</label>
+      <label class="check-toggle"><input type="checkbox" data-conf-por="produtosConferidosPor" ${os.produtosConferidosPor?'checked':''}> 📋 Produtos conferidos${os.produtosConferidosPor?`<span class="conf-por">✓ por ${esc(os.produtosConferidosPor)}</span>`:''}</label>
+      <label class="check-toggle"><input type="checkbox" data-f-check="ferramentasConferidas" data-conf-por="ferramentasConferidasPor" ${os.ferramentasConferidas?'checked':''}> 🧰 Ferramentas conferidas${os.ferramentasConferidasPor?`<span class="conf-por">✓ por ${esc(os.ferramentasConferidasPor)}</span>`:''}</label>
 
       ${!confirmado ? `<div class="trava-msg">🔒 Confirme o horário com o cliente (POP EXI‑002) antes de liberar o carro / sair.</div>` : ''}
       <div class="edit-only">
@@ -1149,9 +1146,7 @@ function blocoExec(os, ro, done) {
 
       <!-- ── Processo 2: Retorno · Execução ─────────────────────── -->
       <div class="exec-step"><span class="exec-step-tit">🔧 Retorno · Execução</span></div>
-      <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" data-conf-por="conferidoPor" ${os.instalacaoOK?'checked':''}> ✅ Instalação OK</label>
-      ${os.conferidoPor?`<div class="conf-por">✓ conferido por ${esc(os.conferidoPor)}</div>`:''}
-      <div class="field"><label>Obs técnicas</label><textarea data-f="obsTecnicas">${esc(os.obsTecnicas)}</textarea></div>
+      <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" data-conf-por="conferidoPor" ${os.instalacaoOK?'checked':''}> ✅ Instalação OK${os.conferidoPor?`<span class="conf-por">✓ por ${esc(os.conferidoPor)}</span>`:''}</label>
 
       <label class="check-toggle retrab"><input type="checkbox" data-f-check="retrabalho" ${os.retrabalho?'checked':''}> 🔴 Retrabalho?</label>
       <div data-retrabalho-fields style="${os.retrabalho?'':'display:none'}">
@@ -1181,6 +1176,7 @@ function blocoExec(os, ro, done) {
         <div class="field"><label>Situação</label><select data-f="checkout.situacao"><option value="">— selecionar —</option>${sitOpts}${sitExtra}</select></div>
         <div class="field"><label>Obs de fechamento</label><input data-f="checkout.obs" value="${esc(co.obs)}"></div>
       </div>
+      <div class="field"><label>Obs técnicas</label><textarea data-f="obsTecnicas">${esc(os.obsTecnicas)}</textarea></div>
 
       <div class="edit-only mt-12">
         ${os.finalizadaEm
