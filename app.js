@@ -201,10 +201,15 @@ function calcStatus(os) {
   if (isInterno(os)) {
     return os.liberadoPCP ? 'apto' : 'aguardando_producao';
   }
-  if (os.horaSaida) return 'em_andamento';
-  if (os.confirmacao === 'Confirmado') return 'confirmada';
-  if (os.instalacao && os.instalacao.data && os.instalacao.periodo && (os.equipe || []).length) return 'agendada';
-  if (os.liberadoPCP) return 'apto';
+  const inst = os.instalacao || {};
+  const agendada   = !!(inst.data && inst.periodo && (os.equipe || []).length);
+  const confirmada = os.confirmacao === 'Confirmado';
+  // Funil coerente: não dá pra "confirmar" sem agendar, nem "sair" sem confirmar.
+  // (antes bastava preencher um campo solto e a O.S pulava etapa.)
+  if (os.horaSaida && confirmada && agendada) return 'em_andamento';
+  if (confirmada && agendada)                 return 'confirmada';
+  if (agendada)                               return 'agendada';
+  if (os.liberadoPCP)                         return 'apto';
   return 'aguardando_producao';
 }
 
@@ -216,6 +221,71 @@ const STATUS_LABEL = {
   em_andamento:        'Em andamento',
   finalizada:          'Finalizada'
 };
+
+/* ── Etapas do processo (stepper / régua do funil) ───────────────────────── */
+// Rótulo curto + ícone de cada etapa, na ordem do funil.
+const STEP_DEFS = {
+  aguardando_producao: { curto: 'Produção',  icon: '🏭' },
+  apto:                { curto: 'Apto',       icon: '✅' },
+  agendada:            { curto: 'Agenda',     icon: '📅' },
+  confirmada:          { curto: 'Confirmado', icon: '📞' },
+  em_andamento:        { curto: 'Em rota',    icon: '🚚' },
+  finalizada:          { curto: 'Final',      icon: '🏁' }
+};
+const ETAPAS_EXT = ['aguardando_producao', 'apto', 'agendada', 'confirmada', 'em_andamento', 'finalizada'];
+const ETAPAS_INT = ['aguardando_producao', 'apto', 'finalizada'];
+function etapasDe(os) { return isInterno(os) ? ETAPAS_INT : ETAPAS_EXT; }
+
+// Régua visual das etapas. compact = só bolinhas (usado no card).
+function stepperHTML(os, compact) {
+  const seq = etapasDe(os);
+  const atual = calcStatus(os);
+  const idx = seq.indexOf(atual);
+  const hist = Array.isArray(os.historico) ? os.historico : [];
+  const passos = seq.map((s, i) => {
+    const cls = i < idx ? 'done' : (i === idx ? 'cur' : 'todo');
+    const d = STEP_DEFS[s];
+    const h = hist.find(x => x.etapa === s);
+    const quando = h && h.em ? ` — ${new Date(h.em).toLocaleDateString('pt-BR')}${h.por ? ' · ' + h.por : ''}` : '';
+    return `<span class="step ${cls}" title="${esc(STATUS_LABEL[s])}${quando}">
+      <span class="step-dot">${i < idx ? '✓' : d.icon}</span>
+      ${compact ? '' : `<span class="step-lbl">${esc(d.curto)}</span>`}
+    </span>`;
+  }).join('<span class="step-sep"></span>');
+  return `<div class="stepper ${compact ? 'stepper-compact' : ''}">${passos}</div>`;
+}
+
+// Próximo passo do processo: o que falta para avançar a etapa atual.
+// Reaproveitado pelo "próximo passo" do card (B) e pelo CTA dinâmico (C).
+function proximoPasso(os) {
+  const st = calcStatus(os);
+  if (st === 'finalizada') return null;
+  if (isInterno(os)) {
+    if (!os.liberadoPCP)            return { label: 'PCP precisa liberar', cta: '✓ Liberar PCP', acao: 'pcp' };
+    if (!(os.itens || []).length)  return { label: 'Adicionar itens',      cta: '+ Itens',       acao: 'itens' };
+    return { label: 'Pronto p/ finalizar', cta: '🏁 Finalizar', acao: 'finalizar' };
+  }
+  const inst = os.instalacao || {};
+  if (!os.liberadoPCP)                                              return { label: 'PCP precisa liberar',     cta: '✓ Liberar PCP', acao: 'pcp' };
+  if (!(inst.data && inst.periodo && (os.equipe || []).length))    return { label: 'Falta agendar',           cta: '📅 Agendar',    acao: 'agenda' };
+  if (os.confirmacao !== 'Confirmado')                             return { label: 'Falta confirmar cliente', cta: '📞 Confirmar',  acao: 'confirmar' };
+  if (!os.carroLiberado && !os.horaSaida)                          return { label: 'Liberar carro / saída',   cta: '🚗 Liberar saída', acao: 'saida' };
+  const faltas = validarFinalizacao(os);
+  if (faltas.length) return { label: 'Falta: ' + faltas.join(', '), cta: '🏁 Finalizar', acao: 'exec' };
+  return { label: 'Pronto p/ finalizar', cta: '🏁 Finalizar', acao: 'finalizar' };
+}
+
+// Registra a entrada em cada etapa (histórico de transições) para medir o
+// lead time por etapa. Só grava quando a etapa muda de fato.
+function registrarEtapa(os) {
+  if (!os) return;
+  const st = calcStatus(os);
+  if (!Array.isArray(os.historico)) os.historico = [];
+  const ultimo = os.historico[os.historico.length - 1];
+  if (!ultimo || ultimo.etapa !== st) {
+    os.historico.push({ etapa: st, em: nowISO(), por: (STATE.user && STATE.user.nome) || '' });
+  }
+}
 
 // ── Datas / prazos (PCP) ─────────────────────────────────────────────────────
 // Data de hoje em YYYY-MM-DD no fuso LOCAL (toISOString convertia pra UTC e
@@ -710,6 +780,7 @@ function saveDraft() {
   if (!_modalDraft) return;
   _modalDraft.atualizadoEm = nowISO();
   _modalDraft.atualizadoPor = STATE.user.nome;
+  registrarEtapa(_modalDraft); // histórico de transições (lead time por etapa)
   STORE.saveOS(_modalDraft);
   _modalDirty = false;
 
@@ -769,6 +840,16 @@ function renderModal() {
   const pct = fichaPercent(os);
   const interno = isInterno(os);
 
+  // Régua de etapas + próximo passo + tempos do processo (doutor em processos).
+  const pp = proximoPasso(os);
+  const histAtual = (Array.isArray(os.historico) ? os.historico : []).filter(h => h.etapa === st).slice(-1)[0];
+  const diasPedido = os.dataEntrada ? diasDesde(os.dataEntrada)
+                   : (os.criadoEm ? diasEntre(os.criadoEm.slice(0, 10), todayISO()) : null);
+  const diasEtapa = histAtual && histAtual.em ? diasEntre(histAtual.em.slice(0, 10), todayISO()) : null;
+  const temposTags = [];
+  if (diasPedido != null && diasPedido >= 0) temposTags.push(`⏱ ${diasPedido}d desde o pedido`);
+  if (diasEtapa != null && diasEtapa >= 0 && !finalizada) temposTags.push(`📍 ${diasEtapa}d nesta etapa`);
+
   // Seletor de tipo do pedido (Interno / Externo)
   const tipoSelector = `
     <div class="tipo-selector edit-only" role="group" aria-label="Tipo de pedido">
@@ -805,6 +886,10 @@ function renderModal() {
     </div>` : ''}
 
     ${finalizada ? '' : tipoSelector}
+
+    ${stepperHTML(os, false)}
+    ${temposTags.length ? `<div class="modal-tempos">${temposTags.join(' · ')}</div>` : ''}
+    ${pp ? `<div class="prox-passo prox-passo-modal"><span class="prox-passo-tag">Próximo passo</span> <strong>${esc(pp.label)}</strong></div>` : ''}
 
     <div class="ficha-pct">
       <div class="ficha-pct-bar"><div class="ficha-pct-fill" style="width:${pct}%"></div></div>
@@ -853,10 +938,10 @@ function blocoPCP(os, ro, done) {
           <datalist id="dl-servicos">${tiposServicoHist().map(s=>`<option value="${esc(s)}">`).join('')}</datalist>
         </div>
       </div>
-      <div class="field"><label>Cliente</label><input data-f="cliente" value="${esc(os.cliente)}"></div>
+      <div class="field"><label>Cliente <span class="req">*</span></label><input data-f="cliente" value="${esc(os.cliente)}"></div>
       <div class="field-row">
         <div class="field"><label>Contato</label><input type="text" data-f="contato" value="${esc(os.contato)}"></div>
-        <div class="field"><label>WhatsApp</label><input type="tel" inputmode="tel" data-f="whatsapp" data-mask="tel" value="${esc(maskTel(os.whatsapp))}" placeholder="(00) 00000-0000">
+        <div class="field"><label>WhatsApp <span class="req">*</span></label><input type="tel" inputmode="tel" data-f="whatsapp" data-mask="tel" value="${esc(maskTel(os.whatsapp))}" placeholder="(00) 00000-0000">
           ${(() => {
             const dig = String(os.whatsapp || '').replace(/\D/g,'');
             // BR: 10 (fixo) ou 11 (celular). Aceita também 12-13 se já vier com DDI.
@@ -979,10 +1064,21 @@ function blocoAgenda(os, ro, done) {
       </div>
       <div class="field"><label>Obs agenda</label><textarea data-f="obsAgenda">${esc(os.obsAgenda)}</textarea></div>
 
-      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
-        <div class="flex gap-8" style="align-items:center;margin-bottom:8px">
-          <strong style="font-size:.85rem">Confirmação com o cliente</strong>
+      <div class="conf-block">
+        <div class="conf-head">
+          <strong>Confirmação com o cliente</strong>
           <span class="conf-badge ${confClass}">${os.confirmacao || 'Não confirmado'}</span>
+        </div>
+        <div class="conf-ref">
+          👤 <strong>${esc(os.cliente || 'Cliente não informado')}</strong>
+          ${(() => {
+            const dig = String(os.whatsapp || '').replace(/\D/g, '');
+            if (dig.length >= 10) {
+              const sem55 = dig.startsWith('55') ? dig : '55' + dig;
+              return `· <a class="inline-link" target="_blank" href="https://wa.me/${esc(sem55)}">📱 ${esc(maskTel(os.whatsapp))}</a>`;
+            }
+            return `· <span class="conf-falta">⚠ sem WhatsApp — preencha no bloco 1 · PCP</span>`;
+          })()}
         </div>
         <div class="field-row3">
           <div class="field"><label>Situação</label><select data-f="confirmacao">${confOpts}</select></div>
@@ -993,10 +1089,13 @@ function blocoAgenda(os, ro, done) {
           <div class="field"><label>Confirmado por</label><select data-f="confPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.confPor)}</select></div>
           <div class="field"><label>Obs</label><input data-f="confObs" value="${esc(os.confObs)}"></div>
         </div>
-        <div class="field-row">
-          <div class="field"><label>Acompanhante da Empresa</label><input data-f="confAcompanha" value="${esc(os.confAcompanha)}"></div>
-          <div class="field"><label>Contato do acompanhante</label><input type="tel" inputmode="tel" data-f="confAcompanhaContato" data-mask="tel" value="${esc(maskTel(os.confAcompanhaContato))}" placeholder="(00) 00000-0000"></div>
-        </div>
+        <details class="conf-acomp"${(os.confAcompanha || os.confAcompanhaContato) ? ' open' : ''}>
+          <summary>+ Acompanhante da empresa (opcional)</summary>
+          <div class="field-row">
+            <div class="field"><label>Nome</label><input data-f="confAcompanha" value="${esc(os.confAcompanha)}"></div>
+            <div class="field"><label>Contato</label><input type="tel" inputmode="tel" data-f="confAcompanhaContato" data-mask="tel" value="${esc(maskTel(os.confAcompanhaContato))}" placeholder="(00) 00000-0000"></div>
+          </div>
+        </details>
         <button class="btn-success btn-sm edit-only mt-8" id="btn-confirmei">✓ Confirmei agora</button>
       </div>
     </div>
@@ -1524,13 +1623,19 @@ function aplicarFinalizacao(os) {
    ══════════════════════════════════════════════════════════════════════════ */
 function osCardHTML(os) {
   const st = calcStatus(os);
-  const chk = checklist(os);
-  const chkStr = chk.map(c => (c.ok ? '✓' : '⬜')).join(' ');
   const itens = os.itens || [];
   const prontos = itens.filter(i => i.pronto).length;
   const pct = fichaPercent(os);
   const resp = os.atualizadoPor || os.responsavelPCP || os.criadoPor || '—';
   const interno = isInterno(os);
+  const pp = proximoPasso(os); // próximo passo do funil (null se finalizada)
+  // CTA dinâmico: quando já está pronto pra finalizar, age direto pelo card;
+  // nas demais etapas, abre a O.S no bloco certo (clique no card já faz isso).
+  const ctaBtn = pp
+    ? (pp.acao === 'finalizar' || pp.acao === 'exec'
+        ? `<button class="btn-success btn-sm edit-only card-finalizar" data-finalizar-os="${esc(os.id)}" title="Finalizar serviço">${esc(pp.cta)}</button>`
+        : `<button class="btn-primary btn-sm edit-only card-cta" data-cta-os="${esc(os.id)}" title="${esc(pp.label)}">${esc(pp.cta)}</button>`)
+    : `<span class="card-fin-tag" title="Serviço finalizado">✓ Finalizado</span>`;
   return `
     <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
       <div class="card-header">
@@ -1544,19 +1649,18 @@ function osCardHTML(os) {
         <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏭 Interno' : '🚚 Externo'}</span>
         ${os.finalizadaEm ? '' : `<button class="btn-xs btn-ghost edit-only card-toggle-tipo" data-toggle-tipo="${esc(os.id)}" title="Alternar entre Interno e Externo">⇄ ${interno ? 'Tornar Externo' : 'Tornar Interno'}</button>`}
       </div>
+      ${stepperHTML(os, true)}
       ${cardTempoHTML(os)}
       ${(os.equipe||[]).length ? `<div class="card-equipe">👷 ${esc(os.equipe.join(', '))}</div>` : ''}
       <div class="card-pct" title="${pct}% da ficha preenchida">
         <div class="card-pct-bar"><div class="card-pct-fill" style="width:${pct}%"></div></div>
         <span class="card-pct-num">${pct}%</span>
       </div>
-      <div class="card-resp">✍ ${esc(resp)}</div>
-      <div class="card-checklist">${chkStr}${itens.length?` · ${prontos}/${itens.length} itens`:''}</div>
+      ${pp ? `<div class="prox-passo"><span class="prox-passo-tag">Próximo</span> ${esc(pp.label)}</div>` : ''}
+      <div class="card-resp">✍ ${esc(resp)}${itens.length ? ` · ${prontos}/${itens.length} itens` : ''}</div>
       <div class="card-acoes">
         <button class="btn-ghost btn-sm card-pop" data-pop-os="${esc(os.id)}" title="Enviar POP para a equipe">📚 Enviar POP</button>
-        ${os.finalizadaEm
-          ? `<span class="card-fin-tag" title="Serviço finalizado">✓ Finalizado</span>`
-          : `<button class="btn-success btn-sm edit-only card-finalizar" data-finalizar-os="${esc(os.id)}" title="Finalizar serviço">🏁 Finalizar Serviço</button>`}
+        ${ctaBtn}
       </div>
     </div>`;
 }
@@ -1626,6 +1730,14 @@ function bindCardClicks(container) {
       finalizarServicoDoCard(b.dataset.finalizarOs);
     };
   });
+  // CTA dinâmico (próximo passo): abre a O.S no bloco relevante da etapa.
+  $$('[data-cta-os]', container).forEach(b => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const os = STORE.getOS(b.dataset.ctaOs);
+      if (os) openModal(os);
+    };
+  });
   // Alternar tipo Interno/Externo direto no card (triagem rápida).
   $$('[data-toggle-tipo]', container).forEach(b => {
     b.onclick = (e) => {
@@ -1636,6 +1748,7 @@ function bindCardClicks(container) {
       os.tipo = novo;
       os.atualizadoEm = nowISO();
       os.atualizadoPor = STATE.user.nome;
+      registrarEtapa(os);
       STORE.saveOS(os);
       toast(`Pedido marcado como ${novo === 'interno' ? 'Interno 🏭' : 'Externo 🚚'}`, 'success');
       renderActiveTab();
@@ -1657,6 +1770,7 @@ function finalizarServicoDoCard(osId) {
   aplicarFinalizacao(os);
   os.atualizadoEm = nowISO();
   os.atualizadoPor = STATE.user.nome;
+  registrarEtapa(os);
   STORE.saveOS(os);
   toast('Serviço finalizado 🏁', 'success');
   renderActiveTab();

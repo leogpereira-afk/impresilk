@@ -27,10 +27,14 @@ function fmtInstalacao(inst) {
 
 function calcStatus(os) {
   if (os.finalizadaEm) return 'finalizada';
-  if (os.horaSaida) return 'em_andamento';
-  if (os.confirmacao === 'Confirmado') return 'confirmada';
-  if (os.instalacao && os.instalacao.data && os.instalacao.periodo && (os.equipe||[]).length) return 'agendada';
-  if (os.liberadoPCP) return 'apto';
+  const inst = os.instalacao || {};
+  const agendada   = !!(inst.data && inst.periodo && (os.equipe || []).length);
+  const confirmada = os.confirmacao === 'Confirmado';
+  // Funil coerente (igual ao app de gestão): confirmar/sair exige agenda.
+  if (os.horaSaida && confirmada && agendada) return 'em_andamento';
+  if (confirmada && agendada)                 return 'confirmada';
+  if (agendada)                               return 'agendada';
+  if (os.liberadoPCP)                         return 'apto';
   return 'aguardando_producao';
 }
 const STATUS_LABEL = {

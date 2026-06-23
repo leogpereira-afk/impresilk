@@ -1365,3 +1365,69 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
   .proxima-acoes .btn-primary { flex: 1 1 100%; }
   .proxima-acoes .btn-ghost   { flex: 1 1 100%; justify-content: center; }
 }
+
+/* ── Régua de etapas (stepper) ───────────────────────────────────────────── */
+.stepper {
+  display: flex; align-items: center; gap: 2px;
+  margin: 8px 0; flex-wrap: nowrap; overflow-x: auto;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.stepper::-webkit-scrollbar { display: none; }
+.step { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.step-dot {
+  width: 22px; height: 22px; flex: 0 0 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; font-size: .72rem; line-height: 1;
+  background: #eef2f7; color: var(--muted);
+  border: 1.5px solid transparent;
+}
+.step-lbl { font-size: .72rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.step.done .step-dot { background: var(--green); color: #fff; }
+.step.done .step-lbl { color: var(--green); }
+.step.cur  .step-dot { background: var(--blue); color: #fff; border-color: var(--blue-d); box-shadow: 0 0 0 3px rgba(24,119,242,.18); }
+.step.cur  .step-lbl { color: var(--blue-d); font-weight: 800; }
+.step.todo .step-dot { opacity: .6; }
+.step-sep { flex: 1 1 8px; min-width: 8px; height: 2px; background: var(--border); border-radius: 2px; }
+.step.done + .step-sep { background: var(--green); }
+/* Versão compacta no card: só bolinhas, sem rótulos */
+.stepper-compact { margin: 6px 0; gap: 0; }
+.stepper-compact .step-dot { width: 18px; height: 18px; flex-basis: 18px; font-size: .62rem; }
+.stepper-compact .step-sep { min-width: 6px; }
+
+/* ── Próximo passo (card + modal) ────────────────────────────────────────── */
+.prox-passo {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: .8rem; color: var(--text); margin: 4px 0;
+}
+.prox-passo-tag {
+  font-size: .64rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+  background: #fef3c7; color: var(--amber); padding: 2px 7px; border-radius: 999px;
+}
+.prox-passo-modal {
+  margin: 8px 16px 0; padding: 8px 12px; background: #fffbeb;
+  border: 1px solid #fde68a; border-radius: var(--radius-s); font-size: .85rem;
+}
+.modal-tempos {
+  margin: 6px 16px 0; font-size: .74rem; color: var(--muted); font-weight: 600;
+}
+
+/* ── Bloco de confirmação compacto ───────────────────────────────────────── */
+.conf-block { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 4px; }
+.conf-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.conf-head strong { font-size: .85rem; }
+.conf-ref {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius-s);
+  padding: 7px 10px; font-size: .82rem; margin-bottom: 8px;
+}
+.conf-falta { color: var(--red); font-weight: 600; font-size: .76rem; }
+.conf-acomp { margin: 4px 0; }
+.conf-acomp > summary {
+  cursor: pointer; font-size: .78rem; color: var(--muted); font-weight: 600;
+  padding: 4px 0; list-style: none;
+}
+.conf-acomp > summary::-webkit-details-marker { display: none; }
+.conf-acomp[open] > summary { color: var(--blue-d); }
+
+/* Asterisco de campo obrigatório */
+.req { color: var(--red); font-weight: 800; }
