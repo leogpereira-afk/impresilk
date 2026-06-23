@@ -384,6 +384,27 @@ function renderModal() {
   const fotos = os.fotosCheckinIds || [];
   const co = os.checkout || {};
   const causas = STORE.getCFG().causas_retrabalho || [];
+  const ro = !!os.finalizadaEm; // O.S finalizada = somente leitura no espelho
+
+  // Informações de preparação (PCP/agenda) que o instalador só VÊ, não edita.
+  const infoRows = [
+    ['Serviço',      os.servico],
+    ['Acesso',       os.acesso],
+    ['Fixação',      os.fixacao],
+    ['Ferramentas',  (os.ferramentas || []).join(', ')],
+    ['Suprimentos',  (os.suprimentos || []).join(', ')],
+    ['Contato',      os.contato],
+    ['Obs PCP',      os.obsPCP],
+    ['Obs agenda',   os.obsAgenda]
+  ].filter(([, v]) => v && String(v).trim());
+  const infoEstatica = (infoRows.length || os.layoutFotoId) ? `
+    <details class="card-fs" data-bloco="info">
+      <summary>📋 Informações da O.S <span class="item-progress" style="margin-left:auto;font-weight:600">somente leitura</span></summary>
+      <div class="fs-body eq-info">
+        ${infoRows.map(([k, v]) => `<div class="eq-info-row"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}
+        ${os.layoutFotoId ? `<div class="eq-info-foto"><span>Layout</span><img data-img="${esc(os.layoutFotoId)}" alt="layout"></div>` : ''}
+      </div>
+    </details>` : '';
 
   const itensCards = itens.map((it, i) => {
     const st = it.statusInst || '';
@@ -395,11 +416,11 @@ function renderModal() {
         <label>O que faltou / detalhe</label>
         <input data-iobs="${i}" value="${esc(it.obsProb)}" placeholder="ex.: medida errada, faltou peça…">
         <div class="item-foto">
-          ${it.fotoProbId ? `<div class="foto-thumb-wrap"><img class="foto-thumb" data-img="${esc(it.fotoProbId)}"><button class="foto-rm" data-irm="${i}">×</button></div>` : ''}
-          <label class="foto-box">
+          ${it.fotoProbId ? `<div class="foto-thumb-wrap"><img class="foto-thumb" data-img="${esc(it.fotoProbId)}">${ro?'':`<button class="foto-rm" data-irm="${i}">×</button>`}</div>` : ''}
+          ${ro ? '' : `<label class="foto-box">
             <span class="foto-hint">📷 Foto do problema</span>
             <input type="file" accept="image/*" capture="environment" data-ifoto="${i}">
-          </label>
+          </label>`}
         </div>
       </div>` : '';
     return `
@@ -409,9 +430,9 @@ function renderModal() {
           <div class="item-card-sub">${esc(it.descricao||'')}${it.medidas?` · ${esc(it.medidas)}`:''}</div>
         </div>
         <div class="seg">
-          <button data-iset="${i}|"       class="${st===''?'active':''}">Pendente</button>
-          <button data-iset="${i}|ok"     class="seg-ok ${st==='ok'?'active':''}">✅ Instalado</button>
-          <button data-iset="${i}|retrab" class="seg-retrab ${st==='retrab'?'active':''}">🔴 Retrabalho</button>
+          <button data-iset="${i}|"       ${ro?'disabled':''} class="${st===''?'active':''}">Pendente</button>
+          <button data-iset="${i}|ok"     ${ro?'disabled':''} class="seg-ok ${st==='ok'?'active':''}">✅ Instalado</button>
+          <button data-iset="${i}|retrab" ${ro?'disabled':''} class="seg-retrab ${st==='retrab'?'active':''}">🔴 Retrabalho</button>
         </div>
         ${retrabBox}
       </div>`;
@@ -427,6 +448,10 @@ function renderModal() {
       <button class="modal-close" id="m-close">×</button>
     </div>
 
+    ${ro ? `<div class="finalizada-lock lock-allow">
+      <span>🔒 O.S finalizada${os.finalizadoPor ? ' por <strong>' + esc(os.finalizadoPor) + '</strong>' : ''}${os.finalizadaEm ? ' · ' + new Date(os.finalizadaEm).toLocaleString('pt-BR') : ''} — somente leitura.</span>
+    </div>` : ''}
+
     <div style="padding:12px 16px;background:#eff6ff;border-bottom:1px solid var(--border)">
       <div class="list-date" style="font-size:.95rem">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
       <div class="text-sm" style="margin-top:4px">📍 ${esc(os.endereco||'')}</div>
@@ -434,6 +459,8 @@ function renderModal() {
       ${os.whatsapp ? `<a class="inline-link" target="_blank" href="https://wa.me/55${esc(String(os.whatsapp).replace(/\D/g,''))}">💬 WhatsApp cliente</a>` : ''}
       ${os.endereco ? ` · <a class="inline-link" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(os.endereco)}">🗺 Mapa</a>` : ''}
     </div>
+
+    ${infoEstatica}
 
     <details class="card-fs" open>
       <summary>Itens <span class="item-progress" style="margin-left:auto">✅ ${instalados}/${itens.length}${retrabN?` · 🔴 ${retrabN}`:''}</span></summary>
@@ -449,7 +476,7 @@ function renderModal() {
         ${!confirmado ? `<div class="trava-msg">🔒 Aguarde a confirmação do cliente (POP EXI‑002) antes de sair.</div>` : ''}
         ${os.carroLiberado
           ? `<div class="liberar-status">🚗 Carro liberado · ${esc(os.carroLiberadoPor||'')}</div>`
-          : `<button class="btn-primary btn-sm" id="m-carro" ${!confirmado?'disabled style="opacity:.5"':''}>🚗 Liberar carro / Saída</button>`}
+          : `<button class="btn-primary btn-sm" id="m-carro" ${(!confirmado||ro)?'disabled style="opacity:.5"':''}>🚗 Liberar carro / Saída</button>`}
 
         <div class="field-row">
           <div class="field"><label>Hora saída</label><input type="time" data-f="horaSaida" value="${esc(os.horaSaida)}"></div>
@@ -501,18 +528,29 @@ function renderModal() {
       ${os.finalizadaEm
         ? `<div class="liberar-status" style="background:#dcfce7;color:var(--green)">✓ Finalizada · ${new Date(os.finalizadaEm).toLocaleString('pt-BR')}</div>`
         : `<button class="btn-primary w-100" id="m-finalizar">🏁 Finalizar instalação</button>`}
-      <button class="btn-ghost btn-sm w-100 mt-8" id="m-save">Salvar e fechar</button>
+      <button class="btn-ghost btn-sm w-100 mt-8" id="m-save">${ro ? 'Fechar' : 'Salvar e fechar'}</button>
     </div>
   `;
-  bindModal(os);
+  // Trava visual de edição quando finalizada (mesma classe do app de gestão).
+  $('#modal-os').classList.toggle('os-locked', ro);
+  bindModal(os, ro);
 }
 
-function bindModal(os) {
+function bindModal(os, ro) {
   const root = $('#modal-os');
   $('#m-close').onclick = closeModal;
   $('#m-save').onclick = closeModal;
 
-  $$('[data-f]', root).forEach(el => el.oninput = () => setF(el.dataset.f, el.value));
+  // Carrega imagens (layout/check‑in/problema) — vale também em somente‑leitura.
+  $$('[data-img]', root).forEach(async img => {
+    const b64 = await STORE.pullPhoto(img.dataset.img);
+    if (b64) img.src = b64;
+  });
+
+  // O.S finalizada: somente leitura. Não liga nenhum handler de edição.
+  if (ro) return;
+
+  $$('[data-f]', root).forEach(el => el.oninput = el.onchange = () => setF(el.dataset.f, el.value));
   $$('[data-c]', root).forEach(el => el.onchange = () => setF(el.dataset.c, el.checked));
   // Status por item (Pendente / Instalado / Retrabalho)
   $$('[data-iset]', root).forEach(btn => btn.onclick = () => {
@@ -594,10 +632,6 @@ function bindModal(os) {
     STORE.delFoto(b.dataset.rm);
     _draft.fotosCheckinIds = (_draft.fotosCheckinIds||[]).filter(x => x !== b.dataset.rm);
     save(); reRender();
-  });
-  $$('[data-img]', root).forEach(async img => {
-    const b64 = await STORE.pullPhoto(img.dataset.img);
-    if (b64) img.src = b64;
   });
 }
 

@@ -1431,3 +1431,17 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 
 /* Asterisco de campo obrigatório */
 .req { color: var(--red); font-weight: 800; }
+
+/* ── Espelho: informações da O.S em modo leitura (instalador só vê) ───────── */
+.eq-info { display: flex; flex-direction: column; gap: 6px; }
+.eq-info-row {
+  display: flex; gap: 10px; align-items: baseline;
+  font-size: .85rem; padding: 3px 0; border-bottom: 1px dashed var(--border);
+}
+.eq-info-row span { flex: 0 0 96px; color: var(--muted); font-weight: 600; }
+.eq-info-row strong { flex: 1; font-weight: 600; word-break: break-word; }
+.eq-info-foto { margin-top: 6px; }
+.eq-info-foto span { display: block; color: var(--muted); font-weight: 600; font-size: .8rem; margin-bottom: 4px; }
+.eq-info-foto img { max-width: 100%; border-radius: var(--radius-s); border: 1px solid var(--border); }
+/* Controles desabilitados na O.S finalizada ficam visivelmente inertes */
+#modal-os.os-locked .seg button[disabled] { opacity: .5; }
