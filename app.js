@@ -736,13 +736,15 @@ let _modalDraft = null;   // cópia de trabalho da O.S
 let _modalDirty = false;
 let _modalPrevPct = 0;    // % de preenchimento ao abrir (para celebrar ao chegar a 100%)
 let _modalReturnFocus = null; // elemento focado antes de abrir (restaurado no close)
+let _modalBlocoForcado = null; // bloco a abrir por escolha do usuário (botões de etapa do card)
 
-function openModal(os) {
+function openModal(os, blocoForcado) {
   if (!os) { toast('O.S não encontrada.', 'error'); return; }
   _modalDraft = JSON.parse(JSON.stringify(os));
   _modalDirty = false;
   _modalPrevPct = fichaPercent(_modalDraft);
   STATE.modalOSId = os.id;
+  _modalBlocoForcado = blocoForcado || null;
   // Guarda o elemento que abriu o modal pra restaurar o foco depois.
   _modalReturnFocus = document.activeElement;
   renderModal();
@@ -914,7 +916,13 @@ function renderModal() {
   // Abre por padrão o bloco mais relevante para a etapa atual (quem está na rua
   // quase sempre quer "Execução"; quem está no PCP quer "PCP"). reRenderModalKeepOpen
   // preserva o que o usuário abrir/fechar depois.
-  const blocoAlvo = blocoRelevante(os, st, interno);
+  const blocosDisponiveis = $$('#modal-os .card-fs').map(d => d.dataset.bloco);
+  let blocoAlvo = blocoRelevante(os, st, interno);
+  // Se o usuário clicou num botão de etapa do card, abre direto naquele bloco.
+  if (_modalBlocoForcado && blocosDisponiveis.includes(_modalBlocoForcado)) {
+    blocoAlvo = _modalBlocoForcado;
+  }
+  _modalBlocoForcado = null;
   $$('#modal-os .card-fs').forEach(d => { d.open = (d.dataset.bloco === blocoAlvo); });
 
   bindModalEvents(os, ro);
@@ -1680,6 +1688,14 @@ function osCardHTML(os) {
   const resp = os.atualizadoPor || os.responsavelPCP || os.criadoPor || '—';
   const interno = isInterno(os);
   const pp = proximoPasso(os); // próximo passo do funil (null se finalizada)
+  // Botões de etapa: abrem o modal direto no bloco escolhido. Interno só tem
+  // PCP e Itens; externo tem as quatro etapas do processo.
+  const etapasCard = interno
+    ? [['pcp', '📋 PCP'], ['itens', '📦 Itens']]
+    : [['pcp', '📋 PCP'], ['itens', '📦 Itens'], ['agenda', '📅 Agenda'], ['exec', '🔧 Execução']];
+  const etapasBtns = `<div class="card-etapas edit-only">${etapasCard
+    .map(([b, lbl]) => `<button class="card-etapa-btn" data-etapa-os="${esc(os.id)}" data-etapa-bloco="${b}" title="Abrir em ${esc(lbl)}">${esc(lbl)}</button>`)
+    .join('')}</div>`;
   // CTA dinâmico: quando já está pronto pra finalizar, age direto pelo card;
   // nas demais etapas, abre a O.S no bloco certo (clique no card já faz isso).
   const ctaBtn = pp
@@ -1700,7 +1716,7 @@ function osCardHTML(os) {
         <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏬 Cliente retira' : '🚚 Externo'}</span>
         ${os.finalizadaEm ? '' : `<button class="btn-xs btn-ghost edit-only card-toggle-tipo" data-toggle-tipo="${esc(os.id)}" title="Alternar entre Cliente retira e Externo">⇄ ${interno ? 'Tornar Externo' : 'Tornar Cliente retira'}</button>`}
       </div>
-      ${stepperHTML(os, true)}
+      ${os.finalizadaEm ? stepperHTML(os, true) : ''}
       ${cardTempoHTML(os)}
       ${(os.equipe||[]).length ? `<div class="card-equipe">👷 ${esc(os.equipe.join(', '))}</div>` : ''}
       <div class="card-pct" title="${pct}% da ficha preenchida">
@@ -1709,6 +1725,7 @@ function osCardHTML(os) {
       </div>
       ${pp ? `<div class="prox-passo"><span class="prox-passo-tag">Próximo</span> ${esc(pp.label)}</div>` : ''}
       <div class="card-resp">✍ ${esc(resp)}${itens.length ? ` · ${prontos}/${itens.length} itens` : ''}</div>
+      ${etapasBtns}
       <div class="card-acoes">
         ${ctaBtn}
       </div>
@@ -1778,6 +1795,14 @@ function bindCardClicks(container) {
     b.onclick = (e) => {
       e.stopPropagation();
       finalizarServicoDoCard(b.dataset.finalizarOs);
+    };
+  });
+  // Botões de etapa do card: abrem o modal direto no bloco escolhido.
+  $$('[data-etapa-os]', container).forEach(b => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const os = STORE.getOS(b.dataset.etapaOs);
+      if (os) openModal(os, b.dataset.etapaBloco);
     };
   });
   // CTA dinâmico (próximo passo): abre a O.S no bloco relevante da etapa.
