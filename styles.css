@@ -398,6 +398,32 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .item-ok-toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: .72rem; font-weight: 600; color: var(--muted); }
 .item-del-cell { text-align: right; white-space: nowrap; }
 
+/* Campos estáticos (vêm do pedido) — sinalizam que não são editáveis */
+.items-table input[readonly], .fs-body input[readonly] {
+  background: #f8fafc; color: var(--text); cursor: default; border-color: #eef2f7;
+}
+
+/* Verificação do item: ✓ verificado / ✗ reprovado */
+.verif-cell { width: 84px; text-align: center; white-space: nowrap; }
+.verif-btn {
+  width: 30px; height: 30px; border-radius: 7px; cursor: pointer;
+  border: 1.5px solid var(--border); background: #fff; font-size: .95rem;
+  font-weight: 700; color: var(--muted); margin: 0 2px; line-height: 1;
+}
+.verif-ok.on { border-color: var(--green); background: #ecfdf5; color: var(--green); }
+.verif-no.on { border-color: var(--red);   background: #fef2f2; color: var(--red); }
+.items-table tr.item-reprov { background: #fff7f7; }
+.motivo-row input { border-color: var(--red); }
+
+/* Marcação de escolha única (Acesso / Fixação) */
+.mark-group { display: flex; flex-wrap: wrap; gap: 6px; }
+.mark-opt {
+  padding: 7px 12px; border-radius: 999px; cursor: pointer;
+  border: 1.5px solid var(--border); background: #fff;
+  font-size: .82rem; font-weight: 600; color: var(--text);
+}
+.mark-opt.on { border-color: var(--blue); background: #eff6ff; color: var(--blue); }
+
 /* ── Itens viram cards empilhados no celular (tabela é ruim de tocar) ─────── */
 @media (max-width: 600px) {
   .items-cards thead { display: none; }
@@ -415,6 +441,9 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   .items-cards td input { flex: 1; width: auto; font-size: .9rem; padding: 7px 8px; }
   .items-cards .pronto-check { width: 100%; }
   .items-cards .pronto-check::before { content: ''; flex: 0 0 84px; }
+  .items-cards .verif-cell { width: 100%; justify-content: flex-start; }
+  .items-cards .verif-cell::before { content: 'Verificação'; flex: 0 0 84px; }
+  .items-cards tr.item-reprov { background: #fff7f7; border-color: #fecaca; }
   .items-cards .item-del-cell::before { content: ''; flex: 0 0 84px; }
   .items-cards .item-del-cell { justify-content: flex-start; }
 }

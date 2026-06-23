@@ -924,6 +924,9 @@ function renderModal() {
 function blocoPCP(os, ro, done) {
   const lib = os.liberadoPCP;
   const cfg = STORE.getCFG();
+  // Dados do pedido (vindos do Mubisys) ficam estáticos: Nº O.S, Serviço,
+  // Cliente, Vendedor e Data de entrada. O.S manual continua editável.
+  const lockPed = os.origemMubisys ? 'readonly' : '';
   const respOpts = (cfg.responsaveis || []).map(r => `<option ${os.responsavelPCP === r ? 'selected' : ''}>${esc(r)}</option>`).join('');
   // se o valor atual não está na lista (ex.: importado), mantém como opção
   const respExtra = os.responsavelPCP && !(cfg.responsaveis || []).includes(os.responsavelPCP)
@@ -933,12 +936,12 @@ function blocoPCP(os, ro, done) {
     <summary>1 · PCP &amp; Cliente ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
     <div class="fs-body">
       <div class="field-row">
-        <div class="field"><label>Nº O.S</label><input data-f="numero" value="${esc(os.numero)}"></div>
-        <div class="field"><label>Serviço (Ref.)</label><input data-f="servico" list="dl-servicos" value="${esc(os.servico)}" placeholder="tipo de instalação">
+        <div class="field"><label>Nº O.S</label><input data-f="numero" value="${esc(os.numero)}" ${lockPed}></div>
+        <div class="field"><label>Serviço (Ref.)</label><input data-f="servico" list="dl-servicos" value="${esc(os.servico)}" placeholder="tipo de instalação" ${lockPed}>
           <datalist id="dl-servicos">${tiposServicoHist().map(s=>`<option value="${esc(s)}">`).join('')}</datalist>
         </div>
       </div>
-      <div class="field"><label>Cliente <span class="req">*</span></label><input data-f="cliente" value="${esc(os.cliente)}"></div>
+      <div class="field"><label>Cliente <span class="req">*</span></label><input data-f="cliente" value="${esc(os.cliente)}" ${lockPed}></div>
       <div class="field-row">
         <div class="field"><label>Contato</label><input type="text" data-f="contato" value="${esc(os.contato)}"></div>
         <div class="field"><label>WhatsApp <span class="req">*</span></label><input type="tel" inputmode="tel" data-f="whatsapp" data-mask="tel" value="${esc(maskTel(os.whatsapp))}" placeholder="(00) 00000-0000">
@@ -955,11 +958,11 @@ function blocoPCP(os, ro, done) {
         ${os.endereco ? `<a class="inline-link" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(os.endereco)}">Ver no Mapa ↗</a>` : ''}
       </div>
       <div class="field-row3">
-        <div class="field"><label>Data entrada</label><input type="date" data-f="dataEntrada" value="${esc(os.dataEntrada)}"></div>
+        <div class="field"><label>Data entrada</label><input type="date" data-f="dataEntrada" value="${esc(os.dataEntrada)}" ${lockPed}></div>
         <div class="field"><label>Responsável PCP *</label>
           <select data-f="responsavelPCP"><option value="">— selecionar —</option>${respOpts}${respExtra}</select>
         </div>
-        <div class="field"><label>Vendedor</label><input data-f="vendedor" value="${esc(os.vendedor)}"></div>
+        <div class="field"><label>Vendedor</label><input data-f="vendedor" value="${esc(os.vendedor)}" ${lockPed}></div>
       </div>
       <div class="field"><label>Observação (PCP)</label><textarea data-f="obsPCP">${esc(os.obsPCP)}</textarea></div>
       <div class="field">
@@ -985,26 +988,36 @@ function blocoItens(os, ro, done) {
   const itens = os.itens || [];
   const prontos = itens.filter(i => i.pronto).length;
 
-  const acessoOpts = ACESSO_OPTS.map(o => `<option ${os.acesso === o ? 'selected' : ''}>${o}</option>`).join('');
-  const fixOpts    = FIXACAO_OPTS.map(o => `<option ${os.fixacao === o ? 'selected' : ''}>${o}</option>`).join('');
+  const markGroup = (field, opts) => `<div class="mark-group" data-mark="${field}">${
+    opts.map(o => `<button type="button" class="mark-opt ${os[field] === o ? 'on' : ''}" data-mark-val="${esc(o)}">${esc(o)}</button>`).join('')
+  }</div>`;
 
-  const rows = itens.map((it, i) => `
-    <tr data-item-row="${i}" class="${it.pronto ? 'item-ok' : ''}">
-      <td data-label="Item"><input data-item="${i}.item" value="${esc(it.item)}"></td>
-      <td data-label="Descrição"><input data-item="${i}.descricao" value="${esc(it.descricao)}"></td>
-      <td data-label="Medidas"><input data-item="${i}.medidas" value="${esc(it.medidas)}"></td>
-      <td data-label="Qtde"><input data-item="${i}.qtde" value="${esc(it.qtde)}" inputmode="numeric"></td>
-      <td class="pronto-check" data-label="Pronto?"><label class="item-ok-toggle"><input type="checkbox" data-item-pronto="${i}" ${it.pronto ? 'checked' : ''}> <span>OK</span></label></td>
+  // Itens são estáticos (vêm do pedido/PDF). Só itens adicionados manualmente
+  // (it.manual) ficam editáveis. A verificação usa ✓ (verificado) / ✗ (reprovado).
+  const rows = itens.map((it, i) => {
+    const lock = it.manual ? '' : 'readonly';
+    return `
+    <tr data-item-row="${i}" class="${it.pronto ? 'item-ok' : ''} ${it.reprovado ? 'item-reprov' : ''}">
+      <td data-label="Item"><input data-item="${i}.item" value="${esc(it.item)}" ${lock}></td>
+      <td data-label="Descrição"><input data-item="${i}.descricao" value="${esc(it.descricao)}" ${lock}></td>
+      <td data-label="Medidas"><input data-item="${i}.medidas" value="${esc(it.medidas)}" ${lock}></td>
+      <td data-label="Qtde"><input data-item="${i}.qtde" value="${esc(it.qtde)}" inputmode="numeric" ${lock}></td>
+      <td class="verif-cell" data-label="Verificação">
+        <button type="button" class="verif-btn verif-ok ${it.pronto ? 'on' : ''}" data-item-verif="${i}.ok" title="Verificado">✓</button>
+        <button type="button" class="verif-btn verif-no ${it.reprovado ? 'on' : ''}" data-item-verif="${i}.no" title="Reprovado">✗</button>
+      </td>
       <td class="item-del-cell"><button class="btn-xs btn-danger edit-only" data-item-del="${i}" title="Remover item">× remover</button></td>
-    </tr>`).join('');
+    </tr>
+    ${it.reprovado ? `<tr class="motivo-row"><td colspan="6" data-label="O que deu errado?"><input data-item="${i}.motivoReprovado" value="${esc(it.motivoReprovado || '')}" placeholder="❗ O que deu errado neste item?"></td></tr>` : ''}`;
+  }).join('');
 
   return `
   <details class="card-fs ${done ? 'done' : ''}" data-bloco="itens">
     <summary>2 · Serviço &amp; Itens ${done ? '<span class="sum-check">✓</span>' : ''}<span class="item-progress" style="margin-left:auto">${prontos}/${itens.length} prontos</span></summary>
     <div class="fs-body">
       <div class="field-row">
-        <div class="field"><label>Acesso</label><select data-f="acesso"><option value=""></option>${acessoOpts}</select></div>
-        <div class="field"><label>Fixação</label><select data-f="fixacao"><option value=""></option>${fixOpts}</select></div>
+        <div class="field"><label>Acesso</label>${markGroup('acesso', ACESSO_OPTS)}</div>
+        <div class="field"><label>Fixação</label>${markGroup('fixacao', FIXACAO_OPTS)}</div>
       </div>
       <div class="field">
         <label>Ferramentas</label>
@@ -1378,9 +1391,20 @@ function bindModalEvents(os, ro) {
     };
     el.onblur = () => { if (_modalDirty) saveDraft(); };
   });
-  $$('[data-item-pronto]', root).forEach(el => {
-    el.onchange = () => {
-      _modalDraft.itens[+el.dataset.itemPronto].pronto = el.checked;
+  // Verificação do item: ✓ verificado / ✗ reprovado (com motivo).
+  $$('[data-item-verif]', root).forEach(el => {
+    el.onclick = () => {
+      const [idx, kind] = el.dataset.itemVerif.split('.');
+      const it = _modalDraft.itens[+idx];
+      if (!it) return;
+      if (kind === 'ok') {
+        it.pronto = !it.pronto;
+        if (it.pronto) it.reprovado = false;
+      } else {
+        it.reprovado = !it.reprovado;
+        if (it.reprovado) it.pronto = false;
+        else it.motivoReprovado = '';
+      }
       saveDraft(); reRenderModalKeepOpen();
     };
   });
@@ -1390,9 +1414,20 @@ function bindModalEvents(os, ro) {
       saveDraft(); reRenderModalKeepOpen();
     };
   });
+  // Marcação de escolha única (Acesso / Fixação).
+  $$('[data-mark]', root).forEach(grp => {
+    const field = grp.dataset.mark;
+    $$('[data-mark-val]', grp).forEach(b => {
+      b.onclick = () => {
+        const val = b.dataset.markVal;
+        setField(field, _modalDraft[field] === val ? '' : val);
+        saveDraft(); reRenderModalKeepOpen();
+      };
+    });
+  });
   const addItem = $('#btn-add-item');
   if (addItem) addItem.onclick = () => {
-    _modalDraft.itens.push({ item: String(_modalDraft.itens.length + 1), descricao: '', medidas: '', qtde: '1', valorUnit: '0', subtotal: 0, pronto: false });
+    _modalDraft.itens.push({ item: String(_modalDraft.itens.length + 1), descricao: '', medidas: '', qtde: '1', valorUnit: '0', subtotal: 0, pronto: false, reprovado: false, motivoReprovado: '', manual: true });
     saveDraft(); reRenderModalKeepOpen();
   };
   const impItens = $('#btn-import-itens');
@@ -3231,7 +3266,7 @@ function kv(label, val) {
 
 async function exportarFichaPDF(os) {
   const itens = (os.itens || []).map(i =>
-    `<tr><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.item)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.descricao)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.medidas)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.qtde)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${i.pronto?'✓':''}</td></tr>`
+    `<tr><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.item)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.descricao)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.medidas)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.qtde)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${i.pronto?'✓':(i.reprovado?'✗ '+esc(i.motivoReprovado||'reprovado'):'')}</td></tr>`
   ).join('');
 
   // Carrega as imagens anexadas (layout, embarque e check‑in) como base64
