@@ -1710,7 +1710,6 @@ function osCardHTML(os) {
       ${pp ? `<div class="prox-passo"><span class="prox-passo-tag">Próximo</span> ${esc(pp.label)}</div>` : ''}
       <div class="card-resp">✍ ${esc(resp)}${itens.length ? ` · ${prontos}/${itens.length} itens` : ''}</div>
       <div class="card-acoes">
-        <button class="btn-ghost btn-sm card-pop" data-pop-os="${esc(os.id)}" title="Enviar POP para a equipe">📚 Enviar POP</button>
         ${ctaBtn}
       </div>
     </div>`;
