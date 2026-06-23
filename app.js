@@ -1693,8 +1693,10 @@ function osCardHTML(os) {
   const etapasCard = interno
     ? [['pcp', '📋 PCP'], ['itens', '📦 Itens']]
     : [['pcp', '📋 PCP'], ['itens', '📦 Itens'], ['agenda', '📅 Agenda'], ['exec', '🔧 Execução']];
+  // Card externo finalizado e 100% preenchido: botões de etapa ficam verdes.
+  const etapaDone = !interno && os.finalizadaEm && pct >= 100;
   const etapasBtns = `<div class="card-etapas edit-only">${etapasCard
-    .map(([b, lbl]) => `<button class="card-etapa-btn" data-etapa-os="${esc(os.id)}" data-etapa-bloco="${b}" title="Abrir em ${esc(lbl)}">${esc(lbl)}</button>`)
+    .map(([b, lbl]) => `<button class="card-etapa-btn ${etapaDone ? 'done' : ''}" data-etapa-os="${esc(os.id)}" data-etapa-bloco="${b}" title="Abrir em ${esc(lbl)}">${esc(lbl)}</button>`)
     .join('')}</div>`;
   // CTA dinâmico: quando já está pronto pra finalizar, age direto pelo card;
   // nas demais etapas, abre a O.S no bloco certo (clique no card já faz isso).

@@ -1254,6 +1254,8 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .card-etapas { margin-top: 8px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .card-etapa-btn { font-size: .78rem; font-weight: 600; padding: 7px 8px; border: 1px solid var(--border); border-radius: var(--radius-s); background: #f8fafc; color: var(--text); cursor: pointer; transition: background .12s, border-color .12s; }
 .card-etapa-btn:hover { background: #eff6ff; border-color: #bfdbfe; }
+.card-etapa-btn.done { background: var(--green); border-color: var(--green); color: #fff; }
+.card-etapa-btn.done:hover { background: var(--green); border-color: var(--green); }
 .card-acoes { margin-top: 8px; display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .card-pop { font-size: .78rem; }
 .card-finalizar { font-size: .78rem; }
