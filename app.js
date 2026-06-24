@@ -426,12 +426,13 @@ function peopleOptions(cfg, selected) {
    ══════════════════════════════════════════════════════════════════════════ */
 const STATE = {
   user: null,           // {nome, papel}
-  activeTab: 'painel',
+  activeTab: 'pcp',     // login abre direto no PCP
   calRef: new Date(),   // mês de referência do calendário
   calView: 'cal',       // 'cal' | 'lista'
   modalOSId: null,
   painelModo: 'dia',
-  filtroBusca: ''
+  filtroBusca: '',
+  pcpVista: ''          // '' = ativos | 'arquivados' | 'retrabalho'
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1874,19 +1875,40 @@ const PCP_SORTS = {
   empresa: { label: 'Tempo na empresa',        fn: (a, b) => (a.dataEntrada || '9999-12-31').localeCompare(b.dataEntrada || '9999-12-31') }
 };
 
+// Dias desde a finalização (a partir da data, ignorando a hora).
+function diasDesdeFinal(os) {
+  if (!os || !os.finalizadaEm) return null;
+  return diasDesde(String(os.finalizadaEm).slice(0, 10));
+}
+
+// Lista-base do PCP conforme a vista escolhida:
+//  - ''           → ativos: não finalizadas (não mostra finalizadas em "Todos");
+//  - 'retrabalho' → O.S marcadas como retrabalho ainda em aberto;
+//  - 'arquivados' → finalizadas há 1 semana ou mais.
+function pcpBaseList() {
+  const all = STORE.getAllOS().slice();
+  if (STATE.pcpVista === 'retrabalho') return all.filter(o => o.retrabalho && !o.finalizadaEm);
+  if (STATE.pcpVista === 'arquivados') return all.filter(o => { const d = diasDesdeFinal(o); return d != null && d >= 7; });
+  return all.filter(o => !o.finalizadaEm);
+}
+
 // Recalcula a lista filtrada do PCP e atualiza SÓ a grade de cards.
 // Usada na busca em tempo real para não reconstruir o painel (o que destruía
 // o próprio <input> em digitação e fazia o filtro só "pegar" depois do clique).
 function pcpRenderCards() {
   const grid = $('#panel-pcp .cards-grid');
   if (!grid) return;
-  let list = STORE.getAllOS().slice();
+  let list = pcpBaseList();
   if (STATE.pcpTipo !== 'todos') list = list.filter(o => osTipo(o) === STATE.pcpTipo);
-  if (STATE.pcpStatus !== 'todos') list = list.filter(o => calcStatus(o) === STATE.pcpStatus);
+  if (STATE.pcpVista === '' && STATE.pcpStatus !== 'todos') list = list.filter(o => calcStatus(o) === STATE.pcpStatus);
   list = applyFilter(list, STATE.filtroBusca);
   list = list.sort((PCP_SORTS[STATE.pcpSort] || PCP_SORTS.entrega).fn);
-  grid.innerHTML = list.map(osCardHTML).join('') ||
-    emptyState('📋', 'Nenhuma O.S neste filtro', 'Troque o filtro, limpe a busca ou crie uma nova O.S.');
+  const vazio = STATE.pcpVista === 'arquivados'
+    ? emptyState('🗄', 'Nenhuma O.S arquivada', 'Aparecem aqui as finalizadas há 1 semana ou mais.')
+    : STATE.pcpVista === 'retrabalho'
+      ? emptyState('🔧', 'Nenhum retrabalho em aberto', 'Tudo certo: nada voltou para correção.')
+      : emptyState('📋', 'Nenhuma O.S neste filtro', 'Troque o filtro, limpe a busca ou crie uma nova O.S.');
+  grid.innerHTML = list.map(osCardHTML).join('') || vazio;
   bindCardClicks(grid);
 }
 
@@ -1895,24 +1917,44 @@ function renderPCP() {
   STATE.pcpStatus = STATE.pcpStatus || 'todos';
   STATE.pcpSort   = STATE.pcpSort   || 'entrega';
   STATE.pcpTipo   = STATE.pcpTipo   || 'todos';
+  STATE.pcpVista  = STATE.pcpVista  || '';
 
   const all = STORE.getAllOS().slice();
 
-  // Contagem por status (para os chips), antes de qualquer filtro.
-  const cont = { todos: all.length };
+  // Contagem das vistas (botões após a busca).
+  const contVista = {
+    '':           all.filter(o => !o.finalizadaEm).length,
+    retrabalho:   all.filter(o => o.retrabalho && !o.finalizadaEm).length,
+    arquivados:   all.filter(o => { const d = diasDesdeFinal(o); return d != null && d >= 7; }).length
+  };
+
+  // Base da vista atual: chips de status/tipo e contagens só contam a vista ativa.
+  const base = pcpBaseList();
+
+  // Contagem por status (para os chips) — finalizada não entra na vista ativa.
+  const cont = { todos: base.length };
   Object.keys(STATUS_LABEL).forEach(k => cont[k] = 0);
-  all.forEach(o => { const s = calcStatus(o); cont[s] = (cont[s] || 0) + 1; });
+  base.forEach(o => { const s = calcStatus(o); cont[s] = (cont[s] || 0) + 1; });
 
   // Contagem por tipo (para os chips de triagem).
-  const contTipo = { todos: all.length, interno: 0, externo: 0 };
-  all.forEach(o => { contTipo[osTipo(o)]++; });
+  const contTipo = { todos: base.length, interno: 0, externo: 0 };
+  base.forEach(o => { contTipo[osTipo(o)]++; });
 
-  const chips = [['todos', 'Todos'], ...Object.entries(STATUS_LABEL)]
+  // Chips de status só na vista de ativos; sem "Finalizada".
+  const statusEntries = Object.entries(STATUS_LABEL).filter(([k]) => k !== 'finalizada');
+  const chips = [['todos', 'Todos'], ...statusEntries]
     .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" data-pcp-status="${k}">${esc(lbl)} <span class="pcp-chip-n">${cont[k] || 0}</span></button>`).join('');
 
   const tipoChips = [
     ['todos', 'Todos'], ['externo', '🚚 Externo'], ['interno', '🏬 Cliente retira']
   ].map(([k, lbl]) => `<button class="pcp-chip pcp-chip-tipo tipo-${k} ${STATE.pcpTipo === k ? 'active' : ''}" data-pcp-tipo="${k}">${esc(lbl)} <span class="pcp-chip-n">${contTipo[k] || 0}</span></button>`).join('');
+
+  // Botões de vista, logo após a busca.
+  const vistaBtns = [
+    ['',           '📋 Ativos'],
+    ['retrabalho', '🔧 Retrabalho'],
+    ['arquivados', '🗄 Arquivados']
+  ].map(([k, lbl]) => `<button class="pcp-chip pcp-vista ${STATE.pcpVista === k ? 'active' : ''}" data-pcp-vista="${k}">${esc(lbl)} <span class="pcp-chip-n">${contVista[k] || 0}</span></button>`).join('');
 
   const sorts = Object.entries(PCP_SORTS)
     .map(([k, v]) => `<option value="${k}" ${STATE.pcpSort === k ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
@@ -1923,8 +1965,9 @@ function renderPCP() {
       <label class="pcp-sort-wrap">Ordenar: <select id="pcp-sort">${sorts}</select></label>
       ${podeEditar() ? '<button class="btn-primary btn-sm" id="pcp-nova-ext">+ O.S Externa</button><button class="btn-primary btn-sm" id="pcp-nova-int">+ O.S Interna</button>' : ''}
     </div>
+    <div class="pcp-chips pcp-chips-vista">${vistaBtns}</div>
     <div class="pcp-chips pcp-chips-tipo">${tipoChips}</div>
-    <div class="pcp-chips">${chips}</div>
+    ${STATE.pcpVista === '' ? `<div class="pcp-chips">${chips}</div>` : ''}
     <div class="cards-grid"></div>`;
 
   pcpRenderCards(); // preenche a grade conforme os filtros atuais
@@ -1933,6 +1976,9 @@ function renderPCP() {
   // Busca em tempo real: atualiza só a grade, sem reconstruir o input.
   busca.oninput = () => { STATE.filtroBusca = busca.value; pcpRenderCards(); };
   $('#pcp-sort').onchange = (e) => { STATE.pcpSort = e.target.value; pcpRenderCards(); };
+  $$('[data-pcp-vista]', el).forEach(b => {
+    b.onclick = () => { STATE.pcpVista = b.dataset.pcpVista; STATE.pcpStatus = 'todos'; renderPCP(); };
+  });
   $$('[data-pcp-status]', el).forEach(b => {
     b.onclick = () => { STATE.pcpStatus = b.dataset.pcpStatus; renderPCP(); };
   });

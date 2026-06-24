@@ -1083,6 +1083,9 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .pcp-chips-tipo { margin-bottom: 8px; }
 .pcp-chip-tipo.tipo-externo.active { background: #3b82f6; border-color: #3b82f6; }
 .pcp-chip-tipo.tipo-interno.active { background: #8b5cf6; border-color: #8b5cf6; }
+.pcp-chips-vista { margin-bottom: 8px; }
+.pcp-vista { font-weight: 600; }
+.pcp-vista.active { background: var(--ink, #0f172a); border-color: var(--ink, #0f172a); }
 /* seletor de tipo no modal */
 .tipo-selector {
   display: flex; gap: 6px; padding: 12px 16px 0; }
