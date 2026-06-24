@@ -1882,14 +1882,15 @@ function diasDesdeFinal(os) {
 }
 
 // Lista-base do PCP conforme a vista escolhida:
-//  - ''           → ativos: não finalizadas (não mostra finalizadas em "Todos");
+//  - ''           → ativos: todas as O.S (o filtro de status decide o recorte;
+//                    "Todos" esconde finalizadas, mas o chip Finalizada mostra);
 //  - 'retrabalho' → O.S marcadas como retrabalho ainda em aberto;
 //  - 'arquivados' → finalizadas há 1 semana ou mais.
 function pcpBaseList() {
   const all = STORE.getAllOS().slice();
   if (STATE.pcpVista === 'retrabalho') return all.filter(o => o.retrabalho && !o.finalizadaEm);
   if (STATE.pcpVista === 'arquivados') return all.filter(o => { const d = diasDesdeFinal(o); return d != null && d >= 7; });
-  return all.filter(o => !o.finalizadaEm);
+  return all;
 }
 
 // Recalcula a lista filtrada do PCP e atualiza SÓ a grade de cards.
@@ -1900,7 +1901,11 @@ function pcpRenderCards() {
   if (!grid) return;
   let list = pcpBaseList();
   if (STATE.pcpTipo !== 'todos') list = list.filter(o => osTipo(o) === STATE.pcpTipo);
-  if (STATE.pcpVista === '' && STATE.pcpStatus !== 'todos') list = list.filter(o => calcStatus(o) === STATE.pcpStatus);
+  if (STATE.pcpVista === '') {
+    // "Todos" esconde finalizadas; os demais chips filtram pelo status exato.
+    if (STATE.pcpStatus === 'todos') list = list.filter(o => calcStatus(o) !== 'finalizada');
+    else list = list.filter(o => calcStatus(o) === STATE.pcpStatus);
+  }
   list = applyFilter(list, STATE.filtroBusca);
   list = list.sort((PCP_SORTS[STATE.pcpSort] || PCP_SORTS.entrega).fn);
   const vazio = STATE.pcpVista === 'arquivados'
@@ -1931,8 +1936,8 @@ function renderPCP() {
   // Base da vista atual: chips de status/tipo e contagens só contam a vista ativa.
   const base = pcpBaseList();
 
-  // Contagem por status (para os chips) — finalizada não entra na vista ativa.
-  const cont = { todos: base.length };
+  // Contagem por status (para os chips). "Todos" não conta finalizadas.
+  const cont = { todos: base.filter(o => calcStatus(o) !== 'finalizada').length };
   Object.keys(STATUS_LABEL).forEach(k => cont[k] = 0);
   base.forEach(o => { const s = calcStatus(o); cont[s] = (cont[s] || 0) + 1; });
 
@@ -1940,9 +1945,8 @@ function renderPCP() {
   const contTipo = { todos: base.length, interno: 0, externo: 0 };
   base.forEach(o => { contTipo[osTipo(o)]++; });
 
-  // Chips de status só na vista de ativos; sem "Finalizada".
-  const statusEntries = Object.entries(STATUS_LABEL).filter(([k]) => k !== 'finalizada');
-  const chips = [['todos', 'Todos'], ...statusEntries]
+  // Chips de status (Finalizada continua, mas só aparece ao clicar nela).
+  const chips = [['todos', 'Todos'], ...Object.entries(STATUS_LABEL)]
     .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" data-pcp-status="${k}">${esc(lbl)} <span class="pcp-chip-n">${cont[k] || 0}</span></button>`).join('');
 
   const tipoChips = [
