@@ -48,18 +48,29 @@ exports.handler = async (event, context) => {
       case 'list': {
         const store = blobStore('os');
         const PAGE = 150; // O.S completas por resposta (margem folgada vs. 6 MB)
-        const offset = Math.max(0, Number(body.offset) || 0);
 
         const keys = (await allKeys(store)).sort();
-        const slice = keys.slice(offset, offset + PAGE);
+        // Paginação por CHAVE ("after"): estável quando O.S são criadas ou
+        // apagadas entre páginas (o offset numérico deslocava o corte e podia
+        // pular uma O.S — que o cliente então apagava do cache local achando
+        // que ela sumiu do servidor). "offset" segue aceito p/ clientes antigos.
+        let inicio;
+        if (body.after != null) {
+          inicio = keys.findIndex(k => k > String(body.after));
+          if (inicio < 0) inicio = keys.length;
+        } else {
+          inicio = Math.max(0, Number(body.offset) || 0);
+        }
+        const slice = keys.slice(inicio, inicio + PAGE);
         const items = await Promise.all(
           slice.map(k => store.get(k, { type: 'json' }).catch(() => null))
         );
-        const nextOffset = offset + PAGE;
+        const fim = inicio + slice.length;
         return resp({
           os: items.filter(Boolean),
           total: keys.length,
-          nextOffset: nextOffset < keys.length ? nextOffset : null
+          nextAfter: fim < keys.length && slice.length ? slice[slice.length - 1] : null,
+          nextOffset: fim < keys.length ? fim : null
         });
       }
 
@@ -78,7 +89,11 @@ exports.handler = async (event, context) => {
           }
         }
 
-        const toSave = { ...os, atualizadoEm: new Date().toISOString() };
+        // Preserva o atualizadoEm do autor. Reescrever com o relógio do
+        // servidor misturava duas fontes de tempo: bastava o relógio do
+        // aparelho atrasar para o próprio autor receber "conflito" na
+        // edição seguinte.
+        const toSave = { ...os };
         await store.setJSON(os.id, toSave);
         return resp({ ok: true, os: toSave });
       }
@@ -95,7 +110,7 @@ exports.handler = async (event, context) => {
         if (existing) {
           const fotoIds = [
             ...(existing.fotosCheckinIds || []),
-            existing.fotoEmbarqueId,
+            ...(existing.fotosRetornoIds || []),
             existing.layoutFotoId
           ].filter(Boolean);
           await Promise.all(fotoIds.map(fid => fotosStore.delete(fid).catch(() => {})));
@@ -127,6 +142,15 @@ exports.handler = async (event, context) => {
         const id = fileId || ('foto_' + Date.now() + '_' + Math.random().toString(36).slice(2));
         await store.setJSON(id, { base64, mime: mime || 'image/jpeg' });
         return resp({ fileId: id });
+      }
+
+      // ── deletePhoto: remove foto individual (excluída/substituída no app) ──
+      case 'deletePhoto': {
+        const store = blobStore('fotos');
+        const { fileId } = body;
+        if (!fileId) return resp({ error: 'fileId ausente' }, 400);
+        await store.delete(fileId).catch(() => {});
+        return resp({ ok: true });
       }
 
       // ── getPhoto: recupera foto ─────────────────────────────────────────────

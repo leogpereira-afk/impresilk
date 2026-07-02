@@ -156,6 +156,15 @@ const STORE = (() => {
         return;
       }
     }
+    // Deletar uma foto descarta o upload pendente dela (senão o servidor
+    // recebe o put depois do delete e a foto "excluída" ressuscita lá).
+    if (item.action === 'deletePhoto') {
+      q = q.filter(x => !(x.action === 'putPhoto' && x.fileId === item.fileId));
+      if (q.some(x => x.action === 'deletePhoto' && x.fileId === item.fileId)) {
+        lsSet(K.FILA, q);
+        return;
+      }
+    }
     q.push(item);
     lsSet(K.FILA, q);
   }
@@ -165,10 +174,11 @@ const STORE = (() => {
   // então comparar por referência (x !== item) nunca removeria nada.
   function _sigFila(item) {
     if (!item) return '';
-    if (item.action === 'upsert')   return 'upsert:'  + (item.os && item.os.id);
-    if (item.action === 'delete')   return 'delete:'  + item.id;
-    if (item.action === 'putPhoto') return 'putPhoto:' + item.fileId;
-    if (item.action === 'setCfg')   return 'setCfg';
+    if (item.action === 'upsert')      return 'upsert:'  + (item.os && item.os.id);
+    if (item.action === 'delete')      return 'delete:'  + item.id;
+    if (item.action === 'putPhoto')    return 'putPhoto:' + item.fileId;
+    if (item.action === 'deletePhoto') return 'deletePhoto:' + item.fileId;
+    if (item.action === 'setCfg')      return 'setCfg';
     return JSON.stringify(item);
   }
 
@@ -176,7 +186,17 @@ const STORE = (() => {
     const sig = _sigFila(item);
     let removido = false;
     const q = getQueue().filter(x => {
-      if (!removido && _sigFila(x) === sig) { removido = true; return false; }
+      if (!removido && _sigFila(x) === sig) {
+        // Upsert: só remove se for a MESMA versão que foi enviada. Se o
+        // usuário salvou de novo durante o envio, a fila contém uma versão
+        // mais nova — mantê-la para o próximo ciclo (senão a edição feita
+        // durante o sync em voo se perderia sem aviso).
+        if (item.action === 'upsert' && x.os && item.os && x.os.atualizadoEm !== item.os.atualizadoEm) {
+          return true;
+        }
+        removido = true;
+        return false;
+      }
       return true;
     });
     lsSet(K.FILA, q);
@@ -276,7 +296,13 @@ const STORE = (() => {
           if (item.action === 'upsert' && res && res.os) {
             const all = getAllOS();
             const idx = all.findIndex(o => o.id === res.os.id);
-            if (idx >= 0) { all[idx].atualizadoEm = res.os.atualizadoEm; _setAllOS(all); }
+            // Só sincroniza o timestamp se NÃO houve edição local durante o
+            // envio — senão o pull deixaria de enxergar a divergência e a
+            // edição nova ficaria só neste aparelho.
+            if (idx >= 0 && all[idx].atualizadoEm === item.os.atualizadoEm) {
+              all[idx].atualizadoEm = res.os.atualizadoEm;
+              _setAllOS(all);
+            }
           }
         }
         consecutiveNetFails = 0;
@@ -314,18 +340,27 @@ const STORE = (() => {
       const byId = new Map(local.map(o => [o.id, o]));
       let changed = false;
 
+      // Deletes pendentes na fila: a O.S ainda existe no servidor, mas foi
+      // excluída aqui — sem este filtro o pull a "ressuscitava" na lista.
+      const pendingDeletes = new Set(
+        getQueue().filter(x => x.action === 'delete').map(x => x.id)
+      );
+
       // O endpoint "list" é paginado (resposta limitada para não estourar o
-      // teto de ~6 MB das Netlify Functions). Percorremos as páginas pelo
-      // cursor "nextOffset" até não haver mais.
+      // teto de ~6 MB das Netlify Functions). Preferimos paginação por CHAVE
+      // ("after"/"nextAfter"), estável quando O.S são criadas/apagadas entre
+      // páginas; "nextOffset" fica como fallback para função antiga no ar.
       const remoteIds = new Set();
       let offset = 0;
+      let after = null;
       let guard = 0; // trava de segurança contra loop infinito
       while (true) {
-        const res = await api({ action: 'list', offset });
+        const res = await api(after != null ? { action: 'list', after } : { action: 'list', offset });
         if (!Array.isArray(res.os)) return;
 
         for (const remote of res.os) {
           if (!remote || !remote.id) continue;
+          if (pendingDeletes.has(remote.id)) continue;
           remoteIds.add(remote.id);
           const localOS = byId.get(remote.id);
           if (!localOS) {
@@ -342,14 +377,15 @@ const STORE = (() => {
           }
         }
 
-        if (res.nextOffset == null) break;
+        if (res.nextAfter != null) after = res.nextAfter;
+        else if (res.nextOffset != null) offset = res.nextOffset;
+        else break;
         if (++guard > 1000) {
           // Atingiu o teto de segurança (>150k O.S). Avisa em vez de truncar silenciosamente.
           console.warn('[store] pull abortado: mais de 1000 páginas. Lista pode estar truncada.');
           _notifyListeners('pull-truncado', { paginas: guard });
           break;
         }
-        offset = res.nextOffset;
       }
 
       // Após varrer TODAS as páginas: remove do local as O.S que sumiram do
@@ -442,6 +478,16 @@ const STORE = (() => {
     // Falhou → enfileira só o fileId (o base64 já está no IndexedDB)
     _enqueue({ action: 'putPhoto', mime, fileId });
     return fileId;
+  }
+
+  // Remove a foto local E do servidor (enfileira deletePhoto na fila de sync).
+  // delFoto sozinho só apagava do IndexedDB — o blob ficava para sempre no
+  // servidor e nos outros aparelhos.
+  function delFotoSync(fileId) {
+    if (!fileId) return;
+    delFoto(fileId);
+    _enqueue({ action: 'deletePhoto', fileId });
+    trySync();
   }
 
   async function pullPhoto(fileId) {
@@ -545,7 +591,7 @@ const STORE = (() => {
     // Sync
     trySync, pull, pullCFG,
     // Fotos
-    pushPhoto, pullPhoto, putFoto, getFoto, delFoto,
+    pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos
     onSync, onConflict, on,
     // Conflito manual

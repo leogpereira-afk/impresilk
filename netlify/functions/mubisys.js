@@ -273,7 +273,9 @@ function montarEndereco(c) {
 }
 
 function definirPeriodo(hora) {
-  if (!hora) return 'Manhã';
+  // Sem hora de entrega, o período fica em branco — assumir "Manhã" criava um
+  // agendamento matinal fictício que ninguém escolheu (o PCP define depois).
+  if (!hora) return '';
   const h = parseInt(hora.split(':')[0], 10);
   return h >= 12 ? 'Tarde' : 'Manhã';
 }

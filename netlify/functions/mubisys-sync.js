@@ -100,7 +100,8 @@ function montarOSImportada(remoto) {
   if (remoto.observacao) os.obsPCP = remoto.observacao;
   if (remoto.instalacao) os.instalacao = Object.assign(os.instalacao, remoto.instalacao);
   if (Array.isArray(remoto.itens) && remoto.itens.length) os.itens = remoto.itens;
-  if (!os.instalacao.periodo) os.instalacao.periodo = 'Manhã';
+  // Sem hora de entrega o período fica em branco até o PCP agendar de verdade
+  // (o default "Manhã" criava agendamento matinal fictício).
   os.origemMubisys = true;
   return os;
 }

@@ -98,7 +98,7 @@ function dentroPeriodo(dataISO, key) {
   const f = STATE[key];
   if (!f || (!f.de && !f.ate)) return true;
   if (!dataISO) return false;
-  const d = String(dataISO).slice(0, 10);
+  const d = diaLocalISO(dataISO);
   if (f.de && d < f.de) return false;
   if (f.ate && d > f.ate) return false;
   return true;
@@ -120,13 +120,22 @@ function ymdLocal(d) {
   return `${y}-${m}-${dd}`;
 }
 
+// Dia local (YYYY-MM-DD) de um timestamp ISO completo. nowISO() grava em UTC:
+// sem esta conversão, eventos entre 21h e 23h59 (UTC-3) caem no "dia seguinte".
+function diaLocalISO(iso) {
+  if (!iso) return '';
+  const s = String(iso);
+  return s.includes('T') ? ymdLocal(new Date(s)) : s.slice(0, 10);
+}
+function mesLocalISO(iso) { return diaLocalISO(iso).slice(0, 7); }
+
 const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
 // "29/06/26" (curto, para tags compactas no card)
 function fmtDataBR(iso) {
   if (!iso) return '';
-  const d = parseLocalDate(String(iso).slice(0, 10));
+  const d = parseLocalDate(diaLocalISO(iso));
   if (!d) return '';
   const dd = String(d.getDate()).padStart(2, '0');
   const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -295,8 +304,10 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 // Diferença em dias (bISO − aISO). null se faltar alguma data.
+// Aceita tanto YYYY-MM-DD quanto ISO completo (normaliza para o dia LOCAL).
 function diasEntre(aISO, bISO) {
   if (!aISO || !bISO) return null;
+  aISO = diaLocalISO(aISO); bISO = diaLocalISO(bISO);
   const a = new Date(aISO + 'T00:00:00'), b = new Date(bISO + 'T00:00:00');
   if (isNaN(a) || isNaN(b)) return null;
   return Math.round((b - a) / 86400000);
@@ -547,16 +558,31 @@ function enterApp() {
   initPicker();
   if (typeof iniciarFraseBar === 'function') iniciarFraseBar();
 
-  // Pull inicial + CFG, depois render
-  STORE.pullCFG();
-  STORE.pull(() => renderActiveTab());
+  // Pull inicial + CFG, depois render. A CFG pode trazer níveis de acesso
+  // novos do servidor — reaplica as permissões quando ela chegar.
+  STORE.pullCFG().then(() => { aplicarPermissoes(); refreshAposPull(); }).catch(() => {});
+  STORE.pull(refreshAposPull);
   STORE.trySync();
   renderActiveTab();
 
-  // Pull periódico a cada 30s. Guardamos o id para evitar timers duplicados
-  // se enterApp() rodar mais de uma vez (auto-login + login manual, etc.).
+  // Pull periódico a cada 30s (incluindo a CFG, senão as permissões ficam
+  // congeladas com os níveis antigos a sessão inteira). Guardamos o id para
+  // evitar timers duplicados se enterApp() rodar mais de uma vez.
   if (window._pullTimer) clearInterval(window._pullTimer);
-  window._pullTimer = setInterval(() => { STORE.pull(() => renderActiveTab()); STORE.trySync(); }, 30000);
+  window._pullTimer = setInterval(() => {
+    STORE.pullCFG().then(aplicarPermissoes).catch(() => {});
+    STORE.pull(refreshAposPull);
+    STORE.trySync();
+  }, 30000);
+}
+
+// Re-render pós-pull. Se o usuário está digitando na busca do PCP, atualiza só
+// a grade — reconstruir o painel destruía o <input>, derrubava o foco e fechava
+// o teclado no celular a cada sync com mudança.
+function refreshAposPull() {
+  const ae = document.activeElement;
+  if (STATE.activeTab === 'pcp' && ae && ae.id === 'busca-pcp') { pcpRenderCards(); return; }
+  renderActiveTab();
 }
 
 function aplicarPermissoes() {
@@ -565,11 +591,20 @@ function aplicarPermissoes() {
   document.body.classList.toggle('somente-leitura', !perm.editar);
   document.body.classList.toggle('nao-admin', STATE.user.papel !== 'admin');
 
+  const permitida = t => perm.abas === '*' || perm.abas.includes(t);
   $$('.tab').forEach(t => {
-    const tab = t.dataset.tab;
-    const allowed = perm.abas === '*' || perm.abas.includes(tab);
-    t.classList.toggle('hidden', !allowed);
+    t.classList.toggle('hidden', !permitida(t.dataset.tab));
   });
+
+  // Se a aba ativa não é permitida para o papel, pousa na primeira permitida
+  // (senão o painel proibido fica visível — e sem botão para sair dele).
+  if (!permitida(STATE.activeTab)) {
+    const ordem = ['pcp', 'painel', 'programacao', 'execucao', 'retrabalho', 'finalizados', 'controle', 'pops'];
+    const dest = ordem.find(permitida) || 'painel';
+    STATE.activeTab = dest;
+    $$('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === dest));
+    $$('.tab-panel').forEach(x => x.classList.toggle('active', x.dataset.panel === dest));
+  }
 }
 
 function podeEditar() {
@@ -595,7 +630,7 @@ function initTabs() {
       const tab = t.dataset.tab;
       $(`#panel-${tab}`).classList.add('active');
       STATE.activeTab = tab;
-      STORE.pull(() => renderActiveTab());
+      STORE.pull(refreshAposPull);
       renderActiveTab();
     };
   });
@@ -612,6 +647,9 @@ function initTopbar() {
   if (instrBtn) instrBtn.onclick = abrirInstrucoes;
   $('#btn-logout').onclick = () => {
     STORE.setUser(null);
+    // Tablet compartilhado: sair da gestão também desloga o espelho do
+    // instalador (senão equipe.html auto-entra como a última pessoa clicada).
+    STORE.setInstalador(null);
     location.reload();
   };
 }
@@ -737,6 +775,7 @@ let _modalDraft = null;   // cópia de trabalho da O.S
 let _modalDirty = false;
 let _modalPrevPct = 0;    // % de preenchimento ao abrir (para celebrar ao chegar a 100%)
 let _modalReturnFocus = null; // elemento focado antes de abrir (restaurado no close)
+let _modalReturnFocusSel = null; // seletor p/ relocalizar o elemento após re-render
 let _modalBlocoForcado = null; // bloco a abrir por escolha do usuário (botões de etapa do card)
 
 function openModal(os, blocoForcado) {
@@ -746,8 +785,16 @@ function openModal(os, blocoForcado) {
   _modalPrevPct = fichaPercent(_modalDraft);
   STATE.modalOSId = os.id;
   _modalBlocoForcado = blocoForcado || null;
-  // Guarda o elemento que abriu o modal pra restaurar o foco depois.
-  _modalReturnFocus = document.activeElement;
+  // Guarda o elemento que abriu o modal pra restaurar o foco depois. Como o
+  // fechamento re-renderiza a aba (DOM novo), guarda também um seletor para
+  // relocalizar o card/botão equivalente.
+  const fe = document.activeElement;
+  _modalReturnFocus = fe;
+  _modalReturnFocusSel = fe && fe.dataset && fe.dataset.etapaOs
+    ? `[data-etapa-os="${fe.dataset.etapaOs}"][data-etapa-bloco="${fe.dataset.etapaBloco}"]`
+    : (fe && fe.closest && fe.closest('[data-os-id]')
+        ? `[data-os-id="${fe.closest('[data-os-id]').dataset.osId}"]`
+        : null);
   renderModal();
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -759,10 +806,16 @@ function closeModal() {
   _modalDraft = null;
   renderActiveTab();
   // Restaura o foco para o card/elemento que originou o modal (acessibilidade).
-  if (_modalReturnFocus && document.body.contains(_modalReturnFocus)) {
-    try { _modalReturnFocus.focus({ preventScroll: false }); } catch {}
+  // O renderActiveTab recria o DOM, então o elemento original quase nunca
+  // sobrevive — relocaliza pelo seletor guardado no openModal.
+  let alvo = (_modalReturnFocus && document.body.contains(_modalReturnFocus)) ? _modalReturnFocus : null;
+  if (!alvo && _modalReturnFocusSel) { try { alvo = document.querySelector(_modalReturnFocusSel); } catch {} }
+  if (alvo) {
+    if (alvo.tagName !== 'BUTTON' && !alvo.hasAttribute('tabindex')) alvo.setAttribute('tabindex', '-1');
+    try { alvo.focus({ preventScroll: false }); } catch {}
   }
   _modalReturnFocus = null;
+  _modalReturnFocusSel = null;
 }
 
 function markDirty() { _modalDirty = true; }
@@ -847,8 +900,8 @@ function renderModal() {
   const pp = proximoPasso(os);
   const histAtual = (Array.isArray(os.historico) ? os.historico : []).filter(h => h.etapa === st).slice(-1)[0];
   const diasPedido = os.dataEntrada ? diasDesde(os.dataEntrada)
-                   : (os.criadoEm ? diasEntre(os.criadoEm.slice(0, 10), todayISO()) : null);
-  const diasEtapa = histAtual && histAtual.em ? diasEntre(histAtual.em.slice(0, 10), todayISO()) : null;
+                   : (os.criadoEm ? diasEntre(os.criadoEm, todayISO()) : null);
+  const diasEtapa = histAtual && histAtual.em ? diasEntre(histAtual.em, todayISO()) : null;
   const temposTags = [];
   if (diasPedido != null && diasPedido >= 0) temposTags.push(`⏱ ${diasPedido}d desde o pedido`);
   if (diasEtapa != null && diasEtapa >= 0 && !finalizada) temposTags.push(`📍 ${diasEtapa}d nesta etapa`);
@@ -998,7 +1051,7 @@ function blocoItens(os, ro, done) {
   const prontos = itens.filter(i => i.pronto).length;
 
   const markGroup = (field, opts) => `<div class="mark-group" data-mark="${field}">${
-    opts.map(o => `<button type="button" class="mark-opt ${os[field] === o ? 'on' : ''}" data-mark-val="${esc(o)}">${esc(o)}</button>`).join('')
+    opts.map(o => `<button type="button" class="mark-opt ${os[field] === o ? 'on' : ''}" data-mark-val="${esc(o)}" ${ro ? 'disabled' : ''}>${esc(o)}</button>`).join('')
   }</div>`;
 
   // Itens são estáticos (vêm do pedido/PDF). Só itens adicionados manualmente
@@ -1012,10 +1065,10 @@ function blocoItens(os, ro, done) {
       <td data-label="Medidas"><input data-item="${i}.medidas" value="${esc(it.medidas)}" ${lock}></td>
       <td data-label="Qtde"><input data-item="${i}.qtde" value="${esc(it.qtde)}" inputmode="numeric" ${lock}></td>
       <td class="verif-cell" data-label="Verificação">
-        <button type="button" class="verif-btn verif-ok ${it.pronto ? 'on' : ''}" data-item-verif="${i}.ok" title="Verificado">✓</button>
-        <button type="button" class="verif-btn verif-no ${it.reprovado ? 'on' : ''}" data-item-verif="${i}.no" title="Reprovado">✗</button>
+        <button type="button" class="verif-btn verif-ok ${it.pronto ? 'on' : ''}" data-item-verif="${i}.ok" title="Verificado" ${ro ? 'disabled' : ''}>✓</button>
+        <button type="button" class="verif-btn verif-no ${it.reprovado ? 'on' : ''}" data-item-verif="${i}.no" title="Reprovado" ${ro ? 'disabled' : ''}>✗</button>
       </td>
-      <td class="item-del-cell"><button class="btn-xs btn-danger edit-only" data-item-del="${i}" title="Remover item">× remover</button></td>
+      <td class="item-del-cell">${it.manual ? `<button class="btn-xs btn-danger edit-only" data-item-del="${i}" title="Remover item">× remover</button>` : ''}</td>
     </tr>
     ${it.reprovado ? `<tr class="motivo-row"><td colspan="6" data-label="O que deu errado?"><input data-item="${i}.motivoReprovado" value="${esc(it.motivoReprovado || '')}" placeholder="❗ O que deu errado neste item?"></td></tr>` : ''}`;
   }).join('');
@@ -1139,9 +1192,9 @@ function blocoExec(os, ro, done) {
     <div class="fs-body">
       <!-- ── Processo 1: Embarque · Saída ───────────────────────── -->
       <div class="exec-step"><span class="exec-step-tit">📦 Embarque · Saída</span></div>
-      <label class="check-toggle"><input type="checkbox" data-conf-por="embarqueConferidoPor" ${os.embarqueConferidoPor?'checked':''}> 📦 Embarque conferido${os.embarqueConferidoPor?`<span class="conf-por">✓ por ${esc(os.embarqueConferidoPor)}</span>`:''}</label>
-      <label class="check-toggle"><input type="checkbox" data-conf-por="produtosConferidosPor" ${os.produtosConferidosPor?'checked':''}> 📋 Produtos conferidos${os.produtosConferidosPor?`<span class="conf-por">✓ por ${esc(os.produtosConferidosPor)}</span>`:''}</label>
-      <label class="check-toggle"><input type="checkbox" data-f-check="ferramentasConferidas" data-conf-por="ferramentasConferidasPor" ${os.ferramentasConferidas?'checked':''}> 🧰 Ferramentas conferidas${os.ferramentasConferidasPor?`<span class="conf-por">✓ por ${esc(os.ferramentasConferidasPor)}</span>`:''}</label>
+      <label class="check-toggle"><input type="checkbox" data-conf-por="embarqueConferidoPor" ${os.embarqueConferidoPor?'checked':''} ${ro?'disabled':''}> 📦 Embarque conferido${os.embarqueConferidoPor?`<span class="conf-por">✓ por ${esc(os.embarqueConferidoPor)}</span>`:''}</label>
+      <label class="check-toggle"><input type="checkbox" data-conf-por="produtosConferidosPor" ${os.produtosConferidosPor?'checked':''} ${ro?'disabled':''}> 📋 Produtos conferidos${os.produtosConferidosPor?`<span class="conf-por">✓ por ${esc(os.produtosConferidosPor)}</span>`:''}</label>
+      <label class="check-toggle"><input type="checkbox" data-f-check="ferramentasConferidas" data-conf-por="ferramentasConferidasPor" ${os.ferramentasConferidas?'checked':''} ${ro?'disabled':''}> 🧰 Ferramentas conferidas${os.ferramentasConferidasPor?`<span class="conf-por">✓ por ${esc(os.ferramentasConferidasPor)}</span>`:''}</label>
 
       ${!confirmado ? `<div class="trava-msg">🔒 Confirme o horário com o cliente (POP EXI‑002) antes de liberar o carro / sair.</div>` : ''}
       <div class="edit-only">
@@ -1168,9 +1221,9 @@ function blocoExec(os, ro, done) {
 
       <!-- ── Processo 2: Retorno · Execução ─────────────────────── -->
       <div class="exec-step"><span class="exec-step-tit">🔧 Retorno · Execução</span></div>
-      <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" data-conf-por="conferidoPor" ${os.instalacaoOK?'checked':''}> ✅ Instalação OK${os.conferidoPor?`<span class="conf-por">✓ por ${esc(os.conferidoPor)}</span>`:''}</label>
+      <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" data-conf-por="conferidoPor" ${os.instalacaoOK?'checked':''} ${ro?'disabled':''}> ✅ Instalação OK${os.conferidoPor?`<span class="conf-por">✓ por ${esc(os.conferidoPor)}</span>`:''}</label>
 
-      <label class="check-toggle retrab"><input type="checkbox" data-f-check="retrabalho" ${os.retrabalho?'checked':''}> 🔴 Retrabalho?</label>
+      <label class="check-toggle retrab"><input type="checkbox" data-f-check="retrabalho" ${os.retrabalho?'checked':''} ${ro?'disabled':''}> 🔴 Retrabalho?</label>
       <div data-retrabalho-fields style="${os.retrabalho?'':'display:none'}">
         <div class="field"><label>Problema</label><input data-f="problema" value="${esc(os.problema)}"></div>
         <div class="field-row">
@@ -1374,11 +1427,19 @@ function bindModalEvents(os, ro) {
   // logado (registra o nome no campo correspondente) — sem seleção manual.
   $$('[data-f-check],[data-conf-por]', root).forEach(el => {
     el.onchange = () => {
+      if (ro) { el.checked = !el.checked; return; } // somente-leitura/finalizada não grava
       if (el.dataset.fCheck) setField(el.dataset.fCheck, el.checked);
       if (el.dataset.confPor) setField(el.dataset.confPor, el.checked ? STATE.user.nome : '');
       if (el.dataset.fCheck === 'retrabalho') {
         const box = $('[data-retrabalho-fields]', root);
         if (box) box.style.display = el.checked ? '' : 'none';
+        if (!el.checked) {
+          // Desmarcou: limpa os campos do retrabalho (senão o PDF/ficha sai
+          // com "Problema/Causa" fantasmas de uma marcação desfeita).
+          ['problema', 'causa', 'resolvidoPor', 'dataResolvido'].forEach(f => setField(f, ''));
+          if (box) $$('input,select,textarea', box).forEach(i => { i.value = ''; });
+        }
+        saveDraft();
         return;
       }
       if (el.dataset.confPor) { saveDraft(); reRenderModalKeepOpen(); }
@@ -1403,12 +1464,13 @@ function bindModalEvents(os, ro) {
   // Verificação do item: ✓ verificado / ✗ reprovado (com motivo).
   $$('[data-item-verif]', root).forEach(el => {
     el.onclick = () => {
+      if (ro) return;
       const [idx, kind] = el.dataset.itemVerif.split('.');
       const it = _modalDraft.itens[+idx];
       if (!it) return;
       if (kind === 'ok') {
         it.pronto = !it.pronto;
-        if (it.pronto) it.reprovado = false;
+        if (it.pronto) { it.reprovado = false; it.motivoReprovado = ''; }
       } else {
         it.reprovado = !it.reprovado;
         if (it.reprovado) it.pronto = false;
@@ -1419,6 +1481,10 @@ function bindModalEvents(os, ro) {
   });
   $$('[data-item-del]', root).forEach(el => {
     el.onclick = () => {
+      if (ro) return;
+      const it = _modalDraft.itens[+el.dataset.itemDel];
+      if (!it) return;
+      if (!confirm(`Remover o item "${it.descricao || it.item || ''}"?`)) return;
       _modalDraft.itens.splice(+el.dataset.itemDel, 1);
       saveDraft(); reRenderModalKeepOpen();
     };
@@ -1428,6 +1494,7 @@ function bindModalEvents(os, ro) {
     const field = grp.dataset.mark;
     $$('[data-mark-val]', grp).forEach(b => {
       b.onclick = () => {
+        if (ro) return;
         const val = b.dataset.markVal;
         setField(field, _modalDraft[field] === val ? '' : val);
         saveDraft(); reRenderModalKeepOpen();
@@ -1436,8 +1503,13 @@ function bindModalEvents(os, ro) {
   });
   const addItem = $('#btn-add-item');
   if (addItem) addItem.onclick = () => {
-    _modalDraft.itens.push({ item: String(_modalDraft.itens.length + 1), descricao: '', medidas: '', qtde: '1', valorUnit: '0', subtotal: 0, pronto: false, reprovado: false, motivoReprovado: '', manual: true });
-    saveDraft(); reRenderModalKeepOpen();
+    // Número = maior existente + 1 (length+1 duplicava após remoções).
+    const prox = Math.max(0, ..._modalDraft.itens.map(i => parseInt(i.item, 10) || 0)) + 1;
+    _modalDraft.itens.push({ item: String(prox), descricao: '', medidas: '', qtde: '1', valorUnit: '0', subtotal: 0, pronto: false, reprovado: false, motivoReprovado: '', manual: true });
+    // Não persiste ainda: o item vazio contaria no checklist. O onblur da
+    // descrição salva quando o usuário digitar algo.
+    markDirty();
+    reRenderModalKeepOpen();
   };
   const impItens = $('#btn-import-itens');
   if (impItens) impItens.onclick = () => importarItensPDF(_modalDraft);
@@ -1548,45 +1620,54 @@ function bindModalEvents(os, ro) {
     toast('O.S reaberta', 'success');
   };
 
+  // Persiste o draft após um upload de foto. O upload é lento (4G): se o
+  // usuário fechou o modal no meio, grava direto no STORE para as fotos e a
+  // hora carimbada não se perderem (antes viravam blobs órfãos).
+  const persistirAposFoto = (draft) => {
+    if (_modalDraft === draft) { saveDraft(); reRenderModalKeepOpen(); }
+    else { draft.atualizadoEm = nowISO(); draft.atualizadoPor = STATE.user.nome; STORE.saveOS(draft); }
+  };
+
   // Fotos single (layout, embarque)
   $$('[data-foto-input]', root).forEach(inp => {
     inp.onchange = async () => {
+      const draft = _modalDraft;
       const field = inp.dataset.fotoInput;
       const file = inp.files[0];
-      if (!file) return;
+      if (!file || !draft) return;
       toast('Enviando foto…');
       const fileId = await STORE.pushPhoto(file);
-      if (fileId) {
-        if (_modalDraft[field]) STORE.delFoto(_modalDraft[field]);
-        _modalDraft[field] = fileId;
-        saveDraft(); reRenderModalKeepOpen();
-      }
+      if (!fileId) return;
+      if (draft[field]) STORE.delFotoSync(draft[field]);
+      draft[field] = fileId;
+      persistirAposFoto(draft);
     };
   });
 
   // Fotos check-in (múltiplas)
   const ckInput = $('[data-foto-checkin-input]', root);
   if (ckInput) ckInput.onchange = async () => {
+    const draft = _modalDraft;
     const files = Array.from(ckInput.files || []);
-    if (!files.length) return;
-    if (!_modalDraft.fotosCheckinIds) _modalDraft.fotosCheckinIds = [];
+    if (!files.length || !draft) return;
+    if (!draft.fotosCheckinIds) draft.fotosCheckinIds = [];
     toast(`Enviando ${files.length} foto(s)…`);
     for (const f of files) {
       const fileId = await STORE.pushPhoto(f);
-      if (fileId) _modalDraft.fotosCheckinIds.push(fileId);
+      if (fileId) draft.fotosCheckinIds.push(fileId);
     }
-    // A foto de check‑in registra a saída: preenche a hora se ainda estiver vazia.
-    if (!_modalDraft.horaSaida) {
+    // A foto de saída registra a saída: preenche a hora se ainda estiver vazia.
+    if (!draft.horaSaida) {
       const agora = new Date();
-      _modalDraft.horaSaida = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
+      draft.horaSaida = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
     }
-    capturarLocalCheckin();
-    saveDraft(); reRenderModalKeepOpen();
+    if (_modalDraft === draft) capturarLocalCheckin();
+    persistirAposFoto(draft);
   };
   $$('[data-foto-rm]', root).forEach(btn => {
     btn.onclick = () => {
       const fid = btn.dataset.fotoRm;
-      STORE.delFoto(fid);
+      STORE.delFotoSync(fid);
       _modalDraft.fotosCheckinIds = (_modalDraft.fotosCheckinIds || []).filter(x => x !== fid);
       saveDraft(); reRenderModalKeepOpen();
     };
@@ -1595,24 +1676,25 @@ function bindModalEvents(os, ro) {
   // Fotos de retorno (múltiplas) — a foto carimba a hora de retorno.
   const retInput = $('[data-foto-retorno-input]', root);
   if (retInput) retInput.onchange = async () => {
+    const draft = _modalDraft;
     const files = Array.from(retInput.files || []);
-    if (!files.length) return;
-    if (!_modalDraft.fotosRetornoIds) _modalDraft.fotosRetornoIds = [];
+    if (!files.length || !draft) return;
+    if (!draft.fotosRetornoIds) draft.fotosRetornoIds = [];
     toast(`Enviando ${files.length} foto(s)…`);
     for (const f of files) {
       const fileId = await STORE.pushPhoto(f);
-      if (fileId) _modalDraft.fotosRetornoIds.push(fileId);
+      if (fileId) draft.fotosRetornoIds.push(fileId);
     }
-    if (!_modalDraft.horaRetorno) {
+    if (!draft.horaRetorno) {
       const agora = new Date();
-      _modalDraft.horaRetorno = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
+      draft.horaRetorno = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
     }
-    saveDraft(); reRenderModalKeepOpen();
+    persistirAposFoto(draft);
   };
   $$('[data-foto-rm-retorno]', root).forEach(btn => {
     btn.onclick = () => {
       const fid = btn.dataset.fotoRmRetorno;
-      STORE.delFoto(fid);
+      STORE.delFotoSync(fid);
       _modalDraft.fotosRetornoIds = (_modalDraft.fotosRetornoIds || []).filter(x => x !== fid);
       saveDraft(); reRenderModalKeepOpen();
     };
@@ -1628,8 +1710,12 @@ function bindModalEvents(os, ro) {
 // Geolocalização automática no check‑in (espelho de gestão). Registra só uma vez.
 function capturarLocalCheckin() {
   if (!_modalDraft || _modalDraft.checkinGPS || !navigator.geolocation) return;
+  const draft = _modalDraft; // o GPS pode demorar (timeout 8s) e o modal mudar
   navigator.geolocation.getCurrentPosition(
     pos => {
+      // Só grava se o modal ainda é da MESMA O.S (senão as coordenadas iriam
+      // parar na O.S errada) e se ninguém registrou o GPS nesse meio-tempo.
+      if (_modalDraft !== draft || draft.checkinGPS) return;
       _modalDraft.checkinGPS = {
         lat: +pos.coords.latitude.toFixed(6),
         lng: +pos.coords.longitude.toFixed(6),
@@ -1637,7 +1723,7 @@ function capturarLocalCheckin() {
         ts: nowISO()
       };
       saveDraft();
-      toast('📍 Localização do check‑in registrada', 'success');
+      toast('📍 Localização da saída registrada', 'success');
     },
     () => {},
     { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
@@ -1660,9 +1746,15 @@ function validarFinalizacao(os) {
     return f;
   }
   if (os.confirmacao !== 'Confirmado') f.push('confirmação do cliente');
+  // Processo 1 (Embarque · Saída): conferências e saída registrada.
+  if (!os.embarqueConferidoPor) f.push('embarque conferido');
+  if (!os.produtosConferidosPor) f.push('produtos conferidos');
+  if (!os.ferramentasConferidas) f.push('ferramentas conferidas');
+  if (!os.carroLiberado && !os.horaSaida) f.push('liberar carro / saída');
+  // Processo 2 (Retorno · Execução)
   if (!os.instalacaoOK) f.push('Instalação OK');
   if (!os.conferidoPor) f.push('conferido por');
-  if (!(os.fotosCheckinIds || []).length) f.push('≥1 foto de check‑in');
+  if (!(os.fotosCheckinIds || []).length) f.push('≥1 foto de saída');
   if (os.retrabalho && !os.problema) f.push('descrição do problema (retrabalho)');
   return f;
 }
@@ -1696,7 +1788,7 @@ function osCardHTML(os) {
     : [['pcp', '📋 PCP'], ['itens', '📦 Itens'], ['agenda', '📅 Agenda'], ['exec', '🔧 Execução']];
   // Card externo finalizado e 100% preenchido: botões de etapa ficam verdes.
   const etapaDone = !interno && os.finalizadaEm && pct >= 100;
-  const etapasBtns = `<div class="card-etapas edit-only">${etapasCard
+  const etapasBtns = `<div class="card-etapas">${etapasCard
     .map(([b, lbl]) => `<button class="card-etapa-btn ${etapaDone ? 'done' : ''}" data-etapa-os="${esc(os.id)}" data-etapa-bloco="${b}" title="Abrir em ${esc(lbl)}">${esc(lbl)}</button>`)
     .join('')}</div>`;
   // CTA dinâmico: quando já está pronto pra finalizar, age direto pelo card;
@@ -1875,22 +1967,53 @@ const PCP_SORTS = {
   empresa: { label: 'Tempo na empresa',        fn: (a, b) => (a.dataEntrada || '9999-12-31').localeCompare(b.dataEntrada || '9999-12-31') }
 };
 
-// Dias desde a finalização (a partir da data, ignorando a hora).
+// Dias desde a finalização (a partir da data LOCAL, ignorando a hora).
 function diasDesdeFinal(os) {
   if (!os || !os.finalizadaEm) return null;
-  return diasDesde(String(os.finalizadaEm).slice(0, 10));
+  return diasDesde(os.finalizadaEm);
 }
 
 // Lista-base do PCP conforme a vista escolhida:
-//  - ''           → ativos: todas as O.S (o filtro de status decide o recorte;
-//                    "Todos" esconde finalizadas, mas o chip Finalizada mostra);
+//  - ''           → ativos: em aberto + finalizadas recentes (<7 dias — o chip
+//                    Finalizada as mostra; "Todos" as esconde);
 //  - 'retrabalho' → O.S marcadas como retrabalho ainda em aberto;
-//  - 'arquivados' → finalizadas há 1 semana ou mais.
+//  - 'arquivados' → finalizadas há 1 semana ou mais (saem da vista Ativos).
 function pcpBaseList() {
   const all = STORE.getAllOS().slice();
   if (STATE.pcpVista === 'retrabalho') return all.filter(o => o.retrabalho && !o.finalizadaEm);
   if (STATE.pcpVista === 'arquivados') return all.filter(o => { const d = diasDesdeFinal(o); return d != null && d >= 7; });
-  return all;
+  return all.filter(o => { const d = diasDesdeFinal(o); return d == null || d < 7; });
+}
+
+// Recalcula os números dos chips considerando os OUTROS filtros ativos — cada
+// dimensão conta sobre a base filtrada pelas dimensões ortogonais + busca
+// (senão os números não batem com os cards exibidos).
+function pcpAtualizarChips() {
+  const el = $('#panel-pcp');
+  if (!el) return;
+  const busca = STATE.filtroBusca || '';
+  const porTipo = list => STATE.pcpTipo === 'todos' ? list : list.filter(o => osTipo(o) === STATE.pcpTipo);
+  const porStatus = list => {
+    if (STATE.pcpVista !== '') return list;
+    if (STATE.pcpStatus === 'todos') return list.filter(o => calcStatus(o) !== 'finalizada');
+    return list.filter(o => calcStatus(o) === STATE.pcpStatus);
+  };
+  const setN = (sel, n) => { const s = el.querySelector(`${sel} .pcp-chip-n`); if (s) s.textContent = n; };
+
+  const base = pcpBaseList();
+  // Chips de status: base da vista × tipo × busca
+  const bST = applyFilter(porTipo(base), busca);
+  setN('[data-pcp-status="todos"]', bST.filter(o => calcStatus(o) !== 'finalizada').length);
+  Object.keys(STATUS_LABEL).forEach(k => setN(`[data-pcp-status="${k}"]`, bST.filter(o => calcStatus(o) === k).length));
+  // Chips de tipo: base da vista × status × busca
+  const bTP = applyFilter(porStatus(base), busca);
+  setN('[data-pcp-tipo="todos"]', bTP.length);
+  ['externo', 'interno'].forEach(k => setN(`[data-pcp-tipo="${k}"]`, bTP.filter(o => osTipo(o) === k).length));
+  // Botões de vista: cada vista com a própria base × tipo × busca
+  const fAll = applyFilter(porTipo(STORE.getAllOS().slice()), busca);
+  setN('[data-pcp-vista=""]', fAll.filter(o => !o.finalizadaEm).length);
+  setN('[data-pcp-vista="retrabalho"]', fAll.filter(o => o.retrabalho && !o.finalizadaEm).length);
+  setN('[data-pcp-vista="arquivados"]', fAll.filter(o => { const d = diasDesdeFinal(o); return d != null && d >= 7; }).length);
 }
 
 // Recalcula a lista filtrada do PCP e atualiza SÓ a grade de cards.
@@ -1908,13 +2031,19 @@ function pcpRenderCards() {
   }
   list = applyFilter(list, STATE.filtroBusca);
   list = list.sort((PCP_SORTS[STATE.pcpSort] || PCP_SORTS.entrega).fn);
-  const vazio = STATE.pcpVista === 'arquivados'
-    ? emptyState('🗄', 'Nenhuma O.S arquivada', 'Aparecem aqui as finalizadas há 1 semana ou mais.')
-    : STATE.pcpVista === 'retrabalho'
-      ? emptyState('🔧', 'Nenhum retrabalho em aberto', 'Tudo certo: nada voltou para correção.')
-      : emptyState('📋', 'Nenhuma O.S neste filtro', 'Troque o filtro, limpe a busca ou crie uma nova O.S.');
+  // Empty state honesto: se a busca/tipo é que zerou a lista, diz isso (a
+  // mensagem da vista sugeriria que não existe nada, contradizendo os números).
+  const filtrosAtivos = (STATE.filtroBusca || '').trim() || STATE.pcpTipo !== 'todos';
+  const vazio = filtrosAtivos
+    ? emptyState('📋', 'Nenhuma O.S neste filtro', 'Limpe a busca ou o filtro de tipo para ver as O.S desta vista.')
+    : STATE.pcpVista === 'arquivados'
+      ? emptyState('🗄', 'Nenhuma O.S arquivada', 'Aparecem aqui as finalizadas há 1 semana ou mais.')
+      : STATE.pcpVista === 'retrabalho'
+        ? emptyState('🔧', 'Nenhum retrabalho em aberto', 'Tudo certo: nada voltou para correção.')
+        : emptyState('📋', 'Nenhuma O.S neste filtro', 'Troque o filtro, limpe a busca ou crie uma nova O.S.');
   grid.innerHTML = list.map(osCardHTML).join('') || vazio;
   bindCardClicks(grid);
+  pcpAtualizarChips();
 }
 
 function renderPCP() {
@@ -1924,41 +2053,22 @@ function renderPCP() {
   STATE.pcpTipo   = STATE.pcpTipo   || 'todos';
   STATE.pcpVista  = STATE.pcpVista  || '';
 
-  const all = STORE.getAllOS().slice();
-
-  // Contagem das vistas (botões após a busca).
-  const contVista = {
-    '':           all.filter(o => !o.finalizadaEm).length,
-    retrabalho:   all.filter(o => o.retrabalho && !o.finalizadaEm).length,
-    arquivados:   all.filter(o => { const d = diasDesdeFinal(o); return d != null && d >= 7; }).length
-  };
-
-  // Base da vista atual: chips de status/tipo e contagens só contam a vista ativa.
-  const base = pcpBaseList();
-
-  // Contagem por status (para os chips). "Todos" não conta finalizadas.
-  const cont = { todos: base.filter(o => calcStatus(o) !== 'finalizada').length };
-  Object.keys(STATUS_LABEL).forEach(k => cont[k] = 0);
-  base.forEach(o => { const s = calcStatus(o); cont[s] = (cont[s] || 0) + 1; });
-
-  // Contagem por tipo (para os chips de triagem).
-  const contTipo = { todos: base.length, interno: 0, externo: 0 };
-  base.forEach(o => { contTipo[osTipo(o)]++; });
-
-  // Chips de status (Finalizada continua, mas só aparece ao clicar nela).
+  // Chips com contagem 0 de placeholder — pcpRenderCards() (chamado logo
+  // abaixo) delega a pcpAtualizarChips() os números reais, já consistentes
+  // com os filtros/busca ativos.
   const chips = [['todos', 'Todos'], ...Object.entries(STATUS_LABEL)]
-    .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" data-pcp-status="${k}">${esc(lbl)} <span class="pcp-chip-n">${cont[k] || 0}</span></button>`).join('');
+    .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" data-pcp-status="${k}">${esc(lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
   const tipoChips = [
     ['todos', 'Todos'], ['externo', '🚚 Externo'], ['interno', '🏬 Cliente retira']
-  ].map(([k, lbl]) => `<button class="pcp-chip pcp-chip-tipo tipo-${k} ${STATE.pcpTipo === k ? 'active' : ''}" data-pcp-tipo="${k}">${esc(lbl)} <span class="pcp-chip-n">${contTipo[k] || 0}</span></button>`).join('');
+  ].map(([k, lbl]) => `<button class="pcp-chip pcp-chip-tipo tipo-${k} ${STATE.pcpTipo === k ? 'active' : ''}" data-pcp-tipo="${k}">${esc(lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
   // Botões de vista, logo após a busca.
   const vistaBtns = [
     ['',           '📋 Ativos'],
     ['retrabalho', '🔧 Retrabalho'],
     ['arquivados', '🗄 Arquivados']
-  ].map(([k, lbl]) => `<button class="pcp-chip pcp-vista ${STATE.pcpVista === k ? 'active' : ''}" data-pcp-vista="${k}">${esc(lbl)} <span class="pcp-chip-n">${contVista[k] || 0}</span></button>`).join('');
+  ].map(([k, lbl]) => `<button class="pcp-chip pcp-vista ${STATE.pcpVista === k ? 'active' : ''}" data-pcp-vista="${k}">${esc(lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
   const sorts = Object.entries(PCP_SORTS)
     .map(([k, v]) => `<option value="${k}" ${STATE.pcpSort === k ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
@@ -1981,7 +2091,12 @@ function renderPCP() {
   busca.oninput = () => { STATE.filtroBusca = busca.value; pcpRenderCards(); };
   $('#pcp-sort').onchange = (e) => { STATE.pcpSort = e.target.value; pcpRenderCards(); };
   $$('[data-pcp-vista]', el).forEach(b => {
-    b.onclick = () => { STATE.pcpVista = b.dataset.pcpVista; STATE.pcpStatus = 'todos'; renderPCP(); };
+    b.onclick = () => {
+      if (b.dataset.pcpVista === STATE.pcpVista) return; // clique redundante não reseta o status
+      STATE.pcpVista = b.dataset.pcpVista;
+      STATE.pcpStatus = 'todos';
+      renderPCP();
+    };
   });
   $$('[data-pcp-status]', el).forEach(b => {
     b.onclick = () => { STATE.pcpStatus = b.dataset.pcpStatus; renderPCP(); };
@@ -2615,7 +2730,7 @@ function renderRetrabalho() {
   const el = $('#panel-retrabalho');
   // Filtra pela data de abertura do retrabalho (atualizadoEm) ou de resolução.
   const list = STORE.getAllOS().filter(o => o.retrabalho)
-    .filter(o => dentroPeriodo((o.dataResolvido || o.atualizadoEm || ''), '_fRetra'))
+    .filter(o => dentroPeriodo((o.dataResolvido || diaLocalISO(o.atualizadoEm) || ''), '_fRetra'))
     .sort((a, b) => (b.atualizadoEm || '').localeCompare(a.atualizadoEm || ''));
 
   const resolvidos = list.filter(o => o.dataResolvido).length;
@@ -2658,7 +2773,7 @@ function iniciais(nome) {
 function finFinalizadasPeriodo() {
   return STORE.getAllOS()
     .filter(o => o.finalizadaEm)
-    .filter(o => dentroPeriodo((o.finalizadaEm || '').slice(0, 10), '_fFin'))
+    .filter(o => dentroPeriodo(o.finalizadaEm, '_fFin'))
     .sort((a, b) => (b.finalizadaEm || '').localeCompare(a.finalizadaEm || ''));
 }
 
@@ -2694,7 +2809,7 @@ function finRenderCards() {
     // Toda O.S aqui já está finalizada (filtrada por finalizadaEm). O status
     // principal é sempre "Finalizado"; retrabalho vira apenas uma tag secundária.
     const teveRetrabalho = os.retrabalho || (os.checkout && os.checkout.situacao === 'Retrabalho');
-    const dF = parseLocalDate((os.finalizadaEm || '').slice(0, 10));
+    const dF = parseLocalDate(diaLocalISO(os.finalizadaEm));
     const dataF = dF ? `${String(dF.getDate()).padStart(2,'0')}/${String(dF.getMonth()+1).padStart(2,'0')}/${dF.getFullYear()}` : '—';
     return `<div class="os-list-item st-finalizada" data-os-id="${esc(os.id)}">
       <div class="list-info">
@@ -2740,7 +2855,7 @@ function finRenderDash() {
   // — item 12: serviços por mês (últimos 6 meses, de TODAS as finalizadas) —
   const todasFin = STORE.getAllOS().filter(o => o.finalizadaEm);
   const porMes = {};
-  todasFin.forEach(o => { const k = (o.finalizadaEm || '').slice(0, 7); if (k) porMes[k] = (porMes[k] || 0) + 1; });
+  todasFin.forEach(o => { const k = mesLocalISO(o.finalizadaEm); if (k) porMes[k] = (porMes[k] || 0) + 1; });
   const mesesOrd = Object.keys(porMes).sort().slice(-6);
   const maxMes = mesesOrd.reduce((m, k) => Math.max(m, porMes[k]), 0) || 1;
   const agora = new Date();
@@ -2854,7 +2969,7 @@ function exportarFinalizadosPDF(list) {
   const mediaH = horas.length ? (horas.reduce((a, b) => a + b, 0) / horas.length) : 0;
 
   const linhasOS = list.map(os => {
-    const dF = parseLocalDate((os.finalizadaEm || '').slice(0, 10));
+    const dF = parseLocalDate(diaLocalISO(os.finalizadaEm));
     const dataF = dF ? `${String(dF.getDate()).padStart(2,'0')}/${String(dF.getMonth()+1).padStart(2,'0')}/${dF.getFullYear()}` : '—';
     // Toda O.S listada aqui está finalizada; retrabalho é apenas observação.
     const teveRetrabalho = os.retrabalho || (os.checkout && os.checkout.situacao === 'Retrabalho');
@@ -3226,12 +3341,15 @@ function wireMubisys(el) {
 
 // Funde os campos vindos do Mubisys numa O.S nova e válida do Impresilk.
 function montarOSImportada(remoto) {
-  const os = novaOS('externo'); // O.S vinda do Mubisys entra sempre como Externa
+  // Respeita o tipo calculado pelo backend (logística "Cliente retira" → interno),
+  // igual ao sync automático — antes a importação manual forçava tudo como externo.
+  const os = novaOS(remoto.tipo === 'interno' ? 'interno' : 'externo');
   ['numero', 'servico', 'vendedor', 'dataEntrada', 'previsaoEntrega', 'cliente', 'contato', 'whatsapp', 'cnpjCpf', 'endereco']
     .forEach(k => { if (remoto[k]) os[k] = remoto[k]; });
   if (remoto.instalacao) os.instalacao = Object.assign(os.instalacao, remoto.instalacao);
   if (Array.isArray(remoto.itens) && remoto.itens.length) os.itens = remoto.itens;
-  if (!os.instalacao.periodo) os.instalacao.periodo = 'Manhã';
+  // Período fica em branco até o PCP agendar de verdade (default "Manhã" criava
+  // um agendamento matinal fictício para pedidos sem hora de entrega).
   os.origemMubisys = true;
   return os;
 }
@@ -3258,7 +3376,7 @@ function abrirInstrucoes() {
       <h2>As 2 únicas travas</h2>
       <ul>
         <li><strong>🔒 Saída / liberar carro:</strong> só após <em>Confirmação = Confirmado</em> (POP EXI‑002).</li>
-        <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + Instalação OK + conferido por + ≥1 foto de check‑in (+ problema, se retrabalho).</li>
+        <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + conferências do embarque + saída registrada + Instalação OK + ≥1 foto de saída (+ problema, se retrabalho).</li>
       </ul>
       <p>Todo o resto é guia — nenhum campo trava por ordem. Preencha na ordem que quiser; a barra de <strong>% preenchida</strong> no topo da ficha mostra o quanto falta.</p>
 
@@ -3267,7 +3385,7 @@ function abrirInstrucoes() {
         <li><strong>PCP:</strong> cria/importa a O.S, define itens, clica <em>"✓ Liberar para instalação"</em>.</li>
         <li><strong>Agendamento:</strong> data + período (obrigatório) + equipe → confirma com o cliente.</li>
         <li><strong>Embarque:</strong> confere embarque/produtos/ferramentas e registra o <strong>KM de saída</strong>.</li>
-        <li><strong>Execução:</strong> libera o carro (após confirmar), tira fotos de check‑in.</li>
+        <li><strong>Execução:</strong> libera o carro (após confirmar), tira fotos de saída.</li>
         <li><strong>Check‑out:</strong> registra situação, <strong>KM de retorno</strong> e finaliza. A O.S vai para <em>Finalizados</em>.</li>
       </ol>
 
@@ -3594,7 +3712,7 @@ function relatorioServicosDia(dataISO) {
 // Uma O.S com 2 pessoas na equipe conta +1 para cada uma.
 function produtividadeMes(mesISO) {
   if (!mesISO) return [];
-  const fins = STORE.getAllOS().filter(o => o.finalizadaEm && String(o.finalizadaEm).slice(0, 7) === mesISO);
+  const fins = STORE.getAllOS().filter(o => o.finalizadaEm && mesLocalISO(o.finalizadaEm) === mesISO);
   const mapa = {};
   fins.forEach(os => {
     const eq = (os.equipe || []);
@@ -3815,7 +3933,10 @@ function parseItensPDF(texto) {
         medidas: `${medida[1]}x${medida[2]}`,
         qtde: qm ? qm[1] : '1',
         valorUnit: String(valorUnit),
-        subtotal, pronto: false
+        subtotal, pronto: false, reprovado: false, motivoReprovado: '',
+        // O parse do PDF é heurístico e erra às vezes — deixa editável para
+        // o PCP poder corrigir (o lock readonly fica só para itens do ERP).
+        manual: true
       });
       descBuf = [];
     } else {
@@ -3835,7 +3956,6 @@ function importarPDF() {
       toast('Lendo PDF…');
       const { texto, itensPos } = await lerPDF(file);
       const os = parsePDF(texto, itensPos);
-      if (!os.instalacao.periodo) os.instalacao.periodo = 'Manhã';
       openModal(os);
       toast('O.S importada — confira os campos', 'success');
     } catch (e) {
@@ -3857,7 +3977,14 @@ function importarItensPDF(draft) {
       const { texto } = await lerPDF(file);
       const itens = parseItensPDF(texto);
       if (!itens.length) { toast('Nenhum item reconhecido', 'warn'); return; }
-      draft.itens = (draft.itens || []).concat(itens);
+      // Importar 2x o mesmo PDF duplicava a tabela: se já há itens, pergunta
+      // se substitui; e renumera a partir do total para não repetir números.
+      let atuais = draft.itens || [];
+      if (atuais.length && confirm(`Esta O.S já tem ${atuais.length} item(ns). Substituir pelos ${itens.length} do PDF?\n(Cancelar = adicionar ao final)`)) {
+        atuais = [];
+      }
+      itens.forEach((it, k) => { it.item = String(atuais.length + k + 1); });
+      draft.itens = atuais.concat(itens);
       saveDraft(); reRenderModalKeepOpen();
       toast(`${itens.length} item(ns) importado(s)`, 'success');
     } catch (e) {

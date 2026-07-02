@@ -1,19 +1,26 @@
 // sw.js — Service worker: deixa o app abrir offline (casca/shell em cache).
 // Os DADOS continuam sincronizando pela fila do store.js; aqui só cuidamos
 // dos arquivos estáticos para o app carregar sem internet.
-const CACHE = 'impresilk-shell-v38';
+const CACHE = 'impresilk-shell-v39';
 const SHELL = [
   './', 'index.html', 'equipe.html', 'styles.css',
   'config.js', 'logo.js', 'frases.js', 'store.js', 'pops.js', 'app.js', 'equipe.js',
   'manifest.json', 'icon.svg',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
 ];
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
     const c = await caches.open(CACHE);
-    // allSettled: se um recurso (ex.: CDN) falhar, não quebra a instalação.
-    await Promise.allSettled(SHELL.map(u => c.add(u)));
+    // Assets locais (core): addAll — se algum falhar, o install aborta e o
+    // cache da versão anterior (íntegro) continua valendo. Antes, o allSettled
+    // aceitava um shell incompleto e o activate apagava o cache bom.
+    // CDN: allSettled — falha de rede externa não bloqueia a instalação.
+    const core = SHELL.filter(u => !u.startsWith('http'));
+    const cdn  = SHELL.filter(u => u.startsWith('http'));
+    await c.addAll(core);
+    await Promise.allSettled(cdn.map(u => c.add(u)));
     self.skipWaiting();
   })());
 });
