@@ -9,11 +9,15 @@
 //
 // A chamada do próprio app é protegida pelo mesmo TOKEN já usado em os.js.
 
-const { getStore } = require('@netlify/blobs');
+const { getStore, connectLambda } = require('@netlify/blobs');
 
 const DEFAULT_BASE = 'https://api.mubisys.com/api';
 
+// Contexto do Blobs vem do runtime (connectLambda no handler). O caminho manual
+// via BLOBS_SITE_ID/BLOBS_TOKEN fica só de fallback — o token pessoal expira.
+let _blobsConectado = false;
 function blobStore(name) {
+  if (_blobsConectado) return getStore(name);
   const siteID = process.env.BLOBS_SITE_ID;
   const token  = process.env.BLOBS_TOKEN;
   if (siteID && token) return getStore({ name, siteID, token });
@@ -34,6 +38,9 @@ async function getCreds() {
 }
 
 exports.handler = async (event) => {
+  // Conecta o contexto do Blobs que o runtime envia no evento (Lambda v1).
+  try { connectLambda(event); _blobsConectado = true; } catch { _blobsConectado = false; }
+
   if (event.httpMethod !== 'POST') return resp({ error: 'Method not allowed' }, 405);
 
   let body;

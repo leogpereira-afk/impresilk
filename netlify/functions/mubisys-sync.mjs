@@ -7,16 +7,11 @@
 // aqui, montar a O.S completa (esqueleto igual ao novaOS() do app) e gravar
 // as que ainda não existem (comparando pelo número).
 
-const { getStore } = require('@netlify/blobs');
+// Functions 2.0 (ESM): o runtime injeta o contexto do Netlify Blobs sozinho —
+// sem depender do BLOBS_TOKEN manual, que expira (derrubou o sync em 30/06/2026).
+import { getStore } from '@netlify/blobs';
 
-function blobStore(name) {
-  const siteID = process.env.BLOBS_SITE_ID;
-  const token  = process.env.BLOBS_TOKEN;
-  if (siteID && token) return getStore({ name, siteID, token });
-  return getStore(name);
-}
-
-exports.handler = async () => {
+export default async () => {
   try {
     if (!process.env.TOKEN) return resp({ error: 'TOKEN não configurado' }, 500);
 
@@ -36,7 +31,7 @@ exports.handler = async () => {
     const remotas = Array.isArray(data.os) ? data.os : [];
 
     // 2) Coleta os números já existentes no store "os"
-    const store = blobStore('os');
+    const store = getStore('os');
     const keys = await allKeys(store);
     const atuais = await Promise.all(
       keys.map(k => store.get(k, { type: 'json' }).catch(() => null))
@@ -129,9 +124,5 @@ async function allKeys(store) {
 }
 
 function resp(data, status = 200) {
-  return {
-    statusCode: status,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  };
+  return Response.json(data, { status });
 }
