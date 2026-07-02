@@ -2,12 +2,15 @@
 // Backend: Netlify Blobs (stores: "os", "fotos", "cfg")
 // Autenticação leve: header x-token ou corpo.token === process.env.TOKEN
 
-const { getStore } = require('@netlify/blobs');
+const { getStore, connectLambda } = require('@netlify/blobs');
 
-// Abre um store do Netlify Blobs. Em produção o Netlify normalmente injeta o
-// contexto sozinho; se isso falhar, usamos a configuração manual com as
-// variáveis de ambiente BLOBS_SITE_ID e BLOBS_TOKEN.
+// Abre um store do Netlify Blobs usando o contexto injetado pelo runtime
+// (via connectLambda no início do handler). O caminho manual com
+// BLOBS_SITE_ID/BLOBS_TOKEN fica só como fallback — o token pessoal expira
+// (foi o que derrubou a sincronização em 30/06/2026).
+let _blobsConectado = false;
 function blobStore(name) {
+  if (_blobsConectado) return getStore(name);
   const siteID = process.env.BLOBS_SITE_ID;
   const token  = process.env.BLOBS_TOKEN;
   if (siteID && token) return getStore({ name, siteID, token });
@@ -15,6 +18,9 @@ function blobStore(name) {
 }
 
 exports.handler = async (event, context) => {
+  // Conecta o contexto do Blobs que o runtime envia no evento (Lambda v1).
+  try { connectLambda(event); _blobsConectado = true; } catch { _blobsConectado = false; }
+
   if (event.httpMethod !== 'POST') {
     return resp({ error: 'Method not allowed' }, 405);
   }
