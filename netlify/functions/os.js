@@ -40,6 +40,28 @@ exports.handler = async (event, context) => {
       case 'ping':
         return resp({ ok: true });
 
+      // ── diag: testa os dois caminhos de autenticação do Netlify Blobs ──────
+      // (contexto automático do runtime × manual via BLOBS_SITE_ID/BLOBS_TOKEN)
+      // Não expõe segredos — só diz qual caminho funciona.
+      case 'diag': {
+        const out = { env: {
+          siteId: !!process.env.BLOBS_SITE_ID,
+          token: !!process.env.BLOBS_TOKEN,
+          tokenLen: (process.env.BLOBS_TOKEN || '').length
+        } };
+        try {
+          const s = getStore('os');
+          const r = await s.list();
+          out.auto = 'ok (' + ((r && r.blobs) ? r.blobs.length : '?') + ' chaves)';
+        } catch (e) { out.auto = 'ERR: ' + ((e && (e.message || e.name)) || e); }
+        try {
+          const s = getStore({ name: 'os', siteID: process.env.BLOBS_SITE_ID, token: process.env.BLOBS_TOKEN });
+          const r = await s.list();
+          out.manual = 'ok (' + ((r && r.blobs) ? r.blobs.length : '?') + ' chaves)';
+        } catch (e) { out.manual = 'ERR: ' + ((e && (e.message || e.name)) || e); }
+        return resp(out);
+      }
+
       // ── list: retorna as O.S em páginas ─────────────────────────────────────
       // Paginado para a resposta nunca passar do limite de ~6 MB das Netlify
       // Functions. O cliente percorre as páginas usando "offset"/"nextOffset".
