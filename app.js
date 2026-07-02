@@ -502,7 +502,7 @@ function renderMontagemNomes() {
   const box = $('#montagem-nomes');
   const pintar = lista => {
     if (!lista.length) {
-      box.innerHTML = '<p class="text-muted">Nenhum instalador cadastrado. Peça à gestão para cadastrar em Painel de Controle.</p>';
+      box.innerHTML = '<p class="text-muted">Nenhum instalador cadastrado. Peça à gestão para cadastrar em ⚙️ Configurações.</p>';
       return;
     }
     box.innerHTML = lista.map(n =>
@@ -1325,7 +1325,7 @@ function abrirPicker(field) {
       <input type="checkbox" value="${esc(r.nome)}" ${atuais.includes(r.nome) ? 'checked' : ''}>
       <span>${esc(r.nome)}</span>
       ${r.n > 0 ? `<span class="picker-n">${r.n}×</span>` : ''}
-    </label>`).join('') || '<p class="text-muted">Cadastre opções no Painel de Controle.</p>';
+    </label>`).join('') || '<p class="text-muted">Cadastre opções em ⚙️ Configurações.</p>';
   $('#picker-novo').value = '';
   $('#picker-overlay').classList.remove('hidden');
 }
@@ -3029,7 +3029,7 @@ function abrirEspelhos() {
        <div class="espelhos-pessoas">
          ${instaladores.map(n => `<a class="btn-ghost btn-sm" href="equipe.html#i=${encodeURIComponent(n)}" target="_blank" rel="noopener">👤 ${esc(n)}</a>`).join('')}
        </div>`
-    : '<p class="text-muted mt-12" style="font-size:.8rem">Cadastre instaladores no Painel de Controle para abrir a visão individual.</p>';
+    : '<p class="text-muted mt-12" style="font-size:.8rem">Cadastre instaladores em ⚙️ Configurações para abrir a visão individual.</p>';
   modal.innerHTML = `
     <div class="modal-header">
       <div style="flex:1"><div class="modal-title">🪞 Espelhos</div></div>
@@ -3065,43 +3065,45 @@ function renderControle() {
   const cfg = STORE.getCFG();
   const ro = !podeCadastrar();
 
+  // Listas simples em chips compactos, lado a lado num grid (antes cada nome
+  // ocupava uma linha inteira da tela e a aba passava de 2.800px de altura).
   const listasHTML = CFG_LISTAS.map(({ key, label }) => `
     <div class="cfg-section">
       <h3>${label}</h3>
-      <div class="cfg-list">
+      <div class="cfg-list cfg-list-chips">
         ${(cfg[key] || []).map(v => `
-          <div class="cfg-item">
-            <span>${esc(v)}</span>
-            ${ro ? '' : `<button class="btn-xs btn-danger" data-cfg-del="${key}|${esc(v)}">🗑</button>`}
-          </div>`).join('') || '<p class="text-muted">Vazio</p>'}
-        ${ro ? '' : `<div class="flex gap-6 mt-8">
-          <input class="w-100" data-cfg-input="${key}" placeholder="Adicionar ${esc(label.toLowerCase())}…">
-          <button class="btn-primary btn-sm" data-cfg-add="${key}">+</button>
-        </div>`}
+          <span class="cfg-chip">${esc(v)}${ro ? '' : `<button data-cfg-del="${key}|${esc(v)}" title="Remover">×</button>`}</span>`).join('') || '<p class="text-muted">Vazio</p>'}
       </div>
+      ${ro ? '' : `<div class="flex gap-6 mt-8">
+        <input class="w-100" data-cfg-input="${key}" placeholder="Adicionar ${esc(label.toLowerCase())}…">
+        <button class="btn-primary btn-sm" data-cfg-add="${key}">+</button>
+      </div>`}
     </div>`).join('');
 
-  const usuariosHTML = `
+  // ── Usuários — SOMENTE admin (papel com "Cadastrar" edita listas, não logins;
+  // senão qualquer um com o flag criaria um admin novo ou apagaria os existentes).
+  const isAdmin = STATE.user.papel === 'admin';
+  const usuariosHTML = isAdmin ? `
     <div class="cfg-section">
-      <h3>Usuários</h3>
+      <h3>👤 Usuários</h3>
       <div class="cfg-list">
         ${(cfg.usuarios || []).map((u, i) => `
           <div class="cfg-item">
             <span>${esc(u.nome)} <span class="text-muted">(${esc(u.papel)})</span></span>
-            ${ro ? '' : `<button class="btn-xs btn-danger" data-user-del="${i}">🗑</button>`}
+            <button class="btn-xs btn-danger" data-user-del="${i}">🗑</button>
           </div>`).join('')}
-        ${ro ? '' : `<div class="field-row3 mt-8">
+        <div class="field-row3 mt-8">
           <input data-user-nome placeholder="Nome">
           <select data-user-papel>
             <option value="pcp">PCP</option><option value="montagem">Montagem</option>
             <option value="operacao">Operação</option><option value="comercial">Comercial</option>
             <option value="admin">Admin</option>
           </select>
-          <input data-user-senha placeholder="Senha (opcional)">
+          <input type="password" data-user-senha placeholder="Senha (opcional)" autocomplete="new-password">
         </div>
-        <button class="btn-primary btn-sm mt-8" data-user-add>+ Adicionar usuário</button>`}
+        <button class="btn-primary btn-sm mt-8" data-user-add>+ Adicionar usuário</button>
       </div>
-    </div>`;
+    </div>` : '';
 
   // ── Contatos / Funcionários (envio rápido via WhatsApp) ──────────────────
   const contatos = cfg.funcionarios || [];
@@ -3128,7 +3130,6 @@ function renderControle() {
     </div>`;
 
   // ── Níveis de acesso configuráveis (somente admin) ───────────────────────
-  const isAdmin = STATE.user.papel === 'admin';
   const PERM = getPermissoes();
   const PAPEIS = ['pcp', 'montagem', 'operacao', 'comercial'];
   const niveisHTML = isAdmin ? `
@@ -3172,7 +3173,13 @@ function renderControle() {
       </div>
     </div>` : '';
 
-  el.innerHTML = (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') + listasHTML + contatosHTML + usuariosHTML + niveisHTML + mubisysHTML;
+  // Ordem: administração no topo (Usuários, Níveis, Integração), depois
+  // contatos e por fim as listas do dia a dia em grid compacto.
+  el.innerHTML =
+    (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') +
+    usuariosHTML + niveisHTML + mubisysHTML + contatosHTML +
+    `<h3 class="cfg-group-tit">📋 Listas — equipe, recursos e opções</h3>
+     <div class="cfg-grid">${listasHTML}</div>`;
 
   // Handlers da Integração Mubisys (admin)
   if (isAdmin) wireMubisys(el);
@@ -3210,6 +3217,7 @@ function renderControle() {
     });
     const resetBtn = $('[data-nivel-reset]', el);
     if (resetBtn) resetBtn.onclick = () => {
+      if (!confirm('Restaurar TODOS os níveis de acesso ao padrão? As permissões personalizadas serão perdidas.')) return;
       const c = STORE.getCFG(); c.niveis = null; STORE.saveCFG(c);
       renderControle(); toast('Níveis restaurados ao padrão', 'success');
     };
@@ -3220,6 +3228,8 @@ function renderControle() {
   // Handlers de contatos
   $$('[data-cont-del]', el).forEach(b => b.onclick = () => {
     const c = STORE.getCFG();
+    const ct = (c.funcionarios || [])[+b.dataset.contDel];
+    if (ct && !confirm(`Excluir o contato "${ct.nome}"?`)) return;
     (c.funcionarios || []).splice(+b.dataset.contDel, 1);
     STORE.saveCFG(c); renderControle();
   });
@@ -3240,6 +3250,10 @@ function renderControle() {
     if (!c[key]) c[key] = [];
     if (!c[key].includes(val.trim())) c[key].push(val.trim());
     STORE.saveCFG(c); renderControle(); toast('Adicionado', 'success');
+    // Devolve o foco ao mesmo campo: cadastrar vários em sequência sem
+    // precisar clicar de novo a cada item (o re-render destrói o input).
+    const inp = $(`[data-cfg-input="${key}"]`);
+    if (inp) inp.focus();
   }
   $$('[data-cfg-add]', el).forEach(b => b.onclick = () => {
     const key = b.dataset.cfgAdd;
@@ -3250,12 +3264,22 @@ function renderControle() {
   });
   $$('[data-cfg-del]', el).forEach(b => b.onclick = () => {
     const [key, val] = b.dataset.cfgDel.split('|');
+    const lst = CFG_LISTAS.find(l => l.key === key);
+    if (!confirm(`Remover "${val}" de ${lst ? lst.label : key}?`)) return;
     const c = STORE.getCFG();
     c[key] = (c[key] || []).filter(x => x !== val);
     STORE.saveCFG(c); renderControle();
   });
   $$('[data-user-del]', el).forEach(b => b.onclick = () => {
     const c = STORE.getCFG();
+    const u = (c.usuarios || [])[+b.dataset.userDel];
+    if (!u) return;
+    // Sem o último admin, o login "Admin" volta para a senha padrão fraca.
+    if (u.papel === 'admin' && c.usuarios.filter(x => x.papel === 'admin').length <= 1) {
+      toast('Não dá para excluir o último admin.', 'error');
+      return;
+    }
+    if (!confirm(`Excluir o usuário "${u.nome}" (${u.papel})?`)) return;
     c.usuarios.splice(+b.dataset.userDel, 1);
     STORE.saveCFG(c); renderControle();
   });
@@ -3395,14 +3419,14 @@ function abrirInstrucoes() {
         <li><strong>PCP:</strong> todas as O.S ordenadas por data de entrega, com % preenchido e responsável.</li>
         <li><strong>Instalação:</strong> quadro <em>Kanban</em> por dia (horário, cliente, O.S). Botão 🖨 gera o espelho do dia.</li>
         <li><strong>Execução / Retrabalho / Finalizados:</strong> acompanhamento na rua, pendências e arquivo.</li>
-        <li><strong>Painel de Controle</strong> (admin): listas, usuários, contatos e níveis de acesso.</li>
+        <li><strong>⚙️ Configurações</strong> (admin): listas, usuários, contatos e níveis de acesso.</li>
       </ul>
 
       <h2>Importar do PDF do ERP</h2>
       <p>Botão <code>📄 Importar PDF</code> no topo cria uma O.S já preenchida (puxa a data de "Entrega"). Dentro de uma O.S aberta dá para importar <em>só os itens</em>.</p>
 
       <h2>Espelhos &amp; WhatsApp</h2>
-      <p>O botão <strong>🪞 Espelhos</strong> (admin) abre as visões somente‑leitura para instaladores e comercial. Na ficha e no PDF do dia há envio rápido via WhatsApp para contatos cadastrados (nome · departamento · número) no Painel de Controle.</p>
+      <p>O botão <strong>🪞 Espelhos</strong> (admin) abre as visões somente‑leitura para instaladores e comercial. Na ficha e no PDF do dia há envio rápido via WhatsApp para contatos cadastrados (nome · departamento · número) em ⚙️ Configurações.</p>
 
       <h2>Backup</h2>
       <p>No <em>Painel</em> há <code>⬇ Backup</code> (baixa um .json) e <code>⬆ Restaurar</code>. A nuvem (Netlify Blobs) é a fonte da verdade; o backup é rede de segurança extra.</p>

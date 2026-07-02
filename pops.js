@@ -1164,7 +1164,7 @@ function abrirEnvioPOP(pop) {
         <button class="modal-close" id="pop-envio-x">×</button>
       </div>
       <p class="pop-envio-sub">${popEsc(pop.titulo)}</p>
-      ${opts ? `<div class="pop-contatos">${opts}</div>` : '<p class="text-muted">Nenhum contato cadastrado no Painel de Controle.</p>'}
+      ${opts ? `<div class="pop-contatos">${opts}</div>` : '<p class="text-muted">Nenhum contato cadastrado em ⚙️ Configurações.</p>'}
       <div class="pop-envio-manual">
         <input id="pop-num-manual" type="tel" placeholder="ou digite o número (DDD + número)">
         <button class="btn-primary btn-sm" id="pop-env-manual">Enviar via WhatsApp</button>
@@ -1308,7 +1308,7 @@ function abrirEnvioPOPparaOS(pop, os) {
         <button class="modal-close" id="pop-envio-x">×</button>
       </div>
       <p class="pop-envio-sub">${popEsc(pop.titulo)}</p>
-      ${opts ? `<div class="pop-contatos">${opts}</div>` : '<p class="text-muted">Nenhum contato cadastrado no Painel de Controle.</p>'}
+      ${opts ? `<div class="pop-contatos">${opts}</div>` : '<p class="text-muted">Nenhum contato cadastrado em ⚙️ Configurações.</p>'}
       <div class="pop-envio-manual">
         <input id="pop-num-manual" type="tel" placeholder="ou digite o número (DDD + número)">
         <button class="btn-primary btn-sm" id="pop-env-manual">Enviar via WhatsApp</button>
