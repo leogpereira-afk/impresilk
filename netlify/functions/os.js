@@ -108,6 +108,21 @@ exports.handler = async (event, context) => {
         const { os } = body;
         if (!os || !os.id) return resp({ error: 'O.S sem id' }, 400);
 
+        // Blindagem anti-duplicata: app desatualizado importando do Mubisys com
+        // id aleatório, quando o pedido já existe na chave canônica (mub-<nº>).
+        // Se o que chegou é um esqueleto intocado, devolve a ficha canônica em
+        // vez de criar cópia (o aparelho converge no próximo pull).
+        if (os.origemMubisys && os.numero) {
+          const canonicalId = 'mub-' + String(os.numero).trim();
+          const semTrabalho = (os.atualizadoPor || 'Mubisys (auto)') === 'Mubisys (auto)'
+            && !os.liberadoPCP && !os.finalizadaEm
+            && !(os.fotosCheckinIds || []).length && !(os.fotosRetornoIds || []).length;
+          if (os.id !== canonicalId && semTrabalho) {
+            const canonico = await store.get(canonicalId, { type: 'json' }).catch(() => null);
+            if (canonico) return resp({ ok: true, os: canonico, duplicataEvitada: true });
+          }
+        }
+
         const existing = await store.get(os.id, { type: 'json' }).catch(() => null);
         if (existing && existing.atualizadoEm && os.atualizadoEm) {
           const tsServer = new Date(existing.atualizadoEm).getTime();
@@ -170,6 +185,14 @@ exports.handler = async (event, context) => {
         const id = fileId || ('foto_' + Date.now() + '_' + Math.random().toString(36).slice(2));
         await store.setJSON(id, { base64, mime: mime || 'image/jpeg' });
         return resp({ fileId: id });
+      }
+
+      // ── saude: visão geral p/ o painel "Saúde da conexão" do app ───────────
+      case 'saude': {
+        const store = blobStore('os');
+        const keys = await allKeys(store);
+        const st = await blobStore('integracoes').get('sync_status', { type: 'json' }).catch(() => null);
+        return resp({ ok: true, totalOS: keys.length, ultimaImportacao: st });
       }
 
       // ── deletePhoto: remove foto individual (excluída/substituída no app) ──

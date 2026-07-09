@@ -56,10 +56,55 @@ export default async () => {
     }
     if (semNumero) console.warn(`[mubisys-sync] ${semNumero} O.S sem número foram ignoradas.`);
 
+    // 4) Faxina anti-duplicata: se alguma cópia repetida do mesmo número entrou
+    // por QUALQUER caminho (execução paralela, app desatualizado, fila offline),
+    // remove os esqueletos intocados — NUNCA apaga ficha com trabalho humano.
+    const intocada = o => (o.atualizadoPor || 'Mubisys (auto)') === 'Mubisys (auto)'
+      && (o.criadoPor || '') === 'Mubisys (auto)'
+      && !o.liberadoPCP && !o.finalizadaEm && !o.carroLiberado
+      && !(o.fotosCheckinIds || []).length && !(o.fotosRetornoIds || []).length && !o.layoutFotoId
+      && !(o.equipe || []).length && !o.confirmacao && !o.horaSaida
+      && !(o.itens || []).some(i => i && (i.pronto || i.reprovado));
+    const porNumero = new Map();
+    for (const o of atuais.filter(Boolean)) {
+      const n = String(o.numero || '').trim();
+      if (!n) continue;
+      if (!porNumero.has(n)) porNumero.set(n, []);
+      porNumero.get(n).push(o);
+    }
+    let duplicatasRemovidas = 0;
+    for (const [n, copias] of porNumero) {
+      if (copias.length < 2) continue;
+      const temTocada = copias.some(o => !intocada(o));
+      // Se há cópia trabalhada, todos os esqueletos saem; se são todos
+      // esqueletos, mantém o de id canônico (mub-<numero>) ou o mais antigo.
+      const manter = temTocada ? null
+        : (copias.find(o => o.id === 'mub-' + n)
+           || copias.slice().sort((a, b) => String(a.criadoEm || '').localeCompare(String(b.criadoEm || '')))[0]);
+      for (const o of copias) {
+        if (!intocada(o)) continue;
+        if (manter && o.id === manter.id) continue;
+        await store.delete(o.id).catch(() => {});
+        duplicatasRemovidas++;
+      }
+    }
+    if (duplicatasRemovidas) console.log(`[mubisys-sync] faxina: ${duplicatasRemovidas} duplicata(s) removida(s).`);
+
+    // 5) Batimento cardíaco: registra a execução para o painel de saúde do app.
+    await getStore('integracoes').setJSON('sync_status', {
+      em: new Date().toISOString(), ok: true, novas, total: remotas.length, duplicatasRemovidas
+    }).catch(() => {});
+
     console.log(`[mubisys-sync] ${novas} O.S nova(s) de ${remotas.length} encontradas.`);
-    return resp({ ok: true, novas, total: remotas.length });
+    return resp({ ok: true, novas, total: remotas.length, duplicatasRemovidas });
   } catch (e) {
     console.error('[mubisys-sync] erro:', e);
+    // Registra a falha para o painel de saúde (se o Blobs estiver de pé).
+    try {
+      await getStore('integracoes').setJSON('sync_status', {
+        em: new Date().toISOString(), ok: false, erro: String((e && e.message) || e)
+      });
+    } catch {}
     return resp({ error: e.message || 'Erro interno' }, 500);
   }
 };

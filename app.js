@@ -3083,6 +3083,14 @@ function renderControle() {
   // ── Usuários — SOMENTE admin (papel com "Cadastrar" edita listas, não logins;
   // senão qualquer um com o flag criaria um admin novo ou apagaria os existentes).
   const isAdmin = STATE.user.papel === 'admin';
+
+  // ── Saúde da conexão (admin): nuvem, importação automática e fila local ──
+  const saudeHTML = isAdmin ? `
+    <div class="cfg-section">
+      <h3>🩺 Saúde da conexão</h3>
+      <div id="saude-box" class="saude-box text-muted">Verificando servidor…</div>
+      <button class="btn-ghost btn-xs mt-8" id="saude-refresh">↻ Verificar de novo</button>
+    </div>` : '';
   const usuariosHTML = isAdmin ? `
     <div class="cfg-section">
       <h3>👤 Usuários</h3>
@@ -3177,12 +3185,12 @@ function renderControle() {
   // contatos e por fim as listas do dia a dia em grid compacto.
   el.innerHTML =
     (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') +
-    usuariosHTML + niveisHTML + mubisysHTML + contatosHTML +
+    saudeHTML + usuariosHTML + niveisHTML + mubisysHTML + contatosHTML +
     `<h3 class="cfg-group-tit">📋 Listas — equipe, recursos e opções</h3>
      <div class="cfg-grid">${listasHTML}</div>`;
 
-  // Handlers da Integração Mubisys (admin)
-  if (isAdmin) wireMubisys(el);
+  // Handlers da Integração Mubisys e do painel de saúde (admin)
+  if (isAdmin) { wireMubisys(el); wireSaude(el); }
 
   // Handlers de níveis (admin) — funcionam mesmo quando ro é false
   if (isAdmin) {
@@ -3292,6 +3300,47 @@ function renderControle() {
     c.usuarios.push({ nome, papel: $('[data-user-papel]', el).value, senha: $('[data-user-senha]', el).value });
     STORE.saveCFG(c); renderControle(); toast('Usuário adicionado', 'success');
   };
+}
+
+/* ── Saúde da conexão: nuvem OK? importação automática rodando? fila local? ─ */
+function wireSaude(el) {
+  const box = $('#saude-box', el);
+  if (!box) return;
+  const pintar = () => {
+    const fila = STORE.getQueue().length;
+    const filaTxt = fila
+      ? `⏳ <strong>${fila}</strong> alteração(ões) deste aparelho aguardando envio`
+      : '✅ Nada pendente neste aparelho';
+    box.innerHTML = 'Verificando servidor…';
+    STORE.api({ action: 'saude' }).then(s => {
+      if (!s || s.error) {
+        box.innerHTML = `❌ <strong>Servidor com problema:</strong> ${esc((s && s.error) || 'sem resposta')}<br>${filaTxt}`;
+        return;
+      }
+      const ult = s.ultimaImportacao;
+      let impIcone = '⚠️', impTxt = 'ainda sem registro (aguarde a próxima hora cheia)';
+      if (ult && ult.em) {
+        const horas = (Date.now() - new Date(ult.em).getTime()) / 3600000;
+        const quando = new Date(ult.em).toLocaleString('pt-BR');
+        if (ult.ok === false) { impIcone = '❌'; impTxt = `${quando} — ERRO: ${esc(ult.erro || 'desconhecido')}`; }
+        else {
+          impIcone = horas < 2 ? '✅' : '⚠️';
+          impTxt = `${quando} — ${ult.novas || 0} nova(s)` +
+            (ult.duplicatasRemovidas ? `, ${ult.duplicatasRemovidas} duplicata(s) limpas` : '') +
+            (horas >= 2 ? ` — <strong>há mais de ${Math.floor(horas)}h sem rodar!</strong>` : '');
+        }
+      }
+      box.innerHTML = `
+        ✅ <strong>Nuvem OK</strong> — ${s.totalOS} O.S guardadas no servidor<br>
+        ${impIcone} Importação automática do Mubisys: ${impTxt}<br>
+        ${filaTxt}`;
+    }).catch(() => {
+      box.innerHTML = `❌ <strong>Sem conexão com o servidor.</strong><br>${filaTxt}`;
+    });
+  };
+  pintar();
+  const btn = $('#saude-refresh', el);
+  if (btn) btn.onclick = pintar;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
