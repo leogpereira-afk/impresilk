@@ -46,6 +46,10 @@ export default async () => {
       if (!num) { semNumero++; continue; } // sem número não dá pra deduplicar com segurança
       if (existentes.has(num)) continue;
       const os = montarOSImportada(remoto);
+      // Id DETERMINÍSTICO pelo número: o Netlify às vezes dispara execuções
+      // agendadas em paralelo/repetidas — com uuid aleatório cada execução
+      // criava uma cópia da mesma O.S. Com a mesma chave, escrever 2x é inócuo.
+      os.id = 'mub-' + num;
       await store.setJSON(os.id, os);
       existentes.add(num);
       novas++;

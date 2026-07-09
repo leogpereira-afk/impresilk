@@ -3375,6 +3375,10 @@ function montarOSImportada(remoto) {
   // Período fica em branco até o PCP agendar de verdade (default "Manhã" criava
   // um agendamento matinal fictício para pedidos sem hora de entrega).
   os.origemMubisys = true;
+  // Id determinístico pelo número (mesma regra do mubisys-sync): importar o
+  // mesmo pedido 2x — manual + automático em paralelo — cai na MESMA ficha.
+  const num = String(os.numero || '').trim();
+  if (num) os.id = 'mub-' + num;
   return os;
 }
 
