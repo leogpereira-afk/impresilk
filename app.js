@@ -1877,6 +1877,18 @@ function cardTempoHTML(os) {
     }
     tags.push(`<span class="prazo-tag prazo-ok" title="Finalizada em">✅ ${fmtDataBR(os.finalizadaEm)}</span>`);
   } else {
+    // Selo HOJE/AMANHÃ: instalação marcada para hoje é o primeiro filtro
+    // mental do PCP de manhã — merece saltar aos olhos antes de tudo.
+    // Quando o selo aparece, as tags de entrega/agenda somem (repetiriam a
+    // mesma informação três vezes no card).
+    const instData = os.instalacao && os.instalacao.data;
+    let selo = null;
+    if (instData) {
+      const dd = diasEntre(todayISO(), instData);
+      if (dd === 0) { selo = 0; tags.unshift(`<span class="prazo-tag prazo-hoje" title="Instalação marcada para hoje">📌 HOJE${os.instalacao.periodo ? ' · ' + esc(os.instalacao.periodo) : ''}</span>`); }
+      else if (dd === 1) { selo = 1; tags.unshift(`<span class="prazo-tag prazo-amanha" title="Instalação marcada para amanhã">AMANHÃ${os.instalacao.periodo ? ' · ' + esc(os.instalacao.periodo) : ''}</span>`); }
+    }
+
     // Em aberto: dias na empresa
     const naEmpresa = os.dataEntrada ? diasDesde(os.dataEntrada) : null;
     if (naEmpresa != null && naEmpresa >= 0) {
@@ -1889,7 +1901,7 @@ function cardTempoHTML(os) {
       const desde = os.aptoEm ? diasDesde(os.aptoEm) : null;
       const cls = desde != null && desde >= 3 ? 'prazo-urgente' : 'prazo-info';
       tags.push(`<span class="prazo-tag ${cls}" title="Pronto para retirada${os.aptoEm ? ' desde ' + fmtDataBR(os.aptoEm) : ''}">🛍 ${desde != null && desde > 0 ? `aguardando retirada há ${desde}d` : 'aguardando retirada'}</span>`);
-    } else {
+    } else if (selo == null) {
       // Contador de entrega
       const entrega = dataEntregaOS(os);
       const paraEntrega = entrega ? diasEntre(todayISO(), entrega) : null;
@@ -1900,8 +1912,8 @@ function cardTempoHTML(os) {
       }
     }
 
-    // Data agendada (instalação) — só se houver
-    if (os.instalacao && os.instalacao.data) {
+    // Data agendada (instalação) — só se houver e o selo HOJE/AMANHÃ não já disser
+    if (os.instalacao && os.instalacao.data && selo == null) {
       const ag = fmtDataBR(os.instalacao.data) + (os.instalacao.periodo ? ' · ' + os.instalacao.periodo : '');
       tags.push(`<span class="prazo-tag prazo-info" title="Agendada">📅 ${ag}</span>`);
     }
@@ -2156,6 +2168,14 @@ function renderPCP() {
       <label class="pcp-sort-wrap">Ordenar: <select id="pcp-sort">${sorts}</select></label>
       ${podeEditar() ? '<button class="btn-primary btn-sm" id="pcp-nova-ext">+ O.S Externa</button><button class="btn-primary btn-sm" id="pcp-nova-int">+ O.S Interna</button>' : ''}
     </div>
+    <details class="pcp-legenda" ${STATE.legendaAberta ? 'open' : ''}><summary>🎨 Legenda de cores</summary>
+      <div class="leg-linhas">
+        <span><span class="leg-sw" style="background:linear-gradient(90deg,#fffdf5,#fef3c7,#fed7aa,#fca5a5)"></span><strong>Fundo do card</strong> = prazo de entrega: quanto mais quente, mais perto — vermelho = atrasada.</span>
+        <span><span class="leg-sw" style="background:#3b82f6"></span>Borda esquerda azul = 🚚 Externo · <span class="leg-sw" style="background:#db2777"></span>magenta = 🏬 Cliente retira.</span>
+        <span><span class="badge st-agendada">Agendada</span> Badge = etapa do funil · pastel = esperando · <span class="badge st-em_andamento">Em andamento</span> sólido = acontecendo agora.</span>
+        <span><span class="badge" style="background:#fee2e2;color:#b91c1c">⏰ atrasada</span> <span class="badge st-retrabalho">🔴 retrabalho</span> <span class="prazo-tag prazo-hoje">📌 HOJE</span> = atenção imediata.</span>
+      </div>
+    </details>
     <div class="pcp-chips pcp-chips-vista">${vistaBtns}</div>
     <div class="pcp-chips pcp-chips-tipo">${tipoChips}</div>
     ${STATE.pcpVista === '' ? `<div class="pcp-chips">${chips}</div>` : ''}
@@ -2166,6 +2186,9 @@ function renderPCP() {
   const busca = $('#busca-pcp');
   // Busca em tempo real: atualiza só a grade, sem reconstruir o input.
   busca.oninput = () => { STATE.filtroBusca = busca.value; pcpRenderCards(); };
+  // Legenda: lembra aberta/fechada entre re-renders (pull de 30s etc.).
+  const leg = el.querySelector('.pcp-legenda');
+  if (leg) leg.ontoggle = () => { STATE.legendaAberta = leg.open; };
   $('#pcp-sort').onchange = (e) => { STATE.pcpSort = e.target.value; pcpRenderCards(); };
   $$('[data-pcp-vista]', el).forEach(b => {
     b.onclick = () => {
