@@ -245,18 +245,36 @@ const ETAPAS_EXT = ['aguardando_producao', 'apto', 'agendada', 'confirmada', 'em
 const ETAPAS_INT = ['aguardando_producao', 'apto', 'finalizada'];
 function etapasDe(os) { return isInterno(os) ? ETAPAS_INT : ETAPAS_EXT; }
 
+// Cliente retira fala outra língua: "Apto" vira "Pronto p/ retirada" e
+// "Finalizada" vira "Retirado". Só afeta exibição — o status interno é o mesmo.
+const STATUS_LABEL_INT = {
+  aguardando_producao: 'Aguardando produção',
+  apto:                '🛍 Pronto p/ retirada',
+  finalizada:          'Retirado'
+};
+const STEP_DEFS_INT = {
+  aguardando_producao: { curto: 'Produção', icon: '🏭' },
+  apto:                { curto: 'Pronto',   icon: '🛍' },
+  finalizada:          { curto: 'Retirado', icon: '📦' }
+};
+function statusLabelDe(os, st) {
+  if (isInterno(os) && STATUS_LABEL_INT[st]) return STATUS_LABEL_INT[st];
+  return STATUS_LABEL[st] || st;
+}
+
 // Régua visual das etapas. compact = só bolinhas (usado no card).
 function stepperHTML(os, compact) {
   const seq = etapasDe(os);
   const atual = calcStatus(os);
   const idx = seq.indexOf(atual);
   const hist = Array.isArray(os.historico) ? os.historico : [];
+  const interno = isInterno(os);
   const passos = seq.map((s, i) => {
     const cls = i < idx ? 'done' : (i === idx ? 'cur' : 'todo');
-    const d = STEP_DEFS[s];
+    const d = (interno && STEP_DEFS_INT[s]) || STEP_DEFS[s];
     const h = hist.find(x => x.etapa === s);
     const quando = h && h.em ? ` — ${new Date(h.em).toLocaleDateString('pt-BR')}${h.por ? ' · ' + h.por : ''}` : '';
-    return `<span class="step ${cls}" title="${esc(STATUS_LABEL[s])}${quando}">
+    return `<span class="step ${cls}" title="${esc(statusLabelDe(os, s))}${quando}">
       <span class="step-dot">${i < idx ? '✓' : d.icon}</span>
       ${compact ? '' : `<span class="step-lbl">${esc(d.curto)}</span>`}
     </span>`;
@@ -272,7 +290,7 @@ function proximoPasso(os) {
   if (isInterno(os)) {
     if (!os.liberadoPCP)            return { label: 'PCP precisa liberar', cta: '✓ Liberar PCP', acao: 'pcp' };
     if (!(os.itens || []).length)  return { label: 'Adicionar itens',      cta: '+ Itens',       acao: 'itens' };
-    return { label: 'Pronto p/ finalizar', cta: '🏁 Finalizar', acao: 'finalizar' };
+    return { label: 'Aguardando o cliente retirar', cta: '📦 Cliente retirou', acao: 'finalizar' };
   }
   const inst = os.instalacao || {};
   if (!os.liberadoPCP)                                              return { label: 'PCP precisa liberar',     cta: '✓ Liberar PCP', acao: 'pcp' };
@@ -918,7 +936,7 @@ function renderModal() {
     ? `${blocoPCP(os, ro, done.pcp)}
        ${blocoItens(os, ro, done.itens)}
        ${finalizada ? '' : `<div class="fs-body interno-finalizar edit-only" style="padding:14px 16px">
-         <button class="btn-success" id="btn-finalizar-interno" style="width:100%">🏁 Finalizar pedido interno</button>
+         <button class="btn-success" id="btn-finalizar-interno" style="width:100%">📦 Cliente retirou — finalizar</button>
        </div>`}`
     : `${blocoPCP(os, ro, done.pcp)}
        ${blocoItens(os, ro, done.itens)}
@@ -931,7 +949,7 @@ function renderModal() {
         <div class="modal-title">O.S ${esc(os.numero || '(nova)')} <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏬 Cliente retira' : '🚚 Externo'}</span></div>
         <div class="modal-meta">Atualizado por ${esc(os.atualizadoPor || '—')}${os.atualizadoEm ? ' · ' + new Date(os.atualizadoEm).toLocaleString('pt-BR') : ''}</div>
       </div>
-      <span class="modal-status badge st-${st}">${STATUS_LABEL[st]}</span>
+      <span class="modal-status badge st-${st}">${statusLabelDe(os, st)}</span>
       <button class="modal-close" id="modal-close-btn">×</button>
     </div>
 
@@ -1607,7 +1625,7 @@ function bindModalEvents(os, ro) {
     }
     aplicarFinalizacao(_modalDraft);
     saveDraft(); reRenderModalKeepOpen();
-    toast('Pedido interno finalizado 🏁', 'success');
+    toast('Retirada registrada 📦', 'success');
   };
   // Reabrir O.S finalizada (interno e externo): limpa a finalização e deixa o
   // status voltar sozinho para a etapa anterior (calcStatus recalcula).
@@ -1786,8 +1804,12 @@ function osCardHTML(os) {
   const etapasCard = interno
     ? [['pcp', '📋 PCP'], ['itens', '📦 Itens']]
     : [['pcp', '📋 PCP'], ['itens', '📦 Itens'], ['agenda', '📅 Agenda'], ['exec', '🔧 Execução']];
-  // Card externo finalizado e 100% preenchido: botões de etapa ficam verdes.
-  const etapaDone = !interno && os.finalizadaEm && pct >= 100;
+  // Card finalizado e 100% preenchido: botões de etapa ficam verdes.
+  const etapaDone = os.finalizadaEm && pct >= 100;
+  // Cliente retira, pronto: botão para avisar o cliente pelo WhatsApp.
+  const avisarBtn = interno && !os.finalizadaEm && st === 'apto'
+    ? `<button class="btn-ghost btn-sm card-avisar" data-avisar-os="${esc(os.id)}" title="Avisar o cliente no WhatsApp que o pedido está pronto">📢 Avisar cliente</button>`
+    : '';
   const etapasBtns = `<div class="card-etapas">${etapasCard
     .map(([b, lbl]) => `<button class="card-etapa-btn ${etapaDone ? 'done' : ''}" data-etapa-os="${esc(os.id)}" data-etapa-bloco="${b}" title="Abrir em ${esc(lbl)}">${esc(lbl)}</button>`)
     .join('')}</div>`;
@@ -1805,7 +1827,7 @@ function osCardHTML(os) {
           <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${os.retrabalho && !os.finalizadaEm ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}</div>
           <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
         </div>
-        <span class="badge st-${st}" style="margin-left:auto">${STATUS_LABEL[st]}</span>
+        <span class="badge st-${st}" style="margin-left:auto">${statusLabelDe(os, st)}</span>
       </div>
       <div class="card-tipo-row">
         <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏬 Cliente retira' : '🚚 Externo'}</span>
@@ -1822,6 +1844,7 @@ function osCardHTML(os) {
       <div class="card-resp">✍ ${esc(resp)}${itens.length ? ` · ${prontos}/${itens.length} itens` : ''}</div>
       ${etapasBtns}
       <div class="card-acoes">
+        ${avisarBtn}
         ${ctaBtn}
       </div>
     </div>`;
@@ -1851,13 +1874,21 @@ function cardTempoHTML(os) {
       tags.push(`<span class="prazo-tag prazo-empresa" title="Dias desde o pedido">🏭 ${naEmpresa}d</span>`);
     }
 
-    // Contador de entrega
-    const entrega = dataEntregaOS(os);
-    const paraEntrega = entrega ? diasEntre(todayISO(), entrega) : null;
-    if (paraEntrega != null) {
-      const cls = paraEntrega < 0 ? 'prazo-atraso' : (paraEntrega <= 2 ? 'prazo-urgente' : 'prazo-ok');
-      const txt = paraEntrega < 0 ? `atrasada ${-paraEntrega}d` : (paraEntrega === 0 ? 'entrega hoje' : `entrega em ${paraEntrega}d`);
-      tags.push(`<span class="prazo-tag ${cls}" title="Entrega prevista: ${esc(entrega)}">📦 ${txt}</span>`);
+    if (isInterno(os) && calcStatus(os) === 'apto') {
+      // Cliente retira, já pronto: o que importa é há quanto tempo o produto
+      // está parado esperando o cliente — não o prazo de entrega.
+      const desde = os.aptoEm ? diasDesde(os.aptoEm) : null;
+      const cls = desde != null && desde >= 3 ? 'prazo-urgente' : 'prazo-info';
+      tags.push(`<span class="prazo-tag ${cls}" title="Pronto para retirada${os.aptoEm ? ' desde ' + fmtDataBR(os.aptoEm) : ''}">🛍 ${desde != null && desde > 0 ? `aguardando retirada há ${desde}d` : 'aguardando retirada'}</span>`);
+    } else {
+      // Contador de entrega
+      const entrega = dataEntregaOS(os);
+      const paraEntrega = entrega ? diasEntre(todayISO(), entrega) : null;
+      if (paraEntrega != null) {
+        const cls = paraEntrega < 0 ? 'prazo-atraso' : (paraEntrega <= 2 ? 'prazo-urgente' : 'prazo-ok');
+        const txt = paraEntrega < 0 ? `atrasada ${-paraEntrega}d` : (paraEntrega === 0 ? 'entrega hoje' : `entrega em ${paraEntrega}d`);
+        tags.push(`<span class="prazo-tag ${cls}" title="Entrega prevista: ${esc(entrega)}">📦 ${txt}</span>`);
+      }
     }
 
     // Data agendada (instalação) — só se houver
@@ -1890,6 +1921,18 @@ function bindCardClicks(container) {
     b.onclick = (e) => {
       e.stopPropagation();
       finalizarServicoDoCard(b.dataset.finalizarOs);
+    };
+  });
+  // Avisar cliente (Cliente retira): abre o WhatsApp com mensagem pronta.
+  $$('[data-avisar-os]', container).forEach(b => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const os = STORE.getOS(b.dataset.avisarOs);
+      if (!os) return;
+      const num = String(os.whatsapp || '').replace(/\D/g, '');
+      if (!num) { toast('Sem WhatsApp cadastrado nesta O.S — preencha no bloco PCP & Cliente.', 'error'); return; }
+      const msg = `Olá${os.contato ? ' ' + os.contato : ''}! Seu pedido nº ${os.numero || ''}${os.servico ? ' (' + os.servico + ')' : ''} está pronto para retirada na Impresilk. 🛍`;
+      window.open(`https://wa.me/55${num}?text=${encodeURIComponent(msg)}`, '_blank');
     };
   });
   // Botões de etapa do card: abrem o modal direto no bloco escolhido.
@@ -2472,7 +2515,7 @@ function osMiniList(list) {
   return `<div class="os-list">${list.map(os => `
     <div class="os-list-item st-${calcStatus(os)} ${alertaOS(os)}" data-os-id="${esc(os.id)}">
       <div class="list-info">
-        <div class="list-numero">O.S ${esc(os.numero||'—')} <span class="badge st-${calcStatus(os)}">${STATUS_LABEL[calcStatus(os)]}</span></div>
+        <div class="list-numero">O.S ${esc(os.numero||'—')} <span class="badge st-${calcStatus(os)}">${statusLabelDe(os, calcStatus(os))}</span></div>
         <div class="list-cliente">${esc(os.cliente||'Sem cliente')}${os.servico?' — '+esc(os.servico):''}</div>
         <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))}${(os.equipe||[]).length?' · 👷 '+esc(os.equipe.join(', ')):''}</div>
       </div>
@@ -3768,7 +3811,7 @@ function relatorioServicosDia(dataISO) {
       <td>${esc(os.endereco || '')}</td>
       <td>${esc((os.equipe || []).join(', '))}</td>
       <td>${esc(os.veiculo || '')}</td>
-      <td>${esc(STATUS_LABEL[st])}</td>
+      <td>${esc(statusLabelDe(os, st))}</td>
     </tr>`;
   }).join('');
   const w = window.open('', '_blank');
