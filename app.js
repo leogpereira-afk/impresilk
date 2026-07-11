@@ -1819,7 +1819,15 @@ function osCardHTML(os) {
     ? (pp.acao === 'finalizar' || pp.acao === 'exec'
         ? `<button class="btn-success btn-sm edit-only card-finalizar" data-finalizar-os="${esc(os.id)}" title="Finalizar serviço">${esc(pp.cta)}</button>`
         : `<button class="btn-primary btn-sm edit-only card-cta" data-cta-os="${esc(os.id)}" title="${esc(pp.label)}">${esc(pp.cta)}</button>`)
-    : `<span class="card-fin-tag" title="Serviço finalizado">✓ Finalizado</span>`;
+    : `<span class="card-fin-tag" title="Serviço finalizado">✓ ${interno ? 'Retirado' : 'Finalizado'}</span>`;
+  // Finalizada recente: opção de arquivar já (sem esperar os 7 dias automáticos);
+  // arquivada manualmente: opção de desfazer.
+  const diasFin = diasDesdeFinal(os);
+  const arquivarBtn = os.finalizadaEm && (diasFin == null || diasFin < 7)
+    ? (os.arquivadaEm
+        ? `<button class="btn-ghost btn-sm edit-only" data-desarquivar-os="${esc(os.id)}" title="Voltar para Finalizados/Ativos">↩ Desarquivar</button>`
+        : `<button class="btn-ghost btn-sm edit-only" data-arquivar-os="${esc(os.id)}" title="Mandar agora para a vista Arquivados">🗄 Arquivar</button>`)
+    : '';
   return `
     <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
       <div class="card-header">
@@ -1845,6 +1853,7 @@ function osCardHTML(os) {
       ${etapasBtns}
       <div class="card-acoes">
         ${avisarBtn}
+        ${arquivarBtn}
         ${ctaBtn}
       </div>
     </div>`;
@@ -1922,6 +1931,24 @@ function bindCardClicks(container) {
       e.stopPropagation();
       finalizarServicoDoCard(b.dataset.finalizarOs);
     };
+  });
+  // Arquivar / desarquivar O.S finalizada (a vista Arquivados também pega
+  // automaticamente as finalizadas há 7+ dias).
+  const setArquivo = (id, valor) => {
+    const os = STORE.getOS(id);
+    if (!os) return;
+    os.arquivadaEm = valor;
+    os.atualizadoEm = nowISO();
+    os.atualizadoPor = STATE.user.nome;
+    STORE.saveOS(os);
+    toast(valor ? 'O.S arquivada 🗄' : 'O.S desarquivada ↩', 'success');
+    renderActiveTab();
+  };
+  $$('[data-arquivar-os]', container).forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); setArquivo(b.dataset.arquivarOs, nowISO()); };
+  });
+  $$('[data-desarquivar-os]', container).forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); setArquivo(b.dataset.desarquivarOs, ''); };
   });
   // Avisar cliente (Cliente retira): abre o WhatsApp com mensagem pronta.
   $$('[data-avisar-os]', container).forEach(b => {
@@ -2021,11 +2048,18 @@ function diasDesdeFinal(os) {
 //                    Finalizada as mostra; "Todos" as esconde);
 //  - 'retrabalho' → O.S marcadas como retrabalho ainda em aberto;
 //  - 'arquivados' → finalizadas há 1 semana ou mais (saem da vista Ativos).
+// Arquivada = marcada manualmente (arquivadaEm) OU finalizada há 7+ dias.
+function estaArquivada(o) {
+  if (o.arquivadaEm) return true;
+  const d = diasDesdeFinal(o);
+  return d != null && d >= 7;
+}
+
 function pcpBaseList() {
   const all = STORE.getAllOS().slice();
   if (STATE.pcpVista === 'retrabalho') return all.filter(o => o.retrabalho && !o.finalizadaEm);
-  if (STATE.pcpVista === 'arquivados') return all.filter(o => { const d = diasDesdeFinal(o); return d != null && d >= 7; });
-  return all.filter(o => { const d = diasDesdeFinal(o); return d == null || d < 7; });
+  if (STATE.pcpVista === 'arquivados') return all.filter(estaArquivada);
+  return all.filter(o => !estaArquivada(o));
 }
 
 // Recalcula os números dos chips considerando os OUTROS filtros ativos — cada
@@ -2056,7 +2090,7 @@ function pcpAtualizarChips() {
   const fAll = applyFilter(porTipo(STORE.getAllOS().slice()), busca);
   setN('[data-pcp-vista=""]', fAll.filter(o => !o.finalizadaEm).length);
   setN('[data-pcp-vista="retrabalho"]', fAll.filter(o => o.retrabalho && !o.finalizadaEm).length);
-  setN('[data-pcp-vista="arquivados"]', fAll.filter(o => { const d = diasDesdeFinal(o); return d != null && d >= 7; }).length);
+  setN('[data-pcp-vista="arquivados"]', fAll.filter(estaArquivada).length);
 }
 
 // Recalcula a lista filtrada do PCP e atualiza SÓ a grade de cards.
@@ -2854,12 +2888,15 @@ function finRenderCards() {
     const teveRetrabalho = os.retrabalho || (os.checkout && os.checkout.situacao === 'Retrabalho');
     const dF = parseLocalDate(diaLocalISO(os.finalizadaEm));
     const dataF = dF ? `${String(dF.getDate()).padStart(2,'0')}/${String(dF.getMonth()+1).padStart(2,'0')}/${dF.getFullYear()}` : '—';
+    const diasFin = diasDesdeFinal(os);
+    const podeArquivar = !os.arquivadaEm && (diasFin == null || diasFin < 7);
     return `<div class="os-list-item st-finalizada" data-os-id="${esc(os.id)}">
       <div class="list-info">
-        <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge st-finalizada">Finalizado</span>${teveRetrabalho ? ' <span class="badge st-retrabalho" title="Houve retrabalho neste serviço">↻ Retrabalho</span>' : ''}</div>
+        <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge st-finalizada">${isInterno(os) ? 'Retirado' : 'Finalizado'}</span>${teveRetrabalho ? ' <span class="badge st-retrabalho" title="Houve retrabalho neste serviço">↻ Retrabalho</span>' : ''}${estaArquivada(os) ? ' <span class="badge" title="Está na vista Arquivados do PCP">🗄 Arquivada</span>' : ''}</div>
         <div class="list-cliente">${esc(os.cliente || 'Sem cliente')}${os.servico ? ' — ' + esc(os.servico) : ''}</div>
         <div class="list-date">🏁 Finalizada em ${esc(dataF)}${(os.equipe||[]).length ? ' · 👷 ' + esc(os.equipe.join(', ')) : ''}</div>
       </div>
+      ${podeArquivar ? `<button class="btn-ghost btn-sm edit-only" data-arquivar-os="${esc(os.id)}" title="Mandar agora para a vista Arquivados">🗄</button>` : ''}
       <button class="btn-ghost btn-sm card-pop" data-pop-os="${esc(os.id)}" title="Enviar POP para a equipe">📚</button>
     </div>`;
   }).join('');
