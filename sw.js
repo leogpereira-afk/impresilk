@@ -1,7 +1,7 @@
 // sw.js — Service worker: deixa o app abrir offline (casca/shell em cache).
 // Os DADOS continuam sincronizando pela fila do store.js; aqui só cuidamos
 // dos arquivos estáticos para o app carregar sem internet.
-const CACHE = 'impresilk-shell-v45';
+const CACHE = 'impresilk-shell-v46';
 const SHELL = [
   './', 'index.html', 'equipe.html', 'styles.css',
   'config.js', 'logo.js', 'frases.js', 'store.js', 'pops.js', 'app.js', 'equipe.js',
@@ -39,6 +39,9 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
 
   // Nunca cachear a API — o store.js já trata offline pela fila.
+  // O backend agora é o Supabase; a regra do Netlify vira letra morta quando o
+  // site velho morrer, mas fica até lá (na transição os dois respondem).
+  if (url.hostname.endsWith('supabase.co')) return;
   if (url.pathname.includes('/.netlify/functions/')) return;
 
   // Network-first: online pega a versão nova e atualiza o cache;

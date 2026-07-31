@@ -1,0 +1,59 @@
+name: Deploy (GitHub Pages)
+
+# Publica o PCP / Instalacao no GitHub Pages. O backend e o Supabase (Edge
+# Functions pcp-sync / pcp-mubisys), chamado direto pelo navegador.
+#
+# App vanilla, sem build: o passo abaixo so separa o que e SITE do que e
+# ferramenta de repositorio (netlify/, supabase/, scripts/, guias), para nao
+# publicar codigo de servidor junto com a pagina.
+#
+# Nao precisa de 404.html: o app e multipagina (index.html + equipe.html), os
+# arquivos existem de verdade -- diferente de uma SPA.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Separar os arquivos do site
+        run: |
+          mkdir -p dist
+          rsync -a ./ dist/ \
+            --exclude dist/ --exclude .git/ --exclude .github/ \
+            --exclude .netlify/ --exclude netlify/ --exclude supabase/ \
+            --exclude scripts/ --exclude node_modules/ \
+            --exclude 'GUIA-*' --exclude package.json --exclude package-lock.json \
+            --exclude netlify.toml
+          echo "--- publicando: ---"; ls dist
+
+      # Sem "enablement": o token do Actions publica no Pages mas nao pode
+      # CRIA-lo ("Resource not accessible by integration"). O site e habilitado
+      # uma vez pela API.
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
