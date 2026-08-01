@@ -191,6 +191,10 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   white-space: nowrap; border: 1px solid transparent;
 }
 .prazo-hoje    { background: var(--amber); color: #fff; font-weight: 800; }
+.prazo-retira  { background: #db2777; color: #fff; font-weight: 800; }
+.card-avisar.avisado { color: var(--green); border-color: #bbf7d0; }
+/* Banner global: importação do Mubisys parada (clicável → Configurações) */
+.alerta-importacao { background: #fee2e2; color: #b91c1c; font-size: .82rem; font-weight: 600; padding: 8px 16px; cursor: pointer; border-bottom: 1px solid #fecaca; }
 .prazo-amanha  { background: #fef3c7; color: #92400e; }
 .prazo-empresa { background: #f1f5f9; color: #475569; }
 .prazo-info    { background: #e0f2fe; color: #075985; }

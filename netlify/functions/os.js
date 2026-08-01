@@ -124,6 +124,21 @@ exports.handler = async (event, context) => {
         }
 
         const existing = await store.get(os.id, { type: 'json' }).catch(() => null);
+
+        // Cache velho: esqueleto re-importado por cima de ficha já trabalhada
+        // (mesmo id canônico). Esqueleto nunca vence ficha com trabalho.
+        if (os.origemMubisys && existing) {
+          const payloadSemTrabalho = !os.liberadoPCP && !os.finalizadaEm &&
+            !(os.fotosCheckinIds || []).length && !(os.fotosRetornoIds || []).length &&
+            !(os.equipe || []).length && !os.confirmacao && !os.horaSaida;
+          const existenteComTrabalho = !!(existing.liberadoPCP || existing.finalizadaEm ||
+            (existing.fotosCheckinIds || []).length || (existing.fotosRetornoIds || []).length ||
+            (existing.equipe || []).length || existing.confirmacao || existing.horaSaida);
+          if (payloadSemTrabalho && existenteComTrabalho) {
+            return resp({ ok: true, os: existing, duplicataEvitada: true });
+          }
+        }
+
         if (existing && existing.atualizadoEm && os.atualizadoEm) {
           const tsServer = new Date(existing.atualizadoEm).getTime();
           const tsClient = new Date(os.atualizadoEm).getTime();

@@ -165,6 +165,21 @@ Deno.serve(async (req: Request) => {
         }
 
         const existing = await getReg("os", os.id);
+
+        // Cache velho: aparelho re-importa um ESQUELETO por cima de ficha ja
+        // trabalhada no servidor (mesmo id canonico, atualizadoEm mais novo).
+        // Esqueleto nunca vence ficha com trabalho — devolve a do servidor e o
+        // pull realinha o aparelho.
+        if (os.origemMubisys && existing) {
+          const semTrabalho = !os.liberadoPCP && !os.finalizadaEm &&
+            !(os.fotosCheckinIds ?? []).length && !(os.fotosRetornoIds ?? []).length &&
+            !(os.equipe ?? []).length && !os.confirmacao && !os.horaSaida;
+          const comTrabalho = !!(existing.liberadoPCP || existing.finalizadaEm ||
+            (existing.fotosCheckinIds ?? []).length || (existing.fotosRetornoIds ?? []).length ||
+            (existing.equipe ?? []).length || existing.confirmacao || existing.horaSaida);
+          if (semTrabalho && comTrabalho) return resp({ ok: true, os: existing, duplicataEvitada: true });
+        }
+
         if (existing?.atualizadoEm && os.atualizadoEm) {
           if (new Date(existing.atualizadoEm).getTime() > new Date(os.atualizadoEm).getTime()) {
             return resp({ conflito: true, servidor: existing });

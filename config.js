@@ -10,3 +10,7 @@ const TOKEN = 'impresilk-bhinxmdp5b7dwgaxpv9u2xqh';
 // pedindo 'os' e 'mubisys'; a tradução é aqui.
 const API_BASE = 'https://heveemylixartyijxewh.supabase.co/functions/v1';
 const API_FN = { os: 'pcp-sync', mubisys: 'pcp-mubisys' };
+
+// Versão do shell instalado neste aparelho (manter IGUAL ao CACHE do sw.js a
+// cada deploy). Aparece na Saúde da conexão — 1ª pergunta do suporte.
+const APP_VERSAO = 'v47';

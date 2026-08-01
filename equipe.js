@@ -41,6 +41,14 @@ const STATUS_LABEL = {
   aguardando_producao:'Aguardando', apto:'Apto', agendada:'Agendada',
   confirmada:'Confirmada', em_andamento:'Em andamento', finalizada:'Finalizada'
 };
+// Cliente retira fala outra língua (espelha o app.js): "Apto" = pronto p/
+// retirada e "Finalizada" = retirado. Só exibição — o status é o mesmo.
+const STATUS_LABEL_INT = { aguardando_producao:'Aguardando', apto:'🛍 Pronto p/ retirada', finalizada:'Retirado' };
+function isInterno(os) { return !!(os && os.tipo === 'interno'); }
+function statusLabelDe(os, st) {
+  if (isInterno(os) && STATUS_LABEL_INT[st]) return STATUS_LABEL_INT[st];
+  return STATUS_LABEL[st] || st;
+}
 
 function toast(msg, type = '') {
   const el = document.createElement('div');
@@ -250,7 +258,7 @@ function renderList() {
             <div class="list-cliente">${esc(os.cliente)} · ${esc(os.endereco||'')}</div>
             <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
           </div>
-          <span class="badge st-${st}">${STATUS_LABEL[st]}</span>
+          <span class="badge st-${st}">${statusLabelDe(os, st)}</span>
         </div>`;
       }).join('') || '<p class="text-muted">Nenhuma O.S atribuída a você ainda.</p>'}
     </div>`;
@@ -329,7 +337,7 @@ function renderModalComercial() {
         <div class="modal-title">O.S ${esc(os.numero||'—')}</div>
         <div class="modal-meta">${esc(os.cliente||'')}</div>
       </div>
-      <span class="badge st-${st}">${STATUS_LABEL[st]}</span>
+      <span class="badge st-${st}">${statusLabelDe(os, st)}</span>
       <button class="modal-close" id="m-close">×</button>
     </div>
 
@@ -444,7 +452,7 @@ function renderModal() {
         <div class="modal-title">O.S ${esc(os.numero||'—')}</div>
         <div class="modal-meta">${esc(os.cliente||'')}</div>
       </div>
-      <span class="badge st-${st}">${STATUS_LABEL[st]}</span>
+      <span class="badge st-${st}">${statusLabelDe(os, st)}</span>
       <button class="modal-close" id="m-close">×</button>
     </div>
 

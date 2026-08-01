@@ -592,6 +592,11 @@ function enterApp() {
     STORE.pull(refreshAposPull);
     STORE.trySync();
   }, 30000);
+
+  // Vigia da importação Mubisys: checa agora e a cada 15 min (banner global).
+  vigiarImportacao();
+  if (window._saudeTimer) clearInterval(window._saudeTimer);
+  window._saudeTimer = setInterval(vigiarImportacao, 15 * 60000);
 }
 
 // Re-render pós-pull. Se o usuário está digitando na busca do PCP, atualiza só
@@ -600,7 +605,43 @@ function enterApp() {
 function refreshAposPull() {
   const ae = document.activeElement;
   if (STATE.activeTab === 'pcp' && ae && ae.id === 'busca-pcp') { pcpRenderCards(); return; }
+  // Finalizados tem busca em tempo real igual — atualiza só a lista.
+  if (STATE.activeTab === 'finalizados' && ae && ae.id === 'busca-fin') { finRenderCards(); return; }
+  // Configurações: digitando em qualquer campo (add de lista, usuário, Mubisys),
+  // pula o re-render — a aba não exibe O.S, nada urgente se perde.
+  if (STATE.activeTab === 'controle' && ae && ['INPUT', 'TEXTAREA', 'SELECT'].includes(ae.tagName) && ae.closest('#panel-controle')) return;
   renderActiveTab();
+}
+
+// ── Vigia da importação Mubisys (visível no app INTEIRO, não só em ⚙️) ──────
+// Banner vermelho sob as abas quando a importação está com erro ou >2h parada.
+function avaliarImportacao(s) {
+  const ult = s && s.ultimaImportacao;
+  if (!ult || !ult.em) return { parada: false };
+  const horas = (Date.now() - new Date(ult.em).getTime()) / 3600000;
+  if (ult.ok === false) return { parada: true, motivo: 'erro: ' + (ult.erro || 'desconhecido') };
+  if (horas >= 2) return { parada: true, motivo: `há ${Math.floor(horas)}h sem rodar` };
+  return { parada: false };
+}
+function vigiarImportacao() {
+  // Aviso só para quem pode agir (admin/pcp) — os demais não têm o que fazer.
+  if (!STATE.user || !['admin', 'pcp'].includes(STATE.user.papel)) return;
+  if (!navigator.onLine) return;
+  STORE.api({ action: 'saude' }).then(s => {
+    const av = avaliarImportacao(s);
+    let ban = $('#alerta-importacao');
+    if (!av.parada) { if (ban) ban.remove(); return; }
+    if (!ban) {
+      ban = document.createElement('div');
+      ban.id = 'alerta-importacao';
+      ban.className = 'alerta-importacao';
+      const tabs = $('#tabs');
+      if (tabs && tabs.parentNode) tabs.parentNode.insertBefore(ban, tabs.nextSibling);
+      else document.body.prepend(ban);
+      ban.onclick = () => { const t = $('[data-tab="controle"]'); if (t) t.click(); };
+    }
+    ban.innerHTML = `⚠️ <strong>Importação do Mubisys parada</strong> — ${esc(av.motivo)}. Toque para abrir a Saúde da conexão.`;
+  }).catch(() => {});
 }
 
 function aplicarPermissoes() {
@@ -1029,7 +1070,7 @@ function blocoPCP(os, ro, done) {
             const dig = String(os.whatsapp || '').replace(/\D/g,'');
             // BR: 10 (fixo) ou 11 (celular). Aceita também 12-13 se já vier com DDI.
             if (dig.length < 10) return os.whatsapp ? '<span class="foto-hint" title="WhatsApp incompleto">⚠ número curto</span>' : '';
-            const sem55 = dig.startsWith('55') ? dig : '55' + dig;
+            const sem55 = (dig.startsWith('55') && dig.length > 11) ? dig : '55' + dig;
             return `<a class="inline-link" target="_blank" href="https://wa.me/${esc(sem55)}">Abrir Zap ↗</a>`;
           })()}
         </div>
@@ -1164,7 +1205,7 @@ function blocoAgenda(os, ro, done) {
           ${(() => {
             const dig = String(os.whatsapp || '').replace(/\D/g, '');
             if (dig.length >= 10) {
-              const sem55 = dig.startsWith('55') ? dig : '55' + dig;
+              const sem55 = (dig.startsWith('55') && dig.length > 11) ? dig : '55' + dig;
               return `· <a class="inline-link" target="_blank" href="https://wa.me/${esc(sem55)}">📱 ${esc(maskTel(os.whatsapp))}</a>`;
             }
             return `· <span class="conf-falta">⚠ sem WhatsApp — preencha no bloco 1 · PCP</span>`;
@@ -1633,17 +1674,25 @@ function bindModalEvents(os, ro) {
   if (reabrirOS) reabrirOS.onclick = () => {
     if (!confirm('Reabrir esta O.S? Ela volta para o status anterior e fica editável novamente.')) return;
     _modalDraft.finalizadaEm = ''; _modalDraft.finalizadoPor = '';
+    // Reaberta = ativa: sai do arquivo também (senão fica presa em Arquivados
+    // sem botão de saída — desarquivar exige finalizadaEm).
+    _modalDraft.arquivadaEm = '';
     if (_modalDraft.checkout) { _modalDraft.checkout.situacao = ''; _modalDraft.checkout.confirmado = false; }
     saveDraft(); reRenderModalKeepOpen();
     toast('O.S reaberta', 'success');
   };
 
   // Persiste o draft após um upload de foto. O upload é lento (4G): se o
-  // usuário fechou o modal no meio, grava direto no STORE para as fotos e a
-  // hora carimbada não se perderem (antes viravam blobs órfãos).
-  const persistirAposFoto = (draft) => {
-    if (_modalDraft === draft) { saveDraft(); reRenderModalKeepOpen(); }
-    else { draft.atualizadoEm = nowISO(); draft.atualizadoPor = STATE.user.nome; STORE.saveOS(draft); }
+  // usuário fechou o modal no meio, NÃO gravamos o draft inteiro capturado
+  // (atropelaria edições feitas depois de fechar/reabrir) — reaplicamos só os
+  // campos que o upload alterou por cima da versão mais atual da O.S.
+  const persistirAposFoto = (draft, campos) => {
+    if (_modalDraft === draft) { saveDraft(); reRenderModalKeepOpen(); return; }
+    const base = (_modalDraft && _modalDraft.id === draft.id) ? _modalDraft : (STORE.getOS(draft.id) || draft);
+    (campos || []).forEach(c => { base[c] = draft[c]; });
+    base.atualizadoEm = nowISO(); base.atualizadoPor = STATE.user.nome;
+    STORE.saveOS(base);
+    if (_modalDraft === base) reRenderModalKeepOpen(); // mesma O.S reaberta: mostra as fotos novas
   };
 
   // Fotos single (layout, embarque)
@@ -1658,7 +1707,7 @@ function bindModalEvents(os, ro) {
       if (!fileId) return;
       if (draft[field]) STORE.delFotoSync(draft[field]);
       draft[field] = fileId;
-      persistirAposFoto(draft);
+      persistirAposFoto(draft, [field]);
     };
   });
 
@@ -1680,7 +1729,7 @@ function bindModalEvents(os, ro) {
       draft.horaSaida = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
     }
     if (_modalDraft === draft) capturarLocalCheckin();
-    persistirAposFoto(draft);
+    persistirAposFoto(draft, ['fotosCheckinIds', 'horaSaida']);
   };
   $$('[data-foto-rm]', root).forEach(btn => {
     btn.onclick = () => {
@@ -1707,7 +1756,7 @@ function bindModalEvents(os, ro) {
       const agora = new Date();
       draft.horaRetorno = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
     }
-    persistirAposFoto(draft);
+    persistirAposFoto(draft, ['fotosRetornoIds', 'horaRetorno']);
   };
   $$('[data-foto-rm-retorno]', root).forEach(btn => {
     btn.onclick = () => {
@@ -1808,7 +1857,7 @@ function osCardHTML(os) {
   const etapaDone = os.finalizadaEm && pct >= 100;
   // Cliente retira, pronto: botão para avisar o cliente pelo WhatsApp.
   const avisarBtn = interno && !os.finalizadaEm && st === 'apto'
-    ? `<button class="btn-ghost btn-sm card-avisar" data-avisar-os="${esc(os.id)}" title="Avisar o cliente no WhatsApp que o pedido está pronto">📢 Avisar cliente</button>`
+    ? `<button class="btn-ghost btn-sm card-avisar ${os.avisadoEm ? 'avisado' : ''}" data-avisar-os="${esc(os.id)}" title="${os.avisadoEm ? `Cliente avisado em ${new Date(os.avisadoEm).toLocaleString('pt-BR')}${os.avisadoPor ? ' por ' + esc(os.avisadoPor) : ''} — clique para avisar de novo` : 'Avisar o cliente no WhatsApp que o pedido está pronto'}">${os.avisadoEm ? '✅ Avisado ' + fmtDataBR(os.avisadoEm) : '📢 Avisar cliente'}</button>`
     : '';
   const etapasBtns = `<div class="card-etapas">${etapasCard
     .map(([b, lbl]) => `<button class="card-etapa-btn ${etapaDone ? 'done' : ''}" data-etapa-os="${esc(os.id)}" data-etapa-bloco="${b}" title="Abrir em ${esc(lbl)}">${esc(lbl)}</button>`)
@@ -1885,8 +1934,11 @@ function cardTempoHTML(os) {
     let selo = null;
     if (instData) {
       const dd = diasEntre(todayISO(), instData);
-      if (dd === 0) { selo = 0; tags.unshift(`<span class="prazo-tag prazo-hoje" title="Instalação marcada para hoje">📌 HOJE${os.instalacao.periodo ? ' · ' + esc(os.instalacao.periodo) : ''}</span>`); }
-      else if (dd === 1) { selo = 1; tags.unshift(`<span class="prazo-tag prazo-amanha" title="Instalação marcada para amanhã">AMANHÃ${os.instalacao.periodo ? ' · ' + esc(os.instalacao.periodo) : ''}</span>`); }
+      // Cliente retira fala outra língua: é RETIRADA hoje/amanhã, não instalação.
+      const rt = isInterno(os);
+      const per = os.instalacao.periodo ? ' · ' + esc(os.instalacao.periodo) : '';
+      if (dd === 0) { selo = 0; tags.unshift(`<span class="prazo-tag ${rt ? 'prazo-retira' : 'prazo-hoje'}" title="${rt ? 'Cliente retira hoje' : 'Instalação marcada para hoje'}">${rt ? '🛍 Retirada HOJE' : '📌 HOJE'}${per}</span>`); }
+      else if (dd === 1) { selo = 1; tags.unshift(`<span class="prazo-tag prazo-amanha" title="${rt ? 'Cliente retira amanhã' : 'Instalação marcada para amanhã'}">${rt ? '🛍 Retirada AMANHÃ' : 'AMANHÃ'}${per}</span>`); }
     }
 
     // Em aberto: dias na empresa
@@ -1968,10 +2020,20 @@ function bindCardClicks(container) {
       e.stopPropagation();
       const os = STORE.getOS(b.dataset.avisarOs);
       if (!os) return;
-      const num = String(os.whatsapp || '').replace(/\D/g, '');
-      if (!num) { toast('Sem WhatsApp cadastrado nesta O.S — preencha no bloco PCP & Cliente.', 'error'); return; }
+      const dig = String(os.whatsapp || '').replace(/\D/g, '');
+      if (!dig) { toast('Sem WhatsApp cadastrado nesta O.S — preencha no bloco PCP & Cliente.', 'error'); return; }
+      // Número do ERP pode já vir com DDI 55 — não duplicar (5555…). O guard
+      // de comprimento preserva DDD 55 (RS) de número local com 10-11 dígitos.
+      const num = (dig.startsWith('55') && dig.length > 11) ? dig : '55' + dig;
       const msg = `Olá${os.contato ? ' ' + os.contato : ''}! Seu pedido nº ${os.numero || ''}${os.servico ? ' (' + os.servico + ')' : ''} está pronto para retirada na Impresilk. 🛍`;
-      window.open(`https://wa.me/55${num}?text=${encodeURIComponent(msg)}`, '_blank');
+      window.open(`https://wa.me/${num}?text=${encodeURIComponent(msg)}`, '_blank');
+      // Registra o aviso (evita avisar 2x em tablet compartilhado).
+      if (podeEditar()) {
+        os.avisadoEm = nowISO(); os.avisadoPor = STATE.user.nome;
+        os.atualizadoEm = nowISO(); os.atualizadoPor = STATE.user.nome;
+        STORE.saveOS(os);
+        renderActiveTab();
+      }
     };
   });
   // Botões de etapa do card: abrem o modal direto no bloco escolhido.
@@ -2061,7 +2123,10 @@ function diasDesdeFinal(os) {
 //  - 'retrabalho' → O.S marcadas como retrabalho ainda em aberto;
 //  - 'arquivados' → finalizadas há 1 semana ou mais (saem da vista Ativos).
 // Arquivada = marcada manualmente (arquivadaEm) OU finalizada há 7+ dias.
+// Só O.S FINALIZADA pode estar arquivada — solta retroativamente qualquer
+// reaberta que tenha ficado com arquivadaEm gravado (dado antigo preso).
 function estaArquivada(o) {
+  if (!o.finalizadaEm) return false;
   if (o.arquivadaEm) return true;
   const d = diasDesdeFinal(o);
   return d != null && d >= 7;
@@ -3436,9 +3501,10 @@ function wireSaude(el) {
       box.innerHTML = `
         ✅ <strong>Nuvem OK</strong> — ${s.totalOS} O.S guardadas no servidor<br>
         ${impIcone} Importação automática do Mubisys: ${impTxt}<br>
-        ${filaTxt}`;
+        ${filaTxt}<br>
+        📦 Versão do app neste aparelho: <strong>${typeof APP_VERSAO !== 'undefined' ? APP_VERSAO : '—'}</strong>`;
     }).catch(() => {
-      box.innerHTML = `❌ <strong>Sem conexão com o servidor.</strong><br>${filaTxt}`;
+      box.innerHTML = `❌ <strong>Sem conexão com o servidor.</strong><br>${filaTxt}<br>📦 Versão do app neste aparelho: <strong>${typeof APP_VERSAO !== 'undefined' ? APP_VERSAO : '—'}</strong>`;
     });
   };
   pintar();
