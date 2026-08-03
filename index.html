@@ -37,11 +37,11 @@
       <div id="login-gestao" class="hidden">
         <div class="field">
           <label for="login-user">Usuário</label>
-          <select id="login-user"></select>
+          <input type="text" id="login-user" placeholder="seu nome" autocomplete="username" autocapitalize="none">
         </div>
         <div class="field mt-12">
           <label for="login-pass">Senha</label>
-          <input type="password" id="login-pass" placeholder="Senha do papel" autocomplete="current-password">
+          <input type="password" id="login-pass" placeholder="sua senha" autocomplete="current-password">
         </div>
         <button class="btn-primary w-100 mt-12" id="login-btn">Entrar</button>
         <div id="login-error" class="login-error hidden"></div>
@@ -154,6 +154,7 @@
   <script src="logo.js"></script>
   <script src="frases.js"></script>
   <script src="store.js"></script>
+  <script src="auth.js"></script>
   <script src="pops.js"></script>
   <script src="app.js"></script>
   <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>

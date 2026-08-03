@@ -71,13 +71,27 @@ function initSelect() {
     return;
   }
   // Deep link do admin: equipe.html#i=NOME abre direto a visão daquele instalador.
+  //
+  // Antes ele aceitava QUALQUER texto — nem precisava ser alguém da equipe —, o
+  // que dava para qualquer pessoa da internet entrar como quem quisesse só
+  // montando a URL. Agora o nome precisa estar na lista de instaladores; quem
+  // não estiver cai na tela normal de escolher o nome.
   if (location.hash.startsWith('#i=')) {
-    const nome = decodeURIComponent(location.hash.slice(3));
-    if (nome) {
+    const nome = decodeURIComponent(location.hash.slice(3)).trim();
+    const naEquipe = n => (STORE.getCFG().instaladores || [])
+      .some(x => String(x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+              === String(n).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim());
+    if (nome && naEquipe(nome)) {
       EQ.instalador = nome;
       STORE.setInstalador(nome);
       enter();
       return;
+    }
+    // lista ainda não baixada neste aparelho: tenta uma vez antes de desistir
+    if (nome) {
+      STORE.pullCFG().then(() => {
+        if (naEquipe(nome)) { EQ.instalador = nome; STORE.setInstalador(nome); enter(); }
+      }).catch(() => {});
     }
   }
   const sel = $('#sel-instalador');

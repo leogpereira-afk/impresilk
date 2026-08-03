@@ -22,7 +22,11 @@ function getPermissoes() {
   return out;
 }
 
-const SENHAS = { admin: 'admin', comercial: 'comercial', pcp: '', montagem: '', operacao: '' };
+// As senhas de papel morreram (03/08/2026). Eram públicas — iam no bundle — e
+// três delas eram VAZIAS: bastava escolher o nome na lista para entrar como PCP,
+// Montagem ou Operação. Agora a gestão entra com usuário e senha conferidos no
+// servidor (auth.js → equipe-auth). A montagem segue sem senha, em equipe.html,
+// por decisão do dono.
 const ABAS_DISPONIVEIS = ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle','pops'];
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -468,21 +472,10 @@ const STATE = {
    LOGIN
    ══════════════════════════════════════════════════════════════════════════ */
 function initLogin() {
-  const sel = $('#login-user');
-  const cfg = STORE.getCFG();
-  const opts = [
-    { nome: 'Admin',     papel: 'admin'    },
-    { nome: 'PCP',       papel: 'pcp'      },
-    { nome: 'Montagem',  papel: 'montagem' },
-    { nome: 'Operação',  papel: 'operacao' },
-    { nome: 'Comercial', papel: 'comercial'}
-  ];
-  // Acrescenta usuários cadastrados
-  (cfg.usuarios || []).forEach(u => {
-    if (!opts.find(o => o.papel === u.papel && o.nome === u.nome)) opts.push(u);
-  });
-  sel.innerHTML = opts.map((o, i) => `<option value="${i}">${esc(o.nome)} (${esc(o.papel)})</option>`).join('');
-  sel._opts = opts;
+  const campo = $('#login-user');
+  // O último usuário fica lembrado no aparelho — a senha, nunca.
+  const lembrado = localStorage.getItem('impresilk_inst_lembrado') || '';
+  if (lembrado) campo.value = lembrado;
 
   // Logo no card de login
   const logoEl = $('#login-logo');
@@ -536,26 +529,81 @@ function renderMontagemNomes() {
   STORE.pullCFG().then(() => pintar(STORE.getCFG().instaladores || [])).catch(() => {});
 }
 
-function doLogin() {
-  const sel = $('#login-user');
-  const opt = sel._opts[+sel.value];
+let _entrando = false;
+async function doLogin() {
+  if (_entrando) return;                       // Enter duas vezes na rede lenta
+  const usuario = $('#login-user').value.trim();
   const pass = $('#login-pass').value;
   const err = $('#login-error');
+  const mostrarErro = txt => { err.textContent = txt; err.classList.remove('hidden'); };
+  if (!usuario || !pass) { mostrarErro('Preencha usuário e senha.'); return; }
 
-  // Senha do papel (admin/comercial exigem; demais livres)
-  const cfgUser = (STORE.getCFG().usuarios || []).find(u => u.nome === opt.nome && u.papel === opt.papel);
-  const expected = cfgUser && cfgUser.senha != null ? cfgUser.senha : (SENHAS[opt.papel] || '');
-
-  if (expected && pass !== expected) {
-    err.textContent = 'Senha incorreta.';
-    err.classList.remove('hidden');
+  _entrando = true;
+  const bt = $('#login-btn'); const rot = bt.textContent;
+  bt.disabled = true; bt.textContent = 'Entrando…';
+  let r;
+  try {
+    // A conferência acontece no servidor. A senha não mora mais no pacote de
+    // configuração que todo aparelho baixa — era assim que ela vazava.
+    r = await AUTH.login(usuario, pass);
+  } catch (e) {
+    _entrando = false; bt.disabled = false; bt.textContent = rot;
+    if (e.status === 401 || e.status === 403) { mostrarErro(e.erro || 'Usuário ou senha incorretos.'); return; }
+    mostrarErro('Não consegui falar com o servidor. Entrar precisa de internet — depois disso o app trabalha offline.');
     return;
   }
+  _entrando = false; bt.disabled = false; bt.textContent = rot;
   err.classList.add('hidden');
-  STATE.user = { nome: opt.nome, papel: opt.papel };
+  localStorage.setItem('impresilk_inst_lembrado', r.usuario);
+  STATE.user = { nome: r.nome || r.usuario, papel: r.papel, usuario: r.usuario, trocarSenha: !!r.trocarSenha };
   STORE.setUser(STATE.user);
   enterApp();
+  // Senha criada por outra pessoa: trocar é a primeira coisa.
+  if (r.trocarSenha) setTimeout(() => telaTrocarSenha(true), 60);
 }
+
+// Trocar a própria senha, num painel próprio — este app não tem helper de
+// modal genérico, e depender do de O.S. só para isto seria acoplamento à toa.
+function telaTrocarSenha(obrigado) {
+  const fundo = document.createElement('div');
+  fundo.className = 'login-wrap';
+  fundo.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55)';
+  fundo.innerHTML =
+    '<div class="login-card">' +
+      '<h2>' + (obrigado ? 'Crie a sua senha' : 'Trocar a senha') + '</h2>' +
+      (obrigado ? '<p class="subtitle">A senha atual foi criada por outra pessoa.</p>' : '') +
+      (obrigado ? '' : '<div class="field"><label>Senha atual</label><input type="password" id="ts-atual" autocomplete="current-password"></div>') +
+      '<div class="field mt-12"><label>Senha nova (mínimo 6)</label><input type="password" id="ts-nova" autocomplete="new-password"></div>' +
+      '<div class="field mt-12"><label>Repita a senha nova</label><input type="password" id="ts-rep" autocomplete="new-password"></div>' +
+      '<div id="ts-erro" class="login-error hidden"></div>' +
+      '<button class="btn-primary w-100 mt-12" id="ts-ok">Salvar</button>' +
+      (obrigado ? '' : '<button class="login-voltar" id="ts-cancelar">← Voltar</button>') +
+    '</div>';
+  document.body.appendChild(fundo);
+  const erro = txt => { const e = fundo.querySelector('#ts-erro'); e.textContent = txt; e.classList.remove('hidden'); };
+  const cancelar = fundo.querySelector('#ts-cancelar');
+  if (cancelar) cancelar.onclick = () => fundo.remove();
+  fundo.querySelector('#ts-ok').onclick = async () => {
+    const nova = fundo.querySelector('#ts-nova').value || '';
+    if (nova.length < 6) { erro('A senha nova precisa de ao menos 6 caracteres.'); return; }
+    if (nova !== (fundo.querySelector('#ts-rep').value || '')) { erro('As duas senhas novas não são iguais.'); return; }
+    const bt = fundo.querySelector('#ts-ok'); bt.disabled = true; bt.textContent = 'Salvando…';
+    try {
+      const atual = obrigado ? '' : (fundo.querySelector('#ts-atual').value || '');
+      await AUTH.trocarMinhaSenha(atual, nova);
+    } catch (e) {
+      bt.disabled = false; bt.textContent = 'Salvar';
+      erro(e.erro || 'Não consegui trocar a senha agora.');
+      return;
+    }
+    STATE.user = Object.assign({}, STATE.user, { trocarSenha: false });
+    STORE.setUser(STATE.user);
+    fundo.remove();
+    toast('Senha trocada', 'success');
+  };
+}
+
+
 
 function enterApp() {
   $('#login-screen').classList.add('hidden');
@@ -705,6 +753,8 @@ function initTopbar() {
   const instrBtn = $('#btn-instrucoes');
   if (instrBtn) instrBtn.onclick = abrirInstrucoes;
   $('#btn-logout').onclick = () => {
+    // Sem apagar o crachá, o próximo a pegar o tablet entra como você.
+    AUTH.esquecer();
     STORE.setUser(null);
     // Tablet compartilhado: sair da gestão também desloga o espelho do
     // instalador (senão equipe.html auto-entra como a última pessoa clicada).
@@ -3261,21 +3311,22 @@ function renderControle() {
     </div>` : '';
   const usuariosHTML = isAdmin ? `
     <div class="cfg-section">
-      <h3>👤 Usuários</h3>
-      <div class="cfg-list">
-        ${(cfg.usuarios || []).map((u, i) => `
-          <div class="cfg-item">
-            <span>${esc(u.nome)} <span class="text-muted">(${esc(u.papel)})</span></span>
-            <button class="btn-xs btn-danger" data-user-del="${i}">🗑</button>
-          </div>`).join('')}
+      <h3>👤 Acessos da gestão</h3>
+      <p class="text-muted" style="font-size:12px;margin:-4px 0 8px">
+        A senha fica no servidor, embaralhada — ninguém consegue lê-la, nem eu.
+        Senha que você cria para outra pessoa é temporária: ela troca na primeira entrada.
+        <br>A equipe de montagem não entra por aqui: ela toca no próprio nome em equipe.html, sem senha.
+      </p>
+      <div class="cfg-list" id="acessos-lista">
+        <div class="text-muted">Carregando…</div>
         <div class="field-row3 mt-8">
-          <input data-user-nome placeholder="Nome">
+          <input data-user-nome placeholder="Nome (é o login)">
           <select data-user-papel>
             <option value="pcp">PCP</option><option value="montagem">Montagem</option>
             <option value="operacao">Operação</option><option value="comercial">Comercial</option>
             <option value="admin">Admin</option>
           </select>
-          <input type="password" data-user-senha placeholder="Senha (opcional)" autocomplete="new-password">
+          <input type="password" data-user-senha placeholder="Senha (mínimo 6)" autocomplete="new-password">
         </div>
         <button class="btn-primary btn-sm mt-8" data-user-add>+ Adicionar usuário</button>
       </div>
@@ -3446,28 +3497,66 @@ function renderControle() {
     c[key] = (c[key] || []).filter(x => x !== val);
     STORE.saveCFG(c); renderControle();
   });
-  $$('[data-user-del]', el).forEach(b => b.onclick = () => {
-    const c = STORE.getCFG();
-    const u = (c.usuarios || [])[+b.dataset.userDel];
-    if (!u) return;
-    // Sem o último admin, o login "Admin" volta para a senha padrão fraca.
-    if (u.papel === 'admin' && c.usuarios.filter(x => x.papel === 'admin').length <= 1) {
-      toast('Não dá para excluir o último admin.', 'error');
-      return;
-    }
-    if (!confirm(`Excluir o usuário "${u.nome}" (${u.papel})?`)) return;
-    c.usuarios.splice(+b.dataset.userDel, 1);
-    STORE.saveCFG(c); renderControle();
-  });
+  pintarAcessos(el);
   const addUser = $('[data-user-add]', el);
-  if (addUser) addUser.onclick = () => {
+  if (addUser) addUser.onclick = async () => {
     const nome = $('[data-user-nome]', el).value.trim();
+    const senha = $('[data-user-senha]', el).value;
     if (!nome) { toast('Informe o nome', 'error'); return; }
-    const c = STORE.getCFG();
-    c.usuarios = c.usuarios || [];
-    c.usuarios.push({ nome, papel: $('[data-user-papel]', el).value, senha: $('[data-user-senha]', el).value });
-    STORE.saveCFG(c); renderControle(); toast('Usuário adicionado', 'success');
+    if (senha.length < 6) { toast('A senha precisa de ao menos 6 caracteres', 'error'); return; }
+    try {
+      await AUTH.salvarConta({ usuario: nome, nome, papel: $('[data-user-papel]', el).value, senha, ativo: true });
+    } catch (e) { toast(e.erro || 'Não consegui salvar', 'error'); return; }
+    $('[data-user-nome]', el).value = ''; $('[data-user-senha]', el).value = '';
+    toast('Acesso criado — a pessoa troca a senha na primeira entrada', 'success');
+    pintarAcessos(el);
   };
+}
+
+// Desenha a lista de acessos com o que o SERVIDOR diz. Antes vinha do pacote de
+// configuração que todo aparelho baixava — junto com a senha de cada um.
+async function pintarAcessos(el) {
+  const box = $('#acessos-lista', el);
+  if (!box) return;
+  if (!AUTH.temCracha()) {
+    box.innerHTML = '<div class="text-muted">Sua sessão é anterior ao login novo. Saia e entre de novo para administrar os acessos.</div>';
+    return;
+  }
+  let contas = [];
+  try {
+    contas = (await AUTH.listarContas()).contas || [];
+  } catch (e) {
+    box.innerHTML = '<div class="text-muted">' +
+      (e.status === 401 || e.status === 403
+        ? 'Sua sessão expirou. Saia e entre de novo para administrar os acessos.'
+        : 'Não consegui ler os acessos: ' + esc(e.erro || e.message) + ' — esta lista precisa de internet.') + '</div>';
+    return;
+  }
+  box.innerHTML = contas.map(u => `
+    <div class="cfg-item">
+      <span>${esc(u.nome)} <span class="text-muted">(${esc(u.papel)}${u.ativo === false ? ' · desativado' : u.trocarSenha ? ' · senha temporária' : ''})</span></span>
+      <span>
+        <button class="btn-xs" data-user-senha-de="${esc(u.usuario)}">🔑</button>
+        <button class="btn-xs btn-danger" data-user-del="${esc(u.usuario)}">🗑</button>
+      </span>
+    </div>`).join('') || '<div class="text-muted">Nenhum acesso cadastrado.</div>';
+
+  $$('[data-user-del]', box).forEach(b => b.onclick = async () => {
+    const u = b.dataset.userDel;
+    if (!confirm('Tirar o acesso de "' + u + '"? As O.S. dele continuam onde estão.')) return;
+    try { await AUTH.removerConta(u); } catch (e) { toast(e.erro || 'Não consegui remover', 'error'); return; }
+    toast('Acesso removido', 'success'); pintarAcessos(el);
+  });
+  $$('[data-user-senha-de]', box).forEach(b => b.onclick = async () => {
+    const u = b.dataset.userSenhaDe;
+    const nova = prompt('Senha nova para "' + u + '" (mínimo 6). Ela vai ser obrigada a trocar na primeira entrada:');
+    if (nova == null) return;
+    if (nova.length < 6) { toast('A senha precisa de ao menos 6 caracteres', 'error'); return; }
+    const conta = contas.find(c => c.usuario === u) || {};
+    try { await AUTH.salvarConta({ usuario: u, nome: conta.nome || u, papel: conta.papel, senha: nova }); }
+    catch (e) { toast(e.erro || 'Não consegui trocar', 'error'); return; }
+    toast('Senha definida — ela troca na primeira entrada', 'success'); pintarAcessos(el);
+  });
 }
 
 /* ── Saúde da conexão: nuvem OK? importação automática rodando? fila local? ─ */
