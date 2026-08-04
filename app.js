@@ -752,6 +752,10 @@ function initTopbar() {
   if (espBtn) espBtn.onclick = abrirEspelhos;
   const instrBtn = $('#btn-instrucoes');
   if (instrBtn) instrBtn.onclick = abrirInstrucoes;
+  // A tela de troca de senha já existia, mas só abria sozinha quando a senha
+  // era temporária -- ninguém conseguia trocar por vontade própria.
+  const btSenha = $('#btn-senha');
+  if (btSenha) btSenha.onclick = () => telaTrocarSenha(false);
   $('#btn-logout').onclick = () => {
     // Sem apagar o crachá, o próximo a pegar o tablet entra como você.
     AUTH.esquecer();
