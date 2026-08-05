@@ -1,7 +1,7 @@
 // sw.js — Service worker: deixa o app abrir offline (casca/shell em cache).
 // Os DADOS continuam sincronizando pela fila do store.js; aqui só cuidamos
 // dos arquivos estáticos para o app carregar sem internet.
-const CACHE = 'impresilk-shell-v49';
+const CACHE = 'impresilk-shell-v50';
 const SHELL = [
   './', 'index.html', 'equipe.html', 'styles.css',
   'config.js', 'logo.js', 'frases.js', 'store.js', 'auth.js', 'pops.js', 'app.js', 'equipe.js',
@@ -19,7 +19,10 @@ self.addEventListener('install', e => {
     // CDN: allSettled — falha de rede externa não bloqueia a instalação.
     const core = SHELL.filter(u => !u.startsWith('http'));
     const cdn  = SHELL.filter(u => u.startsWith('http'));
-    await c.addAll(core);
+    // cache:'reload' por arquivo: sem isto o SW guarda o que estava no cache
+    // HTTP do navegador (o Pages manda max-age=600) e passa a SERVIR a versão
+    // velha até o próximo bump — a equipe não recebe a correção recém-publicada.
+    await c.addAll(core.map(u => new Request(u, { cache: 'reload' })));
     await Promise.allSettled(cdn.map(u => c.add(u)));
     self.skipWaiting();
   })());
