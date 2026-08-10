@@ -1,6 +1,10 @@
-// TOKEN — mesma string deve estar aqui E como variável de ambiente TOKEN no Netlify
-// Site settings → Environment variables → TOKEN = <sua-senha-secreta>
-const TOKEN = 'impresilk-bhinxmdp5b7dwgaxpv9u2xqh';
+// ⚠️ NÃO coloque token nenhum neste arquivo: ele é servido ao navegador e
+// qualquer pessoa lê no código-fonte da página.
+//
+// Até 05/08/2026 havia aqui um `const TOKEN = '...'`, e era ele que autorizava
+// os dados no servidor — ou seja, as O.S. da casa saíam sem login para quem
+// abrisse o código-fonte. Quem autoriza agora é o CRACHÁ da pessoa (store.js),
+// assinado por um segredo que só o servidor conhece. O token antigo foi girado.
 
 // Backend: Supabase (Edge Functions). Antes eram Netlify Functions em
 // /.netlify/functions/. O contrato das ações é o MESMO — só mudou o endereço.

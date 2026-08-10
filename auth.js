@@ -42,6 +42,8 @@ const AUTH = (() => {
 
   return {
     temCracha: () => !!pegar(),
+    // O crachá agora também autoriza os DADOS (pcp-sync), não só a tela.
+    cracha: pegar,
     esquecer,
     async login(usuario, senha) {
       const r = await chamar('login', { usuario, senha });
