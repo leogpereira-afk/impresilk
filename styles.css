@@ -1503,3 +1503,18 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .eq-info-foto img { max-width: 100%; border-radius: var(--radius-s); border: 1px solid var(--border); }
 /* Controles desabilitados na O.S finalizada ficam visivelmente inertes */
 #modal-os.os-locked .seg button[disabled] { opacity: .5; }
+
+/* ── Linha do tempo (Painel): régua arrastável ───────────────────────────── */
+.lt-barra { display: flex; align-items: center; gap: 8px; }
+#lt-range { flex: 1; accent-color: var(--blue); height: 30px; touch-action: pan-x; }
+.lt-escala { display: flex; justify-content: space-between; font-size: .68rem; color: var(--muted); margin: 2px 2px 12px; }
+.lt-agora { color: var(--blue); font-weight: 800; }
+.lt-resumo { font-size: .9rem; margin-bottom: 10px; line-height: 1.5; }
+.lt-funil { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.lt-sec { margin-bottom: 12px; }
+.lt-sec-tit { font-size: .78rem; font-weight: 700; color: var(--muted); margin-bottom: 5px; display: flex; align-items: center; gap: 6px; }
+.lt-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-s); padding: 6px 10px; margin-bottom: 4px; font-size: .82rem; cursor: pointer; }
+.lt-item:hover { background: #eff6ff; }
+.lt-cli { flex: 1 1 auto; min-width: 120px; }
+.lt-extra { font-size: .76rem; }
+.lt-vazio { font-size: .78rem; padding: 2px 0 4px; }

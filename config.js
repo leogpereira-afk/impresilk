@@ -17,4 +17,4 @@ const API_FN = { os: 'pcp-sync', mubisys: 'pcp-mubisys' };
 
 // Versão do shell instalado neste aparelho (manter IGUAL ao CACHE do sw.js a
 // cada deploy). Aparece na Saúde da conexão — 1ª pergunta do suporte.
-const APP_VERSAO = 'v48';
+const APP_VERSAO = 'v52';

@@ -2355,6 +2355,7 @@ function salvarPainelVista() {
 // Bloco recolhível do Painel (item 5) com título padrão (item 4).
 // Ícones Tabler (SVG inline, traço branco) por bloco do Painel — item 2.
 const TABLER_ICOS = {
+  linhatempo: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   exec:    '<path d="M7 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M17 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M5 17h-2v-11a1 1 0 0 1 1 -1h9v12m-4 0h6m4 0h2v-6h-8m0 -5h5l3 5"/>',
   tend:    '<path d="M3 17l6 -6l4 4l8 -8"/><path d="M14 7l7 0l0 7"/>',
   func:    '<path d="M10 13a3 3 0 1 0 0 -6a3 3 0 0 0 0 6z"/><path d="M21 21l-2.35 -2.35"/><path d="M3 19a4 4 0 0 1 4 -4h2"/>',
@@ -2364,6 +2365,98 @@ const TABLER_ICOS = {
   prodfunc:'<path d="M3 3v18h18"/><path d="M9 17v-5"/><path d="M13 17v-3"/><path d="M17 17v-7"/>',
   cmp:     '<path d="M3 6l4 0"/><path d="M3 12l4 0"/><path d="M3 18l4 0"/><path d="M11 5l10 0"/><path d="M11 12l10 0"/><path d="M11 19l10 0"/>'
 };
+/* ── Linha do tempo (Painel): régua arrastável passado ⟷ AGORA ⟷ futuro ─── */
+// Em que etapa a O.S estava no instante T (reconstruído do historico[]).
+// O.S sem histórico até T: se já existia, aproxima como "aguardando produção".
+function etapaEmT(os, T) {
+  const h = (Array.isArray(os.historico) ? os.historico : []).filter(x => x && x.em && new Date(x.em) <= T);
+  if (h.length) return h[h.length - 1].etapa;
+  const nasc = os.criadoEm || (os.dataEntrada ? os.dataEntrada + 'T12:00:00' : null);
+  if (!nasc || new Date(nasc) > T) return null; // ainda não existia
+  return 'aguardando_producao';
+}
+
+// Fotografia do momento escolhido na régua (offset em dias: <0 passado, 0 agora, >0 futuro)
+function fotografiaLT(offset) {
+  const todas = STORE.getAllOS();
+  const base = parseLocalDate(todayISO());
+  const dia = new Date(base); dia.setDate(dia.getDate() + offset);
+  const diaISO = ymdLocal(dia);
+  const rotDia = `${DIAS_SEMANA[dia.getDay()]}, ${fmtDataBR(diaISO)}`;
+  const item = (o, extra, stO) => {
+    const st = stO || calcStatus(o);
+    return `<div class="lt-item" data-os-id="${esc(o.id)}"><span class="badge st-${st}">${statusLabelDe(o, st)}</span> <strong>O.S ${esc(o.numero || '—')}</strong> <span class="lt-cli">${esc(o.cliente || '')}</span>${extra ? `<span class="text-muted lt-extra">${extra}</span>` : ''}</div>`;
+  };
+  const sec = (tit, arr, vazio) => `<div class="lt-sec"><div class="lt-sec-tit">${tit} <span class="pcp-chip-n">${arr.length}</span></div>${arr.length ? arr.join('') : `<div class="text-muted lt-vazio">${vazio}</div>`}</div>`;
+
+  if (offset > 0) {
+    // FUTURO: o que já está estruturado para o dia
+    const agendadas = todas.filter(o => !o.finalizadaEm && o.instalacao && o.instalacao.data === diaISO)
+      .sort((a, b) => String((a.instalacao || {}).periodo || 'zz').localeCompare(String((b.instalacao || {}).periodo || 'zz')));
+    const entregas = todas.filter(o => !o.finalizadaEm && dataEntregaOS(o) === diaISO && !(o.instalacao && o.instalacao.data === diaISO));
+    const retiradas = todas.filter(o => isInterno(o) && !o.finalizadaEm && o.liberadoPCP);
+    const equipes = [...new Set(agendadas.flatMap(o => o.equipe || []))];
+    return `
+      <div class="lt-resumo">📐 <strong>Estruturado para ${rotDia}</strong> <span class="text-muted">(em ${offset} dia${offset > 1 ? 's' : ''})</span>${equipes.length ? `<br>👷 Escalados: ${equipes.map(esc).join(', ')}` : ''}</div>
+      ${sec('📅 Instalações agendadas', agendadas.map(o => item(o, `${esc((o.instalacao || {}).periodo || 'sem período')}${(o.equipe || []).length ? ' · 👷 ' + esc(o.equipe.join(', ')) : ' · <strong>⚠ sem equipe</strong>'}`)), 'Nada agendado — dia livre para encaixar serviço')}
+      ${sec('📦 Entregas prometidas vencendo no dia', entregas.map(o => item(o)), 'Nenhuma entrega vencendo')}
+      ${sec('🛍 Estarão aguardando retirada (se não forem retirados antes)', retiradas.map(o => item(o)), 'Nenhum pedido pronto aguardando')}`;
+  }
+
+  // PASSADO / AGORA: reconstrução pelo histórico
+  const T = offset === 0 ? new Date() : new Date(dia.getFullYear(), dia.getMonth(), dia.getDate(), 23, 59, 59);
+  const hhT = `${String(T.getHours()).padStart(2, '0')}:${String(T.getMinutes()).padStart(2, '0')}`;
+  const cont = {};
+  todas.forEach(o => { const st = etapaEmT(o, T); if (st && st !== 'finalizada') cont[st] = (cont[st] || 0) + 1; });
+  const funil = ETAPAS_EXT.filter(k => k !== 'finalizada')
+    .map(k => `<span class="pcp-chip">${esc(STATUS_LABEL[k])} <span class="pcp-chip-n">${cont[k] || 0}</span></span>`).join('');
+  const doDia = todas.filter(o => o.instalacao && o.instalacao.data === diaISO);
+  const naRua = offset === 0
+    ? doDia.filter(o => !o.finalizadaEm && o.horaSaida && (!o.horaRetorno || o.horaRetorno > hhT))
+    : doDia.filter(o => o.horaSaida);
+  const finalizadasDia = todas.filter(o => o.finalizadaEm && diaLocalISO(o.finalizadaEm) === diaISO);
+  const retAguard = offset === 0 ? todas.filter(o => isInterno(o) && !o.finalizadaEm && o.liberadoPCP) : [];
+  return `
+    <div class="lt-resumo">${offset === 0
+      ? `📸 <strong>Agora — ${rotDia} · ${hhT}</strong>`
+      : `🕰 <strong>Como estava em ${rotDia}</strong> <span class="text-muted">(há ${-offset} dia${offset < -1 ? 's' : ''} · fim do dia, reconstruído pelo histórico)</span>`}</div>
+    <div class="lt-funil">${funil}</div>
+    ${sec(offset === 0 ? '🚗 Na rua agora' : '🚗 Rodaram na rua neste dia',
+      naRua.map(o => item(o, `👷 ${esc((o.equipe || []).join(', ') || '—')} · saiu ${esc(o.horaSaida || '')}${o.horaRetorno ? ' → voltou ' + esc(o.horaRetorno) : ''}`, offset === 0 ? null : etapaEmT(o, T) || undefined)),
+      offset === 0 ? 'Ninguém na rua neste momento' : 'Nenhuma equipe saiu neste dia')}
+    ${sec(offset === 0 ? '📅 Agendadas para hoje' : '📅 Estava agendado para o dia', doDia.map(o => item(o, esc((o.instalacao || {}).periodo || ''))), 'Nada agendado para este dia')}
+    ${offset === 0 ? sec('🛍 Aguardando retirada', retAguard.map(o => item(o)), 'Nenhum pedido pronto aguardando') : ''}
+    ${sec(offset === 0 ? '✅ Finalizadas hoje' : '✅ Finalizadas neste dia', finalizadasDia.map(o => item(o, isInterno(o) ? 'retirado' : 'instalado', 'finalizada')), 'Nenhuma finalização neste dia')}`;
+}
+
+function corpoLinhaTempo() {
+  return `
+    <div class="lt-barra">
+      <button class="btn-ghost btn-xs" id="lt-menos" title="1 dia para trás">◀</button>
+      <input type="range" id="lt-range" min="-30" max="30" step="1" value="${STATE.ltOffset || 0}" aria-label="Régua do tempo: arraste para ver passado e futuro">
+      <button class="btn-ghost btn-xs" id="lt-mais" title="1 dia para frente">▶</button>
+      <button class="btn-ghost btn-xs" id="lt-hoje">Agora</button>
+    </div>
+    <div class="lt-escala"><span>◂ 30 dias atrás</span><span class="lt-agora">AGORA</span><span>30 dias à frente ▸</span></div>
+    <div id="lt-foto"></div>`;
+}
+
+function wireLinhaTempo(el) {
+  const r = $('#lt-range', el);
+  if (!r) return;
+  const foto = $('#lt-foto', el);
+  const pintar = () => {
+    STATE.ltOffset = +r.value;
+    foto.innerHTML = fotografiaLT(STATE.ltOffset);
+    bindCardClicks(foto);
+  };
+  r.oninput = pintar;
+  $('#lt-hoje', el).onclick = () => { r.value = 0; pintar(); };
+  $('#lt-menos', el).onclick = () => { r.value = Math.max(-30, +r.value - 1); pintar(); };
+  $('#lt-mais', el).onclick = () => { r.value = Math.min(30, +r.value + 1); pintar(); };
+  pintar();
+}
+
 function tablerIco(id) {
   const p = TABLER_ICOS[id];
   if (!p) return '';
@@ -2596,6 +2689,8 @@ function renderPainelKPIs() {
     </div>
     ${prevTxt ? `<div style="margin:-6px 0 10px">${prevTxt}</div>` : ''}
 
+    ${painelBloco('linhatempo', 'Linha do tempo <span class="text-muted" style="font-weight:400;font-size:.75rem">(arraste a régua: passado · agora · futuro)</span>', corpoLinhaTempo())}
+
     ${painelBloco('exec', 'Trabalhos em execução agora',
       `<div class="exec-now-grid">${execCards || emptyState('🚗', 'Ninguém na rua agora', 'Quando uma equipe iniciar uma instalação ela aparece aqui.')}</div>`)}
 
@@ -2637,6 +2732,7 @@ function renderPainelKPIs() {
     <div id="painel-detail"></div>`;
 
   bindCardClicks(el);
+  wireLinhaTempo(el);
 
   // Recolher/expandir blocos do Painel (item 5)
   $$('[data-bloco-tog]', el).forEach(h => h.onclick = () => {
