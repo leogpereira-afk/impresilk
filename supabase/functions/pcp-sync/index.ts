@@ -20,6 +20,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TOKEN = Deno.env.get("PCP_TOKEN") ?? "";
+// Credencial de MONITORAMENTO (vigia diário): só libera as ações de saúde
+// (ping/diag/saude) — nunca lê nem escreve O.S. Girável sem afetar ninguém.
+const SAUDE_TOKEN = Deno.env.get("PCP_SAUDE_TOKEN") ?? "";
 const JWT_SECRET = Deno.env.get("EQUIPE_JWT_SECRET") ?? "";
 
 // AUTORIZACAO (mudou em 05/08/2026): ate aqui a unica porta era o x-token, e
@@ -145,7 +148,9 @@ Deno.serve(async (req: Request) => {
   const cracha = m ? await lerCracha(m[1]) : null;
   const token = req.headers.get("x-token") ?? body.token;
   const ehMaquina = !!TOKEN && token === TOKEN;
-  if (!cracha && !ehMaquina) return resp({ error: "Entre no sistema.", semSessao: true }, 401);
+  const ehVigia = !!SAUDE_TOKEN && token === SAUDE_TOKEN &&
+    ["ping", "diag", "saude"].includes(String(body.action));
+  if (!cracha && !ehMaquina && !ehVigia) return resp({ error: "Entre no sistema.", semSessao: true }, 401);
 
   try {
     switch (body.action as string) {
