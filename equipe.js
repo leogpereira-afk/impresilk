@@ -37,13 +37,16 @@ function calcStatus(os) {
   if (os.liberadoPCP)                         return 'apto';
   return 'aguardando_producao';
 }
+// Os rótulos são os MESMOS do app.js (linhas 229 e 254). Duas telas com réguas
+// de texto diferentes para o mesmo estado é bug de leitura: aqui dizia
+// "Aguardando" e na gestão "Aguardando produção".
 const STATUS_LABEL = {
-  aguardando_producao:'Aguardando', apto:'Apto', agendada:'Agendada',
+  aguardando_producao:'Aguardando produção', apto:'Apto', agendada:'Agendada',
   confirmada:'Confirmada', em_andamento:'Em andamento', finalizada:'Finalizada'
 };
 // Cliente retira fala outra língua (espelha o app.js): "Apto" = pronto p/
 // retirada e "Finalizada" = retirado. Só exibição — o status é o mesmo.
-const STATUS_LABEL_INT = { aguardando_producao:'Aguardando', apto:'🛍 Pronto p/ retirada', finalizada:'Retirado' };
+const STATUS_LABEL_INT = { aguardando_producao:'Aguardando produção', apto:'🛍 Pronto p/ retirada', finalizada:'Retirado' };
 function isInterno(os) { return !!(os && os.tipo === 'interno'); }
 function statusLabelDe(os, st) {
   if (isInterno(os) && STATUS_LABEL_INT[st]) return STATUS_LABEL_INT[st];
@@ -64,7 +67,22 @@ let _draft = null, _dirty = false;
 /* ── Seleção do instalador ───────────────────────────────────────────────── */
 function initSelect() {
   // Espelho comercial: somente‑leitura, sem execução, sem escolher instalador.
+  //
+  // EXIGE CRACHÁ. Isto aqui não é visão de execução: mostra TODAS as O.S
+  // liberadas, com cliente, endereço e telefone, lendo direto do cache local.
+  // Como o dado já está no aparelho, no tablet compartilhado da fábrica bastava
+  // digitar "#comercial" depois que o gestor saía para ler a carteira inteira
+  // sem senha nenhuma. O logout da gestão agora também limpa esse cache, mas a
+  // porta se fecha aqui — não só pela ausência do dado.
   if (location.hash === '#comercial') {
+    if (typeof AUTH === 'undefined' || !AUTH.temCracha()) {
+      $('#select-screen').innerHTML =
+        '<div class="card" style="max-width:420px;margin:40px auto;text-align:center">' +
+        '<h2>🔒 Visão comercial</h2>' +
+        '<p class="text-muted">Esta tela mostra a carteira de clientes. Entre pela gestão neste aparelho antes de abri-la.</p>' +
+        '<p><a class="btn-primary" href="index.html">Ir para a gestão</a></p></div>';
+      return;
+    }
     EQ.comercial = true;
     EQ.instalador = 'Comercial';
     enter();
@@ -142,13 +160,30 @@ function enter() {
   STORE.onSync((status, pending) => {
     const el = $('#sync-indicator');
     el.className = 'sync-indicator ' + status;
-    el.textContent = status === 'ok' ? '✅' : (status === 'pending' ? `⏳ ${pending}` : '⚠️');
+    // 'sem-sessao' não é falta de sinal: dizer "Sem conexão" com Wi-Fi cheio
+    // manda o instalador caçar roteador enquanto o problema é o crachá.
+    const semSessao = status === 'sem-sessao';
+    el.textContent = status === 'ok' ? '✅'
+      : status === 'pending' ? `⏳ ${pending}`
+      : semSessao ? '🔒' : '⚠️';
     el.title = status === 'ok' ? 'Tudo salvo na nuvem.'
       : status === 'pending' ? `${pending} alteração(ões) aguardando envio. Some sozinho ao reconectar.`
+      : semSessao ? 'A nuvem recusou este aparelho (sessão/acesso). Seu trabalho está guardado aqui — avise a gestão.'
       : 'Sem conexão — pode continuar; envia ao reconectar.';
     el.style.cursor = 'pointer';
     el.onclick = () => { if (el.title) toast(el.title); };
   });
+  // Perda de dado nunca é silenciosa (o espelho é onde o trabalho nasce).
+  STORE.on('item-descartado', ({ item, motivo }) => {
+    const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : 'alteração';
+    toast(`⚠️ ${ref} NÃO foi salva na nuvem (${motivo || 'erro'}). Refaça e avise a gestão.`, 'error');
+  });
+  STORE.on('pull-truncado', () => toast('A lista pode estar incompleta — recarregue a página.', 'error'));
+  STORE.on('sem-sessao', () => {
+    if (window._avisouSessao) return; window._avisouSessao = true;
+    toast('🔒 A nuvem recusou este aparelho. O trabalho fica guardado aqui; avise a gestão.', 'error');
+  });
+  STORE.on('quota', () => toast('Memória do aparelho cheia — avise a gestão.', 'error'));
   initConflict();
   const vBtn = $('#btn-verificar');
   if (vBtn) vBtn.onclick = verificarNuvem;
@@ -254,14 +289,21 @@ function renderList() {
 
   let heroHtml = '';
   if (proxima) {
-    const naRua = (proxima.carroLiberado || proxima.horaSaida) && !proxima.horaRetorno;
-    const maps = proxima.endereco ? `https://maps.google.com/?q=${encodeURIComponent(proxima.endereco)}` : '';
+    // O.S interna = CLIENTE RETIRA: não há deslocamento. Chamar isso de "sua
+    // próxima instalação" com botão de Rota mandava o instalador carregar o
+    // carro e dirigir até o endereço do cliente para descobrir na porta que era
+    // o cliente quem vinha buscar.
+    const interno = isInterno(proxima);
+    const naRua = !interno && (proxima.carroLiberado || proxima.horaSaida) && !proxima.horaRetorno;
+    const maps = (!interno && proxima.endereco) ? `https://maps.google.com/?q=${encodeURIComponent(proxima.endereco)}` : '';
+    const tag = interno ? '🛍 Pronto p/ retirada — o cliente vem buscar'
+      : naRua ? '🚗 Em rota' : '📍 Sua próxima instalação';
     heroHtml = `
-      <div class="proxima-card" data-hero-id="${esc(proxima.id)}">
-        <div class="proxima-tag">${naRua ? '🚗 Em rota' : '📍 Sua próxima instalação'}</div>
+      <div class="proxima-card${interno ? ' is-interno' : ''}" data-hero-id="${esc(proxima.id)}">
+        <div class="proxima-tag">${tag}</div>
         <div class="proxima-os">O.S ${esc(proxima.numero || '—')}</div>
         <div class="proxima-cliente">${esc(proxima.cliente || 'Sem cliente')}</div>
-        <div class="proxima-end">${esc(proxima.endereco || 'Endereço não informado')}</div>
+        <div class="proxima-end">${interno ? 'Retirada na fábrica' : esc(proxima.endereco || 'Endereço não informado')}</div>
         <div class="proxima-data">📅 ${esc(fmtInstalacao(proxima.instalacao))}</div>
         <div class="proxima-acoes">
           <button class="btn-primary" data-hero-abrir="${esc(proxima.id)}">Abrir O.S ▶</button>
@@ -583,7 +625,14 @@ function bindModal(os, ro) {
   // O.S finalizada: somente leitura. Não liga nenhum handler de edição.
   if (ro) return;
 
-  $$('[data-f]', root).forEach(el => el.oninput = el.onchange = () => setF(el.dataset.f, el.value));
+  $$('[data-f]', root).forEach(el => el.oninput = el.onchange = () => {
+    setF(el.dataset.f, el.value);
+    // A hora sozinha ('HH:MM') não diz em que DIA a equipe saiu/voltou, e a
+    // Linha do Tempo da gestão precisa disso para reconstruir o passado sem
+    // depender do agendamento de hoje. Mesmo carimbo do app.js.
+    if (el.dataset.f === 'horaSaida')   STORE.carimbarMomento(_draft, 'horaSaida', 'saidaEm');
+    if (el.dataset.f === 'horaRetorno') STORE.carimbarMomento(_draft, 'horaRetorno', 'retornoEm');
+  });
   $$('[data-c]', root).forEach(el => el.onchange = () => setF(el.dataset.c, el.checked));
   // Status por item (Pendente / Instalado / Retrabalho)
   $$('[data-iset]', root).forEach(btn => btn.onclick = () => {

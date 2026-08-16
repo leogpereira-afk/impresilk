@@ -770,12 +770,22 @@ function initTopbar() {
   const btSenha = $('#btn-senha');
   if (btSenha) btSenha.onclick = () => telaTrocarSenha(false);
   $('#btn-logout').onclick = () => {
-    // Sem apagar o crachá, o próximo a pegar o tablet entra como você.
+    // Sair no tablet compartilhado tem de levar o DADO junto, não só o crachá:
+    // as O.S ficavam no aparelho e equipe.html#comercial as lia sem senha.
+    // Com fila pendente o cache NÃO é apagado (o trabalho só existe aqui), e
+    // quem está saindo precisa saber disso antes de entregar o aparelho.
+    const fila = STORE.getQueue().length;
+    if (fila && !confirm(
+      `Há ${fila} alteração(ões) ainda não enviadas para a nuvem.\n\n` +
+      'Se sair agora elas continuam guardadas NESTE aparelho (e o cache de O.S ' +
+      'não será apagado). O ideal é reconectar e esperar o ✅.\n\nSair mesmo assim?'
+    )) return;
     AUTH.esquecer();
     STORE.setUser(null);
     // Tablet compartilhado: sair da gestão também desloga o espelho do
     // instalador (senão equipe.html auto-entra como a última pessoa clicada).
     STORE.setInstalador(null);
+    STORE.limparCache(); // no-op quando ainda há fila
     location.reload();
   };
 }
@@ -1546,7 +1556,37 @@ function bindModalEvents(os, ro) {
       // Máscara de telefone enquanto digita (mantém o cursor no fim).
       if (el.dataset.mask === 'tel') { v = maskTel(v); el.value = v; }
       if (el.dataset.f === 'instalacao.duracaoDias') v = Math.max(1, +v || 1);
+      // Reagendamento é HISTÓRIA: a régua do tempo precisa saber para que dia a
+      // O.S estava marcada NAQUELE dia, não para o dia de hoje. Sem este log,
+      // remarcar apagava do passado o que já tinha sido combinado.
+      //
+      // Só data COMPLETA entra: `oninput` num campo de data dispara a cada
+      // dígito e encheria o log de datas pela metade ("0002-08-05").
+      if (el.dataset.f === 'instalacao.data' && _modalDraft &&
+          (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v))) {
+        const antes = (_modalDraft.instalacao || {}).data || '';
+        if (antes !== v) {
+          if (!Array.isArray(_modalDraft.agendaLog)) _modalDraft.agendaLog = [];
+          const log = _modalDraft.agendaLog;
+          const ultimo = log[log.length - 1];
+          // Ajuste em cima do ajuste (mexeu, olhou o calendário, mexeu de novo)
+          // é UMA remarcação: corrige o destino e preserva o `de` original —
+          // que é o que permite reconstruir a agenda de antes dela.
+          if (ultimo && Date.now() - new Date(ultimo.em).getTime() < 120000) {
+            ultimo.data = v || '';
+            ultimo.em = nowISO();
+          } else {
+            // `de` guarda o que valia ANTES: sem isso, para um dia anterior à
+            // primeira remarcação a régua não saberia a agenda de então.
+            log.push({ de: antes, data: v || '', em: nowISO(), por: (STATE.user && STATE.user.nome) || '' });
+            if (log.length > 40) _modalDraft.agendaLog = log.slice(-40);
+          }
+        }
+      }
       setField(el.dataset.f, v);
+      // Hora de saída/retorno sem dia não reconstrói o passado (carimbarMomento).
+      if (el.dataset.f === 'horaSaida')   STORE.carimbarMomento(_modalDraft, 'horaSaida', 'saidaEm');
+      if (el.dataset.f === 'horaRetorno') STORE.carimbarMomento(_modalDraft, 'horaRetorno', 'retornoEm');
       // Re-render leve em campos que afetam status/checklist/travas
       if (['confirmacao','instalacao.periodo','instalacao.data','liberadoPCP'].includes(el.dataset.f)) {
         saveDraft(); reRenderModalKeepOpen();
@@ -1811,8 +1851,10 @@ function bindModalEvents(os, ro) {
       const agora = new Date();
       draft.horaSaida = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
     }
+    // A hora sozinha não diz em QUE dia a equipe saiu (ver carimbarMomento).
+    STORE.carimbarMomento(draft, 'horaSaida', 'saidaEm');
     if (_modalDraft === draft) capturarLocalCheckin();
-    persistirAposFoto(draft, ['fotosCheckinIds', 'horaSaida']);
+    persistirAposFoto(draft, ['fotosCheckinIds', 'horaSaida', 'saidaEm']);
   };
   $$('[data-foto-rm]', root).forEach(btn => {
     btn.onclick = () => {
@@ -1839,7 +1881,8 @@ function bindModalEvents(os, ro) {
       const agora = new Date();
       draft.horaRetorno = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
     }
-    persistirAposFoto(draft, ['fotosRetornoIds', 'horaRetorno']);
+    STORE.carimbarMomento(draft, 'horaRetorno', 'retornoEm');
+    persistirAposFoto(draft, ['fotosRetornoIds', 'horaRetorno', 'retornoEm']);
   };
   $$('[data-foto-rm-retorno]', root).forEach(btn => {
     btn.onclick = () => {
@@ -2408,6 +2451,27 @@ function etapaEmT(os, T) {
   return 'aguardando_producao';
 }
 
+// Para que dia a O.S estava agendada NAQUELE momento (T), e não hoje.
+//
+// `agendaLog` guarda cada remarcação ({de, data, em}); com ele a resposta é
+// exata. Sem ele (O.S que nunca foi remarcada desde que o log existe, ou O.S
+// antiga) sobra o agendamento atual — que é o certo enquanto ninguém remarcou,
+// mas é palpite depois. `exato:false` marca esse palpite para a tela avisar em
+// vez de afirmar "reconstruído pelo histórico".
+function agendaEmT(os, T) {
+  const log = (Array.isArray(os.agendaLog) ? os.agendaLog : []).filter(x => x && x.em);
+  if (!log.length) return { data: (os.instalacao || {}).data || '', exato: false };
+  const ate = log.filter(x => new Date(x.em) <= T);
+  if (ate.length) return { data: ate[ate.length - 1].data || '', exato: true };
+  return { data: log[0].de || '', exato: true }; // T é anterior à 1ª remarcação
+}
+// 'HH:MM' de um carimbo ISO local, com a hora solta como reserva.
+function horaDe(stamp, reserva) {
+  const s = String(stamp || '');
+  const m = s.match(/T(\d{2}:\d{2})/);
+  return m ? m[1] : (reserva || '');
+}
+
 // Fotografia do momento escolhido na régua (offset em dias: <0 passado, 0 agora, >0 futuro)
 // Recebe `todas` já lido uma vez (evita re-parsear o localStorage a cada arrasto).
 function fotografiaLT(offset, todas) {
@@ -2443,21 +2507,46 @@ function fotografiaLT(offset, todas) {
   todas.forEach(o => { const st = etapaEmT(o, T); if (st && st !== 'finalizada') cont[st] = (cont[st] || 0) + 1; });
   const funil = ETAPAS_EXT.filter(k => k !== 'finalizada')
     .map(k => `<span class="pcp-chip">${esc(STATUS_LABEL[k])} <span class="pcp-chip-n">${cont[k] || 0}</span></span>`).join('');
-  const doDia = todas.filter(o => o.instalacao && o.instalacao.data === diaISO);
+  // PASSADO: o dia da saída vem do CARIMBO (saidaEm), não do agendamento de
+  // hoje — remarcar uma O.S movia a saída de dia e reescrevia a história. O.S
+  // sem carimbo (anteriores a este campo) caem na regra velha, e a seção avisa
+  // que ali há reconstrução por aproximação em vez de afirmar histórico.
+  // Uma passada só: a régua re-renderiza a cada pixel de arrasto.
+  const agendaT = offset === 0 ? null : new Map(todas.map(o => [o.id, agendaEmT(o, T)]));
+  const doDia = offset === 0
+    ? todas.filter(o => (o.instalacao || {}).data === diaISO)
+    : todas.filter(o => (agendaT.get(o.id) || {}).data === diaISO);
+  const agendaAdivinhada = offset === 0 ? 0
+    : doDia.filter(o => !(agendaT.get(o.id) || {}).exato).length;
+  const saiuNoDia = o => o.saidaEm
+    ? diaLocalISO(o.saidaEm) === diaISO
+    : (!!o.horaSaida && (agendaT.get(o.id) || {}).data === diaISO);
   const naRua = offset === 0
     ? doDia.filter(o => !o.finalizadaEm && o.horaSaida && (!o.horaRetorno || o.horaRetorno > hhT))
-    : doDia.filter(o => o.horaSaida);
+    : todas.filter(saiuNoDia);
+  const saidaAdivinhada = offset === 0 ? 0 : naRua.filter(o => !o.saidaEm).length;
   const finalizadasDia = todas.filter(o => o.finalizadaEm && diaLocalISO(o.finalizadaEm) === diaISO);
   const retAguard = offset === 0 ? todas.filter(o => isInterno(o) && !o.finalizadaEm && o.liberadoPCP) : [];
+  // "voltou HH:MM" só quando o retorno foi NESTE dia (serviço de dois dias, ou
+  // O.S que voltou depois, não devem carimbar retorno no dia da saída).
+  const extraRua = o => {
+    const saiu = offset === 0 ? (o.horaSaida || '') : horaDe(o.saidaEm, o.horaSaida);
+    const voltouNoDia = o.retornoEm ? diaLocalISO(o.retornoEm) === diaISO : !!o.horaRetorno;
+    const voltou = voltouNoDia ? (offset === 0 ? o.horaRetorno : horaDe(o.retornoEm, o.horaRetorno)) : '';
+    return `👷 ${esc((o.equipe || []).join(', ') || '—')} · saiu ${esc(saiu)}${voltou ? ' → voltou ' + esc(voltou) : ''}`;
+  };
+  const nota = t => `<div class="text-muted lt-vazio" style="margin-top:6px">${t}</div>`;
   return `
     <div class="lt-resumo">${offset === 0
       ? `📸 <strong>Agora — ${rotDia} · ${hhT}</strong>`
       : `🕰 <strong>Como estava em ${rotDia}</strong> <span class="text-muted">(há ${-offset} dia${offset < -1 ? 's' : ''} · fim do dia, reconstruído pelo histórico)</span>`}</div>
     <div class="lt-funil">${funil}</div>
     ${sec(offset === 0 ? '🚗 Na rua agora' : '🚗 Rodaram na rua neste dia',
-      naRua.map(o => item(o, `👷 ${esc((o.equipe || []).join(', ') || '—')} · saiu ${esc(o.horaSaida || '')}${o.horaRetorno ? ' → voltou ' + esc(o.horaRetorno) : ''}`, offset === 0 ? null : etapaEmT(o, T) || undefined)),
+      naRua.map(o => item(o, extraRua(o), offset === 0 ? null : etapaEmT(o, T) || undefined)),
       offset === 0 ? 'Ninguém na rua neste momento' : 'Nenhuma equipe saiu neste dia')}
+    ${saidaAdivinhada ? nota(`⚠ ${saidaAdivinhada} sem carimbo de dia na saída (O.S antiga): posicionada pelo agendamento atual.`) : ''}
     ${sec(offset === 0 ? '📅 Agendadas para hoje' : '📅 Estava agendado para o dia', doDia.map(o => item(o, esc((o.instalacao || {}).periodo || ''))), 'Nada agendado para este dia')}
+    ${agendaAdivinhada ? nota(`⚠ ${agendaAdivinhada} sem histórico de remarcação: mostradas pela agenda de hoje.`) : ''}
     ${offset === 0 ? sec('🛍 Aguardando retirada', retAguard.map(o => item(o)), 'Nenhum pedido pronto aguardando') : ''}
     ${sec(offset === 0 ? '✅ Finalizadas hoje' : '✅ Finalizadas neste dia', finalizadasDia.map(o => item(o, isInterno(o) ? 'retirado' : 'instalado', 'finalizada')), 'Nenhuma finalização neste dia')}`;
 }

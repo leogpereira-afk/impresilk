@@ -83,6 +83,64 @@ const BUCKET = "pcp-arquivos";
 
 const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
+// ---------------------------------------------------------------- revogacao
+// O cracha e um JWT stateless de 30 dias guardado no localStorage. Ate aqui,
+// "desativar a conta" na Central nao fechava porta nenhuma deste lado: o token
+// ja emitido continuava lendo e gravando O.S ate expirar, e a unica forma de
+// cortar era girar o EQUIPE_JWT_SECRET — que derruba os SETE sistemas de uma vez.
+//
+// A regra e: so recusa com PROVA de revogacao.
+//   - papel montagem   -> nao tem conta; o cracha nasce da lista de instaladores,
+//                         entao tirar o nome da lista e a revogacao dele.
+//   - demais papeis    -> linha em equipe_contas (sistema pcp) com ativo=false;
+//                         sem linha, tenta acesso_conta (quem entrou pela Central).
+//   - nada encontrado  -> ACEITA. Trancar por ausencia de linha derrubaria quem
+//                         entrou por um caminho que nao provisionou conta aqui,
+//                         e o prejuizo de trancar a casa inteira e maior que o de
+//                         um cracha sobreviver ate expirar.
+//   - banco fora do ar -> ACEITA (e nao guarda no cache).
+const CACHE_REVOG = new Map<string, { ate: number; revogado: boolean }>();
+const CACHE_REVOG_MS = 60_000; // uma consulta por pessoa por minuto, nao por request
+
+const semAcento = (s: string) =>
+  s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+async function crachaRevogado(cracha: any): Promise<boolean> {
+  const sub = String(cracha?.sub ?? "").trim();
+  const papel = String(cracha?.papel ?? "");
+  if (!sub) return false;
+  const chave = papel + ":" + sub;
+  const agora = Date.now();
+  const emCache = CACHE_REVOG.get(chave);
+  if (emCache && emCache.ate > agora) return emCache.revogado;
+
+  let revogado = false;
+  try {
+    if (papel === "montagem") {
+      const cfg = (await getCfg()) ?? {};
+      const lista: unknown[] = Array.isArray(cfg.instaladores) ? cfg.instaladores : [];
+      // Lista vazia = config nao carregada ou ainda sem cadastro: nao e prova.
+      if (lista.length) revogado = !lista.some((n) => semAcento(String(n)) === semAcento(sub));
+    } else {
+      const { data: conta, error } = await sb.from("equipe_contas")
+        .select("ativo").eq("sistema", "pcp").eq("usuario", sub).maybeSingle();
+      if (error) throw new Error(error.message);
+      if (conta) {
+        revogado = conta.ativo === false;
+      } else {
+        const { data: central } = await sb.from("acesso_conta")
+          .select("ativo").eq("usuario", sub).maybeSingle();
+        revogado = !!central && central.ativo === false;
+      }
+    }
+  } catch (e) {
+    console.error("[pcp-sync] revogacao indisponivel:", (e as Error).message);
+    return false;
+  }
+  CACHE_REVOG.set(chave, { ate: agora + CACHE_REVOG_MS, revogado });
+  return revogado;
+}
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-token",
@@ -94,31 +152,46 @@ const resp = (data: unknown, status = 200) =>
 
 // ---------------------------------------------------------------- registros
 
+// APAGADO E LAPIDE, nao sumico: o delete marca `apagado` em vez de remover a
+// linha (a coluna existe desde o 0001_init). Motivo: a importacao horaria decide
+// o que e novo perguntando quais NUMEROS ja existem na tabela — com a linha
+// removida, o numero "nao existe" e a O.S excluida voltava como esqueleto zerado
+// na hora seguinte, para sempre. A lapide continua ocupando o numero (o indice
+// unico vale para ela tambem) e barra a reinsercao sozinha.
+//
+// Em troca, TODA leitura que serve o app precisa filtrar apagado — senao a O.S
+// excluida continua na tela.
 async function getReg(colecao: string, id: string): Promise<any | null> {
   const { data } = await sb
     .from("pcp_registros").select("registro")
-    .eq("colecao", colecao).eq("id", id).maybeSingle();
+    .eq("colecao", colecao).eq("id", id).eq("apagado", false).maybeSingle();
   return data?.registro ?? null;
 }
 
 async function setReg(colecao: string, id: string, registro: any) {
   const { error } = await sb.from("pcp_registros").upsert(
-    { colecao, id, registro, atualizado_em: new Date().toISOString() },
+    { colecao, id, registro, atualizado_em: new Date().toISOString(), apagado: false },
     { onConflict: "colecao,id" },
   );
   if (error) throw new Error(error.message);
 }
 
+// Gravacao escrita explicitamente RESSUSCITA a lapide (apagado: false acima). E
+// deliberado: um aparelho que estava offline com edicao pendente prefere ver o
+// trabalho de volta a perde-lo calado. Quem nao ressuscita e a importacao.
 async function delReg(colecao: string, id: string) {
   // Confere o erro (o supabase-js NAO lanca — devolve {error}). Sem isso, um
   // delete que falhou respondia ok:true e o cliente tirava o item da fila.
-  const { error } = await sb.from("pcp_registros").delete().eq("colecao", colecao).eq("id", id);
+  const { error } = await sb.from("pcp_registros")
+    .update({ apagado: true, atualizado_em: new Date().toISOString() })
+    .eq("colecao", colecao).eq("id", id);
   if (error) throw new Error(error.message);
 }
 
 async function contarRegs(colecao: string): Promise<number> {
   const { count } = await sb
-    .from("pcp_registros").select("id", { count: "exact", head: true }).eq("colecao", colecao);
+    .from("pcp_registros").select("id", { count: "exact", head: true })
+    .eq("colecao", colecao).eq("apagado", false);
   return count ?? 0;
 }
 
@@ -192,6 +265,13 @@ Deno.serve(async (req: Request) => {
     ["ping", "diag", "saude"].includes(acao);
   if (!cracha && !ehMaquina && !ehVigia) return resp({ error: "Entre no sistema.", semSessao: true }, 401);
 
+  // Assinatura valida nao basta: a conta pode ter sido desativada DEPOIS de o
+  // cracha ser emitido (ele vale 30 dias). semSessao:true de proposito — o app
+  // preserva a fila e pede para entrar de novo em vez de descartar trabalho.
+  if (cracha && !ehMaquina && (await crachaRevogado(cracha))) {
+    return resp({ error: "Seu acesso ao PCP foi encerrado. Fale com a gestão.", semSessao: true }, 401);
+  }
+
   // AUTORIZACAO POR PAPEL no SERVIDOR (05/08 fechou o token publico, mas o
   // switch executava tudo sem olhar papel: um cracha 'comercial' se promovia a
   // admin via setCfg ou apagava O.S). A porta de MAQUINA (backup do Hub) segue
@@ -232,7 +312,7 @@ Deno.serve(async (req: Request) => {
       case "list": {
         const PAGE = 150;
         let q = sb.from("pcp_registros").select("id, registro")
-          .eq("colecao", "os").order("id").limit(PAGE);
+          .eq("colecao", "os").eq("apagado", false).order("id").limit(PAGE);
         if (body.after != null) q = q.gt("id", String(body.after));
         const { data, error } = await q;
         if (error) throw new Error(error.message);
@@ -280,16 +360,37 @@ Deno.serve(async (req: Request) => {
           if (semTrabalho && comTrabalho) return resp({ ok: true, os: existing, duplicataEvitada: true });
         }
 
-        if (existing?.atualizadoEm && os.atualizadoEm) {
-          if (new Date(existing.atualizadoEm).getTime() > new Date(os.atualizadoEm).getTime()) {
+        // CONFLITO POR VERSAO DO SERVIDOR, nao por relogio de parede.
+        //
+        // `atualizadoEm` e carimbado pelo CLIENTE (de proposito — ver abaixo).
+        // Comparar o carimbo de dois aparelhos e comparar dois relogios: o
+        // celular 40 min adiantado do instalador "vencia" e transformava edicao
+        // legitima do escritorio em conflito ate o tempo real alcanca-lo. Agora
+        // cada gravacao aceita incrementa `rev`, e o cliente devolve o rev que
+        // leu: divergiu, houve outra escrita no meio.
+        //
+        // COMPATIBILIDADE: app em cache antigo nao manda `rev`. Para esse cai a
+        // regra velha do relogio — se exigissemos rev dele, o "Sobrescrever" do
+        // proprio banner de conflito reenviaria sem rev e o aparelho ficaria
+        // preso em conflito eterno, sem conseguir subir o trabalho do dia.
+        const revAtual = typeof existing?.rev === "number" ? existing.rev : 0;
+        if (existing) {
+          if (typeof os.rev === "number") {
+            if (revAtual !== os.rev) return resp({ conflito: true, servidor: existing });
+          } else if (
+            existing.atualizadoEm && os.atualizadoEm &&
+            new Date(existing.atualizadoEm).getTime() > new Date(os.atualizadoEm).getTime()
+          ) {
             return resp({ conflito: true, servidor: existing });
           }
         }
 
         // Preserva o atualizadoEm do autor: reescrever com o relogio do servidor
         // misturava duas fontes de tempo e o proprio autor levava "conflito".
+        // (Ele segue valendo para EXIBIR "alterado em"; quem decide conflito e o rev.)
+        const gravar = { ...os, rev: revAtual + 1 };
         try {
-          await setReg("os", os.id, { ...os });
+          await setReg("os", os.id, gravar);
         } catch (e) {
           // O indice unico de numero e a ultima linha de defesa contra duas O.S
           // com o mesmo numero. Se bateu nele, devolve a que ja existe em vez de
@@ -304,14 +405,31 @@ Deno.serve(async (req: Request) => {
             let sobrevivente = await getReg("os", "mub-" + num);
             if (!sobrevivente) {
               const { data } = await sb.from("pcp_registros").select("registro")
-                .eq("colecao", "os").eq("registro->>numero", num).limit(1).maybeSingle();
+                .eq("colecao", "os").eq("apagado", false)
+                .eq("registro->>numero", num).limit(1).maybeSingle();
               sobrevivente = data?.registro ?? null;
             }
             if (sobrevivente) return resp({ ok: true, os: sobrevivente, duplicataEvitada: true });
+
+            // Ninguem VIVO com esse numero: quem o ocupa e uma lapide (a O.S foi
+            // excluida e alguem esta criando outra com o mesmo numero). Devolver
+            // a lapide como se fosse a ficha ressuscitaria na tela uma O.S
+            // apagada; recusar prenderia a fila do aparelho. Entao a linha morta
+            // recebe o conteudo novo e volta a viver com o id dela — o aparelho
+            // converge no proximo pull, como no caso da duplicata canonica.
+            const { data: morta } = await sb.from("pcp_registros").select("id, registro")
+              .eq("colecao", "os").eq("apagado", true)
+              .eq("registro->>numero", num).limit(1).maybeSingle();
+            if (morta?.id) {
+              const revMorta = typeof morta.registro?.rev === "number" ? morta.registro.rev : 0;
+              const revivido = { ...os, id: morta.id, rev: revMorta + 1 };
+              await setReg("os", morta.id, revivido);
+              return resp({ ok: true, os: revivido, duplicataEvitada: true });
+            }
           }
           throw e;
         }
-        return resp({ ok: true, os: { ...os } });
+        return resp({ ok: true, os: gravar });
       }
 
       case "delete": {

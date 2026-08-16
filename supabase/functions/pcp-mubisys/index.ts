@@ -242,6 +242,53 @@ async function lerCracha(token: string): Promise<any | null> {
   }
 }
 
+// ---------------------------------------------------------------- revogacao
+// GEMEA da funcao de mesmo nome no pcp-sync — as duas precisam existir, senao
+// "desativar a conta" fecharia so metade da casa: a pessoa desligada perderia
+// as O.S mas continuaria consultando o ERP por aqui ate o cracha expirar (30
+// dias). Se mudar a regra la, mude aqui. Motivo e criterio estao documentados
+// no pcp-sync; o resumo e: so recusa com PROVA de revogacao, e erro de banco
+// ou ausencia de linha ACEITAM.
+const CACHE_REVOG = new Map<string, { ate: number; revogado: boolean }>();
+const CACHE_REVOG_MS = 60_000;
+const semAcento = (s: string) =>
+  s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+async function crachaRevogado(cracha: any): Promise<boolean> {
+  const sub = String(cracha?.sub ?? "").trim();
+  const papel = String(cracha?.papel ?? "");
+  if (!sub) return false;
+  const chave = papel + ":" + sub;
+  const agora = Date.now();
+  const emCache = CACHE_REVOG.get(chave);
+  if (emCache && emCache.ate > agora) return emCache.revogado;
+
+  let revogado = false;
+  try {
+    if (papel === "montagem") {
+      const { data } = await sb.from("pcp_config_global").select("config").eq("id", true).maybeSingle();
+      const lista: unknown[] = Array.isArray(data?.config?.instaladores) ? data!.config.instaladores : [];
+      if (lista.length) revogado = !lista.some((n) => semAcento(String(n)) === semAcento(sub));
+    } else {
+      const { data: conta, error } = await sb.from("equipe_contas")
+        .select("ativo").eq("sistema", "pcp").eq("usuario", sub).maybeSingle();
+      if (error) throw new Error(error.message);
+      if (conta) {
+        revogado = conta.ativo === false;
+      } else {
+        const { data: central } = await sb.from("acesso_conta")
+          .select("ativo").eq("usuario", sub).maybeSingle();
+        revogado = !!central && central.ativo === false;
+      }
+    }
+  } catch (e) {
+    console.error("[pcp-mubisys] revogacao indisponivel:", (e as Error).message);
+    return false;
+  }
+  CACHE_REVOG.set(chave, { ate: agora + CACHE_REVOG_MS, revogado });
+  return revogado;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return resp({ error: "Method not allowed" }, 405);
@@ -261,6 +308,11 @@ Deno.serve(async (req: Request) => {
   const action = body.action as string;
   const ehCron = !!CRON_TOKEN && token === CRON_TOKEN && action === "importar";
   if (!cracha && !ehMaquina && !ehCron) return resp({ error: "Entre no sistema.", semSessao: true }, 401);
+
+  // Conta desativada depois do cracha emitido (ver crachaRevogado, acima).
+  if (cracha && !ehMaquina && (await crachaRevogado(cracha))) {
+    return resp({ error: "Seu acesso ao PCP foi encerrado. Fale com a gestão.", semSessao: true }, 401);
+  }
 
   // Configurar o ERP (chave da API) é coisa de ADMIN. Antes qualquer crachá
   // válido salvava credencial ou lia a publicKey/token mascarado do Mubisys.
@@ -377,6 +429,12 @@ Deno.serve(async (req: Request) => {
         // Conferir antes e mais barato e mais explicito: uma consulta, e so
         // entra o que realmente falta. O indice continua como rede de seguranca
         // contra duas execucoes simultaneas.
+        // NAO FILTRE `apagado` AQUI. E de proposito: a O.S excluida no app vira
+        // LAPIDE (pcp-sync marca apagado=true em vez de remover a linha), e e
+        // esta consulta que a enxerga e barra a reinsercao. Com o filtro, o
+        // pedido cancelado que segue PRODUCAO no ERP voltaria como esqueleto
+        // zerado na hora seguinte -- excluir de novo so compraria mais 60 min,
+        // toda hora, por meses.
         const numeros = linhas.map((l) => l.registro.numero);
         const { data: jaTem, error: erroLeitura } = await sb
           .from("pcp_registros")

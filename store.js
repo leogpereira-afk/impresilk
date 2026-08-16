@@ -261,8 +261,33 @@ const STORE = (() => {
     _syncListeners.forEach(fn => { try { fn(status, pending); } catch {} });
   }
 
+  // Versão do servidor mostrada no último conflito de cada O.S. Guardada para o
+  // "Sobrescrever" poder reenviar com o rev que o servidor exibiu — reenviar com
+  // o rev velho bateria no mesmo conflito para sempre.
+  const _conflitoRemoto = new Map();
+
   function _notifyConflict(local, remote) {
+    if (remote && remote.id) _conflitoRemoto.set(remote.id, remote);
     _conflictListeners.forEach(fn => { try { fn(local, remote); } catch {} });
+  }
+
+  // O servidor devolve o registro com o `rev` novo (ver pcp-sync: o conflito
+  // deixou de ser comparação de relógios). Adotar esse número é o que mantém a
+  // próxima gravação fora de conflito, e ele precisa alcançar DOIS lugares: o
+  // registro local e o item que ficou na fila. O _removeFromQueue preserva de
+  // propósito a versão editada durante o envio; se ela ficasse com o rev velho,
+  // o envio seguinte levaria "conflito" contra uma escrita que foi a nossa.
+  function _revNaFila(osServidor) {
+    if (!osServidor || !osServidor.id || typeof osServidor.rev !== 'number') return;
+    const q = getQueue();
+    let mudou = false;
+    for (const it of q) {
+      if (it.action === 'upsert' && it.os && it.os.id === osServidor.id && it.os.rev !== osServidor.rev) {
+        it.os.rev = osServidor.rev;
+        mudou = true;
+      }
+    }
+    if (mudou) lsSet(K.FILA, q);
   }
 
   function _notifyListeners(event, data) {
@@ -316,13 +341,26 @@ const STORE = (() => {
           if (item.action === 'upsert' && res && res.os) {
             const all = getAllOS();
             const idx = all.findIndex(o => o.id === res.os.id);
-            // Só sincroniza o timestamp se NÃO houve edição local durante o
-            // envio — senão o pull deixaria de enxergar a divergência e a
-            // edição nova ficaria só neste aparelho.
-            if (idx >= 0 && all[idx].atualizadoEm === item.os.atualizadoEm) {
-              all[idx].atualizadoEm = res.os.atualizadoEm;
-              _setAllOS(all);
+            if (idx >= 0) {
+              let mudou = false;
+              // O rev é adotado SEMPRE, inclusive se editaram durante o envio:
+              // aquela edição nasceu por cima da versão que o servidor acabou
+              // de aceitar, então herda a linhagem dela.
+              if (typeof res.os.rev === 'number' && all[idx].rev !== res.os.rev) {
+                all[idx].rev = res.os.rev;
+                mudou = true;
+              }
+              // Já o timestamp só é sincronizado se NÃO houve edição local
+              // durante o envio — senão o pull deixaria de enxergar a
+              // divergência e a edição nova ficaria só neste aparelho.
+              if (all[idx].atualizadoEm === item.os.atualizadoEm &&
+                  all[idx].atualizadoEm !== res.os.atualizadoEm) {
+                all[idx].atualizadoEm = res.os.atualizadoEm;
+                mudou = true;
+              }
+              if (mudou) _setAllOS(all);
             }
+            _revNaFila(res.os);
           }
         }
         consecutiveNetFails = 0;
@@ -381,6 +419,14 @@ const STORE = (() => {
       const pendingDeletes = new Set(
         getQueue().filter(x => x.action === 'delete').map(x => x.id)
       );
+      // Edição deste aparelho que ainda não subiu: o pull NÃO passa a versão do
+      // servidor por cima dela. Antes, o trabalho sumia da tela no ciclo de 30s
+      // e só reaparecia quando o conflito fosse resolvido — assustador e
+      // desnecessário, já que a fila guarda a versão local intacta e a
+      // divergência aparece no envio, com as duas lado a lado.
+      const pendingUpserts = new Set(
+        getQueue().filter(x => x.action === 'upsert' && x.os && x.os.id).map(x => x.os.id)
+      );
 
       // O endpoint "list" é paginado (resposta limitada para não estourar o
       // teto de ~6 MB das Netlify Functions). Preferimos paginação por CHAVE
@@ -403,10 +449,17 @@ const STORE = (() => {
             local.push(remote);
             byId.set(remote.id, remote);
             changed = true;
-          } else {
-            const tsRemote = remote.atualizadoEm ? new Date(remote.atualizadoEm).getTime() : 0;
-            const tsLocal  = localOS.atualizadoEm ? new Date(localOS.atualizadoEm).getTime() : 0;
-            if (tsRemote > tsLocal) {
+          } else if (!pendingUpserts.has(remote.id)) {
+            // `rev` é do SERVIDOR e só cresce — comparar rev compara escritas,
+            // não relógios de aparelhos diferentes. Quando um dos lados ainda
+            // não tem rev (O.S recém-importada, nunca gravada pelo app, ou
+            // cache anterior a este campo), cai no timestamp, como antes.
+            const revR = typeof remote.rev  === 'number' ? remote.rev  : null;
+            const revL = typeof localOS.rev === 'number' ? localOS.rev : null;
+            const maisNovo = (revR !== null && revL !== null)
+              ? revR > revL
+              : (new Date(remote.atualizadoEm || 0).getTime() > new Date(localOS.atualizadoEm || 0).getTime());
+            if (maisNovo) {
               Object.assign(localOS, remote);
               changed = true;
             }
@@ -561,6 +614,38 @@ const STORE = (() => {
   function setInstalador(n)  { lsSet(K.INSTALADOR, n); }
   function getLastSync()     { return lsGet(K.LASTSYNC,   null); }
 
+  // ── Limpar o dado local (sair no aparelho compartilhado) ──────────────────
+  // O logout apagava só o crachá. As O.S ficavam no localStorage (cliente,
+  // endereço, telefone) e as fotos no IndexedDB — e equipe.html#comercial lê
+  // tudo isso direto do cache. No tablet da produção, quem pegasse o aparelho
+  // depois do gestor lia a carteira inteira sem senha.
+  //
+  // NUNCA limpa com fila pendente: o trabalho ainda não enviado só existe aqui.
+  // Devolve false nesse caso para o chamador poder avisar.
+  //
+  // O pacote de configuração FICA (o espelho precisa da lista de instaladores
+  // para a pessoa tocar no próprio nome, e sem crachá não há como rebaixá-lo do
+  // servidor), mas os dois campos sensíveis dele saem: `usuarios` e a agenda de
+  // `funcionarios` com os telefones — que só o crachá de admin recebe.
+  function limparCache() {
+    if (getQueue().length) return false;
+    try {
+      localStorage.removeItem(K.OS);
+      localStorage.removeItem(K.FILA);
+      localStorage.removeItem(K.LASTSYNC);
+      const cfg = lsGet(K.CFG, null);
+      if (cfg && typeof cfg === 'object') {
+        const { usuarios: _u, funcionarios: _f, ...resto } = cfg;
+        lsSet(K.CFG, resto);
+      }
+    } catch {}
+    try {
+      if (_db) { _db.close(); _db = null; }
+      indexedDB.deleteDatabase('impresilk_inst');
+    } catch {}
+    return true;
+  }
+
   // ── Resolver conflito manualmente ─────────────────────────────────────────
   // Sobrescreve O.S local com versão do servidor
   function aceitarServidor(remoteOS) {
@@ -572,12 +657,20 @@ const STORE = (() => {
     const q = getQueue().filter(x => !(x.action === 'upsert' && x.os.id === remoteOS.id));
     lsSet(K.FILA, q);
     _flagged.delete('upsert:' + remoteOS.id);
+    _conflitoRemoto.delete(remoteOS.id);
   }
 
   // Força sobrescrita: grava o local e re-enfileira
   function sobrescreverServidor(localOS) {
     // Atualiza timestamp para ser mais novo
     localOS.atualizadoEm = new Date().toISOString();
+    // ...e adota o rev que o servidor mostrou no banner. Forçar é dizer "minha
+    // versão vence a de vocês", não "reenviar a mesma base": sem isto o reenvio
+    // bateria exatamente no mesmo conflito, para sempre, e o botão não faria
+    // nada além de girar a fila.
+    const remoto = _conflitoRemoto.get(localOS.id);
+    if (remoto && typeof remoto.rev === 'number') localOS.rev = remoto.rev;
+    _conflitoRemoto.delete(localOS.id);
     _flagged.delete('upsert:' + localOS.id);
     saveOS(localOS);
   }
@@ -605,6 +698,33 @@ const STORE = (() => {
     lsSet(K.FILA, []);
     _flagged.clear();
     _failCount.clear();
+  }
+
+  // ── Carimbo de DIA para as horas de saída/retorno ─────────────────────────
+  // horaSaida/horaRetorno são 'HH:MM' sem data — campos vitalícios da O.S. A
+  // Linha do Tempo então respondia "quem rodou na rua no dia X?" filtrando pelo
+  // agendamento ATUAL: bastava reagendar para a saída mudar de dia e a história
+  // ser reescrita (a equipe saiu dia 05, choveu, remarcou p/ 12 → o dia 05
+  // aparecia vazio e o dia 12 com uma saída que nunca houve).
+  //
+  // Aqui a hora ganha o dia em que foi carimbada. O dia vem do agendamento
+  // vigente no momento do carimbo (é o dia em que a equipe está trabalhando),
+  // com hoje como último recurso. Corrigir a hora depois NÃO muda o dia já
+  // carimbado — só o próprio campo de hora ficar vazio apaga o carimbo.
+  //
+  // Grava ISO LOCAL (sem Z) de propósito: quem lê usa diaLocalISO, que parseia
+  // como hora local — assim o dia volta igual ao que foi gravado.
+  function carimbarMomento(os, campoHora, campoStamp) {
+    if (!os) return;
+    const m = String(os[campoHora] || '').match(/^(\d{1,2}):(\d{2})/);
+    if (!m) { delete os[campoStamp]; return; }
+    const jaTem = /^\d{4}-\d{2}-\d{2}/.test(String(os[campoStamp] || ''))
+      ? String(os[campoStamp]).slice(0, 10) : '';
+    const agendado = String((os.instalacao && os.instalacao.data) || '');
+    const d = new Date();
+    const hoje = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const dia = jaTem || (/^\d{4}-\d{2}-\d{2}$/.test(agendado) ? agendado : hoje);
+    os[campoStamp] = `${dia}T${m[1].padStart(2, '0')}:${m[2]}:00`;
   }
 
   // ── UUID v4 cripto-seguro (fallback p/ Math.random em ambientes antigos) ──
@@ -635,7 +755,7 @@ const STORE = (() => {
     // CFG
     getCFG, saveCFG,
     // Identidade
-    getUser, setUser, getInstalador, setInstalador, getLastSync,
+    getUser, setUser, getInstalador, setInstalador, getLastSync, limparCache,
     // Sync
     trySync, pull, pullCFG,
     // Fotos
@@ -649,6 +769,6 @@ const STORE = (() => {
     // Backup
     exportarBackup, importarBackup,
     // Utilitários
-    uuid, api, apiFn
+    uuid, api, apiFn, carimbarMomento
   };
 })();
