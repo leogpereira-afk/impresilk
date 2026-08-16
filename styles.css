@@ -859,6 +859,20 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 }
 .login-voltar:hover { color: var(--text); }
 
+/* "Esqueci minha senha": discreto, mas achável sem precisar ligar para alguém. */
+.login-link {
+  display: block; width: 100%;
+  background: none; border: none; color: var(--muted);
+  font-size: .85rem; cursor: pointer; margin-top: 14px; padding: 6px 4px;
+  text-decoration: underline;
+}
+.login-link:hover { color: var(--text); }
+/* Passo a passo do "esqueci a senha" — texto para ler, não formulário. */
+.ajuda-passos { text-align: left; margin: 4px 0 0; padding: 0; list-style: none; }
+.ajuda-passos li { margin: 12px 0; font-size: .9rem; line-height: 1.45; color: var(--text); }
+.ajuda-passos li strong { display: block; margin-bottom: 2px; }
+.ajuda-passos .ajuda-obs { color: var(--muted); font-size: .85rem; }
+
 /* ── Dialog de conflito ──────────────────────────────────────────────────── */
 .conflict-dialog {
   position: fixed; inset: 0; z-index: 600;

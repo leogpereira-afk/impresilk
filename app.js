@@ -483,6 +483,8 @@ function initLogin() {
 
   $('#login-btn').onclick = doLogin;
   $('#login-pass').onkeydown = e => { if (e.key === 'Enter') doLogin(); };
+  const btEsq = $('#login-esqueci');
+  if (btEsq) btEsq.onclick = telaEsqueciSenha;
 
   wireLoginChooser();
 
@@ -559,7 +561,15 @@ async function doLogin() {
     r = await AUTH.login(usuario, pass);
   } catch (e) {
     _entrando = false; bt.disabled = false; bt.textContent = rot;
-    if (e.status === 401 || e.status === 403) { mostrarErro(e.erro || 'Usuário ou senha incorretos.'); return; }
+    if (e.status === 401 || e.status === 403) {
+      // A recusa é a mesma para usuário inexistente e senha errada (o servidor
+      // não conta quais contas existem). Como o tropeço comum é digitar o nome
+      // completo, a dica do usuário vem junto — senão a pessoa fica tentando
+      // variações da senha para um usuário que nunca vai existir.
+      mostrarErro((e.erro || 'Usuário ou senha incorretos.') +
+        ' Confira o usuário: em geral é só o primeiro nome, minúsculo e sem acento.');
+      return;
+    }
     mostrarErro('Não consegui falar com o servidor. Entrar precisa de internet — depois disso o app trabalha offline.');
     return;
   }
@@ -575,6 +585,45 @@ async function doLogin() {
 
 // Trocar a própria senha, num painel próprio — este app não tem helper de
 // modal genérico, e depender do de O.S. só para isto seria acoplamento à toa.
+// "Esqueci minha senha" — não é um botão que reseta nada, e é de propósito.
+//
+// Ninguém aqui tem e-mail corporativo, então o "link de redefinição por e-mail"
+// que todo site tem não existe para nós: quem redefine é uma pessoa, na Central
+// de Acessos. O que faltava era a tela DIZER isso — sem ela, quem não conseguia
+// entrar ficava tentando senha até desistir e ligar para alguém.
+//
+// O primeiro passo é o do usuário porque foi assim que o dono da casa ficou de
+// fora: digitou o nome completo, e o usuário do PCP é curto. O servidor responde
+// "usuário ou senha incorretos" nos dois casos (não conta quais contas existem,
+// o que é o certo), então a pista tem de estar aqui.
+function telaEsqueciSenha() {
+  const fundo = document.createElement('div');
+  fundo.className = 'login-wrap';
+  fundo.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);padding:16px';
+  fundo.innerHTML =
+    '<div class="login-card">' +
+      '<h2>Esqueci minha senha</h2>' +
+      '<ol class="ajuda-passos">' +
+        '<li><strong>1. Confira o usuário antes da senha.</strong>' +
+          'Ele costuma ser só o <em>primeiro nome</em>, em minúsculas e sem acento — não o nome ' +
+          'completo. Se o navegador preencheu sozinho, apague e escreva à mão.' +
+          '<div class="ajuda-obs">O aviso é o mesmo para usuário errado e senha errada, então ' +
+          'vale descartar esta parte primeiro.</div></li>' +
+        '<li><strong>2. Peça a redefinição a quem administra.</strong>' +
+          'Em um minuto, na Central de Acessos (Painel → Acessos), a gestão define uma senha ' +
+          'temporária e te passa. Ao entrar com ela, o app pede para você criar a sua.' +
+          '<div class="ajuda-obs">Se quem administra é você, é nessa mesma tela.</div></li>' +
+        '<li><strong>3. Vai instalar? Você não precisa de senha.</strong>' +
+          'Volte e escolha <em>Montagem</em>: é só tocar no seu nome.</li>' +
+      '</ol>' +
+      '<button class="btn-primary w-100 mt-12" id="esq-ok">Entendi</button>' +
+    '</div>';
+  document.body.appendChild(fundo);
+  const fechar = () => fundo.remove();
+  fundo.querySelector('#esq-ok').onclick = fechar;
+  fundo.onclick = e => { if (e.target === fundo) fechar(); };
+}
+
 function telaTrocarSenha(obrigado) {
   const fundo = document.createElement('div');
   fundo.className = 'login-wrap';
