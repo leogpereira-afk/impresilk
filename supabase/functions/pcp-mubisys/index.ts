@@ -19,6 +19,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TOKEN = Deno.env.get("PCP_TOKEN") ?? "";
+// Credencial DEDICADA do robô horário (pg_cron): libera SÓ a ação "importar".
+// Separada do PCP_TOKEN do Hub — girável sem coordenar com o backup, e vive só
+// no cron.job (banco privado), não no repo público.
+const CRON_TOKEN = Deno.env.get("PCP_CRON_TOKEN") ?? "";
 const DEFAULT_BASE = "https://api.mubisys.com/api";
 
 const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
@@ -230,7 +234,7 @@ async function lerCracha(token: string): Promise<any | null> {
       "HMAC", chave, b64url(partes[2]), enc.encode(`${partes[0]}.${partes[1]}`));
     if (!ok) return null;
     const p = JSON.parse(new TextDecoder().decode(b64url(partes[1])));
-    if (typeof p.exp === "number" && p.exp < Math.floor(Date.now() / 1000)) return null;
+    if (typeof p.exp !== "number" || p.exp < Math.floor(Date.now() / 1000)) return null;
     if (p.sis !== "pcp") return null;
     return p;
   } catch {
@@ -254,9 +258,16 @@ Deno.serve(async (req: Request) => {
   const cracha = m ? await lerCracha(m[1]) : null;
   const token = req.headers.get("x-token") ?? body.token;
   const ehMaquina = !!TOKEN && token === TOKEN;
-  if (!cracha && !ehMaquina) return resp({ error: "Entre no sistema.", semSessao: true }, 401);
-
   const action = body.action as string;
+  const ehCron = !!CRON_TOKEN && token === CRON_TOKEN && action === "importar";
+  if (!cracha && !ehMaquina && !ehCron) return resp({ error: "Entre no sistema.", semSessao: true }, 401);
+
+  // Configurar o ERP (chave da API) é coisa de ADMIN. Antes qualquer crachá
+  // válido salvava credencial ou lia a publicKey/token mascarado do Mubisys.
+  if (cracha && !ehMaquina && (action === "salvarConfig" || action === "statusConfig")
+      && String(cracha.papel ?? "") !== "admin") {
+    return resp({ error: "Só o administrador configura a integração." }, 403);
+  }
 
   try {
     if (action === "salvarConfig") {
@@ -377,9 +388,16 @@ Deno.serve(async (req: Request) => {
 
         // O.S que ja existe NAO e sobrescrita -- pode ter trabalho humano em
         // cima (fotos de check-in, equipe montada, conferencia do carro).
-        const novasLinhas = linhas.filter((l) => !existentes.has(String(l.registro.numero)));
+        // Dedup por id DENTRO do lote (dois números iguais no mesmo payload do
+        // ERP viram o mesmo mub-<n> e o insert multi-linha morreria inteiro).
+        const porId = new Map<string, any>();
+        for (const l of linhas.filter((l) => !existentes.has(String(l.registro.numero)))) porId.set(l.id, l);
+        const novasLinhas = [...porId.values()];
         if (novasLinhas.length) {
-          const { error } = await sb.from("pcp_registros").insert(novasLinhas);
+          // upsert ignoreDuplicates: se o cron do minuto :20 correr junto com o
+          // botão "Importar agora", a colisão de chave NÃO derruba o lote todo.
+          const { error } = await sb.from("pcp_registros")
+            .upsert(novasLinhas, { onConflict: "colecao,id", ignoreDuplicates: true });
           if (error) throw new Error(error.message);
         }
         const novas = novasLinhas.length;

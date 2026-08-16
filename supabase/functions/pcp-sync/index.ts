@@ -52,12 +52,32 @@ async function lerCracha(token: string): Promise<any | null> {
       "HMAC", chave, b64url(partes[2]), enc.encode(`${partes[0]}.${partes[1]}`));
     if (!ok) return null;
     const p = JSON.parse(new TextDecoder().decode(b64url(partes[1])));
-    if (typeof p.exp === "number" && p.exp < Math.floor(Date.now() / 1000)) return null;
+    // exp OBRIGATORIO e numerico: cracha sem exp (ou string) nao pode valer p/ sempre.
+    if (typeof p.exp !== "number" || p.exp < Math.floor(Date.now() / 1000)) return null;
     if (p.sis !== "pcp") return null;
     return p;
   } catch {
     return null;
   }
+}
+
+// Assina um cracha de MONTAGEM (mesma chave da equipe-auth). Usado so pela
+// entrada sem senha do espelho: o instalador toca no nome (validado contra a
+// lista de instaladores) e recebe um cracha papel 'montagem' de 30 dias.
+const b64urlSign = (bytes: Uint8Array) => {
+  let s = ""; for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};
+async function assinarCrachaMontagem(nome: string): Promise<string> {
+  const enc = new TextEncoder();
+  const chave = await crypto.subtle.importKey(
+    "raw", enc.encode(JWT_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const agora = Math.floor(Date.now() / 1000);
+  const corpo = { sis: "pcp", sub: nome, nome, papel: "montagem", iat: agora, exp: agora + 30 * 86400 };
+  const cab = b64urlSign(enc.encode(JSON.stringify({ alg: "HS256", typ: "JWT" })));
+  const meio = `${cab}.${b64urlSign(enc.encode(JSON.stringify(corpo)))}`;
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", chave, enc.encode(meio)));
+  return `${meio}.${b64urlSign(sig)}`;
 }
 const BUCKET = "pcp-arquivos";
 
@@ -90,7 +110,10 @@ async function setReg(colecao: string, id: string, registro: any) {
 }
 
 async function delReg(colecao: string, id: string) {
-  await sb.from("pcp_registros").delete().eq("colecao", colecao).eq("id", id);
+  // Confere o erro (o supabase-js NAO lanca — devolve {error}). Sem isso, um
+  // delete que falhou respondia ok:true e o cliente tirava o item da fila.
+  const { error } = await sb.from("pcp_registros").delete().eq("colecao", colecao).eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 async function contarRegs(colecao: string): Promise<number> {
@@ -144,16 +167,49 @@ Deno.serve(async (req: Request) => {
     return resp({ error: "JSON inválido" }, 400);
   }
 
+  const acao = String(body.action);
+
+  // ENTRADA DA MONTAGEM (sem senha, por decisao do dono): o instalador toca no
+  // nome; validamos contra a lista de instaladores e emitimos um cracha de 30
+  // dias. Nao exige credencial previa — e o unico caminho assim, e so cria
+  // cracha papel 'montagem' (que nao pode setCfg). Substitui o #i=NOME antigo,
+  // que aceitava QUALQUER nome. Rodada ANTES do portao.
+  if (acao === "entrarMontagem") {
+    const nome = String(body.nome ?? "").trim();
+    if (!nome) return resp({ error: "nome ausente" }, 400);
+    const cfg = (await getCfg()) ?? {};
+    const lista: string[] = Array.isArray(cfg.instaladores) ? cfg.instaladores : [];
+    const bate = lista.find((n) => String(n).trim().toLowerCase() === nome.toLowerCase());
+    if (!bate) return resp({ error: "Nome não está na lista de instaladores." }, 403);
+    return resp({ token: await assinarCrachaMontagem(bate), nome: bate, papel: "montagem" });
+  }
+
   const m = String(req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i);
   const cracha = m ? await lerCracha(m[1]) : null;
   const token = req.headers.get("x-token") ?? body.token;
   const ehMaquina = !!TOKEN && token === TOKEN;
   const ehVigia = !!SAUDE_TOKEN && token === SAUDE_TOKEN &&
-    ["ping", "diag", "saude"].includes(String(body.action));
+    ["ping", "diag", "saude"].includes(acao);
   if (!cracha && !ehMaquina && !ehVigia) return resp({ error: "Entre no sistema.", semSessao: true }, 401);
 
+  // AUTORIZACAO POR PAPEL no SERVIDOR (05/08 fechou o token publico, mas o
+  // switch executava tudo sem olhar papel: um cracha 'comercial' se promovia a
+  // admin via setCfg ou apagava O.S). A porta de MAQUINA (backup do Hub) segue
+  // com poder total. Papeis com editar=true: admin/pcp/montagem/operacao.
+  if (cracha && !ehMaquina) {
+    const papel = String(cracha.papel ?? "");
+    const podeEditar = ["admin", "pcp", "montagem", "operacao"].includes(papel);
+    const ESCRITA = ["upsert", "delete", "putPhoto", "deletePhoto"];
+    if (acao === "setCfg" && papel !== "admin") {
+      return resp({ error: "Só o administrador altera as configurações." }, 403);
+    }
+    if (ESCRITA.includes(acao) && !podeEditar) {
+      return resp({ error: "Seu acesso é somente leitura." }, 403);
+    }
+  }
+
   try {
-    switch (body.action as string) {
+    switch (acao) {
       case "ping":
         return resp({ ok: true });
 
@@ -239,9 +295,19 @@ Deno.serve(async (req: Request) => {
           // com o mesmo numero. Se bateu nele, devolve a que ja existe em vez de
           // estourar erro na cara do instalador.
           const msg = (e as Error).message || "";
-          if (msg.includes("pcp_os_numero_idx") && os.numero) {
-            const canonico = await getReg("os", "mub-" + String(os.numero).trim());
-            if (canonico) return resp({ ok: true, os: canonico, duplicataEvitada: true });
+          // Colisao no indice de numero: devolve a ficha que ja existe. Antes so
+          // procurava a canonica mub-<n>; se a sobrevivente tem id aleatorio
+          // (O.S antiga/manual), procura pelo NUMERO — senao o erro estourava
+          // 500 e travava a fila do aparelho para sempre.
+          if ((/duplicate key|pcp_os_numero_idx|23505/i).test(msg) && os.numero) {
+            const num = String(os.numero).trim();
+            let sobrevivente = await getReg("os", "mub-" + num);
+            if (!sobrevivente) {
+              const { data } = await sb.from("pcp_registros").select("registro")
+                .eq("colecao", "os").eq("registro->>numero", num).limit(1).maybeSingle();
+              sobrevivente = data?.registro ?? null;
+            }
+            if (sobrevivente) return resp({ ok: true, os: sobrevivente, duplicataEvitada: true });
           }
           throw e;
         }
@@ -252,20 +318,34 @@ Deno.serve(async (req: Request) => {
         const id = body.id;
         if (!id) return resp({ error: "id ausente" }, 400);
         const existing = await getReg("os", id);
+        // Apaga a LINHA primeiro (e confere o erro). Só depois remove as fotos
+        // do bucket — se a foto some mas a linha fica, o app finge que apagou.
+        await delReg("os", id);
         if (existing) {
           const ids = [
             ...(existing.fotosCheckinIds ?? []),
             ...(existing.fotosRetornoIds ?? []),
             existing.layoutFotoId,
           ].filter(Boolean);
-          if (ids.length) await sb.storage.from(BUCKET).remove(ids).catch(() => {});
+          if (ids.length) {
+            const { error } = await sb.storage.from(BUCKET).remove(ids);
+            if (error) console.error("[pcp-sync] fotos órfãs no delete de", id, error.message);
+          }
         }
-        await delReg("os", id);
         return resp({ ok: true });
       }
 
-      case "getCfg":
-        return resp({ cfg: (await getCfg()) ?? {} });
+      case "getCfg": {
+        const cfg = (await getCfg()) ?? {};
+        // Papel nao-admin nao recebe dados sensiveis: a lista de usuarios (com
+        // senha em texto no CFG_DEFAULT) e a agenda de funcionarios (telefones).
+        // Maquina/Hub recebe tudo (backup).
+        if (cracha && !ehMaquina && String(cracha.papel ?? "") !== "admin") {
+          const { usuarios: _u, funcionarios: _f, ...publico } = cfg;
+          return resp({ cfg: publico });
+        }
+        return resp({ cfg });
+      }
 
       case "setCfg": {
         if (!body.cfg) return resp({ error: "cfg ausente" }, 400);

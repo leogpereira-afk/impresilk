@@ -18,14 +18,16 @@ create extension if not exists pg_net;
 select cron.unschedule('pcp-importacao-horaria')
 where exists (select 1 from cron.job where jobname = 'pcp-importacao-horaria');
 
-select cron.schedule(
-  'pcp-importacao-horaria',
-  '20 * * * *',
-  $job$
-  select net.http_post(
-    url     := 'https://heveemylixartyijxewh.supabase.co/functions/v1/pcp-mubisys',
-    headers := '{"Content-Type":"application/json","x-token":"impresilk-bhinxmdp5b7dwgaxpv9u2xqh"}'::jsonb,
-    body    := '{"action":"importar"}'::jsonb
-  );
-  $job$
-);
+-- ATENÇÃO: NÃO commitar o token aqui. A porta do robô é a credencial DEDICADA
+-- PCP_CRON_TOKEN (secret do projeto, só libera "importar"), gravada no comando
+-- do job direto no banco via cron.alter_job — nunca neste arquivo, que é
+-- público (o repo serve o GitHub Pages). O token que existia aqui foi girado.
+-- Para (re)criar o job, rode manualmente no SQL Editor substituindo <TOKEN>:
+--
+-- select cron.schedule('pcp-importacao-horaria', '20 * * * *', $job$
+--   select net.http_post(
+--     url     := 'https://heveemylixartyijxewh.supabase.co/functions/v1/pcp-mubisys',
+--     headers := jsonb_build_object('Content-Type','application/json','x-token','<PCP_CRON_TOKEN>'),
+--     body    := '{"action":"importar"}'::jsonb
+--   , timeout_milliseconds := 60000);
+-- $job$);
