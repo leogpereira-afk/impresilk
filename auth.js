@@ -50,6 +50,15 @@ const AUTH = (() => {
       guardar(r.token);
       return r;
     },
+    // Entrada da MONTAGEM (sem senha): o instalador tocou no nome; o pcp-sync
+    // valida contra a lista de instaladores e devolve um crachá papel 'montagem'.
+    // Guarda no mesmo lugar do crachá de gestão (mesmo origin) para o store.js
+    // anexar nas próximas chamadas.
+    async entrarMontagem(nome) {
+      const r = await STORE.api({ action: 'entrarMontagem', nome });
+      if (r && r.token) { guardar(r.token); return r; }
+      throw new Error((r && r.error) || 'Não foi possível entrar.');
+    },
     // null = sem internet (segue com o que está no aparelho); false = crachá morto
     async eu() { try { return await chamar('eu', {}, true); } catch (e) { return e.status === 401 ? false : null; } },
     trocarMinhaSenha(senhaAtual, novaSenha) { return chamar('trocarMinhaSenha', { senhaAtual, novaSenha }, true); },

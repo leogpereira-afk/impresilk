@@ -233,7 +233,14 @@ const STORE = (() => {
         signal:  ctrl.signal
       });
       if (!res.ok && res.status !== 409) {
-        throw new Error('HTTP ' + res.status);
+        // Anexa o status (e o semSessao do corpo) para o sync distinguir
+        // "sem internet" de "crachá recusado" — 401/403 é sessão, não item.
+        let corpo = {};
+        try { corpo = await res.json(); } catch { /* sem corpo */ }
+        throw Object.assign(new Error('HTTP ' + res.status), {
+          status: res.status,
+          semSessao: !!(corpo && corpo.semSessao)
+        });
       }
       return res.json();
     } finally {
@@ -320,14 +327,30 @@ const STORE = (() => {
         }
         consecutiveNetFails = 0;
       } catch (e) {
+        const msg = (e && e.message) || '';
+        // 401/403 = SESSÃO recusada (crachá expirado/ausente), NÃO erro do item.
+        // Preserva a fila INTEIRA, para o ciclo e avisa a UI para reautenticar.
+        // (Antes 401 caía no ramo de erro permanente e descartava o trabalho do
+        // dia em ~25 ciclos com um "✅ Sincronizado" falso.)
+        if (e && (e.semSessao || e.status === 401 || e.status === 403)) {
+          _syncing = false;
+          _notifySync('sem-sessao', getQueue().length);
+          _notifyListeners('sem-sessao', {});
+          return;
+        }
         // Distingue falha de rede (parar o ciclo) de erro permanente do item
         // (incrementa contador; quando estourar, descarta o item pra não travar).
-        const msg = (e && e.message) || '';
         const isNetwork = !msg.startsWith('HTTP ') || /HTTP 5\d\d/.test(msg);
         if (isNetwork) {
           consecutiveNetFails++;
           if (consecutiveNetFails >= 1) break; // sai do loop, tenta no próximo trySync
         } else {
+          // Delete/deletePhoto NUNCA são descartados: são leves (~50 bytes) e
+          // descartar ressuscitaria a O.S excluída no pull seguinte.
+          if (item.action === 'delete' || item.action === 'deletePhoto') {
+            _notifyListeners('item-descartado', { item, motivo: 'exclusão pendente: ' + msg });
+            continue;
+          }
           const n = (_failCount.get(sig) || 0) + 1;
           _failCount.set(sig, n);
           if (n >= MAX_FAILS) {
@@ -424,8 +447,15 @@ const STORE = (() => {
       const q = getQueue();
       _notifySync(q.length ? 'pending' : 'ok', q.length);
       return { updated: changed };
-    } catch {
-      _notifySync('offline', getQueue().length);
+    } catch (e) {
+      // 401/403 = crachá recusado, NÃO falta de internet. Avisa 'sem-sessao'
+      // (senão o banner diz "Sem conexão" com sinal cheio e não reautentica).
+      if (e && (e.semSessao || e.status === 401 || e.status === 403)) {
+        _notifySync('sem-sessao', getQueue().length);
+        _notifyListeners('sem-sessao', {});
+      } else {
+        _notifySync('offline', getQueue().length);
+      }
     }
   }
 
@@ -442,7 +472,12 @@ const STORE = (() => {
         const merged = Object.assign(getCFG(), res.cfg);
         lsSet(K.CFG, merged);
       }
-    } catch {}
+    } catch (e) {
+      if (e && (e.semSessao || e.status === 401 || e.status === 403)) {
+        _notifySync('sem-sessao', getQueue().length);
+        _notifyListeners('sem-sessao', {});
+      }
+    }
   }
 
   // ── Fotos ─────────────────────────────────────────────────────────────────

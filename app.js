@@ -486,9 +486,20 @@ function initLogin() {
 
   wireLoginChooser();
 
-  // Auto-login se já tinha sessão
+  // Auto-login: só entra com sessão SE houver crachá guardado (a reforma de
+  // 05/08 passou a exigir crachá para os dados). Sessão salva antes da reforma,
+  // ou com crachá vencido, não pode entrar num app que só descartaria edições.
   const saved = STORE.getUser();
-  if (saved) { STATE.user = saved; enterApp(); }
+  if (saved && typeof AUTH !== 'undefined' && AUTH.temCracha()) {
+    STATE.user = saved; enterApp();
+    // Em 2º plano confirma o crachá: se estiver morto, encerra a sessão.
+    AUTH.eu().then(r => {
+      if (r === false) { AUTH.esquecer(); STORE.setUser(null); toast('Sua sessão expirou — entre de novo.', 'error'); setTimeout(() => location.reload(), 1500); }
+    }).catch(() => {});
+  } else if (saved) {
+    // Sessão órfã (sem crachá): limpa e mostra o login em vez de um app morto.
+    STORE.setUser(null);
+  }
 }
 
 // Seletor inicial: Gestão (admin/usuário+senha) × Montagem (clicar no nome)
@@ -665,7 +676,9 @@ function refreshAposPull() {
 // Banner vermelho sob as abas quando a importação está com erro ou >2h parada.
 function avaliarImportacao(s) {
   const ult = s && s.ultimaImportacao;
-  if (!ult || !ult.em) return { parada: false };
+  // Ausência de heartbeat = importação NUNCA rodou (ou parou faz muito) — é o
+  // caso-limite que o vigia existe para pegar, não sinal de saúde.
+  if (!ult || !ult.em) return { parada: true, motivo: 'nenhuma importação registrada — o robô horário pode estar desligado' };
   const horas = (Date.now() - new Date(ult.em).getTime()) / 3600000;
   if (ult.ok === false) return { parada: true, motivo: 'erro: ' + (ult.erro || 'desconhecido') };
   if (horas >= 2) return { parada: true, motivo: `há ${Math.floor(horas)}h sem rodar` };
@@ -780,12 +793,26 @@ function initSyncIndicator() {
     } else if (status === 'pending') {
       el.textContent = `⏳ ${pending} pendente${pending === 1 ? '' : 's'}`;
       el.title = `${pending} alteração(ões) aguardando envio. Some sozinho quando reconectar.`;
+    } else if (status === 'sem-sessao') {
+      el.textContent = '🔒 Entre de novo';
+      el.title = 'Sua sessão expirou — o trabalho está guardado, mas entre de novo para enviar.';
     } else {
       el.textContent = '⚠️ Offline';
       el.title = 'Sem conexão — você pode continuar trabalhando; o envio acontece ao reconectar.';
     }
   });
   STORE.on('quota', () => toast('Armazenamento local cheio — limpe fotos antigas', 'error'));
+  // Perda de dados nunca é silenciosa: item descartado / lista truncada avisam.
+  STORE.on('item-descartado', ({ item, motivo }) => {
+    const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : (item && item.action) || 'alteração';
+    toast(`⚠️ ${ref} NÃO foi salva na nuvem (${motivo || 'erro'}). Refaça a edição.`, 'error');
+  });
+  STORE.on('pull-truncado', () => toast('Lista de O.S pode estar incompleta — recarregue.', 'error'));
+  // Crachá recusado: guarda o que dá e manda entrar de novo (o dado fica).
+  STORE.on('sem-sessao', () => {
+    if (window._avisouSessao) return; window._avisouSessao = true;
+    toast('🔒 Sua sessão expirou. Entre de novo para continuar enviando.', 'error');
+  });
 
   const vBtn = $('#btn-verificar');
   if (vBtn) vBtn.onclick = verificarNuvem;
@@ -800,7 +827,9 @@ async function verificarNuvem() {
   try {
     await STORE.trySync();
     const res = await STORE.api({ action: 'list' });
-    const n = Array.isArray(res.os) ? res.os.length : 0;
+    // Usa o total do servidor (a lista é paginada em 150) — senão o toast dizia
+    // "150 O.S" mesmo com ~570 no banco.
+    const n = Number.isFinite(res.total) ? res.total : (Array.isArray(res.os) ? res.os.length : 0);
     const fila = STORE.getQueue().length;
     if (fila) toast(`☁️ ${n} O.S na nuvem · ⏳ ${fila} ainda na fila deste aparelho`, 'error');
     else      toast(`✅ Tudo salvo na nuvem: ${n} O.S confirmada(s)`, 'success');
@@ -2369,6 +2398,9 @@ const TABLER_ICOS = {
 // Em que etapa a O.S estava no instante T (reconstruído do historico[]).
 // O.S sem histórico até T: se já existia, aproxima como "aguardando produção".
 function etapaEmT(os, T) {
+  // Finalizada até T é finalizada — o espelho da equipe finaliza SEM gravar
+  // no histórico, então sem este fallback a O.S ficava eterna no funil.
+  if (os.finalizadaEm && new Date(os.finalizadaEm) <= T) return 'finalizada';
   const h = (Array.isArray(os.historico) ? os.historico : []).filter(x => x && x.em && new Date(x.em) <= T);
   if (h.length) return h[h.length - 1].etapa;
   const nasc = os.criadoEm || (os.dataEntrada ? os.dataEntrada + 'T12:00:00' : null);
@@ -2377,8 +2409,9 @@ function etapaEmT(os, T) {
 }
 
 // Fotografia do momento escolhido na régua (offset em dias: <0 passado, 0 agora, >0 futuro)
-function fotografiaLT(offset) {
-  const todas = STORE.getAllOS();
+// Recebe `todas` já lido uma vez (evita re-parsear o localStorage a cada arrasto).
+function fotografiaLT(offset, todas) {
+  todas = todas || STORE.getAllOS();
   const base = parseLocalDate(todayISO());
   const dia = new Date(base); dia.setDate(dia.getDate() + offset);
   const diaISO = ymdLocal(dia);
@@ -2445,12 +2478,18 @@ function wireLinhaTempo(el) {
   const r = $('#lt-range', el);
   if (!r) return;
   const foto = $('#lt-foto', el);
+  // Lê as O.S UMA vez (o painel re-renderiza quando o dado muda) e coalesce o
+  // arrasto com requestAnimationFrame — antes cada pixel re-parseava ~570 O.S
+  // do localStorage e reconstruía o DOM, travando o celular.
+  const todas = STORE.getAllOS();
+  let raf = 0;
   const pintar = () => {
     STATE.ltOffset = +r.value;
-    foto.innerHTML = fotografiaLT(STATE.ltOffset);
+    foto.innerHTML = fotografiaLT(STATE.ltOffset, todas);
     bindCardClicks(foto);
   };
-  r.oninput = pintar;
+  const agendar = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; pintar(); }); };
+  r.oninput = agendar;
   $('#lt-hoje', el).onclick = () => { r.value = 0; pintar(); };
   $('#lt-menos', el).onclick = () => { r.value = Math.max(-30, +r.value - 1); pintar(); };
   $('#lt-mais', el).onclick = () => { r.value = Math.min(30, +r.value + 1); pintar(); };

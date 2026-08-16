@@ -119,6 +119,15 @@ function initSelect() {
 }
 
 function enter() {
+  // Garante o crachá de montagem: o instalador tocou no nome mas não tem
+  // credencial (a reforma de 05/08 fechou a porta sem senha). Pega um crachá
+  // papel 'montagem' e dispara o sync — sem isso todo request leva 401.
+  // Comercial usa o crachá que já estiver no aparelho (aberto pela gestão).
+  if (!EQ.comercial && EQ.instalador && typeof AUTH !== 'undefined' && !AUTH.temCracha()) {
+    AUTH.entrarMontagem(EQ.instalador)
+      .then(() => { STORE.pull(() => renderList()); STORE.trySync(); })
+      .catch(e => { toast('⚠️ ' + (e.message || 'Não foi possível entrar na nuvem.'), 'error'); });
+  }
   $('#select-screen').classList.add('hidden');
   $('#eq-app').classList.remove('hidden');
   const logo = $('#topbar-logo');
@@ -215,12 +224,14 @@ async function verificarNuvem() {
   try {
     await STORE.trySync();
     const res = await STORE.api({ action: 'list' });
-    const n = Array.isArray(res.os) ? res.os.length : 0;
+    const n = Number.isFinite(res.total) ? res.total : (Array.isArray(res.os) ? res.os.length : 0);
     const fila = STORE.getQueue().length;
     if (fila) toast(`☁️ ${n} na nuvem · ⏳ ${fila} ainda neste aparelho`, 'error');
     else      toast(`✅ Tudo salvo na nuvem (${n} O.S)`, 'success');
-  } catch {
-    toast('❌ Sem resposta da nuvem — você está offline?', 'error');
+  } catch (e) {
+    if (e && (e.semSessao || e.status === 401 || e.status === 403))
+      toast('🔒 A nuvem recusou este aparelho — a sessão pode ter expirado. Avise a gestão.', 'error');
+    else toast('❌ Sem resposta da nuvem — você está offline?', 'error');
   } finally {
     if (vBtn) vBtn.disabled = false;
   }
