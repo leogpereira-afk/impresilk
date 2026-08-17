@@ -275,12 +275,41 @@ Deno.serve(async (req: Request) => {
   // cracha papel 'montagem' (que nao pode setCfg). Substitui o #i=NOME antigo,
   // que aceitava QUALQUER nome. Rodada ANTES do portao.
   if (acao === "entrarMontagem") {
+      /* FREIO. Esta porta e um oraculo: ela responde 200 para nome que esta na
+         lista e 403 para o que nao esta -- ou seja, da para varrer nomes ate
+         achar um que abra, e cada acerto vale 30 dias de acesso. Nao havia
+         limite nenhum. A contagem e a mesma das outras portas de senha, so que
+         aqui a "senha" e o nome. */
+      {
+        const alvoNome = String(body.nome ?? "").trim().toLowerCase();
+        const { data: travado } = await sb.rpc("porta_travada", { p_sistema: "pcp", p_usuario: alvoNome || "-" });
+        if (travado === true) {
+          return resp({ error: "Muitas tentativas. Espere 15 minutos e tente de novo." }, 429);
+        }
+      }
     const nome = String(body.nome ?? "").trim();
     if (!nome) return resp({ error: "nome ausente" }, 400);
     const cfg = (await getCfg()) ?? {};
     const lista: string[] = Array.isArray(cfg.instaladores) ? cfg.instaladores : [];
     const bate = lista.find((n) => String(n).trim().toLowerCase() === nome.toLowerCase());
-    if (!bate) return resp({ error: "Nome não está na lista de instaladores." }, 403);
+    if (!bate) {
+        await sb.rpc("porta_registrar", {
+          p_sistema: "pcp", p_usuario: String(body.nome ?? "").trim().toLowerCase(),
+          p_acao: "login-falhou", p_por: "-", p_detalhe: "nome fora da lista de instaladores",
+        }).then(() => {}, () => {});
+        /* FREIO PELO RELOGIO, e nao por bloqueio.
+           Esta porta e um oraculo: 200 para nome da lista, 403 para o resto --
+           da para varrer nomes ate achar um que abra, e cada acerto vale 30
+           dias de acesso. Contar por NOME nao adianta (o varredor troca de nome
+           a cada tentativa, e foi o que o meu proprio teste mostrou); e travar a
+           porta depois de N erros trancaria a FABRICA -- o instalador chega na
+           obra e nao entra.
+           Entao a resposta errada custa 1,5s. Quem toca no proprio nome acerta
+           de primeira e nao sente; quem varre cai de milhares de tentativas por
+           minuto para quarenta. */
+        await new Promise((r) => setTimeout(r, 1500));
+        return resp({ error: "Nome não está na lista de instaladores." }, 403);
+      }
     return resp({ token: await assinarCrachaMontagem(bate), nome: bate, papel: "montagem" });
   }
 
