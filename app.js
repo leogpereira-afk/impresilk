@@ -492,7 +492,24 @@ function initLogin() {
   // 05/08 passou a exigir crachá para os dados). Sessão salva antes da reforma,
   // ou com crachá vencido, não pode entrar num app que só descartaria edições.
   const saved = STORE.getUser();
-  if (saved && typeof AUTH !== 'undefined' && AUTH.temCracha()) {
+  const temCracha = typeof AUTH !== 'undefined' && AUTH.temCracha();
+  // Crachá SEM usuário salvo é o caso da ENTRADA ÚNICA: quem entra pelo Painel
+  // recebe aqui o crachá do PCP (mesmo endereço, mesmo localStorage), mas o
+  // Painel não grava o `usuario` — ele não conhece o formato interno de cada
+  // app. Sem este ramo, a pessoa chegava com crachá válido no bolso, via a tela
+  // de senha assim mesmo, e digitava a senha da CENTRAL numa conta que só
+  // existe aqui — recebendo "usuário ou senha incorretos" sem ter errado nada.
+  // O dono sai do próprio crachá; se ele estiver vencido, dono() devolve null e
+  // a tela de login aparece, como deve.
+  const doCracha = (!saved && temCracha) ? AUTH.dono() : null;
+  if (doCracha) {
+    STATE.user = { nome: doCracha.nome, papel: doCracha.papel, usuario: doCracha.usuario };
+    STORE.setUser(STATE.user);
+    enterApp();
+    AUTH.eu().then(r => {
+      if (r === false) { AUTH.esquecer(); STORE.setUser(null); toast('Sua sessão expirou — entre de novo.', 'error'); setTimeout(() => location.reload(), 1500); }
+    }).catch(() => {});
+  } else if (saved && temCracha) {
     STATE.user = saved; enterApp();
     // Em 2º plano confirma o crachá: se estiver morto, encerra a sessão.
     AUTH.eu().then(r => {

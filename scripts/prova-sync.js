@@ -36,6 +36,11 @@ const ctx = {
   console,
   fetch: async () => { throw new Error('sem rede no teste'); },
   setTimeout, clearTimeout, AbortController,
+  // atob/btoa não são da linguagem, são do navegador — sem eles aqui dentro, o
+  // auth.js falharia no teste por falta de ambiente, não por defeito.
+  atob: s => Buffer.from(s, 'base64').toString('binary'),
+  btoa: s => Buffer.from(s, 'binary').toString('base64'),
+  escape, unescape,
   API_BASE: 'http://teste', API_FN: {},
   crypto: require('crypto').webcrypto,
 };
@@ -207,7 +212,34 @@ console.log('\n#24 limparCache');
   eq('agenda de telefones sai', cfg.funcionarios, undefined);
 }
 
-provaRevNaFila().then(() => {
+// ── 7. entrada única: crachá sem usuário salvo (auth.js) ────────────────────
+// O Painel planta SÓ o crachá no localStorage (mesmo endereço). Se o app exigir
+// também um usuário salvo, a pessoa chega com credencial válida no bolso e vê a
+// tela de senha assim mesmo — foi o que trancou o dono da casa fora do PCP.
+function provaDonoDoCracha() {
+  console.log('\nentrada única · AUTH.dono()');
+  vm.runInContext(fs.readFileSync(`${RAIZ}/auth.js`, 'utf8') + '\n;AUTH;', ctx);
+  const AUTH = vm.runInContext('AUTH', ctx);
+  const b64 = o => Buffer.from(JSON.stringify(o)).toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const cracha = corpo => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64(corpo)}.assinatura`;
+  const daqui = Math.floor(Date.now() / 1000) + 3600;
+  const por = t => { mem.set('impresilk_inst_cracha', t); return AUTH.dono(); };
+
+  eq('crachá bom identifica a pessoa',
+    por(cracha({ sis: 'pcp', sub: 'leo', nome: 'Leo', papel: 'admin', exp: daqui })),
+    { usuario: 'leo', nome: 'Leo', papel: 'admin' });
+  eq('crachá vencido não entra',
+    por(cracha({ sis: 'pcp', sub: 'leo', nome: 'Leo', papel: 'admin', exp: Math.floor(Date.now() / 1000) - 1 })), null);
+  eq('crachá sem exp não entra',
+    por(cracha({ sis: 'pcp', sub: 'leo', nome: 'Leo', papel: 'admin' })), null);
+  eq('crachá de OUTRO sistema não entra',
+    por(cracha({ sis: 'rh', sub: 'leo', nome: 'Leo', papel: 'admin', exp: daqui })), null);
+  eq('texto que não é crachá não entra', por('lixo-sem-pontos'), null);
+  mem.delete('impresilk_inst_cracha');
+}
+
+provaRevNaFila().then(provaDonoDoCracha).then(() => {
   console.log(`\n${testes - falhas}/${testes} passaram`);
   process.exit(falhas ? 1 : 0);
 });
