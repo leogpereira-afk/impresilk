@@ -116,11 +116,38 @@ async function crachaRevogado(cracha: any): Promise<boolean> {
 
   let revogado = false;
   try {
-    if (papel === "montagem") {
+    /* DOIS CRACHAS DIFERENTES USAM O MESMO PAPEL `montagem`, e ate 17/08/2026
+       este ramo tratava os dois como se fossem um.
+
+         a) o do TOQUE NO NOME: o instalador toca no proprio nome no espelho e
+            recebe um cracha de 30 dias. Nao ha senha, entao a LISTA de
+            instaladores e a credencial -- e tirar alguem da lista tem de
+            revogar o cracha dele. E o que este ramo faz.
+         b) o de uma CONTA de verdade, de equipe_contas, com papel `montagem` e
+            senha. A conta `montagem` do PCP e uma delas.
+
+       O cracha (b) nunca teve nada a ver com a lista: `montagem` nao e nome de
+       instalador nenhum, entao caia como revogado. O efeito era grotesco --
+       login respondia 200, entregava o cracha, e a porta de dados devolvia 401
+       "Seu acesso ao PCP foi encerrado". Nao entrava por caminho nenhum.
+
+       A separacao NAO precisa de campo novo no cracha (o que so valeria para os
+       emitidos daqui para a frente, deixando os de 30 dias ja no bolso das
+       pessoas sem conferencia): quem TEM conta e conferido como conta, quem nao
+       tem e conferido contra a lista. Instalador nao tem conta -- e por isso
+       que ele toca no nome. */
+    const { data: contaMont } = papel === "montagem"
+      ? await sb.from("equipe_contas").select("ativo").eq("sistema", "pcp").eq("usuario", sub).maybeSingle()
+      : { data: null };
+
+    if (papel === "montagem" && !contaMont) {
       const cfg = (await getCfg()) ?? {};
       const lista: unknown[] = Array.isArray(cfg.instaladores) ? cfg.instaladores : [];
       // Lista vazia = config nao carregada ou ainda sem cadastro: nao e prova.
       if (lista.length) revogado = !lista.some((n) => semAcento(String(n)) === semAcento(sub));
+    } else if (papel === "montagem") {
+      // Conta de verdade com papel montagem: vale a regra de conta.
+      revogado = contaMont.ativo === false;
     } else {
       const { data: conta, error } = await sb.from("equipe_contas")
         .select("ativo").eq("sistema", "pcp").eq("usuario", sub).maybeSingle();
