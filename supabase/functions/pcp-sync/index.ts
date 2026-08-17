@@ -303,6 +303,7 @@ Deno.serve(async (req: Request) => {
   // switch executava tudo sem olhar papel: um cracha 'comercial' se promovia a
   // admin via setCfg ou apagava O.S). A porta de MAQUINA (backup do Hub) segue
   // com poder total. Papeis com editar=true: admin/pcp/montagem/operacao.
+  let ehToqueNoNome = false;
   if (cracha && !ehMaquina) {
     const papel = String(cracha.papel ?? "");
     const podeEditar = ["admin", "pcp", "montagem", "operacao"].includes(papel);
@@ -327,12 +328,63 @@ Deno.serve(async (req: Request) => {
        Conta de verdade com papel `montagem` (com senha, em equipe_contas)
        continua podendo: quem tem senha e quem responde por ela. E a mesma
        distincao que o crachaRevogado faz. */
-    if (acao === "delete" && papel === "montagem") {
-      const { data: temConta } = await sb.from("equipe_contas")
-        .select("usuario").eq("sistema", "pcp").eq("usuario", String(cracha.sub ?? "")).maybeSingle();
-      if (!temConta) {
-        return resp({ error: "Quem entra pelo nome não apaga O.S. Fale com o PCP." }, 403);
+    /* O QUE O CRACHA DE TOQUE ESCREVE: so a execucao.
+       Ele nasce de um primeiro nome, sem senha. Poder gravar o registro inteiro
+       significa poder reescrever o CLIENTE, o ENDERECO e o VENDEDOR de uma O.S
+       -- coisas que o instalador nunca preenche e que o PCP nao teria como
+       saber que mudaram. A lista abaixo saiu do que a tela dele de fato salva
+       (equipe.js: checkin, checkinGPS, checkout, fotos, carro liberado,
+       conclusao), mais os campos de conferencia que a mesma tela usa.
+
+       Campo fora da lista NAO derruba a gravacao: ele e descartado e o resto
+       passa. Recusar tudo faria o aparelho na rua, offline ha horas, perder o
+       checkin inteiro por causa de um campo a mais. */
+    /* "Entrou pelo nome" = papel montagem SEM conta em equipe_contas. E a mesma
+       distincao do crachaRevogado; calculada uma vez e usada nas tres regras
+       (nao apaga, escreve so execucao, nao ve documento). */
+    const { data: contaDoCracha } = papel === "montagem"
+      ? await sb.from("equipe_contas").select("usuario").eq("sistema", "pcp")
+          .eq("usuario", String(cracha.sub ?? "")).maybeSingle()
+      : { data: null };
+    ehToqueNoNome = papel === "montagem" && !contaDoCracha;
+
+    const CAMPOS_MONTAGEM = new Set([
+      "id", "atualizadoEm", "atualizadoPor",
+      "checkin", "checkinGPS", "checkout", "conclusao",
+      "fotosCheckinIds", "fotosRetornoIds",
+      "carroLiberado", "carroLiberadoEm", "carroLiberadoPor",
+      "equipe", "obsTecnicas", "instalacaoOK", "problema",
+      "ferramentasConferidas", "ferramentasConferidasPor",
+      "kmSaida", "kmRetorno", "horaSaida", "horaRetorno",
+    ]);
+    /* MESCLA, NAO FILTRA -- e a diferenca entre proteger e destruir.
+       O upsert do PCP SUBSTITUI a O.S inteira (nao funde campo a campo). Entao
+       "deixar passar so os campos de execucao" apagava cliente, endereco e
+       vendedor a cada checkin de instalador: o filtro protegeria esses campos de
+       serem reescritos e os destruiria por omissao. Peguei isso testando, e o
+       estrago teria sido diario e silencioso.
+
+       O certo e partir do que JA ESTA gravado e deixar o cracha de toque mudar
+       so os campos dele. O.S que ainda nao existe: nao ha o que preservar, e
+       criar O.S nunca foi trabalho de instalador.
+
+       (O upsert recebe a O.S em `body.os`, e nao em `registro` como os outros
+       sistemas da casa -- apontar para o campo errado nao daria erro nenhum,
+       passaria tudo.) */
+    if (acao === "upsert" && ehToqueNoNome && body?.os) {
+      const veio = body.os as Record<string, unknown>;
+      const id = String(veio.id ?? "");
+      const atual = id ? await getReg("os", id) : null;
+      if (!atual) {
+        return resp({ error: "Quem entra pelo nome não cria O.S. Fale com o PCP." }, 403);
       }
+      const mesclado: Record<string, unknown> = { ...atual };
+      for (const k of Object.keys(veio)) if (CAMPOS_MONTAGEM.has(k)) mesclado[k] = veio[k];
+      body.os = mesclado;
+    }
+
+    if (acao === "delete" && ehToqueNoNome) {
+      return resp({ error: "Quem entra pelo nome não apaga O.S. Fale com o PCP." }, 403);
     }
   }
 
@@ -365,8 +417,23 @@ Deno.serve(async (req: Request) => {
         const { data, error } = await q;
         if (error) throw new Error(error.message);
         const linhas = data ?? [];
+        /* CPF/CNPJ NAO VAI PARA QUEM ENTROU PELO NOME.
+           O cracha de toque sai de um primeiro nome da lista, sem senha. Ele
+           precisa do cliente, do endereco e do contato -- e o servico dele: ele
+           vai ao lugar e liga para avisar. Nao precisa do documento de ninguem.
+
+           O filtro NAO e por equipe, e a razao esta no dado: de 615 O.S, apenas
+           81 tem `equipe` preenchida. Escopar por ela deixaria o instalador
+           enxergando 13% do trabalho, e as outras 534 nao apareceriam para
+           ninguem. Enquanto o PCP nao preencher equipe, isso e decisao do dono,
+           nao conserto. */
+        const soExecucao = ehToqueNoNome;
         return resp({
-          os: linhas.map((r: any) => r.registro),
+          os: linhas.map((r: any) => {
+            if (!soExecucao) return r.registro;
+            const { cnpjCpf, ...resto } = r.registro ?? {};
+            return resto;
+          }),
           total: await contarRegs("os"),
           nextAfter: linhas.length === PAGE ? linhas[linhas.length - 1].id : null,
           nextOffset: null, // paginacao por chave; offset era so compatibilidade
