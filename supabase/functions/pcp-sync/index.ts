@@ -313,6 +313,27 @@ Deno.serve(async (req: Request) => {
     if (ESCRITA.includes(acao) && !podeEditar) {
       return resp({ error: "Seu acesso é somente leitura." }, 403);
     }
+    /* APAGAR O.S NAO E COISA DE QUEM ENTROU SEM SENHA.
+       O cracha do TOQUE NO NOME nasce de um primeiro nome da lista de
+       instaladores -- sem senha nenhuma. Medido em 17/08/2026: com o nome
+       "Osmane" sai um cracha, e com ele `delete` respondia 200 e apagava O.S.
+       Nomes dessa lista sao nomes comuns (Charles, Douglas, Lucas, Saulo), e
+       ela e publica para quem abre o espelho.
+
+       Escrever o proprio trabalho e o motivo do cracha existir, e continua
+       liberado (upsert, fotos). Apagar ordem de servico nunca foi trabalho de
+       instalador em cima de andaime -- e apagada, a O.S nao volta.
+
+       Conta de verdade com papel `montagem` (com senha, em equipe_contas)
+       continua podendo: quem tem senha e quem responde por ela. E a mesma
+       distincao que o crachaRevogado faz. */
+    if (acao === "delete" && papel === "montagem") {
+      const { data: temConta } = await sb.from("equipe_contas")
+        .select("usuario").eq("sistema", "pcp").eq("usuario", String(cracha.sub ?? "")).maybeSingle();
+      if (!temConta) {
+        return resp({ error: "Quem entra pelo nome não apaga O.S. Fale com o PCP." }, 403);
+      }
+    }
   }
 
   try {
