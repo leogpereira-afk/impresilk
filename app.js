@@ -4404,11 +4404,41 @@ function abrirWhatsAppDia(dia, lista) {
    IMPORTAR O.S DO PDF DO ERP (pdf.js)
    ══════════════════════════════════════════════════════════════════════════ */
 // Lê o PDF retornando texto por linhas E itens com posição (x,y,página)
+/* A BIBLIOTECA DE LEITURA DE PDF CHEGA SO QUANDO ALGUEM IMPORTA UM PDF.
+ *
+ * Sao 87 kB, de uma CDN externa, e estavam no <script> do index.html: todo
+ * mundo que abria a lista de O.S baixava, em toda visita. Medido na rede, era
+ * 51% de tudo o que a primeira tela pedia (87 de 171 kB) -- para um recurso
+ * usado quando se clica em "Importar PDF", e por poucas pessoas.
+ *
+ * Uma promessa so, e zerada em caso de falha para a proxima tentativa poder
+ * tentar de novo (sem isto, uma queda momentanea de rede deixaria o botao
+ * quebrado ate recarregar a pagina).
+ */
+const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174';
+let _pdfJsPronto = null;
+function garantirPdfJs() {
+  if (typeof pdfjsLib !== 'undefined') return Promise.resolve();
+  if (_pdfJsPronto) return _pdfJsPronto;
+  _pdfJsPronto = new Promise((ok, falhou) => {
+    const s = document.createElement('script');
+    s.src = PDFJS_CDN + '/pdf.min.js';
+    s.onload = () => ok();
+    s.onerror = () => {
+      _pdfJsPronto = null;
+      falhou(new Error('pdf.js indisponível (sem internet) — use o cadastro manual.'));
+    };
+    document.head.appendChild(s);
+  });
+  return _pdfJsPronto;
+}
+
 async function lerPDF(file) {
+  await garantirPdfJs();
   if (typeof pdfjsLib === 'undefined') {
     throw new Error('pdf.js indisponível (sem internet) — use o cadastro manual.');
   }
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_CDN + '/pdf.worker.min.js';
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
   let texto = '';

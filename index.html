@@ -149,8 +149,10 @@
     <div class="celebra-box" id="celebra-box"></div>
   </div>
 
-  <!-- pdf.js via CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- pdf.js NAO entra aqui. Sao 87 kB de CDN externa que TODO mundo baixava
+       so para abrir a lista de O.S, e a biblioteca serve a uma unica coisa:
+       importar O.S a partir do PDF do ERP. Passou a ser carregada na hora em
+       que alguem clica em "Importar PDF" -- ver garantirPdfJs() no app.js. -->
 
   <script src="config.js"></script>
   <script src="logo.js"></script>
