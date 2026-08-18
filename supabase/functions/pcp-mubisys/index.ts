@@ -246,14 +246,14 @@ async function lerCracha(token: string): Promise<any | null> {
 // GEMEA da funcao de mesmo nome no pcp-sync — as duas precisam existir, senao
 // "desativar a conta" fecharia so metade da casa: a pessoa desligada perderia
 // as O.S mas continuaria consultando o ERP por aqui ate o cracha expirar (30
-// dias). Se mudar a regra la, mude aqui. Motivo e criterio estao documentados
-// no pcp-sync; o resumo e: so recusa com PROVA de revogacao, e erro de banco
+// dias). A REGRA EM SI nao mora mais aqui: as duas chamam
+// `public.acesso_revogado`, no banco. Ate 18/08/2026 cada uma tinha a sua copia,
+// e o aviso que ficava nesta linha ("se mudar a regra la, mude aqui") foi
+// desobedecido no mesmo dia em que a regra mudou. So recusa com PROVA, e erro de
+// banco
 // ou ausencia de linha ACEITAM.
 const CACHE_REVOG = new Map<string, { ate: number; revogado: boolean }>();
 const CACHE_REVOG_MS = 60_000;
-const semAcento = (s: string) =>
-  s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-
 async function crachaRevogado(cracha: any): Promise<boolean> {
   const sub = String(cracha?.sub ?? "").trim();
   const papel = String(cracha?.papel ?? "");
@@ -265,23 +265,20 @@ async function crachaRevogado(cracha: any): Promise<boolean> {
 
   let revogado = false;
   try {
-    if (papel === "montagem") {
-      const { data } = await sb.from("pcp_config_global").select("config").eq("id", true).maybeSingle();
-      const lista: unknown[] = Array.isArray(data?.config?.instaladores) ? data!.config.instaladores : [];
-      if (lista.length) revogado = !lista.some((n) => semAcento(String(n)) === semAcento(sub));
-    } else {
-      const { data: conta, error } = await sb.from("equipe_contas")
-        .select("ativo").eq("sistema", "pcp").eq("usuario", sub).maybeSingle();
-      if (error) throw new Error(error.message);
-      if (conta) {
-        revogado = conta.ativo === false;
-      } else {
-        const { data: central } = await sb.from("acesso_conta")
-          .select("ativo").eq("usuario", sub).maybeSingle();
-        revogado = !!central && central.ativo === false;
-      }
-    }
+    /* A REGRA MORA NO BANCO -- e esta funcao e a prova de por que.
+       O comentario acima dizia "Se mudar a regra la, mude aqui". Em 17/08/2026 a
+       regra mudou no pcp-sync e ninguem mudou aqui: por horas o PCP fechava as
+       O.S. para quem foi desligado e continuava servindo o ERP pela porta gemea,
+       ate o cracha de 30 dias vencer. Um aviso em comentario nao e mecanismo.
+       Agora as duas perguntam a mesma `public.acesso_revogado`, junto com as
+       outras onze portas de dados: uma mudanca, doze portas. */
+    const { data, error } = await sb.rpc("acesso_revogado", {
+      p_sistema: "pcp", p_sub: sub, p_papel: papel,
+    });
+    if (error) throw new Error(error.message);
+    revogado = data === true;
   } catch (e) {
+    // Banco fora do ar ACEITA e nao guarda no cache.
     console.error("[pcp-mubisys] revogacao indisponivel:", (e as Error).message);
     return false;
   }
