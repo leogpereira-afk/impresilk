@@ -589,8 +589,27 @@ Deno.serve(async (req: Request) => {
 
       case "setCfg": {
         if (!body.cfg) return resp({ error: "cfg ausente" }, 400);
+        /* O QUE O getCfg ESCONDE, O setCfg TEM DE REPOR -- senao esconder APAGA.
+           `getCfg` tira `usuarios` e `funcionarios` do pacote de quem nao e
+           admin. O app guarda esse pacote e devolve ele INTEIRO ao salvar
+           qualquer ajuste de Configuracoes. Gravando como veio, o elenco e a
+           agenda de telefones sumiam do banco -- e ninguem ligaria a coisa: quem
+           apagou nem viu os campos, e quem perdeu o acesso nao mexeu em nada.
+
+           E o elenco NAO E DO APP nem quando quem salva e admin: quem manda nele
+           e a Central (e o gatilho `espelhar_elenco`, que o reescreve a cada
+           mudanca em equipe_contas). Deixar o PCP grava-lo faria o admin de UM
+           sistema administrar acesso -- exatamente o que a Central existe para
+           concentrar. Entao vale sempre o que ja esta no banco, para todo mundo.
+           Mesma regra que o Brief ja aplicava. */
+        const atual = (await getCfg()) ?? {};
+        const limpo: Record<string, unknown> = { ...body.cfg };
+        for (const campo of ["usuarios", "funcionarios"]) {
+          if (campo in atual) limpo[campo] = (atual as any)[campo];
+          else delete limpo[campo];
+        }
         const { error } = await sb.from("pcp_config_global").upsert(
-          { id: true, config: body.cfg, atualizado_em: new Date().toISOString() },
+          { id: true, config: limpo, atualizado_em: new Date().toISOString() },
           { onConflict: "id" },
         );
         if (error) throw new Error(error.message);
