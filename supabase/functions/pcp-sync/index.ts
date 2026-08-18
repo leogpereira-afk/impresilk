@@ -89,21 +89,19 @@ const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: fal
 // ja emitido continuava lendo e gravando O.S ate expirar, e a unica forma de
 // cortar era girar o EQUIPE_JWT_SECRET — que derruba os SETE sistemas de uma vez.
 //
-// A regra e: so recusa com PROVA de revogacao.
-//   - papel montagem   -> nao tem conta; o cracha nasce da lista de instaladores,
-//                         entao tirar o nome da lista e a revogacao dele.
-//   - demais papeis    -> linha em equipe_contas (sistema pcp) com ativo=false;
-//                         sem linha, tenta acesso_conta (quem entrou pela Central).
-//   - nada encontrado  -> ACEITA. Trancar por ausencia de linha derrubaria quem
-//                         entrou por um caminho que nao provisionou conta aqui,
-//                         e o prejuizo de trancar a casa inteira e maior que o de
-//                         um cracha sobreviver ate expirar.
-//   - banco fora do ar -> ACEITA (e nao guarda no cache).
+// A REGRA E `public.acesso_revogado`, no banco -- a mesma que as outras onze
+// portas de dados consultam. Aqui fica so o cache de 60s e a decisao de aceitar
+// quando o banco nao responde.
+//
+// Ela recusa com PROVA: conta desativada no proprio sistema; pessoa ou papel
+// desativado no quadro unico; instalador tirado da lista (papel montagem sem
+// conta); prazo de terceirizado vencido; ou ficha marcada como desligada no RH.
+// Ausencia de qualquer uma ACEITA -- trancar por ausencia derrubaria quem entrou
+// por um caminho que nao provisiona conta aqui, e o prejuizo de trancar a fabrica
+// e maior que o de um cracha durar ate expirar. Banco fora do ar tambem aceita,
+// e nao guarda no cache.
 const CACHE_REVOG = new Map<string, { ate: number; revogado: boolean }>();
 const CACHE_REVOG_MS = 60_000; // uma consulta por pessoa por minuto, nao por request
-
-const semAcento = (s: string) =>
-  s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 
 async function crachaRevogado(cracha: any): Promise<boolean> {
   const sub = String(cracha?.sub ?? "").trim();
@@ -116,51 +114,31 @@ async function crachaRevogado(cracha: any): Promise<boolean> {
 
   let revogado = false;
   try {
-    /* DOIS CRACHAS DIFERENTES USAM O MESMO PAPEL `montagem`, e ate 17/08/2026
-       este ramo tratava os dois como se fossem um.
+    /* A REGRA MORA NO BANCO, E NAO AQUI.
+       Ate 17/08/2026 esta funcao reimplementava a revogacao inteira: conta em
+       `equipe_contas`, conta na Central, e a lista de instaladores para o cracha
+       de toque no nome. A implementacao estava certa -- e era uma COPIA. As
+       outras onze portas de dados perguntam a `public.acesso_revogado`, e no
+       mesmo dia essa funcao ganhou duas regras que esta copia jamais aprenderia:
+       prazo vencido de terceirizado, e ficha marcada como desligada no RH.
+       O PCP seguiria abrindo para quem as outras onze ja tinham fechado, e nada
+       acusaria a diferenca -- que e exatamente a doenca que a funcao no banco
+       existe para curar.
 
-         a) o do TOQUE NO NOME: o instalador toca no proprio nome no espelho e
-            recebe um cracha de 30 dias. Nao ha senha, entao a LISTA de
-            instaladores e a credencial -- e tirar alguem da lista tem de
-            revogar o cracha dele. E o que este ramo faz.
-         b) o de uma CONTA de verdade, de equipe_contas, com papel `montagem` e
-            senha. A conta `montagem` do PCP e uma delas.
-
-       O cracha (b) nunca teve nada a ver com a lista: `montagem` nao e nome de
-       instalador nenhum, entao caia como revogado. O efeito era grotesco --
-       login respondia 200, entregava o cracha, e a porta de dados devolvia 401
-       "Seu acesso ao PCP foi encerrado". Nao entrava por caminho nenhum.
-
-       A separacao NAO precisa de campo novo no cracha (o que so valeria para os
-       emitidos daqui para a frente, deixando os de 30 dias ja no bolso das
-       pessoas sem conferencia): quem TEM conta e conferido como conta, quem nao
-       tem e conferido contra a lista. Instalador nao tem conta -- e por isso
-       que ele toca no nome. */
-    const { data: contaMont } = papel === "montagem"
-      ? await sb.from("equipe_contas").select("ativo").eq("sistema", "pcp").eq("usuario", sub).maybeSingle()
-      : { data: null };
-
-    if (papel === "montagem" && !contaMont) {
-      const cfg = (await getCfg()) ?? {};
-      const lista: unknown[] = Array.isArray(cfg.instaladores) ? cfg.instaladores : [];
-      // Lista vazia = config nao carregada ou ainda sem cadastro: nao e prova.
-      if (lista.length) revogado = !lista.some((n) => semAcento(String(n)) === semAcento(sub));
-    } else if (papel === "montagem") {
-      // Conta de verdade com papel montagem: vale a regra de conta.
-      revogado = contaMont.ativo === false;
-    } else {
-      const { data: conta, error } = await sb.from("equipe_contas")
-        .select("ativo").eq("sistema", "pcp").eq("usuario", sub).maybeSingle();
-      if (error) throw new Error(error.message);
-      if (conta) {
-        revogado = conta.ativo === false;
-      } else {
-        const { data: central } = await sb.from("acesso_conta")
-          .select("ativo").eq("usuario", sub).maybeSingle();
-        revogado = !!central && central.ativo === false;
-      }
-    }
+       A funcao de la e superconjunto do que havia aqui, inclusive a separacao
+       dos DOIS crachas de papel `montagem`: quem TEM conta e conferido como
+       conta; quem nao tem (o instalador, que entra tocando no nome) e conferido
+       contra a lista. Sem essa guarda, a conta `montagem` -- que nao e nome de
+       instalador nenhum -- caia como revogada, e a pessoa nao entrava por
+       caminho nenhum. */
+    const { data, error } = await sb.rpc("acesso_revogado", {
+      p_sistema: "pcp", p_sub: sub, p_papel: papel,
+    });
+    if (error) throw new Error(error.message);
+    revogado = data === true;
   } catch (e) {
+    // Banco fora do ar ACEITA e nao guarda no cache -- trancar a fabrica por
+    // erro de infraestrutura custa mais que um cracha durar ate expirar.
     console.error("[pcp-sync] revogacao indisponivel:", (e as Error).message);
     return false;
   }
