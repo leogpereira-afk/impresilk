@@ -18,9 +18,12 @@ const STORE = (() => {
   function _openDB() {
     if (_db) return Promise.resolve(_db);
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open('impresilk_inst', 1);
+      // Versão 2: entrou o armazém 'os'. Ver "O CACHE DAS O.S MORA AQUI".
+      const req = indexedDB.open('impresilk_inst', 2);
       req.onupgradeneeded = e => {
-        e.target.result.createObjectStore('fotos', { keyPath: 'id' });
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('fotos')) db.createObjectStore('fotos', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('os'))    db.createObjectStore('os');
       };
       req.onsuccess = e => { _db = e.target.result; resolve(_db); };
       req.onerror   = e => reject(e.target.error);
@@ -76,9 +79,88 @@ const STORE = (() => {
     }
   }
 
-  // ── CRUD de O.S (cache local) ─────────────────────────────────────────────
+  // ── O CACHE DAS O.S MORA AQUI (memória + IndexedDB) ───────────────────────
+  //
+  // POR QUE SAIU DO localStorage (07/09/2026): o localStorage é de ~5 MB POR
+  // ORIGEM -- e todos os sistemas da casa moram na MESMA origem
+  // (leogpereira-afk.github.io/painel, /impresilk, /rh, ...), então dividem o
+  // mesmo cofre. Só as O.S do PCP já ocupavam 1,5 MB. Quando o cofre enchia,
+  // `lsSet` levava QuotaExceededError, o cache NÃO era gravado, e o app abria
+  // vazio a cada recarga: era o "entra e não puxa os dados". O IndexedDB do
+  // mesmo aparelho oferece ~2,7 GB.
+  //
+  // getAllOS() continua SÍNCRONO (27 chamadas espalhadas pelo app contam com
+  // isso): a lista vive em memória e o IndexedDB é só a cópia em disco,
+  // gravada logo depois. Quem precisa da lista já carregada no boot chama
+  // STORE.pronto().
+  let _osMem   = null;   // null = ainda não carregado do disco
+  let _osTimer = null;
+  let _semIDB  = false;  // navegador sem IndexedDB (aba privada): usa localStorage
+
   function getAllOS() {
-    return lsGet(K.OS, []);
+    if (_osMem) return _osMem;
+    return lsGet(K.OS, []);   // antes do pronto(), ou sem IndexedDB
+  }
+
+  // Grava a lista no IndexedDB. Agrupa rajadas (o pull chama _setAllOS várias
+  // vezes seguidas) para não escrever a lista inteira a cada mexida.
+  function _persistirOS() {
+    if (_osTimer) clearTimeout(_osTimer);
+    _osTimer = setTimeout(async () => {
+      _osTimer = null;
+      if (_semIDB) { lsSet(K.OS, _osMem || []); return; }
+      try {
+        const db = await _openDB();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('os', 'readwrite');
+          tx.objectStore('os').put(_osMem || [], 'lista');
+          tx.oncomplete = resolve;
+          tx.onerror    = e => reject(e.target.error);
+        });
+      } catch (e) {
+        // Disco cheio de verdade (ou IndexedDB indisponível): avisa a tela em
+        // vez de perder a gravação em silêncio, como acontecia antes.
+        console.error('[store] falha ao gravar as O.S no IndexedDB', e);
+        _notifyListeners('quota', null);
+      }
+    }, 250);
+  }
+
+  // Carrega o cache do disco. Roda uma vez, no boot. Se ainda houver lista no
+  // localStorage (aparelho vindo da versão antiga), ela é a fonte desta vez:
+  // migra para o IndexedDB e LIBERA o espaço no localStorage.
+  let _prontoP = null;
+  function pronto() {
+    if (_prontoP) return _prontoP;
+    _prontoP = (async () => {
+      let doLS = null;
+      try { doLS = JSON.parse(localStorage.getItem(K.OS) || 'null'); } catch { doLS = null; }
+      try {
+        const db = await _openDB();
+        const daBase = await new Promise((resolve, reject) => {
+          const tx  = db.transaction('os', 'readonly');
+          const req = tx.objectStore('os').get('lista');
+          req.onsuccess = e => resolve(e.target.result || null);
+          req.onerror   = e => reject(e.target.error);
+        });
+        if (Array.isArray(doLS) && doLS.length) {
+          // Migração: o que está no localStorage é o mais recente do aparelho.
+          _osMem = doLS;
+          _persistirOS();
+          try { localStorage.removeItem(K.OS); } catch {}
+          console.log('[store] cache das O.S migrado para o IndexedDB (' + doLS.length + ') e liberado do localStorage');
+        } else {
+          _osMem = Array.isArray(daBase) ? daBase : [];
+        }
+      } catch (e) {
+        // Sem IndexedDB: segue no localStorage, como antes.
+        _semIDB = true;
+        _osMem = Array.isArray(doLS) ? doLS : [];
+        console.warn('[store] IndexedDB indisponível; cache das O.S segue no localStorage', e);
+      }
+      return _osMem;
+    })();
+    return _prontoP;
   }
 
   function getOS(id) {
@@ -86,7 +168,8 @@ const STORE = (() => {
   }
 
   function _setAllOS(arr) {
-    lsSet(K.OS, arr);
+    _osMem = Array.isArray(arr) ? arr : [];
+    _persistirOS();
   }
 
   // Salva (cria ou atualiza) uma O.S offline-first
@@ -640,6 +723,11 @@ const STORE = (() => {
       }
     } catch {}
     try {
+      // Cancela gravação agendada e zera a memória ANTES de derrubar a base:
+      // sem isto o _persistirOS pendente recriava a lista logo depois do
+      // delete, e getAllOS() seguia servindo as O.S da sessão que saiu.
+      if (_osTimer) { clearTimeout(_osTimer); _osTimer = null; }
+      _osMem = null; _prontoP = null;
       if (_db) { _db.close(); _db = null; }
       indexedDB.deleteDatabase('impresilk_inst');
     } catch {}
@@ -751,7 +839,7 @@ const STORE = (() => {
   // ── API pública ───────────────────────────────────────────────────────────
   return {
     // CRUD O.S
-    getAllOS, getOS, saveOS, deleteOS,
+    getAllOS, getOS, saveOS, deleteOS, pronto,
     // CFG
     getCFG, saveCFG,
     // Identidade

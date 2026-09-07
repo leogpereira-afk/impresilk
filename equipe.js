@@ -183,15 +183,19 @@ function enter() {
     if (window._avisouSessao) return; window._avisouSessao = true;
     toast('🔒 A nuvem recusou este aparelho. O trabalho fica guardado aqui; avise a gestão.', 'error');
   });
-  STORE.on('quota', () => toast('Memória do aparelho cheia — avise a gestão.', 'error'));
+  STORE.on('quota', () => toast('Sem espaço no aparelho. Libere espaço e recarregue — nada foi perdido.', 'error'));
   initConflict();
   const vBtn = $('#btn-verificar');
   if (vBtn) vBtn.onclick = verificarNuvem;
   if (typeof iniciarFraseBar === 'function') iniciarFraseBar();
 
-  STORE.pull(() => renderList());
-  STORE.trySync();
+  // Espelho: mesma regra do app — o cache das O.S vem do IndexedDB, então
+  // pinta agora e repinta quando o disco responder (senão o instalador abre
+  // numa lista vazia e acha que perdeu o dia).
   renderList();
+  STORE.pronto()
+    .then(() => { renderList(); STORE.pull(() => renderList()); STORE.trySync(); })
+    .catch(() => { STORE.pull(() => renderList()); STORE.trySync(); });
   setInterval(() => { STORE.pull(() => renderList()); STORE.trySync(); }, 30000);
 }
 

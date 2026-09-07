@@ -704,9 +704,15 @@ function enterApp() {
   // Pull inicial + CFG, depois render. A CFG pode trazer níveis de acesso
   // novos do servidor — reaplica as permissões quando ela chegar.
   STORE.pullCFG().then(() => { aplicarPermissoes(); refreshAposPull(); }).catch(() => {});
-  STORE.pull(refreshAposPull);
-  STORE.trySync();
+
+  // O cache das O.S vem do IndexedDB (desde 07/09/2026), e ler disco é
+  // assíncrono: pintar antes de ele chegar mostraria a tela VAZIA por um
+  // instante -- justamente o susto que estamos consertando. Então pinta uma
+  // vez agora (com o que houver) e repinta assim que o cache estiver na mão.
   renderActiveTab();
+  STORE.pronto()
+    .then(() => { refreshAposPull(); STORE.pull(refreshAposPull); STORE.trySync(); })
+    .catch(() => { STORE.pull(refreshAposPull); STORE.trySync(); });
 
   // Pull periódico a cada 30s (incluindo a CFG, senão as permissões ficam
   // congeladas com os níveis antigos a sessão inteira). Guardamos o id para
@@ -877,7 +883,7 @@ function initSyncIndicator() {
       el.title = 'Sem conexão — você pode continuar trabalhando; o envio acontece ao reconectar.';
     }
   });
-  STORE.on('quota', () => toast('Armazenamento local cheio — limpe fotos antigas', 'error'));
+  STORE.on('quota', () => toast('Sem espaço no aparelho para guardar as O.S. Libere espaço (fotos/apps) e recarregue.', 'error'));
   // Perda de dados nunca é silenciosa: item descartado / lista truncada avisam.
   STORE.on('item-descartado', ({ item, motivo }) => {
     const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : (item && item.action) || 'alteração';
