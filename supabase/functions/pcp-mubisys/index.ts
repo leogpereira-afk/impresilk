@@ -148,6 +148,9 @@ function mapearOS(o: any) {
   return {
     tipo: /retir/i.test(logistica) ? "interno" : "externo",
     numero: String(pick(o, "sequencial_ordem", "numero", "numeroOS", "codigo") || ""),
+    // Situacao da O.S no ERP. E o que permite a BAIXA AUTOMATICA: quando o
+    // pedido sai de producao la, ele nao pode continuar ocupando a mesa aqui.
+    statusERP: String(pick(o, "status", "situacao", "status_os") || "").trim().toUpperCase(),
     servico: pick(o, "nome_trabalho", "referencia", "titulo", "descricao"),
     vendedor: pick(o, "vendedor", "atendente", "vendedorNome"),
     dataEntrada: isoData(pick(o, "data_cadastro", "data_aprovacao")),
@@ -162,6 +165,132 @@ function mapearOS(o: any) {
     itens: (o.itens || o.produtos || o.items || []).map(mapearItem),
     _origemMubisys: true,
   };
+}
+
+// ── BAIXA AUTOMATICA ────────────────────────────────────────────────────────
+//
+// O PROBLEMA: a O.S entra aqui quando o ERP a poe em producao, mas quando ela
+// SAI de producao la (concluida, entregue, cancelada) ninguem avisa o PCP. A
+// equipe entrega e esquece de finalizar no app, e a mesa vai entupindo: em
+// 07/09/2026 havia 341 cards ativos, 309 deles "aguardando producao", muitos
+// atrasados ha mais de 40 dias -- pedidos que ja tinham saido no ERP.
+//
+// A REGRA: quem manda no ciclo de vida e o ERP. O.S que o ERP reporta em
+// situacao final recebe baixa aqui, com carimbo de quem deu (nunca deducao
+// muda: o status vem escrito na resposta do ERP). A equipe pode desfazer pelo
+// botao "Reabrir / voltar status" do proprio card.
+//
+// O QUE NUNCA ACONTECE:
+//  - baixar O.S que o ERP NAO mencionou (fora da janela de datas): ausencia da
+//    lista nao e prova de conclusao, e so o que o ERP AFIRMA vale;
+//  - apagar qualquer coisa: baixa e finalizar, o card vai para Finalizados e
+//    depois para Arquivados, com todo o historico;
+//  - baixar em massa por engano: o freio abaixo interrompe se a conta passar
+//    do razoavel, porque uma resposta estranha do ERP nao pode virar faxina.
+const STATUS_FINAIS = new Set(["CONCLUIDO", "CONCLUÍDO", "ENTREGUE", "CANCELADO", "FINALIZADO"]);
+// Acima deste tanto de baixas numa passada so mexe com confirmacao explicita
+// (body.forcar). Protege contra o ERP devolver uma lista torta.
+const TETO_BAIXAS = 60;
+
+async function baixaAutomatica(sb: any, base: string, publicKey: string, headers: any, opts: any = {}) {
+  const simular = opts.simular !== false ? opts.simular === true : false;
+  // Janela larga: o mesmo -180/+180 da importacao, por data de CADASTRO.
+  const hoje = new Date();
+  const ini = new Date(hoje); ini.setDate(ini.getDate() - 365);
+  const fim = new Date(hoje); fim.setDate(fim.getDate() + 180);
+  const q = new URLSearchParams({
+    status: "TODOS",
+    filtrodata: "CADASTRO",
+    datainicial: ini.toISOString().slice(0, 10),
+    datafinal: fim.toISOString().slice(0, 10),
+  });
+  const r = await fetch(`${base}/${publicKey}/ordem-servico?${q}`, { headers });
+  const data = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(`Mubisys retornou HTTP ${r.status} na conferencia de status`);
+  const doErp = extrairLista(data).map(mapearOS);
+  // Lista vazia nao e "tudo concluido" -- e resposta suspeita. Nao mexe.
+  if (!doErp.length) return { ok: false, motivo: "o ERP nao devolveu nenhuma O.S nesta janela", baixadas: 0 };
+
+  const statusPorNumero = new Map<string, string>();
+  for (const o of doErp) if (o.numero) statusPorNumero.set(String(o.numero), o.statusERP || "");
+
+  // As que estao ABERTAS aqui (nao apagadas, sem finalizacao).
+  const { data: linhas, error } = await sb
+    .from("pcp_registros").select("id, registro")
+    .eq("colecao", "os").eq("apagado", false);
+  if (error) throw new Error(error.message);
+  const abertas = (linhas ?? []).filter((l: any) => !String(l.registro?.finalizadaEm || "").trim());
+
+  // Dia de hoje no fuso da empresa (UTC-3): a agenda da equipe e local, e
+  // comparar com a data UTC tiraria da mesa, de madrugada, o servico de hoje.
+  const hojeLocal = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+
+  const alvos: any[] = [];
+  let semNoticia = 0;
+  let agendadas = 0;
+  for (const l of abertas) {
+    const num = String(l.registro?.numero || "").trim();
+    if (!num) continue;
+    const st = statusPorNumero.get(num);
+    if (st === undefined) { semNoticia++; continue; }  // o ERP nao falou dela: nao mexe
+    if (!STATUS_FINAIS.has(st)) continue;              // segue viva la
+    // A EQUIPE TEM VISITA MARCADA: nao tira da mesa. O ERP costuma marcar
+    // ENTREGUE quando o material sai da fabrica, e a instalacao ainda esta por
+    // vir -- baixar aqui sumiria com a agenda de quem vai subir no andaime.
+    const dataAgenda = String(l.registro?.instalacao?.data || "").trim();
+    if (dataAgenda && dataAgenda >= hojeLocal) { agendadas++; continue; }
+    alvos.push({ id: l.id, registro: l.registro, statusERP: st });
+  }
+
+  const resumo = {
+    ok: true,
+    abertasNoPcp: abertas.length,
+    conferidas: abertas.length - semNoticia,
+    semNoticiaDoErp: semNoticia,
+    poupadasComAgenda: agendadas,
+    baixadas: 0,
+    candidatas: alvos.length,
+    porStatus: alvos.reduce((acc: any, a: any) => { acc[a.statusERP] = (acc[a.statusERP] || 0) + 1; return acc; }, {}),
+    exemplos: alvos.slice(0, 8).map((a: any) => `${a.registro.numero} ${String(a.registro.cliente || "").slice(0, 28)} [${a.statusERP}]`),
+    simulado: !!simular,
+    freado: false as boolean | string,
+  };
+
+  if (simular) return resumo;
+
+  // BAIXA EM PARCELAS, e nao tudo de uma vez. O teto nao existe para impedir a
+  // limpeza -- existe para que um erro nao vire estrago grande antes de alguem
+  // ver. Com o atraso acumulado (177 na primeira vez), as primeiras 60 saem
+  // agora e o resto nas proximas rodadas de hora em hora: a mesa se limpa
+  // sozinha em pouco tempo e qualquer coisa errada aparece cedo, pequena e
+  // reversivel (o card tem "Reabrir / voltar status").
+  const lote = opts.forcar ? alvos : alvos.slice(0, TETO_BAIXAS);
+  if (alvos.length > lote.length) {
+    resumo.freado = `${alvos.length} candidatas: baixando ${lote.length} agora, o restante nas próximas rodadas.`;
+  }
+
+  const agora = new Date().toISOString();
+  const linhasBaixa = lote.map((a: any) => ({
+    colecao: "os",
+    id: a.id,
+    registro: {
+      ...a.registro,
+      finalizadaEm: agora,
+      finalizadoPor: `Mubisys (baixa automática · ${a.statusERP})`,
+      baixaAutoERP: { em: agora, status: a.statusERP },
+      atualizadoEm: agora,
+      atualizadoPor: "Mubisys (auto)",
+    },
+    atualizado_em: agora,
+    apagado: false,
+  }));
+  for (let i = 0; i < linhasBaixa.length; i += 100) {
+    const { error: e2 } = await sb.from("pcp_registros")
+      .upsert(linhasBaixa.slice(i, i + 100), { onConflict: "colecao,id" });
+    if (e2) throw new Error(e2.message);
+  }
+  resumo.baixadas = linhasBaixa.length;
+  return resumo;
 }
 
 // Esqueleto identico ao novaOS() do app, preenchido com os campos do Mubisys.
@@ -303,7 +432,7 @@ Deno.serve(async (req: Request) => {
   const token = req.headers.get("x-token") ?? body.token;
   const ehMaquina = !!TOKEN && token === TOKEN;
   const action = body.action as string;
-  const ehCron = !!CRON_TOKEN && token === CRON_TOKEN && action === "importar";
+  const ehCron = !!CRON_TOKEN && token === CRON_TOKEN && (action === "importar" || action === "baixaAuto");
   if (!cracha && !ehMaquina && !ehCron) return resp({ error: "Entre no sistema.", semSessao: true }, 401);
 
   // Conta desativada depois do cracha emitido (ver crachaRevogado, acima).
@@ -386,6 +515,20 @@ Deno.serve(async (req: Request) => {
       return resp({ os: mapearOS(extrairUm(data)) });
     }
 
+    // ---- baixaAuto: da baixa no que o ERP ja fechou ----
+    // Sem "simular: false" explicito ela so CONTA, nunca escreve: conferir a
+    // lista antes de mexer em 300 cards e o minimo.
+    if (action === "baixaAuto") {
+      if (cracha && !ehMaquina && !ehCron && String(cracha.papel ?? "") !== "admin" && body.simular === false) {
+        return resp({ error: "Só o administrador dá baixa em lote." }, 403);
+      }
+      const res = await baixaAutomatica(sb, creds.base, creds.publicKey, headers, {
+        simular: body.simular !== false,
+        forcar: body.forcar === true,
+      });
+      return resp(res);
+    }
+
     // ---- importar: o que o pg_cron chama de hora em hora ----
     //
     // A FAXINA DE DUPLICATAS FOI APOSENTADA de proposito. Ela existia porque o
@@ -458,7 +601,18 @@ Deno.serve(async (req: Request) => {
         const novas = novasLinhas.length;
         const jaExistiam = linhas.length - novas;
 
-        const st = { em: new Date().toISOString(), ok: true, novas, total: remotas.length, jaExistiam, duplicatasRemovidas: 0 };
+        // Depois de trazer as novas, tira da mesa as que o ERP ja fechou. Se
+        // esta parte falhar, a importacao continua valendo -- sao dois
+        // trabalhos independentes, e perder a baixa nao pode derrubar a
+        // entrada de O.S nova.
+        let baixa: any = null;
+        try {
+          baixa = await baixaAutomatica(sb, creds.base, creds.publicKey, headers, { simular: false });
+        } catch (e) {
+          baixa = { ok: false, erro: String((e as Error)?.message || e) };
+        }
+
+        const st = { em: new Date().toISOString(), ok: true, novas, total: remotas.length, jaExistiam, duplicatasRemovidas: 0, baixa };
         await setMeta("sync_status", st);
         console.log(`[pcp-mubisys] ${novas} nova(s) de ${remotas.length}.`);
         return resp(st);
