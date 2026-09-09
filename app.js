@@ -2310,7 +2310,7 @@ function diasDesdeFinal(os) {
 
 // Lista-base do PCP conforme a vista escolhida:
 //  - ''           → ativos: em aberto + finalizadas recentes (<7 dias — o chip
-//                    Finalizada as mostra; "Todos" as esconde);
+//                    Finalizada as mostra; "Em aberto" as esconde);
 //  - 'retrabalho' → O.S marcadas como retrabalho ainda em aberto;
 //  - 'arquivados' → finalizadas há 1 semana ou mais (saem da vista Ativos).
 // Arquivada = marcada manualmente (arquivadaEm) OU finalizada há 7+ dias.
@@ -2370,7 +2370,7 @@ function pcpRenderCards() {
   let list = pcpBaseList();
   if (STATE.pcpTipo !== 'todos') list = list.filter(o => osTipo(o) === STATE.pcpTipo);
   if (STATE.pcpVista === '') {
-    // "Todos" esconde finalizadas; os demais chips filtram pelo status exato.
+    // "Em aberto" esconde finalizadas; os demais chips filtram pelo status exato.
     if (STATE.pcpStatus === 'todos') list = list.filter(o => calcStatus(o) !== 'finalizada');
     else list = list.filter(o => calcStatus(o) === STATE.pcpStatus);
   }
@@ -2387,6 +2387,10 @@ function pcpRenderCards() {
         ? emptyState('🔧', 'Nenhum retrabalho em aberto', 'Tudo certo: nada voltou para correção.')
         : emptyState('📋', 'Nenhuma O.S neste filtro', 'Troque o filtro, limpe a busca ou crie uma nova O.S.');
   grid.innerHTML = list.map(osCardHTML).join('') || vazio;
+  const resultado = $('#pcp-resultado');
+  if (resultado) resultado.textContent = `${list.length} O.S ${list.length === 1 ? 'exibida' : 'exibidas'}`;
+  const limpar = $('#pcp-limpar-filtros');
+  if (limpar) limpar.hidden = !((STATE.filtroBusca || '').trim() || STATE.pcpTipo !== 'todos' || (STATE.pcpVista === '' && STATE.pcpStatus !== 'todos'));
   bindCardClicks(grid);
   pcpAtualizarChips();
 }
@@ -2422,30 +2426,47 @@ function renderPCP() {
   // Chips com contagem 0 de placeholder — pcpRenderCards() (chamado logo
   // abaixo) delega a pcpAtualizarChips() os números reais, já consistentes
   // com os filtros/busca ativos.
-  const chips = [['todos', 'Todos'], ...Object.entries(STATUS_LABEL)]
-    .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" data-pcp-status="${k}">${esc(lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
+  const chips = [['todos', 'Em aberto'], ...Object.entries(STATUS_LABEL)]
+    .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" aria-pressed="${STATE.pcpStatus === k}" data-pcp-status="${k}">${esc(lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
   const tipoChips = [
-    ['todos', 'Todos'], ['externo', '🚚 Externo'], ['interno', '🏬 Cliente retira']
-  ].map(([k, lbl]) => `<button class="pcp-chip pcp-chip-tipo tipo-${k} ${STATE.pcpTipo === k ? 'active' : ''}" data-pcp-tipo="${k}">${esc(lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
+    ['todos', 'Todos os tipos'], ['externo', 'Instalação externa'], ['interno', 'Cliente retira']
+  ].map(([k, lbl]) => `<button class="pcp-chip pcp-chip-tipo tipo-${k} ${STATE.pcpTipo === k ? 'active' : ''}" aria-pressed="${STATE.pcpTipo === k}" data-pcp-tipo="${k}">${esc(lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
-  // Botões de vista, logo após a busca.
+  // Navegação da carteira, acima da busca e dos filtros.
   const vistaBtns = [
-    ['',           '📋 Ativos'],
-    ['retrabalho', '🔧 Retrabalho'],
-    ['arquivados', '🗄 Arquivados']
-  ].map(([k, lbl]) => `<button class="pcp-chip pcp-vista ${STATE.pcpVista === k ? 'active' : ''}" data-pcp-vista="${k}">${esc(lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
+    ['',           'Ativos'],
+    ['retrabalho', 'Retrabalho'],
+    ['arquivados', 'Arquivados']
+  ].map(([k, lbl]) => `<button class="pcp-chip pcp-vista ${STATE.pcpVista === k ? 'active' : ''}" aria-pressed="${STATE.pcpVista === k}" data-pcp-vista="${k}">${esc(lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
   const sorts = Object.entries(PCP_SORTS)
     .map(([k, v]) => `<option value="${k}" ${STATE.pcpSort === k ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
 
   el.innerHTML = `
-    <div class="filter-bar">
-      <input type="search" id="busca-pcp" aria-label="Buscar na carteira" placeholder="Buscar O.S, cliente, endereço…" value="${esc(STATE.filtroBusca)}">
-      <label class="pcp-sort-wrap">Ordenar: <select id="pcp-sort">${sorts}</select></label>
-      ${podeEditar() ? '<button class="btn-primary btn-sm" id="pcp-nova-ext">+ O.S Externa</button><button class="btn-primary btn-sm" id="pcp-nova-int">+ O.S Interna</button>' : ''}
-    </div>
-    <details class="pcp-legenda" ${STATE.legendaAberta ? 'open' : ''}><summary>🎨 Legenda de cores</summary>
+    <section class="pcp-controles" aria-labelledby="pcp-carteira-titulo">
+      <div class="pcp-controles-topo">
+        <h2 id="pcp-carteira-titulo">Ordens de serviço</h2>
+        <div class="pcp-chips pcp-vistas" role="group" aria-label="Situação das ordens de serviço">${vistaBtns}</div>
+      </div>
+      <div class="pcp-busca-linha">
+        <label class="pcp-busca-campo">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
+          <input type="search" id="busca-pcp" aria-label="Buscar na carteira" placeholder="Buscar por O.S, cliente, endereço ou serviço" value="${esc(STATE.filtroBusca)}">
+        </label>
+        <label class="pcp-ordenacao"><span>Ordenar por</span><select id="pcp-sort">${sorts}</select></label>
+        ${podeEditar() ? '<div class="pcp-criar-acoes"><button class="btn-primary" id="pcp-nova-ext">+ O.S externa</button><button class="btn-ghost" id="pcp-nova-int">+ O.S retirada</button></div>' : ''}
+      </div>
+      <div class="pcp-filtro-linha" role="group" aria-labelledby="pcp-atendimento-label">
+        <span class="pcp-filtro-label" id="pcp-atendimento-label">Atendimento</span>
+        <div class="pcp-chips">${tipoChips}</div>
+      </div>
+      ${STATE.pcpVista === '' ? `<div class="pcp-filtro-linha" role="group" aria-labelledby="pcp-etapa-label"><span class="pcp-filtro-label" id="pcp-etapa-label">Etapa</span><div class="pcp-chips">${chips}</div></div>` : ''}
+      <div class="pcp-controles-rodape">
+        <span id="pcp-resultado" role="status" aria-live="polite"></span>
+        <button class="pcp-limpar" id="pcp-limpar-filtros" hidden>Limpar filtros</button>
+      </div>
+    <details class="pcp-legenda" ${STATE.legendaAberta ? 'open' : ''}><summary>Entenda as cores dos cards</summary>
       <div class="leg-linhas">
         <span><span class="leg-sw" style="background:linear-gradient(90deg,#fffdf5,#fef3c7,#fed7aa,#fca5a5)"></span><strong>Fundo do card</strong> = prazo de entrega: quanto mais quente, mais perto — vermelho = atrasada.</span>
         <span><span class="leg-sw" style="background:#3b82f6"></span>Borda esquerda azul = 🚚 Externo · <span class="leg-sw" style="background:#db2777"></span>magenta = 🏬 Cliente retira.</span>
@@ -2453,9 +2474,7 @@ function renderPCP() {
         <span><span class="badge" style="background:#fee2e2;color:#b91c1c">⏰ atrasada</span> <span class="badge st-retrabalho">🔴 retrabalho</span> <span class="prazo-tag prazo-hoje">📌 HOJE</span> = atenção imediata.</span>
       </div>
     </details>
-    <div class="pcp-chips pcp-chips-vista">${vistaBtns}</div>
-    <div class="pcp-chips pcp-chips-tipo">${tipoChips}</div>
-    ${STATE.pcpVista === '' ? `<div class="pcp-chips">${chips}</div>` : ''}
+    </section>
     <div class="cards-grid"></div>`;
 
   el.insertAdjacentHTML('afterbegin','<div id="pcp-prioridades" class="gestao-box"></div>');
@@ -2469,6 +2488,11 @@ function renderPCP() {
   const leg = el.querySelector('.pcp-legenda');
   if (leg) leg.ontoggle = () => { STATE.legendaAberta = leg.open; };
   $('#pcp-sort').onchange = (e) => { STATE.pcpSort = e.target.value; pcpRenderCards(); };
+  $('#pcp-limpar-filtros').onclick = () => {
+    STATE.filtroBusca = ''; STATE.pcpTipo = 'todos'; STATE.pcpStatus = 'todos';
+    renderPCP();
+    $('#busca-pcp').focus();
+  };
   $$('[data-pcp-vista]', el).forEach(b => {
     b.onclick = () => {
       if (b.dataset.pcpVista === STATE.pcpVista) return; // clique redundante não reseta o status

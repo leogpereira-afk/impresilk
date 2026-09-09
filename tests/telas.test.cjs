@@ -8,7 +8,7 @@ const hoje='2026-09-09';
 function tela(lista) {
   const nodes=new Map();
   function node(sel) {
-    if (!nodes.has(sel)) nodes.set(sel,{innerHTML:'',textContent:'',value:sel==='#prod-mes'?'2026-09':'',querySelector:node,querySelectorAll:()=>[],setAttribute(){},classList:{toggle(){},add(){},remove(){}},scrollIntoView(){},insertAdjacentHTML(_,v){this.innerHTML+=v;}});
+    if (!nodes.has(sel)) nodes.set(sel,{innerHTML:'',textContent:'',value:sel==='#prod-mes'?'2026-09':'',querySelector:node,querySelectorAll:()=>[],setAttribute(){},classList:{toggle(){},add(){},remove(){}},focus(){},scrollIntoView(){},insertAdjacentHTML(_,v){this.innerHTML+=v;}});
     return nodes.get(sel);
   }
   const doc={querySelector:node,querySelectorAll:()=>[],addEventListener(){}};
@@ -88,4 +88,19 @@ test('retrabalho pendente fica em atenção mesmo após conclusão da O.S origin
   const html=t.node('#panel-retrabalho').innerHTML;
   assert.match(html,/class="os-list-item st-retrabalho" data-os-id="a"/);
   assert.match(html,/class="os-list-item st-finalizada" data-os-id="resolvida"/);
+});
+test('busca atualiza total e limpar filtros preserva a vista e a ordenação escolhidas',()=>{
+  const t=tela([{...final,cliente:'Loja',retrabalho:true},{...final,id:'b',cliente:'Clínica',tipo:'interno',retrabalho:true}]);
+  t.run("STATE.pcpVista='retrabalho'; STATE.pcpTipo='externo'; STATE.filtroBusca='Loja'; STATE.pcpSort='pedido'; renderPCP()");
+  assert.equal(t.node('#pcp-resultado').textContent,'1 O.S exibida');
+  assert.equal(t.node('#pcp-limpar-filtros').hidden,false);
+  t.node('#busca-pcp').value='não existe';
+  t.node('#busca-pcp').oninput();
+  assert.equal(t.node('#pcp-resultado').textContent,'0 O.S exibidas');
+  t.node('#pcp-limpar-filtros').onclick();
+  assert.equal(t.node('#pcp-resultado').textContent,'2 O.S exibidas');
+  assert.equal(t.run('STATE.pcpVista'),'retrabalho');
+  assert.equal(t.run('STATE.pcpSort'),'pedido');
+  assert.equal(t.run('STATE.filtroBusca'),'');
+  assert.equal(t.node('#pcp-limpar-filtros').hidden,true);
 });
