@@ -146,7 +146,13 @@ const STORE = (() => {
         if (Array.isArray(doLS) && doLS.length) {
           // Migração: o que está no localStorage é o mais recente do aparelho.
           _osMem = doLS;
-          _persistirOS();
+          await new Promise((resolve, reject) => {
+            const tx = db.transaction('os', 'readwrite');
+            tx.oncomplete = resolve;
+            tx.onerror = e => reject(e.target.error);
+            tx.onabort = () => reject(tx.error || new Error('Migração interrompida'));
+            tx.objectStore('os').put(doLS, 'lista');
+          });
           try { localStorage.removeItem(K.OS); } catch {}
           console.log('[store] cache das O.S migrado para o IndexedDB (' + doLS.length + ') e liberado do localStorage');
         } else {
@@ -386,8 +392,8 @@ const STORE = (() => {
   // _flagged: chaves de itens com conflito não-resolvido (pulamos no próximo
   // ciclo pra não travar a fila inteira atrás de um item esperando o usuário).
   const _flagged = new Set();
-  // Contagem de falhas por item (chave = _sigFila). Item que falha N vezes
-  // sai da fila pra não inchar o localStorage indefinidamente.
+  // Contagem de falhas por item (chave = _sigFila). Ao atingir N falhas,
+  // avisa a tela; o trabalho permanece na fila para recuperação.
   const _failCount = new Map();
   const MAX_FAILS = 25;
 
@@ -409,7 +415,10 @@ const STORE = (() => {
         if (item.action === 'putPhoto') {
           let base64 = item.base64;
           if (!base64) { const f = await getFoto(item.fileId); base64 = f && f.base64; }
-          if (!base64) { _removeFromQueue(item); _failCount.delete(sig); continue; }
+          if (!base64) {
+            if (!_failCount.has(sig)) _notifyListeners('item-pendente', {item,motivo:'Foto não encontrada no aparelho; confira o anexo.'});
+            _failCount.set(sig,1); continue;
+          }
           const res = await api({ action: 'putPhoto', base64, mime: item.mime, fileId: item.fileId });
           if (res && res.fileId) { _removeFromQueue(item); _failCount.delete(sig); }
         } else {
@@ -460,7 +469,7 @@ const STORE = (() => {
           return;
         }
         // Distingue falha de rede (parar o ciclo) de erro permanente do item
-        // (incrementa contador; quando estourar, descarta o item pra não travar).
+        // (incrementa contador e avisa sem descartar o trabalho).
         const isNetwork = !msg.startsWith('HTTP ') || /HTTP 5\d\d/.test(msg);
         if (isNetwork) {
           consecutiveNetFails++;
@@ -469,16 +478,15 @@ const STORE = (() => {
           // Delete/deletePhoto NUNCA são descartados: são leves (~50 bytes) e
           // descartar ressuscitaria a O.S excluída no pull seguinte.
           if (item.action === 'delete' || item.action === 'deletePhoto') {
-            _notifyListeners('item-descartado', { item, motivo: 'exclusão pendente: ' + msg });
+            if (!_failCount.has(sig)) _notifyListeners('item-pendente', { item, motivo: 'exclusão pendente: ' + msg });
+            _failCount.set(sig,1);
             continue;
           }
           const n = (_failCount.get(sig) || 0) + 1;
           _failCount.set(sig, n);
-          if (n >= MAX_FAILS) {
-            console.warn('[store] descartando item após', n, 'falhas:', sig, msg);
-            _removeFromQueue(item);
-            _failCount.delete(sig);
-            _notifyListeners('item-descartado', { item, motivo: msg });
+          if (n === MAX_FAILS) {
+            console.warn('[store] item preservado na fila após', n, 'falhas:', sig, msg);
+            _notifyListeners('item-pendente', { item, motivo: msg });
           }
         }
       }
@@ -493,109 +501,64 @@ const STORE = (() => {
   async function pull(onRefresh) {
     if (!navigator.onLine) return;
     try {
-      const local = getAllOS();
-      const byId = new Map(local.map(o => [o.id, o]));
-      let changed = false;
-
-      // Deletes pendentes na fila: a O.S ainda existe no servidor, mas foi
-      // excluída aqui — sem este filtro o pull a "ressuscitava" na lista.
-      const pendingDeletes = new Set(
-        getQueue().filter(x => x.action === 'delete').map(x => x.id)
-      );
-      // Edição deste aparelho que ainda não subiu: o pull NÃO passa a versão do
-      // servidor por cima dela. Antes, o trabalho sumia da tela no ciclo de 30s
-      // e só reaparecia quando o conflito fosse resolvido — assustador e
-      // desnecessário, já que a fila guarda a versão local intacta e a
-      // divergência aparece no envio, com as duas lado a lado.
-      const pendingUpserts = new Set(
-        getQueue().filter(x => x.action === 'upsert' && x.os && x.os.id).map(x => x.os.id)
-      );
-
-      // O endpoint "list" é paginado (resposta limitada para não estourar o
-      // teto de ~6 MB das Netlify Functions). Preferimos paginação por CHAVE
-      // ("after"/"nextAfter"), estável quando O.S são criadas/apagadas entre
-      // páginas; "nextOffset" fica como fallback para função antiga no ar.
-      const remoteIds = new Set();
-      let offset = 0;
-      let after = null;
-      let guard = 0; // trava de segurança contra loop infinito
-      while (true) {
-        const res = await api(after != null ? { action: 'list', after } : { action: 'list', offset });
-        if (!Array.isArray(res.os)) return;
-
-        for (const remote of res.os) {
-          if (!remote || !remote.id) continue;
-          if (pendingDeletes.has(remote.id)) continue;
-          remoteIds.add(remote.id);
-          const localOS = byId.get(remote.id);
-          if (!localOS) {
-            local.push(remote);
-            byId.set(remote.id, remote);
-            changed = true;
-          } else if (!pendingUpserts.has(remote.id)) {
-            // `rev` é do SERVIDOR e só cresce — comparar rev compara escritas,
-            // não relógios de aparelhos diferentes. Quando um dos lados ainda
-            // não tem rev (O.S recém-importada, nunca gravada pelo app, ou
-            // cache anterior a este campo), cai no timestamp, como antes.
-            const revR = typeof remote.rev  === 'number' ? remote.rev  : null;
-            const revL = typeof localOS.rev === 'number' ? localOS.rev : null;
-            const maisNovo = (revR !== null && revL !== null)
-              ? revR > revL
-              : (new Date(remote.atualizadoEm || 0).getTime() > new Date(localOS.atualizadoEm || 0).getTime());
-            if (maisNovo) {
-              Object.assign(localOS, remote);
-              changed = true;
-            }
-          }
+      // Só uma lista completa autoriza remover registros do cache. A coleta
+      // não altera a memória; edição feita durante a rede será lida no merge.
+      const remotas = new Map();
+      const cursores = new Set();
+      let consulta = {action:'list',offset:0};
+      for (let pagina=0; ; pagina++) {
+        const chave = JSON.stringify(consulta);
+        if (pagina >= 1000 || cursores.has(chave)) {
+          _notifyListeners('pull-truncado', {paginas:pagina});
+          return {updated:false,incompleta:true};
         }
-
-        if (res.nextAfter != null) after = res.nextAfter;
-        else if (res.nextOffset != null) offset = res.nextOffset;
+        cursores.add(chave);
+        const res = await api(consulta);
+        if (!res || !Array.isArray(res.os) || res.os.some(o => !o || !o.id)) {
+          _notifyListeners('pull-truncado', {paginas:pagina+1});
+          return {updated:false,incompleta:true};
+        }
+        for (const o of res.os) remotas.set(o.id,o);
+        if (res.nextAfter != null) consulta = {action:'list',after:res.nextAfter};
+        else if (res.nextOffset != null) consulta = {action:'list',offset:res.nextOffset};
         else break;
-        if (++guard > 1000) {
-          // Atingiu o teto de segurança (>150k O.S). Avisa em vez de truncar silenciosamente.
-          console.warn('[store] pull abortado: mais de 1000 páginas. Lista pode estar truncada.');
-          _notifyListeners('pull-truncado', { paginas: guard });
-          break;
-        }
       }
 
-      // Após varrer TODAS as páginas: remove do local as O.S que sumiram do
-      // servidor (foram apagadas em outro aparelho ou via limpeza administrativa),
-      // mas preserva as que ainda estão na fila aguardando envio (criadas offline).
-      const queue = getQueue();
-      const pendingIds = new Set(
-        queue.filter(q => q.action === 'upsert' && q.os && q.os.id).map(q => q.os.id)
-      );
-      const sobreviventes = local.filter(o => remoteIds.has(o.id) || pendingIds.has(o.id));
-      if (sobreviventes.length !== local.length) {
-        changed = true;
-        local.length = 0;
-        for (const o of sobreviventes) local.push(o);
+      const fila = getQueue();
+      const pendentes = new Set(fila.filter(q => q.action === 'upsert' && q.os?.id).map(q => q.os.id));
+      const excluidas = new Set(fila.filter(q => q.action === 'delete').map(q => q.id));
+      const local = getAllOS();
+      const porId = new Map(local.map(o => [o.id,o]));
+      const resultado = [];
+      let changed = false;
+      for (const [id,remote] of remotas) {
+        if (excluidas.has(id)) continue;
+        const atual = porId.get(id);
+        const revR = typeof remote.rev === 'number' ? remote.rev : null;
+        const revL = typeof atual?.rev === 'number' ? atual.rev : null;
+        const novo = !atual || ((revR !== null && revL !== null)
+          ? revR > revL
+          : new Date(remote.atualizadoEm || 0) > new Date(atual.atualizadoEm || 0));
+        if (!pendentes.has(id) && novo) { resultado.push(remote); changed=true; }
+        else resultado.push(atual || remote);
       }
-
+      for (const o of local) if (pendentes.has(o.id) && !remotas.has(o.id) && !excluidas.has(o.id)) resultado.push(o);
+      if (resultado.length !== local.length) changed=true;
       if (changed) {
-        _setAllOS(local);
-        lsSet(K.LASTSYNC, new Date().toISOString());
+        _setAllOS(resultado);
+        lsSet(K.LASTSYNC,new Date().toISOString());
         if (typeof onRefresh === 'function') onRefresh();
       }
-
       const q = getQueue();
-      _notifySync(q.length ? 'pending' : 'ok', q.length);
-      return { updated: changed };
+      _notifySync(q.length ? 'pending' : 'ok',q.length);
+      return {updated:changed};
     } catch (e) {
-      // 401/403 = crachá recusado, NÃO falta de internet. Avisa 'sem-sessao'
-      // (senão o banner diz "Sem conexão" com sinal cheio e não reautentica).
       if (e && (e.semSessao || e.status === 401 || e.status === 403)) {
-        _notifySync('sem-sessao', getQueue().length);
-        _notifyListeners('sem-sessao', {});
-      } else {
-        _notifySync('offline', getQueue().length);
-      }
+        _notifySync('sem-sessao',getQueue().length);
+        _notifyListeners('sem-sessao',{});
+      } else _notifySync('offline',getQueue().length);
     }
   }
-
-  // ── pullCFG ───────────────────────────────────────────────────────────────
   async function pullCFG() {
     if (!navigator.onLine) return;
     // Se há um setCfg pendente na fila, a config local é mais nova que a do

@@ -1,13 +1,11 @@
 // sw.js — Service worker: deixa o app abrir offline (casca/shell em cache).
 // Os DADOS continuam sincronizando pela fila do store.js; aqui só cuidamos
 // dos arquivos estáticos para o app carregar sem internet.
-const CACHE = 'impresilk-shell-v57';
+const CACHE = 'impresilk-shell-v58';
 const SHELL = [
   './', 'index.html', 'equipe.html', 'styles.css',
-  'config.js', 'logo.js', 'frases.js', 'store.js', 'auth.js', 'pops.js', 'app.js', 'equipe.js',
-  'manifest.json', 'icon.svg',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+  'config.js', 'logo.js', 'frases.js', 'store.js', 'auth.js', 'operacao.js', 'app.js', 'equipe.js',
+  'manifest.json', 'icon.svg', 'favicon.svg'
 ];
 
 self.addEventListener('install', e => {
@@ -31,7 +29,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)));
+    await Promise.all(keys.filter(k => k.startsWith('impresilk-shell-') && k !== CACHE).map(k => caches.delete(k)));
     await self.clients.claim();
   })());
 });

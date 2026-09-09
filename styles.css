@@ -28,6 +28,39 @@
 
 html { font-size: 16px; -webkit-text-size-adjust: 100%; }
 
+/* Conferência operacional: prioridade, quantidade e próximo passo juntos. */
+.gestao-box { background:#fff; border:1px solid #d7e1ee; border-radius:16px; padding:20px; margin:0 0 22px; }
+.gestao-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; }
+.gestao-head h2, .secao-titulo { font-size:1.15rem; font-weight:750; color:#163654; }
+.gestao-head h3 { font-size:1rem; }
+.gestao-head p, .metricas-nota { font-size:.82rem; line-height:1.55; color:#526378; margin:6px 0 12px; }
+.gestao-indicadores { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+.gestao-indicador { display:flex; flex-direction:column; align-items:flex-start; padding:14px; gap:8px; color:#334155; border:1px solid #dbe3ed; background:#f8fafc; text-align:left; white-space:normal; }
+.gestao-indicador strong { font-size:1.85rem; line-height:1; color:#163654; }
+.gestao-indicador small { font-size:.74rem; line-height:1.4; font-weight:400; color:#526378; }
+.gestao-indicador:hover { background:#edf4fb; border-color:#8bacce; }
+.gestao-indicador.selecionado { border-color:#286397; background:#edf5fd; box-shadow:inset 0 3px #286397; }
+.gestao-detalhe { margin-top:16px; max-height:480px; overflow:auto; overscroll-behavior:contain; }
+.gestao-detalhe .os-list-item { background:#f8fafc; }
+.conflitos-agenda { background:#fff9ed; border:1px solid #ead2a6; border-radius:10px; padding:14px; margin:14px 0; }
+.conflitos-agenda summary { color:#80520d; font-weight:650; cursor:pointer; }
+.conflitos-agenda p { font-size:.82rem; line-height:1.5; margin:10px 0; color:#785526; }
+.conflito-linha { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; border-top:1px solid #efdfc5; padding:10px 0; font-size:.85rem; }
+.conflito-linha button { white-space:normal; color:#634417; }
+.kanban-pendencias { font-size:.74rem; line-height:1.4; color:#80520d; margin-top:8px; }
+.erp-aviso { background:#edf5fc; color:#214968; white-space:normal; text-align:left; margin:0 0 14px; }
+.secao-titulo { margin:18px 0 10px; }
+[role="button"]:focus-visible, [data-os-id]:focus-visible, [data-detail]:focus-visible, [data-kan-os]:focus-visible { outline:3px solid #1877f2; outline-offset:3px; }
+@media(max-width:640px) {
+  .gestao-box { padding:14px; border-radius:12px; }
+  .gestao-indicadores { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .gestao-head { align-items:flex-start; }
+  .gestao-head h2 { font-size:1.05rem; }
+  .gestao-detalhe { max-height:400px; }
+  .conflito-linha > span { display:flex; flex-wrap:wrap; gap:6px; }
+  .painel-bloco-corpo, .fin-bloco, .cfg-section { overflow-x:auto; }
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif;
   background: var(--bg);
@@ -70,6 +103,15 @@ button, .btn, .tab, .os-card, .os-list-item, a, summary, label, input, select {
 .topbar-date { font-size: .68rem; color: var(--muted); font-weight: 500; }
 
 .topbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+
+@media (max-width: 760px) {
+  :root { --topbar-h: 106px; }
+  .topbar { flex-wrap:wrap; align-content:center; row-gap:8px; padding-bottom:8px; }
+  .topbar-user { flex:1; min-width:0; margin-left:4px; }
+  .topbar-user #user-badge, .topbar-date { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .topbar-actions { flex:0 0 100%; width:100%; min-width:0; overflow-x:auto; margin-left:0; padding:2px 0; }
+  .topbar-actions > * { flex-shrink:0; }
+}
 
 /* Visibilidade só-admin */
 body.nao-admin .admin-only { display: none !important; }
@@ -1088,9 +1130,9 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .os-card.urg-1 { background: #fffdf5; }
 .os-card.urg-2 { background: #fef9e7; }
 .os-card.urg-3 { background: #fef3c7; }
-.os-card.urg-4 { background: #fed7aa; }
-.os-card.urg-5 { background: #fecaca; }
-.os-card.urg-6 { background: #fca5a5; }
+.os-card.urg-4 { background: #fff6e8; }
+.os-card.urg-5 { background: #fff4f2; }
+.os-card.urg-6 { background: #fff0ed; }
 /* nos níveis fortes, a borda já fica vermelha pela alerta-atraso */
 
 /* ── Tipo de pedido: Interno / Externo ───────────────────────────── */

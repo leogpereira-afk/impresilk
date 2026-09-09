@@ -6,10 +6,10 @@
    ══════════════════════════════════════════════════════════════════════════ */
 const PERMISSOES_PADRAO = {
   admin:     { abas: '*', editar: true,  cadastrar: true  },
-  pcp:       { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle','pops'], editar: true, cadastrar: false },
-  montagem:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','pops'], editar: true, cadastrar: false },
-  operacao:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','pops'], editar: true, cadastrar: false },
-  comercial: { abas: ['painel','pcp','programacao','finalizados','pops'], editar: false, cadastrar: false }
+  pcp:       { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle'], editar: true, cadastrar: false },
+  montagem:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados'], editar: true, cadastrar: false },
+  operacao:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados'], editar: true, cadastrar: false },
+  comercial: { abas: ['painel','pcp','programacao','finalizados'], editar: false, cadastrar: false }
 };
 
 // Permissões efetivas = padrão sobrescrito pelos níveis configurados pelo admin (CFG.niveis)
@@ -18,6 +18,7 @@ function getPermissoes() {
   const out = {};
   Object.keys(PERMISSOES_PADRAO).forEach(papel => {
     out[papel] = Object.assign({}, PERMISSOES_PADRAO[papel], niveis[papel] || {});
+    if (Array.isArray(out[papel].abas)) out[papel].abas = out[papel].abas.filter(a => ABAS_DISPONIVEIS.includes(a));
   });
   return out;
 }
@@ -27,7 +28,8 @@ function getPermissoes() {
 // Montagem ou Operação. Agora a gestão entra com usuário e senha conferidos no
 // servidor (auth.js → equipe-auth). A montagem segue sem senha, em equipe.html,
 // por decisão do dono.
-const ABAS_DISPONIVEIS = ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle','pops'];
+const ABAS_DISPONIVEIS = ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle'];
+const ABAS_NOMES = {painel:'Painel',pcp:'PCP',programacao:'Instalação',execucao:'Execução',retrabalho:'Retrabalho',finalizados:'Finalizados',controle:'Configurações'};
 
 /* ══════════════════════════════════════════════════════════════════════════
    UTILITÁRIOS
@@ -69,22 +71,17 @@ function nowISO() { return new Date().toISOString(); }
 /* ── Fase 2: filtro de período reutilizável ───────────────────────────────
    Estado por aba em STATE[key] = {de, ate} (vazio = todos os períodos). */
 function periodoQuickToRange(id) {
-  const now = new Date();
-  if (id === 'todos') return { de: '', ate: '' };
-  if (id === 'hoje') { const s = ymdLocal(now); return { de: s, ate: s }; }
-  if (id === 'mes') return { de: ymdLocal(new Date(now.getFullYear(), now.getMonth(), 1)), ate: ymdLocal(now) };
-  const de = new Date(); de.setDate(now.getDate() - (+id));
-  return { de: ymdLocal(de), ate: ymdLocal(now) };
+  return OPERACAO.periodoRapido(id);
 }
 function filtroPeriodoHTML(key) {
   const f = STATE[key] || { de: '', ate: '' };
   return `<div class="periodo-filtro" data-pf="${key}">
-    <input type="date" class="pf-de" value="${f.de || ''}">
+    <input type="date" class="pf-de" aria-label="Data inicial" value="${f.de || ''}">
     <span class="text-muted">até</span>
-    <input type="date" class="pf-ate" value="${f.ate || ''}">
+    <input type="date" class="pf-ate" aria-label="Data final" value="${f.ate || ''}">
     <button class="btn-ghost btn-xs" data-pq="hoje">Hoje</button>
-    <button class="btn-ghost btn-xs" data-pq="7">7d</button>
-    <button class="btn-ghost btn-xs" data-pq="30">30d</button>
+    <button class="btn-ghost btn-xs" data-pq="7">${key === '_fProg' ? 'Próximos 7 dias' : 'Últimos 7 dias'}</button>
+    <button class="btn-ghost btn-xs" data-pq="30">${key === '_fProg' ? 'Próximos 30 dias' : 'Últimos 30 dias'}</button>
     <button class="btn-ghost btn-xs" data-pq="mes">Mês</button>
     <button class="btn-ghost btn-xs" data-pq="todos">Todos</button>
     ${periodoIndicador(f.de, f.ate)}
@@ -94,9 +91,14 @@ function wireFiltroPeriodo(container, key, onChange) {
   const box = container.querySelector(`.periodo-filtro[data-pf="${key}"]`);
   if (!box) return;
   const get = () => (STATE[key] = STATE[key] || { de: '', ate: '' });
-  box.querySelector('.pf-de').onchange = e => { get().de = e.target.value; onChange(); };
-  box.querySelector('.pf-ate').onchange = e => { get().ate = e.target.value; onChange(); };
-  $$('[data-pq]', box).forEach(b => b.onclick = () => { STATE[key] = periodoQuickToRange(b.dataset.pq); onChange(); });
+  const mudar = (campo, valor) => {
+    const f = {...get(), [campo]:valor};
+    if (f.de && f.ate && f.de > f.ate) { toast('A data inicial precisa ser anterior ou igual à final.', 'error'); onChange(); return; }
+    STATE[key] = f; onChange();
+  };
+  box.querySelector('.pf-de').onchange = e => mudar('de',e.target.value);
+  box.querySelector('.pf-ate').onchange = e => mudar('ate',e.target.value);
+  $$('[data-pq]', box).forEach(b => b.onclick = () => { STATE[key] = OPERACAO.periodoRapido(b.dataset.pq,hojeISO(),key === '_fProg'); onChange(); });
 }
 function dentroPeriodo(dataISO, key) {
   const f = STATE[key];
@@ -208,22 +210,7 @@ function osTipo(os) { return (os && os.tipo === 'interno') ? 'interno' : 'extern
 function isInterno(os) { return osTipo(os) === 'interno'; }
 
 function calcStatus(os) {
-  if (!os) return 'aguardando_producao';
-  if (os.finalizadaEm) return 'finalizada';
-  // Pedido interno: só passa por PCP & Itens; não tem agenda/execução.
-  if (isInterno(os)) {
-    return os.liberadoPCP ? 'apto' : 'aguardando_producao';
-  }
-  const inst = os.instalacao || {};
-  const agendada   = !!(inst.data && inst.periodo && (os.equipe || []).length);
-  const confirmada = os.confirmacao === 'Confirmado';
-  // Funil coerente: não dá pra "confirmar" sem agendar, nem "sair" sem confirmar.
-  // (antes bastava preencher um campo solto e a O.S pulava etapa.)
-  if (os.horaSaida && confirmada && agendada) return 'em_andamento';
-  if (confirmada && agendada)                 return 'confirmada';
-  if (agendada)                               return 'agendada';
-  if (os.liberadoPCP)                         return 'apto';
-  return 'aguardando_producao';
+  return OPERACAO.status(os);
 }
 
 const STATUS_LABEL = {
@@ -262,6 +249,7 @@ const STEP_DEFS_INT = {
   finalizada:          { curto: 'Retirado', icon: '📦' }
 };
 function statusLabelDe(os, st) {
+  if (st === 'finalizada' && OPERACAO.encerradaERP(os)) return 'Encerrada no ERP';
   if (isInterno(os) && STATUS_LABEL_INT[st]) return STATUS_LABEL_INT[st];
   return STATUS_LABEL[st] || st;
 }
@@ -298,9 +286,10 @@ function proximoPasso(os) {
   }
   const inst = os.instalacao || {};
   if (!os.liberadoPCP)                                              return { label: 'PCP precisa liberar',     cta: '✓ Liberar PCP', acao: 'pcp' };
-  if (!(inst.data && inst.periodo && (os.equipe || []).length))    return { label: 'Falta agendar',           cta: '📅 Agendar',    acao: 'agenda' };
+  if (!OPERACAO.agendaCompleta(os))                                return { label: 'Completar programação', cta: '📅 Agendar', acao: 'agenda' };
   if (os.confirmacao !== 'Confirmado')                             return { label: 'Falta confirmar cliente', cta: '📞 Confirmar',  acao: 'confirmar' };
   if (!os.carroLiberado && !os.horaSaida)                          return { label: 'Liberar carro / saída',   cta: '🚗 Liberar saída', acao: 'saida' };
+  if (!os.horaSaida) return {label:'Registrar a saída da equipe',cta:'🚗 Registrar saída',acao:'saida'};
   const faltas = validarFinalizacao(os);
   if (faltas.length) return { label: 'Falta: ' + faltas.join(', '), cta: '🏁 Finalizar', acao: 'exec' };
   return { label: 'Pronto p/ finalizar', cta: '🏁 Finalizar', acao: 'finalizar' };
@@ -336,15 +325,11 @@ function diasEntre(aISO, bISO) {
 }
 function diasDesde(aISO) { return diasEntre(aISO, todayISO()); }   // quanto já passou
 // Data de entrega da O.S: a agendada (instalação) tem prioridade; senão a previsão importada.
-function dataEntregaOS(os) { return (os && os.instalacao && os.instalacao.data) || (os && os.previsaoEntrega) || ''; }
+function dataEntregaOS(os) { return OPERACAO.prazo(os); }
 
 // Atrasada: agendada para data passada e ainda não finalizada.
 function estaAtrasada(os) {
-  if (!os || os.finalizadaEm) return false;
-  const d = os.instalacao && os.instalacao.data;
-  if (!d) return false;
-  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-  return new Date(d + 'T00:00:00') < hoje;
+  return OPERACAO.atrasada(os);
 }
 
 // Camada de cor semântica vermelha (alerta) sobre o status normal:
@@ -389,7 +374,7 @@ function checklist(os) {
   return [
     { k: 'pcp',     label: 'PCP liberou',        ok: !!os.liberadoPCP },
     { k: 'itens',   label: 'Itens definidos',    ok: (os.itens || []).length >= 1 },
-    { k: 'agenda',  label: 'Agendada',           ok: !!(inst.data && inst.periodo && (os.equipe || []).length) },
+    { k: 'agenda',  label: 'Programação completa', ok: OPERACAO.agendaCompleta(os) },
     { k: 'conf',    label: 'Cliente confirmado', ok: os.confirmacao === 'Confirmado', warn: os.confirmacao !== 'Confirmado' },
     { k: 'carro',   label: 'Carro liberado',     ok: !!os.carroLiberado },
     { k: 'exec',    label: 'Execução + fotos',   ok: !!(os.instalacaoOK && os.conferidoPor && (os.fotosCheckinIds || []).length) }
@@ -408,7 +393,7 @@ function blocosCompletos(os) {
   return {
     pcp,
     itens:  itensOk,
-    agenda: !!(inst.data && inst.periodo && (os.equipe || []).length && os.confirmacao === 'Confirmado'),
+    agenda: OPERACAO.agendaCompleta(os) && os.confirmacao === 'Confirmado',
     exec:   !!(os.finalizadaEm || (os.instalacaoOK && os.conferidoPor && (os.fotosCheckinIds || []).length))
   };
 }
@@ -791,7 +776,7 @@ function aplicarPermissoes() {
   // Se a aba ativa não é permitida para o papel, pousa na primeira permitida
   // (senão o painel proibido fica visível — e sem botão para sair dele).
   if (!permitida(STATE.activeTab)) {
-    const ordem = ['pcp', 'painel', 'programacao', 'execucao', 'retrabalho', 'finalizados', 'controle', 'pops'];
+    const ordem = ['pcp', 'painel', 'programacao', 'execucao', 'retrabalho', 'finalizados', 'controle'];
     const dest = ordem.find(permitida) || 'painel';
     STATE.activeTab = dest;
     $$('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === dest));
@@ -870,8 +855,8 @@ function initSyncIndicator() {
   STORE.onSync((status, pending) => {
     el.className = 'sync-indicator ' + status;
     if (status === 'ok') {
-      el.textContent = '✅ Sincronizado';
-      el.title = 'Tudo salvo na nuvem.';
+      el.textContent = '✅ Edições salvas';
+      el.title = 'Não há edições deste aparelho aguardando envio. A importação do ERP é conferida em Configurações → Saúde da conexão.';
     } else if (status === 'pending') {
       el.textContent = `⏳ ${pending} pendente${pending === 1 ? '' : 's'}`;
       el.title = `${pending} alteração(ões) aguardando envio. Some sozinho quando reconectar.`;
@@ -885,9 +870,9 @@ function initSyncIndicator() {
   });
   STORE.on('quota', () => toast('Sem espaço no aparelho para guardar as O.S. Libere espaço (fotos/apps) e recarregue.', 'error'));
   // Perda de dados nunca é silenciosa: item descartado / lista truncada avisam.
-  STORE.on('item-descartado', ({ item, motivo }) => {
+  STORE.on('item-pendente', ({ item, motivo }) => {
     const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : (item && item.action) || 'alteração';
-    toast(`⚠️ ${ref} NÃO foi salva na nuvem (${motivo || 'erro'}). Refaça a edição.`, 'error');
+    toast(`⚠️ ${ref} continua na fila deste aparelho (${motivo || 'erro'}). Confira a conexão e o acesso.`, 'error');
   });
   STORE.on('pull-truncado', () => toast('Lista de O.S pode estar incompleta — recarregue.', 'error'));
   // Crachá recusado: guarda o que dá e manda entrar de novo (o dado fica).
@@ -951,7 +936,6 @@ function renderActiveTab() {
     case 'retrabalho':  renderRetrabalho(); break;
     case 'finalizados': renderFinalizados(); break;
     case 'controle':    renderControle(); break;
-    case 'pops':        renderPops(); break;
   }
 }
 
@@ -1327,6 +1311,13 @@ function blocoItens(os, ro, done) {
 }
 
 /* ── Bloco 3: Agendamento & Confirmação ──────────────────────────────────── */
+function alertasAgendaHTML(os) {
+  const base = STORE.getAllOS().filter(o => o.id !== os.id).concat(os);
+  const conflitos = OPERACAO.diasAgenda(os).flatMap(dia => OPERACAO.conflitos(base,dia).filter(c => c.a.id===os.id || c.b.id===os.id).map(c => ({...c,dia})));
+  if (!conflitos.length) return '';
+  return `<div class="conflitos-agenda"><strong>Conferir disponibilidade antes da saída</strong><p>Possível uso simultâneo de equipe ou veículo. Confira duração e deslocamento.</p>${conflitos.map(c => `<div class="conflito-linha">${esc(fmtDataBR(c.dia))} · O.S ${esc((c.a.id===os.id?c.b:c.a).numero || '—')} · ${esc([...c.equipe,c.veiculo].filter(Boolean).join(', '))}</div>`).join('')}</div>`;
+}
+
 function blocoAgenda(os, ro, done) {
   const cfg = STORE.getCFG();
   const inst = os.instalacao || {};
@@ -1359,6 +1350,7 @@ function blocoAgenda(os, ro, done) {
         ${chipsField('equipe', os.equipe || [], cfg.instaladores, ro)}
       </div>
       <div class="field"><label>Obs agenda</label><textarea data-f="obsAgenda">${esc(os.obsAgenda)}</textarea></div>
+      <div id="agenda-alertas" aria-live="polite">${alertasAgendaHTML(os)}</div>
 
       <div class="conf-block">
         <div class="conf-head">
@@ -1656,6 +1648,9 @@ function bindModalEvents(os, ro) {
         }
       }
       setField(el.dataset.f, v);
+      if (['instalacao.data','instalacao.periodo','instalacao.hora','instalacao.duracaoDias','veiculo'].includes(el.dataset.f)) {
+        const alertas = $('#agenda-alertas',root); if(alertas) alertas.innerHTML=alertasAgendaHTML(_modalDraft);
+      }
       // Hora de saída/retorno sem dia não reconstrói o passado (carimbarMomento).
       if (el.dataset.f === 'horaSaida')   STORE.carimbarMomento(_modalDraft, 'horaSaida', 'saidaEm');
       if (el.dataset.f === 'horaRetorno') STORE.carimbarMomento(_modalDraft, 'horaRetorno', 'retornoEm');
@@ -1812,8 +1807,8 @@ function bindModalEvents(os, ro) {
   // TRAVA 1 — Liberar carro / saída
   const carroBtn = $('#btn-liberar-carro');
   if (carroBtn) carroBtn.onclick = () => {
-    if (_modalDraft.confirmacao !== 'Confirmado') {
-      toast('Confirme o horário com o cliente (POP EXI‑002) antes de liberar o carro / sair.', 'error');
+    if (!_modalDraft.liberadoPCP || !OPERACAO.agendaCompleta(_modalDraft) || _modalDraft.confirmacao !== 'Confirmado') {
+      toast('Libere o PCP, complete a programação e confirme o cliente antes de liberar o carro.', 'error');
       return;
     }
     _modalDraft.carroLiberado = true;
@@ -2093,7 +2088,7 @@ function osCardHTML(os) {
       ${(os.equipe||[]).length ? `<div class="card-equipe">👷 ${esc(os.equipe.join(', '))}</div>` : ''}
       <div class="card-pct" title="${pct}% da ficha preenchida">
         <div class="card-pct-bar"><div class="card-pct-fill" style="width:${pct}%"></div></div>
-        <span class="card-pct-num">${pct}%</span>
+        <span class="card-pct-num">Ficha ${pct}%</span>
       </div>
       ${pp ? `<div class="prox-passo"><span class="prox-passo-tag">Próximo</span> ${esc(pp.label)}</div>` : ''}
       <div class="card-resp">✍ ${esc(resp)}${itens.length ? ` · ${prontos}/${itens.length} itens` : ''}</div>
@@ -2174,17 +2169,14 @@ function cardTempoHTML(os) {
 
 function bindCardClicks(container) {
   $$('[data-os-id]', container).forEach(c => {
+    if (c.tagName !== 'BUTTON') {
+      c.tabIndex = 0;
+      c.setAttribute('aria-label','Abrir O.S '+(STORE.getOS(c.dataset.osId)?.numero || ''));
+      c.onkeydown = e => { if(e.target===c && (e.key==='Enter'||e.key===' ')){e.preventDefault();c.click();} };
+    }
     c.onclick = () => {
       const os = STORE.getOS(c.dataset.osId);
       if (os) openModal(os);
-    };
-  });
-  // Item 25: botão "Enviar POP" no card, sem abrir o modal da O.S.
-  $$('[data-pop-os]', container).forEach(b => {
-    b.onclick = (e) => {
-      e.stopPropagation();
-      const os = STORE.getOS(b.dataset.popOs);
-      if (os && typeof abrirSeletorPOPparaOS === 'function') abrirSeletorPOPparaOS(os);
     };
   });
   // Item 6: botão "Finalizar Serviço" direto no card.
@@ -2332,7 +2324,7 @@ function estaArquivada(o) {
 
 function pcpBaseList() {
   const all = STORE.getAllOS().slice();
-  if (STATE.pcpVista === 'retrabalho') return all.filter(o => o.retrabalho && !o.finalizadaEm);
+  if (STATE.pcpVista === 'retrabalho') return all.filter(o => o.retrabalho && !o.dataResolvido);
   if (STATE.pcpVista === 'arquivados') return all.filter(estaArquivada);
   return all.filter(o => !estaArquivada(o));
 }
@@ -2364,7 +2356,7 @@ function pcpAtualizarChips() {
   // Botões de vista: cada vista com a própria base × tipo × busca
   const fAll = applyFilter(porTipo(STORE.getAllOS().slice()), busca);
   setN('[data-pcp-vista=""]', fAll.filter(o => !o.finalizadaEm).length);
-  setN('[data-pcp-vista="retrabalho"]', fAll.filter(o => o.retrabalho && !o.finalizadaEm).length);
+  setN('[data-pcp-vista="retrabalho"]', fAll.filter(o => o.retrabalho && !o.dataResolvido).length);
   setN('[data-pcp-vista="arquivados"]', fAll.filter(estaArquivada).length);
 }
 
@@ -2398,6 +2390,27 @@ function pcpRenderCards() {
   pcpAtualizarChips();
 }
 
+// Cada indicador abre exatamente as O.S contadas, sem combinar filtros da grade.
+function renderPrioridades() {
+  const el = $('#pcp-prioridades'); if (!el) return;
+  const resumo = OPERACAO.resumo(STORE.getAllOS());
+  const defs = [
+    ['hoje','Para hoje','Entrega prevista ou instalação em curso'],
+    ['atrasadas','Prazo vencido','Conferir entrega ou remarcar'],
+    ['semPrazo','Sem prazo','Definir uma data com o responsável'],
+    ['retirada','Prontas para retirada','Combinar retirada com o cliente'],
+    ['semRetorno','Saída a conferir','Registro antigo ou sem data válida'],
+    ['retrabalho','Retrabalhos pendentes','Conferir correção e responsável']
+  ];
+  const foco = defs.find(d => d[0] === STATE._prioridade);
+  el.innerHTML = `<div class="gestao-head"><div><h2>Prioridades da operação</h2><p>Carteira completa · ${fmtDataBR(hojeISO())}. Os grupos podem conter a mesma O.S.</p></div></div>
+    <div class="gestao-indicadores">${defs.map(([key,nome,dica]) => `<button class="gestao-indicador ${key === STATE._prioridade ? 'selecionado' : ''}" aria-pressed="${key === STATE._prioridade}" data-prioridade="${key}"><span>${esc(nome)}</span><strong>${resumo[key].length}</strong><small>${esc(dica)}</small></button>`).join('')}</div>
+    ${foco ? `<div class="gestao-detalhe"><div class="gestao-head"><h3>${esc(foco[1])} · ${resumo[foco[0]].length} O.S</h3><button class="btn-ghost btn-sm" data-fechar-prioridade>Fechar lista</button></div>${osMiniList(resumo[foco[0]])}</div>` : ''}`;
+  $$('[data-prioridade]',el).forEach(b => b.onclick = () => { STATE._prioridade = STATE._prioridade === b.dataset.prioridade ? '' : b.dataset.prioridade; renderPrioridades(); });
+  const fechar = el.querySelector('[data-fechar-prioridade]'); if (fechar) fechar.onclick = () => { STATE._prioridade=''; renderPrioridades(); };
+  bindCardClicks(el);
+}
+
 function renderPCP() {
   const el = $('#panel-pcp');
   STATE.pcpStatus = STATE.pcpStatus || 'todos';
@@ -2427,7 +2440,7 @@ function renderPCP() {
 
   el.innerHTML = `
     <div class="filter-bar">
-      <input type="search" id="busca-pcp" placeholder="Buscar O.S, cliente, endereço…" value="${esc(STATE.filtroBusca)}">
+      <input type="search" id="busca-pcp" aria-label="Buscar na carteira" placeholder="Buscar O.S, cliente, endereço…" value="${esc(STATE.filtroBusca)}">
       <label class="pcp-sort-wrap">Ordenar: <select id="pcp-sort">${sorts}</select></label>
       ${podeEditar() ? '<button class="btn-primary btn-sm" id="pcp-nova-ext">+ O.S Externa</button><button class="btn-primary btn-sm" id="pcp-nova-int">+ O.S Interna</button>' : ''}
     </div>
@@ -2444,6 +2457,8 @@ function renderPCP() {
     ${STATE.pcpVista === '' ? `<div class="pcp-chips">${chips}</div>` : ''}
     <div class="cards-grid"></div>`;
 
+  el.insertAdjacentHTML('afterbegin','<div id="pcp-prioridades" class="gestao-box"></div>');
+  renderPrioridades();
   pcpRenderCards(); // preenche a grade conforme os filtros atuais
 
   const busca = $('#busca-pcp');
@@ -2560,14 +2575,14 @@ function fotografiaLT(offset, todas) {
 
   if (offset > 0) {
     // FUTURO: o que já está estruturado para o dia
-    const agendadas = todas.filter(o => !o.finalizadaEm && o.instalacao && o.instalacao.data === diaISO)
+    const agendadas = OPERACAO.programadas(todas,diaISO,diaISO)
       .sort((a, b) => String((a.instalacao || {}).periodo || 'zz').localeCompare(String((b.instalacao || {}).periodo || 'zz')));
     const entregas = todas.filter(o => !o.finalizadaEm && dataEntregaOS(o) === diaISO && !(o.instalacao && o.instalacao.data === diaISO));
     const retiradas = todas.filter(o => isInterno(o) && !o.finalizadaEm && o.liberadoPCP);
     const equipes = [...new Set(agendadas.flatMap(o => o.equipe || []))];
     return `
       <div class="lt-resumo">📐 <strong>Estruturado para ${rotDia}</strong> <span class="text-muted">(em ${offset} dia${offset > 1 ? 's' : ''})</span>${equipes.length ? `<br>👷 Escalados: ${equipes.map(esc).join(', ')}` : ''}</div>
-      ${sec('📅 Instalações agendadas', agendadas.map(o => item(o, `${esc((o.instalacao || {}).periodo || 'sem período')}${(o.equipe || []).length ? ' · 👷 ' + esc(o.equipe.join(', ')) : ' · <strong>⚠ sem equipe</strong>'}`)), 'Nada agendado — dia livre para encaixar serviço')}
+      ${sec('📅 Instalações previstas', agendadas.map(o => item(o, `${esc((o.instalacao || {}).periodo || 'sem período')}${(o.equipe || []).length ? ' · 👷 ' + esc(o.equipe.join(', ')) : ' · <strong>⚠ sem equipe</strong>'}`)), 'Nenhuma programação registrada para este dia')}
       ${sec('📦 Entregas prometidas vencendo no dia', entregas.map(o => item(o)), 'Nenhuma entrega vencendo')}
       ${sec('🛍 Estarão aguardando retirada (se não forem retirados antes)', retiradas.map(o => item(o)), 'Nenhum pedido pronto aguardando')}`;
   }
@@ -2576,7 +2591,7 @@ function fotografiaLT(offset, todas) {
   const T = offset === 0 ? new Date() : new Date(dia.getFullYear(), dia.getMonth(), dia.getDate(), 23, 59, 59);
   const hhT = `${String(T.getHours()).padStart(2, '0')}:${String(T.getMinutes()).padStart(2, '0')}`;
   const cont = {};
-  todas.forEach(o => { const st = etapaEmT(o, T); if (st && st !== 'finalizada') cont[st] = (cont[st] || 0) + 1; });
+  todas.forEach(o => { const st = offset === 0 ? calcStatus(o) : etapaEmT(o, T); if (st && st !== 'finalizada') cont[st] = (cont[st] || 0) + 1; });
   const funil = ETAPAS_EXT.filter(k => k !== 'finalizada')
     .map(k => `<span class="pcp-chip">${esc(STATUS_LABEL[k])} <span class="pcp-chip-n">${cont[k] || 0}</span></span>`).join('');
   // PASSADO: o dia da saída vem do CARIMBO (saidaEm), não do agendamento de
@@ -2586,7 +2601,7 @@ function fotografiaLT(offset, todas) {
   // Uma passada só: a régua re-renderiza a cada pixel de arrasto.
   const agendaT = offset === 0 ? null : new Map(todas.map(o => [o.id, agendaEmT(o, T)]));
   const doDia = offset === 0
-    ? todas.filter(o => (o.instalacao || {}).data === diaISO)
+    ? OPERACAO.programadas(todas,diaISO,diaISO)
     : todas.filter(o => (agendaT.get(o.id) || {}).data === diaISO);
   const agendaAdivinhada = offset === 0 ? 0
     : doDia.filter(o => !(agendaT.get(o.id) || {}).exato).length;
@@ -2594,10 +2609,11 @@ function fotografiaLT(offset, todas) {
     ? diaLocalISO(o.saidaEm) === diaISO
     : (!!o.horaSaida && (agendaT.get(o.id) || {}).data === diaISO);
   const naRua = offset === 0
-    ? doDia.filter(o => !o.finalizadaEm && o.horaSaida && (!o.horaRetorno || o.horaRetorno > hhT))
-    : todas.filter(saiuNoDia);
+    ? todas.filter(o => OPERACAO.naRua(o,diaISO))
+    : todas.filter(o => !isInterno(o) && saiuNoDia(o));
   const saidaAdivinhada = offset === 0 ? 0 : naRua.filter(o => !o.saidaEm).length;
-  const finalizadasDia = todas.filter(o => o.finalizadaEm && diaLocalISO(o.finalizadaEm) === diaISO);
+  const finalizadasDia = OPERACAO.conclusoes(todas,diaISO,diaISO);
+  const erpDia = todas.filter(o => OPERACAO.encerradaERP(o) && diaLocalISO(o.finalizadaEm) === diaISO);
   const retAguard = offset === 0 ? todas.filter(o => isInterno(o) && !o.finalizadaEm && o.liberadoPCP) : [];
   // "voltou HH:MM" só quando o retorno foi NESTE dia (serviço de dois dias, ou
   // O.S que voltou depois, não devem carimbar retorno no dia da saída).
@@ -2617,10 +2633,11 @@ function fotografiaLT(offset, todas) {
       naRua.map(o => item(o, extraRua(o), offset === 0 ? null : etapaEmT(o, T) || undefined)),
       offset === 0 ? 'Ninguém na rua neste momento' : 'Nenhuma equipe saiu neste dia')}
     ${saidaAdivinhada ? nota(`⚠ ${saidaAdivinhada} sem carimbo de dia na saída (O.S antiga): posicionada pelo agendamento atual.`) : ''}
-    ${sec(offset === 0 ? '📅 Agendadas para hoje' : '📅 Estava agendado para o dia', doDia.map(o => item(o, esc((o.instalacao || {}).periodo || ''))), 'Nada agendado para este dia')}
+    ${sec(offset === 0 ? '📅 Instalações previstas hoje' : '📅 Estava agendado para o dia', doDia.map(o => item(o, esc((o.instalacao || {}).periodo || ''))), 'Nada agendado para este dia')}
     ${agendaAdivinhada ? nota(`⚠ ${agendaAdivinhada} sem histórico de remarcação: mostradas pela agenda de hoje.`) : ''}
     ${offset === 0 ? sec('🛍 Aguardando retirada', retAguard.map(o => item(o)), 'Nenhum pedido pronto aguardando') : ''}
-    ${sec(offset === 0 ? '✅ Finalizadas hoje' : '✅ Finalizadas neste dia', finalizadasDia.map(o => item(o, isInterno(o) ? 'retirado' : 'instalado', 'finalizada')), 'Nenhuma finalização neste dia')}`;
+    ${sec(offset === 0 ? '✅ Conclusões registradas hoje' : '✅ Conclusões registradas neste dia', finalizadasDia.map(o => item(o, isInterno(o) ? 'retirado' : 'instalado', 'finalizada')), 'Nenhuma conclusão registrada neste dia')}
+    ${erpDia.length ? sec('↻ Encerramentos recebidos do ERP', erpDia.map(o => item(o,'Data de sincronização; não comprova entrega no dia.')), '') : ''}`;
 }
 
 function corpoLinhaTempo() {
@@ -2665,7 +2682,7 @@ function tablerIco(id) {
 function painelBloco(id, titulo, corpo) {
   const aberto = painelVistaAberta(id);
   return `<div class="painel-bloco ${aberto ? 'aberto' : ''}" data-bloco="${id}">
-    <h3 class="bloco-titulo painel-h" data-bloco-tog="${id}">${tablerIco(id)}${titulo}<span class="bloco-chevron">${aberto ? '▾' : '▸'}</span></h3>
+    <h3 class="bloco-titulo painel-h" role="button" tabindex="0" aria-expanded="${aberto}" data-bloco-tog="${id}">${tablerIco(id)}${titulo}<span class="bloco-chevron">${aberto ? '▾' : '▸'}</span></h3>
     <div class="painel-bloco-corpo"${aberto ? '' : ' hidden'}>${corpo}</div>
   </div>`;
 }
@@ -2701,26 +2718,31 @@ function renderPainelRange() {
   const hoje = ymdLocal(new Date());
   if (STATE.painelModo === 'dia') {
     if (!STATE._painelDia) STATE._painelDia = hoje;
-    el.innerHTML = `<input type="date" id="painel-data" value="${STATE._painelDia}">`;
+    el.innerHTML = `<input type="date" id="painel-data" aria-label="Dia dos indicadores" value="${STATE._painelDia}">`;
     $('#painel-data').onchange = e => { STATE._painelDia = e.target.value; renderPainelKPIs(); };
   } else {
-    if (!STATE._painelDe) { const d = new Date(); d.setDate(d.getDate() - 30); STATE._painelDe = ymdLocal(d); }
+    if (!STATE._painelDe) { const d = new Date(); d.setDate(d.getDate() - 29); STATE._painelDe = ymdLocal(d); }
     if (!STATE._painelAte) STATE._painelAte = hoje;
     el.innerHTML = `
-      <input type="date" id="painel-de" value="${STATE._painelDe}">
+      <input type="date" id="painel-de" aria-label="Data inicial dos indicadores" value="${STATE._painelDe}">
       <span class="text-muted">até</span>
-      <input type="date" id="painel-ate" value="${STATE._painelAte}">
+      <input type="date" id="painel-ate" aria-label="Data final dos indicadores" value="${STATE._painelAte}">
       <button class="btn-ghost btn-xs" data-quick="7">7d</button>
       <button class="btn-ghost btn-xs" data-quick="30">30d</button>
       <button class="btn-ghost btn-xs" data-quick="mes">Mês</button>
       <button class="btn-ghost btn-xs" data-quick="ano">Ano</button>`;
-    $('#painel-de').onchange = e => { STATE._painelDe = e.target.value; renderPainelKPIs(); };
-    $('#painel-ate').onchange = e => { STATE._painelAte = e.target.value; renderPainelKPIs(); };
+    const mudar = (campo,valor) => {
+      const de = campo === '_painelDe' ? valor : STATE._painelDe, ate = campo === '_painelAte' ? valor : STATE._painelAte;
+      if(!de || !ate || de > ate){toast('Preencha um período válido: início até fim.','error');renderPainelRange();return;}
+      STATE[campo]=valor;renderPainelKPIs();
+    };
+    $('#painel-de').onchange = e => mudar('_painelDe',e.target.value);
+    $('#painel-ate').onchange = e => mudar('_painelAte',e.target.value);
     $$('[data-quick]', el).forEach(b => b.onclick = () => {
       const now = new Date();
       let de = new Date();
-      if (b.dataset.quick === '7') de.setDate(now.getDate() - 7);
-      else if (b.dataset.quick === '30') de.setDate(now.getDate() - 30);
+      if (b.dataset.quick === '7') de.setDate(now.getDate() - 6);
+      else if (b.dataset.quick === '30') de.setDate(now.getDate() - 29);
       else if (b.dataset.quick === 'mes') de = new Date(now.getFullYear(), now.getMonth(), 1);
       else if (b.dataset.quick === 'ano') de = new Date(now.getFullYear(), 0, 1);
       STATE._painelDe = ymdLocal(de); STATE._painelAte = ymdLocal(now);
@@ -2729,27 +2751,23 @@ function renderPainelRange() {
   }
 }
 
+function painelIntervalo() {
+  return STATE.painelModo === 'dia' ? {de:STATE._painelDia || hojeISO(),ate:STATE._painelDia || hojeISO()} : {de:STATE._painelDe,ate:STATE._painelAte};
+}
 function osNoRange(os) {
-  const d = os.instalacao && os.instalacao.data ? os.instalacao.data : null;
-  if (!d) return false;
-  if (STATE.painelModo === 'dia') return d === STATE._painelDia;
-  return d >= STATE._painelDe && d <= STATE._painelAte;
+  const {de,ate} = painelIntervalo();
+  return !isInterno(os) && OPERACAO.diasAgenda(os).some(d => OPERACAO.emIntervalo(d,de,ate));
 }
 
 function horasExec(os) {
-  if (!os.horaSaida || !os.horaRetorno) return null;
-  const [hs, ms] = os.horaSaida.split(':').map(Number);
-  const [hr, mr] = os.horaRetorno.split(':').map(Number);
-  let diff = (hr * 60 + mr) - (hs * 60 + ms);
-  if (diff < 0) diff += 24 * 60;
-  return diff / 60;
+  return OPERACAO.horas(os);
 }
 
 // Estatísticas de um conjunto de O.S finalizadas, por pessoa da equipe
 function statsPorInstalador(finalizadas) {
   const porInst = {};
-  finalizadas.forEach(os => {
-    (os.equipe || []).forEach(nome => {
+  finalizadas.filter(o => OPERACAO.concluida(o) && !isInterno(o)).forEach(os => {
+    OPERACAO.equipe(os).forEach(nome => {
       if (!porInst[nome]) porInst[nome] = { entregas: 0, retrab: 0, checkin: 0, horas: [] };
       porInst[nome].entregas++;
       if (os.retrabalho) porInst[nome].retrab++;
@@ -2797,9 +2815,11 @@ function trendBlock(titulo, tipo, pares) {
 function renderPainelKPIs() {
   const el = $('#painel-content');
   const todas = STORE.getAllOS().filter(osNoRange);
-  const finalizadas = todas.filter(o => o.finalizadaEm);
+  const {de,ate} = painelIntervalo();
+  const finalizadas = OPERACAO.conclusoes(STORE.getAllOS(),de,ate);
+  const recebidasERP = STORE.getAllOS().filter(o => OPERACAO.encerradaERP(o) && OPERACAO.emIntervalo(o.finalizadaEm,de,ate));
   const comRetrab = finalizadas.filter(o => o.retrabalho).length;
-  const horas = finalizadas.map(horasExec).filter(h => h != null);
+  const horas = finalizadas.filter(o => !isInterno(o)).map(horasExec).filter(h => h != null);
   const mediaH = horas.length ? (horas.reduce((a, b) => a + b, 0) / horas.length) : 0;
 
   const porInst = statsPorInstalador(finalizadas);
@@ -2813,7 +2833,7 @@ function renderPainelKPIs() {
     .map(([nome, d]) => [nome, notaInstalador(d), d])
     .sort((a, b) => b[1] - a[1] || b[2].entregas - a[2].entregas)
     .map(([nome, nota, d], i) => {
-      const medalha = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}º`;
+      const medalha = `${i+1}.`;
       const pctR = d.entregas ? Math.round(d.retrab / d.entregas * 100) : 0;
       const cor = nota >= 9 ? 'var(--green)' : (nota >= 7 ? 'var(--amber)' : 'var(--red)');
       return `<tr class="row-click" data-detail="inst:${esc(nome)}"><td>${medalha} ${esc(nome)}</td><td><strong style="color:${cor}">${nota.toFixed(1)}</strong></td><td>${d.entregas}</td><td>${d.retrab} (${pctR}%)</td></tr>`;
@@ -2821,9 +2841,9 @@ function renderPainelKPIs() {
 
   // ── Em execução AGORA + indicadores ao vivo (independe do período) ───────
   const todasOS = STORE.getAllOS();
-  const emRua = todasOS.filter(o => !o.finalizadaEm && o.liberadoPCP && (o.carroLiberado || o.horaSaida) && !o.horaRetorno)
+  const emRua = todasOS.filter(o => OPERACAO.naRua(o))
     .sort((a, b) => (a.horaSaida || '').localeCompare(b.horaSaida || ''));
-  const agendadasHoje = todasOS.filter(o => o.instalacao && o.instalacao.data === ymdLocal(new Date()) && !o.finalizadaEm).length;
+  const agendadasHoje = OPERACAO.programadas(todasOS,hojeISO(),hojeISO()).length;
   const aptas = todasOS.filter(o => calcStatus(o) === 'apto').length;
 
   const execCards = emRua.map(os => `
@@ -2842,7 +2862,7 @@ function renderPainelKPIs() {
     porOper[nome].soma += fichaPercent(os);
   });
   const rankOper = Object.entries(porOper).sort((a, b) => b[1].soma - a[1].soma).map(([nome, d], i) => {
-    const medalha = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}º`;
+    const medalha = `${i+1}.`;
     const media = d.os ? Math.round(d.soma / d.os) : 0;
     return `<tr class="row-click" data-detail="oper:${esc(nome)}"><td>${medalha} ${esc(nome)}</td><td>${d.os}</td><td>${media}%</td></tr>`;
   }).join('');
@@ -2855,7 +2875,7 @@ function renderPainelKPIs() {
     const pAte = new Date(de); pAte.setDate(de.getDate() - 1);
     const pDe = new Date(pAte); pDe.setDate(pAte.getDate() - (dias - 1));
     const pDeS = ymdLocal(pDe), pAteS = ymdLocal(pAte);
-    const prev = todasOS.filter(o => o.instalacao && o.instalacao.data >= pDeS && o.instalacao.data <= pAteS);
+    const prev = todasOS.filter(o => OPERACAO.diasAgenda(o).some(d => OPERACAO.emIntervalo(d,pDeS,pAteS)));
     const delta = todas.length - prev.length;
     const seta = delta > 0 ? '▲' : (delta < 0 ? '▼' : '▬');
     const cor = delta > 0 ? 'var(--green)' : (delta < 0 ? 'var(--red)' : 'var(--muted)');
@@ -2866,7 +2886,7 @@ function renderPainelKPIs() {
   const trendHTML = `
     ${trendBlock('🚚 Carro mais utilizado', 'veiculo', contar(todas, o => o.veiculo))}
     ${trendBlock('🛠 Ferramentas mais usadas', 'ferramenta', contar(todas, o => o.ferramentas))}
-    ${trendBlock('📐 Tipo de instalação mais frequente', 'periodo', contar(todas, o => (o.instalacao && o.instalacao.periodo)))}
+    ${trendBlock('📅 Períodos programados', 'periodo', contar(todas, o => (o.instalacao && o.instalacao.periodo)))}
     ${trendBlock('📦 Insumos mais utilizados', 'suprimento', contar(todas, o => o.suprimentos))}`;
 
   // ── Serviços por funcionário ─────────────────────────────────────────────
@@ -2879,14 +2899,16 @@ function renderPainelKPIs() {
 
   el.innerHTML = `
     <div class="kpi-grid">
-      <div class="kpi-card clickable" data-detail="todas"><div class="kpi-val">${todas.length}</div><div class="kpi-lbl">O.S no período</div></div>
-      <div class="kpi-card clickable" data-detail="finalizadas"><div class="kpi-val">${finalizadas.length}</div><div class="kpi-lbl">Finalizadas</div></div>
+      <div class="kpi-card clickable" data-detail="todas"><div class="kpi-val">${todas.length}</div><div class="kpi-lbl">Instalações previstas no período</div></div>
+      <div class="kpi-card clickable" data-detail="finalizadas"><div class="kpi-val">${finalizadas.length}</div><div class="kpi-lbl">Conclusões registradas no período</div></div>
       <div class="kpi-card clickable" data-detail="retrab"><div class="kpi-val">${comRetrab}</div><div class="kpi-lbl">Com retrabalho</div></div>
-      <div class="kpi-card"><div class="kpi-val">${mediaH.toFixed(1)}h</div><div class="kpi-lbl">Média execução</div></div>
+      <div class="kpi-card"><div class="kpi-val">${horas.length ? mediaH.toFixed(1)+'h' : '—'}</div><div class="kpi-lbl">Tempo entre saída e retorno · ${horas.length} ${horas.length===1?'registro':'registros'}</div></div>
       <div class="kpi-card clickable live" data-detail="emrua"><div class="kpi-val">${emRua.length}</div><div class="kpi-lbl">Em execução agora</div></div>
-      <div class="kpi-card clickable" data-detail="hoje"><div class="kpi-val">${agendadasHoje}</div><div class="kpi-lbl">Agendadas hoje</div></div>
+      <div class="kpi-card clickable" data-detail="hoje"><div class="kpi-val">${agendadasHoje}</div><div class="kpi-lbl">Instalações previstas hoje</div></div>
       <div class="kpi-card clickable" data-detail="aptas"><div class="kpi-val">${aptas}</div><div class="kpi-lbl">Aptas (aguardando)</div></div>
     </div>
+    <p class="metricas-nota">Conclusões usam a data de finalização registrada pela equipe e incluem retiradas. Tempo inclui deslocamento; não mede horas produtivas. Os três últimos indicadores mostram a situação atual.</p>
+    ${recebidasERP.length ? `<button class="btn-ghost erp-aviso" data-detail="erp">↻ ${recebidasERP.length} ${recebidasERP.length===1?'encerramento recebido':'encerramentos recebidos'} do ERP no período · conferir separadamente</button>` : ''}
     ${prevTxt ? `<div style="margin:-6px 0 10px">${prevTxt}</div>` : ''}
 
     ${painelBloco('linhatempo', 'Linha do tempo <span class="text-muted" style="font-weight:400;font-size:.75rem">(arraste a régua: passado · agora · futuro)</span>', corpoLinhaTempo())}
@@ -2900,15 +2922,15 @@ function renderPainelKPIs() {
     ${painelBloco('func', 'Serviços por funcionário',
       `<div class="filter-bar"><select id="painel-func"><option value="">— selecionar funcionário —</option>${funcOpts}</select></div>`)}
 
-    ${painelBloco('oper', 'Ranking de preenchimento (operadores)',
-      `<table class="control-table">
+    ${painelBloco('oper', 'Qualidade do cadastro por último responsável · histórico completo',
+      `<p class="metricas-nota">Agrupa pelo último autor registrado; não mede trabalho realizado por pessoa. O percentual indica campos preenchidos, sem avaliar se o conteúdo está correto.</p><table class="control-table">
         <thead><tr><th>Operador</th><th>O.S preenchidas</th><th>Média preenchimento</th></tr></thead>
         <tbody>${rankOper || '<tr><td colspan="3" class="text-muted" style="text-align:center;padding:12px">Sem dados</td></tr>'}</tbody>
       </table>`)}
 
-    ${painelBloco('nota', 'Ranking de notas <span class="text-muted" style="font-weight:400;font-size:.75rem">(quem tem menos retrabalho pontua mais — clique para ver os serviços)</span>',
-      `<table class="control-table">
-        <thead><tr><th>Instalador</th><th>Nota</th><th>Entregas</th><th>Retrabalhos</th></tr></thead>
+    ${painelBloco('nota', 'Índice de registros por instalador',
+      `<p class="metricas-nota">Índice de 0 a 10: 70% ausência de retrabalho registrado e 30% presença de foto. Não mede produtividade nem atribui a causa do retrabalho à equipe; confira a quantidade de serviços da amostra.</p><table class="control-table">
+        <thead><tr><th>Instalador</th><th>Índice</th><th>Entregas</th><th>Retrabalhos</th></tr></thead>
         <tbody>${rankNota || '<tr><td colspan="4" class="text-muted" style="text-align:center;padding:12px">Sem dados no período</td></tr>'}</tbody>
       </table>`)}
 
@@ -2918,7 +2940,7 @@ function renderPainelKPIs() {
         <tbody>${linhas || '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:12px">Sem dados no período</td></tr>'}</tbody>
       </table>`)}
 
-    ${painelBloco('prodfunc', 'Produtividade por Funcionário <span class="text-muted" style="font-weight:400;font-size:.75rem">(quantas O.S cada pessoa finalizou no mês)</span>',
+    ${painelBloco('prodfunc', 'Participação nas instalações concluídas · mês independente',
       `<div class="flex gap-6"><input type="month" id="prod-mes" value="${prodMes}"><button class="btn-primary btn-sm" id="prod-mes-pdf">📄 PDF</button></div>
        <div id="prod-mes-out" style="margin-top:8px"></div>`)}
 
@@ -2940,17 +2962,20 @@ function renderPainelKPIs() {
     const bloco = h.closest('.painel-bloco');
     const corpo = bloco.querySelector('.painel-bloco-corpo');
     const aberto = painelVistaAberta(h.dataset.blocoTog);
+    h.setAttribute('aria-expanded',String(aberto));
     corpo.hidden = !aberto;
     bloco.classList.toggle('aberto', aberto);
     const chev = h.querySelector('.bloco-chevron');
     if (chev) chev.textContent = aberto ? '▾' : '▸';
   });
 
+  $$('[data-bloco-tog]', el).forEach(h => h.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); h.click(); } });
+
   // Cliques em itens (cards KPI, linhas, tendências)
-  $$('[data-detail]', el).forEach(node => node.onclick = () => {
+  $$('[data-detail]', el).forEach(node => { node.tabIndex=0; node.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();node.click();}};node.onclick = () => {
     STATE._painelDetail = node.dataset.detail;
     renderPainelDetalhe(todas, todasOS, finalizadas, porInst);
-  });
+  }; });
 
   // Serviços por funcionário
   $('#painel-func').onchange = e => {
@@ -3001,11 +3026,12 @@ function renderPainelDetalhe(todas, todasOS, finalizadas, porInst) {
   if (!d) { box.innerHTML = ''; return; }
 
   let titulo = '', list = [];
-  if (d === 'todas')            { titulo = 'O.S no período'; list = todas; }
+  if (d === 'todas')            { titulo = 'Instalações previstas no período'; list = todas; }
   else if (d === 'finalizadas') { titulo = 'Finalizadas no período'; list = finalizadas; }
   else if (d === 'retrab')      { titulo = 'Com retrabalho'; list = finalizadas.filter(o => o.retrabalho); }
-  else if (d === 'emrua')       { titulo = 'Em execução agora'; list = todasOS.filter(o => !o.finalizadaEm && o.liberadoPCP && (o.carroLiberado || o.horaSaida) && !o.horaRetorno); }
-  else if (d === 'hoje')        { titulo = 'Agendadas hoje'; list = todasOS.filter(o => o.instalacao && o.instalacao.data === ymdLocal(new Date()) && !o.finalizadaEm); }
+  else if (d === 'erp')         { titulo = 'Encerramentos recebidos do ERP — data de sincronização'; const {de,ate}=painelIntervalo(); list=todasOS.filter(o => OPERACAO.encerradaERP(o) && OPERACAO.emIntervalo(o.finalizadaEm,de,ate)); }
+  else if (d === 'emrua')       { titulo = 'Em execução agora'; list = todasOS.filter(o => OPERACAO.naRua(o)); }
+  else if (d === 'hoje')        { titulo = 'Instalações previstas hoje'; list = OPERACAO.programadas(todasOS,hojeISO(),hojeISO()); }
   else if (d === 'aptas')       { titulo = 'Aptas (aguardando)'; list = todasOS.filter(o => calcStatus(o) === 'apto'); }
   else if (d.startsWith('inst:')) { const n = d.slice(5); titulo = 'Serviços de ' + n; list = finalizadas.filter(o => (o.equipe||[]).includes(n)); }
   else if (d.startsWith('oper:')) { const n = d.slice(5); titulo = 'O.S preenchidas por ' + n; list = todasOS.filter(o => (o.atualizadoPor||o.aptoPor||o.criadoPor) === n); }
@@ -3048,7 +3074,7 @@ function renderComparativo(finalizadas) {
         ${linha('Entregas', ca.entregas, cb.entregas)}
         ${linha('% Retrabalho', ca.retrab, cb.retrab)}
         ${linha('% Check‑in', ca.checkin, cb.checkin)}
-        ${linha('Média execução', ca.mh, cb.mh)}
+        ${linha('Tempo entre saída e retorno', ca.mh, cb.mh)}
       </tbody>
     </table>`;
 }
@@ -3056,8 +3082,31 @@ function renderComparativo(finalizadas) {
 /* ══════════════════════════════════════════════════════════════════════════
    ABA: PROGRAMAÇÃO (Instalação) — Calendário / Lista
    ══════════════════════════════════════════════════════════════════════════ */
+function renderConferenciaDia() {
+  const el = $('#prog-conferencia'); if (!el) return;
+  const data = STATE._progDia || hojeISO();
+  const all = STORE.getAllOS(), lista = OPERACAO.programadas(all,data,data);
+  const grupos = {
+    todas:lista,
+    pcp:lista.filter(o => !o.liberadoPCP),
+    equipe:lista.filter(o => !OPERACAO.equipe(o).length),
+    veiculo:lista.filter(o => !String(o.veiculo || '').trim()),
+    cliente:lista.filter(o => o.confirmacao !== 'Confirmado')
+  };
+  const conflitos = OPERACAO.conflitos(all,data);
+  const defs=[['todas','Instalações previstas'],['pcp','PCP pendente'],['equipe','Sem equipe'],['veiculo','Sem veículo'],['cliente','Cliente a confirmar']];
+  const foco = STATE._progFoco || 'todas';
+  el.innerHTML = `<div class="gestao-head"><div><h2>Conferência do dia · ${fmtDataBR(data)}</h2><p>Somente instalações em aberto. Inclui as que continuam de dias anteriores. Confira os impedimentos antes de liberar a equipe.</p></div></div>
+    <div class="gestao-indicadores">${defs.map(([k,n]) => `<button class="gestao-indicador ${foco===k?'selecionado':''}" data-dia-grupo="${k}" aria-pressed="${foco===k}"><span>${n}</span><strong>${grupos[k].length}</strong></button>`).join('')}</div>
+    ${conflitos.length ? `<details class="conflitos-agenda" open><summary>${conflitos.length} ${conflitos.length===1?'possível conflito':'possíveis conflitos'} de equipe ou veículo</summary><p>São cruzamentos no mesmo dia e período. Horários sem duração exigem conferência; vários serviços podem caber no mesmo turno.</p>${conflitos.map(c => `<div class="conflito-linha"><strong>${esc([...c.equipe,c.veiculo].filter(Boolean).join(' · '))}</strong><span>${[c.a,c.b].map(o => `<button class="btn-ghost btn-sm" data-os-id="${esc(o.id)}">O.S ${esc(o.numero||'—')} · ${esc(rotuloHora(o))}</button>`).join(' × ')}</span></div>`).join('')}</details>` : '<p class="metricas-nota">Nenhuma sobreposição encontrada entre os recursos cadastrados. Isso não comprova capacidade disponível: faltam duração e deslocamento por serviço.</p>'}
+    <div class="gestao-detalhe">${osMiniList(grupos[foco] || lista)}</div>`;
+  $$('[data-dia-grupo]',el).forEach(b => b.onclick = () => { STATE._progFoco=b.dataset.diaGrupo; renderConferenciaDia(); });
+  bindCardClicks(el);
+}
+
 function renderProgramacao() {
   const el = $('#panel-programacao');
+  if (!STATE._fProg) STATE._fProg = OPERACAO.periodoRapido('7',hojeISO(),true);
   el.innerHTML = `
     <div class="filter-bar">
       <div class="view-toggle">
@@ -3065,17 +3114,21 @@ function renderProgramacao() {
         <button id="vt-lista" class="${STATE.calView==='lista'?'active':''}">☰ Lista</button>
       </div>
       <div class="rel-dia">
-        <input type="date" id="rel-data" value="${hojeISO()}">
+        <label>Conferir dia <input type="date" id="rel-data" value="${STATE._progDia || hojeISO()}"></label>
         <button class="btn-ghost btn-sm" id="rel-pdf" title="Lista de serviços do dia em PDF">📄 Serviços do dia</button>
         <button class="btn-ghost btn-sm" id="rel-wpp" title="Enviar a lista do dia por WhatsApp">💬 Enviar dia</button>
       </div>
     </div>
+    <div id="prog-conferencia" class="gestao-box"></div>
+    <h2 class="secao-titulo">Agenda de instalações em aberto</h2>
     <div class="filter-bar">${filtroPeriodoHTML('_fProg')}</div>
     <div id="prog-content"></div>`;
   $('#vt-cal').onclick = () => { STATE.calView = 'cal'; renderProgramacao(); };
   $('#vt-lista').onclick = () => { STATE.calView = 'lista'; renderProgramacao(); };
   $('#rel-pdf').onclick = () => relatorioServicosDia($('#rel-data').value);
   $('#rel-wpp').onclick = () => whatsappServicosDia($('#rel-data').value);
+  $('#rel-data').onchange = e => { STATE._progDia=e.target.value || hojeISO(); renderConferenciaDia(); };
+  renderConferenciaDia();
   wireFiltroPeriodo(el, '_fProg', () => renderProgramacao());
   if (STATE.calView === 'cal') renderKanban();
   else renderProgLista();
@@ -3098,9 +3151,8 @@ function rotuloHora(os) {
 
 function renderProgLista() {
   const el = $('#prog-content');
-  const list = STORE.getAllOS()
-    .filter(o => o.instalacao && o.instalacao.data)
-    .filter(o => dentroPeriodo(o.instalacao.data, '_fProg'))
+  const f = STATE._fProg || {};
+  const list = OPERACAO.programadas(STORE.getAllOS(),f.de,f.ate)
     .sort((a, b) => a.instalacao.data.localeCompare(b.instalacao.data));
   el.innerHTML = `<div class="cards-grid">${list.map(osCardHTML).join('') || emptyState('📅', 'Nenhuma O.S no período', 'Ajuste o filtro de datas ou confirme datas na aba PCP.')}</div>`;
   bindCardClicks(el);
@@ -3109,25 +3161,19 @@ function renderProgLista() {
 function renderKanban() {
   const el = $('#prog-content');
   const hojeStr = ymdLocal(new Date());
-  const all = STORE.getAllOS().filter(o => o.instalacao && o.instalacao.data && !o.finalizadaEm);
+  const all = OPERACAO.programadas(STORE.getAllOS());
 
   // indexa O.S por dia (considerando duracaoDias)
   const porDia = {};
   all.forEach(os => {
-    const d0 = parseLocalDate(os.instalacao.data);
-    if (!d0) return;
-    const dur = Math.max(1, os.instalacao.duracaoDias || 1);
-    for (let i = 0; i < dur; i++) {
-      const d = new Date(d0); d.setDate(d0.getDate() + i);
-      (porDia[ymdLocal(d)] = porDia[ymdLocal(d)] || []).push(os);
-    }
+    OPERACAO.diasAgenda(os).forEach(d => (porDia[d] = porDia[d] || []).push(os));
   });
 
   // Com filtro de período ativo, usa o intervalo; senão, de hoje em diante.
   const f = STATE._fProg;
   const temFiltro = f && (f.de || f.ate);
   const dias = Object.keys(porDia)
-    .filter(k => temFiltro ? dentroPeriodo(k, '_fProg') : k >= hojeStr)
+    .filter(k => dentroPeriodo(k, '_fProg'))
     .sort();
 
   if (!dias.length) {
@@ -3145,6 +3191,7 @@ function renderKanban() {
         <div class="kanban-hora">⏰ ${esc(rotuloHora(os))}</div>
         <div class="kanban-os">O.S ${esc(os.numero || '—')}</div>
         <div class="kanban-cliente">${esc(os.cliente || 'Sem cliente')}</div>
+        <div class="kanban-pendencias">${esc([!os.liberadoPCP && 'PCP pendente',!OPERACAO.equipe(os).length && 'Sem equipe',!os.veiculo && 'Sem veículo'].filter(Boolean).join(' · ') || statusLabelDe(os,st))}</div>
         ${(os.equipe||[]).length ? `<div class="kanban-equipe">👷 ${esc(os.equipe.join(', '))}</div>` : ''}
       </div>`;
     }).join('');
@@ -3160,10 +3207,10 @@ function renderKanban() {
 
   el.innerHTML = `<div class="kanban">${colunas}</div>`;
 
-  $$('[data-kan-os]', el).forEach(c => c.onclick = () => {
+  $$('[data-kan-os]', el).forEach(c => { c.tabIndex=0; c.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();c.click();}}; c.onclick = () => {
     const os = STORE.getOS(c.dataset.kanOs);
     if (os) openModal(os);
-  });
+  }; });
   $$('[data-kan-pdf]', el).forEach(b => b.onclick = e => {
     e.stopPropagation();
     const key = b.dataset.kanPdf;
@@ -3176,24 +3223,26 @@ function renderKanban() {
    ══════════════════════════════════════════════════════════════════════════ */
 function renderExecucao() {
   const el = $('#panel-execucao');
-  const list = STORE.getAllOS().filter(o => o.liberadoPCP && !o.finalizadaEm)
+  const list = STORE.getAllOS().filter(o => !isInterno(o) && !o.finalizadaEm && (o.liberadoPCP || o.horaSaida || o.saidaEm))
     .filter(o => dentroPeriodo(o.instalacao && o.instalacao.data, '_fExec'));
   // na-rua primeiro
   list.sort((a, b) => {
-    const ra = (!a.finalizadaEm && (a.carroLiberado || a.horaSaida) && !a.horaRetorno) ? 0 : 1;
-    const rb = (!b.finalizadaEm && (b.carroLiberado || b.horaSaida) && !b.horaRetorno) ? 0 : 1;
+    const ra = OPERACAO.naRua(a) ? 0 : 1;
+    const rb = OPERACAO.naRua(b) ? 0 : 1;
     if (ra !== rb) return ra - rb;
     return (a.instalacao?.data || '').localeCompare(b.instalacao?.data || '');
   });
 
-  const naRua = list.filter(o => (o.carroLiberado || o.horaSaida) && !o.horaRetorno).length;
+  const naRua = list.filter(o => OPERACAO.naRua(o)).length;
+  const conferir = list.filter(o => ['sem-retorno','conferir'].includes(OPERACAO.situacaoSaida(o))).length;
   const atrasadas = list.filter(estaAtrasada).length;
 
   el.innerHTML = `
     <div class="filter-bar">${filtroPeriodoHTML('_fExec')}</div>
     <div class="exec-resumo">
-      <span class="exec-chip">🛠 ${list.length} em execução</span>
-      <span class="exec-chip">🚗 ${naRua} na rua</span>
+      <span class="exec-chip">🛠 ${list.length} instalações para acompanhar</span>
+      <span class="exec-chip">🚗 ${naRua} saídas sem retorno hoje</span>
+      ${conferir ? `<span class="exec-chip exec-chip-atraso">${conferir} saídas a conferir</span>` : ''}
       ${atrasadas ? `<span class="exec-chip exec-chip-atraso">⏰ ${atrasadas} atrasada${atrasadas === 1 ? '' : 's'}</span>` : ''}
     </div>
     <div class="os-list">${list.map(execItemHTML).join('') || emptyState('🛠', 'Nenhuma O.S em execução', 'As O.S confirmadas e em andamento aparecem aqui.')}</div>`;
@@ -3210,7 +3259,7 @@ function renderExecucao() {
   $$('[data-inline="carro"]', el).forEach(b => b.onclick = () => {
     const os = STORE.getOS(b.dataset.id);
     if (!os) { toast('O.S não encontrada (pode ter sido removida em outro aparelho).', 'error'); renderExecucao(); return; }
-    if (os.confirmacao !== 'Confirmado') { toast('Confirme o cliente (POP EXI‑002) antes de liberar o carro / sair.', 'error'); return; }
+    if (!os.liberadoPCP || !OPERACAO.agendaCompleta(os) || os.confirmacao !== 'Confirmado') { toast('Libere o PCP, complete a programação e confirme o cliente antes de liberar o carro.', 'error'); return; }
     os.carroLiberado = true; os.carroLiberadoPor = STATE.user.nome; os.carroLiberadoEm = nowISO();
     os.atualizadoEm = nowISO(); os.atualizadoPor = STATE.user.nome;
     STORE.saveOS(os); renderExecucao(); toast('Carro liberado', 'success');
@@ -3223,11 +3272,12 @@ function renderExecucao() {
 
 function execItemHTML(os) {
   const st = calcStatus(os);
-  const naRua = !os.finalizadaEm && (os.carroLiberado || os.horaSaida) && !os.horaRetorno;
+  const naRua = OPERACAO.naRua(os);
+  const conferir = ['sem-retorno','conferir'].includes(OPERACAO.situacaoSaida(os));
   return `
     <div class="os-list-item st-${st} ${alertaOS(os)}" data-os-id="${esc(os.id)}">
       <div class="list-info">
-        <div class="list-numero">O.S ${esc(os.numero || '—')} ${naRua ? '🚗 na rua' : ''}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}</div>
+        <div class="list-numero">O.S ${esc(os.numero || '—')} ${naRua ? '🚗 na rua' : ''}${conferir ? ' <span class="tag-atraso">Saída antiga ou sem data · conferir retorno</span>' : ''}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}</div>
         <div class="list-cliente">${esc(os.cliente)} · ${esc(os.endereco || '')}</div>
         <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))} · 👷 ${esc((os.equipe||[]).join(', ') || '—')}</div>
       </div>
@@ -3253,6 +3303,7 @@ function renderRetrabalho() {
 
   el.innerHTML = `
     <div class="filter-bar">${filtroPeriodoHTML('_fRetra')}</div>
+    <p class="metricas-nota">O período considera a data de resolução ou a última atualização da O.S. A data de abertura do retrabalho não está disponível em todos os registros.</p>
     <div class="exec-resumo">
       <span class="exec-chip">🔧 ${list.length} no período</span>
       ${pendentes ? `<span class="exec-chip exec-chip-atraso">⚠ ${pendentes} pendente${pendentes === 1 ? '' : 's'}</span>` : ''}
@@ -3330,12 +3381,11 @@ function finRenderCards() {
     const podeArquivar = !os.arquivadaEm && (diasFin == null || diasFin < 7);
     return `<div class="os-list-item st-finalizada" data-os-id="${esc(os.id)}">
       <div class="list-info">
-        <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge st-finalizada">${isInterno(os) ? 'Retirado' : 'Finalizado'}</span>${teveRetrabalho ? ' <span class="badge st-retrabalho" title="Houve retrabalho neste serviço">↻ Retrabalho</span>' : ''}${estaArquivada(os) ? ' <span class="badge" title="Está na vista Arquivados do PCP">🗄 Arquivada</span>' : ''}</div>
+        <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge st-finalizada">${statusLabelDe(os,'finalizada')}</span>${teveRetrabalho ? ' <span class="badge st-retrabalho" title="Houve retrabalho neste serviço">↻ Retrabalho</span>' : ''}${estaArquivada(os) ? ' <span class="badge" title="Está na vista Arquivados do PCP">🗄 Arquivada</span>' : ''}</div>
         <div class="list-cliente">${esc(os.cliente || 'Sem cliente')}${os.servico ? ' — ' + esc(os.servico) : ''}</div>
-        <div class="list-date">🏁 Finalizada em ${esc(dataF)}${(os.equipe||[]).length ? ' · 👷 ' + esc(os.equipe.join(', ')) : ''}</div>
+        <div class="list-date">${OPERACAO.encerradaERP(os) ? '↻ Recebida do ERP em' : '🏁 Conclusão registrada em'} ${esc(dataF)}${(os.equipe||[]).length ? ' · 👷 ' + esc(os.equipe.join(', ')) : ''}${OPERACAO.encerradaERP(os) ? ' · '+esc(os.baixaAutoERP?.status || 'encerramento')+' · não comprova entrega nesta data' : ''}</div>
       </div>
       ${podeArquivar ? `<button class="btn-ghost btn-sm edit-only" data-arquivar-os="${esc(os.id)}" title="Mandar agora para a vista Arquivados">🗄</button>` : ''}
-      <button class="btn-ghost btn-sm card-pop" data-pop-os="${esc(os.id)}" title="Enviar POP para a equipe">📚</button>
     </div>`;
   }).join('');
   lista.innerHTML = cards || emptyState('🏁', 'Nenhuma O.S no período', 'Ajuste o filtro de datas para ver o histórico.');
@@ -3364,14 +3414,15 @@ function finRenderLista() {
    retrabalho por colaborador; item 14: produtividade por colaborador. */
 function finRenderDash() {
   const el = $('#fin-content');
-  const list = finFinalizadasPeriodo();
+  const periodo = finFinalizadasPeriodo();
+  const list = periodo.filter(o => OPERACAO.concluida(o));
   if (!list.length) {
-    el.innerHTML = emptyState('📊', 'Sem dados no período', 'Ajuste o filtro para ver os indicadores.');
+    el.innerHTML = emptyState('📊', 'Nenhuma conclusão registrada pela equipe no período', `${periodo.length} encerramentos recebidos do ERP podem ser conferidos na lista. A data de sincronização não comprova entrega.`);
     return;
   }
 
   // — item 12: serviços por mês (últimos 6 meses, de TODAS as finalizadas) —
-  const todasFin = STORE.getAllOS().filter(o => o.finalizadaEm);
+  const todasFin = OPERACAO.conclusoes(STORE.getAllOS());
   const porMes = {};
   todasFin.forEach(o => { const k = mesLocalISO(o.finalizadaEm); if (k) porMes[k] = (porMes[k] || 0) + 1; });
   const mesesOrd = Object.keys(porMes).sort().slice(-6);
@@ -3380,8 +3431,12 @@ function finRenderDash() {
   const kAtual = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
   const dPrev = new Date(agora.getFullYear(), agora.getMonth() - 1, 1);
   const kPrev = `${dPrev.getFullYear()}-${String(dPrev.getMonth() + 1).padStart(2, '0')}`;
-  const nAtual = porMes[kAtual] || 0, nPrev = porMes[kPrev] || 0;
-  const delta = nPrev ? Math.round((nAtual - nPrev) / nPrev * 100) : (nAtual ? 100 : 0);
+  const diaComparacao = Math.min(agora.getDate(),new Date(agora.getFullYear(),agora.getMonth(),0).getDate());
+  const ateAtual = `${kAtual}-${String(diaComparacao).padStart(2,'0')}`;
+  const atePrev = `${kPrev}-${String(diaComparacao).padStart(2,'0')}`;
+  const nAtual = todasFin.filter(o => OPERACAO.emIntervalo(o.finalizadaEm,kAtual+'-01',ateAtual)).length;
+  const nPrev = todasFin.filter(o => OPERACAO.emIntervalo(o.finalizadaEm,kPrev+'-01',atePrev)).length;
+  const delta = nPrev ? Math.round((nAtual - nPrev) / nPrev * 100) : null;
   const deltaCls = delta > 0 ? 'pos' : (delta < 0 ? 'neg' : '');
   const barras = mesesOrd.map(k => {
     const [y, m] = k.split('-');
@@ -3419,7 +3474,7 @@ function finRenderDash() {
     const media = horas.length ? horas.reduce((a, b) => a + b, 0) / horas.length : 0;
     return { nome: n, entregas: d.entregas, retrab: d.retrab, media, nota: notaInstalador(d), horas };
   }).sort((a, b) => {
-    if (sort === 'tempo') return a.media - b.media;
+    if (sort === 'tempo') return (a.horas.length ? a.media : Infinity) - (b.horas.length ? b.media : Infinity);
     if (sort === 'nota') return b.nota - a.nota;
     return b.entregas - a.entregas;
   });
@@ -3432,7 +3487,7 @@ function finRenderDash() {
       <span class="fin-avatar">${esc(iniciais(p.nome))}</span>
       <span class="fin-prod-nome">${esc(p.nome)}</span>
       <span class="fin-prod-col">${p.entregas}</span>
-      <span class="fin-prod-col">${p.media ? p.media.toFixed(1) + 'h' : '—'}</span>
+      <span class="fin-prod-col">${p.horas.length ? p.media.toFixed(1) + 'h' : '—'}</span>
       <span class="fin-prod-col">${p.nota.toFixed(1)}</span>
       <span class="fin-prod-spark">${spark(p.horas)}</span>
     </div>`).join('');
@@ -3442,29 +3497,32 @@ function finRenderDash() {
 
   el.innerHTML = `
     <div class="fin-kpis">
-      <div class="fin-kpi"><span class="fin-kpi-num">${list.length}</span><span class="fin-kpi-lbl">finalizadas no período</span></div>
-      <div class="fin-kpi"><span class="fin-kpi-num">${nAtual}</span><span class="fin-kpi-lbl">${MESES[agora.getMonth()]} <span class="fin-delta ${deltaCls}">${delta>0?'▲':delta<0?'▼':''} ${Math.abs(delta)}%</span> vs ${MESES[dPrev.getMonth()].slice(0,3)}</span></div>
+      <div class="fin-kpi"><span class="fin-kpi-num">${list.length}</span><span class="fin-kpi-lbl">conclusões registradas no período</span></div>
+      <div class="fin-kpi"><span class="fin-kpi-num">${nAtual}</span><span class="fin-kpi-lbl">${MESES[agora.getMonth()]} até dia ${diaComparacao} <span class="fin-delta ${deltaCls}">${delta == null ? 'sem base percentual' : (delta>0?'▲ ':delta<0?'▼ ':'')+Math.abs(delta)+'%'}</span> vs os mesmos dias de ${MESES[dPrev.getMonth()].slice(0,3)} · independente do filtro</span></div>
       <div class="fin-kpi"><span class="fin-kpi-num">${totalRetrab}</span><span class="fin-kpi-lbl">retrabalhos (${taxa}%)</span></div>
     </div>
 
     <div class="fin-bloco">
-      <h3 class="bloco-titulo">📅 Serviços por mês</h3>
+      <h3 class="bloco-titulo">📅 Conclusões registradas por mês · histórico completo</h3>
+      <p class="metricas-nota">${periodo.length-list.length} baixas automáticas do ERP no período não entram nos indicadores de entrega. Retiradas estão no total; os indicadores por instalador consideram somente instalações externas.</p>
       <div class="fin-mes-chart">${barras}</div>
     </div>
 
     <div class="fin-bloco">
-      <h3 class="bloco-titulo">🔁 Ranking de retrabalho por colaborador</h3>
+      <h3 class="bloco-titulo">🔁 Participação em O.S com retrabalho</h3>
+      <p class="metricas-nota">Participação não identifica quem causou o retrabalho. Confira a causa registrada na O.S.</p>
       <div class="fin-colab-lista">${retrabHTML}</div>
     </div>
 
     <div class="fin-bloco">
-      <h3 class="bloco-titulo">⚡ Produtividade por colaborador</h3>
+      <h3 class="bloco-titulo">Instalações por colaborador</h3>
+      <p class="metricas-nota">Uma O.S pode contar para várias pessoas. Tempo inclui deslocamento. Índice: 70% ausência de retrabalho registrado e 30% presença de foto; não mede produtividade.</p>
       <div class="fin-prod-head">
         <span class="fin-avatar" style="visibility:hidden">··</span>
         <span class="fin-prod-nome">Colaborador</span>
         <button class="fin-prod-col fin-sort ${sort==='entregas'?'ativo':''}" data-sort="entregas">Entregas</button>
         <button class="fin-prod-col fin-sort ${sort==='tempo'?'ativo':''}" data-sort="tempo">Tempo méd.</button>
-        <button class="fin-prod-col fin-sort ${sort==='nota'?'ativo':''}" data-sort="nota">Nota</button>
+        <button class="fin-prod-col fin-sort ${sort==='nota'?'ativo':''}" data-sort="nota">Índice</button>
         <span class="fin-prod-spark">Tempos</span>
       </div>
       <div class="fin-prod-lista">${prodHTML}</div>
@@ -3483,7 +3541,7 @@ function exportarFinalizadosPDF(list) {
 
   const porInst = statsPorInstalador(list);
   const totalRetrab = list.filter(o => o.retrabalho).length;
-  const horas = list.map(horasExec).filter(h => h != null);
+  const horas = list.filter(o => OPERACAO.concluida(o) && !isInterno(o)).map(horasExec).filter(h => h != null);
   const mediaH = horas.length ? (horas.reduce((a, b) => a + b, 0) / horas.length) : 0;
 
   const linhasOS = list.map(os => {
@@ -3491,7 +3549,7 @@ function exportarFinalizadosPDF(list) {
     const dataF = dF ? `${String(dF.getDate()).padStart(2,'0')}/${String(dF.getMonth()+1).padStart(2,'0')}/${dF.getFullYear()}` : '—';
     // Toda O.S listada aqui está finalizada; retrabalho é apenas observação.
     const teveRetrabalho = os.retrabalho || (os.checkout && os.checkout.situacao === 'Retrabalho');
-    const sit = teveRetrabalho ? 'Finalizado (c/ retrabalho)' : 'Finalizado';
+    const sit = statusLabelDe(os,'finalizada') + (teveRetrabalho ? ' (c/ retrabalho)' : '');
     return `<tr>
       <td>${esc(dataF)}</td><td><strong>${esc(os.numero||'—')}</strong></td>
       <td>${esc(os.cliente||'')}</td><td>${esc(os.servico||'')}</td>
@@ -3522,12 +3580,14 @@ function exportarFinalizadosPDF(list) {
     </style></head><body>
     <div class="top">${logo}<h1>Relatório de O.S finalizadas</h1></div>
     <p class="sub">Período: ${esc(periodoTxt)} · Gerado em ${new Date().toLocaleString('pt-BR')}</p>
+    <p>${list.filter(o => OPERACAO.concluida(o)).length} conclusões registradas pela equipe · ${list.filter(o => OPERACAO.encerradaERP(o)).length} encerramentos recebidos do ERP (data de sincronização, não de entrega). Tempo inclui deslocamento.</p>
     <div class="kpis">
       <div class="kpi"><b>${list.length}</b><span>finalizadas</span></div>
       <div class="kpi"><b>${totalRetrab}</b><span>retrabalhos</span></div>
       <div class="kpi"><b>${mediaH ? mediaH.toFixed(1) + 'h' : '—'}</b><span>tempo médio</span></div>
     </div>
-    <h2>Produtividade por colaborador</h2>
+    <h2>Participação nas instalações concluídas pela equipe</h2>
+    <p>Uma O.S pode envolver várias pessoas. Índice de registros: 70% ausência de retrabalho e 30% presença de foto; não mede produtividade.</p>
     <table><thead><tr><th>Colaborador</th><th>Entregas</th><th>Retrab.</th><th>Tempo méd.</th><th>Nota</th></tr></thead><tbody>${linhasInst || '<tr><td colspan="5">—</td></tr>'}</tbody></table>
     <h2>Detalhe das O.S</h2>
     <table><thead><tr><th>Data</th><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Equipe</th><th>Situação</th></tr></thead><tbody>${linhasOS}</tbody></table>
@@ -3664,13 +3724,13 @@ function renderControle() {
       <h3>🔐 Níveis de acesso</h3>
       <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">Defina o que cada nível pode ver/editar. Admin tem acesso total (não editável).</p>
       <table class="control-table niveis-table">
-        <thead><tr><th>Nível</th>${ABAS_DISPONIVEIS.map(a=>`<th>${esc(a)}</th>`).join('')}<th>Editar</th><th>Cadastrar</th></tr></thead>
+        <thead><tr><th>Nível</th>${ABAS_DISPONIVEIS.map(a=>`<th>${esc(ABAS_NOMES[a])}</th>`).join('')}<th>Editar</th><th>Cadastrar</th></tr></thead>
         <tbody>
           ${PAPEIS.map(papel => {
             const p = PERM[papel];
             const abas = p.abas === '*' ? ABAS_DISPONIVEIS : p.abas;
             return `<tr><td><strong>${esc(papel)}</strong></td>
-              ${ABAS_DISPONIVEIS.map(a => `<td><input type="checkbox" data-nivel-aba="${papel}|${a}" ${abas.includes(a)?'checked':''}></td>`).join('')}
+              ${ABAS_DISPONIVEIS.map(a => `<td><input type="checkbox" aria-label="${esc(papel)}: acesso a ${esc(ABAS_NOMES[a])}" data-nivel-aba="${papel}|${a}" ${abas.includes(a)?'checked':''}></td>`).join('')}
               <td><input type="checkbox" data-nivel-flag="${papel}|editar" ${p.editar?'checked':''}></td>
               <td><input type="checkbox" data-nivel-flag="${papel}|cadastrar" ${p.cadastrar?'checked':''}></td>
             </tr>`;
@@ -4296,8 +4356,7 @@ function hojeISO() {
 
 // O.S agendadas para um dia, ordenadas por horário.
 function servicosDoDia(dataISO) {
-  return STORE.getAllOS()
-    .filter(o => (o.instalacao && o.instalacao.data) === dataISO)
+  return OPERACAO.programadas(STORE.getAllOS(),dataISO,dataISO)
     .sort((a, b) => ordemHora(a).localeCompare(ordemHora(b)));
 }
 
@@ -4346,49 +4405,37 @@ function relatorioServicosDia(dataISO) {
 // Conta quantas O.S cada instalador entregou (finalizou) no mês. mesISO = 'YYYY-MM'.
 // Uma O.S com 2 pessoas na equipe conta +1 para cada uma.
 function produtividadeMes(mesISO) {
-  if (!mesISO) return [];
-  const fins = STORE.getAllOS().filter(o => o.finalizadaEm && mesLocalISO(o.finalizadaEm) === mesISO);
-  const mapa = {};
-  fins.forEach(os => {
-    const eq = (os.equipe || []);
-    const pessoas = eq.length ? eq : ['(sem equipe)'];
-    pessoas.forEach(nome => {
-      const m = mapa[nome] = mapa[nome] || { nome, entregas: 0, retrab: 0 };
-      m.entregas++;
-      if (os.retrabalho) m.retrab++;
-    });
-  });
-  return Object.values(mapa).sort((a, b) => b.entregas - a.entregas);
+  return OPERACAO.mensal(STORE.getAllOS(),mesISO).pessoas;
 }
 
 function tabelaProdutividadeMes(mesISO) {
-  const dados = produtividadeMes(mesISO);
-  if (!dados.length) return '<p class="text-muted mt-8">Nenhuma O.S finalizada nesse mês.</p>';
-  const total = dados.reduce((s, d) => s + d.entregas, 0);
-  return `<table class="control-table" style="margin-top:8px">
-    <thead><tr><th>Instalador</th><th>Entregas</th><th>Retrabalho</th></tr></thead>
+  const r = OPERACAO.mensal(STORE.getAllOS(),mesISO), dados = r.pessoas;
+  if (!r.total) return '<p class="text-muted mt-8">Nenhuma instalação concluída pela equipe nesse mês.</p>';
+  return `<p class="metricas-nota">${r.total} O.S únicas · ${r.participacoes} participações · ${r.semEquipe} sem equipe. Uma O.S pode envolver várias pessoas. Retiradas e baixas automáticas do ERP ficam fora desta contagem.</p><table class="control-table" style="margin-top:8px">
+    <thead><tr><th>Instalador</th><th>Participações em O.S</th><th>O.S com retrabalho</th></tr></thead>
     <tbody>${dados.map(d => `<tr><td>${esc(d.nome)}</td><td>${d.entregas}</td><td>${d.retrab}</td></tr>`).join('')}
-      <tr style="font-weight:700;border-top:2px solid #ccc"><td>Total de entregas</td><td>${total}</td><td>${dados.reduce((s, d) => s + d.retrab, 0)}</td></tr>
+      <tr style="font-weight:700;border-top:2px solid #ccc"><td>O.S únicas concluídas</td><td>${r.total}</td><td>${r.retrabalho}</td></tr>
     </tbody></table>`;
 }
 
 function relatorioMensalPorPessoa(mesISO) {
-  const dados = produtividadeMes(mesISO);
-  if (!dados.length) { toast('Nenhuma O.S finalizada nesse mês', 'error'); return; }
+  const r = OPERACAO.mensal(STORE.getAllOS(),mesISO), dados = r.pessoas;
+  if (!r.total) { toast('Nenhuma instalação concluída pela equipe nesse mês', 'error'); return; }
   const [y, m] = String(mesISO).split('-');
   const titulo = `${m}/${y}`;
-  const total = dados.reduce((s, d) => s + d.entregas, 0);
+  const total = r.total;
   const linhas = dados.map(d => `<tr><td>${esc(d.nome)}</td><td>${d.entregas}</td><td>${d.retrab}</td></tr>`).join('');
   const w = window.open('', '_blank');
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Produtividade ${esc(titulo)}</title>
     <style>body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}h1{font-size:20px;margin:0 0 4px}.date{font-size:15px;color:#0d9488;font-weight:700;margin-bottom:12px}
     table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;background:#f0f4fa;padding:6px;border-bottom:2px solid #ccc}td{padding:6px;border-bottom:1px solid #eee}tfoot td{font-weight:700;border-top:2px solid #ccc}</style>
     </head><body>
-    <h1>Impresilk — Produtividade por instalador</h1>
-    <div class="date">📅 ${esc(titulo)} · ${total} entrega(s)</div>
-    <table><thead><tr><th>Instalador</th><th>Entregas (O.S)</th><th>Com retrabalho</th></tr></thead>
+    <h1>Impresilk — Participação nas instalações concluídas</h1>
+    <div class="date">📅 ${esc(titulo)} · ${total} O.S únicas · ${r.participacoes} participações · ${r.semEquipe} sem equipe</div>
+    <p>Uma O.S pode envolver várias pessoas. Retiradas e baixas automáticas do ERP ficam fora desta contagem.</p>
+    <table><thead><tr><th>Instalador</th><th>Participações em O.S</th><th>Com retrabalho</th></tr></thead>
     <tbody>${linhas}</tbody>
-    <tfoot><tr><td>Total</td><td>${total}</td><td>${dados.reduce((s, d) => s + d.retrab, 0)}</td></tr></tfoot></table>
+    <tfoot><tr><td>O.S únicas concluídas</td><td>${total}</td><td>${r.retrabalho}</td></tr></tfoot></table>
     <script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script>
     </body></html>`);
   w.document.close();

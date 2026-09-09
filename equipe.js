@@ -26,16 +26,7 @@ function fmtInstalacao(inst) {
 }
 
 function calcStatus(os) {
-  if (os.finalizadaEm) return 'finalizada';
-  const inst = os.instalacao || {};
-  const agendada   = !!(inst.data && inst.periodo && (os.equipe || []).length);
-  const confirmada = os.confirmacao === 'Confirmado';
-  // Funil coerente (igual ao app de gestão): confirmar/sair exige agenda.
-  if (os.horaSaida && confirmada && agendada) return 'em_andamento';
-  if (confirmada && agendada)                 return 'confirmada';
-  if (agendada)                               return 'agendada';
-  if (os.liberadoPCP)                         return 'apto';
-  return 'aguardando_producao';
+  return OPERACAO.status(os);
 }
 // Os rótulos são os MESMOS do app.js (linhas 229 e 254). Duas telas com réguas
 // de texto diferentes para o mesmo estado é bug de leitura: aqui dizia
@@ -49,6 +40,7 @@ const STATUS_LABEL = {
 const STATUS_LABEL_INT = { aguardando_producao:'Aguardando produção', apto:'🛍 Pronto p/ retirada', finalizada:'Retirado' };
 function isInterno(os) { return !!(os && os.tipo === 'interno'); }
 function statusLabelDe(os, st) {
+  if (st === 'finalizada' && OPERACAO.encerradaERP(os)) return 'Encerrada no ERP';
   if (isInterno(os) && STATUS_LABEL_INT[st]) return STATUS_LABEL_INT[st];
   return STATUS_LABEL[st] || st;
 }
@@ -166,7 +158,7 @@ function enter() {
     el.textContent = status === 'ok' ? '✅'
       : status === 'pending' ? `⏳ ${pending}`
       : semSessao ? '🔒' : '⚠️';
-    el.title = status === 'ok' ? 'Tudo salvo na nuvem.'
+    el.title = status === 'ok' ? 'Não há edições deste aparelho aguardando envio.'
       : status === 'pending' ? `${pending} alteração(ões) aguardando envio. Some sozinho ao reconectar.`
       : semSessao ? 'A nuvem recusou este aparelho (sessão/acesso). Seu trabalho está guardado aqui — avise a gestão.'
       : 'Sem conexão — pode continuar; envia ao reconectar.';
@@ -174,9 +166,9 @@ function enter() {
     el.onclick = () => { if (el.title) toast(el.title); };
   });
   // Perda de dado nunca é silenciosa (o espelho é onde o trabalho nasce).
-  STORE.on('item-descartado', ({ item, motivo }) => {
+  STORE.on('item-pendente', ({ item, motivo }) => {
     const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : 'alteração';
-    toast(`⚠️ ${ref} NÃO foi salva na nuvem (${motivo || 'erro'}). Refaça e avise a gestão.`, 'error');
+    toast(`⚠️ ${ref} continua na fila deste aparelho (${motivo || 'erro'}). Avise a gestão.`, 'error');
   });
   STORE.on('pull-truncado', () => toast('A lista pode estar incompleta — recarregue a página.', 'error'));
   STORE.on('sem-sessao', () => {
@@ -298,7 +290,7 @@ function renderList() {
     // carro e dirigir até o endereço do cliente para descobrir na porta que era
     // o cliente quem vinha buscar.
     const interno = isInterno(proxima);
-    const naRua = !interno && (proxima.carroLiberado || proxima.horaSaida) && !proxima.horaRetorno;
+    const naRua = OPERACAO.naRua(proxima);
     const maps = (!interno && proxima.endereco) ? `https://maps.google.com/?q=${encodeURIComponent(proxima.endereco)}` : '';
     const tag = interno ? '🛍 Pronto p/ retirada — o cliente vem buscar'
       : naRua ? '🚗 Em rota' : '📍 Sua próxima instalação';
@@ -322,7 +314,7 @@ function renderList() {
     <div class="os-list">
       ${list.map(os => {
         const st = calcStatus(os);
-        const naRua = !os.finalizadaEm && (os.carroLiberado || os.horaSaida) && !os.horaRetorno;
+        const naRua = OPERACAO.naRua(os);
         return `<div class="os-list-item st-${st}${os.id===heroId?' is-hero':''}" data-os-id="${esc(os.id)}">
           <div class="list-info">
             <div class="list-numero">O.S ${esc(os.numero||'—')} ${naRua?'🚗':''} ${os.finalizadaEm?'✓':''}</div>

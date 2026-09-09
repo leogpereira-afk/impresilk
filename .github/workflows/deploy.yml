@@ -29,16 +29,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verificar regras, telas e sincronização
+        run: npm run verificar
+
       - name: Separar os arquivos do site
         run: |
           mkdir -p dist
-          rsync -a ./ dist/ \
-            --exclude dist/ --exclude .git/ --exclude .github/ \
-            --exclude .netlify/ --exclude netlify/ --exclude supabase/ \
-            --exclude scripts/ --exclude node_modules/ \
-            --exclude 'GUIA-*' --exclude package.json --exclude package-lock.json \
-            --exclude netlify.toml
-          echo "--- publicando: ---"; ls dist
+          cp index.html equipe.html styles.css config.js logo.js frases.js \
+            store.js auth.js operacao.js app.js equipe.js manifest.json \
+            icon.svg favicon.svg sw.js dist/
 
       # Sem "enablement": o token do Actions publica no Pages mas nao pode
       # CRIA-lo ("Resource not accessible by integration"). O site e habilitado
