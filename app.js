@@ -2426,19 +2426,21 @@ function renderPCP() {
   // Chips com contagem 0 de placeholder — pcpRenderCards() (chamado logo
   // abaixo) delega a pcpAtualizarChips() os números reais, já consistentes
   // com os filtros/busca ativos.
+  const etapaIcones = { todos: '📋', aguardando_producao: '🏭', apto: '📦', agendada: '📅', confirmada: '✅', em_andamento: '⚙️', finalizada: '🏁' };
+  const chipLabel = (icone, texto) => `<span class="pcp-chip-label"><span aria-hidden="true">${icone}</span> ${esc(texto)}</span>`;
   const chips = [['todos', 'Em aberto'], ...Object.entries(STATUS_LABEL)]
-    .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" aria-pressed="${STATE.pcpStatus === k}" data-pcp-status="${k}">${esc(lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
+    .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" aria-pressed="${STATE.pcpStatus === k}" data-pcp-status="${k}">${chipLabel(etapaIcones[k] || '📋', lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
   const tipoChips = [
-    ['todos', 'Todos os tipos'], ['externo', 'Instalação externa'], ['interno', 'Cliente retira']
-  ].map(([k, lbl]) => `<button class="pcp-chip pcp-chip-tipo tipo-${k} ${STATE.pcpTipo === k ? 'active' : ''}" aria-pressed="${STATE.pcpTipo === k}" data-pcp-tipo="${k}">${esc(lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
+    ['todos', '🗂️', 'Todos os tipos'], ['externo', '🚚', 'Instalação externa'], ['interno', '🏬', 'Cliente retira']
+  ].map(([k, icone, lbl]) => `<button class="pcp-chip pcp-chip-tipo tipo-${k} ${STATE.pcpTipo === k ? 'active' : ''}" aria-pressed="${STATE.pcpTipo === k}" data-pcp-tipo="${k}">${chipLabel(icone, lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
   // Navegação da carteira, acima da busca e dos filtros.
   const vistaBtns = [
-    ['',           'Ativos'],
-    ['retrabalho', 'Retrabalho'],
-    ['arquivados', 'Arquivados']
-  ].map(([k, lbl]) => `<button class="pcp-chip pcp-vista ${STATE.pcpVista === k ? 'active' : ''}" aria-pressed="${STATE.pcpVista === k}" data-pcp-vista="${k}">${esc(lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
+    ['',           '📋', 'Ativos'],
+    ['retrabalho', '🔧', 'Retrabalho'],
+    ['arquivados', '🗄️', 'Arquivados']
+  ].map(([k, icone, lbl]) => `<button class="pcp-chip pcp-vista ${STATE.pcpVista === k ? 'active' : ''}" aria-pressed="${STATE.pcpVista === k}" data-pcp-vista="${k}">${chipLabel(icone, lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
   const sorts = Object.entries(PCP_SORTS)
     .map(([k, v]) => `<option value="${k}" ${STATE.pcpSort === k ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
@@ -2455,7 +2457,7 @@ function renderPCP() {
           <input type="search" id="busca-pcp" aria-label="Buscar na carteira" placeholder="Buscar por O.S, cliente, endereço ou serviço" value="${esc(STATE.filtroBusca)}">
         </label>
         <label class="pcp-ordenacao"><span>Ordenar por</span><select id="pcp-sort">${sorts}</select></label>
-        ${podeEditar() ? '<div class="pcp-criar-acoes"><button class="btn-primary" id="pcp-nova-ext">+ O.S externa</button><button class="btn-ghost" id="pcp-nova-int">+ O.S retirada</button></div>' : ''}
+        ${podeEditar() ? '<div class="pcp-criar-acoes"><button class="btn-primary" id="pcp-nova-ext"><span aria-hidden="true">🚚</span> + O.S externa</button><button class="btn-ghost" id="pcp-nova-int"><span aria-hidden="true">🏬</span> + O.S retirada</button></div>' : ''}
       </div>
       <div class="pcp-filtro-linha" role="group" aria-labelledby="pcp-atendimento-label">
         <span class="pcp-filtro-label" id="pcp-atendimento-label">Atendimento</span>
@@ -2466,7 +2468,7 @@ function renderPCP() {
         <span id="pcp-resultado" role="status" aria-live="polite"></span>
         <button class="pcp-limpar" id="pcp-limpar-filtros" hidden>Limpar filtros</button>
       </div>
-    <details class="pcp-legenda" ${STATE.legendaAberta ? 'open' : ''}><summary>Entenda as cores dos cards</summary>
+    <details class="pcp-legenda" ${STATE.legendaAberta ? 'open' : ''}><summary><span aria-hidden="true">🎨</span> Entenda as cores dos cards</summary>
       <div class="leg-linhas">
         <span><span class="leg-sw" style="background:linear-gradient(90deg,#fffdf5,#fef3c7,#fed7aa,#fca5a5)"></span><strong>Fundo do card</strong> = prazo de entrega: quanto mais quente, mais perto — vermelho = atrasada.</span>
         <span><span class="leg-sw" style="background:#3b82f6"></span>Borda esquerda azul = 🚚 Externo · <span class="leg-sw" style="background:#db2777"></span>magenta = 🏬 Cliente retira.</span>
