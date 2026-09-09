@@ -104,3 +104,20 @@ test('busca atualiza total e limpar filtros preserva a vista e a ordenação esc
   assert.equal(t.run('STATE.filtroBusca'),'');
   assert.equal(t.node('#pcp-limpar-filtros').hidden,true);
 });
+test('prioridade do dia abre as O.S contadas sem herdar nem alterar filtros da carteira',()=>{
+  const t=tela([
+    {id:'hoje',numero:'101',instalacao:{data:hoje},cliente:'Cliente de hoje'},
+    {id:'longa',numero:'102',instalacao:{data:'2026-09-08',duracaoDias:3}},
+    {...final,id:'encerrada',instalacao:{data:hoje}},
+    {id:'futura',numero:'103',instalacao:{data:'2026-09-15'}}
+  ]);
+  t.run("STATE.pcpVista='arquivados'; STATE.pcpTipo='interno'; STATE.filtroBusca='outro cliente'; STATE._prioridade='hoje'; renderPrioridades()");
+  const html=t.node('#pcp-prioridades').innerHTML;
+  assert.match(html,/Para hoje · 2 O.S/);
+  assert.match(html,/data-os-id="hoje"/);
+  assert.match(html,/data-os-id="longa"/);
+  assert.doesNotMatch(html,/data-os-id="(encerrada|futura)"/);
+  assert.equal(t.run('STATE.pcpVista'),'arquivados');
+  assert.equal(t.run('STATE.pcpTipo'),'interno');
+  assert.equal(t.run('STATE.filtroBusca'),'outro cliente');
+});

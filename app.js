@@ -2073,12 +2073,13 @@ function osCardHTML(os) {
     : '';
   return `
     <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
-      <div class="card-header">
-        <div>
+      <div class="card-header card-header-os">
+        <div class="card-meta">
           <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${os.retrabalho && !os.finalizadaEm ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}</div>
-          <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
+          <span class="badge st-${st}">${statusLabelDe(os, st)}</span>
         </div>
-        <span class="badge st-${st}" style="margin-left:auto">${statusLabelDe(os, st)}</span>
+        <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
+        ${os.servico ? `<div class="card-servico" title="${esc(os.servico)}">${esc(os.servico)}</div>` : ''}
       </div>
       <div class="card-tipo-row">
         <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏬 Cliente retira' : '🚚 Externo'}</span>
@@ -2091,7 +2092,7 @@ function osCardHTML(os) {
         <div class="card-pct-bar"><div class="card-pct-fill" style="width:${pct}%"></div></div>
         <span class="card-pct-num">Ficha ${pct}%</span>
       </div>
-      ${pp ? `<div class="prox-passo"><span class="prox-passo-tag">Próximo</span> ${esc(pp.label)}</div>` : ''}
+      ${pp ? `<div class="prox-passo" title="${esc(pp.label)}"><span class="prox-passo-tag">Próximo passo</span><span class="prox-passo-texto">${esc(pp.label)}</span></div>` : ''}
       <div class="card-resp">✍ ${esc(resp)}${itens.length ? ` · ${prontos}/${itens.length} itens` : ''}</div>
       ${etapasBtns}
       <div class="card-acoes">
@@ -2400,19 +2401,23 @@ function renderPrioridades() {
   const el = $('#pcp-prioridades'); if (!el) return;
   const resumo = OPERACAO.resumo(STORE.getAllOS());
   const defs = [
-    ['hoje','Para hoje','Entrega prevista ou instalação em curso'],
-    ['atrasadas','Prazo vencido','Conferir entrega ou remarcar'],
-    ['semPrazo','Sem prazo','Definir uma data com o responsável'],
-    ['retirada','Prontas para retirada','Combinar retirada com o cliente'],
-    ['semRetorno','Saída a conferir','Registro antigo ou sem data válida'],
-    ['retrabalho','Retrabalhos pendentes','Conferir correção e responsável']
+    ['hoje','Para hoje','Entrega prevista ou instalação em curso','📅','Abrir o trabalho de hoje'],
+    ['atrasadas','Prazo vencido','Conferir entrega ou remarcar','⏰','Revisar prazos'],
+    ['semPrazo','Sem prazo','Definir uma data com o responsável','🗓️','Planejar entregas'],
+    ['retirada','Prontas para retirada','Combinar retirada com o cliente','🛍️','Organizar retiradas'],
+    ['semRetorno','Saída a conferir','Registro antigo ou sem data válida','🚚','Conferir saídas'],
+    ['retrabalho','Retrabalhos pendentes','Conferir correção e responsável','🔧','Cuidar dos ajustes']
   ];
   const foco = defs.find(d => d[0] === STATE._prioridade);
-  el.innerHTML = `<div class="gestao-head"><div><h2>Prioridades da operação</h2><p>Carteira completa · ${fmtDataBR(hojeISO())}. Os grupos podem conter a mesma O.S.</p></div></div>
-    <div class="gestao-indicadores">${defs.map(([key,nome,dica]) => `<button class="gestao-indicador ${key === STATE._prioridade ? 'selecionado' : ''}" aria-pressed="${key === STATE._prioridade}" data-prioridade="${key}"><span>${esc(nome)}</span><strong>${resumo[key].length}</strong><small>${esc(dica)}</small></button>`).join('')}</div>
-    ${foco ? `<div class="gestao-detalhe"><div class="gestao-head"><h3>${esc(foco[1])} · ${resumo[foco[0]].length} O.S</h3><button class="btn-ghost btn-sm" data-fechar-prioridade>Fechar lista</button></div>${osMiniList(resumo[foco[0]])}</div>` : ''}`;
-  $$('[data-prioridade]',el).forEach(b => b.onclick = () => { STATE._prioridade = STATE._prioridade === b.dataset.prioridade ? '' : b.dataset.prioridade; renderPrioridades(); });
-  const fechar = el.querySelector('[data-fechar-prioridade]'); if (fechar) fechar.onclick = () => { STATE._prioridade=''; renderPrioridades(); };
+  el.innerHTML = `<div class="pcp-abertura">
+      <div><p class="pcp-eyebrow"><span aria-hidden="true">✦</span> PRODUÇÃO IMPRESILK</p><h1>Vamos fazer acontecer<span>.</span></h1><p class="pcp-abertura-texto">Escolha uma prioridade. Cada O.S tem um próximo passo.</p></div>
+      <span class="pcp-data"><span aria-hidden="true">📆</span> ${new Date(hojeISO()+'T12:00:00').toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'})}</span>
+    </div>
+    <div class="pcp-missoes" role="group" aria-label="Prioridades da operação">${defs.map(([key,nome,dica,icone,acao]) => `<button class="pcp-missao ${key === STATE._prioridade ? 'selecionado' : ''}" aria-pressed="${key === STATE._prioridade}" aria-controls="pcp-prioridade-lista" data-prioridade="${key}" title="${esc(dica)}"><span class="pcp-missao-topo"><span class="pcp-missao-icone" aria-hidden="true">${icone}</span><strong>${resumo[key].length}</strong></span><span class="pcp-missao-nome">${esc(nome)}</span><span class="pcp-missao-acao">${esc(acao)} <span aria-hidden="true">→</span></span></button>`).join('')}</div>
+    <p class="pcp-prioridades-nota">Visão da carteira completa · Uma O.S pode aparecer em mais de uma prioridade.</p>
+    <div id="pcp-prioridade-lista" ${foco ? '' : 'hidden'}>${foco ? `<div class="gestao-detalhe"><div class="gestao-head"><div><h2>${esc(foco[1])} · ${resumo[foco[0]].length} O.S</h2><p>${esc(foco[2])}. Clique na O.S para abrir a ficha.</p></div><button class="btn-ghost btn-sm" data-fechar-prioridade>Fechar lista ×</button></div>${resumo[foco[0]].length ? osMiniList(resumo[foco[0]]) : '<p class="pcp-prioridade-vazia">Tudo em dia por aqui. Nenhuma O.S nesta prioridade agora.</p>'}</div>` : ''}</div>`;
+  $$('[data-prioridade]',el).forEach(b => b.onclick = () => { const key=b.dataset.prioridade; STATE._prioridade = STATE._prioridade === key ? '' : key; renderPrioridades(); el.querySelector(`[data-prioridade="${key}"]`).focus(); });
+  const fechar = el.querySelector('[data-fechar-prioridade]'); if (fechar) fechar.onclick = () => { const key=STATE._prioridade; STATE._prioridade=''; renderPrioridades(); el.querySelector(`[data-prioridade="${key}"]`).focus(); };
   bindCardClicks(el);
 }
 
@@ -2448,7 +2453,7 @@ function renderPCP() {
   el.innerHTML = `
     <section class="pcp-controles" aria-labelledby="pcp-carteira-titulo">
       <div class="pcp-controles-topo">
-        <h2 id="pcp-carteira-titulo">Ordens de serviço</h2>
+        <div class="pcp-carteira-heading"><h2 id="pcp-carteira-titulo"><span aria-hidden="true">🗂️</span> Ordens de serviço</h2><span id="pcp-resultado" role="status" aria-live="polite"></span></div>
         <div class="pcp-chips pcp-vistas" role="group" aria-label="Situação das ordens de serviço">${vistaBtns}</div>
       </div>
       <div class="pcp-busca-linha">
@@ -2465,12 +2470,11 @@ function renderPCP() {
       </div>
       ${STATE.pcpVista === '' ? `<div class="pcp-filtro-linha" role="group" aria-labelledby="pcp-etapa-label"><span class="pcp-filtro-label" id="pcp-etapa-label">Etapa</span><div class="pcp-chips">${chips}</div></div>` : ''}
       <div class="pcp-controles-rodape">
-        <span id="pcp-resultado" role="status" aria-live="polite"></span>
         <button class="pcp-limpar" id="pcp-limpar-filtros" hidden>Limpar filtros</button>
       </div>
     <details class="pcp-legenda" ${STATE.legendaAberta ? 'open' : ''}><summary><span aria-hidden="true">🎨</span> Entenda as cores dos cards</summary>
       <div class="leg-linhas">
-        <span><span class="leg-sw" style="background:linear-gradient(90deg,#fffdf5,#fef3c7,#fed7aa,#fca5a5)"></span><strong>Fundo do card</strong> = prazo de entrega: quanto mais quente, mais perto — vermelho = atrasada.</span>
+        <span><span class="leg-sw" style="background:linear-gradient(90deg,#fffdf5,#fef3c7,#fed7aa,#fca5a5)"></span><strong>Fundo do card</strong> = prazo de entrega: quanto mais quente, mais perto. Faixa superior vermelha = atraso ou retrabalho; o aviso escrito identifica o motivo.</span>
         <span><span class="leg-sw" style="background:#3b82f6"></span>Borda esquerda azul = 🚚 Externo · <span class="leg-sw" style="background:#db2777"></span>magenta = 🏬 Cliente retira.</span>
         <span><span class="badge st-agendada">Agendada</span> Badge = etapa do funil · pastel = esperando · <span class="badge st-em_andamento">Em andamento</span> sólido = acontecendo agora.</span>
         <span><span class="badge" style="background:#fee2e2;color:#b91c1c">⏰ atrasada</span> <span class="badge st-retrabalho">🔴 retrabalho</span> <span class="prazo-tag prazo-hoje">📌 HOJE</span> = atenção imediata.</span>
@@ -2479,7 +2483,7 @@ function renderPCP() {
     </section>
     <div class="cards-grid"></div>`;
 
-  el.insertAdjacentHTML('afterbegin','<div id="pcp-prioridades" class="gestao-box"></div>');
+  el.insertAdjacentHTML('afterbegin','<section id="pcp-prioridades" aria-label="Prioridades da operação"></section>');
   renderPrioridades();
   pcpRenderCards(); // preenche a grade conforme os filtros atuais
 
