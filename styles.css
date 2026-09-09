@@ -1249,154 +1249,15 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 }
 .periodo-indicador .pi-ico { font-size: .9rem; }
 
-/* ── Aba POPs (Procedimentos Operacionais Padrão) ─────────────────── */
-.pops-topo { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 12px 0 8px; }
-.pops-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.pops-cab h2 { font-size: 1.1rem; }
-.pops-total { font-size: .76rem; color: var(--muted); font-weight: 600; }
-.pop-busca {
-  width: 100%; margin: 10px 0; padding: 10px 12px; font-size: .9rem;
-  border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface);
-}
-.pop-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.pop-chip {
-  padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border);
-  background: var(--surface); color: var(--muted); font-size: .8rem; font-weight: 600; cursor: pointer;
-  transition: all .15s;
-}
-.pop-chip:hover { border-color: var(--blue); color: var(--blue); }
-.pop-chip.ativo { background: var(--blue); border-color: var(--blue); color: #fff; }
-
-.pops-lista { padding-top: 8px; }
-.pop-categoria { margin-bottom: 18px; }
-.pop-cat-titulo {
-  font-size: .95rem; font-weight: 700; color: var(--text); margin: 8px 0;
-  display: flex; align-items: center; gap: 8px;
-  padding-bottom: 6px; border-bottom: 2px solid var(--border);
-}
-.pop-cat-count {
-  font-size: .72rem; background: var(--border); color: var(--muted);
-  padding: 1px 8px; border-radius: 999px; font-weight: 700;
-}
-
-.pop-card {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-s);
-  margin-bottom: 8px; overflow: hidden; transition: box-shadow .15s;
-}
-.pop-card.aberto { box-shadow: var(--shadow); border-color: var(--blue); }
-.pop-head { display: flex; align-items: center; gap: 10px; padding: 12px; cursor: pointer; }
-.pop-head:hover { background: #f8fafc; }
-.pop-num {
-  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
-  background: var(--blue); color: #fff; font-weight: 800; font-size: .82rem;
-  display: flex; align-items: center; justify-content: center;
-}
-.pop-info { flex: 1; min-width: 0; }
-.pop-titulo { font-size: .9rem; font-weight: 600; color: var(--text); }
-.pop-meta { font-size: .74rem; color: var(--muted); margin-top: 2px; }
-.pop-nivel { flex: 0 0 auto; font-size: .68rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: .3px; }
-.pop-nivel.st-basico   { background: #dcfce7; color: var(--green); }
-.pop-nivel.st-medio    { background: #fef3c7; color: var(--amber); }
-.pop-nivel.st-avancado { background: #fee2e2; color: var(--red); }
-.pop-chevron { flex: 0 0 auto; color: var(--muted); font-size: .7rem; }
-
-.pop-detalhe { padding: 0 14px 14px; border-top: 1px solid var(--border); }
-.pop-bloco { margin-top: 12px; }
-.pop-bloco h4 { font-size: .82rem; font-weight: 700; color: var(--text); margin-bottom: 6px; }
-.pop-bloco ul, .pop-bloco ol { margin: 0; padding-left: 20px; }
-.pop-bloco li { font-size: .84rem; color: var(--text); margin-bottom: 4px; line-height: 1.45; }
-.pop-bloco.pop-atencao { background: #fffbeb; border-left: 3px solid var(--amber); border-radius: 4px; padding: 8px 8px 8px 0; }
-.pop-bloco.pop-atencao h4 { color: var(--amber); padding-left: 12px; }
-.pop-bloco.pop-atencao ul { padding-left: 30px; }
-.pop-bloco.pop-dicas { background: #f0fdf4; border-left: 3px solid var(--green); border-radius: 4px; padding: 8px 8px 8px 0; }
-.pop-bloco.pop-dicas h4 { color: var(--green); padding-left: 12px; }
-.pop-bloco.pop-dicas ul { padding-left: 30px; }
-.pop-card .pop-enviar { margin-top: 12px; }
-.pop-head .pop-enviar { margin: 0; }
-
-/* Modal de envio de POP */
-.pop-envio-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1000;
-  display: flex; align-items: center; justify-content: center; padding: 16px;
-}
-.pop-envio-box {
-  background: var(--surface); border-radius: var(--radius); padding: 16px;
-  width: 100%; max-width: 380px; box-shadow: var(--shadow-m);
-}
-.pop-envio-head { display: flex; align-items: center; justify-content: space-between; }
-.pop-envio-sub { font-size: .82rem; color: var(--muted); margin: 4px 0 12px; }
-.pop-contatos { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
-.pop-contato {
-  text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-s);
-  background: var(--surface); font-size: .85rem; cursor: pointer; transition: all .15s;
-}
-.pop-contato:hover { border-color: var(--green); background: #f0fdf4; }
-.pop-envio-manual { display: flex; gap: 6px; margin-top: 12px; }
-.pop-envio-manual input { flex: 1; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: .85rem; }
-
-/* Item 25 — botão Enviar POP no card da O.S */
+/* ── Etapas e ações dos cards de O.S ─────────────────────────────── */
 .card-etapas { margin-top: auto; padding-top: 8px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .card-etapa-btn { font-size: .78rem; font-weight: 600; padding: 7px 8px; border: 1px solid var(--border); border-radius: var(--radius-s); background: #f8fafc; color: var(--text); cursor: pointer; transition: background .12s, border-color .12s; }
 .card-etapa-btn:hover { background: #eff6ff; border-color: #bfdbfe; }
 .card-etapa-btn.done { background: var(--green); border-color: var(--green); color: #fff; }
 .card-etapa-btn.done:hover { background: var(--green); border-color: var(--green); }
 .card-acoes { margin-top: 8px; display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
-.card-pop { font-size: .78rem; }
 .card-finalizar { font-size: .78rem; }
 .card-fin-tag { font-size: .78rem; font-weight: 600; color: var(--green); align-self: center; }
-.os-list-item .card-pop { margin-left: auto; align-self: center; }
-.pop-envio-grupo { font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 10px 0 4px; }
-.pop-os-box { max-width: 460px; }
-.pop-os-sug { font-size: .82rem; color: var(--text); background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius-s); padding: 6px 10px; margin: 4px 0 8px; }
-.pop-os-lista { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-.pop-os-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface); cursor: pointer; transition: all .15s; }
-.pop-os-item:hover { border-color: var(--blue); background: #eff6ff; }
-.pop-os-tit { flex: 1; font-size: .85rem; }
-.pop-passo-foto { display: block; margin-top: 6px; max-width: 180px; max-height: 140px; border-radius: var(--radius-s); border: 1px solid var(--border); }
-
-/* Itens 28-30 — gerenciador / editor / métricas de POPs */
-.pop-ger-box, .pop-ed-box { max-width: 560px; width: 100%; max-height: 88vh; display: flex; flex-direction: column; }
-.pop-ger-tabs { display: flex; gap: 6px; margin: 8px 0; }
-.pop-ger-tab { flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface); cursor: pointer; font-size: .85rem; }
-.pop-ger-tab.ativo { background: var(--blue); color: #fff; border-color: var(--blue); }
-.pop-ger-corpo { overflow-y: auto; }
-.pop-ger-lista { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
-.pop-ger-linha { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-s); }
-.pop-ger-info { flex: 1; min-width: 0; }
-.pop-ger-tit { font-size: .85rem; font-weight: 500; }
-.pop-ger-sub { font-size: .75rem; color: var(--muted); margin-top: 2px; }
-.pop-ger-acoes { display: flex; gap: 2px; }
-.pop-tag-rasc, .pop-tag-novo, .pop-tag-edit { font-size: .66rem; padding: 1px 6px; border-radius: 999px; font-weight: 600; }
-.pop-tag-rasc { background: #fef3c7; color: var(--amber); }
-.pop-tag-novo { background: #dcfce7; color: var(--green); }
-.pop-tag-edit { background: #e0e7ff; color: var(--blue); }
-
-.pop-ed-corpo { overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px; }
-.pop-ed-lbl { font-size: .76rem; font-weight: 600; color: var(--muted); margin-top: 8px; }
-.pop-ed-corpo input, .pop-ed-corpo textarea, .pop-ed-corpo select { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: .85rem; font-family: inherit; width: 100%; }
-.pop-ed-row { display: flex; gap: 8px; }
-.pop-ed-row > div { flex: 1; }
-.pop-ed-passos { display: flex; flex-direction: column; gap: 6px; }
-.pop-ed-passo { display: flex; gap: 8px; align-items: flex-start; }
-.pop-ed-passo-txt { flex: 1; }
-.pop-ed-passo-foto { display: flex; flex-direction: column; gap: 4px; align-items: center; }
-.pop-ed-passo-foto img { max-width: 64px; max-height: 64px; border-radius: var(--radius-s); border: 1px solid var(--border); }
-.pop-ed-check { display: flex; align-items: center; gap: 8px; font-size: .82rem; margin-top: 10px; }
-.pop-ed-check input { width: auto; }
-.pop-ed-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
-
-.pop-met-bloco { margin-top: 12px; }
-.pop-met-bloco h4 { font-size: .85rem; margin-bottom: 6px; }
-.pop-met-linha { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-bottom: 1px solid var(--border); font-size: .82rem; }
-.pop-met-pos { font-weight: 700; color: var(--blue); width: 28px; }
-.pop-met-tit { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pop-met-dest { color: var(--muted); font-size: .76rem; }
-.pop-met-num { font-weight: 600; color: var(--text); }
-.pop-met-bar { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: .8rem; }
-.pop-met-barlab { width: 42%; }
-.pop-met-bartrack { flex: 1; height: 10px; background: #f1f5f9; border-radius: 999px; overflow: hidden; }
-.pop-met-barfill { display: block; height: 100%; background: var(--blue); }
-
 /* ── Fase 2: filtro de período + resumos ─────────────────────────────────── */
 .periodo-filtro { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .periodo-filtro input[type=date] { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: .82rem; }

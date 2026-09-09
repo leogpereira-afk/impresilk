@@ -51,7 +51,7 @@ ARQUIVOS:
   netlify/functions/os.js       → backend roteador
   netlify/functions/<import>.js → (opcional) importação agendada de ERP externo
   netlify.toml                  → deploy
-  (opcional) frases.js, pops.js → conteúdo estático (frases motivacionais, procedimentos)
+  (opcional) frases.js          → conteúdo estático (frases motivacionais)
 
 ═══════════════════════════════════════════════════════════════════════
 MODELO DE DADOS (entidade O.S)
@@ -262,7 +262,7 @@ FEATURES EXTRAS (implementar conforme o contexto)
 - Backup: exportar/importar JSON (admin).
 - Conflito: ao receber {conflito:true}, oferecer [Recarregar servidor] ou [Manter o meu].
 - Toasts de status; barra de status de sync (ok/pending/offline) visível.
-- (opcional) Frases motivacionais e biblioteca de Procedimentos (POPs) estáticos.
+- (opcional) Frases motivacionais.
 - (opcional) Gamificação: barra de progresso da ficha + celebração ao completar.
 
 ═══════════════════════════════════════════════════════════════════════

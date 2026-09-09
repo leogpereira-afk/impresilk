@@ -8,7 +8,7 @@ As alterações desta revisão tornam essas diferenças visíveis e acrescentam 
 
 ## Escopo e evidência
 
-- Navegação no site publicado: PCP, Instalação, Execução, Retrabalho, Finalizados, Painel e Configurações. POPs foi retirado da navegação, das permissões disponíveis, dos atalhos e dos arquivos publicados. O sistema independente de POPs permanece fora do escopo.
+- Navegação no site publicado: PCP, Instalação, Execução, Retrabalho, Finalizados, Painel e Configurações. POPs foi retirado da navegação, das permissões disponíveis, dos atalhos e dos arquivos publicados. Após autorização expressa, o módulo pops.js e seus estilos também foram excluídos do código do PCP. O sistema independente de POPs permanece fora do escopo.
 - Código de leitura/cálculo, filtros, relatórios, formulário, espelho do instalador, cache, fila de sincronização e caminhos principais das funções do servidor revisados.
 - Implementação em cópia isolada baseada no commit `f2b620b`. Não houve alteração de O.S, credenciais, permissões ou banco de produção.
 - Em consulta visual de 09/09, o diagnóstico publicado mostrava 754 O.S na nuvem, importação automática registrada às 19:21:22 e nenhum envio pendente naquele aparelho. A área de acessos informava sessão expirada. Isso comprova a resposta mostrada por essas telas, não uma certificação de disponibilidade permanente.
@@ -89,7 +89,7 @@ Integrações com RH/Compras devem usar identificadores e decisões explícitas.
 - Revisão final do desktop: sete abas, cards completos, programação, histórico, tabelas e configurações. Os indicadores ocupam a largura disponível; ações dos cards ficam alinhadas; campos das configurações seguem o padrão da ficha; troca de aba retorna ao início. Retrabalho pendente mantém cor de atenção mesmo após conclusão da O.S original, e o histórico explicita os retrabalhos sem equipe ou em retiradas.
 - Não foram executados upload real de fotos, envio de WhatsApp, restauração de backup, mudança de credenciais ou publicação do servidor. Não houve alteração de registros de produção.
 - Comando de verificação: `npm run verificar`. Prévia isolada: `npm run preview:auditoria`.
-- As mudanças estão preparadas em uma branch de revisão. A publicação no endereço oficial e a validação posterior com dados reais são etapas distintas da validação local.
+- A publicação no endereço oficial e a validação posterior com dados reais complementam a validação local; o fluxo de publicação executa novamente as verificações antes de disponibilizar os arquivos.
 
 ## Roteiro de aceite para publicação
 
