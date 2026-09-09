@@ -68,7 +68,7 @@ test('401 conserva fila e informa sessão recusada',async()=>{
 });
 test('service worker remove apenas caches deste sistema',async()=>{
   const handlers={},apagados=[];
-  const ctx=vm.createContext({self:{addEventListener:(e,fn)=>handlers[e]=fn,clients:{claim:async()=>{}}},caches:{keys:async()=>['impresilk-shell-v57','impresilk-shell-v58','rh-v20','dre-v5'],delete:async k=>apagados.push(k)}});
+  const ctx=vm.createContext({self:{addEventListener:(e,fn)=>handlers[e]=fn,clients:{claim:async()=>{}}},caches:{keys:async()=>['impresilk-shell-v57','impresilk-shell-v58','impresilk-shell-v59','rh-v20','dre-v5'],delete:async k=>apagados.push(k)}});
   vm.runInContext(fs.readFileSync(path.join(process.env.PCP_BASELINE || path.join(__dirname,'..'),'sw.js'),'utf8'),ctx);
-  let p;handlers.activate({waitUntil:v=>p=v});await p;assert.deepEqual(apagados,['impresilk-shell-v57']);
+  let p;handlers.activate({waitUntil:v=>p=v});await p;assert.deepEqual(apagados,['impresilk-shell-v57','impresilk-shell-v58']);
 });
