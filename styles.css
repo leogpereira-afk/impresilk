@@ -211,6 +211,7 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 }
 
 .os-card {
+  display: flex; flex-direction: column; min-width: 0;
   background: var(--surface); border-radius: var(--radius);
   box-shadow: var(--shadow); padding: 14px;
   cursor: pointer; border: 2px solid transparent;
@@ -381,7 +382,8 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field label { font-size: .78rem; font-weight: 600; color: var(--muted); }
 
-.field input, .field select, .field textarea {
+.field input, .field select, .field textarea,
+.cfg-section input:not([type]), #painel-range input, #prod-mes {
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
   padding: 8px 10px; font-size: .88rem;
@@ -390,12 +392,15 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   transition: border-color .15s, box-shadow .15s;
   font-family: inherit;
 }
-.field input:focus, .field select:focus, .field textarea:focus {
+.field input:focus, .field select:focus, .field textarea:focus,
+.cfg-section input:not([type]):focus, #painel-range input:focus, #prod-mes:focus {
   outline: none;
   border-color: var(--blue);
   box-shadow: 0 0 0 3px rgba(24,119,242,.15);
 }
 .field textarea { resize: vertical; min-height: 64px; }
+#painel-range input, #prod-mes { width: auto; }
+.cfg-section input:not([type]) { min-width: 0; }
 
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .field-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
@@ -703,7 +708,7 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 
 /* ── Painel de KPIs ──────────────────────────────────────────────────────── */
 .kpi-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px; margin-bottom: 16px;
 }
 .kpi-card {
@@ -1330,7 +1335,7 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .pop-envio-manual input { flex: 1; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: .85rem; }
 
 /* Item 25 — botão Enviar POP no card da O.S */
-.card-etapas { margin-top: 8px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.card-etapas { margin-top: auto; padding-top: 8px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .card-etapa-btn { font-size: .78rem; font-weight: 600; padding: 7px 8px; border: 1px solid var(--border); border-radius: var(--radius-s); background: #f8fafc; color: var(--text); cursor: pointer; transition: background .12s, border-color .12s; }
 .card-etapa-btn:hover { background: #eff6ff; border-color: #bfdbfe; }
 .card-etapa-btn.done { background: var(--green); border-color: var(--green); color: #fff; }

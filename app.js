@@ -809,6 +809,7 @@ function initTabs() {
       STATE.activeTab = tab;
       STORE.pull(refreshAposPull);
       renderActiveTab();
+      window.scrollTo({ top: 0, behavior: 'instant' });
     };
   });
 }
@@ -2899,12 +2900,12 @@ function renderPainelKPIs() {
 
   el.innerHTML = `
     <div class="kpi-grid">
-      <div class="kpi-card clickable" data-detail="todas"><div class="kpi-val">${todas.length}</div><div class="kpi-lbl">Instalações previstas no período</div></div>
+      <div class="kpi-card clickable" data-detail="todas"><div class="kpi-val">${todas.length}</div><div class="kpi-lbl">Agendadas no período · inclui encerradas</div></div>
       <div class="kpi-card clickable" data-detail="finalizadas"><div class="kpi-val">${finalizadas.length}</div><div class="kpi-lbl">Conclusões registradas no período</div></div>
       <div class="kpi-card clickable" data-detail="retrab"><div class="kpi-val">${comRetrab}</div><div class="kpi-lbl">Com retrabalho</div></div>
       <div class="kpi-card"><div class="kpi-val">${horas.length ? mediaH.toFixed(1)+'h' : '—'}</div><div class="kpi-lbl">Tempo entre saída e retorno · ${horas.length} ${horas.length===1?'registro':'registros'}</div></div>
       <div class="kpi-card clickable live" data-detail="emrua"><div class="kpi-val">${emRua.length}</div><div class="kpi-lbl">Em execução agora</div></div>
-      <div class="kpi-card clickable" data-detail="hoje"><div class="kpi-val">${agendadasHoje}</div><div class="kpi-lbl">Instalações previstas hoje</div></div>
+      <div class="kpi-card clickable" data-detail="hoje"><div class="kpi-val">${agendadasHoje}</div><div class="kpi-lbl">Instalações em aberto hoje</div></div>
       <div class="kpi-card clickable" data-detail="aptas"><div class="kpi-val">${aptas}</div><div class="kpi-lbl">Aptas (aguardando)</div></div>
     </div>
     <p class="metricas-nota">Conclusões usam a data de finalização registrada pela equipe e incluem retiradas. Tempo inclui deslocamento; não mede horas produtivas. Os três últimos indicadores mostram a situação atual.</p>
@@ -3026,12 +3027,12 @@ function renderPainelDetalhe(todas, todasOS, finalizadas, porInst) {
   if (!d) { box.innerHTML = ''; return; }
 
   let titulo = '', list = [];
-  if (d === 'todas')            { titulo = 'Instalações previstas no período'; list = todas; }
+  if (d === 'todas')            { titulo = 'Instalações agendadas no período · inclui encerradas'; list = todas; }
   else if (d === 'finalizadas') { titulo = 'Finalizadas no período'; list = finalizadas; }
   else if (d === 'retrab')      { titulo = 'Com retrabalho'; list = finalizadas.filter(o => o.retrabalho); }
   else if (d === 'erp')         { titulo = 'Encerramentos recebidos do ERP — data de sincronização'; const {de,ate}=painelIntervalo(); list=todasOS.filter(o => OPERACAO.encerradaERP(o) && OPERACAO.emIntervalo(o.finalizadaEm,de,ate)); }
   else if (d === 'emrua')       { titulo = 'Em execução agora'; list = todasOS.filter(o => OPERACAO.naRua(o)); }
-  else if (d === 'hoje')        { titulo = 'Instalações previstas hoje'; list = OPERACAO.programadas(todasOS,hojeISO(),hojeISO()); }
+  else if (d === 'hoje')        { titulo = 'Instalações em aberto hoje'; list = OPERACAO.programadas(todasOS,hojeISO(),hojeISO()); }
   else if (d === 'aptas')       { titulo = 'Aptas (aguardando)'; list = todasOS.filter(o => calcStatus(o) === 'apto'); }
   else if (d.startsWith('inst:')) { const n = d.slice(5); titulo = 'Serviços de ' + n; list = finalizadas.filter(o => (o.equipe||[]).includes(n)); }
   else if (d.startsWith('oper:')) { const n = d.slice(5); titulo = 'O.S preenchidas por ' + n; list = todasOS.filter(o => (o.atualizadoPor||o.aptoPor||o.criadoPor) === n); }
@@ -3241,8 +3242,8 @@ function renderExecucao() {
     <div class="filter-bar">${filtroPeriodoHTML('_fExec')}</div>
     <div class="exec-resumo">
       <span class="exec-chip">🛠 ${list.length} instalações para acompanhar</span>
-      <span class="exec-chip">🚗 ${naRua} saídas sem retorno hoje</span>
-      ${conferir ? `<span class="exec-chip exec-chip-atraso">${conferir} saídas a conferir</span>` : ''}
+      <span class="exec-chip">🚗 ${naRua} saída${naRua === 1 ? '' : 's'} sem retorno hoje</span>
+      ${conferir ? `<span class="exec-chip exec-chip-atraso">${conferir} saída${conferir === 1 ? '' : 's'} a conferir</span>` : ''}
       ${atrasadas ? `<span class="exec-chip exec-chip-atraso">⏰ ${atrasadas} atrasada${atrasadas === 1 ? '' : 's'}</span>` : ''}
     </div>
     <div class="os-list">${list.map(execItemHTML).join('') || emptyState('🛠', 'Nenhuma O.S em execução', 'As O.S confirmadas e em andamento aparecem aqui.')}</div>`;
@@ -3312,7 +3313,7 @@ function renderRetrabalho() {
     <div class="os-list">
       ${list.map(os => {
         const resolvido = !!os.dataResolvido;
-        return `<div class="os-list-item st-${calcStatus(os)} ${alertaOS(os)}" data-os-id="${esc(os.id)}">
+        return `<div class="os-list-item st-${resolvido ? 'finalizada' : 'retrabalho'}" data-os-id="${esc(os.id)}">
           <div class="list-info">
             <div class="list-numero">O.S ${esc(os.numero||'—')} ${resolvido?'✓ resolvido':'⚠ pendente'}</div>
             <div class="list-cliente">${esc(os.cliente)} — ${esc(os.problema || 'sem descrição')}</div>
@@ -3464,7 +3465,9 @@ function finRenderDash() {
       <span class="fin-colab-bar"><span style="width:${pct}%"></span></span>
       <span class="fin-colab-num">${x.retrab} <span class="fin-colab-pct">(${pct}%)</span></span>
     </div>`;
-  }).join('') : '<p class="text-muted" style="padding:8px">Nenhum retrabalho no período. 🎉</p>';
+  }).join('') : '<p class="text-muted" style="padding:8px">Nenhum retrabalho em instalações com equipe identificada neste período.</p>';
+  const retrabSemEquipe = list.filter(o => o.retrabalho && !isInterno(o) && !OPERACAO.equipe(o).length).length;
+  const retrabRetiradas = list.filter(o => o.retrabalho && isInterno(o)).length;
 
   // Produtividade (ordenável: entregas | tempo | nota)
   const sort = STATE._finSort || 'entregas';
@@ -3499,12 +3502,12 @@ function finRenderDash() {
     <div class="fin-kpis">
       <div class="fin-kpi"><span class="fin-kpi-num">${list.length}</span><span class="fin-kpi-lbl">conclusões registradas no período</span></div>
       <div class="fin-kpi"><span class="fin-kpi-num">${nAtual}</span><span class="fin-kpi-lbl">${MESES[agora.getMonth()]} até dia ${diaComparacao} <span class="fin-delta ${deltaCls}">${delta == null ? 'sem base percentual' : (delta>0?'▲ ':delta<0?'▼ ':'')+Math.abs(delta)+'%'}</span> vs os mesmos dias de ${MESES[dPrev.getMonth()].slice(0,3)} · independente do filtro</span></div>
-      <div class="fin-kpi"><span class="fin-kpi-num">${totalRetrab}</span><span class="fin-kpi-lbl">retrabalhos (${taxa}%)</span></div>
+      <div class="fin-kpi"><span class="fin-kpi-num">${totalRetrab}</span><span class="fin-kpi-lbl">O.S com retrabalho (${taxa}%)</span></div>
     </div>
 
     <div class="fin-bloco">
       <h3 class="bloco-titulo">📅 Conclusões registradas por mês · histórico completo</h3>
-      <p class="metricas-nota">${periodo.length-list.length} baixas automáticas do ERP no período não entram nos indicadores de entrega. Retiradas estão no total; os indicadores por instalador consideram somente instalações externas.</p>
+      <p class="metricas-nota">Encerramentos automáticos do ERP no período: ${periodo.length-list.length}. Ficam fora dos indicadores de entrega. Retiradas estão no total; os indicadores por instalador consideram somente instalações externas.</p>
       <div class="fin-mes-chart">${barras}</div>
     </div>
 
@@ -3512,6 +3515,7 @@ function finRenderDash() {
       <h3 class="bloco-titulo">🔁 Participação em O.S com retrabalho</h3>
       <p class="metricas-nota">Participação não identifica quem causou o retrabalho. Confira a causa registrada na O.S.</p>
       <div class="fin-colab-lista">${retrabHTML}</div>
+      ${retrabSemEquipe || retrabRetiradas ? `<p class="metricas-nota">Retrabalhos fora da lista por colaborador: ${retrabSemEquipe} em instalações sem equipe identificada · ${retrabRetiradas} em pedidos de retirada. Estão incluídos no total de O.S com retrabalho acima.</p>` : ''}
     </div>
 
     <div class="fin-bloco">

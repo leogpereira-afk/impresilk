@@ -82,10 +82,11 @@ Integrações com RH/Compras devem usar identificadores e decisões explícitas.
 
 ## Validação e publicação
 
-- Verificação local: sintaxe dos arquivos JavaScript e 28 testes de regras, telas e persistência, sem dependências de teste adicionais.
+- Verificação local: sintaxe dos arquivos JavaScript e 30 testes de regras, telas e persistência, sem dependências de teste adicionais.
 - Comparação com a base anterior: 13 testes de regressão falham na versão original e passam nas correções. Os três testes de comportamentos já corretos continuam passando.
 - Prévia com dados fictícios e conexões externas bloqueadas. Navegação nas sete abas, lista/quadro, conferência diária, abertura da ficha por conflito e aviso dentro da ficha verificados no navegador.
 - Layout conferido no tamanho padrão do navegador e com largura de 390 px; transbordamento do cabeçalho e de Configurações corrigido.
+- Revisão final do desktop: sete abas, cards completos, programação, histórico, tabelas e configurações. Os indicadores ocupam a largura disponível; ações dos cards ficam alinhadas; campos das configurações seguem o padrão da ficha; troca de aba retorna ao início. Retrabalho pendente mantém cor de atenção mesmo após conclusão da O.S original, e o histórico explicita os retrabalhos sem equipe ou em retiradas.
 - Não foram executados upload real de fotos, envio de WhatsApp, restauração de backup, mudança de credenciais ou publicação do servidor. Não houve alteração de registros de produção.
 - Comando de verificação: `npm run verificar`. Prévia isolada: `npm run preview:auditoria`.
 - As mudanças estão preparadas em uma branch de revisão. A publicação no endereço oficial e a validação posterior com dados reais são etapas distintas da validação local.

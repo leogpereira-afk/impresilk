@@ -74,3 +74,18 @@ test('conflito aparece na programação da própria ficha e some em turnos disti
   b.instalacao={data:hoje,periodo:'Tarde'};
   assert.equal(t.run("alertasAgendaHTML(STORE.getOS('a'))"),'');
 });
+test('painel de finalizados explica retrabalho sem equipe e em retirada sem fingir ausência',()=>{
+  const t=tela([{...final,equipe:[],retrabalho:true},{...final,id:'retirada',tipo:'interno',retrabalho:true}]);
+  t.run('finRenderDash()');
+  const html=t.node('#fin-content').innerHTML;
+  assert.match(html,/1 em instalações sem equipe identificada · 1 em pedidos de retirada/);
+  assert.doesNotMatch(html,/Nenhum retrabalho no período/);
+  assert.match(html,/>2<\/span><span class="fin-kpi-lbl">O.S com retrabalho/);
+});
+test('retrabalho pendente fica em atenção mesmo após conclusão da O.S original',()=>{
+  const t=tela([{...final,retrabalho:true},{...final,id:'resolvida',retrabalho:true,dataResolvido:hoje}]);
+  t.run('renderRetrabalho()');
+  const html=t.node('#panel-retrabalho').innerHTML;
+  assert.match(html,/class="os-list-item st-retrabalho" data-os-id="a"/);
+  assert.match(html,/class="os-list-item st-finalizada" data-os-id="resolvida"/);
+});
