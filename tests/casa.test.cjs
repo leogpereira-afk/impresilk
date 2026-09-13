@@ -43,7 +43,7 @@ test('entrega da casa é O.S. finalizada no PCP, não baixa Mubisys', () => {
   assert.deepEqual(t.run(`osFinalizadasMes('${mes}').map(o=>o.id)`), ['1']);
 });
 
-test('ponto vai para um instalador na mão; equipe de dois fica de fora até apontar', () => {
+test('ponto vai para quem foi apontado; várias pessoas na mesma O.S. levam ponto', () => {
   const t = casa([
     fin('a', { equipe: ['Natan'] }),
     fin('b', { equipe: ['Paulo', 'Lucas'] }),
@@ -53,9 +53,19 @@ test('ponto vai para um instalador na mão; equipe de dois fica de fora até apo
   assert.equal(rank.length, 1);
   assert.equal(rank[0].nome, 'Natan');
   assert.equal(rank[0].osCount, 1);
-  const apontado = t.run(`rankingFinalizadas('${mes}', {b:'Lucas'})`);
-  assert.equal(apontado.length, 2);
-  assert.equal(apontado.find(p => p.nome === 'Lucas').osCount, 1);
+  const um = t.run(`rankingFinalizadas('${mes}', {b:['Lucas']})`);
+  assert.equal(um.length, 2);
+  assert.equal(um.find(p => p.nome === 'Lucas').osCount, 1);
+  const legado = t.run(`rankingFinalizadas('${mes}', {b:'Lucas'})`);
+  assert.equal(legado.find(p => p.nome === 'Lucas').osCount, 1);
+  const dois = t.run(`rankingFinalizadas('${mes}', {b:['Paulo','Lucas']})`);
+  assert.equal(dois.length, 3);
+  assert.equal(dois.find(p => p.nome === 'Paulo').osCount, 1);
+  assert.equal(dois.find(p => p.nome === 'Lucas').osCount, 1);
+  assert.equal(dois.reduce((s, p) => s + p.osCount, 0), 3);
+  const vazio = t.run(`rankingFinalizadas('${mes}', {a:[], b:['Paulo']})`);
+  assert.equal(vazio.length, 1);
+  assert.equal(vazio[0].nome, 'Paulo');
 });
 
 test('retrabalho marca a pessoa e não inventa valor; extra não entra', () => {

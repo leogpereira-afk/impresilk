@@ -38,22 +38,29 @@ function gravarBonusCasa(b) {
   STORE.saveCFG(cfg);
 }
 
-function instaladorDaOs(os, pontos) {
-  if (pontos[os.id]) return pontos[os.id];
+function nomesDoPonto(valor) {
+  if (Array.isArray(valor)) return [...new Set(valor.map(n => String(n).trim()).filter(Boolean))];
+  if (typeof valor === 'string' && valor.trim()) return [valor.trim()];
+  return [];
+}
+
+function instaladoresDaOs(os, pontos) {
+  if (Object.prototype.hasOwnProperty.call(pontos, os.id)) return nomesDoPonto(pontos[os.id]);
   const eq = OPERACAO.equipe(os);
-  return eq.length === 1 ? eq[0] : '';
+  return eq.length === 1 ? eq : [];
 }
 
 function rankingFinalizadas(mes, pontos) {
   const map = new Map();
   for (const os of osFinalizadasMes(mes)) {
-    const nome = instaladorDaOs(os, pontos);
-    if (!nome) continue;
-    const d = map.get(nome) || { nome, osCount: 0, retrab: 0, itens: [] };
-    d.osCount += 1;
-    if (os.retrabalho) d.retrab += 1;
-    d.itens.push(os);
-    map.set(nome, d);
+    const nomes = instaladoresDaOs(os, pontos);
+    for (const nome of nomes) {
+      const d = map.get(nome) || { nome, osCount: 0, retrab: 0, itens: [] };
+      d.osCount += 1;
+      if (os.retrabalho) d.retrab += 1;
+      d.itens.push(os);
+      map.set(nome, d);
+    }
   }
   return [...map.values()].sort((a, b) => b.osCount - a.osCount || a.nome.localeCompare(b.nome, 'pt-BR'));
 }
@@ -140,7 +147,7 @@ function renderPerformanceCasa() {
     return `<article class="casa-card">
       <header class="casa-card-head">
         <span class="casa-pos">${i + 1}</span>
-        <div><strong>${esc(p.nome)}</strong><p>${p.osCount} O.S. finalizada(s)${p.retrab ? ' · ' + p.retrab + ' retrabalho' : ''}</p></div>
+        <div><strong>${esc(p.nome)}</strong><p>${p.osCount} ponto(s)${p.retrab ? ' · ' + p.retrab + ' retrabalho' : ''}</p></div>
         <div class="casa-valor"><b>${rotulo}</b></div>
       </header>
       <div class="casa-acoes">
@@ -148,26 +155,29 @@ function renderPerformanceCasa() {
         ${st === 'aprovado' ? `<button class="btn-primary btn-sm" data-pagar="${esc(p.nome)}">Pagar bônus</button>` : ''}
         ${st !== 'aberto' ? `<button class="btn-ghost btn-sm" data-reabrir="${esc(p.nome)}">Reabrir</button>` : ''}
       </div>
-      <ul class="casa-os">${p.itens.map(os => {
-        const atual = instaladorDaOs(os, b.pontos);
-        const opts = [...new Set([atual, ...OPERACAO.equipe(os), ...instaladores].filter(Boolean))]
-          .map(n => `<option ${n === atual ? 'selected' : ''}>${esc(n)}</option>`).join('');
-        return `<li>O.S ${esc(os.numero || '—')} · ${esc(os.cliente || '')}
-          <label>Instalador <select data-ponto="${esc(os.id)}"><option value="">Apontar</option>${opts}</select></label>
-        </li>`;
-      }).join('')}</ul>
+      <ul class="casa-os">${p.itens.map(os => `<li>O.S ${esc(os.numero || '—')} · ${esc(os.cliente || '')}</li>`).join('')}</ul>
     </article>`;
   }).join('');
-  const semPonto = fins.filter(os => !instaladorDaOs(os, b.pontos));
+  const semPonto = fins.filter(os => !instaladoresDaOs(os, b.pontos).length);
+  const apontar = fins.map(os => {
+    const marcados = instaladoresDaOs(os, b.pontos);
+    const nomes = [...new Set([...marcados, ...OPERACAO.equipe(os), ...instaladores].filter(Boolean))];
+    return `<li>
+      <div>O.S ${esc(os.numero || '—')} · ${esc(os.cliente || '')}${os.retrabalho ? ' · retrabalho' : ''}</div>
+      <div class="casa-pontos">${nomes.map(n =>
+        `<label><input type="checkbox" data-ponto="${esc(os.id)}" value="${esc(n)}" ${marcados.includes(n) ? 'checked' : ''}> ${esc(n)}</label>`
+      ).join('')}</div>
+    </li>`;
+  }).join('');
   el.innerHTML = `
     <div class="gestao-box">
-      <div class="gestao-head"><div><h2>Performance</h2><p>Entrega = finalizada no PCP. Ponto no instalador, na mão. Extra não entra. Folha da casa não é alterada aqui.</p></div>
+      <div class="gestao-head"><div><h2>Performance</h2><p>Entrega = finalizada no PCP. Na mesma O.S. várias pessoas podem levar ponto — quem leva, você aponta. Extra não entra. Folha da casa não é alterada aqui.</p></div>
         <label class="casa-mes">Mês <input type="month" id="perf-mes" value="${esc(mes)}"></label>
       </div>
       <div class="gestao-indicadores">
         <div class="gestao-indicador"><small>Pessoas em apuração</small><strong>${rank.length}</strong></div>
         <div class="gestao-indicador"><small>O.S. finalizadas</small><strong>${fins.length}</strong></div>
-        <div class="gestao-indicador"><small>Propostas aprovadas</small><strong>${dinheiroCasa(aprovado)}</strong></div>
+        <div class="gestao-indicador"><small>Pontos apontados</small><strong>${totalOs}</strong></div>
         <div class="gestao-indicador"><small>Orçamento disponível</small><strong>${dinheiroCasa(Math.max(0, b.orcamento - aprovado))}</strong></div>
       </div>
       <div class="casa-criterios">
@@ -175,23 +185,27 @@ function renderPerformanceCasa() {
         <label>Teto por pessoa <input type="number" min="0" step="0.01" id="perf-teto" value="${b.teto || ''}" placeholder="Sem teto"></label>
       </div>
       ${pago ? `<p class="metricas-nota">Já marcado como pago nesta apuração: ${dinheiroCasa(pago)}. Não lança na folha.</p>` : ''}
-      ${semPonto.length ? `<p class="metricas-nota">${semPonto.length} O.S. sem instalador apontado — não entram no ranking até você apontar.</p>` : ''}
+      ${semPonto.length ? `<p class="metricas-nota">${semPonto.length} O.S. sem ninguém apontado — não entram no ranking até você apontar.</p>` : ''}
     </div>
-    <div class="casa-rank">${cards || emptyState('🏅', 'Nenhuma finalizada neste mês', 'A apuração lê O.S. finalizada no PCP.')}</div>`;
+    <div class="gestao-box">
+      <div class="gestao-head"><div><h2>Apontar quem leva o ponto</h2><p>Marque uma ou mais pessoas em cada O.S. Não divide sozinho.</p></div></div>
+      <ul class="casa-os">${apontar || '<li class="text-muted">Nenhuma finalizada neste mês.</li>'}</ul>
+    </div>
+    <div class="casa-rank">${cards || emptyState('🏅', 'Nenhum ponto apontado neste mês', 'A apuração lê O.S. finalizada no PCP, com o ponto na mão.')}</div>`;
   const mesEl = document.getElementById('perf-mes');
   if (mesEl) mesEl.onchange = () => { if (mesEl.value) { gravarBonusCasa({ ...b, mes: mesEl.value }); renderPerformanceCasa(); } };
   const orcEl = document.getElementById('perf-orc');
   if (orcEl) orcEl.onchange = () => { gravarBonusCasa({ ...b, orcamento: Math.max(0, Number(orcEl.value) || 0) }); renderPerformanceCasa(); };
   const tetoEl = document.getElementById('perf-teto');
   if (tetoEl) tetoEl.onchange = () => { gravarBonusCasa({ ...b, teto: Math.max(0, Number(tetoEl.value) || 0) }); renderPerformanceCasa(); };
-  el.querySelectorAll('[data-ponto]').forEach(sel => {
-    sel.onchange = () => {
-      const pontos = { ...b.pontos };
-      if (sel.value) pontos[sel.dataset.ponto] = sel.value;
-      else delete pontos[sel.dataset.ponto];
-      gravarBonusCasa({ ...b, pontos });
-      renderPerformanceCasa();
-    };
+  const gravarPontosDaOs = osId => {
+    const nomes = [...el.querySelectorAll(`[data-ponto="${osId}"]`)].filter(cb => cb.checked).map(cb => cb.value);
+    const pontos = { ...b.pontos, [osId]: nomes };
+    gravarBonusCasa({ ...b, pontos });
+    renderPerformanceCasa();
+  };
+  el.querySelectorAll('[data-ponto]').forEach(cb => {
+    cb.onchange = () => gravarPontosDaOs(cb.dataset.ponto);
   });
   el.querySelectorAll('[data-aprovar]').forEach(btn => {
     btn.onclick = () => {

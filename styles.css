@@ -1663,6 +1663,9 @@ body.nav-aberta .nav-fundo { display: block; }
 .casa-os { list-style: none; margin-top: 10px; display: grid; gap: 8px; }
 .casa-os li { font-size: .82rem; color: #334155; }
 .casa-os select { min-height: 36px; margin-top: 4px; }
+.casa-pontos { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 8px; }
+.casa-pontos label { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; font-size: .82rem; color: #163654; }
+.casa-pontos input { width: 18px; height: 18px; }
 .casa-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .casa-cal-dow { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 6px; font-size: .7rem; color: #7a90a6; text-align: center; }
 .casa-dia { min-height: 64px; border: 1px solid #e2e8f0; background: #fff; border-radius: 8px; text-align: left; padding: 6px; font-size: .78rem; }
