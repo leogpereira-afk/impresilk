@@ -1,10 +1,10 @@
 // sw.js — Service worker: deixa o app abrir offline (casca/shell em cache).
 // Os DADOS continuam sincronizando pela fila do store.js; aqui só cuidamos
 // dos arquivos estáticos para o app carregar sem internet.
-const CACHE = 'impresilk-shell-v63';
+const CACHE = 'impresilk-shell-v65';
 const SHELL = [
   './', 'index.html', 'equipe.html', 'styles.css',
-  'config.js', 'logo.js', 'frases.js', 'store.js', 'auth.js', 'operacao.js', 'app.js', 'equipe.js',
+  'config.js', 'logo.js', 'frases.js', 'store.js', 'auth.js', 'operacao.js', 'app.js', 'casa.js', 'equipe.js',
   'manifest.json', 'icon.svg', 'favicon.svg'
 ];
 

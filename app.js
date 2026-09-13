@@ -6,10 +6,10 @@
    ══════════════════════════════════════════════════════════════════════════ */
 const PERMISSOES_PADRAO = {
   admin:     { abas: '*', editar: true,  cadastrar: true  },
-  pcp:       { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle'], editar: true, cadastrar: false },
-  montagem:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados'], editar: true, cadastrar: false },
-  operacao:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados'], editar: true, cadastrar: false },
-  comercial: { abas: ['painel','pcp','programacao','finalizados'], editar: false, cadastrar: false }
+  pcp:       { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','entregas','performance','agenda','plantoes','grade','controle'], editar: true, cadastrar: false },
+  montagem:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','entregas','performance','agenda','plantoes','grade'], editar: true, cadastrar: false },
+  operacao:  { abas: ['painel','pcp','programacao','execucao','retrabalho','finalizados','entregas','performance','agenda','plantoes','grade'], editar: true, cadastrar: false },
+  comercial: { abas: ['painel','pcp','programacao','finalizados','entregas'], editar: false, cadastrar: false }
 };
 
 // Permissões efetivas = padrão sobrescrito pelos níveis configurados pelo admin (CFG.niveis)
@@ -18,7 +18,15 @@ function getPermissoes() {
   const out = {};
   Object.keys(PERMISSOES_PADRAO).forEach(papel => {
     out[papel] = Object.assign({}, PERMISSOES_PADRAO[papel], niveis[papel] || {});
-    if (Array.isArray(out[papel].abas)) out[papel].abas = out[papel].abas.filter(a => ABAS_DISPONIVEIS.includes(a));
+    if (Array.isArray(out[papel].abas)) {
+      const padrao = PERMISSOES_PADRAO[papel].abas;
+      if (Array.isArray(padrao)) {
+        ABAS_NOVAS.forEach(a => {
+          if (padrao.includes(a) && !out[papel].abas.includes(a)) out[papel].abas = out[papel].abas.concat(a);
+        });
+      }
+      out[papel].abas = out[papel].abas.filter(a => ABAS_DISPONIVEIS.includes(a));
+    }
   });
   return out;
 }
@@ -28,8 +36,9 @@ function getPermissoes() {
 // Montagem ou Operação. Agora a gestão entra com usuário e senha conferidos no
 // servidor (auth.js → equipe-auth). A montagem segue sem senha, em equipe.html,
 // por decisão do dono.
-const ABAS_DISPONIVEIS = ['painel','pcp','programacao','execucao','retrabalho','finalizados','controle'];
-const ABAS_NOMES = {painel:'Painel',pcp:'PCP',programacao:'Instalação',execucao:'Execução',retrabalho:'Retrabalho',finalizados:'Finalizados',controle:'Configurações'};
+const ABAS_NOVAS = ['entregas','performance','agenda','plantoes','grade'];
+const ABAS_DISPONIVEIS = ['painel','pcp','programacao','execucao','retrabalho','finalizados','entregas','performance','agenda','plantoes','grade','controle'];
+const ABAS_NOMES = {painel:'Painel',pcp:'PCP',programacao:'Instalação',execucao:'Execução',retrabalho:'Retrabalho',finalizados:'Finalizados',entregas:'Entregas',performance:'Performance',agenda:'Calendário',plantoes:'Plantões',grade:'Programação',controle:'Configurações'};
 
 /* ══════════════════════════════════════════════════════════════════════════
    UTILITÁRIOS
@@ -681,6 +690,7 @@ function enterApp() {
   aplicarPermissoes();
   initTabs();
   initTopbar();
+  if (typeof initCasa === 'function') initCasa();
   initSyncIndicator();
   initConflictDialog();
   initPicker();
@@ -776,7 +786,7 @@ function aplicarPermissoes() {
   // Se a aba ativa não é permitida para o papel, pousa na primeira permitida
   // (senão o painel proibido fica visível — e sem botão para sair dele).
   if (!permitida(STATE.activeTab)) {
-    const ordem = ['pcp', 'painel', 'programacao', 'execucao', 'retrabalho', 'finalizados', 'controle'];
+    const ordem = ['pcp', 'painel', 'programacao', 'execucao', 'retrabalho', 'finalizados', 'entregas', 'performance', 'agenda', 'plantoes', 'grade', 'controle'];
     const dest = ordem.find(permitida) || 'painel';
     STATE.activeTab = dest;
     $$('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === dest));
@@ -936,6 +946,11 @@ function renderActiveTab() {
     case 'execucao':    renderExecucao(); break;
     case 'retrabalho':  renderRetrabalho(); break;
     case 'finalizados': renderFinalizados(); break;
+    case 'entregas':    renderEntregas(); break;
+    case 'performance': renderPerformanceCasa(); break;
+    case 'agenda':      renderAgendaCasa(); break;
+    case 'plantoes':    renderPlantoesCasa(); break;
+    case 'grade':       renderGradeCasa(); break;
     case 'controle':    renderControle(); break;
   }
 }

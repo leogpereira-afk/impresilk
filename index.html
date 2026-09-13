@@ -70,6 +70,7 @@
         <span id="topbar-date" class="topbar-date"></span>
       </div>
       <div class="topbar-actions">
+        <button class="btn-ghost btn-sm" id="btn-menu" aria-label="Abrir menu" title="Menu">☰</button>
         <button class="btn-ghost btn-sm admin-only" id="btn-espelhos" title="Espelhos somente-leitura para instaladores e comercial">🪞 Espelhos</button>
         <button class="btn-ghost btn-sm edit-only" id="btn-import-pdf" title="Importar O.S a partir do PDF do ERP">📄 Importar PDF</button>
         <button class="btn-primary btn-sm edit-only" id="btn-nova-os">+ Nova O.S</button>
@@ -84,13 +85,24 @@
     <!-- Frase motivacional -->
     <div id="frase-bar" class="frase-bar"></div>
 
-    <!-- Tabs -->
-    <nav class="tabs" id="tabs">
+    <div id="nav-fundo" class="nav-fundo" hidden></div>
+    <div class="app-body">
+    <!-- Tabs laterais -->
+    <nav class="tabs" id="tabs" aria-label="Produção Impresilk">
+      <p class="nav-grupo">Operação</p>
       <button class="tab active" data-tab="pcp"><span aria-hidden="true">📋</span> PCP</button>
       <button class="tab" data-tab="programacao"><span aria-hidden="true">🚚</span> Instalação</button>
       <button class="tab" data-tab="execucao"><span aria-hidden="true">⚡</span> Execução</button>
       <button class="tab" data-tab="retrabalho"><span aria-hidden="true">🔧</span> Retrabalho</button>
       <button class="tab" data-tab="finalizados"><span aria-hidden="true">🏁</span> Finalizados</button>
+      <p class="nav-grupo">Entrega</p>
+      <button class="tab" data-tab="entregas"><span aria-hidden="true">📦</span> Entregas</button>
+      <button class="tab" data-tab="performance"><span aria-hidden="true">🏅</span> Performance</button>
+      <p class="nav-grupo">Agenda</p>
+      <button class="tab" data-tab="agenda"><span aria-hidden="true">📅</span> Calendário</button>
+      <button class="tab" data-tab="plantoes"><span aria-hidden="true">🕐</span> Plantões</button>
+      <button class="tab" data-tab="grade"><span aria-hidden="true">🗺️</span> Programação</button>
+      <p class="nav-grupo">Casa</p>
       <button class="tab" data-tab="painel"><span aria-hidden="true">📊</span> Painel</button>
       <button class="tab" data-tab="controle">⚙️ Configurações</button>
     </nav>
@@ -103,8 +115,14 @@
       <section class="tab-panel" data-panel="execucao" id="panel-execucao"></section>
       <section class="tab-panel" data-panel="retrabalho" id="panel-retrabalho"></section>
       <section class="tab-panel" data-panel="finalizados" id="panel-finalizados"></section>
+      <section class="tab-panel" data-panel="entregas" id="panel-entregas"></section>
+      <section class="tab-panel" data-panel="performance" id="panel-performance"></section>
+      <section class="tab-panel" data-panel="agenda" id="panel-agenda"></section>
+      <section class="tab-panel" data-panel="plantoes" id="panel-plantoes"></section>
+      <section class="tab-panel" data-panel="grade" id="panel-grade"></section>
       <section class="tab-panel" data-panel="controle" id="panel-controle"></section>
     </main>
+    </div>
   </div>
 
   <!-- Modal da O.S -->
@@ -160,6 +178,7 @@
   <script src="auth.js"></script>
   <script src="operacao.js"></script>
   <script src="app.js"></script>
+  <script src="casa.js"></script>
   <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
 </body>
 </html>
