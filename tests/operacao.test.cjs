@@ -72,3 +72,9 @@ test('prioridades preservam pendência de retrabalho mesmo após finalização',
   const r = O.resumo([os(),os({id:'b',instalacao:{}}),os({id:'c',finalizadaEm:hoje,retrabalho:true})],hoje);
   assert.equal(r.hoje.length,1); assert.equal(r.semPrazo.length,1); assert.equal(r.retrabalho.length,1);
 });
+test('missão padrão é hoje se houver, senão o maior problema', () => {
+  assert.equal(O.missaoFoco({ hoje:[1], atrasadas:[1,2], retrabalho:[], retirada:[], semPrazo:[], semRetorno:[] }), 'hoje');
+  assert.equal(O.missaoFoco({ hoje:[], atrasadas:[1,2,3], retrabalho:[1], retirada:[], semPrazo:[], semRetorno:[] }), 'atrasadas');
+  assert.equal(O.missaoFoco({ hoje:[], atrasadas:[], retrabalho:[1,2], retirada:[1], semPrazo:[], semRetorno:[] }), 'retrabalho');
+  assert.equal(O.missaoFoco({ hoje:[], atrasadas:[], retrabalho:[], retirada:[], semPrazo:[], semRetorno:[] }), '');
+});

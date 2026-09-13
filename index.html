@@ -89,22 +89,26 @@
     <div class="app-body">
     <!-- Tabs laterais -->
     <nav class="tabs" id="tabs" aria-label="Produção Impresilk">
+      <div class="nav-marca">
+        <img class="nav-logo" id="nav-logo" alt="">
+        <span>Impresilk</span>
+      </div>
       <p class="nav-grupo">Operação</p>
-      <button class="tab active" data-tab="pcp"><span aria-hidden="true">📋</span> PCP</button>
-      <button class="tab" data-tab="programacao"><span aria-hidden="true">🚚</span> Instalação</button>
-      <button class="tab" data-tab="execucao"><span aria-hidden="true">⚡</span> Execução</button>
-      <button class="tab" data-tab="retrabalho"><span aria-hidden="true">🔧</span> Retrabalho</button>
-      <button class="tab" data-tab="finalizados"><span aria-hidden="true">🏁</span> Finalizados</button>
+      <button class="tab active" data-tab="pcp"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9 3v2h6V3M8 10h8M8 14h6"/></svg> PCP</button>
+      <button class="tab" data-tab="programacao"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h13l5 5v6H3z"/><path d="M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg> Instalação</button>
+      <button class="tab" data-tab="execucao"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3 5 14h7l-1 7 8-11h-7z"/></svg> Execução</button>
+      <button class="tab" data-tab="retrabalho"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a5 5 0 0 1 3 8.2L12 20.2 6.3 14.5a5 5 0 0 1 8.4-8.2z"/><path d="M8 11h.01"/></svg> Retrabalho</button>
+      <button class="tab" data-tab="finalizados"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4h9l1 3h9v10H14l-1-3H5"/></svg> Finalizados</button>
       <p class="nav-grupo">Entrega</p>
-      <button class="tab" data-tab="entregas"><span aria-hidden="true">📦</span> Entregas</button>
-      <button class="tab" data-tab="performance"><span aria-hidden="true">🏅</span> Performance</button>
+      <button class="tab" data-tab="entregas"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16.5 9.4 7.5 4.2 3 6.7v10.6l4.5 2.5 9-5.2V9.4z"/><path d="M12 12v7.6M21 8.2v7.6l-4.5 2.5"/></svg> Entregas</button>
+      <button class="tab" data-tab="performance"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="5"/><path d="M8.2 13 7 21l5-3 5 3-1.2-8"/></svg> Performance</button>
       <p class="nav-grupo">Agenda</p>
-      <button class="tab" data-tab="agenda"><span aria-hidden="true">📅</span> Calendário</button>
-      <button class="tab" data-tab="plantoes"><span aria-hidden="true">🕐</span> Plantões</button>
-      <button class="tab" data-tab="grade"><span aria-hidden="true">🗺️</span> Programação</button>
+      <button class="tab" data-tab="agenda"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg> Calendário</button>
+      <button class="tab" data-tab="plantoes"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></svg> Plantões</button>
+      <button class="tab" data-tab="grade"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M6 10.5V20h12v-9.5"/></svg> Programação</button>
       <p class="nav-grupo">Casa</p>
-      <button class="tab" data-tab="painel"><span aria-hidden="true">📊</span> Painel</button>
-      <button class="tab" data-tab="controle">⚙️ Configurações</button>
+      <button class="tab" data-tab="painel"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="5" rx="1"/><rect x="13" y="10" width="8" height="11" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/></svg> Painel</button>
+      <button class="tab" data-tab="controle"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M6.3 17.7l1.4-1.4M16.3 7.7l1.4-1.4"/></svg> Configurações</button>
     </nav>
 
     <!-- Panels -->

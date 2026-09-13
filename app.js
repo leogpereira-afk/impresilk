@@ -55,7 +55,7 @@ function esc(s) {
 // Estado vazio padronizado (ícone + título + dica opcional).
 function emptyState(icon, titulo, dica) {
   return `<div class="empty-state">
-    <div class="empty-ico">${icon || '📭'}</div>
+    ${icon ? `<div class="empty-ico">${icon}</div>` : ''}
     <p class="empty-title">${esc(titulo)}</p>
     ${dica ? `<p class="empty-hint">${esc(dica)}</p>` : ''}
   </div>`;
@@ -682,6 +682,8 @@ function enterApp() {
   $('#user-badge').textContent = STATE.user.nome;
   const logo = $('#topbar-logo');
   if (logo && typeof LOGO_IMPRESILK !== 'undefined') logo.src = LOGO_IMPRESILK;
+  const navLogo = $('#nav-logo');
+  if (navLogo && typeof LOGO_IMPRESILK !== 'undefined') navLogo.src = LOGO_IMPRESILK;
   const dataEl = $('#topbar-date');
   if (dataEl) {
     const d = new Date();
@@ -2118,6 +2120,91 @@ function osCardHTML(os) {
     </div>`;
 }
 
+function prazoPrincipalHTML(os) {
+  const interno = isInterno(os);
+  if (os.finalizadaEm) {
+    return `<span class="prazo-tag prazo-ok">Finalizada ${esc(fmtDataBR(os.finalizadaEm))}</span>`;
+  }
+  const instData = os.instalacao && os.instalacao.data;
+  if (instData) {
+    const dd = diasEntre(todayISO(), instData);
+    const per = os.instalacao.periodo ? ' · ' + esc(os.instalacao.periodo) : '';
+    if (dd === 0) return `<span class="prazo-tag ${interno ? 'prazo-retira' : 'prazo-hoje'}">${interno ? 'Retirada HOJE' : 'HOJE'}${per}</span>`;
+    if (dd === 1) return `<span class="prazo-tag prazo-amanha">${interno ? 'Retirada AMANHÃ' : 'AMANHÃ'}${per}</span>`;
+  }
+  if (interno && calcStatus(os) === 'apto') {
+    const desde = os.aptoEm ? diasDesde(os.aptoEm) : null;
+    const cls = desde != null && desde >= 3 ? 'prazo-urgente' : 'prazo-info';
+    const txt = desde != null && desde > 0 ? `aguardando retirada há ${desde}d` : 'aguardando retirada';
+    return `<span class="prazo-tag ${cls}">${txt}</span>`;
+  }
+  const entrega = dataEntregaOS(os);
+  const paraEntrega = entrega ? diasEntre(todayISO(), entrega) : null;
+  if (paraEntrega != null) {
+    const cls = paraEntrega < 0 ? 'prazo-atraso' : (paraEntrega <= 2 ? 'prazo-urgente' : 'prazo-ok');
+    const txt = paraEntrega < 0 ? `atrasada ${-paraEntrega}d` : (paraEntrega === 0 ? 'entrega hoje' : `entrega em ${paraEntrega}d`);
+    return `<span class="prazo-tag ${cls}">${txt}</span>`;
+  }
+  if (instData) {
+    const ag = fmtDataBR(instData) + (os.instalacao.periodo ? ' · ' + os.instalacao.periodo : '');
+    return `<span class="prazo-tag prazo-info">${esc(ag)}</span>`;
+  }
+  const naEmpresa = os.dataEntrada ? diasDesde(os.dataEntrada) : null;
+  if (naEmpresa != null && naEmpresa >= 0) {
+    return `<span class="prazo-tag prazo-empresa">${naEmpresa}d na casa</span>`;
+  }
+  return '';
+}
+
+function osSeloPcp(os) {
+  const st = calcStatus(os);
+  if (os.retrabalho && !os.finalizadaEm) return '<span class="tag-retrab">retrabalho</span>';
+  if (estaAtrasada(os)) return '<span class="tag-atraso">atrasada</span>';
+  return `<span class="badge st-${st}">${statusLabelDe(os, st)}</span>`;
+}
+
+function osCardPcpHTML(os) {
+  const st = calcStatus(os);
+  const interno = isInterno(os);
+  const pp = proximoPasso(os);
+  const avisarBtn = interno && !os.finalizadaEm && st === 'apto'
+    ? `<button class="btn-ghost btn-sm card-avisar ${os.avisadoEm ? 'avisado' : ''}" data-avisar-os="${esc(os.id)}" title="${os.avisadoEm ? 'Cliente já avisado — clique para avisar de novo' : 'Avisar o cliente no WhatsApp'}">${os.avisadoEm ? 'Avisado ' + fmtDataBR(os.avisadoEm) : 'Avisar cliente'}</button>`
+    : '';
+  const ctaBtn = pp
+    ? (pp.acao === 'finalizar' || pp.acao === 'exec'
+        ? `<button class="btn-success btn-sm edit-only card-finalizar" data-finalizar-os="${esc(os.id)}">${esc(pp.cta)}</button>`
+        : `<button class="btn-primary btn-sm edit-only card-cta" data-cta-os="${esc(os.id)}">${esc(pp.cta)}</button>`)
+    : '';
+  const equipe = (os.equipe || []).length ? `<div class="card-equipe">${esc(os.equipe.join(', '))}</div>` : '';
+  return `
+    <div class="os-card os-card-pcp st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
+      <div class="card-meta">
+        <div class="card-numero">O.S ${esc(os.numero || '—')}</div>
+        ${osSeloPcp(os)}
+      </div>
+      <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
+      ${os.servico ? `<div class="card-servico">${esc(os.servico)}</div>` : ''}
+      <div class="card-tipo-row"><span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? 'Cliente retira' : 'Externo'}</span></div>
+      <div class="card-prazo">${prazoPrincipalHTML(os)}</div>
+      ${equipe}
+      <div class="card-acoes">${avisarBtn}${ctaBtn}</div>
+    </div>`;
+}
+
+function osRowPcpHTML(os) {
+  const interno = isInterno(os);
+  const equipe = (os.equipe || []).length ? esc(os.equipe.join(', ')) : '';
+  return `<div class="pcp-row st-${calcStatus(os)} ${alertaOS(os)}" data-os-id="${esc(os.id)}" tabindex="0">
+      <span class="pcp-row-os">O.S ${esc(os.numero || '—')}</span>
+      <span class="pcp-row-cli">${esc(os.cliente || 'Sem cliente')}</span>
+      <span class="pcp-row-svc">${esc(os.servico || '')}</span>
+      <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? 'Cliente retira' : 'Externo'}</span>
+      ${osSeloPcp(os)}
+      ${prazoPrincipalHTML(os)}
+      <span class="pcp-row-eq">${equipe}</span>
+    </div>`;
+}
+
 // Bloco compacto de tempo/datas no card. Junta tudo num só lugar para evitar
 // duplicidade: data do pedido, dias na empresa, contador de entrega, data
 // agendada e — se finalizada — data de conclusão.
@@ -2392,17 +2479,27 @@ function pcpRenderCards() {
   }
   list = applyFilter(list, STATE.filtroBusca);
   list = list.sort((PCP_SORTS[STATE.pcpSort] || PCP_SORTS.entrega).fn);
+  const missao = STATE._prioridade;
+  if (missao) {
+    // Prioridade mostra exatamente as O.S. contadas, sem herdar filtro da carteira.
+    list = (OPERACAO.resumo(STORE.getAllOS())[missao] || []).slice();
+    list = list.sort((PCP_SORTS[STATE.pcpSort] || PCP_SORTS.entrega).fn);
+  }
   // Empty state honesto: se a busca/tipo é que zerou a lista, diz isso (a
   // mensagem da vista sugeriria que não existe nada, contradizendo os números).
-  const filtrosAtivos = (STATE.filtroBusca || '').trim() || STATE.pcpTipo !== 'todos';
-  const vazio = filtrosAtivos
-    ? emptyState('📋', 'Nenhuma O.S neste filtro', 'Limpe a busca ou o filtro de tipo para ver as O.S desta vista.')
+  const filtrosAtivos = (STATE.filtroBusca || '').trim() || STATE.pcpTipo !== 'todos' || !!STATE._prioridade;
+  const vazio = STATE._prioridade
+    ? emptyState('', 'Nenhuma O.S nesta prioridade', 'Feche a prioridade para ver a carteira, ou limpe busca e tipo.')
+    : filtrosAtivos
+    ? emptyState('', 'Nenhuma O.S neste filtro', 'Limpe a busca ou o filtro de tipo para ver as O.S desta vista.')
     : STATE.pcpVista === 'arquivados'
-      ? emptyState('🗄', 'Nenhuma O.S arquivada', 'Aparecem aqui as finalizadas há 1 semana ou mais.')
+      ? emptyState('', 'Nenhuma O.S arquivada', 'Aparecem aqui as finalizadas há 1 semana ou mais.')
       : STATE.pcpVista === 'retrabalho'
-        ? emptyState('🔧', 'Nenhum retrabalho em aberto', 'Tudo certo: nada voltou para correção.')
-        : emptyState('📋', 'Nenhuma O.S neste filtro', 'Troque o filtro, limpe a busca ou crie uma nova O.S.');
-  grid.innerHTML = list.map(osCardHTML).join('') || vazio;
+        ? emptyState('', 'Nenhum retrabalho em aberto', 'Tudo certo: nada voltou para correção.')
+        : emptyState('', 'Nenhuma O.S neste filtro', 'Troque o filtro, limpe a busca ou crie uma nova O.S.');
+  const usarCards = !!missao;
+  grid.classList.toggle('pcp-lista', !usarCards);
+  grid.innerHTML = list.map(o => usarCards ? osCardPcpHTML(o) : osRowPcpHTML(o)).join('') || vazio;
   const resultado = $('#pcp-resultado');
   if (resultado) resultado.textContent = `${list.length} O.S ${list.length === 1 ? 'exibida' : 'exibidas'}`;
   const limpar = $('#pcp-limpar-filtros');
@@ -2416,24 +2513,32 @@ function renderPrioridades() {
   const el = $('#pcp-prioridades'); if (!el) return;
   const resumo = OPERACAO.resumo(STORE.getAllOS());
   const defs = [
-    ['hoje','Para hoje','Entrega prevista ou instalação em curso','📅','Abrir o trabalho de hoje'],
-    ['atrasadas','Prazo vencido','Conferir entrega ou remarcar','⏰','Revisar prazos'],
-    ['semPrazo','Sem prazo','Definir uma data com o responsável','🗓️','Planejar entregas'],
-    ['retirada','Prontas para retirada','Combinar retirada com o cliente','🛍️','Organizar retiradas'],
-    ['semRetorno','Saída a conferir','Registro antigo ou sem data válida','🚚','Conferir saídas'],
-    ['retrabalho','Retrabalhos pendentes','Conferir correção e responsável','🔧','Cuidar dos ajustes']
+    ['hoje','Para hoje','Entrega prevista ou instalação em curso','Abrir o trabalho de hoje'],
+    ['atrasadas','Prazo vencido','Conferir entrega ou remarcar','Revisar prazos'],
+    ['semPrazo','Sem prazo','Definir uma data com o responsável','Planejar entregas'],
+    ['retirada','Prontas para retirada','Combinar retirada com o cliente','Organizar retiradas'],
+    ['semRetorno','Saída a conferir','Registro antigo ou sem data válida','Conferir saídas'],
+    ['retrabalho','Retrabalhos pendentes','Conferir correção e responsável','Cuidar dos ajustes']
   ];
   const foco = defs.find(d => d[0] === STATE._prioridade);
-  el.innerHTML = `<div class="pcp-abertura">
-      <div><p class="pcp-eyebrow"><span aria-hidden="true">✦</span> PRODUÇÃO IMPRESILK</p><h1>Vamos fazer acontecer<span>.</span></h1><p class="pcp-abertura-texto">Escolha uma prioridade. Cada O.S tem um próximo passo.</p></div>
-      <span class="pcp-data"><span aria-hidden="true">📆</span> ${new Date(hojeISO()+'T12:00:00').toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'})}</span>
-    </div>
-    <div class="pcp-missoes" role="group" aria-label="Prioridades da operação">${defs.map(([key,nome,dica,icone,acao]) => `<button class="pcp-missao ${key === STATE._prioridade ? 'selecionado' : ''}" aria-pressed="${key === STATE._prioridade}" aria-controls="pcp-prioridade-lista" data-prioridade="${key}" title="${esc(dica)}"><span class="pcp-missao-topo"><span class="pcp-missao-icone" aria-hidden="true">${icone}</span><strong>${resumo[key].length}</strong></span><span class="pcp-missao-nome">${esc(nome)}</span><span class="pcp-missao-acao">${esc(acao)} <span aria-hidden="true">→</span></span></button>`).join('')}</div>
-    <p class="pcp-prioridades-nota">Visão da carteira completa · Uma O.S pode aparecer em mais de uma prioridade.</p>
-    <div id="pcp-prioridade-lista" ${foco ? '' : 'hidden'}>${foco ? `<div class="gestao-detalhe"><div class="gestao-head"><div><h2>${esc(foco[1])} · ${resumo[foco[0]].length} O.S</h2><p>${esc(foco[2])}. Clique na O.S para abrir a ficha.</p></div><button class="btn-ghost btn-sm" data-fechar-prioridade>Fechar lista ×</button></div>${resumo[foco[0]].length ? osMiniList(resumo[foco[0]]) : '<p class="pcp-prioridade-vazia">Tudo em dia por aqui. Nenhuma O.S nesta prioridade agora.</p>'}</div>` : ''}</div>`;
-  $$('[data-prioridade]',el).forEach(b => b.onclick = () => { const key=b.dataset.prioridade; STATE._prioridade = STATE._prioridade === key ? '' : key; renderPrioridades(); el.querySelector(`[data-prioridade="${key}"]`).focus(); });
-  const fechar = el.querySelector('[data-fechar-prioridade]'); if (fechar) fechar.onclick = () => { const key=STATE._prioridade; STATE._prioridade=''; renderPrioridades(); el.querySelector(`[data-prioridade="${key}"]`).focus(); };
-  bindCardClicks(el);
+  el.innerHTML = `<div class="pcp-missoes" role="group" aria-label="Prioridades da operação">${defs.map(([key,nome,dica,acao]) => {
+    const n = resumo[key].length;
+    const sel = key === STATE._prioridade;
+    return `<button type="button" class="pcp-missao ${sel ? 'selecionado' : ''} ${n === 0 ? 'zero' : ''}" aria-pressed="${sel}" data-prioridade="${key}" aria-label="${esc(nome)}: ${n}. ${esc(dica)}"><strong>${n}</strong><span class="pcp-missao-nome">${esc(nome)}</span>${sel ? `<span class="pcp-missao-acao">${esc(acao)}</span>` : ''}</button>`;
+  }).join('')}</div>
+    ${foco ? `<p class="pcp-missao-dica">${esc(foco[2])}. A carteira abaixo mostra só estas O.S. <button type="button" class="pcp-ver-carteira" data-fechar-prioridade>Ver carteira</button></p>` : '<p class="pcp-missao-dica">Carteira completa. Toque numa prioridade para recortar o trabalho.</p>'}`;
+  $$('[data-prioridade]',el).forEach(b => b.onclick = () => {
+    const key = b.dataset.prioridade;
+    STATE._prioridade = STATE._prioridade === key ? '' : key;
+    renderPrioridades();
+    pcpRenderCards();
+  });
+  const fechar = el.querySelector('[data-fechar-prioridade]');
+  if (fechar) fechar.onclick = () => {
+    STATE._prioridade = '';
+    renderPrioridades();
+    pcpRenderCards();
+  };
 }
 
 function renderPCP() {
@@ -2446,20 +2551,18 @@ function renderPCP() {
   // Chips com contagem 0 de placeholder — pcpRenderCards() (chamado logo
   // abaixo) delega a pcpAtualizarChips() os números reais, já consistentes
   // com os filtros/busca ativos.
-  const etapaIcones = { todos: '📋', aguardando_producao: '🏭', apto: '📦', agendada: '📅', confirmada: '✅', em_andamento: '⚙️', finalizada: '🏁' };
-  const chipLabel = (icone, texto) => `<span class="pcp-chip-label"><span aria-hidden="true">${icone}</span> ${esc(texto)}</span>`;
+  const chipLabel = (_icone, texto) => `<span class="pcp-chip-label">${esc(texto)}</span>`;
   const chips = [['todos', 'Em aberto'], ...Object.entries(STATUS_LABEL)]
-    .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" aria-pressed="${STATE.pcpStatus === k}" data-pcp-status="${k}">${chipLabel(etapaIcones[k] || '📋', lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
+    .map(([k, lbl]) => `<button class="pcp-chip ${STATE.pcpStatus === k ? 'active' : ''}" aria-pressed="${STATE.pcpStatus === k}" data-pcp-status="${k}">${chipLabel('', lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
   const tipoChips = [
-    ['todos', '🗂️', 'Todos os tipos'], ['externo', '🚚', 'Instalação externa'], ['interno', '🏬', 'Cliente retira']
+    ['todos', '', 'Todos'], ['externo', '', 'Externa'], ['interno', '', 'Cliente retira']
   ].map(([k, icone, lbl]) => `<button class="pcp-chip pcp-chip-tipo tipo-${k} ${STATE.pcpTipo === k ? 'active' : ''}" aria-pressed="${STATE.pcpTipo === k}" data-pcp-tipo="${k}">${chipLabel(icone, lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
-  // Navegação da carteira, acima da busca e dos filtros.
   const vistaBtns = [
-    ['',           '📋', 'Ativos'],
-    ['retrabalho', '🔧', 'Retrabalho'],
-    ['arquivados', '🗄️', 'Arquivados']
+    ['',           '', 'Ativos'],
+    ['retrabalho', '', 'Retrabalho'],
+    ['arquivados', '', 'Arquivados']
   ].map(([k, icone, lbl]) => `<button class="pcp-chip pcp-vista ${STATE.pcpVista === k ? 'active' : ''}" aria-pressed="${STATE.pcpVista === k}" data-pcp-vista="${k}">${chipLabel(icone, lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
   const sorts = Object.entries(PCP_SORTS)
@@ -2468,7 +2571,7 @@ function renderPCP() {
   el.innerHTML = `
     <section class="pcp-controles" aria-labelledby="pcp-carteira-titulo">
       <div class="pcp-controles-topo">
-        <div class="pcp-carteira-heading"><h2 id="pcp-carteira-titulo"><span aria-hidden="true">🗂️</span> Ordens de serviço</h2><span id="pcp-resultado" role="status" aria-live="polite"></span></div>
+        <div class="pcp-carteira-heading"><h2 id="pcp-carteira-titulo">Ordens de serviço</h2><span id="pcp-resultado" role="status" aria-live="polite"></span></div>
         <div class="pcp-chips pcp-vistas" role="group" aria-label="Situação das ordens de serviço">${vistaBtns}</div>
       </div>
       <div class="pcp-busca-linha">
@@ -2477,17 +2580,16 @@ function renderPCP() {
           <input type="search" id="busca-pcp" aria-label="Buscar na carteira" placeholder="Buscar por O.S, cliente, endereço ou serviço" value="${esc(STATE.filtroBusca)}">
         </label>
         <label class="pcp-ordenacao"><span>Ordenar por</span><select id="pcp-sort">${sorts}</select></label>
-        ${podeEditar() ? '<div class="pcp-criar-acoes"><button class="btn-primary" id="pcp-nova-ext"><span aria-hidden="true">🚚</span> + O.S externa</button><button class="btn-ghost" id="pcp-nova-int"><span aria-hidden="true">🏬</span> + O.S retirada</button></div>' : ''}
+        ${podeEditar() ? '<div class="pcp-criar-acoes"><button class="btn-primary" id="pcp-nova-ext">+ O.S externa</button><button class="btn-ghost" id="pcp-nova-int">+ O.S retirada</button></div>' : ''}
       </div>
-      <div class="pcp-filtro-linha" role="group" aria-labelledby="pcp-atendimento-label">
-        <span class="pcp-filtro-label" id="pcp-atendimento-label">Atendimento</span>
+      <div class="pcp-filtro-linha pcp-filtro-unica" role="group" aria-label="Tipo e etapa">
         <div class="pcp-chips">${tipoChips}</div>
+        ${STATE.pcpVista === '' ? `<div class="pcp-chips">${chips}</div>` : ''}
       </div>
-      ${STATE.pcpVista === '' ? `<div class="pcp-filtro-linha" role="group" aria-labelledby="pcp-etapa-label"><span class="pcp-filtro-label" id="pcp-etapa-label">Etapa</span><div class="pcp-chips">${chips}</div></div>` : ''}
       <div class="pcp-controles-rodape">
         <button class="pcp-limpar" id="pcp-limpar-filtros" hidden>Limpar filtros</button>
       </div>
-    <details class="pcp-legenda" ${STATE.legendaAberta ? 'open' : ''}><summary><span aria-hidden="true">🎨</span> Entenda as cores dos cards</summary>
+    <details class="pcp-legenda" ${STATE.legendaAberta ? 'open' : ''}><summary>Entenda as cores dos cards</summary>
       <div class="leg-linhas">
         <span><span class="leg-sw" style="background:linear-gradient(90deg,#fffdf5,#fef3c7,#fed7aa,#fca5a5)"></span><strong>Fundo do card</strong> = prazo de entrega: quanto mais quente, mais perto. Faixa superior vermelha = atraso ou retrabalho; o aviso escrito identifica o motivo.</span>
         <span><span class="leg-sw" style="background:#3b82f6"></span>Borda esquerda azul = 🚚 Externo · <span class="leg-sw" style="background:#db2777"></span>magenta = 🏬 Cliente retira.</span>

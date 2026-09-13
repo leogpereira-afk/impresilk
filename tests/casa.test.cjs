@@ -127,5 +127,7 @@ test('menu e permissões conhecem Entregas, Performance, Agenda, Plantões e Pro
   }
   assert.match(html, /data-tab="programacao"/);
   assert.match(js, /ABAS_DISPONIVEIS = \[[^\]]*'entregas'[^\]]*'grade'/);
+  assert.match(html, /nav-marca/);
+  assert.doesNotMatch(html, /data-tab="pcp"><span[^>]*>📋/);
   assert.doesNotMatch(html, /RH \+ PCP/);
 });

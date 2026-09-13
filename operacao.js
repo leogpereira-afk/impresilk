@@ -131,6 +131,16 @@ const OPERACAO = (() => {
     const n = Math.max(1,Number(id)||1)-1;
     return futuro ? {de:hoje,ate:somarDias(hoje,n)} : {de:somarDias(hoje,-n),ate:hoje};
   }
-  return {dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido};
+  function missaoFoco(resumo) {
+    if ((resumo.hoje || []).length) return 'hoje';
+    const ordem = ['atrasadas', 'retrabalho', 'retirada', 'semPrazo', 'semRetorno'];
+    let best = '', n = 0;
+    for (const k of ordem) {
+      const c = (resumo[k] || []).length;
+      if (c > n) { n = c; best = k; }
+    }
+    return best;
+  }
+  return {dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;

@@ -113,10 +113,13 @@ test('prioridade do dia abre as O.S contadas sem herdar nem alterar filtros da c
   ]);
   t.run("STATE.pcpVista='arquivados'; STATE.pcpTipo='interno'; STATE.filtroBusca='outro cliente'; STATE._prioridade='hoje'; renderPrioridades()");
   const html=t.node('#pcp-prioridades').innerHTML;
-  assert.match(html,/Para hoje · 2 O.S/);
-  assert.match(html,/data-os-id="hoje"/);
-  assert.match(html,/data-os-id="longa"/);
-  assert.doesNotMatch(html,/data-os-id="(encerrada|futura)"/);
+  assert.match(html,/Para hoje: 2/);
+  assert.match(html,/A carteira abaixo mostra só estas O.S/);
+  t.run('pcpRenderCards()');
+  const grade=t.node('#panel-pcp .cards-grid').innerHTML;
+  assert.match(grade,/data-os-id="hoje"/);
+  assert.match(grade,/data-os-id="longa"/);
+  assert.doesNotMatch(grade,/data-os-id="(encerrada|futura)"/);
   assert.equal(t.run('STATE.pcpVista'),'arquivados');
   assert.equal(t.run('STATE.pcpTipo'),'interno');
   assert.equal(t.run('STATE.filtroBusca'),'outro cliente');

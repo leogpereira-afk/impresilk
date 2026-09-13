@@ -162,34 +162,52 @@ function renderEntregas() {
   const mes = STATE._entMes;
   const r = OPERACAO.mensal(STORE.getAllOS(), mes);
   const fins = osFinalizadasMes(mes);
-  const lista = fins.map(os => {
-    const d = OPERACAO.dia(os.finalizadaEm);
-    const data = d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '—';
-    const eq = (os.equipe || []).join(', ') || 'Sem instalador';
-    return `<div class="os-list-item st-finalizada" data-os-id="${esc(os.id)}">
-      <div class="list-info">
-        <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge st-finalizada">Finalizada</span>${os.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</div>
-        <div class="list-cliente">${esc(os.cliente || 'Sem cliente')}${os.servico ? ' — ' + esc(os.servico) : ''}</div>
-        <div class="list-date">${esc(data)} · 👷 ${esc(eq)}</div>
-      </div>
-    </div>`;
+  const porDia = new Map();
+  for (const os of fins) {
+    const iso = OPERACAO.dia(os.finalizadaEm) || '—';
+    if (!porDia.has(iso)) porDia.set(iso, []);
+    porDia.get(iso).push(os);
+  }
+  const dias = [...porDia.keys()].sort().reverse();
+  const grupos = dias.map(iso => {
+    const data = iso === '—' ? '—' : iso.slice(8, 10) + '/' + iso.slice(5, 7);
+    const linhas = porDia.get(iso).map(os => {
+      const eq = (os.equipe || []).join(', ') || 'Sem instalador';
+      return `<li class="casa-linha" data-os-id="${esc(os.id)}">
+        <span class="casa-linha-os">O.S ${esc(os.numero || '—')}</span>
+        <span class="casa-linha-cli">${esc(os.cliente || 'Sem cliente')}</span>
+        <span class="casa-linha-eq">${esc(eq)}</span>
+        <span class="badge st-finalizada">Finalizada</span>${os.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}
+      </li>`;
+    }).join('');
+    return `<section class="casa-dia-grupo"><h3>${esc(data)}</h3><ul>${linhas}</ul></section>`;
   }).join('');
   el.innerHTML = `
-    <div class="gestao-box">
-      <div class="gestao-head"><div><h2>Entregas</h2><p>O que a empresa finalizou no PCP neste mês. Extra e plantão não entram.</p></div>
+    <div class="casa-pagina">
+      <div class="casa-pagina-head">
+        <div><h2>Entregas</h2><p>O que a empresa finalizou no PCP neste mês. Extra e plantão não entram.</p></div>
         <label class="casa-mes">Mês <input type="month" id="ent-mes" value="${esc(mes)}"></label>
       </div>
-      <div class="gestao-indicadores">
-        <div class="gestao-indicador"><small>O.S. finalizadas</small><strong>${r.total}</strong></div>
-        <div class="gestao-indicador"><small>Quem entregou</small><strong>${r.pessoas.length}</strong></div>
-        <div class="gestao-indicador"><small>Retrabalho</small><strong>${r.retrabalho}</strong></div>
-        <div class="gestao-indicador"><small>Sem equipe</small><strong>${r.semEquipe}</strong></div>
+      <div class="casa-kpis">
+        <span><b>${r.total}</b> finalizadas</span>
+        <span><b>${r.pessoas.length}</b> quem entregou</span>
+        <span><b>${r.retrabalho}</b> retrabalho</span>
+        <span><b>${r.semEquipe}</b> sem equipe</span>
       </div>
-    </div>
-    <div class="os-list">${lista || emptyState('🏁', 'Nenhuma finalizada neste mês', 'A entrega desta tela é a O.S. finalizada no PCP.')}</div>`;
+      <div class="casa-grupos">${grupos || emptyState('', 'Nenhuma finalizada neste mês', 'A entrega desta tela é a O.S. finalizada no PCP.')}</div>
+    </div>`;
   const input = document.getElementById('ent-mes');
   if (input) input.onchange = () => { if (input.value) { STATE._entMes = input.value; renderEntregas(); } };
   bindCardClicks(el);
+}
+
+function chipFichaHTML(osId, f, on) {
+  const nome = (f.nome || f.apelido || rotuloPessoaCasa(f.id) || 'ID').split(' ')[0];
+  return `<label class="casa-chip${on ? ' on' : ''}">
+    <input type="checkbox" data-ponto="${esc(osId)}" value="${esc(f.id)}" ${on ? 'checked' : ''}>
+    <span>${esc(nome)}</span>
+    <small>ID ${esc(f.id)}</small>
+  </label>`;
 }
 
 function renderPerformanceCasa() {
@@ -204,83 +222,109 @@ function renderPerformanceCasa() {
   const aprovados = b.itens.filter(i => i.status === 'aprovado' || i.status === 'pago');
   const pago = b.itens.filter(i => i.status === 'pago').reduce((s, i) => s + (Number(i.valor) || 0), 0);
   const aprovado = aprovados.reduce((s, i) => s + (Number(i.valor) || 0), 0);
-  const cards = rank.map((p, i) => {
+  const filtroId = STATE._perfFiltro || '';
+  const rankRows = rank.map((p, i) => {
     const item = itemDaPessoa(b.itens, p.id);
     const valor = item && item.status !== 'aberto' ? item.valor : propostaCasa(p.osCount, totalOs, b.orcamento, b.teto);
     const st = item ? item.status : 'aberto';
-    const rotulo = st === 'pago' ? `Pago ${dinheiroCasa(valor)}` : st === 'aprovado' ? `Aprovado ${dinheiroCasa(valor)}` : (b.orcamento > 0 && valor > 0 ? `${dinheiroCasa(valor)} sugeridos` : 'Abrir apuração');
-    return `<article class="casa-card">
-      <header class="casa-card-head">
-        <span class="casa-pos">${i + 1}</span>
-        <div><strong>${esc(p.nome)}</strong><p>${p.osCount} ponto(s)${p.retrab ? ' · ' + p.retrab + ' retrabalho' : ''}</p></div>
-        <div class="casa-valor"><b>${rotulo}</b></div>
-      </header>
-      <div class="casa-acoes">
-        ${st === 'aberto' ? `<button class="btn-primary btn-sm" data-aprovar="${esc(p.id)}" ${valor <= 0 ? 'disabled' : ''}>Aprovar proposta</button>` : ''}
-        ${st === 'aprovado' ? `<button class="btn-primary btn-sm" data-pagar="${esc(p.id)}">Pagar bônus</button>` : ''}
-        ${st !== 'aberto' ? `<button class="btn-ghost btn-sm" data-reabrir="${esc(p.id)}">Reabrir</button>` : ''}
-      </div>
-      <ul class="casa-os">${p.itens.map(os => `<li>O.S ${esc(os.numero || '—')} · ${esc(os.cliente || '')}</li>`).join('')}</ul>
-    </article>`;
+    const rotulo = st === 'pago' ? `Pago ${dinheiroCasa(valor)}` : st === 'aprovado' ? `Aprovado ${dinheiroCasa(valor)}` : (b.orcamento > 0 && valor > 0 ? dinheiroCasa(valor) : '—');
+    const acao = st === 'aberto'
+      ? `<button class="btn-primary btn-sm" data-aprovar="${esc(p.id)}" ${valor <= 0 ? 'disabled' : ''}>Aprovar</button>`
+      : st === 'aprovado'
+        ? `<button class="btn-primary btn-sm" data-pagar="${esc(p.id)}">Pagar</button><button class="btn-ghost btn-sm" data-reabrir="${esc(p.id)}">Reabrir</button>`
+        : `<button class="btn-ghost btn-sm" data-reabrir="${esc(p.id)}">Reabrir</button>`;
+    return `<tr class="casa-rank-row${filtroId === p.id ? ' on' : ''}" data-filtro-id="${esc(p.id)}">
+      <td class="casa-pos">${i + 1}</td>
+      <td><strong>${esc(p.nome)}</strong></td>
+      <td class="num">${p.osCount}${p.retrab ? ` <small>${p.retrab} retrab</small>` : ''}</td>
+      <td class="num">${esc(rotulo)}</td>
+      <td class="casa-rank-acao">${acao}</td>
+    </tr>`;
   }).join('');
   const semPonto = fins.filter(os => !instaladoresDaOs(os, b.pontos).length);
-  const apontar = fins.map(os => {
+  const finsFiltro = filtroId ? fins.filter(os => instaladoresDaOs(os, b.pontos).includes(filtroId)) : fins;
+  const apontar = finsFiltro.map(os => {
     const marcados = instaladoresDaOs(os, b.pontos);
-    const pessoas = fichas.slice();
-    for (const id of marcados) {
-      if (!pessoas.some(f => f.id === id)) pessoas.push({ id, nome: '', apelido: '' });
+    const eqIds = OPERACAO.equipe(os).map(n => fichaPorApelido(n)).filter(Boolean).map(f => f.id);
+    const primarios = new Set([...marcados, ...eqIds]);
+    const principais = [];
+    for (const id of primarios) {
+      const f = fichas.find(x => x.id === id) || { id, nome: '', apelido: '' };
+      principais.push(f);
     }
+    const outras = fichas.length <= 8 ? fichas.filter(f => !primarios.has(f.id)) : fichas.filter(f => !primarios.has(f.id));
+    const mostrarOutras = fichas.length > 8;
+    const chipsMain = (mostrarOutras ? principais : fichas.slice()).map(f =>
+      chipFichaHTML(os.id, f, marcados.includes(f.id))
+    ).join('');
+    const chipsMais = mostrarOutras ? outras.map(f => chipFichaHTML(os.id, f, marcados.includes(f.id))).join('') : '';
     const semFicha = OPERACAO.equipe(os).filter(n => !fichaPorApelido(n));
-    return `<li>
-      <div>O.S ${esc(os.numero || '—')} · ${esc(os.cliente || '')}${os.retrabalho ? ' · retrabalho' : ''}</div>
-      <div class="casa-pontos">${pessoas.map(f =>
-        `<label><input type="checkbox" data-ponto="${esc(os.id)}" value="${esc(f.id)}" ${marcados.includes(f.id) ? 'checked' : ''}> ${esc(rotuloPessoaCasa(f.id))}</label>`
-      ).join('')}${semFicha.map(n =>
-        `<label class="sem-ficha">${esc(n)} · sem ficha</label>`
-      ).join('')}</div>
+    const d = OPERACAO.dia(os.finalizadaEm);
+    const data = d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '';
+    return `<li class="casa-apontar-os">
+      <div class="casa-apontar-meta">
+        <strong>O.S ${esc(os.numero || '—')}</strong>
+        <span>${esc(os.cliente || '')}</span>
+        <span>${esc(data)}</span>
+        ${os.retrabalho ? '<span class="badge st-retrabalho">Retrabalho</span>' : ''}
+      </div>
+      <div class="casa-pontos">${chipsMain}${semFicha.map(n =>
+        `<span class="sem-ficha">${esc(n)} · sem ficha</span>`
+      ).join('')}${chipsMais ? `<details class="casa-mais-fichas"><summary>+ outra ficha</summary>${chipsMais}</details>` : ''}</div>
     </li>`;
   }).join('');
   el.innerHTML = `
-    <div class="gestao-box">
-      <div class="gestao-head"><div><h2>Performance</h2><p>Entrega = finalizada no PCP. A pessoa é a ficha do RH: o ponto grava o ID (6 dígitos do CPF), nome só na tela. Na mesma O.S. várias fichas podem levar ponto — quem leva, você aponta. Extra não entra. Folha da casa não é alterada aqui.</p></div>
+    <div class="casa-pagina casa-perf">
+      <div class="casa-pagina-head">
+        <div><h2>Performance</h2><p>Entrega = finalizada no PCP. O ponto grava o ID da ficha. Várias fichas na mesma O.S. podem levar ponto. Extra não entra.</p></div>
         <label class="casa-mes">Mês <input type="month" id="perf-mes" value="${esc(mes)}"></label>
       </div>
-      <div class="gestao-indicadores">
-        <div class="gestao-indicador"><small>Pessoas em apuração</small><strong>${rank.length}</strong></div>
-        <div class="gestao-indicador"><small>O.S. finalizadas</small><strong>${fins.length}</strong></div>
-        <div class="gestao-indicador"><small>Pontos apontados</small><strong>${totalOs}</strong></div>
-        <div class="gestao-indicador"><small>Orçamento disponível</small><strong>${dinheiroCasa(Math.max(0, b.orcamento - aprovado))}</strong></div>
-      </div>
-      <div class="casa-criterios">
-        <label>Orçamento do mês <input type="number" min="0" step="0.01" id="perf-orc" value="${b.orcamento || ''}" placeholder="0"></label>
+      <div class="casa-perf-bar">
+        <label>Orçamento <input type="number" min="0" step="0.01" id="perf-orc" value="${b.orcamento || ''}" placeholder="0"></label>
         <label>Teto por pessoa <input type="number" min="0" step="0.01" id="perf-teto" value="${b.teto || ''}" placeholder="Sem teto"></label>
+        <span class="casa-kpis">
+          <span><b>${rank.length}</b> pessoas</span>
+          <span><b>${fins.length}</b> O.S.</span>
+          <span><b>${totalOs}</b> pontos</span>
+          <span><b>${dinheiroCasa(Math.max(0, b.orcamento - aprovado))}</b> disponível</span>
+        </span>
       </div>
       ${pago ? `<p class="metricas-nota">Já marcado como pago nesta apuração: ${dinheiroCasa(pago)}. Não lança na folha.</p>` : ''}
       ${semPonto.length ? `<p class="metricas-nota">${semPonto.length} O.S. sem ficha apontada — não entram no ranking até você apontar.</p>` : ''}
-    </div>
-    <div class="gestao-box">
-      <div class="gestao-head"><div><h2>Fichas do RH</h2><p>Apelido da O.S. liga no ID que você digita. Não casa por nome. PCP não lê a base do RH.</p></div></div>
-      <form id="perf-ficha-form" class="casa-criterios">
-        <label>Apelido no PCP <input name="apelido" required placeholder="Como está na O.S."></label>
-        <label>ID do RH <input name="id" inputmode="numeric" maxlength="14" required placeholder="6 dígitos"></label>
-        <label>Nome na ficha <input name="nome" required placeholder="Nome de exibição"></label>
-        <button class="btn-primary btn-sm" type="submit">Vincular ficha</button>
-      </form>
-      <ul class="casa-os">${fichas.map(f =>
-        `<li>${esc(f.nome || f.apelido)} · ID ${esc(f.id)}${f.apelido ? ' · PCP: ' + esc(f.apelido) : ''} <button class="btn-ghost btn-xs" data-del-ficha="${esc(f.id)}" type="button">Apagar</button></li>`
-      ).join('') || '<li class="text-muted">Nenhuma ficha. Sem ID, ninguém leva ponto.</li>'}</ul>
-    </div>
-    <div class="gestao-box">
-      <div class="gestao-head"><div><h2>Apontar quem leva o ponto</h2><p>Marque uma ou mais fichas em cada O.S. O ponto grava o ID. Não divide sozinho.</p></div></div>
-      <ul class="casa-os">${apontar || '<li class="text-muted">Nenhuma finalizada neste mês.</li>'}</ul>
-    </div>
-    <div class="casa-rank">${cards || emptyState('🏅', 'Nenhum ponto apontado neste mês', 'A apuração lê O.S. finalizada no PCP. Pessoa sem ficha do RH não entra.')}</div>`;
+      ${filtroId ? `<p class="metricas-nota">Filtrando ${esc(rotuloPessoaCasa(filtroId))}. <button type="button" class="pcp-ver-carteira" data-limpar-filtro>Ver todas</button></p>` : ''}
+      <div class="casa-perf-grid">
+        <section class="casa-apontar">
+          <h3>Apontar quem leva o ponto</h3>
+          <p>Marque uma ou mais fichas. O ponto grava o ID. Não divide sozinho.</p>
+          <ul class="casa-apontar-lista">${apontar || '<li class="text-muted">Nenhuma finalizada neste mês.</li>'}</ul>
+        </section>
+        <aside class="casa-rank-box">
+          <h3>Ranking</h3>
+          ${rank.length ? `<table class="casa-rank-tabela"><thead><tr><th>#</th><th>Pessoa</th><th>Pts</th><th>Valor</th><th></th></tr></thead><tbody>${rankRows}</tbody></table>` : emptyState('', 'Nenhum ponto apontado neste mês', 'A apuração lê O.S. finalizada no PCP. Pessoa sem ficha do RH não entra.')}
+        </aside>
+      </div>
+      <details class="casa-fichas" ${STATE._casaFichasOpen ? 'open' : ''}>
+        <summary>Fichas do RH · ${fichas.length} ligada${fichas.length === 1 ? '' : 's'}</summary>
+        <p>Apelido da O.S. liga no ID que você digita. Não casa por nome. PCP não lê a base do RH.</p>
+        <form id="perf-ficha-form" class="casa-criterios">
+          <label>Apelido no PCP <input name="apelido" required placeholder="Como está na O.S."></label>
+          <label>ID do RH <input name="id" inputmode="numeric" maxlength="14" required placeholder="6 dígitos"></label>
+          <label>Nome na ficha <input name="nome" required placeholder="Nome de exibição"></label>
+          <button class="btn-primary btn-sm" type="submit">Vincular ficha</button>
+        </form>
+        <ul class="casa-os">${fichas.map(f =>
+          `<li>${esc(f.nome || f.apelido)} · ID ${esc(f.id)}${f.apelido ? ' · PCP: ' + esc(f.apelido) : ''} <button class="btn-ghost btn-xs" data-del-ficha="${esc(f.id)}" type="button">Apagar</button></li>`
+        ).join('') || '<li class="text-muted">Nenhuma ficha. Sem ID, ninguém leva ponto.</li>'}</ul>
+      </details>
+    </div>`;
   const mesEl = document.getElementById('perf-mes');
   if (mesEl) mesEl.onchange = () => { if (mesEl.value) { gravarBonusCasa({ ...b, mes: mesEl.value }); renderPerformanceCasa(); } };
   const orcEl = document.getElementById('perf-orc');
   if (orcEl) orcEl.onchange = () => { gravarBonusCasa({ ...b, orcamento: Math.max(0, Number(orcEl.value) || 0) }); renderPerformanceCasa(); };
   const tetoEl = document.getElementById('perf-teto');
   if (tetoEl) tetoEl.onchange = () => { gravarBonusCasa({ ...b, teto: Math.max(0, Number(tetoEl.value) || 0) }); renderPerformanceCasa(); };
+  const boxFichas = el.querySelector('.casa-fichas');
+  if (boxFichas) boxFichas.ontoggle = () => { STATE._casaFichasOpen = boxFichas.open; };
   const formFicha = document.getElementById('perf-ficha-form');
   if (formFicha) formFicha.onsubmit = ev => {
     ev.preventDefault();
@@ -293,12 +337,14 @@ function renderPerformanceCasa() {
     const lista = lerVinculosCasa().filter(v => v.id !== id);
     lista.push({ id, apelido, nome });
     gravarVinculosCasa(lista);
+    STATE._casaFichasOpen = true;
     renderPerformanceCasa();
     toast(`Ficha ligada: ${nome} · ID ${id}`, 'success');
   };
   el.querySelectorAll('[data-del-ficha]').forEach(btn => {
     btn.onclick = () => {
       gravarVinculosCasa(lerVinculosCasa().filter(v => v.id !== btn.dataset.delFicha));
+      STATE._casaFichasOpen = true;
       renderPerformanceCasa();
     };
   });
@@ -313,7 +359,8 @@ function renderPerformanceCasa() {
   });
   const mesmaPessoa = (x, id) => x.id === id || (!x.id && chavePessoaCasa(x.nome) === id);
   el.querySelectorAll('[data-aprovar]').forEach(btn => {
-    btn.onclick = () => {
+    btn.onclick = ev => {
+      ev.stopPropagation();
       const id = btn.dataset.aprovar;
       const p = rank.find(x => x.id === id);
       const valor = propostaCasa(p ? p.osCount : 0, totalOs, b.orcamento, b.teto);
@@ -325,7 +372,8 @@ function renderPerformanceCasa() {
     };
   });
   el.querySelectorAll('[data-pagar]').forEach(btn => {
-    btn.onclick = () => {
+    btn.onclick = ev => {
+      ev.stopPropagation();
       const id = btn.dataset.pagar;
       const itens = b.itens.map(x => mesmaPessoa(x, id) && x.status === 'aprovado' ? { ...x, id, status: 'pago' } : x);
       gravarBonusCasa({ ...b, itens });
@@ -334,12 +382,23 @@ function renderPerformanceCasa() {
     };
   });
   el.querySelectorAll('[data-reabrir]').forEach(btn => {
-    btn.onclick = () => {
+    btn.onclick = ev => {
+      ev.stopPropagation();
       const id = btn.dataset.reabrir;
       gravarBonusCasa({ ...b, itens: b.itens.filter(x => !mesmaPessoa(x, id)) });
       renderPerformanceCasa();
     };
   });
+  el.querySelectorAll('[data-filtro-id]').forEach(row => {
+    row.onclick = ev => {
+      if (ev.target.closest('button')) return;
+      const id = row.dataset.filtroId;
+      STATE._perfFiltro = STATE._perfFiltro === id ? '' : id;
+      renderPerformanceCasa();
+    };
+  });
+  const limpar = el.querySelector('[data-limpar-filtro]');
+  if (limpar) limpar.onclick = () => { STATE._perfFiltro = ''; renderPerformanceCasa(); };
 }
 
 function lerAgendaCasa() {
@@ -368,6 +427,11 @@ function renderAgendaCasa() {
   const [y, m] = mes.split('-').map(Number);
   const agenda = lerAgendaCasa();
   const osMes = STORE.getAllOS().filter(o => !OPERACAO.interno(o) && OPERACAO.diasAgenda(o).some(d => d.startsWith(mes)));
+  if (!STATE._agDia || !String(STATE._agDia).startsWith(mes)) {
+    STATE._agDia = OPERACAO.dia(new Date());
+    if (!String(STATE._agDia).startsWith(mes)) STATE._agDia = mes + '-01';
+  }
+  const sel = STATE._agDia;
   const offset = new Date(y, m - 1, 1).getDay();
   const celulas = Array.from({ length: 42 }, (_, i) => new Date(y, m - 1, 1 - offset + i));
   const dow = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
@@ -377,29 +441,52 @@ function renderAgendaCasa() {
     const nOs = osMes.filter(o => OPERACAO.diasAgenda(o).includes(iso)).length;
     const nEv = agenda.eventos.filter(e => e.data === iso).length;
     const nPl = agenda.plantoes.filter(p => p.data === iso && !p.cancelado).length;
-    return `<button type="button" class="casa-dia ${noMes ? '' : 'fora'}" data-dia="${iso}">
+    const pills = [nOs && `<span class="casa-pill">${nOs} OS</span>`, nPl && `<span class="casa-pill navy">plantão</span>`, nEv && `<span class="casa-pill mute">${nEv}</span>`].filter(Boolean).join('');
+    return `<button type="button" class="casa-dia ${noMes ? '' : 'fora'} ${iso === sel ? 'sel' : ''}" data-dia="${iso}">
       <span>${dt.getDate()}</span>
-      <small>${[nOs && nOs + ' O.S.', nPl && nPl + ' plantão', nEv && nEv + ' evento'].filter(Boolean).join(' · ')}</small>
+      <span class="casa-dia-pills">${pills}</span>
     </button>`;
   }).join('');
+  const osDia = osMes.filter(o => OPERACAO.diasAgenda(o).includes(sel));
+  const plDia = agenda.plantoes.filter(p => p.data === sel && !p.cancelado);
+  const evDia = agenda.eventos.filter(e => e.data === sel);
+  const dataBR = sel ? sel.slice(8, 10) + '/' + sel.slice(5, 7) : '';
   el.innerHTML = `
-    <div class="gestao-box">
-      <div class="gestao-head"><div><h2>Calendário da produção</h2><p>Só PCP. Não conversa com o calendário de gente do RH.</p></div>
+    <div class="casa-pagina">
+      <div class="casa-pagina-head">
+        <div><h2>Calendário da produção</h2><p>Só PCP. Não conversa com o calendário de gente do RH.</p></div>
         <label class="casa-mes">Mês <input type="month" id="ag-mes" value="${esc(mes)}"></label>
       </div>
-      <div class="casa-cal-dow">${dow.map(d => `<span>${d}</span>`).join('')}</div>
-      <div class="casa-cal">${grade}</div>
-      <form id="ag-form" class="casa-criterios" style="margin-top:16px">
-        <label>Novo evento <input name="titulo" required placeholder="Título"></label>
-        <label>Data <input name="data" type="date" required></label>
-        <button class="btn-primary btn-sm" type="submit">Registrar</button>
-      </form>
-      <ul class="casa-os">${agenda.eventos.filter(e => (e.data || '').startsWith(mes)).map(e =>
-        `<li>${esc(e.data)} · ${esc(e.titulo)} <button class="btn-ghost btn-xs" data-del-ev="${esc(e.id)}">Apagar</button></li>`
-      ).join('') || '<li class="text-muted">Nenhum evento neste mês.</li>'}</ul>
+      <div class="casa-agenda">
+        <div>
+          <div class="casa-cal-dow">${dow.map(d => `<span>${d}</span>`).join('')}</div>
+          <div class="casa-cal">${grade}</div>
+        </div>
+        <aside class="casa-dia-painel">
+          <h3>Dia ${esc(dataBR)}</h3>
+          <p>${osDia.length} O.S. · ${plDia.length} plantão · ${evDia.length} evento</p>
+          <ul class="casa-os">${osDia.map(os =>
+            `<li data-os-id="${esc(os.id)}">O.S ${esc(os.numero || '—')} · ${esc(os.cliente || '')} · ${esc((os.equipe || []).join(', ') || 'sem equipe')}</li>`
+          ).join('') || '<li class="text-muted">Nenhuma O.S. neste dia.</li>'}</ul>
+          <ul class="casa-os">${plDia.map(p =>
+            `<li>${esc(p.titulo)} · ${esc(p.quem)} · ${esc(p.inicio)}–${esc(p.fim)}</li>`
+          ).join('')}</ul>
+          <ul class="casa-os">${evDia.map(e =>
+            `<li>${esc(e.titulo)} <button class="btn-ghost btn-xs" data-del-ev="${esc(e.id)}">Apagar</button></li>`
+          ).join('')}</ul>
+          <form id="ag-form" class="casa-criterios">
+            <label>Evento neste dia <input name="titulo" required placeholder="Título"></label>
+            <input type="hidden" name="data" value="${esc(sel)}">
+            <button class="btn-primary btn-sm" type="submit">Registrar</button>
+          </form>
+        </aside>
+      </div>
     </div>`;
   const mesEl = document.getElementById('ag-mes');
-  if (mesEl) mesEl.onchange = () => { if (mesEl.value) { STATE._agMes = mesEl.value; renderAgendaCasa(); } };
+  if (mesEl) mesEl.onchange = () => { if (mesEl.value) { STATE._agMes = mesEl.value; STATE._agDia = ''; renderAgendaCasa(); } };
+  el.querySelectorAll('[data-dia]').forEach(btn => {
+    btn.onclick = () => { STATE._agDia = btn.dataset.dia; renderAgendaCasa(); };
+  });
   const form = document.getElementById('ag-form');
   if (form) form.onsubmit = ev => {
     ev.preventDefault();
@@ -420,17 +507,21 @@ function renderAgendaCasa() {
       renderAgendaCasa();
     };
   });
+  bindCardClicks(el);
 }
-
 function renderPlantoesCasa() {
   const el = document.getElementById('panel-plantoes');
   if (!el) return;
   const a = lerAgendaCasa();
   const instaladores = STORE.getCFG().instaladores || [];
+  const lista = a.plantoes.filter(p => !p.cancelado).slice().sort((x, y) => String(x.data).localeCompare(String(y.data)) || String(x.inicio).localeCompare(String(y.inicio)));
+  const hoje = OPERACAO.dia(new Date());
   el.innerHTML = `
-    <div class="gestao-box">
-      <div class="gestao-head"><div><h2>Plantões</h2><p>Agenda da produção. Não entra na Performance e não aparece no RH.</p></div></div>
-      <form id="pl-form" class="casa-criterios">
+    <div class="casa-pagina">
+      <div class="casa-pagina-head">
+        <div><h2>Plantões</h2><p>Agenda da produção. Não entra na Performance e não aparece no RH.</p></div>
+      </div>
+      <form id="pl-form" class="casa-criterios casa-toolbar">
         <label>Título <input name="titulo" required placeholder="Plantão de sábado"></label>
         <label>Data <input name="data" type="date" required></label>
         <label>Quem <input name="quem" list="pl-nomes" required></label>
@@ -439,10 +530,18 @@ function renderPlantoesCasa() {
         <label>Fim <input name="fim" type="time" value="12:00" required></label>
         <button class="btn-primary btn-sm" type="submit">Registrar plantão</button>
       </form>
-      <ul class="casa-os">${a.plantoes.filter(p => !p.cancelado).map(p =>
-        `<li>${esc(p.data)} · ${esc(p.titulo)} · ${esc(p.quem)} · ${esc(p.inicio)}–${esc(p.fim)}
-          <button class="btn-ghost btn-xs" data-del-pl="${esc(p.id)}">Apagar</button></li>`
-      ).join('') || '<li class="text-muted">Nenhum plantão.</li>'}</ul>
+      <table class="casa-tabela">
+        <thead><tr><th>Data</th><th>Quem</th><th>Horário</th><th>Título</th><th></th></tr></thead>
+        <tbody>${lista.map(p =>
+          `<tr class="${p.data < hoje ? 'passado' : ''}">
+            <td>${esc(p.data)}</td>
+            <td>${esc(p.quem)}</td>
+            <td class="num">${esc(p.inicio)}–${esc(p.fim)}</td>
+            <td>${esc(p.titulo)}</td>
+            <td><button class="btn-ghost btn-xs" data-del-pl="${esc(p.id)}">Apagar</button></td>
+          </tr>`
+        ).join('') || '<tr><td colspan="5" class="text-muted">Nenhum plantão.</td></tr>'}</tbody>
+      </table>
     </div>`;
   const form = document.getElementById('pl-form');
   if (form) form.onsubmit = ev => {
@@ -478,20 +577,26 @@ function renderGradeCasa() {
   const el = document.getElementById('panel-grade');
   if (!el) return;
   const hoje = OPERACAO.dia(new Date());
-  const lista = STORE.getAllOS().filter(o => !o.finalizadaEm && !OPERACAO.interno(o) && OPERACAO.diasAgenda(o).includes(hoje));
-  const cards = lista.map(os => `
-    <div class="os-list-item" data-os-id="${esc(os.id)}">
-      <div class="list-info">
-        <div class="list-numero">O.S ${esc(os.numero || '—')}</div>
-        <div class="list-cliente">${esc(os.cliente || '')} · ${esc(os.servico || '')}</div>
-        <div class="list-date">${esc(fmtInstalacao(os.instalacao))} · 👷 ${esc((os.equipe || []).join(', ') || 'sem equipe')} · 🚗 ${esc(os.veiculo || '—')}</div>
-      </div>
-    </div>`).join('');
+  const lista = STORE.getAllOS().filter(o => !o.finalizadaEm && !OPERACAO.interno(o) && OPERACAO.diasAgenda(o).includes(hoje))
+    .sort((a, b) => String((a.instalacao && a.instalacao.hora) || (a.instalacao && a.instalacao.periodo) || '').localeCompare(String((b.instalacao && b.instalacao.hora) || (b.instalacao && b.instalacao.periodo) || '')));
+  const rows = lista.map(os => {
+    const inst = os.instalacao || {};
+    const hora = inst.hora || inst.periodo || '—';
+    return `<tr data-os-id="${esc(os.id)}">
+      <td class="num">${esc(hora)}</td>
+      <td>O.S ${esc(os.numero || '—')}</td>
+      <td>${esc(os.cliente || '')}</td>
+      <td>${esc((os.equipe || []).join(', ') || 'sem equipe')}</td>
+      <td>${esc(os.veiculo || '—')}</td>
+    </tr>`;
+  }).join('');
   el.innerHTML = `
-    <div class="gestao-box">
-      <div class="gestao-head"><div><h2>Programação de serviços</h2><p>Grade do dia na produção. A programação mora na O.S. — não no RH.</p></div></div>
+    <div class="casa-pagina">
+      <div class="casa-pagina-head">
+        <div><h2>Programação de serviços</h2><p>Grade do dia na produção. A programação mora na O.S. — não no RH.</p></div>
+      </div>
       <p class="metricas-nota">Hoje ${esc(hoje)}. Para mudar equipe, veículo ou hora, abra a O.S. A aba Instalação continua sendo a vista operacional.</p>
-    </div>
-    <div class="os-list">${cards || emptyState('📅', 'Nada programado para hoje', 'O.S. com data de instalação hoje aparecem aqui.')}</div>`;
+      ${rows ? `<table class="casa-tabela"><thead><tr><th>Hora</th><th>O.S</th><th>Cliente</th><th>Equipe</th><th>Veículo</th></tr></thead><tbody>${rows}</tbody></table>` : emptyState('', 'Nada programado para hoje', 'O.S. com data de instalação hoje aparecem aqui.')}
+    </div>`;
   bindCardClicks(el);
 }
