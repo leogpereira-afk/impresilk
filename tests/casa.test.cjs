@@ -44,7 +44,7 @@ test('entrega da casa é O.S. finalizada no PCP, não baixa Mubisys', () => {
     fin('3', { tipo: 'interno' }),
     fin('4', { finalizadaEm: '2026-08-30T12:00:00' }),
   ]);
-  assert.deepEqual(t.run(`osFinalizadasMes('${mes}').map(o=>o.id)`), ['1']);
+  assert.deepEqual(t.run(`osFinalizadasMes('${mes}').map(o=>o.id)`), ['1', '3']);
 });
 
 test('id da ficha são 6 dígitos; nome não casa sozinho', () => {
@@ -130,4 +130,15 @@ test('menu e permissões conhecem Entregas, Performance, Agenda, Plantões e Pro
   assert.match(html, /nav-marca/);
   assert.doesNotMatch(html, /data-tab="pcp"><span[^>]*>📋/);
   assert.doesNotMatch(html, /RH \+ PCP/);
+});
+
+test('calendário da casa lê o prazo da O.S., inclusive retirada', () => {
+  const t = casa([
+    { id: 'e', tipo: 'externo', previsaoEntrega: '2026-09-13', instalacao: {} },
+    { id: 'i', tipo: 'interno', instalacao: { data: '2026-09-13' } },
+    { id: 'a', tipo: 'externo', instalacao: { data: '2026-09-13', periodo: 'Manhã' }, equipe: ['Natan'] },
+  ]);
+  assert.equal(t.run('diasCasa(STORE.getAllOS()[0]).join(",")'), '2026-09-13');
+  assert.equal(t.run('diasCasa(STORE.getAllOS()[1]).join(",")'), '2026-09-13');
+  assert.equal(t.run("osNoMesCasa('2026-09').map(o=>o.id).sort().join(',')"), 'a,e,i');
 });

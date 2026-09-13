@@ -948,11 +948,11 @@ function renderActiveTab() {
     case 'execucao':    renderExecucao(); break;
     case 'retrabalho':  renderRetrabalho(); break;
     case 'finalizados': renderFinalizados(); break;
-    case 'entregas':    renderEntregas(); break;
-    case 'performance': renderPerformanceCasa(); break;
-    case 'agenda':      renderAgendaCasa(); break;
-    case 'plantoes':    renderPlantoesCasa(); break;
-    case 'grade':       renderGradeCasa(); break;
+    case 'entregas':    if (typeof renderEntregas === 'function') renderEntregas(); break;
+    case 'performance': if (typeof renderPerformanceCasa === 'function') renderPerformanceCasa(); break;
+    case 'agenda':      if (typeof renderAgendaCasa === 'function') renderAgendaCasa(); break;
+    case 'plantoes':    if (typeof renderPlantoesCasa === 'function') renderPlantoesCasa(); break;
+    case 'grade':       if (typeof renderGradeCasa === 'function') renderGradeCasa(); break;
     case 'controle':    renderControle(); break;
   }
 }
@@ -2497,9 +2497,8 @@ function pcpRenderCards() {
       : STATE.pcpVista === 'retrabalho'
         ? emptyState('', 'Nenhum retrabalho em aberto', 'Tudo certo: nada voltou para correção.')
         : emptyState('', 'Nenhuma O.S neste filtro', 'Troque o filtro, limpe a busca ou crie uma nova O.S.');
-  const usarCards = !!missao;
-  grid.classList.toggle('pcp-lista', !usarCards);
-  grid.innerHTML = list.map(o => usarCards ? osCardPcpHTML(o) : osRowPcpHTML(o)).join('') || vazio;
+  grid.classList.remove('pcp-lista');
+  grid.innerHTML = list.map(osCardHTML).join('') || vazio;
   const resultado = $('#pcp-resultado');
   if (resultado) resultado.textContent = `${list.length} O.S ${list.length === 1 ? 'exibida' : 'exibidas'}`;
   const limpar = $('#pcp-limpar-filtros');

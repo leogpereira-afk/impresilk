@@ -18,7 +18,23 @@ function dinheiroCasa(n) {
 }
 
 function osFinalizadasMes(mes) {
-  return STORE.getAllOS().filter(o => OPERACAO.concluida(o) && !OPERACAO.interno(o) && OPERACAO.dia(o.finalizadaEm).slice(0, 7) === mes);
+  return STORE.getAllOS().filter(o => OPERACAO.concluida(o) && OPERACAO.dia(o.finalizadaEm).slice(0, 7) === mes);
+}
+
+function erpMesCasa(mes) {
+  return STORE.getAllOS().filter(o => OPERACAO.encerradaERP(o) && OPERACAO.dia(o.finalizadaEm).slice(0, 7) === mes);
+}
+
+// Data que a produção já tem na O.S.: agenda completa, senão o dia marcado (inclusive retirada).
+function diasCasa(os) {
+  const ag = OPERACAO.diasAgenda(os);
+  if (ag.length) return ag;
+  const d = OPERACAO.prazo(os) || OPERACAO.dia(os && os.instalacao && os.instalacao.data) || OPERACAO.dia(os && os.previsaoEntrega);
+  return d ? [d] : [];
+}
+
+function osNoMesCasa(mes) {
+  return STORE.getAllOS().filter(o => !OPERACAO.encerradaERP(o) && diasCasa(o).some(d => d.startsWith(mes)));
 }
 
 function lerBonusCasa() {
@@ -160,8 +176,10 @@ function renderEntregas() {
   if (!el) return;
   if (!STATE._entMes) STATE._entMes = mesCasa();
   const mes = STATE._entMes;
-  const r = OPERACAO.mensal(STORE.getAllOS(), mes);
   const fins = osFinalizadasMes(mes);
+  const erp = erpMesCasa(mes);
+  const r = OPERACAO.mensal(STORE.getAllOS(), mes);
+  const retiradas = fins.filter(o => OPERACAO.interno(o)).length;
   const porDia = new Map();
   for (const os of fins) {
     const iso = OPERACAO.dia(os.finalizadaEm) || '—';
@@ -169,32 +187,38 @@ function renderEntregas() {
     porDia.get(iso).push(os);
   }
   const dias = [...porDia.keys()].sort().reverse();
+  const cardFn = typeof osCardHTML === 'function' ? osCardHTML : null;
   const grupos = dias.map(iso => {
     const data = iso === '—' ? '—' : iso.slice(8, 10) + '/' + iso.slice(5, 7);
-    const linhas = porDia.get(iso).map(os => {
-      const eq = (os.equipe || []).join(', ') || 'Sem instalador';
-      return `<li class="casa-linha" data-os-id="${esc(os.id)}">
-        <span class="casa-linha-os">O.S ${esc(os.numero || '—')}</span>
-        <span class="casa-linha-cli">${esc(os.cliente || 'Sem cliente')}</span>
-        <span class="casa-linha-eq">${esc(eq)}</span>
-        <span class="badge st-finalizada">Finalizada</span>${os.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}
-      </li>`;
-    }).join('');
-    return `<section class="casa-dia-grupo"><h3>${esc(data)}</h3><ul>${linhas}</ul></section>`;
+    const lista = porDia.get(iso);
+    const corpo = cardFn
+      ? `<div class="cards-grid">${lista.map(cardFn).join('')}</div>`
+      : `<ul>${lista.map(os => {
+          const eq = (os.equipe || []).join(', ') || 'Sem instalador';
+          return `<li class="casa-linha" data-os-id="${esc(os.id)}">
+            <span class="casa-linha-os">O.S ${esc(os.numero || '—')}</span>
+            <span class="casa-linha-cli">${esc(os.cliente || 'Sem cliente')}</span>
+            <span class="casa-linha-eq">${esc(eq)}</span>
+            <span class="badge st-finalizada">${OPERACAO.interno(os) ? 'Retirada' : 'Finalizada'}</span>${os.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}
+          </li>`;
+        }).join('')}</ul>`;
+    return `<section class="casa-dia-grupo"><h3>${esc(data)} · ${lista.length}</h3>${corpo}</section>`;
   }).join('');
   el.innerHTML = `
     <div class="casa-pagina">
       <div class="casa-pagina-head">
-        <div><h2>Entregas</h2><p>O que a empresa finalizou no PCP neste mês. Extra e plantão não entram.</p></div>
+        <div><h2>Entregas</h2><p>O que a empresa finalizou no PCP neste mês. Baixa do ERP não entra. Extra e plantão não entram na Performance.</p></div>
         <label class="casa-mes">Mês <input type="month" id="ent-mes" value="${esc(mes)}"></label>
       </div>
       <div class="casa-kpis">
-        <span><b>${r.total}</b> finalizadas</span>
+        <span><b>${fins.length}</b> finalizadas no PCP</span>
+        <span><b>${r.total}</b> externas</span>
+        <span><b>${retiradas}</b> retirada</span>
         <span><b>${r.pessoas.length}</b> quem entregou</span>
-        <span><b>${r.retrabalho}</b> retrabalho</span>
-        <span><b>${r.semEquipe}</b> sem equipe</span>
+        <span><b>${fins.filter(o => o.retrabalho).length}</b> retrabalho</span>
       </div>
-      <div class="casa-grupos">${grupos || emptyState('', 'Nenhuma finalizada neste mês', 'A entrega desta tela é a O.S. finalizada no PCP.')}</div>
+      ${erp.length ? `<p class="metricas-nota">${erp.length} baixa${erp.length === 1 ? '' : 's'} do ERP neste mês não entram aqui — a entrega desta tela é a finalização no PCP.</p>` : ''}
+      <div class="casa-grupos">${grupos || emptyState('', 'Nenhuma finalizada no PCP neste mês', erp.length ? 'As baixas do ERP estão na aba Finalizados. Esta tela só conta O.S. que a equipe finalizou no PCP.' : 'Finalizar a O.S. no PCP (não a baixa do ERP) faz ela aparecer aqui.')}</div>
     </div>`;
   const input = document.getElementById('ent-mes');
   if (input) input.onchange = () => { if (input.value) { STATE._entMes = input.value; renderEntregas(); } };
@@ -219,6 +243,7 @@ function renderPerformanceCasa() {
   const rank = rankingFinalizadas(mes, b.pontos);
   const totalOs = rank.reduce((s, x) => s + x.osCount, 0);
   const fichas = lerVinculosCasa();
+  if (!fichas.length) STATE._casaFichasOpen = true;
   const aprovados = b.itens.filter(i => i.status === 'aprovado' || i.status === 'pago');
   const pago = b.itens.filter(i => i.status === 'pago').reduce((s, i) => s + (Number(i.valor) || 0), 0);
   const aprovado = aprovados.reduce((s, i) => s + (Number(i.valor) || 0), 0);
@@ -296,7 +321,7 @@ function renderPerformanceCasa() {
         <section class="casa-apontar">
           <h3>Apontar quem leva o ponto</h3>
           <p>Marque uma ou mais fichas. O ponto grava o ID. Não divide sozinho.</p>
-          <ul class="casa-apontar-lista">${apontar || '<li class="text-muted">Nenhuma finalizada neste mês.</li>'}</ul>
+          <ul class="casa-apontar-lista">${apontar || `<li class="text-muted">${fins.length ? 'Nenhuma O.S. neste filtro.' : 'Nenhuma O.S. finalizada no PCP neste mês. A baixa do ERP não entra.'}</li>`}</ul>
         </section>
         <aside class="casa-rank-box">
           <h3>Ranking</h3>
@@ -426,7 +451,7 @@ function renderAgendaCasa() {
   const mes = STATE._agMes;
   const [y, m] = mes.split('-').map(Number);
   const agenda = lerAgendaCasa();
-  const osMes = STORE.getAllOS().filter(o => !OPERACAO.interno(o) && OPERACAO.diasAgenda(o).some(d => d.startsWith(mes)));
+  const osMes = osNoMesCasa(mes);
   if (!STATE._agDia || !String(STATE._agDia).startsWith(mes)) {
     STATE._agDia = OPERACAO.dia(new Date());
     if (!String(STATE._agDia).startsWith(mes)) STATE._agDia = mes + '-01';
@@ -438,7 +463,7 @@ function renderAgendaCasa() {
   const grade = celulas.map(dt => {
     const iso = OPERACAO.dia(dt);
     const noMes = dt.getMonth() === m - 1;
-    const nOs = osMes.filter(o => OPERACAO.diasAgenda(o).includes(iso)).length;
+    const nOs = osMes.filter(o => diasCasa(o).includes(iso)).length;
     const nEv = agenda.eventos.filter(e => e.data === iso).length;
     const nPl = agenda.plantoes.filter(p => p.data === iso && !p.cancelado).length;
     const pills = [nOs && `<span class="casa-pill">${nOs} OS</span>`, nPl && `<span class="casa-pill navy">plantão</span>`, nEv && `<span class="casa-pill mute">${nEv}</span>`].filter(Boolean).join('');
@@ -447,7 +472,7 @@ function renderAgendaCasa() {
       <span class="casa-dia-pills">${pills}</span>
     </button>`;
   }).join('');
-  const osDia = osMes.filter(o => OPERACAO.diasAgenda(o).includes(sel));
+  const osDia = osMes.filter(o => diasCasa(o).includes(sel));
   const plDia = agenda.plantoes.filter(p => p.data === sel && !p.cancelado);
   const evDia = agenda.eventos.filter(e => e.data === sel);
   const dataBR = sel ? sel.slice(8, 10) + '/' + sel.slice(5, 7) : '';
@@ -466,7 +491,7 @@ function renderAgendaCasa() {
           <h3>Dia ${esc(dataBR)}</h3>
           <p>${osDia.length} O.S. · ${plDia.length} plantão · ${evDia.length} evento</p>
           <ul class="casa-os">${osDia.map(os =>
-            `<li data-os-id="${esc(os.id)}">O.S ${esc(os.numero || '—')} · ${esc(os.cliente || '')} · ${esc((os.equipe || []).join(', ') || 'sem equipe')}</li>`
+            `<li data-os-id="${esc(os.id)}">O.S ${esc(os.numero || '—')} · ${esc(os.cliente || '')} · ${esc((os.equipe || []).join(', ') || 'sem equipe')}${os.finalizadaEm ? ' · finalizada' : ''}</li>`
           ).join('') || '<li class="text-muted">Nenhuma O.S. neste dia.</li>'}</ul>
           <ul class="casa-os">${plDia.map(p =>
             `<li>${esc(p.titulo)} · ${esc(p.quem)} · ${esc(p.inicio)}–${esc(p.fim)}</li>`
@@ -540,7 +565,7 @@ function renderPlantoesCasa() {
             <td>${esc(p.titulo)}</td>
             <td><button class="btn-ghost btn-xs" data-del-pl="${esc(p.id)}">Apagar</button></td>
           </tr>`
-        ).join('') || '<tr><td colspan="5" class="text-muted">Nenhum plantão.</td></tr>'}</tbody>
+        ).join('') || '<tr><td colspan="5" class="text-muted">Nenhum plantão registrado na produção. O RH não manda plantão para cá — cadastre acima.</td></tr>'}</tbody>
       </table>
     </div>`;
   const form = document.getElementById('pl-form');
@@ -577,26 +602,32 @@ function renderGradeCasa() {
   const el = document.getElementById('panel-grade');
   if (!el) return;
   const hoje = OPERACAO.dia(new Date());
-  const lista = STORE.getAllOS().filter(o => !o.finalizadaEm && !OPERACAO.interno(o) && OPERACAO.diasAgenda(o).includes(hoje))
-    .sort((a, b) => String((a.instalacao && a.instalacao.hora) || (a.instalacao && a.instalacao.periodo) || '').localeCompare(String((b.instalacao && b.instalacao.hora) || (b.instalacao && b.instalacao.periodo) || '')));
-  const rows = lista.map(os => {
-    const inst = os.instalacao || {};
-    const hora = inst.hora || inst.periodo || '—';
-    return `<tr data-os-id="${esc(os.id)}">
-      <td class="num">${esc(hora)}</td>
-      <td>O.S ${esc(os.numero || '—')}</td>
-      <td>${esc(os.cliente || '')}</td>
-      <td>${esc((os.equipe || []).join(', ') || 'sem equipe')}</td>
-      <td>${esc(os.veiculo || '—')}</td>
-    </tr>`;
-  }).join('');
+  const lista = (OPERACAO.resumo(STORE.getAllOS(), hoje).hoje || []).slice().sort((a, b) =>
+    String((a.instalacao && a.instalacao.hora) || (a.instalacao && a.instalacao.periodo) || '').localeCompare(
+      String((b.instalacao && b.instalacao.hora) || (b.instalacao && b.instalacao.periodo) || '')
+    )
+  );
+  const cards = typeof osCardHTML === 'function' ? lista.map(osCardHTML).join('') : '';
+  const dataBR = hoje.slice(8, 10) + '/' + hoje.slice(5, 7);
   el.innerHTML = `
     <div class="casa-pagina">
       <div class="casa-pagina-head">
-        <div><h2>Programação de serviços</h2><p>Grade do dia na produção. A programação mora na O.S. — não no RH.</p></div>
+        <div><h2>Programação de serviços</h2><p>O mesmo recorte de Para hoje do PCP. A programação mora na O.S. — não no RH.</p></div>
       </div>
-      <p class="metricas-nota">Hoje ${esc(hoje)}. Para mudar equipe, veículo ou hora, abra a O.S. A aba Instalação continua sendo a vista operacional.</p>
-      ${rows ? `<table class="casa-tabela"><thead><tr><th>Hora</th><th>O.S</th><th>Cliente</th><th>Equipe</th><th>Veículo</th></tr></thead><tbody>${rows}</tbody></table>` : emptyState('', 'Nada programado para hoje', 'O.S. com data de instalação hoje aparecem aqui.')}
+      <p class="metricas-nota">Hoje ${esc(dataBR)}. ${lista.length} O.S. Para mudar equipe, veículo ou hora, abra a O.S.</p>
+      ${lista.length
+        ? (cards ? `<div class="cards-grid">${cards}</div>` : `<table class="casa-tabela"><thead><tr><th>Hora</th><th>O.S</th><th>Cliente</th><th>Equipe</th><th>Veículo</th></tr></thead><tbody>${lista.map(os => {
+            const inst = os.instalacao || {};
+            const hora = inst.hora || inst.periodo || '—';
+            return `<tr data-os-id="${esc(os.id)}">
+              <td class="num">${esc(hora)}</td>
+              <td>O.S ${esc(os.numero || '—')}</td>
+              <td>${esc(os.cliente || '')}</td>
+              <td>${esc((os.equipe || []).join(', ') || 'sem equipe')}</td>
+              <td>${esc(os.veiculo || '—')}</td>
+            </tr>`;
+          }).join('')}</tbody></table>`)
+        : emptyState('', 'Nada para hoje', 'O.S. com entrega ou instalação hoje (o mesmo número de Para hoje no PCP) aparecem aqui.')}
     </div>`;
   bindCardClicks(el);
 }
