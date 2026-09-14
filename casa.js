@@ -853,7 +853,10 @@ function carrosHTML(f) {
     m.set(nome, d);
   }
   const lista = [...m.values()].sort((a, b) => b.os - a.os);
-  if (!lista.length) return '<p class="text-muted">Nenhuma O.S com veículo no período.</p>';
+  if (!lista.length) {
+    const foraDoPeriodo = STORE.getAllOS().filter(o => String(o.veiculo || '').trim()).length;
+    return `<p class="text-muted">Nenhuma O.S com veículo neste período.${foraDoPeriodo ? ` Há ${foraDoPeriodo} O.S com veículo em outras datas — amplie o período acima para vê-las.` : ' O campo Veículo da O.S está em branco em todas — sem ele não dá para saber que carro rodou.'}</p>`;
+  }
   const semUso = veiculosRH().filter(v => !lista.some(x => normCasa(x.nome) === normCasa(v.nome)));
   return `${barrasCasa(lista.map(c => ({ rotulo: c.nome, valor: c.os, extra: c.km ? `${Math.round(c.km)} km` : '' })), v => `${v} O.S`)}
     <div class="casa-tabela-wrap"><table class="casa-tabela">
@@ -900,7 +903,7 @@ function painelTVCasa(i, f) {
   const podio = (lista, medida, fmt) => lista.slice(0, 8).map((p, k) => `<li class="tv-linha ${k < 3 ? 'tv-podio' : ''}">
       <span class="tv-pos">${k + 1}</span>
       ${avatarRH(p.pessoa || { nome: p.nome }, 'tv-foto')}
-      <span class="tv-nome">${esc(p.nome)}<small>${esc((p.pessoa && p.pessoa.cargo) || 'sem ficha do RH')}</small></span>
+      <span class="tv-nome">${esc(p.nome)}${p.pessoa && p.pessoa.cargo ? `<small>${esc(p.pessoa.cargo)}</small>` : ''}</span>
       <span class="tv-num">${fmt(medida(p))}</span>
     </li>`).join('');
   const paineis = [
@@ -1240,7 +1243,7 @@ function renderAgendaCasa() {
     // larga que empurrava a coluna e encavalava a grade inteira. Agora é
     // contagem + as duas primeiras O.S, e o resto no painel do dia.
     const pills = [
-      doDia.length && `<span class="casa-pill os" title="${esc(doDia.map(o => o.numero).join(', '))}">${doDia.length} O.S</span>`,
+      doDia.length && `<span class="casa-pill os" title="${esc(doDia.map(o => o.numero).join(', '))}">${doDia.length}<span class="so-largo"> O.S</span></span>`,
       ...pls.slice(0, 2).map(pillPlantao),
       pls.length > 2 && `<span class="casa-pill navy">+${pls.length - 2}</span>`,
       nEv && `<span class="casa-pill mute">${nEv} ev.</span>`,

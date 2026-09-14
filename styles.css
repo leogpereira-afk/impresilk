@@ -1988,4 +1988,6 @@ body.tv-ligada { overflow:hidden; }
   .casa-dia-nav .casa-dia-acoes { margin-left:0; width:100%; }
   .casa-dia { min-height:62px; padding:5px; }
   .casa-dia-os { display:none; }
+  /* "8 O.S" não cabe na célula do celular: fica só o número. */
+  .casa-dia .so-largo { display:none; }
 }
