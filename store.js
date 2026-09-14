@@ -340,9 +340,12 @@ const STORE = (() => {
         // "sem internet" de "crachá recusado" — 401/403 é sessão, não item.
         let corpo = {};
         try { corpo = await res.json(); } catch { /* sem corpo */ }
-        throw Object.assign(new Error('HTTP ' + res.status), {
+        // A mensagem do servidor vai junto: "HTTP 403" não diz a quem clicou o
+        // que houve, e é justamente ela que o aviso de recusa precisa mostrar.
+        throw Object.assign(new Error((corpo && corpo.error) ? String(corpo.error) : 'HTTP ' + res.status), {
           status: res.status,
-          semSessao: !!(corpo && corpo.semSessao)
+          semSessao: !!(corpo && corpo.semSessao),
+          servidor: (corpo && corpo.error) ? String(corpo.error) : ''
         });
       }
       return res.json();
@@ -495,7 +498,13 @@ const STORE = (() => {
         if (e && e.status === 403) {
           _removeFromQueue(item);
           _failCount.delete(sig);
-          _notifyListeners('item-recusado', { item, motivo: msg || 'sem permissão para esta ação' });
+          // Recusado não pode continuar valendo NESTE aparelho como se tivesse
+          // salvo: `saveCFG` grava no localStorage antes de enfileirar, e o
+          // `pullCFG` só sobrepõe chave que o servidor TAMBÉM tem — uma chave
+          // que nunca chegou lá (uma escala, por exemplo) ficava para sempre na
+          // tela de quem tentou, e só na dele. A cópia local volta à do banco.
+          if (item.action === 'setCfg') reverterCFG();
+          _notifyListeners('item-recusado', { item, motivo: e.servidor || msg || 'sem permissão para esta ação' });
           continue;
         }
         // Distingue falha de rede (parar o ciclo) de erro permanente do item
@@ -607,6 +616,24 @@ const STORE = (() => {
         _notifyListeners('sem-sessao', {});
       }
     }
+  }
+
+  // Devolve a configuração deste aparelho ao que o SERVIDOR tem. Substitui em
+  // vez de mesclar: o problema é justamente a chave a mais, que a mescla
+  // preserva. `usuarios`/`funcionarios` ficam de fora porque o getCfg não os
+  // manda para quem não é admin — apagá-los aqui seria perder cache à toa.
+  async function reverterCFG() {
+    try {
+      const res = await api({ action: 'getCfg' });
+      if (!res || !res.cfg) return;
+      const local = lsGet(K.CFG, {}) || {};
+      const novo = Object.assign({}, res.cfg);
+      for (const campo of ['usuarios', 'funcionarios']) {
+        if (!(campo in novo) && campo in local) novo[campo] = local[campo];
+      }
+      lsSet(K.CFG, novo);
+      _notifyListeners('cfg', novo);
+    } catch { /* sem rede: o próximo pull resolve */ }
   }
 
   // ── Valor de cada O.S (uma base só) ───────────────────────────────────────

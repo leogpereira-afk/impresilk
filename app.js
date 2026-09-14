@@ -901,6 +901,9 @@ function initSyncIndicator() {
   // o servidor não vai aceitar esta ação deste crachá. O item sai da fila para
   // não travar o envio do trabalho do dia, e quem clicou precisa saber que
   // aquela alteração ficou só neste aparelho.
+  // A config voltou ao que o servidor tem (alteração recusada): repinta, senão
+  // a tela segue mostrando o que não foi salvo.
+  STORE.on('cfg', () => { aplicarPermissoes(); renderActiveTab(); });
   STORE.on('item-recusado', ({ item, motivo }) => {
     const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero
       : item && item.action === 'setCfg' ? 'a alteração das configurações' : (item && item.action) || 'a alteração';
