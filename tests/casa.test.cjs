@@ -18,7 +18,7 @@ function casa(lista, cfg = {}, elenco = null) {
       elenco: () => elenco || { pessoas: [], veiculos: [], ferias: [], ausencias: [] },
       entreguesMes: () => null,
       pullEntreguesMes() {},
-      anosEntreguesEmCache: () => 2,
+      anosEntregues: () => (cfg._anosERP || [2026, 2025, 2024, 2023, 2022, 2021, 2020]),
       valores: () => ({}),
     },
     STATE: {},
@@ -327,12 +327,22 @@ test('retrabalho cobra a viagem da O.S de CORREÇÃO, não a da entrega original
   assert.doesNotMatch(quem, /Natan/, 'quem entregou não pode ser listado como quem refez');
 });
 
-test('chips de ano não oferecem ano que o cache joga fora', () => {
+test('há um chip para cada ano que o banco tem, e nenhum inventado', () => {
+  // Pedido do dono (14/09/2026): chip de todos os anos existentes. A lista vem
+  // do servidor; o app não pode chutar — chutar três anos com o cache guardando
+  // dois foi o que criou o chip que pedia ao ERP em laço infinito.
   const t = casa([], {}, ELENCO);
-  const anos = t.run('anosEntregas()');
-  const guardados = t.run('STORE.anosEntreguesEmCache()');
-  assert.equal(anos.length, guardados, 'oferecer mais anos que o cache guarda dá laço infinito de pedidos');
-  assert.equal(anos[0], new Date().getFullYear());
+  // (join: array criado dentro da sandbox tem outro protótipo, e deepEqual
+  //  estrito compara protótipo — comparar o conteúdo é o que interessa aqui.)
+  assert.equal(t.run("anosEntregas().join(',')"), '2026,2025,2024,2023,2022,2021,2020');
+  // Servidor ainda não respondeu: só o ano corrente, nunca um ano inventado.
+  const mudo = casa([], { _anosERP: [] }, ELENCO);
+  assert.equal(mudo.run("anosEntregas().join(',')"), String(new Date().getFullYear()));
+  // E o intervalo de meses cobre o período mais longo que os chips oferecem.
+  const meses = t.run("mesesEntre('2020-01-01', '2026-12-31')");
+  assert.equal(meses.length, 84, 'sete anos = 84 meses');
+  assert.equal(meses.truncou, false, 'o teto não pode cortar o que os chips oferecem');
+  assert.equal(t.run("mesesEntre('2020-01-01','2026-12-31').indexOf('2020-01')"), 0);
 });
 
 test('editar plantão não apaga o vínculo com O.S já finalizada', () => {

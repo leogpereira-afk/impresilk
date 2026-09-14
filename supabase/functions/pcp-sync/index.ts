@@ -643,7 +643,22 @@ Deno.serve(async (req: Request) => {
             if (r.numero && Number.isFinite(v)) valores[String(r.numero)] = v;
           }
         }
-        return resp({ valores, em: new Date().toISOString() });
+        /* OS ANOS QUE EXISTEM SAO OS QUE O BANCO TEM, nao uma constante.
+           A tela de Entregas oferece um chip por ano e precisa saber ate onde
+           voltar. Chutar "tres anos" foi o que criou o chip que nunca carregava.
+           `painel_ordens` e a carga historica do ERP no MESMO banco (2020+),
+           entao a lista sai de la e se mantem sozinha. Vai junto do `valores`
+           de proposito: mesma tela, mesma trava de papel, zero ida extra. */
+        const { data: faixa } = await sb.from("painel_ordens")
+          .select("data").not("data", "is", null).order("data", { ascending: true }).limit(1);
+        const primeiro = Number(String(faixa?.[0]?.data ?? "").slice(0, 4));
+        const anoAtual = new Date().getFullYear();
+        const anos: number[] = [];
+        // Teto de 20 para uma data corrompida no banco nao virar 2 mil chips.
+        if (primeiro >= 2000 && primeiro <= anoAtual) {
+          for (let a = anoAtual; a >= Math.max(primeiro, anoAtual - 19); a--) anos.push(a);
+        }
+        return resp({ valores, anos, em: new Date().toISOString() });
       }
 
       // ---- elenco: quem instala (RH) e com que carro (Ativos do Painel) ----

@@ -178,6 +178,16 @@ const STORE = (() => {
         if (velho && Array.isArray(velho.pessoas)) { _elenco = _podarElenco(velho); _gravarElencoDisco(_elenco); }
       }
       try { localStorage.removeItem(K.ELENCO); } catch {}
+      // Entregues do ERP: também do disco. `entreguesMes()` é síncrono e a tela
+      // de Entregas conta com o que já foi baixado antes de pedir mais ao ERP.
+      const entrDisco = await _lerEntreguesDisco();
+      if (entrDisco && typeof entrDisco === 'object') _entregues = entrDisco;
+      const entrVelho = lsGet(K.ENTREGUES, null);   // aparelho vindo do localStorage
+      if (entrVelho && typeof entrVelho === 'object') {
+        for (const [k, v] of Object.entries(entrVelho)) if (!_entregues[k]) _entregues[k] = v;
+        _persistirEntregues();
+      }
+      try { localStorage.removeItem(K.ENTREGUES); } catch {}
       return _osMem;
     })();
     return _prontoP;
@@ -652,7 +662,10 @@ const STORE = (() => {
     try {
       const res = await api({ action: 'valores' });
       if (res && res.valores && typeof res.valores === 'object') {
-        _valores = { em: res.em || new Date().toISOString(), mapa: res.valores };
+        // `anos` vem junto: são os anos que o ERP tem no banco, e é deles que
+        // a tela de Entregas tira os chips. Ver `anosEntregues()`.
+        _valores = { em: res.em || new Date().toISOString(), mapa: res.valores,
+                     anos: Array.isArray(res.anos) ? res.anos : (_valores.anos || []) };
         lsSet(K.VALORES, _valores);
         _notifyListeners('valores', _valores);
       }
@@ -667,43 +680,90 @@ const STORE = (() => {
   // O valor entregue vem daqui, não da soma das O.S que o PCP conhece. Um
   // pacote por mês {em, mes, total, os[]}; o servidor guarda em cache e a
   // tela pede o mês corrente e os meses do ano conforme abre.
-  let _entregues = lsGet(K.ENTREGUES, {});
+  /* SAIU DO localStorage (14/09/2026). Cada mês pesa ~33 KB e o dono pediu um
+     chip para CADA ano que existe — 2020 a hoje são 84 meses, ~2,7 MB. Os sete
+     sistemas dividem 5 MB de localStorage na mesma origem, então isso estourava
+     a cota de todo mundo (e o `lsSet` engole o erro: o app abriria vazio, como
+     já aconteceu). No IndexedDB do mesmo aparelho cabem ~2,7 GB.
+     Ver [[feedback_localstorage_origem_compartilhada]]. */
+  let _entregues = {};
   let _entreguesPedindo = {};
-  // Pacote sem v:2 e da versao que usava a PREVISAO de entrega: descarta e pede de novo.
-  // Quantos anos de pacotes do ERP cabem no cache (ver a poda em pullEntreguesMes).
-  // Quem desenha os chips de ano PERGUNTA aqui — nunca decide por conta própria.
-  const ANOS_ENTREGUES = 2;
-  function anosEntreguesEmCache() { return ANOS_ENTREGUES; }
+  let _entreguesTimer = null;
+  async function _lerEntreguesDisco() {
+    try {
+      const db = await _openDB();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction('os', 'readonly');
+        const req = tx.objectStore('os').get('entregues');
+        req.onsuccess = e => resolve(e.target.result || null);
+        req.onerror = e => reject(e.target.error);
+      });
+    } catch { return null; }
+  }
+  function _persistirEntregues() {
+    if (_semIDB) { lsSet(K.ENTREGUES, _entregues); return; }
+    if (_entreguesTimer) clearTimeout(_entreguesTimer);
+    _entreguesTimer = setTimeout(async () => {
+      _entreguesTimer = null;
+      try {
+        const db = await _openDB();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('os', 'readwrite');
+          tx.objectStore('os').put(_entregues, 'entregues');
+          tx.oncomplete = resolve;
+          tx.onerror = e => reject(e.target.error);
+        });
+      } catch (e) { console.warn('[store] entregues não gravou no IndexedDB', e); }
+    }, 300);
+  }
+
+  /* OS ANOS QUE EXISTEM vêm do BANCO (a ação `valores` os traz junto, de
+     `painel_ordens`), nunca de uma constante aqui. Uma lista copiada falha
+     calada: a versão anterior chutava três anos enquanto o cache guardava dois,
+     e o chip do ano mais antigo pedia ao ERP em laço infinito. Sem resposta do
+     servidor ainda, vale só o ano corrente — nunca um ano que não sabemos se
+     existe. Ver [[feedback_lista_copiada_falha_calada]]. */
+  function anosEntregues() {
+    const doServidor = (_valores && Array.isArray(_valores.anos)) ? _valores.anos : [];
+    const atual = new Date().getFullYear();
+    if (!doServidor.length) return [atual];
+    return doServidor.filter(a => Number.isFinite(a) && a <= atual).sort((x, y) => y - x);
+  }
 
   function entreguesMes(mes) { const p = _entregues[mes]; return p && p.v === 2 ? p : null; }
   async function pullEntreguesMes(mes, forcar) {
     if (!navigator.onLine || !mes || _entreguesPedindo[mes]) return null;
     const atual = _entregues[mes];
     const hojeMes = new Date().toISOString().slice(0, 7);
-    const validade = mes === hojeMes ? 15 * 60000 : 6 * 3600000;
+    /* MÊS FECHADO NÃO MUDA — não vale revarrer o ERP por ele.
+       A validade de 6 h servia quando o cache ia até o ano anterior. Com um chip
+       por ano desde 2020, ela mandaria o app revarrer 84 meses a cada 6 h, a
+       25–40 s por mês. O passado distante é história: só o mês corrente e o
+       anterior ainda recebem lançamento. */
+    const anterior = new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().slice(0, 7);
+    const validade = mes === hojeMes ? 15 * 60000 : (mes === anterior ? 6 * 3600000 : 30 * 864e5);
     if (atual && !forcar && Date.now() - new Date(atual.em).getTime() < validade) return atual;
     _entreguesPedindo[mes] = true;
     try {
       const res = await apiFn('mubisys', { action: 'entreguesMes', mes }, 120000);
       if (res && Array.isArray(res.os)) {
         _entregues = Object.assign({}, _entregues, { [mes]: { v: res.v || 0, em: res.em, mes, total: res.total, os: res.os } });
-        /* A PODA E OS CHIPS DE ANO TÊM DE LER A MESMA RÉGUA.
-           Esta poda existe porque o localStorage é dividido pelos 7 sistemas.
-           Só que a tela de Entregas oferecia chips de TRÊS anos e o cache
-           guardava DOIS: escolher o ano mais antigo fazia o pacote ser apagado
-           no mesmo `pullEntreguesMes` que acabara de gravá-lo, o mês voltava
-           para "faltando", a tela repintava e pedia de novo — laço infinito,
-           preso em "carregando 12 de 12 meses", sem nenhum erro na tela.
-           Agora a régua é uma só e `anosEmCache()` a publica para a tela. */
-        const corte = String(new Date().getFullYear() - (ANOS_ENTREGUES - 1));
-        for (const k of Object.keys(_entregues)) if (k < corte) delete _entregues[k];
-        lsSet(K.ENTREGUES, _entregues);
+        /* A PODA SEGUE OS CHIPS, e os chips seguem o banco. Guardar o que a
+           tela oferece é a regra; o que ficou ANTES do primeiro ano do ERP é
+           que sai (mês de pacote antigo, ano corrompido). Antes a poda cortava
+           por uma constante própria e apagava o pacote no mesmo pull que o
+           gravava — laço infinito preso em "carregando 12 de 12 meses". */
+        const anos = anosEntregues();
+        const corte = String(Math.min(...anos));
+        for (const k of Object.keys(_entregues)) if (k.slice(0, 4) < corte) delete _entregues[k];
+        _persistirEntregues();
         _notifyListeners('entregues', { mes });
         return _entregues[mes];
       }
     } catch (e) {
       // 403 = papel sem acesso; 502 = ERP fora do ar. A tela mostra "sem dado do ERP".
       _entregues = Object.assign({}, _entregues, { [mes]: Object.assign({ em: new Date().toISOString(), mes, total: 0, os: [], erro: true }, atual || {}, { em: new Date().toISOString(), erro: true }) });
+      _persistirEntregues();
     } finally { delete _entreguesPedindo[mes]; }
     return _entregues[mes] || null;
   }
@@ -1051,7 +1111,7 @@ const STORE = (() => {
     // Identidade
     getUser, setUser, getInstalador, setInstalador, getLastSync, limparCache,
     // Sync
-    trySync, pull, pullCFG, pullValores, valores, valoresEm, pullElenco, elenco, pullEntreguesMes, entreguesMes, anosEntreguesEmCache,
+    trySync, pull, pullCFG, pullValores, valores, valoresEm, pullElenco, elenco, pullEntreguesMes, entreguesMes, anosEntregues,
     // Fotos
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos

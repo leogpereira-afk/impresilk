@@ -467,16 +467,24 @@ function lancarEntregaManual(osId) {
 }
 
 // ── Meses do ERP para um intervalo, e o que ainda falta carregar ─────────────
+/* O teto era 36 meses e o intervalo hoje pode passar de 80 (um chip por ano
+   desde 2020). Teto que corta calado vira número errado com cara de certo: o
+   total do período sairia menor e ninguém saberia. Agora o teto cobre o que os
+   chips oferecem, e quando ele morde a tela AVISA. */
+const TETO_MESES = 12 * 25;
 function mesesEntre(de, ate) {
   const out = [];
   let [y, m] = de.slice(0, 7).split('-').map(Number);
   const fim = ate.slice(0, 7);
-  for (let i = 0; i < 36; i++) {
+  if (!Number.isFinite(y) || !Number.isFinite(m)) return out;
+  let truncou = true;
+  for (let i = 0; i < TETO_MESES; i++) {
     const k = `${y}-${String(m).padStart(2, '0')}`;
     out.push(k);
-    if (k >= fim) break;
+    if (k >= fim) { truncou = false; break; }
     m++; if (m > 12) { m = 1; y++; }
   }
+  out.truncou = truncou;
   return out;
 }
 // O VALOR ENTREGUE vem do ERP (status ENTREGUE, pela data de entrega), todas
@@ -507,7 +515,7 @@ function entreguesERP(de, ate) {
   // Mês corrente: renova em silêncio quando envelhece (o store decide).
   const hojeMes = OPERACAO.dia(new Date()).slice(0, 7);
   if (meses.includes(hojeMes) && STORE.entreguesMes(hojeMes)) STORE.pullEntreguesMes(hojeMes);
-  return { os, faltando, comErro, meses };
+  return { os, faltando, comErro, meses, truncou: !!meses.truncou };
 }
 
 // A lista de Entregas abre nos ÚLTIMOS 30 DIAS (ordem do dono, 14/09/2026):
@@ -520,15 +528,17 @@ function periodoEntregas() {
   }
   return STATE._fEnt;
 }
-/* OS CHIPS SÓ OFERECEM O QUE O CACHE GUARDA.
-   Ofereciam três anos enquanto o cache guardava dois: escolher o mais antigo
-   fazia o pacote ser apagado no mesmo pull que o gravou, o mês voltava para
-   "faltando" e a tela pedia de novo, para sempre — presa em "carregando 12 de
-   12 meses", sem erro nenhum. Agora quem manda na régua é o store. */
+/* UM CHIP PARA CADA ANO QUE EXISTE (pedido do dono, 14/09/2026).
+   A lista vem do BANCO — a ação `valores` traz os anos de `painel_ordens`
+   junto — e não de uma constante aqui. A versão anterior chutava três anos
+   enquanto o cache guardava dois, e o chip do ano mais antigo pedia ao ERP
+   em laço infinito. Agora o cache guarda todos (IndexedDB) e a régua é uma só.
+   Enquanto o servidor não responde, só o ano corrente: melhor faltar chip do
+   que oferecer um ano que talvez não exista. */
 function anosEntregas() {
   const atual = Number(OPERACAO.dia(new Date()).slice(0, 4));
-  const n = (STORE.anosEntreguesEmCache ? STORE.anosEntreguesEmCache() : 2);
-  return Array.from({ length: Math.max(1, n) }, (_, i) => atual - i);
+  const doStore = (STORE.anosEntregues ? STORE.anosEntregues() : []) || [];
+  return doStore.length ? doStore : [atual];
 }
 function chipsPeriodoEntregas(f) {
   const hoje = OPERACAO.dia(new Date());
@@ -722,7 +732,7 @@ function renderEntregas() {
         <td>${dataBR(erp.data)}</td>
         <td class="num">${valorTxt(erp.valor)}</td>
       </tr>`; }).join('')}</tbody>
-    <tfoot><tr><td colspan="5">${lista.length} O.S entregues no período${lista.length > TETO_LINHAS ? ` · mostrando as ${TETO_LINHAS} mais recentes` : ''}${semValorLista ? ` · ${semValorLista} sem valor` : ''}${per.faltando.length ? ` · carregando ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'}…` : ''}</td><td class="num">${dinheiroCasa(totLista)}</td></tr></tfoot>
+    <tfoot><tr><td colspan="5">${lista.length} O.S entregues no período${lista.length > TETO_LINHAS ? ` · mostrando as ${TETO_LINHAS} mais recentes` : ''}${semValorLista ? ` · ${semValorLista} sem valor` : ''}${per.faltando.length ? ` · carregando ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'}…` : ''}${per.truncou ? ` · <span class="badge sem-valor">intervalo longo demais: entraram só os primeiros ${TETO_MESES} meses</span>` : ''}</td><td class="num">${dinheiroCasa(totLista)}</td></tr></tfoot>
   </table></div>`;
   const cardFn = typeof osCardHTML === 'function' ? osCardHTML : null;
   const cards = cardFn ? `<div class="cards-grid">${visiveis.filter(x => x.card).map(x => cardFn(x.card)).join('')}</div>` : tabela;
