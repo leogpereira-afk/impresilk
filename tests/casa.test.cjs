@@ -18,6 +18,7 @@ function casa(lista, cfg = {}, elenco = null) {
       elenco: () => elenco || { pessoas: [], veiculos: [], ferias: [], ausencias: [] },
       entreguesMes: () => null,
       pullEntreguesMes() {},
+      anosEntreguesEmCache: () => 2,
       valores: () => ({}),
     },
     STATE: {},
@@ -73,7 +74,12 @@ test('id da ficha são 6 dígitos; nome não casa sozinho', () => {
   assert.equal(t.run("idPessoaCasa('Natan')"), '');
   assert.equal(t.run("chavePessoaCasa('111111')"), '111111');
   assert.equal(t.run("chavePessoaCasa('Natan')"), '111111');
-  assert.equal(t.run("chavePessoaCasa('natan')"), '');
+  // DUAS RÉGUAS VIRARAM UMA (14/09/2026): `fichaDoApelido` já casava
+  // normalizado (sem acento, sem caixa) e `fichaPorApelido` casava byte a byte
+  // — a mesma pergunta com duas respostas. Caixa não distingue pessoa: o
+  // apelido é digitado à mão na O.S, e "natan" é o Natan. O que continua NÃO
+  // casando sozinho é o nome completo, que é o ponto deste teste.
+  assert.equal(t.run("chavePessoaCasa('natan')"), '111111');
   assert.equal(t.run("chavePessoaCasa('Natan da Silva')"), '');
   assert.equal(t.run("rotuloPessoaCasa('111111')"), 'Natan da Silva · ID 111111');
 });
@@ -194,6 +200,27 @@ test('presença de hoje: férias e falta saem; inativo não entra em nenhuma lis
   assert.match(t.run("presencaRH('2026-09-25').presentes.map(x => x.nome).join('|')"), /Lucas Lima/);
 });
 
+// O CASO RUIM: quem entra pelo nome, sem senha, NÃO recebe férias nem ausências
+// do servidor (elas são ficha do RH). O pacote chega com as listas vazias e
+// `fichaRH:false`. Antes deste teste a tela lia esse vazio como "ninguém está
+// fora" e escrevia "0 fora hoje" com gente de atestado na fábrica.
+test('sem acesso à ficha do RH, a presença não afirma que ninguém está fora', () => {
+  const semFicha = { ...ELENCO, ferias: [], ausencias: [], fichaRH: false,
+    pessoas: ELENCO.pessoas.map(p => ({ ...p, statusId: '', status: '' })) };
+  const t = casa([], {}, semFicha);
+  assert.equal(t.run('temFichaRH()'), false, 'o pacote diz que a ficha não veio');
+  assert.equal(t.run("presencaRH('2026-09-14').sabeSituacao"), false, 'a tela precisa saber que não sabe');
+  assert.equal(t.run("presencaRH('2026-09-14').ausentes.length"), 0, 'sem dado, ninguém é classificado como ausente');
+  // e o aviso da escala diz que não conferiu, em vez de ficar mudo
+  assert.match(t.run("avisoAusenciaCasa(['Lucas'], '2026-09-14')"), /não foram conferidos|crachá da gestão/);
+  // com a ficha (gestão), nada muda: continua apontando quem está fora
+  const comFicha = casa([], {}, ELENCO);
+  assert.equal(comFicha.run('temFichaRH()'), true);
+  assert.equal(comFicha.run("presencaRH('2026-09-14').sabeSituacao"), true);
+  assert.equal(comFicha.run("presencaRH('2026-09-14').ausentes.length"), 2);
+  assert.equal(comFicha.run("avisoAusenciaCasa(['Natan'], '2026-09-14')"), '', 'quem está disponível não gera aviso');
+});
+
 test('quem está inativo no RH sai da lista de escala; o RH entra para o plantão', () => {
   const t = casa([], {}, ELENCO);
   const pcp = t.run("equipeEscalavel().doPCP.join('|')");
@@ -254,4 +281,115 @@ test('quadro de análise guarda aberto/fechado no aparelho', () => {
   assert.match(t.run("quadroCasa('x','T','corpo',true)"), /<details class="casa-quadro" data-quadro="x" open>/);
   t.run("localStorage.setItem('impresilk_inst_quadros', JSON.stringify({x:false}))");
   assert.ok(!t.run("quadroAberto('x', true)"), 'a escolha guardada vence o padrão');
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   OS CASOS RUINS DA REVISÃO ADVERSARIAL (14/09/2026)
+   Onze defeitos foram confirmados na onda 4 e a suíte de então passava 51/51
+   sem pegar nenhum. Cada teste abaixo falha contra o código de antes.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+test('ligar um SEGUNDO apelido à mesma pessoa não descarta o primeiro', () => {
+  const t = casa([], {}, ELENCO);
+  assert.equal(t.run("ligarApelidoRH('Natanzinho', 'natan-silva')"), true);
+  assert.equal(t.run("ligarApelidoRH('Natan N.', 'natan-silva')"), true, 'o segundo apelido também tem de pegar');
+  const ligados = t.run("lerVinculosCasa().map(v => v.apelido).sort().join('|')");
+  assert.equal(ligados, 'Natan N.|Natanzinho', 'os dois apelidos da mesma pessoa convivem');
+  // os dois acham a mesma ficha
+  assert.equal(t.run("fichaDoApelido('Natanzinho').nome"), 'Natan da Silva');
+  assert.equal(t.run("fichaDoApelido('Natan N.').nome"), 'Natan da Silva');
+  // a chave do RH sobrevive à leitura (era descartada, e o vínculo com ela)
+  assert.equal(t.run("lerVinculosCasa().every(v => v.chave === 'natan-silva')"), true);
+  // desligar um não derruba o outro
+  t.run("gravarVinculosCasa(lerVinculosCasa().filter(v => normCasa(v.apelido) !== normCasa('Natanzinho')))");
+  assert.equal(t.run("lerVinculosCasa().map(v => v.apelido).join('|')"), 'Natan N.');
+});
+
+test('ficha do RH sem CPF de 11 dígitos ainda pode ser ligada pela chave', () => {
+  const semCPF = { ...ELENCO, pessoas: [...ELENCO.pessoas, { chave: 'zeca-mota', id: '', nome: 'Zeca Mota', apelido: 'Zeca', cargo: 'Ajudante', area: 'Instalação Externa', statusId: 'ativo', ativo: true, foto: '' }] };
+  const t = casa([], {}, semCPF);
+  assert.equal(t.run("ligarApelidoRH('Zequinha', 'zeca-mota')"), true, 'sem id de 6 dígitos o vínculo sumia inteiro');
+  assert.equal(t.run("fichaDoApelido('Zequinha').nome"), 'Zeca Mota');
+});
+
+test('retrabalho cobra a viagem da O.S de CORREÇÃO, não a da entrega original', () => {
+  // 900 = a entrega que voltou (viagem cara). 901 = a correção (viagem curta).
+  const mae = fin('900', { numero: '900', retrabalho: true, equipe: ['Natan'], horaSaida: '08:00', horaRetorno: '18:00', kmSaida: '1000', kmRetorno: '1200' });
+  const filha = fin('901', { numero: '901', osOriginal: '900', equipe: ['Lucas'], horaSaida: '08:00', horaRetorno: '09:00', kmSaida: '2000', kmRetorno: '2010' });
+  const t = casa([mae, filha], { custoRetrabalho: { hora: 100, km: 1 }, ...FICHAS }, ELENCO);
+  const html = t.run("retrabalhoHTML({de:'2026-09-01', ate:'2026-09-30'})");
+  // filha: 1 h × R$100 + 10 km × R$1 = R$110. A mãe daria 10 h + 200 km = R$1.200.
+  assert.match(html, /R\$\s?110,00/, 'o custo tem de vir da filha');
+  assert.doesNotMatch(html, /R\$\s?1\.200,00/, 'a viagem da entrega original não é custo de retrabalho');
+  // e quem foi refazer é a equipe da FILHA (Lucas), não quem entregou (Natan)
+  const quem = html.split('Quem foi refazer')[1].split('Responsável da etapa')[0];
+  assert.match(quem, /Lucas/);
+  assert.doesNotMatch(quem, /Natan/, 'quem entregou não pode ser listado como quem refez');
+});
+
+test('chips de ano não oferecem ano que o cache joga fora', () => {
+  const t = casa([], {}, ELENCO);
+  const anos = t.run('anosEntregas()');
+  const guardados = t.run('STORE.anosEntreguesEmCache()');
+  assert.equal(anos.length, guardados, 'oferecer mais anos que o cache guarda dá laço infinito de pedidos');
+  assert.equal(anos[0], new Date().getFullYear());
+});
+
+test('editar plantão não apaga o vínculo com O.S já finalizada', () => {
+  const aberta = { id: 'A', numero: '10', cliente: 'Cliente A' };
+  const fechada = { id: 'B', numero: '11', cliente: 'Cliente B', finalizadaEm: '2026-09-12T12:00:00' };
+  const t = casa([aberta, fechada], {}, ELENCO);
+  const porId = "new Map([['A'," + JSON.stringify(aberta) + "],['B'," + JSON.stringify(fechada) + "]])";
+  const html = t.run(`opcoesOSPlantao({osIds:['B']}, [${JSON.stringify(aberta)}], ${porId})`);
+  assert.match(html, /value="B"[^>]*selected/, 'a O.S finalizada continua na lista, marcada');
+  assert.match(html, /já finalizada/);
+  assert.match(html, /value="A"/, 'as abertas continuam aparecendo');
+  // vínculo para O.S que este aparelho não conhece também não se perde
+  const html2 = t.run(`opcoesOSPlantao({osIds:['Z']}, [], new Map())`);
+  assert.match(html2, /value="Z"[^>]*selected/);
+});
+
+test('plantão de quem saiu do RH ainda abre para edição', () => {
+  const t = casa([], {}, ELENCO);
+  // Paulo está inativo no RH: sai da escala, mas o plantão antigo é dele
+  assert.doesNotMatch(t.run("optionsEquipeCasa('')"), /Paulo Souza/, 'inativo não entra na escala nova');
+  const comPaulo = t.run("optionsEquipeCasa('Paulo Souza')");
+  assert.match(comPaulo, /value="Paulo Souza"[^>]*selected/, 'sem isto o select fica vazio e o Salvar trava');
+  assert.match(comPaulo, /fora da lista atual do RH/);
+});
+
+test('sem ficha do RH, plantões não marcam ninguém como disponível por omissão', () => {
+  const semFicha = { ...ELENCO, ferias: [], ausencias: [], fichaRH: false,
+    pessoas: ELENCO.pessoas.map(p => ({ ...p, statusId: '', status: '' })) };
+  const t = casa([], {}, semFicha);
+  assert.equal(t.run("temFichaRH()"), false);
+  assert.equal(t.run("ausenciaRH(fichaDoApelido('Lucas'), '2026-09-14')"), null, 'sem dado não há como afirmar ausência');
+  assert.match(t.run("avisoAusenciaCasa(['Lucas'], '2026-09-14')"), /não foram conferidos/);
+});
+
+/* A versão dessincronizada é o defeito que mais custou tempo neste app: a v79
+   subiu e o dono continuou vendo a v76, porque um `?v=` ficou para trás. Aqui
+   a regra de deploy da casa vira teste: CACHE (sw.js), APP_VERSAO (config.js)
+   e TODOS os `?v=` de index.html, equipe.html e do SHELL são a MESMA string. */
+test('CACHE, APP_VERSAO e todos os ?v= sobem juntos', () => {
+  const ler = f => fs.readFileSync(path.join(root, f), 'utf8');
+  const sw = ler('sw.js'), cfg = ler('config.js');
+  const cache = /const CACHE = 'impresilk-shell-(v\d+)'/.exec(sw);
+  const versao = /const APP_VERSAO = '(v\d+)'/.exec(cfg);
+  assert.ok(cache, 'sw.js precisa declarar CACHE = impresilk-shell-vNN');
+  assert.ok(versao, 'config.js precisa declarar APP_VERSAO');
+  assert.equal(cache[1], versao[1], 'CACHE do sw.js e APP_VERSAO do config.js divergiram');
+  const esperado = versao[1];
+  for (const arquivo of ['index.html', 'equipe.html', 'sw.js']) {
+    const achados = [...ler(arquivo).matchAll(/\?v=(v\d+)/g)].map(m => m[1]);
+    assert.ok(achados.length, `${arquivo} não tem nenhum ?v= — o cache da CDN vai segurar arquivo velho`);
+    const fora = [...new Set(achados.filter(v => v !== esperado))];
+    assert.deepEqual(fora, [], `${arquivo} ainda pede ${fora.join(', ')} enquanto a versão é ${esperado}`);
+  }
+  // Todo .js/.css que o index pede tem de estar no SHELL do service worker.
+  const pedidos = [...ler('index.html').matchAll(/(?:src|href)="([\w.-]+\.(?:js|css))\?v=/g)].map(m => m[1]);
+  const shell = /const SHELL = \[([\s\S]*?)\];/.exec(ler('sw.js'))[1];
+  for (const arq of pedidos) {
+    assert.ok(shell.includes(arq), `${arq} está no index.html mas ficou fora do SHELL do sw.js — o app não abre offline`);
+  }
 });

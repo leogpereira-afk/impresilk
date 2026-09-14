@@ -897,6 +897,15 @@ function initSyncIndicator() {
     const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : (item && item.action) || 'alteração';
     toast(`⚠️ ${ref} continua na fila deste aparelho (${motivo || 'erro'}). Confira a conexão e o acesso.`, 'error');
   });
+  // Recusa por PAPEL (403): não adianta tentar de novo nem entrar outra vez —
+  // o servidor não vai aceitar esta ação deste crachá. O item sai da fila para
+  // não travar o envio do trabalho do dia, e quem clicou precisa saber que
+  // aquela alteração ficou só neste aparelho.
+  STORE.on('item-recusado', ({ item, motivo }) => {
+    const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero
+      : item && item.action === 'setCfg' ? 'a alteração das configurações' : (item && item.action) || 'a alteração';
+    toast(`⛔ O servidor recusou ${ref}: ${motivo || 'sem permissão'}. Ela vale só neste aparelho — peça a um administrador. O resto da fila seguiu normalmente.`, 'error');
+  });
   STORE.on('pull-truncado', () => toast('Lista de O.S pode estar incompleta — recarregue.', 'error'));
   // Crachá recusado: guarda o que dá e manda entrar de novo (o dado fica).
   STORE.on('sem-sessao', () => {

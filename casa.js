@@ -62,22 +62,43 @@ function idPessoaCasa(valor) {
   return '';
 }
 
+/* UMA PESSOA TEM VÁRIOS APELIDOS NA O.S — E CADA UM PRECISA DO SEU VÍNCULO.
+   Esta leitura deduplicava por `id` (os 6 dígitos do CPF) e jogava fora o
+   `chave` (o id do RH). Resultado: ligar o SEGUNDO apelido da mesma pessoa
+   ("Osmane" e "Osmane V.") gravava, dizia "Foto e cargo já aparecem" num toast
+   verde, e o vínculo era descartado na releitura seguinte — a linha continuava
+   pendente na tela. E ficha do RH sem CPF de 11 dígitos (`id` vazio) sumia
+   inteira. A chave certa é o APELIDO: é ele que a O.S guarda e é dele que a
+   tela precisa partir para achar a pessoa. Ver [[vinculo_invisivel]]. */
+/* MEMÓRIA DE UMA VOLTA SÓ.
+   `STORE.getCFG()` reparseia o CFG inteiro do localStorage a cada chamada, e
+   esta função é chamada de dentro de laços sobre ~800 O.S. O cache vale até o
+   fim do render (é síncrono) e some no microtask seguinte, então gravação e
+   pull nunca leem valor velho. `gravarVinculosCasa` derruba na hora. */
+let _vincCache = null;
+function esquecerVinculosCasa() { _vincCache = null; }
 function lerVinculosCasa() {
+  if (_vincCache) return _vincCache;
   const raw = STORE.getCFG().vinculosRH;
   const lista = Array.isArray(raw) ? raw : [];
   const saida = [];
   const vistos = new Set();
   for (const v of lista) {
     if (!v || typeof v !== 'object') continue;
+    const apelido = String(v.apelido || v.nomePCP || '').trim();
+    const chave = String(v.chave || '').trim();
     const id = idPessoaCasa(v.id || v.idPessoa);
-    if (!id || vistos.has(id)) continue;
-    vistos.add(id);
-    saida.push({
-      id,
-      nome: String(v.nome || '').trim(),
-      apelido: String(v.apelido || v.nomePCP || '').trim(),
-    });
+    // Sem apelido não há o que ligar; sem NENHUM identificador da pessoa
+    // (nem chave do RH, nem id de 6 dígitos) o vínculo não aponta para lugar
+    // nenhum. Qualquer um dos dois basta.
+    if (!apelido || (!chave && !id)) continue;
+    const k = normCasa(apelido);
+    if (vistos.has(k)) continue;
+    vistos.add(k);
+    saida.push({ id, chave, nome: String(v.nome || '').trim(), apelido });
   }
+  _vincCache = saida;
+  Promise.resolve().then(esquecerVinculosCasa);
   return saida;
 }
 
@@ -85,6 +106,7 @@ function gravarVinculosCasa(lista) {
   const cfg = STORE.getCFG();
   cfg.vinculosRH = lista;
   STORE.saveCFG(cfg);
+  esquecerVinculosCasa();   // quem grava e relê na mesma volta vê o novo
 }
 
 function fichaPorId(id) {
@@ -96,7 +118,7 @@ function fichaPorId(id) {
 function fichaPorApelido(apelido) {
   const a = String(apelido || '').trim();
   if (!a) return null;
-  const hits = lerVinculosCasa().filter(v => v.apelido === a);
+  const hits = lerVinculosCasa().filter(v => normCasa(v.apelido) === normCasa(a));
   return hits.length === 1 ? hits[0] : null;
 }
 
@@ -270,17 +292,24 @@ function ausenciaRH(p, dia) {
   if (STATUS_AUSENTE[p.statusId]) return { motivo: STATUS_AUSENTE[p.statusId], ate: '', tipo: p.statusId };
   return null;
 }
+// A situação da pessoa (férias, atestado, aviso prévio) é ficha do RH e só
+// desce para admin/pcp. Quem entrou pelo nome, sem senha, recebe as listas
+// VAZIAS — e vazio aqui não quer dizer "ninguém está fora". Ver [[zero não é
+// resultado]]: a tela tem de dizer que não sabe, em vez de afirmar zero.
+function temFichaRH() { return elencoRH().fichaRH !== false; }
+
 // Quem está na empresa hoje, agrupado. Inativo e desligado NÃO entram em nenhuma
 // das duas listas — saem da empresa, saem da tela (ordem do dono, 14/09/2026).
 function presencaRH(dia) {
   const presentes = [], ausentes = [], fora = [];
+  const sabeSituacao = temFichaRH();
   for (const p of pessoasRH()) {
     if (p.ativo === false) { fora.push(p); continue; }
-    const a = ausenciaRH(p, dia);
+    const a = sabeSituacao ? ausenciaRH(p, dia) : null;
     if (a) ausentes.push({ p, ...a }); else presentes.push(p);
   }
   const porNome = (a, b) => String(a.nome || a.p.nome).localeCompare(String(b.nome || b.p.nome));
-  return { presentes: presentes.sort(porNome), ausentes: ausentes.sort(porNome), fora };
+  return { presentes: presentes.sort(porNome), ausentes: ausentes.sort(porNome), fora, sabeSituacao };
 }
 
 // Apelido escrito na O.S → ficha do RH (vínculo salvo, senão casamento automático).
@@ -299,21 +328,32 @@ function normCasa(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/
 
 // Apelidos usados nas O.S que ainda não acharam ficha — o que a tela oferece
 // para ligar. Vínculo invisível manda dinheiro errado: aqui ele fica à vista.
+// Conta primeiro, resolve depois: `fichaDoApelido` relê e reparseia o CFG
+// inteiro do localStorage a cada chamada, e chamá-la por equipe de CADA O.S
+// dava da ordem de 7 mil JSON.parse por pintura (~1 s no tablet, crescendo com
+// o histórico). Os apelidos distintos são algumas dezenas.
 function apelidosSemFicha() {
   const conta = new Map();
   for (const os of STORE.getAllOS()) for (const ap of OPERACAO.equipe(os)) {
-    if (fichaDoApelido(ap)) continue;
     conta.set(ap, (conta.get(ap) || 0) + 1);
   }
-  return [...conta.entries()].map(([apelido, n]) => ({ apelido, n })).sort((a, b) => b.n - a.n || a.apelido.localeCompare(b.apelido));
+  return [...conta.entries()]
+    .filter(([apelido]) => !fichaDoApelido(apelido))
+    .map(([apelido, n]) => ({ apelido, n }))
+    .sort((a, b) => b.n - a.n || a.apelido.localeCompare(b.apelido));
 }
+// Substitui o vínculo DESTE apelido. Outros apelidos da mesma pessoa ficam:
+// o ERP escreve o nome de jeitos diferentes e todos têm de achar a ficha.
+// Só devolve true depois de conferir que o vínculo sobreviveu à releitura —
+// antes a função respondia true sempre e o toast verde mentia.
 function ligarApelidoRH(apelido, chave) {
   const p = pessoaRHPorChave(chave);
-  if (!p) return false;
-  const lista = lerVinculosCasa().filter(v => normCasa(v.apelido) !== normCasa(apelido) && v.chave !== p.chave);
-  lista.push({ id: p.id, chave: p.chave, nome: p.nome, apelido: String(apelido || '').trim() });
+  const ap = String(apelido || '').trim();
+  if (!p || !ap) return false;
+  const lista = lerVinculosCasa().filter(v => normCasa(v.apelido) !== normCasa(ap));
+  lista.push({ id: p.id, chave: p.chave, nome: p.nome, apelido: ap });
   gravarVinculosCasa(lista);
-  return true;
+  return !!fichaDoApelido(ap);
 }
 
 // Avatar: foto da ficha quando existe, iniciais quando não.
@@ -480,9 +520,15 @@ function periodoEntregas() {
   }
   return STATE._fEnt;
 }
+/* OS CHIPS SÓ OFERECEM O QUE O CACHE GUARDA.
+   Ofereciam três anos enquanto o cache guardava dois: escolher o mais antigo
+   fazia o pacote ser apagado no mesmo pull que o gravou, o mês voltava para
+   "faltando" e a tela pedia de novo, para sempre — presa em "carregando 12 de
+   12 meses", sem erro nenhum. Agora quem manda na régua é o store. */
 function anosEntregas() {
   const atual = Number(OPERACAO.dia(new Date()).slice(0, 4));
-  return [atual, atual - 1, atual - 2];
+  const n = (STORE.anosEntreguesEmCache ? STORE.anosEntreguesEmCache() : 2);
+  return Array.from({ length: Math.max(1, n) }, (_, i) => atual - i);
 }
 function chipsPeriodoEntregas(f) {
   const hoje = OPERACAO.dia(new Date());
@@ -797,7 +843,30 @@ function retrabalhoHTML(f) {
   const todas = STORE.getAllOS();
   const doPeriodo = todas.filter(o => o.retrabalho && OPERACAO.emIntervalo(diaEntrega(o) || o.dataRetrabalho || o.criadoEm, f.de, f.ate));
   const { pessoas } = pessoasDoPeriodo(f);
-  const porPessoa = pessoas.filter(p => p.retrab > 0)
+  /* A O.S FILHA É QUEM REFAZ. A marcada com `retrabalho` é a que VOLTOU; o ERP
+     emite uma O.S NOVA para a correção, ligada pelo campo `osOriginal`. Quem
+     foi corrigir, quantas horas gastou e quantos km rodou está na FILHA — a
+     mãe guarda a viagem da entrega original. Somar a mãe cobrava a viagem
+     errada (R$ 1.040 onde a aba Retrabalho, que já pareia certo, dizia R$ 120)
+     e nomeava quem ENTREGOU como quem refez, na parede da fábrica. */
+  const filhaDe = new Map();
+  for (const x of todas) {
+    const orig = String(x.osOriginal || '').trim();
+    if (orig) filhaDe.set(orig, x);
+  }
+  const filha = o => filhaDe.get(String(o.numero || '').trim()) || null;
+  const refizeram = new Map();
+  for (const o of doPeriodo) {
+    const c = filha(o);
+    for (const ap of OPERACAO.equipe(c || {})) {
+      const p = nomeExibicaoCasa(ap);
+      refizeram.set(p.chave, { rotulo: p.nome, valor: (refizeram.get(p.chave)?.valor || 0) + 1 });
+    }
+  }
+  const porPessoa = [...refizeram.values()].sort((a, b) => b.valor - a.valor);
+  // "De quem voltou serviço" é outra pergunta, e continua valendo — só não pode
+  // usar o mesmo título de "quem refez".
+  const porQuemEntregou = pessoas.filter(p => p.retrab > 0)
     .map(p => ({ rotulo: `${p.nome}`, valor: p.retrab, extra: `${p.os} entregas · ${Math.round(p.retrab / p.os * 100)}%` }))
     .sort((a, b) => b.valor - a.valor);
   const contar = campo => {
@@ -808,10 +877,13 @@ function retrabalhoHTML(f) {
   const etapas = contar('etapaOrigem'), causas = contar('causaRaiz'), responsaveis = contar('responsavelEtapa');
   const cfgCusto = (STORE.getCFG().custoRetrabalho) || {};
   const horaR = Number(cfgCusto.hora) || 0, kmR = Number(cfgCusto.km) || 0;
-  let horas = 0, km = 0;
+  // Horas e km da CORREÇÃO (a filha), nunca da entrega original.
+  let horas = 0, km = 0, semFilha = 0;
   for (const o of doPeriodo) {
-    const h = OPERACAO.horas(o); if (h != null) horas += h;
-    const a = Number(o.kmSaida), b = Number(o.kmRetorno);
+    const c = filha(o);
+    if (!c) { semFilha++; continue; }
+    const h = OPERACAO.horas(c); if (h != null) horas += h;
+    const a = Number(c.kmSaida), b = Number(c.kmRetorno);
     if (Number.isFinite(a) && Number.isFinite(b) && b > a) km += b - a;
   }
   const custo = horas * horaR + km * kmR;
@@ -821,7 +893,7 @@ function retrabalhoHTML(f) {
   return `<div class="casa-kpi-cards">
       <div class="casa-kpi alerta"><b>${doPeriodo.length}</b><small>O.S de retrabalho no período</small></div>
       <div class="casa-kpi"><b>${taxa.toFixed(1).replace('.', ',')}%</b><small>sobre ${totalEntregas} participações em entrega</small></div>
-      <div class="casa-kpi"><b>${fmtHorasCasa(horas || null)}</b><small>horas na rua refazendo${km ? ` · ${Math.round(km)} km` : ''}</small></div>
+      <div class="casa-kpi"><b>${fmtHorasCasa(horas || null)}</b><small>horas na rua refazendo${km ? ` · ${Math.round(km)} km` : ''}${semFilha ? ` · <span class="badge sem-valor">${semFilha} sem O.S de correção ligada</span>` : ''}</small></div>
       ${custo > 0 ? `<div class="casa-kpi alerta"><b>${dinheiroCasa(custo)}</b><small>custo estimado (hora + km de Configurações)</small></div>` : ''}
     </div>
     <div class="casa-duas">
@@ -829,10 +901,14 @@ function retrabalhoHTML(f) {
       <div><h4>Por causa raiz</h4>${barrasCasa(causas, v => `${v}`) || '<p class="text-muted">Sem causa informada.</p>'}</div>
     </div>
     <div class="casa-duas">
-      <div><h4>Quem refez (instalação)</h4>${barrasCasa(porPessoa, v => `${v}`) || '<p class="text-muted">Nenhuma equipe registrada nos retrabalhos.</p>'}</div>
+      <div><h4>Quem foi refazer</h4>${barrasCasa(porPessoa, v => `${v}`) || '<p class="text-muted">Nenhuma O.S de correção com equipe registrada. Ligue a correção à original pelo campo “retrabalho da O.S nº”.</p>'}</div>
       <div><h4>Responsável da etapa de origem</h4>${barrasCasa(responsaveis, v => `${v}`) || '<p class="text-muted">Sem responsável informado.</p>'}</div>
     </div>
-    <p class="text-muted" style="font-size:.8rem">Quem <em>refez</em> não é quem causou: a etapa de origem e o responsável acima é que dizem de onde veio. Valor por hora e por km ficam em ⚙️ Configurações.</p>`;
+    <div class="casa-duas">
+      <div><h4>De quem voltou serviço</h4>${barrasCasa(porQuemEntregou, v => `${v}`) || '<p class="text-muted">Nenhuma equipe registrada nas entregas que voltaram.</p>'}</div>
+      <div></div>
+    </div>
+    <p class="text-muted" style="font-size:.8rem"><strong>Quem foi refazer</strong> é a equipe da O.S de correção. <strong>De quem voltou serviço</strong> é a equipe da entrega original — e não quer dizer culpa: quem causou está na etapa de origem e no responsável acima. Valor por hora e por km ficam em ⚙️ Configurações.</p>`;
 }
 
 /* ── Carros mais usados ────────────────────────────────────────────────────
@@ -889,7 +965,7 @@ function ligacaoRHHTML() {
       </tr>`).join('')}</tbody></table></div>`
       : '<p class="text-muted">Todo apelido usado nas O.S já tem ficha. 👍</p>'}
     ${ligados.length ? `<details class="casa-mais-fichas" style="margin-top:10px"><summary>Ligações salvas à mão · ${ligados.length}</summary>
-      <ul class="casa-os">${ligados.map(v => `<li>${esc(v.apelido)} → ${esc(v.nome || v.chave || v.id)} <button class="btn-ghost btn-xs" data-del-ficha="${esc(v.id)}" type="button">Desligar</button></li>`).join('')}</ul>
+      <ul class="casa-os">${ligados.map(v => `<li>${esc(v.apelido)} → ${esc(v.nome || v.chave || v.id)} <button class="btn-ghost btn-xs" data-del-ficha="${esc(v.apelido)}" type="button">Desligar</button></li>`).join('')}</ul>
     </details>` : ''}
     <p class="text-muted" style="font-size:.8rem">${ativos.length} pessoas ativas no RH${pessoasRH().length > ativos.length ? ` · ${pessoasRH().length - ativos.length} inativa(s) fora da lista` : ''}. Quem sai da empresa sai daqui sozinho.</p>`;
 }
@@ -1082,14 +1158,16 @@ function renderPerformanceCasa() {
       const sel = el.querySelector(`[data-lig-sel="${CSS.escape(ap)}"]`);
       if (!sel || !sel.value) { toast('Escolha a pessoa do RH.', 'error'); return; }
       const p = pessoaRHPorChave(sel.value);
-      if (!ligarApelidoRH(ap, sel.value)) { toast('Pessoa não encontrada no RH.', 'error'); return; }
+      if (!ligarApelidoRH(ap, sel.value)) { toast('Não consegui ligar este apelido — confira se a ficha do RH tem CPF cadastrado.', 'error'); return; }
       renderPerformanceCasa();
       toast(`${ap} → ${p.nome}. Foto e cargo já aparecem.`, 'success');
     };
   });
   el.querySelectorAll('[data-del-ficha]').forEach(btn => {
     btn.onclick = () => {
-      gravarVinculosCasa(lerVinculosCasa().filter(v => v.id !== btn.dataset.delFicha));
+      // Apaga só ESTE apelido. Outro apelido da mesma pessoa continua ligado —
+      // eles dividem o id do RH, e filtrar por id desligava os dois de uma vez.
+      gravarVinculosCasa(lerVinculosCasa().filter(v => normCasa(v.apelido) !== normCasa(btn.dataset.delFicha)));
       renderPerformanceCasa();
     };
   });
@@ -1178,13 +1256,26 @@ function equipeEscalavel() {
 function optionsEquipeCasa(selecionado) {
   const { doPCP, doRH } = equipeEscalavel();
   const op = n => `<option value="${esc(n)}" ${n === selecionado ? 'selected' : ''}>${esc(n)}</option>`;
+  /* QUEM JÁ ESTÁ GRAVADO TEM DE CABER NA LISTA.
+     O campo "Quem" era texto livre e virou select fechado com `required`. Quem
+     foi desligado, inativado, ou teve o nome corrigido no RH deixou de ter
+     opção: ao reabrir um plantão antigo o navegador selecionava a vazia e o
+     Salvar só devolvia "Selecione um item da lista" — sem dizer o motivo, com
+     o nome certo visível na tabela logo abaixo. As saídas eram falsear quem
+     fez o sobreaviso ou apagar o plantão. */
+  const alvo = String(selecionado || '').trim();
+  const naLista = alvo && (doPCP.some(n => normCasa(n) === normCasa(alvo))
+    || doRH.some(p => normCasa(p.nome) === normCasa(alvo)));
+  const gravado = alvo && !naLista
+    ? `<optgroup label="Registrado neste plantão"><option value="${esc(alvo)}" selected>${esc(alvo)} · fora da lista atual do RH</option></optgroup>`
+    : '';
   const porArea = new Map();
   for (const p of doRH) {
     const k = p.area || p.setor || 'Sem área';
     if (!porArea.has(k)) porArea.set(k, []);
     porArea.get(k).push(p);
   }
-  return `${doPCP.length ? `<optgroup label="Instalação (PCP)">${doPCP.map(op).join('')}</optgroup>` : ''}
+  return `${gravado}${doPCP.length ? `<optgroup label="Instalação (PCP)">${doPCP.map(op).join('')}</optgroup>` : ''}
     ${[...porArea.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([area, ps]) =>
       `<optgroup label="${esc(area)}">${ps.map(p => op(p.nome)).join('')}</optgroup>`).join('')}`;
 }
@@ -1194,8 +1285,13 @@ function optionsVeiculoCasa(selecionado) {
   return `${doAtivos.map(v => `<option value="${esc(v.nome)}" ${v.nome === selecionado ? 'selected' : ''}>${esc(v.nome)}${v.lugares ? ` · ${v.lugares} lugares` : ''}${v.placa ? ` · ${v.placa}` : ''}</option>`).join('')}
     ${doCfg.length ? `<optgroup label="Só no PCP (cadastrar no Ativos)">${doCfg.map(v => `<option value="${esc(v)}" ${v === selecionado ? 'selected' : ''}>${esc(v)}</option>`).join('')}</optgroup>` : ''}`;
 }
-// Aviso quando a pessoa escalada está de férias/atestado no dia.
+// Aviso quando a pessoa escalada está de férias/atestado no dia. Sem acesso à
+// ficha do RH, o silêncio seria lido como "está todo mundo disponível" — então
+// a tela diz que não conferiu, em vez de não dizer nada.
 function avisoAusenciaCasa(nomes, dia) {
+  if (!temFichaRH()) {
+    return '<p class="metricas-nota">Férias e atestados não foram conferidos: a situação da equipe só aparece com crachá da gestão.</p>';
+  }
   const fora = (nomes || []).map(n => {
     const p = fichaDoApelido(n);
     const a = p ? ausenciaRH(p, dia) : null;
@@ -1402,6 +1498,30 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
    instalação), lida do RH — ordem do dono em 14/09/2026. O plantão pode
    carregar as O.S que serão atendidas naquele turno. */
 function plantaoComOS(p) { return Array.isArray(p.osIds) ? p.osIds : []; }
+
+/* O QUE NÃO VIRA <option> SOME NO SALVAR — E AQUI ISSO APAGAVA HISTÓRICO.
+   O select só listava O.S abertas (e só as 300 primeiras), mas o submit
+   regrava `osIds` inteiro com o que estiver marcado. Como a baixa automática
+   do ERP fecha O.S sozinha de hora em hora, bastava reabrir o plantão na
+   segunda para acertar o horário: a O.S que o plantão atendeu no sábado já
+   estava finalizada, não aparecia na lista, e o vínculo era apagado calado —
+   sem como refazer pela tela, já que finalizada nunca mais volta ao select.
+   Arquivado é guardado: as já vinculadas entram SEMPRE, mesmo fechadas. */
+function opcoesOSPlantao(plantao, candidatas, porId) {
+  const jaLigadas = plantaoComOS(plantao);
+  const vistos = new Set();
+  const linha = (o, fechada) => {
+    vistos.add(o.id);
+    const prazo = OPERACAO.prazo(o);
+    return `<option value="${esc(o.id)}" ${jaLigadas.includes(o.id) ? 'selected' : ''}>${esc(o.numero || '—')} — ${esc((o.cliente || '').slice(0, 40))}${fechada ? ' · já finalizada' : (prazo ? ' · prazo ' + prazo.slice(8, 10) + '/' + prazo.slice(5, 7) : '')}</option>`;
+  };
+  const fixas = jaLigadas.map(id => porId.get(id)).filter(Boolean).map(o => linha(o, !!o.finalizadaEm)).join('');
+  const resto = candidatas.filter(o => !vistos.has(o.id)).slice(0, 300).map(o => linha(o, false)).join('');
+  // Vínculo para O.S que o aparelho não conhece: preserva o id, não o perde.
+  const orfas = jaLigadas.filter(id => !porId.has(id))
+    .map(id => `<option value="${esc(id)}" selected>O.S fora deste aparelho — vínculo preservado</option>`).join('');
+  return fixas + orfas + resto;
+}
 function renderPlantoesCasa() {
   const el = document.getElementById('panel-plantoes');
   if (!el) return;
@@ -1429,9 +1549,12 @@ function renderPlantoesCasa() {
     .sort((x, y) => (OPERACAO.prazo(x) || '9999').localeCompare(OPERACAO.prazo(y) || '9999'));
   const f = editando || { tipo: 'diarista', inicio: '08:00', fim: '12:00', data: '', quem: '', titulo: '', obs: '', osIds: [] };
 
+  const sabeSituacao = temFichaRH();
   const linhaPlantao = p => {
     const pes = fichaDoApelido(p.quem);
-    const aus = pes ? ausenciaRH(pes, p.data) : null;
+    // Sem a ficha do RH (crachá sem senha) a situação não foi conferida — a
+    // linha não pode sair limpa como se a pessoa estivesse disponível.
+    const aus = (pes && sabeSituacao) ? ausenciaRH(pes, p.data) : null;
     const oss = plantaoComOS(p).map(id => porId.get(id)).filter(Boolean);
     return `<tr class="${p.data < hoje ? 'passado' : ''}">
       <td><strong>${esc(p.data.slice(8, 10) + '/' + p.data.slice(5, 7))}</strong><small class="bloco">${esc(DIAS_SEMANA ? DIAS_SEMANA[new Date(p.data + 'T12:00:00').getDay()] : '')}</small></td>
@@ -1469,7 +1592,7 @@ function renderPlantoesCasa() {
           <label>Fim <input name="fim" type="time" value="${esc(f.fim)}" required></label>
           <label class="larga">Título <input name="titulo" required placeholder="Plantão de sábado" value="${esc(f.titulo)}"></label>
           <label class="larga">Observação <input name="obs" placeholder="opcional" value="${esc(f.obs)}"></label>
-          <label class="larga">O.S deste plantão <select name="osIds" multiple size="5">${candidatas.slice(0, 300).map(o => `<option value="${esc(o.id)}" ${plantaoComOS(f).includes(o.id) ? 'selected' : ''}>${esc(o.numero || '—')} — ${esc((o.cliente || '').slice(0, 40))}${OPERACAO.prazo(o) ? ' · prazo ' + OPERACAO.prazo(o).slice(8, 10) + '/' + OPERACAO.prazo(o).slice(5, 7) : ''}</option>`).join('')}</select>
+          <label class="larga">O.S deste plantão <select name="osIds" multiple size="5">${opcoesOSPlantao(f, candidatas, porId)}</select>
             <small class="text-muted">Segure Ctrl (ou ⌘) para marcar mais de uma. Vincular aqui não programa a O.S — só anota o que este plantão atende.</small></label>
           <div class="larga casa-dia-acoes">
             <button class="btn-primary btn-sm" type="submit">${editando ? 'Salvar alterações' : 'Registrar plantão'}</button>
@@ -1505,7 +1628,7 @@ function renderPlantoesCasa() {
     };
     if (!p.titulo || !p.data || !p.quem) { toast('Data, quem e título são obrigatórios.', 'error'); return; }
     const pes = fichaDoApelido(p.quem);
-    const aus = pes ? ausenciaRH(pes, p.data) : null;
+    const aus = (pes && temFichaRH()) ? ausenciaRH(pes, p.data) : null;
     if (aus && !confirm(`${pes.nome} está marcado como "${aus.motivo}" neste dia no RH.\n\nRegistrar o plantão mesmo assim?`)) return;
     const ag = lerAgendaCasa();
     ag.plantoes = id ? ag.plantoes.map(x => x.id === id ? p : x) : [p, ...ag.plantoes];
@@ -1603,10 +1726,11 @@ function renderGradeCasa() {
         <button class="btn-ghost btn-sm ${dia === hoje ? 'active' : ''}" id="gr-hoje">Hoje</button>
         <strong class="casa-dia-rot">${esc(dataBR)}${dia === hoje ? ' · hoje' : ''}</strong>
         <span class="casa-dia-acoes">
-          <button class="btn-success btn-sm" id="gr-wpp" ${lista.length ? '' : 'disabled'} title="Mensagem da programação no formato da casa">💬 Enviar no WhatsApp</button>
-          <button class="btn-ghost btn-sm" id="gr-pdf" ${lista.length ? '' : 'disabled'} title="Salvar ou imprimir o PDF do dia">🖨 Salvar PDF</button>
+          <button class="btn-success btn-sm" id="gr-wpp" ${lista.length ? '' : 'disabled'} title="Mensagem da programação no formato da casa">💬 WhatsApp${STATE._grVista === 'mes' ? ' de ' + esc(dia.slice(8, 10) + '/' + dia.slice(5, 7)) : ''}</button>
+          <button class="btn-ghost btn-sm" id="gr-pdf" ${lista.length ? '' : 'disabled'} title="Salvar ou imprimir o PDF do dia escolhido">🖨 PDF${STATE._grVista === 'mes' ? ' de ' + esc(dia.slice(8, 10) + '/' + dia.slice(5, 7)) : ''}</button>
         </span>
       </div>
+      ${STATE._grVista === 'mes' ? '<p class="metricas-nota">A tela mostra o mês; o WhatsApp e o PDF saem sempre do <strong>dia escolhido acima</strong> — a programação é mandada dia a dia. Clique num dia da lista para trocá-lo.</p>' : ''}
       ${STATE._grVista === 'dia' ? `
         <div class="casa-kpi-cards">
           <div class="casa-kpi"><b>${lista.length}</b><small>O.S neste dia</small></div>
@@ -1650,7 +1774,7 @@ function renderGradeCasa() {
    chega aqui; quem está inativo aparece só no rodapé, fora da conta. */
 function abrirEquipeCasa() {
   const hoje = OPERACAO.dia(new Date());
-  const { presentes, ausentes, fora } = presencaRH(hoje);
+  const { presentes, ausentes, fora, sabeSituacao } = presencaRH(hoje);
   const escalados = new Map();
   for (const os of STORE.getAllOS()) {
     if (!diasCasa(os).includes(hoje) || OPERACAO.encerradaERP(os)) continue;
@@ -1692,11 +1816,13 @@ function abrirEquipeCasa() {
       <div class="wpp-picker-head"><strong>👥 Equipe hoje · ${hoje.slice(8, 10)}/${hoje.slice(5, 7)}</strong><button class="modal-close" id="eq-x">×</button></div>
       <div class="wpp-picker-body">
         <div class="casa-kpi-cards">
-          <div class="casa-kpi"><b>${presentes.length}</b><small>na empresa</small></div>
+          <div class="casa-kpi"><b>${presentes.length}</b><small>${sabeSituacao ? 'na empresa' : 'na lista do RH'}</small></div>
           <div class="casa-kpi"><b>${naRua}</b><small>escalados na rua hoje</small></div>
-          <div class="casa-kpi ${ausentes.length ? 'alerta' : ''}"><b>${ausentes.length}</b><small>fora hoje</small></div>
+          <div class="casa-kpi ${sabeSituacao && ausentes.length ? 'alerta' : ''}"><b>${sabeSituacao ? ausentes.length : '—'}</b><small>${sabeSituacao ? 'fora hoje' : 'não conferido'}</small></div>
         </div>
-        ${ausentes.length ? `<h4 class="eq-titulo">Fora hoje</h4><ul class="eq-lista">${ausentes.map(a => cartao(a.p, `${a.motivo}${a.ate && a.tipo === 'ferias' ? ' até ' + a.ate.slice(8, 10) + '/' + a.ate.slice(5, 7) : ''}`, 'fora')).join('')}</ul>` : ''}
+        ${sabeSituacao
+          ? (ausentes.length ? `<h4 class="eq-titulo">Fora hoje</h4><ul class="eq-lista">${ausentes.map(a => cartao(a.p, `${a.motivo}${a.ate && a.tipo === 'ferias' ? ' até ' + a.ate.slice(8, 10) + '/' + a.ate.slice(5, 7) : ''}`, 'fora')).join('')}</ul>` : '')
+          : '<p class="metricas-nota">Quem está de férias, de atestado ou em aviso prévio <strong>não foi conferido</strong>: essa parte é ficha do RH e só abre com crachá da gestão. A lista abaixo é quem está na empresa, não quem está na fábrica hoje.</p>'}
         ${porArea(presentes).map(([area, ps]) => `<h4 class="eq-titulo">${esc(area)} <small>${ps.length}</small></h4><ul class="eq-lista">${ps.map(p => cartao(p)).join('')}</ul>`).join('')}
         ${presentes.length || ausentes.length ? '' : '<p class="text-muted">O elenco do RH ainda não chegou neste aparelho. Entre com um crachá da gestão e recarregue.</p>'}
         <p class="text-muted" style="font-size:.75rem;margin-top:10px">Fonte: fichas do RH${fora.length ? ` · ${fora.length} pessoa(s) inativa(s) fora desta lista` : ''}${elencoRH().em ? ` · atualizado ${new Date(elencoRH().em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}. Desligados não aparecem.</p>

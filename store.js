@@ -169,12 +169,13 @@ const STORE = (() => {
       }
       // Elenco (com as fotos do RH) também vem do disco no boot: `elenco()` é
       // síncrono e a mensagem do dia depende dele já preenchido.
+      // PODADO PELO PAPEL DE AGORA, não pelo de quem gravou — ver _podarElenco.
       const doDisco = await _lerElencoDisco();
-      if (doDisco && Array.isArray(doDisco.pessoas)) _elenco = Object.assign({}, ELENCO_VAZIO, doDisco);
+      if (doDisco && Array.isArray(doDisco.pessoas)) _elenco = _podarElenco(doDisco);
       else {
         // Aparelho vindo da versão que guardava o elenco no localStorage.
         const velho = lsGet(K.ELENCO, null);
-        if (velho && Array.isArray(velho.pessoas)) { _elenco = Object.assign({}, ELENCO_VAZIO, velho); _gravarElencoDisco(_elenco); }
+        if (velho && Array.isArray(velho.pessoas)) { _elenco = _podarElenco(velho); _gravarElencoDisco(_elenco); }
       }
       try { localStorage.removeItem(K.ELENCO); } catch {}
       return _osMem;
@@ -475,11 +476,27 @@ const STORE = (() => {
         // Preserva a fila INTEIRA, para o ciclo e avisa a UI para reautenticar.
         // (Antes 401 caía no ramo de erro permanente e descartava o trabalho do
         // dia em ~25 ciclos com um "✅ Sincronizado" falso.)
-        if (e && (e.semSessao || e.status === 401 || e.status === 403)) {
+        if (e && (e.semSessao || e.status === 401)) {
           _syncing = false;
           _notifySync('sem-sessao', getQueue().length);
           _notifyListeners('sem-sessao', {});
           return;
+        }
+        /* 403 NÃO É 401. O crachá está bom; o SERVIDOR recusou ESTA ação para
+           ESTE papel — e vai recusar de novo, para sempre. Tratar os dois
+           juntos punha a fila inteira em "sem sessão" e parava o laço com o
+           item preso na frente: bastava o gestor do PCP clicar em "Ligar" (que
+           enfileira um setCfg, exclusivo de admin) para que a O.S finalizada às
+           14h, as fotos do check-in e os lançamentos do dia nunca mais saíssem
+           do aparelho. E não havia saída: `pullCFG` para com setCfg na fila e
+           `limparCache` desiste com fila pendente, então nem sair e entrar
+           resolvia — enquanto o indicador mandava fazer login de novo.
+           Recusa definitiva sai da fila e é DITA; o resto do dia segue. */
+        if (e && e.status === 403) {
+          _removeFromQueue(item);
+          _failCount.delete(sig);
+          _notifyListeners('item-recusado', { item, motivo: msg || 'sem permissão para esta ação' });
+          continue;
         }
         // Distingue falha de rede (parar o ciclo) de erro permanente do item
         // (incrementa contador e avisa sem descartar o trabalho).
@@ -626,6 +643,11 @@ const STORE = (() => {
   let _entregues = lsGet(K.ENTREGUES, {});
   let _entreguesPedindo = {};
   // Pacote sem v:2 e da versao que usava a PREVISAO de entrega: descarta e pede de novo.
+  // Quantos anos de pacotes do ERP cabem no cache (ver a poda em pullEntreguesMes).
+  // Quem desenha os chips de ano PERGUNTA aqui — nunca decide por conta própria.
+  const ANOS_ENTREGUES = 2;
+  function anosEntreguesEmCache() { return ANOS_ENTREGUES; }
+
   function entreguesMes(mes) { const p = _entregues[mes]; return p && p.v === 2 ? p : null; }
   async function pullEntreguesMes(mes, forcar) {
     if (!navigator.onLine || !mes || _entreguesPedindo[mes]) return null;
@@ -638,8 +660,15 @@ const STORE = (() => {
       const res = await apiFn('mubisys', { action: 'entreguesMes', mes }, 120000);
       if (res && Array.isArray(res.os)) {
         _entregues = Object.assign({}, _entregues, { [mes]: { v: res.v || 0, em: res.em, mes, total: res.total, os: res.os } });
-        // Guarda só o ano corrente e o anterior: o localStorage é dividido.
-        const corte = String(new Date().getFullYear() - 1);
+        /* A PODA E OS CHIPS DE ANO TÊM DE LER A MESMA RÉGUA.
+           Esta poda existe porque o localStorage é dividido pelos 7 sistemas.
+           Só que a tela de Entregas oferecia chips de TRÊS anos e o cache
+           guardava DOIS: escolher o ano mais antigo fazia o pacote ser apagado
+           no mesmo `pullEntreguesMes` que acabara de gravá-lo, o mês voltava
+           para "faltando", a tela repintava e pedia de novo — laço infinito,
+           preso em "carregando 12 de 12 meses", sem nenhum erro na tela.
+           Agora a régua é uma só e `anosEmCache()` a publica para a tela. */
+        const corte = String(new Date().getFullYear() - (ANOS_ENTREGUES - 1));
         for (const k of Object.keys(_entregues)) if (k < corte) delete _entregues[k];
         lsSet(K.ENTREGUES, _entregues);
         _notifyListeners('entregues', { mes });
@@ -656,9 +685,34 @@ const STORE = (() => {
   // MORA NO INDEXEDDB, não no localStorage: desde 14/09/2026 o pacote traz a
   // FOTO da ficha (30 fotos ≈ 400 KB) e os 7 sistemas dividem 5 MB de
   // localStorage por origem — jogar isso lá estourava a cota de todo mundo.
-  const ELENCO_VAZIO = { em: '', pessoas: [], veiculos: [], ferias: [], ausencias: [] };
+  const ELENCO_VAZIO = { em: '', pessoas: [], veiculos: [], ferias: [], ausencias: [], fichaRH: false, papel: '' };
   let _elenco = ELENCO_VAZIO;
   function elenco() { return _elenco || ELENCO_VAZIO; }
+
+  /* O GATE DO SERVIDOR NÃO ALCANÇA O QUE JÁ ESTÁ NO APARELHO.
+     O tablet da fábrica é compartilhado. A gestão entra, o elenco COMPLETO
+     (com férias, atestados e aviso prévio) fica gravado no IndexedDB, e a
+     montagem entra em seguida. O boot lê o pacote do disco sem olhar quem está
+     logado agora, e o `pullElenco` ainda espera 30 min antes de renovar — nessa
+     janela quem entrou SEM SENHA lia a ficha de RH de 35 pessoas, com o gate do
+     servidor intacto e sem nada acusando.
+     (E a saída não salvava: `limparCache` desiste quando há fila pendente.)
+
+     Então o pacote passa a andar carimbado com o papel que o baixou, e a
+     leitura poda o que o papel de agora não pode ver. Podar é o que vale —
+     apenas apagar deixaria a tela dizendo "ninguém está fora". */
+  const _vePapelFicha = p => ['admin', 'pcp'].includes(String(p || ''));
+  function _papelAtual() { const u = getUser(); return String((u && u.papel) || ''); }
+  function _podarElenco(pac) {
+    const base = Object.assign({}, ELENCO_VAZIO, pac || {});
+    if (_vePapelFicha(_papelAtual())) return base;
+    return Object.assign(base, {
+      fichaRH: false,
+      ferias: [],
+      ausencias: [],
+      pessoas: (base.pessoas || []).map(p => Object.assign({}, p, { statusId: '', status: '' })),
+    });
+  }
   async function _lerElencoDisco() {
     try {
       const db = await _openDB();
@@ -682,10 +736,26 @@ const STORE = (() => {
       });
     } catch (e) { console.warn('[store] elenco não gravou no IndexedDB', e); }
   }
+  async function _apagarElencoDisco() {
+    if (_semIDB) return;
+    try {
+      const db = await _openDB();
+      await new Promise((resolve) => {
+        const tx = db.transaction('os', 'readwrite');
+        tx.objectStore('os').delete('elenco');
+        tx.oncomplete = resolve;
+        tx.onerror = resolve;   // sair do sistema nunca trava por causa do cache
+      });
+    } catch { /* base já fechada/apagada: nada a apagar */ }
+  }
   async function pullElenco(forcar) {
     if (!navigator.onLine) return;
     const idade = _elenco.em ? Date.now() - new Date(_elenco.em).getTime() : Infinity;
-    if (!forcar && idade < 30 * 60000) return;
+    // Papel diferente do que baixou o pacote = pacote velho, por mais novo que
+    // seja o relógio: a gestão enxerga o que a montagem não pode, e vice-versa.
+    // Sem isto, o crachá novo passaria até 30 min servindo a régua do anterior.
+    const trocouPapel = String(_elenco.papel || '') !== _papelAtual();
+    if (!forcar && !trocouPapel && idade < 30 * 60000) return;
     try {
       const res = await api({ action: 'elenco' });
       if (res && Array.isArray(res.pessoas)) {
@@ -695,6 +765,12 @@ const STORE = (() => {
           veiculos: res.veiculos || [],
           ferias: res.ferias || [],
           ausencias: res.ausencias || [],
+          // O servidor só manda férias/ausências para admin/pcp. `fichaRH:false`
+          // quer dizer "veio vazio porque você não pode ver", e não "não há
+          // ninguém fora" — a tela precisa saber a diferença. Pacote antigo (sem
+          // o campo) trazia a ficha, então ausente vale como true.
+          fichaRH: res.fichaRH !== false,
+          papel: _papelAtual(),   // carimbo de quem baixou — ver _podarElenco
         };
         await _gravarElencoDisco(_elenco);
         _notifyListeners('elenco', _elenco);
@@ -797,6 +873,17 @@ const STORE = (() => {
   // servidor), mas os dois campos sensíveis dele saem: `usuarios` e a agenda de
   // `funcionarios` com os telefones — que só o crachá de admin recebe.
   function limparCache() {
+    /* O ELENCO SAI SEMPRE, ANTES DE QUALQUER DESISTÊNCIA.
+       Abaixo, `limparCache` devolve false quando há fila pendente — e com
+       razão: as O.S da fila só existem neste aparelho e apagá-las perderia o
+       trabalho do dia. Mas o elenco não é trabalho de ninguém, é cache do RH.
+       Deixá-lo para trás fazia a saída "com fila" entregar a ficha de 35
+       pessoas ao próximo crachá — inclusive o da montagem, que entra sem senha. */
+    try {
+      _elenco = ELENCO_VAZIO;
+      localStorage.removeItem(K.ELENCO);
+      _apagarElencoDisco();
+    } catch {}
     if (getQueue().length) return false;
     try {
       localStorage.removeItem(K.OS);

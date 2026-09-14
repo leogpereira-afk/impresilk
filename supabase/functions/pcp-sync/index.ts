@@ -315,8 +315,45 @@ Deno.serve(async (req: Request) => {
     const papel = String(cracha.papel ?? "");
     const podeEditar = ["admin", "pcp", "montagem", "operacao"].includes(papel);
     const ESCRITA = ["upsert", "delete", "putPhoto", "deletePhoto"];
+    /* O PCP PRECISA GRAVAR A ESCALA -- SO NAO A CHAVE DE CASA.
+       Ate aqui setCfg era admin e mais ninguem, e a razao continua valida: o
+       CFG carrega `niveis` (quem pode o que), `usuarios` e a lista de
+       instaladores, que e por onde se entra sem senha. Deixar papel qualquer
+       gravar isso seria deixar o sistema se promover.
+
+       So que o CFG tambem carrega o TRABALHO das telas novas: plantao e evento
+       (agendaPCP), bonus e ponto (bonusPCP), o vinculo apelido->ficha do RH
+       (vinculosRH) e o registro de envio da mensagem do dia (mensagemDia). O
+       papel `pcp` -- a gestao da producao, dona dessas telas -- levava 403 em
+       todos, e o 403 travava a fila inteira do aparelho.
+
+       Entao a regua deixa de ser "quem" e passa a ser "o que": o papel `pcp`
+       grava APENAS as chaves de operacao, mescladas sobre o que ja esta no
+       banco. Chave fora da lista e ignorada, nao recusada -- recusar faria o
+       aparelho perder o plantao inteiro por causa de um campo a mais, como ja
+       aprendemos no upsert da montagem. */
+    const CFG_OPERACAO = new Set(["agendaPCP", "bonusPCP", "vinculosRH", "mensagemDia"]);
     if (acao === "setCfg" && papel !== "admin") {
-      return resp({ error: "Só o administrador altera as configurações." }, 403);
+      if (papel !== "pcp") {
+        return resp({ error: "Só a gestão do PCP altera as configurações." }, 403);
+      }
+      const atual = (await getCfg()) ?? {};
+      const veio = (body.cfg ?? {}) as Record<string, unknown>;
+      const mesclado: Record<string, unknown> = { ...atual };
+      let mudou = false;
+      for (const k of Object.keys(veio)) {
+        if (!CFG_OPERACAO.has(k)) continue;
+        if (JSON.stringify(veio[k]) === JSON.stringify((atual as any)[k])) continue;
+        mesclado[k] = veio[k];
+        mudou = true;
+      }
+      // Nada de operacao mudou: o pedido so trazia campo de admin. Recusa
+      // explicita, para o cliente tirar da fila e AVISAR quem clicou -- em vez
+      // de responder ok e a pessoa achar que salvou.
+      if (!mudou) {
+        return resp({ error: "Este ajuste é do administrador. A gestão do PCP grava escala, bônus e vínculos." }, 403);
+      }
+      body.cfg = mesclado;
     }
     if (ESCRITA.includes(acao) && !podeEditar) {
       return resp({ error: "Seu acesso é somente leitura." }, 403);
@@ -621,6 +658,14 @@ Deno.serve(async (req: Request) => {
       // ficha NUNCA passam por esta porta -- a regua larga fica na porta de
       // dados, nao na tela.
       case "elenco": {
+        // DUAS REGUAS NA MESMA PORTA. Quem entra pela montagem NAO DIGITA SENHA
+        // -- basta escolher o nome na lista. Esse cracha pode saber quem sao os
+        // colegas (a mensagem do dia precisa do nome completo, e a foto e o
+        // cargo sao inocuos dentro da fabrica), mas NAO pode saber que fulano
+        // esta de atestado, em aviso previo ou de ferias: isso e ficha de RH e
+        // so sobe para admin/pcp. Sem o gate, o botao Equipe entregaria a
+        // situacao de 35 pessoas a quem entrou sem senha.
+        const verFichaRH = ehMaquina || ["admin", "pcp"].includes(String(cracha?.papel ?? ""));
         // A FICHA DO RH VEM INTEIRA? NAO. So o que a tela de instalacao usa:
         // quem e a pessoa (nome/apelido), onde trabalha (setor/area/cargo), se
         // esta na ativa (status) e a cara dela (foto). Salario, endereco,
@@ -656,8 +701,8 @@ Deno.serve(async (req: Request) => {
               setor: String(g.setor || "").trim(),
               area: areas[String(g.areaId || "")] || "",
               cargo: cargos[String(g.cargoId || "")] || String(g.cargoLivre || g.funcao || ""),
-              statusId: st,
-              status: situacoes[st] || st,
+              statusId: verFichaRH ? st : "",
+              status: verFichaRH ? (situacoes[st] || st) : "",
               ativo: !FORA.has(st),
               foto: foto.startsWith("data:image") && foto.length < 200000 ? foto : "",
             };
@@ -667,16 +712,16 @@ Deno.serve(async (req: Request) => {
         // tela; aqui e UTC). Janela curta para o pacote nao inchar.
         const hojeUTC = new Date().toISOString().slice(0, 10);
         const de = new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
-        const { data: fer } = await sb.from("registros")
+        const { data: fer } = verFichaRH ? await sb.from("registros")
           .select("registro->>colaboradorId, registro->>dataInicio, registro->>dataRetorno, registro->>status")
-          .eq("colecao", "ferias").eq("apagado", false);
+          .eq("colecao", "ferias").eq("apagado", false) : { data: [] };
         const ferias = ((fer ?? []) as any[])
           .map((r) => ({ chave: String(r.colaboradorId || ""), de: String(r.dataInicio || "").slice(0, 10),
                          ate: String(r.dataRetorno || "").slice(0, 10), status: String(r.status || "") }))
           .filter((f) => f.chave && f.ate && f.ate >= de);
-        const { data: aus } = await sb.from("registros")
+        const { data: aus } = verFichaRH ? await sb.from("registros")
           .select("registro->>colaboradorId, registro->>data, registro->>tipo, registro->>horas")
-          .eq("colecao", "ausencias").eq("apagado", false).gte("registro->>data", de);
+          .eq("colecao", "ausencias").eq("apagado", false).gte("registro->>data", de) : { data: [] };
         const ausencias = ((aus ?? []) as any[])
           .map((r) => ({ chave: String(r.colaboradorId || ""), data: String(r.data || "").slice(0, 10),
                          tipo: String(r.tipo || ""), horas: Number(r.horas) || 0 }))
@@ -700,7 +745,14 @@ Deno.serve(async (req: Request) => {
                      motorista: String(e.motorista || g.motorista || g.responsavel || "").trim() };
           })
           .sort((a: any, b: any) => a.nome.localeCompare(b.nome));
-        return resp({ pessoas, veiculos, ferias, ausencias, hoje: hojeUTC, em: new Date().toISOString() });
+        // `fichaRH` DIZ SE A LISTA DE AUSENCIAS E VAZIA OU SO ESCONDIDA.
+        // Sem este aviso o cliente nao tem como distinguir "ninguem esta de
+        // ferias hoje" de "voce nao tem acesso a essa informacao" -- e o botao
+        // Equipe escrevia "0 fora hoje" para quem entrou sem senha, com uma
+        // pessoa de atestado na fabrica. Lista vazia nao e resposta; quem sabe
+        // por que ela veio vazia e esta porta, entao e ela que precisa contar.
+        return resp({ pessoas, veiculos, hoje: hojeUTC, em: new Date().toISOString(), fichaRH: verFichaRH,
+                      ferias: verFichaRH ? ferias : [], ausencias: verFichaRH ? ausencias : [] });
       }
 
       case "getCfg": {
