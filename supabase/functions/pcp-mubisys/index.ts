@@ -565,12 +565,19 @@ Deno.serve(async (req: Request) => {
         if (pag.length < 500) break;
       }
       // So o necessario para somar e listar; sem contato/endereco.
-      const os = lista.map(mapearOS).filter((o: any) => o.numero).map((o: any) => ({
+      // O datafinal e o 1o dia do mes SEGUINTE (o ERP corta na meia-noite, entao
+      // pedir 31/08 perdia o dia 31) -- mas isso traz junto as entregas do dia
+      // 1o do mes seguinte. Fica so o que tem data de entrega DENTRO do mes;
+      // sem data de entrega (raro) fica, porque o filtro do ERP ja a garantiu.
+      const vistos = new Set<string>();
+      const os = lista.map(mapearOS).filter((o: any) => o.numero).filter((o: any) => {
+        if (o.dataEntrega && !String(o.dataEntrega).startsWith(mes)) return false;
+        if (vistos.has(String(o.numero))) return false;
+        vistos.add(String(o.numero)); return true;
+      }).map((o: any) => ({
         numero: o.numero, cliente: o.cliente || "", servico: o.servico || "", tipo: o.tipo,
         data: o.dataEntrega || "", valor: o.valorTotal,
       }));
-      // A data de entrega pode ficar fora do mes pedido por fuso/hora: mantem
-      // o que o ERP devolveu (o filtro e dele), mas registra o mes pedido.
       const pacote = { em: new Date().toISOString(), mes, total: os.length, os };
       await setMeta(chave, pacote);
       return resp(pacote);
@@ -673,7 +680,30 @@ Deno.serve(async (req: Request) => {
           baixa = { ok: false, erro: String((e as Error)?.message || e) };
         }
 
-        const st = { em: new Date().toISOString(), ok: true, novas, total: remotas.length, jaExistiam, duplicatasRemovidas: 0, baixa };
+        // Renova o mes corrente de "entregues" (valor entregue da tela de
+        // Entregas) na mesma hora: uma consulta a mais ao ERP por hora, e a
+        // gestao abre a tela com o numero pronto. Falha aqui nao derruba nada.
+        let entregues: any = null;
+        try {
+          const mesAtual = new Date().toISOString().slice(0, 7);
+          const [yy, mm] = mesAtual.split("-").map(Number);
+          const fimD = new Date(Date.UTC(yy, mm, 1));
+          const lista: any[] = [];
+          for (let page = 1; page <= 10; page++) {
+            const q = new URLSearchParams({ status: "ENTREGUE", filtrodata: "ENTREGA", datainicial: `${mesAtual}-01`, datafinal: fimD.toISOString().slice(0, 10), page: String(page), per_page: "500" });
+            const r2 = await fetch(`${creds.base}/${creds.publicKey}/ordem-servico?${q}`, { headers });
+            const d2 = await r2.json().catch(() => null);
+            if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
+            const pag = extrairLista(d2); lista.push(...pag); if (pag.length < 500) break;
+          }
+          const vistos2 = new Set<string>();
+          const os = lista.map(mapearOS).filter((o: any) => o.numero && (!o.dataEntrega || String(o.dataEntrega).startsWith(mesAtual)) && !vistos2.has(String(o.numero)) && vistos2.add(String(o.numero)))
+            .map((o: any) => ({ numero: o.numero, cliente: o.cliente || "", servico: o.servico || "", tipo: o.tipo, data: o.dataEntrega || "", valor: o.valorTotal }));
+          await setMeta(`entregues:${mesAtual}`, { em: new Date().toISOString(), mes: mesAtual, total: os.length, os });
+          entregues = { mes: mesAtual, total: os.length };
+        } catch (e) { entregues = { erro: String((e as Error)?.message || e) }; }
+
+        const st = { em: new Date().toISOString(), ok: true, novas, total: remotas.length, jaExistiam, duplicatasRemovidas: 0, baixa, entregues };
         await setMeta("sync_status", st);
         console.log(`[pcp-mubisys] ${novas} nova(s) de ${remotas.length}.`);
         return resp(st);

@@ -315,11 +315,17 @@ function mesesEntre(de, ate) {
 function entreguesERP(de, ate) {
   const meses = mesesEntre(de, ate);
   const os = [], faltando = [], comErro = [];
+  const vistos = new Set();   // o mesmo número nunca soma duas vezes (pacote de borda de mês)
   for (const m of meses) {
     const pac = STORE.entreguesMes(m);
     if (!pac) { faltando.push(m); STORE.pullEntreguesMes(m); continue; }
     if (pac.erro && !(pac.os || []).length) comErro.push(m);
-    for (const o of pac.os || []) if (!o.data || (o.data >= de && o.data <= ate)) os.push(o);
+    for (const o of pac.os || []) {
+      if (o.data && (o.data < de || o.data > ate)) continue;
+      const k = String(o.numero || '');
+      if (vistos.has(k)) continue;
+      vistos.add(k); os.push(o);
+    }
   }
   // Mês corrente: renova em silêncio quando envelhece (o store decide).
   const hojeMes = OPERACAO.dia(new Date()).slice(0, 7);
