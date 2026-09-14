@@ -463,7 +463,26 @@ const ymd = (d: Date) => d.toISOString().slice(0, 10);
 function janelaDatas(body: any) {
   if (body.datainicial && body.datafinal) return { datainicial: body.datainicial, datafinal: body.datafinal };
   const hoje = new Date();
-  const ini = new Date(hoje); ini.setDate(ini.getDate() - 180);
+  /* DOIS ANOS, NAO 180 DIAS -- e o numero saiu de medicao, nao de palpite.
+     A busca e por data de CADASTRO: O.S que o ERP mantem em PRODUCAO e que foi
+     cadastrada antes da janela nunca e trazida, e some da conta sem erro
+     nenhum. Em 14/09/2026 o dono viu 148 no Mubi contra 138 no PCP e apontou
+     que ha pedido em aberto com mais de 180 dias.
+
+     A sonda (painel-impresilk, scripts/sondar-mubi.mjs) rodou a MESMA consulta
+     em quatro larguras:
+
+       180 dias  108     <- o que se buscava
+       1 ano     114     (+6)
+       2 anos    116     (+2)
+       5 anos    116     (+0)   <- nao existe nada alem disso
+
+     Ou seja: a janela antiga escondia OITO O.S em producao, e dois anos pega
+     todas. Cinco anos nao acrescenta nada e so pesa.
+
+     Tirar a janela nao e opcao: sem `datainicial`/`datafinal` o ERP responde
+     422. Por isso alargar, e alargar ate onde a medicao mostrou fundo. */
+  const ini = new Date(hoje); ini.setDate(ini.getDate() - 730);
   // O filtro e por data de CADASTRO, que nunca esta no futuro: 180 dias a
   // frente era peso puro no ERP. +1 porque ele corta na meia-noite.
   const fim = new Date(hoje); fim.setDate(fim.getDate() + 1);
