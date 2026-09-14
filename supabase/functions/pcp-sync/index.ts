@@ -640,12 +640,16 @@ Deno.serve(async (req: Request) => {
           .filter((r: any) => r.registro?.tipo === "veiculo" && String(r.registro?.nome || "").trim())
           .map((r: any) => {
             const g = r.registro || {}, e = g.especificacao || {};
-            const lug = Number(g.lugares);
+            // A lotacao mora na FICHA TECNICA do Painel (especificacao), ao lado
+            // da placa -- e a unica tela que edita isso. Aceita tambem na raiz
+            // por tolerancia a registro antigo.
+            const lug = Number(e.lugares ?? g.lugares);
+            const grade = String(e.possuiGrade ?? g.possuiGrade ?? "").toLowerCase();
             return { id: r.id, nome: String(g.nome).trim(), categoria: String(g.categoria || ""),
                      placa: String(e.placa || g.identificacao || ""), modelo: String(e.marcaModelo || ""),
                      lugares: Number.isFinite(lug) && lug > 0 ? lug : null,
-                     grade: g.possuiGrade === true || g.grade === true,
-                     motorista: String(g.motorista || g.responsavel || "").trim() };
+                     grade: grade === "sim" || grade === "true",
+                     motorista: String(e.motorista || g.motorista || g.responsavel || "").trim() };
           })
           .sort((a: any, b: any) => a.nome.localeCompare(b.nome));
         return resp({ pessoas, veiculos, em: new Date().toISOString() });

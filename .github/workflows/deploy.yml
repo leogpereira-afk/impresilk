@@ -36,12 +36,22 @@ jobs:
       - name: Verificar regras, telas e sincronização
         run: npm run verificar
 
+      # POR GLOB, NAO POR LISTA. A lista nominal deixou o casa.js de fora quando
+      # ele nasceu (13/09/2026): o site subiu com index.html pedindo um arquivo
+      # que o Pages respondia com 404, e Entregas, Performance, Calendario,
+      # Plantoes e Programacao abriram VAZIOS por dias sem ninguem perceber --
+      # o app engole a funcao ausente em silencio. Tudo que e site mora na raiz;
+      # o que nao e (netlify/, supabase/, scripts/, tests/, guias) fica fora
+      # porque nao esta na raiz ou nao tem essas extensoes.
       - name: Separar os arquivos do site
         run: |
           mkdir -p dist
-          cp index.html equipe.html styles.css config.js logo.js frases.js \
-            store.js auth.js operacao.js app.js equipe.js manifest.json \
-            icon.svg favicon.svg sw.js dist/
+          cp *.html *.css *.js manifest.json *.svg dist/
+          rm -f dist/*.config.js dist/*.test.js
+          echo "publicando:"; ls dist
+          for f in index.html equipe.html app.js casa.js operacao.js store.js sw.js; do
+            test -f "dist/$f" || { echo "FALTA $f no site"; exit 1; }
+          done
 
       # Sem "enablement": o token do Actions publica no Pages mas nao pode
       # CRIA-lo ("Resource not accessible by integration"). O site e habilitado
