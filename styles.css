@@ -1838,3 +1838,11 @@ body.nav-aberta .nav-fundo { display: block; }
 .wpp-texto { width:100%; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; border:1px solid var(--border); border-radius:10px; padding:10px; resize:vertical; background:#fbfcfe; color:#163654; }
 .wpp-acoes { display:flex; gap:8px; margin-top:10px; }
 .wpp-acoes button { flex:1; }
+.casa-toggle { display:inline-flex; align-items:center; gap:6px; font-size:.78rem; color:#526378; min-height:40px; cursor:pointer; }
+.casa-toggle input { width:16px; height:16px; }
+.field-discreto label { color:#7a90a6; }
+.inline-link { cursor:pointer; color:#163654; font-weight:650; text-decoration:underline dotted; }
+.casa-tabela tr.os-list-item { display:table-row; box-shadow:none; border:0; border-radius:0; padding:0; background:transparent; }
+.casa-tabela tr.os-list-item:hover { box-shadow:none; background:#f4f8fc; }
+.casa-tabela tr.st-retrabalho td:first-child { border-left:3px solid #ef4444; }
+.casa-tabela tr.st-finalizada td:first-child { border-left:3px solid #10b981; }

@@ -988,6 +988,7 @@ function novaOS(tipo) {
     carroLiberado: false, carroLiberadoPor: '', carroLiberadoEm: '',
     horaSaida: '', horaRetorno: '', kmSaida: '', kmRetorno: '', instalacaoOK: false, conferidoPor: '',
     retrabalho: false, problema: '', causa: '', resolvidoPor: '', dataResolvido: '',
+    osOriginal: '',   // esta O.S é o RETRABALHO da O.S nº (o ERP sempre emite uma nova)
     obsTecnicas: '', fotosCheckinIds: [], fotosRetornoIds: [], checkinGPS: null,
     checkout: { situacao: '', hora: '', por: '', obs: '', confirmado: false },
     finalizadaEm: '', finalizadoPor: ''
@@ -1472,6 +1473,18 @@ function blocoExec(os, ro, done) {
         </div>
         <div class="field"><label>Data resolvido</label><input type="date" data-f="dataResolvido" value="${esc(os.dataResolvido)}"></div>
       </div>
+      ${(() => {
+        // O ERP sempre emite uma O.S nova para o retrabalho ("RETRABALHO - ...").
+        // Esta é a ponte: a O.S filha aponta a original, e é a viagem DELA
+        // (saída/retorno, km) que vira o custo do retrabalho na aba.
+        const ehFilha = /^\s*retrab/i.test(os.servico || '') || !!os.osOriginal;
+        const mesmoCliente = (STORE.getAllOS() || []).filter(o => o.id !== os.id && o.numero && normNome(o.cliente) && normNome(o.cliente) === normNome(os.cliente))
+          .sort((a, b) => String(b.numero).localeCompare(String(a.numero))).slice(0, 12);
+        return `<div class="field ${ehFilha ? '' : 'field-discreto'}"><label>🔁 Esta O.S é retrabalho da O.S nº <span class="text-muted">(o ERP emite uma O.S nova; aponte a original)</span></label>
+          <input data-f="osOriginal" list="os-orig-${esc(os.id)}" inputmode="numeric" value="${esc(os.osOriginal || '')}" placeholder="${ehFilha ? 'nº da O.S original' : 'só se for retrabalho'}">
+          <datalist id="os-orig-${esc(os.id)}">${mesmoCliente.map(o => `<option value="${esc(o.numero)}">${esc(o.numero)} — ${esc((o.servico || '').slice(0, 40))}</option>`).join('')}</datalist>
+        </div>`;
+      })()}
 
       <div class="field">
         <label>Fotos de retorno (carimba a hora de retorno)</label>
@@ -3446,36 +3459,111 @@ function execItemHTML(os) {
    ══════════════════════════════════════════════════════════════════════════ */
 function renderRetrabalho() {
   const el = $('#panel-retrabalho');
-  // Filtra pela data de abertura do retrabalho (atualizadoEm) ou de resolução.
-  const list = STORE.getAllOS().filter(o => o.retrabalho)
-    .filter(o => dentroPeriodo((o.dataResolvido || diaLocalISO(o.atualizadoEm) || ''), '_fRetra'))
-    .sort((a, b) => (b.atualizadoEm || '').localeCompare(a.atualizadoEm || ''));
+  const todas = STORE.getAllOS();
+  const porNumero = new Map(todas.map(o => [String(o.numero || '').trim(), o]));
+  // Pares original ↔ filha. Filha = O.S com osOriginal apontado (o ERP emite
+  // uma O.S nova para o retrabalho). Original marcada sem filha também entra:
+  // é retrabalho registrado que ainda não virou O.S -- ou que ninguém apontou.
+  const filhaDe = new Map();
+  for (const f of todas) {
+    const k = String(f.osOriginal || '').trim();
+    if (!k) continue;
+    if (!filhaDe.has(k)) filhaDe.set(k, []);
+    filhaDe.get(k).push(f);
+  }
+  // Pareia pelo OBJETO da original (não pelo número): dois registros com o
+  // mesmo número não podem virar um só na tela.
+  const pares = [];
+  const filhasVistas = new Set();
+  for (const o of todas.filter(x => x.retrabalho)) {
+    const num = String(o.numero || '').trim();
+    const fs = num ? (filhaDe.get(num) || []) : [];
+    if (fs.length) for (const f of fs) { pares.push({ num, orig: o, filha: f }); filhasVistas.add(f.id); }
+    else pares.push({ num, orig: o, filha: null });
+  }
+  for (const f of todas) {
+    const num = String(f.osOriginal || '').trim();
+    if (num && !filhasVistas.has(f.id)) pares.push({ num, orig: porNumero.get(num) || null, filha: f });
+  }
+  const dataPar = p => p.filha
+    ? (OPERACAO.dia(p.filha.finalizadaEm) || OPERACAO.dia(p.filha.instalacao && p.filha.instalacao.data) || diaLocalISO(p.filha.criadoEm) || '')
+    : (p.orig ? (p.orig.dataResolvido || diaLocalISO(p.orig.atualizadoEm) || '') : '');
+  const lista = pares.filter(p => dentroPeriodo(dataPar(p), '_fRetra'))
+    .sort((a, b) => String(dataPar(b)).localeCompare(String(dataPar(a))));
 
-  const resolvidos = list.filter(o => o.dataResolvido).length;
-  const pendentes = list.length - resolvidos;
+  // Custo: horas (saída→retorno) e km (retorno−saída) da O.S FILHA -- a
+  // viagem da correção, não a original. Em reais só se a casa cadastrou
+  // R$/hora e R$/km em Configurações; senão mostra horas e km crus.
+  const cc = STORE.getCFG().custoRetrabalho || {};
+  const rHora = Number(cc.hora) || 0, rKm = Number(cc.km) || 0;
+  const custoDe = f => {
+    if (!f) return { horas: null, km: null, reais: null };
+    const h = OPERACAO.horas(f);
+    const ks = Number(f.kmSaida), kr = Number(f.kmRetorno);
+    const km = ks > 0 && kr > ks ? kr - ks : null;
+    const reais = (rHora || rKm) && (h != null || km != null) ? (h || 0) * rHora + (km || 0) * rKm : null;
+    return { horas: h, km, reais };
+  };
+  const custos = lista.map(p => custoDe(p.filha));
+  const somaH = custos.reduce((s, c) => s + (c.horas || 0), 0);
+  const somaKm = custos.reduce((s, c) => s + (c.km || 0), 0);
+  const somaR = custos.reduce((s, c) => s + (c.reais || 0), 0);
+  const semCusto = custos.filter(c => c.horas == null && c.km == null).length;
+  const f = STATE._fRetra || { de: '', ate: '' };
+  const entregues = todas.filter(o => OPERACAO.dia(o.finalizadaEm) && OPERACAO.emIntervalo(o.finalizadaEm, f.de, f.ate) && !OPERACAO.interno(o)).length;
+  const taxa = entregues ? Math.round(lista.length / entregues * 1000) / 10 : null;
+  const pendentes = lista.filter(p => !(p.filha ? p.filha.finalizadaEm : (p.orig && p.orig.dataResolvido))).length;
+  const fmtH = h => h == null ? '—' : (h < 1 ? Math.round(h * 60) + ' min' : (Math.round(h * 10) / 10).toString().replace('.', ',') + ' h');
+
+  // Barras: por técnico (equipe da filha, senão quem resolveu) e por serviço da original.
+  const conta = (chaves) => { const m = new Map(); for (const k of chaves) if (k) m.set(k, (m.get(k) || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8); };
+  const porTecnico = conta(lista.flatMap(p => p.filha && OPERACAO.equipe(p.filha).length ? OPERACAO.equipe(p.filha) : (p.orig && p.orig.resolvidoPor ? [p.orig.resolvidoPor] : [])));
+  const porServico = conta(lista.map(p => p.orig ? String(p.orig.servico || '').trim() : ''));
+  const porCausa = conta(lista.map(p => p.orig ? String(p.orig.causa || '').trim() : ''));
+  const barras = (pares_, total, cor) => pares_.map(([nome, n]) => `<div class="fin-colab">
+      <span class="fin-colab-nome" title="${esc(nome)}">${esc(nome)}</span>
+      <span class="fin-colab-bar"><span style="width:${Math.round(n / total * 100)}%;${cor ? 'background:' + cor : ''}"></span></span>
+      <span class="fin-colab-num">${n} <span class="fin-colab-pct">(${Math.round(n / total * 100)}%)</span></span>
+    </div>`).join('') || '<p class="text-muted">Sem dados no período.</p>';
 
   el.innerHTML = `
     <div class="filter-bar">${filtroPeriodoHTML('_fRetra')}</div>
-    <p class="metricas-nota">O período considera a data de resolução ou a última atualização da O.S. A data de abertura do retrabalho não está disponível em todos os registros.</p>
-    <div class="exec-resumo">
-      <span class="exec-chip">🔧 ${list.length} no período</span>
-      ${pendentes ? `<span class="exec-chip exec-chip-atraso">⚠ ${pendentes} pendente${pendentes === 1 ? '' : 's'}</span>` : ''}
-      <span class="exec-chip">✓ ${resolvidos} resolvido${resolvidos === 1 ? '' : 's'}</span>
+    <div class="casa-kpi-cards">
+      <div class="casa-kpi"><b>${lista.length}</b><small>retrabalhos no período${pendentes ? ` · <span class="badge st-retrabalho">${pendentes} pendente${pendentes === 1 ? '' : 's'}</span>` : ''}</small></div>
+      <div class="casa-kpi ${semCusto ? 'alerta' : ''}"><b>${somaR ? brMoney(somaR) : `${fmtH(somaH)} · ${Math.round(somaKm)} km`}</b><small>custo (horas + km da O.S de retrabalho)${somaR ? ` · ${fmtH(somaH)} · ${Math.round(somaKm)} km` : ''}${semCusto ? ` · ${semCusto} sem viagem registrada` : ''}${!(rHora || rKm) ? ' · sem R$/h e R$/km em Configurações' : ''}</small></div>
+      <div class="casa-kpi"><b>${taxa == null ? '—' : taxa.toString().replace('.', ',') + '%'}</b><small>taxa geral · ${lista.length} em ${entregues} entrega${entregues === 1 ? '' : 's'} no período</small></div>
     </div>
-    <div class="os-list">
-      ${list.map(os => {
-        const resolvido = !!os.dataResolvido;
-        return `<div class="os-list-item st-${resolvido ? 'finalizada' : 'retrabalho'}" data-os-id="${esc(os.id)}">
-          <div class="list-info">
-            <div class="list-numero">O.S ${esc(os.numero||'—')} ${resolvido?'✓ resolvido':'⚠ pendente'}</div>
-            <div class="list-cliente">${esc(os.cliente)} — ${esc(os.problema || 'sem descrição')}</div>
-            <div class="list-date">Causa: ${esc(os.causa || '—')}${os.resolvidoPor?` · por ${esc(os.resolvidoPor)}`:''}</div>
-          </div>
-        </div>`;
-      }).join('') || emptyState('✅', 'Nenhum retrabalho no período', 'Ajuste o filtro de datas ou comemore: nada voltou para correção.')}
+    <p class="metricas-nota">Original = O.S marcada com o problema. Retrabalho = a O.S nova que o ERP emite (aponte a original na ficha dela, campo "🔁 retrabalho da O.S nº"). Sem filha apontada, o custo fica em branco.</p>
+    <div class="casa-tabela-wrap"><table class="casa-tabela">
+      <thead><tr><th>O.S original</th><th>O.S retrabalho</th><th>Cliente</th><th>Motivo</th><th>Técnico</th><th class="num">Custo</th><th>Data</th></tr></thead>
+      <tbody>${lista.map((p, i) => {
+        const c = custos[i];
+        const o = p.orig, fi = p.filha;
+        const tec = fi && OPERACAO.equipe(fi).length ? OPERACAO.equipe(fi).join(', ') : (o && o.resolvidoPor) || '—';
+        const motivo = o ? [o.problema, o.causa].filter(Boolean).join(' · ') || '—' : '—';
+        const custoTxt = c.reais != null ? brMoney(c.reais) : (c.horas != null || c.km != null ? `${fmtH(c.horas)}${c.km != null ? ' · ' + Math.round(c.km) + ' km' : ''}` : '<span class="badge sem-valor">sem viagem</span>');
+        const d = dataPar(p);
+        const pendente = !(fi ? fi.finalizadaEm : (o && o.dataResolvido));
+        const abre = o || fi;
+        return `<tr class="os-list-item st-${pendente ? 'retrabalho' : 'finalizada'}" data-os-id="${esc(abre.id)}">
+          <td>${o ? `O.S ${esc(p.num)}` : `O.S ${esc(p.num)} <span class="text-muted">(não está no PCP)</span>`} ${pendente ? '<span class="badge st-retrabalho">pendente</span>' : '<span class="badge st-finalizada">resolvido</span>'}</td>
+          <td>${fi ? `<button type="button" class="btn-ghost btn-xs" data-abrir-os="${esc(fi.id)}">O.S ${esc(fi.numero || '—')}</button>${fi.finalizadaEm ? ' <span class="badge st-finalizada">feita</span>' : ' <span class="badge st-agendada">aberta</span>'}` : '<span class="badge st-aguardando_producao">sem O.S de retrabalho</span>'}</td>
+          <td>${esc((o || fi || {}).cliente || '')}</td>
+          <td>${esc(motivo)}</td>
+          <td>${esc(tec)}</td>
+          <td class="num">${custoTxt}</td>
+          <td>${d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'}</td>
+        </tr>`;
+      }).join('') || `<tr><td colspan="7">${emptyState('✅', 'Nenhum retrabalho no período', 'Ajuste o filtro de datas ou comemore: nada voltou para correção.')}</td></tr>`}</tbody>
+    </table></div>
+    <div class="casa-perf-grid" style="margin-top:14px">
+      <section class="casa-prod-box"><h3>Retrabalho por técnico</h3><p>Participação na O.S de retrabalho (quem foi corrigir), ou quem resolveu quando não há O.S filha. Não diz quem causou.</p><div class="fin-colab-lista">${barras(porTecnico, lista.length)}</div></section>
+      <section class="casa-prod-box"><h3>Por serviço e por causa</h3><p>Serviço da O.S original (texto do ERP) e causa marcada na ficha.</p><div class="fin-colab-lista">${barras(porServico, lista.length, '#0ea5e9')}</div><hr style="border:0;border-top:1px solid #eef2f7;margin:10px 0"><div class="fin-colab-lista">${barras(porCausa, lista.length, '#8b5cf6')}</div></section>
     </div>`;
   wireFiltroPeriodo(el, '_fRetra', () => renderRetrabalho());
   bindCardClicks(el);
+  // A O.S de retrabalho abre pelo botão da célula, sem abrir a original junto.
+  $$('[data-abrir-os]', el).forEach(b => b.onclick = ev => { ev.stopPropagation(); const os = STORE.getOS(b.dataset.abrirOs); if (os) openModal(os); });
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -3889,6 +3977,18 @@ function renderControle() {
       <p class="text-muted" style="font-size:.72rem">Equipe sai como <em>Apelido (Nome completo)</em> pela ficha do RH e o veículo com lugares/grade/motorista pelo Ativos do Painel — uma base só. Elenco atualizado ${STORE.elenco().em ? new Date(STORE.elenco().em).toLocaleString('pt-BR') : 'ainda não neste aparelho'}.</p>
     </div>`;
 
+  // ── Custo do retrabalho (R$/hora da equipe e R$/km) ──────────────────────
+  const cr = cfg.custoRetrabalho || {};
+  const custoHTML = `
+    <div class="cfg-section">
+      <h3>🔁 Custo do retrabalho</h3>
+      <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">A aba Retrabalho soma horas (saída→retorno) e km (retorno−saída) da O.S de retrabalho. Com estes dois valores, mostra em reais.</p>
+      <div class="field-row">
+        <div class="field"><label>R$ por hora de equipe</label><input type="number" min="0" step="0.01" data-custo-campo="hora" value="${esc(cr.hora || '')}" placeholder="ex.: 45" ${ro ? 'disabled' : ''}></div>
+        <div class="field"><label>R$ por km rodado</label><input type="number" min="0" step="0.01" data-custo-campo="km" value="${esc(cr.km || '')}" placeholder="ex.: 1,20" ${ro ? 'disabled' : ''}></div>
+      </div>
+    </div>`;
+
   // ── Níveis de acesso configuráveis (somente admin) ───────────────────────
   const PERM = getPermissoes();
   const PAPEIS = ['pcp', 'montagem', 'operacao', 'comercial'];
@@ -3937,7 +4037,7 @@ function renderControle() {
   // contatos e por fim as listas do dia a dia em grid compacto.
   el.innerHTML =
     (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') +
-    saudeHTML + usuariosHTML + niveisHTML + mubisysHTML + contatosHTML + mensagemHTML +
+    saudeHTML + usuariosHTML + niveisHTML + mubisysHTML + contatosHTML + mensagemHTML + custoHTML +
     `<h3 class="cfg-group-tit">📋 Listas — equipe, recursos e opções</h3>
      <div class="cfg-grid">${listasHTML}</div>`;
 
@@ -4003,6 +4103,12 @@ function renderControle() {
     c.mensagemDia = m;
     STORE.saveCFG(c);
     toast('Mensagem da programação salva', 'success');
+  });
+  $$('[data-custo-campo]', el).forEach(inp => inp.onchange = () => {
+    const c = STORE.getCFG();
+    c.custoRetrabalho = Object.assign({}, c.custoRetrabalho || {}, { [inp.dataset.custoCampo]: Math.max(0, Number(inp.value) || 0) });
+    STORE.saveCFG(c);
+    toast('Custo do retrabalho salvo', 'success');
   });
   const addCont = $('[data-cont-add]', el);
   if (addCont) addCont.onclick = () => {

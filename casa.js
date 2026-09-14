@@ -199,6 +199,15 @@ function periodoOuMes(chave) {
   }
   return STATE[chave];
 }
+// Entrega = O.S finalizada. Desde 07/09/2026 o ERP dá baixa sozinho no que
+// marcou ENTREGUE (e a equipe parou de finalizar à mão: setembro teve 269 pelo
+// robô, 0 pela equipe). Excluir a baixa do ERP deixaria estas telas vazias --
+// e ENTREGUE no ERP é a melhor prova de entrega que a casa tem. Fica com
+// etiqueta e um interruptor; o BÔNUS por pontos continua estrito (só
+// finalização humana com ficha apontada).
+function entregasBase(incluirERP) {
+  return STORE.getAllOS().filter(o => OPERACAO.dia(o.finalizadaEm) && (incluirERP || !OPERACAO.encerradaERP(o)));
+}
 function nomeExibicaoCasa(apelido) {
   const f = fichaPorApelido(apelido);
   return f ? { chave: f.id, nome: f.nome || apelido, id: f.id } : { chave: apelido, nome: apelido, id: '' };
@@ -226,7 +235,8 @@ function renderEntregas() {
   const el = document.getElementById('panel-entregas');
   if (!el) return;
   const todas = STORE.getAllOS();
-  const concl = OPERACAO.conclusoes(todas);          // finalizadas pela equipe (baixa do ERP fora)
+  const incluiERP = STATE._entERP !== false;
+  const concl = entregasBase(incluiERP);
   const hoje = OPERACAO.dia(new Date());
   const f = periodoOuMes('_fEnt');
   const tecnico = STATE._entTecnico || '';
@@ -248,6 +258,7 @@ function renderEntregas() {
     .sort((a, b) => String(b.finalizadaEm).localeCompare(String(a.finalizadaEm)));
   const tot = somaValores(lista);
   const erpNoPeriodo = todas.filter(o => OPERACAO.encerradaERP(o) && OPERACAO.emIntervalo(o.finalizadaEm, f.de, f.ate)).length;
+  const pcpNoPeriodo = lista.filter(o => !OPERACAO.encerradaERP(o)).length;
 
   const tecnicos = [...new Set(concl.flatMap(o => OPERACAO.equipe(o)))].sort((a, b) => a.localeCompare(b));
   const tipos = typeof tiposServicoHist === 'function' ? tiposServicoHist() : [];
@@ -265,7 +276,7 @@ function renderEntregas() {
   const tabela = `<div class="casa-tabela-wrap"><table class="casa-tabela">
     <thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Conclusão</th><th class="num">Valor</th></tr></thead>
     <tbody>${lista.map(os => `<tr data-os-id="${esc(os.id)}">
-        <td><strong>${esc(os.numero || '—')}</strong>${OPERACAO.interno(os) ? ' <span class="badge st-finalizada">Retirada</span>' : ''}${os.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</td>
+        <td><strong>${esc(os.numero || '—')}</strong>${OPERACAO.interno(os) ? ' <span class="badge st-finalizada">Retirada</span>' : ''}${OPERACAO.encerradaERP(os) ? ' <span class="badge st-aguardando_producao" title="Baixa automática: o ERP marcou entregue">baixa ERP</span>' : ''}${os.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</td>
         <td>${esc(os.cliente || '')}</td>
         <td>${esc(os.servico || '—')}</td>
         <td>${esc(OPERACAO.equipe(os).join(', ') || (OPERACAO.interno(os) ? 'balcão' : 'sem equipe'))}</td>
@@ -280,21 +291,23 @@ function renderEntregas() {
   el.innerHTML = `
     <div class="casa-pagina">
       <div class="casa-pagina-head">
-        <div><h2>Entregas</h2><p>O que a equipe finalizou no PCP, em reais. Baixa automática do ERP não entra. Valor vem do cache do Painel${STORE.valoresEm && STORE.valoresEm() ? ` (${new Date(STORE.valoresEm()).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})` : ' — ainda sem valores neste aparelho'}.</p></div>
+        <div><h2>Entregas</h2><p>O que foi entregue, em reais: finalizado no PCP pela equipe ou baixado pelo ERP (entregue). Valor vem do cache do Painel${STORE.valoresEm && STORE.valoresEm() ? ` (${new Date(STORE.valoresEm()).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})` : ' — ainda sem valores neste aparelho'}.</p></div>
       </div>
       <div class="casa-kpi-cards">${kpiHTML(kHoje, 'entregue hoje')}${kpiHTML(kMes, 'entregue no mês')}${kpiHTML(kAno, 'entregue no ano')}</div>
       <div class="filter-bar">${filtroPeriodoHTML('_fEnt')}</div>
       <div class="casa-filtros">
         <label>Técnico <select id="ent-tecnico"><option value="">Todos</option>${tecnicos.map(t => opt(t, tecnico)).join('')}</select></label>
         <label>Tipo de serviço <select id="ent-tipo"><option value="">Todos</option>${tipos.map(t => opt(t, tipo)).join('')}</select></label>
+        <label class="casa-toggle"><input type="checkbox" id="ent-erp" ${incluiERP ? 'checked' : ''}> incluir baixas do ERP</label>
         <span class="casa-vista"><button class="btn-ghost btn-sm ${STATE._entVista === 'tabela' ? 'active' : ''}" data-ent-vista="tabela">Tabela</button><button class="btn-ghost btn-sm ${STATE._entVista === 'cards' ? 'active' : ''}" data-ent-vista="cards">Cards</button></span>
       </div>
-      ${erpNoPeriodo ? `<p class="metricas-nota">${erpNoPeriodo} baixa${erpNoPeriodo === 1 ? '' : 's'} automática${erpNoPeriodo === 1 ? '' : 's'} do ERP no período não entram aqui — entrega é a finalização no PCP.</p>` : ''}
+      <p class="metricas-nota">${incluiERP ? `No período: ${pcpNoPeriodo} finalizada${pcpNoPeriodo === 1 ? '' : 's'} pela equipe no PCP e ${erpNoPeriodo} baixa${erpNoPeriodo === 1 ? '' : 's'} do ERP (etiqueta <em>baixa ERP</em>).` : `${erpNoPeriodo} baixa${erpNoPeriodo === 1 ? '' : 's'} do ERP no período estão fora — só finalização humana.`}</p>
       ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', 'Nenhuma entrega no período', 'Finalizar a O.S no PCP (não a baixa do ERP) faz ela aparecer aqui.')}
     </div>`;
   wireFiltroPeriodo(el, '_fEnt', renderEntregas);
   const selT = document.getElementById('ent-tecnico'); if (selT) selT.onchange = () => { STATE._entTecnico = selT.value; renderEntregas(); };
   const selS = document.getElementById('ent-tipo'); if (selS) selS.onchange = () => { STATE._entTipo = selS.value; renderEntregas(); };
+  const chkE = document.getElementById('ent-erp'); if (chkE) chkE.onchange = () => { STATE._entERP = chkE.checked; renderEntregas(); };
   el.querySelectorAll('[data-ent-vista]').forEach(b => b.onclick = () => { STATE._entVista = b.dataset.entVista; renderEntregas(); });
   bindCardClicks(el);
 }
@@ -314,7 +327,8 @@ function chipFichaHTML(osId, f, on) {
 // está ligado; senão o próprio apelido, marcado "sem ficha".
 function produtividadeHTML() {
   const f = periodoOuMes('_fPerf');
-  const concl = OPERACAO.conclusoes(STORE.getAllOS());
+  const incluiERP = STATE._perfERP !== false;
+  const concl = entregasBase(incluiERP);
   const noPeriodo = concl.filter(o => OPERACAO.emIntervalo(o.finalizadaEm, f.de, f.ate));
   const agrupar = lista => {
     const m = new Map();
@@ -322,8 +336,8 @@ function produtividadeHTML() {
       const v = valorDaOS(os), h = OPERACAO.horas(os);
       for (const ap of OPERACAO.equipe(os)) {
         const p = nomeExibicaoCasa(ap);
-        const d = m.get(p.chave) || { ...p, os: 0, valor: 0, semValor: 0, horas: [], retrab: 0 };
-        d.os++; if (v == null) d.semValor++; else d.valor += v; if (h != null) d.horas.push(h); if (os.retrabalho) d.retrab++;
+        const d = m.get(p.chave) || { ...p, os: 0, valor: 0, semValor: 0, horas: [], retrab: 0, erp: 0 };
+        d.os++; if (v == null) d.semValor++; else d.valor += v; if (h != null) d.horas.push(h); if (os.retrabalho) d.retrab++; if (OPERACAO.encerradaERP(os)) d.erp++;
         m.set(p.chave, d);
       }
     }
@@ -342,7 +356,7 @@ function produtividadeHTML() {
       <div>
         <div class="casa-prod-nome">${esc(p.nome)}<small>${p.id ? 'ID ' + esc(p.id) : 'sem ficha do RH'}</small></div>
         <dl>
-          <dt>O.S concluídas</dt><dd>${p.os}${p.retrab ? ` <small>(${p.retrab} retrab.)</small>` : ''}</dd>
+          <dt>O.S entregues</dt><dd>${p.os}${p.erp ? ` <small>(${p.erp} baixa ERP)</small>` : ''}${p.retrab ? ` <small>(${p.retrab} retrab.)</small>` : ''}</dd>
           <dt>Valor entregue</dt><dd>${dinheiroCasa(p.valor)}${p.semValor ? ` <span class="badge sem-valor">${p.semValor} s/ valor</span>` : ''}</dd>
           <dt>Tempo médio</dt><dd>${fmtH(media(p.horas))}${p.horas.length && p.horas.length < p.os ? ` <small>(${p.horas.length} c/ hora)</small>` : ''}</dd>
         </dl>
@@ -350,8 +364,8 @@ function produtividadeHTML() {
     </div>`).join('');
   return `<section class="casa-prod-box">
       <h3>Produtividade</h3>
-      <p>Quem estava na equipe da O.S finalizada no PCP. Valor é participação (não divide, não é bônus). Tempo = saída → retorno registrados na O.S.</p>
-      <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}</div>
+      <p>Quem estava na equipe da O.S entregue (finalizada no PCP ou baixada pelo ERP). Valor é participação (não divide, não é bônus). Tempo = saída → retorno registrados na O.S.</p>
+      <div class="filter-bar">${filtroPeriodoHTML('_fPerf')} <label class="casa-toggle"><input type="checkbox" id="perf-erp" ${incluiERP ? 'checked' : ''}> incluir baixas do ERP</label></div>
       ${destaque ? `<p class="metricas-nota">★ Destaque da semana (${sem.de.slice(8, 10)}/${sem.de.slice(5, 7)} a ${sem.ate.slice(8, 10)}/${sem.ate.slice(5, 7)}): <strong>${esc(destaque.nome)}</strong>, ${dinheiroCasa(destaque.valor)} em ${destaque.os} O.S.</p>` : ''}
       ${semEquipe ? `<p class="metricas-nota">${semEquipe} O.S no período sem equipe registrada — não contam para ninguém.</p>` : ''}
       ${pessoas.length ? `<div class="casa-prod-grid">${cards}</div>` : emptyState('', 'Nenhuma entrega com equipe no período', 'A O.S precisa ter equipe e ser finalizada no PCP.')}
@@ -468,6 +482,7 @@ function renderPerformanceCasa() {
       </details>
     </div>`;
   wireFiltroPeriodo(el, '_fPerf', renderPerformanceCasa);
+  const chkP = document.getElementById('perf-erp'); if (chkP) chkP.onchange = () => { STATE._perfERP = chkP.checked; renderPerformanceCasa(); };
   const mesEl = document.getElementById('perf-mes');
   if (mesEl) mesEl.onchange = () => { if (mesEl.value) { gravarBonusCasa({ ...b, mes: mesEl.value }); renderPerformanceCasa(); } };
   const orcEl = document.getElementById('perf-orc');
