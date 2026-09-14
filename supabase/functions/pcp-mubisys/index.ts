@@ -154,6 +154,7 @@ function mapearOS(o: any) {
     // Valor cobrado: bruto menos desconto (a regra do Painel, conferida em
     // 200 O.S). Fica no card so como RESERVA para O.S que o Painel ainda nao
     // carregou; a tela prefere sempre painel_ordens (acao 'valores').
+    dataEntrega: entregaIso || "",
     valorTotal: (() => {
       const bruto = Number(String(pick(o, "valor_total", "valorTotal", "total") ?? "").replace(",", "."));
       const desc = Number(String(pick(o, "valor_desconto", "valorDesconto", "desconto") ?? "0").replace(",", "."));
@@ -441,7 +442,7 @@ Deno.serve(async (req: Request) => {
   const token = req.headers.get("x-token") ?? body.token;
   const ehMaquina = !!TOKEN && token === TOKEN;
   const action = body.action as string;
-  const ehCron = !!CRON_TOKEN && token === CRON_TOKEN && (action === "importar" || action === "baixaAuto");
+  const ehCron = !!CRON_TOKEN && token === CRON_TOKEN && (action === "importar" || action === "baixaAuto" || action === "entreguesMes");
   if (!cracha && !ehMaquina && !ehCron) return resp({ error: "Entre no sistema.", semSessao: true }, 401);
 
   // Conta desativada depois do cracha emitido (ver crachaRevogado, acima).
@@ -522,6 +523,57 @@ Deno.serve(async (req: Request) => {
       const data = await r.json().catch(() => null);
       if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
       return resp({ os: mapearOS(extrairUm(data)) });
+    }
+
+    // ---- entreguesMes: o que o ERP diz que foi ENTREGUE no mes, pela DATA DE ENTREGA ----
+    //
+    // Por que existe (14/09/2026): a tela de Entregas somava so as O.S que o
+    // PCP conhece (desde junho) e pela data da BAIXA -- o robo baixou em
+    // setembro coisas entregues em julho/agosto. Nem o mes nem o ano batiam
+    // com o ERP. A verdade do "valor entregue" e esta consulta: status
+    // ENTREGUE filtrado pela data de entrega, todas as O.S, paginado.
+    //
+    // O ERP leva 25-40 s por pagina, entao o mes fica em cache no pcp_meta:
+    // mes corrente vale 1 h; mes fechado vale 24 h. `forcar` ignora o cache.
+    // E dinheiro da casa: mesma regua da acao 'valores' (admin/pcp).
+    if (action === "entreguesMes") {
+      const mes = String(body.mes || "").trim();
+      if (!/^\d{4}-\d{2}$/.test(mes)) return resp({ error: "mes no formato AAAA-MM" }, 400);
+      if (cracha && !ehMaquina && !ehCron && !["admin", "pcp"].includes(String(cracha.papel ?? ""))) {
+        return resp({ error: "Entregas do ERP só para a gestão do PCP." }, 403);
+      }
+      const chave = `entregues:${mes}`;
+      const hojeMes = new Date().toISOString().slice(0, 7);
+      const validade = mes === hojeMes ? 60 * 60000 : 24 * 3600000;
+      const cache = await getMeta(chave);
+      if (cache?.em && !body.forcar && Date.now() - new Date(cache.em).getTime() < validade) {
+        return resp({ ...cache, cache: true });
+      }
+      const [y, m] = mes.split("-").map(Number);
+      const ini = `${mes}-01`;
+      // `datafinal` corta na meia-noite: pedir o 1o dia do mes seguinte.
+      const fimD = new Date(Date.UTC(y, m, 1));
+      const fim = fimD.toISOString().slice(0, 10);
+      const lista: any[] = [];
+      for (let page = 1; page <= 10; page++) {
+        const q = new URLSearchParams({ status: "ENTREGUE", filtrodata: "ENTREGA", datainicial: ini, datafinal: fim, page: String(page), per_page: "500" });
+        const r = await fetch(`${creds.base}/${creds.publicKey}/ordem-servico?${q}`, { headers });
+        const data = await r.json().catch(() => null);
+        if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
+        const pag = extrairLista(data);
+        lista.push(...pag);
+        if (pag.length < 500) break;
+      }
+      // So o necessario para somar e listar; sem contato/endereco.
+      const os = lista.map(mapearOS).filter((o: any) => o.numero).map((o: any) => ({
+        numero: o.numero, cliente: o.cliente || "", servico: o.servico || "", tipo: o.tipo,
+        data: o.dataEntrega || "", valor: o.valorTotal,
+      }));
+      // A data de entrega pode ficar fora do mes pedido por fuso/hora: mantem
+      // o que o ERP devolveu (o filtro e dele), mas registra o mes pedido.
+      const pacote = { em: new Date().toISOString(), mes, total: os.length, os };
+      await setMeta(chave, pacote);
+      return resp(pacote);
     }
 
     // ---- baixaAuto: da baixa no que o ERP ja fechou ----

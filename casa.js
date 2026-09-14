@@ -296,91 +296,137 @@ function lancarEntregaManual(osId) {
   };
 }
 
+// ── Meses do ERP para um intervalo, e o que ainda falta carregar ─────────────
+function mesesEntre(de, ate) {
+  const out = [];
+  let [y, m] = de.slice(0, 7).split('-').map(Number);
+  const fim = ate.slice(0, 7);
+  for (let i = 0; i < 36; i++) {
+    const k = `${y}-${String(m).padStart(2, '0')}`;
+    out.push(k);
+    if (k >= fim) break;
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+// O VALOR ENTREGUE vem do ERP (status ENTREGUE, pela data de entrega), todas
+// as O.S -- não só as que o PCP conhece, e não pela data da baixa. Pede ao
+// servidor os meses que faltam; a tela repinta quando chegam.
+function entreguesERP(de, ate) {
+  const meses = mesesEntre(de, ate);
+  const os = [], faltando = [], comErro = [];
+  for (const m of meses) {
+    const pac = STORE.entreguesMes(m);
+    if (!pac) { faltando.push(m); STORE.pullEntreguesMes(m); continue; }
+    if (pac.erro && !(pac.os || []).length) comErro.push(m);
+    for (const o of pac.os || []) if (!o.data || (o.data >= de && o.data <= ate)) os.push(o);
+  }
+  // Mês corrente: renova em silêncio quando envelhece (o store decide).
+  const hojeMes = OPERACAO.dia(new Date()).slice(0, 7);
+  if (meses.includes(hojeMes) && STORE.entreguesMes(hojeMes)) STORE.pullEntreguesMes(hojeMes);
+  return { os, faltando, comErro, meses };
+}
+
 function renderEntregas() {
   const el = document.getElementById('panel-entregas');
   if (!el) return;
   const todas = STORE.getAllOS();
+  const porNumero = new Map(todas.map(o => [String(o.numero || '').trim(), o]));
   const cls = classificarEntregas(todas);
-  const contam = cls.instalacoes.concat(cls.retiradas);   // valor: instalações + retiradas
+  const registradas = new Set(cls.instalacoes.map(o => String(o.numero || '').trim()));
+  const aLancarSet = new Set(cls.aLancar.map(o => String(o.numero || '').trim()));
   const hoje = OPERACAO.dia(new Date());
   const f = periodoOuMes('_fEnt');
   const tecnico = STATE._entTecnico || '';
   const tipo = STATE._entTipo || '';
   if (!STATE._entVista) STATE._entVista = 'tabela';
 
-  // KPIs fixos: hoje, mês, ano — independem dos filtros da lista.
+  // KPIs fixos pelo ERP: hoje, mês, ano.
   const kpi = (de, ate) => {
-    const l = contam.filter(o => OPERACAO.emIntervalo(diaEntrega(o), de, ate));
-    const inst = l.filter(o => !OPERACAO.interno(o)).length;
-    return { n: inst, retiradas: l.length - inst, ...somaValores(l) };
+    const r = entreguesERP(de, ate);
+    const inst = r.os.filter(o => o.tipo !== 'interno');
+    let total = 0, semValor = 0;
+    for (const o of r.os) { if (Number.isFinite(Number(o.valor)) && o.valor !== null) total += Number(o.valor); else semValor++; }
+    return { total, n: r.os.length, inst: inst.length, retiradas: r.os.length - inst.length, semValor, faltando: r.faltando.length, comErro: r.comErro.length, meses: r.meses.length };
   };
   const kHoje = kpi(hoje, hoje), kMes = kpi(hoje.slice(0, 7) + '-01', hoje), kAno = kpi(hoje.slice(0, 4) + '-01-01', hoje);
+  const registradasMes = cls.instalacoes.filter(o => OPERACAO.emIntervalo(diaEntrega(o), hoje.slice(0, 7) + '-01', hoje)).length;
 
-  // Lista filtrada
-  const lista = contam
-    .filter(o => OPERACAO.emIntervalo(diaEntrega(o), f.de, f.ate))
-    .filter(o => !tecnico || OPERACAO.equipe(o).includes(tecnico))
-    .filter(o => !tipo || String(o.servico || '').trim() === tipo)
-    .sort((a, b) => String(b.finalizadaEm).localeCompare(String(a.finalizadaEm)));
-  const tot = somaValores(lista);
+  // Lista do período: o que o ERP diz que foi entregue, com o estado no PCP.
+  const per = entreguesERP(f.de || hoje.slice(0, 7) + '-01', f.ate || hoje);
+  const estadoPCP = o => {
+    const n = String(o.numero || '').trim();
+    if (o.tipo === 'interno') return { rotulo: 'Retirada', classe: 'st-finalizada', dica: 'Só o valor conta; retirada não é entrega realizada' };
+    const card = porNumero.get(n);
+    if (!card) return { rotulo: 'fora do PCP', classe: 'st-aguardando_producao', dica: 'O ERP entregou, mas esta O.S nunca passou pelo PCP' };
+    if (card.entregaLancada) return { rotulo: 'lançada', classe: 'st-confirmada', dica: 'Baixa do ERP lançada à mão por ' + (card.entregaLancada.por || '') };
+    if (registradas.has(n)) return { rotulo: 'registrada', classe: 'st-confirmada', dica: 'Entrega registrada no PCP' };
+    if (aLancarSet.has(n)) return { rotulo: 'a lançar', classe: 'st-retrabalho', dica: 'Baixada pelo ERP; falta lançar no PCP' };
+    if (card.finalizadaEm) return { rotulo: 'baixada', classe: 'st-aguardando_producao', dica: 'Finalizada no PCP' };
+    return { rotulo: 'aberta no PCP', classe: 'st-agendada', dica: 'O ERP marcou entregue, mas o card segue aberto' };
+  };
+  const lista = per.os
+    .map(o => ({ erp: o, card: porNumero.get(String(o.numero || '').trim()) || null }))
+    .filter(x => !tecnico || (x.card && OPERACAO.equipe(x.card).includes(tecnico)))
+    .filter(x => !tipo || String((x.card && x.card.servico) || x.erp.servico || '').trim() === tipo)
+    .sort((a, b) => String(b.erp.data).localeCompare(String(a.erp.data)) || String(b.erp.numero).localeCompare(String(a.erp.numero)));
+  let totLista = 0, semValorLista = 0;
+  for (const x of lista) { if (x.erp.valor !== null && Number.isFinite(Number(x.erp.valor))) totLista += Number(x.erp.valor); else semValorLista++; }
   const aLancar = cls.aLancar.filter(o => OPERACAO.emIntervalo(o.finalizadaEm, f.de, f.ate))
     .sort((a, b) => String(b.finalizadaEm).localeCompare(String(a.finalizadaEm)));
-  const tecnicosDaOS = o => OPERACAO.equipe(o).join(', ');
 
-  const tecnicos = [...new Set(contam.flatMap(o => OPERACAO.equipe(o)))].sort((a, b) => a.localeCompare(b));
+  const tecnicos = [...new Set(todas.filter(o => o.finalizadaEm).flatMap(o => OPERACAO.equipe(o)))].sort((a, b) => a.localeCompare(b));
   const tipos = typeof tiposServicoHist === 'function' ? tiposServicoHist() : [];
   const opt = (v, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(v)}</option>`;
-  const kpiHTML = (k, rotulo) => `<div class="casa-kpi ${k.semValor ? 'alerta' : ''}">
-      <b>${dinheiroCasa(k.total)}</b>
-      <small>${esc(rotulo)} · <strong>${k.n}</strong> entrega${k.n === 1 ? '' : 's'} realizada${k.n === 1 ? '' : 's'}${k.retiradas ? ` · ${k.retiradas} retirada${k.retiradas === 1 ? '' : 's'} (só valor)` : ''}${k.semValor ? ` · <span class="badge sem-valor">${k.semValor} sem valor</span>` : ''}</small>
+  const dataBR = iso => { const d = OPERACAO.dia(iso); return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'; };
+  const valorTxt = v => (v !== null && Number.isFinite(Number(v))) ? dinheiroCasa(Number(v)) : '<span class="badge sem-valor">sem valor</span>';
+  const kpiHTML = (k, rotulo) => `<div class="casa-kpi ${k.semValor || k.faltando || k.comErro ? 'alerta' : ''}">
+      <b>${k.faltando && !k.n ? '…' : dinheiroCasa(k.total)}</b>
+      <small>${esc(rotulo)} · ${k.n} O.S${k.inst ? ` · ${k.inst} instalaç${k.inst === 1 ? 'ão' : 'ões'}` : ''}${k.retiradas ? ` · ${k.retiradas} retirada${k.retiradas === 1 ? '' : 's'}` : ''}${k.semValor ? ` · <span class="badge sem-valor">${k.semValor} sem valor</span>` : ''}${k.faltando ? ` · <span class="badge st-agendada">carregando ${k.faltando} de ${k.meses} mês${k.meses === 1 ? '' : 'es'}…</span>` : ''}${k.comErro ? ` · <span class="badge sem-valor">${k.comErro} mês${k.comErro === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}</small>
     </div>`;
 
-  const linhaValor = os => {
-    const v = valorDaOS(os);
-    return v == null ? '<span class="badge sem-valor">sem valor</span>' : dinheiroCasa(v);
-  };
-  const dataBR = iso => { const d = OPERACAO.dia(iso); return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'; };
   const tabela = `<div class="casa-tabela-wrap"><table class="casa-tabela">
-    <thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Conclusão</th><th class="num">Valor</th></tr></thead>
-    <tbody>${lista.map(os => `<tr data-os-id="${esc(os.id)}">
-        <td><strong>${esc(os.numero || '—')}</strong>${OPERACAO.interno(os) ? ' <span class="badge st-finalizada" title="Só o valor conta; retirada não é entrega realizada">Retirada</span>' : ''}${os.entregaLancada ? ` <span class="badge st-confirmada" title="Baixada pelo ERP e lançada à mão por ${esc(os.entregaLancada.por || '')}">lançada</span>` : ''}${erpAntesDoCorte(os) ? ` <span class="badge st-aguardando_producao" title="Baixa do ERP antes de ${CORTE_LANCAMENTO_MANUAL.slice(8, 10)}/${CORTE_LANCAMENTO_MANUAL.slice(5, 7)}: conta como entregue por decisão da direção">ERP · antes do corte</span>` : ''}${os.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</td>
-        <td>${esc(os.cliente || '')}</td>
-        <td>${esc(os.servico || '—')}</td>
-        <td>${esc(OPERACAO.equipe(os).join(', ') || (OPERACAO.interno(os) ? 'balcão' : 'sem equipe'))}</td>
-        <td>${dataBR(diaEntrega(os))}</td>
-        <td class="num">${linhaValor(os)}</td>
-      </tr>`).join('')}</tbody>
-    <tfoot><tr><td colspan="5">${lista.length} O.S no período${tot.semValor ? ` · ${tot.semValor} sem valor` : ''}</td><td class="num">${dinheiroCasa(tot.total)}</td></tr></tfoot>
+    <thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Entrega (ERP)</th><th class="num">Valor</th></tr></thead>
+    <tbody>${lista.map(({ erp, card }) => { const st = estadoPCP(erp); return `<tr ${card ? `data-os-id="${esc(card.id)}"` : ''}>
+        <td><strong>${esc(erp.numero || '—')}</strong> <span class="badge ${st.classe}" title="${esc(st.dica)}">${esc(st.rotulo)}</span>${card && card.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</td>
+        <td>${esc(erp.cliente || (card && card.cliente) || '')}</td>
+        <td>${esc((card && card.servico) || erp.servico || '—')}</td>
+        <td>${esc(card ? (OPERACAO.equipe(card).join(', ') || (erp.tipo === 'interno' ? 'balcão' : 'sem equipe')) : '—')}</td>
+        <td>${dataBR(erp.data)}</td>
+        <td class="num">${valorTxt(erp.valor)}</td>
+      </tr>`; }).join('')}</tbody>
+    <tfoot><tr><td colspan="5">${lista.length} O.S entregues no período${semValorLista ? ` · ${semValorLista} sem valor` : ''}${per.faltando.length ? ` · carregando ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'}…` : ''}</td><td class="num">${dinheiroCasa(totLista)}</td></tr></tfoot>
   </table></div>`;
   const cardFn = typeof osCardHTML === 'function' ? osCardHTML : null;
-  const cards = cardFn ? `<div class="cards-grid">${lista.map(cardFn).join('')}</div>` : tabela;
+  const cards = cardFn ? `<div class="cards-grid">${lista.filter(x => x.card).map(x => cardFn(x.card)).join('')}</div>` : tabela;
 
   el.innerHTML = `
     <div class="casa-pagina">
       <div class="casa-pagina-head">
-        <div><h2>Entregas</h2><p>Finalizada no PCP = entrega (valor + realizada). Cliente retira = só o valor. Baixada pelo ERP = só depois de lançada à mão, abaixo. Valor vem do cache do Painel${STORE.valoresEm && STORE.valoresEm() ? ` (${new Date(STORE.valoresEm()).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})` : ' — ainda sem valores neste aparelho'}.</p></div>
+        <div><h2>Entregas</h2><p><strong>Valor</strong> = o que o ERP marcou ENTREGUE, pela data de entrega, todas as O.S (líquido de desconto). <strong>Entrega realizada</strong> = instalação registrada no PCP (finalizada, ou baixa do ERP lançada à mão). Cliente retira só soma valor.</p></div>
       </div>
       <div class="casa-kpi-cards">${kpiHTML(kHoje, 'entregue hoje')}${kpiHTML(kMes, 'entregue no mês')}${kpiHTML(kAno, 'entregue no ano')}</div>
+      <p class="metricas-nota">Registradas no PCP neste mês: <strong>${registradasMes}</strong> instalaç${registradasMes === 1 ? 'ão' : 'ões'}${cls.aLancar.length ? ` · a lançar: <strong>${cls.aLancar.length}</strong>` : ''}. Fonte do valor: ERP${STORE.entreguesMes(hoje.slice(0, 7)) ? `, atualizado ${new Date(STORE.entreguesMes(hoje.slice(0, 7)).em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' (carregando…)'}.</p>
       <div class="filter-bar">${filtroPeriodoHTML('_fEnt')}</div>
       <div class="casa-filtros">
         <label>Técnico <select id="ent-tecnico"><option value="">Todos</option>${tecnicos.map(t => opt(t, tecnico)).join('')}</select></label>
         <label>Tipo de serviço <select id="ent-tipo"><option value="">Todos</option>${tipos.map(t => opt(t, tipo)).join('')}</select></label>
         <span class="casa-vista"><button class="btn-ghost btn-sm ${STATE._entVista === 'tabela' ? 'active' : ''}" data-ent-vista="tabela">Tabela</button><button class="btn-ghost btn-sm ${STATE._entVista === 'cards' ? 'active' : ''}" data-ent-vista="cards">Cards</button></span>
       </div>
-      ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', 'Nenhuma entrega registrada no período', 'Finalizar a O.S no PCP registra a entrega. Baixas do ERP ficam na lista abaixo até serem lançadas.')}
+      ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', per.faltando.length ? 'Carregando o ERP…' : 'Nenhuma entrega no período segundo o ERP', per.faltando.length ? `Pedindo ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'} ao Mubisys (25–40 s cada, depois fica em cache).` : 'O ERP não tem O.S com status ENTREGUE e data de entrega neste intervalo.')}
       <section class="casa-prod-box casa-lancar">
         <h3>Lançamento manual — baixadas pelo ERP fora do sistema · ${aLancar.length}</h3>
-        <p>O ERP marcou entregue, mas ninguém finalizou no PCP. Não conta como entrega até alguém lançar: confirme data e equipe e responda se gerou retrabalho. Baixas anteriores a ${CORTE_LANCAMENTO_MANUAL.slice(8, 10)}/${CORTE_LANCAMENTO_MANUAL.slice(5, 7)}/${CORTE_LANCAMENTO_MANUAL.slice(0, 4)} já contam como entregues (decisão da direção).</p>
+        <p>O ERP marcou entregue, mas ninguém finalizou no PCP. Não conta como entrega realizada até alguém lançar: confirme data e equipe e responda se gerou retrabalho. Baixas anteriores a ${CORTE_LANCAMENTO_MANUAL.slice(8, 10)}/${CORTE_LANCAMENTO_MANUAL.slice(5, 7)}/${CORTE_LANCAMENTO_MANUAL.slice(0, 4)} já contam como entregues (decisão da direção).</p>
         ${aLancar.length ? `<div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Baixa ERP</th><th class="num">Valor</th><th></th></tr></thead><tbody>${aLancar.map(os => `<tr>
-            <td><strong>${esc(os.numero || '—')}</strong></td><td>${esc(os.cliente || '')}</td><td>${esc(os.servico || '—')}</td><td>${esc(tecnicosDaOS(os) || 'sem equipe')}</td><td>${dataBR(os.finalizadaEm)}</td><td class="num">${linhaValor(os)}</td>
+            <td><strong>${esc(os.numero || '—')}</strong></td><td>${esc(os.cliente || '')}</td><td>${esc(os.servico || '—')}</td><td>${esc(OPERACAO.equipe(os).join(', ') || 'sem equipe')}</td><td>${dataBR(os.finalizadaEm)}</td><td class="num">${valorTxt(valorDaOS(os))}</td>
             <td><button class="btn-primary btn-xs edit-only" data-lancar-os="${esc(os.id)}">Lançar entrega</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="text-muted">Nada pendente de lançamento neste período.</p>'}
       </section>
     </div>`;
   wireFiltroPeriodo(el, '_fEnt', renderEntregas);
   const selT = document.getElementById('ent-tecnico'); if (selT) selT.onchange = () => { STATE._entTecnico = selT.value; renderEntregas(); };
   const selS = document.getElementById('ent-tipo'); if (selS) selS.onchange = () => { STATE._entTipo = selS.value; renderEntregas(); };
-  el.querySelectorAll('[data-lancar-os]').forEach(b => b.onclick = () => lancarEntregaManual(b.dataset.lancarOs));
   el.querySelectorAll('[data-ent-vista]').forEach(b => b.onclick = () => { STATE._entVista = b.dataset.entVista; renderEntregas(); });
+  el.querySelectorAll('[data-lancar-os]').forEach(b => b.onclick = () => lancarEntregaManual(b.dataset.lancarOs));
   bindCardClicks(el);
 }
 

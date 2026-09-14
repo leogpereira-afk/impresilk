@@ -11,7 +11,8 @@ const STORE = (() => {
     FILA:       'impresilk_inst_fila',
     LASTSYNC:   'impresilk_inst_lastsync',
     VALORES:    'impresilk_inst_valores',
-    ELENCO:     'impresilk_inst_elenco'
+    ELENCO:     'impresilk_inst_elenco',
+    ENTREGUES:  'impresilk_inst_entregues'
   };
 
   // ── IndexedDB (fotos) ──────────────────────────────────────────────────────
@@ -608,6 +609,38 @@ const STORE = (() => {
     }
   }
 
+  // ── Entregues por mês, segundo o ERP (data de entrega) ───────────────────
+  // O valor entregue vem daqui, não da soma das O.S que o PCP conhece. Um
+  // pacote por mês {em, mes, total, os[]}; o servidor guarda em cache e a
+  // tela pede o mês corrente e os meses do ano conforme abre.
+  let _entregues = lsGet(K.ENTREGUES, {});
+  let _entreguesPedindo = {};
+  function entreguesMes(mes) { return _entregues[mes] || null; }
+  async function pullEntreguesMes(mes, forcar) {
+    if (!navigator.onLine || !mes || _entreguesPedindo[mes]) return null;
+    const atual = _entregues[mes];
+    const hojeMes = new Date().toISOString().slice(0, 7);
+    const validade = mes === hojeMes ? 15 * 60000 : 6 * 3600000;
+    if (atual && !forcar && Date.now() - new Date(atual.em).getTime() < validade) return atual;
+    _entreguesPedindo[mes] = true;
+    try {
+      const res = await apiFn('mubisys', { action: 'entreguesMes', mes }, 120000);
+      if (res && Array.isArray(res.os)) {
+        _entregues = Object.assign({}, _entregues, { [mes]: { em: res.em, mes, total: res.total, os: res.os } });
+        // Guarda só o ano corrente e o anterior: o localStorage é dividido.
+        const corte = String(new Date().getFullYear() - 1);
+        for (const k of Object.keys(_entregues)) if (k < corte) delete _entregues[k];
+        lsSet(K.ENTREGUES, _entregues);
+        _notifyListeners('entregues', { mes });
+        return _entregues[mes];
+      }
+    } catch (e) {
+      // 403 = papel sem acesso; 502 = ERP fora do ar. A tela mostra "sem dado do ERP".
+      _entregues = Object.assign({}, _entregues, { [mes]: Object.assign({ em: new Date().toISOString(), mes, total: 0, os: [], erro: true }, atual || {}, { em: new Date().toISOString(), erro: true }) });
+    } finally { delete _entreguesPedindo[mes]; }
+    return _entregues[mes] || null;
+  }
+
   // ── Elenco: pessoas do RH e veículos do Ativos (uma base só) ─────────────
   let _elenco = lsGet(K.ELENCO, { em: '', pessoas: [], veiculos: [] });
   function elenco() { return _elenco || { pessoas: [], veiculos: [] }; }
@@ -727,6 +760,8 @@ const STORE = (() => {
       localStorage.removeItem(K.LASTSYNC);
       localStorage.removeItem(K.VALORES);
       localStorage.removeItem(K.ELENCO);
+      localStorage.removeItem(K.ENTREGUES);
+      _entregues = {};
       _valores = { em: '', mapa: {} };
       _elenco = { em: '', pessoas: [], veiculos: [] };
       const cfg = lsGet(K.CFG, null);
@@ -858,7 +893,7 @@ const STORE = (() => {
     // Identidade
     getUser, setUser, getInstalador, setInstalador, getLastSync, limparCache,
     // Sync
-    trySync, pull, pullCFG, pullValores, valores, valoresEm, pullElenco, elenco,
+    trySync, pull, pullCFG, pullValores, valores, valoresEm, pullElenco, elenco, pullEntreguesMes, entreguesMes,
     // Fotos
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos

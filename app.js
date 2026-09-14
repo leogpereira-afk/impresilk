@@ -888,6 +888,7 @@ function initSyncIndicator() {
   STORE.on('quota', () => toast('Sem espaço no aparelho para guardar as O.S. Libere espaço (fotos/apps) e recarregue.', 'error'));
   // Chegou o valor das O.S: repinta as telas que mostram dinheiro.
   STORE.on('valores', () => { if (['entregas', 'performance'].includes(STATE.activeTab)) renderActiveTab(); });
+  STORE.on('entregues', () => { if (STATE.activeTab === 'entregas') renderActiveTab(); });
   // Perda de dados nunca é silenciosa: item descartado / lista truncada avisam.
   STORE.on('item-pendente', ({ item, motivo }) => {
     const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : (item && item.action) || 'alteração';
