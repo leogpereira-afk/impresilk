@@ -128,7 +128,8 @@ test('menu e permissões conhecem Entregas, Performance, Agenda, Plantões e Pro
   assert.match(html, /data-tab="programacao"/);
   assert.match(js, /ABAS_DISPONIVEIS = \[[^\]]*'entregas'[^\]]*'grade'/);
   assert.match(html, /nav-marca/);
-  assert.doesNotMatch(html, /data-tab="pcp"><span[^>]*>📋/);
+  // Padrão da casa (RH/Painel), pedido do dono em 14/09/2026: emoji por item.
+  assert.match(html, /data-tab="pcp"><span class="nav-emoji"[^>]*>📋/);
   assert.doesNotMatch(html, /RH \+ PCP/);
 });
 
