@@ -84,8 +84,8 @@ export function semCredencial(texto: unknown): string {
   let t = String(texto ?? "");
   if (CHAVE_CONHECIDA.length >= 8) t = t.split(CHAVE_CONHECIDA).join("<chave>");
   return t
-    .replace(/(https?:\/\/[^/\s)]+\/api\/)[^/\s?)]+/gi, "\<chave>")
-    .replace(/([?&](?:apikey|api_key|token|access[-_]?token)=)[^&\s)]+/gi, "\<oculto>");
+    .replace(/(https?:\/\/[^/\s)]+\/api\/)[^/\s?)]+/gi, "$1<chave>")
+    .replace(/([?&](?:apikey|api_key|token|access[-_]?token)=)[^&\s)]+/gi, "$1<oculto>");
 }
 
 async function getCreds() {
