@@ -153,6 +153,57 @@ function propostaCasa(osCount, total, orcamento, teto) {
   return Math.round(capped * 100) / 100;
 }
 
+// ── Valor da O.S (uma base só) ───────────────────────────────────────────────
+// Ordem: painel_ordens (STORE.valores, verdade do Painel com rateio conferido)
+// > valorTotal que a importação gravou > soma dos itens. null = sem valor,
+// que a tela mostra em laranja em vez de fingir zero.
+function numBR(v) {
+  if (v == null || v === '') return NaN;
+  if (typeof v === 'number') return v;
+  const t = String(v).trim();
+  return Number(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t);
+}
+function valorDaOS(os) {
+  const num = String(os && os.numero || '').trim();
+  const doPainel = num && STORE.valores ? STORE.valores()[num] : undefined;
+  if (Number.isFinite(doPainel)) return doPainel;
+  const vt = numBR(os && os.valorTotal);
+  if (Number.isFinite(vt) && vt > 0) return vt;
+  let soma = 0, tem = false;
+  for (const it of (Array.isArray(os && os.itens) ? os.itens : [])) {
+    const n = numBR(it && it.subtotal);
+    if (Number.isFinite(n) && n > 0) { soma += n; tem = true; }
+  }
+  return tem ? soma : null;
+}
+function somaValores(lista) {
+  let total = 0, semValor = 0;
+  for (const os of lista) { const v = valorDaOS(os); if (v == null) semValor++; else total += v; }
+  return { total, semValor };
+}
+function iniciaisCasa(nome) {
+  const p = String(nome || '').trim().split(/\s+/).filter(Boolean);
+  return ((p[0] || '?')[0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase();
+}
+// Semana corrente: segunda a domingo, no calendário local.
+function semanaAtualCasa() {
+  const hoje = OPERACAO.dia(new Date());
+  const d = new Date(hoje + 'T12:00:00');
+  const dow = (d.getDay() + 6) % 7; // 0 = segunda
+  return { de: OPERACAO.somarDias(hoje, -dow), ate: OPERACAO.somarDias(hoje, 6 - dow) };
+}
+function periodoOuMes(chave) {
+  if (!STATE[chave]) {
+    const hoje = OPERACAO.dia(new Date());
+    STATE[chave] = { de: hoje.slice(0, 7) + '-01', ate: hoje };
+  }
+  return STATE[chave];
+}
+function nomeExibicaoCasa(apelido) {
+  const f = fichaPorApelido(apelido);
+  return f ? { chave: f.id, nome: f.nome || apelido, id: f.id } : { chave: apelido, nome: apelido, id: '' };
+}
+
 function initCasa() {
   const btn = document.getElementById('btn-menu');
   const fundo = document.getElementById('nav-fundo');
@@ -174,54 +225,77 @@ function initCasa() {
 function renderEntregas() {
   const el = document.getElementById('panel-entregas');
   if (!el) return;
-  if (!STATE._entMes) STATE._entMes = mesCasa();
-  const mes = STATE._entMes;
-  const fins = osFinalizadasMes(mes);
-  const erp = erpMesCasa(mes);
-  const r = OPERACAO.mensal(STORE.getAllOS(), mes);
-  const retiradas = fins.filter(o => OPERACAO.interno(o)).length;
-  const porDia = new Map();
-  for (const os of fins) {
-    const iso = OPERACAO.dia(os.finalizadaEm) || '—';
-    if (!porDia.has(iso)) porDia.set(iso, []);
-    porDia.get(iso).push(os);
-  }
-  const dias = [...porDia.keys()].sort().reverse();
+  const todas = STORE.getAllOS();
+  const concl = OPERACAO.conclusoes(todas);          // finalizadas pela equipe (baixa do ERP fora)
+  const hoje = OPERACAO.dia(new Date());
+  const f = periodoOuMes('_fEnt');
+  const tecnico = STATE._entTecnico || '';
+  const tipo = STATE._entTipo || '';
+  if (!STATE._entVista) STATE._entVista = 'tabela';
+
+  // KPIs fixos: hoje, mês, ano — independem dos filtros da lista.
+  const kpi = (de, ate) => {
+    const l = concl.filter(o => OPERACAO.emIntervalo(o.finalizadaEm, de, ate));
+    return { n: l.length, ...somaValores(l) };
+  };
+  const kHoje = kpi(hoje, hoje), kMes = kpi(hoje.slice(0, 7) + '-01', hoje), kAno = kpi(hoje.slice(0, 4) + '-01-01', hoje);
+
+  // Lista filtrada
+  const lista = concl
+    .filter(o => OPERACAO.emIntervalo(o.finalizadaEm, f.de, f.ate))
+    .filter(o => !tecnico || OPERACAO.equipe(o).includes(tecnico))
+    .filter(o => !tipo || String(o.servico || '').trim() === tipo)
+    .sort((a, b) => String(b.finalizadaEm).localeCompare(String(a.finalizadaEm)));
+  const tot = somaValores(lista);
+  const erpNoPeriodo = todas.filter(o => OPERACAO.encerradaERP(o) && OPERACAO.emIntervalo(o.finalizadaEm, f.de, f.ate)).length;
+
+  const tecnicos = [...new Set(concl.flatMap(o => OPERACAO.equipe(o)))].sort((a, b) => a.localeCompare(b));
+  const tipos = typeof tiposServicoHist === 'function' ? tiposServicoHist() : [];
+  const opt = (v, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(v)}</option>`;
+  const kpiHTML = (k, rotulo) => `<div class="casa-kpi ${k.semValor ? 'alerta' : ''}">
+      <b>${dinheiroCasa(k.total)}</b>
+      <small>${esc(rotulo)} · ${k.n} O.S${k.semValor ? ` · <span class="badge sem-valor">${k.semValor} sem valor</span>` : ''}</small>
+    </div>`;
+
+  const linhaValor = os => {
+    const v = valorDaOS(os);
+    return v == null ? '<span class="badge sem-valor">sem valor</span>' : dinheiroCasa(v);
+  };
+  const dataBR = iso => { const d = OPERACAO.dia(iso); return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'; };
+  const tabela = `<div class="casa-tabela-wrap"><table class="casa-tabela">
+    <thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Conclusão</th><th class="num">Valor</th></tr></thead>
+    <tbody>${lista.map(os => `<tr data-os-id="${esc(os.id)}">
+        <td><strong>${esc(os.numero || '—')}</strong>${OPERACAO.interno(os) ? ' <span class="badge st-finalizada">Retirada</span>' : ''}${os.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</td>
+        <td>${esc(os.cliente || '')}</td>
+        <td>${esc(os.servico || '—')}</td>
+        <td>${esc(OPERACAO.equipe(os).join(', ') || (OPERACAO.interno(os) ? 'balcão' : 'sem equipe'))}</td>
+        <td>${dataBR(os.finalizadaEm)}</td>
+        <td class="num">${linhaValor(os)}</td>
+      </tr>`).join('')}</tbody>
+    <tfoot><tr><td colspan="5">${lista.length} O.S no período${tot.semValor ? ` · ${tot.semValor} sem valor` : ''}</td><td class="num">${dinheiroCasa(tot.total)}</td></tr></tfoot>
+  </table></div>`;
   const cardFn = typeof osCardHTML === 'function' ? osCardHTML : null;
-  const grupos = dias.map(iso => {
-    const data = iso === '—' ? '—' : iso.slice(8, 10) + '/' + iso.slice(5, 7);
-    const lista = porDia.get(iso);
-    const corpo = cardFn
-      ? `<div class="cards-grid">${lista.map(cardFn).join('')}</div>`
-      : `<ul>${lista.map(os => {
-          const eq = (os.equipe || []).join(', ') || 'Sem instalador';
-          return `<li class="casa-linha" data-os-id="${esc(os.id)}">
-            <span class="casa-linha-os">O.S ${esc(os.numero || '—')}</span>
-            <span class="casa-linha-cli">${esc(os.cliente || 'Sem cliente')}</span>
-            <span class="casa-linha-eq">${esc(eq)}</span>
-            <span class="badge st-finalizada">${OPERACAO.interno(os) ? 'Retirada' : 'Finalizada'}</span>${os.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}
-          </li>`;
-        }).join('')}</ul>`;
-    return `<section class="casa-dia-grupo"><h3>${esc(data)} · ${lista.length}</h3>${corpo}</section>`;
-  }).join('');
+  const cards = cardFn ? `<div class="cards-grid">${lista.map(cardFn).join('')}</div>` : tabela;
+
   el.innerHTML = `
     <div class="casa-pagina">
       <div class="casa-pagina-head">
-        <div><h2>Entregas</h2><p>O que a empresa finalizou no PCP neste mês. Baixa do ERP não entra. Extra e plantão não entram na Performance.</p></div>
-        <label class="casa-mes">Mês <input type="month" id="ent-mes" value="${esc(mes)}"></label>
+        <div><h2>Entregas</h2><p>O que a equipe finalizou no PCP, em reais. Baixa automática do ERP não entra. Valor vem do cache do Painel${STORE.valoresEm && STORE.valoresEm() ? ` (${new Date(STORE.valoresEm()).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})` : ' — ainda sem valores neste aparelho'}.</p></div>
       </div>
-      <div class="casa-kpis">
-        <span><b>${fins.length}</b> finalizadas no PCP</span>
-        <span><b>${r.total}</b> externas</span>
-        <span><b>${retiradas}</b> retirada</span>
-        <span><b>${r.pessoas.length}</b> quem entregou</span>
-        <span><b>${fins.filter(o => o.retrabalho).length}</b> retrabalho</span>
+      <div class="casa-kpi-cards">${kpiHTML(kHoje, 'entregue hoje')}${kpiHTML(kMes, 'entregue no mês')}${kpiHTML(kAno, 'entregue no ano')}</div>
+      <div class="filter-bar">${filtroPeriodoHTML('_fEnt')}</div>
+      <div class="casa-filtros">
+        <label>Técnico <select id="ent-tecnico"><option value="">Todos</option>${tecnicos.map(t => opt(t, tecnico)).join('')}</select></label>
+        <label>Tipo de serviço <select id="ent-tipo"><option value="">Todos</option>${tipos.map(t => opt(t, tipo)).join('')}</select></label>
+        <span class="casa-vista"><button class="btn-ghost btn-sm ${STATE._entVista === 'tabela' ? 'active' : ''}" data-ent-vista="tabela">Tabela</button><button class="btn-ghost btn-sm ${STATE._entVista === 'cards' ? 'active' : ''}" data-ent-vista="cards">Cards</button></span>
       </div>
-      ${erp.length ? `<p class="metricas-nota">${erp.length} baixa${erp.length === 1 ? '' : 's'} do ERP neste mês não entram aqui — a entrega desta tela é a finalização no PCP.</p>` : ''}
-      <div class="casa-grupos">${grupos || emptyState('', 'Nenhuma finalizada no PCP neste mês', erp.length ? 'As baixas do ERP estão na aba Finalizados. Esta tela só conta O.S. que a equipe finalizou no PCP.' : 'Finalizar a O.S. no PCP (não a baixa do ERP) faz ela aparecer aqui.')}</div>
+      ${erpNoPeriodo ? `<p class="metricas-nota">${erpNoPeriodo} baixa${erpNoPeriodo === 1 ? '' : 's'} automática${erpNoPeriodo === 1 ? '' : 's'} do ERP no período não entram aqui — entrega é a finalização no PCP.</p>` : ''}
+      ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', 'Nenhuma entrega no período', 'Finalizar a O.S no PCP (não a baixa do ERP) faz ela aparecer aqui.')}
     </div>`;
-  const input = document.getElementById('ent-mes');
-  if (input) input.onchange = () => { if (input.value) { STATE._entMes = input.value; renderEntregas(); } };
+  wireFiltroPeriodo(el, '_fEnt', renderEntregas);
+  const selT = document.getElementById('ent-tecnico'); if (selT) selT.onchange = () => { STATE._entTecnico = selT.value; renderEntregas(); };
+  const selS = document.getElementById('ent-tipo'); if (selS) selS.onchange = () => { STATE._entTipo = selS.value; renderEntregas(); };
+  el.querySelectorAll('[data-ent-vista]').forEach(b => b.onclick = () => { STATE._entVista = b.dataset.entVista; renderEntregas(); });
   bindCardClicks(el);
 }
 
@@ -232,6 +306,56 @@ function chipFichaHTML(osId, f, on) {
     <span>${esc(nome)}</span>
     <small>ID ${esc(f.id)}</small>
   </label>`;
+}
+
+// Produtividade por pessoa: O.S concluídas, valor entregue (participação: quem
+// estava na equipe leva o valor inteiro — não é rateio nem bônus), tempo médio
+// saída→retorno e o destaque da semana. Chave é a ficha do RH quando o apelido
+// está ligado; senão o próprio apelido, marcado "sem ficha".
+function produtividadeHTML() {
+  const f = periodoOuMes('_fPerf');
+  const concl = OPERACAO.conclusoes(STORE.getAllOS());
+  const noPeriodo = concl.filter(o => OPERACAO.emIntervalo(o.finalizadaEm, f.de, f.ate));
+  const agrupar = lista => {
+    const m = new Map();
+    for (const os of lista) {
+      const v = valorDaOS(os), h = OPERACAO.horas(os);
+      for (const ap of OPERACAO.equipe(os)) {
+        const p = nomeExibicaoCasa(ap);
+        const d = m.get(p.chave) || { ...p, os: 0, valor: 0, semValor: 0, horas: [], retrab: 0 };
+        d.os++; if (v == null) d.semValor++; else d.valor += v; if (h != null) d.horas.push(h); if (os.retrabalho) d.retrab++;
+        m.set(p.chave, d);
+      }
+    }
+    return [...m.values()].sort((a, b) => b.valor - a.valor || b.os - a.os || a.nome.localeCompare(b.nome));
+  };
+  const pessoas = agrupar(noPeriodo);
+  const sem = semanaAtualCasa();
+  const daSemana = agrupar(concl.filter(o => OPERACAO.emIntervalo(o.finalizadaEm, sem.de, sem.ate)));
+  const destaque = daSemana.length && daSemana[0].valor > 0 ? daSemana[0] : null;
+  const semEquipe = noPeriodo.filter(o => !OPERACAO.equipe(o).length).length;
+  const media = hs => hs.length ? (hs.reduce((a, b) => a + b, 0) / hs.length) : null;
+  const fmtH = h => h == null ? '—' : (h < 1 ? Math.round(h * 60) + ' min' : (Math.round(h * 10) / 10).toString().replace('.', ',') + ' h');
+  const cards = pessoas.map(p => `<div class="casa-prod ${destaque && destaque.chave === p.chave ? 'destaque' : ''}">
+      ${destaque && destaque.chave === p.chave ? '<span class="casa-destaque">★ Destaque da semana</span>' : ''}
+      <div class="casa-avatar" aria-hidden="true">${esc(iniciaisCasa(p.nome))}</div>
+      <div>
+        <div class="casa-prod-nome">${esc(p.nome)}<small>${p.id ? 'ID ' + esc(p.id) : 'sem ficha do RH'}</small></div>
+        <dl>
+          <dt>O.S concluídas</dt><dd>${p.os}${p.retrab ? ` <small>(${p.retrab} retrab.)</small>` : ''}</dd>
+          <dt>Valor entregue</dt><dd>${dinheiroCasa(p.valor)}${p.semValor ? ` <span class="badge sem-valor">${p.semValor} s/ valor</span>` : ''}</dd>
+          <dt>Tempo médio</dt><dd>${fmtH(media(p.horas))}${p.horas.length && p.horas.length < p.os ? ` <small>(${p.horas.length} c/ hora)</small>` : ''}</dd>
+        </dl>
+      </div>
+    </div>`).join('');
+  return `<section class="casa-prod-box">
+      <h3>Produtividade</h3>
+      <p>Quem estava na equipe da O.S finalizada no PCP. Valor é participação (não divide, não é bônus). Tempo = saída → retorno registrados na O.S.</p>
+      <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}</div>
+      ${destaque ? `<p class="metricas-nota">★ Destaque da semana (${sem.de.slice(8, 10)}/${sem.de.slice(5, 7)} a ${sem.ate.slice(8, 10)}/${sem.ate.slice(5, 7)}): <strong>${esc(destaque.nome)}</strong>, ${dinheiroCasa(destaque.valor)} em ${destaque.os} O.S.</p>` : ''}
+      ${semEquipe ? `<p class="metricas-nota">${semEquipe} O.S no período sem equipe registrada — não contam para ninguém.</p>` : ''}
+      ${pessoas.length ? `<div class="casa-prod-grid">${cards}</div>` : emptyState('', 'Nenhuma entrega com equipe no período', 'A O.S precisa ter equipe e ser finalizada no PCP.')}
+    </section>`;
 }
 
 function renderPerformanceCasa() {
@@ -304,6 +428,7 @@ function renderPerformanceCasa() {
         <div><h2>Performance</h2><p>Entrega = finalizada no PCP. O ponto grava o ID da ficha. Várias fichas na mesma O.S. podem levar ponto. Extra não entra.</p></div>
         <label class="casa-mes">Mês <input type="month" id="perf-mes" value="${esc(mes)}"></label>
       </div>
+      ${produtividadeHTML()}
       <div class="casa-perf-bar">
         <label>Orçamento <input type="number" min="0" step="0.01" id="perf-orc" value="${b.orcamento || ''}" placeholder="0"></label>
         <label>Teto por pessoa <input type="number" min="0" step="0.01" id="perf-teto" value="${b.teto || ''}" placeholder="Sem teto"></label>
@@ -342,6 +467,7 @@ function renderPerformanceCasa() {
         ).join('') || '<li class="text-muted">Nenhuma ficha. Sem ID, ninguém leva ponto.</li>'}</ul>
       </details>
     </div>`;
+  wireFiltroPeriodo(el, '_fPerf', renderPerformanceCasa);
   const mesEl = document.getElementById('perf-mes');
   if (mesEl) mesEl.onchange = () => { if (mesEl.value) { gravarBonusCasa({ ...b, mes: mesEl.value }); renderPerformanceCasa(); } };
   const orcEl = document.getElementById('perf-orc');
@@ -441,6 +567,12 @@ function gravarAgendaCasa(a) {
   STORE.saveCFG(cfg);
 }
 
+const TIPOS_PLANTAO = { diarista: 'Diarista', sobreaviso: 'Sobreaviso', folga: 'Folga' };
+function pillPlantao(p) {
+  const t = TIPOS_PLANTAO[p.tipo] ? p.tipo : '';
+  return `<span class="casa-pill ${t || 'navy'}" title="${esc(p.quem || '')}${p.obs ? ' — ' + esc(p.obs) : ''}">${t ? esc(TIPOS_PLANTAO[t]) : 'plantão'}</span>`;
+}
+
 function renderAgendaCasa() {
   const el = document.getElementById('panel-agenda');
   if (!el) return;
@@ -451,6 +583,7 @@ function renderAgendaCasa() {
   const mes = STATE._agMes;
   const [y, m] = mes.split('-').map(Number);
   const agenda = lerAgendaCasa();
+  const todas = STORE.getAllOS();
   const osMes = osNoMesCasa(mes);
   if (!STATE._agDia || !String(STATE._agDia).startsWith(mes)) {
     STATE._agDia = OPERACAO.dia(new Date());
@@ -463,55 +596,114 @@ function renderAgendaCasa() {
   const grade = celulas.map(dt => {
     const iso = OPERACAO.dia(dt);
     const noMes = dt.getMonth() === m - 1;
-    const nOs = osMes.filter(o => diasCasa(o).includes(iso)).length;
+    const doDia = osMes.filter(o => diasCasa(o).includes(iso)).sort((a, b) => String(a.numero).localeCompare(String(b.numero)));
+    const nums = doDia.slice(0, 3).map(o => esc(o.numero || '—'));
+    const resto = doDia.length - nums.length;
+    const pls = agenda.plantoes.filter(p => p.data === iso && !p.cancelado);
     const nEv = agenda.eventos.filter(e => e.data === iso).length;
-    const nPl = agenda.plantoes.filter(p => p.data === iso && !p.cancelado).length;
-    const pills = [nOs && `<span class="casa-pill">${nOs} OS</span>`, nPl && `<span class="casa-pill navy">plantão</span>`, nEv && `<span class="casa-pill mute">${nEv}</span>`].filter(Boolean).join('');
-    return `<button type="button" class="casa-dia ${noMes ? '' : 'fora'} ${iso === sel ? 'sel' : ''}" data-dia="${iso}">
+    const pills = [
+      nums.length && `<span class="casa-pill os">${nums.join(' · ')}${resto > 0 ? ` +${resto}` : ''}</span>`,
+      ...pls.slice(0, 2).map(pillPlantao),
+      pls.length > 2 && `<span class="casa-pill navy">+${pls.length - 2}</span>`,
+      nEv && `<span class="casa-pill mute">${nEv} ev.</span>`,
+    ].filter(Boolean).join('');
+    return `<button type="button" class="casa-dia ${noMes ? '' : 'fora'} ${iso === sel ? 'sel' : ''}" data-dia="${iso}" title="${doDia.length} O.S">
       <span>${dt.getDate()}</span>
       <span class="casa-dia-pills">${pills}</span>
     </button>`;
   }).join('');
-  const osDia = osMes.filter(o => diasCasa(o).includes(sel));
+
+  const osDia = osMes.filter(o => diasCasa(o).includes(sel)).sort((a, b) => (typeof ordemHora === 'function' ? ordemHora(a).localeCompare(ordemHora(b)) : 0));
   const plDia = agenda.plantoes.filter(p => p.data === sel && !p.cancelado);
   const evDia = agenda.eventos.filter(e => e.data === sel);
-  const dataBR = sel ? sel.slice(8, 10) + '/' + sel.slice(5, 7) : '';
+  const dSel = new Date(sel + 'T12:00:00');
+  const dataBR = `${(typeof DIAS_SEMANA !== 'undefined' ? DIAS_SEMANA[dSel.getDay()] : '')} ${sel.slice(8, 10)}/${sel.slice(5, 7)}`;
+  const cfg = STORE.getCFG();
+  const hoje = OPERACAO.dia(new Date());
+  // O.S que dá para colocar neste dia: aberta, não interna, ainda não neste dia.
+  const candidatas = todas.filter(o => !o.finalizadaEm && !OPERACAO.interno(o) && !diasCasa(o).includes(sel))
+    .sort((a, b) => (OPERACAO.prazo(a) || '9999').localeCompare(OPERACAO.prazo(b) || '9999') || String(b.numero).localeCompare(String(a.numero)));
+  const conflitosDia = OPERACAO.conflitos(todas, sel);
+  const statusHTML = os => { const st = OPERACAO.status(os); return `<span class="badge st-${st}">${esc(typeof statusLabelDe === 'function' ? statusLabelDe(os, st) : st)}</span>`; };
+
   el.innerHTML = `
     <div class="casa-pagina">
       <div class="casa-pagina-head">
-        <div><h2>Calendário da produção</h2><p>Só PCP. Não conversa com o calendário de gente do RH.</p></div>
+        <div><h2>Calendário da produção</h2><p>Cada dia mostra as O.S programadas e os plantões. Clique no dia para ver, programar e mandar a mensagem.</p></div>
         <label class="casa-mes">Mês <input type="month" id="ag-mes" value="${esc(mes)}"></label>
       </div>
       <div class="casa-agenda">
         <div>
           <div class="casa-cal-dow">${dow.map(d => `<span>${d}</span>`).join('')}</div>
           <div class="casa-cal">${grade}</div>
+          <p class="metricas-nota"><span class="casa-pill diarista">Diarista</span> <span class="casa-pill sobreaviso">Sobreaviso</span> <span class="casa-pill folga">Folga</span> — plantões vêm da aba Plantões.</p>
         </div>
         <aside class="casa-dia-painel">
-          <h3>Dia ${esc(dataBR)}</h3>
-          <p>${osDia.length} O.S. · ${plDia.length} plantão · ${evDia.length} evento</p>
-          <ul class="casa-os">${osDia.map(os =>
-            `<li data-os-id="${esc(os.id)}">O.S ${esc(os.numero || '—')} · ${esc(os.cliente || '')} · ${esc((os.equipe || []).join(', ') || 'sem equipe')}${os.finalizadaEm ? ' · finalizada' : ''}</li>`
-          ).join('') || '<li class="text-muted">Nenhuma O.S. neste dia.</li>'}</ul>
-          <ul class="casa-os">${plDia.map(p =>
-            `<li>${esc(p.titulo)} · ${esc(p.quem)} · ${esc(p.inicio)}–${esc(p.fim)}</li>`
-          ).join('')}</ul>
-          <ul class="casa-os">${evDia.map(e =>
-            `<li>${esc(e.titulo)} <button class="btn-ghost btn-xs" data-del-ev="${esc(e.id)}">Apagar</button></li>`
-          ).join('')}</ul>
-          <form id="ag-form" class="casa-criterios">
+          <h3>${esc(dataBR)}${sel === hoje ? ' · hoje' : ''}</h3>
+          <p>${osDia.length} O.S · ${plDia.length} plantão · ${evDia.length} evento${conflitosDia.length ? ` · <strong>${conflitosDia.length} possível conflito</strong>` : ''}</p>
+          <div>${osDia.map(os => `<div class="casa-dia-item" data-os-id="${esc(os.id)}">
+              <div class="l1"><span>⏰ ${esc(typeof rotuloHora === 'function' ? rotuloHora(os) : '')}</span><span>O.S ${esc(os.numero || '—')}</span><span>${esc(os.cliente || '')}</span>${statusHTML(os)}</div>
+              <div class="l2"><span>👥 ${esc(OPERACAO.equipe(os).join(', ') || 'sem equipe')}</span><span>🚗 ${esc(os.veiculo || 'sem veículo')}</span>${os.servico ? `<span>${esc(os.servico)}</span>` : ''}</div>
+            </div>`).join('') || '<p class="text-muted">Nenhuma O.S neste dia.</p>'}</div>
+          ${plDia.length ? `<ul class="casa-os">${plDia.map(p => `<li>${pillPlantao(p)} ${esc(p.quem)} · ${esc(p.inicio)}–${esc(p.fim)}${p.titulo ? ' · ' + esc(p.titulo) : ''}</li>`).join('')}</ul>` : ''}
+          ${evDia.length ? `<ul class="casa-os">${evDia.map(e => `<li>${esc(e.titulo)} <button class="btn-ghost btn-xs edit-only" data-del-ev="${esc(e.id)}">Apagar</button></li>`).join('')}</ul>` : ''}
+          <div class="casa-dia-acoes">
+            <button class="btn-ghost btn-sm" id="ag-wpp" ${osDia.length ? '' : 'disabled'} title="Mensagem da programação do dia">💬 Mensagem do dia</button>
+            <button class="btn-ghost btn-sm" id="ag-pdf" ${osDia.length ? '' : 'disabled'} title="Relatório do dia em PDF">🖨 PDF do dia</button>
+          </div>
+          <details class="casa-add-os edit-only" ${STATE._agAddAberto ? 'open' : ''}>
+            <summary>+ Adicionar O.S ao dia</summary>
+            <form id="ag-add">
+              <label>O.S <select name="osId" required><option value="">— escolher —</option>${candidatas.slice(0, 200).map(o => `<option value="${esc(o.id)}">${esc(o.numero || '—')} — ${esc((o.cliente || '').slice(0, 34))}${OPERACAO.prazo(o) ? ' · prazo ' + OPERACAO.prazo(o).slice(8, 10) + '/' + OPERACAO.prazo(o).slice(5, 7) : ''}</option>`).join('')}</select></label>
+              <div class="linha2">
+                <label>Período <select name="periodo">${(typeof PERIODO_OPTS !== 'undefined' ? PERIODO_OPTS : ['Manhã', 'Tarde', 'Dia inteiro', 'Horário']).map(o => `<option>${esc(o)}</option>`).join('')}</select></label>
+                <label>Hora de saída <input name="hora" type="time"></label>
+              </div>
+              <div class="linha2">
+                <label>Duração (dias) <input name="dias" type="number" min="1" value="1"></label>
+                <label>Veículo <select name="veiculo"><option value="">— sem veículo —</option>${(cfg.veiculos || []).map(v => `<option>${esc(v)}</option>`).join('')}</select></label>
+              </div>
+              <label>Equipe <div class="casa-chips">${(cfg.instaladores || []).map(n => `<label class="casa-chip"><input type="checkbox" name="equipe" value="${esc(n)}"><span>${esc(n)}</span></label>`).join('') || '<span class="text-muted">Cadastre instaladores em Configurações.</span>'}</div></label>
+              <button class="btn-primary btn-sm" type="submit">Programar neste dia</button>
+            </form>
+          </details>
+          <form id="ag-form" class="casa-criterios edit-only">
             <label>Evento neste dia <input name="titulo" required placeholder="Título"></label>
             <input type="hidden" name="data" value="${esc(sel)}">
-            <button class="btn-primary btn-sm" type="submit">Registrar</button>
+            <button class="btn-ghost btn-sm" type="submit">Registrar evento</button>
           </form>
         </aside>
       </div>
     </div>`;
   const mesEl = document.getElementById('ag-mes');
   if (mesEl) mesEl.onchange = () => { if (mesEl.value) { STATE._agMes = mesEl.value; STATE._agDia = ''; renderAgendaCasa(); } };
-  el.querySelectorAll('[data-dia]').forEach(btn => {
-    btn.onclick = () => { STATE._agDia = btn.dataset.dia; renderAgendaCasa(); };
-  });
+  el.querySelectorAll('[data-dia]').forEach(btn => { btn.onclick = () => { STATE._agDia = btn.dataset.dia; renderAgendaCasa(); }; });
+  const wpp = document.getElementById('ag-wpp'); if (wpp) wpp.onclick = () => { if (typeof whatsappServicosDia === 'function') whatsappServicosDia(sel); };
+  const pdf = document.getElementById('ag-pdf'); if (pdf) pdf.onclick = () => { if (typeof relatorioServicosDia === 'function') relatorioServicosDia(sel); };
+  const add = el.querySelector('.casa-add-os'); if (add) add.ontoggle = () => { STATE._agAddAberto = add.open; };
+  el.querySelectorAll('.casa-chip input[name="equipe"]').forEach(cb => { cb.onchange = () => cb.closest('.casa-chip').classList.toggle('on', cb.checked); });
+  const fAdd = document.getElementById('ag-add');
+  if (fAdd) fAdd.onsubmit = ev => {
+    ev.preventDefault();
+    const fd = new FormData(fAdd);
+    const os = STORE.getOS(String(fd.get('osId') || ''));
+    if (!os) { toast('Escolha a O.S.', 'error'); return; }
+    const periodo = String(fd.get('periodo') || 'Manhã');
+    const hora = String(fd.get('hora') || '');
+    if (periodo === 'Horário' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(hora)) { toast('Período "Horário" pede a hora.', 'error'); return; }
+    const equipe = fd.getAll('equipe').map(String).filter(Boolean);
+    os.instalacao = Object.assign({}, os.instalacao || {}, { data: sel, periodo, hora, duracaoDias: Math.max(1, Number(fd.get('dias')) || 1) });
+    if (equipe.length) os.equipe = equipe;
+    const veiculo = String(fd.get('veiculo') || ''); if (veiculo) os.veiculo = veiculo;
+    os.atualizadoEm = new Date().toISOString();
+    os.atualizadoPor = (STATE.user && STATE.user.nome) || '';
+    STORE.saveOS(os);
+    const conf = OPERACAO.conflitos(STORE.getAllOS(), sel).filter(c => c.a.id === os.id || c.b.id === os.id);
+    if (conf.length) toast(`Programada, mas com possível conflito: ${conf.map(c => [...c.equipe, c.veiculo].filter(Boolean).join(', ')).join(' · ')} já está em outra O.S neste turno.`, 'error');
+    else toast(`O.S ${os.numero || ''} programada para ${sel.slice(8, 10)}/${sel.slice(5, 7)}.`, 'success');
+    STATE._agAddAberto = false;
+    renderAgendaCasa();
+  };
   const form = document.getElementById('ag-form');
   if (form) form.onsubmit = ev => {
     ev.preventDefault();
@@ -549,23 +741,26 @@ function renderPlantoesCasa() {
       <form id="pl-form" class="casa-criterios casa-toolbar">
         <label>Título <input name="titulo" required placeholder="Plantão de sábado"></label>
         <label>Data <input name="data" type="date" required></label>
+        <label>Tipo <select name="tipo">${Object.entries(TIPOS_PLANTAO).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
         <label>Quem <input name="quem" list="pl-nomes" required></label>
         <datalist id="pl-nomes">${instaladores.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
         <label>Início <input name="inicio" type="time" value="08:00" required></label>
         <label>Fim <input name="fim" type="time" value="12:00" required></label>
+        <label>Observação <input name="obs" placeholder="opcional"></label>
         <button class="btn-primary btn-sm" type="submit">Registrar plantão</button>
       </form>
       <table class="casa-tabela">
-        <thead><tr><th>Data</th><th>Quem</th><th>Horário</th><th>Título</th><th></th></tr></thead>
+        <thead><tr><th>Data</th><th>Tipo</th><th>Quem</th><th>Horário</th><th>Título / obs.</th><th></th></tr></thead>
         <tbody>${lista.map(p =>
           `<tr class="${p.data < hoje ? 'passado' : ''}">
-            <td>${esc(p.data)}</td>
+            <td>${esc(p.data.slice(8, 10) + '/' + p.data.slice(5, 7) + '/' + p.data.slice(0, 4))}</td>
+            <td>${pillPlantao(p)}</td>
             <td>${esc(p.quem)}</td>
             <td class="num">${esc(p.inicio)}–${esc(p.fim)}</td>
-            <td>${esc(p.titulo)}</td>
+            <td>${esc(p.titulo)}${p.obs ? ` <small class="text-muted">— ${esc(p.obs)}</small>` : ''}</td>
             <td><button class="btn-ghost btn-xs" data-del-pl="${esc(p.id)}">Apagar</button></td>
           </tr>`
-        ).join('') || '<tr><td colspan="5" class="text-muted">Nenhum plantão registrado na produção. O RH não manda plantão para cá — cadastre acima.</td></tr>'}</tbody>
+        ).join('') || '<tr><td colspan="6" class="text-muted">Nenhum plantão registrado na produção. O RH não manda plantão para cá — cadastre acima.</td></tr>'}</tbody>
       </table>
     </div>`;
   const form = document.getElementById('pl-form');
@@ -579,6 +774,8 @@ function renderPlantoesCasa() {
       quem: String(fd.get('quem') || '').trim(),
       inicio: String(fd.get('inicio') || ''),
       fim: String(fd.get('fim') || ''),
+      tipo: TIPOS_PLANTAO[String(fd.get('tipo') || '')] ? String(fd.get('tipo')) : 'diarista',
+      obs: String(fd.get('obs') || '').trim(),
       cancelado: false,
     };
     if (!p.titulo || !p.data || !p.quem) return;

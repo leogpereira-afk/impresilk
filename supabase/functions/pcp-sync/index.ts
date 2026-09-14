@@ -575,6 +575,40 @@ Deno.serve(async (req: Request) => {
         return resp({ ok: true });
       }
 
+      // ---- valores: quanto vale cada O.S, lido do cache do Painel ----
+      //
+      // O PCP nunca soube o valor do servico: o card guarda so itens com
+      // subtotal (nem sempre preenchido) e nenhuma tela somava. A verdade do
+      // valor ja existe no MESMO banco -- painel_ordens, alimentada pela carga
+      // do Painel a cada 20 min, com o rateio de unioes conferido. Uma base so:
+      // em vez de copiar o numero para dentro de cada O.S (segunda verdade que
+      // envelhece), a tela pergunta aqui e recebe {numero: valor}.
+      //
+      // E dinheiro da casa: so quem enxerga Entregas/Performance recebe
+      // (admin e pcp). Montagem, operacao e comercial levam 403 -- e o app
+      // trata como "sem valor", nao como erro.
+      case "valores": {
+        if (cracha && !ehMaquina && !["admin", "pcp"].includes(String(cracha.papel ?? ""))) {
+          return resp({ error: "Valores só para a gestão do PCP." }, 403);
+        }
+        const { data: nums, error: e1 } = await sb.from("pcp_registros")
+          .select("registro->>numero").eq("colecao", "os").eq("apagado", false);
+        if (e1) return resp({ error: e1.message }, 500);
+        const lista = [...new Set((nums ?? []).map((r: any) => String(r.numero || "").trim()).filter(Boolean))];
+        const valores: Record<string, number> = {};
+        // PostgREST corta em 1000 linhas por pedido: pergunta em fatias.
+        for (let i = 0; i < lista.length; i += 500) {
+          const { data: po, error: e2 } = await sb.from("painel_ordens")
+            .select("numero, valor").in("numero", lista.slice(i, i + 500));
+          if (e2) return resp({ error: e2.message }, 500);
+          for (const r of po ?? []) {
+            const v = Number(r.valor);
+            if (r.numero && Number.isFinite(v)) valores[String(r.numero)] = v;
+          }
+        }
+        return resp({ valores, em: new Date().toISOString() });
+      }
+
       case "getCfg": {
         const cfg = (await getCfg()) ?? {};
         // Papel nao-admin nao recebe dados sensiveis: a lista de usuarios (com

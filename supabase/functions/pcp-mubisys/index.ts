@@ -151,6 +151,14 @@ function mapearOS(o: any) {
     // Situacao da O.S no ERP. E o que permite a BAIXA AUTOMATICA: quando o
     // pedido sai de producao la, ele nao pode continuar ocupando a mesa aqui.
     statusERP: String(pick(o, "status", "situacao", "status_os") || "").trim().toUpperCase(),
+    // Valor cobrado: bruto menos desconto (a regra do Painel, conferida em
+    // 200 O.S). Fica no card so como RESERVA para O.S que o Painel ainda nao
+    // carregou; a tela prefere sempre painel_ordens (acao 'valores').
+    valorTotal: (() => {
+      const bruto = Number(String(pick(o, "valor_total", "valorTotal", "total") ?? "").replace(",", "."));
+      const desc = Number(String(pick(o, "valor_desconto", "valorDesconto", "desconto") ?? "0").replace(",", "."));
+      return Number.isFinite(bruto) ? Math.max(0, bruto - (Number.isFinite(desc) ? desc : 0)) : null;
+    })(),
     servico: pick(o, "nome_trabalho", "referencia", "titulo", "descricao"),
     vendedor: pick(o, "vendedor", "atendente", "vendedorNome"),
     dataEntrada: isoData(pick(o, "data_cadastro", "data_aprovacao")),
@@ -320,6 +328,7 @@ function montarOSImportada(remoto: any) {
   for (const k of ["numero", "servico", "vendedor", "dataEntrada", "previsaoEntrega", "cliente", "contato", "whatsapp", "cnpjCpf", "endereco"]) {
     if (remoto[k]) os[k] = remoto[k];
   }
+  if (remoto.valorTotal != null) os.valorTotal = remoto.valorTotal;
   if (remoto.tipo === "interno" || remoto.tipo === "externo") os.tipo = remoto.tipo;
   if (remoto.observacao) os.obsPCP = remoto.observacao;
   if (remoto.instalacao) os.instalacao = Object.assign(os.instalacao, remoto.instalacao);

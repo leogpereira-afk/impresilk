@@ -9,7 +9,8 @@ const STORE = (() => {
     USER:       'impresilk_inst_user',
     INSTALADOR: 'impresilk_inst_instalador',
     FILA:       'impresilk_inst_fila',
-    LASTSYNC:   'impresilk_inst_lastsync'
+    LASTSYNC:   'impresilk_inst_lastsync',
+    VALORES:    'impresilk_inst_valores'
   };
 
   // ── IndexedDB (fotos) ──────────────────────────────────────────────────────
@@ -579,6 +580,31 @@ const STORE = (() => {
     }
   }
 
+  // ── Valor de cada O.S (uma base só) ───────────────────────────────────────
+  // O PCP nunca soube quanto vale o serviço. A verdade mora no cache do
+  // Painel (painel_ordens, mesmo banco), e o pcp-sync entrega {numero: valor}
+  // pela ação 'valores' — só para admin/pcp. Fica em memória (e uma cópia
+  // pequena no localStorage, ~12 KB, para a tela não abrir zerada offline).
+  // Papel sem acesso recebe 403 e a tela mostra "sem valor", não erro.
+  let _valores = lsGet(K.VALORES, { em: '', mapa: {} });
+  function valores() { return (_valores && _valores.mapa) || {}; }
+  function valoresEm() { return (_valores && _valores.em) || ''; }
+  async function pullValores(forcar) {
+    if (!navigator.onLine) return;
+    const idade = _valores.em ? Date.now() - new Date(_valores.em).getTime() : Infinity;
+    if (!forcar && idade < 5 * 60000) return;
+    try {
+      const res = await api({ action: 'valores' });
+      if (res && res.valores && typeof res.valores === 'object') {
+        _valores = { em: res.em || new Date().toISOString(), mapa: res.valores };
+        lsSet(K.VALORES, _valores);
+        _notifyListeners('valores', _valores);
+      }
+    } catch (e) {
+      // 403 = papel sem acesso a dinheiro; 401 = sessão — o pull normal já avisa.
+    }
+  }
+
   // ── Fotos ─────────────────────────────────────────────────────────────────
   // Comprime imagem antes de gravar (max 1280px, JPEG 0.75)
   async function compressImage(file) {
@@ -679,6 +705,8 @@ const STORE = (() => {
       localStorage.removeItem(K.OS);
       localStorage.removeItem(K.FILA);
       localStorage.removeItem(K.LASTSYNC);
+      localStorage.removeItem(K.VALORES);
+      _valores = { em: '', mapa: {} };
       const cfg = lsGet(K.CFG, null);
       if (cfg && typeof cfg === 'object') {
         const { usuarios: _u, funcionarios: _f, ...resto } = cfg;
@@ -808,7 +836,7 @@ const STORE = (() => {
     // Identidade
     getUser, setUser, getInstalador, setInstalador, getLastSync, limparCache,
     // Sync
-    trySync, pull, pullCFG,
+    trySync, pull, pullCFG, pullValores, valores, valoresEm,
     // Fotos
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos
