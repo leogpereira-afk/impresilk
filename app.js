@@ -753,18 +753,23 @@ function avaliarImportacao(s) {
   // caso-limite que o vigia existe para pegar, não sinal de saúde.
   if (!ult || !ult.em) return { parada: true, motivo: 'nenhuma importação registrada — o robô horário pode estar desligado' };
   const horas = (Date.now() - new Date(ult.em).getTime()) / 3600000;
-  if (ult.ok === false) return { parada: true, motivo: 'erro: ' + (ult.erro || 'desconhecido') };
+  if (ult.ok === false) {
+    const bom = ult.ultimoSucesso && ult.ultimoSucesso.em
+      ? ' · última que deu certo: ' + new Date(ult.ultimoSucesso.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+      : '';
+    return { parada: true, motivo: 'erro: ' + (ult.erro || 'desconhecido') + bom };
+  }
   if (horas >= 2) return { parada: true, motivo: `há ${Math.floor(horas)}h sem rodar` };
   return { parada: false };
 }
 function vigiarImportacao() {
   // Aviso só para quem pode agir (admin/pcp) — os demais não têm o que fazer.
-  if (!STATE.user || !['admin', 'pcp'].includes(STATE.user.papel)) return;
-  if (!navigator.onLine) return;
-  STORE.api({ action: 'saude' }).then(s => {
+  if (!STATE.user || !['admin', 'pcp'].includes(STATE.user.papel)) return Promise.resolve(null);
+  if (!navigator.onLine) return Promise.resolve(null);
+  return STORE.api({ action: 'saude' }).then(s => {
     const av = avaliarImportacao(s);
     let ban = $('#alerta-importacao');
-    if (!av.parada) { if (ban) ban.remove(); return; }
+    if (!av.parada) { if (ban) ban.remove(); return { s, av }; }
     if (!ban) {
       ban = document.createElement('div');
       ban.id = 'alerta-importacao';
@@ -784,7 +789,8 @@ function vigiarImportacao() {
       ban.onclick = () => { const t = $('[data-tab="controle"]'); if (t) t.click(); };
     }
     ban.innerHTML = `⚠️ <strong>Importação do Mubisys parada</strong> — ${esc(av.motivo)}. Toque para abrir a Saúde da conexão.`;
-  }).catch(() => {});
+    return { s, av };
+  }).catch(() => null);
 }
 
 function aplicarPermissoes() {
@@ -942,8 +948,13 @@ async function verificarNuvem() {
     // "150 O.S" mesmo com ~570 no banco.
     const n = Number.isFinite(res.total) ? res.total : (Array.isArray(res.os) ? res.os.length : 0);
     const fila = STORE.getQueue().length;
-    if (fila) toast(`☁️ ${n} O.S na nuvem · ⏳ ${fila} ainda na fila deste aparelho`, 'error');
-    else      toast(`✅ Tudo salvo na nuvem: ${n} O.S confirmada(s)`, 'success');
+    // O mesmo botão confere a IMPORTAÇÃO (pedido do dono, 14/09/2026: o
+    // "Verificar de novo" só existia dentro de Configurações). Quem não vê
+    // a importação (montagem, comercial) recebe null e nada muda.
+    const v = await vigiarImportacao();
+    const imp = !v ? '' : (v.av.parada ? ` · ⚠️ importação ${v.av.motivo}` : ' · ✅ importação do Mubisys em dia');
+    if (fila || (v && v.av.parada)) toast(`☁️ ${n} O.S na nuvem${fila ? ` · ⏳ ${fila} ainda na fila deste aparelho` : ''}${imp}`, 'error');
+    else toast(`✅ Tudo salvo na nuvem: ${n} O.S confirmada(s)${imp}`, 'success');
   } catch {
     toast('❌ Sem resposta da nuvem — offline ou backend não publicado/TOKEN ausente', 'error');
   } finally {
@@ -4348,9 +4359,18 @@ function wireSaude(el) {
             (horas >= 2 ? ` — <strong>há mais de ${Math.floor(horas)}h sem rodar!</strong>` : '');
         }
       }
+      // A última que DEU CERTO, separada da última tentativa (pedido do dono,
+      // 14/09/2026: um dia de ERP fora escondia desde quando a fábrica estava
+      // sem O.S nova). O servidor carrega esse carimbo através das falhas.
+      const bom = (ult && ult.ultimoSucesso && ult.ultimoSucesso.em) ? ult.ultimoSucesso
+        : (ult && ult.ok !== false && ult.em ? { em: ult.em, novas: ult.novas } : null);
+      const completaTxt = bom
+        ? `${new Date(bom.em).toLocaleString('pt-BR')} — ${bom.novas || 0} nova(s)`
+        : 'nenhuma registrada ainda';
       box.innerHTML = `
         ✅ <strong>Nuvem OK</strong> — ${s.totalOS} O.S guardadas no servidor<br>
-        ${impIcone} Importação automática do Mubisys: ${impTxt}<br>
+        📅 Última importação <strong>completa</strong>: ${completaTxt}<br>
+        ${impIcone} Última tentativa de importação: ${impTxt}<br>
         ${filaTxt}<br>
         📦 Versão do app neste aparelho: <strong>${typeof APP_VERSAO !== 'undefined' ? APP_VERSAO : '—'}</strong>`;
     }).catch(() => {

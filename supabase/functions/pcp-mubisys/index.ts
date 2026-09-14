@@ -495,6 +495,23 @@ async function gravarImportadas(sb: any, remotas: any[]) {
   return { novas, jaExistiam, total: remotas.length, semNumero };
 }
 
+/* O BATIMENTO GUARDA DUAS DATAS: a da ultima TENTATIVA e a da ultima que DEU
+   CERTO. Ate 14/09/2026 so havia uma -- e um dia inteiro de ERP fora apagava
+   do registro a hora em que a importacao funcionou pela ultima vez. "Desde
+   quando?" e a primeira pergunta de quem ve o aviso, e o painel nao tinha
+   como responder. Falha carrega o ultimo sucesso para a frente; sucesso o
+   renova. TODA gravacao de sync_status passa por aqui. */
+async function gravarBatimento(novo: any) {
+  const anterior = (await getMeta("sync_status")) ?? {};
+  const ultimoSucesso = novo.ok === false
+    ? (anterior.ultimoSucesso
+        ?? (anterior.ok !== false && anterior.em ? { em: anterior.em, novas: anterior.novas ?? 0 } : undefined))
+    : { em: novo.em, novas: novo.novas ?? 0 };
+  const st = ultimoSucesso ? { ...novo, ultimoSucesso } : novo;
+  await setMeta("sync_status", st);   // a ÚNICA escrita direta; o resto passa por aqui
+  return st;
+}
+
 // ---------------------------------------------------------------- handler
 
 
@@ -810,11 +827,11 @@ Deno.serve(async (req: Request) => {
         const remotas = lista.map(mapearOS);
         const r = await gravarImportadas(sb, remotas);
         const st = { em: new Date().toISOString(), ok: true, origem: "actions", ...r };
-        await setMeta("sync_status", st);
+        await gravarBatimento(st);
         console.log(`[pcp-mubisys] lote do Actions: ${r.novas} nova(s) de ${r.total}.`);
         return resp(st);
       } catch (e) {
-        await setMeta("sync_status", {
+        await gravarBatimento({
           em: new Date().toISOString(), ok: false, origem: "actions",
           erro: (e as Error)?.message ?? String(e),
         }).catch(() => {});
@@ -848,7 +865,7 @@ Deno.serve(async (req: Request) => {
            precisa saber que a importacao em si funcionou -- senao o vigia
            acusa "importacao parada" com a importacao tendo funcionado. */
         const parcial = { em: new Date().toISOString(), ok: true, novas, total: remotas.length, jaExistiam, duplicatasRemovidas: 0 };
-        await setMeta("sync_status", parcial).catch(() => {});
+        await gravarBatimento(parcial).catch(() => {});
 
         let baixa: any = null;
         if (sobra() < 25_000) {
@@ -883,13 +900,13 @@ Deno.serve(async (req: Request) => {
         } catch (e) { entregues = { erro: String((e as Error)?.message || e) }; }
 
         const st = { ...parcial, em: new Date().toISOString(), baixa, entregues };
-        await setMeta("sync_status", st);
+        await gravarBatimento(st);
         console.log(`[pcp-mubisys] ${novas} nova(s) de ${remotas.length}.`);
         return resp(st);
       } catch (e) {
         // Registra a falha: o painel de saude do app precisa denunciar que a
         // importacao parou, senao ela morre em silencio.
-        await setMeta("sync_status", {
+        await gravarBatimento({
           em: new Date().toISOString(), ok: false, erro: (e as Error)?.message ?? String(e),
         }).catch(() => {});
         throw e;
