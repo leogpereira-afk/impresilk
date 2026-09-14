@@ -1991,3 +1991,18 @@ body.tv-ligada { overflow:hidden; }
   /* "8 O.S" não cabe na célula do celular: fica só o número. */
   .casa-dia .so-largo { display:none; }
 }
+
+/* Tarja de versão nova (o service worker trocou por baixo da página aberta) */
+#nova-versao {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 950;
+  display: flex; align-items: center; gap: 10px;
+  background: #163654; color: #fff; border-radius: 999px;
+  padding: 8px 10px 8px 18px; box-shadow: 0 8px 28px rgba(10,22,38,.35);
+  font-size: .84rem; max-width: calc(100vw - 24px);
+}
+#nova-versao button { border: 0; cursor: pointer; font: inherit; border-radius: 999px; }
+#nv-recarregar { background: #28796a; color: #fff; padding: 7px 14px; font-weight: 650; min-height: 36px; }
+#nv-recarregar:hover { background: #1f6255; }
+#nv-depois { background: transparent; color: #9fc4dd; font-size: 1.2rem; line-height: 1; padding: 4px 8px; min-height: 36px; }
+@media (max-width: 480px) { #nova-versao { font-size: .78rem; padding-left: 14px; } }

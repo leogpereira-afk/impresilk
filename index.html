@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Impresilk">
-  <link rel="stylesheet" href="styles.css?v=v81">
+  <link rel="stylesheet" href="styles.css?v=v82">
 </head>
 <body>
 
@@ -176,14 +176,45 @@
        importar O.S a partir do PDF do ERP. Passou a ser carregada na hora em
        que alguem clica em "Importar PDF" -- ver garantirPdfJs() no app.js. -->
 
-  <script src="config.js?v=v81"></script>
-  <script src="logo.js?v=v81"></script>
-  <script src="frases.js?v=v81"></script>
-  <script src="store.js?v=v81"></script>
-  <script src="auth.js?v=v81"></script>
-  <script src="operacao.js?v=v81"></script>
-  <script src="app.js?v=v81"></script>
-  <script src="casa.js?v=v81"></script>
-  <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
+  <script src="config.js?v=v82"></script>
+  <script src="logo.js?v=v82"></script>
+  <script src="frases.js?v=v82"></script>
+  <script src="store.js?v=v82"></script>
+  <script src="auth.js?v=v82"></script>
+  <script src="operacao.js?v=v82"></script>
+  <script src="app.js?v=v82"></script>
+  <script src="casa.js?v=v82"></script>
+  <script>
+  /* Service worker + AVISO DE VERSÃO NOVA.
+     O sw.js faz skipWaiting/claim, então a versão nova assume assim que o
+     navegador a baixa -- mas a PÁGINA JÁ ABERTA continua rodando o JS velho
+     até alguém recarregar. Numa tela que fica aberta o dia inteiro (o caso
+     aqui), isso já fez o dono olhar uma versão de dias atrás achando que nada
+     tinha mudado. Agora: checa de hora em hora e, quando a troca acontece,
+     aparece a tarja para recarregar na hora que ele quiser -- nunca recarrega
+     sozinho, que jogaria fora o que estiver sendo digitado. */
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').then(function (reg) {
+        setInterval(function () { reg.update().catch(function () {}); }, 3600000);
+        document.addEventListener('visibilitychange', function () {
+          if (!document.hidden) reg.update().catch(function () {});
+        });
+      }).catch(function () {});
+      var jaTinha = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (!jaTinha || document.getElementById('nova-versao')) return;
+        var d = document.createElement('div');
+        d.id = 'nova-versao';
+        d.innerHTML = '<span>✨ Saiu uma versão nova do sistema.</span>' +
+          '<button type="button" id="nv-recarregar">Recarregar agora</button>' +
+          '<button type="button" id="nv-depois" aria-label="Fechar">×</button>';
+        document.body.appendChild(d);
+        d.querySelector('#nv-recarregar').onclick = function () { location.reload(); };
+        d.querySelector('#nv-depois').onclick = function () { d.remove(); };
+      });
+    });
+  }
+  </script>
 </body>
 </html>
