@@ -1504,7 +1504,7 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 #app:has(#panel-pcp.active) .frase-bar { display:none; }
 #app:has(#panel-pcp.active) { background: var(--bg); }
 #tabs .tab { display:inline-flex; align-items:center; gap:8px; font-weight:650; }
-#tabs .tab.active { background:#1e4d78; color:#fff; box-shadow:inset 2px 0 0 #fff; }
+/* ativo: ver o bloco 'Barra lateral no padrão dos outros sistemas' */
 #tabs .tab.hidden { display:none; }
 #panel-pcp { padding-top:14px; }
 #pcp-prioridades { margin-bottom:14px; }
@@ -1747,10 +1747,10 @@ body.nav-aberta .nav-fundo { display: block; }
     align-items: stretch;
     overflow-y: auto;
     overflow-x: hidden;
-    border-right: 1px solid #0f2840;
+    border-right: 1px solid var(--border);
     border-bottom: none;
     padding: 10px 8px 28px;
-    background: #163654;
+    background: #fff;
   }
   #tabs .tab {
     display: flex;
@@ -1781,8 +1781,9 @@ body.nav-aberta .nav-fundo { display: block; }
     z-index: 300;
     transform: translateX(-105%);
     transition: transform .2s ease;
-    background: #163654;
-    border-right: 1px solid #0f2840;
+    background: #fff;
+    border-right: 1px solid var(--border);
+    box-shadow: 0 0 40px rgba(10,22,38,.25);
     padding: calc(12px + env(safe-area-inset-top)) 10px 24px;
   }
   body.nav-aberta #tabs { transform: none; }
