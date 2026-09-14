@@ -603,6 +603,8 @@ const STORE = (() => {
       }
     } catch (e) {
       // 403 = papel sem acesso a dinheiro; 401 = sessão — o pull normal já avisa.
+      // Marca a tentativa para não bater a cada 30 s numa porta que recusou.
+      _valores = Object.assign({}, _valores, { em: new Date().toISOString() });
     }
   }
 

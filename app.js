@@ -1236,6 +1236,20 @@ function blocoPCP(os, ro, done) {
           <datalist id="dl-servicos">${tiposServicoHist().map(s=>`<option value="${esc(s)}">`).join('')}</datalist>
         </div>
       </div>
+      ${(() => {
+        // O ERP sempre emite uma O.S nova para o retrabalho ("RETRABALHO - ...").
+        // Esta é a ponte: a O.S filha aponta a original, e é a viagem DELA
+        // (saída/retorno, km) que vira o custo do retrabalho na aba. Fica no
+        // bloco 1 porque a filha nasce "aguardando produção" -- e é aí que
+        // alguém a liga à original, não na execução.
+        const ehFilha = /^\s*retrab/i.test(os.servico || '') || !!os.osOriginal;
+        const mesmoCliente = (STORE.getAllOS() || []).filter(o => o.id !== os.id && o.numero && normNome(o.cliente) && normNome(o.cliente) === normNome(os.cliente))
+          .sort((a, b) => String(b.numero).localeCompare(String(a.numero))).slice(0, 12);
+        return `<div class="field ${ehFilha ? '' : 'field-discreto'}"><label>🔁 Esta O.S é retrabalho da O.S nº <span class="text-muted">(o ERP emite uma O.S nova; aponte a original)</span></label>
+          <input data-f="osOriginal" list="os-orig-${esc(os.id)}" inputmode="numeric" value="${esc(os.osOriginal || '')}" placeholder="${ehFilha ? 'nº da O.S original' : 'só se for retrabalho'}">
+          <datalist id="os-orig-${esc(os.id)}">${mesmoCliente.map(o => `<option value="${esc(o.numero)}">${esc(o.numero)} — ${esc((o.servico || '').slice(0, 40))}</option>`).join('')}</datalist>
+        </div>`;
+      })()}
       <div class="field"><label>Cliente <span class="req">*</span></label><input data-f="cliente" value="${esc(os.cliente)}" ${lockPed}></div>
       <div class="field-row">
         <div class="field"><label>Contato</label><input type="text" data-f="contato" value="${esc(os.contato)}"></div>
@@ -1473,18 +1487,7 @@ function blocoExec(os, ro, done) {
         </div>
         <div class="field"><label>Data resolvido</label><input type="date" data-f="dataResolvido" value="${esc(os.dataResolvido)}"></div>
       </div>
-      ${(() => {
-        // O ERP sempre emite uma O.S nova para o retrabalho ("RETRABALHO - ...").
-        // Esta é a ponte: a O.S filha aponta a original, e é a viagem DELA
-        // (saída/retorno, km) que vira o custo do retrabalho na aba.
-        const ehFilha = /^\s*retrab/i.test(os.servico || '') || !!os.osOriginal;
-        const mesmoCliente = (STORE.getAllOS() || []).filter(o => o.id !== os.id && o.numero && normNome(o.cliente) && normNome(o.cliente) === normNome(os.cliente))
-          .sort((a, b) => String(b.numero).localeCompare(String(a.numero))).slice(0, 12);
-        return `<div class="field ${ehFilha ? '' : 'field-discreto'}"><label>🔁 Esta O.S é retrabalho da O.S nº <span class="text-muted">(o ERP emite uma O.S nova; aponte a original)</span></label>
-          <input data-f="osOriginal" list="os-orig-${esc(os.id)}" inputmode="numeric" value="${esc(os.osOriginal || '')}" placeholder="${ehFilha ? 'nº da O.S original' : 'só se for retrabalho'}">
-          <datalist id="os-orig-${esc(os.id)}">${mesmoCliente.map(o => `<option value="${esc(o.numero)}">${esc(o.numero)} — ${esc((o.servico || '').slice(0, 40))}</option>`).join('')}</datalist>
-        </div>`;
-      })()}
+
 
       <div class="field">
         <label>Fotos de retorno (carimba a hora de retorno)</label>
