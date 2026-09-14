@@ -621,18 +621,66 @@ Deno.serve(async (req: Request) => {
       // ficha NUNCA passam por esta porta -- a regua larga fica na porta de
       // dados, nao na tela.
       case "elenco": {
+        // A FICHA DO RH VEM INTEIRA? NAO. So o que a tela de instalacao usa:
+        // quem e a pessoa (nome/apelido), onde trabalha (setor/area/cargo), se
+        // esta na ativa (status) e a cara dela (foto). Salario, endereco,
+        // telefone, CPF completo e o resto NUNCA passam por esta porta.
         const { data: col, error: e1 } = await sb.from("registros")
-          .select("registro->>nome, registro->>apelido, registro->>cpf, registro->>setor, registro->>dataDesligamento")
-          .eq("colecao", "colaboradores").eq("apagado", false);
+          .select("registro").eq("colecao", "colaboradores").eq("apagado", false);
         if (e1) return resp({ error: e1.message }, 500);
+        // Tabelas de apoio do RH: cargo, area e status sao ids, nao textos.
+        const apoio = async (colecao: string) => {
+          const { data } = await sb.from("registros")
+            .select("registro->>id, registro->>nome").eq("colecao", colecao).eq("apagado", false);
+          const m: Record<string, string> = {};
+          for (const r of (data ?? []) as any[]) if (r.id) m[String(r.id)] = String(r.nome ?? "");
+          return m;
+        };
+        const [cargos, areas, situacoes] = await Promise.all([apoio("cargos"), apoio("areas"), apoio("status")]);
+        // Quem saiu da empresa some da lista; quem esta inativo/abandono fica,
+        // marcado `ativo:false` -- a TELA e que tira das escolhas. Apagar aqui
+        // quebraria o historico: O.S antiga ficaria com nome sem ficha.
+        const FORA = new Set(["inativo", "abandono", "externo"]);
         const pessoas = (col ?? [])
-          .filter((r: any) => String(r.nome || "").trim() && !String(r.dataDesligamento || "").trim())
-          .map((r: any) => {
-            const d = String(r.cpf || "").replace(/\D/g, "");
-            return { id: d.length === 11 ? d.slice(0, 6) : "", nome: String(r.nome).trim(),
-                     apelido: String(r.apelido || "").trim(), setor: String(r.setor || "").trim() };
+          .map((r: any) => r.registro || {})
+          .filter((g: any) => String(g.nome || "").trim() && !String(g.dataDesligamento || "").trim())
+          .map((g: any) => {
+            const d = String(g.cpf || "").replace(/\D/g, "");
+            const st = String(g.statusId || "").trim();
+            const foto = String(g.fotoDataUrl || "");
+            return {
+              chave: String(g.id || ""),                       // id do RH (slug) -- casa ferias/ausencias
+              id: d.length === 11 ? d.slice(0, 6) : "",        // id de pessoa da casa (6 primeiros do CPF)
+              nome: String(g.nome).trim(),
+              apelido: String(g.apelido || "").trim(),
+              setor: String(g.setor || "").trim(),
+              area: areas[String(g.areaId || "")] || "",
+              cargo: cargos[String(g.cargoId || "")] || String(g.cargoLivre || g.funcao || ""),
+              statusId: st,
+              status: situacoes[st] || st,
+              ativo: !FORA.has(st),
+              foto: foto.startsWith("data:image") && foto.length < 200000 ? foto : "",
+            };
           })
           .sort((a: any, b: any) => a.nome.localeCompare(b.nome));
+        // Presenca: ferias e ausencias vem CRUAS (o dia local quem sabe e a
+        // tela; aqui e UTC). Janela curta para o pacote nao inchar.
+        const hojeUTC = new Date().toISOString().slice(0, 10);
+        const de = new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
+        const { data: fer } = await sb.from("registros")
+          .select("registro->>colaboradorId, registro->>dataInicio, registro->>dataRetorno, registro->>status")
+          .eq("colecao", "ferias").eq("apagado", false);
+        const ferias = ((fer ?? []) as any[])
+          .map((r) => ({ chave: String(r.colaboradorId || ""), de: String(r.dataInicio || "").slice(0, 10),
+                         ate: String(r.dataRetorno || "").slice(0, 10), status: String(r.status || "") }))
+          .filter((f) => f.chave && f.ate && f.ate >= de);
+        const { data: aus } = await sb.from("registros")
+          .select("registro->>colaboradorId, registro->>data, registro->>tipo, registro->>horas")
+          .eq("colecao", "ausencias").eq("apagado", false).gte("registro->>data", de);
+        const ausencias = ((aus ?? []) as any[])
+          .map((r) => ({ chave: String(r.colaboradorId || ""), data: String(r.data || "").slice(0, 10),
+                         tipo: String(r.tipo || ""), horas: Number(r.horas) || 0 }))
+          .filter((a) => a.chave && a.data);
         const { data: ativos, error: e2 } = await sb.from("painel_registros")
           .select("id, registro").eq("colecao", "ativo");
         if (e2) return resp({ error: e2.message }, 500);
@@ -652,7 +700,7 @@ Deno.serve(async (req: Request) => {
                      motorista: String(e.motorista || g.motorista || g.responsavel || "").trim() };
           })
           .sort((a: any, b: any) => a.nome.localeCompare(b.nome));
-        return resp({ pessoas, veiculos, em: new Date().toISOString() });
+        return resp({ pessoas, veiculos, ferias, ausencias, hoje: hojeUTC, em: new Date().toISOString() });
       }
 
       case "getCfg": {

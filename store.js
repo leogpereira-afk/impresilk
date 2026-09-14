@@ -167,6 +167,16 @@ const STORE = (() => {
         _osMem = Array.isArray(doLS) ? doLS : [];
         console.warn('[store] IndexedDB indisponível; cache das O.S segue no localStorage', e);
       }
+      // Elenco (com as fotos do RH) também vem do disco no boot: `elenco()` é
+      // síncrono e a mensagem do dia depende dele já preenchido.
+      const doDisco = await _lerElencoDisco();
+      if (doDisco && Array.isArray(doDisco.pessoas)) _elenco = Object.assign({}, ELENCO_VAZIO, doDisco);
+      else {
+        // Aparelho vindo da versão que guardava o elenco no localStorage.
+        const velho = lsGet(K.ELENCO, null);
+        if (velho && Array.isArray(velho.pessoas)) { _elenco = Object.assign({}, ELENCO_VAZIO, velho); _gravarElencoDisco(_elenco); }
+      }
+      try { localStorage.removeItem(K.ELENCO); } catch {}
       return _osMem;
     })();
     return _prontoP;
@@ -643,8 +653,35 @@ const STORE = (() => {
   }
 
   // ── Elenco: pessoas do RH e veículos do Ativos (uma base só) ─────────────
-  let _elenco = lsGet(K.ELENCO, { em: '', pessoas: [], veiculos: [] });
-  function elenco() { return _elenco || { pessoas: [], veiculos: [] }; }
+  // MORA NO INDEXEDDB, não no localStorage: desde 14/09/2026 o pacote traz a
+  // FOTO da ficha (30 fotos ≈ 400 KB) e os 7 sistemas dividem 5 MB de
+  // localStorage por origem — jogar isso lá estourava a cota de todo mundo.
+  const ELENCO_VAZIO = { em: '', pessoas: [], veiculos: [], ferias: [], ausencias: [] };
+  let _elenco = ELENCO_VAZIO;
+  function elenco() { return _elenco || ELENCO_VAZIO; }
+  async function _lerElencoDisco() {
+    try {
+      const db = await _openDB();
+      return await new Promise((resolve, reject) => {
+        const tx  = db.transaction('os', 'readonly');
+        const req = tx.objectStore('os').get('elenco');
+        req.onsuccess = e => resolve(e.target.result || null);
+        req.onerror   = e => reject(e.target.error);
+      });
+    } catch { return null; }
+  }
+  async function _gravarElencoDisco(pac) {
+    if (_semIDB) return;                      // aba privada: elenco só em memória
+    try {
+      const db = await _openDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('os', 'readwrite');
+        tx.objectStore('os').put(pac, 'elenco');
+        tx.oncomplete = resolve;
+        tx.onerror    = e => reject(e.target.error);
+      });
+    } catch (e) { console.warn('[store] elenco não gravou no IndexedDB', e); }
+  }
   async function pullElenco(forcar) {
     if (!navigator.onLine) return;
     const idade = _elenco.em ? Date.now() - new Date(_elenco.em).getTime() : Infinity;
@@ -652,8 +689,14 @@ const STORE = (() => {
     try {
       const res = await api({ action: 'elenco' });
       if (res && Array.isArray(res.pessoas)) {
-        _elenco = { em: res.em || new Date().toISOString(), pessoas: res.pessoas, veiculos: res.veiculos || [] };
-        lsSet(K.ELENCO, _elenco);
+        _elenco = {
+          em: res.em || new Date().toISOString(),
+          pessoas: res.pessoas,
+          veiculos: res.veiculos || [],
+          ferias: res.ferias || [],
+          ausencias: res.ausencias || [],
+        };
+        await _gravarElencoDisco(_elenco);
         _notifyListeners('elenco', _elenco);
       }
     } catch (e) { /* sem sessão: o pull normal avisa */ }
@@ -764,7 +807,7 @@ const STORE = (() => {
       localStorage.removeItem(K.ENTREGUES);
       _entregues = {};
       _valores = { em: '', mapa: {} };
-      _elenco = { em: '', pessoas: [], veiculos: [] };
+      _elenco = ELENCO_VAZIO;
       const cfg = lsGet(K.CFG, null);
       if (cfg && typeof cfg === 'object') {
         const { usuarios: _u, funcionarios: _f, ...resto } = cfg;

@@ -839,6 +839,9 @@ function initTopbar() {
   if (espBtn) espBtn.onclick = abrirEspelhos;
   const instrBtn = $('#btn-instrucoes');
   if (instrBtn) instrBtn.onclick = abrirInstrucoes;
+  // Quem está na empresa hoje, pela ficha do RH (casa.js).
+  const eqBtn = $('#btn-equipe');
+  if (eqBtn) eqBtn.onclick = () => { if (typeof abrirEquipeCasa === 'function') abrirEquipeCasa(); };
   // A tela de troca de senha já existia, mas só abria sozinha quando a senha
   // era temporária -- ninguém conseguia trocar por vontade própria.
   const btSenha = $('#btn-senha');

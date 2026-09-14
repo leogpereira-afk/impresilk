@@ -1716,13 +1716,20 @@ body.nav-aberta .nav-fundo { display: block; }
 .casa-os { list-style: none; margin-top: 10px; display: grid; gap: 8px; }
 .casa-os li { font-size: .82rem; color: #334155; }
 .casa-agenda { display:grid; grid-template-columns: minmax(0,1.4fr) minmax(260px,.8fr); gap:16px; align-items:start; }
-.casa-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
-.casa-cal-dow { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 6px; font-size: .7rem; color: #7a90a6; text-align: center; }
-.casa-dia { min-height: 88px; border: 1px solid #e2e8f0; background: #fff; border-radius: 10px; text-align: left; padding: 8px; font-size: .78rem; display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
+.casa-cal-box { min-width:0; }
+/* minmax(0,1fr): sem isso a coluna do grid nunca encolhe abaixo do conteúdo,
+   e uma célula com muitos números de O.S empurrava a grade para fora da tela
+   (a tela "encavalada" que o dono viu em 14/09/2026). */
+.casa-cal { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 6px; }
+.casa-cal-dow { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 6px; margin-bottom: 6px; font-size: .7rem; color: #7a90a6; text-align: center; }
+.casa-dia { min-height: 88px; min-width: 0; overflow: hidden; border: 1px solid #e2e8f0; background: #fff; border-radius: 10px; text-align: left; padding: 8px; font-size: .78rem; display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
+.casa-dia.hoje { border-color:#28796a; box-shadow:inset 0 0 0 1px #28796a; }
+.casa-dia-num { font-weight:700; color:#163654; }
+.casa-dia-os { font-size:.6rem; color:#7a90a6; font-variant-numeric:tabular-nums; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .casa-dia.fora { opacity: .4; }
 .casa-dia.sel { outline:2px solid #163654; outline-offset:1px; }
-.casa-dia-pills { display:flex; flex-wrap:wrap; gap:3px; }
-.casa-pill { font-size:.62rem; background:#e8eef5; color:#163654; border-radius:999px; padding:1px 6px; font-weight:650; }
+.casa-dia-pills { display:flex; flex-wrap:wrap; gap:3px; max-width:100%; }
+.casa-pill { font-size:.62rem; background:#e8eef5; color:#163654; border-radius:999px; padding:1px 6px; font-weight:650; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .casa-pill.navy { background:#163654; color:#fff; }
 .casa-pill.mute { background:#f1f5f9; color:#7a90a6; }
 
@@ -1861,3 +1868,124 @@ body.nav-aberta .nav-fundo { display: block; }
 .retrab-form .field { display:flex; flex-direction:column; gap:4px; }
 .retrab-form textarea, .retrab-form input, .retrab-form select { min-height:40px; }
 .casa-lancar { margin-top:16px; border-color:#f59e0b; }
+
+
+/* ── Onda 4 do Painel de Instalação (14/09/2026) ───────────────────────────
+   Relatórios de entrega, ficha do RH na Performance, modo TV, escala e
+   programação do dia. Tudo claro, no padrão dos outros sistemas. */
+
+/* Avatar: agora pode ser a FOTO da ficha do RH, não só as iniciais. */
+img.casa-avatar { object-fit: cover; background:#e8eef5; }
+.casa-avatar.mini { width:34px; height:34px; font-size:.75rem; }
+.casa-prod { align-items:center; }
+.casa-prod-nome small { text-transform:none; }
+
+/* Chips de período (Entregas) */
+.casa-chips-periodo { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 4px; }
+.casa-chip-per { min-height:36px; padding:6px 14px; border-radius:999px; border:1px solid #d7e1ee; background:#fff; color:#163654; font-size:.8rem; font-weight:650; cursor:pointer; }
+.casa-chip-per:hover { border-color:#8bacce; }
+.casa-chip-per.on { background:#28796a; border-color:#28796a; color:#fff; }
+
+/* Quadros de análise recolhíveis, com a escolha guardada */
+.casa-quadro { background:#fff; border:1px solid #d7e1ee; border-radius:14px; margin-top:12px; overflow:hidden; }
+.casa-quadro > summary { cursor:pointer; padding:12px 16px; font-weight:700; color:#163654; font-size:.92rem; list-style:none; display:flex; align-items:center; gap:8px; min-height:44px; }
+.casa-quadro > summary::-webkit-details-marker { display:none; }
+.casa-quadro > summary::before { content:'▸'; color:#7a90a6; font-size:.8rem; transition:transform .15s ease; }
+.casa-quadro[open] > summary::before { transform:rotate(90deg); }
+.casa-quadro > summary small { font-weight:500; color:#7a90a6; }
+.casa-quadro > summary:hover { background:#f7fafd; }
+.casa-quadro-corpo { padding:4px 16px 16px; border-top:1px solid #eef2f7; }
+.casa-quadro-corpo h4 { font-size:.8rem; color:#526378; text-transform:uppercase; letter-spacing:.04em; margin:12px 0 6px; }
+.casa-relatorios { margin-top:20px; }
+.casa-relatorios > h3 { font-size:1rem; color:#163654; margin-bottom:2px; }
+.casa-duas { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px,1fr)); gap:8px 20px; }
+
+/* Barras horizontais (sem biblioteca) */
+.casa-barras { display:grid; gap:5px; margin:6px 0; }
+.casa-barra-linha { display:grid; grid-template-columns: minmax(80px, 30%) minmax(0,1fr) auto; gap:10px; align-items:center; font-size:.78rem; }
+.casa-barra-rot { color:#163654; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.casa-barra-trilho { background:#eef3f8; border-radius:999px; height:14px; overflow:hidden; }
+.casa-barra-preenche { display:block; height:100%; background:linear-gradient(90deg,#28796a,#3f9c87); border-radius:999px; }
+.casa-barra-val { color:#163654; font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.casa-barra-val small { font-weight:500; color:#7a90a6; }
+
+/* Escala e programação */
+.casa-mes-nav { display:inline-flex; align-items:flex-end; gap:6px; }
+.casa-mes-titulo { font-size:.95rem; color:#163654; margin:18px 0 6px; }
+.casa-mes-titulo small { font-weight:500; color:#7a90a6; }
+.casa-dia-nav { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; }
+.casa-dia-nav input[type=date] { min-height:40px; }
+.casa-dia-rot { color:#163654; font-size:.95rem; }
+.casa-dia-nav .casa-dia-acoes { margin-left:auto; margin-top:0; }
+.casa-dia-bloco { margin-top:14px; }
+.casa-dia-bloco h4 { font-size:.85rem; color:#163654; margin-bottom:4px; }
+.casa-dia-bloco h4 small { font-weight:500; color:#7a90a6; }
+.casa-form-grade { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:10px; align-items:end; }
+.casa-form-grade label { display:flex; flex-direction:column; gap:4px; font-size:.78rem; color:#526378; }
+.casa-form-grade label.larga { grid-column:1/-1; }
+.casa-form-grade input, .casa-form-grade select { min-height:40px; }
+.casa-form-grade select[multiple] { min-height:110px; }
+.casa-quem { display:inline-flex; align-items:center; gap:8px; }
+.casa-quem > span { display:flex; flex-direction:column; line-height:1.25; }
+.casa-quem small, .casa-tabela small.bloco { display:block; color:#7a90a6; font-size:.68rem; font-weight:500; }
+.alerta-txt { color:#c2410c !important; font-weight:650; }
+.alerta-ausencia { color:#c2410c; }
+.casa-chip.fora { border-color:#fdba74; background:#fff7ed; }
+.casa-chip.fora small { color:#c2410c; }
+.casa-pill.os[data-abrir-os] { cursor:pointer; }
+.casa-pill.os[data-abrir-os]:hover { background:#28796a; color:#fff; }
+
+/* Botão Equipe (quem está na empresa hoje) */
+.eq-titulo { font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color:#7a90a6; margin:14px 0 6px; }
+.eq-titulo small { color:#163654; font-weight:700; }
+.eq-lista { list-style:none; display:grid; gap:6px; }
+.eq-item { display:flex; align-items:center; gap:10px; padding:6px 8px; border:1px solid #eef2f7; border-radius:10px; background:#fff; }
+.eq-item.fora { background:#fff7ed; border-color:#fed7aa; }
+.eq-txt { display:flex; flex-direction:column; line-height:1.3; min-width:0; }
+.eq-txt strong { color:#163654; font-size:.84rem; }
+.eq-txt small { color:#7a90a6; font-size:.7rem; }
+.eq-os { color:#28796a !important; font-weight:650; }
+
+/* ── Modo TV: ranking na tela da fábrica ─────────────────────────────────── */
+body.tv-ligada { overflow:hidden; }
+.tv-overlay { position:fixed; inset:0; z-index:900; background:linear-gradient(160deg,#0d2438,#163654 60%,#0f2c46); color:#fff; display:flex; align-items:center; justify-content:center; padding:2vh 3vw; }
+.tv-painel { width:100%; max-width:1400px; height:96%; display:flex; flex-direction:column; }
+.tv-head { display:flex; align-items:baseline; justify-content:space-between; gap:16px; border-bottom:2px solid rgba(255,255,255,.18); padding-bottom:1.2vh; }
+.tv-head h2 { font-size:clamp(1.4rem,3.2vw,2.6rem); color:#fff; margin:0; }
+.tv-relogio { font-size:clamp(.8rem,1.4vw,1.2rem); color:#9fc4dd; font-variant-numeric:tabular-nums; }
+.tv-corpo { flex:1; min-height:0; overflow:auto; padding:2vh 0; }
+.tv-lista { list-style:none; display:grid; gap:1.2vh; margin:0; }
+.tv-linha { display:grid; grid-template-columns:auto auto minmax(0,1fr) auto; gap:2vw; align-items:center; background:rgba(255,255,255,.07); border-radius:14px; padding:1.1vh 2vw; }
+.tv-podio { background:rgba(255,255,255,.15); }
+.tv-linha:first-child { background:linear-gradient(90deg,rgba(245,158,11,.35),rgba(255,255,255,.1)); }
+.tv-pos { font-size:clamp(1.1rem,2.4vw,2rem); font-weight:800; color:#f59e0b; min-width:1.6em; text-align:center; }
+.tv-foto, .tv-linha .casa-avatar { width:clamp(38px,4.4vw,64px) !important; height:clamp(38px,4.4vw,64px) !important; font-size:clamp(.8rem,1.4vw,1.2rem) !important; background:rgba(255,255,255,.2); }
+.tv-nome { font-size:clamp(1rem,2vw,1.7rem); font-weight:700; display:flex; flex-direction:column; line-height:1.2; min-width:0; }
+.tv-nome small { font-size:clamp(.6rem,1vw,.9rem); font-weight:500; color:#9fc4dd; }
+.tv-num { font-size:clamp(1.1rem,2.2vw,1.9rem); font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.tv-vazio { font-size:clamp(1rem,2vw,1.5rem); color:#9fc4dd; text-align:center; padding:6vh 0; }
+.tv-rodape { display:flex; align-items:center; justify-content:space-between; gap:16px; border-top:2px solid rgba(255,255,255,.18); padding-top:1.2vh; font-size:clamp(.7rem,1.2vw,1rem); color:#9fc4dd; }
+.tv-pontos { display:inline-flex; gap:7px; }
+.tv-pontos i { width:9px; height:9px; border-radius:50%; background:rgba(255,255,255,.28); display:block; }
+.tv-pontos i.on { background:#f59e0b; }
+.tv-x, .tv-seta { position:absolute; background:rgba(255,255,255,.12); color:#fff; border:0; border-radius:50%; width:46px; height:46px; font-size:1.5rem; cursor:pointer; line-height:1; }
+.tv-x { top:16px; right:18px; }
+.tv-seta { top:50%; transform:translateY(-50%); }
+.tv-esq { left:12px; } .tv-dir { right:12px; }
+.tv-x:hover, .tv-seta:hover { background:rgba(255,255,255,.26); }
+/* Na TV o que importa são os números; tabela e barras herdam o fundo escuro. */
+.tv-corpo .casa-tabela { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.16); color:#fff; font-size:clamp(.75rem,1.3vw,1.05rem); }
+.tv-corpo .casa-tabela th { background:rgba(255,255,255,.1); color:#9fc4dd; border-color:rgba(255,255,255,.16); }
+.tv-corpo .casa-tabela td { border-color:rgba(255,255,255,.12); }
+.tv-corpo .casa-kpi { background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.18); }
+.tv-corpo .casa-kpi b, .tv-corpo h4 { color:#fff; }
+.tv-corpo .casa-kpi small, .tv-corpo .text-muted { color:#9fc4dd; }
+.tv-corpo .casa-barra-rot, .tv-corpo .casa-barra-val { color:#fff; }
+.tv-corpo .casa-barra-trilho { background:rgba(255,255,255,.14); }
+
+@media (max-width: 700px) {
+  .casa-barra-linha { grid-template-columns: minmax(70px,40%) minmax(0,1fr) auto; font-size:.72rem; }
+  .casa-dia-nav .casa-dia-acoes { margin-left:0; width:100%; }
+  .casa-dia { min-height:62px; padding:5px; }
+  .casa-dia-os { display:none; }
+}

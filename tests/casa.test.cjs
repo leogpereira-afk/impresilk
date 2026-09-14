@@ -5,7 +5,8 @@ const vm = require('node:vm');
 const path = require('path');
 const root = path.join(__dirname, '..');
 
-function casa(lista, cfg = {}) {
+function casa(lista, cfg = {}, elenco = null) {
+  const guardado = {};
   const ctx = vm.createContext({
     console,
     Date,
@@ -14,14 +15,31 @@ function casa(lista, cfg = {}) {
       getCFG: () => ({ instaladores: ['Natan', 'Paulo', 'Lucas', 'Rafael'], ...cfg }),
       saveCFG(c) { Object.assign(cfg, c); },
       uuid: () => 'id-1',
+      elenco: () => elenco || { pessoas: [], veiculos: [], ferias: [], ausencias: [] },
+      entreguesMes: () => null,
+      pullEntreguesMes() {},
+      valores: () => ({}),
     },
     STATE: {},
     document: { getElementById: () => null, querySelectorAll: () => [], body: { classList: { add() {}, remove() {}, contains: () => false } } },
+    localStorage: {
+      getItem: k => (k in guardado ? guardado[k] : null),
+      setItem: (k, v) => { guardado[k] = String(v); },
+      removeItem: k => { delete guardado[k]; },
+    },
     esc: s => String(s ?? ''),
     emptyState: () => '',
     bindCardClicks() {},
     toast() {},
     fmtInstalacao: () => '',
+    filtroPeriodoHTML: () => '',
+    parseLocalDate: str => { const m = String(str || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; },
+    // pessoaDoElenco mora no app.js; aqui entra a mesma regra, reduzida.
+    pessoaDoElenco: apelido => {
+      const n = x => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+      const ps = (elenco && elenco.pessoas) || [];
+      return ps.find(p => n(p.apelido) === n(apelido)) || ps.find(p => n(p.nome) === n(apelido)) || null;
+    },
   });
   vm.runInContext(fs.readFileSync(path.join(root, 'operacao.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(root, 'casa.js'), 'utf8'), ctx);
@@ -142,4 +160,98 @@ test('calendário da casa lê o prazo da O.S., inclusive retirada', () => {
   assert.equal(t.run('diasCasa(STORE.getAllOS()[0]).join(",")'), '2026-09-13');
   assert.equal(t.run('diasCasa(STORE.getAllOS()[1]).join(",")'), '2026-09-13');
   assert.equal(t.run("osNoMesCasa('2026-09').map(o=>o.id).sort().join(',')"), 'a,e,i');
+});
+
+/* ── Onda 4 (14/09/2026): ficha do RH, presença, relatórios e escala ────── */
+const ELENCO = {
+  em: '2026-09-14T10:00:00Z',
+  pessoas: [
+    { chave: 'natan-silva', id: '111111', nome: 'Natan da Silva', apelido: 'Natan', cargo: 'Instalador de CV', area: 'Instalação Externa', statusId: 'ativo', status: 'Ativo', ativo: true, foto: 'data:image/jpeg;base64,AAA' },
+    { chave: 'paulo-souza', id: '222222', nome: 'Paulo Souza', apelido: 'Paulo', cargo: 'Soldador', area: 'Serralheria', statusId: 'inativo', status: 'Inativo', ativo: false, foto: '' },
+    { chave: 'lucas-lima', id: '333333', nome: 'Lucas Lima', apelido: 'Lucas', cargo: 'Operador', area: 'Montagem Interna', statusId: 'ativo', status: 'Ativo', ativo: true, foto: '' },
+    { chave: 'ana-dias', id: '444444', nome: 'Ana Dias', apelido: 'ana', cargo: 'Consultora', area: 'Comercial', statusId: 'ativo', status: 'Ativo', ativo: true, foto: '' },
+  ],
+  veiculos: [{ id: 'v1', nome: 'Strada', categoria: 'Utilitário', placa: 'ABC1D23', modelo: 'Fire Flex', lugares: 2, grade: true, motorista: 'Natan da Silva' }],
+  ferias: [{ chave: 'lucas-lima', de: '2026-09-10', ate: '2026-09-20', status: 'Agendada' }],
+  ausencias: [{ chave: 'ana-dias', data: '2026-09-14', tipo: 'Falta', horas: 8 }],
+};
+
+test('ficha do apelido: vínculo salvo manda, senão casa sozinho pelo RH', () => {
+  const t = casa([], {}, ELENCO);
+  assert.equal(t.run("fichaDoApelido('Natan').nome"), 'Natan da Silva');
+  assert.equal(t.run("fichaDoApelido('Ninguém')"), null);
+  // vínculo salvo à mão vence o casamento automático
+  const t2 = casa([], { vinculosRH: [{ id: '333333', chave: 'lucas-lima', nome: 'Lucas Lima', apelido: 'Natan' }] }, ELENCO);
+  assert.equal(t2.run("fichaDoApelido('Natan').chave"), 'lucas-lima');
+});
+
+test('presença de hoje: férias e falta saem; inativo não entra em nenhuma lista', () => {
+  const t = casa([], {}, ELENCO);
+  assert.equal(t.run("presencaRH('2026-09-14').presentes.map(x => x.nome).join('|')"), 'Natan da Silva');
+  assert.equal(t.run("presencaRH('2026-09-14').ausentes.map(x => x.p.nome + ': ' + x.motivo).join('|')"), 'Ana Dias: Falta|Lucas Lima: Férias');
+  assert.equal(t.run("presencaRH('2026-09-14').fora.map(x => x.nome).join('|')"), 'Paulo Souza');
+  // fora do intervalo das férias, Lucas volta
+  assert.match(t.run("presencaRH('2026-09-25').presentes.map(x => x.nome).join('|')"), /Lucas Lima/);
+});
+
+test('quem está inativo no RH sai da lista de escala; o RH entra para o plantão', () => {
+  const t = casa([], {}, ELENCO);
+  const pcp = t.run("equipeEscalavel().doPCP.join('|')");
+  const rh = t.run("equipeEscalavel().doRH.map(p => p.nome).join('|')");
+  assert.ok(!pcp.includes('Paulo'), 'Paulo está inativo e não pode ser escalado');
+  assert.match(pcp, /Natan/); assert.match(pcp, /Lucas/);
+  assert.match(pcp, /Rafael/, 'apelido sem ficha continua na lista do PCP');
+  assert.match(rh, /Ana Dias/, 'a empresa toda entra pelo RH');
+  assert.ok(!rh.includes('Paulo Souza'), 'inativo não entra nem pelo RH');
+});
+
+test('apelido sem ficha aparece para ligar, e ligar resolve', () => {
+  const cfg = {};
+  const t = casa([fin('a', { equipe: ['Natan', 'Zeca'] })], cfg, ELENCO);
+  assert.equal(t.run("apelidosSemFicha().map(x => x.apelido).join('|')"), 'Zeca');
+  assert.equal(t.run("ligarApelidoRH('Zeca', 'lucas-lima')"), true);
+  assert.equal(t.run("fichaDoApelido('Zeca').nome"), 'Lucas Lima');
+  assert.equal(t.run('apelidosSemFicha().length'), 0);
+});
+
+test('produtividade agrupa pela ficha: dois apelidos da mesma pessoa viram um', () => {
+  const t = casa([
+    fin('1', { equipe: ['Natan'] }),
+    fin('2', { equipe: ['Natan da Silva'] }),
+  ], {}, ELENCO);
+  assert.equal(t.run('agruparPorPessoaCasa(STORE.getAllOS()).length'), 1);
+  assert.equal(t.run('agruparPorPessoaCasa(STORE.getAllOS())[0].chave'), 'natan-silva');
+  assert.equal(t.run('agruparPorPessoaCasa(STORE.getAllOS())[0].os'), 2);
+});
+
+test('meses do intervalo e a fila de três por vez', () => {
+  const t = casa([]);
+  assert.equal(t.run("mesesEntre('2026-07-05','2026-09-14').join('|')"), '2026-07|2026-08|2026-09');
+  assert.equal(t.run("mesesEntre('2026-09-01','2026-09-30').join('|')"), '2026-09');
+  assert.equal(t.run('ERP_EM_VOO'), 3);
+  // nenhum pacote em cache: a tela não quebra, pede os meses e segue vazia
+  assert.equal(t.run("entreguesERP('2026-01-01','2026-09-14').os.length"), 0);
+  assert.equal(t.run("entreguesERP('2026-01-01','2026-09-14').faltando.length"), 9);
+});
+
+test('Entregas abre nos últimos 30 dias, não no ano inteiro', () => {
+  const t = casa([]);
+  const dias = t.run("(() => { STATE._fEnt = null; const f = periodoEntregas(); return (new Date(f.ate) - new Date(f.de)) / 86400000; })()");
+  assert.equal(dias, 29);
+});
+
+test('barras só mostram o que tem valor e nunca estouram 100%', () => {
+  const t = casa([]);
+  const html = t.run("barrasCasa([{rotulo:'A',valor:10},{rotulo:'B',valor:5},{rotulo:'C',valor:0}], v => v + '')");
+  assert.match(html, /width:100%/);
+  assert.match(html, /width:50%/);
+  assert.ok(!html.includes('>C<'), 'item zerado não vira barra');
+  assert.equal(t.run('barrasCasa([], v => v)'), '');
+});
+
+test('quadro de análise guarda aberto/fechado no aparelho', () => {
+  const t = casa([]);
+  assert.match(t.run("quadroCasa('x','T','corpo',true)"), /<details class="casa-quadro" data-quadro="x" open>/);
+  t.run("localStorage.setItem('impresilk_inst_quadros', JSON.stringify({x:false}))");
+  assert.ok(!t.run("quadroAberto('x', true)"), 'a escolha guardada vence o padrão');
 });
