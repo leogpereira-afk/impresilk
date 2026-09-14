@@ -2558,21 +2558,95 @@ function estaArquivada(o) {
   return d != null && d >= 7;
 }
 
-let _arqBuscou = false;
 function pcpBaseList() {
   const all = STORE.getAllOS().slice();
   if (STATE.pcpVista === 'retrabalho') return all.filter(o => o.retrabalho && !o.dataResolvido);
   if (STATE.pcpVista === 'arquivados') {
-    // Arquivadas fora da janela local moram no servidor: busca uma vez por
-    // sessao ao abrir a vista, e a lista repinta quando chegar.
-    if (!_arqBuscou && STORE.buscarHistorico) {
-      _arqBuscou = true;
-      STORE.buscarHistorico({}).then(() => { if (STATE.pcpVista === 'arquivados') renderActiveTab(); }).catch(() => {});
-    }
+    // Aparelho (janela local) + o que a busca sob demanda já trouxe do servidor.
     const vistos = new Set();
     return all.concat(STORE.historico ? STORE.historico() : []).filter(o => !vistos.has(o.id) && vistos.add(o.id)).filter(estaArquivada);
   }
   return all.filter(o => !estaArquivada(o));
+}
+
+/* ── VISTA ARQUIVADOS: leve de propósito (pedido do dono, 14/09/2026) ──────
+   "Pesquisa pelo nome do cliente e número da O.S, chips de ano e mês; o card
+   não precisa abrir aqui, até para deixar o sistema mais leve." Então:
+   linhas de uma tabela em vez de 563 cards, um recorte por vez (ano + mês),
+   e o servidor só é consultado quando o recorte sai da janela local ou
+   quando há busca digitada. Tocar na linha abre a O.S normalmente. */
+const MESES_ARQ = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+function arqEstado() {
+  if (!STATE._arq) {
+    const h = hojeISO();
+    STATE._arq = { ano: h.slice(0, 4), mes: h.slice(5, 7) };
+  }
+  return STATE._arq;
+}
+function arqRecorte() {
+  const a = arqEstado();
+  if (a.mes) {
+    const ultimo = new Date(Number(a.ano), Number(a.mes), 0).getDate();
+    return { de: `${a.ano}-${a.mes}-01`, ate: `${a.ano}-${a.mes}-${String(ultimo).padStart(2, '0')}` };
+  }
+  return { de: `${a.ano}-01-01`, ate: `${a.ano}-12-31` };
+}
+function arqAnos() {
+  const atual = Number(hojeISO().slice(0, 4));
+  const fx = STATE._arqFaixa;
+  const primeiro = fx && fx.de ? Number(fx.de.slice(0, 4)) : atual;
+  const anos = [];
+  for (let y = atual; y >= Math.max(primeiro, atual - 15); y--) anos.push(String(y));
+  return anos;
+}
+function arqChipsHTML() {
+  const a = arqEstado();
+  const hoje = hojeISO();
+  const anos = arqAnos().map(y => `<button class="pcp-chip ${a.ano === y ? 'active' : ''}" data-arq-ano="${y}">${y}</button>`).join('');
+  const meses = MESES_ARQ.map((m, i) => {
+    const mm = String(i + 1).padStart(2, '0');
+    const futuro = `${a.ano}-${mm}` > hoje.slice(0, 7);
+    return futuro ? '' : `<button class="pcp-chip ${a.mes === mm ? 'active' : ''}" data-arq-mes="${mm}">${m}</button>`;
+  }).join('');
+  return `<div class="pcp-chips" role="group" aria-label="Ano">${anos}</div>
+    <div class="pcp-chips" role="group" aria-label="Mês"><button class="pcp-chip ${a.mes === '' ? 'active' : ''}" data-arq-mes="">Ano inteiro</button>${meses}</div>`;
+}
+let _arqBuscaTimer = null, _arqChave = '';
+function arqPrecisaDoServidor() {
+  const { de } = arqRecorte();
+  const dias = (typeof STORE.JANELA_LOCAL_DIAS === 'number') ? STORE.JANELA_LOCAL_DIAS : 60;
+  const corte = OPERACAO.somarDias(hojeISO(), -dias);
+  return !!String(STATE.filtroBusca || '').trim() || de < corte;
+}
+function arqBuscar(depois) {
+  if (!STORE.buscarHistorico || !arqPrecisaDoServidor()) { _arqChave = ''; return; }
+  const { de, ate } = arqRecorte();
+  const q = String(STATE.filtroBusca || '').trim();
+  const chave = JSON.stringify([de, ate, q]);
+  if (chave === _arqChave) return;
+  clearTimeout(_arqBuscaTimer);
+  _arqBuscaTimer = setTimeout(async () => {
+    _arqChave = chave;
+    const nota = $('#arq-nota'); if (nota) nota.textContent = 'buscando no servidor…';
+    const r = await STORE.buscarHistorico({ de, ate, q });
+    if (nota) nota.textContent = r.offline ? 'sem rede: só o que está neste aparelho'
+      : (r.truncou ? `servidor: mostrando as ${r.itens.length} mais antigas — refine a busca` : (r.itens.length ? `${r.itens.length} do servidor` : 'nada mais no servidor'));
+    if (typeof depois === 'function') depois();
+  }, q ? 350 : 0);
+}
+function arqListaHTML(list) {
+  const dt = iso => { const d = parseLocalDate(diaLocalISO(iso)); return d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}` : '—'; };
+  const linhas = list.map(os => `<tr data-os-id="${esc(os.id)}">
+      <td class="num"><strong>${esc(os.numero || '—')}</strong></td>
+      <td>${esc(os.cliente || 'Sem cliente')}${os.servico ? `<br><small class="text-muted">${esc(os.servico)}</small>` : ''}</td>
+      <td>${osTipo(os) === 'interno' ? '🏬 retira' : '🚚 externa'}</td>
+      <td class="num">${dt(os.finalizadaEm)}</td>
+      <td>${esc((os.equipe || []).join(', ') || '—')}</td>
+      <td>${os.retrabalho ? '<span class="badge st-retrabalho">retrabalho</span>' : ''}${OPERACAO.encerradaERP(os) ? '<span class="badge st-aguardando_producao" title="Baixa automática do ERP">ERP</span>' : ''}</td>
+    </tr>`).join('');
+  return `<div class="casa-tabela-wrap"><table class="casa-tabela pcp-arq-tabela">
+    <thead><tr><th>O.S</th><th>Cliente · serviço</th><th>Tipo</th><th class="num">Finalizada</th><th>Equipe</th><th></th></tr></thead>
+    <tbody>${linhas}</tbody></table></div>`;
 }
 
 // Recalcula os números dos chips considerando os OUTROS filtros ativos — cada
@@ -2620,6 +2694,23 @@ function pcpRenderCards() {
     else list = list.filter(o => calcStatus(o) === STATE.pcpStatus);
   }
   list = applyFilter(list, STATE.filtroBusca);
+  // A PRIORIDADE manda antes da vista: "Para hoje" mostra exatamente as O.S
+  // contadas, mesmo com Arquivados escolhido (regra já testada em telas.test).
+  if (STATE.pcpVista === 'arquivados' && !STATE._prioridade) {
+    // Recorte por ano/mês da finalização; linhas, não cards; servidor só se preciso.
+    const { de, ate } = arqRecorte();
+    list = list.filter(o => { const d = diaLocalISO(o.finalizadaEm); return d >= de && d <= ate; })
+      .sort((a, b) => String(b.finalizadaEm || '').localeCompare(String(a.finalizadaEm || '')));
+    grid.classList.add('pcp-lista');
+    grid.innerHTML = list.length ? arqListaHTML(list)
+      : emptyState('', 'Nenhuma O.S arquivada neste recorte', arqPrecisaDoServidor() ? 'Se acabou de escolher o período, o servidor ainda pode estar respondendo.' : 'Troque o ano ou o mês, ou digite um cliente ou número.');
+    const resultado = $('#pcp-resultado');
+    if (resultado) resultado.textContent = `${list.length} arquivada${list.length === 1 ? '' : 's'} no recorte`;
+    bindCardClicks(grid);
+    pcpAtualizarChips();
+    arqBuscar(pcpRenderCards);
+    return;
+  }
   list = list.sort((PCP_SORTS[STATE.pcpSort] || PCP_SORTS.entrega).fn);
   const missao = STATE._prioridade;
   if (missao) {
@@ -2726,6 +2817,7 @@ function renderPCP() {
       <div class="pcp-filtro-linha pcp-filtro-unica" role="group" aria-label="Tipo e etapa">
         <div class="pcp-chips">${tipoChips}</div>
         ${STATE.pcpVista === '' ? `<div class="pcp-chips">${chips}</div>` : ''}
+        ${STATE.pcpVista === 'arquivados' ? `<div id="arq-chips" class="pcp-arq-chips">${arqChipsHTML()}</div><span id="arq-nota" class="text-muted" style="font-size:.75rem"></span>` : ''}
       </div>
       <div class="pcp-controles-rodape">
         <button class="pcp-limpar" id="pcp-limpar-filtros" hidden>Limpar filtros</button>
@@ -2771,6 +2863,17 @@ function renderPCP() {
   $$('[data-pcp-tipo]', el).forEach(b => {
     b.onclick = () => { STATE.pcpTipo = b.dataset.pcpTipo; renderPCP(); };
   });
+  if (STATE.pcpVista === 'arquivados') {
+    const religar = () => {
+      const box = $('#arq-chips'); if (!box) return;
+      box.innerHTML = arqChipsHTML();
+      $$('[data-arq-ano]', box).forEach(b => b.onclick = () => { arqEstado().ano = b.dataset.arqAno; if (`${arqEstado().ano}-${arqEstado().mes}` > hojeISO().slice(0, 7)) arqEstado().mes = ''; religar(); pcpRenderCards(); });
+      $$('[data-arq-mes]', box).forEach(b => b.onclick = () => { arqEstado().mes = b.dataset.arqMes; religar(); pcpRenderCards(); });
+    };
+    religar();
+    // Até onde os anos voltam: pergunta ao servidor uma vez por sessão.
+    if (!STATE._arqFaixa && STORE.faixaHistorico) STORE.faixaHistorico().then(f => { if (f) { STATE._arqFaixa = f; religar(); } }).catch(() => {});
+  }
   const novaExt = $('#pcp-nova-ext');
   if (novaExt) novaExt.onclick = () => openModal(novaOS('externo'));
   const novaInt = $('#pcp-nova-int');

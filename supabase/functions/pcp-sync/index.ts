@@ -515,6 +515,19 @@ Deno.serve(async (req: Request) => {
           const termo = String(body.q ?? "").trim().replace(/[%,()*]/g, " ").trim();
           if (termo) q = q.or(`registro->>numero.ilike.*${termo}*,registro->>cliente.ilike.*${termo}*`);
         }
+        // `faixa`: a primeira e a ultima finalizacao que existem -- os chips de
+        // ano da vista Arquivados nascem daqui, nao de um chute. Duas consultas
+        // de uma linha, so quando pedido.
+        let faixa: any = undefined;
+        if (body.faixa) {
+          const base = () => sb.from("pcp_registros").select("registro->>finalizadaEm").eq("colecao", "os").eq("apagado", false)
+            .not("registro->>finalizadaEm", "is", null).neq("registro->>finalizadaEm", "").limit(1);
+          const [{ data: a }, { data: z }] = await Promise.all([
+            base().order("registro->>finalizadaEm", { ascending: true }),
+            base().order("registro->>finalizadaEm", { ascending: false }),
+          ]);
+          faixa = { de: String(a?.[0]?.finalizadaEm ?? "").slice(0, 10), ate: String(z?.[0]?.finalizadaEm ?? "").slice(0, 10) };
+        }
         if (body.after != null) q = q.gt("id", String(body.after));
         const { data, error } = await q;
         if (error) throw new Error(error.message);
@@ -527,7 +540,7 @@ Deno.serve(async (req: Request) => {
           total: await contarRegs("os"),
           nextAfter: linhas.length === PAGE ? linhas[linhas.length - 1].id : null,
           nextOffset: null,
-          agora, escopo, dias,
+          agora, escopo, dias, faixa,
         });
       }
 

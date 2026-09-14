@@ -685,6 +685,18 @@ const STORE = (() => {
   /* HISTORICO SOB DEMANDA: Finalizados/Arquivados fora da janela local, ou uma
      busca por numero/cliente. Vai para _osHistorico (memoria), nunca para o
      cache do aparelho. Ate 5 paginas; se cortar, avisa em `truncou`. */
+  // Primeira e última finalização que o servidor tem: os chips de ano da vista
+  // Arquivados vêm daqui. Uma chamada por sessão.
+  let _faixaHist = null;
+  async function faixaHistorico() {
+    if (_faixaHist) return _faixaHist;
+    if (!navigator.onLine) return null;
+    try {
+      const res = await api({ action: 'list', escopo: 'finalizadas', faixa: true, ate: '1900-01-01' });
+      if (res && res.faixa && res.faixa.de) _faixaHist = res.faixa;
+    } catch { /* sem rede: os chips usam o que está no aparelho */ }
+    return _faixaHist;
+  }
   async function buscarHistorico({ de = '', ate = '', q = '' } = {}) {
     if (!navigator.onLine) return { itens: [], offline: true };
     const itens = [];
@@ -1270,7 +1282,7 @@ const STORE = (() => {
     getUser, setUser, getInstalador, setInstalador, getLastSync, limparCache,
     // Sync
     trySync, pull, pullCFG, pullValores, valores, valoresEm, pullElenco, elenco, pullEntreguesMes, entreguesMes, entreguesFalhou, anosEntregues,
-    iniciarMaestro, sincronizarAgora, buscarHistorico, historico, JANELA_LOCAL_DIAS,
+    iniciarMaestro, sincronizarAgora, buscarHistorico, historico, faixaHistorico, JANELA_LOCAL_DIAS,
     // Fotos
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos

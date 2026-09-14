@@ -124,3 +124,29 @@ test('prioridade do dia abre as O.S contadas sem herdar nem alterar filtros da c
   assert.equal(t.run('STATE.pcpTipo'),'interno');
   assert.equal(t.run('STATE.filtroBusca'),'outro cliente');
 });
+
+/* ══ VISTA ARQUIVADOS LEVE (pedido do dono, 14/09/2026) ══
+   "Pesquisa por cliente e número, chips de ano e mês; o card não precisa
+   abrir aqui, até para deixar o sistema mais leve." Linhas de tabela no lugar
+   de 563 cards, recorte por ano/mês, e a prioridade continua mandando. */
+test('Arquivados pinta linhas leves no recorte do mês, não cards', () => {
+  const t = tela([
+    { ...final, id: 'arq1', numero: '201', cliente: 'CLIENTE ANTIGO', finalizadaEm: '2026-09-01T12:00:00' },
+    { ...final, id: 'arq2', numero: '202', cliente: 'OUTRO', finalizadaEm: '2026-08-02T12:00:00' },
+    { id: 'aberta', numero: '203', instalacao: { data: hoje } },
+  ]);
+  t.run("STATE.pcpVista='arquivados'; STATE._prioridade=''; STATE._arq={ano:'2026',mes:'09'}; renderPCP()");
+  const grade = t.node('#panel-pcp .cards-grid').innerHTML;
+  assert.match(grade, /pcp-arq-tabela/, 'é tabela, não cards');
+  assert.doesNotMatch(grade, /class="os-card/, 'nenhum card pesado');
+  assert.match(grade, /data-os-id="arq1"/, 'a de setembro entra');
+  assert.doesNotMatch(grade, /data-os-id="arq2"/, 'a de agosto fica fora do recorte de setembro');
+  assert.doesNotMatch(grade, /data-os-id="aberta"/, 'aberta nunca é arquivada');
+  // chips de ano e mês existem e o mês corrente vem marcado
+  const chips = t.node('#arq-chips').innerHTML;
+  assert.match(chips, /data-arq-ano="2026"[^>]*>2026/);
+  assert.match(chips, /class="pcp-chip active" data-arq-mes="09"/);
+  // trocar para o ano inteiro traz agosto também
+  t.run("STATE._arq.mes=''; pcpRenderCards()");
+  assert.match(t.node('#panel-pcp .cards-grid').innerHTML, /data-os-id="arq2"/);
+});

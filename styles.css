@@ -2009,3 +2009,9 @@ body.tv-ligada { overflow:hidden; }
 #nv-recarregar:hover { background: #1f6255; }
 #nv-depois { background: transparent; color: #9fc4dd; font-size: 1.2rem; line-height: 1; padding: 4px 8px; min-height: 36px; }
 @media (max-width: 480px) { #nova-versao { font-size: .78rem; padding-left: 14px; } }
+
+/* ── Vista Arquivados: chips de ano/mês e a tabela leve (14/09/2026) ── */
+.pcp-arq-chips { display:flex; flex-direction:column; gap:6px; }
+.pcp-arq-tabela td.num, .pcp-arq-tabela th.num { text-align:left; }
+.pcp-arq-tabela tbody tr { cursor:pointer; }
+.pcp-arq-tabela tbody tr:hover { background:#f4f8fc; }
