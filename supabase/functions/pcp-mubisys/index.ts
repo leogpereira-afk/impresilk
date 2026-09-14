@@ -472,7 +472,7 @@ Deno.serve(async (req: Request) => {
   const token = req.headers.get("x-token") ?? body.token;
   const ehMaquina = !!TOKEN && token === TOKEN;
   const action = body.action as string;
-  const ehCron = !!CRON_TOKEN && token === CRON_TOKEN && (action === "importar" || action === "baixaAuto" || action === "entreguesMes");
+  const ehCron = !!CRON_TOKEN && token === CRON_TOKEN && (action === "importar" || action === "baixaAuto" || action === "entreguesMes" || action === "pingERP");
   if (!cracha && !ehMaquina && !ehCron) return resp({ error: "Entre no sistema.", semSessao: true }, 401);
 
   // Conta desativada depois do cracha emitido (ver crachaRevogado, acima).
@@ -525,6 +525,41 @@ Deno.serve(async (req: Request) => {
       datainicial, datafinal,
     });
     const urlOS = `${creds.base}/${creds.publicKey}/ordem-servico?${q}`;
+
+    /* SONDA DO ERP: um dia so, prazo curto, e diz o que aconteceu.
+       Quando o Mubisys para de responder, toda acao do PCP trava e a unica
+       coisa que sabemos e "nao voltou". Esta sonda pede a menor janela
+       possivel com 20s de prazo e separa os tres casos que exigem providencias
+       diferentes: RESPONDEU (ok), RECUSOU (credencial/permissao mudou -- HTTP
+       401/403) e MUDO (nao respondeu no prazo -- ERP fora do ar ou lento). */
+    if (action === "pingERP") {
+      const hoje = new Date();
+      const de = body.datainicial || ymd(hoje);
+      const ate = body.datafinal || ymd(hoje);
+      const q1 = new URLSearchParams({
+        status: body.status || creds.status,
+        filtrodata: body.filtrodata || "CADASTRO",
+        datainicial: de,
+        datafinal: ate,
+      });
+      if (body.per_page) { q1.set("per_page", String(body.per_page)); q1.set("page", String(body.page || 1)); }
+      const inicio = Date.now();
+      try {
+        const r = await fetchERP(`${creds.base}/${creds.publicKey}/ordem-servico?${q1}`, headers, 20000);
+        const corpo = await r.text().catch(() => "");
+        return resp({
+          estado: r.ok ? "respondeu" : "recusou",
+          http: r.status,
+          ms: Date.now() - inicio,
+          amostra: corpo.slice(0, 200),
+          janela: { datainicial: de, datafinal: ate, per_page: q1.get("per_page"), page: q1.get("page") },
+          itens: (() => { try { const d = JSON.parse(corpo); return Array.isArray(d) ? d.length : (Array.isArray(d?.data) ? d.data.length : null); } catch { return null; } })(),
+          status: q1.get("status"),
+        });
+      } catch (e) {
+        return resp({ estado: "mudo", ms: Date.now() - inicio, erro: String((e as Error)?.message || e) });
+      }
+    }
 
     if (action === "ping") {
       const r = await fetchERP(urlOS, headers, 30000);
