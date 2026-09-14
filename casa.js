@@ -206,12 +206,20 @@ function periodoOuMes(chave) {
 //  • Baixada fora do sistema, pelo ERP → NÃO entra sozinha: vai para a lista
 //    de LANÇAMENTO MANUAL, e só conta depois que alguém registra (entregaLancada).
 //    Retirada baixada pelo ERP segue a regra da retirada (valor entra).
+// CORTE (decisão do dono, 14/09/2026): "as entregas antigas pode jogar todas
+// como entregues para somar nos valores; vai ser de amanhã para frente". Baixa
+// do ERP anterior a esta data conta como entregue sem lançamento; a partir
+// dela, lançamento manual. Regra explícita aqui, não 147 carimbos no banco.
+const CORTE_LANCAMENTO_MANUAL = '2026-09-15';
+function erpAntesDoCorte(o) {
+  return OPERACAO.encerradaERP(o) && !o.entregaLancada && OPERACAO.dia(o.finalizadaEm) < CORTE_LANCAMENTO_MANUAL;
+}
 function classificarEntregas(lista) {
   const r = { retiradas: [], instalacoes: [], aLancar: [] };
   for (const o of lista || STORE.getAllOS()) {
     if (!OPERACAO.dia(o.finalizadaEm)) continue;
     if (OPERACAO.interno(o)) { r.retiradas.push(o); continue; }
-    if (OPERACAO.encerradaERP(o) && !o.entregaLancada) { r.aLancar.push(o); continue; }
+    if (OPERACAO.encerradaERP(o) && !o.entregaLancada && !erpAntesDoCorte(o)) { r.aLancar.push(o); continue; }
     r.instalacoes.push(o);
   }
   return r;
@@ -335,7 +343,7 @@ function renderEntregas() {
   const tabela = `<div class="casa-tabela-wrap"><table class="casa-tabela">
     <thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Conclusão</th><th class="num">Valor</th></tr></thead>
     <tbody>${lista.map(os => `<tr data-os-id="${esc(os.id)}">
-        <td><strong>${esc(os.numero || '—')}</strong>${OPERACAO.interno(os) ? ' <span class="badge st-finalizada" title="Só o valor conta; retirada não é entrega realizada">Retirada</span>' : ''}${os.entregaLancada ? ` <span class="badge st-confirmada" title="Baixada pelo ERP e lançada à mão por ${esc(os.entregaLancada.por || '')}">lançada</span>` : ''}${os.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</td>
+        <td><strong>${esc(os.numero || '—')}</strong>${OPERACAO.interno(os) ? ' <span class="badge st-finalizada" title="Só o valor conta; retirada não é entrega realizada">Retirada</span>' : ''}${os.entregaLancada ? ` <span class="badge st-confirmada" title="Baixada pelo ERP e lançada à mão por ${esc(os.entregaLancada.por || '')}">lançada</span>` : ''}${erpAntesDoCorte(os) ? ` <span class="badge st-aguardando_producao" title="Baixa do ERP antes de ${CORTE_LANCAMENTO_MANUAL.slice(8, 10)}/${CORTE_LANCAMENTO_MANUAL.slice(5, 7)}: conta como entregue por decisão da direção">ERP · antes do corte</span>` : ''}${os.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</td>
         <td>${esc(os.cliente || '')}</td>
         <td>${esc(os.servico || '—')}</td>
         <td>${esc(OPERACAO.equipe(os).join(', ') || (OPERACAO.interno(os) ? 'balcão' : 'sem equipe'))}</td>
@@ -362,7 +370,7 @@ function renderEntregas() {
       ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', 'Nenhuma entrega registrada no período', 'Finalizar a O.S no PCP registra a entrega. Baixas do ERP ficam na lista abaixo até serem lançadas.')}
       <section class="casa-prod-box casa-lancar">
         <h3>Lançamento manual — baixadas pelo ERP fora do sistema · ${aLancar.length}</h3>
-        <p>O ERP marcou entregue, mas ninguém finalizou no PCP. Não conta como entrega até alguém lançar: confirme data e equipe e responda se gerou retrabalho.</p>
+        <p>O ERP marcou entregue, mas ninguém finalizou no PCP. Não conta como entrega até alguém lançar: confirme data e equipe e responda se gerou retrabalho. Baixas anteriores a ${CORTE_LANCAMENTO_MANUAL.slice(8, 10)}/${CORTE_LANCAMENTO_MANUAL.slice(5, 7)}/${CORTE_LANCAMENTO_MANUAL.slice(0, 4)} já contam como entregues (decisão da direção).</p>
         ${aLancar.length ? `<div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Baixa ERP</th><th class="num">Valor</th><th></th></tr></thead><tbody>${aLancar.map(os => `<tr>
             <td><strong>${esc(os.numero || '—')}</strong></td><td>${esc(os.cliente || '')}</td><td>${esc(os.servico || '—')}</td><td>${esc(tecnicosDaOS(os) || 'sem equipe')}</td><td>${dataBR(os.finalizadaEm)}</td><td class="num">${linhaValor(os)}</td>
             <td><button class="btn-primary btn-xs edit-only" data-lancar-os="${esc(os.id)}">Lançar entrega</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="text-muted">Nada pendente de lançamento neste período.</p>'}
