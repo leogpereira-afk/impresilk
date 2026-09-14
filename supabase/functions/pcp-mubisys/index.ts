@@ -430,6 +430,71 @@ function janelaDatas(body: any) {
   return { datainicial: ymd(ini), datafinal: ymd(fim) };
 }
 
+/* GRAVACAO DAS O.S IMPORTADAS -- usada por DOIS caminhos.
+   `importar` busca no ERP aqui dentro (e morre aos 150s quando o Mubisys
+   esta lento). `importarLote` recebe a lista JA BUSCADA pelo GitHub Actions,
+   que tem 900s de teto. A logica de deduplicacao, lapide e preservacao de
+   trabalho humano e a MESMA nos dois -- ela mora aqui, e nao duplicada. */
+async function gravarImportadas(sb: any, remotas: any[]) {
+      // TUDO NUMA GRAVACAO SO. Uma linha por vez estourava o teto de 150s da
+      // Edge Function: ~123 O.S vindas do ERP viravam 123 idas e voltas ao
+      // banco, somadas a uma API do Mubisys que ja e lenta por natureza.
+      let semNumero = 0;
+      const linhas = [];
+      for (const remoto of remotas) {
+        const num = String(remoto.numero ?? "").trim();
+        if (!num) { semNumero++; continue; } // sem numero nao da para deduplicar
+        const os = montarOSImportada(remoto);
+        os.id = "mub-" + num; // id deterministico: gravar duas vezes e inocuo
+        linhas.push({ colecao: "os", id: os.id, registro: os });
+      }
+      if (semNumero) console.warn(`[pcp-mubisys] ${semNumero} O.S sem numero ignoradas.`);
+
+      // Filtra por NUMERO antes de inserir, em vez de confiar no ON CONFLICT.
+      //
+      // Por que: o "ignoreDuplicates" do cliente vira ON CONFLICT (colecao,id)
+      // DO NOTHING -- cobre so a chave primaria. Mas existe O.S antiga gravada
+      // com id aleatorio e o MESMO numero que o ERP devolve; ao inserir com o
+      // id novo (mub-<numero>), o choque acontece no indice do NUMERO, que o
+      // ON CONFLICT nao estava cobrindo, e o lote inteiro morria.
+      //
+      // Conferir antes e mais barato e mais explicito: uma consulta, e so
+      // entra o que realmente falta. O indice continua como rede de seguranca
+      // contra duas execucoes simultaneas.
+      // NAO FILTRE `apagado` AQUI. E de proposito: a O.S excluida no app vira
+      // LAPIDE (pcp-sync marca apagado=true em vez de remover a linha), e e
+      // esta consulta que a enxerga e barra a reinsercao. Com o filtro, o
+      // pedido cancelado que segue PRODUCAO no ERP voltaria como esqueleto
+      // zerado na hora seguinte -- excluir de novo so compraria mais 60 min,
+      // toda hora, por meses.
+      const numeros = linhas.map((l) => l.registro.numero);
+      const { data: jaTem, error: erroLeitura } = await sb
+        .from("pcp_registros")
+        .select("registro->>numero")
+        .eq("colecao", "os")
+        .in("registro->>numero", numeros);
+      if (erroLeitura) throw new Error(erroLeitura.message);
+      const existentes = new Set((jaTem ?? []).map((r: any) => String(r.numero)));
+
+      // O.S que ja existe NAO e sobrescrita -- pode ter trabalho humano em
+      // cima (fotos de check-in, equipe montada, conferencia do carro).
+      // Dedup por id DENTRO do lote (dois números iguais no mesmo payload do
+      // ERP viram o mesmo mub-<n> e o insert multi-linha morreria inteiro).
+      const porId = new Map<string, any>();
+      for (const l of linhas.filter((l) => !existentes.has(String(l.registro.numero)))) porId.set(l.id, l);
+      const novasLinhas = [...porId.values()];
+      if (novasLinhas.length) {
+        // upsert ignoreDuplicates: se o cron do minuto :20 correr junto com o
+        // botão "Importar agora", a colisão de chave NÃO derruba o lote todo.
+        const { error } = await sb.from("pcp_registros")
+          .upsert(novasLinhas, { onConflict: "colecao,id", ignoreDuplicates: true });
+        if (error) throw new Error(error.message);
+      }
+      const novas = novasLinhas.length;
+      const jaExistiam = linhas.length - novas;
+  return { novas, jaExistiam, total: remotas.length, semNumero };
+}
+
 // ---------------------------------------------------------------- handler
 
 
@@ -525,7 +590,7 @@ Deno.serve(async (req: Request) => {
   const token = req.headers.get("x-token") ?? body.token;
   const ehMaquina = !!TOKEN && token === TOKEN;
   const action = body.action as string;
-  const ehCron = !!CRON_TOKEN && token === CRON_TOKEN && (action === "importar" || action === "baixaAuto" || action === "entreguesMes" || action === "pingERP");
+  const ehCron = !!CRON_TOKEN && token === CRON_TOKEN && (action === "importar" || action === "baixaAuto" || action === "entreguesMes" || action === "pingERP" || action === "importarLote");
   if (!cracha && !ehMaquina && !ehCron) return resp({ error: "Entre no sistema.", semSessao: true }, 401);
 
   // Conta desativada depois do cracha emitido (ver crachaRevogado, acima).
@@ -722,6 +787,41 @@ Deno.serve(async (req: Request) => {
     // copia). O indice unico pcp_os_numero_idx torna isso impossivel: a segunda
     // gravacao e recusada pelo banco. Sem a faxina, some tambem a varredura
     // completa que rodava de hora em hora so para procurar repetidos.
+    /* IMPORTACAO VINDA DE FORA (GitHub Actions).
+       A busca no ERP saiu daqui em 14/09/2026: uma pagina do Mubisys ja levou
+       206s no horario comercial e esta funcao morre aos 150s -- ela nunca teve
+       folga, so funcionava enquanto o ERP respondia em 15-20s. Quem busca agora
+       e o workflow `importar-mubisys.yml`, que tem 900s e usa as mesmas regras
+       de 404/tentativa do cliente do Painel. Aqui chega a lista JA BUSCADA.
+
+       O trabalho de banco (deduplicacao, lapide, preservar trabalho humano)
+       continua sendo feito AQUI, por `gravarImportadas` -- a mesma funcao que o
+       `importar` usa. Mover a busca nao pode significar duplicar a regra. */
+    if (action === "importarLote") {
+      const lista = Array.isArray(body.os) ? body.os : null;
+      if (!lista) return resp({ error: "mande { os: [...] } com o que o ERP devolveu" }, 400);
+      // LISTA VAZIA NAO E SUCESSO. Quem busca ja aplica a regra dos dois 404;
+      // se mesmo assim veio vazio, gravar "importacao ok, 0 novas" carimbaria
+      // saude num ciclo que nao trouxe nada. Melhor recusar e o workflow falhar.
+      if (!lista.length && !body.vazioEsperado) {
+        return resp({ error: "lote vazio recusado: use vazioEsperado:true se o ERP realmente não tem O.S na janela" }, 400);
+      }
+      try {
+        const remotas = lista.map(mapearOS);
+        const r = await gravarImportadas(sb, remotas);
+        const st = { em: new Date().toISOString(), ok: true, origem: "actions", ...r };
+        await setMeta("sync_status", st);
+        console.log(`[pcp-mubisys] lote do Actions: ${r.novas} nova(s) de ${r.total}.`);
+        return resp(st);
+      } catch (e) {
+        await setMeta("sync_status", {
+          em: new Date().toISOString(), ok: false, origem: "actions",
+          erro: (e as Error)?.message ?? String(e),
+        }).catch(() => {});
+        throw e;
+      }
+    }
+
     if (action === "importar") {
       /* ORCAMENTO DE TEMPO. A Edge Function morre aos 150s, e `importar` faz
          TRES trabalhos que batem no ERP: trazer O.S nova (o que a fabrica
@@ -737,62 +837,7 @@ Deno.serve(async (req: Request) => {
         const data = await erpGet(urlOS, headers, Math.min(95_000, Math.max(20_000, sobra() - 25_000)));
         const remotas = extrairLista(data).map(mapearOS);
 
-        // TUDO NUMA GRAVACAO SO. Uma linha por vez estourava o teto de 150s da
-        // Edge Function: ~123 O.S vindas do ERP viravam 123 idas e voltas ao
-        // banco, somadas a uma API do Mubisys que ja e lenta por natureza.
-        let semNumero = 0;
-        const linhas = [];
-        for (const remoto of remotas) {
-          const num = String(remoto.numero ?? "").trim();
-          if (!num) { semNumero++; continue; } // sem numero nao da para deduplicar
-          const os = montarOSImportada(remoto);
-          os.id = "mub-" + num; // id deterministico: gravar duas vezes e inocuo
-          linhas.push({ colecao: "os", id: os.id, registro: os });
-        }
-        if (semNumero) console.warn(`[pcp-mubisys] ${semNumero} O.S sem numero ignoradas.`);
-
-        // Filtra por NUMERO antes de inserir, em vez de confiar no ON CONFLICT.
-        //
-        // Por que: o "ignoreDuplicates" do cliente vira ON CONFLICT (colecao,id)
-        // DO NOTHING -- cobre so a chave primaria. Mas existe O.S antiga gravada
-        // com id aleatorio e o MESMO numero que o ERP devolve; ao inserir com o
-        // id novo (mub-<numero>), o choque acontece no indice do NUMERO, que o
-        // ON CONFLICT nao estava cobrindo, e o lote inteiro morria.
-        //
-        // Conferir antes e mais barato e mais explicito: uma consulta, e so
-        // entra o que realmente falta. O indice continua como rede de seguranca
-        // contra duas execucoes simultaneas.
-        // NAO FILTRE `apagado` AQUI. E de proposito: a O.S excluida no app vira
-        // LAPIDE (pcp-sync marca apagado=true em vez de remover a linha), e e
-        // esta consulta que a enxerga e barra a reinsercao. Com o filtro, o
-        // pedido cancelado que segue PRODUCAO no ERP voltaria como esqueleto
-        // zerado na hora seguinte -- excluir de novo so compraria mais 60 min,
-        // toda hora, por meses.
-        const numeros = linhas.map((l) => l.registro.numero);
-        const { data: jaTem, error: erroLeitura } = await sb
-          .from("pcp_registros")
-          .select("registro->>numero")
-          .eq("colecao", "os")
-          .in("registro->>numero", numeros);
-        if (erroLeitura) throw new Error(erroLeitura.message);
-        const existentes = new Set((jaTem ?? []).map((r: any) => String(r.numero)));
-
-        // O.S que ja existe NAO e sobrescrita -- pode ter trabalho humano em
-        // cima (fotos de check-in, equipe montada, conferencia do carro).
-        // Dedup por id DENTRO do lote (dois números iguais no mesmo payload do
-        // ERP viram o mesmo mub-<n> e o insert multi-linha morreria inteiro).
-        const porId = new Map<string, any>();
-        for (const l of linhas.filter((l) => !existentes.has(String(l.registro.numero)))) porId.set(l.id, l);
-        const novasLinhas = [...porId.values()];
-        if (novasLinhas.length) {
-          // upsert ignoreDuplicates: se o cron do minuto :20 correr junto com o
-          // botão "Importar agora", a colisão de chave NÃO derruba o lote todo.
-          const { error } = await sb.from("pcp_registros")
-            .upsert(novasLinhas, { onConflict: "colecao,id", ignoreDuplicates: true });
-          if (error) throw new Error(error.message);
-        }
-        const novas = novasLinhas.length;
-        const jaExistiam = linhas.length - novas;
+        const { novas, jaExistiam } = await gravarImportadas(sb, remotas);
 
         // Depois de trazer as novas, tira da mesa as que o ERP ja fechou. Se
         // esta parte falhar, a importacao continua valendo -- sao dois

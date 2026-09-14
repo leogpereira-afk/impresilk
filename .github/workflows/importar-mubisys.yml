@@ -1,0 +1,53 @@
+name: Importar O.S do Mubisys
+
+# A busca no ERP saiu da Edge Function em 14/09/2026. Motivo medido: uma pagina
+# do Mubisys ja levou 206 s no horario comercial e a Edge Function do Supabase
+# morre aos 150 s -- e, como a morte vem de fora, o registro de falha nunca era
+# gravado. A importacao parou por horas sem ninguem saber, com a fabrica
+# trabalhando. Aqui ha 900 s de teto e a falha fica VERMELHA na lista de
+# execucoes. Mesmo padrao que o Painel ja usa para carregar o ERP.
+#
+# O robo do banco (pg_cron, job 2) continua rodando: ele cuida da baixa
+# automatica e do mes de entregas, que sao leves. Se o ERP estiver rapido, os
+# dois caminhos funcionam e um nao atrapalha o outro -- a gravacao ignora o que
+# ja existe.
+
+on:
+  schedule:
+    # De hora em hora aos :25. Cinco minutos depois do pg_cron para os dois nao
+    # baterem no ERP no mesmo segundo (2 chamadas em paralelo o ERP aguenta;
+    # 4 estouram todas -- medido no Painel).
+    - cron: '25 * * * *'
+  workflow_dispatch:
+    inputs:
+      dias_atras:
+        description: 'Quantos dias para tras buscar (padrao 180)'
+        required: false
+        default: '180'
+
+# Duas execucoes ao mesmo tempo bateriam no ERP em paralelo sem necessidade.
+concurrency:
+  group: importar-mubisys
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  importar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Buscar no Mubisys e entregar ao PCP
+        env:
+          MUBI_BASE_URL: ${{ secrets.MUBI_BASE_URL }}
+          MUBI_PUBLIC_KEY: ${{ secrets.MUBI_PUBLIC_KEY }}
+          MUBI_TOKEN: ${{ secrets.MUBI_TOKEN }}
+          PCP_CRON_TOKEN: ${{ secrets.PCP_CRON_TOKEN }}
+          MUBI_DIAS_ATRAS: ${{ github.event.inputs.dias_atras || '180' }}
+        run: node scripts/importar-mubisys.mjs
