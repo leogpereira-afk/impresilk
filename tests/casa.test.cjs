@@ -393,3 +393,16 @@ test('CACHE, APP_VERSAO e todos os ?v= sobem juntos', () => {
     assert.ok(shell.includes(arq), `${arq} está no index.html mas ficou fora do SHELL do sw.js — o app não abre offline`);
   }
 });
+
+/* A régua única só funciona se ela estiver EXPORTADA. Publiquei a v83 com
+   `anosEntreguesEmCache` definida e fora do objeto que o store devolve: o
+   `casa.js` caía no padrão por sorte e a régua ficava desligada, calada. */
+test('store exporta o que as telas perguntam', () => {
+  const store = fs.readFileSync(path.join(root, 'store.js'), 'utf8');
+  const retorno = /return \{([\s\S]*?)\n  \};/.exec(store);
+  assert.ok(retorno, 'não achei o objeto exportado do store');
+  const casaJs = fs.readFileSync(path.join(root, 'casa.js'), 'utf8');
+  const usadas = [...casaJs.matchAll(/STORE\.(\w+)/g)].map(m => m[1]);
+  const ausentes = [...new Set(usadas)].filter(n => !new RegExp(`\\b${n}\\b`).test(retorno[1]));
+  assert.deepEqual(ausentes, [], `casa.js chama STORE.${ausentes.join(', STORE.')} que o store não exporta`);
+});
