@@ -2620,8 +2620,8 @@ function arqPrecisaDoServidor() {
 }
 function arqBuscar(depois) {
   if (!STORE.buscarHistorico || !arqPrecisaDoServidor()) { _arqChave = ''; return; }
-  const { de, ate } = arqRecorte();
   const q = String(STATE.filtroBusca || '').trim();
+  const { de, ate } = q ? { de: '', ate: '' } : arqRecorte();   // busca = histórico inteiro
   const chave = JSON.stringify([de, ate, q]);
   if (chave === _arqChave) return;
   clearTimeout(_arqBuscaTimer);
@@ -2698,14 +2698,18 @@ function pcpRenderCards() {
   // contadas, mesmo com Arquivados escolhido (regra já testada em telas.test).
   if (STATE.pcpVista === 'arquivados' && !STATE._prioridade) {
     // Recorte por ano/mês da finalização; linhas, não cards; servidor só se preciso.
+    // BUSCA VALE PARA O HISTÓRICO INTEIRO. Quem digita o nome de um cliente
+    // quer achá-lo — não adivinhar em que mês a O.S foi finalizada. Com texto
+    // na busca, o recorte de ano/mês sai do caminho (aqui e no servidor).
+    const buscando = !!String(STATE.filtroBusca || '').trim();
     const { de, ate } = arqRecorte();
-    list = list.filter(o => { const d = diaLocalISO(o.finalizadaEm); return d >= de && d <= ate; })
-      .sort((a, b) => String(b.finalizadaEm || '').localeCompare(String(a.finalizadaEm || '')));
+    if (!buscando) list = list.filter(o => { const d = diaLocalISO(o.finalizadaEm); return d >= de && d <= ate; });
+    list = list.sort((a, b) => String(b.finalizadaEm || '').localeCompare(String(a.finalizadaEm || '')));
     grid.classList.add('pcp-lista');
     grid.innerHTML = list.length ? arqListaHTML(list)
       : emptyState('', 'Nenhuma O.S arquivada neste recorte', arqPrecisaDoServidor() ? 'Se acabou de escolher o período, o servidor ainda pode estar respondendo.' : 'Troque o ano ou o mês, ou digite um cliente ou número.');
     const resultado = $('#pcp-resultado');
-    if (resultado) resultado.textContent = `${list.length} arquivada${list.length === 1 ? '' : 's'} no recorte`;
+    if (resultado) resultado.textContent = `${list.length} arquivada${list.length === 1 ? '' : 's'} ${buscando ? 'na busca (todo o histórico)' : 'no recorte'}`;
     bindCardClicks(grid);
     pcpAtualizarChips();
     arqBuscar(pcpRenderCards);

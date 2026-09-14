@@ -149,4 +149,10 @@ test('Arquivados pinta linhas leves no recorte do mês, não cards', () => {
   // trocar para o ano inteiro traz agosto também
   t.run("STATE._arq.mes=''; pcpRenderCards()");
   assert.match(t.node('#panel-pcp .cards-grid').innerHTML, /data-os-id="arq2"/);
+  // BUSCA IGNORA O RECORTE: com setembro escolhido, "OUTRO" (agosto) tem de aparecer.
+  t.run("STATE._arq.mes='09'; STATE.filtroBusca='OUTRO'; pcpRenderCards()");
+  const busca = t.node('#panel-pcp .cards-grid').innerHTML;
+  assert.match(busca, /data-os-id="arq2"/, 'quem digita o cliente acha a O.S em qualquer mês');
+  assert.doesNotMatch(busca, /data-os-id="arq1"/, 'e só o que casa com a busca');
+  assert.match(t.node('#pcp-resultado').textContent, /todo o histórico/);
 });
