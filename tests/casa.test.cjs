@@ -434,3 +434,17 @@ test('mês que o ERP recusou aparece como falha, não como "carregando" eterno',
   assert.ok(pedidos.includes('2025-03'), 'o que falhou tenta de novo');
   assert.ok(pedidos.indexOf('2025-02') < pedidos.indexOf('2025-03'), 'quem nunca chegou vai na frente');
 });
+
+test('sem resposta do ERP o valor sai "…", nunca R$ 0,00', () => {
+  // R$ 0,00 ao lado de "sem resposta do ERP" é uma afirmação sobre dinheiro que
+  // a tela não tem como fazer. Zero não é resultado.
+  const t = casa([], {}, ELENCO);
+  assert.equal(t.run("valorKpiCasa({ total: 0, n: 0, comErro: 3, faltando: 0 })"), '…',
+    'ERP fora do ar não é R$ 0,00');
+  assert.equal(t.run("valorKpiCasa({ total: 0, n: 0, comErro: 0, faltando: 2 })"), '…',
+    'mês ainda carregando também não é R$ 0,00');
+  // Zero de verdade (tudo chegou, nada foi entregue) continua sendo zero.
+  assert.match(t.run("valorKpiCasa({ total: 0, n: 0, comErro: 0, faltando: 0 })"), /0,00/);
+  // E com dado na mão o valor sai, mesmo que um mês ainda esteja vindo.
+  assert.match(t.run("valorKpiCasa({ total: 1500, n: 4, comErro: 1, faltando: 1 })"), /1\.500,00/);
+});

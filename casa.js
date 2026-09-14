@@ -671,6 +671,14 @@ function relatoriosEntregasHTML(lista, porNumero, estadoPCP) {
   </section>`;
 }
 
+/* R$ 0,00 AO LADO DE "SEM RESPOSTA DO ERP" É UMA AFIRMAÇÃO QUE A TELA NÃO PODE
+   FAZER. Enquanto faltar mês — porque ainda não chegou OU porque falhou — e não
+   houver nenhuma O.S na mão, o valor é desconhecido, não zero. Só vira número
+   quando alguma coisa de fato veio. Ver [[feedback_zero_nao_e_resultado]]. */
+function valorKpiCasa(k) {
+  return (k.faltando || k.comErro) && !k.n ? '…' : dinheiroCasa(k.total);
+}
+
 function renderEntregas() {
   const el = document.getElementById('panel-entregas');
   if (!el) return;
@@ -728,7 +736,7 @@ function renderEntregas() {
   const dataBR = iso => { const d = OPERACAO.dia(iso); return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'; };
   const valorTxt = v => (v !== null && Number.isFinite(Number(v))) ? dinheiroCasa(Number(v)) : '<span class="badge sem-valor">sem valor</span>';
   const kpiHTML = (k, rotulo) => `<div class="casa-kpi ${k.semValor || k.faltando || k.comErro ? 'alerta' : ''}">
-      <b>${k.faltando && !k.n ? '…' : dinheiroCasa(k.total)}</b>
+      <b>${valorKpiCasa(k)}</b>
       <small>${esc(rotulo)} · ${k.n} O.S${k.inst ? ` · ${k.inst} instalaç${k.inst === 1 ? 'ão' : 'ões'}` : ''}${k.retiradas ? ` · ${k.retiradas} retirada${k.retiradas === 1 ? '' : 's'}` : ''}${k.semValor ? ` · <span class="badge sem-valor">${k.semValor} sem valor</span>` : ''}${k.faltando ? ` · <span class="badge st-agendada">carregando ${k.faltando} de ${k.meses} mês${k.meses === 1 ? '' : 'es'}…</span>` : ''}${k.comErro ? ` · <span class="badge sem-valor">${k.comErro} mês${k.comErro === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}</small>
     </div>`;
 
