@@ -63,13 +63,40 @@ function baseConfiavel(url: string): boolean {
   return host === "mubisys.com" || host.endsWith(".mubisys.com");
 }
 
+/* ── A MENSAGEM DE ERRO NAO PODE CARREGAR A CHAVE ─────────────────────────
+   A rota do Mubisys leva a chave publica no CAMINHO:
+
+     https://api.mubisys.com/api/<CHAVE>/ordem-servico?status=PRODUCAO&...
+
+   Quando o ERP cai, o erro do Deno cita a URL INTEIRA ("error sending request
+   for url (...)"). Essa mensagem era gravada crua em  e o app
+   mostrava no aviso vermelho embaixo das abas -- visto em 14/09/2026, com a
+   chave legivel para qualquer pessoa que abrisse o PCP. O aviso e util; a
+   chave dentro dele nao.
+
+   Duas redes de seguranca, porque uma so falha calada:
+   1. o VALOR da chave, quando ja resolvemos as credenciais -- e o corte exato;
+   2. a FORMA da URL (o segmento logo depois de /api/), que pega tambem o caso
+      de a chave ter mudado, ou de o erro nascer antes do getCreds.
+   O resto da mensagem fica inteiro: qual rota, qual erro, qual codigo. */
+let CHAVE_CONHECIDA = "";
+export function semCredencial(texto: unknown): string {
+  let t = String(texto ?? "");
+  if (CHAVE_CONHECIDA.length >= 8) t = t.split(CHAVE_CONHECIDA).join("<chave>");
+  return t
+    .replace(/(https?:\/\/[^/\s)]+\/api\/)[^/\s?)]+/gi, "\<chave>")
+    .replace(/([?&](?:apikey|api_key|token|access[-_]?token)=)[^&\s)]+/gi, "\<oculto>");
+}
+
 async function getCreds() {
   const cfg = (await getMeta("mubisys")) ?? {};
   const bruta = String(cfg.base || Deno.env.get("MUBI_BASE_URL") || DEFAULT_BASE).replace(/\/+$/, "");
   const base = baseConfiavel(bruta) ? bruta : DEFAULT_BASE;
   if (base !== bruta) console.warn("[pcp-mubisys] base recusada:", bruta);
+  const chave = cfg.publicKey || Deno.env.get("MUBI_PUBLIC_KEY") || "";
+  CHAVE_CONHECIDA = String(chave);
   return {
-    publicKey: cfg.publicKey || Deno.env.get("MUBI_PUBLIC_KEY") || "",
+    publicKey: chave,
     accessToken: cfg.accessToken || Deno.env.get("MUBI_TOKEN") || "",
     base,
     status: cfg.status || "PRODUCAO",
@@ -886,7 +913,7 @@ Deno.serve(async (req: Request) => {
         } else try {
           baixa = await baixaAutomatica(sb, creds.base, creds.publicKey, headers, { simular: false, prazoMs: Math.min(60_000, sobra() - 15_000) });
         } catch (e) {
-          baixa = { ok: false, erro: String((e as Error)?.message || e) };
+          baixa = { ok: false, erro: semCredencial((e as Error)?.message || e) };
         }
 
         // Renova o mes corrente de "entregues" (valor entregue da tela de
@@ -920,7 +947,7 @@ Deno.serve(async (req: Request) => {
         // Registra a falha: o painel de saude do app precisa denunciar que a
         // importacao parou, senao ela morre em silencio.
         await gravarBatimento({
-          em: new Date().toISOString(), ok: false, erro: (e as Error)?.message ?? String(e),
+          em: new Date().toISOString(), ok: false, erro: semCredencial((e as Error)?.message ?? e),
         }).catch(() => {});
         throw e;
       }
@@ -929,6 +956,6 @@ Deno.serve(async (req: Request) => {
     return resp({ error: `Ação desconhecida: ${action}` }, 400);
   } catch (e) {
     console.error("[pcp-mubisys] erro:", e);
-    return resp({ error: (e as Error)?.message ?? "Erro interno" }, 500);
+    return resp({ error: semCredencial((e as Error)?.message ?? "Erro interno") }, 500);
   }
 });

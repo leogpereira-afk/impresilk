@@ -739,6 +739,22 @@ function refreshAposPull() {
 
 // ── Vigia da importação Mubisys (visível no app INTEIRO, não só em ⚙️) ──────
 // Banner vermelho sob as abas quando a importação está com erro ou >2h parada.
+/* A CHAVE NAO APARECE NO AVISO. O erro de rede do Deno cita a URL inteira, e a
+   rota do Mubisys leva a chave publica no CAMINHO
+   (https://api.mubisys.com/api/<CHAVE>/ordem-servico?...). Em 14/09/2026 o
+   banner vermelho estampou a chave para qualquer pessoa que abrisse o PCP.
+
+   A `pcp-mubisys` ja corta na hora de GRAVAR (ver semCredencial la). Este corte
+   e aqui DE NOVO, na hora de mostrar, por dois motivos: o registro que ja esta
+   gravado continua com a chave dentro -- e so seria reescrito quando uma
+   importacao nova desse certo, ou seja, justamente quando o ERP voltasse; e
+   porque a tela nao deve depender de quem escreveu ter feito a parte dele. */
+function semCredencial(texto) {
+  return String(texto ?? '')
+    .replace(/(https?:\/\/[^/\s)]+\/api\/)[^/\s?)]+/gi, '$1<chave>')
+    .replace(/([?&](?:apikey|api_key|token|access[-_]?token)=)[^&\s)]+/gi, '$1<oculto>');
+}
+
 function avaliarImportacao(s) {
   const ult = s && s.ultimaImportacao;
   // Ausência de heartbeat = importação NUNCA rodou (ou parou faz muito) — é o
@@ -749,7 +765,7 @@ function avaliarImportacao(s) {
     const bom = ult.ultimoSucesso && ult.ultimoSucesso.em
       ? ' · última que deu certo: ' + new Date(ult.ultimoSucesso.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
       : '';
-    return { parada: true, motivo: 'erro: ' + (ult.erro || 'desconhecido') + bom };
+    return { parada: true, motivo: 'erro: ' + semCredencial(ult.erro || 'desconhecido') + bom };
   }
   if (horas >= 2) return { parada: true, motivo: `há ${Math.floor(horas)}h sem rodar` };
   return { parada: false };
