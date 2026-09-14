@@ -155,6 +155,10 @@ function mapearOS(o: any) {
     // 200 O.S). Fica no card so como RESERVA para O.S que o Painel ainda nao
     // carregou; a tela prefere sempre painel_ordens (acao 'valores').
     dataEntrega: entregaIso || "",
+    // data_entrega e a PREVISAO combinada; data_entregue e quando saiu de fato.
+    // E por data_entregue que o ERP filtra ENTREGA -- e e ela que vale para
+    // "entregue no mes". Confundir as duas derrubou janeiro de 165 para 135.
+    dataEntregue: isoData(pick(o, "data_entregue", "dataEntregue")) || "",
     valorTotal: (() => {
       const bruto = Number(String(pick(o, "valor_total", "valorTotal", "total") ?? "").replace(",", "."));
       const desc = Number(String(pick(o, "valor_desconto", "valorDesconto", "desconto") ?? "0").replace(",", "."));
@@ -546,7 +550,7 @@ Deno.serve(async (req: Request) => {
       const hojeMes = new Date().toISOString().slice(0, 7);
       const validade = mes === hojeMes ? 60 * 60000 : 24 * 3600000;
       const cache = await getMeta(chave);
-      if (cache?.em && !body.forcar && Date.now() - new Date(cache.em).getTime() < validade) {
+      if (cache?.em && cache?.v === 2 && !body.forcar && Date.now() - new Date(cache.em).getTime() < validade) {
         return resp({ ...cache, cache: true });
       }
       const [y, m] = mes.split("-").map(Number);
@@ -571,14 +575,15 @@ Deno.serve(async (req: Request) => {
       // sem data de entrega (raro) fica, porque o filtro do ERP ja a garantiu.
       const vistos = new Set<string>();
       const os = lista.map(mapearOS).filter((o: any) => o.numero).filter((o: any) => {
-        if (o.dataEntrega && !String(o.dataEntrega).startsWith(mes)) return false;
+        if (o.dataEntregue && !String(o.dataEntregue).startsWith(mes)) return false;
         if (vistos.has(String(o.numero))) return false;
         vistos.add(String(o.numero)); return true;
       }).map((o: any) => ({
         numero: o.numero, cliente: o.cliente || "", servico: o.servico || "", tipo: o.tipo,
-        data: o.dataEntrega || "", valor: o.valorTotal,
+        data: o.dataEntregue || "", valor: o.valorTotal,
       }));
-      const pacote = { em: new Date().toISOString(), mes, total: os.length, os };
+      // v: 2 = data e a ENTREGA REAL (data_entregue). O app descarta pacote sem v.
+      const pacote = { v: 2, em: new Date().toISOString(), mes, total: os.length, os };
       await setMeta(chave, pacote);
       return resp(pacote);
     }
@@ -697,9 +702,9 @@ Deno.serve(async (req: Request) => {
             const pag = extrairLista(d2); lista.push(...pag); if (pag.length < 500) break;
           }
           const vistos2 = new Set<string>();
-          const os = lista.map(mapearOS).filter((o: any) => o.numero && (!o.dataEntrega || String(o.dataEntrega).startsWith(mesAtual)) && !vistos2.has(String(o.numero)) && vistos2.add(String(o.numero)))
-            .map((o: any) => ({ numero: o.numero, cliente: o.cliente || "", servico: o.servico || "", tipo: o.tipo, data: o.dataEntrega || "", valor: o.valorTotal }));
-          await setMeta(`entregues:${mesAtual}`, { em: new Date().toISOString(), mes: mesAtual, total: os.length, os });
+          const os = lista.map(mapearOS).filter((o: any) => o.numero && (!o.dataEntregue || String(o.dataEntregue).startsWith(mesAtual)) && !vistos2.has(String(o.numero)) && vistos2.add(String(o.numero)))
+            .map((o: any) => ({ numero: o.numero, cliente: o.cliente || "", servico: o.servico || "", tipo: o.tipo, data: o.dataEntregue || "", valor: o.valorTotal }));
+          await setMeta(`entregues:${mesAtual}`, { v: 2, em: new Date().toISOString(), mes: mesAtual, total: os.length, os });
           entregues = { mes: mesAtual, total: os.length };
         } catch (e) { entregues = { erro: String((e as Error)?.message || e) }; }
 

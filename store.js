@@ -615,7 +615,8 @@ const STORE = (() => {
   // tela pede o mês corrente e os meses do ano conforme abre.
   let _entregues = lsGet(K.ENTREGUES, {});
   let _entreguesPedindo = {};
-  function entreguesMes(mes) { return _entregues[mes] || null; }
+  // Pacote sem v:2 e da versao que usava a PREVISAO de entrega: descarta e pede de novo.
+  function entreguesMes(mes) { const p = _entregues[mes]; return p && p.v === 2 ? p : null; }
   async function pullEntreguesMes(mes, forcar) {
     if (!navigator.onLine || !mes || _entreguesPedindo[mes]) return null;
     const atual = _entregues[mes];
@@ -626,7 +627,7 @@ const STORE = (() => {
     try {
       const res = await apiFn('mubisys', { action: 'entreguesMes', mes }, 120000);
       if (res && Array.isArray(res.os)) {
-        _entregues = Object.assign({}, _entregues, { [mes]: { em: res.em, mes, total: res.total, os: res.os } });
+        _entregues = Object.assign({}, _entregues, { [mes]: { v: res.v || 0, em: res.em, mes, total: res.total, os: res.os } });
         // Guarda só o ano corrente e o anterior: o localStorage é dividido.
         const corte = String(new Date().getFullYear() - 1);
         for (const k of Object.keys(_entregues)) if (k < corte) delete _entregues[k];
