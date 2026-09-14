@@ -2677,7 +2677,11 @@ function pcpAtualizarChips() {
   const fAll = applyFilter(porTipo(STORE.getAllOS().slice()), busca);
   setN('[data-pcp-vista=""]', fAll.filter(o => !o.finalizadaEm).length);
   setN('[data-pcp-vista="retrabalho"]', fAll.filter(o => o.retrabalho && !o.dataResolvido).length);
-  setN('[data-pcp-vista="arquivados"]', fAll.filter(estaArquivada).length);
+  // Arquivados conta aparelho + o que a busca já trouxe do servidor — senão o
+  // selo dizia 324 com a lista mostrando 564, e parecia bug.
+  const vistosArq = new Set();
+  const comHist = STORE.getAllOS().concat(STORE.historico ? STORE.historico() : []).filter(o => !vistosArq.has(o.id) && vistosArq.add(o.id));
+  setN('[data-pcp-vista="arquivados"]', applyFilter(porTipo(comHist), busca).filter(estaArquivada).length);
 }
 
 // Recalcula a lista filtrada do PCP e atualiza SÓ a grade de cards.
