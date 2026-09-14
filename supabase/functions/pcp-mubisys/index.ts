@@ -215,6 +215,61 @@ const TETO_BAIXAS = 60;
 
    Com prazo proprio, a chamada falha ANTES da plataforma, o catch roda, e o
    app passa a dizer "o ERP nao respondeu" em vez de "ha 5h sem rodar". */
+/* AS REGRAS DO MUBISYS QUE O PAINEL JA SABIA E O PCP NAO.
+   Fonte: painel/netlify/functions/lib/mubi.js, o cliente que carrega o Painel
+   ha meses sem cair -- e a trava de regressao painel/scripts/conferir-404.mjs.
+
+   1. **404 NAO E ERRO**: quer dizer "nenhum registro neste filtro". Medido em
+      31/07/2026: `contas-pagar?status=VENCIDO` na janela de -30 dias devolve
+      404, e a MESMA consulta desde 2015 devolve 201 com 9 titulos.
+   2. **O ERP PISCA 404 em recurso valido.** Por isso vazio so vale quando DOIS
+      404 CONCORDAM e o ultimo que se ouviu foi 404. Um 404 sozinho virando
+      "lista vazia" ja apagou o vinculo de vendedor do Painel inteiro, gravado
+      como sucesso.
+   3. **401 = credencial errada, 403 = plano sem MubiPro**: fatais, nao adianta
+      repetir.
+   4. **5xx e timeout NUNCA viram vazio** -- vazio apaga, erro preserva. Entre
+      errar para o lado de nao atualizar e para o lado de zerar, o primeiro.
+
+   O que muda aqui em relacao ao Painel: la cada tentativa espera ate 280s
+   (uma pagina de 500 itens ja foi medida em 206s no horario comercial) porque
+   ele roda no GitHub Actions. Esta funcao morre aos 150s, entao as tentativas
+   cabem dentro do prazo que o chamador der -- e quando nao cabem, falha
+   dizendo isso, em vez de morrer calada. */
+async function erpGet(url: string, headers: any, prazoTotalMs: number): Promise<any> {
+  const ate = Date.now() + Math.max(8000, prazoTotalMs);
+  const ESPERA = 1500;
+  let n404 = 0, ultimoFoi404 = false, ultimoFoiRede = false, ultimoErro: Error | null = null;
+  for (let tentativa = 1; tentativa <= 4; tentativa++) {
+    const sobra = ate - Date.now();
+    if (sobra < 6000) break;
+    try {
+      const r = await fetchERP(url, headers, Math.min(sobra - 2000, 60000));
+      if (r.status === 401) throw Object.assign(new Error("o Mubisys recusou a credencial (401)"), { fatal: true });
+      if (r.status === 403) throw Object.assign(new Error("o Mubisys recusou (403): o plano precisa do pacote MubiPro"), { fatal: true });
+      if (r.status === 404) {
+        n404 += 1; ultimoFoi404 = true; ultimoFoiRede = false;
+        if (n404 >= 2) return { data: [] };          // dois 404 concordando = vazio de verdade
+        ultimoErro = new Error("o Mubisys devolveu 404 uma vez (pode ser piscada)");
+        await new Promise((r2) => setTimeout(r2, ESPERA * tentativa));
+        continue;
+      }
+      if (!r.ok) throw Object.assign(new Error(`o Mubisys respondeu HTTP ${r.status}`), { httpStatus: r.status });
+      return await r.json();
+    } catch (e) {
+      if ((e as any)?.fatal) throw e;
+      ultimoFoi404 = false;
+      ultimoFoiRede = !(e as any)?.httpStatus;      // timeout/rede: nunca vira vazio
+      ultimoErro = e as Error;
+      if (tentativa < 4 && ate - Date.now() > 6000) await new Promise((r2) => setTimeout(r2, ESPERA * tentativa));
+    }
+  }
+  // Vazio so no caso que a regra promete. 5xx e estouro de prazo explodem, para
+  // a importacao falhar e o que ja esta gravado ser preservado.
+  if (n404 >= 2 && (ultimoFoi404 || ultimoFoiRede)) return { data: [] };
+  throw ultimoErro || new Error("o Mubisys não respondeu dentro do prazo");
+}
+
 async function fetchERP(url: string, headers: any, ms: number): Promise<Response> {
   const ctrl = new AbortController();
   const limite = Math.max(5000, ms);
@@ -243,9 +298,7 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
     datainicial: ini.toISOString().slice(0, 10),
     datafinal: fim.toISOString().slice(0, 10),
   });
-  const r = await fetchERP(`${base}/${publicKey}/ordem-servico?${q}`, headers, opts.prazoMs || 60000);
-  const data = await r.json().catch(() => null);
-  if (!r.ok) throw new Error(`Mubisys retornou HTTP ${r.status} na conferencia de status`);
+  const data = await erpGet(`${base}/${publicKey}/ordem-servico?${q}`, headers, opts.prazoMs || 60000);
   const doErp = extrairLista(data).map(mapearOS);
   // Lista vazia nao e "tudo concluido" -- e resposta suspeita. Nao mexe.
   if (!doErp.length) return { ok: false, motivo: "o ERP nao devolveu nenhuma O.S nesta janela", baixadas: 0 };
@@ -622,9 +675,7 @@ Deno.serve(async (req: Request) => {
       const lista: any[] = [];
       for (let page = 1; page <= 10; page++) {
         const q = new URLSearchParams({ status: "ENTREGUE", filtrodata: "ENTREGA", datainicial: ini, datafinal: fim, page: String(page), per_page: "500" });
-        const r = await fetchERP(`${creds.base}/${creds.publicKey}/ordem-servico?${q}`, headers, 45000);
-        const data = await r.json().catch(() => null);
-        if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
+        const data = await erpGet(`${creds.base}/${creds.publicKey}/ordem-servico?${q}`, headers, 45000);
         const pag = extrairLista(data);
         lista.push(...pag);
         if (pag.length < 500) break;
@@ -682,9 +733,8 @@ Deno.serve(async (req: Request) => {
       const ATE = Date.now() + 118_000;   // 32s de folga para gravar e responder
       const sobra = () => ATE - Date.now();
       try {
-        const r = await fetchERP(urlOS, headers, 60000);
-        const data = await r.json().catch(() => null);
-        if (!r.ok) throw new Error(`Mubisys retornou HTTP ${r.status}`);
+        // Prazo vem do orcamento: as tentativas cabem no que sobrar da rodada.
+        const data = await erpGet(urlOS, headers, Math.min(95_000, Math.max(20_000, sobra() - 25_000)));
         const remotas = extrairLista(data).map(mapearOS);
 
         // TUDO NUMA GRAVACAO SO. Uma linha por vez estourava o teto de 150s da
@@ -777,9 +827,7 @@ Deno.serve(async (req: Request) => {
           const lista: any[] = [];
           for (let page = 1; page <= 10 && sobra() > 12_000; page++) {
             const q = new URLSearchParams({ status: "ENTREGUE", filtrodata: "ENTREGA", datainicial: `${mesAtual}-01`, datafinal: fimD.toISOString().slice(0, 10), page: String(page), per_page: "500" });
-            const r2 = await fetchERP(`${creds.base}/${creds.publicKey}/ordem-servico?${q}`, headers, 40000);
-            const d2 = await r2.json().catch(() => null);
-            if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
+            const d2 = await erpGet(`${creds.base}/${creds.publicKey}/ordem-servico?${q}`, headers, Math.min(40_000, Math.max(12_000, sobra() - 10_000)));
             const pag = extrairLista(d2); lista.push(...pag); if (pag.length < 500) break;
           }
           const vistos2 = new Set<string>();
