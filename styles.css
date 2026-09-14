@@ -237,7 +237,10 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .prazo-retira  { background: #db2777; color: #fff; font-weight: 800; }
 .card-avisar.avisado { color: var(--green); border-color: #bbf7d0; }
 /* Banner global: importação do Mubisys parada (clicável → Configurações) */
-.alerta-importacao { background: #fee2e2; color: #b91c1c; font-size: .82rem; font-weight: 600; padding: 8px 16px; cursor: pointer; border-bottom: 1px solid #fecaca; }
+/* Mora DENTRO do <main> (ver vigiarImportacao). Preso no topo da coluna de
+   conteúdo para não rolar para fora: é um aviso de que a fábrica está sem
+   O.S nova, tem de continuar à vista enquanto durar. */
+.alerta-importacao { background: #fee2e2; color: #b91c1c; font-size: .82rem; font-weight: 600; padding: 8px 16px; cursor: pointer; border-bottom: 1px solid #fecaca; position: sticky; top: 0; z-index: 5; }
 .prazo-amanha  { background: #fef3c7; color: #92400e; }
 .prazo-empresa { background: #f1f5f9; color: #475569; }
 .prazo-info    { background: #e0f2fe; color: #075985; }

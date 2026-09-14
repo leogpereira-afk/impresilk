@@ -769,8 +769,17 @@ function vigiarImportacao() {
       ban = document.createElement('div');
       ban.id = 'alerta-importacao';
       ban.className = 'alerta-importacao';
-      const tabs = $('#tabs');
-      if (tabs && tabs.parentNode) tabs.parentNode.insertBefore(ban, tabs.nextSibling);
+      /* DENTRO DO <main>, NUNCA AO LADO DA BARRA.
+         A versão anterior inseria o aviso como vizinho de #tabs. Isso era
+         inofensivo no layout antigo (flex), mas desde que a barra lateral
+         virou GRADE de duas colunas (v76) o aviso passou a ser um item da
+         grade: roubava a coluna do conteúdo inteira (781×712 px) e empurrava
+         o <main> para a linha de baixo, na coluna da barra — 228 px de
+         largura, 70 mil de altura, abaixo da dobra. A tela ficava só um
+         fundo rosa. Ninguém viu por dois meses porque o aviso só dispara
+         com a importação parada, e ela só parou de verdade em 14/09/2026. */
+      const main = document.querySelector('main');
+      if (main) main.prepend(ban);
       else document.body.prepend(ban);
       ban.onclick = () => { const t = $('[data-tab="controle"]'); if (t) t.click(); };
     }
