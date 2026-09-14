@@ -1,15 +1,15 @@
 // sw.js — Service worker: deixa o app abrir offline (casca/shell em cache).
 // Os DADOS continuam sincronizando pela fila do store.js; aqui só cuidamos
 // dos arquivos estáticos para o app carregar sem internet.
-const CACHE = 'impresilk-shell-v86';
+const CACHE = 'impresilk-shell-v87';
 // ?v= nos arquivos do shell: a CDN do GitHub Pages (Fastly) segurou um casa.js
 // velho por mais de uma hora depois do deploy (14/09/2026) enquanto servia os
 // outros novos. Com a versão na URL, cada publicação é um endereço novo para a
 // CDN. Regra de deploy: CACHE aqui, APP_VERSAO no config.js e o ?v= no
 // index.html/equipe.html sobem JUNTOS.
 const SHELL = [
-  './', 'index.html', 'equipe.html', 'styles.css?v=v86',
-  'config.js?v=v86', 'logo.js?v=v86', 'frases.js?v=v86', 'store.js?v=v86', 'auth.js?v=v86', 'operacao.js?v=v86', 'app.js?v=v86', 'casa.js?v=v86', 'equipe.js?v=v86',
+  './', 'index.html', 'equipe.html', 'styles.css?v=v87',
+  'config.js?v=v87', 'logo.js?v=v87', 'frases.js?v=v87', 'store.js?v=v87', 'auth.js?v=v87', 'operacao.js?v=v87', 'app.js?v=v87', 'casa.js?v=v87', 'equipe.js?v=v87',
   'manifest.json', 'icon.svg', 'favicon.svg'
 ];
 
@@ -81,8 +81,8 @@ self.addEventListener('fetch', e => {
       }
       /* ÚLTIMO RECURSO: o mesmo arquivo de outra versão.
          Se o install da versão nova abortou (o addAll é tudo-ou-nada e uma
-         queda de rede basta), o HTML pode pedir `casa.js?v=v86` enquanto o
-         cache só tem `?v=v86`. `caches.match` casa a URL inteira, então isso
+         queda de rede basta), o HTML pode pedir `casa.js?v=v87` enquanto o
+         cache só tem `?v=v87`. `caches.match` casa a URL inteira, então isso
          dava miss e `Response.error()` — tela branca, calada, na fábrica.
          Servir o arquivo da versão anterior deixa o app ABRIR; a tarja de
          versão nova avisa para recarregar assim que houver internet. */

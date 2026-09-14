@@ -416,3 +416,21 @@ test('store exporta o que as telas perguntam', () => {
   const ausentes = [...new Set(usadas)].filter(n => !new RegExp(`\\b${n}\\b`).test(retorno[1]));
   assert.deepEqual(ausentes, [], `casa.js chama STORE.${ausentes.join(', STORE.')} que o store não exporta`);
 });
+
+test('mês que o ERP recusou aparece como falha, não como "carregando" eterno', () => {
+  // `entreguesMes` devolve null tanto para "ainda não chegou" quanto para
+  // "falhou", e a tela contava os dois como carregando — o mês recusado ficava
+  // girando para sempre sem nada girar.
+  const t = casa([], {}, ELENCO);
+  t.run(`STORE.entreguesMes = m => null;
+         STORE.entreguesFalhou = m => m === '2025-03';
+         STORE.pullEntreguesMes = m => { (globalThis.__pedidos = globalThis.__pedidos || []).push(m); };`);
+  const r = t.run("entreguesERP('2025-02-01','2025-03-31')");
+  assert.deepEqual([...r.comErro], ['2025-03'], 'o mês que falhou é contado como falha');
+  assert.deepEqual([...r.faltando], ['2025-02'], 'o que não chegou continua faltando');
+  // e o que falhou ainda é pedido de novo, depois dos que nunca chegaram
+  const pedidos = t.run('globalThis.__pedidos.join(",")');
+  assert.ok(pedidos.includes('2025-02'), 'o que falta é pedido');
+  assert.ok(pedidos.includes('2025-03'), 'o que falhou tenta de novo');
+  assert.ok(pedidos.indexOf('2025-02') < pedidos.indexOf('2025-03'), 'quem nunca chegou vai na frente');
+});

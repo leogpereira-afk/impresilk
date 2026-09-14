@@ -502,8 +502,14 @@ function entreguesERP(de, ate) {
   const vistos = new Set();   // o mesmo número nunca soma duas vezes (pacote de borda de mês)
   for (const m of meses) {
     const pac = STORE.entreguesMes(m);
-    if (!pac) { faltando.push(m); continue; }
-    if (pac.erro && !(pac.os || []).length) comErro.push(m);
+    if (!pac) {
+      // Falhou é diferente de ainda não chegou: um fica em "sem resposta do
+      // ERP", o outro em "carregando". Antes os dois viravam "carregando" e o
+      // mês recusado ficava girando para sempre sem nada girar.
+      if (STORE.entreguesFalhou && STORE.entreguesFalhou(m)) comErro.push(m);
+      else faltando.push(m);
+      continue;
+    }
     for (const o of pac.os || []) {
       if (o.data && (o.data < de || o.data > ate)) continue;
       const k = String(o.numero || '');
@@ -511,7 +517,11 @@ function entreguesERP(de, ate) {
       vistos.add(k); os.push(o);
     }
   }
-  for (const m of faltando.slice().sort().reverse().slice(0, ERP_EM_VOO)) STORE.pullEntreguesMes(m);
+  // Quem nunca chegou vai na frente; quem falhou tenta depois (o store segura
+  // por 10 min, então isso não vira martelada no ERP). Sem esta segunda fila um
+  // tropeço de rede deixaria o mês morto até alguém recarregar a página.
+  const aPedir = faltando.slice().sort().reverse().concat(comErro.slice().sort().reverse());
+  for (const m of aPedir.slice(0, ERP_EM_VOO)) STORE.pullEntreguesMes(m);
   // Mês corrente: renova em silêncio quando envelhece (o store decide).
   const hojeMes = OPERACAO.dia(new Date()).slice(0, 7);
   if (meses.includes(hojeMes) && STORE.entreguesMes(hojeMes)) STORE.pullEntreguesMes(hojeMes);

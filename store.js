@@ -731,6 +731,11 @@ const STORE = (() => {
   }
 
   function entreguesMes(mes) { const p = _entregues[mes]; return p && p.v === 2 ? p : null; }
+  /* "NÃO VEIO" E "FALHOU" SÃO COISAS DIFERENTES na tela. `entreguesMes` devolve
+     null nos dois casos, e a tela contava os dois como "carregando N meses" —
+     mês que o ERP recusou (403) ou que voltou com erro ficava eternamente em
+     "carregando", sem nada carregando. Aqui ela pergunta qual dos dois é. */
+  function entreguesFalhou(mes) { const p = _entregues[mes]; return !!(p && p.erro && !(p.os || []).length); }
   async function pullEntreguesMes(mes, forcar) {
     if (!navigator.onLine || !mes || _entreguesPedindo[mes]) return null;
     const atual = _entregues[mes];
@@ -741,7 +746,11 @@ const STORE = (() => {
        25–40 s por mês. O passado distante é história: só o mês corrente e o
        anterior ainda recebem lançamento. */
     const anterior = new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().slice(0, 7);
-    const validade = mes === hojeMes ? 15 * 60000 : (mes === anterior ? 6 * 3600000 : 30 * 864e5);
+    // Pacote que FALHOU não herda a validade longa: uma queda do ERP tem de se
+    // curar sozinha em minutos, senão um tropeço de rede congelaria o mês por
+    // 30 dias. (Recusa por papel também repete, mas 403 volta na hora.)
+    const validade = (atual && atual.erro) ? 10 * 60000
+      : (mes === hojeMes ? 15 * 60000 : (mes === anterior ? 6 * 3600000 : 30 * 864e5));
     if (atual && !forcar && Date.now() - new Date(atual.em).getTime() < validade) return atual;
     _entreguesPedindo[mes] = true;
     try {
@@ -1111,7 +1120,7 @@ const STORE = (() => {
     // Identidade
     getUser, setUser, getInstalador, setInstalador, getLastSync, limparCache,
     // Sync
-    trySync, pull, pullCFG, pullValores, valores, valoresEm, pullElenco, elenco, pullEntreguesMes, entreguesMes, anosEntregues,
+    trySync, pull, pullCFG, pullValores, valores, valoresEm, pullElenco, elenco, pullEntreguesMes, entreguesMes, entreguesFalhou, anosEntregues,
     // Fotos
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos
