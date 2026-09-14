@@ -989,6 +989,11 @@ function novaOS(tipo) {
     horaSaida: '', horaRetorno: '', kmSaida: '', kmRetorno: '', instalacaoOK: false, conferidoPor: '',
     retrabalho: false, problema: '', causa: '', resolvidoPor: '', dataResolvido: '',
     osOriginal: '',   // esta O.S é o RETRABALHO da O.S nº (o ERP sempre emite uma nova)
+    // Regras de registro (14/09/2026): a pergunta "gerou retrabalho?" é
+    // obrigatória ao finalizar instalação; se sim, taxonomia fixa.
+    etapaOrigem: '', causaRaiz: '', responsavelEtapa: '', dataRetrabalho: '',
+    retrabalhoPerguntado: null,   // { em, por, resposta: 'sim' | 'nao' }
+    entregaLancada: null,         // baixa do ERP registrada à mão: { em, por, data }
     obsTecnicas: '', fotosCheckinIds: [], fotosRetornoIds: [], checkinGPS: null,
     checkout: { situacao: '', hora: '', por: '', obs: '', confirmado: false },
     finalizadaEm: '', finalizadoPor: ''
@@ -1485,7 +1490,16 @@ function blocoExec(os, ro, done) {
           <div class="field"><label>Causa</label><select data-f="causa"><option value=""></option>${causaOpts}</select></div>
           <div class="field"><label>Quem resolveu</label><input data-f="resolvidoPor" value="${esc(os.resolvidoPor)}"></div>
         </div>
+        <div class="field-row">
+          <div class="field"><label>Etapa de origem</label><select data-f="etapaOrigem"><option value=""></option>${ETAPAS_ORIGEM.map(v => `<option ${os.etapaOrigem === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+          <div class="field"><label>Causa raiz</label><select data-f="causaRaiz"><option value=""></option>${CAUSAS_RAIZ.map(v => `<option ${os.causaRaiz === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Responsável da etapa</label><input data-f="responsavelEtapa" value="${esc(os.responsavelEtapa || '')}" placeholder="nome ou setor"></div>
+          <div class="field"><label>Data do retrabalho</label><input type="date" data-f="dataRetrabalho" value="${esc(os.dataRetrabalho || '')}"></div>
+        </div>
         <div class="field"><label>Data resolvido</label><input type="date" data-f="dataResolvido" value="${esc(os.dataResolvido)}"></div>
+        ${os.retrabalhoPerguntado ? `<p class="text-muted" style="font-size:.74rem">Pergunta feita em ${new Date(os.retrabalhoPerguntado.em).toLocaleString('pt-BR')} por ${esc(os.retrabalhoPerguntado.por || '')}: ${os.retrabalhoPerguntado.resposta === 'sim' ? 'gerou retrabalho' : 'não gerou'}.</p>` : ''}
       </div>
 
 
@@ -1871,9 +1885,11 @@ function bindModalEvents(os, ro) {
       toast('Falta: ' + faltas.join(', '), 'error');
       return;
     }
-    aplicarFinalizacao(_modalDraft);
-    saveDraft(); reRenderModalKeepOpen();
-    toast('Instalação finalizada 🏁', 'success');
+    perguntarRetrabalho(_modalDraft, () => {
+      aplicarFinalizacao(_modalDraft);
+      saveDraft(); reRenderModalKeepOpen();
+      toast('Instalação finalizada 🏁', 'success');
+    });
   };
 
   // Seletor de tipo (Interno / Externo)
@@ -2035,6 +2051,68 @@ function reRenderModalKeepOpen() {
   const opens = $$('#modal-os .card-fs').map(d => d.open);
   renderModal();
   $$('#modal-os .card-fs').forEach((d, i) => { if (opens[i] != null) d.open = opens[i]; });
+}
+
+/* ── PERGUNTA OBRIGATÓRIA: "Este serviço gerou retrabalho?" ──────────────────
+   Regra da casa (14/09/2026): em todo serviço de INSTALAÇÃO, sempre, sem
+   exceção. Não é checkbox que se ignora: é um diálogo que só fecha com
+   resposta. Sim → cadastro com taxonomia fixa (etapa de origem, causa raiz),
+   porque o objetivo é uma base para achar causa recorrente -- texto livre não
+   agrupa. A resposta fica carimbada (quem, quando) mesmo quando é "não". */
+const ETAPAS_ORIGEM = ['Medição', 'Arte', 'Produção', 'Instalação'];
+const CAUSAS_RAIZ = ['Erro humano', 'Material', 'Comunicação', 'Especificação', 'Outro'];
+function perguntarRetrabalho(os, aoResponder) {
+  const old = $('#retrab-pergunta'); if (old) old.remove();
+  const box = document.createElement('div');
+  box.id = 'retrab-pergunta';
+  box.className = 'wpp-picker-overlay';
+  const elenco = (STORE.elenco && STORE.elenco().pessoas) || [];
+  const setores = [...new Set(elenco.map(p => p.setor).filter(Boolean))].sort();
+  const jaSim = !!os.retrabalho;
+  const opt = (lista, sel) => lista.map(v => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(v)}</option>`).join('');
+  box.innerHTML = `
+    <div class="wpp-picker retrab-box" role="dialog" aria-modal="true" aria-labelledby="retrab-tit">
+      <div class="wpp-picker-head"><strong id="retrab-tit">🔴 Este serviço gerou retrabalho?</strong></div>
+      <div class="wpp-picker-body">
+        <p class="text-muted" style="font-size:.8rem;margin-bottom:10px">O.S ${esc(os.numero || '—')} · ${esc(os.cliente || '')}. A pergunta é obrigatória em toda instalação.</p>
+        <div class="wpp-acoes">
+          <button class="btn-success" id="retrab-nao" ${jaSim ? '' : 'autofocus'}>Não</button>
+          <button class="btn-danger" id="retrab-sim">Sim, gerou</button>
+        </div>
+        <form id="retrab-form" class="retrab-form" ${jaSim ? '' : 'hidden'}>
+          <div class="field"><label>Descrição do problema <span class="req">*</span> <span class="text-muted">(o que precisou ser refeito)</span></label><textarea name="problema" rows="2" required>${esc(os.problema || '')}</textarea></div>
+          <div class="field-row">
+            <div class="field"><label>Etapa de origem <span class="req">*</span></label><select name="etapaOrigem" required><option value="">— escolher —</option>${opt(ETAPAS_ORIGEM, os.etapaOrigem)}</select></div>
+            <div class="field"><label>Causa raiz <span class="req">*</span></label><select name="causaRaiz" required><option value="">— escolher —</option>${opt(CAUSAS_RAIZ, os.causaRaiz)}</select></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Responsável da etapa <span class="req">*</span> <span class="text-muted">(nome ou setor)</span></label><input name="responsavelEtapa" list="retrab-resp" required value="${esc(os.responsavelEtapa || '')}"><datalist id="retrab-resp">${setores.map(x => `<option value="${esc(x)}">`).join('')}${elenco.map(p => `<option value="${esc(p.nome)}">`).join('')}</datalist></div>
+            <div class="field"><label>Data do retrabalho <span class="req">*</span></label><input name="dataRetrabalho" type="date" required value="${esc(os.dataRetrabalho || hojeISO())}"></div>
+          </div>
+          <button class="btn-primary w-100" type="submit">Registrar retrabalho e continuar</button>
+        </form>
+      </div>
+    </div>`;
+  document.body.appendChild(box);
+  // Sem × e sem fechar no fundo: a regra diz "não pode ser pulado".
+  const carimbo = resposta => ({ em: nowISO(), por: (STATE.user && STATE.user.nome) || '', resposta });
+  $('#retrab-nao', box).onclick = () => {
+    os.retrabalhoPerguntado = carimbo('nao');
+    box.remove(); aoResponder();
+  };
+  const form = $('#retrab-form', box);
+  $('#retrab-sim', box).onclick = () => { form.hidden = false; form.querySelector('[name=problema]').focus(); };
+  form.onsubmit = ev => {
+    ev.preventDefault();
+    const fd = new FormData(form);
+    const v = k => String(fd.get(k) || '').trim();
+    if (!v('problema') || !v('etapaOrigem') || !v('causaRaiz') || !v('responsavelEtapa') || !v('dataRetrabalho')) { toast('Preencha os cinco campos do retrabalho.', 'error'); return; }
+    os.retrabalho = true;
+    os.problema = v('problema'); os.etapaOrigem = v('etapaOrigem'); os.causaRaiz = v('causaRaiz');
+    os.responsavelEtapa = v('responsavelEtapa'); os.dataRetrabalho = v('dataRetrabalho');
+    os.retrabalhoPerguntado = carimbo('sim');
+    box.remove(); aoResponder();
+  };
 }
 
 function validarFinalizacao(os) {
@@ -2397,13 +2475,17 @@ function finalizarServicoDoCard(osId) {
     openModal(os);
     return;
   }
-  aplicarFinalizacao(os);
-  os.atualizadoEm = nowISO();
-  os.atualizadoPor = STATE.user.nome;
-  registrarEtapa(os);
-  STORE.saveOS(os);
-  toast('Serviço finalizado 🏁', 'success');
-  renderActiveTab();
+  const concluir = () => {
+    aplicarFinalizacao(os);
+    os.atualizadoEm = nowISO();
+    os.atualizadoPor = STATE.user.nome;
+    registrarEtapa(os);
+    STORE.saveOS(os);
+    toast('Serviço finalizado 🏁', 'success');
+    renderActiveTab();
+  };
+  // Retirada não é instalação: sem a pergunta. Instalação: sempre.
+  if (isInterno(os)) concluir(); else perguntarRetrabalho(os, concluir);
 }
 
 function applyFilter(list, busca) {
@@ -3488,9 +3570,9 @@ function renderRetrabalho() {
     const num = String(f.osOriginal || '').trim();
     if (num && !filhasVistas.has(f.id)) pares.push({ num, orig: porNumero.get(num) || null, filha: f });
   }
-  const dataPar = p => p.filha
+  const dataPar = p => (p.orig && p.orig.dataRetrabalho) || (p.filha
     ? (OPERACAO.dia(p.filha.finalizadaEm) || OPERACAO.dia(p.filha.instalacao && p.filha.instalacao.data) || diaLocalISO(p.filha.criadoEm) || '')
-    : (p.orig ? (p.orig.dataResolvido || diaLocalISO(p.orig.atualizadoEm) || '') : '');
+    : (p.orig ? (p.orig.dataResolvido || diaLocalISO(p.orig.atualizadoEm) || '') : ''));
   const lista = pares.filter(p => dentroPeriodo(dataPar(p), '_fRetra'))
     .sort((a, b) => String(dataPar(b)).localeCompare(String(dataPar(a))));
 
@@ -3521,8 +3603,9 @@ function renderRetrabalho() {
   // Barras: por técnico (equipe da filha, senão quem resolveu) e por serviço da original.
   const conta = (chaves) => { const m = new Map(); for (const k of chaves) if (k) m.set(k, (m.get(k) || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8); };
   const porTecnico = conta(lista.flatMap(p => p.filha && OPERACAO.equipe(p.filha).length ? OPERACAO.equipe(p.filha) : (p.orig && p.orig.resolvidoPor ? [p.orig.resolvidoPor] : [])));
-  const porServico = conta(lista.map(p => p.orig ? String(p.orig.servico || '').trim() : ''));
-  const porCausa = conta(lista.map(p => p.orig ? String(p.orig.causa || '').trim() : ''));
+  const porEtapa = conta(lista.map(p => p.orig ? String(p.orig.etapaOrigem || '').trim() : ''));
+  const porCausa = conta(lista.map(p => p.orig ? String(p.orig.causaRaiz || p.orig.causa || '').trim() : ''));
+  const semTaxonomia = lista.filter(p => p.orig && !(p.orig.etapaOrigem && p.orig.causaRaiz)).length;
   const barras = (pares_, total, cor) => pares_.map(([nome, n]) => `<div class="fin-colab">
       <span class="fin-colab-nome" title="${esc(nome)}">${esc(nome)}</span>
       <span class="fin-colab-bar"><span style="width:${Math.round(n / total * 100)}%;${cor ? 'background:' + cor : ''}"></span></span>
@@ -3536,14 +3619,14 @@ function renderRetrabalho() {
       <div class="casa-kpi ${semCusto ? 'alerta' : ''}"><b>${somaR ? brMoney(somaR) : `${fmtH(somaH)} · ${Math.round(somaKm)} km`}</b><small>custo (horas + km da O.S de retrabalho)${somaR ? ` · ${fmtH(somaH)} · ${Math.round(somaKm)} km` : ''}${semCusto ? ` · ${semCusto} sem viagem registrada` : ''}${!(rHora || rKm) ? ' · sem R$/h e R$/km em Configurações' : ''}</small></div>
       <div class="casa-kpi"><b>${taxa == null ? '—' : taxa.toString().replace('.', ',') + '%'}</b><small>taxa geral · ${lista.length} em ${entregues} entrega${entregues === 1 ? '' : 's'} no período</small></div>
     </div>
-    <p class="metricas-nota">Original = O.S marcada com o problema. Retrabalho = a O.S nova que o ERP emite (aponte a original na ficha dela, campo "🔁 retrabalho da O.S nº"). Sem filha apontada, o custo fica em branco.</p>
+    <p class="metricas-nota">Original = O.S marcada com o problema. Retrabalho = a O.S nova que o ERP emite (aponte a original na ficha dela, campo "🔁 retrabalho da O.S nº"). Sem filha apontada, o custo fica em branco.${semTaxonomia ? ` <strong>${semTaxonomia} sem etapa de origem/causa raiz</strong> — abra a ficha e complete.` : ''}</p>
     <div class="casa-tabela-wrap"><table class="casa-tabela">
       <thead><tr><th>O.S original</th><th>O.S retrabalho</th><th>Cliente</th><th>Motivo</th><th>Técnico</th><th class="num">Custo</th><th>Data</th></tr></thead>
       <tbody>${lista.map((p, i) => {
         const c = custos[i];
         const o = p.orig, fi = p.filha;
         const tec = fi && OPERACAO.equipe(fi).length ? OPERACAO.equipe(fi).join(', ') : (o && o.resolvidoPor) || '—';
-        const motivo = o ? [o.problema, o.causa].filter(Boolean).join(' · ') || '—' : '—';
+        const motivo = o ? [o.problema, o.etapaOrigem && ('origem: ' + o.etapaOrigem), o.causaRaiz || o.causa, o.responsavelEtapa && ('resp.: ' + o.responsavelEtapa)].filter(Boolean).join(' · ') || '—' : '—';
         const custoTxt = c.reais != null ? brMoney(c.reais) : (c.horas != null || c.km != null ? `${fmtH(c.horas)}${c.km != null ? ' · ' + Math.round(c.km) + ' km' : ''}` : '<span class="badge sem-valor">sem viagem</span>');
         const d = dataPar(p);
         const pendente = !(fi ? fi.finalizadaEm : (o && o.dataResolvido));
@@ -3561,7 +3644,7 @@ function renderRetrabalho() {
     </table></div>
     <div class="casa-perf-grid" style="margin-top:14px">
       <section class="casa-prod-box"><h3>Retrabalho por técnico</h3><p>Participação na O.S de retrabalho (quem foi corrigir), ou quem resolveu quando não há O.S filha. Não diz quem causou.</p><div class="fin-colab-lista">${barras(porTecnico, lista.length)}</div></section>
-      <section class="casa-prod-box"><h3>Por serviço e por causa</h3><p>Serviço da O.S original (texto do ERP) e causa marcada na ficha.</p><div class="fin-colab-lista">${barras(porServico, lista.length, '#0ea5e9')}</div><hr style="border:0;border-top:1px solid #eef2f7;margin:10px 0"><div class="fin-colab-lista">${barras(porCausa, lista.length, '#8b5cf6')}</div></section>
+      <section class="casa-prod-box"><h3>Etapa de origem e causa raiz</h3><p>É a base para achar a causa recorrente: onde nasceu (Medição / Arte / Produção / Instalação) e por quê (Erro humano / Material / Comunicação / Especificação / Outro).</p><div class="fin-colab-lista">${barras(porEtapa, lista.length, '#0ea5e9')}</div><hr style="border:0;border-top:1px solid #eef2f7;margin:10px 0"><div class="fin-colab-lista">${barras(porCausa, lista.length, '#8b5cf6')}</div></section>
     </div>`;
   wireFiltroPeriodo(el, '_fRetra', () => renderRetrabalho());
   bindCardClicks(el);
@@ -4508,7 +4591,7 @@ async function exportarFichaPDF(os) {
       ${kv('Hora saída', os.horaSaida)}${kv('KM saída', os.kmSaida)}${kv('Hora retorno', os.horaRetorno)}${kv('KM retorno', os.kmRetorno)}
       ${kv('KM rodado', (os.kmSaida && os.kmRetorno && (+os.kmRetorno - +os.kmSaida) >= 0) ? (+os.kmRetorno - +os.kmSaida) + ' km' : '')}
       ${kv('Instalação OK', os.instalacaoOK?'Sim':'Não')}
-      ${kv('Conferido por', os.conferidoPor)}${kv('Situação', os.checkout && os.checkout.situacao)}${kv('Retrabalho', os.retrabalho?'Sim':'')}${kv('Problema', os.problema)}${kv('Causa', os.causa)}
+      ${kv('Conferido por', os.conferidoPor)}${kv('Situação', os.checkout && os.checkout.situacao)}${kv('Retrabalho', os.retrabalho?'Sim':'')}${kv('Problema', os.problema)}${kv('Etapa de origem', os.etapaOrigem)}${kv('Causa raiz', os.causaRaiz)}${kv('Responsável da etapa', os.responsavelEtapa)}${kv('Causa', os.causa)}
       ${kv('Obs técnicas', os.obsTecnicas)}${kv('Fotos check‑in', (os.fotosCheckinIds||[]).length+' foto(s)')}
       ${os.checkinGPS ? kv('Local do check‑in', `${os.checkinGPS.lat}, ${os.checkinGPS.lng} (±${os.checkinGPS.precisao||'?'}m) — maps.google.com/?q=${os.checkinGPS.lat},${os.checkinGPS.lng}`) : ''}
       ${kv('Finalizada', os.finalizadaEm?`${new Date(os.finalizadaEm).toLocaleString('pt-BR')} — ${os.finalizadoPor||''}`:'')}

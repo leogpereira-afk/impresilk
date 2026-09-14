@@ -1846,3 +1846,8 @@ body.nav-aberta .nav-fundo { display: block; }
 .casa-tabela tr.os-list-item:hover { box-shadow:none; background:#f4f8fc; }
 .casa-tabela tr.st-retrabalho td:first-child { border-left:3px solid #ef4444; }
 .casa-tabela tr.st-finalizada td:first-child { border-left:3px solid #10b981; }
+.retrab-box { max-width: 560px; }
+.retrab-form { display:grid; gap:10px; margin-top:12px; }
+.retrab-form .field { display:flex; flex-direction:column; gap:4px; }
+.retrab-form textarea, .retrab-form input, .retrab-form select { min-height:40px; }
+.casa-lancar { margin-top:16px; border-color:#f59e0b; }
