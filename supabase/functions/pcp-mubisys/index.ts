@@ -205,6 +205,32 @@ const STATUS_FINAIS = new Set(["CONCLUIDO", "CONCLUÍDO", "ENTREGUE", "CANCELADO
 // (body.forcar). Protege contra o ERP devolver uma lista torta.
 const TETO_BAIXAS = 60;
 
+/* O ERP PODE NAO RESPONDER -- E QUANDO ISSO ACONTECE ELE NAO DIZ NADA.
+   Em 14/09/2026 o Mubisys parou de responder ao PCP e TODA chamada ficou
+   pendurada ate a Edge Function ser morta pela plataforma aos 150s
+   (IDLE_TIMEOUT). Como a morte vem de fora, o `catch` que grava
+   `sync_status: {ok:false}` NUNCA rodava: a importacao morria calada, e a
+   unica pista era o heartbeat velho. Cinco horas se passaram sem ninguem
+   saber por que.
+
+   Com prazo proprio, a chamada falha ANTES da plataforma, o catch roda, e o
+   app passa a dizer "o ERP nao respondeu" em vez de "ha 5h sem rodar". */
+async function fetchERP(url: string, headers: any, ms: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const limite = Math.max(5000, ms);
+  const t = setTimeout(() => ctrl.abort(), limite);
+  try {
+    return await fetch(url, { headers, signal: ctrl.signal });
+  } catch (e) {
+    if ((e as Error)?.name === "AbortError") {
+      throw new Error(`o ERP (Mubisys) nao respondeu em ${Math.round(limite / 1000)}s`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 async function baixaAutomatica(sb: any, base: string, publicKey: string, headers: any, opts: any = {}) {
   const simular = opts.simular !== false ? opts.simular === true : false;
   // Janela larga: o mesmo -180/+180 da importacao, por data de CADASTRO.
@@ -217,7 +243,7 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
     datainicial: ini.toISOString().slice(0, 10),
     datafinal: fim.toISOString().slice(0, 10),
   });
-  const r = await fetch(`${base}/${publicKey}/ordem-servico?${q}`, { headers });
+  const r = await fetchERP(`${base}/${publicKey}/ordem-servico?${q}`, headers, opts.prazoMs || 60000);
   const data = await r.json().catch(() => null);
   if (!r.ok) throw new Error(`Mubisys retornou HTTP ${r.status} na conferencia de status`);
   const doErp = extrairLista(data).map(mapearOS);
@@ -501,12 +527,12 @@ Deno.serve(async (req: Request) => {
     const urlOS = `${creds.base}/${creds.publicKey}/ordem-servico?${q}`;
 
     if (action === "ping") {
-      const r = await fetch(urlOS, { headers });
+      const r = await fetchERP(urlOS, headers, 30000);
       return resp({ ok: r.ok, http: r.status });
     }
 
     if (action === "preview") {
-      const r = await fetch(urlOS, { headers });
+      const r = await fetchERP(urlOS, headers, 30000);
       const data = await r.json().catch(() => null);
       if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
       const lista = extrairLista(data);
@@ -514,7 +540,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "listarOS") {
-      const r = await fetch(urlOS, { headers });
+      const r = await fetchERP(urlOS, headers, 30000);
       const data = await r.json().catch(() => null);
       if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
       const lista = extrairLista(data);
@@ -523,7 +549,7 @@ Deno.serve(async (req: Request) => {
 
     if (action === "getOS") {
       if (!body.numero) return resp({ error: "numero ausente" }, 400);
-      const r = await fetch(`${creds.base}/${creds.publicKey}/ordem-servico/numero/${encodeURIComponent(body.numero)}`, { headers });
+      const r = await fetchERP(`${creds.base}/${creds.publicKey}/ordem-servico/numero/${encodeURIComponent(body.numero)}`, headers, 30000);
       const data = await r.json().catch(() => null);
       if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
       return resp({ os: mapearOS(extrairUm(data)) });
@@ -561,7 +587,7 @@ Deno.serve(async (req: Request) => {
       const lista: any[] = [];
       for (let page = 1; page <= 10; page++) {
         const q = new URLSearchParams({ status: "ENTREGUE", filtrodata: "ENTREGA", datainicial: ini, datafinal: fim, page: String(page), per_page: "500" });
-        const r = await fetch(`${creds.base}/${creds.publicKey}/ordem-servico?${q}`, { headers });
+        const r = await fetchERP(`${creds.base}/${creds.publicKey}/ordem-servico?${q}`, headers, 45000);
         const data = await r.json().catch(() => null);
         if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
         const pag = extrairLista(data);
@@ -611,8 +637,17 @@ Deno.serve(async (req: Request) => {
     // gravacao e recusada pelo banco. Sem a faxina, some tambem a varredura
     // completa que rodava de hora em hora so para procurar repetidos.
     if (action === "importar") {
+      /* ORCAMENTO DE TEMPO. A Edge Function morre aos 150s, e `importar` faz
+         TRES trabalhos que batem no ERP: trazer O.S nova (o que a fabrica
+         precisa), dar baixa no que o ERP ja fechou, e renovar o mes de
+         entregas. Quando o ERP fica lento, os tres juntos nao cabem -- e o
+         primeiro, que e o critico, morria junto com os outros dois.
+         Agora cada etapa so comeca se houver tempo, e o BATIMENTO e gravado
+         assim que a importacao termina, nao no fim de tudo. */
+      const ATE = Date.now() + 118_000;   // 32s de folga para gravar e responder
+      const sobra = () => ATE - Date.now();
       try {
-        const r = await fetch(urlOS, { headers });
+        const r = await fetchERP(urlOS, headers, 60000);
         const data = await r.json().catch(() => null);
         if (!r.ok) throw new Error(`Mubisys retornou HTTP ${r.status}`);
         const remotas = extrairLista(data).map(mapearOS);
@@ -678,9 +713,18 @@ Deno.serve(async (req: Request) => {
         // esta parte falhar, a importacao continua valendo -- sao dois
         // trabalhos independentes, e perder a baixa nao pode derrubar a
         // entrada de O.S nova.
+        /* O BATIMENTO VAI AQUI, e nao no fim. As O.S novas ja estao gravadas
+           neste ponto; se a baixa ou as entregas travarem no ERP, o app ainda
+           precisa saber que a importacao em si funcionou -- senao o vigia
+           acusa "importacao parada" com a importacao tendo funcionado. */
+        const parcial = { em: new Date().toISOString(), ok: true, novas, total: remotas.length, jaExistiam, duplicatasRemovidas: 0 };
+        await setMeta("sync_status", parcial).catch(() => {});
+
         let baixa: any = null;
-        try {
-          baixa = await baixaAutomatica(sb, creds.base, creds.publicKey, headers, { simular: false });
+        if (sobra() < 25_000) {
+          baixa = { ok: false, pulado: "sem tempo nesta rodada (ERP lento); tenta na próxima hora" };
+        } else try {
+          baixa = await baixaAutomatica(sb, creds.base, creds.publicKey, headers, { simular: false, prazoMs: Math.min(60_000, sobra() - 15_000) });
         } catch (e) {
           baixa = { ok: false, erro: String((e as Error)?.message || e) };
         }
@@ -689,14 +733,16 @@ Deno.serve(async (req: Request) => {
         // Entregas) na mesma hora: uma consulta a mais ao ERP por hora, e a
         // gestao abre a tela com o numero pronto. Falha aqui nao derruba nada.
         let entregues: any = null;
-        try {
+        if (sobra() < 20_000) {
+          entregues = { pulado: "sem tempo nesta rodada (ERP lento); tenta na próxima hora" };
+        } else try {
           const mesAtual = new Date().toISOString().slice(0, 7);
           const [yy, mm] = mesAtual.split("-").map(Number);
           const fimD = new Date(Date.UTC(yy, mm, 1));
           const lista: any[] = [];
-          for (let page = 1; page <= 10; page++) {
+          for (let page = 1; page <= 10 && sobra() > 12_000; page++) {
             const q = new URLSearchParams({ status: "ENTREGUE", filtrodata: "ENTREGA", datainicial: `${mesAtual}-01`, datafinal: fimD.toISOString().slice(0, 10), page: String(page), per_page: "500" });
-            const r2 = await fetch(`${creds.base}/${creds.publicKey}/ordem-servico?${q}`, { headers });
+            const r2 = await fetchERP(`${creds.base}/${creds.publicKey}/ordem-servico?${q}`, headers, 40000);
             const d2 = await r2.json().catch(() => null);
             if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
             const pag = extrairLista(d2); lista.push(...pag); if (pag.length < 500) break;
@@ -708,7 +754,7 @@ Deno.serve(async (req: Request) => {
           entregues = { mes: mesAtual, total: os.length };
         } catch (e) { entregues = { erro: String((e as Error)?.message || e) }; }
 
-        const st = { em: new Date().toISOString(), ok: true, novas, total: remotas.length, jaExistiam, duplicatasRemovidas: 0, baixa, entregues };
+        const st = { ...parcial, em: new Date().toISOString(), baixa, entregues };
         await setMeta("sync_status", st);
         console.log(`[pcp-mubisys] ${novas} nova(s) de ${remotas.length}.`);
         return resp(st);
