@@ -32,13 +32,57 @@ fi
 
 FUNCOES=("$@")
 if [ ${#FUNCOES[@]} -eq 0 ]; then
-  FUNCOES=(pcp-sync pcp-mubisys)
+  # "TODAS" E A PASTA, NAO UMA LISTA ESCRITA A MAO.
+  #
+  # Esta linha era `FUNCOES=(pcp-sync pcp-mubisys)`. Funcionava enquanto fossem
+  # essas duas -- e o dia em que uma terceira entrasse no git, ela nao subiria, o
+  # script diria "publica as duas" e terminaria com exit 0, sem uma linha de
+  # aviso. E o MESMO defeito que deixou o casa.js fora do ar por dias em 13/09 e
+  # que, no painel, manteve quatro functions sem publicar: deploy por lista
+  # nominal esquece exatamente o arquivo novo, que e o unico que ninguem ainda
+  # sabe conferir. Varrer o diretorio nao esquece.
+  #
+  # `_shared` fica de fora porque nao e function: e biblioteca, e vai junto com
+  # cada uma no laco abaixo.
+  FUNCOES=()
+  for dir in "$RAIZ"/*/; do
+    nome="$(basename "$dir")"
+    [ "$nome" = "_shared" ] && continue
+    [ -f "$dir/index.ts" ] || continue
+    FUNCOES+=("$nome")
+  done
+  # Varredura sem resultado NAO pode terminar em sucesso: "publicou 0" com
+  # exit 0 e a mesma mentira que a lista nominal contava.
+  if [ ${#FUNCOES[@]} -eq 0 ]; then
+    echo "Nenhuma function encontrada em $RAIZ -- nada foi publicado." >&2
+    exit 1
+  fi
+  echo "Publicando as ${#FUNCOES[@]} functions de supabase/functions: ${FUNCOES[*]}"
 fi
 
 cd "$RAIZ"
 falhou=0
 for fn in "${FUNCOES[@]}"; do
   [ -f "$fn/index.ts" ] || { echo "$fn: nao existe em supabase/functions"; falhou=1; continue; }
+
+  # A PASTA INTEIRA, NAO SO O index.ts.
+  #
+  # Mandar um arquivo so quebra no dia em que a function ganhar um ajudante ao
+  # lado do index -- e foi exatamente o que aconteceu no painel: o painel-crm
+  # importa `./contrato.ts` na linha 3, o arquivo nunca subia, e o Supabase
+  # recusava a publicacao inteira com "Module not found". A function ficou presa
+  # na versao velha enquanto o script anunciava sucesso para as outras.
+  # Varrer a pasta nao esquece.
+  args=()
+  while IFS= read -r arq; do
+    rel="${arq#$fn/}"
+    case "$rel" in
+      *.mjs|*.js) tipo=application/javascript ;;
+      *.json)     tipo=application/json ;;
+      *)          tipo=application/typescript ;;
+    esac
+    args+=(-F "file=@$arq;filename=$rel;type=$tipo")
+  done < <(find "$fn" -type f \( -name '*.ts' -o -name '*.mjs' -o -name '*.js' -o -name '*.json' \) | sort)
 
   # verify_jwt=false de proposito: o preflight CORS chega sem token e o gateway
   # barraria antes de a function rodar. Quem confere o cracha (EQUIPE_JWT_SECRET)
@@ -47,7 +91,7 @@ for fn in "${FUNCOES[@]}"; do
     "https://api.supabase.com/v1/projects/$REF/functions/deploy?slug=$fn" \
     -H "Authorization: Bearer $TOKEN" \
     -F "metadata={\"entrypoint_path\":\"index.ts\",\"name\":\"$fn\",\"verify_jwt\":false};type=application/json" \
-    -F "file=@$fn/index.ts;filename=index.ts;type=application/typescript") \
+    "${args[@]}") \
     || { echo "$fn: falhou a chamada"; falhou=1; continue; }
 
   echo "$resp" | FN="$fn" python3 -c "

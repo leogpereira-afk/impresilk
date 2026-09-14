@@ -1,0 +1,60 @@
+# PUBLICA AS EDGE FUNCTIONS DO PCP. Sem isto, o codigo fica no git e o servidor
+# continua rodando a versao velha, calado.
+#
+# O QUE CUSTOU: em 14/09/2026 o aviso de "importacao parada" do PCP estampava a
+# MUBI_PUBLIC_KEY, porque a mensagem de erro do Deno cita a URL inteira e a
+# chave viaja no caminho. O conserto foi nas duas pontas -- ao gravar
+# (pcp-mubisys) e ao mostrar (app.js). So que o `deploy.yml` publica a TELA, e
+# mais nada: a metade do conserto que mora na function ficou no git, esperando
+# alguem lembrar de rodar o script a mao. O painel passou por isto no mesmo dia,
+# com a tela de Documentos e ativos: front novo no ar, porta de dados antiga.
+#
+# PRECISA DO SECRET `SUPABASE_ACCESS_TOKEN` (personal access token do Supabase,
+# comeca com sbp_ -- https://supabase.com/dashboard/account/tokens). Sem ele o
+# job FALHA em vez de passar pulando: "publicou 0" com check verde e a mesma
+# mentira que este arquivo existe para acabar.
+name: Edge Functions no Supabase
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/**'
+      - 'scripts/publicar-functions.sh'
+      - '.github/workflows/functions.yml'
+  workflow_dispatch: {}
+
+# Duas publicacoes ao mesmo tempo mandariam versoes diferentes da mesma
+# function; a ultima a chegar venceria, e nao necessariamente e a mais nova.
+concurrency:
+  group: functions-supabase
+  cancel-in-progress: false
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: O secret existe?
+        env:
+          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Falta o secret SUPABASE_ACCESS_TOKEN. As functions NAO foram publicadas -- o que esta no ar continua sendo a versao anterior."
+            exit 1
+          fi
+
+      - name: Publicar todas as functions da pasta
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          chmod +x scripts/publicar-functions.sh
+          ./scripts/publicar-functions.sh
+
+      # O script ja falha por function que nao publicou (exit 1). Este passo so
+      # deixa no log QUAL versao ficou no ar, para quem for conferir depois nao
+      # precisar adivinhar -- "deployed" na resposta nao prova corpo publicado.
+      - name: O que ficou no ar
+        if: always()
+        run: echo "Confira em https://supabase.com/dashboard/project/heveemylixartyijxewh/functions"
