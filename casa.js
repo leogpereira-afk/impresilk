@@ -679,6 +679,23 @@ function valorKpiCasa(k) {
   return (k.faltando || k.comErro) && !k.n ? '…' : dinheiroCasa(k.total);
 }
 
+/* "O ERP NÃO TEM NADA NESTE PERÍODO" É UMA AFIRMAÇÃO, e só cabe quando ele
+   respondeu. Se algum mês ainda está vindo, a lista está incompleta; se algum
+   falhou, ela pode estar errada — e nos dois casos a tela dizia que não havia
+   entrega nenhuma. Ver [[feedback_zero_nao_e_resultado]]. */
+function vazioEntregas(per) {
+  if (per.faltando.length) {
+    return { titulo: 'Carregando o ERP…',
+             dica: `Pedindo ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'} ao Mubisys, três por vez (25–40 s cada, depois fica em cache).` };
+  }
+  if (per.comErro.length) {
+    return { titulo: 'O ERP não respondeu neste período',
+             dica: `${per.comErro.length} mês${per.comErro.length === 1 ? ' não veio' : 'es não vieram'} do Mubisys. Não quer dizer que não houve entrega — quer dizer que não deu para perguntar. Tente de novo em alguns minutos.` };
+  }
+  return { titulo: 'Nenhuma entrega no período segundo o ERP',
+           dica: 'O ERP não tem O.S com status ENTREGUE e data de entrega neste intervalo.' };
+}
+
 function renderEntregas() {
   const el = document.getElementById('panel-entregas');
   if (!el) return;
@@ -750,7 +767,7 @@ function renderEntregas() {
         <td>${dataBR(erp.data)}</td>
         <td class="num">${valorTxt(erp.valor)}</td>
       </tr>`; }).join('')}</tbody>
-    <tfoot><tr><td colspan="5">${lista.length} O.S entregues no período${lista.length > TETO_LINHAS ? ` · mostrando as ${TETO_LINHAS} mais recentes` : ''}${semValorLista ? ` · ${semValorLista} sem valor` : ''}${per.faltando.length ? ` · carregando ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'}…` : ''}${per.truncou ? ` · <span class="badge sem-valor">intervalo longo demais: entraram só os primeiros ${TETO_MESES} meses</span>` : ''}</td><td class="num">${dinheiroCasa(totLista)}</td></tr></tfoot>
+    <tfoot><tr><td colspan="5">${lista.length} O.S entregues no período${lista.length > TETO_LINHAS ? ` · mostrando as ${TETO_LINHAS} mais recentes` : ''}${semValorLista ? ` · ${semValorLista} sem valor` : ''}${per.faltando.length ? ` · carregando ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'}…` : ''}${per.comErro.length ? ` · <span class="badge sem-valor">${per.comErro.length} mês${per.comErro.length === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}${per.truncou ? ` · <span class="badge sem-valor">intervalo longo demais: entraram só os primeiros ${TETO_MESES} meses</span>` : ''}</td><td class="num">${dinheiroCasa(totLista)}</td></tr></tfoot>
   </table></div>`;
   const cardFn = typeof osCardHTML === 'function' ? osCardHTML : null;
   const cards = cardFn ? `<div class="cards-grid">${visiveis.filter(x => x.card).map(x => cardFn(x.card)).join('')}</div>` : tabela;
@@ -769,7 +786,7 @@ function renderEntregas() {
         <label>Tipo de serviço <select id="ent-tipo"><option value="">Todos</option>${tipos.map(t => opt(t, tipo)).join('')}</select></label>
         <span class="casa-vista"><button class="btn-ghost btn-sm ${STATE._entVista === 'tabela' ? 'active' : ''}" data-ent-vista="tabela">Tabela</button><button class="btn-ghost btn-sm ${STATE._entVista === 'cards' ? 'active' : ''}" data-ent-vista="cards">Cards</button></span>
       </div>
-      ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', per.faltando.length ? 'Carregando o ERP…' : 'Nenhuma entrega no período segundo o ERP', per.faltando.length ? `Pedindo ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'} ao Mubisys, três por vez (25–40 s cada, depois fica em cache).` : 'O ERP não tem O.S com status ENTREGUE e data de entrega neste intervalo.')}
+      ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', vazioEntregas(per).titulo, vazioEntregas(per).dica)}
       ${relatoriosEntregasHTML(lista.map(x => x.erp), porNumero, estadoPCP)}
       <section class="casa-prod-box casa-lancar">
         <h3>Lançamento manual — baixadas pelo ERP fora do sistema · ${aLancar.length}</h3>

@@ -448,3 +448,11 @@ test('sem resposta do ERP o valor sai "…", nunca R$ 0,00', () => {
   // E com dado na mão o valor sai, mesmo que um mês ainda esteja vindo.
   assert.match(t.run("valorKpiCasa({ total: 1500, n: 4, comErro: 1, faltando: 1 })"), /1\.500,00/);
 });
+
+test('lista vazia só afirma "não houve entrega" quando o ERP respondeu', () => {
+  const t = casa([], {}, ELENCO);
+  assert.match(t.run("vazioEntregas({ faltando: [1,2], comErro: [] }).titulo"), /Carregando/);
+  assert.match(t.run("vazioEntregas({ faltando: [], comErro: ['2025-03'] }).titulo"), /não respondeu/);
+  assert.match(t.run("vazioEntregas({ faltando: [], comErro: ['2025-03'] }).dica"), /não quer dizer que não houve entrega|Não quer dizer/);
+  assert.match(t.run("vazioEntregas({ faltando: [], comErro: [] }).titulo"), /Nenhuma entrega no período/);
+});
