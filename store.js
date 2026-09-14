@@ -10,7 +10,8 @@ const STORE = (() => {
     INSTALADOR: 'impresilk_inst_instalador',
     FILA:       'impresilk_inst_fila',
     LASTSYNC:   'impresilk_inst_lastsync',
-    VALORES:    'impresilk_inst_valores'
+    VALORES:    'impresilk_inst_valores',
+    ELENCO:     'impresilk_inst_elenco'
   };
 
   // ── IndexedDB (fotos) ──────────────────────────────────────────────────────
@@ -605,6 +606,23 @@ const STORE = (() => {
     }
   }
 
+  // ── Elenco: pessoas do RH e veículos do Ativos (uma base só) ─────────────
+  let _elenco = lsGet(K.ELENCO, { em: '', pessoas: [], veiculos: [] });
+  function elenco() { return _elenco || { pessoas: [], veiculos: [] }; }
+  async function pullElenco(forcar) {
+    if (!navigator.onLine) return;
+    const idade = _elenco.em ? Date.now() - new Date(_elenco.em).getTime() : Infinity;
+    if (!forcar && idade < 30 * 60000) return;
+    try {
+      const res = await api({ action: 'elenco' });
+      if (res && Array.isArray(res.pessoas)) {
+        _elenco = { em: res.em || new Date().toISOString(), pessoas: res.pessoas, veiculos: res.veiculos || [] };
+        lsSet(K.ELENCO, _elenco);
+        _notifyListeners('elenco', _elenco);
+      }
+    } catch (e) { /* sem sessão: o pull normal avisa */ }
+  }
+
   // ── Fotos ─────────────────────────────────────────────────────────────────
   // Comprime imagem antes de gravar (max 1280px, JPEG 0.75)
   async function compressImage(file) {
@@ -706,7 +724,9 @@ const STORE = (() => {
       localStorage.removeItem(K.FILA);
       localStorage.removeItem(K.LASTSYNC);
       localStorage.removeItem(K.VALORES);
+      localStorage.removeItem(K.ELENCO);
       _valores = { em: '', mapa: {} };
+      _elenco = { em: '', pessoas: [], veiculos: [] };
       const cfg = lsGet(K.CFG, null);
       if (cfg && typeof cfg === 'object') {
         const { usuarios: _u, funcionarios: _f, ...resto } = cfg;
@@ -836,7 +856,7 @@ const STORE = (() => {
     // Identidade
     getUser, setUser, getInstalador, setInstalador, getLastSync, limparCache,
     // Sync
-    trySync, pull, pullCFG, pullValores, valores, valoresEm,
+    trySync, pull, pullCFG, pullValores, valores, valoresEm, pullElenco, elenco,
     // Fotos
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos

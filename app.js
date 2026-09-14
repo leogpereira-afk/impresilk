@@ -710,7 +710,7 @@ function enterApp() {
   // Valor das O.S (Entregas/Performance): só para quem enxerga dinheiro.
   const podeVerValores = () => ['admin', 'pcp'].includes(String((STATE.user || {}).papel || ''));
   STORE.pronto()
-    .then(() => { refreshAposPull(); STORE.pull(refreshAposPull); STORE.trySync(); if (podeVerValores()) STORE.pullValores(true); })
+    .then(() => { refreshAposPull(); STORE.pull(refreshAposPull); STORE.trySync(); if (podeVerValores()) STORE.pullValores(true); STORE.pullElenco(); })
     .catch(() => { STORE.pull(refreshAposPull); STORE.trySync(); });
 
   // Pull periódico a cada 30s (incluindo a CFG, senão as permissões ficam
@@ -722,6 +722,7 @@ function enterApp() {
     STORE.pull(refreshAposPull);
     STORE.trySync();
     if (podeVerValores()) STORE.pullValores(); // a cada 5 min, por dentro
+    STORE.pullElenco(); // a cada 30 min, por dentro
   }, 30000);
 
   // Vigia da importação Mubisys: checa agora e a cada 15 min (banner global).
@@ -3871,6 +3872,23 @@ function renderControle() {
       </div>
     </div>`;
 
+  // ── Mensagem da programação (WhatsApp) — o formato que o dono usa ────────
+  const msg = mensagemDiaCfg();
+  const gerentes = (STORE.elenco().pessoas || []).filter(p => /montagem|instala|produ|gest|dire/i.test(p.setor || '') || true);
+  const mensagemHTML = `
+    <div class="cfg-section">
+      <h3>💬 Mensagem da programação do dia</h3>
+      <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">É o texto que sai no botão "Mensagem do dia" (Calendário e Instalação). O cabeçalho, as O.S, a equipe e o veículo são montados sozinhos; aqui ficam as partes fixas.</p>
+      <div class="field"><label>Regra crítica (sai logo abaixo do título)</label>
+        <textarea data-msg-campo="regra" rows="4" ${ro ? 'disabled' : ''}>${esc(msg.regra)}</textarea></div>
+      <div class="field"><label>Lembretes (um por linha — saem no fim, se houver)</label>
+        <textarea data-msg-campo="lembretes" rows="3" ${ro ? 'disabled' : ''} placeholder="Ex.: Conferir EPI antes de sair">${esc((msg.lembretes || []).join('\n'))}</textarea></div>
+      <div class="field"><label>Gerente de instalação (assina a mensagem)</label>
+        <input data-msg-campo="gerente" list="msg-gerentes" value="${esc(msg.gerente)}" placeholder="Nome como deve aparecer" ${ro ? 'disabled' : ''}>
+        <datalist id="msg-gerentes">${gerentes.map(p => `<option value="${esc(p.nome)}">`).join('')}</datalist></div>
+      <p class="text-muted" style="font-size:.72rem">Equipe sai como <em>Apelido (Nome completo)</em> pela ficha do RH e o veículo com lugares/grade/motorista pelo Ativos do Painel — uma base só. Elenco atualizado ${STORE.elenco().em ? new Date(STORE.elenco().em).toLocaleString('pt-BR') : 'ainda não neste aparelho'}.</p>
+    </div>`;
+
   // ── Níveis de acesso configuráveis (somente admin) ───────────────────────
   const PERM = getPermissoes();
   const PAPEIS = ['pcp', 'montagem', 'operacao', 'comercial'];
@@ -3919,7 +3937,7 @@ function renderControle() {
   // contatos e por fim as listas do dia a dia em grid compacto.
   el.innerHTML =
     (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') +
-    saudeHTML + usuariosHTML + niveisHTML + mubisysHTML + contatosHTML +
+    saudeHTML + usuariosHTML + niveisHTML + mubisysHTML + contatosHTML + mensagemHTML +
     `<h3 class="cfg-group-tit">📋 Listas — equipe, recursos e opções</h3>
      <div class="cfg-grid">${listasHTML}</div>`;
 
@@ -3974,6 +3992,17 @@ function renderControle() {
     if (ct && !confirm(`Excluir o contato "${ct.nome}"?`)) return;
     (c.funcionarios || []).splice(+b.dataset.contDel, 1);
     STORE.saveCFG(c); renderControle();
+  });
+  // Mensagem da programação: grava ao sair do campo
+  $$('[data-msg-campo]', el).forEach(inp => inp.onchange = () => {
+    const c = STORE.getCFG();
+    const m = Object.assign({}, mensagemDiaCfg(), c.mensagemDia || {});
+    const k = inp.dataset.msgCampo;
+    if (k === 'lembretes') m.lembretes = inp.value.split('\n').map(x => x.trim()).filter(Boolean);
+    else m[k] = inp.value.trim();
+    c.mensagemDia = m;
+    STORE.saveCFG(c);
+    toast('Mensagem da programação salva', 'success');
   });
   const addCont = $('[data-cont-add]', el);
   if (addCont) addCont.onclick = () => {
@@ -4399,6 +4428,167 @@ async function exportarFichaPDF(os) {
   w.document.close();
 }
 
+/* ── MENSAGEM DA PROGRAMAÇÃO DO DIA ─────────────────────────────────────────
+   Formato dado pelo dono em 14/09/2026 ("hoje uso esse padrão"), montado a
+   partir do que a O.S já tem. Partes fixas (regra crítica, lembretes,
+   gerente) vêm de Configurações; equipe e veículo vêm do elenco (RH + Ativos),
+   uma base só. Nada aqui inventa: sem ficha, sai o apelido; sem lotação
+   cadastrada, sai só o nome do carro. */
+const REGRA_CRITICA_PADRAO = '“Serviço só sai do Comercial quando houver OS validada, prazo acordado, dossiê completo, exportação total e liberação do Diretor (na fase inicial). Instalação só sai com confirmação no dia.”\nQuem liberar a equipe sem essa confirmação por telefone ou WhatsApp assume a responsabilidade pelos problemas causados (tempo, custo, retrabalho e desgaste).';
+function mensagemDiaCfg() {
+  const m = (STORE.getCFG().mensagemDia) || {};
+  return {
+    regra: typeof m.regra === 'string' ? m.regra : REGRA_CRITICA_PADRAO,
+    lembretes: Array.isArray(m.lembretes) ? m.lembretes : [],
+    gerente: typeof m.gerente === 'string' ? m.gerente : '',
+  };
+}
+// Emoji do serviço pelo que o nome diz. Sem palavra conhecida, ferramenta.
+function emojiServico(servico) {
+  const t = String(servico || '').toLowerCase();
+  const mapa = [
+    [/solar|fotovolt|energia/, '☀️'], [/acr[ií]l|letra|caixa|lumin|neon/, '💎'],
+    [/plotag|adesiv|envelop|vinil|pelic/, '🖼️'], [/lona|banner|faixa|tenda/, '🏳️'],
+    [/placa|fachada|acm|totem|sinaliz|painel|letreiro/, '🪧'], [/evento|feira|stand/, '🎪'],
+    [/manuten|troca|reparo|retrab/, '🔧'], [/entrega|retirad/, '📦'],
+  ];
+  for (const [re, e] of mapa) if (re.test(t)) return e;
+  return '🛠️';
+}
+function emojiVeiculo(v) {
+  const c = String((v && v.categoria) || '').toLowerCase();
+  if (/caminh/.test(c)) return '🚚';
+  if (/utilit|picape|pickup|strada|saveiro/.test(c) || /strada|saveiro|montana/i.test((v && v.nome) || '')) return '🛻';
+  if (/moto/.test(c)) return '🏍️';
+  return '🚗';
+}
+function normNome(s) { return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
+// Apelido da O.S → "Apelido (Nome completo)" pela ficha do RH.
+function pessoaDoElenco(apelido) {
+  const ap = normNome(apelido);
+  if (!ap) return null;
+  const pessoas = STORE.elenco().pessoas || [];
+  // Como o PCP escreve: "Osmane" (apelido do RH), "Adriano Pinheiro" (início
+  // do nome, que separa os dois Adrianos). Um só nome sem apelido no RH fica
+  // ambíguo de propósito -- melhor sair só o apelido do que o nome errado.
+  const tokens = ap.split(' ');
+  const prefixo = p => { const n = normNome(p.nome).split(' '); return tokens.every((t, i) => n[i] === t); };
+  const porPrefixo = pessoas.filter(prefixo);
+  return pessoas.find(p => normNome(p.apelido) === ap)
+      || pessoas.find(p => normNome(p.nome) === ap)
+      || (tokens.length >= 2 && porPrefixo.length === 1 ? porPrefixo[0] : null)
+      || (tokens.length === 1 && porPrefixo.length === 1 ? porPrefixo[0] : null)
+      || null;
+}
+function rotuloPessoaMsg(apelido) {
+  const p = pessoaDoElenco(apelido);
+  if (!p) return String(apelido || '').trim();
+  const ap = String(apelido || '').trim();
+  return normNome(ap) === normNome(p.nome) ? p.nome : `${ap} (${p.nome})`;
+}
+function veiculoDoElenco(nome) {
+  const n = normNome(nome);
+  if (!n) return null;
+  const vs = STORE.elenco().veiculos || [];
+  return vs.find(v => normNome(v.nome) === n) || vs.find(v => normNome(v.nome).replace(/\s+/g, '') === n.replace(/\s+/g, '')) || null;
+}
+function rotuloVeiculoMsg(nomeNaOS) {
+  const v = veiculoDoElenco(nomeNaOS);
+  if (!v) return { emoji: '🚗', texto: String(nomeNaOS || '').trim() };
+  const partes = [];
+  if (v.lugares) partes.push(`${String(v.lugares).padStart(2, '0')} lugares`);
+  if (v.grade) partes.push('possui grade');
+  if (v.motorista) partes.push(`motorista: ${rotuloPessoaMsg(v.motorista).replace(/^.*\((.*)\)$/, '$1')}`);
+  const nome = v.modelo && !normNome(v.nome).includes(normNome(v.modelo).split(' ')[0]) ? `${v.modelo} ${v.nome}` : v.nome;
+  return { emoji: emojiVeiculo(v), texto: partes.length ? `${nome} (${partes.join('; ')})` : nome };
+}
+function listarPessoasMsg(nomes) {
+  const r = (nomes || []).map(rotuloPessoaMsg).filter(Boolean);
+  if (!r.length) return '—';
+  return r.length === 1 ? r[0] : r.slice(0, -1).join(', ') + ' e ' + r[r.length - 1];
+}
+function montarMensagemDia(dia, lista) {
+  const cfgMsg = mensagemDiaCfg();
+  const d = parseLocalDate(dia);
+  const dataBR = d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}` : dia;
+  const sep = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
+  const ordenada = lista.slice().sort((a, b) => ordemHora(a).localeCompare(ordemHora(b)));
+  let txt = `🗓️ PROGRAMAÇÃO DE INSTALAÇÃO ATUALIZADA - ${dataBR} 🛠️\n\n`;
+  if (cfgMsg.regra) txt += `⚠️ REGRA CRÍTICA (Fluxo de Liberação): ${cfgMsg.regra}\n\n`;
+  for (const os of ordenada) {
+    const inst = os.instalacao || {};
+    const hora = inst.periodo === 'Horário' || /^\d{2}:\d{2}$/.test(inst.hora || '') ? (inst.hora || inst.periodo) : (inst.periodo || '—');
+    const veic = rotuloVeiculoMsg(os.veiculo);
+    txt += `${sep}\n`;
+    txt += `⏰ ${hora} 📍 O.S: ${os.numero || '—'} — ${os.cliente || ''}\n`;
+    txt += `${emojiServico(os.servico)} Serviço: ${os.servico || '—'}\n`;
+    txt += `👥 Equipe: ${listarPessoasMsg(os.equipe)}\n`;
+    txt += os.veiculo ? `${veic.emoji} Veículo: ${veic.texto}\n` : `🚗 Veículo: a definir\n`;
+    if (os.endereco) txt += `📍 ${os.endereco}\n`;
+    txt += `\n`;
+  }
+  txt += `${sep}\n`;
+  if (cfgMsg.lembretes.length) txt += `\n📌 Lembretes:\n${cfgMsg.lembretes.map(l => `• ${l}`).join('\n')}\n`;
+  if (cfgMsg.gerente) txt += `\n👷 Gerente de instalação: ${cfgMsg.gerente}`;
+  return txt.trim();
+}
+// Preview antes de enviar: dá para ler, ajustar, copiar e abrir. Registra o
+// envio no aparelho e na config (quem mandou, quando) — antes ninguém sabia
+// se a programação do dia tinha ido para o grupo.
+function abrirMensagemDia(dia) {
+  const lista = servicosDoDia(dia);
+  if (!lista.length) { toast('Nenhum serviço agendado nesse dia', 'error'); return; }
+  const texto = montarMensagemDia(dia, lista);
+  const contatos = (STORE.getCFG().funcionarios || []);
+  const envios = (STORE.getCFG().mensagemDia || {}).envios || {};
+  const ja = envios[dia];
+  const old = $('#wpp-picker'); if (old) old.remove();
+  const box = document.createElement('div');
+  box.id = 'wpp-picker';
+  box.className = 'wpp-picker-overlay';
+  box.innerHTML = `
+    <div class="wpp-picker wpp-picker-larga">
+      <div class="wpp-picker-head"><strong>💬 Programação de ${esc(dia.slice(8, 10))}/${esc(dia.slice(5, 7))} · ${lista.length} serviço${lista.length === 1 ? '' : 's'}</strong><button class="modal-close" id="wpp-x">×</button></div>
+      <div class="wpp-picker-body">
+        ${ja ? `<p class="metricas-nota">Já enviada em ${new Date(ja.em).toLocaleString('pt-BR')}${ja.por ? ' por ' + esc(ja.por) : ''}. Enviar de novo substitui o registro.</p>` : ''}
+        <textarea id="wpp-texto" class="wpp-texto" rows="16" spellcheck="false">${esc(texto)}</textarea>
+        <div class="wpp-acoes">
+          <button class="btn-primary" id="wpp-copiar">📋 Copiar texto</button>
+          <button class="btn-success" data-wpp-num="">🟢 Abrir WhatsApp Web</button>
+        </div>
+        ${contatos.length ? `<p class="text-muted" style="font-size:.75rem;margin:10px 0 4px">Ou mandar direto para:</p>${contatos.map(c => `<button class="btn-ghost w-100 mt-6" data-wpp-num="${esc(String(c.numero || '').replace(/\D/g, ''))}">👤 ${esc(c.nome)} <span class="text-muted">(${esc(c.departamento || '—')})</span></button>`).join('')}` : ''}
+      </div>
+    </div>`;
+  document.body.appendChild(box);
+  const fechar = () => box.remove();
+  const registrar = () => {
+    try {
+      const c = STORE.getCFG();
+      const m = Object.assign({}, mensagemDiaCfg(), c.mensagemDia || {});
+      const env = Object.assign({}, m.envios || {});
+      env[dia] = { em: nowISO(), por: (STATE.user && STATE.user.nome) || '' };
+      // Guarda só os últimos 90 dias — a config viaja para todo aparelho.
+      const corte = OPERACAO.somarDias(hojeISO(), -90);
+      for (const k of Object.keys(env)) if (k < corte) delete env[k];
+      m.envios = env; c.mensagemDia = m; STORE.saveCFG(c);
+    } catch (e) { /* registro é conveniência; o envio já aconteceu */ }
+  };
+  const textoAtual = () => $('#wpp-texto', box).value;
+  $('#wpp-x', box).onclick = fechar;
+  box.onclick = e => { if (e.target === box) fechar(); };
+  $('#wpp-copiar', box).onclick = async () => {
+    const t = textoAtual();
+    try { await navigator.clipboard.writeText(t); }
+    catch { const ta = $('#wpp-texto', box); ta.focus(); ta.select(); document.execCommand('copy'); }
+    registrar(); toast('Mensagem copiada — cole no grupo.', 'success');
+  };
+  $$('[data-wpp-num]', box).forEach(b => b.onclick = () => {
+    const num = b.dataset.wppNum;
+    window.open(num ? `https://wa.me/55${num}?text=${encodeURIComponent(textoAtual())}` : `https://wa.me/?text=${encodeURIComponent(textoAtual())}`, '_blank');
+    registrar(); fechar();
+  });
+}
+
 function montarTextoWhatsApp(os) {
   const co = os.checkout || {};
   return `*O.S ${os.numero || '—'}* — ${os.cliente || ''}\n` +
@@ -4517,9 +4707,9 @@ function servicosDoDia(dataISO) {
 
 // Lista de serviços do dia via WhatsApp (link de compartilhamento).
 function whatsappServicosDia(dataISO) {
-  const lista = servicosDoDia(dataISO);
-  if (!lista.length) { toast('Nenhum serviço agendado nesse dia', 'error'); return; }
-  abrirWhatsAppDia(dataISO, lista);
+  // Desde 14/09/2026 abre o preview (formato do dono, copiar/abrir). O
+  // abrirWhatsAppDia antigo fica só como reserva.
+  abrirMensagemDia(dataISO);
 }
 
 // Relatório dos serviços do dia em PDF (impressão).

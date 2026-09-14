@@ -1834,3 +1834,7 @@ body.nav-aberta .nav-fundo { display: block; }
 .casa-prod-box h3 { font-size:.95rem; color:#163654; }
 .casa-prod-box > p { font-size:.82rem; color:#526378; line-height:1.5; }
 .casa-vista .btn-ghost.active { background:#163654; color:#fff; border-color:#163654; }
+.wpp-picker-larga { max-width: 560px; }
+.wpp-texto { width:100%; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; border:1px solid var(--border); border-radius:10px; padding:10px; resize:vertical; background:#fbfcfe; color:#163654; }
+.wpp-acoes { display:flex; gap:8px; margin-top:10px; }
+.wpp-acoes button { flex:1; }

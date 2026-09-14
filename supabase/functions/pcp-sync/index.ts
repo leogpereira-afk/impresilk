@@ -609,6 +609,48 @@ Deno.serve(async (req: Request) => {
         return resp({ valores, em: new Date().toISOString() });
       }
 
+      // ---- elenco: quem instala (RH) e com que carro (Ativos do Painel) ----
+      //
+      // "Usar uma base de dados apenas" (ordem do dono, 14/09/2026): o PCP
+      // deixa de manter lista propria de nomes e carros. As pessoas vem da
+      // ficha do RH (id = 6 primeiros digitos do CPF, nome completo, apelido,
+      // setor) e os veiculos do modulo Ativos do Painel (nome, categoria,
+      // placa, modelo, e os campos de lotacao quando cadastrados).
+      //
+      // So estes campos saem daqui. Salario, endereco, telefone e o resto da
+      // ficha NUNCA passam por esta porta -- a regua larga fica na porta de
+      // dados, nao na tela.
+      case "elenco": {
+        const { data: col, error: e1 } = await sb.from("registros")
+          .select("registro->>nome, registro->>apelido, registro->>cpf, registro->>setor, registro->>dataDesligamento")
+          .eq("colecao", "colaboradores").eq("apagado", false);
+        if (e1) return resp({ error: e1.message }, 500);
+        const pessoas = (col ?? [])
+          .filter((r: any) => String(r.nome || "").trim() && !String(r.dataDesligamento || "").trim())
+          .map((r: any) => {
+            const d = String(r.cpf || "").replace(/\D/g, "");
+            return { id: d.length === 11 ? d.slice(0, 6) : "", nome: String(r.nome).trim(),
+                     apelido: String(r.apelido || "").trim(), setor: String(r.setor || "").trim() };
+          })
+          .sort((a: any, b: any) => a.nome.localeCompare(b.nome));
+        const { data: ativos, error: e2 } = await sb.from("painel_registros")
+          .select("id, registro").eq("colecao", "ativo");
+        if (e2) return resp({ error: e2.message }, 500);
+        const veiculos = (ativos ?? [])
+          .filter((r: any) => r.registro?.tipo === "veiculo" && String(r.registro?.nome || "").trim())
+          .map((r: any) => {
+            const g = r.registro || {}, e = g.especificacao || {};
+            const lug = Number(g.lugares);
+            return { id: r.id, nome: String(g.nome).trim(), categoria: String(g.categoria || ""),
+                     placa: String(e.placa || g.identificacao || ""), modelo: String(e.marcaModelo || ""),
+                     lugares: Number.isFinite(lug) && lug > 0 ? lug : null,
+                     grade: g.possuiGrade === true || g.grade === true,
+                     motorista: String(g.motorista || g.responsavel || "").trim() };
+          })
+          .sort((a: any, b: any) => a.nome.localeCompare(b.nome));
+        return resp({ pessoas, veiculos, em: new Date().toISOString() });
+      }
+
       case "getCfg": {
         const cfg = (await getCfg()) ?? {};
         // Papel nao-admin nao recebe dados sensiveis: a lista de usuarios (com
