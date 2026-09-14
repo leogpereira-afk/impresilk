@@ -12,8 +12,14 @@ const STORE = (() => {
     LASTSYNC:   'impresilk_inst_lastsync',
     VALORES:    'impresilk_inst_valores',
     ELENCO:     'impresilk_inst_elenco',
-    ENTREGUES:  'impresilk_inst_entregues'
+    ENTREGUES:  'impresilk_inst_entregues',
+    CURSOR:     'impresilk_inst_cursor',   // carimbo do servidor do ultimo pull
+    CFGVER:     'impresilk_inst_cfgver'    // versao da config que o aparelho tem
   };
+  // O que o aparelho GUARDA: abertas + finalizadas nos ultimos N dias (ordem do
+  // dono, 14/09/2026). O resto so vem por busca. E a unica regua: o servidor
+  // recebe este numero, nao tem o dele.
+  const JANELA_LOCAL_DIAS = 60;
 
   // ── IndexedDB (fotos) ──────────────────────────────────────────────────────
   let _db = null;
@@ -193,8 +199,12 @@ const STORE = (() => {
     return _prontoP;
   }
 
+  // Historico buscado sob demanda (Finalizados/Arquivados fora da janela local).
+  // Nao vai para o disco: some ao recarregar, volta na proxima busca.
+  const _osHistorico = new Map();
+  function historico() { return [..._osHistorico.values()]; }
   function getOS(id) {
-    return getAllOS().find(o => o.id === id) || null;
+    return getAllOS().find(o => o.id === id) || _osHistorico.get(id) || null;
   }
 
   function _setAllOS(arr) {
@@ -547,79 +557,215 @@ const STORE = (() => {
   }
 
   // ── pull: busca lista do servidor e mescla ────────────────────────────────
-  async function pull(onRefresh) {
-    if (!navigator.onLine) return;
+  /* PULL INCREMENTAL (14/09/2026). Antes: a lista inteira, 6 paginas, a cada
+     30 s, em todo aparelho -- 5 MB por minuto e meio para receber 2 O.S por
+     hora. Agora: "o que mudou desde o carimbo", que quase sempre e nada.
+     Completo so no primeiro uso, quando o cursor envelhece (6 h) ou quando o
+     incremental vem cheio. O completo tambem PODA: o aparelho guarda abertas
+     + finalizadas de JANELA_LOCAL_DIAS; o resto sai (o historico vem por
+     busca). Edicao pendente na fila nunca sai nem e sobrescrita. */
+  let _pulling = false;
+  async function pull(onRefresh, opts = {}) {
+    if (!navigator.onLine) return { updated: false, offline: true };
+    if (_pulling) return { updated: false, ocupado: true };   // rede lenta nao empilha pulls
+    _pulling = true;
     try {
-      // Só uma lista completa autoriza remover registros do cache. A coleta
-      // não altera a memória; edição feita durante a rede será lida no merge.
-      const remotas = new Map();
-      const cursores = new Set();
-      let consulta = {action:'list',offset:0};
-      for (let pagina=0; ; pagina++) {
-        const chave = JSON.stringify(consulta);
-        if (pagina >= 1000 || cursores.has(chave)) {
-          _notifyListeners('pull-truncado', {paginas:pagina});
-          return {updated:false,incompleta:true};
-        }
-        cursores.add(chave);
-        const res = await api(consulta);
-        if (!res || !Array.isArray(res.os) || res.os.some(o => !o || !o.id)) {
-          _notifyListeners('pull-truncado', {paginas:pagina+1});
-          return {updated:false,incompleta:true};
-        }
-        for (const o of res.os) remotas.set(o.id,o);
-        if (res.nextAfter != null) consulta = {action:'list',after:res.nextAfter};
-        else if (res.nextOffset != null) consulta = {action:'list',offset:res.nextOffset};
-        else break;
+      const cursor = lsGet(K.CURSOR, null);
+      const idade = cursor && cursor.em ? Date.now() - new Date(cursor.em).getTime() : Infinity;
+      const completo = !!opts.completo || !cursor || !cursor.em || idade > 6 * 3600000;
+      if (!completo) {
+        const r = await _pullIncremental(cursor.em, onRefresh);
+        if (!r.cheio) return r;
+        // 500 mudancas desde o cursor: refaz completo em vez de fingir.
       }
-
-      const fila = getQueue();
-      const pendentes = new Set(fila.filter(q => q.action === 'upsert' && q.os?.id).map(q => q.os.id));
-      const excluidas = new Set(fila.filter(q => q.action === 'delete').map(q => q.id));
-      const local = getAllOS();
-      const porId = new Map(local.map(o => [o.id,o]));
-      const resultado = [];
-      let changed = false;
-      for (const [id,remote] of remotas) {
-        if (excluidas.has(id)) continue;
-        const atual = porId.get(id);
-        const revR = typeof remote.rev === 'number' ? remote.rev : null;
-        const revL = typeof atual?.rev === 'number' ? atual.rev : null;
-        const novo = !atual || ((revR !== null && revL !== null)
-          ? revR > revL
-          : new Date(remote.atualizadoEm || 0) > new Date(atual.atualizadoEm || 0));
-        if (!pendentes.has(id) && novo) { resultado.push(remote); changed=true; }
-        else resultado.push(atual || remote);
-      }
-      for (const o of local) if (pendentes.has(o.id) && !remotas.has(o.id) && !excluidas.has(o.id)) resultado.push(o);
-      if (resultado.length !== local.length) changed=true;
-      if (changed) {
-        _setAllOS(resultado);
-        lsSet(K.LASTSYNC,new Date().toISOString());
-        if (typeof onRefresh === 'function') onRefresh();
-      }
-      const q = getQueue();
-      _notifySync(q.length ? 'pending' : 'ok',q.length);
-      return {updated:changed};
+      return await _pullCompleto(onRefresh);
     } catch (e) {
       if (e && (e.semSessao || e.status === 401 || e.status === 403)) {
-        _notifySync('sem-sessao',getQueue().length);
-        _notifyListeners('sem-sessao',{});
-      } else _notifySync('offline',getQueue().length);
+        _notifySync('sem-sessao', getQueue().length);
+        _notifyListeners('sem-sessao', {});
+      } else _notifySync('offline', getQueue().length);
+      return { updated: false, erro: true };
+    } finally { _pulling = false; }
+  }
+
+  const _revMaisNova = (remote, atual) => {
+    const revR = typeof remote.rev === 'number' ? remote.rev : null;
+    const revL = typeof atual?.rev === 'number' ? atual.rev : null;
+    return !atual || ((revR !== null && revL !== null)
+      ? revR > revL
+      : new Date(remote.atualizadoEm || 0) > new Date(atual.atualizadoEm || 0));
+  };
+
+  async function _pullIncremental(since, onRefresh) {
+    const res = await api({ action: 'list', since });
+    if (!res || !Array.isArray(res.os)) { _notifyListeners('pull-truncado', { paginas: 1 }); return { updated: false, incompleta: true }; }
+    if (res.cheio) return { updated: false, cheio: true };
+    const fila = getQueue();
+    const pendentes = new Set(fila.filter(q => q.action === 'upsert' && q.os?.id).map(q => q.os.id));
+    const excluidas = new Set(fila.filter(q => q.action === 'delete').map(q => q.id));
+    const local = getAllOS();
+    const porId = new Map(local.map(o => [o.id, o]));
+    let changed = false;
+    for (const r of res.os) {
+      if (!r || !r.id) continue;
+      if (r.apagado) {
+        // Lapide de outro aparelho: sai daqui -- a menos que ESTE aparelho tenha
+        // edicao pendente dela (o upsert ressuscita no servidor, por desenho).
+        if (porId.has(r.id) && !pendentes.has(r.id)) { porId.delete(r.id); changed = true; }
+        continue;
+      }
+      if (excluidas.has(r.id) || pendentes.has(r.id)) continue;
+      const atual = porId.get(r.id);
+      if (_revMaisNova(r, atual)) { porId.set(r.id, r); changed = true; }
+    }
+    if (changed) { _setAllOS([...porId.values()]); if (typeof onRefresh === 'function') onRefresh(); }
+    lsSet(K.CURSOR, { em: res.agora || new Date().toISOString(), modo: 'incremental' });
+    lsSet(K.LASTSYNC, new Date().toISOString());
+    const q = getQueue();
+    _notifySync(q.length ? 'pending' : 'ok', q.length);
+    return { updated: changed, incremental: true, mudancas: res.os.length };
+  }
+
+  async function _pullCompleto(onRefresh) {
+    // So uma lista completa autoriza remover registros do cache. A coleta
+    // nao altera a memoria; edicao feita durante a rede sera lida no merge.
+    const remotas = new Map();
+    const cursores = new Set();
+    let consulta = { action: 'list', escopo: 'recentes', dias: JANELA_LOCAL_DIAS };
+    let agora = '';
+    for (let pagina = 0; ; pagina++) {
+      const chave = JSON.stringify(consulta);
+      if (pagina >= 1000 || cursores.has(chave)) {
+        _notifyListeners('pull-truncado', { paginas: pagina });
+        return { updated: false, incompleta: true };
+      }
+      cursores.add(chave);
+      const res = await api(consulta);
+      if (!res || !Array.isArray(res.os) || res.os.some(o => !o || !o.id)) {
+        _notifyListeners('pull-truncado', { paginas: pagina + 1 });
+        return { updated: false, incompleta: true };
+      }
+      // O carimbo e o da PRIMEIRA pagina: o que mudar durante a paginacao tem
+      // atualizado_em maior que ele e chega no proximo incremental.
+      if (!agora) agora = res.agora || new Date().toISOString();
+      for (const o of res.os) remotas.set(o.id, o);
+      if (res.nextAfter != null) consulta = { ...consulta, after: res.nextAfter };
+      else if (res.nextOffset != null) consulta = { ...consulta, offset: res.nextOffset };
+      else break;
+    }
+
+    const fila = getQueue();
+    const pendentes = new Set(fila.filter(q => q.action === 'upsert' && q.os?.id).map(q => q.os.id));
+    const excluidas = new Set(fila.filter(q => q.action === 'delete').map(q => q.id));
+    const local = getAllOS();
+    const porId = new Map(local.map(o => [o.id, o]));
+    const resultado = [];
+    let changed = false;
+    for (const [id, remote] of remotas) {
+      if (excluidas.has(id)) continue;
+      const atual = porId.get(id);
+      if (!pendentes.has(id) && _revMaisNova(remote, atual)) { resultado.push(remote); changed = true; }
+      else resultado.push(atual || remote);
+    }
+    // O que o servidor nao mandou sai daqui (poda por janela, lapide, ou
+    // exclusao) -- menos o que este aparelho ainda nao conseguiu enviar.
+    for (const o of local) if (pendentes.has(o.id) && !remotas.has(o.id) && !excluidas.has(o.id)) resultado.push(o);
+    if (resultado.length !== local.length) changed = true;
+    if (changed) {
+      _setAllOS(resultado);
+      if (typeof onRefresh === 'function') onRefresh();
+    }
+    lsSet(K.CURSOR, { em: agora, modo: 'completo' });
+    lsSet(K.LASTSYNC, new Date().toISOString());
+    const q = getQueue();
+    _notifySync(q.length ? 'pending' : 'ok', q.length);
+    return { updated: changed, completo: true, total: remotas.size };
+  }
+
+  /* HISTORICO SOB DEMANDA: Finalizados/Arquivados fora da janela local, ou uma
+     busca por numero/cliente. Vai para _osHistorico (memoria), nunca para o
+     cache do aparelho. Ate 5 paginas; se cortar, avisa em `truncou`. */
+  async function buscarHistorico({ de = '', ate = '', q = '' } = {}) {
+    if (!navigator.onLine) return { itens: [], offline: true };
+    const itens = [];
+    let consulta = { action: 'list', escopo: 'finalizadas', de, ate, q };
+    let truncou = false;
+    for (let pagina = 0; pagina < 5; pagina++) {
+      const res = await api(consulta);
+      if (!res || !Array.isArray(res.os)) break;
+      for (const o of res.os) { if (o && o.id) { itens.push(o); if (!getAllOS().some(x => x.id === o.id)) _osHistorico.set(o.id, o); } }
+      if (res.nextAfter == null) { truncou = false; break; }
+      consulta = { ...consulta, after: res.nextAfter };
+      truncou = true;
+    }
+    _notifyListeners('historico', { n: itens.length, truncou });
+    return { itens, truncou };
+  }
+
+  /* ── MAESTRO: um relogio so para toda a sincronizacao ──────────────────────
+     Antes eram tres timers e uma rajada no boot; agora um ciclo, que nunca roda
+     por cima de si mesmo e sabe tres coisas que os timers nao sabiam:
+       - aba ESCONDIDA nao precisa de dado a cada 30 s (3 min basta);
+       - erro seguido merece esperar mais (30 s -> 1 -> 2 -> 5 min), nao martelar;
+       - voltar a aba, ou voltar a rede, e hora de sincronizar AGORA.
+     Config a cada 5 min (com versao, 40 bytes se nada mudou), valores a cada
+     5 min, elenco a cada 30 min -- e o pull incremental a cada volta. */
+  const MAESTRO = { visivelMs: 30000, ocultoMs: 180000, tetoMs: 300000, cfgMs: 5 * 60000, valoresMs: 5 * 60000, elencoMs: 30 * 60000 };
+  let _mOpts = null, _mTimer = null, _mFalhas = 0, _mCiclando = false;
+  const _mUltimo = { cfg: 0, valores: 0, elenco: 0 };
+  const _visivel = () => (typeof document === 'undefined') || document.visibilityState !== 'hidden';
+  function _agendar() {
+    if (_mTimer) clearTimeout(_mTimer);
+    const base = _visivel() ? MAESTRO.visivelMs : MAESTRO.ocultoMs;
+    const ms = Math.min(MAESTRO.tetoMs, base * Math.pow(2, Math.min(_mFalhas, 4)));
+    _mTimer = setTimeout(() => _ciclo('agenda'), ms);
+  }
+  async function _ciclo(motivo) {
+    if (_mCiclando || !_mOpts) return;
+    _mCiclando = true;
+    let ok = true;
+    try {
+      await trySync();
+      const r = await pull(_mOpts.aoAtualizar);
+      if (r && (r.erro || r.offline)) ok = false;
+      const t = Date.now();
+      if (t - _mUltimo.cfg > MAESTRO.cfgMs) { _mUltimo.cfg = t; const mudou = await pullCFG(); if (mudou && _mOpts.aoCfg) _mOpts.aoCfg(); }
+      if (_mOpts.podeVerValores && _mOpts.podeVerValores() && t - _mUltimo.valores > MAESTRO.valoresMs) { _mUltimo.valores = t; await pullValores(true); }
+      if (t - _mUltimo.elenco > MAESTRO.elencoMs) { _mUltimo.elenco = t; await pullElenco(); }
+    } catch { ok = false; }
+    finally {
+      _mFalhas = ok ? 0 : _mFalhas + 1;
+      _mCiclando = false;
+      _agendar();
     }
   }
+  function iniciarMaestro(opts) {
+    _mOpts = opts || {};
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('visibilitychange', () => { if (_visivel()) _ciclo('visivel'); });
+    }
+    if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('online', () => _ciclo('online'));
+    return _ciclo('inicio');
+  }
+  function sincronizarAgora() { return _ciclo('pedido'); }
+
   async function pullCFG() {
     if (!navigator.onLine) return;
     // Se há um setCfg pendente na fila, a config local é mais nova que a do
     // servidor — não sobrescrever (evita perder níveis/usuários/funcionários
     // editados offline). O trySync envia a versão local em seguida.
-    if (getQueue().some(x => x.action === 'setCfg')) return;
+    if (getQueue().some(x => x.action === 'setCfg')) return false;
     try {
-      const res = await api({ action: 'getCfg' });
+      // Manda a versao que ja tem: se nada mudou, volta {semMudanca} e nada e gravado.
+      const res = await api({ action: 'getCfg', seVersao: lsGet(K.CFGVER, '') || '' });
+      if (res && res.semMudanca) return false;
       if (res.cfg && Object.keys(res.cfg).length) {
         const merged = Object.assign(getCFG(), res.cfg);
         lsSet(K.CFG, merged);
+        if (res.versao) lsSet(K.CFGVER, res.versao);
+        return true;
       }
+      return false;
     } catch (e) {
       if (e && (e.semSessao || e.status === 401 || e.status === 403)) {
         _notifySync('sem-sessao', getQueue().length);
@@ -988,6 +1134,9 @@ const STORE = (() => {
       localStorage.removeItem(K.VALORES);
       localStorage.removeItem(K.ELENCO);
       localStorage.removeItem(K.ENTREGUES);
+      localStorage.removeItem(K.CURSOR);
+      localStorage.removeItem(K.CFGVER);
+      _osHistorico.clear();
       _entregues = {};
       _valores = { em: '', mapa: {} };
       _elenco = ELENCO_VAZIO;
@@ -1121,6 +1270,7 @@ const STORE = (() => {
     getUser, setUser, getInstalador, setInstalador, getLastSync, limparCache,
     // Sync
     trySync, pull, pullCFG, pullValores, valores, valoresEm, pullElenco, elenco, pullEntreguesMes, entreguesMes, entreguesFalhou, anosEntregues,
+    iniciarMaestro, sincronizarAgora, buscarHistorico, historico, JANELA_LOCAL_DIAS,
     // Fotos
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos

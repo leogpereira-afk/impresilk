@@ -211,6 +211,13 @@ async function getCfg(): Promise<any> {
   const { data } = await sb.from("pcp_config_global").select("config").eq("id", true).maybeSingle();
   return data?.config ?? null;
 }
+// Config com o carimbo: o cliente manda `seVersao` e, se nada mudou, recebe
+// 40 bytes em vez da config inteira. Ela mudou pela ultima vez em 18/08 e era
+// baixada a cada 30 s por todo aparelho.
+async function getCfgComVersao(): Promise<{ config: any; versao: string }> {
+  const { data } = await sb.from("pcp_config_global").select("config, atualizado_em").eq("id", true).maybeSingle();
+  return { config: data?.config ?? null, versao: String(data?.atualizado_em ?? "") };
+}
 
 // ---------------------------------------------------------------- fotos
 // O app manda (e espera de volta) uma DATA URL, que vai direto para img.src.
@@ -454,33 +461,73 @@ Deno.serve(async (req: Request) => {
       // Pagina NO BANCO (antes carregava todas as chaves e fatiava na memoria --
       // com 496 O.S isso ja era uma varredura completa a cada consulta).
       case "list": {
+        /* TRES MODOS, UMA PORTA (14/09/2026). Medido no app parado: 6 paginas
+           de 150 O.S a cada 30 s, 5 MB por minuto e meio POR APARELHO, para
+           receber em media 2 O.S por hora. Em 44 das ultimas 48 horas nada
+           mudou. Numa fabrica com wifi fraco isso e "a conexao esta ruim".
+
+           1. INCREMENTAL (`since`): so o que mudou depois do carimbo -- inclui
+              LAPIDES (apagado=true) como {id, apagado:true}, senao a exclusao
+              feita em outro aparelho nunca chega. Devolve `agora` (relogio do
+              SERVIDOR) para o proximo cursor: relogio de tablet nao serve.
+           2. COMPLETO por ESCOPO (`escopo`): 'recentes' = abertas + finalizadas
+              nos ultimos `dias` (ordem do dono: "so baixar as abertas; as
+              finalizadas so se um dia fizer pesquisa" -- as recentes ficam
+              porque Performance/Entregas/Retrabalho leem delas). 'tudo' e o
+              que o app antigo pede e continua funcionando.
+           3. BUSCA (`escopo:'finalizadas'` + de/ate/q): historico sob demanda,
+              paginado, sem entrar no cache do aparelho. */
         const PAGE = 150;
+        const agora = new Date().toISOString();
+        const soExecucao = ehToqueNoNome;
+        const podar = (r: any) => { if (!soExecucao) return r; const { cnpjCpf, ...resto } = r ?? {}; return resto; };
+
+        if (body.since) {
+          const since = String(body.since);
+          const { data, error } = await sb.from("pcp_registros")
+            .select("id, registro, apagado, atualizado_em")
+            .eq("colecao", "os").gt("atualizado_em", since)
+            .order("atualizado_em").limit(500);
+          if (error) throw new Error(error.message);
+          const linhas = data ?? [];
+          return resp({
+            os: linhas.map((r: any) => r.apagado ? { id: r.id, apagado: true } : podar(r.registro)),
+            agora, incremental: true,
+            // 500 mudancas desde o cursor nao e "incremental": o cliente refaz completo.
+            cheio: linhas.length >= 500,
+            total: await contarRegs("os"),
+          });
+        }
+
+        const escopo = String(body.escopo || "tudo");
+        const dias = Math.min(365, Math.max(7, Number(body.dias) || 60));
         let q = sb.from("pcp_registros").select("id, registro")
           .eq("colecao", "os").eq("apagado", false).order("id").limit(PAGE);
+        if (escopo === "abertas") {
+          q = q.or("registro->>finalizadaEm.is.null,registro->>finalizadaEm.eq.");
+        } else if (escopo === "recentes") {
+          const corte = new Date(Date.now() - dias * 864e5).toISOString();
+          q = q.or(`registro->>finalizadaEm.is.null,registro->>finalizadaEm.eq.,registro->>finalizadaEm.gte.${corte}`);
+        } else if (escopo === "finalizadas") {
+          q = q.not("registro->>finalizadaEm", "is", null).neq("registro->>finalizadaEm", "");
+          if (body.de) q = q.gte("registro->>finalizadaEm", String(body.de));
+          if (body.ate) q = q.lte("registro->>finalizadaEm", String(body.ate) + "T23:59:59.999Z");
+          const termo = String(body.q ?? "").trim().replace(/[%,()*]/g, " ").trim();
+          if (termo) q = q.or(`registro->>numero.ilike.*${termo}*,registro->>cliente.ilike.*${termo}*`);
+        }
         if (body.after != null) q = q.gt("id", String(body.after));
         const { data, error } = await q;
         if (error) throw new Error(error.message);
         const linhas = data ?? [];
-        /* CPF/CNPJ NAO VAI PARA QUEM ENTROU PELO NOME.
-           O cracha de toque sai de um primeiro nome da lista, sem senha. Ele
-           precisa do cliente, do endereco e do contato -- e o servico dele: ele
-           vai ao lugar e liga para avisar. Nao precisa do documento de ninguem.
-
-           O filtro NAO e por equipe, e a razao esta no dado: de 615 O.S, apenas
-           81 tem `equipe` preenchida. Escopar por ela deixaria o instalador
-           enxergando 13% do trabalho, e as outras 534 nao apareceriam para
-           ninguem. Enquanto o PCP nao preencher equipe, isso e decisao do dono,
-           nao conserto. */
-        const soExecucao = ehToqueNoNome;
+        /* CPF/CNPJ NAO VAI PARA QUEM ENTROU PELO NOME (ver `podar`): o cracha
+           de toque sai de um primeiro nome, sem senha; precisa de cliente,
+           endereco e contato, nao do documento de ninguem. */
         return resp({
-          os: linhas.map((r: any) => {
-            if (!soExecucao) return r.registro;
-            const { cnpjCpf, ...resto } = r.registro ?? {};
-            return resto;
-          }),
+          os: linhas.map((r: any) => podar(r.registro)),
           total: await contarRegs("os"),
           nextAfter: linhas.length === PAGE ? linhas[linhas.length - 1].id : null,
-          nextOffset: null, // paginacao por chave; offset era so compatibilidade
+          nextOffset: null,
+          agora, escopo, dias,
         });
       }
 
@@ -771,15 +818,17 @@ Deno.serve(async (req: Request) => {
       }
 
       case "getCfg": {
-        const cfg = (await getCfg()) ?? {};
+        const { config, versao } = await getCfgComVersao();
+        if (body.seVersao && versao && String(body.seVersao) === versao) return resp({ semMudanca: true, versao });
+        const cfg = config ?? {};
         // Papel nao-admin nao recebe dados sensiveis: a lista de usuarios (com
         // senha em texto no CFG_DEFAULT) e a agenda de funcionarios (telefones).
         // Maquina/Hub recebe tudo (backup).
         if (cracha && !ehMaquina && String(cracha.papel ?? "") !== "admin") {
           const { usuarios: _u, funcionarios: _f, ...publico } = cfg;
-          return resp({ cfg: publico });
+          return resp({ cfg: publico, versao });
         }
-        return resp({ cfg });
+        return resp({ cfg, versao });
       }
 
       case "setCfg": {

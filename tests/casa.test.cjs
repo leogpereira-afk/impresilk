@@ -409,7 +409,11 @@ test('CACHE, APP_VERSAO e todos os ?v= sobem juntos', () => {
    `casa.js` caía no padrão por sorte e a régua ficava desligada, calada. */
 test('store exporta o que as telas perguntam', () => {
   const store = fs.readFileSync(path.join(root, 'store.js'), 'utf8');
-  const retorno = /return \{([\s\S]*?)\n  \};/.exec(store);
+  // Ancorado no bloco de exports (2 espaços, `return {` sozinho na linha):
+  // um `return { ... };` de uma linha dentro de qualquer função vinha antes e
+  // o regex antigo capturava o trecho errado — o guarda acusava falta de
+  // exports que existiam.
+  const retorno = /\n  return \{\n([\s\S]*?)\n  \};/.exec(store);
   assert.ok(retorno, 'não achei o objeto exportado do store');
   const casaJs = fs.readFileSync(path.join(root, 'casa.js'), 'utf8');
   const usadas = [...casaJs.matchAll(/STORE\.(\w+)/g)].map(m => m[1]);

@@ -78,3 +78,82 @@ test('service worker remove apenas caches deste sistema',async()=>{
   assert.equal(apagados.includes(atual),false);
   assert.equal(apagados.includes('rh-v20'),false);
 });
+
+/* ══ PULL INCREMENTAL E MAESTRO (14/09/2026) ══
+   Medido no app parado: 6 páginas de 150 O.S a cada 30 s, 5 MB por minuto e
+   meio POR APARELHO, para receber 2 O.S por hora. Os testes abaixo travam a
+   regra nova: com cursor fresco o app pede só o que mudou; lápide de outro
+   aparelho some daqui; edição pendente nunca sai nem é sobrescrita; sem
+   cursor (ou com ele velho) vem a lista completa POR ESCOPO. */
+const CURSOR = 'impresilk_inst_cursor';
+function comCursor(o, em) { o.ls.set(CURSOR, JSON.stringify({ em })); return o; }
+
+test('com cursor fresco o pull pede só o que mudou (since) e guarda o carimbo do SERVIDOR', async () => {
+  const pedidos = [];
+  const o = comCursor(store({ lista: [{ id: 'a', rev: 1 }, { id: 'b', rev: 1 }],
+    responder: q => { pedidos.push(q); return { os: [{ id: 'a', rev: 2, cliente: 'novo' }], agora: '2099-01-01T00:00:00.000Z', incremental: true }; } }),
+    new Date().toISOString());
+  await o.s.pronto(); const r = await o.s.pull();
+  assert.equal(pedidos.length, 1, 'uma requisição, não seis páginas');
+  assert.ok(pedidos[0].since, 'manda o carimbo');
+  assert.equal(r.incremental, true);
+  assert.equal(o.s.getOS('a').cliente, 'novo');
+  assert.equal(o.s.getOS('b').rev, 1, 'o que o servidor não mencionou fica como está');
+  assert.equal(JSON.parse(o.ls.get(CURSOR)).em, '2099-01-01T00:00:00.000Z', 'cursor = relógio do servidor, não do tablet');
+});
+
+test('lápide vinda no incremental remove a O.S — mas não a que tem edição pendente aqui', async () => {
+  const edit = { id: 'b', rev: 1, cliente: 'editado offline' };
+  const o = comCursor(store({ lista: [{ id: 'a', rev: 1 }, edit], fila: [{ action: 'upsert', os: edit }],
+    responder: () => ({ os: [{ id: 'a', apagado: true }, { id: 'b', apagado: true }], agora: '2099-01-01T00:00:00.000Z', incremental: true }) }),
+    new Date().toISOString());
+  await o.s.pronto(); await o.s.pull();
+  assert.equal(o.s.getOS('a'), null, 'apagada em outro aparelho some daqui');
+  assert.equal(o.s.getOS('b').cliente, 'editado offline', 'edição pendente nunca sai nem é sobrescrita');
+});
+
+test('incremental que vem cheio (500 mudanças) refaz a lista completa por escopo', async () => {
+  const pedidos = [];
+  const muitos = Array.from({ length: 500 }, (_, i) => ({ id: 'x' + i, rev: 1 }));
+  const o = comCursor(store({ lista: [], responder: q => {
+    pedidos.push(q);
+    if (q.since) return { os: muitos, agora: '2099-01-01T00:00:00.000Z', incremental: true, cheio: true };
+    return { os: [{ id: 'a', rev: 1 }], agora: '2099-01-02T00:00:00.000Z', escopo: q.escopo };
+  } }), new Date().toISOString());
+  await o.s.pronto(); const r = await o.s.pull();
+  assert.equal(pedidos[0].since !== undefined, true);
+  assert.equal(pedidos[1].escopo, 'recentes', 'o completo pede só abertas + finalizadas recentes');
+  assert.equal(pedidos[1].dias, o.s.JANELA_LOCAL_DIAS);
+  assert.equal(r.completo, true);
+  assert.equal(o.s.getAllOS().length, 1);
+});
+
+test('sem cursor, ou com cursor velho, vem a lista completa e o cursor nasce da PRIMEIRA página', async () => {
+  const pedidos = [];
+  const o = store({ lista: [], responder: q => { pedidos.push(q); return q.after ? { os: [{ id: 'b', rev: 1 }], agora: 'T-pag2' } : { os: [{ id: 'a', rev: 1 }], nextAfter: 'a', agora: 'T-pag1' }; } });
+  await o.s.pronto(); await o.s.pull();
+  assert.equal(pedidos[0].since, undefined);
+  assert.equal(JSON.parse(o.ls.get(CURSOR)).em, 'T-pag1', 'o que mudar durante a paginação chega no próximo incremental');
+  // cursor velho (7 h) também força o completo
+  const v = comCursor(store({ lista: [], responder: q => { pedidos.push(q); return { os: [], agora: 'T3' }; } }), new Date(Date.now() - 7 * 3600000).toISOString());
+  await v.s.pronto(); await v.s.pull();
+  assert.equal(pedidos[pedidos.length - 1].since, undefined, 'cursor de 7 h não vale como incremental');
+});
+
+test('o pull não roda por cima de si mesmo em rede lenta', async () => {
+  let liberar; const lento = new Promise(r => liberar = r);
+  const o = comCursor(store({ lista: [], responder: () => lento }), new Date().toISOString());
+  await o.s.pronto();
+  const p1 = o.s.pull(); const p2 = await o.s.pull();
+  assert.equal(p2.ocupado, true, 'o segundo pull desiste em vez de empilhar');
+  liberar({ os: [], agora: 'T', incremental: true }); await p1;
+});
+
+test('config só volta inteira quando a versão mudou', async () => {
+  const pedidos = [];
+  const o = store({ lista: [], responder: q => { pedidos.push(q); return q.seVersao === 'v1' ? { semMudanca: true, versao: 'v1' } : { cfg: { instaladores: ['X'] }, versao: 'v1' }; } });
+  await o.s.pronto();
+  assert.equal(await o.s.pullCFG(), true, 'primeira vez: baixou');
+  assert.equal(await o.s.pullCFG(), false, 'segunda vez: 40 bytes, nada gravado');
+  assert.equal(pedidos[1].seVersao, 'v1');
+});

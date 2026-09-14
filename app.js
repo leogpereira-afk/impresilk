@@ -709,21 +709,13 @@ function enterApp() {
   renderActiveTab();
   // Valor das O.S (Entregas/Performance): só para quem enxerga dinheiro.
   const podeVerValores = () => ['admin', 'pcp'].includes(String((STATE.user || {}).papel || ''));
-  STORE.pronto()
-    .then(() => { refreshAposPull(); STORE.pull(refreshAposPull); STORE.trySync(); if (podeVerValores()) STORE.pullValores(true); STORE.pullElenco(); })
-    .catch(() => { STORE.pull(refreshAposPull); STORE.trySync(); });
-
-  // Pull periódico a cada 30s (incluindo a CFG, senão as permissões ficam
-  // congeladas com os níveis antigos a sessão inteira). Guardamos o id para
-  // evitar timers duplicados se enterApp() rodar mais de uma vez.
-  if (window._pullTimer) clearInterval(window._pullTimer);
-  window._pullTimer = setInterval(() => {
-    STORE.pullCFG().then(aplicarPermissoes).catch(() => {});
-    STORE.pull(refreshAposPull);
-    STORE.trySync();
-    if (podeVerValores()) STORE.pullValores(); // a cada 5 min, por dentro
-    STORE.pullElenco(); // a cada 30 min, por dentro
-  }, 30000);
+  // UM RELOGIO SO (14/09/2026): o maestro do store substitui a rajada do boot
+  // e o timer fixo de 30 s. Ele faz o pull INCREMENTAL, espaca a config, os
+  // valores e o elenco, desacelera com a aba escondida e recua em erro.
+  // Medido antes: 5 MB a cada 90 s por aparelho, com o app parado.
+  const maestro = () => STORE.iniciarMaestro({ aoAtualizar: refreshAposPull, aoCfg: aplicarPermissoes, podeVerValores });
+  STORE.pronto().then(() => { refreshAposPull(); maestro(); }).catch(maestro);
+  if (window._pullTimer) { clearInterval(window._pullTimer); window._pullTimer = null; }
 
   // Vigia da importação Mubisys: checa agora e a cada 15 min (banner global).
   vigiarImportacao();
@@ -2566,10 +2558,20 @@ function estaArquivada(o) {
   return d != null && d >= 7;
 }
 
+let _arqBuscou = false;
 function pcpBaseList() {
   const all = STORE.getAllOS().slice();
   if (STATE.pcpVista === 'retrabalho') return all.filter(o => o.retrabalho && !o.dataResolvido);
-  if (STATE.pcpVista === 'arquivados') return all.filter(estaArquivada);
+  if (STATE.pcpVista === 'arquivados') {
+    // Arquivadas fora da janela local moram no servidor: busca uma vez por
+    // sessao ao abrir a vista, e a lista repinta quando chegar.
+    if (!_arqBuscou && STORE.buscarHistorico) {
+      _arqBuscou = true;
+      STORE.buscarHistorico({}).then(() => { if (STATE.pcpVista === 'arquivados') renderActiveTab(); }).catch(() => {});
+    }
+    const vistos = new Set();
+    return all.concat(STORE.historico ? STORE.historico() : []).filter(o => !vistos.has(o.id) && vistos.add(o.id)).filter(estaArquivada);
+  }
   return all.filter(o => !estaArquivada(o));
 }
 
@@ -3699,11 +3701,43 @@ function iniciais(nome) {
 }
 
 // Finalizadas dentro do período do filtro (_fFin), mais recentes primeiro.
+/* O aparelho guarda finalizadas de STORE.JANELA_LOCAL_DIAS; o resto vem por
+   busca (ordem do dono, 14/09/2026). Esta lista une as duas fontes, e
+   `finPrecisaDoServidor` decide quando ir buscar. */
 function finFinalizadasPeriodo() {
-  return STORE.getAllOS()
-    .filter(o => o.finalizadaEm)
+  const vistos = new Set();
+  return STORE.getAllOS().concat(STORE.historico ? STORE.historico() : [])
+    .filter(o => o.finalizadaEm && !vistos.has(o.id) && vistos.add(o.id))
     .filter(o => dentroPeriodo(o.finalizadaEm, '_fFin'))
     .sort((a, b) => (b.finalizadaEm || '').localeCompare(a.finalizadaEm || ''));
+}
+function finCorteLocal() {
+  const dias = (typeof STORE.JANELA_LOCAL_DIAS === 'number') ? STORE.JANELA_LOCAL_DIAS : 60;
+  return OPERACAO.somarDias(hojeISO(), -dias);
+}
+// Periodo que comeca antes da janela local, "todos", ou busca digitada: o
+// aparelho nao tem como responder sozinho.
+function finPrecisaDoServidor() {
+  const f = STATE._fFin || { de: '', ate: '' };
+  const termo = String(STATE.filtroFinalizados || '').trim();
+  return !!termo || !f.de || f.de < finCorteLocal();
+}
+let _finBuscaTimer = null, _finBuscaChave = '';
+function finBuscarNoServidor(depois) {
+  if (!STORE.buscarHistorico || !finPrecisaDoServidor()) return;
+  const f = STATE._fFin || { de: '', ate: '' };
+  const q = String(STATE.filtroFinalizados || '').trim();
+  const chave = JSON.stringify([f.de, f.ate, q]);
+  if (chave === _finBuscaChave) return;            // ja buscado para este recorte
+  clearTimeout(_finBuscaTimer);
+  _finBuscaTimer = setTimeout(async () => {
+    _finBuscaChave = chave;
+    const nota = $('#fin-nota-servidor'); if (nota) nota.textContent = 'buscando no servidor…';
+    const r = await STORE.buscarHistorico({ de: f.de, ate: f.ate, q });
+    if (nota) nota.textContent = r.offline ? 'sem rede: mostrando só o que está neste aparelho'
+      : (r.truncou ? `servidor: mostrando as ${r.itens.length} mais antigas encontradas — refine a busca` : (r.itens.length ? `${r.itens.length} do servidor` : ''));
+    if (typeof depois === 'function') depois();
+  }, q ? 350 : 0);
 }
 
 function renderFinalizados() {
@@ -3716,10 +3750,12 @@ function renderFinalizados() {
         <button id="fv-dash" class="${STATE.finView==='dash'?'active':''}">📊 Painel</button>
       </div>
       ${filtroPeriodoHTML('_fFin')}
+      <span id="fin-nota-servidor" class="text-muted" style="font-size:.75rem"></span>
       <button class="btn-ghost btn-sm" id="fin-pdf" title="Exportar relatório do período em PDF" style="margin-left:auto">📄 Relatório PDF</button>
     </div>
     <div id="fin-content"></div>`;
   wireFiltroPeriodo(el, '_fFin', () => renderFinalizados());
+  finBuscarNoServidor(() => { if (STATE.activeTab === 'finalizados') renderFinalizados(); });
   $('#fv-lista').onclick = () => { STATE.finView = 'lista'; renderFinalizados(); };
   $('#fv-dash').onclick = () => { STATE.finView = 'dash'; renderFinalizados(); };
   $('#fin-pdf').onclick = () => exportarFinalizadosPDF(finFinalizadasPeriodo());
@@ -3769,7 +3805,7 @@ function finRenderLista() {
   finRenderCards();
   const busca = $('#busca-fin');
   // Busca em tempo real: atualiza só a lista, mantendo o input intacto.
-  busca.oninput = () => { STATE.filtroFinalizados = busca.value; finRenderCards(); };
+  busca.oninput = () => { STATE.filtroFinalizados = busca.value; finRenderCards(); finBuscarNoServidor(finRenderCards); };
 }
 
 /* ── Fase 3: dashboards de Finalizados ─────────────────────────────────────

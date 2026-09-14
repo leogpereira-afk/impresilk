@@ -288,10 +288,21 @@ async function fetchERP(url: string, headers: any, ms: number): Promise<Response
 
 async function baixaAutomatica(sb: any, base: string, publicKey: string, headers: any, opts: any = {}) {
   const simular = opts.simular !== false ? opts.simular === true : false;
-  // Janela larga: o mesmo -180/+180 da importacao, por data de CADASTRO.
+  /* A JANELA E DO TAMANHO DO QUE ESTA ABERTO, nao de 545 dias. Pedir status
+     TODOS de um ano e meio era a consulta mais pesada do sistema, toda hora.
+     So interessa o que o PCP tem aberto: a mais antiga hoje e de fevereiro. */
   const hoje = new Date();
-  const ini = new Date(hoje); ini.setDate(ini.getDate() - 365);
-  const fim = new Date(hoje); fim.setDate(fim.getDate() + 180);
+  const { data: abertasNoPcp } = await sb.from("pcp_registros")
+    .select("registro->>dataEntrada, registro->>criadoEm")
+    .eq("colecao", "os").eq("apagado", false).or("registro->>finalizadaEm.is.null,registro->>finalizadaEm.eq.");
+  let maisAntiga = "";
+  for (const r of (abertasNoPcp ?? []) as any[]) {
+    const d = String(r.dataEntrada || r.criadoEm || "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d) && (!maisAntiga || d < maisAntiga)) maisAntiga = d;
+  }
+  const ini = maisAntiga ? new Date(maisAntiga + "T12:00:00Z") : new Date(hoje);
+  ini.setDate(ini.getDate() - (maisAntiga ? 7 : 365));   // margem de uma semana
+  const fim = new Date(hoje); fim.setDate(fim.getDate() + 1);
   const q = new URLSearchParams({
     status: "TODOS",
     filtrodata: "CADASTRO",
@@ -426,7 +437,9 @@ function janelaDatas(body: any) {
   if (body.datainicial && body.datafinal) return { datainicial: body.datainicial, datafinal: body.datafinal };
   const hoje = new Date();
   const ini = new Date(hoje); ini.setDate(ini.getDate() - 180);
-  const fim = new Date(hoje); fim.setDate(fim.getDate() + 180);
+  // O filtro e por data de CADASTRO, que nunca esta no futuro: 180 dias a
+  // frente era peso puro no ERP. +1 porque ele corta na meia-noite.
+  const fim = new Date(hoje); fim.setDate(fim.getDate() + 1);
   return { datainicial: ymd(ini), datafinal: ymd(fim) };
 }
 
