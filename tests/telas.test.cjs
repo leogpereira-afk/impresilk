@@ -156,3 +156,29 @@ test('Arquivados pinta linhas leves no recorte do mês, não cards', () => {
   assert.doesNotMatch(busca, /data-os-id="arq1"/, 'e só o que casa com a busca');
   assert.match(t.node('#pcp-resultado').textContent, /todo o histórico/);
 });
+
+/* A VISTA "Parado Cliente" e o ATALHO da lateral.
+ *
+ * O atalho e `data-tab="pcp" data-vista="parado"` de proposito: leva ao MESMO
+ * painel do PCP. Se alguem o transformar numa aba de verdade (data-tab="parado"),
+ * o initTabs vai ativar um `#panel-parado` que nao existe e o PCP sera pintado
+ * num painel escondido -- TELA BRANCA, sem erro nenhum. Este teste e o alarme.
+ */
+test('a vista Parado Cliente esta cabeada nos quatro lugares', () => {
+  const app = fs.readFileSync(path.join(root,'app.js'),'utf8');
+  const html = fs.readFileSync(path.join(root,'index.html'),'utf8');
+  assert.match(app, /pcpVista === 'parado'\) return all\.filter\(o => OPERACAO\.paradoNoCliente\(o\)\)/,
+    'a lista da vista tem de usar o MESMO predicado do card, senao acumula fantasma');
+  assert.match(app, /\['parado',\s*'⏸',\s*'Parado Cliente'\]/, 'falta o botao da vista');
+  assert.match(app, /data-pcp-vista="parado"/, 'falta o contador do botao');
+  assert.match(html, /data-tab="pcp" data-vista="parado"/,
+    'o atalho da lateral tem de apontar para o painel do PCP, nao para um painel proprio');
+  assert.doesNotMatch(html, /data-tab="parado"/,
+    'aba propria pintaria o PCP num painel escondido: tela branca sem erro');
+});
+
+test('entrar pelo PCP limpa a vista do atalho', () => {
+  const app = fs.readFileSync(path.join(root,'app.js'),'utf8');
+  assert.match(app, /if \(tab === 'pcp'\) STATE\.pcpVista = t\.dataset\.vista \?\? '';/,
+    'sem o ?? "" a vista fica grudada e o PCP abre so com os parados');
+});

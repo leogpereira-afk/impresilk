@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Impresilk">
-  <link rel="stylesheet" href="styles.css?v=v97">
+  <link rel="stylesheet" href="styles.css?v=v98">
 </head>
 <body>
 
@@ -98,6 +98,13 @@
       <button class="tab active" data-tab="pcp"><span class="nav-emoji" aria-hidden="true">📋</span> PCP</button>
       <button class="tab" data-tab="programacao"><span class="nav-emoji" aria-hidden="true">🚚</span> Instalação</button>
       <button class="tab" data-tab="execucao"><span class="nav-emoji" aria-hidden="true">⚡</span> Execução</button>
+      <!-- ATALHO, NAO ABA. `data-tab="pcp"` de proposito: leva para o MESMO painel
+           do PCP, so que ja na vista "Parado Cliente". Uma aba de verdade custaria
+           seis listas paralelas no app.js (ABAS_DISPONIVEIS, ABAS_NOVAS, ABAS_NOMES,
+           PERMISSOES_PADRAO, o switch de renderActiveTab e o `ordem` de
+           aplicarPermissoes) -- e quatro delas descartam o desconhecido SEM ERRO.
+           Como atalho, nenhuma delas precisa saber que ele existe. -->
+      <button class="tab" data-tab="pcp" data-vista="parado"><span class="nav-emoji" aria-hidden="true">⏸</span> Parado Cliente</button>
       <button class="tab" data-tab="retrabalho"><span class="nav-emoji" aria-hidden="true">🔧</span> Retrabalho</button>
       <button class="tab" data-tab="finalizados"><span class="nav-emoji" aria-hidden="true">🏁</span> Finalizados</button>
       <p class="nav-grupo">Entrega</p>
@@ -176,14 +183,14 @@
        importar O.S a partir do PDF do ERP. Passou a ser carregada na hora em
        que alguem clica em "Importar PDF" -- ver garantirPdfJs() no app.js. -->
 
-  <script src="config.js?v=v97"></script>
-  <script src="logo.js?v=v97"></script>
-  <script src="frases.js?v=v97"></script>
-  <script src="store.js?v=v97"></script>
-  <script src="auth.js?v=v97"></script>
-  <script src="operacao.js?v=v97"></script>
-  <script src="app.js?v=v97"></script>
-  <script src="casa.js?v=v97"></script>
+  <script src="config.js?v=v98"></script>
+  <script src="logo.js?v=v98"></script>
+  <script src="frases.js?v=v98"></script>
+  <script src="store.js?v=v98"></script>
+  <script src="auth.js?v=v98"></script>
+  <script src="operacao.js?v=v98"></script>
+  <script src="app.js?v=v98"></script>
+  <script src="casa.js?v=v98"></script>
   <script>
   /* Service worker + AVISO DE VERSÃO NOVA.
      O sw.js faz skipWaiting/claim, então a versão nova assume assim que o

@@ -28,7 +28,18 @@ const OPERACAO = (() => {
     const i = o?.instalacao || {};
     return !!(dia(i.data) && i.periodo && equipe(o).length && (i.periodo !== 'Horário' || /^([01]\d|2[0-3]):[0-5]\d$/.test(i.hora || '')));
   }
-  /* ESPERANDO O CLIENTE LIBERAR A INSTALACAO.
+  /* PARADO NO CLIENTE -- REGRA, NAO ETAPA.
+     Servico pronto cujo cliente ainda nao liberou a instalacao. Isto NAO e uma
+     etapa do funil: e um estado que atravessa a etapa `apto`. A diferenca
+     importa -- como etapa, ela obrigava a inventar ordem ("vem antes ou depois
+     de agendar?") e colidia com o `confirmacao`, que ja e um portao do cliente
+     logo adiante. Como regra, ela so responde uma pergunta: esta parado ali?
+
+     Quem usa: a VISTA "Parado Cliente" do PCP, o selo do card e o "proximo
+     passo". Nenhum dos tres precisa que exista uma etapa.
+
+     ORIGINAL (o comentario da etapa, mantido pelo que ele explica):
+     ESPERANDO O CLIENTE LIBERAR A INSTALACAO.
      Servico pronto, mas o cliente ainda nao autorizou entrar na obra. Antes
      desta etapa isso ficava indistinguivel de "pronto e ninguem agendou": as
      duas caiam em 'apto', e a tela nao separava o que esta parado por nossa
@@ -53,7 +64,6 @@ const OPERACAO = (() => {
   function status(o) {
     if (o?.finalizadaEm) return 'finalizada';
     if (!o?.liberadoPCP) return 'aguardando_producao';
-    if (paradoNoCliente(o)) return 'parado_cliente';
     if (interno(o) || !agendaCompleta(o)) return 'apto';
     if (o.confirmacao !== 'Confirmado') return 'agendada';
     return o.horaSaida ? 'em_andamento' : 'confirmada';
