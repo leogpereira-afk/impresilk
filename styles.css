@@ -2016,3 +2016,23 @@ body.tv-ligada { overflow:hidden; }
 .pcp-arq-tabela td.num, .pcp-arq-tabela th.num { text-align:left; }
 .pcp-arq-tabela tbody tr { cursor:pointer; }
 .pcp-arq-tabela tbody tr:hover { background:#f4f8fc; }
+
+/* ── Histórico completo de Entregas: grade ano × mês e o relatório de anos ──
+   Pedido do dono (15/09/2026): "ter todos os meses e ao final uma aba de
+   relatório que posso puxar de todos os anos, ver as tendências".
+   A grade tem 13 colunas de número e precisa caber no tablet: fonte tabular,
+   padding curto e rolagem horizontal própria (o .casa-tabela-wrap já dá). */
+.casa-grade-meses { font-size: .78rem; }
+.casa-grade-meses th, .casa-grade-meses td { padding: 7px 8px; }
+.casa-grade-meses td.num { font-variant-numeric: tabular-nums; }
+.casa-grade-meses tbody tr:hover { background: #f7fafd; }
+/* O valor do mês é clicável (abre o período dele), mas dentro de uma tabela de
+   números ele não pode parecer um botão: herda tamanho e alinhamento da célula
+   e só se revela no hover. Botão de tamanho cheio aqui empurraria a grade para
+   fora da tela no tablet. */
+.btn-link {
+  background: none; border: 0; padding: 0; margin: 0; font: inherit; color: #1d4ed8;
+  cursor: pointer; text-align: right; text-decoration: none; border-radius: 4px;
+}
+.btn-link:hover, .btn-link:focus-visible { text-decoration: underline; color: #0f3d91; }
+.btn-link:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 2px; }

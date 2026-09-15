@@ -920,7 +920,29 @@ function initSyncIndicator() {
   STORE.on('quota', () => toast('Sem espaço no aparelho para guardar as O.S. Libere espaço (fotos/apps) e recarregue.', 'error'));
   // Chegou o valor das O.S: repinta as telas que mostram dinheiro.
   STORE.on('valores', () => { if (['entregas', 'performance'].includes(STATE.activeTab)) renderActiveTab(); });
-  STORE.on('entregues', () => { if (STATE.activeTab === 'entregas') renderActiveTab(); });
+  /* ENTREGAS REPINTA EM LOTE, E NUNCA POR CIMA DE QUEM ESTÁ MEXENDO.
+     Os meses chegam um a um do ERP e cada chegada reconstruía a tela inteira:
+     o <select> de Técnico fechava sozinho se estivesse aberto, a data que a
+     pessoa estava escolhendo no filtro sumia (o onchange só grava no blur) e a
+     rolagem da tabela pulava para o topo — a sensação de tela que não para
+     quieta. Agora as chegadas se agrupam em ~700 ms e a repintura espera quem
+     está com o dedo num campo. Mesma guarda que o refresh de pull já usa. */
+  let _entreguesTimerUI = null;
+  STORE.on('entregues', () => {
+    if (STATE.activeTab !== 'entregas') return;
+    if (_entreguesTimerUI) clearTimeout(_entreguesTimerUI);
+    _entreguesTimerUI = setTimeout(function repintar() {
+      _entreguesTimerUI = null;
+      if (STATE.activeTab !== 'entregas') return;
+      const ae = document.activeElement;
+      if (ae && ['INPUT', 'TEXTAREA', 'SELECT'].includes(ae.tagName) && ae.closest && ae.closest('#panel-entregas')) {
+        // Tenta de novo quando a pessoa soltar o campo, em vez de desistir.
+        _entreguesTimerUI = setTimeout(repintar, 1500);
+        return;
+      }
+      renderActiveTab();
+    }, 700);
+  });
   // Perda de dados nunca é silenciosa: item descartado / lista truncada avisam.
   STORE.on('item-pendente', ({ item, motivo }) => {
     const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : (item && item.action) || 'alteração';

@@ -183,7 +183,7 @@ const STORE = (() => {
         const velho = lsGet(K.ELENCO, null);
         if (velho && Array.isArray(velho.pessoas)) { _elenco = _podarElenco(velho); _gravarElencoDisco(_elenco); }
       }
-      try { localStorage.removeItem(K.ELENCO); } catch {}
+      if (!_semIDB) { try { localStorage.removeItem(K.ELENCO); } catch {} }   // idem: sem IDB, isto É o armazém
       // Entregues do ERP: também do disco. `entreguesMes()` é síncrono e a tela
       // de Entregas conta com o que já foi baixado antes de pedir mais ao ERP.
       const entrDisco = await _lerEntreguesDisco();
@@ -193,7 +193,12 @@ const STORE = (() => {
         for (const [k, v] of Object.entries(entrVelho)) if (!_entregues[k]) _entregues[k] = v;
         _persistirEntregues();
       }
-      try { localStorage.removeItem(K.ENTREGUES); } catch {}
+      /* SÓ APAGA A CÓPIA VELHA SE HOUVER PARA ONDE MIGRAR. Em navegador sem
+         IndexedDB (aba anônima, Safari com armazenamento bloqueado) o
+         localStorage É o armazém: apagá-lo aqui varria, a cada boot, a lista de
+         meses já carregada — e se a sessão terminasse sem um pull bem-sucedido
+         (só olhou, ou estava sem rede), tudo se perdia. */
+      if (!_semIDB) { try { localStorage.removeItem(K.ENTREGUES); } catch {} }
       return _osMem;
     })();
     return _prontoP;
@@ -858,6 +863,17 @@ const STORE = (() => {
       });
     } catch { return null; }
   }
+  async function _apagarEntreguesDisco() {
+    try {
+      const db = await _openDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('os', 'readwrite');
+        tx.objectStore('os').delete('entregues');
+        tx.oncomplete = resolve;
+        tx.onerror = e => reject(e.target.error);
+      });
+    } catch { /* sem IndexedDB: o removeItem acima já deu conta */ }
+  }
   function _persistirEntregues() {
     if (_semIDB) { lsSet(K.ENTREGUES, _entregues); return; }
     if (_entreguesTimer) clearTimeout(_entreguesTimer);
@@ -900,45 +916,213 @@ const STORE = (() => {
      mês que o ERP recusou (403) ou que voltou com erro ficava eternamente em
      "carregando", sem nada carregando. Aqui ela pergunta qual dos dois é. */
   function entreguesFalhou(mes) { const p = _entregues[mes]; return !!(p && p.erro && !(p.os || []).length); }
+  /* QUE MÊS É HOJE, pelo calendário de quem está olhando.
+     `toISOString()` é UTC: das 21h à meia-noite do último dia do mês, o store
+     achava que o mês seguinte já tinha começado — o mês que estava fechando
+     caía na régua longa e parava de atualizar bem na noite em que o número mais
+     importa, enquanto a tela (que usa OPERACAO.dia, local) ainda pedia o mês
+     certo. Duas réguas de "que mês é hoje" no mesmo app é uma a mais. */
+  function _mesLocal(d) {
+    const x = d || new Date();
+    return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0');
+  }
+  function _mesAnterior() {
+    const x = new Date();
+    return _mesLocal(new Date(x.getFullYear(), x.getMonth() - 1, 1));
+  }
+
+  /* ORÇAMENTO GLOBAL de varreduras no ERP.
+     O teto de 3 morava na TELA e era por chamada: `renderEntregas` chama
+     `entreguesERP` três vezes (hoje, mês, ano), então um chip de ano passado
+     disparava seis varreduras de uma vez sobre um ERP que já anda no limite —
+     e mês que volta com timeout é justamente o que trava a fila. O orçamento
+     tem de ser do store, que é quem sabe quantas estão em voo. */
+  const ENTREGUES_EM_VOO = 3;
+  function entreguesEmVoo() { return Object.keys(_entreguesPedindo).length; }
+
+  /* QUANTO VALE O PACOTE NESTE APARELHO.
+     Medido contra `recebidoEm` (quando ESTE aparelho recebeu), nunca contra
+     `em` (quando o SERVIDOR leu o ERP). Eram réguas diferentes: o servidor
+     devolve do próprio cache com o `em` da montagem, que pode ter horas; o
+     cliente comparava esse carimbo com 15 minutos e concluía "vencido" toda
+     vez — pedindo o mês corrente à Edge Function repetidamente, 45 de cada 60
+     minutos, e repintando a tela a cada volta. Era literalmente "subir toda
+     vez". Pacote antigo, sem `recebidoEm`, cai no `em` e se cura no primeiro
+     pull. */
+  function _validadeEntregues(mes, p) {
+    if (p && p.erro) return 10 * 60000;   // falha tem de se curar em minutos
+    const hoje = _mesLocal();
+    if (mes === hoje) return 15 * 60000;
+    if (mes === _mesAnterior()) return 6 * 3600000;
+    return 30 * 864e5;
+  }
+  function _idadeEntregues(p) {
+    const carimbo = (p && (p.recebidoEm || p.em)) || 0;
+    const t = new Date(carimbo).getTime();
+    return Number.isFinite(t) ? Date.now() - t : Infinity;
+  }
+  function entreguesFresco(mes) {
+    const p = _entregues[mes];
+    return !!(p && !p.erro && _idadeEntregues(p) < _validadeEntregues(mes, p));
+  }
+
+  /* A PODA SEGUE OS CHIPS, e os chips seguem o BANCO — mas só quando o banco já
+     falou. `anosEntregues()` devolve `[ano atual]` enquanto `valores` não
+     chegou, e isso não é "o banco só tem este ano", é "ainda não sei". Com essa
+     régua provisória a poda apagava, calada e do disco, todo mês de 2025 e
+     anteriores que o aparelho tinha custado 25-40 s cada para baixar — e, num
+     chip de ano passado, chegava a apagar o pacote no MESMO pull que o gravou,
+     deixando a tela em "carregando 12 de 12 meses" para sempre, varrendo o ERP
+     em círculo. Agora: só poda com lista vinda do servidor, e nunca toca no mês
+     que acabou de chegar. */
+  function _podarEntregues(mesRecemChegado) {
+    const doServidor = (_valores && Array.isArray(_valores.anos)) ? _valores.anos : [];
+    if (!doServidor.length) return;
+    const corte = String(Math.min.apply(null, doServidor));
+    for (const k of Object.keys(_entregues)) {
+      if (k !== mesRecemChegado && k.slice(0, 4) < corte) delete _entregues[k];
+    }
+  }
+
+  /* VÁRIOS MESES DE UMA VEZ, só do que o servidor já tem guardado.
+     O chip de um ano pede nove a doze meses; um a um, com teto de três em voo e
+     uma fila que só anda quando a tela repinta, isso é a espera que o dono
+     descreveu. Esta porta NUNCA vai ao ERP: devolve o que está no cache do
+     servidor e diz o que falta. Por isso pode levar o ano inteiro sem risco —
+     e funciona em aparelho novo, ou depois de sair e entrar, que é quando o
+     disco local está vazio. */
+  async function pullEntreguesLote(meses) {
+    const querer = (meses || []).filter(m => /^\d{4}-\d{2}$/.test(m) && !entreguesFresco(m));
+    if (!navigator.onLine || !querer.length) return { pedidos: 0, vieram: 0 };
+    let res;
+    try {
+      res = await apiFn('mubisys', { action: 'entreguesMeses', meses: querer }, 60000);
+    } catch { return { pedidos: querer.length, vieram: 0, erro: true }; }
+    const pacotes = (res && res.pacotes) || {};
+    const agora = new Date().toISOString();
+    const novos = {};
+    for (const [mes, p] of Object.entries(pacotes)) {
+      if (!p || !Array.isArray(p.os)) continue;
+      novos[mes] = { v: p.v || 0, em: p.em, recebidoEm: agora, mes, total: p.total, os: p.os };
+    }
+    const vieram = Object.keys(novos).length;
+    if (vieram) {
+      _entregues = Object.assign({}, _entregues, novos);
+      _podarEntregues();
+      _persistirEntregues();
+      _notifyListeners('entregues', { lote: Object.keys(novos) });
+    }
+    return { pedidos: querer.length, vieram, faltando: (res && res.faltando) || [] };
+  }
+
+  /* O MÊS A MÊS DE TODOS OS ANOS, sem descer as O.S.
+     84 meses de pacote cheio seriam ~2,7 MB para desenhar 84 barras. O servidor
+     agrega os MESMOS pacotes que a tela já usa e devolve uma linha por mês —
+     mesma origem, mesma soma, nenhuma segunda verdade sobre dinheiro. Fica em
+     memória (não em disco: é barato de refazer e envelhece junto com os meses).
+     `faltando` viaja junto: mês sem pacote é mês sem dado, nunca zero. */
+  let _resumoEntregues = null;
+  let _resumoPedindo = null;
+  function resumoEntregues() { return _resumoEntregues; }
+  async function pullEntreguesResumo(meses, forcar) {
+    const lista = (meses || []).filter(m => /^\d{4}-\d{2}$/.test(m));
+    if (!navigator.onLine || !lista.length) return _resumoEntregues;
+    const chave = lista.slice().sort().join('|');
+    if (!forcar && _resumoEntregues && _resumoEntregues.chave === chave
+        && Date.now() - _resumoEntregues.emMs < 10 * 60000) return _resumoEntregues;
+    if (_resumoPedindo === chave) return _resumoEntregues;
+    _resumoPedindo = chave;
+    try {
+      const res = await apiFn('mubisys', { action: 'entreguesResumo', meses: lista }, 60000);
+      if (res && Array.isArray(res.meses)) {
+        _resumoEntregues = {
+          chave, emMs: Date.now(),
+          meses: res.meses,
+          faltando: res.faltando || [],
+        };
+        _notifyListeners('entregues', { resumo: true });
+      }
+    } catch (e) {
+      _resumoEntregues = Object.assign({}, _resumoEntregues || { meses: [], faltando: lista },
+        { chave, emMs: Date.now(), erro: (e && e.message) || 'falhou' });
+      _notifyListeners('entregues', { resumo: true, erro: true });
+    } finally { _resumoPedindo = null; }
+    return _resumoEntregues;
+  }
+
   async function pullEntreguesMes(mes, forcar) {
-    if (!navigator.onLine || !mes || _entreguesPedindo[mes]) return null;
+    if (!mes || _entreguesPedindo[mes]) return null;
+    /* OFFLINE NÃO É "CARREGANDO". Antes isto devolvia null calado e a tela
+       anunciava "carregando N meses…" com nada em voo — promessa que não se
+       cumpre. O que já está no disco continua servindo; o que falta fica
+       declarado como o que é. */
+    if (!navigator.onLine) {
+      _notifyListeners('entregues', { mes, offline: true });
+      return null;
+    }
     const atual = _entregues[mes];
-    const hojeMes = new Date().toISOString().slice(0, 7);
-    /* MÊS FECHADO NÃO MUDA — não vale revarrer o ERP por ele.
-       A validade de 6 h servia quando o cache ia até o ano anterior. Com um chip
-       por ano desde 2020, ela mandaria o app revarrer 84 meses a cada 6 h, a
-       25–40 s por mês. O passado distante é história: só o mês corrente e o
-       anterior ainda recebem lançamento. */
-    const anterior = new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().slice(0, 7);
-    // Pacote que FALHOU não herda a validade longa: uma queda do ERP tem de se
-    // curar sozinha em minutos, senão um tropeço de rede congelaria o mês por
-    // 30 dias. (Recusa por papel também repete, mas 403 volta na hora.)
-    const validade = (atual && atual.erro) ? 10 * 60000
-      : (mes === hojeMes ? 15 * 60000 : (mes === anterior ? 6 * 3600000 : 30 * 864e5));
-    if (atual && !forcar && Date.now() - new Date(atual.em).getTime() < validade) return atual;
+    if (atual && !forcar && _idadeEntregues(atual) < _validadeEntregues(mes, atual)) return atual;
     _entreguesPedindo[mes] = true;
     try {
-      const res = await apiFn('mubisys', { action: 'entreguesMes', mes }, 120000);
+      // `forcar` existia dos dois lados e nunca viajava: o cliente pulava a
+      // própria validade e o servidor respondia da cópia dele. Com a escada de
+      // validade longa lá, um botão "conferir de novo no ERP" sem esta linha
+      // seria um botão que não confere nada.
+      const res = await apiFn('mubisys', { action: 'entreguesMes', mes, forcar: !!forcar }, 120000);
       if (res && Array.isArray(res.os)) {
-        _entregues = Object.assign({}, _entregues, { [mes]: { v: res.v || 0, em: res.em, mes, total: res.total, os: res.os } });
-        /* A PODA SEGUE OS CHIPS, e os chips seguem o banco. Guardar o que a
-           tela oferece é a regra; o que ficou ANTES do primeiro ano do ERP é
-           que sai (mês de pacote antigo, ano corrompido). Antes a poda cortava
-           por uma constante própria e apagava o pacote no mesmo pull que o
-           gravava — laço infinito preso em "carregando 12 de 12 meses". */
-        const anos = anosEntregues();
-        const corte = String(Math.min(...anos));
-        for (const k of Object.keys(_entregues)) if (k.slice(0, 4) < corte) delete _entregues[k];
+        _entregues = Object.assign({}, _entregues, {
+          [mes]: {
+            v: res.v || 0,
+            em: res.em,                          // quando o ERP foi lido (servidor)
+            recebidoEm: new Date().toISOString(), // quando ESTE aparelho recebeu
+            mes, total: res.total, os: res.os,
+            // O servidor avisa quando serviu cópia velha porque o ERP não
+            // respondeu (ou devolveu lista que desabou). Não é erro — é um
+            // número bom com idade declarada, e a tela diz isso.
+            ...(res.velho ? { velho: true, avisoErro: res.avisoErro || '' } : {}),
+          },
+        });
+        _podarEntregues(mes);
         _persistirEntregues();
         _notifyListeners('entregues', { mes });
         return _entregues[mes];
       }
     } catch (e) {
-      // 403 = papel sem acesso; 502 = ERP fora do ar. A tela mostra "sem dado do ERP".
-      _entregues = Object.assign({}, _entregues, { [mes]: Object.assign({ em: new Date().toISOString(), mes, total: 0, os: [], erro: true }, atual || {}, { em: new Date().toISOString(), erro: true }) });
+      /* A FALHA NÃO REESCREVE `em`. Ele significa "quando o ERP foi lido", e a
+         tela mostra isso como "atualizado às …" — carimbar a hora da tentativa
+         fracassada fazia a tela afirmar que o número era fresco justamente
+         quando a atualização falhou. A falha vai em `falhouEm`, o pacote bom
+         anterior fica inteiro, e a validade curta de 10 min olha `falhouEm`. */
+      const bom = atual && Array.isArray(atual.os) && atual.os.length ? atual : null;
+      _entregues = Object.assign({}, _entregues, {
+        [mes]: Object.assign({ mes, total: 0, os: [] }, bom || {}, {
+          erro: true, falhouEm: new Date().toISOString(),
+          recebidoEm: new Date().toISOString(),
+        }),
+      });
       _persistirEntregues();
+      /* AVISAR TAMBÉM NO FRACASSO. Só o sucesso notificava, e a fila de meses
+         mora no render: três meses falhando juntos deixavam o contador parado
+         em "carregando 7 de 9" por minutos, com nada carregando, e o rótulo
+         dizia "carregando" para mês que já tinha falhado — sendo que a tela
+         sabe distinguir os dois. */
+      _notifyListeners('entregues', { mes, erro: true });
     } finally { delete _entreguesPedindo[mes]; }
     return _entregues[mes] || null;
+  }
+
+  /* A FILA MORA AQUI, não no render. A tela só diz de quais meses precisa; o
+     store decide quantos pedir agora, respeitando o orçamento global. */
+  function garantirEntregues(meses) {
+    const faltam = (meses || []).filter(m => /^\d{4}-\d{2}$/.test(m) && !entreguesFresco(m) && !_entreguesPedindo[m]);
+    if (!faltam.length) return 0;
+    const vagas = Math.max(0, ENTREGUES_EM_VOO - entreguesEmVoo());
+    // Quem nunca veio primeiro; depois quem falhou (a tentativa de novo não
+    // pode empurrar para trás o mês que ainda não chegou nenhuma vez).
+    const nunca = faltam.filter(m => !_entregues[m]).sort().reverse();
+    const falhos = faltam.filter(m => _entregues[m]).sort().reverse();
+    for (const m of nunca.concat(falhos).slice(0, vagas)) pullEntreguesMes(m);
+    return faltam.length;
   }
 
   // ── Elenco: pessoas do RH e veículos do Ativos (uma base só) ─────────────
@@ -1143,6 +1327,16 @@ const STORE = (() => {
       _elenco = ELENCO_VAZIO;
       localStorage.removeItem(K.ELENCO);
       _apagarElencoDisco();
+      /* O FATURAMENTO ENTREGUE SAI JUNTO COM O ELENCO, antes da trava da fila.
+         Quem sai com trabalho ainda não enviado — o caso comum no tablet da
+         produção — devolvia o aparelho com o valor entregue do ERP guardado
+         nele, ao alcance do próximo crachá, inclusive o da montagem, que entra
+         sem senha. O botão de sair avisa que o cache das O.S fica; isso vale
+         para o trabalho da pessoa, não para dinheiro da casa. */
+      _entregues = {};
+      localStorage.removeItem(K.ENTREGUES);
+      if (_entreguesTimer) { clearTimeout(_entreguesTimer); _entreguesTimer = null; }
+      _apagarEntreguesDisco();
     } catch {}
     if (getQueue().length) return false;
     try {
@@ -1288,6 +1482,8 @@ const STORE = (() => {
     getUser, setUser, getInstalador, setInstalador, getLastSync, limparCache,
     // Sync
     trySync, pull, pullCFG, pullValores, valores, valoresEm, pullElenco, elenco, pullEntreguesMes, entreguesMes, entreguesFalhou, anosEntregues,
+    pullEntreguesLote, garantirEntregues, entreguesEmVoo, entreguesFresco,
+    pullEntreguesResumo, resumoEntregues,
     iniciarMaestro, sincronizarAgora, buscarHistorico, historico, faixaHistorico, JANELA_LOCAL_DIAS,
     // Fotos
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,

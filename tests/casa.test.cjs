@@ -570,25 +570,214 @@ test('SLA: o fuso não muda a contagem de dias', () => {
   assert.equal(s.mediaAtraso, 8, 'oito dias corridos, com ou sem horário de verão no meio');
 });
 
-/* O PACOTE DE ENTREGUES É MONTADO EM DOIS PONTOS da mesma function — a ação
-   `entreguesMes` e o robô horário dentro de `importar`. Eles nasceram iguais e
-   divergiram no primeiro campo novo: `previsao` entrou num e não no outro, e
-   como o robô roda a cada hora ele APAGARIA o prazo do mês corrente logo depois
-   de a tela gravá-lo — o campo nunca existiria justamente no mês mais olhado.
-   Peguei isso lendo a function publicada, não o código-fonte. Aqui a regra vira
-   teste: as duas gravações usam a MESMA montagem e a MESMA versão. */
-test('as duas gravações do pacote de entregues usam a mesma montagem', () => {
+/* O PACOTE DE ENTREGUES É GRAVADO EM TRÊS PONTOS da mesma function — a ação
+   `entreguesMes`, o robô horário que renova o mês corrente, e o aquecimento de
+   um mês vencido. Eles já divergiram uma vez: `previsao` entrou só num, e como
+   o robô roda a cada hora ele apagava o campo que a tela acabara de gravar,
+   calado. Peguei lendo a function publicada, não o diff. Aqui a regra vira
+   teste: uma montagem só (`varrerMesEntregues` + `linhaEntregue`), um carimbo
+   só (`pacoteEntregues` com `ENTREGUES_V`), e nenhum objeto de pacote escrito
+   à mão em lugar nenhum. */
+test('todo pacote de entregues sai da mesma montagem e do mesmo carimbo', () => {
   const src = fs.readFileSync(path.join(root, 'supabase/functions/pcp-mubisys/index.ts'), 'utf8');
-  // Os dois pacotes de entregues carimbam a versão pela constante, nunca por
-  // número solto — foi o número solto que deixou o robô uma versão atrás.
-  const carimbos = [...src.matchAll(/\{\s*v:\s*([^,]+),\s*em: new Date\(\)\.toISOString\(\),\s*mes\b/g)].map(m => m[1].trim());
-  assert.ok(carimbos.length >= 2, `esperava dois pacotes de entregues carimbados; achei ${carimbos.length}`);
-  assert.deepEqual([...new Set(carimbos)], ['ENTREGUES_V'],
-    'pacote de entregues com versão literal em vez de ENTREGUES_V: ' + carimbos.join(', '));
-  assert.equal(
-    (src.match(/\.map\(linhaEntregue\)/g) || []).length, 2,
-    'os dois pontos que montam o pacote de entregues têm de chamar linhaEntregue()'
-  );
+
+  const gravacoes = [...src.matchAll(/setMeta\(\s*`entregues:\$\{[^}]+\}`\s*,\s*([^)]+)\)/g)].map(m => m[1].trim());
+  assert.ok(gravacoes.length >= 2, `esperava ao menos duas gravações de entregues; achei ${gravacoes.length}`);
+  for (const g of gravacoes) {
+    assert.match(g, /^pacoteEntregues\(|^pacote$/,
+      `gravação de entregues com pacote montado à mão: ${g.slice(0, 60)}`);
+  }
+
+  // A varredura do ERP e a montagem da linha existem UMA vez cada.
+  assert.equal((src.match(/\.map\(linhaEntregue\)/g) || []).length, 1,
+    'a linha do pacote de entregues tem de ser montada num lugar só (varrerMesEntregues)');
+  assert.match(src, /const pacoteEntregues = \([\s\S]{0,200}v: ENTREGUES_V/,
+    'pacoteEntregues precisa carimbar ENTREGUES_V');
   assert.match(src, /function linhaEntregue[\s\S]{0,400}previsao: o\.previsaoEntrega/,
     'linhaEntregue precisa levar a previsão — é a régua do SLA');
+
+  // Ninguém mais pode carimbar uma versão literal num pacote de entregues.
+  const literais = [...src.matchAll(/\{\s*v:\s*(\d+),\s*em: new Date\(\)\.toISOString\(\),\s*mes\b/g)];
+  assert.deepEqual(literais.map(m => m[0]), [],
+    'pacote de entregues com versão literal em vez de ENTREGUES_V');
+});
+
+/* A VALIDADE DO MÊS SEGUE A IDADE DELE. Era binária (1 h para o corrente, 24 h
+   para todo o resto) e por isso oito dos nove meses de 2026 venciam no mesmo
+   dia, mandando o ERP ser varrido de novo por história que não muda — era o
+   "carregando 7 de 9 meses" que o dono via. Duas travas não podem sumir:
+   pacote em versão velha nunca ganha validade longa (senão um campo novo
+   congela por meio ano), e a validade do servidor tem de ser mais longa que a
+   do cliente (30 dias), senão os dois relógios vencem juntos e a varredura
+   volta a ser mensal. */
+test('a validade do pacote de entregues cresce com a idade do mês', () => {
+  const src = fs.readFileSync(path.join(root, 'supabase/functions/pcp-mubisys/index.ts'), 'utf8');
+  const fn = /function validadeEntregues[\s\S]*?\n}/.exec(src);
+  assert.ok(fn, 'validadeEntregues precisa existir');
+  const corpo = fn[0];
+  assert.match(corpo, /Number\(versao\) < ENTREGUES_V/,
+    'versão velha tem de ter teto curto, para remontar uma vez e ganhar os campos novos');
+
+  const dias = n => n * 864e5;
+  // O arquivo é TypeScript; para rodar a regra de verdade aqui, tira só as
+  // anotações de tipo da assinatura (a lógica interna é JS puro).
+  const corpoJs = corpo
+    .replace(/function validadeEntregues\([^)]*\)\s*:\s*number/, 'function validadeEntregues(mes, versao)');
+  const validade = new Function('ENTREGUES_V', 'mesLocal', 'distanciaMeses', `${corpoJs}; return validadeEntregues;`)(
+    3,
+    () => '2026-09',
+    (mes, hoje) => { const [a, b] = mes.split('-').map(Number); const [c, d] = hoje.split('-').map(Number); return (c - a) * 12 + (d - b); },
+  );
+  assert.equal(validade('2026-09', 3), 60 * 60000, 'mês corrente: 1 h');
+  assert.equal(validade('2026-08', 3), 12 * 3600000, 'mês passado ainda recebe lançamento');
+  assert.ok(validade('2026-07', 3) >= dias(7), 'trimestre recente: dias, não horas');
+  assert.ok(validade('2026-01', 3) > dias(30),
+    'história tem de valer MAIS que os 30 dias do cliente, senão os dois vencem juntos');
+  assert.equal(validade('2026-01', 2), 24 * 3600000,
+    'pacote em versão velha remonta em 24 h, por mais antigo que o mês seja');
+});
+
+/* ---------------- Tendência: todos os meses e o que eles dizem ----------------
+   Pedido do dono: "ter todos os meses e ao final uma aba de relatório que posso
+   puxar de todos os anos, ver as tendências". O risco desta tela não é errar a
+   soma — é afirmar movimento que não houve. */
+
+const mesR = (mes, valor, extra = {}) => ({ mes, valor, os: 10, instalacoes: 6, retiradas: 4, ...extra });
+
+test('tendência: mês sem pacote NÃO vira zero na série', () => {
+  const t = casa([]);
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({
+    meses: [mesR('2026-01', 100000), mesR('2026-03', 120000)],
+    faltando: ['2026-02'],
+  })}, '2026-03')`);
+  const ano = r.porAno.find(a => a.ano === '2026');
+  // join: array criado dentro da sandbox tem outro protótipo e deepEqual recusa.
+  assert.equal(ano.semDado.join(','), '2026-02', 'o mês ausente é declarado, não somado como zero');
+  assert.equal(ano.valor, 220000, 'o total soma só o que existe');
+});
+
+test('tendência: o futuro não conta como mês sem dado', () => {
+  const t = casa([]);
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({
+    meses: [mesR('2026-01', 100000), mesR('2026-02', 100000)], faltando: [],
+  })}, '2026-02')`);
+  assert.equal(r.porAno[0].semDado.join(','), '', 'março a dezembro de 2026 ainda não aconteceram');
+});
+
+test('tendência: a comparação entre anos é do MESMO período', () => {
+  const t = casa([]);
+  const meses = [];
+  for (let m = 1; m <= 12; m++) meses.push(mesR(`2025-${String(m).padStart(2, '0')}`, 100000));
+  for (let m = 1; m <= 3; m++) meses.push(mesR(`2026-${String(m).padStart(2, '0')}`, 110000));
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-03')`);
+  const a26 = r.porAno.find(a => a.ano === '2026');
+  assert.equal(a26.mesmoPeriodo, 330000);
+  assert.equal(a26.variacao, 10, '330k contra os 300k de jan-mar de 2025 = +10%');
+  assert.notEqual(a26.variacao, -72.5, 'comparar 330k com o ano cheio de 1,2 mi seria a conta errada');
+});
+
+test('tendência: com menos de 6 meses fechados não afirma direção', () => {
+  const t = casa([]);
+  const meses = [mesR('2026-01', 10), mesR('2026-02', 20), mesR('2026-03', 30), mesR('2026-04', 40)];
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-05')`);
+  assert.equal(r.tendencia, null, 'quatro pontos é ruído, não tendência');
+});
+
+test('tendência: variação pequena é "estável", não "subindo"', () => {
+  const t = casa([]);
+  const meses = [];
+  for (let m = 1; m <= 8; m++) meses.push(mesR(`2026-${String(m).padStart(2, '0')}`, 100000 + m * 200));
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-09')`);
+  assert.equal(r.tendencia.direcao, 'estável', '0,2% ao mês é ruído; chamar de alta seria ler notícia no ruído');
+});
+
+test('tendência: queda consistente é reconhecida', () => {
+  const t = casa([]);
+  const meses = [];
+  for (let m = 1; m <= 8; m++) meses.push(mesR(`2026-${String(m).padStart(2, '0')}`, 200000 - m * 15000));
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-09')`);
+  assert.equal(r.tendencia.direcao, 'caindo');
+  assert.ok(r.tendencia.porMes < 0);
+});
+
+test('tendência: o mês corrente fica FORA da reta e da média sazonal', () => {
+  const t = casa([]);
+  const meses = [];
+  for (let m = 1; m <= 8; m++) meses.push(mesR(`2026-${String(m).padStart(2, '0')}`, 100000));
+  meses.push(mesR('2026-09', 3000));   // mês pela metade
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-09')`);
+  assert.equal(r.tendencia.meses, 8, 'o mês em andamento não entra na reta');
+  assert.equal(r.tendencia.direcao, 'estável', 'senão um mês pela metade viraria desabamento');
+  const set = r.sazonal.find(x => x.n === 9);
+  assert.equal(set.media, null, 'setembro corrente não vira média de setembro');
+});
+
+test('tendência: ano parcial é marcado como parcial na comparação', () => {
+  const t = casa([]);
+  const meses = [mesR('2025-01', 50000), mesR('2025-06', 50000)];
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-09')`);
+  const a25 = r.porAno.find(a => a.ano === '2025');
+  assert.equal(a25.semDado.length, 10, 'dez meses de 2025 sem pacote guardado');
+});
+
+test('tela: a grade mostra traço em mês sem dado, nunca R$ 0,00', () => {
+  const t = casa([], { _anosERP: [2026] });
+  const html = t.run(`
+    STORE.resumoEntregues = () => (${JSON.stringify({
+      meses: [mesR('2026-01', 100000), mesR('2026-03', 120000)], faltando: ['2026-02'],
+    })});
+    STATE._entRel = 'meses';
+    relatorioAnosHTML()`);
+  assert.match(html, /sem dado guardado para este mês/);
+  assert.ok(!/R\$ 0,00/.test(html), 'mês sem pacote não pode aparecer como venda zero');
+  assert.match(html, /não é venda zero/);
+});
+
+test('tendência: sem ano anterior carregado, diz "sem base" e não finge queda', () => {
+  const t = casa([]);
+  // Só out/nov/dez de 2025 estão guardados; 2026 vai até setembro. Comparar
+  // jan-set de 2026 com jan-set de 2025 é impossível — e não pode virar -100%.
+  const meses = [
+    mesR('2025-10', 411123), mesR('2025-11', 479522), mesR('2025-12', 360146),
+    mesR('2026-08', 651754), mesR('2026-09', 410879),
+  ];
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-09')`);
+  const a26 = r.porAno.find(a => a.ano === '2026');
+  assert.equal(a26.variacao, undefined, 'sem base de comparação não se inventa percentual');
+  assert.match(a26.porQueNaoCompara, /2025 não tem nenhum mês carregado/);
+});
+
+test('tendência: comparação com cobertura diferente vem marcada', () => {
+  const t = casa([]);
+  const meses = [
+    mesR('2025-01', 100000), mesR('2025-02', 100000),
+    mesR('2026-01', 120000), mesR('2026-02', 120000), mesR('2026-03', 120000),
+  ];
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-03')`);
+  const a26 = r.porAno.find(a => a.ano === '2026');
+  assert.equal(a26.compara, '2025');
+  assert.match(a26.avisoCobertura, /3 mês\(es\) contra 2/, '3 meses contra 2 tem de ser declarado');
+});
+
+test('tela: ano sem nenhum mês carregado aparece com botão, não sumido', () => {
+  const t = casa([], { _anosERP: [2026, 2025, 2024] });
+  const html = t.run(`
+    STORE.resumoEntregues = () => (${JSON.stringify({ meses: [mesR('2026-01', 100000)], faltando: [] })});
+    STATE._entRel = 'meses';
+    relatorioAnosHTML()`);
+  assert.match(html, /data-carregar-ano="2024"/, '2024 existe no banco e tem de aparecer');
+  assert.match(html, /data-carregar-ano="2025"/);
+  assert.match(html, /25-40 s por mês/, 'o preço de carregar precisa estar dito');
+});
+
+test('tela: acumulado de ano sem mês no período não vira R$ 0,00', () => {
+  const t = casa([], { _anosERP: [2026, 2025] });
+  const html = t.run(`
+    STORE.resumoEntregues = () => (${JSON.stringify({
+      meses: [mesR('2025-10', 411123), mesR('2026-09', 410879)], faltando: [],
+    })});
+    STATE._entRel = 'anos';
+    relatorioAnosHTML()`);
+  assert.match(html, /nenhum mês deste período está carregado/);
+  assert.match(html, /sem base/);
 });

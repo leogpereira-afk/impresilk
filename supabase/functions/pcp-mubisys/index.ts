@@ -289,6 +289,99 @@ function linhaEntregue(o: any) {
    um campo novo nao derrubar o app de quem ainda nao recarregou a aba. */
 const ENTREGUES_V = 3;
 
+/* QUE MES E HOJE -- NO FUSO DA EMPRESA, nao em UTC.
+   `new Date().toISOString()` vira o mes as 21h de Brasilia. Nas ultimas tres
+   horas do mes o servidor ja considerava o mes SEGUINTE como corrente: o mes
+   que estava fechando caia na regua de "mes fechado" (parava de atualizar
+   justamente na noite em que o numero mais importa) e o robo horario passava a
+   renovar um mes que ainda nao comecou. A casa opera em America/Sao_Paulo
+   (UTC-3, sem horario de verao desde 2019). */
+const mesLocal = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 7);
+
+/* Quantos meses de distancia do mes corrente. 0 = este mes, 1 = o passado. */
+function distanciaMeses(mes: string, hoje: string): number {
+  const [y1, m1] = mes.split("-").map(Number);
+  const [y2, m2] = hoje.split("-").map(Number);
+  return (y2 - y1) * 12 + (m2 - m1);
+}
+
+/* QUANTO TEMPO O PACOTE DE UM MES VALE NO SERVIDOR.
+ *
+ * Era binario -- 1 h para o mes corrente, 24 h para TODO o resto -- e por isso
+ * a tela voltava a dizer "carregando 7 de 9 meses" quase todo dia: medido no
+ * banco em 15/09/2026, oito dos nove meses de 2026 estavam vencidos ao mesmo
+ * tempo, remontados 31 h antes. Cada mes vencido custa uma varredura de 25-40 s
+ * no ERP, tres por vez: o dono esperava minutos por um numero que o sistema ja
+ * tinha inteiro em disco.
+ *
+ * Marco de 2026 nao muda mais. O que de fato muda num mes encerrado e
+ * lancamento retroativo e estorno, e isso acontece na virada, nao meio ano
+ * depois. Entao a validade passa a seguir a IDADE do mes.
+ *
+ * DUAS TRAVAS, as duas necessarias:
+ * 1. Pacote em versao ANTIGA nunca ganha validade longa (teto de 24 h). Sem
+ *    isso, subir a versao do pacote -- foi o que aconteceu com `previsao`, a
+ *    regua do SLA -- congelaria o campo novo por meio ano nos meses velhos,
+ *    justamente os de pior cobertura. Cada mes se reconstroi UMA vez ao subir a
+ *    versao e so entao dorme.
+ * 2. A validade do servidor tem de ser ESTRITAMENTE mais longa que a do cliente
+ *    (store.js: 30 dias para mes antigo). Se as duas vencessem juntas, o
+ *    cliente repergunta e encontra o servidor igualmente vencido -- e paga a
+ *    varredura mensalmente. Por isso 180 dias no fim da escada.
+ */
+function validadeEntregues(mes: string, versao: number): number {
+  const d = distanciaMeses(mes, mesLocal());
+  if (Number(versao) < ENTREGUES_V) return 24 * 3600_000;   // remonta uma vez para virar v3
+  if (d <= 0) return 60 * 60_000;        // mes corrente: 1 h
+  if (d === 1) return 12 * 3600_000;     // mes passado: ainda recebe lancamento
+  if (d <= 3) return 7 * 864e5;          // trimestre recente: 7 dias
+  return 180 * 864e5;                    // historia: so por pedido explicito
+}
+
+/* VARRE UM MES NO ERP e devolve as linhas prontas do pacote.
+ *
+ * Existe para haver UM lugar so que monta isto. Ja houve dois -- a acao
+ * `entreguesMes` e o robo horario dentro de `importar` -- e eles divergiram no
+ * primeiro campo novo (`previsao`): o robo, que roda a cada hora, apagava o
+ * campo que a tela acabara de gravar, calado. Agora um terceiro chamador (o
+ * aquecimento de mes vencido) entra sem repetir nada.
+ *
+ * `datafinal` e o 1o dia do mes SEGUINTE porque o ERP corta na meia-noite, e
+ * pedir 31/08 perdia o dia 31; por isso a filtragem por `dataEntregue` depois.
+ */
+async function varrerMesEntregues(
+  mes: string, base: string, publicKey: string, headers: any,
+  opts: { prazoMs?: number; sobra?: () => number } = {},
+) {
+  const [y, m] = mes.split("-").map(Number);
+  const fim = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  const lista: any[] = [];
+  for (let page = 1; page <= 10; page++) {
+    if (opts.sobra && opts.sobra() < 12_000) break;
+    const q = new URLSearchParams({
+      status: "ENTREGUE", filtrodata: "ENTREGA",
+      datainicial: `${mes}-01`, datafinal: fim, page: String(page), per_page: "500",
+    });
+    const prazo = opts.sobra
+      ? Math.min(40_000, Math.max(12_000, opts.sobra() - 10_000))
+      : (opts.prazoMs ?? 45_000);
+    const data = await erpGet(`${base}/${publicKey}/ordem-servico?${q}`, headers, prazo);
+    const pag = extrairLista(data);
+    lista.push(...pag);
+    if (pag.length < 500) break;
+  }
+  const vistos = new Set<string>();
+  return lista.map(mapearOS).filter((o: any) => o.numero).filter((o: any) => {
+    if (o.dataEntregue && !String(o.dataEntregue).startsWith(mes)) return false;
+    if (vistos.has(String(o.numero))) return false;
+    vistos.add(String(o.numero)); return true;
+  }).map(linhaEntregue);
+}
+
+/* O pacote gravado, sempre com a mesma forma e a mesma versao. */
+const pacoteEntregues = (mes: string, os: any[]) =>
+  ({ v: ENTREGUES_V, em: new Date().toISOString(), mes, total: os.length, os });
+
 async function erpGet(url: string, headers: any, prazoTotalMs: number): Promise<any> {
   const ate = Date.now() + Math.max(8000, prazoTotalMs);
   const ESPERA = 1500;
@@ -828,50 +921,161 @@ Deno.serve(async (req: Request) => {
         return resp({ error: "Entregas do ERP só para a gestão do PCP." }, 403);
       }
       const chave = `entregues:${mes}`;
-      const hojeMes = new Date().toISOString().slice(0, 7);
-      const validade = mes === hojeMes ? 60 * 60000 : 24 * 3600000;
       const cache = await getMeta(chave);
-      /* ACEITA v2 E v3. A v3 acrescentou `previsao` (o prazo combinado, para o
-         SLA da tela de Entregas). Exigir v3 aqui invalidaria os dez meses que
-         ja estao em cache de uma vez so -- e cada remontagem custa 25-40 s por
-         pagina no ERP, que anda lento. Deixando os v2 servirem ate vencerem
-         (mes fechado: 24 h), a previsao entra sozinha na proxima remontagem e
-         a tela nunca fica sem dado. Quem nao tem previsao entra como "sem
-         regua" na conta, e a tela DIZ quantas sao. */
+      /* ACEITA v2 E v3: a v3 so acrescentou `previsao`. Exigir a versao nova
+         aqui invalidaria os dez meses em cache de uma vez, e cada remontagem
+         custa 25-40 s por pagina num ERP lento. O v2 serve ate vencer -- e
+         `validadeEntregues` da a ele teto de 24 h justamente para que remonte
+         uma vez e vire v3, em vez de congelar meio ano sem a regua do SLA. */
+      const validade = validadeEntregues(mes, Number(cache?.v ?? 0));
       if (cache?.em && Number(cache?.v) >= 2 && !body.forcar && Date.now() - new Date(cache.em).getTime() < validade) {
         return resp({ ...cache, cache: true });
       }
-      const [y, m] = mes.split("-").map(Number);
-      const ini = `${mes}-01`;
-      // `datafinal` corta na meia-noite: pedir o 1o dia do mes seguinte.
-      const fimD = new Date(Date.UTC(y, m, 1));
-      const fim = fimD.toISOString().slice(0, 10);
-      const lista: any[] = [];
-      for (let page = 1; page <= 10; page++) {
-        const q = new URLSearchParams({ status: "ENTREGUE", filtrodata: "ENTREGA", datainicial: ini, datafinal: fim, page: String(page), per_page: "500" });
-        const data = await erpGet(`${creds.base}/${creds.publicKey}/ordem-servico?${q}`, headers, 45000);
-        const pag = extrairLista(data);
-        lista.push(...pag);
-        if (pag.length < 500) break;
+      /* O ERP FALHANDO NAO PODE APAGAR O QUE JA ESTAVA CERTO.
+         Antes, qualquer erro subia e virava 502: a tela mostrava "sem resposta
+         do ERP" em branco para agosto -- um mes que nao muda mais e cujo numero
+         estava guardado a um SELECT de distancia -- e o aparelho gravava uma
+         lapide de erro por cima. Agora a falha devolve o pacote velho, dizendo
+         que e velho e por que. Sem cache nenhum, ai sim e erro de verdade. */
+      let os: any[];
+      try {
+        os = await varrerMesEntregues(mes, creds.base, creds.publicKey, headers, { prazoMs: 45_000 });
+      } catch (e) {
+        const motivo = (e as Error)?.message ?? String(e);
+        if (cache?.em && Number(cache?.v) >= 2) {
+          return resp({ ...cache, cache: true, velho: true, avisoErro: motivo });
+        }
+        throw e;
       }
-      // So o necessario para somar e listar; sem contato/endereco.
-      // O datafinal e o 1o dia do mes SEGUINTE (o ERP corta na meia-noite, entao
-      // pedir 31/08 perdia o dia 31) -- mas isso traz junto as entregas do dia
-      // 1o do mes seguinte. Fica so o que tem data de entrega DENTRO do mes;
-      // sem data de entrega (raro) fica, porque o filtro do ERP ja a garantiu.
-      const vistos = new Set<string>();
-      const os = lista.map(mapearOS).filter((o: any) => o.numero).filter((o: any) => {
-        if (o.dataEntregue && !String(o.dataEntregue).startsWith(mes)) return false;
-        if (vistos.has(String(o.numero))) return false;
-        vistos.add(String(o.numero)); return true;
-      }).map(linhaEntregue);
+
+      /* LISTA VAZIA (OU QUE DESABOU) NAO E VERDADE SOBRE UM MES QUE JA TINHA
+         NUMERO. O ERP responde 200 com zero registro quando tropeca no filtro,
+         e isso gravava "entregue no mes: R$ 0" com cara de dado fresco por cima
+         de 200+ O.S corretas -- calado, e por ate 30 dias no aparelho. Zero so
+         vale quando nunca houve nada. Ver a licao: zero nao e resultado. */
+      const tinha = Number(cache?.total ?? 0);
+      const desabou = tinha > 0 && os.length < tinha * 0.5;
+      if (desabou && cache?.em && Number(cache?.v) >= 2) {
+        return resp({ ...cache, cache: true, velho: true,
+          avisoErro: `o ERP devolveu ${os.length} O.S para um mes que tinha ${tinha}; mantido o numero anterior` });
+      }
+
       /* `previsao` sai do MESMO objeto ja baixado -- nenhuma chamada a mais ao
          ERP. Sem ela o SLA da tela so alcancava as O.S que o aparelho ainda
          guarda (abertas + finalizadas de 60 dias): medido no banco, a cobertura
          caia de 93% em setembro para 20% em junho e ZERO antes de maio. */
-      const pacote = { v: ENTREGUES_V, em: new Date().toISOString(), mes, total: os.length, os };
+      const pacote = pacoteEntregues(mes, os);
       await setMeta(chave, pacote);
       return resp(pacote);
+    }
+
+    /* ---- entreguesMeses: varios meses de uma vez, SO do que ja esta guardado ----
+     *
+     * O chip de um ano pede nove a doze meses. Um a um, com teto de tres em voo,
+     * isso e uma fila que so anda quando a tela repinta -- e no primeiro acesso
+     * de qualquer aparelho, ou depois de sair e entrar (a saida apaga o disco
+     * local), vira a espera que o dono descreveu como "subir toda vez".
+     *
+     * Esta acao NUNCA vai ao ERP. Ela le o pcp_meta num `.in()` so e devolve o
+     * que existe, dizendo quais meses NAO tem (nunca cortar calado). Com ela a
+     * tela pinta o ano inteiro num pedido, e a fila lenta de tres em tres fica
+     * so para o que realmente falta. Mesma trava de papel da acao acima: e
+     * dinheiro da casa.
+     */
+    /* ---- entreguesResumo: o mes a mes e a tendencia, sem descer as O.S ----
+     *
+     * Pedido do dono (15/09/2026): "aqui em baixo ter todos os meses e ao final
+     * uma aba de relatorio que posso puxar de todos os anos, ver as tendencias".
+     *
+     * Trazer 84 meses de pacote cheio para o aparelho seriam ~2,7 MB para
+     * desenhar 84 barras. Aqui o servidor agrega os MESMOS pacotes que a tela
+     * ja usa -- mesma origem, mesma soma, nenhuma segunda verdade sobre
+     * dinheiro -- e devolve uma linha por mes.
+     *
+     * O que NAO tem pacote guardado sai em `faltando`, nunca como zero: mes sem
+     * dado e mes sem dado, e a tela precisa poder dizer isso. Zero calado num
+     * grafico de tendencia inventa uma queda que nunca houve.
+     */
+    if (action === "entreguesResumo") {
+      if (cracha && !ehMaquina && !ehCron && !["admin", "pcp"].includes(String(cracha.papel ?? ""))) {
+        return resp({ error: "Entregas do ERP só para a gestão do PCP." }, 403);
+      }
+      const pedidos = Array.isArray(body.meses) ? body.meses.map((x: any) => String(x || "").trim()) : [];
+      const meses = [...new Set(pedidos.filter((x: string) => /^\d{4}-\d{2}$/.test(x)))].sort();
+      if (!meses.length) return resp({ error: "meses: lista de AAAA-MM" }, 400);
+      const TETO = 300;
+      const usar = meses.slice(0, TETO);
+      const { data, error } = await sb.from("pcp_meta").select("chave, valor")
+        .in("chave", usar.map((mm: string) => `entregues:${mm}`));
+      if (error) throw new Error(error.message);
+      const linhas: any[] = [];
+      const achados = new Set<string>();
+      for (const linha of data ?? []) {
+        const mm = String(linha.chave).slice("entregues:".length);
+        const p = linha.valor;
+        if (!p || !Array.isArray(p.os) || Number(p.v) < 2) continue;
+        achados.add(mm);
+        let valor = 0, semValor = 0, instal = 0, retiradas = 0;
+        let comPrazo = 0, noPrazo = 0, somaAtraso = 0, atrasadas = 0;
+        for (const o of p.os) {
+          const v = Number(o?.valor);
+          if (Number.isFinite(v) && o?.valor !== null) valor += v; else semValor++;
+          if (o?.tipo === "interno") retiradas++; else instal++;
+          /* O PRAZO VEM JUNTO porque a pergunta "como estamos indo" e a mesma:
+             faturou quanto E entregou no prazo. So conta o que tem regua. */
+          const prev = String(o?.previsao || "").slice(0, 10);
+          const ent = String(o?.data || "").slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(prev) && /^\d{4}-\d{2}-\d{2}$/.test(ent)) {
+            comPrazo++;
+            const d = Math.round((Date.parse(ent + "T12:00:00Z") - Date.parse(prev + "T12:00:00Z")) / 86400000);
+            if (d <= 0) noPrazo++; else { atrasadas++; somaAtraso += d; }
+          }
+        }
+        linhas.push({
+          mes: mm, valor: Math.round(valor * 100) / 100, os: p.os.length,
+          instalacoes: instal, retiradas, semValor,
+          comPrazo, noPrazo, atrasadas,
+          mediaAtraso: atrasadas ? Math.round(somaAtraso / atrasadas * 10) / 10 : null,
+          em: p.em, v: p.v,
+        });
+      }
+      linhas.sort((a, b) => String(a.mes).localeCompare(String(b.mes)));
+      return resp({
+        meses: linhas,
+        faltando: usar.filter((mm: string) => !achados.has(mm)),
+        ...(meses.length > usar.length ? { cortados: meses.length - usar.length } : {}),
+      });
+    }
+
+    if (action === "entreguesMeses") {
+      if (cracha && !ehMaquina && !ehCron && !["admin", "pcp"].includes(String(cracha.papel ?? ""))) {
+        return resp({ error: "Entregas do ERP só para a gestão do PCP." }, 403);
+      }
+      const pedidos = Array.isArray(body.meses) ? body.meses.map((x: any) => String(x || "").trim()) : [];
+      const meses = [...new Set(pedidos.filter((x: string) => /^\d{4}-\d{2}$/.test(x)))];
+      if (!meses.length) return resp({ error: "meses: lista de AAAA-MM" }, 400);
+      /* TETO DECLARADO, nunca corte mudo: 300 meses sao 25 anos, mais do que a
+         tela oferece em chips. Se um dia passar disso, a resposta DIZ quantos
+         ficaram de fora. Ver a licao do `.slice(0,20)` que descartava
+         candidatura em silencio no Painel. */
+      const TETO = 300;
+      const usar = meses.slice(0, TETO);
+      const { data, error } = await sb.from("pcp_meta").select("chave, valor")
+        .in("chave", usar.map((mm: string) => `entregues:${mm}`));
+      if (error) throw new Error(error.message);
+      const pacotes: Record<string, any> = {};
+      for (const linha of data ?? []) {
+        const mm = String(linha.chave).slice("entregues:".length);
+        const p = linha.valor;
+        if (p && Number(p.v) >= 2 && Array.isArray(p.os)) pacotes[mm] = { ...p, cache: true };
+      }
+      return resp({
+        pacotes,
+        // O que o servidor ainda nao tem: a tela pede pela fila normal, sem
+        // achar que o ano esta completo.
+        faltando: usar.filter((mm: string) => !pacotes[mm]),
+        ...(meses.length > usar.length ? { cortados: meses.length - usar.length } : {}),
+      });
     }
 
     // ---- baixaAuto: da baixa no que o ERP ja fechou ----
@@ -975,21 +1179,55 @@ Deno.serve(async (req: Request) => {
         if (sobra() < 20_000) {
           entregues = { pulado: "sem tempo nesta rodada (ERP lento); tenta na próxima hora" };
         } else try {
-          const mesAtual = new Date().toISOString().slice(0, 7);
-          const [yy, mm] = mesAtual.split("-").map(Number);
-          const fimD = new Date(Date.UTC(yy, mm, 1));
-          const lista: any[] = [];
-          for (let page = 1; page <= 10 && sobra() > 12_000; page++) {
-            const q = new URLSearchParams({ status: "ENTREGUE", filtrodata: "ENTREGA", datainicial: `${mesAtual}-01`, datafinal: fimD.toISOString().slice(0, 10), page: String(page), per_page: "500" });
-            const d2 = await erpGet(`${creds.base}/${creds.publicKey}/ordem-servico?${q}`, headers, Math.min(40_000, Math.max(12_000, sobra() - 10_000)));
-            const pag = extrairLista(d2); lista.push(...pag); if (pag.length < 500) break;
+          // Fuso da empresa, nao UTC: as 21h do ultimo dia o robo renovava o
+          // mes SEGUINTE, que ainda nao comecou, e o mes que fechava parava.
+          const mesAtual = mesLocal();
+          const os = await varrerMesEntregues(mesAtual, creds.base, creds.publicKey, headers, { sobra });
+          const anterior = await getMeta(`entregues:${mesAtual}`);
+          const tinha = Number(anterior?.total ?? 0);
+          // Mesma trava da acao: lista que desabou nao apaga mes que tinha numero.
+          if (tinha > 0 && os.length < tinha * 0.5) {
+            entregues = { mes: mesAtual, recusado: `ERP devolveu ${os.length} de ${tinha}; mantido o anterior` };
+          } else {
+            await setMeta(`entregues:${mesAtual}`, pacoteEntregues(mesAtual, os));
+            entregues = { mes: mesAtual, total: os.length };
           }
-          const vistos2 = new Set<string>();
-          const os = lista.map(mapearOS).filter((o: any) => o.numero && (!o.dataEntregue || String(o.dataEntregue).startsWith(mesAtual)) && !vistos2.has(String(o.numero)) && vistos2.add(String(o.numero)))
-            .map(linhaEntregue);
-          await setMeta(`entregues:${mesAtual}`, { v: ENTREGUES_V, em: new Date().toISOString(), mes: mesAtual, total: os.length, os });
-          entregues = { mes: mesAtual, total: os.length };
-        } catch (e) { entregues = { erro: String((e as Error)?.message || e) }; }
+
+          /* AQUECER UM MES VENCIDO POR RODADA.
+             Sem isto, a conta da remontagem cai sempre sobre quem abre a tela
+             primeiro -- segunda de manha, e sempre a mesma pessoa. O robo roda
+             de hora em hora e quase nunca tem o que fazer aqui (com a escada de
+             validade, historia so vence a cada 180 dias): quando tem, resolve um
+             mes por vez, de madrugada, sem ninguem esperando. Do mais recente
+             para o mais antigo, que e a ordem em que alguem vai olhar. */
+          if (sobra() > 45_000) {
+            const doAno = [];
+            const [ay, am] = mesAtual.split("-").map(Number);
+            for (let d = 1; d <= 11; d++) {
+              const dt = new Date(Date.UTC(ay, am - 1 - d, 1));
+              doAno.push(dt.toISOString().slice(0, 7));
+            }
+            const { data: linhas } = await sb.from("pcp_meta").select("chave, valor")
+              .in("chave", doAno.map((mm) => `entregues:${mm}`));
+            const porMes: Record<string, any> = {};
+            for (const l of linhas ?? []) porMes[String(l.chave).slice("entregues:".length)] = l.valor;
+            const vencido = doAno.find((mm) => {
+              const p = porMes[mm];
+              if (!p?.em) return true;   // nunca montado: aquecer tambem
+              return Date.now() - new Date(p.em).getTime() >= validadeEntregues(mm, Number(p.v ?? 0));
+            });
+            if (vencido && sobra() > 45_000) {
+              const osV = await varrerMesEntregues(vencido, creds.base, creds.publicKey, headers, { sobra });
+              const tinhaV = Number(porMes[vencido]?.total ?? 0);
+              if (!(tinhaV > 0 && osV.length < tinhaV * 0.5)) {
+                await setMeta(`entregues:${vencido}`, pacoteEntregues(vencido, osV));
+                entregues = { ...entregues, aquecido: { mes: vencido, total: osV.length } };
+              } else {
+                entregues = { ...entregues, aquecido: { mes: vencido, recusado: `${osV.length} de ${tinhaV}` } };
+              }
+            }
+          }
+        } catch (e) { entregues = { ...(entregues || {}), erro: String((e as Error)?.message || e) }; }
 
         const st = { ...parcial, em: new Date().toISOString(), baixa, entregues };
         await gravarBatimento(st);

@@ -496,6 +496,10 @@ function mesesEntre(de, ate) {
 // com erro. A fila anda sozinha — cada pacote que chega repinta a tela e a
 // próxima leva sai. Os meses mais RECENTES primeiro: é o que o dono olha.
 const ERP_EM_VOO = 3;
+/* Qual conjunto de meses já foi pedido em lote nesta sessão. Sem isto, cada
+   repintura repetiria o mesmo pedido enquanto a fila lenta ainda não tivesse
+   trazido o que falta. */
+let _loteEntreguesPedido = '';
 function entreguesERP(de, ate) {
   const meses = mesesEntre(de, ate);
   const os = [], faltando = [], comErro = [];
@@ -517,11 +521,30 @@ function entreguesERP(de, ate) {
       vistos.add(k); os.push(o);
     }
   }
-  // Quem nunca chegou vai na frente; quem falhou tenta depois (o store segura
-  // por 10 min, então isso não vira martelada no ERP). Sem esta segunda fila um
-  // tropeço de rede deixaria o mês morto até alguém recarregar a página.
-  const aPedir = faltando.slice().sort().reverse().concat(comErro.slice().sort().reverse());
-  for (const m of aPedir.slice(0, ERP_EM_VOO)) STORE.pullEntreguesMes(m);
+  /* PRIMEIRO O QUE JÁ ESTÁ GUARDADO NO SERVIDOR, num pedido só.
+     O que falta pode estar no cache do servidor mesmo sem estar neste aparelho
+     — é o caso de todo aparelho novo, e de toda vez que alguém sai e entra (a
+     saída apaga o disco local). Esta porta não vai ao ERP: traz o que existe e
+     diz o que não existe, então pode levar o ano inteiro de uma vez. Uma vez
+     por combinação de meses, senão o render repetiria o pedido. */
+  const aPedir = faltando.concat(comErro);
+  if (aPedir.length && STORE.pullEntreguesLote) {
+    const chave = aPedir.slice().sort().join('|');
+    if (_loteEntreguesPedido !== chave) {
+      _loteEntreguesPedido = chave;
+      STORE.pullEntreguesLote(aPedir).then(r => {
+        // O que o servidor também não tem só pode vir do ERP, pela fila lenta.
+        if (r && r.faltando && r.faltando.length && STORE.garantirEntregues) STORE.garantirEntregues(r.faltando);
+      }).catch(() => {});
+    }
+  }
+  /* A FILA MORA NO STORE. O teto de 3 era por CHAMADA e renderEntregas chama
+     esta função três vezes (hoje, mês, ano): um chip de ano passado disparava
+     seis varreduras de uma vez sobre um ERP que já anda no limite, e mês que
+     volta com timeout é justamente o que trava o carregamento. Agora a tela só
+     diz do que precisa; quem dosa é quem sabe quantas estão em voo. */
+  if (STORE.garantirEntregues) STORE.garantirEntregues(aPedir.slice().sort().reverse());
+  else for (const m of aPedir.slice(0, ERP_EM_VOO)) STORE.pullEntreguesMes(m);
   // Mês corrente: renova em silêncio quando envelhece (o store decide).
   const hojeMes = OPERACAO.dia(new Date()).slice(0, 7);
   if (meses.includes(hojeMes) && STORE.entreguesMes(hojeMes)) STORE.pullEntreguesMes(hojeMes);
@@ -654,6 +677,232 @@ function slaEntregas(lista, porNumero) {
     pior: atrasos.length ? atrasos[atrasos.length - 1] : null,
     faixas,
   };
+}
+
+/* ---------------------------------------------------------------- TENDÊNCIA
+ * Pedido do dono (15/09/2026): "aqui em baixo ter todos os meses e ao final uma
+ * aba de relatório que posso puxar de todos os anos, ver as tendências etc".
+ *
+ * A conta é pura e trabalha sobre o RESUMO (uma linha por mês, agregada no
+ * servidor a partir dos mesmos pacotes que a tela já soma). Nada aqui inventa
+ * número: mês sem pacote guardado não vira zero, vira buraco declarado — um
+ * zero calado num gráfico de tendência desenha uma queda que nunca houve.
+ */
+const MES_CURTO = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+function tendenciaEntregas(resumo, mesHoje) {
+  const linhas = (resumo && resumo.meses) || [];
+  const faltando = new Set((resumo && resumo.faltando) || []);
+  const porMes = new Map(linhas.map(l => [l.mes, l]));
+  const anos = [...new Set(linhas.map(l => String(l.mes).slice(0, 4)))].sort();
+  const hoje = String(mesHoje || '').slice(0, 7);
+  const mesDoAno = hoje ? Number(hoje.slice(5, 7)) : 12;
+
+  const porAno = anos.map(ano => {
+    const doAno = linhas.filter(l => l.mes.startsWith(ano));
+    const valor = doAno.reduce((t, l) => t + (l.valor || 0), 0);
+    const os = doAno.reduce((t, l) => t + (l.os || 0), 0);
+    const semDado = [];
+    for (let m = 1; m <= 12; m++) {
+      const k = `${ano}-${String(m).padStart(2, '0')}`;
+      if (hoje && k > hoje) continue;              // futuro não é buraco
+      if (!porMes.has(k)) semDado.push(k);
+    }
+    /* MESMO PERÍODO: comparar um ano de nove meses com um de doze é a
+       comparação errada, e é a que aparece sozinha se ninguém cuidar. O
+       acumulado até o mesmo mês responde "estamos melhores que no ano passado
+       a esta altura?", que é a pergunta de quem olha. */
+    const ate = doAno.filter(l => Number(l.mes.slice(5, 7)) <= mesDoAno);
+    return {
+      ano,
+      valor: Math.round(valor * 100) / 100,
+      os,
+      meses: doAno.length,
+      semDado,
+      mesmoPeriodo: Math.round(ate.reduce((t, l) => t + (l.valor || 0), 0) * 100) / 100,
+      mesesMesmoPeriodo: ate.length,
+      // Prazo do ano, quando há régua.
+      comPrazo: doAno.reduce((t, l) => t + (l.comPrazo || 0), 0),
+      noPrazo: doAno.reduce((t, l) => t + (l.noPrazo || 0), 0),
+    };
+  });
+
+  /* Variação contra o ano anterior, sempre no MESMO período — e, quando não dá
+     para comparar, dizendo por quê. "—" sozinho faz o leitor supor queda; um
+     ano cujo período nem foi carregado não é um ano ruim, é um ano ausente. */
+  for (let i = 1; i < porAno.length; i++) {
+    const a = porAno[i], b = porAno[i - 1];
+    if (String(Number(b.ano) + 1) !== a.ano) { a.porQueNaoCompara = `não há ${Number(a.ano) - 1} carregado`; continue; }
+    if (!a.mesesMesmoPeriodo) { a.porQueNaoCompara = 'este ano não tem mês carregado no período'; continue; }
+    if (!b.mesesMesmoPeriodo || b.mesmoPeriodo <= 0) {
+      a.porQueNaoCompara = `${b.ano} não tem nenhum mês carregado até o mesmo mês`;
+      continue;
+    }
+    a.variacao = Math.round((a.mesmoPeriodo / b.mesmoPeriodo - 1) * 1000) / 10;
+    a.compara = b.ano;
+    // Comparar 9 meses com 3 seria o mesmo erro de outra forma.
+    if (a.mesesMesmoPeriodo !== b.mesesMesmoPeriodo) {
+      a.avisoCobertura = `${a.mesesMesmoPeriodo} mês(es) contra ${b.mesesMesmoPeriodo}`;
+    }
+  }
+
+  /* SAZONALIDADE: quanto cada mês do calendário costuma render, em média dos
+     anos que têm aquele mês. O mês corrente fica de fora: está pela metade e
+     puxaria a própria média para baixo. */
+  const sazonal = MES_CURTO.map((rotulo, i) => {
+    const n = i + 1;
+    const doMes = linhas.filter(l => Number(l.mes.slice(5, 7)) === n && l.mes !== hoje);
+    const media = doMes.length ? doMes.reduce((t, l) => t + (l.valor || 0), 0) / doMes.length : null;
+    return { n, rotulo, media: media === null ? null : Math.round(media * 100) / 100, anos: doMes.length };
+  });
+
+  /* PARA ONDE ESTÁ INDO: reta de mínimos quadrados sobre os 12 meses fechados
+     mais recentes (o mês corrente está incompleto e viraria uma queda falsa).
+     Só afirma direção com pelo menos 6 meses — abaixo disso a reta é ruído. */
+  const fechados = linhas.filter(l => !hoje || l.mes < hoje).slice(-12);
+  let tendencia = null;
+  if (fechados.length >= 6) {
+    const n = fechados.length;
+    const mx = (n - 1) / 2;
+    const my = fechados.reduce((t, l) => t + (l.valor || 0), 0) / n;
+    let num = 0, den = 0;
+    fechados.forEach((l, i) => { num += (i - mx) * ((l.valor || 0) - my); den += (i - mx) * (i - mx); });
+    const inclinacao = den ? num / den : 0;           // R$ por mês
+    const pct = my ? Math.round(inclinacao / my * 1000) / 10 : 0;
+    tendencia = {
+      meses: n,
+      porMes: Math.round(inclinacao * 100) / 100,
+      pct,
+      // Abaixo de 1% ao mês, dizer "subindo" seria ler ruído como notícia.
+      direcao: Math.abs(pct) < 1 ? 'estável' : (pct > 0 ? 'subindo' : 'caindo'),
+      media: Math.round(my * 100) / 100,
+    };
+  }
+
+  const comValor = linhas.filter(l => (l.valor || 0) > 0);
+  const melhor = comValor.slice().sort((a, b) => b.valor - a.valor)[0] || null;
+  const pior = comValor.slice().sort((a, b) => a.valor - b.valor)[0] || null;
+
+  return {
+    anos, porAno, sazonal, tendencia, melhor, pior,
+    totalMeses: linhas.length,
+    semDado: [...faltando],
+    porMes,
+  };
+}
+
+function rotuloMesTend(mes) {
+  const m = Number(String(mes).slice(5, 7));
+  return (MES_CURTO[m - 1] || '?') + '/' + String(mes).slice(2, 4);
+}
+
+/* A SEÇÃO DO FINAL DA TELA: todos os meses, e o que eles dizem juntos. */
+function relatorioAnosHTML() {
+  const resumo = STORE.resumoEntregues ? STORE.resumoEntregues() : null;
+  const aba = STATE._entRel === 'anos' ? 'anos' : 'meses';
+  const botoes = `<span class="casa-vista">
+      <button class="btn-ghost btn-sm ${aba === 'meses' ? 'active' : ''}" data-ent-rel="meses">Mês a mês</button>
+      <button class="btn-ghost btn-sm ${aba === 'anos' ? 'active' : ''}" data-ent-rel="anos">Anos e tendência</button>
+    </span>`;
+  if (!resumo) {
+    return `<section class="casa-relatorios">
+      <h3>📈 Histórico completo</h3>
+      <p class="text-muted" style="font-size:.8rem">Carregando o mês a mês de todos os anos…</p>
+    </section>`;
+  }
+  const t = tendenciaEntregas(resumo, OPERACAO.dia(new Date()).slice(0, 7));
+  const dinheiroCurto = v => v >= 1000 ? 'R$ ' + (v / 1000).toFixed(v >= 10000 ? 0 : 1).replace('.', ',') + ' mil' : dinheiroCasa(v);
+  const hoje = OPERACAO.dia(new Date()).slice(0, 7);
+
+  /* A GRADE ANO × MÊS: 12 colunas, uma linha por ano. Célula vazia é "—" com
+     dica, nunca R$ 0 — é a diferença entre "não vendemos" e "não perguntamos".
+
+     MOSTRA TODOS OS ANOS QUE O BANCO DIZ EXISTIR, não só os que já foram
+     carregados. Esconder 2020-2024 porque o servidor ainda não tem o pacote
+     deles faria a tela afirmar que a empresa começou em 2025. O ano vazio
+     aparece com o botão de carregar e o preço declarado (25-40 s por mês). */
+  const anosChips = (STORE.anosEntregues ? STORE.anosEntregues() : []).map(String);
+  const anosDesc = [...new Set(anosChips.concat(t.anos))].sort().reverse();
+  const grade = `<div class="casa-tabela-wrap"><table class="casa-tabela casa-grade-meses">
+    <thead><tr><th>Ano</th>${MES_CURTO.map(m => `<th class="num">${m}</th>`).join('')}<th class="num">Total</th></tr></thead>
+    <tbody>${anosDesc.map(ano => {
+      const linha = t.porAno.find(a => a.ano === ano) || null;
+      if (!linha) {
+        // Ano inteiro sem nada guardado: uma linha só, com o preço na frente.
+        return `<tr><td><strong>${esc(ano)}</strong></td>
+          <td colspan="13" class="text-muted">nenhum mês carregado
+            <button class="btn-ghost btn-xs edit-only" data-carregar-ano="${esc(ano)}">carregar ${esc(ano)} do ERP</button>
+            <small>leva 25-40 s por mês</small></td></tr>`;
+      }
+      return `<tr>
+        <td><strong>${esc(ano)}</strong></td>
+        ${MES_CURTO.map((_, i) => {
+          const k = `${ano}-${String(i + 1).padStart(2, '0')}`;
+          const l = t.porMes.get(k);
+          if (k > hoje) return '<td class="num text-muted"></td>';
+          if (!l) return '<td class="num text-muted" title="sem dado guardado para este mês">—</td>';
+          const parcial = k === hoje ? ' title="mês em andamento"' : '';
+          return `<td class="num"${parcial}><button class="btn-link btn-mes-ent" data-mes-ent="${k}">${dinheiroCurto(l.valor)}${k === hoje ? '*' : ''}</button></td>`;
+        }).join('')}
+        <td class="num"><strong>${dinheiroCurto(linha.valor)}</strong>${linha.semDado.length ? ` <span class="badge sem-valor" title="${linha.semDado.join(', ')}">${linha.semDado.length} sem dado</span>` : ''}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>
+  <p class="text-muted" style="font-size:.8rem">Toque num mês para abrir o período dele acima. <strong>*</strong> mês em andamento. Traço é mês sem pacote guardado — não é venda zero.${t.semDado.length ? ` Faltam <strong>${t.semDado.length}</strong> mês${t.semDado.length === 1 ? '' : 'es'} no servidor; cada um leva 25-40 s para o ERP montar.` : ''}</p>`;
+
+  const barrasAno = barrasCasa(
+    t.porAno.slice().reverse().map(a => ({
+      rotulo: a.ano, valor: a.valor,
+      extra: `${a.os} O.S · ${a.meses} mês${a.meses === 1 ? '' : 'es'}${a.semDado.length ? ` · ${a.semDado.length} sem dado` : ''}`,
+    })), dinheiroCurto) || '<p class="text-muted">Sem dado de ano nenhum.</p>';
+
+  const comparativo = `<div class="casa-tabela-wrap"><table class="casa-tabela">
+    <thead><tr><th>Ano</th><th class="num">Total do ano</th><th class="num">Até ${MES_CURTO[Number(hoje.slice(5, 7)) - 1]}</th><th class="num">vs. ano anterior</th><th class="num">No prazo</th></tr></thead>
+    <tbody>${t.porAno.slice().reverse().map(a => {
+      const v = a.variacao;
+      const cor = v === undefined ? '' : (v >= 0 ? 'st-confirmada' : 'sem-valor');
+      return `<tr>
+        <td><strong>${esc(a.ano)}</strong>${a.semDado.length ? ` <span class="badge sem-valor" title="${a.semDado.join(', ')}">parcial</span>` : ''}</td>
+        <td class="num">${dinheiroCasa(a.valor)}</td>
+        <td class="num">${a.mesesMesmoPeriodo
+          ? `${dinheiroCasa(a.mesmoPeriodo)} <small class="text-muted">${a.mesesMesmoPeriodo} m</small>`
+          : '<span class="text-muted" title="nenhum mês deste período está carregado — não é venda zero">—</span>'}</td>
+        <td class="num">${v === undefined
+          ? `<span class="text-muted" title="${esc(a.porQueNaoCompara || 'sem ano anterior carregado para comparar')}">sem base</span>`
+          : `<span class="badge ${cor}">${v > 0 ? '+' : ''}${String(v).replace('.', ',')}%</span> <small class="text-muted">vs ${esc(a.compara)}</small>`}</td>
+        <td class="num">${a.comPrazo ? Math.round(a.noPrazo / a.comPrazo * 100) + '%' : '—'}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>
+  <p class="text-muted" style="font-size:.8rem">A comparação é sempre do <strong>mesmo período</strong>: o acumulado até ${MES_CURTO[Number(hoje.slice(5, 7)) - 1]} de cada ano. Comparar um ano de ${Number(hoje.slice(5, 7))} meses com um de 12 responderia a pergunta errada.</p>`;
+
+  const kpiLinha = (rotulo, valor, nota) => `<div class="casa-kpi"><b>${valor}</b><small>${esc(rotulo)}${nota ? ` · ${esc(nota)}` : ''}</small></div>`;
+  const tend = t.tendencia;
+  const kpis = `<div class="casa-kpi-cards">
+      ${kpiLinha('para onde vai', tend ? tend.direcao : '—', tend ? `${tend.pct > 0 ? '+' : ''}${String(tend.pct).replace('.', ',')}% ao mês nos últimos ${tend.meses}` : 'menos de 6 meses fechados')}
+      ${kpiLinha('média mensal', tend ? dinheiroCurto(tend.media) : '—', tend ? `últimos ${tend.meses} meses fechados` : '')}
+      ${kpiLinha('melhor mês', t.melhor ? dinheiroCurto(t.melhor.valor) : '—', t.melhor ? rotuloMesTend(t.melhor.mes) : '')}
+      ${kpiLinha('meses guardados', String(t.totalMeses), t.semDado.length ? `${t.semDado.length} sem dado` : 'sem buraco')}
+    </div>`;
+
+  const sazonalHTML = barrasCasa(
+    t.sazonal.filter(m => m.media !== null).map(m => ({
+      rotulo: m.rotulo, valor: m.media, extra: `média de ${m.anos} ano${m.anos === 1 ? '' : 's'}`,
+    })), dinheiroCurto) || '<p class="text-muted">Ainda não há anos suficientes para uma média por mês.</p>';
+
+  const corpo = aba === 'meses' ? grade : `${kpis}
+    ${quadroCasa('ent-anos-comp', '📊 Ano a ano, no mesmo período', comparativo, true)}
+    ${quadroCasa('ent-anos-barras', '📈 Total por ano', barrasAno, false)}
+    ${quadroCasa('ent-anos-sazonal', '🗓️ Como costuma ser cada mês <small>— média dos anos</small>', sazonalHTML, false)}`;
+
+  return `<section class="casa-relatorios">
+    <div class="casa-pagina-head" style="align-items:center">
+      <h3 style="margin:0">📈 Histórico completo</h3>
+      ${botoes}
+    </div>
+    <p class="text-muted" style="font-size:.8rem">Todos os meses que o servidor tem guardados, somados do mesmo pacote do ERP que alimenta os números acima. Não vai ao ERP: é leitura do que já foi carregado.${resumo.erro ? ` <span class="badge sem-valor">a última atualização falhou</span>` : ''}</p>
+    ${corpo}
+  </section>`;
 }
 
 function prazoEntregasHTML(lista, porNumero) {
@@ -796,7 +1045,13 @@ function relatoriosEntregasHTML(lista, porNumero, estadoPCP) {
    houver nenhuma O.S na mão, o valor é desconhecido, não zero. Só vira número
    quando alguma coisa de fato veio. Ver [[feedback_zero_nao_e_resultado]]. */
 function valorKpiCasa(k) {
-  return (k.faltando || k.comErro) && !k.n ? '…' : dinheiroCasa(k.total);
+  if ((k.faltando || k.comErro) && !k.n) return '…';
+  /* NÚMERO INCOMPLETO TEM DE DIZER QUE É INCOMPLETO. Enquanto falta mês, o
+     valor do ano é uma fração dele — e um número grande sem etiqueta é o tipo
+     de coisa que alguém repete numa reunião. O total continua aparecendo
+     (esconder seria pior), com a palavra na frente. */
+  if (k.faltando || k.comErro) return 'parcial ' + dinheiroCasa(k.total);
+  return dinheiroCasa(k.total);
 }
 
 /* "O ERP NÃO TEM NADA NESTE PERÍODO" É UMA AFIRMAÇÃO, e só cabe quando ele
@@ -909,6 +1164,7 @@ function renderEntregas() {
       ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', vazioEntregas(per).titulo, vazioEntregas(per).dica)}
       ${lista.length ? prazoEntregasHTML(lista.map(x => x.erp), porNumero) : ''}
       ${relatoriosEntregasHTML(lista.map(x => x.erp), porNumero, estadoPCP)}
+      ${relatorioAnosHTML()}
       <section class="casa-prod-box casa-lancar">
         <h3>Lançamento manual — baixadas pelo ERP fora do sistema · ${aLancar.length}</h3>
         <p>O ERP marcou entregue, mas ninguém finalizou no PCP. Não conta como entrega realizada até alguém lançar: confirme data e equipe e responda se gerou retrabalho. Baixas anteriores a ${CORTE_LANCAMENTO_MANUAL.slice(8, 10)}/${CORTE_LANCAMENTO_MANUAL.slice(5, 7)}/${CORTE_LANCAMENTO_MANUAL.slice(0, 4)} já contam como entregues (decisão da direção).</p>
@@ -926,6 +1182,50 @@ function renderEntregas() {
   const selT = document.getElementById('ent-tecnico'); if (selT) selT.onchange = () => { STATE._entTecnico = selT.value; renderEntregas(); };
   const selS = document.getElementById('ent-tipo'); if (selS) selS.onchange = () => { STATE._entTipo = selS.value; renderEntregas(); };
   el.querySelectorAll('[data-ent-vista]').forEach(b => b.onclick = () => { STATE._entVista = b.dataset.entVista; renderEntregas(); });
+  el.querySelectorAll('[data-ent-rel]').forEach(b => b.onclick = () => { STATE._entRel = b.dataset.entRel; renderEntregas(); });
+  /* Tocar num mês da grade abre o período dele lá em cima — é o caminho natural
+     de "esse mês foi fraco, o que houve nele?". */
+  el.querySelectorAll('[data-mes-ent]').forEach(b => b.onclick = () => {
+    const mes = b.dataset.mesEnt;
+    const [a, m] = mes.split('-').map(Number);
+    const ultimo = new Date(Date.UTC(a, m, 0)).getUTCDate();
+    STATE._fEnt = { de: `${mes}-01`, ate: `${mes}-${String(ultimo).padStart(2, '0')}` };
+    renderEntregas();
+    const topo = document.getElementById('panel-entregas');
+    if (topo && topo.scrollIntoView) topo.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  /* CARREGAR UM ANO INTEIRO do ERP, sob pedido e com o preço dito. Não é
+     automático de propósito: são 12 varreduras de 25-40 s, e ninguém deve
+     disparar meia hora de ERP por engano ao abrir uma tela. */
+  el.querySelectorAll('[data-carregar-ano]').forEach(b => b.onclick = () => {
+    const ano = b.dataset.carregarAno;
+    const hoje = OPERACAO.dia(new Date()).slice(0, 7);
+    const meses = [];
+    for (let m = 1; m <= 12; m++) {
+      const k = `${ano}-${String(m).padStart(2, '0')}`;
+      if (k <= hoje) meses.push(k);
+    }
+    if (typeof toast === 'function') toast(`Pedindo ${meses.length} meses de ${ano} ao ERP — de 25 a 40 s cada, três por vez. Pode sair da tela.`);
+    if (STORE.pullEntreguesLote) {
+      STORE.pullEntreguesLote(meses).then(r => {
+        if (r && r.faltando && r.faltando.length && STORE.garantirEntregues) STORE.garantirEntregues(r.faltando);
+      }).catch(() => {});
+    } else if (STORE.garantirEntregues) STORE.garantirEntregues(meses);
+  });
+  /* O resumo de todos os meses: uma vez por sessão (o store segura por 10 min).
+     Não vai ao ERP — é leitura do que o servidor já guardou. */
+  if (STORE.pullEntreguesResumo) {
+    const anos = STORE.anosEntregues ? STORE.anosEntregues() : [];
+    const hoje = OPERACAO.dia(new Date()).slice(0, 7);
+    const todos = [];
+    for (const ano of anos) {
+      for (let m = 1; m <= 12; m++) {
+        const k = `${ano}-${String(m).padStart(2, '0')}`;
+        if (k <= hoje) todos.push(k);
+      }
+    }
+    if (todos.length) STORE.pullEntreguesResumo(todos);
+  }
   el.querySelectorAll('[data-lancar-os]').forEach(b => b.onclick = () => lancarEntregaManual(b.dataset.lancarOs));
   bindCardClicks(el);
 }
