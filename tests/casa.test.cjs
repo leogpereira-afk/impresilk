@@ -1045,3 +1045,61 @@ test('plantão: o tipo virou chips de rádio, com o mesmo name', () => {
   assert.ok(!/<select name="tipo"/.test(html));
   assert.equal((html.match(/name="tipo"/g) || []).length, 3, 'diarista, sobreaviso e folga');
 });
+
+/* ── Relatório: entregas no tempo, gente e retrabalho ─────────────────────── */
+
+test('serviços entregues: ano e mês saem do histórico, não do filtro do período', () => {
+  const t = casa([
+    fin('1', { finalizadaEm: '2024-03-10T12:00:00' }),
+    fin('2', { finalizadaEm: '2025-07-02T12:00:00' }),
+    fin('3', { finalizadaEm: '2025-07-20T12:00:00' }),
+    fin('4', { finalizadaEm: '2026-09-10T12:00:00' }),
+  ]);
+  const html = t.run('servicosEntreguesHTML()');
+  for (const ano of ['2024', '2025', '2026']) assert.match(html, new RegExp(ano), 'faltou o ano ' + ano);
+  assert.match(html, /4 entregas no histórico inteiro/);
+  /* O ano corrente está pela metade: comparar de igual para igual com um ano
+     fechado transformaria calendário em desempenho. */
+  assert.match(html, /em curso/);
+});
+
+test('serviços entregues: sem entrega nenhuma não inventa gráfico', () => {
+  assert.match(casa([]).run('servicosEntreguesHTML()'), /Nenhuma entrega registrada/);
+});
+
+test('retrabalho: dimensão vazia vira frase, não barra de "não informado"', () => {
+  const t = casa([
+    fin('10', { retrabalho: true, servico: 'Instalação de fachada', cliente: 'Cliente A' }),
+    fin('11', { retrabalho: true, servico: 'Instalação de fachada', cliente: 'Cliente B' }),
+  ], FICHAS);
+  const html = t.run(`retrabalhoHTML({de:'2026-09-01',ate:'2026-09-30'})`);
+  /* etapaOrigem/causaRaiz não vieram preenchidas: a tela tem de DIZER isso,
+     em vez de desenhar uma barra cheia chamada "não informado" — que parece
+     resposta e é ausência de resposta. */
+  assert.ok(!/não informado/.test(html), 'ainda desenha "não informado" como categoria');
+  assert.match(html, /Nenhuma das 2 O\.S tem isto preenchido/);
+  // e o que veio do ERP aparece
+  assert.match(html, /Instalação de fachada/);
+  assert.match(html, /Por tipo de serviço/);
+});
+
+test('retrabalho: a tabela de gente junta entregou, voltou e foi refazer', () => {
+  const t = casa([
+    fin('20', { equipe: ['Natan'] }),
+    fin('21', { equipe: ['Natan'], retrabalho: true }),
+    fin('22', { equipe: ['Paulo'], osOriginal: '21' }),
+  ], FICHAS);
+  const html = t.run(`retrabalhoHTML({de:'2026-09-01',ate:'2026-09-30'})`);
+  assert.match(html, /Foi refazer/);
+  assert.match(html, /Natan/);
+  assert.match(html, /Paulo/, 'quem refez tem de aparecer na tabela mesmo sem ter entregado');
+  // a taxa é sobre as entregas da própria pessoa: Natan entregou 2, 1 voltou
+  assert.match(html, /50%/);
+});
+
+test('retrabalho: taxa alta com poucas entregas vem com a ressalva escrita', () => {
+  const t = casa([fin('30', { equipe: ['Natan'], retrabalho: true })], FICHAS);
+  const html = t.run(`retrabalhoHTML({de:'2026-09-01',ate:'2026-09-30'})`);
+  assert.match(html, /100%/);
+  assert.match(html, /poucas entregas/, 'faltou dizer que a taxa com poucas entregas não quer dizer muito');
+});

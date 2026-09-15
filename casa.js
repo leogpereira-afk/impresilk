@@ -13,6 +13,10 @@ function rotuloMesCasa(mes) {
   return new Date(y, m - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 }
 
+/* Valor curto para gráfico: "R$ 12 mil" cabe onde "R$ 12.345,67" não cabe.
+   Estava copiado dentro de TRÊS funções — e a quarta cópia, a minha, ia faltar,
+   porque `const` dentro de função não é global. Uma definição só. */
+const dinheiroCurto = v => v >= 1000 ? 'R$ ' + (v / 1000).toFixed(v >= 10000 ? 0 : 1).replace('.', ',') + ' mil' : dinheiroCasa(v);
 function dinheiroCasa(n) {
   return (Number(n) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
@@ -877,7 +881,6 @@ function equipeHistoricoHTML(t) {
   if (!h) return '<p class="text-muted">Carregando o tamanho da equipe…</p>';
   if (h.erro) return '<p class="text-muted">O tamanho da equipe não veio do RH nesta sessão.</p>';
   if (!h.meses.length) return '<p class="text-muted">O RH não tem ficha com data de admissão.</p>';
-  const dinheiroCurto = v => v >= 1000 ? 'R$ ' + (v / 1000).toFixed(v >= 10000 ? 0 : 1).replace('.', ',') + ' mil' : dinheiroCasa(v);
   const areas = h.areas || [];
   const anos = t.anos.slice().reverse();
   const linhas = anos.map(ano => {
@@ -922,7 +925,6 @@ function relatorioAnosHTML() {
     </section>`;
   }
   const t = tendenciaEntregas(resumo, OPERACAO.dia(new Date()).slice(0, 7));
-  const dinheiroCurto = v => v >= 1000 ? 'R$ ' + (v / 1000).toFixed(v >= 10000 ? 0 : 1).replace('.', ',') + ' mil' : dinheiroCasa(v);
   const hoje = OPERACAO.dia(new Date()).slice(0, 7);
 
   /* A GRADE ANO × MÊS: 12 colunas, uma linha por ano. Célula vazia é "—" com
@@ -1063,7 +1065,6 @@ function relatoriosEntregasHTML(lista, porNumero, estadoPCP) {
     const arr = [...m.values()].sort((a, b) => b.valor - a.valor || b.n - a.n);
     return limite ? arr.slice(0, limite) : arr;
   };
-  const dinheiroCurto = v => v >= 1000 ? 'R$ ' + (v / 1000).toFixed(v >= 10000 ? 0 : 1).replace('.', ',') + ' mil' : dinheiroCasa(v);
 
   // 1. Mês a mês
   const porMes = new Map();
@@ -1447,6 +1448,60 @@ function produtividadeHTML() {
    A O.S filha (RETRABALHO) carrega etapa de origem, causa raiz e responsável
    desde 14/09/2026. Aqui isso vira: quem teve mais, de onde veio e por quê.
    Taxa = retrabalhos ÷ entregas da pessoa — sem entregas não há taxa. */
+/* ── Serviços entregues: ano a ano e mês a mês ─────────────────────────────
+   NÃO obedece ao filtro de período de propósito. A pergunta aqui é de
+   HISTÓRICO — "como foi 2024 contra 2025" — e um recorte de 15 dias em cima
+   disso responderia sempre "um mês". O filtro continua mandando nos quadros de
+   retrabalho e de gente, que são do período. */
+function servicosEntreguesHTML() {
+  const entregues = classificarEntregas(STORE.getAllOS()).instalacoes
+    .map(o => ({ dia: diaEntrega(o), valor: valorDaOS(o), servico: String(o.servico || '').trim() }))
+    .filter(x => x.dia);
+  if (!entregues.length) return '<p class="text-muted">Nenhuma entrega registrada ainda.</p>';
+
+  const junta = (chave) => {
+    const m = new Map();
+    for (const x of entregues) {
+      const k = chave(x); if (!k) continue;
+      const d = m.get(k) || { k, n: 0, valor: 0, semValor: 0 };
+      d.n++; if (x.valor == null) d.semValor++; else d.valor += x.valor;
+      m.set(k, d);
+    }
+    return [...m.values()];
+  };
+  const anos = junta(x => x.dia.slice(0, 4)).sort((a, b) => a.k.localeCompare(b.k));
+  const meses = junta(x => x.dia.slice(0, 7)).sort((a, b) => a.k.localeCompare(b.k)).slice(-24);
+
+  /* O ANO CORRENTE ESTÁ PELA METADE e não pode ser comparado de igual para
+     igual com um ano fechado: a queda apareceria como desempenho, quando é só
+     o calendário. Marca-se em vez de esconder. */
+  const anoAtual = String(new Date().getFullYear());
+  const anosHTML = barrasCasa(anos.map(a => ({
+    rotulo: a.k + (a.k === anoAtual ? ' (em curso)' : ''),
+    valor: a.n,
+    extra: `${dinheiroCurto(a.valor)}${a.semValor ? ` · ${a.semValor} sem valor` : ''}`
+  })), v => `${v} O.S`) || '<p class="text-muted">Sem ano apurado.</p>';
+
+  const mesesHTML = barrasCasa(meses.map(m => ({
+    rotulo: rotuloMesCasa(m.k), valor: m.n, extra: dinheiroCurto(m.valor)
+  })), v => `${v} O.S`) || '<p class="text-muted">Sem mês apurado.</p>';
+
+  const fechados = anos.filter(a => a.k !== anoAtual);
+  const media = fechados.length ? Math.round(fechados.reduce((t, a) => t + a.n, 0) / fechados.length) : null;
+  const esteAno = anos.find(a => a.k === anoAtual);
+
+  return `<p class="text-muted" style="font-size:.8rem">${entregues.length} entregas no histórico inteiro — este quadro ignora o filtro de período acima, de propósito.</p>
+    <div class="casa-kpi-cards">
+      <div class="casa-kpi"><b>${entregues.length}</b><small>entregas desde o começo</small></div>
+      <div class="casa-kpi"><b>${esteAno ? esteAno.n : 0}</b><small>em ${anoAtual}, ano em curso</small></div>
+      ${media != null ? `<div class="casa-kpi"><b>${media}</b><small>média por ano fechado · ${fechados.length} ano${fechados.length === 1 ? '' : 's'}</small></div>` : ''}
+    </div>
+    <div class="casa-duas">
+      <div><h4>Por ano</h4>${anosHTML}</div>
+      <div><h4>Mês a mês <small>— últimos ${meses.length}</small></h4>${mesesHTML}</div>
+    </div>`;
+}
+
 function retrabalhoHTML(f) {
   const todas = STORE.getAllOS();
   const doPeriodo = todas.filter(o => o.retrabalho && OPERACAO.emIntervalo(diaEntrega(o) || o.dataRetrabalho || o.criadoEm, f.de, f.ate));
@@ -1477,12 +1532,31 @@ function retrabalhoHTML(f) {
   const porQuemEntregou = pessoas.filter(p => p.retrab > 0)
     .map(p => ({ rotulo: `${p.nome}`, valor: p.retrab, extra: `${p.os} entregas · ${Math.round(p.retrab / p.os * 100)}%` }))
     .sort((a, b) => b.valor - a.valor);
-  const contar = campo => {
-    const m = new Map();
-    for (const o of doPeriodo) { const k = String(o[campo] || '').trim() || 'não informado'; m.set(k, (m.get(k) || 0) + 1); }
-    return [...m.entries()].map(([rotulo, valor]) => ({ rotulo, valor })).sort((a, b) => b.valor - a.valor);
+  /* Antes isto empilhava "não informado" como se fosse uma categoria, e a tela
+     desenhava uma barra cheia dizendo 3 — parecia resposta e era ausência de
+     resposta. Agora o preenchido vai para o gráfico e o resto é contado à
+     parte, para a frase dizer quantas faltam preencher. */
+  const contar = (campo, lista) => {
+    const base = lista || doPeriodo;
+    const m = new Map(); let vazios = 0;
+    for (const o of base) {
+      const k = String(o[campo] || '').trim();
+      if (!k) { vazios++; continue; }
+      m.set(k, (m.get(k) || 0) + 1);
+    }
+    const itens = [...m.entries()].map(([rotulo, valor]) => ({ rotulo, valor })).sort((a, b) => b.valor - a.valor);
+    return { itens, vazios, total: base.length };
   };
   const etapas = contar('etapaOrigem'), causas = contar('causaRaiz'), responsaveis = contar('responsavelEtapa');
+  const tipos = contar('servico'), clientes = contar('cliente');
+  /* Uma dimensão 100% vazia não vira gráfico: vira uma frase que diz o que
+     preencher e onde. Gráfico de um item só chamado "não informado" ocupa o
+     lugar da informação sem ser informação. */
+  const dimensao = (d, ondePreencher) => {
+    if (!d.itens.length) return `<p class="text-muted">Nenhuma das ${d.total} O.S tem isto preenchido${ondePreencher ? ` — ${ondePreencher}` : ''}.</p>`;
+    const barras = barrasCasa(d.itens, v => `${v}`);
+    return barras + (d.vazios ? `<p class="text-muted" style="font-size:.78rem">${d.vazios} de ${d.total} sem preencher.</p>` : '');
+  };
   const cfgCusto = (STORE.getCFG().custoRetrabalho) || {};
   const horaR = Number(cfgCusto.hora) || 0, kmR = Number(cfgCusto.km) || 0;
   // Horas e km da CORREÇÃO (a filha), nunca da entrega original.
@@ -1495,6 +1569,30 @@ function retrabalhoHTML(f) {
     if (Number.isFinite(a) && Number.isFinite(b) && b > a) km += b - a;
   }
   const custo = horas * horaR + km * kmR;
+  /* A LEITURA QUE FALTAVA: numa linha só, quem entregou, quanto voltou e
+     quantas vezes a pessoa foi refazer. Nos três gráficos separados dava para
+     ver cada número e não dava para ver a PESSOA. Taxa alta com uma entrega só
+     não é sinal de nada — por isso a contagem vai junto do percentual. */
+  const porNome = new Map();
+  for (const p of pessoas) porNome.set(p.chave, { nome: p.nome, entregas: p.os, voltou: p.retrab, refez: 0 });
+  for (const [chave, v] of refizeram) {
+    const d = porNome.get(chave) || { nome: v.rotulo, entregas: 0, voltou: 0, refez: 0 };
+    d.refez = v.valor; porNome.set(chave, d);
+  }
+  const linhasPessoa = [...porNome.values()]
+    .filter(d => d.voltou > 0 || d.refez > 0)
+    .sort((a, b) => (b.voltou + b.refez) - (a.voltou + a.refez) || b.entregas - a.entregas);
+  const tabelaPessoas = linhasPessoa.length ? `<div class="casa-tabela-rol"><table class="casa-tabela">
+      <thead><tr><th>Pessoa</th><th class="num">Entregas</th><th class="num">Voltaram</th><th class="num">Taxa</th><th class="num">Foi refazer</th></tr></thead>
+      <tbody>${linhasPessoa.map(d => `<tr>
+        <td>${esc(d.nome)}</td>
+        <td class="num">${d.entregas || '—'}</td>
+        <td class="num">${d.voltou || '—'}</td>
+        <td class="num">${d.entregas ? (d.voltou / d.entregas * 100).toFixed(0) + '%' : '—'}</td>
+        <td class="num">${d.refez || '—'}</td></tr>`).join('')}</tbody></table></div>
+      <p class="text-muted" style="font-size:.78rem">Taxa é sobre as entregas da própria pessoa no período — com poucas entregas ela sobe fácil e não quer dizer muito.</p>`
+    : '<p class="text-muted">Ninguém com retrabalho no período.</p>';
+
   const totalEntregas = pessoas.reduce((s, p) => s + p.os, 0);
   const taxa = totalEntregas ? (doPeriodo.length / totalEntregas * 100) : 0;
   if (!doPeriodo.length) return '<p class="text-muted">Nenhum retrabalho registrado no período. 🎉</p>';
@@ -1505,15 +1603,21 @@ function retrabalhoHTML(f) {
       ${custo > 0 ? `<div class="casa-kpi alerta"><b>${dinheiroCasa(custo)}</b><small>custo estimado (hora + km de Configurações)</small></div>` : ''}
     </div>
     <div class="casa-duas">
-      <div><h4>Por etapa de origem</h4>${barrasCasa(etapas, v => `${v}`) || '<p class="text-muted">Sem etapa informada.</p>'}</div>
-      <div><h4>Por causa raiz</h4>${barrasCasa(causas, v => `${v}`) || '<p class="text-muted">Sem causa informada.</p>'}</div>
+      <div><h4>Por tipo de serviço</h4>${dimensao(tipos, 'o serviço vem do ERP')}</div>
+      <div><h4>Por cliente</h4>${dimensao(clientes, 'o cliente vem do ERP')}</div>
     </div>
-    <div class="casa-duas">
-      <div><h4>Quem foi refazer</h4>${barrasCasa(porPessoa, v => `${v}`) || '<p class="text-muted">Nenhuma O.S de correção com equipe registrada. Ligue a correção à original pelo campo “retrabalho da O.S nº”.</p>'}</div>
-      <div><h4>Responsável da etapa de origem</h4>${barrasCasa(responsaveis, v => `${v}`) || '<p class="text-muted">Sem responsável informado.</p>'}</div>
-    </div>
+    <h4>Gente</h4>
+    ${tabelaPessoas}
     <div class="casa-duas">
       <div><h4>De quem voltou serviço</h4>${barrasCasa(porQuemEntregou, v => `${v}`) || '<p class="text-muted">Nenhuma equipe registrada nas entregas que voltaram.</p>'}</div>
+      <div><h4>Quem foi refazer</h4>${barrasCasa(porPessoa, v => `${v}`) || '<p class="text-muted">Nenhuma O.S de correção com equipe registrada. Ligue a correção à original pelo campo “retrabalho da O.S nº”.</p>'}</div>
+    </div>
+    <div class="casa-duas">
+      <div><h4>Por etapa de origem</h4>${dimensao(etapas, 'preenche-se na O.S que voltou')}</div>
+      <div><h4>Por causa raiz</h4>${dimensao(causas, 'preenche-se na O.S que voltou')}</div>
+    </div>
+    <div class="casa-duas">
+      <div><h4>Responsável da etapa de origem</h4>${dimensao(responsaveis, 'preenche-se na O.S que voltou')}</div>
       <div></div>
     </div>
     <p class="text-muted" style="font-size:.8rem"><strong>Quem foi refazer</strong> é a equipe da O.S de correção. <strong>De quem voltou serviço</strong> é a equipe da entrega original — e não quer dizer culpa: quem causou está na etapa de origem e no responsável acima. Valor por hora e por km ficam em ⚙️ Configurações.</p>`;
@@ -1753,7 +1857,7 @@ function renderPerformanceCasa() {
       <div class="casa-pagina-head">
         <div><h2>Performance</h2><p>${abaPerf === 'equipe'
           ? 'Quem entregou, com a ficha do RH (foto, cargo e situação), e o bônus do mês.'
-          : 'Retrabalho e carros no período escolhido — o que a operação produziu, lido de longe.'}</p></div>
+          : 'Entregas ao longo dos anos, gente e retrabalho — o que a operação produziu, lido de longe.'}</p></div>
         <span class="casa-vista">
           <button class="btn-ghost btn-sm ${abaPerf === 'equipe' ? 'active' : ''}" data-perf-aba="equipe">Equipe</button>
           <button class="btn-ghost btn-sm ${abaPerf === 'relatorio' ? 'active' : ''}" data-perf-aba="relatorio">Relatório</button>
@@ -1766,7 +1870,9 @@ function renderPerformanceCasa() {
         ${quadroCasa('perf-bonus', '💰 Bônus por ponto <small>— apuração manual do mês</small>', bonusHTML, false)}
       ` : `
         <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}</div>
-        ${quadroCasa('perf-retrab', '🔧 Retrabalho <small>— de onde veio e quanto custou</small>', retrabalhoHTML(f), true)}
+        ${quadroCasa('perf-entregues', '📦 Serviços entregues <small>— ano a ano e mês a mês</small>', servicosEntreguesHTML(), true)}
+        ${quadroCasa('perf-gente', '👷 Performance dos funcionários <small>— no período escolhido</small>', produtividadeHTML(), true)}
+        ${quadroCasa('perf-retrab', '🔧 Retrabalho <small>— de onde veio, de quem e de que tipo</small>', retrabalhoHTML(f), true)}
         ${quadroCasa('perf-carros', '🚚 Carros mais usados', carrosHTML(f), false)}
       `}
     </div>`;
