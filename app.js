@@ -225,10 +225,6 @@ function calcStatus(os) {
 const STATUS_LABEL = {
   aguardando_producao: 'Aguardando produção',
   apto:                'Apto',
-  // "Liberacao do cliente" e nao "aguardando cliente": ja existe um
-  // "Falta confirmar cliente" logo adiante (a confirmacao da DATA). Dois
-  // rotulos parecidos, colados no funil, fariam o PCP marcar o errado.
-  parado_cliente:   'Parado · Cliente',
   agendada:            'Agendada',
   confirmada:          'Confirmada',
   em_andamento:        'Em andamento',
@@ -240,13 +236,12 @@ const STATUS_LABEL = {
 const STEP_DEFS = {
   aguardando_producao: { curto: 'Produção',  icon: '🏭' },
   apto:                { curto: 'Apto',       icon: '✅' },
-  parado_cliente:   { curto: 'Parado',      icon: '⏸' },
   agendada:            { curto: 'Agenda',     icon: '📅' },
   confirmada:          { curto: 'Confirmado', icon: '📞' },
   em_andamento:        { curto: 'Em rota',    icon: '🚚' },
   finalizada:          { curto: 'Final',      icon: '🏁' }
 };
-const ETAPAS_EXT = ['aguardando_producao', 'apto', 'parado_cliente', 'agendada', 'confirmada', 'em_andamento', 'finalizada'];
+const ETAPAS_EXT = ['aguardando_producao', 'apto', 'agendada', 'confirmada', 'em_andamento', 'finalizada'];
 const ETAPAS_INT = ['aguardando_producao', 'apto', 'finalizada'];
 function etapasDe(os) { return isInterno(os) ? ETAPAS_INT : ETAPAS_EXT; }
 
@@ -465,7 +460,7 @@ const STATE = {
   modalOSId: null,
   painelModo: 'dia',
   filtroBusca: '',
-  pcpVista: ''          // '' = ativos | 'arquivados' | 'retrabalho'
+  pcpVista: ''          // '' = ativos | 'parado' | 'retrabalho' | 'arquivados'
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -852,6 +847,11 @@ function initTabs() {
       const tab = t.dataset.tab;
       $(`#panel-${tab}`).classList.add('active');
       STATE.activeTab = tab;
+      /* O atalho da lateral manda junto a vista do PCP. Sem `?? ''` o botao
+         "PCP" (que nao tem data-vista) deixaria a vista anterior grudada: quem
+         entrasse por "Parado Cliente" e depois clicasse em "PCP" continuaria
+         vendo so os parados, achando que a carteira sumiu. */
+      if (tab === 'pcp') STATE.pcpVista = t.dataset.vista ?? '';
       STORE.pull(refreshAposPull);
       renderActiveTab();
       window.scrollTo({ top: 0, behavior: 'instant' });
@@ -1159,7 +1159,6 @@ function blocoRelevante(os, st, interno) {
   switch (st) {
     case 'aguardando_producao': return 'pcp';
     case 'apto':                return 'agenda';
-    case 'parado_cliente':   return 'agenda';
     case 'agendada':            return 'agenda';
     case 'confirmada':          return 'exec';
     case 'em_andamento':        return 'exec';
@@ -2222,6 +2221,11 @@ function osCardHTML(os) {
   const avisarBtn = interno && !os.finalizadaEm && st === 'apto'
     ? `<button class="btn-ghost btn-sm card-avisar ${os.avisadoEm ? 'avisado' : ''}" data-avisar-os="${esc(os.id)}" title="${os.avisadoEm ? `Cliente avisado em ${new Date(os.avisadoEm).toLocaleString('pt-BR')}${os.avisadoPor ? ' por ' + esc(os.avisadoPor) : ''} — clique para avisar de novo` : 'Avisar o cliente no WhatsApp que o pedido está pronto'}">${os.avisadoEm ? '✅ Avisado ' + fmtDataBR(os.avisadoEm) : '📢 Avisar cliente'}</button>`
     : '';
+  /* O SELO. Sem a etapa no funil, o badge do card volta a dizer "Apto" -- e a
+     O.S parada some de vista no meio das outras, que e o oposto do pedido. A
+     tag fica ao lado de "⏰ atrasada" e "🔴 retrabalho", que e onde o olho ja
+     procura o que esta errado. */
+  const seloParado = OPERACAO.paradoNoCliente(os) ? ' <span class="tag-parado">⏸ parado no cliente</span>' : '';
   const etapasBtns = `<div class="card-etapas">${etapasCard
     .map(([b, lbl]) => `<button class="card-etapa-btn ${etapaDone ? 'done' : ''}" data-etapa-os="${esc(os.id)}" data-etapa-bloco="${b}" title="Abrir em ${esc(lbl)}">${esc(lbl)}</button>`)
     .join('')}</div>`;
@@ -2255,7 +2259,7 @@ function osCardHTML(os) {
     <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
       <div class="card-header card-header-os">
         <div class="card-meta">
-          <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${os.retrabalho && !os.finalizadaEm ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}</div>
+          <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${os.retrabalho && !os.finalizadaEm ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}${seloParado}</div>
           <span class="badge st-${st}">${statusLabelDe(os, st)}</span>
         </div>
         <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
@@ -2617,6 +2621,14 @@ function estaArquivada(o) {
 function pcpBaseList() {
   const all = STORE.getAllOS().slice();
   if (STATE.pcpVista === 'retrabalho') return all.filter(o => o.retrabalho && !o.dataResolvido);
+  /* A MESMA REGUA DO CARD, nao uma parecida. Filtrar so por `paradoClienteEm`
+     pareceria igual e criaria fantasma: a O.S marcada e depois agendada ficaria
+     nesta vista para sempre, e ninguem saberia como tirar -- o botao de
+     desmarcar nem aparece mais quando ja ha agenda. `paradoNoCliente` ja
+     resolve isso (exige externo, liberado, sem agenda e nao finalizada), e e a
+     mesma funcao que o selo e o proximo passo usam. Duas reguas para o mesmo
+     estado e como a tela e o servidor discordarem: um dos dois esta mentindo. */
+  if (STATE.pcpVista === 'parado') return all.filter(o => OPERACAO.paradoNoCliente(o));
   if (STATE.pcpVista === 'arquivados') {
     // Aparelho (janela local) + o que a busca sob demanda já trouxe do servidor.
     const vistos = new Set();
@@ -2732,6 +2744,7 @@ function pcpAtualizarChips() {
   // Botões de vista: cada vista com a própria base × tipo × busca
   const fAll = applyFilter(porTipo(STORE.getAllOS().slice()), busca);
   setN('[data-pcp-vista=""]', fAll.filter(o => !o.finalizadaEm).length);
+  setN('[data-pcp-vista="parado"]', fAll.filter(o => OPERACAO.paradoNoCliente(o)).length);
   setN('[data-pcp-vista="retrabalho"]', fAll.filter(o => o.retrabalho && !o.dataResolvido).length);
   // Arquivados conta aparelho + o que a busca já trouxe do servidor — senão o
   // selo dizia 324 com a lista mostrando 564, e parecia bug.
@@ -2791,6 +2804,8 @@ function pcpRenderCards() {
     ? emptyState('', 'Nenhuma O.S neste filtro', 'Limpe a busca ou o filtro de tipo para ver as O.S desta vista.')
     : STATE.pcpVista === 'arquivados'
       ? emptyState('', 'Nenhuma O.S arquivada', 'Aparecem aqui as finalizadas há 1 semana ou mais.')
+      : STATE.pcpVista === 'parado'
+        ? emptyState('', 'Nada parado no cliente', 'Aparecem aqui os serviços prontos que o cliente ainda não liberou para instalar.')
       : STATE.pcpVista === 'retrabalho'
         ? emptyState('', 'Nenhum retrabalho em aberto', 'Tudo certo: nada voltou para correção.')
         : emptyState('', 'Nenhuma O.S neste filtro', 'Troque o filtro, limpe a busca ou crie uma nova O.S.');
@@ -2857,6 +2872,7 @@ function renderPCP() {
 
   const vistaBtns = [
     ['',           '', 'Ativos'],
+    ['parado',     '⏸', 'Parado Cliente'],
     ['retrabalho', '', 'Retrabalho'],
     ['arquivados', '', 'Arquivados']
   ].map(([k, icone, lbl]) => `<button class="pcp-chip pcp-vista ${STATE.pcpVista === k ? 'active' : ''}" aria-pressed="${STATE.pcpVista === k}" data-pcp-vista="${k}">${chipLabel(icone, lbl)} <span class="pcp-chip-n">0</span></button>`).join('');

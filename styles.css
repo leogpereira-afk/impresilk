@@ -1226,7 +1226,7 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 @media(max-width:640px) {
   .pcp-controles { padding:14px; gap:14px; grid-template-columns:minmax(0,1fr); }
   .pcp-controles-topo { align-items:stretch; flex-direction:column; gap:10px; }
-  .pcp-controles .pcp-vistas { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .pcp-controles .pcp-vistas { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } /* 4 vistas: 2x2 no celular, senao a quarta cai sozinha numa linha com 1/3 da largura */
   .pcp-vistas .pcp-vista { padding:7px 5px; justify-content:center; flex-direction:column; gap:4px; font-size:.75rem; }
   .pcp-busca-linha { grid-template-columns:minmax(0,1fr); gap:10px; }
   .pcp-ordenacao select { flex:1; }
@@ -1244,6 +1244,7 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
   display: inline-block; font-size: .64rem; font-weight: 700;
   padding: 1px 6px; border-radius: 10px; vertical-align: middle; margin-left: 4px;
 }
+.tag-parado { background:#fef3c7; color:#92400e; border-radius:999px; padding:.05rem .4rem; font-size:.7rem; font-weight:600; white-space:nowrap; }
 /* Padrão de cores de status (item 14): Atrasado = vermelho · Retrabalho = âmbar */
 .tag-atraso { background: #fee2e2; color: var(--red); }
 .tag-retrab { background: #fef3c7; color: var(--amber); }
