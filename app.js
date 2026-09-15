@@ -4711,7 +4711,8 @@ function abrirInstrucoes() {
       <h2>As 2 únicas travas</h2>
       <ul>
         <li><strong>🔒 Saída / liberar carro:</strong> só após <em>Confirmação = Confirmado</em> (POP EXI‑002).</li>
-        <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + conferências do embarque + saída registrada + Instalação OK + ≥1 foto de saída (+ problema, se retrabalho).</li>
+        <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + conferências do embarque (embarque, produtos e ferramentas) + saída registrada + Instalação OK + conferido por + ≥1 foto de saída (+ descrição do problema, se retrabalho).<br>
+          <em>Pedido interno (retirada) é diferente:</em> basta PCP liberado + ≥1 item — não há agenda, nem embarque, nem foto.</li>
       </ul>
       <p>Todo o resto é guia — nenhum campo trava por ordem. Preencha na ordem que quiser; a barra de <strong>% preenchida</strong> no topo da ficha mostra o quanto falta.</p>
 
@@ -4719,18 +4720,28 @@ function abrirInstrucoes() {
       <ol>
         <li><strong>PCP:</strong> cria/importa a O.S, define itens, clica <em>"✓ Liberar para instalação"</em>.</li>
         <li><strong>Agendamento:</strong> data + período (obrigatório) + equipe → confirma com o cliente.</li>
+        <li><strong>⏸ Parado no cliente</strong> (quando for o caso): a O.S está pronta e o cliente ainda não liberou a instalação. Clique no botão do card para marcar — ela some da fila de agendamento e passa a aparecer na vista <strong>Parado Cliente</strong>, que separa o que está parado <em>por culpa nossa</em> do que está parado esperando o cliente. Quando ele liberar, o mesmo card traz <em>"▶ Cliente liberou"</em> e ela volta para a fila.</li>
         <li><strong>Embarque:</strong> confere embarque/produtos/ferramentas e registra o <strong>KM de saída</strong>.</li>
         <li><strong>Execução:</strong> libera o carro (após confirmar), tira fotos de saída.</li>
         <li><strong>Check‑out:</strong> registra situação, <strong>KM de retorno</strong> e finaliza. A O.S vai para <em>Finalizados</em>.</li>
       </ol>
 
-      <h2>Abas</h2>
+      <h2>A barra lateral</h2>
       <ul>
-        <li><strong>Painel:</strong> indicadores, trabalhos em execução agora, ranking e tendências. Clique nos números para ver os detalhes.</li>
-        <li><strong>PCP:</strong> todas as O.S ordenadas por data de entrega, com % preenchido e responsável.</li>
-        <li><strong>Instalação:</strong> quadro <em>Kanban</em> por dia (horário, cliente, O.S). Botão 🖨 gera o espelho do dia.</li>
-        <li><strong>Execução / Retrabalho / Finalizados:</strong> acompanhamento na rua, pendências e arquivo.</li>
-        <li><strong>⚙️ Configurações</strong> (admin): listas, usuários, contatos e níveis de acesso.</li>
+        <li><strong>Operação</strong> — 📋 <strong>PCP</strong> (todas as O.S por data de entrega, com % preenchido e responsável), 🚚 <strong>Instalação</strong> (quadro <em>Kanban</em> por dia; o 🖨 gera o espelho), ⚡ <strong>Execução</strong> (o que está na rua agora), ⏸ <strong>Parado Cliente</strong>, 🔧 <strong>Retrabalho</strong> e 🏁 <strong>Finalizados</strong>.</li>
+        <li><strong>Entrega</strong> — 📦 Entregas e 🏅 Performance.</li>
+        <li><strong>Agenda</strong> — 📅 Calendário, ⏰ Plantões e 🗓️ Programação.</li>
+        <li><strong>Casa</strong> — 📊 <strong>Painel</strong> (indicadores, ranking e tendências; clique nos números para abrir o detalhe) e ⚙️ <strong>Configurações</strong> (admin: listas, usuários, contatos e níveis de acesso).</li>
+      </ul>
+      <p><strong>⏸ Parado Cliente é atalho, não tela separada:</strong> ele abre o próprio PCP já na vista certa. É a mesma lista que o botão da barra de vistas mostra — um caminho a mais para o mesmo lugar, não um segundo lugar.</p>
+
+      <h2>As vistas do PCP</h2>
+      <p>Logo acima dos cards há quatro botões, e o número em cada um conta o que aquela vista mostra:</p>
+      <ul>
+        <li><strong>Ativos</strong> — a carteira em aberto. Só aqui aparecem os chips de etapa (Aguardando produção, Apto, Agendado…).</li>
+        <li><strong>⏸ Parado Cliente</strong> — prontas, esperando o cliente liberar a instalação.</li>
+        <li><strong>Retrabalho</strong> — voltou com problema e ainda não foi resolvido.</li>
+        <li><strong>Arquivados</strong> — o histórico finalizado, por ano e mês. A busca aqui vale para o histórico inteiro, não só para o recorte escolhido.</li>
       </ul>
 
       <h2>Importar do PDF do ERP</h2>
@@ -4740,7 +4751,7 @@ function abrirInstrucoes() {
       <p>O botão <strong>🪞 Espelhos</strong> (admin) abre as visões somente‑leitura para instaladores e comercial. Na ficha e no PDF do dia há envio rápido via WhatsApp para contatos cadastrados (nome · departamento · número) em ⚙️ Configurações.</p>
 
       <h2>Backup</h2>
-      <p>No <em>Painel</em> há <code>⬇ Backup</code> (baixa um .json) e <code>⬆ Restaurar</code>. A nuvem (Netlify Blobs) é a fonte da verdade; o backup é rede de segurança extra.</p>
+      <p>No <em>Painel</em> há <code>⬇ Backup</code> (baixa um .json) e <code>⬆ Restaurar</code>. A nuvem (Supabase) é a fonte da verdade; o backup é rede de segurança extra. <em>O Netlify saiu do caminho em agosto de 2026</em> — se alguma instrução antiga ainda falar em "Netlify Blobs", ela está velha.</p>
     </div>`;
   overlay.classList.remove('hidden');
   $('#instr-fechar').onclick = () => overlay.classList.add('hidden');

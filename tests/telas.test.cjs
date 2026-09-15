@@ -182,3 +182,38 @@ test('entrar pelo PCP limpa a vista do atalho', () => {
   assert.match(app, /if \(tab === 'pcp'\) STATE\.pcpVista = t\.dataset\.vista \?\? '';/,
     'sem o ?? "" a vista fica grudada e o PCP abre so com os parados');
 });
+
+/* O MANUAL DENTRO DO APP ENVELHECE CALADO.
+ *
+ * Em 15/09/2026 o `abrirInstrucoes()` ainda ensinava um app de cinco abas
+ * (Painel, PCP, Instalacao, "Execucao / Retrabalho / Finalizados",
+ * Configuracoes) quando a lateral ja tinha TREZE, e afirmava que "a nuvem
+ * (Netlify Blobs) e a fonte da verdade" -- o Netlify foi desligado em agosto de
+ * 2026. Manual errado e pior que manual ausente: ele e lido como verdade e
+ * ninguem abre chamado contra um texto.
+ *
+ * Este teste nao julga a redacao. Ele so cobra que TODA aba da lateral apareca
+ * pelo nome no manual, e que a frase sobre a fonte da verdade nao volte a
+ * nomear o Netlify.
+ */
+test('o manual do app conhece todas as abas da lateral', () => {
+  const app  = fs.readFileSync(path.join(root,'app.js'),'utf8');
+  const html = fs.readFileSync(path.join(root,'index.html'),'utf8');
+
+  const ini = app.indexOf('function abrirInstrucoes()');
+  assert.ok(ini > 0, 'o manual sumiu do app.js');
+  const manual = app.slice(ini, app.indexOf('\n}', ini));
+
+  // O rotulo visivel de cada botao da lateral: o texto depois do </span>.
+  const nav = html.slice(html.indexOf('<p class="nav-grupo">'), html.indexOf('</nav>'));
+  const rotulos = [...nav.matchAll(/<button class="tab[^"]*"[^>]*>.*?<\/span>\s*([^<]+?)\s*<\/button>/g)]
+    .map(m => m[1]);
+  assert.ok(rotulos.length >= 10, `esperava a lateral inteira, achei ${rotulos.length}`);
+
+  const faltando = rotulos.filter(r => !manual.includes(r));
+  assert.deepEqual(faltando, [],
+    `o manual nao cita estas abas da lateral: ${faltando.join(', ')}`);
+
+  assert.doesNotMatch(manual, /Netlify Blobs\)? é a fonte da verdade/,
+    'o Netlify foi desligado em 08/2026; a fonte da verdade e o Supabase');
+});
