@@ -579,14 +579,50 @@ function anosEntregas() {
 }
 function chipsPeriodoEntregas(f) {
   const hoje = OPERACAO.dia(new Date());
+  const anoHoje = Number(hoje.slice(0, 4));
   const alvos = [
     { id: '30d', rotulo: 'Últimos 30 dias', de: OPERACAO.somarDias(hoje, -29), ate: hoje },
     { id: 'mes', rotulo: 'Este mês', de: hoje.slice(0, 7) + '-01', ate: hoje },
-    ...anosEntregas().map(a => ({ id: 'a' + a, rotulo: String(a), de: a + '-01-01', ate: a === Number(hoje.slice(0, 4)) ? hoje : a + '-12-31' })),
+    ...anosEntregas().map(a => ({ id: 'a' + a, rotulo: String(a), de: a + '-01-01', ate: a === anoHoje ? hoje : a + '-12-31' })),
   ];
-  return `<div class="casa-chips-periodo">${alvos.map(a =>
+  const linhaAnos = `<div class="casa-chips-periodo">${alvos.map(a =>
     `<button type="button" class="casa-chip-per ${f.de === a.de && f.ate === a.ate ? 'on' : ''}" data-per-de="${a.de}" data-per-ate="${a.ate}">${esc(a.rotulo)}</button>`
   ).join('')}</div>`;
+
+  /* OS MESES DO ANO EM FOCO, na fileira de baixo (pedido do dono, 15/09/2026:
+     "colocar o chip dos meses aqui embaixo").
+     Chegar em março de 2025 exigia escolher o ano e depois digitar duas datas.
+     Agora: toca no ano, toca no mês.
+
+     O ANO EM FOCO SAI DO PERÍODO ESCOLHIDO, não de um estado próprio — assim a
+     fileira de meses sempre concorda com o que está aceso em cima, inclusive
+     quando o período veio das datas digitadas ou de um clique na grade do
+     histórico. Sem ano legível (período atravessando dois anos), mostra o ano
+     corrente, que é onde a pessoa está.
+
+     O PONTO marca mês que tem pacote guardado no servidor. Sem ele, um mês
+     nunca carregado e um mês sem venda pareceriam a mesma coisa — e o primeiro
+     custa 25-40 s de ERP para descobrir. */
+  const anoFoco = (String(f.de || '').slice(0, 4) === String(f.ate || '').slice(0, 4) && /^\d{4}$/.test(String(f.de || '').slice(0, 4)))
+    ? Number(String(f.de).slice(0, 4))
+    : anoHoje;
+  const resumo = STORE.resumoEntregues ? STORE.resumoEntregues() : null;
+  const comPacote = new Set(((resumo && resumo.meses) || []).map(l => l.mes));
+  const linhaMeses = `<div class="casa-chips-periodo casa-chips-mes">${MES_CURTO.map((rot, i) => {
+    const mm = String(i + 1).padStart(2, '0');
+    const k = `${anoFoco}-${mm}`;
+    const ultimo = new Date(Date.UTC(anoFoco, i + 1, 0)).getUTCDate();
+    const de = `${k}-01`;
+    const ate = k === hoje.slice(0, 7) ? hoje : `${k}-${String(ultimo).padStart(2, '0')}`;
+    // Mês que ainda não começou não é escolha: fica visível e desligado, para a
+    // fileira não mudar de tamanho ao trocar de ano.
+    const futuro = k > hoje.slice(0, 7);
+    const aceso = f.de === de && f.ate === ate;
+    return `<button type="button" class="casa-chip-per ${aceso ? 'on' : ''}${k === hoje.slice(0, 7) ? ' hoje' : ''}"
+      ${futuro ? 'disabled title="ainda não aconteceu"' : `data-per-de="${de}" data-per-ate="${ate}"`}>${rot}${comPacote.has(k) ? '<i class="casa-chip-ponto" title="mês já carregado"></i>' : ''}</button>`;
+  }).join('')}<span class="casa-chips-nota">${anoFoco}</span></div>`;
+
+  return linhaAnos + linhaMeses;
 }
 
 /* ── Relatórios de entrega ────────────────────────────────────────────────

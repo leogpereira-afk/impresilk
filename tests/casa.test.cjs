@@ -945,3 +945,47 @@ test('performance: as duas abas existem e nenhuma seção se perde', () => {
     assert.match(html, /data-perf-aba="relatorio"/);
   }
 });
+
+/* ---------------- Chips de mês em Entregas ----------------
+   Pedido do dono: "colocar o chip dos meses aqui embaixo". Chegar em março de
+   2025 exigia escolher o ano e digitar duas datas. */
+
+test('chips de Entregas: a fileira de meses segue o ANO escolhido em cima', () => {
+  const t = casa([], { _anosERP: [2026, 2025, 2024] });
+  const html = t.run(`
+    STORE.resumoEntregues = () => null;
+    chipsPeriodoEntregas({ de: '2025-01-01', ate: '2025-12-31' })`);
+  assert.match(html, /data-per-de="2025-03-01" data-per-ate="2025-03-31"/,
+    'março de 2025 tem de ser um toque, não duas datas digitadas');
+  assert.match(html, /casa-chips-nota">2025</, 'a fileira precisa dizer de que ano são estes meses');
+  assert.ok(!/data-per-de="2026-/.test(html.split('casa-chips-mes')[1] || ''),
+    'os meses são do ano em foco, não do corrente');
+});
+
+test('chips de Entregas: mês que ainda não aconteceu fica desligado, não some', () => {
+  const t = casa([], { _anosERP: [2026] });
+  const html = t.run(`
+    STORE.resumoEntregues = () => null;
+    chipsPeriodoEntregas({ de: '2026-01-01', ate: '2026-09-15' })`);
+  const meses = html.split('casa-chips-mes')[1] || '';
+  assert.equal((meses.match(/casa-chip-per/g) || []).length, 12, 'os doze aparecem sempre');
+  assert.match(meses, /disabled title="ainda não aconteceu"/);
+  // Nenhum mês futuro pode ser clicável.
+  assert.ok(!/data-per-de="2026-1[012]/.test(meses), 'out a dez de 2026 ainda não existem');
+});
+
+test('chips de Entregas: o mês corrente recorta até hoje, não até o fim do mês', () => {
+  const t = casa([], { _anosERP: [2026] });
+  const hoje = t.run(`OPERACAO.dia(new Date())`);
+  const html = t.run(`STORE.resumoEntregues = () => null; chipsPeriodoEntregas({ de: '', ate: '' })`);
+  assert.match(html, new RegExp(`data-per-ate="${hoje}"`),
+    'setembro vai até hoje; até 30/09 prometeria entregas que ainda não aconteceram');
+});
+
+test('chips de Entregas: ponto marca mês já carregado, para não confundir com mês sem venda', () => {
+  const t = casa([], { _anosERP: [2026] });
+  const html = t.run(`
+    STORE.resumoEntregues = () => ({ meses: [{ mes: '2026-03', valor: 1, os: 1 }], faltando: [] });
+    chipsPeriodoEntregas({ de: '2026-01-01', ate: '2026-09-15' })`);
+  assert.equal((html.match(/casa-chip-ponto/g) || []).length, 1, 'só março tem pacote guardado');
+});

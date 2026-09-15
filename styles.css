@@ -2096,3 +2096,12 @@ body.tv-ligada { overflow:hidden; }
 .casa-dia-os { font-size: .7rem; }
 .casa-pill { font-size: .68rem; }
 @media (max-width: 899px) { .casa-dia { padding: 7px; } }
+
+/* A fileira de MESES em Entregas, abaixo dos anos. Menor que a de cima, porque
+   é o nível de baixo e não deve competir com os anos. O ano em foco aparece no
+   fim da linha: sem ele, "mar" aceso não diz mar de quando. */
+.casa-chips-mes { margin-top: 6px; align-items: center; }
+.casa-chips-mes .casa-chip-per { font-size: .75rem; padding: 5px 11px; min-height: 36px; }
+.casa-chips-mes .casa-chip-per[disabled] { opacity: .38; cursor: default; }
+.casa-chips-mes .casa-chip-per[disabled]:hover { border-color: #d7e1ee; }
+.casa-chips-nota { font-size: .72rem; color: var(--muted); font-weight: 700; margin-left: 4px; }
