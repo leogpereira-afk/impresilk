@@ -15,6 +15,16 @@
 #   ./scripts/publicar-functions.sh              # publica as duas
 #   ./scripts/publicar-functions.sh pcp-sync     # so uma
 #
+# QUEM RODA ISTO NA CI NAO E ESTE REPOSITORIO. E o painel-impresilk, no job
+# `publicar-pcp` do .github/workflows/functions.yml de la: ele faz checkout
+# deste repo (publico) e chama este script com o SUPABASE_ACCESS_TOKEN que ja
+# existe por la. O projeto Supabase e o MESMO (heveemylixartyijxewh), e um
+# token so e uma copia a menos para girar no dia em que ele vazar.
+#
+# Havia um workflow igual AQUI, e ele falhava em toda mudanca de function por
+# falta do secret. Vermelho cronico ensina a ignorar vermelho -- entao ficou um
+# publicador so, o que funciona.
+#
 # O token NAO fica gravado em lugar nenhum: sai do ambiente e some quando o
 # terminal fecha. Nunca escreva ele num arquivo do repositorio -- este repo e
 # PUBLICO.
