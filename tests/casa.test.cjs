@@ -351,12 +351,15 @@ test('editar plantão não apaga o vínculo com O.S já finalizada', () => {
   const t = casa([aberta, fechada], {}, ELENCO);
   const porId = "new Map([['A'," + JSON.stringify(aberta) + "],['B'," + JSON.stringify(fechada) + "]])";
   const html = t.run(`opcoesOSPlantao({osIds:['B']}, [${JSON.stringify(aberta)}], ${porId})`);
-  assert.match(html, /value="B"[^>]*selected/, 'a O.S finalizada continua na lista, marcada');
+  // A marcação virou checkbox (o <select multiple> pedia Ctrl, que não existe
+  // no tablet); a REGRA é a mesma: o vínculo não se perde ao editar.
+  assert.match(html, /value="B"[^>]*checked/, 'a O.S finalizada continua na lista, marcada');
   assert.match(html, /já finalizada/);
   assert.match(html, /value="A"/, 'as abertas continuam aparecendo');
   // vínculo para O.S que este aparelho não conhece também não se perde
   const html2 = t.run(`opcoesOSPlantao({osIds:['Z']}, [], new Map())`);
-  assert.match(html2, /value="Z"[^>]*selected/);
+  assert.match(html2, /value="Z"[^>]*checked/);
+  assert.match(html2, /vínculo preservado/);
 });
 
 test('plantão de quem saiu do RH ainda abre para edição', () => {
@@ -988,4 +991,57 @@ test('chips de Entregas: ponto marca mês já carregado, para não confundir com
     STORE.resumoEntregues = () => ({ meses: [{ mes: '2026-03', valor: 1, os: 1 }], faltando: [] });
     chipsPeriodoEntregas({ de: '2026-01-01', ate: '2026-09-15' })`);
   assert.equal((html.match(/casa-chip-ponto/g) || []).length, 1, 'só março tem pacote guardado');
+});
+
+/* ---------------- Seletor de O.S do plantão ----------------
+   O <select multiple> pedia "Segure Ctrl (ou ⌘)" num tablet, onde não há Ctrl:
+   marcar a segunda O.S desmarcava a primeira. Virou lista de toque com busca. */
+
+test('seletor de O.S: cada linha é um checkbox com o mesmo name, o envio não muda', () => {
+  const t = casa([]);
+  const html = t.run(`opcoesOSPlantao({ osIds: [] }, [
+    { id: 'A', numero: '101', cliente: 'CLIENTE UM' },
+    { id: 'B', numero: '102', cliente: 'CLIENTE DOIS' }
+  ], new Map())`);
+  assert.equal((html.match(/name="osIds"/g) || []).length, 2, 'fd.getAll("osIds") precisa continuar funcionando');
+  assert.equal((html.match(/type="checkbox"/g) || []).length, 2);
+  assert.ok(!/<select/.test(html), 'nada de select multiple');
+  assert.ok(!/Ctrl/.test(html));
+});
+
+test('seletor de O.S: a lista carrega dado de busca por número E por cliente', () => {
+  const t = casa([]);
+  const html = t.run(`opcoesOSPlantao({ osIds: [] }, [
+    { id: 'A', numero: '22701', cliente: 'JECAL PRODUTOS' }
+  ], new Map())`);
+  assert.match(html, /data-busca="22701 jecal produtos"/,
+    'a busca precisa achar tanto pelo número quanto pelo nome do cliente');
+});
+
+test('seletor de O.S: o teto é dito, não cortado em silêncio', () => {
+  const t = casa([]);
+  const muitas = Array.from({ length: 340 }, (_, i) => ({ id: 'x' + i, numero: String(1000 + i), cliente: 'C' + i }));
+  const html = t.run(`opcoesOSPlantao({ osIds: [] }, ${JSON.stringify(muitas)}, new Map())`);
+  assert.equal((html.match(/name="osIds"/g) || []).length, 300, 'trezentas na lista');
+  assert.match(html, /40 fora da lista — use a busca/, 'o corte tem de ser dito');
+});
+
+test('seletor de O.S: o contador começa com o que já estava marcado', () => {
+  const t = casa([]);
+  const porId = `new Map([['A',{id:'A',numero:'1',cliente:'X'}],['B',{id:'B',numero:'2',cliente:'Y'}]])`;
+  const html = t.run(`opcoesOSPlantao({ osIds: ['A','B'] }, [], ${porId})`);
+  assert.match(html, /os-pick-conta">2<\/span> marcadas/);
+});
+
+test('plantão: o tipo virou chips de rádio, com o mesmo name', () => {
+  const t = casa([], {}, ELENCO);
+  const html = t.run(`
+    var wireFiltroPeriodo = () => {};
+    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => null };
+    document.getElementById = () => el;
+    renderPlantoesCasa();
+    el.innerHTML`);
+  assert.match(html, /type="radio" name="tipo" value="diarista"/);
+  assert.ok(!/<select name="tipo"/.test(html));
+  assert.equal((html.match(/name="tipo"/g) || []).length, 3, 'diarista, sobreaviso e folga');
 });

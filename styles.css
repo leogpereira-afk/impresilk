@@ -2105,3 +2105,47 @@ body.tv-ligada { overflow:hidden; }
 .casa-chips-mes .casa-chip-per[disabled] { opacity: .38; cursor: default; }
 .casa-chips-mes .casa-chip-per[disabled]:hover { border-color: #d7e1ee; }
 .casa-chips-nota { font-size: .72rem; color: var(--muted); font-weight: 700; margin-left: 4px; }
+
+/* ── Seletor de O.S do plantão: lista de toque com busca ───────────────────
+   Substituiu um <select multiple> de 300 linhas com "Segure Ctrl (ou ⌘)" —
+   instrução impossível de seguir num tablet, onde marcar a segunda O.S
+   desmarcava a primeira. */
+.casa-os-pick { display: block; margin-top: 6px; }
+.os-pick-busca {
+  width: 100%; min-height: 40px; padding: 8px 12px; margin-bottom: 8px;
+  border: 1px solid #d7e1ee; border-radius: 10px; font-size: .85rem; background: #fff;
+}
+.os-pick-lista {
+  max-height: 260px; overflow-y: auto; border: 1px solid #d7e1ee;
+  border-radius: 12px; background: #fff;
+}
+.os-pick-item {
+  display: grid; grid-template-columns: 22px 78px minmax(0, 1fr) auto;
+  align-items: center; gap: 10px; min-height: 44px; padding: 6px 12px;
+  border-bottom: 1px solid #eef2f7; cursor: pointer; font-size: .82rem;
+}
+.os-pick-item:last-child { border-bottom: 0; }
+.os-pick-item:hover { background: #f7fafd; }
+.os-pick-item.on { background: #eef7f4; }
+.os-pick-item input { width: 20px; height: 20px; accent-color: #28796a; margin: 0; }
+.os-pick-num { font-weight: 700; color: #163654; font-variant-numeric: tabular-nums; }
+.os-pick-cli { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-pick-det { font-size: .72rem; color: var(--muted); white-space: nowrap; }
+.os-pick-nota { font-size: .78rem; margin-top: 6px; }
+.os-pick-conta { font-weight: 700; color: #163654; }
+@media (max-width: 760px) {
+  /* No estreito o detalhe do prazo cede a vez ao cliente. */
+  .os-pick-item { grid-template-columns: 22px 70px minmax(0, 1fr); }
+  .os-pick-det { display: none; }
+}
+
+/* Tipo do plantão: três opções não precisam de um <select>. */
+.casa-radio-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.casa-radio-chip { display: inline-flex; align-items: center; cursor: pointer; min-height: 40px; }
+.casa-radio-chip input { position: absolute; opacity: 0; pointer-events: none; }
+.casa-radio-chip .casa-pill {
+  min-height: 40px; display: inline-flex; align-items: center; padding: 0 16px;
+  border: 2px solid transparent; font-size: .82rem;
+}
+.casa-radio-chip.on .casa-pill { border-color: #163654; font-weight: 700; }
+.casa-radio-chip input:focus-visible + .casa-pill { outline: 2px solid #1d4ed8; outline-offset: 2px; }

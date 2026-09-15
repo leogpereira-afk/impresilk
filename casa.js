@@ -2226,20 +2226,56 @@ function plantaoComOS(p) { return Array.isArray(p.osIds) ? p.osIds : []; }
    estava finalizada, não aparecia na lista, e o vínculo era apagado calado —
    sem como refazer pela tela, já que finalizada nunca mais volta ao select.
    Arquivado é guardado: as já vinculadas entram SEMPRE, mesmo fechadas. */
+/* AS O.S QUE ESTE PLANTÃO ATENDE.
+ *
+ * Era um <select multiple> com 300 linhas e a instrução "Segure Ctrl (ou ⌘)
+ * para marcar mais de uma" — num tablet, onde não existe Ctrl e o gesto de
+ * seleção múltipla nativa é quase impossível com o dedo. Marcar a segunda O.S
+ * desmarcava a primeira, e ninguém entendia por quê.
+ *
+ * Agora é uma lista de toque, com busca. Cada linha é um checkbox de verdade
+ * com `name="osIds"`, então o envio não mudou nada: `fd.getAll('osIds')`
+ * continua recebendo a mesma coisa. A busca filtra escondendo linhas, sem
+ * redesenhar nada — redesenhar apagaria o que já estava marcado e o que estava
+ * sendo digitado.
+ *
+ * As JÁ LIGADAS vêm primeiro e não somem na busca: elas são o que a pessoa já
+ * decidiu, e uma escolha que some do campo de visão vira escolha desfeita por
+ * engano. Inclui as que o aparelho não conhece mais — o vínculo é preservado,
+ * nunca descartado em silêncio. */
 function opcoesOSPlantao(plantao, candidatas, porId) {
   const jaLigadas = plantaoComOS(plantao);
   const vistos = new Set();
-  const linha = (o, fechada) => {
+  const TETO = 300;
+  const item = (o, marcada, fechada) => {
     vistos.add(o.id);
     const prazo = OPERACAO.prazo(o);
-    return `<option value="${esc(o.id)}" ${jaLigadas.includes(o.id) ? 'selected' : ''}>${esc(o.numero || '—')} — ${esc((o.cliente || '').slice(0, 40))}${fechada ? ' · já finalizada' : (prazo ? ' · prazo ' + prazo.slice(8, 10) + '/' + prazo.slice(5, 7) : '')}</option>`;
+    const detalhe = fechada ? 'já finalizada' : (prazo ? 'prazo ' + prazo.slice(8, 10) + '/' + prazo.slice(5, 7) : 'sem prazo');
+    const busca = `${o.numero || ''} ${o.cliente || ''}`.toLowerCase();
+    return `<label class="os-pick-item${marcada ? ' on' : ''}" data-busca="${esc(busca)}">
+      <input type="checkbox" name="osIds" value="${esc(o.id)}" ${marcada ? 'checked' : ''}>
+      <span class="os-pick-num">${esc(o.numero || '—')}</span>
+      <span class="os-pick-cli">${esc((o.cliente || '').slice(0, 44))}</span>
+      <span class="os-pick-det">${esc(detalhe)}</span>
+    </label>`;
   };
-  const fixas = jaLigadas.map(id => porId.get(id)).filter(Boolean).map(o => linha(o, !!o.finalizadaEm)).join('');
-  const resto = candidatas.filter(o => !vistos.has(o.id)).slice(0, 300).map(o => linha(o, false)).join('');
-  // Vínculo para O.S que o aparelho não conhece: preserva o id, não o perde.
-  const orfas = jaLigadas.filter(id => !porId.has(id))
-    .map(id => `<option value="${esc(id)}" selected>O.S fora deste aparelho — vínculo preservado</option>`).join('');
-  return fixas + orfas + resto;
+  const fixas = jaLigadas.map(id => porId.get(id)).filter(Boolean)
+    .map(o => item(o, true, !!o.finalizadaEm)).join('');
+  const orfas = jaLigadas.filter(id => !porId.has(id)).map(id =>
+    `<label class="os-pick-item on" data-busca="${esc(String(id).toLowerCase())}">
+      <input type="checkbox" name="osIds" value="${esc(id)}" checked>
+      <span class="os-pick-num">—</span>
+      <span class="os-pick-cli">O.S fora deste aparelho</span>
+      <span class="os-pick-det">vínculo preservado</span>
+    </label>`).join('');
+  const restantes = candidatas.filter(o => !vistos.has(o.id));
+  const resto = restantes.slice(0, TETO).map(o => item(o, false, false)).join('');
+  const cortadas = Math.max(0, restantes.length - TETO);
+  return `<div class="casa-os-pick">
+    <input type="search" class="os-pick-busca" placeholder="Buscar por número ou cliente" aria-label="Buscar O.S">
+    <div class="os-pick-lista">${fixas}${orfas}${resto}</div>
+    <p class="text-muted os-pick-nota"><span class="os-pick-conta">${jaLigadas.length}</span> marcada${jaLigadas.length === 1 ? '' : 's'}${cortadas ? ` · as ${TETO} mais próximas do prazo (${cortadas} fora da lista — use a busca)` : ''}</p>
+  </div>`;
 }
 function renderPlantoesCasa() {
   const el = document.getElementById('panel-plantoes');
@@ -2305,14 +2341,18 @@ function renderPlantoesCasa() {
         <form id="pl-form" class="casa-form-grade">
           <input type="hidden" name="id" value="${esc(editando ? editando.id : '')}">
           <label>Data <input name="data" type="date" required value="${esc(f.data)}"></label>
-          <label>Tipo <select name="tipo">${Object.entries(TIPOS_PLANTAO).map(([k, v]) => `<option value="${k}" ${f.tipo === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+          <label class="larga">Tipo
+            <span class="casa-radio-chips">${Object.entries(TIPOS_PLANTAO).map(([k, v]) =>
+              `<label class="casa-radio-chip ${f.tipo === k ? 'on' : ''}"><input type="radio" name="tipo" value="${k}" ${f.tipo === k ? 'checked' : ''}><span class="casa-pill ${k}">${esc(v)}</span></label>`
+            ).join('')}</span></label>
           <label>Quem <select name="quem" required><option value="">— escolher —</option>${optionsEquipeCasa(f.quem)}</select></label>
           <label>Início <input name="inicio" type="time" value="${esc(f.inicio)}" required></label>
           <label>Fim <input name="fim" type="time" value="${esc(f.fim)}" required></label>
           <label class="larga">Título <input name="titulo" required placeholder="Plantão de sábado" value="${esc(f.titulo)}"></label>
           <label class="larga">Observação <input name="obs" placeholder="opcional" value="${esc(f.obs)}"></label>
-          <label class="larga">O.S deste plantão <select name="osIds" multiple size="5">${opcoesOSPlantao(f, candidatas, porId)}</select>
-            <small class="text-muted">Segure Ctrl (ou ⌘) para marcar mais de uma. Vincular aqui não programa a O.S — só anota o que este plantão atende.</small></label>
+          <label class="larga">O.S deste plantão
+            ${opcoesOSPlantao(f, candidatas, porId)}
+            <small class="text-muted">Toque para marcar. Vincular aqui não programa a O.S — só anota o que este plantão atende.</small></label>
           <div class="larga casa-dia-acoes">
             <button class="btn-primary btn-sm" type="submit">${editando ? 'Salvar alterações' : 'Registrar plantão'}</button>
             ${editando ? '<button class="btn-ghost btn-sm" type="button" id="pl-cancelar">Cancelar</button>' : ''}
@@ -2364,6 +2404,44 @@ function renderPlantoesCasa() {
   };
   const cancelar = document.getElementById('pl-cancelar');
   if (cancelar) cancelar.onclick = () => { STATE._plEdit = ''; renderPlantoesCasa(); };
+  /* A BUSCA DO SELETOR DE O.S FILTRA, NÃO REDESENHA.
+     Redesenhar apagaria o que já estava marcado e o que estava sendo digitado
+     nos outros campos do formulário — o defeito clássico deste app. Aqui só
+     escondemos linhas. As já marcadas NUNCA são escondidas: uma escolha que
+     some do campo de visão vira escolha desfeita por engano. */
+  el.querySelectorAll('.casa-os-pick').forEach(box => {
+    const busca = box.querySelector('.os-pick-busca');
+    const itens = [...box.querySelectorAll('.os-pick-item')];
+    const conta = box.querySelector('.os-pick-conta');
+    const atualizarConta = () => {
+      if (!conta) return;
+      const n = itens.filter(i => i.querySelector('input').checked).length;
+      conta.textContent = String(n);
+      const nota = conta.parentElement;
+      if (nota) nota.firstChild.nextSibling.textContent = n === 1 ? ' marcada' : ' marcadas';
+    };
+    if (busca) {
+      busca.oninput = () => {
+        const q = busca.value.trim().toLowerCase();
+        for (const i of itens) {
+          const marcada = i.querySelector('input').checked;
+          i.hidden = !!q && !marcada && !(i.dataset.busca || '').includes(q);
+        }
+      };
+    }
+    for (const i of itens) {
+      i.querySelector('input').onchange = e => {
+        i.classList.toggle('on', e.target.checked);
+        atualizarConta();
+      };
+    }
+  });
+  /* Os chips de tipo são radios de verdade: o FormData não mudou. */
+  el.querySelectorAll('.casa-radio-chip input').forEach(r => {
+    r.onchange = () => {
+      el.querySelectorAll('.casa-radio-chip').forEach(c => c.classList.toggle('on', c.contains(r) && r.checked));
+    };
+  });
   el.querySelectorAll('[data-edit-pl]').forEach(btn => {
     btn.onclick = () => {
       STATE._plEdit = btn.dataset.editPl;
