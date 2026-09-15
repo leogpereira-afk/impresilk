@@ -742,6 +742,83 @@ Deno.serve(async (req: Request) => {
       // So estes campos saem daqui. Salario, endereco, telefone e o resto da
       // ficha NUNCA passam por esta porta -- a regua larga fica na porta de
       // dados, nao na tela.
+      /* ---- equipeHistorico: QUANTA GENTE A CASA TINHA EM CADA MES ----
+       *
+       * Pedido do dono (15/09/2026), olhando o historico de entregas: "adicionar
+       * a qntd de funcionarios ativos na epoca ate pra gente entender puxando do
+       * rh e colocando os de producao adm etc". O uso e comparar faturamento com
+       * tamanho da equipe: R$ 400 mil com 30 pessoas nao e R$ 400 mil com 45.
+       *
+       * SO DESCE CONTAGEM. Nenhum nome, nenhuma data de admissao, nenhuma ficha
+       * -- a resposta e {mes, total, porArea:{...}}. Contagem por area e leitura
+       * de tamanho de operacao; ficha de pessoa nao tem por que atravessar esta
+       * porta, e a regra da casa e cortar na PORTA, nao na tela.
+       *
+       * O LIMITE DO DADO VIAJA JUNTO. O RH da casa so passou a registrar
+       * desligamento a partir de 2025 (conferido no banco: nenhuma saida antes
+       * disso). Para meses anteriores, quem saiu antes da implantacao nunca foi
+       * cadastrado -- entao a contagem e um PISO, nao o total. Devolver esse
+       * numero sem dizer isso faria a tela afirmar que a empresa era menor do
+       * que era, e a comparacao com faturamento sairia ao contrario.
+       */
+      case "equipeHistorico": {
+        if (!ehMaquina && !["admin", "pcp"].includes(String(cracha?.papel ?? ""))) {
+          return resp({ error: "Tamanho da equipe é da gestão do PCP." }, 403);
+        }
+        const pedidos = Array.isArray(body.meses) ? body.meses.map((x: any) => String(x || "").trim()) : [];
+        const meses = [...new Set(pedidos.filter((x: string) => /^\d{4}-\d{2}$/.test(x)))].sort();
+        if (!meses.length) return resp({ error: "meses: lista de AAAA-MM" }, 400);
+        const usar = meses.slice(0, 300);
+
+        const { data: col, error: eH } = await sb.from("registros")
+          .select("registro").eq("colecao", "colaboradores").eq("apagado", false);
+        if (eH) return resp({ error: eH.message }, 500);
+        const { data: ar } = await sb.from("registros")
+          .select("registro->>id, registro->>nome").eq("colecao", "areas").eq("apagado", false);
+        const areaNome: Record<string, string> = {};
+        for (const r of (ar ?? []) as any[]) if (r.id) areaNome[String(r.id)] = String(r.nome ?? "");
+
+        const gente = (col ?? []).map((r: any) => r.registro || {})
+          .map((g: any) => ({
+            admissao: String(g.dataAdmissao || "").slice(0, 10),
+            saida: String(g.dataDesligamento || "").slice(0, 10),
+            area: areaNome[String(g.areaId || "")] || "(sem área)",
+          }))
+          .filter((g: any) => /^\d{4}-\d{2}-\d{2}$/.test(g.admissao));
+
+        /* ATE QUANDO A BASE NAO SABE DE SAIDAS. Antes da primeira saida
+           registrada, a ausencia de desligamento nao prova que a pessoa estava
+           na casa -- prova que o RH ainda nao existia. */
+        const saidas = gente.map((g: any) => g.saida).filter((d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+        const primeiraSaida = saidas[0] || "";
+
+        const linhas = usar.map((mes: string) => {
+          const ini = `${mes}-01`;
+          const [y, m] = mes.split("-").map(Number);
+          const fim = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);   // ultimo dia
+          const porArea: Record<string, number> = {};
+          let total = 0;
+          for (const g of gente) {
+            if (g.admissao > fim) continue;                       // ainda nao tinha entrado
+            if (g.saida && g.saida < ini) continue;               // ja tinha saido
+            total++;
+            porArea[g.area] = (porArea[g.area] || 0) + 1;
+          }
+          return {
+            mes, total, porArea,
+            // `piso` = a base nao registra quem saiu antes desta data.
+            piso: !!primeiraSaida && fim < primeiraSaida,
+          };
+        });
+
+        return resp({
+          meses: linhas,
+          areas: [...new Set(gente.map((g: any) => g.area))].sort(),
+          desdeQuando: primeiraSaida,
+          em: new Date().toISOString(),
+        });
+      }
+
       case "elenco": {
         // DUAS REGUAS NA MESMA PORTA. Quem entra pela montagem NAO DIGITA SENHA
         // -- basta escolher o nome na lista. Esse cracha pode saber quem sao os

@@ -2036,3 +2036,16 @@ body.tv-ligada { overflow:hidden; }
 }
 .btn-link:hover, .btn-link:focus-visible { text-decoration: underline; color: #0f3d91; }
 .btn-link:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 2px; }
+
+/* Chips do calendário: os mesmos de Entregas, em duas fileiras (ano e mês).
+   O ponto marca mês que tem O.S programada — assim dá para achar trabalho sem
+   abrir mês por mês. A fileira de anos vem um pouco menor, porque é o nível de
+   cima e não deve competir com os meses. */
+.casa-chips-ano .casa-chip-per { font-size: .75rem; padding: 5px 12px; }
+.casa-chip-ponto {
+  display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+  background: #28796a; margin-left: 5px; vertical-align: middle;
+}
+.casa-chip-per.on .casa-chip-ponto { background: #fff; }
+/* O mês corrente fica marcado mesmo sem estar escolhido. */
+.casa-chip-per.hoje:not(.on) { border-color: #28796a; color: #28796a; font-weight: 700; }

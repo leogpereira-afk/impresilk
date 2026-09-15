@@ -796,6 +796,77 @@ function rotuloMesTend(mes) {
   return (MES_CURTO[m - 1] || '?') + '/' + String(mes).slice(2, 4);
 }
 
+/* QUANTA GENTE A CASA TINHA — do RH, só contagem.
+ * Pedido do dono: "adicionar a qntd de funcionarios ativos na epoca ate pra
+ * gente entender". O uso é ler faturamento junto com tamanho: R$ 400 mil com 30
+ * pessoas não é R$ 400 mil com 45.
+ *
+ * O RH da casa só passou a registrar DESLIGAMENTO em 2025. Para meses
+ * anteriores, quem saiu antes nunca foi cadastrado — a contagem é um PISO, e a
+ * tela marca isso com "+". Número sem essa marca faria a empresa parecer menor
+ * do que era, e a leitura de produtividade sairia invertida. */
+function equipeDoMes(mes) {
+  const h = STORE.equipeHistorico ? STORE.equipeHistorico() : null;
+  if (!h || !Array.isArray(h.meses)) return null;
+  return h.meses.find(l => l.mes === mes) || null;
+}
+function equipeDoAno(ano) {
+  const h = STORE.equipeHistorico ? STORE.equipeHistorico() : null;
+  if (!h || !Array.isArray(h.meses)) return null;
+  const doAno = h.meses.filter(l => String(l.mes).startsWith(ano));
+  if (!doAno.length) return null;
+  const media = doAno.reduce((t, l) => t + (l.total || 0), 0) / doAno.length;
+  return {
+    media: Math.round(media * 10) / 10,
+    piso: doAno.some(l => l.piso),
+    meses: doAno.length,
+  };
+}
+function equipeDoAnoHTML(ano) {
+  const e = equipeDoAno(ano);
+  if (!e) return '<span class="text-muted">—</span>';
+  const n = String(e.media).replace('.', ',');
+  return e.piso
+    ? `<span title="o RH só registra saídas a partir de ${(STORE.equipeHistorico() || {}).desdeQuando || '2025'}; quem saiu antes não está cadastrado, então isto é um mínimo">${n}+</span>`
+    : n;
+}
+
+/* O QUADRO DA EQUIPE: quanta gente, por área, e quanto cada um entregou. */
+function equipeHistoricoHTML(t) {
+  const h = STORE.equipeHistorico ? STORE.equipeHistorico() : null;
+  if (!h) return '<p class="text-muted">Carregando o tamanho da equipe…</p>';
+  if (h.erro) return '<p class="text-muted">O tamanho da equipe não veio do RH nesta sessão.</p>';
+  if (!h.meses.length) return '<p class="text-muted">O RH não tem ficha com data de admissão.</p>';
+  const dinheiroCurto = v => v >= 1000 ? 'R$ ' + (v / 1000).toFixed(v >= 10000 ? 0 : 1).replace('.', ',') + ' mil' : dinheiroCasa(v);
+  const areas = h.areas || [];
+  const anos = t.anos.slice().reverse();
+  const linhas = anos.map(ano => {
+    const e = equipeDoAno(ano);
+    const fat = (t.porAno.find(a => a.ano === ano) || {});
+    const doAno = h.meses.filter(l => String(l.mes).startsWith(ano));
+    const porArea = {};
+    for (const a of areas) {
+      const soma = doAno.reduce((tot, l) => tot + ((l.porArea || {})[a] || 0), 0);
+      porArea[a] = doAno.length ? Math.round(soma / doAno.length * 10) / 10 : 0;
+    }
+    /* POR PESSOA só quando os dois lados cobrem o mesmo período. Dividir o
+       faturamento de 3 meses pela equipe média de 12 daria um número que não
+       significa nada — e number que não significa nada é o que mais engana. */
+    const podeDividir = e && fat.meses && fat.meses === e.meses && e.media > 0;
+    return { ano, e, fat, porArea, porPessoa: podeDividir ? fat.valor / e.media : null };
+  });
+  return `<div class="casa-tabela-wrap"><table class="casa-tabela">
+    <thead><tr><th>Ano</th><th class="num">Equipe média</th>${areas.map(a => `<th class="num">${esc(a)}</th>`).join('')}<th class="num">Faturado por pessoa</th></tr></thead>
+    <tbody>${linhas.map(l => `<tr>
+      <td><strong>${esc(l.ano)}</strong></td>
+      <td class="num">${l.e ? `${String(l.e.media).replace('.', ',')}${l.e.piso ? '+' : ''}` : '—'}</td>
+      ${areas.map(a => `<td class="num">${l.porArea[a] ? String(l.porArea[a]).replace('.', ',') : '<span class="text-muted">—</span>'}</td>`).join('')}
+      <td class="num">${l.porPessoa === null ? '<span class="text-muted" title="faturamento e equipe cobrem períodos diferentes neste ano">—</span>' : dinheiroCurto(l.porPessoa)}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>
+  <p class="text-muted" style="font-size:.8rem">Gente ativa pela ficha do RH (admissão e desligamento), média dos meses do ano, por área. <strong>+</strong> quer dizer mínimo: o RH só registra saída a partir de ${esc(h.desdeQuando || '2025')}, então quem saiu antes disso não está na conta. "Faturado por pessoa" só aparece quando o ano tem faturamento e equipe no mesmo período.</p>`;
+}
+
 /* A SEÇÃO DO FINAL DA TELA: todos os meses, e o que eles dizem juntos. */
 function relatorioAnosHTML() {
   const resumo = STORE.resumoEntregues ? STORE.resumoEntregues() : null;
@@ -824,13 +895,13 @@ function relatorioAnosHTML() {
   const anosChips = (STORE.anosEntregues ? STORE.anosEntregues() : []).map(String);
   const anosDesc = [...new Set(anosChips.concat(t.anos))].sort().reverse();
   const grade = `<div class="casa-tabela-wrap"><table class="casa-tabela casa-grade-meses">
-    <thead><tr><th>Ano</th>${MES_CURTO.map(m => `<th class="num">${m}</th>`).join('')}<th class="num">Total</th></tr></thead>
+    <thead><tr><th>Ano</th>${MES_CURTO.map(m => `<th class="num">${m}</th>`).join('')}<th class="num">Total</th><th class="num" title="média de gente ativa no ano, pela ficha do RH">Equipe</th></tr></thead>
     <tbody>${anosDesc.map(ano => {
       const linha = t.porAno.find(a => a.ano === ano) || null;
       if (!linha) {
         // Ano inteiro sem nada guardado: uma linha só, com o preço na frente.
         return `<tr><td><strong>${esc(ano)}</strong></td>
-          <td colspan="13" class="text-muted">nenhum mês carregado
+          <td colspan="14" class="text-muted">nenhum mês carregado
             <button class="btn-ghost btn-xs edit-only" data-carregar-ano="${esc(ano)}">carregar ${esc(ano)} do ERP</button>
             <small>leva 25-40 s por mês</small></td></tr>`;
       }
@@ -845,6 +916,7 @@ function relatorioAnosHTML() {
           return `<td class="num"${parcial}><button class="btn-link btn-mes-ent" data-mes-ent="${k}">${dinheiroCurto(l.valor)}${k === hoje ? '*' : ''}</button></td>`;
         }).join('')}
         <td class="num"><strong>${dinheiroCurto(linha.valor)}</strong>${linha.semDado.length ? ` <span class="badge sem-valor" title="${linha.semDado.join(', ')}">${linha.semDado.length} sem dado</span>` : ''}</td>
+        <td class="num">${equipeDoAnoHTML(ano)}</td>
       </tr>`;
     }).join('')}</tbody>
   </table></div>
@@ -893,7 +965,8 @@ function relatorioAnosHTML() {
   const corpo = aba === 'meses' ? grade : `${kpis}
     ${quadroCasa('ent-anos-comp', '📊 Ano a ano, no mesmo período', comparativo, true)}
     ${quadroCasa('ent-anos-barras', '📈 Total por ano', barrasAno, false)}
-    ${quadroCasa('ent-anos-sazonal', '🗓️ Como costuma ser cada mês <small>— média dos anos</small>', sazonalHTML, false)}`;
+    ${quadroCasa('ent-anos-sazonal', '🗓️ Como costuma ser cada mês <small>— média dos anos</small>', sazonalHTML, false)}
+    ${quadroCasa('ent-anos-equipe', '👥 Quanta gente a casa tinha <small>— do RH, por área</small>', equipeHistoricoHTML(t), true)}`;
 
   return `<section class="casa-relatorios">
     <div class="casa-pagina-head" style="align-items:center">
@@ -1224,7 +1297,11 @@ function renderEntregas() {
         if (k <= hoje) todos.push(k);
       }
     }
-    if (todos.length) STORE.pullEntreguesResumo(todos);
+    if (todos.length) {
+      STORE.pullEntreguesResumo(todos);
+      // Tamanho da equipe no mesmo intervalo (só contagem; o RH corta na porta).
+      if (STORE.pullEquipeHistorico) STORE.pullEquipeHistorico(todos);
+    }
   }
   el.querySelectorAll('[data-lancar-os]').forEach(b => b.onclick = () => lancarEntregaManual(b.dataset.lancarOs));
   bindCardClicks(el);
@@ -1772,6 +1849,50 @@ function pillPlantao(p) {
   return `<span class="casa-pill ${t || 'navy'}" title="${esc(p.quem || '')}${p.obs ? ' — ' + esc(p.obs) : ''}">${t ? esc(TIPOS_PLANTAO[t]) : 'plantão'}</span>`;
 }
 
+/* OS CHIPS DO CALENDÁRIO — o mesmo controle que Entregas já usa.
+ *
+ * Pedido do dono (15/09/2026): "colocar chips nessa parte". O calendário tinha
+ * só `‹ [input month] ›`: para chegar em março do ano passado eram dezoito
+ * toques numa seta, e o <input type="month"> abre um seletor nativo diferente
+ * em cada aparelho (no tablet ele é pequeno e some atrás do teclado). Chips
+ * mostram o ano inteiro de uma vez, com alvo grande para o dedo.
+ *
+ * Dois níveis: os anos (só os que a casa tem O.S) e os doze meses do ano
+ * escolhido. O mês com O.S programada leva um ponto — assim dá para ver onde há
+ * trabalho sem abrir mês por mês.
+ */
+function anosAgendaCasa() {
+  const todas = STORE.getAllOS() || [];
+  const anos = new Set();
+  for (const o of todas) {
+    const d = OPERACAO.dia(o && o.instalacao && o.instalacao.data) || '';
+    if (/^\d{4}/.test(d)) anos.add(Number(d.slice(0, 4)));
+  }
+  const atual = new Date().getFullYear();
+  anos.add(atual);
+  return [...anos].filter(a => Number.isFinite(a)).sort((a, b) => b - a);
+}
+
+function chipsAgendaCasa(mes) {
+  const ano = Number(mes.slice(0, 4));
+  const hojeMes = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  const anos = anosAgendaCasa();
+  const comOS = new Set();
+  for (const o of STORE.getAllOS() || []) {
+    const d = OPERACAO.dia(o && o.instalacao && o.instalacao.data) || '';
+    if (d.slice(0, 4) === String(ano)) comOS.add(d.slice(0, 7));
+  }
+  const chipAno = anos.map(a =>
+    `<button type="button" class="casa-chip-per ${a === ano ? 'on' : ''}" data-ag-ano="${a}">${a}</button>`
+  ).join('');
+  const chipMes = MES_CURTO.map((rot, i) => {
+    const k = `${ano}-${String(i + 1).padStart(2, '0')}`;
+    return `<button type="button" class="casa-chip-per ${k === mes ? 'on' : ''}${k === hojeMes ? ' hoje' : ''}" data-ag-mes="${k}" title="${k === hojeMes ? 'mês corrente' : ''}">${rot}${comOS.has(k) ? '<i class="casa-chip-ponto" title="tem O.S programada"></i>' : ''}</button>`;
+  }).join('');
+  return `<div class="casa-chips-periodo casa-chips-ano">${chipAno}</div>
+    <div class="casa-chips-periodo">${chipMes}</div>`;
+}
+
 function renderAgendaCasa() {
   const el = document.getElementById('panel-agenda');
   if (!el) return;
@@ -1840,6 +1961,7 @@ function renderAgendaCasa() {
           <button class="btn-ghost btn-sm" id="ag-prox" title="Próximo mês">›</button>
         </span>
       </div>
+      ${chipsAgendaCasa(mes)}
       <div class="casa-agenda">
         <div class="casa-cal-box">
           <div class="casa-cal-dow">${dow.map(d => `<span>${d}</span>`).join('')}</div>
@@ -1879,6 +2001,17 @@ function renderAgendaCasa() {
     STATE._agMes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     STATE._agDia = ''; renderAgendaCasa();
   };
+  el.querySelectorAll('[data-ag-mes]').forEach(b => b.onclick = () => {
+    STATE._agMes = b.dataset.agMes; STATE._agDia = ''; renderAgendaCasa();
+  });
+  el.querySelectorAll('[data-ag-ano]').forEach(b => b.onclick = () => {
+    // Troca de ano mantém o MÊS escolhido: quem está olhando agosto quer agosto
+    // do outro ano, não janeiro. Se o mês não existir mais (futuro), cai no mês
+    // corrente daquele ano.
+    const ano = b.dataset.agAno;
+    const mesAtual = String(STATE._agMes || '').slice(5, 7) || '01';
+    STATE._agMes = `${ano}-${mesAtual}`; STATE._agDia = ''; renderAgendaCasa();
+  });
   const ant = document.getElementById('ag-ant'); if (ant) ant.onclick = () => andar(-1);
   const prox = document.getElementById('ag-prox'); if (prox) prox.onclick = () => andar(1);
   el.querySelectorAll('[data-dia]').forEach(btn => { btn.onclick = () => { STATE._agDia = btn.dataset.dia; renderAgendaCasa(); }; });

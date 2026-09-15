@@ -1050,6 +1050,38 @@ const STORE = (() => {
     return _resumoEntregues;
   }
 
+  /* QUANTA GENTE A CASA TINHA EM CADA MÊS — só contagem, vinda do RH.
+     Serve para ler o faturamento junto com o tamanho da operação: R$ 400 mil
+     com 30 pessoas não é R$ 400 mil com 45. Nenhum nome e nenhuma data
+     individual descem: a porta manda {mes, total, porArea}. O limite do dado
+     vem junto (`desdeQuando`): antes da primeira saída registrada no RH, a
+     contagem é um PISO, porque quem saiu antes nunca foi cadastrado. */
+  let _equipeHist = null;
+  let _equipePedindo = null;
+  function equipeHistorico() { return _equipeHist; }
+  async function pullEquipeHistorico(meses, forcar) {
+    const lista = (meses || []).filter(m => /^\d{4}-\d{2}$/.test(m));
+    if (!navigator.onLine || !lista.length) return _equipeHist;
+    const chave = lista.slice().sort().join('|');
+    if (!forcar && _equipeHist && _equipeHist.chave === chave
+        && Date.now() - _equipeHist.emMs < 30 * 60000) return _equipeHist;
+    if (_equipePedindo === chave) return _equipeHist;
+    _equipePedindo = chave;
+    try {
+      const res = await apiFn('sync', { action: 'equipeHistorico', meses: lista }, 60000);
+      if (res && Array.isArray(res.meses)) {
+        _equipeHist = { chave, emMs: Date.now(), meses: res.meses, areas: res.areas || [], desdeQuando: res.desdeQuando || '' };
+        _notifyListeners('equipe', { historico: true });
+      }
+    } catch (e) {
+      // 403 = papel sem acesso a RH. Não é erro de tela: a seção simplesmente
+      // não mostra o tamanho da equipe, em vez de mostrar zero.
+      _equipeHist = { chave, emMs: Date.now(), meses: [], areas: [], erro: (e && e.message) || 'falhou' };
+      _notifyListeners('equipe', { historico: true, erro: true });
+    } finally { _equipePedindo = null; }
+    return _equipeHist;
+  }
+
   async function pullEntreguesMes(mes, forcar) {
     if (!mes || _entreguesPedindo[mes]) return null;
     /* OFFLINE NÃO É "CARREGANDO". Antes isto devolvia null calado e a tela
@@ -1484,6 +1516,7 @@ const STORE = (() => {
     trySync, pull, pullCFG, pullValores, valores, valoresEm, pullElenco, elenco, pullEntreguesMes, entreguesMes, entreguesFalhou, anosEntregues,
     pullEntreguesLote, garantirEntregues, entreguesEmVoo, entreguesFresco,
     pullEntreguesResumo, resumoEntregues,
+    pullEquipeHistorico, equipeHistorico,
     iniciarMaestro, sincronizarAgora, buscarHistorico, historico, faixaHistorico, JANELA_LOCAL_DIAS,
     // Fotos
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,

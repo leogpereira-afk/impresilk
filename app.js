@@ -917,6 +917,8 @@ function initSyncIndicator() {
       el.title = 'Sem conexão — você pode continuar trabalhando; o envio acontece ao reconectar.';
     }
   });
+  // Tamanho da equipe (RH) chegou: quem mostra isso é o histórico de Entregas.
+  STORE.on('equipe', () => { if (STATE.activeTab === 'entregas') renderActiveTab(); });
   STORE.on('quota', () => toast('Sem espaço no aparelho para guardar as O.S. Libere espaço (fotos/apps) e recarregue.', 'error'));
   // Chegou o valor das O.S: repinta as telas que mostram dinheiro.
   STORE.on('valores', () => { if (['entregas', 'performance'].includes(STATE.activeTab)) renderActiveTab(); });

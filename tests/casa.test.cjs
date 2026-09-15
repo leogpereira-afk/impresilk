@@ -781,3 +781,92 @@ test('tela: acumulado de ano sem mês no período não vira R$ 0,00', () => {
   assert.match(html, /nenhum mês deste período está carregado/);
   assert.match(html, /sem base/);
 });
+
+/* ---------------- Tamanho da equipe por época (RH) ----------------
+   Pedido do dono: "adicionar a qntd de funcionarios ativos na epoca". O risco
+   aqui não é a média errada — é afirmar um tamanho que a base não sabe. O RH da
+   casa só registra desligamento a partir de 2025; antes disso quem saiu nunca
+   foi cadastrado, e a contagem é um PISO. */
+
+function comEquipe(t, hist) {
+  return `STORE.equipeHistorico = () => (${JSON.stringify(hist)});`;
+}
+
+test('equipe: ano com dado incompleto no RH sai marcado com +', () => {
+  const t = casa([]);
+  const hist = {
+    desdeQuando: '2025-03-10', areas: ['Montagem Interna'],
+    meses: [
+      { mes: '2024-01', total: 20, porArea: { 'Montagem Interna': 12 }, piso: true },
+      { mes: '2024-02', total: 20, porArea: { 'Montagem Interna': 12 }, piso: true },
+    ],
+  };
+  const html = t.run(`${comEquipe(t, hist)} equipeDoAnoHTML('2024')`);
+  assert.match(html, /20\+/, 'contagem de antes do RH registrar saídas é mínimo, não total');
+  assert.match(html, /não está cadastrado/, 'a razão precisa estar na dica');
+});
+
+test('equipe: ano coberto pelo RH sai sem o +', () => {
+  const t = casa([]);
+  const hist = {
+    desdeQuando: '2025-03-10', areas: ['Montagem Interna'],
+    meses: [
+      { mes: '2026-01', total: 30, porArea: { 'Montagem Interna': 18 }, piso: false },
+      { mes: '2026-02', total: 32, porArea: { 'Montagem Interna': 18 }, piso: false },
+    ],
+  };
+  const html = t.run(`${comEquipe(t, hist)} equipeDoAnoHTML('2026')`);
+  assert.match(html, /^31$/, 'média de 30 e 32 é 31, sem marca de piso');
+});
+
+test('equipe: faturado por pessoa só quando os dois lados cobrem o mesmo período', () => {
+  const t = casa([], { _anosERP: [2026] });
+  const hist = {
+    desdeQuando: '2025-03-10', areas: ['Montagem'],
+    // 12 meses de equipe, mas o faturamento só tem 2 meses carregados.
+    meses: Array.from({ length: 12 }, (_, i) => ({
+      mes: `2026-${String(i + 1).padStart(2, '0')}`, total: 30, porArea: { Montagem: 18 }, piso: false,
+    })),
+  };
+  const html = t.run(`
+    ${comEquipe(t, hist)}
+    STORE.resumoEntregues = () => (${JSON.stringify({
+      meses: [{ mes: '2026-01', valor: 100000, os: 10 }, { mes: '2026-02', valor: 100000, os: 10 }],
+      faltando: [],
+    })});
+    STATE._entRel = 'anos';
+    relatorioAnosHTML()`);
+  assert.match(html, /períodos diferentes neste ano/,
+    'dividir faturamento de 2 meses por equipe média de 12 daria número sem significado');
+});
+
+test('equipe: sem acesso ao RH a seção diz isso, não mostra zero', () => {
+  const t = casa([]);
+  const html = t.run(`
+    STORE.equipeHistorico = () => ({ erro: '403', meses: [], areas: [] });
+    equipeHistoricoHTML({ anos: ['2026'], porAno: [] })`);
+  assert.match(html, /não veio do RH/);
+  assert.ok(!/\b0\b/.test(html.replace(/<[^>]+>/g, '')), 'ausência de acesso não é equipe de zero pessoas');
+});
+
+/* ---------------- Chips do calendário ---------------- */
+
+test('calendário: chips trazem os doze meses e marcam onde há O.S', () => {
+  const t = casa([
+    { id: '1', numero: '1', instalacao: { data: '2026-03-10' } },
+    { id: '2', numero: '2', instalacao: { data: '2026-03-12' } },
+  ]);
+  const html = t.run(`chipsAgendaCasa('2026-03')`);
+  for (const m of ['jan', 'fev', 'mar', 'dez']) assert.ok(html.includes(`>${m}`), `falta o chip de ${m}`);
+  assert.match(html, /data-ag-mes="2026-03"[^>]*class|class="[^"]*on[^"]*"[^>]*data-ag-mes="2026-03"/,
+    'o mês aberto precisa vir marcado');
+  assert.match(html, /casa-chip-ponto/, 'março tem O.S e precisa do ponto');
+  assert.equal((html.match(/casa-chip-ponto/g) || []).length, 1, 'só março tem O.S neste teste');
+});
+
+test('calendário: os chips de ano vêm do que existe, mais o ano corrente', () => {
+  const t = casa([{ id: '1', numero: '1', instalacao: { data: '2024-05-10' } }]);
+  const html = t.run(`chipsAgendaCasa('2026-01')`);
+  assert.match(html, /data-ag-ano="2024"/, 'há O.S de 2024, o chip tem de existir');
+  assert.match(html, /data-ag-ano="2026"/, 'o ano corrente entra mesmo sem O.S');
+});
