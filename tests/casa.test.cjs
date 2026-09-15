@@ -870,3 +870,78 @@ test('calendário: os chips de ano vêm do que existe, mais o ano corrente', () 
   assert.match(html, /data-ag-ano="2024"/, 'há O.S de 2024, o chip tem de existir');
   assert.match(html, /data-ag-ano="2026"/, 'o ano corrente entra mesmo sem O.S');
 });
+
+/* ---------------- Performance: zero e traço têm de dizer o que são ----------
+   É o nome de alguém na parede da fábrica. R$ 0,00 tanto valia "entregou de
+   graça" quanto "o Painel não trouxe o valor"; o traço no tempo, tanto "foi
+   instantâneo" quanto "ninguém anotou saída e retorno". */
+
+test('performance: pessoa sem NENHUM valor no Painel não aparece como R$ 0,00', () => {
+  const t = casa([]);
+  const html = t.run(`valorPessoaHTML({ os: 4, semValor: 4, valor: 0, horas: [] })`);
+  assert.ok(!/R\$ 0,00/.test(html), 'zero aqui seria dizer que a pessoa entregou de graça');
+  assert.match(html, /Painel ainda não trouxe/);
+});
+
+test('performance: valor parcial vem marcado como parcial', () => {
+  const t = casa([]);
+  const html = t.run(`valorPessoaHTML({ os: 5, semValor: 2, valor: 12794.56, horas: [] })`);
+  assert.match(html, /parcial/);
+  assert.match(html, /2 s\/ valor/);
+});
+
+test('performance: tempo sem registro diz que falta registro, não que foi zero', () => {
+  const t = casa([]);
+  const html = t.run(`tempoPessoaHTML({ os: 4, horas: [], semValor: 0, valor: 0 })`);
+  assert.match(html, /sem saída e retorno anotados/);
+  const parcial = t.run(`tempoPessoaHTML({ os: 5, horas: [2, 3], semValor: 0, valor: 0 })`);
+  assert.match(parcial, /média de 2 de 5 O\.S/, 'a cobertura da média precisa estar dita');
+});
+
+test('quadro: a ação explícita abre o quadro mesmo com a escolha guardada fechada', () => {
+  const t = casa([]);
+  // Sem forçar, respeita o padrão (fechado).
+  const fechado = t.run(`quadroCasa('x-teste', 'T', '<p>c</p>', false)`);
+  assert.ok(!/ open>/.test(fechado), 'sem forçar, o padrão manda');
+  const aberto = t.run(`quadroCasa('x-teste', 'T', '<p>c</p>', false, true)`);
+  assert.match(aberto, / open>/, 'editar tem de abrir o formulário, senão o clique não faz nada visível');
+});
+
+/* Performance em duas abas (pedido do dono): Equipe é a operação, Relatório é a
+   análise. O risco de separar é ESCONDER: nada pode sumir, só mudar de lugar. */
+test('performance: as duas abas existem e nenhuma seção se perde', () => {
+  const t = casa([], { vinculosRH: [] }, { pessoas: [], veiculos: [], ferias: [], ausencias: [] });
+  // wireFiltroPeriodo/abrirTVCasa moram no app.js, fora deste harness.
+  t.run(`
+    var wireFiltroPeriodo = () => {};
+    var abrirTVCasa = () => {};
+    var CSS = { escape: x => x };
+  `);
+  const equipe = t.run(`
+    STATE._perfAba = 'equipe';
+    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => null };
+    document.getElementById = () => el;
+    renderPerformanceCasa();
+    el.innerHTML`);
+  const rel = t.run(`
+    STATE._perfAba = 'relatorio';
+    const el2 = { innerHTML: '', querySelectorAll: () => [], querySelector: () => null };
+    document.getElementById = () => el2;
+    renderPerformanceCasa();
+    el2.innerHTML`);
+  // Equipe: produtividade, ligação com o RH e bônus.
+  assert.match(equipe, /Produtividade/);
+  assert.match(equipe, /Ligar apelido do PCP/);
+  assert.match(equipe, /Bônus por ponto/);
+  assert.ok(!/Carros mais usados/.test(equipe), 'carros é relatório');
+  // Relatório: retrabalho e carros, com o filtro de período junto.
+  assert.match(rel, /Retrabalho/);
+  assert.match(rel, /Carros mais usados/);
+  // filtroPeriodoHTML é stub neste harness; o que importa é a barra existir.
+  assert.match(rel, /class="filter-bar"/, 'o relatório precisa do recorte à mão');
+  // As duas abas aparecem nas duas telas, senão não há como voltar.
+  for (const html of [equipe, rel]) {
+    assert.match(html, /data-perf-aba="equipe"/);
+    assert.match(html, /data-perf-aba="relatorio"/);
+  }
+});

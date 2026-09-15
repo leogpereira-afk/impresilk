@@ -372,8 +372,12 @@ function quadroAberto(id, padrao) {
   const q = lerQuadrosCasa();
   return Object.prototype.hasOwnProperty.call(q, id) ? !!q[id] : !!padrao;
 }
-function quadroCasa(id, titulo, corpo, padrao) {
-  return `<details class="casa-quadro" data-quadro="${esc(id)}" ${quadroAberto(id, padrao) ? 'open' : ''}>
+/* `forcar` atropela a escolha guardada. Sem isso, quem tinha fechado o
+   formulário de plantão clicava em "Editar", a tela rolava, e nada abria — nem
+   nada explicava. A preferência continua valendo no uso normal; só a ação
+   explícita a vence. */
+function quadroCasa(id, titulo, corpo, padrao, forcar) {
+  return `<details class="casa-quadro" data-quadro="${esc(id)}" ${(forcar || quadroAberto(id, padrao)) ? 'open' : ''}>
     <summary>${titulo}</summary>
     <div class="casa-quadro-corpo">${corpo}</div>
   </details>`;
@@ -1349,6 +1353,31 @@ const fmtHorasCasa = h => h == null ? '—' : (h < 1 ? Math.round(h * 60) + ' mi
 // estava na equipe leva o valor inteiro — não é rateio nem bônus), tempo médio
 // saída→retorno e o destaque da semana. Desde 14/09/2026 o card traz a FOTO e
 // o cargo da ficha do RH (uma base só).
+/* R$ 0,00 E "—" NÃO PODEM SIGNIFICAR DUAS COISAS.
+ *
+ * No card da pessoa, R$ 0,00 aparecia tanto para quem entregou O.S sem valor no
+ * Painel quanto para quem entregou de graça — e um traço no tempo médio tanto
+ * para "ninguém anotou saída e retorno" quanto para "não deu tempo nenhum".
+ * Isso é o nome de alguém na parede da fábrica: o número tem de dizer se é
+ * ausência de fato ou ausência de medição. Mesma régua que Entregas já usa no
+ * `valorKpiCasa`. */
+function valorPessoaHTML(p) {
+  if (p.semValor && p.semValor === p.os) {
+    return '<span class="text-muted">—</span> <small>o Painel ainda não trouxe o valor destas O.S</small>';
+  }
+  const txt = dinheiroCasa(p.valor);
+  return p.semValor
+    ? `parcial ${txt} <span class="badge sem-valor" title="${p.semValor} de ${p.os} O.S sem valor no Painel">${p.semValor} s/ valor</span>`
+    : txt;
+}
+function tempoPessoaHTML(p) {
+  if (!p.horas.length) return '<span class="text-muted">—</span> <small>sem saída e retorno anotados</small>';
+  const txt = fmtHorasCasa(mediaCasa(p.horas));
+  return p.horas.length < p.os
+    ? `${txt} <small>média de ${p.horas.length} de ${p.os} O.S</small>`
+    : txt;
+}
+
 function produtividadeHTML() {
   const f = periodoOuMes('_fPerf');
   const { concl, noPeriodo, pessoas } = pessoasDoPeriodo(f);
@@ -1363,8 +1392,8 @@ function produtividadeHTML() {
         <div class="casa-prod-nome">${esc(p.nome)}<small>${p.pessoa ? esc([p.pessoa.cargo, p.pessoa.area].filter(Boolean).join(' · ') || ('ID ' + (p.id || '—'))) : 'sem ficha do RH'}</small></div>
         <dl>
           <dt>Entregas realizadas</dt><dd>${p.os}${p.erp ? ` <small>(${p.erp} lançada${p.erp === 1 ? '' : 's'})</small>` : ''}${p.retrab ? ` <small>(${p.retrab} retrab.)</small>` : ''}</dd>
-          <dt>Valor entregue</dt><dd>${dinheiroCasa(p.valor)}${p.semValor ? ` <span class="badge sem-valor">${p.semValor} s/ valor</span>` : ''}</dd>
-          <dt>Tempo médio</dt><dd>${fmtHorasCasa(mediaCasa(p.horas))}${p.horas.length && p.horas.length < p.os ? ` <small>(${p.horas.length} c/ hora)</small>` : ''}</dd>
+          <dt>Valor entregue</dt><dd>${valorPessoaHTML(p)}</dd>
+          <dt>Tempo médio</dt><dd>${tempoPessoaHTML(p)}</dd>
         </dl>
       </div>
     </div>`).join('');
@@ -1674,20 +1703,42 @@ function renderPerformanceCasa() {
         </aside>
       </div>`;
 
+  /* DUAS ABAS (pedido do dono, 15/09/2026: "ter a aba relatório pra transferir
+     o que for relatório pra essa parte"). A tela misturava o que se olha todo
+     dia — quem entregou, o bônus do mês, as fichas a ligar — com a análise do
+     período, e tudo isso numa rolagem só. Agora: EQUIPE é a operação, RELATÓRIO
+     é o que se lê de vez em quando. O filtro de período serve as duas, porque
+     as duas leem o mesmo recorte. Nada foi escondido: o que era quadro
+     recolhível continua recolhível, só mudou de aba. */
+  const abaPerf = STATE._perfAba === 'relatorio' ? 'relatorio' : 'equipe';
+  const pendRH = pendentes.length;
   el.innerHTML = `
     <div class="casa-pagina casa-perf">
       <div class="casa-pagina-head">
-        <div><h2>Performance</h2><p>Quem entregou, com a ficha do RH (foto, cargo e situação). Retrabalho, carros e bônus no mesmo lugar.</p></div>
-        <button class="btn-primary btn-sm" id="perf-tv" title="Ranking em tela cheia para a TV da fábrica">📺 Modo TV</button>
+        <div><h2>Performance</h2><p>${abaPerf === 'equipe'
+          ? 'Quem entregou, com a ficha do RH (foto, cargo e situação), e o bônus do mês.'
+          : 'Retrabalho e carros no período escolhido — o que a operação produziu, lido de longe.'}</p></div>
+        <span class="casa-vista">
+          <button class="btn-ghost btn-sm ${abaPerf === 'equipe' ? 'active' : ''}" data-perf-aba="equipe">Equipe</button>
+          <button class="btn-ghost btn-sm ${abaPerf === 'relatorio' ? 'active' : ''}" data-perf-aba="relatorio">Relatório</button>
+          <button class="btn-primary btn-sm" id="perf-tv" title="Ranking em tela cheia para a TV da fábrica">📺 Modo TV</button>
+        </span>
       </div>
-      ${produtividadeHTML()}
-      ${quadroCasa('perf-retrab', '🔧 Retrabalho <small>— de onde veio e quanto custou</small>', retrabalhoHTML(f), true)}
-      ${quadroCasa('perf-carros', '🚚 Carros mais usados', carrosHTML(f), false)}
-      ${quadroCasa('perf-rh', `🔗 Ligar apelido do PCP à ficha do RH${pendentes.length ? ` <span class="badge sem-valor">${pendentes.length} pendente${pendentes.length === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), pendentes.length > 0)}
-      ${quadroCasa('perf-bonus', '💰 Bônus por ponto <small>— apuração manual do mês</small>', bonusHTML, false)}
+      ${abaPerf === 'equipe' ? `
+        ${produtividadeHTML()}
+        ${quadroCasa('perf-rh', `🔗 Ligar apelido do PCP à ficha do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), pendRH > 0)}
+        ${quadroCasa('perf-bonus', '💰 Bônus por ponto <small>— apuração manual do mês</small>', bonusHTML, false)}
+      ` : `
+        <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}</div>
+        ${quadroCasa('perf-retrab', '🔧 Retrabalho <small>— de onde veio e quanto custou</small>', retrabalhoHTML(f), true)}
+        ${quadroCasa('perf-carros', '🚚 Carros mais usados', carrosHTML(f), false)}
+      `}
     </div>`;
   wireFiltroPeriodo(el, '_fPerf', renderPerformanceCasa);
   wireQuadrosCasa(el);
+  el.querySelectorAll('[data-perf-aba]').forEach(b => b.onclick = () => {
+    STATE._perfAba = b.dataset.perfAba; renderPerformanceCasa();
+  });
   const tv = document.getElementById('perf-tv'); if (tv) tv.onclick = abrirTVCasa;
   const mesEl = document.getElementById('perf-mes');
   if (mesEl) mesEl.onchange = () => { if (mesEl.value) { gravarBonusCasa({ ...b, mes: mesEl.value }); renderPerformanceCasa(); } };
@@ -1861,16 +1912,32 @@ function pillPlantao(p) {
  * escolhido. O mês com O.S programada leva um ponto — assim dá para ver onde há
  * trabalho sem abrir mês por mês.
  */
+/* A MESMA RÉGUA DA GRADE. Os chips liam `instalacao.data` enquanto a grade
+   desenha por `diasCasa()` — que cai no prazo e na previsão quando não há
+   agendamento. Duas réguas no mesmo lugar fazem o chip dizer que o mês está
+   vazio e a grade mostrar O.S nele. */
 function anosAgendaCasa() {
-  const todas = STORE.getAllOS() || [];
   const anos = new Set();
-  for (const o of todas) {
-    const d = OPERACAO.dia(o && o.instalacao && o.instalacao.data) || '';
-    if (/^\d{4}/.test(d)) anos.add(Number(d.slice(0, 4)));
+  for (const o of STORE.getAllOS() || []) {
+    if (OPERACAO.encerradaERP(o)) continue;
+    for (const d of diasCasa(o)) if (/^\d{4}/.test(d)) anos.add(Number(d.slice(0, 4)));
   }
-  const atual = new Date().getFullYear();
-  anos.add(atual);
+  anos.add(new Date().getFullYear());
   return [...anos].filter(a => Number.isFinite(a)).sort((a, b) => b - a);
+}
+
+/* MÊS VAZIO NO PASSADO NÃO É MÊS SEM TRABALHO.
+   O aparelho guarda as O.S abertas e as finalizadas de 60 dias; o que saiu
+   dessa janela, e o que o ERP já encerrou, não está aqui. Sem dizer isso, um
+   março limpo parece um março parado — e é só o aparelho não ter mais os
+   dados. Ver a lição: zero não é resultado. */
+function notaMesAgendaCasa(mes, osMes) {
+  const hojeMes = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  if (mes >= hojeMes) return '';
+  const quantas = (osMes || []).length;
+  return `<p class="metricas-nota">${quantas
+    ? `Mês passado: aparecem só as <strong>${quantas}</strong> O.S que este aparelho ainda guarda.`
+    : 'Nenhuma O.S deste mês está guardada no aparelho.'} O que o ERP encerrou, e o que saiu da janela de ${STORE.JANELA_LOCAL_DIAS || 60} dias, não entra nesta grade — procure em Entregas ou em Arquivados.</p>`;
 }
 
 function chipsAgendaCasa(mes) {
@@ -1879,8 +1946,8 @@ function chipsAgendaCasa(mes) {
   const anos = anosAgendaCasa();
   const comOS = new Set();
   for (const o of STORE.getAllOS() || []) {
-    const d = OPERACAO.dia(o && o.instalacao && o.instalacao.data) || '';
-    if (d.slice(0, 4) === String(ano)) comOS.add(d.slice(0, 7));
+    if (OPERACAO.encerradaERP(o)) continue;
+    for (const d of diasCasa(o)) if (d.slice(0, 4) === String(ano)) comOS.add(d.slice(0, 7));
   }
   const chipAno = anos.map(a =>
     `<button type="button" class="casa-chip-per ${a === ano ? 'on' : ''}" data-ag-ano="${a}">${a}</button>`
@@ -1967,6 +2034,7 @@ function renderAgendaCasa() {
           <div class="casa-cal-dow">${dow.map(d => `<span>${d}</span>`).join('')}</div>
           <div class="casa-cal">${grade}</div>
           <p class="metricas-nota"><span class="casa-pill diarista">Diarista</span> <span class="casa-pill sobreaviso">Sobreaviso</span> <span class="casa-pill folga">Folga</span> — plantões vêm da aba Plantões.</p>
+          ${notaMesAgendaCasa(mes, osMes)}
         </div>
         <aside class="casa-dia-painel">
           <h3>${esc(dataBR)}${sel === hoje ? ' · hoje' : ''}</h3>
@@ -2001,6 +2069,10 @@ function renderAgendaCasa() {
     STATE._agMes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     STATE._agDia = ''; renderAgendaCasa();
   };
+  /* NO TABLET O PAINEL DO DIA FICA ABAIXO DA GRADE (uma coluna a partir de
+     1100 px), então tocar num dia não mudava nada no campo de visão: a pessoa
+     tocava de novo, achando que não pegou. Em tela larga o painel já está ao
+     lado e rolar seria atrapalhar. */
   el.querySelectorAll('[data-ag-mes]').forEach(b => b.onclick = () => {
     STATE._agMes = b.dataset.agMes; STATE._agDia = ''; renderAgendaCasa();
   });
@@ -2014,7 +2086,19 @@ function renderAgendaCasa() {
   });
   const ant = document.getElementById('ag-ant'); if (ant) ant.onclick = () => andar(-1);
   const prox = document.getElementById('ag-prox'); if (prox) prox.onclick = () => andar(1);
-  el.querySelectorAll('[data-dia]').forEach(btn => { btn.onclick = () => { STATE._agDia = btn.dataset.dia; renderAgendaCasa(); }; });
+  el.querySelectorAll('[data-dia]').forEach(btn => {
+    btn.onclick = () => {
+      STATE._agDia = btn.dataset.dia;
+      renderAgendaCasa();
+      // Tela estreita: o painel do dia fica ABAIXO da grade, fora do campo de
+      // visão. Sem levar o dedo até lá, o toque parecia não ter pego.
+      const painel = document.getElementById('panel-agenda');
+      const alvo = painel && painel.querySelector('.casa-dia-painel');
+      if (alvo && window.matchMedia('(max-width: 1100px)').matches) {
+        alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+  });
   const wpp = document.getElementById('ag-wpp'); if (wpp) wpp.onclick = () => { if (typeof whatsappServicosDia === 'function') whatsappServicosDia(sel); };
   const pdf = document.getElementById('ag-pdf'); if (pdf) pdf.onclick = () => { if (typeof relatorioServicosDia === 'function') relatorioServicosDia(sel); };
   const add = el.querySelector('.casa-add-os'); if (add) add.ontoggle = () => { STATE._agAddAberto = add.open; };
@@ -2197,14 +2281,20 @@ function renderPlantoesCasa() {
             <button class="btn-primary btn-sm" type="submit">${editando ? 'Salvar alterações' : 'Registrar plantão'}</button>
             ${editando ? '<button class="btn-ghost btn-sm" type="button" id="pl-cancelar">Cancelar</button>' : ''}
           </div>
-        </form>`, true)}
+        </form>`, false, !!editando)}
       ${lista.length ? [...porMes.entries()].map(([k, ps]) => `
         <h3 class="casa-mes-titulo">${esc(rotuloMesCasa(k))} <small>${ps.length} plantão${ps.length === 1 ? '' : 'es'}</small></h3>
         <div class="casa-tabela-wrap"><table class="casa-tabela">
           <thead><tr><th>Dia</th><th>Tipo</th><th>Quem</th><th>Horário</th><th>Título / O.S</th><th></th></tr></thead>
           <tbody>${ps.map(linhaPlantao).join('')}</tbody>
         </table></div>`).join('')
-        : emptyState('', STATE._plVista === 'proximos' ? 'Nenhum plantão daqui para a frente' : 'Nenhum plantão registrado', 'O RH não manda plantão para cá — registre no formulário acima.')}
+        : emptyState('⏰',
+            STATE._plVista === 'proximos' ? 'Nenhum plantão daqui para a frente' : 'Nenhum plantão registrado',
+            /* O VAZIO CONTA O QUE EXISTE FORA DO FILTRO. "Nada aqui" quando há
+               40 plantões no passado é a tela escondendo o próprio recorte. */
+            (STATE._plVista === 'proximos' && vivos.length)
+              ? `Há ${vivos.length} plantã${vivos.length === 1 ? 'o registrado' : 'os registrados'} antes de hoje. <button class="btn-ghost btn-sm" data-pl-vista="todos">Ver todos</button>`
+              : 'A escala é registrada aqui mesmo, no formulário acima — o RH não manda plantão para o PCP.')}
     </div>`;
   wireQuadrosCasa(el);
   el.querySelectorAll('[data-pl-vista]').forEach(b => b.onclick = () => { STATE._plVista = b.dataset.plVista; renderPlantoesCasa(); });
@@ -2239,7 +2329,15 @@ function renderPlantoesCasa() {
   const cancelar = document.getElementById('pl-cancelar');
   if (cancelar) cancelar.onclick = () => { STATE._plEdit = ''; renderPlantoesCasa(); };
   el.querySelectorAll('[data-edit-pl]').forEach(btn => {
-    btn.onclick = () => { STATE._plEdit = btn.dataset.editPl; renderPlantoesCasa(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+    btn.onclick = () => {
+      STATE._plEdit = btn.dataset.editPl;
+      renderPlantoesCasa();
+      // Parar NO formulário, não no topo da página: rolar para o cabeçalho
+      // deixava a pessoa procurando onde foi parar o que ela mandou editar.
+      const alvo = document.querySelector('#panel-plantoes [data-quadro="pl-form"]');
+      if (alvo) alvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      else window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
   });
   el.querySelectorAll('[data-del-pl]').forEach(btn => {
     btn.onclick = () => {

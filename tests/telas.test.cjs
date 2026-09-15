@@ -217,3 +217,29 @@ test('o manual do app conhece todas as abas da lateral', () => {
   assert.doesNotMatch(manual, /Netlify Blobs\)? é a fonte da verdade/,
     'o Netlify foi desligado em 08/2026; a fonte da verdade e o Supabase');
 });
+
+/* O filtro de período serve quatro abas. Ele passou a mostrar qual recorte está
+   aceso — antes eram botões de 22 px e a única pista vinha depois do clique. */
+test('filtro de período: o recorte escolhido vem aceso, e "Todos" só sem limites', () => {
+  const t = tela([]);
+  const hoje = t.run(`OPERACAO.dia(new Date())`);
+  // Nada escolhido: só "Todos" aceso.
+  let html = t.run(`STATE._fFin = { de: '', ate: '' }; filtroPeriodoHTML('_fFin')`);
+  let acesos = [...html.matchAll(/data-pq="([^"]+)"/g)].map(m => m[1])
+    .filter((_, i) => true);
+  assert.match(html, /class="casa-chip-per on" data-pq="todos"/, '"Todos" acende quando não há recorte');
+  assert.equal((html.match(/casa-chip-per on/g) || []).length, 1, 'só um chip aceso por vez');
+
+  // "Hoje" escolhido: o chip de hoje acende, "Todos" apaga.
+  html = t.run(`STATE._fFin = { de: '${hoje}', ate: '${hoje}' }; filtroPeriodoHTML('_fFin')`);
+  assert.match(html, /class="casa-chip-per on" data-pq="hoje"/);
+  assert.equal((html.match(/casa-chip-per on/g) || []).length, 1);
+
+  // Programação olha para a FRENTE: os mesmos ids valem outro intervalo.
+  const prog = t.run(`
+    const p = OPERACAO.periodoRapido('7', '${hoje}', true);
+    STATE._fProg = { de: p.de, ate: p.ate };
+    filtroPeriodoHTML('_fProg')`);
+  assert.match(prog, /class="casa-chip-per on" data-pq="7"/, 'a régua de futuro não pode desacender o chip');
+  assert.match(prog, /Próximos 7 dias/);
+});

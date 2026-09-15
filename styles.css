@@ -1021,8 +1021,14 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 }
 
 /* ── Frase motivacional (barra superior) ───────────────────────────── */
+/* A FAIXA DA FRASE ROLA JUNTO COM A PÁGINA.
+   Grudada no topo ela cobrava 35 px de altura em todas as telas, para sempre:
+   num iPad deitado, cabeçalho e frase juntos comiam 12% da tela útil. Alguém já
+   tinha sentido o custo e a escondido no PCP; o resto das abas continuava
+   pagando. Sem `sticky` ela aparece ao abrir a tela e sai de cena quando a
+   pessoa rola — nada é apagado, só deixa de ocupar espaço de trabalho. */
 .frase-bar {
-  position: sticky; top: var(--topbar-h); z-index: 150;
+  position: relative; z-index: 150;
   background: linear-gradient(135deg, var(--blue), var(--purple));
   color: #fff; font-size: .82rem; font-weight: 500; line-height: 1.35;
   padding: 7px 16px; text-align: center;
@@ -1380,9 +1386,22 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
   .field input, .field select, .field textarea, .chips-input {
     font-size: 16px;
   }
-  /* Alvos de toque mais confortáveis na barra superior */
-  .topbar-actions button { min-height: 38px; }
 }
+
+/* ALVO DE TOQUE NA BARRA SUPERIOR, EM QUALQUER LARGURA.
+   A única regra que engordava esses botões vivia dentro do media query de
+   640 px, ou seja, só no celular. No tablet — que é onde o app é usado o dia
+   inteiro — eles ficavam com os 28 px do .btn-sm, os menores alvos do sistema,
+   enquanto o menu lateral usa 44 px e os chips 36-40 px. Só `min-height`: pôr
+   `min-width` e alargar o `gap` junto custaria ~38 px de largura, que sairiam
+   do nome do dono e o fariam quebrar em duas linhas justamente a 1024 px. */
+.topbar-actions button { min-height: 44px; }
+
+/* O NOME E A DATA NÃO PODEM QUEBRAR A BARRA, que tem altura fixa. O corte com
+   reticências morava só abaixo de 960 px; entre 961 e 1180 px — tablet em
+   janela — o texto crescia dentro de uma barra travada e transbordava. */
+.topbar-user { min-width: 0; }
+.topbar-user #user-badge, .topbar-date { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Versão LEVE para os funcionários (equipe.html → body.equipe-app) ──────
    Alvos de toque maiores, textos maiores e mais respiro — pensada para uso
@@ -2049,3 +2068,31 @@ body.tv-ligada { overflow:hidden; }
 .casa-chip-per.on .casa-chip-ponto { background: #fff; }
 /* O mês corrente fica marcado mesmo sem estar escolhido. */
 .casa-chip-per.hoje:not(.on) { border-color: #28796a; color: #28796a; font-weight: 700; }
+
+/* ── Repasse de toque: o dedo na fábrica ───────────────────────────────────
+   Levantamento de 15/09/2026: várias telas usavam alvos de 16 a 28 px, menos
+   da metade dos 40-44 px que o menu e os chips já usam. Num tablet em pé, na
+   produção, isso é o que faz errar o botão e tocar duas vezes. */
+
+/* Setas de mês do Calendário: eram .btn-sm sem altura mínima. */
+.casa-mes-nav .btn-ghost { min-height: 40px; min-width: 40px; }
+
+/* Plantões: Editar/Apagar viviam como .btn-xs (22 px) dentro da tabela, e o
+   Apagar colado no Editar — a distância importa mais que o confirm(). */
+.casa-tabela .casa-rank-acao { display: flex; gap: 10px; justify-content: flex-end; }
+.casa-tabela .casa-rank-acao .btn-ghost,
+.casa-tabela .casa-rank-acao .btn-primary { min-height: 40px; padding-inline: 14px; }
+
+/* O chip de O.S dentro de uma linha é clicável: precisa parecer clicável sem
+   depender de hover, que no toque não existe. */
+.casa-pill.os[data-abrir-os] {
+  min-height: 32px; display: inline-flex; align-items: center;
+  border: 1px solid #c6d6e8; cursor: pointer;
+}
+.casa-pill.os[data-abrir-os]:hover { border-color: #28796a; }
+
+/* Calendário: a célula do dia tinha texto de .6rem, ilegível de pé a um braço
+   de distância. Sobe um degrau; a célula já tem overflow próprio. */
+.casa-dia-os { font-size: .7rem; }
+.casa-pill { font-size: .68rem; }
+@media (max-width: 899px) { .casa-dia { padding: 7px; } }

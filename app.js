@@ -82,17 +82,35 @@ function nowISO() { return new Date().toISOString(); }
 function periodoQuickToRange(id) {
   return OPERACAO.periodoRapido(id);
 }
+/* O FILTRO DE PERÍODO DE QUATRO ABAS (Programação, Execução, Retrabalho e
+   Finalizados). Eram botõezinhos de 22 px que não diziam qual estava escolhido:
+   a única pista era o indicador ao lado, e só depois de clicar. Agora são os
+   mesmos chips que Entregas usa — alvo de dedo e o escolhido aceso. Uma função
+   arruma as quatro abas de uma vez. */
 function filtroPeriodoHTML(key) {
   const f = STATE[key] || { de: '', ate: '' };
+  const futuro = key === '_fProg';
+  const hoje = OPERACAO.dia(new Date());
+  const rapidos = [
+    { id: 'hoje', rotulo: 'Hoje' },
+    { id: '7', rotulo: futuro ? 'Próximos 7 dias' : 'Últimos 7 dias' },
+    { id: '30', rotulo: futuro ? 'Próximos 30 dias' : 'Últimos 30 dias' },
+    { id: 'mes', rotulo: 'Mês' },
+    { id: 'todos', rotulo: 'Todos' },
+  ];
+  const aceso = id => {
+    const p = OPERACAO.periodoRapido(id, hoje, futuro) || {};
+    // 'todos' é o período sem limites: só acende quando nada está escolhido.
+    if (id === 'todos') return !f.de && !f.ate;
+    return !!f.de && f.de === p.de && f.ate === p.ate;
+  };
   return `<div class="periodo-filtro" data-pf="${key}">
     <input type="date" class="pf-de" aria-label="Data inicial" value="${f.de || ''}">
     <span class="text-muted">até</span>
     <input type="date" class="pf-ate" aria-label="Data final" value="${f.ate || ''}">
-    <button class="btn-ghost btn-xs" data-pq="hoje">Hoje</button>
-    <button class="btn-ghost btn-xs" data-pq="7">${key === '_fProg' ? 'Próximos 7 dias' : 'Últimos 7 dias'}</button>
-    <button class="btn-ghost btn-xs" data-pq="30">${key === '_fProg' ? 'Próximos 30 dias' : 'Últimos 30 dias'}</button>
-    <button class="btn-ghost btn-xs" data-pq="mes">Mês</button>
-    <button class="btn-ghost btn-xs" data-pq="todos">Todos</button>
+    <span class="casa-chips-periodo">${rapidos.map(r =>
+      `<button type="button" class="casa-chip-per ${aceso(r.id) ? 'on' : ''}" data-pq="${r.id}">${r.rotulo}</button>`
+    ).join('')}</span>
     ${periodoIndicador(f.de, f.ate)}
   </div>`;
 }
@@ -3734,6 +3752,9 @@ function renderExecucao() {
   const atrasadas = list.filter(estaAtrasada).length;
 
   el.innerHTML = `
+    <div class="casa-pagina-head">
+      <div><h2>Execução</h2><p>O.S externas em aberto que o PCP já liberou ou que têm saída registrada. Quem está na rua vem primeiro.</p></div>
+    </div>
     <div class="filter-bar">${filtroPeriodoHTML('_fExec')}</div>
     <div class="exec-resumo">
       <span class="exec-chip">🛠 ${list.length} instalações para acompanhar</span>
@@ -3858,6 +3879,9 @@ function renderRetrabalho() {
     </div>`).join('') || '<p class="text-muted">Sem dados no período.</p>';
 
   el.innerHTML = `
+    <div class="casa-pagina-head">
+      <div><h2>Retrabalho</h2><p>O.S que voltaram e a correção emitida para cada uma. Quem refez, de onde veio e quanto custou.</p></div>
+    </div>
     <div class="filter-bar">${filtroPeriodoHTML('_fRetra')}</div>
     <div class="casa-kpi-cards">
       <div class="casa-kpi"><b>${lista.length}</b><small>retrabalhos no período${pendentes ? ` · <span class="badge st-retrabalho">${pendentes} pendente${pendentes === 1 ? '' : 's'}</span>` : ''}</small></div>
@@ -3951,6 +3975,9 @@ function renderFinalizados() {
   const el = $('#panel-finalizados');
   if (!STATE.finView) STATE.finView = 'lista';
   el.innerHTML = `
+    <div class="casa-pagina-head">
+      <div><h2>Finalizados</h2><p>Concluídas pela equipe e baixas recebidas do ERP. A baixa do ERP não comprova entrega na data — ela diz que a O.S saiu.</p></div>
+    </div>
     <div class="filter-bar">
       <div class="view-toggle">
         <button id="fv-lista" class="${STATE.finView==='lista'?'active':''}">☰ Lista</button>
