@@ -225,6 +225,10 @@ function calcStatus(os) {
 const STATUS_LABEL = {
   aguardando_producao: 'Aguardando produção',
   apto:                'Apto',
+  // "Liberacao do cliente" e nao "aguardando cliente": ja existe um
+  // "Falta confirmar cliente" logo adiante (a confirmacao da DATA). Dois
+  // rotulos parecidos, colados no funil, fariam o PCP marcar o errado.
+  parado_cliente:   'Parado · Cliente',
   agendada:            'Agendada',
   confirmada:          'Confirmada',
   em_andamento:        'Em andamento',
@@ -236,12 +240,13 @@ const STATUS_LABEL = {
 const STEP_DEFS = {
   aguardando_producao: { curto: 'Produção',  icon: '🏭' },
   apto:                { curto: 'Apto',       icon: '✅' },
+  parado_cliente:   { curto: 'Parado',      icon: '⏸' },
   agendada:            { curto: 'Agenda',     icon: '📅' },
   confirmada:          { curto: 'Confirmado', icon: '📞' },
   em_andamento:        { curto: 'Em rota',    icon: '🚚' },
   finalizada:          { curto: 'Final',      icon: '🏁' }
 };
-const ETAPAS_EXT = ['aguardando_producao', 'apto', 'agendada', 'confirmada', 'em_andamento', 'finalizada'];
+const ETAPAS_EXT = ['aguardando_producao', 'apto', 'parado_cliente', 'agendada', 'confirmada', 'em_andamento', 'finalizada'];
 const ETAPAS_INT = ['aguardando_producao', 'apto', 'finalizada'];
 function etapasDe(os) { return isInterno(os) ? ETAPAS_INT : ETAPAS_EXT; }
 
@@ -295,6 +300,7 @@ function proximoPasso(os) {
   }
   const inst = os.instalacao || {};
   if (!os.liberadoPCP)                                              return { label: 'PCP precisa liberar',     cta: '✓ Liberar PCP', acao: 'pcp' };
+  if (OPERACAO.paradoNoCliente(os))                              return { label: 'Parado: o cliente ainda não liberou a instalação', cta: '▶ Cliente liberou', acao: 'agenda' };
   if (!OPERACAO.agendaCompleta(os))                                return { label: 'Completar programação', cta: '📅 Agendar', acao: 'agenda' };
   if (os.confirmacao !== 'Confirmado')                             return { label: 'Falta confirmar cliente', cta: '📞 Confirmar',  acao: 'confirmar' };
   if (!os.carroLiberado && !os.horaSaida)                          return { label: 'Liberar carro / saída',   cta: '🚗 Liberar saída', acao: 'saida' };
@@ -1025,6 +1031,7 @@ function novaOS(tipo) {
     acesso: '', fixacao: '', ferramentas: [], suprimentos: [], itens: [],
     instalacao: { data: '', periodo: '', hora: '', duracaoDias: 1 },
     equipe: [], veiculo: '', responsavelAgenda: [], obsAgenda: '',
+    paradoClienteEm: '', paradoClientePor: '',
     confirmacao: '', confCanal: '', confHora: '', confPor: '', confObs: '',
     confAcompanha: '', confAcompanhaContato: '',
     embarqueConferidoPor: '', produtosConferidosPor: '',
@@ -1152,6 +1159,7 @@ function blocoRelevante(os, st, interno) {
   switch (st) {
     case 'aguardando_producao': return 'pcp';
     case 'apto':                return 'agenda';
+    case 'parado_cliente':   return 'agenda';
     case 'agendada':            return 'agenda';
     case 'confirmada':          return 'exec';
     case 'em_andamento':        return 'exec';
@@ -2224,6 +2232,17 @@ function osCardHTML(os) {
         ? `<button class="btn-success btn-sm edit-only card-finalizar" data-finalizar-os="${esc(os.id)}" title="Finalizar serviço">${esc(pp.cta)}</button>`
         : `<button class="btn-primary btn-sm edit-only card-cta" data-cta-os="${esc(os.id)}" title="${esc(pp.label)}">${esc(pp.cta)}</button>`)
     : `<span class="card-fin-tag" title="Serviço finalizado">✓ ${interno ? 'Retirado' : 'Finalizado'}</span>`;
+  /* O BOTAO DA LIBERACAO DO CLIENTE. So aparece onde a duvida existe: O.S
+     EXTERNA, ja liberada pelo PCP e ainda sem agenda -- que e exatamente o
+     ponto em que "pronto e ninguem agendou" e "pronto e o cliente nao liberou"
+     eram a mesma coisa na tela. O mesmo botao marca e desmarca, porque estado
+     que so se liga e estado que ninguem desliga. */
+  const podeMarcarParado = !interno && !os.finalizadaEm && os.liberadoPCP && !OPERACAO.agendaCompleta(os);
+  const paradoBtn = podeMarcarParado
+    ? (os.paradoClienteEm
+        ? `<button class="btn-success btn-sm edit-only" data-parado-os="${esc(os.id)}" data-parado-acao="liberou" title="O cliente liberou: volta para a fila de agendamento">▶ Cliente liberou</button>`
+        : `<button class="btn-ghost btn-sm edit-only" data-parado-os="${esc(os.id)}" data-parado-acao="aguardar" title="Pronto, mas o cliente ainda não liberou a instalação">⏸ Parado no cliente</button>`)
+    : '';
   // Finalizada recente: opção de arquivar já (sem esperar os 7 dias automáticos);
   // arquivada manualmente: opção de desfazer.
   const diasFin = diasDesdeFinal(os);
@@ -2258,6 +2277,7 @@ function osCardHTML(os) {
       ${etapasBtns}
       <div class="card-acoes">
         ${avisarBtn}
+        ${paradoBtn}
         ${arquivarBtn}
         ${ctaBtn}
       </div>
@@ -2488,6 +2508,26 @@ function bindCardClicks(container) {
       e.stopPropagation();
       const os = STORE.getOS(b.dataset.ctaOs);
       if (os) openModal(os);
+    };
+  });
+  /* Marca / desmarca "esperando o cliente liberar". A DATA fica gravada, nao
+     so um sim/nao: e ela que permite responder depois quanto tempo o cliente
+     costuma segurar -- que era o motivo de separar a etapa. */
+  $$('[data-parado-os]', container).forEach(b => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const os = STORE.getOS(b.dataset.paradoOs);
+      if (!os) return;
+      const liberou = b.dataset.paradoAcao === 'liberou';
+      os.paradoClienteEm  = liberou ? '' : nowISO();
+      os.paradoClientePor = liberou ? '' : STATE.user.nome;
+      os.atualizadoEm = nowISO();
+      os.atualizadoPor = STATE.user.nome;
+      registrarEtapa(os);
+      STORE.saveOS(os);
+      toast(liberou ? 'Cliente liberou — a O.S volta para a fila de agendamento'
+                    : 'Marcada como parada no cliente', 'success');
+      renderActiveTab();
     };
   });
   // Alternar tipo Interno/Externo direto no card (triagem rápida).

@@ -570,12 +570,22 @@ Deno.serve(async (req: Request) => {
         // Esqueleto nunca vence ficha com trabalho — devolve a do servidor e o
         // pull realinha o aparelho.
         if (os.origemMubisys && existing) {
+          /* `paradoClienteEm` entra nas duas listas de proposito, ainda
+             que hoje seja redundante: marcar "o cliente nao liberou" so
+             aparece em O.S ja liberada pelo PCP, e `liberadoPCP` ja esta aqui.
+             A protecao existe, mas por TABELA -- some no dia em que alguem
+             permitir marcar antes da liberacao do PCP, e some em silencio: o
+             esqueleto do Mubisys passa por cima e a marca do cliente
+             desaparece sem erro nenhum. Uma palavra a mais custa nada; achar
+             esse defeito depois custa uma tarde. */
           const semTrabalho = !os.liberadoPCP && !os.finalizadaEm &&
             !(os.fotosCheckinIds ?? []).length && !(os.fotosRetornoIds ?? []).length &&
-            !(os.equipe ?? []).length && !os.confirmacao && !os.horaSaida;
+            !(os.equipe ?? []).length && !os.confirmacao && !os.horaSaida &&
+            !os.paradoClienteEm;
           const comTrabalho = !!(existing.liberadoPCP || existing.finalizadaEm ||
             (existing.fotosCheckinIds ?? []).length || (existing.fotosRetornoIds ?? []).length ||
-            (existing.equipe ?? []).length || existing.confirmacao || existing.horaSaida);
+            (existing.equipe ?? []).length || existing.confirmacao || existing.horaSaida ||
+            existing.paradoClienteEm);
           if (semTrabalho && comTrabalho) return resp({ ok: true, os: existing, duplicataEvitada: true });
         }
 

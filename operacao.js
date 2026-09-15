@@ -28,9 +28,32 @@ const OPERACAO = (() => {
     const i = o?.instalacao || {};
     return !!(dia(i.data) && i.periodo && equipe(o).length && (i.periodo !== 'Horário' || /^([01]\d|2[0-3]):[0-5]\d$/.test(i.hora || '')));
   }
+  /* ESPERANDO O CLIENTE LIBERAR A INSTALACAO.
+     Servico pronto, mas o cliente ainda nao autorizou entrar na obra. Antes
+     desta etapa isso ficava indistinguivel de "pronto e ninguem agendou": as
+     duas caiam em 'apto', e a tela nao separava o que esta parado por nossa
+     conta do que esta parado esperando o cliente.
+
+     E MARCADO, NAO DEDUZIDO. Nao da para inferir de "esta apto ha X dias":
+     isso confundiria de novo as duas coisas, que e o defeito que a etapa vem
+     resolver. Alguem clica, e a data fica registrada -- e e ela que permite
+     responder depois quanto tempo, em media, o cliente segura.
+
+     SO NO EXTERNO: quem retira na loja nao tem instalacao para liberar.
+     SO ENQUANTO NAO HA AGENDA: marcar a data ja e a prova de que o cliente
+     liberou, entao a agenda completa vence a marcacao sozinha -- ninguem
+     precisa lembrar de desmarcar para a O.S seguir o fluxo.
+
+     NAO CONFUNDIR com `confirmacao` ("Falta confirmar cliente"), que vem
+     DEPOIS de agendar e trata da DATA. Esta aqui e antes: trata da AUTORIZACAO
+     de instalar. Os rotulos foram escolhidos para nao se parecerem. */
+  const paradoNoCliente = o =>
+    !!(o?.liberadoPCP && !interno(o) && o?.paradoClienteEm && !agendaCompleta(o) && !o?.finalizadaEm);
+
   function status(o) {
     if (o?.finalizadaEm) return 'finalizada';
     if (!o?.liberadoPCP) return 'aguardando_producao';
+    if (paradoNoCliente(o)) return 'parado_cliente';
     if (interno(o) || !agendaCompleta(o)) return 'apto';
     if (o.confirmacao !== 'Confirmado') return 'agendada';
     return o.horaSaida ? 'em_andamento' : 'confirmada';
@@ -141,6 +164,6 @@ const OPERACAO = (() => {
     }
     return best;
   }
-  return {dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
+  return {dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
