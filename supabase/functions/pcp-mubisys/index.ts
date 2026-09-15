@@ -805,7 +805,14 @@ Deno.serve(async (req: Request) => {
       const hojeMes = new Date().toISOString().slice(0, 7);
       const validade = mes === hojeMes ? 60 * 60000 : 24 * 3600000;
       const cache = await getMeta(chave);
-      if (cache?.em && cache?.v === 2 && !body.forcar && Date.now() - new Date(cache.em).getTime() < validade) {
+      /* ACEITA v2 E v3. A v3 acrescentou `previsao` (o prazo combinado, para o
+         SLA da tela de Entregas). Exigir v3 aqui invalidaria os dez meses que
+         ja estao em cache de uma vez so -- e cada remontagem custa 25-40 s por
+         pagina no ERP, que anda lento. Deixando os v2 servirem ate vencerem
+         (mes fechado: 24 h), a previsao entra sozinha na proxima remontagem e
+         a tela nunca fica sem dado. Quem nao tem previsao entra como "sem
+         regua" na conta, e a tela DIZ quantas sao. */
+      if (cache?.em && Number(cache?.v) >= 2 && !body.forcar && Date.now() - new Date(cache.em).getTime() < validade) {
         return resp({ ...cache, cache: true });
       }
       const [y, m] = mes.split("-").map(Number);
@@ -834,9 +841,17 @@ Deno.serve(async (req: Request) => {
       }).map((o: any) => ({
         numero: o.numero, cliente: o.cliente || "", servico: o.servico || "", tipo: o.tipo,
         data: o.dataEntregue || "", valor: o.valorTotal,
+        /* O PRAZO COMBINADO, para o SLA da tela de Entregas. Sai do MESMO
+           objeto que ja foi baixado -- nao custa nenhuma chamada a mais ao
+           ERP. Sem ele o SLA so alcancava as O.S que ainda estao no aparelho
+           (abertas + finalizadas de 60 dias): em junho a cobertura caia para
+           20% e antes de maio para ZERO, e uma taxa de pontualidade medida em
+           um quinto das entregas nao e uma taxa de pontualidade. */
+        previsao: o.previsaoEntrega || "",
       }));
       // v: 2 = data e a ENTREGA REAL (data_entregue). O app descarta pacote sem v.
-      const pacote = { v: 2, em: new Date().toISOString(), mes, total: os.length, os };
+      // v: 3 = cada O.S leva tambem `previsao` (o prazo combinado).
+      const pacote = { v: 3, em: new Date().toISOString(), mes, total: os.length, os };
       await setMeta(chave, pacote);
       return resp(pacote);
     }

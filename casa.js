@@ -565,6 +565,126 @@ function chipsPeriodoEntregas(f) {
 /* ── Relatórios de entrega ────────────────────────────────────────────────
    Tudo aqui lê o mesmo pacote do ERP que os KPIs — nenhum número novo nasce
    de outra conta. Quadros recolhíveis, escolha guardada no aparelho. */
+/* O PRAZO DE ENTREGA (SLA): quanto do que saiu, saiu no dia combinado.
+ *
+ * A régua é a PREVISÃO do ERP (`data_entrega`, o prazo combinado com o cliente)
+ * contra a ENTREGA REAL (`data_entregue`, quando a O.S de fato saiu). São dois
+ * campos diferentes do mesmo registro, e confundir os dois já derrubou janeiro
+ * de 165 para 135 entregas — por isso a conta nunca deduz um do outro.
+ *
+ * DUAS FONTES PARA A PREVISÃO, nesta ordem:
+ *   1. `previsao` no pacote mensal do ERP (v3) — vale para qualquer mês;
+ *   2. `previsaoEntrega` do card do PCP — só para as O.S que o aparelho ainda
+ *      guarda (abertas + finalizadas de 60 dias).
+ * Sem as duas, a O.S entra como SEM RÉGUA e é CONTADA à parte. Medir
+ * pontualidade só no pedaço que tem prazo, e anunciar o número como se fosse do
+ * período inteiro, seria inventar um resultado: em junho a segunda fonte cobria
+ * 20% das entregas, e antes de maio, nenhuma.
+ *
+ * DIAS CORRIDOS, não úteis: o prazo do ERP é somado em dias corridos, então
+ * medir em dias úteis compararia duas réguas diferentes e daria atraso menor do
+ * que o cliente esperou de verdade.
+ *
+ * ATRASO É SÓ O QUE PASSOU DO PRAZO. Entregar adiantado não compensa entrega
+ * atrasada na média — a média dos atrasados responde "quando atrasa, atrasa
+ * quanto?", que é a pergunta que muda a promessa do vendedor.
+ */
+const SLA_FAIXAS = [
+  { de: 1, ate: 1, rotulo: '1 dia' },
+  { de: 2, ate: 2, rotulo: '2 dias' },
+  { de: 3, ate: 3, rotulo: '3 dias' },
+  { de: 4, ate: 4, rotulo: '4 dias' },
+  { de: 5, ate: 5, rotulo: '5 dias' },
+  { de: 6, ate: 10, rotulo: '6 a 10 dias' },
+  { de: 11, ate: 20, rotulo: '11 a 20 dias' },
+  { de: 21, ate: Infinity, rotulo: '21 dias ou mais' },
+];
+
+/* DATA DE VERDADE, não só no formato. "2026-13-45" passa em qualquer regex de
+   4-2-2 e, comparado como texto, é maior que qualquer prazo — viraria o pior
+   atraso do quadro. Só vale o que o calendário aceita de volta igual. */
+function diaSlaValido(v) {
+  const d = String(v || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return '';
+  const dt = new Date(d + 'T12:00:00Z');
+  return (Number.isFinite(+dt) && dt.toISOString().slice(0, 10) === d) ? d : '';
+}
+
+/* Dias corridos entre duas datas, em UTC. Meio-dia e UTC de propósito: com hora
+   zero e fuso local, o horário de verão faz uma das pontas cair no dia anterior
+   e o atraso sai com um dia a mais ou a menos. */
+function diasEntreSla(de, ate) {
+  return Math.round((Date.parse(ate + 'T12:00:00Z') - Date.parse(de + 'T12:00:00Z')) / 86400000);
+}
+
+function slaEntregas(lista, porNumero) {
+  const atrasos = [];
+  let comRegua = 0, semRegua = 0, emDia = 0, adiantadas = 0;
+  for (const o of lista || []) {
+    const entregue = diaSlaValido(o && o.data);
+    const card = porNumero ? porNumero.get(String((o && o.numero) || '').trim()) : null;
+    const previsto = diaSlaValido((o && o.previsao) || (card && card.previsaoEntrega));
+    if (!entregue || !previsto) { semRegua++; continue; }
+    comRegua++;
+    const d = diasEntreSla(previsto, entregue);
+    if (d <= 0) { emDia++; if (d < 0) adiantadas++; continue; }
+    atrasos.push(d);
+  }
+  atrasos.sort((a, b) => a - b);
+  const soma = atrasos.reduce((s, d) => s + d, 0);
+  const faixas = SLA_FAIXAS.map(f => ({
+    rotulo: f.rotulo,
+    n: atrasos.filter(d => d >= f.de && d <= f.ate).length,
+  }));
+  return {
+    total: (lista || []).length,
+    comRegua, semRegua, emDia, adiantadas,
+    atrasadas: atrasos.length,
+    // Sem régua nenhuma não há percentual: null é "não dá para medir", e 0%
+    // seria a afirmação oposta — a de que nada saiu no prazo.
+    pctEmDia: comRegua ? Math.round(emDia / comRegua * 1000) / 10 : null,
+    mediaAtraso: atrasos.length ? Math.round(soma / atrasos.length * 10) / 10 : null,
+    // A média do período INTEIRO conta quem saiu no prazo como zero: é o número
+    // que responde "quanto a casa atrasa, em geral" sem o viés de olhar só os
+    // atrasados. Os dois juntos porque cada um responde uma pergunta diferente.
+    mediaGeral: comRegua ? Math.round(soma / comRegua * 10) / 10 : null,
+    // A MEDIANA porque a média mente quando há cauda: uma O.S de 50 dias puxa
+    // a média de 300 entregas e some na mediana, que é onde a maioria está.
+    medianaAtraso: atrasos.length ? atrasos[Math.floor((atrasos.length - 1) / 2)] : null,
+    pior: atrasos.length ? atrasos[atrasos.length - 1] : null,
+    faixas,
+  };
+}
+
+function prazoEntregasHTML(lista, porNumero) {
+  const s = slaEntregas(lista, porNumero);
+  const kpiLinha = (rotulo, valor, nota) => `<div class="casa-kpi"><b>${valor}</b><small>${rotulo}${nota ? ` · ${nota}` : ''}</small></div>`;
+  if (!s.comRegua) {
+    return `<section class="casa-relatorios">
+      <h3>⏱️ Prazo de entrega</h3>
+      <p class="text-muted" style="font-size:.8rem">Nenhuma das ${s.total} O.S do período tem prazo combinado gravado, então não dá para medir pontualidade aqui. O prazo entra no pacote do ERP quando o mês é remontado (mês fechado vale 24 h).</p>
+    </section>`;
+  }
+  const cobertura = Math.round(s.comRegua / (s.total || 1) * 100);
+  const barras = barrasCasa(
+    [{ rotulo: 'no prazo', valor: s.emDia, extra: s.adiantadas ? `${s.adiantadas} adiantada${s.adiantadas === 1 ? '' : 's'}` : '' }]
+      .concat(s.faixas.map(f => ({ rotulo: f.rotulo, valor: f.n, extra: `${Math.round(f.n / s.comRegua * 100)}%` }))),
+    v => `${v} O.S`
+  );
+  return `<section class="casa-relatorios">
+    <h3>⏱️ Prazo de entrega</h3>
+    <p class="text-muted" style="font-size:.8rem">Prazo combinado no ERP contra a data em que a O.S saiu, em dias corridos. ${s.comRegua} de ${s.total} O.S do período têm prazo gravado (${cobertura}%)${s.semRegua ? ` · <strong>${s.semRegua}</strong> ficaram de fora da conta por não ter prazo` : ''}. Inclui retiradas no balcão.</p>
+    <div class="casa-kpi-cards">
+      ${kpiLinha('entregues no prazo', `${String(s.pctEmDia).replace('.', ',')}%`, `${s.emDia} de ${s.comRegua} O.S`)}
+      ${kpiLinha('média de atraso', s.mediaAtraso === null ? '—' : `${String(s.mediaAtraso).replace('.', ',')} d`, s.atrasadas ? `nas ${s.atrasadas} que atrasaram` : 'nenhuma atrasou')}
+      ${kpiLinha('atraso típico', s.medianaAtraso === null ? '—' : `${s.medianaAtraso} d`, 'mediana das atrasadas')}
+      ${kpiLinha('média geral', s.mediaGeral === null ? '—' : `${String(s.mediaGeral).replace('.', ',')} d`, 'contando as do prazo como zero')}
+    </div>
+    ${quadroCasa('ent-sla-faixas', '📉 Quantos dias de atraso', `${barras || '<p class="text-muted">Sem atraso no período.</p>'}
+      <p class="text-muted" style="font-size:.8rem">${s.pior !== null ? `Pior caso do período: <strong>${s.pior} dia${s.pior === 1 ? '' : 's'}</strong> de atraso. ` : ''}O prazo lido é o que está no ERP HOJE: prazo renegociado com o cliente e regravado lá aparece como entrega no prazo.</p>`, true)}
+  </section>`;
+}
+
 function relatoriosEntregasHTML(lista, porNumero, estadoPCP) {
   if (!lista.length) return '';
   const val = o => (o.valor !== null && Number.isFinite(Number(o.valor))) ? Number(o.valor) : 0;
@@ -787,6 +907,7 @@ function renderEntregas() {
         <span class="casa-vista"><button class="btn-ghost btn-sm ${STATE._entVista === 'tabela' ? 'active' : ''}" data-ent-vista="tabela">Tabela</button><button class="btn-ghost btn-sm ${STATE._entVista === 'cards' ? 'active' : ''}" data-ent-vista="cards">Cards</button></span>
       </div>
       ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', vazioEntregas(per).titulo, vazioEntregas(per).dica)}
+      ${lista.length ? prazoEntregasHTML(lista.map(x => x.erp), porNumero) : ''}
       ${relatoriosEntregasHTML(lista.map(x => x.erp), porNumero, estadoPCP)}
       <section class="casa-prod-box casa-lancar">
         <h3>Lançamento manual — baixadas pelo ERP fora do sistema · ${aLancar.length}</h3>

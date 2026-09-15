@@ -888,7 +888,13 @@ const STORE = (() => {
     return doServidor.filter(a => Number.isFinite(a) && a <= atual).sort((x, y) => y - x);
   }
 
-  function entreguesMes(mes) { const p = _entregues[mes]; return p && p.v === 2 ? p : null; }
+  /* v2 E v3 SERVEM. A v3 acrescentou `previsao` em cada O.S (o prazo combinado,
+     que alimenta o SLA da tela de Entregas); o resto do pacote é idêntico.
+     Testar `=== 2` fazia o app DESCARTAR o pacote novo e a tela de Entregas
+     ficava em "carregando…" para sempre — a versão do pacote tem de ser um
+     piso, nunca uma igualdade, senão todo campo novo derruba quem não
+     recarregou a aba ainda. */
+  function entreguesMes(mes) { const p = _entregues[mes]; return p && Number(p.v) >= 2 ? p : null; }
   /* "NÃO VEIO" E "FALHOU" SÃO COISAS DIFERENTES na tela. `entreguesMes` devolve
      null nos dois casos, e a tela contava os dois como "carregando N meses" —
      mês que o ERP recusou (403) ou que voltou com erro ficava eternamente em

@@ -460,3 +460,112 @@ test('lista vazia só afirma "não houve entrega" quando o ERP respondeu', () =>
   assert.match(t.run("vazioEntregas({ faltando: [], comErro: ['2025-03'] }).dica"), /não quer dizer que não houve entrega|Não quer dizer/);
   assert.match(t.run("vazioEntregas({ faltando: [], comErro: [] }).titulo"), /Nenhuma entrega no período/);
 });
+
+/* ---------------- Prazo de entrega (SLA) ----------------
+   O caso ruim primeiro: a régua que não existe não pode virar 0% de
+   pontualidade, e a data impossível não pode virar o pior atraso do quadro. */
+
+const ent = (numero, data, previsao) => ({ numero, data, previsao, tipo: 'externo', valor: 100 });
+
+test('SLA: sem prazo gravado não há percentual — null, nunca 0%', () => {
+  const t = casa([]);
+  const s = t.run(`slaEntregas(${JSON.stringify([
+    { numero: '1', data: '2026-09-10' },
+    { numero: '2', data: '2026-09-11', previsao: '' },
+  ])}, new Map())`);
+  assert.equal(s.comRegua, 0);
+  assert.equal(s.semRegua, 2);
+  assert.equal(s.pctEmDia, null, 'sem régua o percentual é desconhecido, não zero');
+  assert.equal(s.mediaAtraso, null);
+});
+
+test('SLA: entregue no dia do prazo conta como no prazo', () => {
+  const t = casa([]);
+  const s = t.run(`slaEntregas(${JSON.stringify([ent('1', '2026-09-10', '2026-09-10')])}, new Map())`);
+  assert.equal(s.emDia, 1);
+  assert.equal(s.atrasadas, 0);
+  assert.equal(s.pctEmDia, 100);
+});
+
+test('SLA: adiantada é no prazo e NÃO compensa atraso na média', () => {
+  const t = casa([]);
+  const s = t.run(`slaEntregas(${JSON.stringify([
+    ent('1', '2026-09-05', '2026-09-10'),   // 5 dias adiantada
+    ent('2', '2026-09-14', '2026-09-10'),   // 4 dias atrasada
+  ])}, new Map())`);
+  assert.equal(s.emDia, 1);
+  assert.equal(s.adiantadas, 1);
+  assert.equal(s.atrasadas, 1);
+  assert.equal(s.mediaAtraso, 4, 'a média dos atrasados ignora a adiantada');
+  assert.equal(s.mediaGeral, 2, 'a média geral conta a adiantada como zero, não como -5');
+});
+
+test('SLA: as faixas de 1 a 5 dias separam dia a dia', () => {
+  const t = casa([]);
+  const lista = [
+    ent('1', '2026-09-11', '2026-09-10'), ent('2', '2026-09-12', '2026-09-10'),
+    ent('3', '2026-09-13', '2026-09-10'), ent('4', '2026-09-14', '2026-09-10'),
+    ent('5', '2026-09-15', '2026-09-10'), ent('6', '2026-09-18', '2026-09-10'),
+    ent('7', '2026-10-05', '2026-09-10'),
+  ];
+  const s = t.run(`slaEntregas(${JSON.stringify(lista)}, new Map())`);
+  assert.deepEqual(s.faixas.map(f => f.n).join(','), '1,1,1,1,1,1,0,1');
+  assert.equal(s.pior, 25);
+  assert.equal(s.medianaAtraso, 4);
+});
+
+test('SLA: data impossível não vira o pior atraso — 2026-13-45 sai da conta', () => {
+  const t = casa([]);
+  const s = t.run(`slaEntregas(${JSON.stringify([
+    ent('1', '2026-13-45', '2026-09-10'),
+    ent('2', '2026-09-11', '2026-02-31'),
+    ent('3', '2026-09-11', '2026-09-10'),
+  ])}, new Map())`);
+  assert.equal(s.comRegua, 1, 'só a linha com duas datas de verdade entra');
+  assert.equal(s.semRegua, 2);
+  assert.equal(s.pior, 1);
+});
+
+test('SLA: sem previsão no pacote, o prazo vem do card do PCP', () => {
+  const t = casa([]);
+  const s = t.run(`slaEntregas(
+    [{ numero: '77', data: '2026-09-15', tipo: 'externo' }],
+    new Map([['77', { numero: '77', previsaoEntrega: '2026-09-10' }]])
+  )`);
+  assert.equal(s.comRegua, 1);
+  assert.equal(s.atrasadas, 1);
+  assert.equal(s.mediaAtraso, 5);
+});
+
+test('SLA: o pacote do ERP manda sobre o card quando os dois têm prazo', () => {
+  const t = casa([]);
+  const s = t.run(`slaEntregas(
+    [{ numero: '77', data: '2026-09-15', previsao: '2026-09-15', tipo: 'externo' }],
+    new Map([['77', { numero: '77', previsaoEntrega: '2026-09-01' }]])
+  )`);
+  assert.equal(s.emDia, 1, 'o prazo do pacote é o do ERP agora; o card pode estar velho');
+});
+
+test('SLA: cobertura parcial é DITA na tela, com o total do período', () => {
+  const t = casa([]);
+  const html = t.run(`prazoEntregasHTML(${JSON.stringify([
+    ent('1', '2026-09-11', '2026-09-10'),
+    { numero: '2', data: '2026-09-12', tipo: 'externo' },
+    { numero: '3', data: '2026-09-13', tipo: 'externo' },
+  ])}, new Map())`);
+  assert.match(html, /1 de 3 O\.S do período têm prazo gravado \(33%\)/);
+  assert.match(html, /<strong>2<\/strong> ficaram de fora/);
+});
+
+test('SLA: período inteiro sem régua não mostra 0% — explica', () => {
+  const t = casa([]);
+  const html = t.run(`prazoEntregasHTML([{ numero: '1', data: '2026-09-11', tipo: 'externo' }], new Map())`);
+  assert.ok(!/0%/.test(html), 'não pode aparecer 0% de pontualidade');
+  assert.match(html, /não dá para medir pontualidade/);
+});
+
+test('SLA: o fuso não muda a contagem de dias', () => {
+  const t = casa([]);
+  const s = t.run(`slaEntregas(${JSON.stringify([ent('1', '2026-10-25', '2026-10-17')])}, new Map())`);
+  assert.equal(s.mediaAtraso, 8, 'oito dias corridos, com ou sem horário de verão no meio');
+});
