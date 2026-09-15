@@ -569,3 +569,26 @@ test('SLA: o fuso não muda a contagem de dias', () => {
   const s = t.run(`slaEntregas(${JSON.stringify([ent('1', '2026-10-25', '2026-10-17')])}, new Map())`);
   assert.equal(s.mediaAtraso, 8, 'oito dias corridos, com ou sem horário de verão no meio');
 });
+
+/* O PACOTE DE ENTREGUES É MONTADO EM DOIS PONTOS da mesma function — a ação
+   `entreguesMes` e o robô horário dentro de `importar`. Eles nasceram iguais e
+   divergiram no primeiro campo novo: `previsao` entrou num e não no outro, e
+   como o robô roda a cada hora ele APAGARIA o prazo do mês corrente logo depois
+   de a tela gravá-lo — o campo nunca existiria justamente no mês mais olhado.
+   Peguei isso lendo a function publicada, não o código-fonte. Aqui a regra vira
+   teste: as duas gravações usam a MESMA montagem e a MESMA versão. */
+test('as duas gravações do pacote de entregues usam a mesma montagem', () => {
+  const src = fs.readFileSync(path.join(root, 'supabase/functions/pcp-mubisys/index.ts'), 'utf8');
+  // Os dois pacotes de entregues carimbam a versão pela constante, nunca por
+  // número solto — foi o número solto que deixou o robô uma versão atrás.
+  const carimbos = [...src.matchAll(/\{\s*v:\s*([^,]+),\s*em: new Date\(\)\.toISOString\(\),\s*mes\b/g)].map(m => m[1].trim());
+  assert.ok(carimbos.length >= 2, `esperava dois pacotes de entregues carimbados; achei ${carimbos.length}`);
+  assert.deepEqual([...new Set(carimbos)], ['ENTREGUES_V'],
+    'pacote de entregues com versão literal em vez de ENTREGUES_V: ' + carimbos.join(', '));
+  assert.equal(
+    (src.match(/\.map\(linhaEntregue\)/g) || []).length, 2,
+    'os dois pontos que montam o pacote de entregues têm de chamar linhaEntregue()'
+  );
+  assert.match(src, /function linhaEntregue[\s\S]{0,400}previsao: o\.previsaoEntrega/,
+    'linhaEntregue precisa levar a previsão — é a régua do SLA');
+});

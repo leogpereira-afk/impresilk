@@ -263,6 +263,32 @@ const TETO_BAIXAS = 60;
    ele roda no GitHub Actions. Esta funcao morre aos 150s, entao as tentativas
    cabem dentro do prazo que o chamador der -- e quando nao cabem, falha
    dizendo isso, em vez de morrer calada. */
+/* A LINHA DE UMA O.S ENTREGUE, num lugar so.
+ *
+ * Este pacote e montado em DOIS pontos -- a acao `entreguesMes` (quando a tela
+ * pede um mes) e o robo horario dentro de `importar` (que renova o mes
+ * corrente). Eles nasceram iguais e foi so questao de tempo: ao acrescentar
+ * `previsao` para o SLA da tela de Entregas, o primeiro passou a gravar v3 com
+ * o prazo e o segundo continuou gravando v2 sem ele -- e como o robo roda a
+ * cada hora, ele APAGARIA o prazo do mes corrente logo depois de a tela
+ * grava-lo. O campo simplesmente nunca existiria justamente no mes que mais se
+ * olha. Mesmo dado, duas portas, reguas diferentes: agora e uma funcao so.
+ *
+ * `previsao` e o prazo COMBINADO (data_entrega) e `data` e a saida REAL
+ * (data_entregue): dois campos distintos do mesmo registro do ERP.
+ */
+function linhaEntregue(o: any) {
+  return {
+    numero: o.numero, cliente: o.cliente || "", servico: o.servico || "", tipo: o.tipo,
+    data: o.dataEntregue || "", valor: o.valorTotal, previsao: o.previsaoEntrega || "",
+  };
+}
+
+/* A VERSAO DO PACOTE DE ENTREGUES. v2 = `data` e a entrega real; v3 = cada O.S
+   leva tambem `previsao`. Quem le aceita v2 OU v3 (piso, nunca igualdade), para
+   um campo novo nao derrubar o app de quem ainda nao recarregou a aba. */
+const ENTREGUES_V = 3;
+
 async function erpGet(url: string, headers: any, prazoTotalMs: number): Promise<any> {
   const ate = Date.now() + Math.max(8000, prazoTotalMs);
   const ESPERA = 1500;
@@ -838,20 +864,12 @@ Deno.serve(async (req: Request) => {
         if (o.dataEntregue && !String(o.dataEntregue).startsWith(mes)) return false;
         if (vistos.has(String(o.numero))) return false;
         vistos.add(String(o.numero)); return true;
-      }).map((o: any) => ({
-        numero: o.numero, cliente: o.cliente || "", servico: o.servico || "", tipo: o.tipo,
-        data: o.dataEntregue || "", valor: o.valorTotal,
-        /* O PRAZO COMBINADO, para o SLA da tela de Entregas. Sai do MESMO
-           objeto que ja foi baixado -- nao custa nenhuma chamada a mais ao
-           ERP. Sem ele o SLA so alcancava as O.S que ainda estao no aparelho
-           (abertas + finalizadas de 60 dias): em junho a cobertura caia para
-           20% e antes de maio para ZERO, e uma taxa de pontualidade medida em
-           um quinto das entregas nao e uma taxa de pontualidade. */
-        previsao: o.previsaoEntrega || "",
-      }));
-      // v: 2 = data e a ENTREGA REAL (data_entregue). O app descarta pacote sem v.
-      // v: 3 = cada O.S leva tambem `previsao` (o prazo combinado).
-      const pacote = { v: 3, em: new Date().toISOString(), mes, total: os.length, os };
+      }).map(linhaEntregue);
+      /* `previsao` sai do MESMO objeto ja baixado -- nenhuma chamada a mais ao
+         ERP. Sem ela o SLA da tela so alcancava as O.S que o aparelho ainda
+         guarda (abertas + finalizadas de 60 dias): medido no banco, a cobertura
+         caia de 93% em setembro para 20% em junho e ZERO antes de maio. */
+      const pacote = { v: ENTREGUES_V, em: new Date().toISOString(), mes, total: os.length, os };
       await setMeta(chave, pacote);
       return resp(pacote);
     }
@@ -968,8 +986,8 @@ Deno.serve(async (req: Request) => {
           }
           const vistos2 = new Set<string>();
           const os = lista.map(mapearOS).filter((o: any) => o.numero && (!o.dataEntregue || String(o.dataEntregue).startsWith(mesAtual)) && !vistos2.has(String(o.numero)) && vistos2.add(String(o.numero)))
-            .map((o: any) => ({ numero: o.numero, cliente: o.cliente || "", servico: o.servico || "", tipo: o.tipo, data: o.dataEntregue || "", valor: o.valorTotal }));
-          await setMeta(`entregues:${mesAtual}`, { v: 2, em: new Date().toISOString(), mes: mesAtual, total: os.length, os });
+            .map(linhaEntregue);
+          await setMeta(`entregues:${mesAtual}`, { v: ENTREGUES_V, em: new Date().toISOString(), mes: mesAtual, total: os.length, os });
           entregues = { mes: mesAtual, total: os.length };
         } catch (e) { entregues = { erro: String((e as Error)?.message || e) }; }
 
