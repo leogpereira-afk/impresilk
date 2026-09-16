@@ -1033,6 +1033,27 @@ test('seletor de O.S: o contador começa com o que já estava marcado', () => {
   assert.match(html, /os-pick-conta">2<\/span> marcadas/);
 });
 
+test('seletor de O.S: a busca existe e procura por número E por cliente', () => {
+  const t = casa([]);
+  const lista = JSON.stringify([{ id: 'A', numero: '4521', cliente: 'Padaria Ibituruna' }]);
+  const html = t.run(`opcoesOSPlantao({ osIds: [] }, ${lista}, new Map())`);
+  assert.match(html, /class="os-pick-busca"/, 'o campo de busca tem de estar na tela');
+  assert.match(html, /data-busca="4521 padaria ibituruna"/, 'busca por número e por nome');
+  assert.match(html, /class="os-pick-vazio" hidden/, 'busca sem resultado precisa de recado');
+});
+
+/* Guarda de CSS, não de HTML: a regra genérica `.casa-form-grade label`
+   (0,1,1) vence `.os-pick-item` (0,1,0) e achatava cada quadrinho numa pilha
+   centralizada. E como `display` de folha do autor atropela o `hidden` do
+   navegador, a busca escondia linha nenhuma. Os dois defeitos eram invisíveis
+   em teste de HTML — só apareciam na tela. */
+test('seletor de O.S: o CSS do quadrinho vence a regra genérica do formulário', () => {
+  const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'styles.css'), 'utf8');
+  assert.match(css, /\.casa-form-grade \.os-pick-item/, 'o seletor precisa repetir o contexto do formulário');
+  assert.match(css, /\.casa-os-pick \.os-pick-item\[hidden\]/, 'hidden precisa voltar a esconder');
+  assert.match(css, /\.os-pick-lista \{[^}]*repeat\(auto-fill/, 'a lista tem de ser grade de quadrinhos');
+});
+
 test('plantão: o tipo virou chips de rádio, com o mesmo name', () => {
   const t = casa([], {}, ELENCO);
   const html = t.run(`

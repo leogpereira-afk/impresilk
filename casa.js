@@ -2381,6 +2381,7 @@ function opcoesOSPlantao(plantao, candidatas, porId) {
     <input type="search" class="os-pick-busca" placeholder="Buscar por número ou cliente" aria-label="Buscar O.S">
     <div class="os-pick-lista">${fixas}${orfas}${resto}</div>
     <p class="text-muted os-pick-nota"><span class="os-pick-conta">${jaLigadas.length}</span> marcada${jaLigadas.length === 1 ? '' : 's'}${cortadas ? ` · as ${TETO} mais próximas do prazo (${cortadas} fora da lista — use a busca)` : ''}</p>
+    <p class="os-pick-vazio" hidden>Nenhuma O.S com esse número ou cliente nesta lista.</p>
   </div>`;
 }
 function renderPlantoesCasa() {
@@ -2527,12 +2528,18 @@ function renderPlantoesCasa() {
       if (nota) nota.firstChild.nextSibling.textContent = n === 1 ? ' marcada' : ' marcadas';
     };
     if (busca) {
+      const vazio = box.querySelector('.os-pick-vazio');
       busca.oninput = () => {
         const q = busca.value.trim().toLowerCase();
+        let visiveis = 0;
         for (const i of itens) {
           const marcada = i.querySelector('input').checked;
           i.hidden = !!q && !marcada && !(i.dataset.busca || '').includes(q);
+          if (!i.hidden) visiveis++;
         }
+        /* Busca que não acha nada precisa DIZER isso: lista vazia sem recado
+           parece tela quebrada, e a pessoa fica digitando achando que travou. */
+        if (vazio) vazio.hidden = visiveis > 0;
       };
     }
     for (const i of itens) {

@@ -2115,29 +2115,42 @@ body.tv-ligada { overflow:hidden; }
   width: 100%; min-height: 40px; padding: 8px 12px; margin-bottom: 8px;
   border: 1px solid #d7e1ee; border-radius: 10px; font-size: .85rem; background: #fff;
 }
+/* Quadrinhos: várias O.S por linha, em vez de uma linha alta por O.S. */
 .os-pick-lista {
-  max-height: 260px; overflow-y: auto; border: 1px solid #d7e1ee;
-  border-radius: 12px; background: #fff;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px; align-content: start;
+  max-height: 320px; overflow-y: auto; padding: 8px;
+  border: 1px solid #d7e1ee; border-radius: 12px; background: #f7fafd;
 }
+/* O seletor repete `.casa-form-grade` de propósito: o formulário tem a regra
+   genérica `.casa-form-grade label { display:flex; flex-direction:column }`,
+   que é MAIS específica (0,1,1) que `.os-pick-item` (0,1,0) e achatava cada
+   quadrinho numa pilha centralizada. Sem este contexto o cartão não existe. */
+.casa-form-grade .os-pick-item,
 .os-pick-item {
-  display: grid; grid-template-columns: 22px 78px minmax(0, 1fr) auto;
-  align-items: center; gap: 10px; min-height: 44px; padding: 6px 12px;
-  border-bottom: 1px solid #eef2f7; cursor: pointer; font-size: .82rem;
+  display: grid; grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start; gap: 2px 10px; min-height: 44px; padding: 8px 10px;
+  border: 1px solid #e2eaf3; border-radius: 10px; background: #fff;
+  cursor: pointer; font-size: .82rem; text-align: left; color: #163654;
 }
-.os-pick-item:last-child { border-bottom: 0; }
-.os-pick-item:hover { background: #f7fafd; }
-.os-pick-item.on { background: #eef7f4; }
-.os-pick-item input { width: 20px; height: 20px; accent-color: #28796a; margin: 0; }
-.os-pick-num { font-weight: 700; color: #163654; font-variant-numeric: tabular-nums; }
-.os-pick-cli { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.os-pick-det { font-size: .72rem; color: var(--muted); white-space: nowrap; }
+/* `hidden` é regra do navegador: qualquer `display` nosso a atropela, e a
+   busca escondia sem esconder nada. Aqui ela volta a valer. */
+.casa-os-pick .os-pick-item[hidden], .os-pick-vazio[hidden] { display: none; }
+.os-pick-item:hover { border-color: #b9cfe4; background: #fbfdff; }
+.os-pick-item.on { border-color: #28796a; background: #eef7f4; box-shadow: inset 0 0 0 1px #28796a; }
+.casa-form-grade .os-pick-item input, .os-pick-item input {
+  grid-row: 1 / 4; width: 20px; height: 20px; min-height: 20px;
+  accent-color: #28796a; margin: 2px 0 0;
+}
+.os-pick-num { grid-column: 2; font-weight: 700; font-variant-numeric: tabular-nums; }
+.os-pick-cli {
+  grid-column: 2; overflow: hidden; color: #35506b;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.os-pick-det { grid-column: 2; font-size: .72rem; color: var(--muted); }
 .os-pick-nota { font-size: .78rem; margin-top: 6px; }
 .os-pick-conta { font-weight: 700; color: #163654; }
-@media (max-width: 760px) {
-  /* No estreito o detalhe do prazo cede a vez ao cliente. */
-  .os-pick-item { grid-template-columns: 22px 70px minmax(0, 1fr); }
-  .os-pick-det { display: none; }
-}
+.os-pick-vazio { font-size: .8rem; color: var(--muted); margin: 8px 2px 0; }
 
 /* Tipo do plantão: três opções não precisam de um <select>. */
 .casa-radio-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
