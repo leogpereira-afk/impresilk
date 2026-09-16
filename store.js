@@ -1143,11 +1143,78 @@ const STORE = (() => {
     return _entregues[mes] || null;
   }
 
+  /* BAIXAR TUDO E DEIXAR GRAVADO (pedido do dono, 15/09/2026: "subir todos os
+     dados via sistema e já deixa gravado").
+
+     A fila normal só anda quando a TELA repinta: `garantirEntregues` dispara
+     até três e devolve; quem puxa a próxima é o render seguinte, provocado pela
+     notificação. Enquanto o dono está olhando, funciona. No instante em que ele
+     troca de aba — ou fecha o quadro — o carregamento congela no meio, e ao
+     voltar a tela diz "carregando 7 de 9" com nada em voo. Foi exatamente isso
+     que ele viu.
+
+     Aqui a fila anda sozinha: três trabalhadores puxam do mesmo balde até
+     acabar, sem depender de nenhum render. Cada mês que chega é gravado no
+     IndexedDB pelo `pullEntreguesMes` — "já deixa gravado" é consequência, não
+     um passo extra.
+
+     PRIMEIRO O SERVIDOR, DEPOIS O ERP. `pullEntreguesLote` traz num pedido só
+     tudo que o servidor já tem guardado; só o que sobra custa os 25-40 s de
+     varredura no ERP. Sem essa ordem, um aparelho novo pagaria o ERP inteiro
+     por dados que já estavam prontos do outro lado.
+
+     E ENQUANTO ISSO RODA, `garantirEntregues` sai da frente: dois donos da
+     mesma fila estourariam o orçamento de três em voo sobre um ERP que já anda
+     no limite. */
+  let _tudoEntregues = null;
+  function progressoEntregues() { return _tudoEntregues; }
+  function pararEntregues() {
+    if (_tudoEntregues && !_tudoEntregues.fim) {
+      _tudoEntregues.parar = true;
+      _notifyListeners('entregues', { tudo: true });
+    }
+  }
+  async function carregarTudoEntregues(meses) {
+    if (_tudoEntregues && !_tudoEntregues.fim) return _tudoEntregues;
+    const lista = [...new Set((meses || []).filter(m => /^\d{4}-\d{2}$/.test(m)))].sort().reverse();
+    const contar = () => lista.filter(m => entreguesFresco(m)).length;
+    _tudoEntregues = { total: lista.length, prontos: contar(), erros: [], parar: false, fim: false, etapa: 'servidor' };
+    if (!lista.length) { _tudoEntregues.fim = true; return _tudoEntregues; }
+    _notifyListeners('entregues', { tudo: true });
+    try {
+      await pullEntreguesLote(lista);
+    } catch { /* o que o servidor não deu, o ERP dá abaixo */ }
+    _tudoEntregues.prontos = contar();
+    _tudoEntregues.etapa = 'erp';
+    const fila = lista.filter(m => !entreguesFresco(m));
+    _notifyListeners('entregues', { tudo: true });
+    let i = 0;
+    const trabalhar = async () => {
+      while (i < fila.length && !_tudoEntregues.parar) {
+        const m = fila[i++];
+        try { await pullEntreguesMes(m); } catch { /* o veredito é o fresco abaixo */ }
+        // Fresco é o veredito: pacote que chegou vazio é mês sem venda, e conta
+        // como pronto. Só entra em `erros` o mês que continua sem resposta.
+        if (!entreguesFresco(m)) _tudoEntregues.erros.push(m);
+        _tudoEntregues.prontos = contar();
+        _notifyListeners('entregues', { tudo: true });
+      }
+    };
+    await Promise.all(Array.from({ length: ENTREGUES_EM_VOO }, trabalhar));
+    _tudoEntregues.fim = true;
+    _tudoEntregues.em = new Date().toISOString();
+    _notifyListeners('entregues', { tudo: true, fim: true });
+    return _tudoEntregues;
+  }
+
   /* A FILA MORA AQUI, não no render. A tela só diz de quais meses precisa; o
      store decide quantos pedir agora, respeitando o orçamento global. */
   function garantirEntregues(meses) {
     const faltam = (meses || []).filter(m => /^\d{4}-\d{2}$/.test(m) && !entreguesFresco(m) && !_entreguesPedindo[m]);
     if (!faltam.length) return 0;
+    // Carregamento completo em curso: ele é o dono da fila. Dois donos
+    // estourariam o teto de três em voo sobre um ERP que já anda no limite.
+    if (_tudoEntregues && !_tudoEntregues.fim) return faltam.length;
     const vagas = Math.max(0, ENTREGUES_EM_VOO - entreguesEmVoo());
     // Quem nunca veio primeiro; depois quem falhou (a tentativa de novo não
     // pode empurrar para trás o mês que ainda não chegou nenhuma vez).
@@ -1515,6 +1582,7 @@ const STORE = (() => {
     // Sync
     trySync, pull, pullCFG, pullValores, valores, valoresEm, pullElenco, elenco, pullEntreguesMes, entreguesMes, entreguesFalhou, anosEntregues,
     pullEntreguesLote, garantirEntregues, entreguesEmVoo, entreguesFresco,
+    carregarTudoEntregues, progressoEntregues, pararEntregues,
     pullEntreguesResumo, resumoEntregues,
     pullEquipeHistorico, equipeHistorico,
     iniciarMaestro, sincronizarAgora, buscarHistorico, historico, faixaHistorico, JANELA_LOCAL_DIAS,

@@ -629,6 +629,47 @@ function chipsPeriodoEntregas(f) {
   return linhaAnos + linhaMeses;
 }
 
+/* TODOS OS MESES QUE EXISTEM, do primeiro ano que o banco conhece até hoje. */
+function mesesTodosEntregas() {
+  const hoje = OPERACAO.dia(new Date()).slice(0, 7);
+  const meses = [];
+  for (const ano of (STORE.anosEntregues ? STORE.anosEntregues() : [])) {
+    for (let m = 1; m <= 12; m++) {
+      const k = `${ano}-${String(m).padStart(2, '0')}`;
+      if (k <= hoje) meses.push(k);
+    }
+  }
+  return meses;
+}
+
+/* A BARRA DE CARGA: quanto já está gravado no aparelho, e o botão de completar.
+   Fica logo abaixo dos chips porque é ali que a pergunta nasce — "troquei o mês
+   e não mudou" quase sempre é "este mês nunca foi baixado". O preço vai dito na
+   frente: varrer o ERP custa 25-40 s por mês, e ninguém deve disparar meia hora
+   de ERP sem saber. */
+function barraCargaEntregas() {
+  const meses = mesesTodosEntregas();
+  if (!meses.length) return '';
+  const guardados = meses.filter(m => STORE.entreguesMes && STORE.entreguesMes(m)).length;
+  const faltam = meses.length - guardados;
+  const p = STORE.progressoEntregues ? STORE.progressoEntregues() : null;
+  const rodando = !!(p && !p.fim);
+  if (rodando) {
+    const etapa = p.etapa === 'servidor' ? 'buscando o que o servidor já tem…' : 'varrendo o ERP, três meses por vez';
+    return `<p class="metricas-nota casa-carga">⏳ <strong>${p.prontos}</strong> de ${p.total} meses guardados · ${esc(etapa)}${p.parar ? ' · parando…' : ''}${p.erros.length ? ` · <span class="badge sem-valor">${p.erros.length} sem resposta</span>` : ''}
+      <button class="btn-ghost btn-xs" data-carga-parar="1">Parar</button>
+      <small>Pode sair da tela: o carregamento continua sozinho.</small></p>`;
+  }
+  if (!faltam) {
+    return `<p class="metricas-nota casa-carga">✅ Todos os <strong>${meses.length}</strong> meses estão gravados neste aparelho${p && p.erros.length ? ` · <span class="badge sem-valor">${p.erros.length} mês(es) não responderam</span>` : ''}.
+      <button class="btn-ghost btn-xs edit-only" data-carga-tudo="1">Conferir de novo</button></p>`;
+  }
+  return `<p class="metricas-nota casa-carga"><strong>${guardados}</strong> de ${meses.length} meses gravados neste aparelho · faltam <strong>${faltam}</strong>.
+    Mês que não está aqui não muda a tela quando você toca no chip: ele precisa ser baixado primeiro.
+    <button class="btn-primary btn-xs edit-only" data-carga-tudo="1">Baixar tudo e guardar</button>
+    <small>O que o servidor já tem vem num pedido só; o resto custa 25-40 s por mês no ERP.</small></p>`;
+}
+
 /* ── Relatórios de entrega ────────────────────────────────────────────────
    Tudo aqui lê o mesmo pacote do ERP que os KPIs — nenhum número novo nasce
    de outra conta. Quadros recolhíveis, escolha guardada no aparelho. */
@@ -1199,19 +1240,25 @@ function renderEntregas() {
   const tipo = STATE._entTipo || '';
   if (!STATE._entVista) STATE._entVista = 'tabela';
 
-  // KPIs fixos pelo ERP: hoje, mês, ano.
-  const kpi = (de, ate) => {
-    const r = entreguesERP(de, ate);
+  /* TRÊS FIXOS PELO ERP — hoje, mês corrente, ano corrente — e UM QUE SEGUE O
+     PERÍODO ESCOLHIDO. Os três primeiros são o pulso da casa e nunca se mexem;
+     o quarto existe porque tocar num chip de mês e ver os números de cima
+     parados parece tela travada. Eram honestos ("entregue no mês") e mesmo
+     assim enganavam: o chip fica ABAIXO deles, o olho volta para cima e não
+     acha o número que acabou de pedir. */
+  const kpiDe = r => {
     const inst = r.os.filter(o => o.tipo !== 'interno');
     let total = 0, semValor = 0;
     for (const o of r.os) { if (Number.isFinite(Number(o.valor)) && o.valor !== null) total += Number(o.valor); else semValor++; }
     return { total, n: r.os.length, inst: inst.length, retiradas: r.os.length - inst.length, semValor, faltando: r.faltando.length, comErro: r.comErro.length, meses: r.meses.length };
   };
+  const kpi = (de, ate) => kpiDe(entreguesERP(de, ate));
   const kHoje = kpi(hoje, hoje), kMes = kpi(hoje.slice(0, 7) + '-01', hoje), kAno = kpi(hoje.slice(0, 4) + '-01-01', hoje);
   const registradasMes = cls.instalacoes.filter(o => OPERACAO.emIntervalo(diaEntrega(o), hoje.slice(0, 7) + '-01', hoje)).length;
 
   // Lista do período: o que o ERP diz que foi entregue, com o estado no PCP.
   const per = entreguesERP(f.de || hoje.slice(0, 7) + '-01', f.ate || hoje);
+  const kPer = kpiDe(per);
   const estadoPCP = o => {
     const n = String(o.numero || '').trim();
     if (o.tipo === 'interno') return { rotulo: 'Retirada', classe: 'st-finalizada', dica: 'Só o valor conta; retirada não é entrega realizada' };
@@ -1241,10 +1288,30 @@ function renderEntregas() {
   const opt = (v, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(v)}</option>`;
   const dataBR = iso => { const d = OPERACAO.dia(iso); return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'; };
   const valorTxt = v => (v !== null && Number.isFinite(Number(v))) ? dinheiroCasa(Number(v)) : '<span class="badge sem-valor">sem valor</span>';
-  const kpiHTML = (k, rotulo) => `<div class="casa-kpi ${k.semValor || k.faltando || k.comErro ? 'alerta' : ''}">
+  const kpiHTML = (k, rotulo, extra) => `<div class="casa-kpi ${extra || ''} ${k.semValor || k.faltando || k.comErro ? 'alerta' : ''}">
       <b>${valorKpiCasa(k)}</b>
       <small>${esc(rotulo)} · ${k.n} O.S${k.inst ? ` · ${k.inst} instalaç${k.inst === 1 ? 'ão' : 'ões'}` : ''}${k.retiradas ? ` · ${k.retiradas} retirada${k.retiradas === 1 ? '' : 's'}` : ''}${k.semValor ? ` · <span class="badge sem-valor">${k.semValor} sem valor</span>` : ''}${k.faltando ? ` · <span class="badge st-agendada">carregando ${k.faltando} de ${k.meses} mês${k.meses === 1 ? '' : 'es'}…</span>` : ''}${k.comErro ? ` · <span class="badge sem-valor">${k.comErro} mês${k.comErro === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}</small>
     </div>`;
+  /* O nome do período no cartão: "em mai/2026" quando é um mês inteiro, "em
+     2026" quando é o ano, e as duas datas quando é qualquer outro recorte. */
+  const rotuloPeriodo = (de, ate) => {
+    if (!de || !ate) return 'no período escolhido';
+    const ultimoDia = m => String(new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0)).getUTCDate()).padStart(2, '0');
+    const mes = de.slice(0, 7);
+    if (de === mes + '-01' && mes === ate.slice(0, 7) && (ate === hoje || ate === mes + '-' + ultimoDia(mes))) {
+      return `entregue em ${MES_CURTO[Number(mes.slice(5, 7)) - 1]}/${mes.slice(0, 4)}`;
+    }
+    const ano = de.slice(0, 4);
+    if (de === ano + '-01-01' && ano === ate.slice(0, 4) && (ate === hoje || ate === ano + '-12-31')) {
+      return `entregue em ${ano}`;
+    }
+    return `entregue de ${dataBR(de)} a ${dataBR(ate)}`;
+  };
+  // Só aparece quando diz algo novo: repetir o cartão do mês ao lado dele seria
+  // ruído, e dois números iguais lado a lado fazem duvidar dos dois.
+  const periodoRepetido = (f.de === hoje.slice(0, 7) + '-01' && f.ate === hoje)
+    || (f.de === hoje.slice(0, 4) + '-01-01' && f.ate === hoje);
+  const kpiPeriodo = periodoRepetido ? '' : kpiHTML(kPer, rotuloPeriodo(f.de, f.ate), 'escolhido');
 
   const tabela = `<div class="casa-tabela-wrap"><table class="casa-tabela">
     <thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Entrega (ERP)</th><th class="num">Valor</th></tr></thead>
@@ -1266,9 +1333,10 @@ function renderEntregas() {
       <div class="casa-pagina-head">
         <div><h2>Entregas</h2><p><strong>Valor</strong> = o que o ERP marcou ENTREGUE, pela data de entrega, todas as O.S (líquido de desconto). <strong>Entrega realizada</strong> = instalação registrada no PCP (finalizada, ou baixa do ERP lançada à mão). Cliente retira só soma valor.</p></div>
       </div>
-      <div class="casa-kpi-cards">${kpiHTML(kHoje, 'entregue hoje')}${kpiHTML(kMes, 'entregue no mês')}${kpiHTML(kAno, 'entregue no ano')}</div>
+      <div class="casa-kpi-cards">${kpiPeriodo}${kpiHTML(kHoje, 'entregue hoje')}${kpiHTML(kMes, 'entregue no mês')}${kpiHTML(kAno, 'entregue no ano')}</div>
       <p class="metricas-nota">Registradas no PCP neste mês: <strong>${registradasMes}</strong> instalaç${registradasMes === 1 ? 'ão' : 'ões'}${cls.aLancar.length ? ` · a lançar: <strong>${cls.aLancar.length}</strong>` : ''}. Fonte do valor: ERP${STORE.entreguesMes(hoje.slice(0, 7)) ? `, atualizado ${new Date(STORE.entreguesMes(hoje.slice(0, 7)).em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' (carregando…)'}.</p>
       ${chipsPeriodoEntregas(f)}
+      ${barraCargaEntregas()}
       <div class="filter-bar">${filtroPeriodoHTML('_fEnt')}</div>
       <div class="casa-filtros">
         <label>Técnico <select id="ent-tecnico"><option value="">Todos</option>${tecnicos.map(t => opt(t, tecnico)).join('')}</select></label>
@@ -1311,6 +1379,24 @@ function renderEntregas() {
   /* CARREGAR UM ANO INTEIRO do ERP, sob pedido e com o preço dito. Não é
      automático de propósito: são 12 varreduras de 25-40 s, e ninguém deve
      disparar meia hora de ERP por engano ao abrir uma tela. */
+  /* BAIXAR TUDO: a fila anda no store, sem depender deste render. Antes, sair
+     da tela congelava o carregamento no meio. */
+  el.querySelectorAll('[data-carga-tudo]').forEach(b => b.onclick = () => {
+    const meses = mesesTodosEntregas();
+    if (!meses.length || !STORE.carregarTudoEntregues) return;
+    const faltam = meses.filter(m => !(STORE.entreguesMes && STORE.entreguesMes(m))).length;
+    if (typeof toast === 'function') {
+      toast(faltam
+        ? `Baixando ${faltam} mês(es). O que o servidor já tem vem agora; o resto leva 25-40 s cada, três por vez. Pode sair da tela.`
+        : 'Conferindo os meses guardados.');
+    }
+    STORE.carregarTudoEntregues(meses).catch(() => {});
+    renderEntregas();
+  });
+  el.querySelectorAll('[data-carga-parar]').forEach(b => b.onclick = () => {
+    if (STORE.pararEntregues) STORE.pararEntregues();
+    renderEntregas();
+  });
   el.querySelectorAll('[data-carregar-ano]').forEach(b => b.onclick = () => {
     const ano = b.dataset.carregarAno;
     const hoje = OPERACAO.dia(new Date()).slice(0, 7);

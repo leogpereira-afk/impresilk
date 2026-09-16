@@ -1836,6 +1836,12 @@ body.nav-aberta .nav-fundo { display: block; }
 .casa-kpi b { display:block; font-size:1.25rem; color:#163654; font-variant-numeric:tabular-nums; line-height:1.2; }
 .casa-kpi small { color:#526378; font-size:.75rem; }
 .casa-kpi.alerta b { color:#c2410c; }
+/* O cartão do período escolhido: o único que muda ao tocar num chip, e por isso
+   o único marcado. Sem essa marca ele vira mais um de quatro números iguais. */
+.casa-kpi.escolhido { border-color:#28796a; box-shadow:inset 0 0 0 1px #28796a; background:#f4fbf8; }
+.casa-kpi.escolhido small { color:#28796a; font-weight:600; }
+.casa-carga { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.casa-carga small { color:var(--muted); }
 .casa-filtros { display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-end; }
 .casa-filtros label { display:flex; flex-direction:column; gap:4px; font-size:.78rem; color:#526378; }
 .casa-filtros select { min-height:40px; max-width:260px; }

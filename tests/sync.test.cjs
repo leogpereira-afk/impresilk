@@ -157,3 +157,57 @@ test('config só volta inteira quando a versão mudou', async () => {
   assert.equal(await o.s.pullCFG(), false, 'segunda vez: 40 bytes, nada gravado');
   assert.equal(pedidos[1].seVersao, 'v1');
 });
+
+/* CARREGAR TUDO ANDA SOZINHO.
+   A fila normal só avança quando a TELA repinta (o render chama
+   garantirEntregues de novo a cada notificação). Sair da aba no meio congelava
+   o carregamento e a tela voltava dizendo "carregando 7 de 9" com nada em voo.
+   Aqui ninguém repinta: se andar, andou sozinho. */
+test('carregar tudo: drena a fila sem nenhum render no meio', async () => {
+  const pedidos = [];
+  const {s} = store({responder: b => {
+    pedidos.push(b.action);
+    if (b.action === 'entreguesMeses') {
+      // O servidor só tem um dos três guardados.
+      return {pacotes: {'2026-07': {v: 3, em: '2026-09-15T10:00:00Z', os: [], total: 0}}, faltando: ['2026-09', '2026-08']};
+    }
+    if (b.action === 'entreguesMes') return {v: 3, em: '2026-09-15T10:00:00Z', mes: b.mes, total: 0, os: []};
+    return {os: []};
+  }});
+  const r = await s.carregarTudoEntregues(['2026-09', '2026-08', '2026-07']);
+  assert.equal(r.fim, true);
+  assert.equal(r.prontos, 3, 'os três meses ficam guardados');
+  assert.deepEqual([...r.erros], []);
+  assert.equal(pedidos.filter(a => a === 'entreguesMeses').length, 1, 'o servidor é perguntado uma vez só');
+  assert.equal(pedidos.filter(a => a === 'entreguesMes').length, 2, 'só o que o servidor não tinha vai ao ERP');
+  assert.ok(s.entreguesMes('2026-08'), 'e fica gravado');
+});
+
+test('carregar tudo: mês que não responde é dito, não vira zero', async () => {
+  const {s} = store({responder: b => {
+    if (b.action === 'entreguesMeses') return {pacotes: {}, faltando: ['2026-08']};
+    if (b.action === 'entreguesMes') return {http: 500};
+    return {os: []};
+  }});
+  const r = await s.carregarTudoEntregues(['2026-08']);
+  assert.deepEqual([...r.erros], ['2026-08'], 'sem resposta entra como erro');
+  assert.equal(r.prontos, 0, 'e não conta como guardado');
+});
+
+test('carregar tudo: enquanto roda, a fila do render sai da frente', async () => {
+  let emVoo = 0, pico = 0;
+  const {s} = store({responder: async b => {
+    if (b.action === 'entreguesMeses') return {pacotes: {}, faltando: []};
+    if (b.action === 'entreguesMes') {
+      emVoo++; pico = Math.max(pico, emVoo);
+      await new Promise(r => queueMicrotask(r));
+      // O render repinta a cada notificação e tentaria empurrar mais meses.
+      s.garantirEntregues(['2026-09', '2026-08', '2026-07', '2026-06', '2026-05']);
+      emVoo--;
+      return {v: 3, em: '2026-09-15T10:00:00Z', mes: b.mes, total: 0, os: []};
+    }
+    return {os: []};
+  }});
+  await s.carregarTudoEntregues(['2026-09', '2026-08', '2026-07', '2026-06', '2026-05']);
+  assert.ok(pico <= 3, `nunca mais de 3 varreduras no ERP ao mesmo tempo (foi ${pico})`);
+});

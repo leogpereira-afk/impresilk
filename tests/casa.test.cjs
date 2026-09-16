@@ -1124,3 +1124,53 @@ test('retrabalho: taxa alta com poucas entregas vem com a ressalva escrita', () 
   assert.match(html, /100%/);
   assert.match(html, /poucas entregas/, 'faltou dizer que a taxa com poucas entregas não quer dizer muito');
 });
+
+/* O CHIP QUE NÃO MUDAVA NADA.
+   Os três cartões de cima são fixos por desenho (hoje / mês / ano) e o chip de
+   mês fica ABAIXO deles: tocar em "mai" e olhar para cima dava a impressão de
+   tela travada. Agora um quarto cartão segue o período — e some quando
+   repetiria um dos fixos. */
+test('entregas: o período escolhido ganha cartão próprio, com o nome do mês', () => {
+  const t = casa([]);
+  const html = t.run(`
+    STATE._fEnt = { de: '2026-05-01', ate: '2026-05-31' };
+    var wireFiltroPeriodo = () => {}; var wireQuadrosCasa = () => {};
+    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => null };
+    document.getElementById = () => el;
+    renderEntregas();
+    el.innerHTML`);
+  assert.match(html, /casa-kpi escolhido/, 'o cartão do período tem de existir');
+  assert.match(html, /entregue em mai\/2026/, 'e dizer QUAL período');
+});
+
+test('entregas: período igual ao mês corrente não ganha cartão repetido', () => {
+  const t = casa([]);
+  const html = t.run(`
+    STATE._fEnt = { de: '2026-09-01', ate: '2026-09-15' };
+    var wireFiltroPeriodo = () => {}; var wireQuadrosCasa = () => {};
+    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => null };
+    document.getElementById = () => el;
+    renderEntregas();
+    el.innerHTML`);
+  assert.ok(!/casa-kpi escolhido/.test(html), 'dois números iguais lado a lado fazem duvidar dos dois');
+});
+
+/* "Troquei o mês e não mudou" quase sempre é "este mês nunca foi baixado".
+   A barra diz isso com todas as letras, em vez de deixar a tela muda. */
+test('entregas: a barra de carga diz quantos meses faltam e oferece baixar tudo', () => {
+  const t = casa([]);
+  const html = t.run('barraCargaEntregas()');
+  assert.match(html, /0<\/strong> de \d+ meses gravados/, 'quantos já estão no aparelho');
+  assert.match(html, /data-carga-tudo/, 'e o botão de completar');
+  assert.match(html, /25-40 s por mês/, 'com o preço dito na frente');
+});
+
+test('entregas: com carga em curso, a barra mostra o andamento e o botão de parar', () => {
+  const t = casa([]);
+  const html = t.run(`
+    STORE.progressoEntregues = () => ({ total: 84, prontos: 7, erros: [], fim: false, etapa: 'erp' });
+    barraCargaEntregas()`);
+  assert.match(html, /<strong>7<\/strong> de 84 meses guardados/);
+  assert.match(html, /data-carga-parar/);
+  assert.ok(!/data-carga-tudo/.test(html), 'não oferecer começar o que já está rodando');
+});
