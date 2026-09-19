@@ -5,11 +5,11 @@ const vm = require('node:vm');
 const path = require('path');
 const root = path.join(__dirname, '..');
 
-function casa(lista, cfg = {}, elenco = null) {
+function casa(lista, cfg = {}, elenco = null, agora = null) {
   const guardado = {};
   const ctx = vm.createContext({
     console,
-    Date,
+    Date: agora ? class extends Date { constructor(...args) { super(...(args.length ? args : [agora])); } static now() { return +new Date(agora); } } : Date,
     STORE: {
       getAllOS: () => lista,
       getCFG: () => ({ instaladores: ['Natan', 'Paulo', 'Lucas', 'Rafael'], ...cfg }),
@@ -261,10 +261,14 @@ test('meses do intervalo e a fila de três por vez', () => {
   assert.equal(t.run("entreguesERP('2026-01-01','2026-09-14').faltando.length"), 9);
 });
 
-test('Entregas abre nos últimos 30 dias, não no ano inteiro', () => {
-  const t = casa([]);
-  const dias = t.run("(() => { STATE._fEnt = null; const f = periodoEntregas(); return (new Date(f.ate) - new Date(f.de)) / 86400000; })()");
-  assert.equal(dias, 29);
+test('Entregas abre do dia 1 ao dia atual, inclusive na virada do mês', () => {
+  for (const dia of ['2026-09-19', '2026-10-01', '2027-01-01']) {
+    const t = casa([], {}, null, dia + 'T12:00:00');
+    assert.equal(t.run('periodoEntregas().de'), dia.slice(0, 7) + '-01');
+    assert.equal(t.run('periodoEntregas().ate'), dia);
+    t.run("STATE._fEnt = { de: '2025-04-01', ate: '2025-04-30' }");
+    assert.equal(t.run('periodoEntregas().ate'), '2025-04-30', 'repintar não apaga o filtro escolhido');
+  }
 });
 
 test('barras só mostram o que tem valor e nunca estouram 100%', () => {
@@ -1144,7 +1148,7 @@ test('entregas: o período escolhido ganha cartão próprio, com o nome do mês'
 });
 
 test('entregas: período igual ao mês corrente não ganha cartão repetido', () => {
-  const t = casa([]);
+  const t = casa([], {}, null, '2026-09-15T12:00:00-03:00');
   const html = t.run(`
     STATE._fEnt = { de: '2026-09-01', ate: '2026-09-15' };
     var wireFiltroPeriodo = () => {}; var wireQuadrosCasa = () => {};

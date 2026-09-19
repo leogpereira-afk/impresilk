@@ -870,6 +870,7 @@ function initTabs() {
          entrasse por "Parado Cliente" e depois clicasse em "PCP" continuaria
          vendo so os parados, achando que a carteira sumiu. */
       if (tab === 'pcp') STATE.pcpVista = t.dataset.vista ?? '';
+      if (tab === 'entregas') STATE._fEnt = null;
       STORE.pull(refreshAposPull);
       renderActiveTab();
       window.scrollTo({ top: 0, behavior: 'instant' });

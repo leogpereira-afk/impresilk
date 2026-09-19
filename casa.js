@@ -559,13 +559,12 @@ function entreguesERP(de, ate) {
   return { os, faltando, comErro, meses, truncou: !!meses.truncou };
 }
 
-// A lista de Entregas abre nos ÚLTIMOS 30 DIAS (ordem do dono, 14/09/2026):
-// o resto se vê pelo seletor ou pelos chips de ano. Ano inteiro na abertura
-// eram 1.900 linhas e nove varreduras no ERP toda vez que alguém clicava na aba.
+// Ao abrir Entregas, usar o mês vigente, do dia 1 até hoje.
+// A navegação limpa o período; repinturas preservam a escolha feita na tela.
 function periodoEntregas() {
   if (!STATE._fEnt) {
     const hoje = OPERACAO.dia(new Date());
-    STATE._fEnt = { de: OPERACAO.somarDias(hoje, -29), ate: hoje };
+    STATE._fEnt = { de: hoje.slice(0, 7) + '-01', ate: hoje };
   }
   return STATE._fEnt;
 }
