@@ -44,6 +44,7 @@ function casa(lista, cfg = {}, elenco = null, agora = null) {
   });
   vm.runInContext(fs.readFileSync(path.join(root, 'operacao.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(root, 'casa.js'), 'utf8'), ctx);
+  vm.runInContext(fs.readFileSync(path.join(root, 'relatorios-entregas.js'), 'utf8'), ctx);
   return { run: code => vm.runInContext(code, ctx) };
 }
 

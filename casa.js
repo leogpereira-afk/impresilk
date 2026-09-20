@@ -1196,6 +1196,7 @@ function vazioEntregas(per) {
 function renderEntregas() {
   const el = document.getElementById('panel-entregas');
   if (!el) return;
+  if(STATE._entAba==='relatorios')return renderRelatoriosEntregas();
   const todas = STORE.getAllOS();
   const porNumero = new Map(todas.map(o => [String(o.numero || '').trim(), o]));
   const cls = classificarEntregas(todas);
@@ -1297,6 +1298,7 @@ function renderEntregas() {
 
   el.innerHTML = `
     <div class="casa-pagina">
+      ${abasEntregasHTML('lista')}
       <div class="casa-pagina-head">
         <div><h2>Entregas</h2><p>Acompanhe as O.S. entregues, os valores e a equipe responsável.</p></div>
       </div>
@@ -1326,6 +1328,7 @@ function renderEntregas() {
             <td><button class="btn-primary btn-xs edit-only" data-lancar-os="${esc(os.id)}">Lançar entrega</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="text-muted">Nada pendente de lançamento neste período.</p>'}
       </section>
     </div>`;
+  wireAbasEntregas(el);
   wireFiltroPeriodo(el, '_fEnt', renderEntregas);
   const mudarMes = () => {
     const ano = el.querySelector('#ent-ano').value;

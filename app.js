@@ -4622,7 +4622,7 @@ async function pintarAcessos(el) {
 /* ── Saúde da conexão: nuvem OK? importação automática rodando? fila local? ─ */
 function imprimirAnalisePCP(titulo,elemento,periodo,fonteApuracao) {
   const copia = elemento.cloneNode(true);
-  copia.querySelectorAll('button,input,select,.filter-bar,.perf-toolbar').forEach(n => { if(n.matches('button[data-os-id],button[data-perf-os]')) n.replaceWith(document.createTextNode(n.textContent)); else n.remove(); });
+  copia.querySelectorAll('button,input,select,.filter-bar,.perf-toolbar').forEach(n => { if(n.matches('button[data-os-id],button[data-perf-os],button[data-rel-ponto]')) n.replaceWith(document.createTextNode(n.textContent)); else n.remove(); });
   copia.querySelectorAll('.painel-bloco-corpo').forEach(n=>n.hidden=false);
   copia.querySelectorAll('details').forEach(n => n.open = true);
   const fonte = STORE.getLastSync?.();

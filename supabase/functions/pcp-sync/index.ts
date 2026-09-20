@@ -475,6 +475,58 @@ Deno.serve(async (req: Request) => {
 
   try {
     switch (acao) {
+      case "relatorioEntregas": {
+        if(!ehMaquina && !["admin","pcp"].includes(String(cracha?.papel || "")))return resp({error:"Relatórios restritos à gestão do PCP."},403);
+        const hoje=perfDia(new Date().toISOString()), ano=Number(body.ano);
+        if(!Number.isInteger(ano) || ano<2000 || ano>Number(hoje.slice(0,4)))return resp({error:"Ano inválido."},422);
+        const de=`${ano}-01-01`, ate=ano===Number(hoje.slice(0,4))?hoje:`${ano}-12-31`;
+        const meses=Array.from({length:12},(_,i)=>`${ano}-${String(i+1).padStart(2,"0")}`);
+        // Paginação por chave: não aceitar o limite padrão do PostgREST como um ano inteiro.
+        async function lerOrdens() {
+          const todos:any[]=[];let after="";
+          for(let i=0;i<100;i++){
+            let q=sb.from("painel_ordens").select("id,numero,cliente,data,valor,atualizado_em").gte("data",de).lte("data",ate).order("id").limit(500);
+            if(after)q=q.gt("id",after);
+            const {data,error}=await q;if(error)throw new Error(error.message);
+            const rows=data || [];todos.push(...rows);if(rows.length<500)return todos;
+            const next=String(rows[rows.length-1].id);if(next<=after)throw new Error("Paginação de vendas inconsistente.");after=next;
+          }throw new Error("Ano excedeu o limite da consulta.");
+        }
+        const [ordens,fluxo,cache,operacao]=await Promise.all([
+          lerOrdens(),
+          sb.from("painel_cache").select("valor,atualizado_em").eq("chave","fluxo_mensal").maybeSingle(),
+          sb.from("pcp_meta").select("chave,valor").in("chave",meses.map(m=>"entregues:"+m)),
+          perfFonte({de,ate}),
+        ]);
+        if(fluxo.error || cache.error)throw new Error("Não foi possível ler as fontes do relatório.");
+        // perfFonte já verifica paginação e alterações concorrentes; só detalhes operacionais mínimos.
+        const pacotes=new Map((cache.data || []).map((r:any)=>[r.chave,r.valor]));
+        const entradas=fluxo.data?.valor?.anos?.[ano]?.entradas;
+        const numero=(v:any)=>v!==null && v!==undefined && v!=="" && Number.isFinite(Number(v))?Number(v):null;
+        const soma=(rows:any[])=>rows.some(r=>numero(r.valor)===null)?null:Math.round(rows.reduce((n,r)=>n+Number(r.valor),0)*100)/100;
+        const linhas=meses.map(mes=>{
+          if(mes>ate.slice(0,7))return {mes,futuro:true};
+          const pacote:any=pacotes.get("entregues:"+mes);
+          const vistos=new Set();
+          const entregas=(Array.isArray(pacote?.os)?pacote.os:[]).filter((r:any)=>{
+            const dia=String(r.data || "").slice(0,10), n=String(r.numero || "");
+            if(!n || vistos.has(n) || !dia.startsWith(mes) || dia>ate)return false;vistos.add(n);return true;
+          }).map((r:any)=>({numero:r.numero,cliente:r.cliente,data:r.data,valor:numero(r.valor)}));
+          const vendas=ordens.filter(r=>String(r.data).startsWith(mes)).map(r=>({numero:r.numero,cliente:r.cliente,data:r.data,valor:numero(r.valor)}));
+          const instalacoes=operacao.registros.filter((r:any)=>r.dia.startsWith(mes));
+          const retrabalhos=instalacoes.filter((r:any)=>r.retrabalho===true).map((r:any)=>({numero:r.numero,cliente:r.cliente,data:r.dia}));
+          return {mes,entregue:pacote?.v>=2 && Array.isArray(pacote.os)?soma(entregas):null,
+            vendido:vendas.length?soma(vendas):null,recebido:entradas && Object.prototype.hasOwnProperty.call(entradas,mes)?numero(entradas[mes]):null,
+            retrabalho:instalacoes.length?100*retrabalhos.length/instalacoes.length:null,baseRetrabalho:instalacoes.length,
+            entregas,vendas,retrabalhos,entregasEm:pacote?.em || null};
+        });
+        return resp({ano,de,ate,meses:linhas,consultadoEm:new Date().toISOString(),recebimentosEm:fluxo.data?.atualizado_em || null,
+          notas:{vendido:"O.S. por data de cadastro no Mubisys, valor líquido. Não equivale a faturamento fiscal. Histórico depende da carga do ERP; mês sem registros não confirma venda zero.",
+          recebido:"Pagamentos de contas a receber pela data de pagamento/crédito, no fluxo mensal do Painel. Fonte agregada: não contém títulos individuais. Anos preservados podem ter atualização anterior à carga indicada.",
+          retrabalho:"Instalações finalizadas no PCP no mês com marca de retrabalho ÷ instalações finalizadas registradas no mesmo mês. Histórico operacional pode ser incompleto; ausência de marca não comprova inspeção de qualidade.",
+          entregue:"O.S. com status entregue no Mubisys pela data de entrega, incluindo retiradas. Valores líquidos; alterações posteriores dependem de nova sincronização."}});
+      }
+
       case "performancePeriodo":
       case "performanceFechamentos":
       case "performanceFechar": {
@@ -867,11 +919,18 @@ Deno.serve(async (req: Request) => {
         if (!meses.length) return resp({ error: "meses: lista de AAAA-MM" }, 400);
         const usar = meses.slice(0, 300);
 
-        const { data: col, error: eH } = await sb.from("registros")
-          .select("registro").eq("colecao", "colaboradores").eq("apagado", false);
-        if (eH) return resp({ error: eH.message }, 500);
-        const { data: ar } = await sb.from("registros")
+        const col:any[]=[];let cursor="", completo=false;
+        for(let pagina=0;pagina<100;pagina++){
+          let q=sb.from("registros").select("id,registro").eq("colecao","colaboradores").eq("apagado",false).order("id").limit(500);
+          if(cursor)q=q.gt("id",cursor);
+          const {data,error}=await q;if(error)throw new Error(error.message);
+          const rows=data || [];col.push(...rows);if(rows.length<500){completo=true;break;}
+          const next=String(rows[rows.length-1].id);if(next<=cursor)throw new Error("Paginação do RH inconsistente.");cursor=next;
+        }
+        if(!completo)throw new Error("Não foi possível concluir a leitura do RH.");
+        const { data: ar,error:areaErro } = await sb.from("registros")
           .select("registro->>id, registro->>nome").eq("colecao", "areas").eq("apagado", false);
+        if(areaErro)throw new Error(areaErro.message);
         const areaNome: Record<string, string> = {};
         for (const r of (ar ?? []) as any[]) if (r.id) areaNome[String(r.id)] = String(r.nome ?? "");
 
@@ -892,7 +951,7 @@ Deno.serve(async (req: Request) => {
         const linhas = usar.map((mes: string) => {
           const ini = `${mes}-01`;
           const [y, m] = mes.split("-").map(Number);
-          const fim = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);   // ultimo dia
+          const fim = [new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10), perfDia(new Date().toISOString())].sort()[0]; // até hoje no mês corrente
           const porArea: Record<string, number> = {};
           let total = 0;
           for (const g of gente) {
@@ -904,7 +963,7 @@ Deno.serve(async (req: Request) => {
           return {
             mes, total, porArea,
             // `piso` = a base nao registra quem saiu antes desta data.
-            piso: !!primeiraSaida && fim < primeiraSaida,
+            piso: !primeiraSaida || fim < primeiraSaida,
           };
         });
 
