@@ -76,3 +76,23 @@ export function validarConclusao(os, anterior, papel) {
   if (faltas.length && !(['admin','pcp'].includes(papel) && String(os.justificativaConclusao || '').trim().length >= 15)) return 'Para concluir: ' + faltas.join(', ') + '. A gestão pode registrar uma justificativa de exceção.';
   return '';
 }
+// Validação da apuração operacional; nenhum lançamento de folha é criado.
+export function validarPerformance(cfg) {
+  if (cfg == null) return '';
+  if (typeof cfg !== 'object' || !Array.isArray(cfg.equipes) || !Array.isArray(cfg.participacoes)) return 'Estrutura de performance inválida.';
+  const texto = (s,n) => typeof s === 'string' && s.trim().length > 0 && s.length <= n;
+  const distintos = xs => new Set(xs.map(x=>x?.id)).size === xs.length;
+  if (cfg.equipes.length > 300 || cfg.participacoes.length > 20000 || !distintos(cfg.equipes) || !distintos(cfg.participacoes)) return 'Registros de performance repetidos ou acima do limite.';
+  const membrosOK = ms => Array.isArray(ms) && ms.length > 0 && ms.length <= 50 && ms.every(p=>p && texto(p.chave,150) && texto(p.nome,150)) && new Set(ms.map(p=>p.chave)).size === ms.length;
+  for (const e of cfg.equipes) {
+    if (!e || !texto(e.id,150) || !texto(e.nome,60) || !['🦅','🚀','🎯','🛡️','⚡','🦁','🏔️','🤝'].includes(e.emblema) || !membrosOK(e.membros)) return 'Equipe inválida. Confira nome, emblema e integrantes.';
+  }
+  for (const p of cfg.participacoes) {
+    if (!p || !texto(p.id,150) || !membrosOK(p.membros)) return 'Participação inválida.';
+    if (p.equipeId && !cfg.equipes.some(e=>e.id===p.equipeId)) return 'Equipe da participação não encontrada.';
+    if (p.membros.some(m=>typeof m.percentual !== 'number' || !Number.isFinite(m.percentual) || m.percentual<=0 || m.percentual>100)) return 'Percentual inválido.';
+    if (Math.abs(p.membros.reduce((s,m)=>s+m.percentual,0)-100) > 0.001) return 'As participações precisam somar 100%.';
+    if (p.obs && (typeof p.obs !== 'string' || p.obs.length>300)) return 'Observação acima do limite.';
+  }
+  return '';
+}

@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -943,7 +943,7 @@ Deno.serve(async (req: Request) => {
           if (!body.baseCfg) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:["Configuração salva por versão antiga; revise antes de reaplicar."]},409);
           const base = visivel(body.baseCfg), local = visivel(body.cfg), remoto = visivel(atual);
           if (cracha?.papel === "pcp" && !ehMaquina) {
-            const permitidas = new Set(["agendaPCP","bonusPCP","vinculosRH","mensagemDia"]);
+            const permitidas = new Set(["agendaPCP","bonusPCP","performancePCP","vinculosRH","mensagemDia"]);
             for (const k of new Set([...Object.keys(base),...Object.keys(local),...Object.keys(remoto)])) {
               if (!permitidas.has(k)) { delete base[k]; delete local[k]; delete remoto[k]; }
             }
@@ -952,6 +952,14 @@ Deno.serve(async (req: Request) => {
           if (result.conflitos.length) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:result.conflitos},409);
           const limpo = {...atual,...result.cfg};
           for (const k of Object.keys(remoto)) if (!(k in result.cfg)) delete limpo[k];
+          if (JSON.stringify(limpo.performancePCP) !== JSON.stringify(atual.performancePCP)) {
+            const erroPerf = validarPerformance(limpo.performancePCP);
+            if (erroPerf) return resp({error:erroPerf},422);
+            if(limpo.performancePCP) limpo.performancePCP.participacoes = limpo.performancePCP.participacoes.map((p:any)=>{
+              const antes=atual.performancePCP?.participacoes?.find((x:any)=>x.id===p.id);
+              return JSON.stringify(antes)===JSON.stringify(p) ? p : {...p,por:cracha?.nome || 'Gestão',em:new Date().toISOString()};
+            });
+          }
           if (JSON.stringify(limpo) === JSON.stringify(atual)) return resp({ok:true,cfg:visivel(atual),versao});
           const novaVersao = new Date(Math.max(Date.now(),Date.parse(versao || '')+1 || 0)).toISOString();
           const query = sb.from("pcp_config_global");

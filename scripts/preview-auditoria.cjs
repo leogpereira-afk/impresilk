@@ -3,7 +3,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['index.html','equipe.html','app.js','equipe.js','casa.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg']);
+const permitidos=new Set(['index.html','equipe.html','app.js','equipe.js','casa.js','performance.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};

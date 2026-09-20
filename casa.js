@@ -1457,8 +1457,10 @@ function agruparPorPessoaCasa(lista) {
   const m = new Map();
   for (const os of lista) {
     const v = valorDaOS(os), h = OPERACAO.horas(os);
+    const vistos = new Set();
     for (const ap of OPERACAO.equipe(os)) {
       const p = nomeExibicaoCasa(ap);
+      if (vistos.has(p.chave)) continue; vistos.add(p.chave);
       const d = m.get(p.chave) || { ...p, os: 0, valor: 0, semValor: 0, horas: [], retrab: 0, erp: 0, apelidos: new Set() };
       d.os++; d.apelidos.add(ap);
       if (v == null) d.semValor++; else d.valor += v;
@@ -1504,19 +1506,15 @@ function tempoPessoaHTML(p) {
 
 function produtividadeHTML() {
   const f = periodoOuMes('_fPerf');
-  const { concl, noPeriodo, pessoas } = pessoasDoPeriodo(f);
-  const sem = semanaAtualCasa();
-  const daSemana = agruparPorPessoaCasa(concl.filter(o => OPERACAO.emIntervalo(diaEntrega(o), sem.de, sem.ate)));
-  const destaque = daSemana.length && daSemana[0].valor > 0 ? daSemana[0] : null;
+  const { noPeriodo, pessoas } = pessoasDoPeriodo(f);
   const semEquipe = noPeriodo.filter(o => !OPERACAO.equipe(o).length).length;
-  const cards = pessoas.map(p => `<div class="casa-prod ${destaque && destaque.chave === p.chave ? 'destaque' : ''}" ${p.pessoa && p.pessoa.chave ? `data-pessoa="${esc(p.pessoa.chave)}"` : ''}>
-      ${destaque && destaque.chave === p.chave ? '<span class="casa-destaque">★ Destaque da semana</span>' : ''}
+  const cards = pessoas.map(p => `<div class="casa-prod" ${p.pessoa && p.pessoa.chave ? `data-pessoa="${esc(p.pessoa.chave)}"` : ''}>
       ${avatarRH(p.pessoa || { nome: p.nome })}
       <div>
         <div class="casa-prod-nome">${esc(p.nome)}<small>${p.pessoa ? esc([p.pessoa.cargo, p.pessoa.area].filter(Boolean).join(' · ') || ('ID ' + (p.id || '—'))) : 'sem ficha do RH'}</small></div>
         <dl>
           <dt>Entregas realizadas</dt><dd>${p.os}${p.erp ? ` <small>(${p.erp} lançada${p.erp === 1 ? '' : 's'})</small>` : ''}${p.retrab ? ` <small>(${p.retrab} retrab.)</small>` : ''}</dd>
-          <dt>Valor entregue</dt><dd>${valorPessoaHTML(p)}</dd>
+          <dt>Valor das O.S. (integral)</dt><dd>${valorPessoaHTML(p)}</dd>
           <dt>Tempo médio</dt><dd>${tempoPessoaHTML(p)}</dd>
         </dl>
       </div>
@@ -1525,7 +1523,6 @@ function produtividadeHTML() {
       <h3>Produtividade</h3>
       <p>Quem estava na equipe da instalação entregue (finalizada no PCP, ou baixa do ERP lançada à mão). Retirada não é entrega. Valor é participação (não divide, não é bônus). Tempo = saída → retorno registrados na O.S.</p>
       <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}</div>
-      ${destaque ? `<p class="metricas-nota">★ Destaque da semana (${sem.de.slice(8, 10)}/${sem.de.slice(5, 7)} a ${sem.ate.slice(8, 10)}/${sem.ate.slice(5, 7)}): <strong>${esc(destaque.nome)}</strong>, ${dinheiroCasa(destaque.valor)} em ${destaque.os} O.S.</p>` : ''}
       ${semEquipe ? `<p class="metricas-nota">${semEquipe} O.S no período sem equipe registrada — não contam para ninguém.</p>` : ''}
       ${pessoas.length ? `<div class="casa-prod-grid">${cards}</div>` : emptyState('', 'Nenhuma entrega com equipe no período', 'A O.S precisa ter equipe e ser finalizada no PCP.')}
     </section>`;
@@ -1772,21 +1769,16 @@ function ligacaoRHHTML() {
 /* ── Modo TV: ranking na tela da fábrica ───────────────────────────────────
    Tela cheia, letra grande, troca de painel sozinha. Esc ou o × sai. */
 function painelTVCasa(i, f) {
-  const { pessoas } = pessoasDoPeriodo(f);
-  const sem = semanaAtualCasa();
-  const daSemana = agruparPorPessoaCasa(classificarEntregas(STORE.getAllOS()).instalacoes.filter(o => OPERACAO.emIntervalo(diaEntrega(o), sem.de, sem.ate)));
-  const podio = (lista, medida, fmt) => lista.slice(0, 8).map((p, k) => `<li class="tv-linha ${k < 3 ? 'tv-podio' : ''}">
-      <span class="tv-pos">${k + 1}</span>
-      ${avatarRH(p.pessoa || { nome: p.nome }, 'tv-foto')}
-      <span class="tv-nome">${esc(p.nome)}${p.pessoa && p.pessoa.cargo ? `<small>${esc(p.pessoa.cargo)}</small>` : ''}</span>
-      <span class="tv-num">${fmt(medida(p))}</span>
-    </li>`).join('');
+  const c = typeof perfConfig === 'function' ? perfConfig() : {equipes:[],participacoes:[]};
+  const entregas=classificarEntregas(STORE.getAllOS()).instalacoes.filter(o=>OPERACAO.emIntervalo(diaEntrega(o),f.de,f.ate));
+  const resumo=typeof PERF !== 'undefined' ? PERF.resumir(entregas.map(o=>perfRegistro(o,c))) : {pessoas:[],equipes:[]};
+  const lista = (ps,medida) => `<ol class="tv-lista">${ps.slice(0,8).map(p=>`<li class="tv-linha"><span class="tv-pos">${esc(p.emblema||'🤝')}</span><span class="tv-nome">${esc(p.nome)}</span><span class="tv-num">${medida(p)}</span></li>`).join('')}</ol>`;
+  const nota='<p class="metricas-nota">Participação operacional; não é nota de mérito ou bonificação. Divisão igual quando ainda não confirmada.</p>';
   const paineis = [
-    { titulo: '🏆 Valor entregue no período', corpo: pessoas.length ? `<ol class="tv-lista">${podio(pessoas, p => p.valor, dinheiroCasa)}</ol>` : '<p class="tv-vazio">Sem entregas registradas no período.</p>' },
-    { titulo: '📦 Entregas realizadas no período', corpo: pessoas.length ? `<ol class="tv-lista">${podio(pessoas.slice().sort((a, b) => b.os - a.os), p => p.os, v => `${v} O.S`)}</ol>` : '<p class="tv-vazio">Sem entregas registradas no período.</p>' },
-    { titulo: `★ Destaque da semana · ${sem.de.slice(8, 10)}/${sem.de.slice(5, 7)} a ${sem.ate.slice(8, 10)}/${sem.ate.slice(5, 7)}`, corpo: daSemana.length ? `<ol class="tv-lista">${podio(daSemana, p => p.valor, dinheiroCasa)}</ol>` : '<p class="tv-vazio">Semana ainda sem entrega registrada.</p>' },
-    { titulo: '🚚 Carros mais usados', corpo: carrosHTML(f) },
-    { titulo: '🔧 Retrabalho no período', corpo: retrabalhoHTML(f) },
+    {titulo:'🤝 Equipes em ação',corpo:resumo.equipes.length?lista(resumo.equipes,p=>p.os+' O.S.'):'<p class="tv-vazio">Sem entregas com equipe neste período.</p>'},
+    {titulo:'📦 Participação nas entregas',corpo:(resumo.pessoas.length?lista(resumo.pessoas,p=>perfFormato(p.equivalentes)+' O.S. equivalentes'):'<p class="tv-vazio">Sem participação registrada.</p>')+nota},
+    {titulo:'🚚 Carros mais usados',corpo:carrosHTML(f)},
+    {titulo:'🔧 Retrabalho no período',corpo:retrabalhoHTML(f)},
   ];
   const n = ((i % paineis.length) + paineis.length) % paineis.length;
   const p = paineis[n];
@@ -1943,7 +1935,7 @@ function renderPerformanceCasa() {
     <div class="casa-pagina casa-perf">
       <div class="casa-pagina-head">
         <div><h2>Performance</h2><p>${abaPerf === 'equipe'
-          ? 'Quem entregou, com a ficha do RH (foto, cargo e situação), e o bônus do mês.'
+          ? 'Entregas, equipes e participação de cada pessoa. Uma apuração que você pode conferir.'
           : 'Entregas ao longo dos anos, gente e retrabalho — o que a operação produziu, lido de longe.'}</p></div>
         <span class="casa-vista">
           <button class="btn-ghost btn-sm ${abaPerf === 'equipe' ? 'active' : ''}" data-perf-aba="equipe">Equipe</button>
@@ -1952,7 +1944,7 @@ function renderPerformanceCasa() {
         </span>
       </div>
       ${abaPerf === 'equipe' ? `
-        ${produtividadeHTML()}
+        ${typeof performanceEquipesHTML === 'function' ? performanceEquipesHTML() : produtividadeHTML()}
         ${quadroCasa('perf-rh', `🔗 Ligar apelido do PCP à ficha do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), pendRH > 0)}
         ${quadroCasa('perf-plantoes', '🗓 Plantões vinculados às O.S.', plantaoPerformanceHTML(), false)}
         ${quadroCasa('perf-bonus', '💰 Bônus por ponto <small>— apuração manual do mês</small>', bonusHTML, false)}
@@ -1969,6 +1961,7 @@ function renderPerformanceCasa() {
   el.querySelectorAll('[data-perf-aba]').forEach(b => b.onclick = () => {
     STATE._perfAba = b.dataset.perfAba; renderPerformanceCasa();
   });
+  if (typeof wirePerformanceEquipes === 'function') wirePerformanceEquipes(el);
   const tv = document.getElementById('perf-tv'); if (tv) tv.onclick = abrirTVCasa;
   const mesEl = document.getElementById('perf-mes');
   if (mesEl) mesEl.onchange = () => { if (mesEl.value) { gravarBonusCasa({ ...b, mes: mesEl.value }); renderPerformanceCasa(); } };
@@ -2229,7 +2222,7 @@ function renderAgendaCasa() {
       nEv && `<span class="casa-pill mute">${nEv} ev.</span>`,
     ].filter(Boolean).join('');
     const nums = doDia.slice(0, 3).map(o => esc(o.numero || '—')).join(' · ');
-    return `<button type="button" class="casa-dia ${noMes ? '' : 'fora'} ${iso === sel ? 'sel' : ''} ${iso === hoje ? 'hoje' : ''}" data-dia="${iso}" title="${doDia.length} O.S${doDia.length ? ': ' + esc(doDia.map(o => o.numero).join(', ')) : ''}">
+    return `<button type="button" class="casa-dia ${noMes ? '' : 'fora'} ${iso === sel ? 'sel' : ''} ${iso === hoje ? 'hoje' : ''}" data-dia="${iso}" aria-pressed="${iso===sel}" aria-label="${esc(dt.toLocaleDateString('pt-BR'))}: ${doDia.length} ordens, ${pls.length} plantões, ${nEv} eventos" title="${doDia.length} O.S${doDia.length ? ': ' + esc(doDia.map(o => o.numero).join(', ')) : ''}">
       <span class="casa-dia-num">${dt.getDate()}</span>
       <span class="casa-dia-pills">${pills}</span>
       ${nums ? `<span class="casa-dia-os">${nums}${doDia.length > 3 ? ` +${doDia.length - 3}` : ''}</span>` : ''}
@@ -2255,7 +2248,7 @@ function renderAgendaCasa() {
         <span class="casa-mes-nav">
           <button class="btn-ghost btn-sm" id="ag-ant" title="Mês anterior">‹</button>
           <label class="casa-mes">Mês <input type="month" id="ag-mes" value="${esc(mes)}"></label>
-          <button class="btn-ghost btn-sm" id="ag-prox" title="Próximo mês">›</button>
+          <button class="btn-ghost btn-sm" id="ag-prox" title="Próximo mês">›</button><button class="btn-ghost btn-sm" id="ag-hoje">Mês atual</button>
         </span>
       </div>
       <label class="agenda-recorte"><input type="checkbox" id="ag-concluidas" ${STATE._agendaConcluidas ? 'checked' : ''}> Incluir concluídas pela equipe</label>
@@ -2295,6 +2288,7 @@ function renderAgendaCasa() {
       </div>
     </div>`;
   const concluidas = document.getElementById('ag-concluidas'); if (concluidas) concluidas.onchange = () => { STATE._agendaConcluidas = concluidas.checked; renderAgendaCasa(); };
+  const hojeBtn=el.querySelector('#ag-hoje');if(hojeBtn)hojeBtn.onclick=()=>{STATE._agMes=hoje.slice(0,7);STATE._agDia=hoje;renderAgendaCasa();};
   const mesEl = document.getElementById('ag-mes');
   if (mesEl) mesEl.onchange = () => { if (mesEl.value) { STATE._agMes = mesEl.value; STATE._agDia = ''; renderAgendaCasa(); } };
   const andar = n => {
@@ -2364,7 +2358,7 @@ function renderAgendaCasa() {
    a programação mora na O.S, não numa agenda paralela. */
 function formAddOSHTML(id, dia, candidatas) {
   return `<form id="${esc(id)}">
-      <label>O.S <select name="osId" required><option value="">— escolher —</option>${candidatas.slice(0, 300).map(o => `<option value="${esc(o.id)}">${esc(o.numero || '—')} — ${esc((o.cliente || '').slice(0, 34))}${OPERACAO.prazo(o) ? ' · prazo ' + OPERACAO.prazo(o).slice(8, 10) + '/' + OPERACAO.prazo(o).slice(5, 7) : ''}</option>`).join('')}</select></label>
+      <label>Buscar O.S. ou cliente <input type="search" data-ag-busca placeholder="Número ou nome do cliente"></label><label>O.S <select name="osId" required><option value="">— escolher —</option>${candidatas.map(o => `<option value="${esc(o.id)}">${esc(o.numero || '—')} — ${esc((o.cliente || '').slice(0, 34))}${OPERACAO.prazo(o) ? ' · prazo ' + OPERACAO.prazo(o).slice(8, 10) + '/' + OPERACAO.prazo(o).slice(5, 7) : ''}</option>`).join('')}</select></label>
       <div class="linha2">
         <label>Período <select name="periodo">${(typeof PERIODO_OPTS !== 'undefined' ? PERIODO_OPTS : ['Manhã', 'Tarde', 'Dia inteiro', 'Horário']).map(o => `<option>${esc(o)}</option>`).join('')}</select></label>
         <label>Hora de saída <input name="hora" type="time"></label>
@@ -2373,6 +2367,7 @@ function formAddOSHTML(id, dia, candidatas) {
         <label>Duração (dias) <input name="dias" type="number" min="1" value="1"></label>
         <label>Veículo <select name="veiculo"><option value="">— sem veículo —</option>${optionsVeiculoCasa('')}</select></label>
       </div>
+      ${typeof perfModeloEquipeHTML === 'function' ? perfModeloEquipeHTML() : ''}
       <label>Equipe <div class="casa-chips">${equipeEscalavel().doPCP.map(n => {
         const p = fichaDoApelido(n);
         const a = p ? ausenciaRH(p, dia) : null;
@@ -2387,6 +2382,9 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
   });
   const f = document.getElementById(id);
   if (!f) return;
+  if (typeof perfWireModelo === 'function') perfWireModelo(f);
+  const buscaOS=f.querySelector('[data-ag-busca]');
+  if(buscaOS) buscaOS.oninput=()=>f.querySelectorAll('[name="osId"] option').forEach(o=>{o.hidden=!!o.value && !o.selected && !normCasa(o.textContent).includes(normCasa(buscaOS.value));});
   f.onsubmit = ev => {
     ev.preventDefault();
     const fd = new FormData(f);
@@ -2492,11 +2490,12 @@ function renderPlantoesCasa() {
   const hoje = OPERACAO.dia(new Date());
   const todas = STORE.getAllOS();
   const porId = new Map(todas.map(o => [o.id, o]));
-  if (!STATE._plVista) STATE._plVista = 'proximos';
+  if (!STATE._plVista) STATE._plVista = 'mes';
+  if (!STATE._plMes) STATE._plMes = hoje.slice(0,7);
   const editando = STATE._plEdit ? a.plantoes.find(p => p.id === STATE._plEdit && !p.cancelado) : null;
   const vivos = a.plantoes.filter(p => !p.cancelado);
   const lista = vivos
-    .filter(p => STATE._plVista === 'todos' || String(p.data) >= hoje)
+    .filter(p => STATE._plVista === 'todos' || (STATE._plVista === 'mes' ? String(p.data).startsWith(STATE._plMes) : String(p.data) >= hoje))
     .sort((x, y) => String(x.data).localeCompare(String(y.data)) || String(x.inicio).localeCompare(String(y.inicio)));
   // Agrupado por mês: a escala se lê por bloco, não por linha solta.
   const porMes = new Map();
@@ -2506,7 +2505,7 @@ function renderPlantoesCasa() {
     porMes.get(k).push(p);
   }
   const contagem = { diarista: 0, sobreaviso: 0, folga: 0 };
-  for (const p of vivos.filter(p => String(p.data).slice(0, 7) === hoje.slice(0, 7))) if (contagem[p.tipo] != null) contagem[p.tipo]++;
+  for (const p of vivos.filter(p => String(p.data).slice(0, 7) === STATE._plMes)) if (contagem[p.tipo] != null) contagem[p.tipo]++;
   const doDia = vivos.filter(p => p.data === hoje);
   const candidatas = todas.filter(o => !o.finalizadaEm)
     .sort((x, y) => (OPERACAO.prazo(x) || '9999').localeCompare(OPERACAO.prazo(y) || '9999'));
@@ -2533,8 +2532,9 @@ function renderPlantoesCasa() {
   el.innerHTML = `
     <div class="casa-pagina">
       <div class="casa-pagina-head">
-        <div><h2>Plantões</h2><p>Escala da casa: diarista, sobreaviso e folga. Entra a empresa toda — a lista de gente vem do RH. Não entra na Performance e não aparece no RH.</p></div>
+        <div><h2>Plantões</h2><p>Escala da casa: diarista, sobreaviso e folga. Entra a empresa toda — a lista de gente vem do RH. Vínculos com O.S. aparecem na Performance; horas extras e pagamento são conferidos separadamente.</p></div>
         <span class="casa-vista">
+          <button class="btn-ghost btn-sm ${STATE._plVista === 'mes' ? 'active' : ''}" data-pl-vista="mes">Mês escolhido</button>
           <button class="btn-ghost btn-sm ${STATE._plVista === 'proximos' ? 'active' : ''}" data-pl-vista="proximos">De hoje em diante</button>
           <button class="btn-ghost btn-sm ${STATE._plVista === 'todos' ? 'active' : ''}" data-pl-vista="todos">Tudo</button>
         </span>
@@ -2545,6 +2545,7 @@ function renderPlantoesCasa() {
         <div class="casa-kpi"><b>${contagem.sobreaviso}</b><small>sobreavisos no mês</small></div>
         <div class="casa-kpi"><b>${contagem.folga}</b><small>folgas no mês</small></div>
       </div>
+      <div class="perf-toolbar"><label>Mês da escala <input id="pl-mes" type="month" value="${esc(STATE._plMes)}"></label><span>Indicadores mensais: ${esc(rotuloMesCasa(STATE._plMes))}</span><button class="btn-ghost" id="pl-pdf">📄 PDF da escala exibida</button></div>
       ${quadroCasa('pl-form', editando ? '✏️ Editando plantão' : '➕ Registrar plantão', `
         <form id="pl-form" class="casa-form-grade">
           <input type="hidden" name="id" value="${esc(editando ? editando.id : '')}">
@@ -2573,7 +2574,7 @@ function renderPlantoesCasa() {
           <tbody>${ps.map(linhaPlantao).join('')}</tbody>
         </table></div>`).join('')
         : emptyState('⏰',
-            STATE._plVista === 'proximos' ? 'Nenhum plantão daqui para a frente' : 'Nenhum plantão registrado',
+            STATE._plVista === 'proximos' ? 'Nenhum plantão daqui para a frente' : STATE._plVista === 'mes' ? 'Nenhum plantão no mês escolhido' : 'Nenhum plantão registrado',
             /* O VAZIO CONTA O QUE EXISTE FORA DO FILTRO. "Nada aqui" quando há
                40 plantões no passado é a tela escondendo o próprio recorte. */
             (STATE._plVista === 'proximos' && vivos.length)
@@ -2582,6 +2583,10 @@ function renderPlantoesCasa() {
     </div>`;
   wireQuadrosCasa(el);
   el.querySelectorAll('[data-pl-vista]').forEach(b => b.onclick = () => { STATE._plVista = b.dataset.plVista; renderPlantoesCasa(); });
+  const mesFiltro=el.querySelector('#pl-mes');
+  if(mesFiltro)mesFiltro.onchange=()=>{if(mesFiltro.value){STATE._plMes=mesFiltro.value;STATE._plVista='mes';renderPlantoesCasa();}};
+  const plPdf=el.querySelector('#pl-pdf');
+  if(plPdf)plPdf.onclick=()=>{const copy=document.createElement('section');copy.innerHTML='<p>Escala exibida: '+esc(STATE._plVista === 'mes' ? rotuloMesCasa(STATE._plMes) : STATE._plVista === 'todos' ? 'Todos os registros disponíveis' : 'De hoje em diante')+'</p>'+([...porMes.entries()].map(([k,ps])=>'<h3>'+esc(rotuloMesCasa(k))+'</h3><table class="casa-tabela"><thead><tr><th>Dia</th><th>Tipo</th><th>Pessoa</th><th>Horário</th><th>Título / O.S.</th><th></th></tr></thead><tbody>'+ps.map(linhaPlantao).join('')+'</tbody></table>').join('') || '<p>Nenhum plantão no filtro.</p>');imprimirAnalisePCP('Escala de plantões',copy,{de:lista[0]?.data,ate:lista.at(-1)?.data});};
   const form = document.getElementById('pl-form');
   if (form) form.onsubmit = ev => {
     ev.preventDefault();
@@ -2600,6 +2605,7 @@ function renderPlantoesCasa() {
       cancelado: false,
     };
     if (!p.titulo || !p.data || !p.quem) { toast('Data, quem e título são obrigatórios.', 'error'); return; }
+    if(p.fim<=p.inicio){toast('O fim precisa ser depois do início. Para virar o dia, registre uma escala em cada data.','error');return;}
     const pes = fichaDoApelido(p.quem);
     const aus = (pes && temFichaRH()) ? ausenciaRH(pes, p.data) : null;
     if (aus && !confirm(`${pes.nome} está marcado como "${aus.motivo}" neste dia no RH.\n\nRegistrar o plantão mesmo assim?`)) return;
@@ -2748,7 +2754,7 @@ function renderGradeCasa() {
       <p class="metricas-nota">${STATE._agendaConcluidas ? 'Histórico incluído na tela. WhatsApp e PDF de saída: somente abertas.' : 'O.S. abertas programadas. Retiradas na loja ficam identificadas; o PDF de saída reúne instalações externas.'}</p>
       <div class="casa-dia-nav">
         <button class="btn-ghost btn-sm" id="gr-ant" title="Dia anterior">‹</button>
-        <input type="date" id="gr-data" value="${esc(dia)}">
+        <input type="date" aria-label="Data da programação" id="gr-data" value="${esc(dia)}">
         <button class="btn-ghost btn-sm" id="gr-prox" title="Próximo dia">›</button>
         <button class="btn-ghost btn-sm ${dia === hoje ? 'active' : ''}" id="gr-hoje">Hoje</button>
         <strong class="casa-dia-rot">${esc(dataBR)}${dia === hoje ? ' · hoje' : ''}</strong>

@@ -3223,6 +3223,7 @@ function renderPainel() {
   const el = $('#panel-painel');
   if (!STATE._vistaCarregada) { carregarPainelVista(); STATE._vistaCarregada = true; }
   el.innerHTML = `
+    <div class="casa-pagina-head"><div><h2>Painel da operação</h2><p>O que foi programado, o que foi entregue e o que precisa de atenção.</p></div><button class="btn-ghost" id="painel-pdf">📄 Relatório PDF</button></div>
     <div class="filter-bar">
       <div class="view-toggle">
         <button id="modo-dia" class="${STATE.painelModo==='dia'?'active':''}">Dia</button>
@@ -3237,6 +3238,7 @@ function renderPainel() {
 
   $('#modo-dia').onclick = () => { STATE.painelModo = 'dia'; renderPainel(); };
   $('#modo-periodo').onclick = () => { STATE.painelModo = 'periodo'; renderPainel(); };
+  $('#painel-pdf').onclick = () => imprimirAnalisePCP('Painel da operação',document.getElementById('painel-content'),painelIntervalo());
   $('#btn-salvar-vista').onclick = salvarPainelVista;
   $('#btn-export-backup').onclick = exportarBackup;
   $('#btn-import-backup').onclick = importarBackup;
@@ -3253,7 +3255,7 @@ function renderPainelRange() {
     el.innerHTML = `<input type="date" id="painel-data" aria-label="Dia dos indicadores" value="${STATE._painelDia}">`;
     $('#painel-data').onchange = e => { STATE._painelDia = e.target.value; renderPainelKPIs(); };
   } else {
-    if (!STATE._painelDe) { const d = new Date(); d.setDate(d.getDate() - 29); STATE._painelDe = ymdLocal(d); }
+    if (!STATE._painelDe) STATE._painelDe = hoje.slice(0,7)+'-01';
     if (!STATE._painelAte) STATE._painelAte = hoje;
     el.innerHTML = `
       <input type="date" id="painel-de" aria-label="Data inicial dos indicadores" value="${STATE._painelDe}">
@@ -3360,16 +3362,8 @@ function renderPainelKPIs() {
     return `<tr class="row-click" data-detail="inst:${esc(nome)}"><td>${esc(nome)}</td><td>${d.entregas}</td><td>${d.entregas?Math.round(d.retrab/d.entregas*100):0}%</td><td>${d.entregas?Math.round(d.checkin/d.entregas*100):0}%</td><td>${mh}h</td></tr>`;
   }).join('');
 
-  // ── Ranking de notas (favorece menos retrabalho) ─────────────────────────
-  const rankNota = Object.entries(porInst)
-    .map(([nome, d]) => [nome, notaInstalador(d), d])
-    .sort((a, b) => b[1] - a[1] || b[2].entregas - a[2].entregas)
-    .map(([nome, nota, d], i) => {
-      const medalha = `${i+1}.`;
-      const pctR = d.entregas ? Math.round(d.retrab / d.entregas * 100) : 0;
-      const cor = nota >= 9 ? 'var(--green)' : (nota >= 7 ? 'var(--amber)' : 'var(--red)');
-      return `<tr class="row-click" data-detail="inst:${esc(nome)}"><td>${medalha} ${esc(nome)}</td><td><strong style="color:${cor}">${nota.toFixed(1)}</strong></td><td>${d.entregas}</td><td>${d.retrab} (${pctR}%)</td></tr>`;
-    }).join('');
+  const rankNota = Object.entries(porInst).sort((a,b)=>a[0].localeCompare(b[0])).map(([nome,d])=>
+    `<tr class="row-click" data-detail="inst:${esc(nome)}"><td>${esc(nome)}</td><td>${d.checkin} de ${d.entregas}</td><td>${d.entregas}</td><td>${d.retrab}</td></tr>`).join('');
 
   // ── Em execução AGORA + indicadores ao vivo (independe do período) ───────
   const todasOS = STORE.getAllOS();
@@ -3388,7 +3382,7 @@ function renderPainelKPIs() {
   const porOper = {};
   todasOS.forEach(os => {
     const nome = os.atualizadoPor || os.aptoPor || os.criadoPor;
-    if (!nome) return;
+    if (!nome || /mubisys|autom[aá]tic|sistema/i.test(nome)) return;
     if (!porOper[nome]) porOper[nome] = { os: 0, soma: 0 };
     porOper[nome].os++;
     porOper[nome].soma += fichaPercent(os);
@@ -3460,9 +3454,9 @@ function renderPainelKPIs() {
         <tbody>${rankOper || '<tr><td colspan="3" class="text-muted" style="text-align:center;padding:12px">Sem dados</td></tr>'}</tbody>
       </table>`)}
 
-    ${painelBloco('nota', 'Índice de registros por instalador',
-      `<p class="metricas-nota">Índice de 0 a 10: 70% ausência de retrabalho registrado e 30% presença de foto. Não mede produtividade nem atribui a causa do retrabalho à equipe; confira a quantidade de serviços da amostra.</p><table class="control-table">
-        <thead><tr><th>Instalador</th><th>Índice</th><th>Entregas</th><th>Retrabalhos</th></tr></thead>
+    ${painelBloco('nota', 'Evidências nas entregas por pessoa',
+      `<p class="metricas-nota">Quantidade de entregas com check-in registrado e serviços de retrabalho. Esses registros não atribuem a causa do problema à pessoa e não geram uma nota automática.</p><table class="control-table">
+        <thead><tr><th>Instalador</th><th>Com check-in</th><th>Entregas</th><th>Retrabalhos</th></tr></thead>
         <tbody>${rankNota || '<tr><td colspan="4" class="text-muted" style="text-align:center;padding:12px">Sem dados no período</td></tr>'}</tbody>
       </table>`)}
 
@@ -4628,7 +4622,8 @@ async function pintarAcessos(el) {
 /* ── Saúde da conexão: nuvem OK? importação automática rodando? fila local? ─ */
 function imprimirAnalisePCP(titulo,elemento,periodo) {
   const copia = elemento.cloneNode(true);
-  copia.querySelectorAll('button,input,select,.filter-bar').forEach(n => n.remove());
+  copia.querySelectorAll('button,input,select,.filter-bar,.perf-toolbar').forEach(n => { if(n.matches('button[data-os-id]')) n.replaceWith(document.createTextNode(n.textContent)); else n.remove(); });
+  copia.querySelectorAll('.painel-bloco-corpo').forEach(n=>n.hidden=false);
   copia.querySelectorAll('details').forEach(n => n.open = true);
   const fonte = STORE.getLastSync?.();
   const em = typeof fonte === 'string' && Number.isFinite(Date.parse(fonte)) ? new Date(fonte).toLocaleString('pt-BR') : 'consulte a conexão do aparelho';
