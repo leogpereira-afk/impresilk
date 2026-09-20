@@ -20,15 +20,15 @@ const PERF = (() => {
     for (const r of registros) {
       if (validar(r.membros)) continue;
       for (const p of r.membros) {
-        const x = pessoas.get(p.chave) || {chave:p.chave,nome:p.nome,os:0,equivalentes:0,valor:0,semValor:0};
-        x.os++; x.equivalentes += p.percentual/100;
+        const x = pessoas.get(p.chave) || {chave:p.chave,nome:p.nome,os:0,equivalentes:0,valor:0,semValor:0,confirmadas:0};
+        x.os++; if(r.confirmado) x.confirmadas++; x.equivalentes += p.percentual/100;
         if (r.valor == null) x.semValor++; else x.valor += r.valor*p.percentual/100;
         pessoas.set(p.chave,x);
       }
       // A equipe leva cada O.S. uma vez, mesmo com participação individual.
       const k = r.equipeId || ('avulsa:'+composicao(r.membros));
-      const x = equipes.get(k) || {chave:k,nome:r.equipeNome || r.membros.map(p=>p.nome).join(' + '),emblema:r.emblema || '🤝',os:0,valor:0,semValor:0};
-      x.os++; if(r.valor == null) x.semValor++; else x.valor+=r.valor;
+      const x = equipes.get(k) || {chave:k,nome:r.equipeNome || r.membros.map(p=>p.nome).join(' + '),emblema:r.emblema || '🤝',os:0,valor:0,semValor:0,confirmadas:0};
+      x.os++; if(r.confirmado) x.confirmadas++; if(r.valor == null) x.semValor++; else x.valor+=r.valor;
       equipes.set(k,x);
     }
     return {pessoas:[...pessoas.values()].sort((a,b)=>b.equivalentes-a.equivalentes || a.nome.localeCompare(b.nome)),equipes:[...equipes.values()].sort((a,b)=>b.os-a.os || a.nome.localeCompare(b.nome))};
@@ -119,7 +119,7 @@ function performanceEquipesHTML() {
   const confirmado=regs.filter(r=>r.confirmado).length, semEquipe=regs.filter(r=>!r.membros.length).length;
   const modo=STATE._perfModo || 'pessoas', pesquisa=STATE._perfBusca || '';
   const linhas=regs;
-  const cards=(modo==='equipes'?resumo.equipes:resumo.pessoas).map(p=>`<article class="perf-score">${modo==='equipes'?`<span class="perf-emblema">${esc(p.emblema)}</span>`:avatarRH(pessoasRH().find(x=>[x.chave,x.id].includes(p.chave))||{nome:p.nome})}<h3>${esc(p.nome)}</h3><strong>${modo==='equipes'?p.os:perfFormato(p.equivalentes)}</strong><span>${modo==='equipes'?'O.S. na equipe':'O.S. equivalentes pela participação'}</span><p>${p.os} ${p.os===1?'entrega':'entregas'} com participação<br>${p.semValor===p.os?'Valor não disponível':dinheiroCasa(p.valor)+(p.semValor?' · valor parcial':'')}</p></article>`).join('');
+  const cards=(modo==='equipes'?resumo.equipes:resumo.pessoas).map(p=>`<article class="perf-score"><div class="perf-score-head">${modo==='equipes'?`<span class="perf-emblema">${esc(p.emblema)}</span>`:avatarRH(pessoasRH().find(x=>[x.chave,x.id].includes(p.chave))||{nome:p.nome})}<h3>${esc(p.nome)}</h3><div class="perf-count"><strong>${p.os}</strong><span>entregas</span></div></div><p class="perf-status">${p.confirmadas} confirmadas · ${p.os-p.confirmadas} a conferir</p><details><summary>Participação e valor</summary><p>${modo==='equipes'?'Valor das O.S. da equipe':perfFormato(p.equivalentes)+' O.S. equivalentes após rateio'}<br>${p.semValor===p.os?'Valor não disponível':dinheiroCasa(p.valor)+(p.semValor?' · valor parcial':'')}${modo==='pessoas'?' · valor rateado':''}</p></details>${modo==='pessoas'?`<button class="inline-link" data-perf-pessoa="${esc(p.nome)}">Ver entregas →</button>`:''}</article>`).join('');
   const sugestoes=new Map();
   for(const os of STORE.getAllOS()) {
     const membros=perfEquipeOS(os);if(membros.length<2)continue;
@@ -128,12 +128,13 @@ function performanceEquipesHTML() {
   }
   const sugeridas=[...sugestoes.values()].sort((a,b)=>b.n-a.n).slice(0,4);
   return `<section class="perf-workspace"><div class="filter-bar">${filtroPeriodoHTML('_fPerf')}<button class="btn-ghost" id="perf-pdf">📄 Relatório PDF</button></div>
-    <div class="perf-summary"><div><b>${lista.length}</b><span>instalações no período</span></div><div><b>${confirmado}/${lista.length}</b><span>participações confirmadas</span></div><div><b>${semEquipe}</b><span>sem equipe informada</span></div></div>
-    <div class="perf-toolbar"><div class="casa-vista"><button class="btn-ghost ${modo==='pessoas'?'active':''}" data-perf-modo="pessoas">👤 Pessoas</button><button class="btn-ghost ${modo==='equipes'?'active':''}" data-perf-modo="equipes">🤝 Equipes</button></div><span>1 O.S. = 100% de participação</span></div>
-    <p class="metricas-nota">Participações ainda não confirmadas usam divisão igual. O valor é rateado para evitar duplicidade; não representa faturamento pessoal ou bônus. Retrabalho, complexidade e qualidade precisam de revisão. Histórico disponível: O.S. carregadas neste aparelho; períodos antigos podem estar incompletos.</p>
+    <div class="perf-summary"><div><b>${lista.length}</b><span>instalações no período</span></div><div><b>${confirmado}/${lista.length}</b><span>entregas com participação confirmada</span></div><div><b>${semEquipe}</b><span>sem equipe informada</span></div></div>
+    <div class="perf-toolbar"><div class="casa-vista"><button class="btn-ghost ${modo==='pessoas'?'active':''}" data-perf-modo="pessoas">👤 Pessoas</button><button class="btn-ghost ${modo==='equipes'?'active':''}" data-perf-modo="equipes">🤝 Equipes</button></div><span>Entregas com participação registrada ou sugerida</span></div>
+    <p class="perf-coverage">${semEquipe ? `${semEquipe} de ${lista.length} entregas sem equipe: a comparação por pessoa está incompleta.` : 'Todas as entregas do período têm participantes.'} ${lista.length-confirmado} apurações aguardam confirmação.</p>
+    <details class="perf-method"><summary>Como interpretar os indicadores</summary><p>Entregas conta as O.S. em que a pessoa participou; não some essa coluna entre pessoas. O.S. equivalentes divide cada entrega pelos percentuais, sem duplicação. Divisões sugeridas ainda não foram confirmadas. Valores rateados não são faturamento pessoal nem bônus. Qualidade, complexidade e retrabalho precisam de revisão. O histórico inclui apenas O.S. carregadas neste aparelho.</p></details>
     <div class="perf-score-grid">${cards || '<p>Nenhuma instalação com equipe neste período.</p>'}</div>
     <details class="perf-config"><summary>Equipes salvas <span>${c.equipes.length}</span></summary><p>Escolha uma equipe na Agenda ou na apuração e ajuste os participantes daquela entrega.</p><div class="perf-team-grid">${c.equipes.map(e=>`<article><span class="perf-emblema">${esc(e.emblema)}</span><h3>${esc(e.nome)}</h3><p>${e.membros.map(p=>esc(p.nome)).join(' · ')}</p>${perfPodeEditar()?`<button class="btn-ghost" data-perf-equipe="${esc(e.id)}">Editar equipe</button>`:''}</article>`).join('')}</div>${perfPodeEditar()?`<button class="btn-primary" id="perf-nova-equipe">+ Criar equipe</button>${sugeridas.length?'<h4>Composições já usadas nas O.S.</h4>':''}${sugeridas.map((s,i)=>`<button class="btn-ghost perf-sugestao" data-perf-sugestao="${i}">${s.membros.map(p=>esc(p.nome)).join(' + ')} <small>· ${s.n} O.S. · salvar como equipe</small></button>`).join('')}`:''}</details>
-    <section class="perf-entregas"><h3>Conferência por entrega</h3><label>Buscar O.S., cliente ou pessoa · filtra a lista abaixo <input id="perf-busca-os" type="search" value="${esc(pesquisa)}" placeholder="Digite para localizar"></label><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / Cliente</th><th>Data</th><th>Equipe e participação</th><th>Conferência</th><th></th></tr></thead><tbody>${linhas.map(r=>`<tr><td><button class="inline-link" data-os-id="${esc(r.id)}">${esc(r.os.numero)}</button><small class="bloco">${esc(r.os.cliente)}</small></td><td>${esc(diaEntrega(r.os).split('-').reverse().join('/'))}</td><td>${r.equipeNome?`<strong>${esc(r.emblema)} ${esc(r.equipeNome)}</strong><br>`:''}${r.membros.map(p=>`${esc(p.nome)} · ${perfFormato(p.percentual)}%`).join('<br>') || 'Sem equipe'}</td><td><span class="badge">${r.confirmado?'Confirmada':'Divisão sugerida'}</span>${r.os.retrabalho?'<small class="bloco">Serviço de retrabalho</small>':''}</td><td>${perfPodeEditar()?`<button class="btn-ghost" data-perf-part="${esc(r.id)}">Conferir</button>`:''}</td></tr>`).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div></section></section>`;
+    <section class="perf-entregas"><h3>Conferência por entrega</h3><label>Buscar O.S., cliente ou pessoa · filtra a lista abaixo <input id="perf-busca-os" type="search" value="${esc(pesquisa)}" placeholder="Digite para localizar"></label><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / Cliente</th><th>Data</th><th>Equipe e participação</th><th>Conferência</th><th></th></tr></thead><tbody>${linhas.map(r=>`<tr><td><button class="inline-link" data-os-id="${esc(r.id)}">${esc(r.os.numero)}</button><small class="bloco">${esc(r.os.cliente)}</small></td><td>${esc(diaEntrega(r.os).split('-').reverse().join('/'))}</td><td>${r.equipeNome?`<strong>${esc(r.emblema)} ${esc(r.equipeNome)}</strong><br>`:''}${r.membros.map(p=>`${esc(p.nome)} · ${perfFormato(p.percentual)}%`).join('<br>') || 'Sem equipe'}</td><td><span class="badge">${r.confirmado?'Confirmada':r.membros.length?'Divisão sugerida':'Sem equipe'}</span>${r.os.retrabalho?'<small class="bloco">Serviço de retrabalho</small>':''}</td><td>${perfPodeEditar()?`<button class="btn-ghost" data-perf-part="${esc(r.id)}">Conferir</button>`:''}</td></tr>`).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div></section></section>`;
 }
 function wirePerformanceEquipes(el) {
   el.querySelectorAll('[data-perf-modo]').forEach(b=>b.onclick=()=>{STATE._perfModo=b.dataset.perfModo;renderPerformanceCasa();});
@@ -144,6 +145,8 @@ function wirePerformanceEquipes(el) {
   for(const os of STORE.getAllOS()){const membros=perfEquipeOS(os),k=PERF.composicao(membros);if(membros.length<2 || c.equipes.some(e=>PERF.composicao(e.membros)===k))continue;const g=grupos.get(k)||{membros,n:0};g.n++;grupos.set(k,g);}
   const sugeridas=[...grupos.values()].sort((a,b)=>b.n-a.n).slice(0,4);
   el.querySelectorAll('[data-perf-sugestao]').forEach(b=>b.onclick=()=>perfEditarEquipe('',sugeridas[Number(b.dataset.perfSugestao)].membros));
+  el.querySelectorAll('[data-perf-pessoa]').forEach(b=>b.onclick=()=>{const input=el.querySelector('#perf-busca-os');input.value=b.dataset.perfPessoa;input.oninput();el.querySelector('.perf-entregas').scrollIntoView({behavior:'smooth',block:'start'});});
+  const relPdf=el.querySelector('#perf-rel-pdf');if(relPdf)relPdf.onclick=()=>imprimirAnalisePCP('Relatório de performance',el.querySelector('.perf-report'),periodoOuMes('_fPerf'));
   const busca=el.querySelector('#perf-busca-os');if(busca)busca.oninput=()=>{
     const termo=normCasa(busca.value);STATE._perfBusca=busca.value;
     el.querySelectorAll('.perf-entregas tbody tr').forEach(tr=>{tr.hidden=!normCasa(tr.textContent).includes(termo);});
@@ -167,4 +170,15 @@ function perfWireModelo(form) {
     if(faltando.length){toast('Equipe possui integrante indisponível no cadastro atual. Confira a seleção individual.','error');return;}
     form.querySelectorAll('[name="equipe"]').forEach(cb=>{cb.checked=e.membros.some(p=>p.chave===perfPessoa(cb.value).chave);cb.closest('.casa-chip').classList.toggle('on',cb.checked);});
   };
+}
+
+function performanceRelatorioHTML() {
+  const f=periodoOuMes('_fPerf'),c=perfConfig();
+  const regs=classificarEntregas(STORE.getAllOS()).instalacoes.filter(o=>OPERACAO.emIntervalo(diaEntrega(o),f.de,f.ate)).map(o=>perfRegistro(o,c));
+  const validos=regs.filter(r=>!PERF.validar(r.membros)), confirmados=validos.filter(r=>r.confirmado);
+  const resumo=PERF.resumir(validos), confirmado=PERF.resumir(confirmados);
+  const semEquipe=regs.filter(r=>!r.membros.length).length;
+  const cobertura=regs.length?Math.round(confirmados.length/regs.length*100):0;
+  const tabela=(titulo,linhas,equipe=false)=>`<h3>${titulo}</h3><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>${equipe?'Equipe':'Pessoa'}</th><th>Entregas</th><th>Confirmadas</th><th>A conferir</th><th>Valor confirmado${equipe?'':' rateado'}</th></tr></thead><tbody>${linhas.map(p=>{const cf=(equipe?confirmado.equipes:confirmado.pessoas).find(x=>x.chave===p.chave);return `<tr><td>${esc(p.nome)}</td><td>${p.os}</td><td>${p.confirmadas}</td><td>${p.os-p.confirmadas}</td><td>${!cf?'—':cf.semValor===cf.os?'Sem valor':dinheiroCasa(cf.valor)+(cf.semValor?' (parcial)':'')}</td></tr>`;}).join('') || '<tr><td colspan="5">Sem participantes registrados neste período.</td></tr>'}</tbody></table></div>`;
+  return `<section class="perf-report"><h3>Conferência do período</h3><div class="perf-summary"><div><b>${regs.length}</b><span>entregas no período</span></div><div><b>${cobertura}%</b><span>com participação confirmada (${confirmados.length})</span></div><div><b>${semEquipe}</b><span>sem equipe informada</span></div></div><p class="perf-coverage">${confirmados.length<regs.length?'Apuração parcial: confirme as participações antes de comparar o desempenho ou decidir bonificações.':'Participações conferidas. Quantidade de entregas não mede sozinha qualidade, esforço ou complexidade.'}</p>${tabela('Participação por pessoa',resumo.pessoas)}${tabela('Participação por equipe',resumo.equipes,true)}<p class="metricas-nota">Entregas inclui participações sugeridas e confirmadas. A mesma O.S. pode aparecer para mais de uma pessoa; não some a coluna entre colaboradores. Valores incluem somente participações confirmadas, sem duplicar o valor entre pessoas. Não representam lucro, recebimento ou bônus. Fonte: instalações disponíveis neste aparelho; histórico antigo pode estar incompleto.</p></section>`;
 }

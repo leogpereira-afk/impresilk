@@ -34,3 +34,13 @@ test('mudar equipe não reescreve a composição e percentuais da entrega confir
  const r=await e.call({action:'setCfg',baseCfg:base,cfg},{papel:'pcp'});
  assert.equal(r.ok,true);assert.deepEqual(r.cfg.performancePCP.participacoes,base.performancePCP.participacoes);
 });
+
+test('confirmação é contada por entrega, sem transformar sugestão em dado confirmado',()=>{
+ const membros=P.iguais(pessoas(2));
+ const regs=[{id:'1',valor:200,membros,confirmado:true},{id:'2',valor:100,membros,confirmado:false}];
+ const tudo=P.resumir(regs), confirmado=P.resumir(regs.filter(r=>r.confirmado));
+ assert.equal(tudo.pessoas[0].os,2);assert.equal(tudo.pessoas[0].confirmadas,1);
+ assert.equal(tudo.equipes[0].confirmadas,1);
+ assert.equal(confirmado.pessoas.reduce((s,p)=>s+p.valor,0),200);
+ assert.equal(P.resumir([{valor:500,membros:[],confirmado:false}]).pessoas.length,0);
+});

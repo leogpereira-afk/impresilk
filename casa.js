@@ -1918,7 +1918,7 @@ function renderPerformanceCasa() {
       <div class="casa-pagina-head">
         <div><h2>Performance</h2><p>${abaPerf === 'equipe'
           ? 'Entregas, equipes e participação de cada pessoa. Uma apuração que você pode conferir.'
-          : 'Entregas ao longo dos anos, gente e retrabalho — o que a operação produziu, lido de longe.'}</p></div>
+          : 'Compare participações confirmadas, identifique pendências e consulte os detalhes da operação.'}</p></div>
         <span class="casa-vista">
           <button class="btn-ghost btn-sm ${abaPerf === 'equipe' ? 'active' : ''}" data-perf-aba="equipe">Equipe</button>
           <button class="btn-ghost btn-sm ${abaPerf === 'relatorio' ? 'active' : ''}" data-perf-aba="relatorio">Relatório</button>
@@ -1931,10 +1931,11 @@ function renderPerformanceCasa() {
         ${quadroCasa('perf-plantoes', '🗓 Plantões vinculados às O.S.', plantaoPerformanceHTML(), false)}
         ${quadroCasa('perf-bonus', '💰 Bônus por ponto <small>— apuração manual do mês</small>', bonusHTML, false)}
       ` : `
-        <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}</div>
-        ${quadroCasa('perf-entregues', '📦 Serviços entregues <small>— ano a ano e mês a mês</small>', servicosEntreguesHTML(), true)}
-        ${quadroCasa('perf-gente', '👷 Performance dos funcionários <small>— no período escolhido</small>', produtividadeHTML(), true)}
-        ${quadroCasa('perf-retrab', '🔧 Retrabalho <small>— de onde veio, de quem e de que tipo</small>', retrabalhoHTML(f), true)}
+        <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}<button class="btn-ghost" id="perf-rel-pdf">📄 PDF da apuração</button></div>
+        ${typeof performanceRelatorioHTML === 'function' ? performanceRelatorioHTML() : ''}
+        ${quadroCasa('perf-entregues', '📦 Serviços entregues <small>— ano a ano e mês a mês</small>', servicosEntreguesHTML(), false)}
+        ${quadroCasa('perf-gente', '👷 Indicadores operacionais <small>— horas e registros do período</small>', produtividadeHTML(), false)}
+        ${quadroCasa('perf-retrab', '🔧 Retrabalho <small>— de onde veio, de quem e de que tipo</small>', retrabalhoHTML(f), false)}
         ${quadroCasa('perf-carros', '🚚 Carros mais usados', carrosHTML(f), false)}
       `}
     </div>`;
