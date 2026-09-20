@@ -44,3 +44,30 @@ test('confirmação é contada por entrega, sem transformar sugestão em dado co
  assert.equal(confirmado.pessoas.reduce((s,p)=>s+p.valor,0),200);
  assert.equal(P.resumir([{valor:500,membros:[],confirmado:false}]).pessoas.length,0);
 });
+
+test('filtro por identidade não confunde nome de cliente nem homônimos',()=>{
+ const membros=[{chave:'rh-1',nome:'Ana Silva',percentual:100}];
+ assert.equal(P.incluiPessoa(membros,'rh-1'),true);
+ assert.equal(P.incluiPessoa(membros,'rh-2'),false);
+ assert.equal(P.incluiPessoa(membros,''),true);
+});
+test('alterar integrantes preserva percentuais e exige acertar o total explicitamente',()=>{
+ const old=[{chave:'a',nome:'A',percentual:70},{chave:'b',nome:'B',percentual:30}];
+ const next=P.manterPesos(old,[old[0],{chave:'c',nome:'C'}]);
+ assert.equal(next[0].percentual,70);assert.equal(next[1].percentual,0);
+ assert.ok(P.validar(next));assert.equal(P.validar(P.iguais(next)),'');
+});
+test('cards e relatório usam somente valor confirmado e filtro de período é único',()=>{
+ const fs=require('fs'),vm=require('vm');
+ const src=fs.readFileSync(require.resolve('../performance.js'),'utf8');
+ const regs=[{id:'1',numero:'1',cliente:'Teste',valorTotal:100,equipe:['Ana']},{id:'2',numero:'2',cliente:'Outro',valorTotal:200,equipe:['Ana']}];
+ const membros=[{chave:'a',nome:'Ana',percentual:100}];
+ const c={STORE:{getCFG:()=>({performancePCP:{equipes:[],participacoes:[{id:'1',membros}]}}),getAllOS:()=>regs},STATE:{user:{papel:'leitura'}},periodoOuMes:()=>({de:'2026-09-01',ate:'2026-09-19'}),classificarEntregas:os=>({instalacoes:os}),OPERACAO:{emIntervalo:()=>true,equipe:os=>os.equipe},diaEntrega:()=> '2026-09-19',valorDaOS:o=>o.valorTotal,nomeExibicaoCasa:()=>({chave:'a',nome:'Ana'}),pessoasRH:()=>[],avatarRH:()=>'',esc:s=>String(s??''),dinheiroCasa:n=>'VALOR-'+n,filtroPeriodoHTML:()=>''};
+ vm.createContext(c);vm.runInContext(src,c);
+ const cards=c.performanceEquipesHTML(),report=c.performanceRelatorioHTML();
+ assert.ok(cards.includes('VALOR-100'));assert.ok(report.includes('VALOR-100'));
+ assert.ok(!cards.includes('VALOR-300'));assert.ok(!report.includes('VALOR-300'));
+ const casa=fs.readFileSync(require.resolve('../casa.js'),'utf8');
+ const prod=casa.slice(casa.indexOf('function produtividadeHTML()'),casa.indexOf('/* ── Retrabalho cruzado'));
+ assert.ok(!prod.includes("filtroPeriodoHTML('_fPerf')"));
+});

@@ -1503,8 +1503,7 @@ function produtividadeHTML() {
     </div>`).join('');
   return `<section class="casa-prod-box">
       <h3>Produtividade</h3>
-      <p>Quem estava na equipe da instalação entregue (finalizada no PCP, ou baixa do ERP lançada à mão). Retirada não é entrega. Valor é participação (não divide, não é bônus). Tempo = saída → retorno registrados na O.S.</p>
-      <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}</div>
+      <p>Visão operacional da equipe registrada na O.S.; pode diferir das participações conferidas acima. O valor é integral por pessoa e não deve ser somado entre colaboradores. Para apuração, use o relatório de participações. Tempo = saída → retorno registrados na O.S.</p>
       ${semEquipe ? `<p class="metricas-nota">${semEquipe} O.S no período sem equipe registrada — não contam para ninguém.</p>` : ''}
       ${pessoas.length ? `<div class="casa-prod-grid">${cards}</div>` : emptyState('', 'Nenhuma entrega com equipe no período', 'A O.S precisa ter equipe e ser finalizada no PCP.')}
     </section>`;
@@ -1929,9 +1928,9 @@ function renderPerformanceCasa() {
         ${typeof performanceEquipesHTML === 'function' ? performanceEquipesHTML() : produtividadeHTML()}
         ${quadroCasa('perf-rh', `🔗 Ligar apelido do PCP à ficha do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), pendRH > 0)}
         ${quadroCasa('perf-plantoes', '🗓 Plantões vinculados às O.S.', plantaoPerformanceHTML(), false)}
-        ${quadroCasa('perf-bonus', '💰 Bônus por ponto <small>— apuração manual do mês</small>', bonusHTML, false)}
+        ${quadroCasa('perf-bonus', '💰 Bônus por ponto <small>— regra própria, independente dos percentuais acima</small>', bonusHTML, false)}
       ` : `
-        <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}<button class="btn-ghost" id="perf-rel-pdf">📄 PDF da apuração</button></div>
+        <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}<button class="btn-ghost" id="perf-rel-pdf">📄 PDF resumido</button><button class="btn-ghost" id="perf-rel-detalhado">PDF com O.S.</button></div>
         ${typeof performanceRelatorioHTML === 'function' ? performanceRelatorioHTML() : ''}
         ${quadroCasa('perf-entregues', '📦 Serviços entregues <small>— ano a ano e mês a mês</small>', servicosEntreguesHTML(), false)}
         ${quadroCasa('perf-gente', '👷 Indicadores operacionais <small>— horas e registros do período</small>', produtividadeHTML(), false)}

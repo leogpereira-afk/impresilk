@@ -2268,3 +2268,17 @@ body.tv-ligada { overflow:hidden; }
 .perf-report td { font-variant-numeric:tabular-nums; }
 @media(max-width:680px) { .perf-score-grid { grid-template-columns:1fr; } .perf-summary { grid-template-columns:1fr; gap:6px; } .perf-summary>div { padding:10px 12px; } .perf-report { padding:12px; } }
 @media print { .perf-report { border:0; padding:0; } .perf-report h3 { break-after:avoid; } .perf-report thead { display:table-header-group; } .perf-report td { font-size:10px; } }
+
+/* Performance: leitura confortável sem cartões excessivamente altos. */
+.perf-score-grid { gap:18px; grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr)); }
+.perf-score { padding:20px; gap:14px; }
+.perf-score h3 { font-size:1rem; line-height:1.45; }
+.perf-score p,.perf-score summary,.perf-summary span,.perf-method { font-size:.92rem; line-height:1.5; }
+.perf-count span { font-size:.85rem; }
+.perf-score-head img,.perf-score-head .rh-avatar,.perf-score-head .perf-emblema { width:44px;height:44px; }
+.perf-filtros { display:flex;flex-wrap:wrap;gap:16px;align-items:end;margin:16px 0; }
+.perf-filtros select { min-height:44px;padding:10px 14px;border:1px solid #cbd5e1;border-radius:10px;background:var(--surface,#fff);color:inherit; }
+.perf-filtros label { display:grid;gap:8px; }
+#perf-recorte { flex-basis:100%;color:var(--muted,#617787);line-height:1.5; }
+@media(max-width:680px){.perf-score-grid{grid-template-columns:1fr}.perf-score{padding:18px}.perf-filtros>*{max-width:100%}}
+@media print{.perf-filtros{display:none}.perf-score-grid{grid-template-columns:repeat(2,1fr)}}
