@@ -2282,3 +2282,5 @@ body.tv-ligada { overflow:hidden; }
 #perf-recorte { flex-basis:100%;color:var(--muted,#617787);line-height:1.5; }
 @media(max-width:680px){.perf-score-grid{grid-template-columns:1fr}.perf-score{padding:18px}.perf-filtros>*{max-width:100%}}
 @media print{.perf-filtros{display:none}.perf-score-grid{grid-template-columns:repeat(2,1fr)}}
+
+.perf-fonte{padding:20px 24px;margin:18px 0;background:var(--surface,#fff);border:1px solid var(--border,#d8e2e7);border-radius:14px;line-height:1.55}.perf-fonte h3{margin:0 0 12px;font-size:1.05rem}.perf-fonte p{overflow-wrap:anywhere}#perf-dialog textarea{display:block;width:100%;min-height:90px;padding:12px;margin:12px 0;border:1px solid #cbd5e1;border-radius:10px;font:inherit}

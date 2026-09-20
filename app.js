@@ -4620,9 +4620,9 @@ async function pintarAcessos(el) {
 }
 
 /* ── Saúde da conexão: nuvem OK? importação automática rodando? fila local? ─ */
-function imprimirAnalisePCP(titulo,elemento,periodo) {
+function imprimirAnalisePCP(titulo,elemento,periodo,fonteApuracao) {
   const copia = elemento.cloneNode(true);
-  copia.querySelectorAll('button,input,select,.filter-bar,.perf-toolbar').forEach(n => { if(n.matches('button[data-os-id]')) n.replaceWith(document.createTextNode(n.textContent)); else n.remove(); });
+  copia.querySelectorAll('button,input,select,.filter-bar,.perf-toolbar').forEach(n => { if(n.matches('button[data-os-id],button[data-perf-os]')) n.replaceWith(document.createTextNode(n.textContent)); else n.remove(); });
   copia.querySelectorAll('.painel-bloco-corpo').forEach(n=>n.hidden=false);
   copia.querySelectorAll('details').forEach(n => n.open = true);
   const fonte = STORE.getLastSync?.();
@@ -4631,7 +4631,7 @@ function imprimirAnalisePCP(titulo,elemento,periodo) {
   if (!box) { box = document.createElement('dialog'); box.id = 'impressao-pcp'; document.body.appendChild(box); }
   box.innerHTML = `<div class="impressao-acoes"><button class="btn-ghost" id="impressao-fechar">Fechar prévia</button><button class="btn-primary" id="impressao-salvar">Imprimir ou salvar PDF</button></div>
     <h1>${esc(titulo)} · Impresilk</h1><p>Período: ${esc(periodo.de || 'início do recorte carregado')} a ${esc(periodo.ate || 'fim do recorte carregado')} · Gerado em ${esc(new Date().toLocaleString('pt-BR'))}</p>
-    <p>Fonte: registros do PCP disponíveis neste aparelho. Última sincronização: ${esc(em)}. ${STORE.getQueue().length} alterações locais aguardando envio.</p>
+    <p>Fonte: ${esc(fonteApuracao || ('registros do PCP disponíveis neste aparelho. Última sincronização: '+em))}. ${STORE.getQueue().length} alterações locais aguardando envio.</p>
     ${copia.innerHTML}<footer>Conferir a cobertura e as medições indicadas. Esta análise não lança pagamentos.</footer>`;
   $('#impressao-fechar',box).onclick = () => box.close();
   $('#impressao-salvar',box).onclick = () => { document.body.classList.add('imprimindo-pcp'); window.print(); document.body.classList.remove('imprimindo-pcp'); };

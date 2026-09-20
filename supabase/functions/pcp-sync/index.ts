@@ -240,6 +240,77 @@ function bytesParaB64(buf: ArrayBuffer): string {
 const mimeDaDataUrl = (b64: string, padrao: string) =>
   /^data:([^;,]+)[;,]/.exec(b64 || "")?.[1] ?? padrao;
 
+// Performance consulta o servidor inteiro; nunca usa a janela local de 60 dias.
+function perfDia(v: any): string {
+  if (!v) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return String(v);
+  const d = new Date(v); if (!Number.isFinite(+d)) return "";
+  return new Intl.DateTimeFormat("en-CA", {timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
+}
+function perfPeriodo(body: any) {
+  const de=String(body.de || ""), ate=String(body.ate || "");
+  const valido=(v:string)=>/^\d{4}-\d{2}-\d{2}$/.test(v) && Number.isFinite(Date.parse(v)) && new Date(v).toISOString().slice(0,10)===v;
+  if(!valido(de)||!valido(ate)||de>ate||(Date.parse(ate)-Date.parse(de))/864e5>366) throw new Error("Escolha um período válido de até um ano.");
+  return {de,ate};
+}
+async function perfHash(v:any) {
+  const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(JSON.stringify(v)));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+async function perfFonte(body:any) {
+  const periodo=perfPeriodo(body), inicio=new Date().toISOString();
+  const cfgAntes=await getCfgComVersao();
+  const lista:any[]=[]; let after="", terminou=false;
+  for(let pagina=0;pagina<100;pagina++) {
+    let q=sb.from("pcp_registros").select("id,registro,atualizado_em").eq("colecao","os").eq("apagado",false).order("id").limit(500);
+    if(after) q=q.gt("id",after);
+    const {data,error}=await q; if(error) throw new Error(error.message);
+    const rows=data || [];
+    for(const row of rows) {
+      const o=row.registro, fim=perfDia(o?.finalizadaEm);
+      if(!fim || o.tipo==="interno") continue;
+      const erp=o.baixaAutoERP?.em===o.finalizadaEm || /^Mubisys\b/i.test(o.finalizadoPor || "");
+      if(erp && !o.entregaLancada && fim>="2026-09-15") continue;
+      const dia=(o.entregaLancada && perfDia(o.entregaLancada.data)) || fim;
+      if(dia>=periodo.de && dia<=periodo.ate) lista.push({...o,id:row.id,_dia:dia});
+    }
+    if(rows.length<500){terminou=true;break;}
+    const proximo=String(rows[rows.length-1].id);if(proximo<=after)throw new Error("Paginação inconsistente. Refaça a consulta.");after=proximo;
+  }
+  if(!terminou)throw new Error("Consulta excedeu o limite; nenhum fechamento foi criado.");
+  const valores:Record<string,number>={};
+  const nums=[...new Set(lista.map(o=>String(o.numero || "").trim()).filter(Boolean))];
+  for(let i=0;i<nums.length;i+=300){
+    const {data,error}=await sb.from("painel_ordens").select("numero,valor").in("numero",nums.slice(i,i+300));
+    if(error)throw new Error(error.message);
+    for(const r of data || []) if(r.valor!==null && r.valor!=="" && Number.isFinite(Number(r.valor)))valores[String(r.numero)]=Number(r.valor);
+  }
+  const cfgDepois=await getCfgComVersao();
+  const {data:mudancas,error:erroMudancas}=await sb.from("pcp_registros").select("id").eq("colecao","os").gte("atualizado_em",inicio).limit(1);
+  if(erroMudancas)throw new Error(erroMudancas.message);
+  if(cfgAntes.versao!==cfgDepois.versao || mudancas?.length)throw new Error("A base mudou durante a consulta. Atualize para conferir novamente.");
+  const participacoes=cfgAntes.config?.performancePCP?.participacoes || [];
+  const num=(v:any)=>v==null||v===""?NaN:typeof v==="number"?v:Number(String(v).includes(",")?String(v).replace(/\./g,"").replace(",","."):v);
+  const registros=lista.map(o=>{
+    const p=participacoes.find((x:any)=>x.id===o.id);
+    let valor=num(o.valorTotal), origem="O.S. do PCP";
+    const mudou=o.erpAlteracoes?.some((h:any)=>h.campos?.some((x:any)=>x.campo==="valorTotal"));
+    if(!mudou && Number.isFinite(valores[String(o.numero)])){valor=valores[String(o.numero)];origem="Painel / ERP";}
+    if(!Number.isFinite(valor)||valor<0){const itens=(o.itens||[]).map((x:any)=>num(x.subtotal)).filter((v:number)=>Number.isFinite(v)&&v>0);valor=itens.length?itens.reduce((a:number,b:number)=>a+b,0):null;origem="Itens da O.S.";}
+    const nomes=[...new Set((o.equipe||[]).map((n:any)=>String(n).trim()).filter(Boolean))];
+    const membros=p?.membros || nomes.map((n,i)=>({chave:n,nome:n,percentual:(Math.floor(10000/nomes.length)+(i<10000%nomes.length?1:0))/100}));
+    const confirmado=!!p && !validarPerformance({equipes:p.equipeId?[{id:p.equipeId,nome:p.equipeNome || "Equipe",emblema:p.emblema || "🤝",membros}]:[],participacoes:[p]});
+    return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,equipeId:p?.equipeId||"",equipeNome:p?.equipeNome||"",emblema:p?.emblema||"🤝",obs:p?.obs||"",por:p?.por||"",em:p?.em||"",retrabalho:!!o.retrabalho};
+  });
+  const conteudo={periodo,regra:"performance-1",registros};
+  return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP."};
+}
+async function perfFechamentos(periodo:any) {
+  const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_fechamentos").eq("apagado",false).eq("registro->>de",periodo.de).eq("registro->>ate",periodo.ate).order("id").limit(1000);
+  if(error)throw new Error(error.message);if(data?.length===1000)throw new Error("Limite de revisões atingido.");
+  return (data||[]).map((r:any)=>r.registro).sort((a:any,b:any)=>b.revisao-a.revisao);
+}
+
 // ---------------------------------------------------------------- handler
 
 Deno.serve(async (req: Request) => {
@@ -404,6 +475,31 @@ Deno.serve(async (req: Request) => {
 
   try {
     switch (acao) {
+      case "performancePeriodo":
+      case "performanceFechamentos":
+      case "performanceFechar": {
+        if(!ehMaquina && !["admin","pcp"].includes(String(cracha?.papel || "")))return resp({error:"Apuração restrita à gestão do PCP."},403);
+        let periodo;try{periodo=perfPeriodo(body);}catch(e){return resp({error:(e as Error).message},422);}
+        if(acao==="performancePeriodo")return resp(await perfFonte(body));
+        const fechamentos=await perfFechamentos(periodo);
+        if(acao==="performanceFechamentos")return resp({fechamentos});
+        const requestId=String(body.requestId || "");
+        if(!/^[a-zA-Z0-9-]{10,80}$/.test(requestId))return resp({error:"Identificação do fechamento inválida."},422);
+        const repetido=fechamentos.find((r:any)=>r.requestId===requestId);if(repetido)return resp({ok:true,fechamento:repetido});
+        const anterior=fechamentos[0];
+        if((anterior?.id || "")!==String(body.anterior || ""))return resp({error:"Outro fechamento foi criado. Recarregue as revisões."},409);
+        const motivo=String(body.motivo || "").trim();
+        if(motivo.length<5 || motivo.length>500)return resp({error:"Informe um motivo de 5 a 500 caracteres para o fechamento ou revisão."},422);
+        const fonte=await perfFonte(body);
+        if(fonte.hash!==body.hash)return resp({error:"Os dados mudaram. Atualize, confira e tente novamente."},409);
+        if(!fonte.registros.length || fonte.registros.some((r:any)=>!r.confirmado || r.valor===null))return resp({error:"Confirme todas as participações e confira os valores antes de fechar."},422);
+        const revisao=(anterior?.revisao || 0)+1,id=periodo.de+":"+periodo.ate+":"+String(revisao).padStart(6,"0");
+        const registro={...fonte,...periodo,id,revisao,anterior:anterior?.id||null,requestId,motivo,fechadoEm:new Date().toISOString(),fechadoPor:cracha?.nome || "Integração autorizada"};
+        const {error}=await sb.from("pcp_registros").insert({colecao:"performance_fechamentos",id,registro,apagado:false,atualizado_em:registro.fechadoEm});
+        if(error){if(error.code==="23505")return resp({error:"O período recebeu outra revisão. Atualize antes de fechar."},409);throw new Error(error.message);}
+        return resp({ok:true,fechamento:registro});
+      }
+
       case "ping":
         return resp({ ok: true });
 

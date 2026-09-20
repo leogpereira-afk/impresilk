@@ -23,7 +23,21 @@ base('111',{instalacao:{data:deslocar(-4)},liberadoPCP:false,previsaoEntrega:des
 ];
 const APP_VERSAO='v106 · prévia'; const AUTH={dono:()=>({nome:'Ana',papel:'montagem'}),temCracha:()=>true,listarContas:async()=>({contas:[]})};
 const cfg={instaladores:['Ana','Bia'],responsaveis:['Responsável de teste'],gerentes_montagem:[],veiculos:['Carro 1','Carro 2'],ferramentas:[],suprimentos:[],causasRetrabalho:['Erro de medida'],funcionarios:[],niveis:{}};
-const STORE={getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id),getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>({pessoas:[],veiculos:[],ferias:[],ausencias:[]}), valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>{}, entreguesMes:()=>null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>{},trySync:async()=>{},pronto:async()=>lista,api:async()=>({ok:true,os:[],totalOS:lista.length,ultimaImportacao:{em:new Date().toISOString(),ok:true,novas:0,atualizadas:1,baixa:{ok:true,semNoticiaDoErp:1,divergencias:[{id:'101',numero:'T-101',motivo:'Exemplo de conferência'}]}}}),apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){}};
+const revisoesPreview=[];
+async function previewApi(body){
+ if(body.action==='performancePeriodo'){
+  const registros=lista.filter(o=>o.finalizadaEm && !o.baixaAutoERP && o.tipo!=='interno').map(o=>{
+   const p=cfg.performancePCP?.participacoes?.find(p=>p.id===o.id);return {id:o.id,numero:o.numero,cliente:o.cliente,dia:hoje,valor:100,origemValor:'Simulação local',membros:p?.membros || (o.equipe||[]).map(n=>({chave:n,nome:n,percentual:100/o.equipe.length})),confirmado:!!p,equipeId:p?.equipeId||'',equipeNome:p?.equipeNome||'',emblema:p?.emblema||'🤝'};
+  });return {completo:true,periodo:{de:body.de,ate:body.ate},hash:'simulacao',registros,consultadoEm:new Date().toISOString(),fonte:'DADOS FICTÍCIOS — simulação local'};
+ }
+ if(body.action==='performanceFechamentos')return {fechamentos:revisoesPreview};
+ if(body.action==='performanceFechar'){
+  const base=await previewApi({...body,action:'performancePeriodo'});if(base.registros.some(r=>!r.confirmado))return {error:'Confirme as participações.'};
+  const f={...structuredClone(base),id:'preview-'+(revisoesPreview.length+1),revisao:revisoesPreview.length+1,fechadoPor:'Teste local',fechadoEm:new Date().toISOString(),motivo:body.motivo};revisoesPreview.unshift(f);return {ok:true,fechamento:f};
+ }
+ return {ok:true,os:[],totalOS:lista.length,ultimaImportacao:{em:new Date().toISOString(),ok:true,novas:0,atualizadas:1,baixa:{ok:true,semNoticiaDoErp:0,divergencias:[]}}};
+}
+const STORE={getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id),getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>({pessoas:[],veiculos:[],ferias:[],ausencias:[]}), valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>{}, entreguesMes:()=>null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>{},trySync:async()=>{},pronto:async()=>lista,api:previewApi,apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){}};
 `;
 const boot=`
 document.addEventListener('DOMContentLoaded',()=>{
