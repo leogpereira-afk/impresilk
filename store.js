@@ -985,7 +985,7 @@ const STORE = (() => {
      vez". Pacote antigo, sem `recebidoEm`, cai no `em` e se cura no primeiro
      pull. */
   function _validadeEntregues(mes, p) {
-    if (p && p.erro) return 10 * 60000;   // falha tem de se curar em minutos
+    if (p && (p.erro || p.velho)) return 10 * 60000;   // falha tem de se curar em minutos
     const hoje = _mesLocal();
     if (mes === hoje) return 15 * 60000;
     if (mes === _mesAnterior()) return 6 * 3600000;

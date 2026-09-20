@@ -260,3 +260,9 @@ test('reconferência completa vence cursor incremental fresco após quinze minut
  await o.s.pull();
  assert.ok(pedidos[1].since,'retoma incremental após conferência bem sucedida');
 });
+test('resumo antigo devolvido por falha do ERP não fica fresco por 30 dias',async()=>{
+ const mes='2026-01', recebidoEm=new Date(Date.now()-11*60000).toISOString();
+ const pacote={v:3,mes,em:recebidoEm,recebidoEm,total:1,os:[{numero:'1',valor:100}],velho:true};
+ const {s}=store({entregues:{[mes]:pacote}});await s.pronto();
+ assert.ok(s.entreguesMes(mes));assert.equal(s.entreguesFresco(mes),false);
+});
