@@ -14,6 +14,7 @@ const STORE = (() => {
     ELENCO:     'impresilk_inst_elenco',
     ENTREGUES:  'impresilk_inst_entregues',
     CURSOR:     'impresilk_inst_cursor',   // carimbo do servidor do ultimo pull
+    CFGCONFLITO:'impresilk_inst_cfgconflito',
     CFGVER:     'impresilk_inst_cfgver'    // versao da config que o aparelho tem
   };
   // O que o aparelho GUARDA: abertas + finalizadas nos ultimos N dias (ordem do
@@ -259,8 +260,9 @@ const STORE = (() => {
   }
 
   function saveCFG(cfg) {
+    const baseCfg = getCFG();
     lsSet(K.CFG, cfg);
-    _enqueue({ action: 'setCfg', cfg });
+    _enqueue({ action: 'setCfg', cfg, baseCfg });
     trySync();
   }
 
@@ -465,6 +467,12 @@ const STORE = (() => {
           if (res && res.fileId) { _removeFromQueue(item); _failCount.delete(sig); }
         } else {
           const res = await api(item);
+          if (res && res.conflitoCfg) {
+            _flagged.add(sig);
+            lsSet(K.CFGCONFLITO, {local:item.cfg, remoto:res.servidorCfg, campos:res.campos || []});
+            _notifyListeners('conflito-cfg', lsGet(K.CFGCONFLITO));
+            continue;
+          }
           if (res && res.conflito) {
             _flagged.add(sig);                 // não retentar até resolução
             _notifyConflict(item.os, res.servidor);
@@ -472,11 +480,20 @@ const STORE = (() => {
           }
           _removeFromQueue(item);
           _failCount.delete(sig);
+          if (item.action === 'setCfg' && res && res.cfg) {
+            if (res.versao) lsSet(K.CFGVER, res.versao);
+            if (!getQueue().some(x => x.action === 'setCfg')) {
+              lsSet(K.CFG, res.cfg); _notifyListeners('cfg', getCFG());
+            }
+          }
           if (item.action === 'upsert' && res && res.os) {
             const all = getAllOS();
             const idx = all.findIndex(o => o.id === res.os.id);
             if (idx >= 0) {
               let mudou = false;
+              if (all[idx].atualizadoEm === item.os.atualizadoEm) {
+                all[idx] = res.os; mudou = true;
+              }
               // O rev é adotado SEMPRE, inclusive se editaram durante o envio:
               // aquela edição nasceu por cima da versão que o servidor acabou
               // de aceitar, então herda a linhagem dela.
@@ -777,7 +794,7 @@ const STORE = (() => {
       const res = await api({ action: 'getCfg', seVersao: lsGet(K.CFGVER, '') || '' });
       if (res && res.semMudanca) return false;
       if (res.cfg && Object.keys(res.cfg).length) {
-        const merged = Object.assign(getCFG(), res.cfg);
+        const merged = Object.assign({}, CFG_DEFAULT, res.cfg);
         lsSet(K.CFG, merged);
         if (res.versao) lsSet(K.CFGVER, res.versao);
         return true;
@@ -807,6 +824,20 @@ const STORE = (() => {
       lsSet(K.CFG, novo);
       _notifyListeners('cfg', novo);
     } catch { /* sem rede: o próximo pull resolve */ }
+  }
+
+  function conflitoCFG() { return lsGet(K.CFGCONFLITO, null); }
+  function resolverCFG(manterLocal) {
+    const conflito = conflitoCFG(); if (!conflito) return;
+    // Salva cópia recuperável antes de qualquer escolha; mantém as outras filas.
+    lsSet('impresilk_inst_cfgrecuperacao', {em:new Date().toISOString(),cfg:getCFG()});
+    const local = getCFG();
+    lsSet(K.FILA, getQueue().filter(x => x.action !== 'setCfg'));
+    lsSet(K.CFG, conflito.remoto || {});
+    localStorage.removeItem(K.CFGCONFLITO); _flagged.delete('setCfg');
+    if (manterLocal) saveCFG(local); // revisão explícita da pessoa; base é a remota exibida
+    else _notifyListeners('cfg', getCFG());
+    trySync();
   }
 
   // ── Valor de cada O.S (uma base só) ───────────────────────────────────────
@@ -1589,7 +1620,7 @@ const STORE = (() => {
     // Fotos
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos
-    onSync, onConflict, on,
+    onSync, onConflict, on, conflitoCFG, resolverCFG,
     // Conflito manual
     aceitarServidor, sobrescreverServidor,
     // Fila

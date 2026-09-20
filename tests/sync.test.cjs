@@ -211,3 +211,23 @@ test('carregar tudo: enquanto roda, a fila do render sai da frente', async () =>
   await s.carregarTudoEntregues(['2026-09', '2026-08', '2026-07', '2026-06', '2026-05']);
   assert.ok(pico <= 3, `nunca mais de 3 varreduras no ERP ao mesmo tempo (foi ${pico})`);
 });
+test('configuração guarda base, mantém conflito recuperável e continua enviando O.S.',async()=>{
+ const {s,ctx,ls}=store({responder:q=>q.action==='setCfg'?{http:409,conflitoCfg:true,servidorCfg:{tema:'verde'},campos:['tema']}:{ok:true,os:q.os}});
+ await s.pronto();ctx.navigator.onLine=false;
+ ls.set('impresilk_inst_cfg',JSON.stringify({tema:'azul'}));
+ s.saveCFG({tema:'vermelho'});s.saveOS({id:'os',atualizadoEm:'2026-09-19'});
+ assert.equal(s.getQueue()[0].baseCfg.tema,'azul');
+ ctx.navigator.onLine=true;await s.trySync();
+ assert.equal(s.getQueue().length,1);assert.equal(s.conflitoCFG().local.tema,'vermelho');assert.equal(s.conflitoCFG().remoto.tema,'verde');
+ s.resolverCFG(false);assert.equal(s.getCFG().tema,'verde');assert.equal(s.getQueue().length,0);
+ assert.ok(ls.get('impresilk_inst_cfgrecuperacao'));
+});
+test('configuração salva durante envio permanece na fila com sua base correta',async()=>{
+ let soltar;const wait=new Promise(r=>soltar=r);let chamadas=0;
+ const {s,ctx,ls}=store({responder:q=>{chamadas++;return chamadas===1?wait:{ok:true,cfg:q.cfg,versao:'2'};}});
+ await s.pronto();ls.set('impresilk_inst_cfg',JSON.stringify({tema:'azul'}));ctx.navigator.onLine=false;
+ s.saveCFG({tema:'verde'});ctx.navigator.onLine=true;const envio=s.trySync();
+ s.saveCFG({tema:'roxo'});soltar({ok:true,cfg:{tema:'verde'},versao:'1'});await envio;
+ assert.equal(s.getCFG().tema,'roxo');assert.equal(s.getQueue().length,1);assert.equal(s.getQueue()[0].baseCfg.tema,'verde');
+ await s.trySync();assert.equal(s.getQueue().length,0);assert.equal(s.getCFG().tema,'roxo');
+});

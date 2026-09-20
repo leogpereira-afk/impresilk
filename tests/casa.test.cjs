@@ -1178,3 +1178,8 @@ test('entregas: com carga em curso, a barra mostra o andamento e o botão de par
   assert.match(html, /data-carga-parar/);
   assert.ok(!/data-carga-tudo/.test(html), 'não oferecer começar o que já está rodando');
 });
+test('correção auditada do ERP vence cache auxiliar e valor zero continua válido',()=>{
+ const t=casa([]);
+ assert.equal(t.run("valorDaOS({numero:'1',valorTotal:0,erpAlteracoes:[{campos:[{campo:'valorTotal'}]}]})"),0);
+ assert.equal(t.run("valorDaOS({numero:'1',valorTotal:150,erpAlteracoes:[{campos:[{campo:'valorTotal'}]}]})"),150);
+});

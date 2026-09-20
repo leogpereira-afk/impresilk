@@ -191,10 +191,12 @@ function numBR(v) {
 }
 function valorDaOS(os) {
   const num = String(os && os.numero || '').trim();
+  const origemAtualizada = os?.erpAlteracoes?.some(h => h.campos?.some(c => c.campo === 'valorTotal'));
+  if (origemAtualizada && Number.isFinite(numBR(os.valorTotal))) return numBR(os.valorTotal);
   const doPainel = num && STORE.valores ? STORE.valores()[num] : undefined;
   if (Number.isFinite(doPainel)) return doPainel;
   const vt = numBR(os && os.valorTotal);
-  if (Number.isFinite(vt) && vt > 0) return vt;
+  if (Number.isFinite(vt) && vt >= 0) return vt;
   let soma = 0, tem = false;
   for (const it of (Array.isArray(os && os.itens) ? os.itens : [])) {
     const n = numBR(it && it.subtotal);
@@ -559,7 +561,7 @@ function entreguesERP(de, ate) {
   return { os, faltando, comErro, meses, truncou: !!meses.truncou };
 }
 
-// Ao abrir Entregas, usar o mês vigente, do dia 1 até hoje.
+// Ao abrir Entregas, usar o mês vigente, do dia 1 até hoje (19/09/2026).
 // A navegação limpa o período; repinturas preservam a escolha feita na tela.
 function periodoEntregas() {
   if (!STATE._fEnt) {
@@ -1923,7 +1925,7 @@ function renderPerformanceCasa() {
           <ul class="casa-apontar-lista">${apontar || `<li class="text-muted">${fins.length ? 'Nenhuma O.S. neste filtro.' : 'Nenhuma O.S. finalizada no PCP neste mês. A baixa do ERP não entra.'}</li>`}</ul>
         </section>
         <aside class="casa-rank-box">
-          <h3>Ranking do bônus</h3>
+          <h3>Apuração para revisão</h3><p class="metricas-nota">Pontos e valores são sugestões manuais. Não lançam pagamento nem horas extras na folha. Compare tipo de serviço, retrabalho e evidências antes de aprovar.</p>
           ${rank.length ? `<table class="casa-rank-tabela"><thead><tr><th>#</th><th>Pessoa</th><th>Pts</th><th>Valor</th><th></th></tr></thead><tbody>${rankRows}</tbody></table>` : emptyState('', 'Nenhum ponto apontado neste mês', 'A apuração lê O.S. finalizada no PCP. Pessoa sem ficha do RH não entra.')}
         </aside>
       </div>`;
@@ -1952,6 +1954,7 @@ function renderPerformanceCasa() {
       ${abaPerf === 'equipe' ? `
         ${produtividadeHTML()}
         ${quadroCasa('perf-rh', `🔗 Ligar apelido do PCP à ficha do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), pendRH > 0)}
+        ${quadroCasa('perf-plantoes', '🗓 Plantões vinculados às O.S.', plantaoPerformanceHTML(), false)}
         ${quadroCasa('perf-bonus', '💰 Bônus por ponto <small>— apuração manual do mês</small>', bonusHTML, false)}
       ` : `
         <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}</div>
@@ -2198,7 +2201,7 @@ function renderAgendaCasa() {
   const [y, m] = mes.split('-').map(Number);
   const agenda = lerAgendaCasa();
   const todas = STORE.getAllOS();
-  const osMes = osNoMesCasa(mes);
+  const osMes = osNoMesCasa(mes).filter(o => STATE._agendaConcluidas || !o.finalizadaEm);
   if (!STATE._agDia || !String(STATE._agDia).startsWith(mes)) {
     STATE._agDia = OPERACAO.dia(new Date());
     if (!String(STATE._agDia).startsWith(mes)) STATE._agDia = mes + '-01';
@@ -2255,6 +2258,8 @@ function renderAgendaCasa() {
           <button class="btn-ghost btn-sm" id="ag-prox" title="Próximo mês">›</button>
         </span>
       </div>
+      <label class="agenda-recorte"><input type="checkbox" id="ag-concluidas" ${STATE._agendaConcluidas ? 'checked' : ''}> Incluir concluídas pela equipe</label>
+      <p class="metricas-nota">${STATE._agendaConcluidas ? 'A lista inclui histórico concluído. WhatsApp e PDF da saída usam somente as O.S. abertas.' : 'O.S. abertas. O calendário também identifica retiradas na loja; o PDF de saída reúne instalações externas.'}</p>
       ${chipsAgendaCasa(mes)}
       <div class="casa-agenda">
         <div class="casa-cal-box">
@@ -2289,6 +2294,7 @@ function renderAgendaCasa() {
         </aside>
       </div>
     </div>`;
+  const concluidas = document.getElementById('ag-concluidas'); if (concluidas) concluidas.onchange = () => { STATE._agendaConcluidas = concluidas.checked; renderAgendaCasa(); };
   const mesEl = document.getElementById('ag-mes');
   if (mesEl) mesEl.onchange = () => { if (mesEl.value) { STATE._agMes = mesEl.value; STATE._agDia = ''; renderAgendaCasa(); } };
   const andar = n => {
@@ -2390,6 +2396,7 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
     const hora = String(fd.get('hora') || '');
     if (periodo === 'Horário' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(hora)) { toast('Período "Horário" pede a hora.', 'error'); return; }
     const equipe = fd.getAll('equipe').map(String).filter(Boolean);
+    os.confirmacao = ''; os.confEm = ''; os.confPor = ''; os.confHora = ''; os.carroLiberado = false;
     os.instalacao = Object.assign({}, os.instalacao || {}, { data: dia, periodo, hora, duracaoDias: Math.max(1, Number(fd.get('dias')) || 1) });
     if (equipe.length) os.equipe = equipe;
     const veiculo = String(fd.get('veiculo') || ''); if (veiculo) os.veiculo = veiculo;
@@ -2407,6 +2414,15 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
    Escala de fim de semana e sobreaviso. Entra a EMPRESA TODA (não só a
    instalação), lida do RH — ordem do dono em 14/09/2026. O plantão pode
    carregar as O.S que serão atendidas naquele turno. */
+function plantaoPerformanceHTML() {
+  const mes = (lerBonusCasa().mes || OPERACAO.dia(new Date()).slice(0,7));
+  const pl = lerAgendaCasa().plantoes.filter(p => !p.cancelado && p.data.startsWith(mes));
+  const vinculados = pl.filter(p => plantaoComOS(p).length);
+  return `<p>${pl.length} plantões registrados em ${esc(rotuloMesCasa(mes))}; ${vinculados.length} com vínculo a O.S. A participação no plantão não atribui pontos automaticamente.</p>
+    ${vinculados.map(p => `<p><strong>${esc(p.quem)}</strong> · ${esc(p.data)} · ${esc(p.inicio)}–${esc(p.fim)}<br>${plantaoComOS(p).map(id => { const o = STORE.getAllOS().find(x => x.id === id); return o ? `O.S. ${esc(o.numero)}` : 'O.S. fora do recorte'; }).join(' · ')}</p>`).join('')}
+    <p class="metricas-nota">Cadastre ou altere vínculos na aba Plantões. Hora extra, remuneração e registros do RH continuam separados desta apuração.</p>`;
+}
+
 function plantaoComOS(p) { return Array.isArray(p.osIds) ? p.osIds : []; }
 
 /* O QUE NÃO VIRA <option> SOME NO SALVAR — E AQUI ISSO APAGAVA HISTÓRICO.
@@ -2679,7 +2695,7 @@ function renderGradeCasa() {
   if (!STATE._grVista) STATE._grVista = 'dia';
   const dia = STATE._grDia;
   const todas = STORE.getAllOS();
-  const doDia = d => todas.filter(o => !OPERACAO.encerradaERP(o) && diasCasa(o).includes(d))
+  const doDia = d => todas.filter(o => !OPERACAO.encerradaERP(o) && (STATE._agendaConcluidas || !o.finalizadaEm) && diasCasa(o).includes(d))
     .sort((a, b) => (typeof ordemHora === 'function' ? ordemHora(a).localeCompare(ordemHora(b)) : 0) || String(a.numero).localeCompare(String(b.numero)));
   const lista = doDia(dia);
   const d = new Date(dia + 'T12:00:00');
@@ -2728,6 +2744,8 @@ function renderGradeCasa() {
           <button class="btn-ghost btn-sm ${STATE._grVista === 'mes' ? 'active' : ''}" data-gr-vista="mes">Mês inteiro</button>
         </span>
       </div>
+      <label class="agenda-recorte"><input type="checkbox" id="gr-concluidas" ${STATE._agendaConcluidas ? 'checked' : ''}> Incluir concluídas pela equipe</label>
+      <p class="metricas-nota">${STATE._agendaConcluidas ? 'Histórico incluído na tela. WhatsApp e PDF de saída: somente abertas.' : 'O.S. abertas programadas. Retiradas na loja ficam identificadas; o PDF de saída reúne instalações externas.'}</p>
       <div class="casa-dia-nav">
         <button class="btn-ghost btn-sm" id="gr-ant" title="Dia anterior">‹</button>
         <input type="date" id="gr-data" value="${esc(dia)}">
@@ -2744,7 +2762,7 @@ function renderGradeCasa() {
         <div class="casa-kpi-cards">
           <div class="casa-kpi"><b>${lista.length}</b><small>O.S neste dia</small></div>
           <div class="casa-kpi"><b>${escalados.length}</b><small>pessoas escaladas</small></div>
-          <div class="casa-kpi"><b>${new Set(lista.map(o => o.veiculo).filter(Boolean)).size}</b><small>veículos na rua</small></div>
+          <div class="casa-kpi"><b>${new Set(lista.map(o => o.veiculo).filter(Boolean)).size}</b><small>veículos programados</small></div>
           <div class="casa-kpi ${valorDia.semValor ? 'alerta' : ''}"><b>${dinheiroCasa(valorDia.total)}</b><small>valor programado${valorDia.semValor ? ` · ${valorDia.semValor} sem valor` : ''}</small></div>
         </div>
         ${conflitos.length ? `<p class="metricas-nota alerta-ausencia">⚠️ ${conflitos.length} possível conflito: ${esc(conflitos.map(c => [...c.equipe, c.veiculo].filter(Boolean).join(', ')).join(' · '))} em mais de uma O.S no mesmo turno.</p>` : ''}
@@ -2762,6 +2780,7 @@ function renderGradeCasa() {
       : (mesHTML ? `<p class="metricas-nota">${esc(rotuloMesCasa(mes))} — clique no dia para abrir a programação dele.</p>${mesHTML}`
                  : emptyState('', 'Nada programado neste mês', 'Programe pelo Calendário ou pela vista de um dia.'))}
     </div>`;
+  const concluidas = document.getElementById('gr-concluidas'); if (concluidas) concluidas.onchange = () => { STATE._agendaConcluidas = concluidas.checked; renderGradeCasa(); };
   const mover = n => { STATE._grDia = OPERACAO.somarDias(dia, n); renderGradeCasa(); };
   const bAnt = document.getElementById('gr-ant'); if (bAnt) bAnt.onclick = () => mover(-1);
   const bProx = document.getElementById('gr-prox'); if (bProx) bProx.onclick = () => mover(1);

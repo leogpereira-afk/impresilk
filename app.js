@@ -315,11 +315,11 @@ function proximoPasso(os) {
   if (!os.liberadoPCP)                                              return { label: 'PCP precisa liberar',     cta: '✓ Liberar PCP', acao: 'pcp' };
   if (OPERACAO.paradoNoCliente(os))                              return { label: 'Parado: o cliente ainda não liberou a instalação', cta: '▶ Cliente liberou', acao: 'agenda' };
   if (!OPERACAO.agendaCompleta(os))                                return { label: 'Completar programação', cta: '📅 Agendar', acao: 'agenda' };
-  if (os.confirmacao !== 'Confirmado')                             return { label: 'Falta confirmar cliente', cta: '📞 Confirmar',  acao: 'confirmar' };
+  if (os.confirmacao !== 'Confirmado' || (!os.horaSaida && !OPERACAO.confirmadaHoje(os))) return { label: 'Falta confirmar cliente', cta: '📞 Confirmar',  acao: 'confirmar' };
   if (!os.carroLiberado && !os.horaSaida)                          return { label: 'Liberar carro / saída',   cta: '🚗 Liberar saída', acao: 'saida' };
   if (!os.horaSaida) return {label:'Registrar a saída da equipe',cta:'🚗 Registrar saída',acao:'saida'};
   const faltas = validarFinalizacao(os);
-  if (faltas.length) return { label: 'Falta: ' + faltas.join(', '), cta: '🏁 Finalizar', acao: 'exec' };
+  if (faltas.length) return { label: 'Conferir execução: ' + faltas.length + ' pendências para concluir', cta: '🔧 Conferir execução', acao: 'exec' };
   return { label: 'Pronto p/ finalizar', cta: '🏁 Finalizar', acao: 'finalizar' };
 }
 
@@ -975,6 +975,8 @@ function initSyncIndicator() {
   // aquela alteração ficou só neste aparelho.
   // A config voltou ao que o servidor tem (alteração recusada): repinta, senão
   // a tela segue mostrando o que não foi salvo.
+  STORE.on('conflito-cfg', mostrarConflitoCFG);
+  if (STORE.conflitoCFG && STORE.conflitoCFG()) mostrarConflitoCFG(STORE.conflitoCFG());
   STORE.on('cfg', () => { aplicarPermissoes(); renderActiveTab(); });
   STORE.on('item-recusado', ({ item, motivo }) => {
     const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero
@@ -1186,6 +1188,11 @@ function saveDraft() {
 
 // Atualiza um campo do draft (caminho com pontos)
 function setField(path, value) {
+  if (path.startsWith('instalacao.') && String(_modalDraft.instalacao?.[path.split('.')[1]] ?? '') !== String(value)) {
+    _modalDraft.confirmacao = ''; _modalDraft.confEm = ''; _modalDraft.confPor = ''; _modalDraft.confHora = '';
+    _modalDraft.carroLiberado = false;
+  }
+  if (path === 'confirmacao' && value === 'Confirmado') { _modalDraft.confEm = nowISO(); _modalDraft.confPor = STATE.user.nome; }
   const parts = path.split('.');
   let obj = _modalDraft;
   for (let i = 0; i < parts.length - 1; i++) {
@@ -1287,6 +1294,8 @@ function renderModal() {
     <div class="checklist-bar">${checklistBar}</div>
 
     ${blocosHTML}
+    ${!interno && !finalizada && ['admin','pcp'].includes(STATE.user.papel) ? `<details class="cfg-grupo"><summary>Exceção de encerramento</summary><p>Use apenas quando não for possível obter a foto final ou a data do retorno. O motivo e o responsável ficam registrados.</p><label>Justificativa (mínimo 15 caracteres)<textarea data-f="justificativaConclusao">${esc(os.justificativaConclusao || '')}</textarea></label></details>` : ''}
+    ${os.erpAlteracoes?.length ? `<details class="cfg-grupo"><summary>Histórico de atualização do Mubisys</summary>${os.erpAlteracoes.slice(-10).reverse().map(h => `<p><strong>${esc(new Date(h.em).toLocaleString('pt-BR'))}</strong><br>${h.campos.map(c => `${esc(c.campo)}: ${esc(c.antes ?? '—')} → ${esc(c.depois)}`).join('<br>')}</p>`).join('')}</details>` : ''}
 
     <div class="fs-body" style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-ghost btn-sm" id="modal-pdf">🖨 PDF da ficha</button>
@@ -1493,7 +1502,7 @@ function blocoAgenda(os, ro, done) {
       <div class="conf-block">
         <div class="conf-head">
           <strong>Confirmação com o cliente</strong>
-          <span class="conf-badge ${confClass}">${os.confirmacao || 'Não confirmado'}</span>
+          <span class="conf-badge ${confClass}">${os.confirmacao || 'Não confirmado'}${os.confirmacao === 'Confirmado' && !OPERACAO.confirmadaHoje(os) ? ' · confirmar hoje' : ''}</span>
         </div>
         <div class="conf-ref">
           👤 <strong>${esc(os.cliente || 'Cliente não informado')}</strong>
@@ -1945,9 +1954,10 @@ function bindModalEvents(os, ro) {
   const confBtn = $('#btn-confirmei');
   if (confBtn) confBtn.onclick = () => {
     _modalDraft.confirmacao = 'Confirmado';
-    _modalDraft.confPor = _modalDraft.confPor || STATE.user.nome;
+    _modalDraft.confPor = STATE.user.nome;
+    _modalDraft.confEm = nowISO();
     const d = new Date();
-    _modalDraft.confHora = _modalDraft.confHora || `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    _modalDraft.confHora = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
     saveDraft(); reRenderModalKeepOpen();
     toast('Cliente confirmado', 'success');
   };
@@ -1955,8 +1965,8 @@ function bindModalEvents(os, ro) {
   // TRAVA 1 — Liberar carro / saída
   const carroBtn = $('#btn-liberar-carro');
   if (carroBtn) carroBtn.onclick = () => {
-    if (!_modalDraft.liberadoPCP || !OPERACAO.agendaCompleta(_modalDraft) || _modalDraft.confirmacao !== 'Confirmado') {
-      toast('Libere o PCP, complete a programação e confirme o cliente antes de liberar o carro.', 'error');
+    if (!_modalDraft.liberadoPCP || !OPERACAO.agendaCompleta(_modalDraft) || !OPERACAO.confirmadaHoje(_modalDraft)) {
+      toast('Libere o PCP, complete a programação e confirme o cliente hoje antes de liberar o carro.', 'error');
       return;
     }
     _modalDraft.carroLiberado = true;
@@ -2227,6 +2237,9 @@ function validarFinalizacao(os) {
   if (!os.instalacaoOK) f.push('Instalação OK');
   if (!os.conferidoPor) f.push('conferido por');
   if (!(os.fotosCheckinIds || []).length) f.push('≥1 foto de saída');
+  const excecao = ['admin','pcp'].includes(STATE.user?.papel) && String(os.justificativaConclusao || '').trim().length >= 15;
+  if (!excecao && !(os.fotosRetornoIds || []).length) f.push('foto do serviço concluído');
+  if (!excecao && !os.retornoEm) f.push('data e hora do retorno');
   if (os.retrabalho && !os.problema) f.push('descrição do problema (retrabalho)');
   return f;
 }
@@ -2275,7 +2288,7 @@ function osCardHTML(os) {
   // CTA dinâmico: quando já está pronto pra finalizar, age direto pelo card;
   // nas demais etapas, abre a O.S no bloco certo (clique no card já faz isso).
   const ctaBtn = pp
-    ? (pp.acao === 'finalizar' || pp.acao === 'exec'
+    ? (pp.acao === 'finalizar'
         ? `<button class="btn-success btn-sm edit-only card-finalizar" data-finalizar-os="${esc(os.id)}" title="Finalizar serviço">${esc(pp.cta)}</button>`
         : `<button class="btn-primary btn-sm edit-only card-cta" data-cta-os="${esc(os.id)}" title="${esc(pp.label)}">${esc(pp.cta)}</button>`)
     : `<span class="card-fin-tag" title="Serviço finalizado">✓ ${interno ? 'Retirado' : 'Finalizado'}</span>`;
@@ -2302,12 +2315,13 @@ function osCardHTML(os) {
     <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
       <div class="card-header card-header-os">
         <div class="card-meta">
-          <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${os.retrabalho && !os.finalizadaEm ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}${seloParado}</div>
+          <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${os.retrabalho && !os.finalizadaEm ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}${seloParado}${os.erpConferirEm ? ' <span class="badge sem-valor">ERP atualizado · conferir</span>' : ''}</div>
           <span class="badge st-${st}">${statusLabelDe(os, st)}</span>
         </div>
         <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
         ${os.servico ? `<div class="card-servico" title="${esc(os.servico)}">${esc(os.servico)}</div>` : ''}
       </div>
+      <details class="card-detalhes"><summary>Detalhes e outras ações</summary>
       <div class="card-tipo-row">
         <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏬 Cliente retira' : '🚚 Externo'}</span>
         ${os.finalizadaEm ? '' : `<button class="btn-xs btn-ghost edit-only card-toggle-tipo" data-toggle-tipo="${esc(os.id)}" title="Alternar entre Cliente retira e Externo">⇄ ${interno ? 'Tornar Externo' : 'Tornar Cliente retira'}</button>`}
@@ -2321,13 +2335,15 @@ function osCardHTML(os) {
       </div>
       ${pp ? `<div class="prox-passo" title="${esc(pp.label)}"><span class="prox-passo-tag">Próximo passo</span><span class="prox-passo-texto">${esc(pp.label)}</span></div>` : ''}
       <div class="card-resp">✍ ${esc(resp)}${itens.length ? ` · ${prontos}/${itens.length} itens` : ''}</div>
+      ${os.erpAlteracoes?.length ? `<details class="erp-historico"><summary>Alterações recebidas do Mubisys</summary>${os.erpAlteracoes.slice(-5).reverse().map(h => `<p><strong>${esc(new Date(h.em).toLocaleString('pt-BR'))}</strong><br>${h.campos.map(c => `${esc(c.campo)}: ${esc(c.antes ?? '—')} → ${esc(c.depois)}`).join('<br>')}</p>`).join('')}</details>` : ''}
       ${etapasBtns}
       <div class="card-acoes">
         ${avisarBtn}
         ${paradoBtn}
         ${arquivarBtn}
-        ${ctaBtn}
       </div>
+      </details>
+      <div class="card-principal">${prazoPrincipalHTML(os)}<small>${esc(os.responsavelPCP || (os.equipe || []).join(', ') || 'Responsável a definir')}</small>${pp ? `<p>${esc(pp.label)}</p>` : ''}${ctaBtn}</div>
     </div>`;
 }
 
@@ -2382,7 +2398,7 @@ function osCardPcpHTML(os) {
     ? `<button class="btn-ghost btn-sm card-avisar ${os.avisadoEm ? 'avisado' : ''}" data-avisar-os="${esc(os.id)}" title="${os.avisadoEm ? 'Cliente já avisado — clique para avisar de novo' : 'Avisar o cliente no WhatsApp'}">${os.avisadoEm ? 'Avisado ' + fmtDataBR(os.avisadoEm) : 'Avisar cliente'}</button>`
     : '';
   const ctaBtn = pp
-    ? (pp.acao === 'finalizar' || pp.acao === 'exec'
+    ? (pp.acao === 'finalizar'
         ? `<button class="btn-success btn-sm edit-only card-finalizar" data-finalizar-os="${esc(os.id)}">${esc(pp.cta)}</button>`
         : `<button class="btn-primary btn-sm edit-only card-cta" data-cta-os="${esc(os.id)}">${esc(pp.cta)}</button>`)
     : '';
@@ -2391,7 +2407,7 @@ function osCardPcpHTML(os) {
     <div class="os-card os-card-pcp st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
       <div class="card-meta">
         <div class="card-numero">O.S ${esc(os.numero || '—')}</div>
-        ${osSeloPcp(os)}
+        ${osSeloPcp(os)}${os.erpConferirEm ? '<span class="badge sem-valor">Atualizado no ERP</span>' : ''}
       </div>
       <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
       ${os.servico ? `<div class="card-servico">${esc(os.servico)}</div>` : ''}
@@ -2410,7 +2426,7 @@ function osRowPcpHTML(os) {
       <span class="pcp-row-cli">${esc(os.cliente || 'Sem cliente')}</span>
       <span class="pcp-row-svc">${esc(os.servico || '')}</span>
       <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? 'Cliente retira' : 'Externo'}</span>
-      ${osSeloPcp(os)}
+      ${osSeloPcp(os)}${os.erpConferirEm ? '<span class="badge sem-valor">Atualizado no ERP</span>' : ''}
       ${prazoPrincipalHTML(os)}
       <span class="pcp-row-eq">${equipe}</span>
     </div>`;
@@ -2489,7 +2505,8 @@ function bindCardClicks(container) {
       c.setAttribute('aria-label','Abrir O.S '+(STORE.getOS(c.dataset.osId)?.numero || ''));
       c.onkeydown = e => { if(e.target===c && (e.key==='Enter'||e.key===' ')){e.preventDefault();c.click();} };
     }
-    c.onclick = () => {
+    c.onclick = e => {
+      if (e.target.closest('summary, details button, details input')) return;
       const os = STORE.getOS(c.dataset.osId);
       if (os) openModal(os);
     };
@@ -3777,7 +3794,7 @@ function renderExecucao() {
   $$('[data-inline="carro"]', el).forEach(b => b.onclick = () => {
     const os = STORE.getOS(b.dataset.id);
     if (!os) { toast('O.S não encontrada (pode ter sido removida em outro aparelho).', 'error'); renderExecucao(); return; }
-    if (!os.liberadoPCP || !OPERACAO.agendaCompleta(os) || os.confirmacao !== 'Confirmado') { toast('Libere o PCP, complete a programação e confirme o cliente antes de liberar o carro.', 'error'); return; }
+    if (!os.liberadoPCP || !OPERACAO.agendaCompleta(os) || !OPERACAO.confirmadaHoje(os)) { toast('Libere o PCP, complete a programação e confirme o cliente hoje antes de liberar o carro.', 'error'); return; }
     os.carroLiberado = true; os.carroLiberadoPor = STATE.user.nome; os.carroLiberadoEm = nowISO();
     os.atualizadoEm = nowISO(); os.atualizadoPor = STATE.user.nome;
     STORE.saveOS(os); renderExecucao(); toast('Carro liberado', 'success');
@@ -3862,8 +3879,8 @@ function renderRetrabalho() {
   const somaR = custos.reduce((s, c) => s + (c.reais || 0), 0);
   const semCusto = custos.filter(c => c.horas == null && c.km == null).length;
   const f = STATE._fRetra || { de: '', ate: '' };
-  const entregues = todas.filter(o => OPERACAO.dia(o.finalizadaEm) && OPERACAO.emIntervalo(o.finalizadaEm, f.de, f.ate) && !OPERACAO.interno(o)).length;
-  const taxa = entregues ? Math.round(lista.length / entregues * 1000) / 10 : null;
+  const indicador = OPERACAO.taxaRetrabalho(todas, f.de, f.ate);
+  const entregues = indicador.entregues, taxa = indicador.taxa;
   const pendentes = lista.filter(p => !(p.filha ? p.filha.finalizadaEm : (p.orig && p.orig.dataResolvido))).length;
   const fmtH = h => h == null ? '—' : (h < 1 ? Math.round(h * 60) + ' min' : (Math.round(h * 10) / 10).toString().replace('.', ',') + ' h');
 
@@ -3881,15 +3898,15 @@ function renderRetrabalho() {
 
   el.innerHTML = `
     <div class="casa-pagina-head">
-      <div><h2>Retrabalho</h2><p>O.S que voltaram e a correção emitida para cada uma. Quem refez, de onde veio e quanto custou.</p></div>
+      <div><h2>Retrabalho</h2><p>O.S que voltaram e a correção emitida para cada uma. Quem refez, de onde veio e quanto custou.</p></div><button class="btn-ghost" id="retra-pdf">🖨 Salvar análise em PDF</button>
     </div>
     <div class="filter-bar">${filtroPeriodoHTML('_fRetra')}</div>
     <div class="casa-kpi-cards">
       <div class="casa-kpi"><b>${lista.length}</b><small>retrabalhos no período${pendentes ? ` · <span class="badge st-retrabalho">${pendentes} pendente${pendentes === 1 ? '' : 's'}</span>` : ''}</small></div>
-      <div class="casa-kpi ${semCusto ? 'alerta' : ''}"><b>${somaR ? brMoney(somaR) : `${fmtH(somaH)} · ${Math.round(somaKm)} km`}</b><small>custo (horas + km da O.S de retrabalho)${somaR ? ` · ${fmtH(somaH)} · ${Math.round(somaKm)} km` : ''}${semCusto ? ` · ${semCusto} sem viagem registrada` : ''}${!(rHora || rKm) ? ' · sem R$/h e R$/km em Configurações' : ''}</small></div>
-      <div class="casa-kpi"><b>${taxa == null ? '—' : taxa.toString().replace('.', ',') + '%'}</b><small>taxa geral · ${lista.length} em ${entregues} entrega${entregues === 1 ? '' : 's'} no período</small></div>
+      <div class="casa-kpi ${semCusto ? 'alerta' : ''}"><b>${semCusto === custos.length ? 'Não apurado' : somaR ? brMoney(somaR) : `${custos.some(c => c.horas != null) ? fmtH(somaH) : 'tempo não apurado'} · ${custos.some(c => c.km != null) ? Math.round(somaKm) + ' km' : 'km não apurado'}`}</b><small>custo conhecido · ${custos.length - semCusto} de ${custos.length} intervenções com medição${somaR ? ` · ${fmtH(somaH)} · ${Math.round(somaKm)} km` : ''}${semCusto ? ` · ${semCusto} sem viagem registrada` : ''}${!(rHora || rKm) ? ' · sem R$/h e R$/km em Configurações' : ''}</small></div>
+      <div class="casa-kpi"><b>${taxa == null ? '—' : taxa.toString().replace('.', ',') + '%'}</b><small>O.S. com retrabalho · ${indicador.afetadas} em ${entregues} entrega${entregues === 1 ? '' : 's'} no período</small></div>
     </div>
-    <p class="metricas-nota">Original = O.S marcada com o problema. Retrabalho = a O.S nova que o ERP emite (aponte a original na ficha dela, campo "🔁 retrabalho da O.S nº"). Sem filha apontada, o custo fica em branco.${semTaxonomia ? ` <strong>${semTaxonomia} sem etapa de origem/causa raiz</strong> — abra a ficha e complete.` : ''}</p>
+    <p class="metricas-nota">Taxa calculada sobre entregas originais concluídas pela equipe no período, com retrabalho conhecido até agora. Cancelamentos e O.S. filhas não entram na base. Duas correções da mesma O.S. contam uma vez na taxa. Original = O.S marcada com o problema. Retrabalho = a O.S nova que o ERP emite (aponte a original na ficha dela, campo "🔁 retrabalho da O.S nº"). Sem filha apontada, o custo fica em branco.${semTaxonomia ? ` <strong>${semTaxonomia} sem etapa de origem/causa raiz</strong> — abra a ficha e complete.` : ''}</p>
     <div class="casa-tabela-wrap"><table class="casa-tabela">
       <thead><tr><th>O.S original</th><th>O.S retrabalho</th><th>Cliente</th><th>Motivo</th><th>Técnico</th><th class="num">Custo</th><th>Data</th></tr></thead>
       <tbody>${lista.map((p, i) => {
@@ -3920,6 +3937,9 @@ function renderRetrabalho() {
   bindCardClicks(el);
   // A O.S de retrabalho abre pelo botão da célula, sem abrir a original junto.
   $$('[data-abrir-os]', el).forEach(b => b.onclick = ev => { ev.stopPropagation(); const os = STORE.getOS(b.dataset.abrirOs); if (os) openModal(os); });
+  const imprimir = $('#retra-pdf',el);
+  if (imprimir) imprimir.onclick = () => imprimirAnalisePCP('Retrabalho',el,STATE._fRetra || {});
+
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -4300,7 +4320,7 @@ function renderControle() {
   const isAdmin = STATE.user.papel === 'admin';
 
   // ── Saúde da conexão (admin): nuvem, importação automática e fila local ──
-  const saudeHTML = isAdmin ? `
+  const saudeHTML = ['admin','pcp'].includes(STATE.user.papel) ? `
     <div class="cfg-section">
       <h3>🩺 Saúde da conexão</h3>
       <div id="saude-box" class="saude-box text-muted">Verificando servidor…</div>
@@ -4312,7 +4332,7 @@ function renderControle() {
       <p class="text-muted" style="font-size:12px;margin:-4px 0 8px">
         A senha fica no servidor, embaralhada — ninguém consegue lê-la, nem eu.
         Senha que você cria para outra pessoa é temporária: ela troca na primeira entrada.
-        <br>A equipe de montagem não entra por aqui: ela toca no próprio nome em equipe.html, sem senha.
+        <br>A montagem usa conta própria ou um aparelho autorizado pela gestão. Escolher um nome, sozinho, não libera acesso.
       </p>
       <div class="cfg-list" id="acessos-lista">
         <div class="text-muted">Carregando…</div>
@@ -4430,12 +4450,15 @@ function renderControle() {
   // contatos e por fim as listas do dia a dia em grid compacto.
   el.innerHTML =
     (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') +
-    saudeHTML + usuariosHTML + niveisHTML + mubisysHTML + contatosHTML + mensagemHTML + custoHTML +
-    `<h3 class="cfg-group-tit">📋 Listas — equipe, recursos e opções</h3>
-     <div class="cfg-grid">${listasHTML}</div>`;
+    `<div class="casa-pagina-head"><div><h2>Configurações</h2><p>Conexão, pessoas e regras da operação, cada uma no seu lugar.</p></div></div>` +
+    `<details class="cfg-grupo" open><summary>🔌 Conexões e sincronização</summary>${saudeHTML}${mubisysHTML}</details>` +
+    `<details class="cfg-grupo"><summary>👥 Equipe e acesso</summary>${usuariosHTML}${niveisHTML}${contatosHTML}</details>` +
+    `<details class="cfg-grupo"><summary>🛠 Regras e recursos da operação</summary>${custoHTML}<div class="cfg-grid">${listasHTML}</div></details>` +
+    `<details class="cfg-grupo"><summary>💬 Mensagens da programação</summary>${mensagemHTML}</details>`;
 
   // Handlers da Integração Mubisys e do painel de saúde (admin)
-  if (isAdmin) { wireMubisys(el); wireSaude(el); }
+  if (isAdmin) wireMubisys(el);
+  if (['admin','pcp'].includes(STATE.user.papel)) wireSaude(el);
 
   // Handlers de níveis (admin) — funcionam mesmo quando ro é false
   if (isAdmin) {
@@ -4603,6 +4626,36 @@ async function pintarAcessos(el) {
 }
 
 /* ── Saúde da conexão: nuvem OK? importação automática rodando? fila local? ─ */
+function imprimirAnalisePCP(titulo,elemento,periodo) {
+  const copia = elemento.cloneNode(true);
+  copia.querySelectorAll('button,input,select,.filter-bar').forEach(n => n.remove());
+  copia.querySelectorAll('details').forEach(n => n.open = true);
+  const fonte = STORE.getLastSync?.();
+  const em = typeof fonte === 'string' && Number.isFinite(Date.parse(fonte)) ? new Date(fonte).toLocaleString('pt-BR') : 'consulte a conexão do aparelho';
+  let box = document.getElementById('impressao-pcp');
+  if (!box) { box = document.createElement('dialog'); box.id = 'impressao-pcp'; document.body.appendChild(box); }
+  box.innerHTML = `<div class="impressao-acoes"><button class="btn-ghost" id="impressao-fechar">Fechar prévia</button><button class="btn-primary" id="impressao-salvar">Imprimir ou salvar PDF</button></div>
+    <h1>${esc(titulo)} · Impresilk</h1><p>Período: ${esc(periodo.de || 'início do recorte carregado')} a ${esc(periodo.ate || 'fim do recorte carregado')} · Gerado em ${esc(new Date().toLocaleString('pt-BR'))}</p>
+    <p>Fonte: registros do PCP disponíveis neste aparelho. Última sincronização: ${esc(em)}. ${STORE.getQueue().length} alterações locais aguardando envio.</p>
+    ${copia.innerHTML}<footer>Conferir a cobertura e as medições indicadas. Esta análise não lança pagamentos.</footer>`;
+  $('#impressao-fechar',box).onclick = () => box.close();
+  $('#impressao-salvar',box).onclick = () => { document.body.classList.add('imprimindo-pcp'); window.print(); document.body.classList.remove('imprimindo-pcp'); };
+  box.showModal();
+}
+
+function mostrarConflitoCFG(c) {
+  let box = document.getElementById('cfg-conflito');
+  if (!box) { box = document.createElement('dialog'); box.id = 'cfg-conflito'; document.body.appendChild(box); }
+  box.innerHTML = `<h2>Conferir alterações simultâneas</h2><p>Outro aparelho alterou os mesmos campos. Suas mudanças estão guardadas neste aparelho.</p>
+    <p>${(c.campos || []).map(esc).join(', ')}</p>
+    <div class="cfg-comparacao"><details><summary>Minha versão</summary><pre>${esc(JSON.stringify(c.local,null,2))}</pre></details><details><summary>Versão do servidor</summary><pre>${esc(JSON.stringify(c.remoto,null,2))}</pre></details></div>
+    <button class="btn-ghost" id="cfg-adiar">Conferir depois</button><button class="btn-ghost" id="cfg-remoto">Usar a versão do servidor</button><button class="btn-primary" id="cfg-local">Reaplicar minha versão revisada</button>`;
+  document.getElementById('cfg-adiar').onclick = () => box.close();
+  document.getElementById('cfg-remoto').onclick = () => { STORE.resolverCFG(false); box.close(); };
+  document.getElementById('cfg-local').onclick = () => { STORE.resolverCFG(true); box.close(); };
+  if (!box.open) box.showModal();
+}
+
 function wireSaude(el) {
   const box = $('#saude-box', el);
   if (!box) return;
@@ -4638,12 +4691,23 @@ function wireSaude(el) {
       const completaTxt = bom
         ? `${new Date(bom.em).toLocaleString('pt-BR')} — ${bom.novas || 0} nova(s)`
         : 'nenhuma registrada ainda';
-      box.innerHTML = `
-        ✅ <strong>Nuvem OK</strong> — ${s.totalOS} O.S guardadas no servidor<br>
-        📅 Última importação <strong>completa</strong>: ${completaTxt}<br>
-        ${impIcone} Última tentativa de importação: ${impTxt}<br>
-        ${filaTxt}<br>
-        📦 Versão do app neste aparelho: <strong>${typeof APP_VERSAO !== 'undefined' ? APP_VERSAO : '—'}</strong>`;
+      const dif = ult?.baixa?.divergencias || [];
+      const semNoticia = Number(ult?.baixa?.semNoticiaDoErp || 0);
+      const pendencias = STORE.getAllOS().filter(o => OPERACAO.pendencias(o).length);
+      box.innerHTML = `<div class="conexao-grid">
+        <section><h4>☁️ Servidor</h4><strong>Conectado</strong><p>${Number(s.totalOS) || 0} O.S. guardadas</p></section>
+        <section><h4>🔄 Atualização do ERP</h4><p>${impIcone} ${impTxt}</p><small>Último sucesso: ${completaTxt}</small><p>${Number(ult?.atualizadas || 0)} fichas atualizadas na última carga</p></section>
+        <section><h4>📤 Este aparelho</h4><p>${filaTxt}</p><small>Versão ${typeof APP_VERSAO !== 'undefined' ? APP_VERSAO : '—'}</small>${STORE.conflitoCFG?.() ? '<button class="btn-ghost btn-sm" id="cfg-rever-conflito">Revisar conflito de configurações</button>' : ''}</section>
+        <section><h4>🔎 Consistência da carteira</h4><strong>${semNoticia ? semNoticia + ' O.S. para conferir no ERP' : ult?.baixa?.ok ? 'Nenhuma ausência nesta consulta' : 'Conferência não disponível'}</strong><p>Ausência numa resposta não cancela nem conclui uma O.S.</p></section>
+      </div>
+      <details class="cfg-grupo" ${semNoticia ? 'open' : ''}><summary>O.S. sem confirmação na última consulta (${semNoticia})</summary>
+        ${dif.length ? dif.map(o => `<button class="btn-ghost" data-divergencia-os="${esc(o.id)}">O.S. ${esc(o.numero)} · ${esc(o.motivo)}</button>`).join('') : `<p>${semNoticia ? 'A lista será registrada na próxima importação com esta versão. A contagem acima veio da carga anterior.' : 'Sem lista de divergências.'}</p>`}
+      </details>
+      <details class="cfg-grupo"><summary>Pendências por etapa (${pendencias.length})</summary><p>Equipe e veículo são cobrados após a liberação do PCP. Estes números cobrem as O.S. disponíveis neste aparelho.</p>
+        ${pendencias.map(o => `<button class="btn-ghost" data-divergencia-os="${esc(o.id)}">O.S. ${esc(o.numero)} · ${esc(OPERACAO.pendencias(o).join(' · '))}</button>`).join('') || '<p>Nenhuma pendência no recorte carregado.</p>'}
+      </details>`;
+      $$('[data-divergencia-os]',box).forEach(b => b.onclick = () => { const os = STORE.getOS(b.dataset.divergenciaOs); if (os) openModal(os); else toast('O.S. fora do cache deste aparelho. Atualize a carteira para conferir.','error'); });
+      const revisar = $('#cfg-rever-conflito',box); if (revisar) revisar.onclick = () => mostrarConflitoCFG(STORE.conflitoCFG());
     }).catch(() => {
       box.innerHTML = `❌ <strong>Sem conexão com o servidor.</strong><br>${filaTxt}<br>📦 Versão do app neste aparelho: <strong>${typeof APP_VERSAO !== 'undefined' ? APP_VERSAO : '—'}</strong>`;
     });

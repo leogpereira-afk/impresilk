@@ -10,10 +10,9 @@
 // nome na lista para entrar. Agora a senha é PBKDF2 no banco e quem confere é o
 // servidor.
 //
-// A MONTAGEM CONTINUA SEM SENHA, por decisão do dono: o instalador toca no
-// próprio nome em equipe.html e o aparelho lembra. Quem sobe em andaime não vai
-// digitar senha no celular. O que se fecha ali é outra coisa: o atalho
-// equipe.html#i=NOME aceitava QUALQUER nome, até um que não estivesse na lista.
+// MONTAGEM: um aparelho novo precisa ser autorizado por admin/PCP autenticado.
+// O acesso emitido fica limitado às O.S. da pessoa escolhida. Depois da primeira
+// entrada, o aparelho mantém a fila offline e não exige senha a cada serviço.
 //
 // O CRACHÁ VALE 30 DIAS de propósito: entrar precisa de internet uma vez; depois
 // o aparelho segue trabalhando sem sinal.
@@ -80,8 +79,8 @@ const AUTH = (() => {
       guardar(r.token);
       return r;
     },
-    // Entrada da MONTAGEM (sem senha): o instalador tocou no nome; o pcp-sync
-    // valida contra a lista de instaladores e devolve um crachá papel 'montagem'.
+    // Entrada da montagem: a gestão autenticada autoriza um aparelho e o
+    // servidor emite um acesso restrito ao instalador escolhido.
     // Guarda no mesmo lugar do crachá de gestão (mesmo origin) para o store.js
     // anexar nas próximas chamadas.
     async entrarMontagem(nome) {

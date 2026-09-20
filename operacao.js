@@ -61,6 +61,27 @@ const OPERACAO = (() => {
   const paradoNoCliente = o =>
     !!(o?.liberadoPCP && !interno(o) && o?.paradoClienteEm && !agendaCompleta(o) && !o?.finalizadaEm);
 
+  const confirmadaHoje = (o, hoje = dia(new Date())) => o?.confirmacao === 'Confirmado' && dia(o.confEm) === hoje;
+  function pendencias(o) {
+    if (!o || o.finalizadaEm) return [];
+    const p = [];
+    if (!prazo(o)) p.push('Definir prazo');
+    if (!o.responsavelPCP) p.push('Definir responsável PCP');
+    if (!interno(o) && o.liberadoPCP) {
+      if (!dia(o.instalacao?.data)) p.push('Programar data');
+      if (!equipe(o).length) p.push('Escalar equipe');
+      if (!o.veiculo) p.push('Definir veículo');
+      if (agendaCompleta(o) && !confirmadaHoje(o)) p.push('Confirmar cliente no dia');
+    }
+    if (o.retrabalho && !o.dataResolvido) p.push('Resolver retrabalho');
+    return p;
+  }
+  function taxaRetrabalho(lista, de = '', ate = '') {
+    const base = conclusoes(lista,de,ate).filter(o => !interno(o) && !o.osOriginal);
+    const originaisComFilhas = new Set(lista.filter(o => o.osOriginal && !encerradaERP(o)).map(o => String(o.osOriginal).trim()));
+    const afetadas = base.filter(o => o.retrabalho || originaisComFilhas.has(String(o.numero || '').trim()));
+    return {entregues:base.length, afetadas:afetadas.length, taxa:base.length ? Math.round(1000*afetadas.length/base.length)/10 : null};
+  }
   function status(o) {
     if (o?.finalizadaEm) return 'finalizada';
     if (!o?.liberadoPCP) return 'aguardando_producao';
@@ -174,6 +195,6 @@ const OPERACAO = (() => {
     }
     return best;
   }
-  return {dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
+  return {confirmadaHoje,pendencias,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;

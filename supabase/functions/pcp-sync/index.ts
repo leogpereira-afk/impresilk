@@ -1,3 +1,4 @@
+import { mesclarConfiguracao, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -73,7 +74,7 @@ async function assinarCrachaMontagem(nome: string): Promise<string> {
   const chave = await crypto.subtle.importKey(
     "raw", enc.encode(JWT_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const agora = Math.floor(Date.now() / 1000);
-  const corpo = { sis: "pcp", sub: nome, nome, papel: "montagem", iat: agora, exp: agora + 30 * 86400 };
+  const corpo = { sis: "pcp", sub: nome, nome, papel: "montagem", montagemIndividual:true, iat: agora, exp: agora + 30 * 86400 };
   const cab = b64urlSign(enc.encode(JSON.stringify({ alg: "HS256", typ: "JWT" })));
   const meio = `${cab}.${b64urlSign(enc.encode(JSON.stringify(corpo)))}`;
   const sig = new Uint8Array(await crypto.subtle.sign("HMAC", chave, enc.encode(meio)));
@@ -254,50 +255,6 @@ Deno.serve(async (req: Request) => {
 
   const acao = String(body.action);
 
-  // ENTRADA DA MONTAGEM (sem senha, por decisao do dono): o instalador toca no
-  // nome; validamos contra a lista de instaladores e emitimos um cracha de 30
-  // dias. Nao exige credencial previa — e o unico caminho assim, e so cria
-  // cracha papel 'montagem' (que nao pode setCfg). Substitui o #i=NOME antigo,
-  // que aceitava QUALQUER nome. Rodada ANTES do portao.
-  if (acao === "entrarMontagem") {
-      /* FREIO. Esta porta e um oraculo: ela responde 200 para nome que esta na
-         lista e 403 para o que nao esta -- ou seja, da para varrer nomes ate
-         achar um que abra, e cada acerto vale 30 dias de acesso. Nao havia
-         limite nenhum. A contagem e a mesma das outras portas de senha, so que
-         aqui a "senha" e o nome. */
-      {
-        const alvoNome = String(body.nome ?? "").trim().toLowerCase();
-        const { data: travado } = await sb.rpc("porta_travada", { p_sistema: "pcp", p_usuario: alvoNome || "-" });
-        if (travado === true) {
-          return resp({ error: "Muitas tentativas. Espere 15 minutos e tente de novo." }, 429);
-        }
-      }
-    const nome = String(body.nome ?? "").trim();
-    if (!nome) return resp({ error: "nome ausente" }, 400);
-    const cfg = (await getCfg()) ?? {};
-    const lista: string[] = Array.isArray(cfg.instaladores) ? cfg.instaladores : [];
-    const bate = lista.find((n) => String(n).trim().toLowerCase() === nome.toLowerCase());
-    if (!bate) {
-        await sb.rpc("porta_registrar", {
-          p_sistema: "pcp", p_usuario: String(body.nome ?? "").trim().toLowerCase(),
-          p_acao: "login-falhou", p_por: "-", p_detalhe: "nome fora da lista de instaladores",
-        }).then(() => {}, () => {});
-        /* FREIO PELO RELOGIO, e nao por bloqueio.
-           Esta porta e um oraculo: 200 para nome da lista, 403 para o resto --
-           da para varrer nomes ate achar um que abra, e cada acerto vale 30
-           dias de acesso. Contar por NOME nao adianta (o varredor troca de nome
-           a cada tentativa, e foi o que o meu proprio teste mostrou); e travar a
-           porta depois de N erros trancaria a FABRICA -- o instalador chega na
-           obra e nao entra.
-           Entao a resposta errada custa 1,5s. Quem toca no proprio nome acerta
-           de primeira e nao sente; quem varre cai de milhares de tentativas por
-           minuto para quarenta. */
-        await new Promise((r) => setTimeout(r, 1500));
-        return resp({ error: "Nome não está na lista de instaladores." }, 403);
-      }
-    return resp({ token: await assinarCrachaMontagem(bate), nome: bate, papel: "montagem" });
-  }
-
   const m = String(req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i);
   const cracha = m ? await lerCracha(m[1]) : null;
   const token = req.headers.get("x-token") ?? body.token;
@@ -311,6 +268,18 @@ Deno.serve(async (req: Request) => {
   // preserva a fila e pede para entrar de novo em vez de descartar trabalho.
   if (cracha && !ehMaquina && (await crachaRevogado(cracha))) {
     return resp({ error: "Seu acesso ao PCP foi encerrado. Fale com a gestão.", semSessao: true }, 401);
+  }
+
+  // Um nome sozinho não autoriza aparelho novo. Gestão autentica e autoriza
+  // a visão de execução; a equipe continua trabalhando offline após a entrada.
+  if (acao === "entrarMontagem") {
+    if (!cracha || !["admin", "pcp"].includes(String(cracha.papel)))
+      return resp({error:"Entre com sua conta do PCP. Um novo aparelho de montagem precisa ser autorizado pela gestão."},403);
+    const cfg = (await getCfg()) || {};
+    const nome = String(body.nome || '').trim();
+    const bate = (cfg.instaladores || []).find((n: string) => n.trim().toLowerCase() === nome.toLowerCase());
+    if (!bate) return resp({error:"Instalador não cadastrado."},400);
+    return resp({token:await assinarCrachaMontagem(bate),nome:bate,papel:"montagem"});
   }
 
   // AUTORIZACAO POR PAPEL no SERVIDOR (05/08 fechou o token publico, mas o
@@ -339,28 +308,12 @@ Deno.serve(async (req: Request) => {
        banco. Chave fora da lista e ignorada, nao recusada -- recusar faria o
        aparelho perder o plantao inteiro por causa de um campo a mais, como ja
        aprendemos no upsert da montagem. */
-    const CFG_OPERACAO = new Set(["agendaPCP", "bonusPCP", "vinculosRH", "mensagemDia"]);
     if (acao === "setCfg" && papel !== "admin") {
       if (papel !== "pcp") {
         return resp({ error: "Só a gestão do PCP altera as configurações." }, 403);
       }
-      const atual = (await getCfg()) ?? {};
-      const veio = (body.cfg ?? {}) as Record<string, unknown>;
-      const mesclado: Record<string, unknown> = { ...atual };
-      let mudou = false;
-      for (const k of Object.keys(veio)) {
-        if (!CFG_OPERACAO.has(k)) continue;
-        if (JSON.stringify(veio[k]) === JSON.stringify((atual as any)[k])) continue;
-        mesclado[k] = veio[k];
-        mudou = true;
-      }
-      // Nada de operacao mudou: o pedido so trazia campo de admin. Recusa
-      // explicita, para o cliente tirar da fila e AVISAR quem clicou -- em vez
-      // de responder ok e a pessoa achar que salvou.
-      if (!mudou) {
-        return resp({ error: "Este ajuste é do administrador. A gestão do PCP grava escala, bônus e vínculos." }, 403);
-      }
-      body.cfg = mesclado;
+      // O filtro de campos e a mescla ocorrem sobre a mesma revisão no setCfg.
+
     }
     if (ESCRITA.includes(acao) && !podeEditar) {
       return resp({ error: "Seu acesso é somente leitura." }, 403);
@@ -397,16 +350,16 @@ Deno.serve(async (req: Request) => {
       ? await sb.from("equipe_contas").select("usuario").eq("sistema", "pcp")
           .eq("usuario", String(cracha.sub ?? "")).maybeSingle()
       : { data: null };
-    ehToqueNoNome = papel === "montagem" && !contaDoCracha;
+    ehToqueNoNome = papel === "montagem" && (cracha.montagemIndividual === true || !contaDoCracha);
 
     const CAMPOS_MONTAGEM = new Set([
-      "id", "atualizadoEm", "atualizadoPor",
+      "id", "rev", "atualizadoEm", "atualizadoPor",
       "checkin", "checkinGPS", "checkout", "conclusao",
       "fotosCheckinIds", "fotosRetornoIds",
       "carroLiberado", "carroLiberadoEm", "carroLiberadoPor",
-      "equipe", "obsTecnicas", "instalacaoOK", "problema",
+      "obsTecnicas", "instalacaoOK", "problema",
       "ferramentasConferidas", "ferramentasConferidasPor",
-      "kmSaida", "kmRetorno", "horaSaida", "horaRetorno",
+      "kmSaida", "kmRetorno", "horaSaida", "horaRetorno", "saidaEm", "retornoEm",
     ]);
     /* MESCLA, NAO FILTRA -- e a diferenca entre proteger e destruir.
        O upsert do PCP SUBSTITUI a O.S inteira (nao funde campo a campo). Entao
@@ -429,14 +382,24 @@ Deno.serve(async (req: Request) => {
       if (!atual) {
         return resp({ error: "Quem entra pelo nome não cria O.S. Fale com o PCP." }, 403);
       }
+      if (!pertenceEquipe(atual, cracha.nome || cracha.sub)) return resp({error:"Esta O.S. não está na sua equipe."},403);
       const mesclado: Record<string, unknown> = { ...atual };
       for (const k of Object.keys(veio)) if (CAMPOS_MONTAGEM.has(k)) mesclado[k] = veio[k];
+      if (!("rev" in veio)) delete mesclado.rev;
       body.os = mesclado;
     }
 
     if (acao === "delete" && ehToqueNoNome) {
       return resp({ error: "Quem entra pelo nome não apaga O.S. Fale com o PCP." }, 403);
     }
+  }
+
+  if (ehToqueNoNome && ["getPhoto","deletePhoto"].includes(acao)) {
+    const {data,error} = await sb.from("pcp_registros").select("registro").eq("colecao","os").eq("apagado",false)
+      .contains("registro",{equipe:[String(cracha.nome || cracha.sub)]});
+    if (error) return resp({error:"Não foi possível conferir o vínculo da foto."},503);
+    const permitida = (data || []).some((r: any) => [r.registro.layoutFotoId,...(r.registro.fotosCheckinIds || []),...(r.registro.fotosRetornoIds || [])].includes(body.fileId));
+    if (!permitida) return resp({error:"Esta foto não está vinculada às O.S. da sua equipe."},403);
   }
 
   try {
@@ -491,7 +454,7 @@ Deno.serve(async (req: Request) => {
           if (error) throw new Error(error.message);
           const linhas = data ?? [];
           return resp({
-            os: linhas.map((r: any) => r.apagado ? { id: r.id, apagado: true } : podar(r.registro)),
+            os: linhas.map((r: any) => r.apagado || (soExecucao && !pertenceEquipe(r.registro, cracha.nome || cracha.sub)) ? { id: r.id, apagado: true } : podar(r.registro)),
             agora, incremental: true,
             // 500 mudancas desde o cursor nao e "incremental": o cliente refaz completo.
             cheio: linhas.length >= 500,
@@ -536,7 +499,7 @@ Deno.serve(async (req: Request) => {
            de toque sai de um primeiro nome, sem senha; precisa de cliente,
            endereco e contato, nao do documento de ninguem. */
         return resp({
-          os: linhas.map((r: any) => podar(r.registro)),
+          os: linhas.filter((r: any) => !soExecucao || pertenceEquipe(r.registro,cracha.nome || cracha.sub)).map((r: any) => podar(r.registro)),
           total: await contarRegs("os"),
           nextAfter: linhas.length === PAGE ? linhas[linhas.length - 1].id : null,
           nextOffset: null,
@@ -563,7 +526,26 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        const existing = await getReg("os", os.id);
+        const {data:linhaAtual,error:erroAtual} = await sb.from("pcp_registros").select("registro,atualizado_em,apagado").eq("colecao","os").eq("id",os.id).maybeSingle();
+        if (erroAtual) throw new Error(erroAtual.message);
+        const existing = linhaAtual?.registro ?? null;
+        const erroConclusao = validarConclusao(os,existing,String(cracha?.papel || ''));
+        if (erroConclusao) return resp({error:erroConclusao},422);
+        if (os.finalizadaEm && !existing?.finalizadaEm && os.justificativaConclusao) {
+          os.excecaoConclusao = {motivo:String(os.justificativaConclusao).trim(),por:cracha?.nome || cracha?.sub,em:new Date().toISOString()};
+        }
+        const erroMomento = validarMomentos(os);
+        if (erroMomento) return resp({error:erroMomento},400);
+        // Remarcar invalida a confirmação anterior; não inventa confirmação de hoje.
+        if (existing && JSON.stringify(existing.instalacao) !== JSON.stringify(os.instalacao) && !(os.confirmacao === "Confirmado" && os.confEm && os.confEm !== existing.confEm)) {
+          os.confirmacao = ''; os.confEm = ''; os.confHora = ''; os.confPor = '';
+          os.carroLiberado = false; os.carroLiberadoEm = ''; os.carroLiberadoPor = '';
+        }
+        if (os.confirmacao === "Confirmado" && (existing?.confirmacao !== "Confirmado" || os.confEm !== existing?.confEm)) {
+          os.confPor = cracha?.nome || cracha?.sub || 'Integração';
+          if (!os.confEm || !Number.isFinite(Date.parse(os.confEm))) os.confEm = new Date().toISOString();
+          os.confRecebidoEm = new Date().toISOString();
+        }
 
         // Cache velho: aparelho re-importa um ESQUELETO por cima de ficha ja
         // trabalhada no servidor (mesmo id canonico, atualizadoEm mais novo).
@@ -614,12 +596,31 @@ Deno.serve(async (req: Request) => {
           }
         }
 
+        if (existing?.origemMubisys) {
+          for (const campo of ['cliente','servico','vendedor','dataEntrada','cnpjCpf','valorTotal','erpAlteracoes','erpConferirEm']) {
+            if (campo in existing) os[campo] = existing[campo];
+          }
+        }
+        if (os.carroLiberado && !existing?.carroLiberado) {
+          const diaSP = (x: string) => Number.isFinite(Date.parse(x)) ? new Date(Date.parse(x)-3*3600*1000).toISOString().slice(0,10) : '';
+          const diaSaida = diaSP(os.carroLiberadoEm || '');
+          if (!diaSaida || os.confirmacao !== 'Confirmado' || diaSP(os.confEm || '') !== diaSaida)
+            return resp({error:"Confirme o cliente no dia da saída antes de liberar o veículo."},422);
+        }
         // Preserva o atualizadoEm do autor: reescrever com o relogio do servidor
         // misturava duas fontes de tempo e o proprio autor levava "conflito".
         // (Ele segue valendo para EXIBIR "alterado em"; quem decide conflito e o rev.)
-        const gravar = { ...os, rev: revAtual + 1 };
+        const gravar = { ...carimbarExecucao(os, existing, cracha?.nome || cracha?.sub || "Integração", new Date().toISOString()), rev: revAtual + 1 };
         try {
-          await setReg("os", os.id, gravar);
+          if (linhaAtual) {
+            const {data,error} = await sb.from("pcp_registros").update({registro:gravar,atualizado_em:new Date(Math.max(Date.now(),Date.parse(linhaAtual.atualizado_em)+1 || 0)).toISOString(),apagado:false})
+              .eq("colecao","os").eq("id",os.id).eq("atualizado_em",linhaAtual.atualizado_em).select("id");
+            if (error) throw new Error(error.message);
+            if (!data?.length) return resp({conflito:true,servidor:await getReg("os",os.id)});
+          } else {
+            const {error} = await sb.from("pcp_registros").insert({colecao:"os",id:os.id,registro:gravar,atualizado_em:new Date().toISOString(),apagado:false});
+            if (error) throw new Error(error.message);
+          }
         } catch (e) {
           // O indice unico de numero e a ultima linha de defesa contra duas O.S
           // com o mesmo numero. Se bateu nele, devolve a que ja existe em vez de
@@ -932,32 +933,34 @@ Deno.serve(async (req: Request) => {
       }
 
       case "setCfg": {
-        if (!body.cfg) return resp({ error: "cfg ausente" }, 400);
-        /* O QUE O getCfg ESCONDE, O setCfg TEM DE REPOR -- senao esconder APAGA.
-           `getCfg` tira `usuarios` e `funcionarios` do pacote de quem nao e
-           admin. O app guarda esse pacote e devolve ele INTEIRO ao salvar
-           qualquer ajuste de Configuracoes. Gravando como veio, o elenco e a
-           agenda de telefones sumiam do banco -- e ninguem ligaria a coisa: quem
-           apagou nem viu os campos, e quem perdeu o acesso nao mexeu em nada.
-
-           E o elenco NAO E DO APP nem quando quem salva e admin: quem manda nele
-           e a Central (e o gatilho `espelhar_elenco`, que o reescreve a cada
-           mudanca em equipe_contas). Deixar o PCP grava-lo faria o admin de UM
-           sistema administrar acesso -- exatamente o que a Central existe para
-           concentrar. Entao vale sempre o que ja esta no banco, para todo mundo.
-           Mesma regra que o Brief ja aplicava. */
-        const atual = (await getCfg()) ?? {};
-        const limpo: Record<string, unknown> = { ...body.cfg };
-        for (const campo of ["usuarios", "funcionarios"]) {
-          if (campo in atual) limpo[campo] = (atual as any)[campo];
-          else delete limpo[campo];
+        if (!body.cfg || typeof body.cfg !== "object" || Array.isArray(body.cfg)) return resp({ error: "Configuração inválida" }, 400);
+        const visivel = (cfg: any) => {
+          const {usuarios,funcionarios,...out} = cfg || {}; return out;
+        };
+        for (let tentativa=0;tentativa<3;tentativa++) {
+          const {config,versao} = await getCfgComVersao();
+          const atual = config || {};
+          if (!body.baseCfg) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:["Configuração salva por versão antiga; revise antes de reaplicar."]},409);
+          const base = visivel(body.baseCfg), local = visivel(body.cfg), remoto = visivel(atual);
+          if (cracha?.papel === "pcp" && !ehMaquina) {
+            const permitidas = new Set(["agendaPCP","bonusPCP","vinculosRH","mensagemDia"]);
+            for (const k of new Set([...Object.keys(base),...Object.keys(local),...Object.keys(remoto)])) {
+              if (!permitidas.has(k)) { delete base[k]; delete local[k]; delete remoto[k]; }
+            }
+          }
+          const result = mesclarConfiguracao(base,local,remoto);
+          if (result.conflitos.length) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:result.conflitos},409);
+          const limpo = {...atual,...result.cfg};
+          for (const k of Object.keys(remoto)) if (!(k in result.cfg)) delete limpo[k];
+          if (JSON.stringify(limpo) === JSON.stringify(atual)) return resp({ok:true,cfg:visivel(atual),versao});
+          const novaVersao = new Date(Math.max(Date.now(),Date.parse(versao || '')+1 || 0)).toISOString();
+          const query = sb.from("pcp_config_global");
+          const {data,error} = versao ? await query.update({config:limpo,atualizado_em:novaVersao}).eq("id",true).eq("atualizado_em",versao).select("id")
+            : await query.insert({id:true,config:limpo,atualizado_em:novaVersao}).select("id");
+          if (error) { if (error.code === "23505") continue; throw new Error(error.message); }
+          if (data?.length) return resp({ok:true,cfg:visivel(limpo),versao:novaVersao});
         }
-        const { error } = await sb.from("pcp_config_global").upsert(
-          { id: true, config: limpo, atualizado_em: new Date().toISOString() },
-          { onConflict: "id" },
-        );
-        if (error) throw new Error(error.message);
-        return resp({ ok: true });
+        return resp({error:"Outro aparelho está salvando. Sua alteração continua na fila; tente novamente."},503);
       }
 
       case "putPhoto": {
@@ -966,15 +969,16 @@ Deno.serve(async (req: Request) => {
         const id = fileId || "foto_" + Date.now() + "_" + Math.random().toString(36).slice(2);
         const { error } = await sb.storage.from(BUCKET).upload(id, b64ParaBytes(base64), {
           contentType: mimeDaDataUrl(base64, mime || "image/jpeg"),
-          upsert: true,
+          upsert: false,
         });
-        if (error) throw new Error("upload: " + error.message);
+        if (error && !(String((error as any).statusCode) === "409" || /already exists|duplicate/i.test(error.message))) throw new Error("upload: " + error.message);
         return resp({ fileId: id });
       }
 
       case "deletePhoto": {
         if (!body.fileId) return resp({ error: "fileId ausente" }, 400);
-        await sb.storage.from(BUCKET).remove([body.fileId]).catch(() => {});
+        const {error} = await sb.storage.from(BUCKET).remove([body.fileId]);
+        if (error) throw new Error(error.message);
         return resp({ ok: true });
       }
 

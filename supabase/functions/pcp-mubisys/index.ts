@@ -1,3 +1,4 @@
+import { atualizarOrigemERP } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-mubisys — integracao com o ERP (substitui mubisys.js + mubisys-sync.mjs)
 //
@@ -187,7 +188,9 @@ function mapearOS(o: any) {
     // "entregue no mes". Confundir as duas derrubou janeiro de 165 para 135.
     dataEntregue: isoData(pick(o, "data_entregue", "dataEntregue")) || "",
     valorTotal: (() => {
-      const bruto = Number(String(pick(o, "valor_total", "valorTotal", "total") ?? "").replace(",", "."));
+      const entrada = pick(o, "valor_total", "valorTotal", "total");
+      if (entrada == null || String(entrada).trim() === "") return null;
+      const bruto = Number(String(entrada).replace(",", "."));
       const desc = Number(String(pick(o, "valor_desconto", "valorDesconto", "desconto") ?? "0").replace(",", "."));
       return Number.isFinite(bruto) ? Math.max(0, bruto - (Number.isFinite(desc) ? desc : 0)) : null;
     })(),
@@ -476,12 +479,13 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
 
   const alvos: any[] = [];
   let semNoticia = 0;
+  const divergencias: any[] = [];
   let agendadas = 0;
   for (const l of abertas) {
     const num = String(l.registro?.numero || "").trim();
     if (!num) continue;
     const st = statusPorNumero.get(num);
-    if (st === undefined) { semNoticia++; continue; }  // o ERP nao falou dela: nao mexe
+    if (st === undefined) { semNoticia++; divergencias.push({id:l.id, numero:num, motivo:"Sem retorno do ERP nesta consulta"}); continue; }  // o ERP nao falou dela: nao mexe
     if (!STATUS_FINAIS.has(st)) continue;              // segue viva la
     // A EQUIPE TEM VISITA MARCADA: nao tira da mesa. O ERP costuma marcar
     // ENTREGUE quando o material sai da fabrica, e a instalacao ainda esta por
@@ -496,6 +500,7 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
     abertasNoPcp: abertas.length,
     conferidas: abertas.length - semNoticia,
     semNoticiaDoErp: semNoticia,
+    divergencias,
     poupadasComAgenda: agendadas,
     baixadas: 0,
     candidatas: alvos.length,
@@ -648,16 +653,29 @@ async function gravarImportadas(sb: any, remotas: any[]) {
       const numeros = linhas.map((l) => l.registro.numero);
       const { data: jaTem, error: erroLeitura } = await sb
         .from("pcp_registros")
-        .select("registro->>numero")
+        .select("id, registro, apagado, atualizado_em")
         .eq("colecao", "os")
         .in("registro->>numero", numeros);
       if (erroLeitura) throw new Error(erroLeitura.message);
-      const existentes = new Set((jaTem ?? []).map((r: any) => String(r.numero)));
+      const existentes = new Set((jaTem ?? []).map((r: any) => String(r.registro?.numero)));
 
-      // O.S que ja existe NAO e sobrescrita -- pode ter trabalho humano em
-      // cima (fotos de check-in, equipe montada, conferencia do carro).
-      // Dedup por id DENTRO do lote (dois números iguais no mesmo payload do
-      // ERP viram o mesmo mub-<n> e o insert multi-linha morreria inteiro).
+      // Só campos da origem; alteração concorrente na oficina ganha e será
+      // reconciliada na próxima importação. Lápides e conclusões são preservadas.
+      const porNumeroERP = new Map(remotas.map(r => [String(r.numero ?? '').trim(), r]));
+      let atualizadas = 0, conflitosAtualizacao = 0;
+      const em = new Date().toISOString();
+      for (const linha of (jaTem ?? [])) {
+        if (linha.apagado) continue;
+        const r = atualizarOrigemERP(linha.registro, porNumeroERP.get(String(linha.registro?.numero)) || {}, em);
+        if (!r.alteracoes.length) continue;
+        const {data, error} = await sb.from("pcp_registros")
+          .update({registro:r.registro, atualizado_em:em})
+          .eq("colecao","os").eq("id",linha.id).eq("apagado",false)
+          .eq("atualizado_em",linha.atualizado_em).select("id");
+        if (error) throw new Error(error.message);
+        if (data?.length) atualizadas++; else conflitosAtualizacao++;
+      }
+      // Deduplicação de novas O.S. dentro do lote.
       const porId = new Map<string, any>();
       for (const l of linhas.filter((l) => !existentes.has(String(l.registro.numero)))) porId.set(l.id, l);
       const novasLinhas = [...porId.values()];
@@ -670,7 +688,7 @@ async function gravarImportadas(sb: any, remotas: any[]) {
       }
       const novas = novasLinhas.length;
       const jaExistiam = linhas.length - novas;
-  return { novas, jaExistiam, total: remotas.length, semNumero };
+  return { novas, atualizadas, conflitosAtualizacao, jaExistiam, total: remotas.length, semNumero };
 }
 
 /* O BATIMENTO GUARDA DUAS DATAS: a da ultima TENTATIVA e a da ultima que DEU

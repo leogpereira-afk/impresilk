@@ -78,3 +78,17 @@ test('missão padrão é hoje se houver, senão o maior problema', () => {
   assert.equal(O.missaoFoco({ hoje:[], atrasadas:[], retrabalho:[1,2], retirada:[1], semPrazo:[], semRetorno:[] }), 'retrabalho');
   assert.equal(O.missaoFoco({ hoje:[], atrasadas:[], retrabalho:[], retirada:[], semPrazo:[], semRetorno:[] }), '');
 });
+test('taxa de retrabalho exclui ERP e filhas, conta original uma única vez',()=>{
+ const f='2026-09-10T12:00:00Z';
+ const lista=[{id:'a',numero:'1',finalizadaEm:f},{id:'b',numero:'2',finalizadaEm:f},{id:'c',numero:'3',finalizadaEm:f,finalizadoPor:'Mubisys · baixa'}, {id:'d',numero:'4',osOriginal:'1',finalizadaEm:f},{id:'e',numero:'5',osOriginal:'1'}];
+ assert.deepEqual(O.taxaRetrabalho(lista,'2026-09-01','2026-09-30'),{entregues:2,afetadas:1,taxa:50});
+ assert.equal(O.taxaRetrabalho(lista,'2026-10-01','2026-10-31').taxa,null);
+});
+test('pendências respeitam etapa, confirmação exige data do dia',()=>{
+ const a={tipo:'externo',liberadoPCP:false};
+ assert.equal(O.pendencias(a).includes('Escalar equipe'),false);
+ assert.equal(O.pendencias({...a,liberadoPCP:true}).includes('Escalar equipe'),true);
+ assert.equal(O.confirmadaHoje({confirmacao:'Confirmado'},'2026-09-19'),false);
+ assert.equal(O.confirmadaHoje({confirmacao:'Confirmado',confEm:'2026-09-19T12:00:00-03:00'},'2026-09-19'),true);
+ assert.equal(O.confirmadaHoje({confirmacao:'Confirmado',confEm:'2026-09-18T12:00:00-03:00'},'2026-09-19'),false);
+});

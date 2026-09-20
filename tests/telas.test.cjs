@@ -243,3 +243,14 @@ test('filtro de período: o recorte escolhido vem aceso, e "Todos" só sem limit
   assert.match(prog, /class="casa-chip-per on" data-pq="7"/, 'a régua de futuro não pode desacender o chip');
   assert.match(prog, /Próximos 7 dias/);
 });
+test('retrabalho sem medição não se apresenta como zero; taxa tem coorte explícita',()=>{
+ const t=tela([{...final,retrabalho:true}]); t.run('renderRetrabalho()');
+ const html=t.node('#panel-retrabalho').innerHTML;
+ assert.match(html,/Não apurado/);assert.match(html,/0 de 1 intervenções com medição/);assert.match(html,/Cancelamentos e O.S. filhas não entram/);
+});
+test('finalização externa exige evidência ou exceção escrita pela gestão',()=>{
+ const t=tela([]);
+ const base={tipo:'externo',liberadoPCP:true,confirmacao:'Confirmado',embarqueConferidoPor:'A',produtosConferidosPor:'A',ferramentasConferidas:true,carroLiberado:true,instalacaoOK:true,conferidoPor:'A',fotosCheckinIds:['f']};
+ assert.match(t.run(`validarFinalizacao(${JSON.stringify(base)}).join(',')`),/foto do serviço concluído/);
+ assert.equal(t.run(`validarFinalizacao(${JSON.stringify({...base,justificativaConclusao:'Cliente não permitiu fotografar o ambiente.'})}).length`),0);
+});

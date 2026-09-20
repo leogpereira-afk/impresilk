@@ -58,6 +58,25 @@ let _draft = null, _dirty = false;
 
 /* ── Seleção do instalador ───────────────────────────────────────────────── */
 function initSelect() {
+  if (typeof AUTH === 'undefined' || !AUTH.dono()) {
+    $('#select-screen').innerHTML = `<div class="login-card"><h2>Autorizar este aparelho</h2>
+      <p>Na primeira entrada, a gestão entra com sua conta do PCP e escolhe o instalador. Depois, o aparelho trabalha offline com acesso às O.S. da equipe.</p>
+      <form id="eq-autorizacao"><div class="field"><label for="eq-user">Usuário da gestão</label><input id="eq-user" autocomplete="username" required></div>
+      <div class="field"><label for="eq-senha">Senha</label><input id="eq-senha" type="password" autocomplete="current-password" required></div>
+      <button class="btn-primary" type="submit">Entrar para autorizar</button><p id="eq-auth-erro" role="alert"></p></form><p><a href="index.html">Entrar pela gestão</a></p></div>`;
+    $('#eq-autorizacao').onsubmit = async e => {
+      e.preventDefault();
+      if (STORE.getQueue().length) { $('#eq-auth-erro').textContent = 'Há trabalho pendente neste aparelho. Entre pela gestão com a mesma conta para enviá-lo antes de trocar o responsável.'; return; }
+      const b = $('#eq-autorizacao button'); b.disabled = true;
+      try {
+        const r = await AUTH.login($('#eq-user').value.trim(),$('#eq-senha').value);
+        $('#eq-senha').value = '';
+        if (r.trocarSenha || !['admin','pcp'].includes(r.papel)) { location.href = 'index.html'; return; }
+        await STORE.pullCFG(); location.reload();
+      } catch (e) { $('#eq-auth-erro').textContent = e.message || 'Não foi possível entrar.'; b.disabled = false; }
+    };
+    return;
+  }
   // Espelho comercial: somente‑leitura, sem execução, sem escolher instalador.
   //
   // EXIGE CRACHÁ. Isto aqui não é visão de execução: mostra TODAS as O.S
@@ -128,15 +147,23 @@ function initSelect() {
   if (saved) { EQ.instalador = saved; enter(); }
 }
 
-function enter() {
-  // Garante o crachá de montagem: o instalador tocou no nome mas não tem
-  // credencial (a reforma de 05/08 fechou a porta sem senha). Pega um crachá
-  // papel 'montagem' e dispara o sync — sem isso todo request leva 401.
-  // Comercial usa o crachá que já estiver no aparelho (aberto pela gestão).
-  if (!EQ.comercial && EQ.instalador && typeof AUTH !== 'undefined' && !AUTH.temCracha()) {
-    AUTH.entrarMontagem(EQ.instalador)
-      .then(() => { STORE.pull(() => renderList()); STORE.trySync(); })
-      .catch(e => { toast('⚠️ ' + (e.message || 'Não foi possível entrar na nuvem.'), 'error'); });
+let _autorizandoEquipe = false;
+async function enter() {
+  if (_autorizandoEquipe) return;
+  const dono = typeof AUTH !== 'undefined' ? AUTH.dono() : null;
+  if (!dono) { initSelect(); return; }
+  if (!EQ.comercial && ['admin','pcp'].includes(dono.papel)) {
+    if (STORE.getQueue().length) { toast('Envie as alterações pendentes antes de autorizar este aparelho para outra pessoa.','error'); return; }
+    _autorizandoEquipe = true;
+    try {
+      // Troca de identidade só após emitir o acesso restrito; nunca limpa fila pendente.
+      await AUTH.entrarMontagem(EQ.instalador);
+      STORE.limparCache(); STORE.setUser(null); STORE.setInstalador(EQ.instalador);
+    } catch (e) { toast(e.message || 'Não foi possível autorizar.','error'); return; }
+    finally { _autorizandoEquipe = false; }
+  } else if (!EQ.comercial && dono.papel === 'montagem') {
+    // O instalador não assume outro nome escolhendo uma opção no navegador.
+    EQ.instalador = dono.nome; STORE.setInstalador(dono.nome);
   }
   $('#select-screen').classList.add('hidden');
   $('#eq-app').classList.remove('hidden');
@@ -146,7 +173,11 @@ function enter() {
   if (EQ.comercial) {
     const t = $('#eq-trocar'); if (t) t.style.display = 'none';
   } else {
-    $('#eq-trocar').onclick = () => { STORE.setInstalador(null); location.reload(); };
+    $('#eq-trocar').textContent = 'Sair';
+    $('#eq-trocar').onclick = () => {
+      if (STORE.getQueue().length) { toast('Envie primeiro as alterações pendentes para não perder o trabalho.','error'); return; }
+      AUTH.esquecer(); STORE.limparCache(); STORE.setUser(null); STORE.setInstalador(null); location.reload();
+    };
   }
 
   STORE.onSync((status, pending) => {
@@ -210,7 +241,7 @@ function initConflict() {
 /* ── Nota por instalador (mesma fórmula do Painel) ───────────────────────── */
 // Premia menos retrabalho (peso .7) e presença de check-in (peso .3). 0–10.
 function notasDaEquipe(equipe) {
-  const fins = STORE.getAllOS().filter(o => o.finalizadaEm);
+  const fins = STORE.getAllOS().filter(o => OPERACAO.concluida(o));
   return (equipe || []).map(nome => {
     let entregas = 0, retrab = 0, checkin = 0;
     fins.forEach(o => {

@@ -2168,3 +2168,24 @@ body.tv-ligada { overflow:hidden; }
 }
 .casa-radio-chip.on .casa-pill { border-color: #163654; font-weight: 700; }
 .casa-radio-chip input:focus-visible + .casa-pill { outline: 2px solid #1d4ed8; outline-offset: 2px; }
+
+/* Auditoria PCP: hierarquia e controles com área de toque legível. */
+.cfg-grupo{margin:0 0 16px;padding:20px;background:var(--card-bg,#fff);border:1px solid var(--border,#dde3eb);border-radius:16px}
+.cfg-grupo>summary,.card-detalhes>summary{cursor:pointer;font-weight:650;color:var(--text,#24324a);padding:8px 0;min-height:32px}
+.cfg-grupo[open]>summary{margin-bottom:16px}
+.conexao-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:20px}
+.conexao-grid section{background:var(--bg,#f5f7fb);padding:18px;border-radius:12px;overflow-wrap:anywhere}
+.conexao-grid h4{margin:0 0 10px;color:#294a9e}.conexao-grid p{line-height:1.5}
+.cfg-grupo [data-divergencia-os]{display:block;width:100%;text-align:left;margin:6px 0;white-space:normal}
+.card-principal{display:grid;gap:10px;padding-top:12px}.card-principal small{color:var(--text-muted,#667085)}
+.card-principal p{margin:0}.card-principal button{min-height:40px}.card-detalhes{border-top:1px solid var(--border,#e4e7ec);margin-top:12px;font-size:.9rem}
+.card-detalhes[open]{padding-bottom:14px}.card-detalhes .prox-passo{display:none}
+.agenda-recorte{display:flex;align-items:center;gap:10px;margin:12px 0}.agenda-recorte input{width:auto}
+#cfg-conflito{width:min(780px,calc(100vw - 32px));max-height:85vh;overflow:auto;border:0;border-radius:20px;padding:24px}#cfg-conflito::backdrop{background:#10223b88}
+.cfg-comparacao{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0}.cfg-comparacao pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:35vh;overflow:auto}
+@media(max-width:640px){.conexao-grid,.cfg-comparacao{grid-template-columns:1fr}.cfg-grupo{padding:14px}.card-principal button{min-height:44px}}
+@media print{details.cfg-grupo{break-inside:avoid}.conexao-grid section{break-inside:avoid}.agenda-recorte{display:none}}
+
+#impressao-pcp{width:min(1100px,calc(100vw - 32px));max-height:90vh;overflow:auto;border:0;border-radius:18px;padding:24px;color:#1d2939;background:white}
+#impressao-pcp::backdrop{background:#10223baa}#impressao-pcp h1{color:#294a9e;font-size:26px}#impressao-pcp .casa-pagina-head{display:none}#impressao-pcp .impressao-acoes{display:flex;justify-content:flex-end;gap:10px;margin-bottom:20px}#impressao-pcp footer{margin-top:20px;font-size:12px;border-top:1px solid #dce3ed;padding-top:12px}
+@media print{@page{size:A4 landscape;margin:14mm}body.imprimindo-pcp>*:not(#impressao-pcp){display:none!important}body.imprimindo-pcp{display:block!important;overflow:visible!important;background:white!important}#impressao-pcp[open]{position:static!important;display:block!important;width:auto!important;max-width:none!important;max-height:none!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important;border:0!important;box-shadow:none!important}#impressao-pcp::backdrop{display:none}#impressao-pcp .impressao-acoes{display:none}#impressao-pcp .casa-kpi,#impressao-pcp tr{break-inside:avoid}#impressao-pcp thead{display:table-header-group}#impressao-pcp .casa-tabela-wrap{overflow:visible!important}}

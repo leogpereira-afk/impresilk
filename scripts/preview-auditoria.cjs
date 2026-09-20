@@ -3,11 +3,11 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['index.html','equipe.html','app.js','equipe.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg']);
+const permitidos=new Set(['index.html','equipe.html','app.js','equipe.js','casa.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
-const base=(id,extra={})=>({id,numero:'T-'+id,cliente:'Cliente de teste '+id,servico:'Fachada e comunicação visual',tipo:'externo',instalacao:{data:hoje,periodo:'Manhã',duracaoDias:1},equipe:['Ana'],veiculo:'Carro 1',liberadoPCP:true,confirmacao:'Confirmado',criadoEm:deslocar(-20)+'T12:00:00',itens:[{descricao:'Painel',qtd:1,pronto:false}],...extra});
+const base=(id,extra={})=>({id,numero:'T-'+id,cliente:'Cliente de teste '+id,servico:'Fachada e comunicação visual',tipo:'externo',instalacao:{data:hoje,periodo:'Manhã',duracaoDias:1},equipe:['Ana'],veiculo:'Carro 1',liberadoPCP:true,confirmacao:'Confirmado',confEm:hoje+'T08:00:00-03:00',criadoEm:deslocar(-20)+'T12:00:00',itens:[{descricao:'Painel',qtd:1,pronto:false}],...extra});
 let lista=[
 base('101',{cliente:'Clínica Horizonte · teste',liberadoPCP:false,equipe:[],veiculo:'',confirmacao:''}),
 base('102',{cliente:'Loja Central · teste'}),
@@ -21,9 +21,9 @@ base('109',{finalizadaEm:hoje+'T11:00:00',finalizadoPor:'Mubisys (auto)',baixaAu
 base('110',{finalizadaEm:hoje+'T11:00:00',finalizadoPor:'Ana',retrabalho:true,problema:'Rever alinhamento da placa',causaRetrabalho:'Erro de medida',equipe:[]}),
 base('111',{instalacao:{data:deslocar(-4)},liberadoPCP:false,previsaoEntrega:deslocar(-4),equipe:[]})
 ];
-const AUTH={temCracha:()=>true,listarContas:async()=>({contas:[]})};
+const APP_VERSAO='v106 · prévia'; const AUTH={dono:()=>({nome:'Ana',papel:'montagem'}),temCracha:()=>true,listarContas:async()=>({contas:[]})};
 const cfg={instaladores:['Ana','Bia'],responsaveis:['Responsável de teste'],gerentes_montagem:[],veiculos:['Carro 1','Carro 2'],ferramentas:[],suprimentos:[],causasRetrabalho:['Erro de medida'],funcionarios:[],niveis:{}};
-const STORE={getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id),getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,getQueue:()=>[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>{},trySync:async()=>{},pronto:async()=>lista,api:async()=>({ok:true,os:[],total:lista.length}),apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(){},uuid:()=>crypto.randomUUID(),carimbarMomento(){}};
+const STORE={getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id),getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>({pessoas:[],veiculos:[],ferias:[],ausencias:[]}), valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>{}, entreguesMes:()=>null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>{},trySync:async()=>{},pronto:async()=>lista,api:async()=>({ok:true,os:[],totalOS:lista.length,ultimaImportacao:{em:new Date().toISOString(),ok:true,novas:0,atualizadas:1,baixa:{ok:true,semNoticiaDoErp:1,divergencias:[{id:'101',numero:'T-101',motivo:'Exemplo de conferência'}]}}}),apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){}};
 `;
 const boot=`
 document.addEventListener('DOMContentLoaded',()=>{
@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded',()=>{
  document.querySelector('#user-badge').textContent=STATE.user.nome;
  document.querySelector('#topbar-logo').src=LOGO_IMPRESILK;
  document.querySelector('#topbar-date').textContent='Sem acesso ao banco de produção';
- aplicarPermissoes();initTabs();initPicker();initTopbar();initConflictDialog();renderActiveTab();
+ aplicarPermissoes();initTabs();initCasa();initPicker();initTopbar();initConflictDialog();renderActiveTab();
 });`;
 http.createServer((req,res)=>{
   const name=new URL(req.url,'http://localhost').pathname.slice(1)||'index.html';
@@ -41,7 +41,7 @@ http.createServer((req,res)=>{
   if(name==='fixture.js'){res.setHeader('Content-Type','text/javascript');res.end(fixture);return;}
   if(!permitidos.has(name)){res.writeHead(404);res.end();return;}
   let body=fs.readFileSync(path.join(root,name));
-  if(name==='index.html') body=body.toString().replace(/<script src="(?:config|store|auth|frases)\.js"><\/script>/g,'').replace('<script src="operacao.js">','<script src="fixture.js"></script><script src="operacao.js">').replace(/<script>if\('serviceWorker'[^]*?<\/script>/,'');
+  if(name==='index.html') body=body.toString().replace(/<script src="(?:config|store|auth)\.js(?:\?[^\"]*)?"><\/script>/g,'').replace(/<script src="operacao.js(?:\?[^"]*)?">/,'<script src="fixture.js"></script><script src="operacao.js">').replace(/<script>if\('serviceWorker'[^]*?<\/script>/,'');
   if(name==='app.js')body=body.toString().replace("document.addEventListener('DOMContentLoaded', initLogin);",boot);
   const ext=path.extname(name);res.setHeader('Content-Type',({'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml'})[ext]);res.end(body);
-}).listen(4178,'127.0.0.1',()=>console.log('Prévia com dados fictícios: http://127.0.0.1:4178'));
+}).listen(Number(process.env.PORT) || 4201,'127.0.0.1',()=>console.log('Prévia com dados fictícios: http://127.0.0.1:4201'));
