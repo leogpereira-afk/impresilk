@@ -941,7 +941,7 @@ const STORE = (() => {
      ficava em "carregando…" para sempre — a versão do pacote tem de ser um
      piso, nunca uma igualdade, senão todo campo novo derruba quem não
      recarregou a aba ainda. */
-  function entreguesMes(mes) { const p = _entregues[mes]; return p && Number(p.v) >= 2 ? p : null; }
+  function entreguesMes(mes) { const p = _entregues[mes]; return p && Number(p.v) >= 2 && Array.isArray(p.os) ? p : null; }
   /* "NÃO VEIO" E "FALHOU" SÃO COISAS DIFERENTES na tela. `entreguesMes` devolve
      null nos dois casos, e a tela contava os dois como "carregando N meses" —
      mês que o ERP recusou (403) ou que voltou com erro ficava eternamente em
@@ -994,7 +994,7 @@ const STORE = (() => {
   }
   function entreguesFresco(mes) {
     const p = _entregues[mes];
-    return !!(p && !p.erro && _idadeEntregues(p) < _validadeEntregues(mes, p));
+    return !!(entreguesMes(mes) && !p.erro && _idadeEntregues(p) < _validadeEntregues(mes, p));
   }
 
   /* A PODA SEGUE OS CHIPS, e os chips seguem o BANCO — mas só quando o banco já
@@ -1033,8 +1033,8 @@ const STORE = (() => {
     const agora = new Date().toISOString();
     const novos = {};
     for (const [mes, p] of Object.entries(pacotes)) {
-      if (!p || !Array.isArray(p.os)) continue;
-      novos[mes] = { v: p.v || 0, em: p.em, recebidoEm: agora, mes, total: p.total, os: p.os };
+      if (!p || Number(p.v) < 2 || !Number.isFinite(Number(p.v)) || !Array.isArray(p.os)) continue;
+      novos[mes] = { v: p.v || 0, em: p.em, recebidoEm: agora, mes, total: p.total, os: p.os, ...(p.velho ? {velho:true,avisoErro:p.avisoErro || ''} : {}) };
     }
     const vieram = Object.keys(novos).length;
     if (vieram) {
@@ -1099,7 +1099,7 @@ const STORE = (() => {
     if (_equipePedindo === chave) return _equipeHist;
     _equipePedindo = chave;
     try {
-      const res = await apiFn('sync', { action: 'equipeHistorico', meses: lista }, 60000);
+      const res = await apiFn('os', { action: 'equipeHistorico', meses: lista }, 60000);
       if (res && Array.isArray(res.meses)) {
         _equipeHist = { chave, emMs: Date.now(), meses: res.meses, areas: res.areas || [], desdeQuando: res.desdeQuando || '' };
         _notifyListeners('equipe', { historico: true });
@@ -1124,7 +1124,7 @@ const STORE = (() => {
       return null;
     }
     const atual = _entregues[mes];
-    if (atual && !forcar && _idadeEntregues(atual) < _validadeEntregues(mes, atual)) return atual;
+    if (!forcar && entreguesFresco(mes)) return atual;
     _entreguesPedindo[mes] = true;
     try {
       // `forcar` existia dos dois lados e nunca viajava: o cliente pulava a

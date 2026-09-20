@@ -4,8 +4,9 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const OS='impresilk_inst_os', FILA='impresilk_inst_fila';
-function store({lista=[],fila=[],responder=()=>({os:[]}),falhaMigracao=false}={}) {
+function store({lista=[],fila=[],responder=()=>({os:[]}),falhaMigracao=false,entregues=null}={}) {
   const ls=new Map([[OS,JSON.stringify(lista)],[FILA,JSON.stringify(fila)]]);
+  if(entregues)ls.set('impresilk_inst_entregues',JSON.stringify(entregues));
   const eventos=[], gravados=[];
   const db={transaction(_name,modo){
     const tx={objectStore:()=>({
@@ -230,4 +231,13 @@ test('configuração salva durante envio permanece na fila com sua base correta'
  s.saveCFG({tema:'roxo'});soltar({ok:true,cfg:{tema:'verde'},versao:'1'});await envio;
  assert.equal(s.getCFG().tema,'roxo');assert.equal(s.getQueue().length,1);assert.equal(s.getQueue()[0].baseCfg.tema,'verde');
  await s.trySync();assert.equal(s.getQueue().length,0);assert.equal(s.getCFG().tema,'roxo');
+});
+
+
+test('mês legado não fica fresco e invisível: substitui pelo pacote guardado no servidor',async()=>{
+  const mes='2026-01', chamadas=[];
+  const {s}=store({entregues:{[mes]:{v:1,em:new Date().toISOString(),recebidoEm:new Date().toISOString(),os:[{numero:'antigo'}]}},responder:q=>{chamadas.push(q);return {pacotes:{[mes]:{v:3,em:'2026-09-19T20:20:00Z',os:[{numero:'1',valor:120,data:'2026-01-10'}]}}};}});
+  await s.pronto();assert.equal(s.entreguesMes(mes),null);assert.equal(s.entreguesFresco(mes),false);
+  await s.pullEntreguesLote([mes]);assert.equal(s.entreguesMes(mes).v,3);assert.equal(s.entreguesMes(mes).os[0].valor,120);assert.equal(s.entreguesFresco(mes),true);
+  assert.deepEqual(chamadas.map(q=>q.action),['entreguesMeses']);
 });
