@@ -691,6 +691,67 @@ async function gravarImportadas(sb: any, remotas: any[]) {
   return { novas, atualizadas, conflitosAtualizacao, jaExistiam, total: remotas.length, semNumero };
 }
 
+// Carteira do acompanhamento: concluída na produção ainda aguarda entrega.
+const STATUS_CARTEIRA = ['PRODUCAO', 'PENDENTE', 'PAUSADO', 'CONCLUIDO'];
+async function buscarCarteiraCompleta(base: string, publicKey: string, headers: any, fim: string) {
+  const lotes = await Promise.all(STATUS_CARTEIRA.map(async status => {
+    const lista: any[] = [], vistos = new Set<string>();
+    for (let page = 1; page <= 20; page++) {
+      const q = new URLSearchParams({status, filtrodata:'CADASTRO', datainicial:'2020-01-01', datafinal:fim, per_page:'500', page:String(page)});
+      const data = await erpGet(`${base}/${publicKey}/ordem-servico?${q}`, headers, 60000);
+      if (![data,data?.data,data?.items,data?.results].some(Array.isArray)) throw new Error('Formato inesperado na carteira ERP; nenhuma baixa aplicada.');
+      const pag = extrairLista(data).map(mapearOS);
+      if (pag.some(o => !o.numero)) throw new Error('Carteira ERP incompleta: O.S. sem número.');
+      if (pag.length && pag.every(o => vistos.has(o.numero))) throw new Error('Paginação ERP repetida; carteira mantida.');
+      for (const o of pag) { vistos.add(o.numero); lista.push(o); }
+      if (pag.length < 500) return lista;
+    }
+    throw new Error('Limite de páginas da carteira atingido; carteira mantida.');
+  }));
+  // Uma O.S. pode aparecer em duas situações durante uma transição no ERP.
+  const unicas = new Map<string, any>();
+  for (const lote of lotes) for (const o of lote) if (!unicas.has(o.numero)) unicas.set(o.numero,o);
+  if (!unicas.size) throw new Error('Carteira ERP vazia: aguardando conferência, sem arquivamento automático.');
+  return [...unicas.values()];
+}
+
+async function reconciliarCarteira(sb: any, remotas: any[]) {
+  const em = new Date().toISOString();
+  const numeros = new Set(remotas.map(o => String(o.numero)));
+  if (!numeros.size || remotas.some(o => !o.numero) || numeros.size !== remotas.length) throw new Error('Carteira inválida.');
+  const {data:linhas,error} = await sb.from('pcp_registros').select('id,registro,apagado,atualizado_em').eq('colecao','os');
+  if (error) throw new Error(error.message);
+  const abertas = (linhas || []).filter((l:any) => !l.apagado && !l.registro.finalizadaEm);
+  if (abertas.length > 20 && numeros.size < abertas.length * 0.5) throw new Error('Carteira ERP caiu mais de 50%; mantida para conferência.');
+  const restaurar = (linhas || []).filter((l:any) => numeros.has(String(l.registro.numero)) && (l.apagado || (l.registro.finalizadaEm && l.registro.baixaAutoERP?.em === l.registro.finalizadaEm)));
+  const arquivar = abertas.filter((l:any) => l.registro.origemMubisys && !numeros.has(String(l.registro.numero)));
+  // Cópia recuperável antes da primeira alteração. Não apaga execução/equipe.
+  const alvos = [...restaurar,...arquivar];
+  if (alvos.length) {
+    const {error:e} = await sb.from('pcp_meta').upsert({chave:`carteira-auditoria:${em}`,valor:{em,origem:'Mubisys · quatro situações',numeros:[...numeros],antes:alvos}},{onConflict:'chave'});
+    if (e) throw new Error(e.message);
+  }
+  let restauradas=0, arquivadas=0, conflitos=0;
+  for (const l of alvos) {
+    const volta = numeros.has(String(l.registro.numero));
+    const r = {...l.registro,rev:(Number(l.registro.rev)||0)+1,atualizadoEm:em,atualizadoPor:'Mubisys · conciliação de carteira'};
+    if (volta) {
+      if (r.baixaAutoERP?.em === r.finalizadaEm) { r.finalizadaEm='';r.finalizadoPor='';delete r.baixaAutoERP;delete r.arquivadaEm; }
+      r.erpCarteira={aberta:true,em};
+    } else {
+      r.finalizadaEm=em;r.finalizadoPor='Mubisys · saiu da carteira aberta';r.arquivadaEm=em;
+      r.baixaAutoERP={em,status:'FORA DA CARTEIRA ABERTA',carteira:true};
+      r.erpCarteira={aberta:false,em};
+    }
+    const {data,error:e}=await sb.from('pcp_registros').update({registro:r,apagado:false,atualizado_em:em})
+      .eq('colecao','os').eq('id',l.id).eq('atualizado_em',l.atualizado_em).select('id');
+    if(e) throw new Error(e.message);
+    if(!data?.length) conflitos++;else if(volta) restauradas++;else arquivadas++;
+  }
+  const importacao = await gravarImportadas(sb,remotas);
+  return {...importacao,restauradas,arquivadas,conflitosCarteira:conflitos,carteiraCompleta:true};
+}
+
 /* O BATIMENTO GUARDA DUAS DATAS: a da ultima TENTATIVA e a da ultima que DEU
    CERTO. Ate 14/09/2026 so havia uma -- e um dia inteiro de ERP fora apagava
    do registro a hora em que a importacao funcionou pela ultima vez. "Desde
@@ -876,7 +937,7 @@ Deno.serve(async (req: Request) => {
       if (body.per_page) { q1.set("per_page", String(body.per_page)); q1.set("page", String(body.page || 1)); }
       const inicio = Date.now();
       try {
-        const r = await fetchERP(`${creds.base}/${creds.publicKey}/ordem-servico?${q1}`, headers, 20000);
+        const r = await fetchERP(`${creds.base}/${creds.publicKey}/ordem-servico?${q1}`, headers, body.conferirNumeros === true ? 60000 : 20000);
         const corpo = await r.text().catch(() => "");
         return resp({
           estado: r.ok ? "respondeu" : "recusou",
@@ -885,6 +946,11 @@ Deno.serve(async (req: Request) => {
           amostra: corpo.slice(0, 200),
           janela: { datainicial: de, datafinal: ate, per_page: q1.get("per_page"), page: q1.get("page") },
           itens: (() => { try { const d = JSON.parse(corpo); return Array.isArray(d) ? d.length : (Array.isArray(d?.data) ? d.data.length : null); } catch { return null; } })(),
+          // Diagnóstico somente-leitura: identifica divergências sem expor clientes ou valores.
+          ordens: body.conferirNumeros === true ? (() => {
+            try { return extrairLista(JSON.parse(corpo)).map(mapearOS).map(o => ({ numero: o.numero, status: o.statusERP })); }
+            catch { return null; }
+          })() : undefined,
           status: q1.get("status"),
         });
       } catch (e) {
@@ -1165,30 +1231,12 @@ Deno.serve(async (req: Request) => {
       const sobra = () => ATE - Date.now();
       try {
         // Prazo vem do orcamento: as tentativas cabem no que sobrar da rodada.
-        const data = await erpGet(urlOS, headers, Math.min(95_000, Math.max(20_000, sobra() - 25_000)));
-        const remotas = extrairLista(data).map(mapearOS);
-
-        const { novas, jaExistiam } = await gravarImportadas(sb, remotas);
-
-        // Depois de trazer as novas, tira da mesa as que o ERP ja fechou. Se
-        // esta parte falhar, a importacao continua valendo -- sao dois
-        // trabalhos independentes, e perder a baixa nao pode derrubar a
-        // entrada de O.S nova.
-        /* O BATIMENTO VAI AQUI, e nao no fim. As O.S novas ja estao gravadas
-           neste ponto; se a baixa ou as entregas travarem no ERP, o app ainda
-           precisa saber que a importacao em si funcionou -- senao o vigia
-           acusa "importacao parada" com a importacao tendo funcionado. */
-        const parcial = { em: new Date().toISOString(), ok: true, novas, total: remotas.length, jaExistiam, duplicatasRemovidas: 0 };
-        await gravarBatimento(parcial).catch(() => {});
-
-        let baixa: any = null;
-        if (sobra() < 25_000) {
-          baixa = { ok: false, pulado: "sem tempo nesta rodada (ERP lento); tenta na próxima hora" };
-        } else try {
-          baixa = await baixaAutomatica(sb, creds.base, creds.publicKey, headers, { simular: false, prazoMs: Math.min(60_000, sobra() - 15_000) });
-        } catch (e) {
-          baixa = { ok: false, erro: semCredencial((e as Error)?.message || e) };
-        }
+        const remotas = await buscarCarteiraCompleta(creds.base, creds.publicKey, headers, datafinal);
+        const conciliacao = await reconciliarCarteira(sb, remotas);
+        const {novas,jaExistiam} = conciliacao;
+        const parcial = {em:new Date().toISOString(),ok:true,...conciliacao,duplicatasRemovidas:0};
+        await gravarBatimento(parcial);
+        const baixa = {ok:conciliacao.conflitosCarteira===0,abertasNoPcp:remotas.length,conferidas:remotas.length,semNoticiaDoErp:0,baixadas:conciliacao.arquivadas,restauradas:conciliacao.restauradas,carteiraCompleta:true};
 
         // Renova o mes corrente de "entregues" (valor entregue da tela de
         // Entregas) na mesma hora: uma consulta a mais ao ERP por hora, e a

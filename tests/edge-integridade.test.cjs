@@ -65,3 +65,42 @@ test('remarcação limpa confirmação anterior e liberação do veículo',async
  const r=await e.call({action:'upsert',os:{id:'1',rev:1,instalacao:{data:'2026-09-20'},confirmacao:'Confirmado',confEm:'2026-09-19T10:00:00Z',carroLiberado:true}},{papel:'pcp'});
  assert.equal(r.os.confirmacao,'');assert.equal(r.os.confEm,'');assert.equal(r.os.carroLiberado,false);
 });
+test('carteira completa restaura exclusão, importa pendente e arquiva fora do ERP sem perder equipe',async()=>{
+ const morta={...row('mub-1',{numero:'1',origemMubisys:true,equipe:['Ana'],fotosRetornoIds:['foto']}),apagado:true};
+ const fora=row('mub-2',{numero:'2',origemMubisys:true,equipe:['Bia'],saidaEm:'2026-09-01T10:00:00Z'});
+ const manual=row('local',{numero:'local',equipe:['Ana']});
+ const e=await edge('pcp-mubisys',{pcp_registros:[morta,fora,manual]});
+ const r=await e.run(`reconciliarCarteira(sb,[{numero:'1',cliente:'Cliente'},{numero:'3',cliente:'Pendente'}])`);
+ assert.equal(r.restauradas,1);assert.equal(r.arquivadas,1);assert.equal(r.novas,1);
+ assert.equal(e.db.pcp_registros[0].apagado,false);assert.deepEqual(e.db.pcp_registros[0].registro.equipe,['Ana']);
+ assert.deepEqual(e.db.pcp_registros[0].registro.fotosRetornoIds,['foto']);
+ assert.equal(e.db.pcp_registros[1].registro.baixaAutoERP.status,'FORA DA CARTEIRA ABERTA');
+ assert.equal(e.db.pcp_registros[1].registro.saidaEm,'2026-09-01T10:00:00Z');
+ assert.equal(e.db.pcp_registros[2].registro.finalizadaEm,undefined);
+ assert.equal(e.db.pcp_meta[0].valor.antes.length,2);
+ const deNovo=await e.run(`reconciliarCarteira(sb,[{numero:'1',cliente:'Cliente'},{numero:'3',cliente:'Pendente'}])`);
+ assert.equal(deNovo.arquivadas,0);assert.equal(deNovo.restauradas,0);assert.equal(deNovo.novas,0);
+});
+test('conciliação recusa lista vazia',async()=>{
+ const e=await edge('pcp-mubisys',{pcp_registros:[row('1',{numero:'1',origemMubisys:true})]});
+ await assert.rejects(e.run('reconciliarCarteira(sb,[])'),/inválida/);
+ assert.equal(e.db.pcp_registros[0].registro.finalizadaEm,undefined);
+});
+test('conciliação usa quatro situações e espera todas antes de gravar',async()=>{
+ const e=await edge('pcp-mubisys');
+ e.run(`erpGet=async url=>{const s=new URL(url).searchParams.get('status');return s==='PRODUCAO'?[{numero:'1'}]:s==='CONCLUIDO'?[{numero:'2'},{numero:'1'}]:s==='PENDENTE'?[{numero:'3'}]:[{numero:'4'}]}`);
+ const r=await e.run(`buscarCarteiraCompleta('https://erp.invalid','key',{},'2026-09-21')`);
+ assert.deepEqual(Array.from(r,x=>x.numero).sort(),['1','2','3','4']);
+ e.run(`erpGet=async url=>{if(new URL(url).searchParams.get('status')==='PAUSADO')throw Error('indisponível');return [{numero:'1'}]}`);
+ await assert.rejects(e.run(`buscarCarteiraCompleta('https://erp.invalid','key',{},'2026-09-21')`),/indisponível/);
+ assert.equal(e.db.pcp_registros.length,0);
+});
+
+test('conciliação preserva edição concorrente e informa conflito',async()=>{
+ const e=await edge('pcp-mubisys',{pcp_registros:[row('1',{numero:'1',origemMubisys:true,equipe:['Ana']})]});
+ e.cliente.beforeWrite=db=>{db.pcp_registros[0].atualizado_em='mais-recente';db.pcp_registros[0].registro.equipe=['Bia'];};
+ const r=await e.run("reconciliarCarteira(sb,[{numero:'2',cliente:'Nova'}])");
+ assert.equal(r.conflitosCarteira,1);assert.equal(r.arquivadas,0);
+ assert.deepEqual(e.db.pcp_registros[0].registro.equipe,['Bia']);
+ assert.equal(e.db.pcp_registros[0].registro.finalizadaEm,undefined);
+});
