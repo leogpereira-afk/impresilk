@@ -13,7 +13,7 @@ const STORE = (() => {
     VALORES:    'impresilk_inst_valores',
     ELENCO:     'impresilk_inst_elenco',
     ENTREGUES:  'impresilk_inst_entregues',
-    CURSOR:     'impresilk_inst_cursor',   // carimbo do servidor do ultimo pull
+    CURSOR:     'impresilk_inst_cursor_v2',   // carimbo do servidor do ultimo pull
     CFGCONFLITO:'impresilk_inst_cfgconflito',
     CFGVER:     'impresilk_inst_cfgver'    // versao da config que o aparelho tem
   };
@@ -614,7 +614,7 @@ const STORE = (() => {
     const revR = typeof remote.rev === 'number' ? remote.rev : null;
     const revL = typeof atual?.rev === 'number' ? atual.rev : null;
     return !atual || ((revR !== null && revL !== null)
-      ? revR > revL
+      ? (revR > revL || (revR === revL && new Date(remote.atualizadoEm || 0) > new Date(atual.atualizadoEm || 0)))
       : new Date(remote.atualizadoEm || 0) > new Date(atual.atualizadoEm || 0));
   };
 

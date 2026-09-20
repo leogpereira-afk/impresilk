@@ -86,7 +86,7 @@ test('service worker remove apenas caches deste sistema',async()=>{
    regra nova: com cursor fresco o app pede só o que mudou; lápide de outro
    aparelho some daqui; edição pendente nunca sai nem é sobrescrita; sem
    cursor (ou com ele velho) vem a lista completa POR ESCOPO. */
-const CURSOR = 'impresilk_inst_cursor';
+const CURSOR = 'impresilk_inst_cursor_v2';
 function comCursor(o, em) { o.ls.set(CURSOR, JSON.stringify({ em })); return o; }
 
 test('com cursor fresco o pull pede só o que mudou (since) e guarda o carimbo do SERVIDOR', async () => {
@@ -240,4 +240,11 @@ test('mês legado não fica fresco e invisível: substitui pelo pacote guardado 
   await s.pronto();assert.equal(s.entreguesMes(mes),null);assert.equal(s.entreguesFresco(mes),false);
   await s.pullEntreguesLote([mes]);assert.equal(s.entreguesMes(mes).v,3);assert.equal(s.entreguesMes(mes).os[0].valor,120);assert.equal(s.entreguesFresco(mes),true);
   assert.deepEqual(chamadas.map(q=>q.action),['entreguesMeses']);
+});
+
+for (const incremental of [false, true]) test(`baixa ERP com mesma revisão atualiza carteira (${incremental ? 'incremental' : 'completo'})`, async () => {
+  const o = store({lista:[{id:'a',rev:3,atualizadoEm:'2026-09-19T10:00:00Z'}], responder:()=>({os:[{id:'a',rev:3,atualizadoEm:'2026-09-20T10:00:00Z',finalizadaEm:'2026-09-20T10:00:00Z'}]})});
+  if(incremental) comCursor(o,new Date().toISOString());
+  await o.s.pronto(); await o.s.pull();
+  assert.ok(o.s.getOS('a').finalizadaEm);
 });
