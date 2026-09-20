@@ -4622,6 +4622,8 @@ async function pintarAcessos(el) {
 /* ── Saúde da conexão: nuvem OK? importação automática rodando? fila local? ─ */
 function imprimirAnalisePCP(titulo,elemento,periodo,fonteApuracao) {
   const copia = elemento.cloneNode(true);
+  copia.querySelectorAll('details').forEach(n=>{if(n.querySelector('[data-rel-area]'))n.remove();});
+  copia.querySelectorAll('.rel-ent-indicador').forEach(n=>{const d=document.createElement('div');d.className=n.className;d.style.cssText=n.style.cssText;d.innerHTML=n.innerHTML;n.replaceWith(d);});
   copia.querySelectorAll('button,input,select,.filter-bar,.perf-toolbar').forEach(n => { if(n.matches('button[data-os-id],button[data-perf-os],button[data-rel-ponto]')) n.replaceWith(document.createTextNode(n.textContent)); else n.remove(); });
   copia.querySelectorAll('.painel-bloco-corpo').forEach(n=>n.hidden=false);
   copia.querySelectorAll('details').forEach(n => n.open = true);

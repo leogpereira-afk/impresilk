@@ -71,3 +71,12 @@ test('cards e relatório usam somente valor confirmado e filtro de período é �
  const prod=casa.slice(casa.indexOf('function produtividadeHTML()'),casa.indexOf('/* ── Retrabalho cruzado'));
  assert.ok(!prod.includes("filtroPeriodoHTML('_fPerf')"));
 });
+
+test('dossiê de equipe usa participantes de cada entrega, avulsos e valores só confirmados',()=>{
+ const a={chave:'a',nome:'Ana',percentual:60},b={chave:'b',nome:'Bia',percentual:40},c={chave:'c',nome:'Caio',percentual:40};
+ const registros=[{id:'1',equipeId:'x',equipeNome:'Horizonte',membros:[a,b],confirmado:true,valor:100,os:{retrabalho:true}},{id:'2',equipeId:'x',equipeNome:'Horizonte',membros:[a,c],confirmado:false,valor:500},{id:'3',membros:[{...c,percentual:100}],confirmado:true,valor:null}];
+ const [e,avulsa]=P.dossie(registros);assert.equal(e.registros.length,2);assert.equal(e.membros.length,3);assert.equal(e.valor,100);assert.equal(e.confirmadas,1);assert.equal(e.retrabalhos,1);assert.equal(e.membros.find(p=>p.chave==='a').equivalentes,.6);assert.equal(e.membros.find(p=>p.chave==='c').equivalentes,0);assert.equal(avulsa.semValor,1);assert.equal(avulsa.nome,'Composição avulsa');
+});
+test('dossiê não atribui equipe ou valor a percentuais inválidos',()=>{
+ assert.deepEqual(P.dossie([{membros:[],valor:100,confirmado:true},{membros:[{chave:'a',nome:'Ana',percentual:80}],valor:100,confirmado:true}]),[]);
+});

@@ -23,13 +23,14 @@ base('111',{instalacao:{data:deslocar(-4)},liberadoPCP:false,previsaoEntrega:des
 ];
 const APP_VERSAO='v106 · prévia'; const AUTH={dono:()=>({nome:'Ana',papel:'montagem'}),temCracha:()=>true,listarContas:async()=>({contas:[]})};
 const cfg={instaladores:['Ana','Bia'],responsaveis:['Responsável de teste'],gerentes_montagem:[],veiculos:['Carro 1','Carro 2'],ferramentas:[],suprimentos:[],causasRetrabalho:['Erro de medida'],funcionarios:[],niveis:{}};
+cfg.performancePCP={equipes:[{id:'teste-equipe',nome:'Horizonte · demonstração',emblema:'🦅',membros:[{chave:'Ana',nome:'Ana'},{chave:'Bia',nome:'Bia'}]}],participacoes:[{id:'108',equipeId:'teste-equipe',equipeNome:'Horizonte · demonstração',emblema:'🦅',membros:[{chave:'Ana',nome:'Ana',percentual:60},{chave:'Bia',nome:'Bia',percentual:40}],por:'Gestor de teste',em:hoje,obs:'Exemplo fictício para revisão visual'}]};
 const revisoesPreview=[];
 async function previewApi(body){
  if(body.action==='equipeHistorico')return {desdeQuando:'2025-01-01',meses:body.meses.map(m=>({mes:m,total:22+Number(m.slice(5)),porArea:{Acabamento:10,Serralheria:8,'Comercial e Atendimento':8},piso:false}))};
  if(body.action==='relatorioEntregas')return {ano:body.ano,de:body.ano+'-01-01',ate:hoje,consultadoEm:new Date().toISOString(),recebimentosEm:new Date().toISOString(),notas:{entregue:'DADOS FICTÍCIOS — demonstração de entregas.',vendido:'DADOS FICTÍCIOS — O.S. por cadastro.',recebido:'DADOS FICTÍCIOS — pagamentos.',retrabalho:'DADOS FICTÍCIOS — taxa das instalações registradas.'},meses:Array.from({length:12},(_,i)=>({mes:body.ano+'-'+String(i+1).padStart(2,'0'),futuro:i+1>Number(hoje.slice(5,7)),entregue:i===3?null:120000+i*27000+Math.sin(i)*50000,vendido:180000+i*18000,recebido:140000+i*23000,retrabalho:8-i*.5,baseRetrabalho:40,entregasEm:new Date().toISOString(),entregas:[{numero:'TESTE-101',cliente:'Demonstração',data:hoje,valor:100}],vendas:[],retrabalhos:[]}))};
  if(body.action==='performancePeriodo'){
   const registros=lista.filter(o=>o.finalizadaEm && !o.baixaAutoERP && o.tipo!=='interno').map(o=>{
-   const p=cfg.performancePCP?.participacoes?.find(p=>p.id===o.id);return {id:o.id,numero:o.numero,cliente:o.cliente,dia:hoje,valor:100,origemValor:'Simulação local',membros:p?.membros || (o.equipe||[]).map(n=>({chave:n,nome:n,percentual:100/o.equipe.length})),confirmado:!!p,equipeId:p?.equipeId||'',equipeNome:p?.equipeNome||'',emblema:p?.emblema||'🤝'};
+   const p=cfg.performancePCP?.participacoes?.find(p=>p.id===o.id);return {id:o.id,numero:o.numero,cliente:o.cliente,dia:hoje,valor:100,origemValor:'Simulação local',membros:p?.membros || (o.equipe||[]).map(n=>({chave:n,nome:n,percentual:100/o.equipe.length})),confirmado:!!p,equipeId:p?.equipeId||'',equipeNome:p?.equipeNome||'',emblema:p?.emblema||'🤝',por:p?.por||'',em:p?.em||'',obs:p?.obs||'',retrabalho:!!o.retrabalho};
   });return {completo:true,periodo:{de:body.de,ate:body.ate},hash:'simulacao',registros,consultadoEm:new Date().toISOString(),fonte:'DADOS FICTÍCIOS — simulação local'};
  }
  if(body.action==='performanceFechamentos')return {fechamentos:revisoesPreview};
