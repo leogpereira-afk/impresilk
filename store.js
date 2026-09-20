@@ -594,7 +594,10 @@ const STORE = (() => {
     try {
       const cursor = lsGet(K.CURSOR, null);
       const idade = cursor && cursor.em ? Date.now() - new Date(cursor.em).getTime() : Infinity;
-      const completo = !!opts.completo || !cursor || !cursor.em || idade > 6 * 3600000;
+      // O cursor incremental avança a cada consulta; não pode adiar a reconciliação.
+      const ultimaCompleta = Number(lsGet('impresilk_inst_conferencia_completa', 0));
+      const conferir = !ultimaCompleta || Date.now() - ultimaCompleta >= 15 * 60000;
+      const completo = !!opts.completo || conferir || !cursor || !cursor.em || idade > 6 * 3600000;
       if (!completo) {
         const r = await _pullIncremental(cursor.em, onRefresh);
         if (!r.cheio) return r;
@@ -698,6 +701,7 @@ const STORE = (() => {
       if (typeof onRefresh === 'function') onRefresh();
     }
     lsSet(K.CURSOR, { em: agora, modo: 'completo' });
+    lsSet('impresilk_inst_conferencia_completa', Date.now());
     lsSet(K.LASTSYNC, new Date().toISOString());
     const q = getQueue();
     _notifySync(q.length ? 'pending' : 'ok', q.length);

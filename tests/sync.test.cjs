@@ -87,7 +87,7 @@ test('service worker remove apenas caches deste sistema',async()=>{
    aparelho some daqui; edição pendente nunca sai nem é sobrescrita; sem
    cursor (ou com ele velho) vem a lista completa POR ESCOPO. */
 const CURSOR = 'impresilk_inst_cursor_v2';
-function comCursor(o, em) { o.ls.set(CURSOR, JSON.stringify({ em })); return o; }
+function comCursor(o, em) { o.ls.set(CURSOR, JSON.stringify({ em })); o.ls.set('impresilk_inst_conferencia_completa', JSON.stringify(Date.now())); return o; }
 
 test('com cursor fresco o pull pede só o que mudou (since) e guarda o carimbo do SERVIDOR', async () => {
   const pedidos = [];
@@ -247,4 +247,16 @@ for (const incremental of [false, true]) test(`baixa ERP com mesma revisão atua
   if(incremental) comCursor(o,new Date().toISOString());
   await o.s.pronto(); await o.s.pull();
   assert.ok(o.s.getOS('a').finalizadaEm);
+});
+
+test('reconferência completa vence cursor incremental fresco após quinze minutos', async () => {
+ const pedidos=[];
+ const o=comCursor(store({lista:[{id:'fantasma'}],responder:q=>{pedidos.push(q);return {os:[],agora:new Date().toISOString()};}}),new Date().toISOString());
+ o.ls.set('impresilk_inst_conferencia_completa',JSON.stringify(Date.now()-16*60000));
+ await o.s.pronto(); await o.s.pull();
+ assert.equal(pedidos[0].escopo,'recentes');
+ assert.equal(o.s.getAllOS().length,0);
+ assert.ok(Number(o.ls.get('impresilk_inst_conferencia_completa'))>Date.now()-10000);
+ await o.s.pull();
+ assert.ok(pedidos[1].since,'retoma incremental após conferência bem sucedida');
 });
