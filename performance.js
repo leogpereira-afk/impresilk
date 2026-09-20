@@ -15,14 +15,28 @@ const PERF = (() => {
     return '';
   };
   const composicao = membros => unicos(membros).map(p => String(p.chave)).sort().join('|');
+  // Rateio em centavos: distribui o resíduo pelas maiores frações, com desempate estável.
+  const ratearCentavos = (valor, membros) => {
+    if (valor == null) return membros.map(() => null);
+    const total = Math.round(Math.abs(valor) * 100), sinal = valor < 0 ? -1 : 1;
+    const partes = membros.map((p,i) => {
+      const exato = total * p.percentual / 100;
+      return {i, chave:String(p.chave), centavos:Math.floor(exato), resto:exato-Math.floor(exato)};
+    });
+    let falta = total - partes.reduce((s,p)=>s+p.centavos,0);
+    const ordem = [...partes].sort((a,b)=>b.resto-a.resto || a.chave.localeCompare(b.chave));
+    for(let i=0;i<falta;i++) ordem[i % ordem.length].centavos++;
+    return partes.map(p=>sinal*p.centavos);
+  };
   const resumir = registros => {
     const pessoas = new Map(), equipes = new Map();
     for (const r of registros) {
       if (validar(r.membros)) continue;
-      for (const p of r.membros) {
+      const centavos = ratearCentavos(r.valor, r.membros);
+      for (const [indice,p] of r.membros.entries()) {
         const x = pessoas.get(p.chave) || {chave:p.chave,nome:p.nome,os:0,equivalentes:0,valor:0,semValor:0,confirmadas:0};
         x.os++; if(r.confirmado) x.confirmadas++; x.equivalentes += p.percentual/100;
-        if (r.valor == null) x.semValor++; else x.valor += r.valor*p.percentual/100;
+        if (r.valor == null) x.semValor++; else x.valor = (Math.round(x.valor*100) + centavos[indice])/100;
         pessoas.set(p.chave,x);
       }
       // A equipe leva cada O.S. uma vez, mesmo com participação individual.
@@ -48,7 +62,7 @@ const PERF = (() => {
     }
     return [...grupos.values()].map(g=>({...g,membros:[...g.membros.values()]})).sort((a,b)=>b.registros.length-a.registros.length || a.nome.localeCompare(b.nome));
   };
-  return {unicos,iguais,validar,composicao,resumir,incluiPessoa,manterPesos,dossie};
+  return {unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,manterPesos,dossie};
 })();
 if (typeof module !== 'undefined') module.exports = PERF;
 

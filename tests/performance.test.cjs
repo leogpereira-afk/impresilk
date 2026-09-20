@@ -80,3 +80,12 @@ test('dossiê de equipe usa participantes de cada entrega, avulsos e valores só
 test('dossiê não atribui equipe ou valor a percentuais inválidos',()=>{
  assert.deepEqual(P.dossie([{membros:[],valor:100,confirmado:true},{membros:[{chave:'a',nome:'Ana',percentual:80}],valor:100,confirmado:true}]),[]);
 });
+test('rateio conserva cada centavo, inclusive valores pequenos e ordem dos participantes',()=>{
+ for(const n of [1,3,7,23]) for(const valor of [0,0.01,8.99,1256.85,-8.99]) {
+  const membros=P.iguais(pessoas(n));
+  const resumo=P.resumir([{valor,membros,confirmado:true}]);
+  assert.equal(resumo.pessoas.reduce((s,p)=>s+Math.round(p.valor*100),0),Math.round(valor*100));
+  const invertido=P.resumir([{valor,membros:[...membros].reverse(),confirmado:true}]);
+  assert.deepEqual(Object.fromEntries(resumo.pessoas.map(p=>[p.chave,p.valor])),Object.fromEntries(invertido.pessoas.map(p=>[p.chave,p.valor])));
+ }
+});
