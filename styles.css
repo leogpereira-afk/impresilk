@@ -2241,3 +2241,5 @@ body.tv-ligada { overflow:hidden; }
 #panel-entregas .ent-controles .casa-filtros label { font-size: 13px; gap: 5px; }
 .ent-controles .casa-vista { margin-left: auto; }
 @media(max-width: 600px) { .ent-controles { padding: 14px; } .ent-periodo label { flex: 1 1 110px; } .ent-periodo select { min-width: 0; width: 100%; } .ent-intervalo { width: 100%; margin: 0; } .ent-controles .casa-filtros label { width: 100%; } .ent-controles .casa-filtros select { max-width: 100%; width: 100%; } }
+
+@media(max-width: 600px) { #panel-entregas .casa-kpi-cards { grid-template-columns: 1fr; } #panel-entregas .casa-kpi .badge { white-space: normal; } }
