@@ -584,50 +584,16 @@ function anosEntregas() {
 }
 function chipsPeriodoEntregas(f) {
   const hoje = OPERACAO.dia(new Date());
-  const anoHoje = Number(hoje.slice(0, 4));
-  const alvos = [
-    { id: '30d', rotulo: 'Últimos 30 dias', de: OPERACAO.somarDias(hoje, -29), ate: hoje },
-    { id: 'mes', rotulo: 'Este mês', de: hoje.slice(0, 7) + '-01', ate: hoje },
-    ...anosEntregas().map(a => ({ id: 'a' + a, rotulo: String(a), de: a + '-01-01', ate: a === anoHoje ? hoje : a + '-12-31' })),
-  ];
-  const linhaAnos = `<div class="casa-chips-periodo">${alvos.map(a =>
-    `<button type="button" class="casa-chip-per ${f.de === a.de && f.ate === a.ate ? 'on' : ''}" data-per-de="${a.de}" data-per-ate="${a.ate}">${esc(a.rotulo)}</button>`
-  ).join('')}</div>`;
-
-  /* OS MESES DO ANO EM FOCO, na fileira de baixo (pedido do dono, 15/09/2026:
-     "colocar o chip dos meses aqui embaixo").
-     Chegar em março de 2025 exigia escolher o ano e depois digitar duas datas.
-     Agora: toca no ano, toca no mês.
-
-     O ANO EM FOCO SAI DO PERÍODO ESCOLHIDO, não de um estado próprio — assim a
-     fileira de meses sempre concorda com o que está aceso em cima, inclusive
-     quando o período veio das datas digitadas ou de um clique na grade do
-     histórico. Sem ano legível (período atravessando dois anos), mostra o ano
-     corrente, que é onde a pessoa está.
-
-     O PONTO marca mês que tem pacote guardado no servidor. Sem ele, um mês
-     nunca carregado e um mês sem venda pareceriam a mesma coisa — e o primeiro
-     custa 25-40 s de ERP para descobrir. */
-  const anoFoco = (String(f.de || '').slice(0, 4) === String(f.ate || '').slice(0, 4) && /^\d{4}$/.test(String(f.de || '').slice(0, 4)))
-    ? Number(String(f.de).slice(0, 4))
-    : anoHoje;
-  const resumo = STORE.resumoEntregues ? STORE.resumoEntregues() : null;
-  const comPacote = new Set(((resumo && resumo.meses) || []).map(l => l.mes));
-  const linhaMeses = `<div class="casa-chips-periodo casa-chips-mes">${MES_CURTO.map((rot, i) => {
-    const mm = String(i + 1).padStart(2, '0');
-    const k = `${anoFoco}-${mm}`;
-    const ultimo = new Date(Date.UTC(anoFoco, i + 1, 0)).getUTCDate();
-    const de = `${k}-01`;
-    const ate = k === hoje.slice(0, 7) ? hoje : `${k}-${String(ultimo).padStart(2, '0')}`;
-    // Mês que ainda não começou não é escolha: fica visível e desligado, para a
-    // fileira não mudar de tamanho ao trocar de ano.
-    const futuro = k > hoje.slice(0, 7);
-    const aceso = f.de === de && f.ate === ate;
-    return `<button type="button" class="casa-chip-per ${aceso ? 'on' : ''}${k === hoje.slice(0, 7) ? ' hoje' : ''}"
-      ${futuro ? 'disabled title="ainda não aconteceu"' : `data-per-de="${de}" data-per-ate="${ate}"`}>${rot}${comPacote.has(k) ? '<i class="casa-chip-ponto" title="mês já carregado"></i>' : ''}</button>`;
-  }).join('')}<span class="casa-chips-nota">${anoFoco}</span></div>`;
-
-  return linhaAnos + linhaMeses;
+  const ano = (f.de || hoje).slice(0, 4);
+  const mesmoMes = f.de && f.ate && f.de.slice(0, 7) === f.ate.slice(0, 7);
+  const mes = mesmoMes ? f.de.slice(5, 7) : '';
+  return `<div class="ent-periodo">
+    <label>Ano<select id="ent-ano">${anosEntregas().map(a => `<option value="${a}" ${String(a) === ano ? 'selected' : ''}>${a}</option>`).join('')}</select></label>
+    <label>Mês<select id="ent-mes"><option value="">Ano inteiro</option>${MES_CURTO.map((m, i) => { const n = String(i + 1).padStart(2, '0'); return `<option value="${n}" ${n === mes ? 'selected' : ''} ${ano + '-' + n > hoje.slice(0, 7) ? 'disabled' : ''}>${m}</option>`; }).join('')}</select></label>
+    <button type="button" class="btn-ghost btn-sm" data-per-de="${hoje.slice(0, 7)}-01" data-per-ate="${hoje}">Este mês</button>
+    <details class="ent-personalizar"><summary>Outras datas</summary><div class="periodo-filtro" data-pf="_fEnt"><label>De<input type="date" class="pf-de" value="${esc(f.de || '')}"></label><label>Até<input type="date" class="pf-ate" value="${esc(f.ate || '')}"></label></div></details>
+    <span class="ent-intervalo">${esc(f.de ? f.de.split('-').reverse().join('/') : 'Início')} — ${esc(f.ate ? f.ate.split('-').reverse().join('/') : 'hoje')}</span>
+  </div>`;
 }
 
 /* TODOS OS MESES QUE EXISTEM, do primeiro ano que o banco conhece até hoje. */
@@ -662,8 +628,8 @@ function barraCargaEntregas() {
       <small>Pode sair da tela: o carregamento continua sozinho.</small></p>`;
   }
   if (!faltam) {
-    return `<p class="metricas-nota casa-carga">✅ Todos os <strong>${meses.length}</strong> meses estão gravados neste aparelho${p && p.erros.length ? ` · <span class="badge sem-valor">${p.erros.length} mês(es) não responderam</span>` : ''}.
-      <button class="btn-ghost btn-xs edit-only" data-carga-tudo="1">Conferir de novo</button></p>`;
+    return `<p class="metricas-nota casa-carga"><strong>${meses.length}</strong> meses disponíveis neste aparelho. Armazenamento não comprova a integridade dos valores históricos${p && p.erros.length ? ` · <span class="badge sem-valor">${p.erros.length} mês(es) não responderam</span>` : ''}.
+      <button class="btn-ghost btn-xs edit-only" data-carga-tudo="1">Atualizar cópia local</button></p>`;
   }
   return `<p class="metricas-nota casa-carga"><strong>${guardados}</strong> de ${meses.length} meses gravados neste aparelho · faltam <strong>${faltam}</strong>.
     Mês que não está aqui não muda a tela quando você toca no chip: ele precisa ser baixado primeiro.
@@ -1332,18 +1298,22 @@ function renderEntregas() {
   el.innerHTML = `
     <div class="casa-pagina">
       <div class="casa-pagina-head">
-        <div><h2>Entregas</h2><p><strong>Valor</strong> = o que o ERP marcou ENTREGUE, pela data de entrega, todas as O.S (líquido de desconto). <strong>Entrega realizada</strong> = instalação registrada no PCP (finalizada, ou baixa do ERP lançada à mão). Cliente retira só soma valor.</p></div>
+        <div><h2>Entregas</h2><p>Acompanhe as O.S. entregues, os valores e a equipe responsável.</p></div>
       </div>
       <div class="casa-kpi-cards">${kpiPeriodo}${kpiHTML(kHoje, 'entregue hoje')}${kpiHTML(kMes, 'entregue no mês')}${kpiHTML(kAno, 'entregue no ano')}</div>
+      <details class="ent-dados"><summary>Origem dos valores e sincronização</summary>
+      <p>Valores líquidos de desconto das O.S. marcadas como entregues no ERP, pela data de entrega. Não representam recebimentos ou lucro. Instalações realizadas dependem do registro no PCP; retiradas pelo cliente entram apenas nos valores.</p>
       <p class="metricas-nota">Registradas no PCP neste mês: <strong>${registradasMes}</strong> instalaç${registradasMes === 1 ? 'ão' : 'ões'}${cls.aLancar.length ? ` · a lançar: <strong>${cls.aLancar.length}</strong>` : ''}. Fonte do valor: ERP${STORE.entreguesMes(hoje.slice(0, 7)) ? `, atualizado ${new Date(STORE.entreguesMes(hoje.slice(0, 7)).em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' (carregando…)'}.</p>
-      ${chipsPeriodoEntregas(f)}
       ${barraCargaEntregas()}
-      <div class="filter-bar">${filtroPeriodoHTML('_fEnt')}</div>
+      </details>
+      <section class="ent-controles" aria-label="Filtros de entregas">
+      ${chipsPeriodoEntregas(f)}
       <div class="casa-filtros">
         <label>Técnico <select id="ent-tecnico"><option value="">Todos</option>${tecnicos.map(t => opt(t, tecnico)).join('')}</select></label>
         <label>Tipo de serviço <select id="ent-tipo"><option value="">Todos</option>${tipos.map(t => opt(t, tipo)).join('')}</select></label>
         <span class="casa-vista"><button class="btn-ghost btn-sm ${STATE._entVista === 'tabela' ? 'active' : ''}" data-ent-vista="tabela">Tabela</button><button class="btn-ghost btn-sm ${STATE._entVista === 'cards' ? 'active' : ''}" data-ent-vista="cards">Cards</button></span>
       </div>
+      </section>
       ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', vazioEntregas(per).titulo, vazioEntregas(per).dica)}
       ${lista.length ? prazoEntregasHTML(lista.map(x => x.erp), porNumero) : ''}
       ${relatoriosEntregasHTML(lista.map(x => x.erp), porNumero, estadoPCP)}
@@ -1357,6 +1327,18 @@ function renderEntregas() {
       </section>
     </div>`;
   wireFiltroPeriodo(el, '_fEnt', renderEntregas);
+  const mudarMes = () => {
+    const ano = el.querySelector('#ent-ano').value;
+    let mes = el.querySelector('#ent-mes').value;
+    if (mes && ano + '-' + mes > hoje.slice(0, 7)) mes = hoje.slice(5, 7);
+    const de = mes ? `${ano}-${mes}-01` : `${ano}-01-01`;
+    const fim = mes ? `${ano}-${mes}-${String(new Date(Date.UTC(Number(ano), Number(mes), 0)).getUTCDate()).padStart(2, '0')}` : `${ano}-12-31`;
+    STATE._fEnt = { de, ate: fim > hoje ? hoje : fim };
+    renderEntregas();
+  };
+  el.querySelector('#ent-ano').onchange = mudarMes;
+  el.querySelector('#ent-mes').onchange = mudarMes;
+
   wireQuadrosCasa(el);
   el.querySelectorAll('[data-per-de]').forEach(b => b.onclick = () => {
     STATE._fEnt = { de: b.dataset.perDe, ate: b.dataset.perAte };

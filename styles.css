@@ -2223,3 +2223,21 @@ body.tv-ligada { overflow:hidden; }
 #panel-painel .painel-bloco{border-radius:16px;overflow:hidden}#panel-painel .filter-bar{gap:10px;padding:14px;background:var(--surface,#fff);border-radius:14px}
 @media(max-width:680px){.perf-summary{grid-template-columns:1fr}.perf-summary>div{padding:14px;flex-direction:row;align-items:center;gap:18px}.perf-score-grid,.perf-team-grid{grid-template-columns:1fr}.perf-entregas{padding:14px}.perf-peso{grid-template-columns:1fr 85px 18px}.perf-toolbar{align-items:flex-start}.perf-toolbar>span{font-size:.85rem}.casa-mes-nav,.casa-dia-nav{flex-wrap:wrap}#perf-dialog{padding:18px}.perf-summary b{font-size:1.5rem}}
 @media print{.perf-score-grid{grid-template-columns:repeat(3,1fr)}.perf-score,.perf-summary>div{break-inside:avoid;box-shadow:none}.perf-config,.perf-toolbar,.perf-entregas>label{display:none}.perf-emblema{background:transparent}.perf-score>strong{font-size:1.4rem}.casa-tabela tr{break-inside:avoid}}
+
+/* Entregas: uma única área de filtros e diagnóstico sob demanda. */
+#panel-entregas .casa-pagina { gap: 18px; }
+#panel-entregas .casa-pagina-head p { max-width: 760px; margin-bottom: 0; }
+.ent-controles { background: #fff; border: 1px solid var(--border, #e2e8f0); border-radius: 16px; padding: 18px 20px; }
+.ent-periodo { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
+.ent-periodo label { display: grid; gap: 5px; color: var(--muted, #64748b); font-size: 13px; font-weight: 600; }
+.ent-periodo select, .ent-controles .casa-filtros select { min-height: 42px; border: 1px solid #dce3e9; border-radius: 10px; background: #f8fafc; padding: 8px 34px 8px 12px; color: #203849; font: inherit; }
+.ent-periodo select { min-width: 130px; }
+.ent-intervalo { margin-left: auto; align-self: center; color: #526474; font-size: 13px; }
+.ent-personalizar summary, .ent-dados summary { cursor: pointer; color: #526474; font-size: 13px; padding: 10px 0; }
+.ent-personalizar .periodo-filtro { margin-top: 8px; }
+.ent-dados { border-bottom: 1px solid #dce3e9; }
+.ent-dados p { font-size: 13px; line-height: 1.6; }
+#panel-entregas .ent-controles .casa-filtros { margin: 14px 0 0; padding-top: 14px; border-top: 1px solid #edf0f3; gap: 12px; align-items: end; }
+#panel-entregas .ent-controles .casa-filtros label { font-size: 13px; gap: 5px; }
+.ent-controles .casa-vista { margin-left: auto; }
+@media(max-width: 600px) { .ent-controles { padding: 14px; } .ent-periodo label { flex: 1 1 110px; } .ent-periodo select { min-width: 0; width: 100%; } .ent-intervalo { width: 100%; margin: 0; } .ent-controles .casa-filtros label { width: 100%; } .ent-controles .casa-filtros select { max-width: 100%; width: 100%; } }

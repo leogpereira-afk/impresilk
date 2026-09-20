@@ -926,13 +926,13 @@ test('performance: as duas abas existem e nenhuma seção se perde', () => {
   `);
   const equipe = t.run(`
     STATE._perfAba = 'equipe';
-    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => null };
+    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => ({ value: '' }) };
     document.getElementById = () => el;
     renderPerformanceCasa();
     el.innerHTML`);
   const rel = t.run(`
     STATE._perfAba = 'relatorio';
-    const el2 = { innerHTML: '', querySelectorAll: () => [], querySelector: () => null };
+    const el2 = { innerHTML: '', querySelectorAll: () => [], querySelector: () => ({ value: '' }) };
     document.getElementById = () => el2;
     renderPerformanceCasa();
     el2.innerHTML`);
@@ -957,44 +957,25 @@ test('performance: as duas abas existem e nenhuma seção se perde', () => {
    Pedido do dono: "colocar o chip dos meses aqui embaixo". Chegar em março de
    2025 exigia escolher o ano e digitar duas datas. */
 
-test('chips de Entregas: a fileira de meses segue o ANO escolhido em cima', () => {
-  const t = casa([], { _anosERP: [2026, 2025, 2024] });
-  const html = t.run(`
-    STORE.resumoEntregues = () => null;
-    chipsPeriodoEntregas({ de: '2025-01-01', ate: '2025-12-31' })`);
-  assert.match(html, /data-per-de="2025-03-01" data-per-ate="2025-03-31"/,
-    'março de 2025 tem de ser um toque, não duas datas digitadas');
-  assert.match(html, /casa-chips-nota">2025</, 'a fileira precisa dizer de que ano são estes meses');
-  assert.ok(!/data-per-de="2026-/.test(html.split('casa-chips-mes')[1] || ''),
-    'os meses são do ano em foco, não do corrente');
+test('Entregas: seletor preserva o ano escolhido e não duplica atalhos', () => {
+  const html = casa([], { _anosERP: [2026, 2025, 2024] }).run(`chipsPeriodoEntregas({de:'2025-01-01',ate:'2025-12-31'})`);
+  assert.match(html, /value="2025" selected/);
+  assert.match(html, /value="03"[^>]*>mar/);
+  assert.equal((html.match(/>Este mês</g) || []).length, 1);
+  assert.ok(!html.includes('Últimos 30 dias'));
 });
-
-test('chips de Entregas: mês que ainda não aconteceu fica desligado, não some', () => {
-  const t = casa([], { _anosERP: [2026] });
-  const html = t.run(`
-    STORE.resumoEntregues = () => null;
-    chipsPeriodoEntregas({ de: '2026-01-01', ate: '2026-09-15' })`);
-  const meses = html.split('casa-chips-mes')[1] || '';
-  assert.equal((meses.match(/casa-chip-per/g) || []).length, 12, 'os doze aparecem sempre');
-  assert.match(meses, /disabled title="ainda não aconteceu"/);
-  // Nenhum mês futuro pode ser clicável.
-  assert.ok(!/data-per-de="2026-1[012]/.test(meses), 'out a dez de 2026 ainda não existem');
+test('Entregas: seletor mantém meses futuros indisponíveis', () => {
+  const t = casa([], { _anosERP: [2026] }, null, '2026-09-19T12:00:00-03:00');
+  const html = t.run(`chipsPeriodoEntregas({de:'2026-09-01',ate:'2026-09-19'})`);
+  for (const mes of ['10','11','12']) assert.match(html, new RegExp('value="'+mes+'"[^>]*disabled'));
+  assert.match(html, /data-per-ate="2026-09-19"/);
+  assert.match(html, /value="09" selected/);
 });
-
-test('chips de Entregas: o mês corrente recorta até hoje, não até o fim do mês', () => {
+test('Entregas: armazenamento não afirma conferência financeira', () => {
   const t = casa([], { _anosERP: [2026] });
-  const hoje = t.run(`OPERACAO.dia(new Date())`);
-  const html = t.run(`STORE.resumoEntregues = () => null; chipsPeriodoEntregas({ de: '', ate: '' })`);
-  assert.match(html, new RegExp(`data-per-ate="${hoje}"`),
-    'setembro vai até hoje; até 30/09 prometeria entregas que ainda não aconteceram');
-});
-
-test('chips de Entregas: ponto marca mês já carregado, para não confundir com mês sem venda', () => {
-  const t = casa([], { _anosERP: [2026] });
-  const html = t.run(`
-    STORE.resumoEntregues = () => ({ meses: [{ mes: '2026-03', valor: 1, os: 1 }], faltando: [] });
-    chipsPeriodoEntregas({ de: '2026-01-01', ate: '2026-09-15' })`);
-  assert.equal((html.match(/casa-chip-ponto/g) || []).length, 1, 'só março tem pacote guardado');
+  const html = t.run(`STORE.entreguesMes=()=>({os:[]}); barraCargaEntregas()`);
+  assert.match(html, /não comprova a integridade dos valores históricos/);
+  assert.ok(!html.includes('✅'));
 });
 
 /* ---------------- Seletor de O.S do plantão ----------------
@@ -1062,7 +1043,7 @@ test('plantão: o tipo virou chips de rádio, com o mesmo name', () => {
   const t = casa([], {}, ELENCO);
   const html = t.run(`
     var wireFiltroPeriodo = () => {};
-    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => null };
+    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => ({ value: '' }) };
     document.getElementById = () => el;
     renderPlantoesCasa();
     el.innerHTML`);
@@ -1139,7 +1120,7 @@ test('entregas: o período escolhido ganha cartão próprio, com o nome do mês'
   const html = t.run(`
     STATE._fEnt = { de: '2026-05-01', ate: '2026-05-31' };
     var wireFiltroPeriodo = () => {}; var wireQuadrosCasa = () => {};
-    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => null };
+    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => ({ value: '' }) };
     document.getElementById = () => el;
     renderEntregas();
     el.innerHTML`);
@@ -1152,7 +1133,7 @@ test('entregas: período igual ao mês corrente não ganha cartão repetido', ()
   const html = t.run(`
     STATE._fEnt = { de: '2026-09-01', ate: '2026-09-15' };
     var wireFiltroPeriodo = () => {}; var wireQuadrosCasa = () => {};
-    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => null };
+    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => ({ value: '' }) };
     document.getElementById = () => el;
     renderEntregas();
     el.innerHTML`);
