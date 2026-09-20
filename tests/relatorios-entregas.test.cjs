@@ -34,3 +34,7 @@ test('RH conta quem esteve ativo no mês, preserva desligados e não inclui admi
  const registros=[['a','2025-01-01','2025-01-15'],['b','2025-02-01',''],['c','2099-01-01','']].map(([id,dataAdmissao,dataDesligamento])=>({id,colecao:'colaboradores',apagado:false,registro:{dataAdmissao,dataDesligamento,areaId:'p'}}));
  const e=await edge('pcp-sync',{registros});const r=await e.call({action:'equipeHistorico',meses:['2025-01','2025-02',mes]});assert.equal(r.status,200);assert.equal(r.meses.find(m=>m.mes==='2025-01').total,1);assert.equal(r.meses.find(m=>m.mes==='2025-02').total,1);assert.equal(r.meses.find(m=>m.mes===mes).total,1);
 });
+test('chips recortam resumo e tabelas por mês, com opção de ano completo',()=>{
+ const run=tela();run("REL_ENT.dados={meses:[{mes:'2026-01'},{mes:'2026-02'},{mes:'2026-12',futuro:true}]};REL_ENT.foco='02'");
+ assert.equal(run('relEntMesesVisiveis().length'),1);assert.equal(run('relEntMesesVisiveis()[0].mes'),'2026-02');run("REL_ENT.foco=''");assert.equal(run('relEntMesesVisiveis().length'),2);
+});
