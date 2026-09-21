@@ -1064,10 +1064,29 @@ test('serviços entregues: ano e mês saem do histórico, não do filtro do per�
   ]);
   const html = t.run('servicosEntreguesHTML()');
   for (const ano of ['2024', '2025', '2026']) assert.match(html, new RegExp(ano), 'faltou o ano ' + ano);
-  assert.match(html, /4 entregas no histórico inteiro/);
+  assert.match(html, /4 entregas guardadas no aparelho/);
   /* O ano corrente está pela metade: comparar de igual para igual com um ano
      fechado transformaria calendário em desempenho. */
   assert.match(html, /em curso/);
+});
+
+/* ESTE TESTE GUARDA UMA PROMESSA QUE A TELA NÃO PODE FAZER.
+   Até 21/09/2026 o quadro escrevia "entregas no histórico inteiro" e
+   "entregas desde o começo", e o teste acima prendia essa frase como se fosse
+   a certa -- a ficha de teste finge um histórico de 2024 a 2026 que o
+   aparelho nunca tem, porque ele guarda só a janela de STORE.JANELA_LOCAL_DIAS
+   dias. Na base de produção daquele dia: 743 entregas no total, 464 dentro da
+   janela. O quadro mostrava 464 chamando de "o histórico inteiro".
+   Enquanto ele contar o que está no aparelho, não pode prometer o todo. */
+test('serviços entregues: o quadro não promete histórico que não alcança', () => {
+  const html = casa([
+    fin('1', { finalizadaEm: '2024-03-10T12:00:00' }),
+    fin('2', { finalizadaEm: '2026-09-10T12:00:00' }),
+  ]).run('servicosEntreguesHTML()');
+  assert.doesNotMatch(html, /histórico inteiro/, 'a tela voltou a prometer o histórico inteiro contando só o aparelho');
+  assert.doesNotMatch(html, /desde o começo/, 'a tela voltou a dizer "desde o começo" contando só o aparelho');
+  // E precisa dizer onde está a resposta completa, senão vira só um aviso.
+  assert.match(html, /Entregas/, 'o quadro tem de apontar onde ver o histórico completo');
 });
 
 test('serviços entregues: sem entrega nenhuma não inventa gráfico', () => {
@@ -1088,6 +1107,67 @@ test('retrabalho: dimensão vazia vira frase, não barra de "não informado"', (
   // e o que veio do ERP aparece
   assert.match(html, /Instalação de fachada/);
   assert.match(html, /Por tipo de serviço/);
+});
+
+/* Recorta o quadro de UMA dimensão do HTML do retrabalho, pelo título. Sem
+   isto, procurar uma frase no HTML inteiro confunde o quadro que se quer
+   conferir com os vizinhos, que têm as mesmas frases. */
+function blocoDaDimensao(html, titulo) {
+  const i = html.indexOf('<h4>' + titulo + '</h4>');
+  if (i < 0) return '';
+  const fim = html.indexOf('</div>', i);
+  return html.slice(i, fim < 0 ? html.length : fim);
+}
+
+/* A CAUSA MORA EM DOIS CAMPOS. O formulário do PCP grava `causaRaiz` (lista
+   fixa: Erro humano, Material...); a ficha e o app do instalador gravam
+   `causa` (lista de Configurações: Erro de medida, Falha de fixação...).
+   Esta tela lia só `causaRaiz` e, em 21/09/2026, das 7 O.S de retrabalho da
+   base de produção ZERO tinham `causaRaiz` e 5 tinham `causa` — a tela
+   escrevia "Nenhuma das 3 O.S tem isto preenchido" sobre O.S que tinham o
+   motivo anotado, enquanto a aba Retrabalho mostrava os motivos certos.
+   Afirmar ausência onde há dado faz o dono cobrar preenchimento que já existe
+   em vez de atacar o problema que os dados apontam. */
+test('retrabalho: causa preenchida pelo instalador conta, não vira "ninguém preencheu"', () => {
+  const t = casa([
+    fin('30', { retrabalho: true, causa: 'Falha de fixação', servico: 'Letreiro' }),
+    fin('31', { retrabalho: true, causa: 'Falha de fixação', servico: 'Letreiro' }),
+    fin('32', { retrabalho: true, causa: 'Erro de medida', servico: 'Adesivo' }),
+  ], FICHAS);
+  const html = t.run(`retrabalhoHTML({de:'2026-09-01',ate:'2026-09-30'})`);
+  assert.match(html, /Falha de fixação/, 'a causa que a equipe escreveu não apareceu');
+  assert.match(html, /Erro de medida/);
+  /* A frase "Nenhuma das N O.S tem isto preenchido" é LEGÍTIMA para etapa de
+     origem e responsável, que continuam vazias nesta ficha de propósito. Por
+     isso a conferência tem de olhar só o pedaço da CAUSA -- uma busca no HTML
+     inteiro acharia a frase das outras dimensões e reprovaria um conserto
+     certo (foi o que aconteceu na primeira versão deste teste). */
+  const bloco = blocoDaDimensao(html, 'Por causa');
+  assert.ok(bloco, 'não achei o quadro "Por causa" no HTML');
+  assert.match(bloco, /Falha de fixação/);
+  assert.ok(!/tem isto preenchido/.test(bloco),
+    'o quadro da causa diz que ninguém preencheu, e as 3 têm causa');
+});
+
+/* Os dois campos na mesma pergunta: o do formulário do PCP tem precedência,
+   igual ao que a aba Retrabalho já faz (causaRaiz || causa). Sem isto, uma
+   O.S com os dois preenchidos seria contada pelo campo errado. */
+test('retrabalho: com os dois campos, vale a causa raiz do formulário', () => {
+  const t = casa([
+    fin('33', { retrabalho: true, causaRaiz: 'Material', causa: 'Erro de medida', servico: 'Letreiro' }),
+  ], FICHAS);
+  const html = t.run(`retrabalhoHTML({de:'2026-09-01',ate:'2026-09-30'})`);
+  assert.match(html, /Material/);
+});
+
+/* O título não pode prometer só a causa raiz, já que o quadro conta os dois
+   campos — e as duas listas têm vocabulários diferentes. */
+test('retrabalho: o quadro da causa não se anuncia como só "causa raiz"', () => {
+  const html = casa([
+    fin('34', { retrabalho: true, causa: 'Erro de medida', servico: 'Adesivo' }),
+  ], FICHAS).run(`retrabalhoHTML({de:'2026-09-01',ate:'2026-09-30'})`);
+  assert.ok(!/<h4>Por causa raiz<\/h4>/.test(html), 'o título voltou a prometer só a causa raiz');
+  assert.match(html, /<h4>Por causa<\/h4>/);
 });
 
 test('retrabalho: a tabela de gente junta entregou, voltou e foi refazer', () => {

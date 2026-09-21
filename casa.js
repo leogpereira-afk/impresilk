@@ -1558,11 +1558,24 @@ function servicosEntreguesHTML() {
   const media = fechados.length ? Math.round(fechados.reduce((t, a) => t + a.n, 0) / fechados.length) : null;
   const esteAno = anos.find(a => a.k === anoAtual);
 
-  return `<p class="text-muted" style="font-size:.8rem">${entregues.length} entregas no histórico inteiro — este quadro ignora o filtro de período acima, de propósito.</p>
+  /* ESTE QUADRO NÃO ALCANÇA O HISTÓRICO INTEIRO, e até 21/09/2026 dizia que
+     alcançava. Ele conta `STORE.getAllOS()`, e o aparelho guarda finalizadas
+     só da janela de STORE.JANELA_LOCAL_DIAS dias (store.js) -- o resto vem por
+     busca. Na base de produção, naquele dia, eram 743 entregas no total e 464
+     dentro da janela: junho inteiro (30) e 249 das 303 de julho ficavam de
+     fora, e mesmo assim o texto prometia "histórico inteiro" e "desde o
+     começo". Número menor com legenda de número maior é pior que número
+     ausente: ninguém desconfia. Quem tem o histórico completo é o servidor
+     (`entreguesResumo`), que a aba Entregas › Relatórios já usa -- enquanto
+     este quadro não for ligado nele, o texto diz o que o número é de verdade
+     e manda o dono para onde a resposta inteira está. */
+  const janela = (typeof STORE.JANELA_LOCAL_DIAS === 'number') ? STORE.JANELA_LOCAL_DIAS : 60;
+
+  return `<p class="text-muted" style="font-size:.8rem">${entregues.length} entregas guardadas no aparelho — os últimos ${janela} dias. Este quadro ignora o filtro de período acima, de propósito, mas o que saiu dessa janela não entra aqui: o histórico completo está em Entregas › Relatórios.</p>
     <div class="casa-kpi-cards">
-      <div class="casa-kpi"><b>${entregues.length}</b><small>entregas desde o começo</small></div>
+      <div class="casa-kpi"><b>${entregues.length}</b><small>entregas guardadas no aparelho</small></div>
       <div class="casa-kpi"><b>${esteAno ? esteAno.n : 0}</b><small>em ${anoAtual}, ano em curso</small></div>
-      ${media != null ? `<div class="casa-kpi"><b>${media}</b><small>média por ano fechado · ${fechados.length} ano${fechados.length === 1 ? '' : 's'}</small></div>` : ''}
+      ${media != null ? `<div class="casa-kpi"><b>${media}</b><small>média por ano fechado · ${fechados.length} ano${fechados.length === 1 ? '' : 's'} · só o que está no aparelho</small></div>` : ''}
     </div>
     <div class="casa-duas">
       <div><h4>Por ano</h4>${anosHTML}</div>
@@ -1604,18 +1617,33 @@ function retrabalhoHTML(f) {
      desenhava uma barra cheia dizendo 3 — parecia resposta e era ausência de
      resposta. Agora o preenchido vai para o gráfico e o resto é contado à
      parte, para a frase dizer quantas faltam preencher. */
+  /* `campo` pode ser o NOME de um campo ou uma REGRA. Existe pergunta que
+     mora em dois campos -- a causa do retrabalho e uma delas -- e ler so um
+     deles faz a tela afirmar ausencia onde ha resposta. */
   const contar = (campo, lista) => {
     const base = lista || doPeriodo;
+    const ler = typeof campo === 'function' ? campo : (o) => o[campo];
     const m = new Map(); let vazios = 0;
     for (const o of base) {
-      const k = String(o[campo] || '').trim();
+      const k = String(ler(o) || '').trim();
       if (!k) { vazios++; continue; }
       m.set(k, (m.get(k) || 0) + 1);
     }
     const itens = [...m.entries()].map(([rotulo, valor]) => ({ rotulo, valor })).sort((a, b) => b.valor - a.valor);
     return { itens, vazios, total: base.length };
   };
-  const etapas = contar('etapaOrigem'), causas = contar('causaRaiz'), responsaveis = contar('responsavelEtapa');
+  /* A CAUSA MORA EM DOIS CAMPOS, e esta tela lia so o novo.
+     `causaRaiz` vem do formulario do PCP (lista fixa CAUSAS_RAIZ: Erro
+     humano, Material, Comunicacao...). `causa` vem da ficha e do app do
+     instalador (lista de Configuracoes: Erro de medida, Falha de fixacao...).
+     Em 21/09/2026, das 7 O.S de retrabalho da base, ZERO tinham `causaRaiz` e
+     5 tinham `causa` -- e esta tela escrevia "Nenhuma das 3 O.S tem isto
+     preenchido" sobre O.S que TINHAM o motivo anotado, enquanto a aba
+     Retrabalho, que ja le os dois (app.js, coluna Motivo), mostrava
+     "Falha de fixacao" e "Erro de medida". Duas telas da mesma casa, a mesma
+     pergunta, respostas opostas -- e a errada e a que vai para a Gestao e
+     para o Modo TV. Aqui passa a valer a MESMA regra da outra tela. */
+  const etapas = contar('etapaOrigem'), causas = contar(o => o.causaRaiz || o.causa), responsaveis = contar('responsavelEtapa');
   const tipos = contar('servico'), clientes = contar('cliente');
   /* Uma dimensão 100% vazia não vira gráfico: vira uma frase que diz o que
      preencher e onde. Gráfico de um item só chamado "não informado" ocupa o
@@ -1682,7 +1710,7 @@ function retrabalhoHTML(f) {
     </div>
     <div class="casa-duas">
       <div><h4>Por etapa de origem</h4>${dimensao(etapas, 'preenche-se na O.S que voltou')}</div>
-      <div><h4>Por causa raiz</h4>${dimensao(causas, 'preenche-se na O.S que voltou')}</div>
+      <div><h4>Por causa</h4>${dimensao(causas, 'preenche-se na O.S que voltou, no formulário de retrabalho ou no campo Causa da ficha')}</div>
     </div>
     <div class="casa-duas">
       <div><h4>Responsável da etapa de origem</h4>${dimensao(responsaveis, 'preenche-se na O.S que voltou')}</div>
