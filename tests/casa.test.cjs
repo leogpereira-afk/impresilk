@@ -1064,7 +1064,7 @@ test('serviços entregues: ano e mês saem do histórico, não do filtro do per�
   ]);
   const html = t.run('servicosEntreguesHTML()');
   for (const ano of ['2024', '2025', '2026']) assert.match(html, new RegExp(ano), 'faltou o ano ' + ano);
-  assert.match(html, /4 entregas guardadas no aparelho/);
+  assert.match(html, /4 instalações entregues entre as O\.S guardadas neste aparelho/);
   /* O ano corrente está pela metade: comparar de igual para igual com um ano
      fechado transformaria calendário em desempenho. */
   assert.match(html, /em curso/);
@@ -1083,14 +1083,29 @@ test('serviços entregues: o quadro não promete histórico que não alcança', 
     fin('1', { finalizadaEm: '2024-03-10T12:00:00' }),
     fin('2', { finalizadaEm: '2026-09-10T12:00:00' }),
   ]).run('servicosEntreguesHTML()');
-  assert.doesNotMatch(html, /histórico inteiro/, 'a tela voltou a prometer o histórico inteiro contando só o aparelho');
-  assert.doesNotMatch(html, /desde o começo/, 'a tela voltou a dizer "desde o começo" contando só o aparelho');
-  // E precisa dizer onde está a resposta completa, senão vira só um aviso.
+  /* PROIBIR FRASE NÃO É EXIGIR VERDADE. A primeira versão desta guarda só
+     vetava "histórico inteiro" e "desde o começo" -- e a mentira voltava
+     reescrita ("histórico completo", "no total") com os testes verdes.
+     Agora a exigência é positiva: a tela TEM de declarar que conta só o que
+     está no aparelho, e dizer a janela. */
+  assert.match(html, /guardadas neste aparelho/, 'a tela parou de declarar que conta só o aparelho');
+  assert.match(html, /\d+ dias/, 'a tela parou de dizer qual é a janela');
   assert.match(html, /Entregas/, 'o quadro tem de apontar onde ver o histórico completo');
+  for (const promessa of [/histórico inteiro/, /histórico completo d[eo]s? (?:registros|entregas)/, /desde o começo/, /no total/]) {
+    assert.doesNotMatch(html, promessa, 'a tela voltou a prometer mais do que conta: ' + promessa);
+  }
+  // E o cartão que anunciava média anual a partir da janela não pode voltar.
+  assert.doesNotMatch(html, /por ano fechado/, 'voltou a média por ano fechado, que a janela não permite calcular');
 });
 
 test('serviços entregues: sem entrega nenhuma não inventa gráfico', () => {
-  assert.match(casa([]).run('servicosEntreguesHTML()'), /Nenhuma entrega registrada/);
+  const vazio = casa([]).run('servicosEntreguesHTML()');
+  assert.match(vazio, /Nenhuma instalação entregue/);
+  /* O ESTADO VAZIO TAMBÉM PRECISA DA RESSALVA: "nenhuma entrega" sem ela se
+     lê como "a casa não entregou nada", e pode ser só "o aparelho ainda não
+     baixou". Era o único caminho que escapava do cabeçalho honesto. */
+  assert.match(vazio, /aparelho/, 'o estado vazio não diz que só olhou o aparelho');
+  assert.match(vazio, /Entregas/, 'o estado vazio não diz onde está o histórico');
 });
 
 test('retrabalho: dimensão vazia vira frase, não barra de "não informado"', () => {
@@ -1115,7 +1130,12 @@ test('retrabalho: dimensão vazia vira frase, não barra de "não informado"', (
 function blocoDaDimensao(html, titulo) {
   const i = html.indexOf('<h4>' + titulo + '</h4>');
   if (i < 0) return '';
-  const fim = html.indexOf('</div>', i);
+  /* Até o PRÓXIMO título, não até a primeira </div>: cada barra de
+     `barrasCasa` é um <div>, então cortar na primeira </div> devolvia só a
+     barra do topo. Com isso a conferência não via a segunda causa nem a linha
+     "N de M sem preencher" -- e uma regressão PARCIAL (parte das O.S voltando
+     a contar só causaRaiz) passava verde. Medido. */
+  const fim = html.indexOf('<h4>', i + 1);
   return html.slice(i, fim < 0 ? html.length : fim);
 }
 
@@ -1147,6 +1167,11 @@ test('retrabalho: causa preenchida pelo instalador conta, não vira "ninguém pr
   assert.match(bloco, /Falha de fixação/);
   assert.ok(!/tem isto preenchido/.test(bloco),
     'o quadro da causa diz que ninguém preencheu, e as 3 têm causa');
+  /* A regressão PARCIAL não apaga o quadro: ela deixa uma barra e escreve
+     "N de M sem preencher". Sem esta linha, a guarda acima não a pega. */
+  assert.ok(!/sem preencher/.test(bloco),
+    'o quadro da causa diz que faltou preencher, e as 3 têm causa');
+  assert.match(bloco, /Erro de medida/, 'a segunda causa ficou fora do quadro');
 });
 
 /* Os dois campos na mesma pergunta: o do formulário do PCP tem precedência,

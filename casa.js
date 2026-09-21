@@ -1525,7 +1525,10 @@ function servicosEntreguesHTML() {
   const entregues = classificarEntregas(STORE.getAllOS()).instalacoes
     .map(o => ({ dia: diaEntrega(o), valor: valorDaOS(o), servico: String(o.servico || '').trim() }))
     .filter(x => x.dia);
-  if (!entregues.length) return '<p class="text-muted">Nenhuma entrega registrada ainda.</p>';
+  /* O ESTADO VAZIO É JUSTO ONDE A RESSALVA MAIS IMPORTA: "nenhuma entrega
+     registrada" lido sem ela vira "a casa não entregou nada", quando pode ser
+     só "o aparelho ainda não baixou". Zero não é resultado. */
+  if (!entregues.length) return '<p class="text-muted">Nenhuma instalação entregue entre as O.S guardadas neste aparelho. O histórico completo está na aba 📦 Entregas.</p>';
 
   const junta = (chave) => {
     const m = new Map();
@@ -1554,8 +1557,16 @@ function servicosEntreguesHTML() {
     rotulo: rotuloMesCasa(m.k), valor: m.n, extra: dinheiroCurto(m.valor)
   })), v => `${v} O.S`) || '<p class="text-muted">Sem mês apurado.</p>';
 
-  const fechados = anos.filter(a => a.k !== anoAtual);
-  const media = fechados.length ? Math.round(fechados.reduce((t, a) => t + a.n, 0) / fechados.length) : null;
+  /* NÃO EXISTE "MÉDIA POR ANO FECHADO" AQUI, e havia um cartão afirmando uma.
+     `anos` sai do que está no aparelho, que é a janela de poucas semanas. Um
+     ano que não seja o corrente só aparece nessa lista entre 1º de janeiro e
+     o fim da janela -- e aparece pela PONTA, com as últimas semanas de
+     dezembro. O cartão então dividia, por exemplo, 200 entregas de meio mês
+     e anunciava "média por ano fechado". Nos outros dez meses do ano ele
+     simplesmente não aparecia, o que escondia o defeito. Acrescentar "· só o
+     que está no aparelho" não resolvia: a ressalva fazia o número parecer
+     conferido. Média anual é pergunta para o servidor, que tem 2020 em
+     diante; enquanto este quadro ler o aparelho, ele não responde isso. */
   const esteAno = anos.find(a => a.k === anoAtual);
 
   /* ESTE QUADRO NÃO ALCANÇA O HISTÓRICO INTEIRO, e até 21/09/2026 dizia que
@@ -1571,11 +1582,10 @@ function servicosEntreguesHTML() {
      e manda o dono para onde a resposta inteira está. */
   const janela = (typeof STORE.JANELA_LOCAL_DIAS === 'number') ? STORE.JANELA_LOCAL_DIAS : 60;
 
-  return `<p class="text-muted" style="font-size:.8rem">${entregues.length} entregas guardadas no aparelho — os últimos ${janela} dias. Este quadro ignora o filtro de período acima, de propósito, mas o que saiu dessa janela não entra aqui: o histórico completo está em Entregas › Relatórios.</p>
+  return `<p class="text-muted" style="font-size:.8rem">${entregues.length} instalações entregues entre as O.S guardadas neste aparelho — as dos últimos ${janela} dias. Não entram as retiradas internas nem as que o ERP encerrou e ainda esperam lançamento. Este quadro ignora o filtro de período acima, de propósito; para o histórico de todos os anos, a aba 📦 Entregas.</p>
     <div class="casa-kpi-cards">
-      <div class="casa-kpi"><b>${entregues.length}</b><small>entregas guardadas no aparelho</small></div>
-      <div class="casa-kpi"><b>${esteAno ? esteAno.n : 0}</b><small>em ${anoAtual}, ano em curso</small></div>
-      ${media != null ? `<div class="casa-kpi"><b>${media}</b><small>média por ano fechado · ${fechados.length} ano${fechados.length === 1 ? '' : 's'} · só o que está no aparelho</small></div>` : ''}
+      <div class="casa-kpi"><b>${entregues.length}</b><small>instalações entregues, no aparelho</small></div>
+      <div class="casa-kpi"><b>${esteAno ? esteAno.n : 0}</b><small>dessas, em ${anoAtual}</small></div>
     </div>
     <div class="casa-duas">
       <div><h4>Por ano</h4>${anosHTML}</div>
