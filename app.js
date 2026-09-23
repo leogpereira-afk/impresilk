@@ -886,6 +886,13 @@ function avaliarImportacao(s) {
     return { parada: true, motivo: 'erro: ' + semCredencial(ult.erro || 'desconhecido') + bom };
   }
   if (horas >= 2) return { parada: true, motivo: `há ${Math.floor(horas)}h sem rodar` };
+  /* Rodada PARCIAL (alguma situação do ERP não respondeu): as O.S. novas
+     entram, mas fechar e reabrir espera a carteira completa. Uma hora assim é
+     normal; três seguidas, a gestão precisa saber. */
+  if (ult.carteiraCompleta === false) {
+    const desde = ult.ultimaCarteiraCompleta ? (Date.now() - new Date(ult.ultimaCarteiraCompleta).getTime()) / 3600000 : Infinity;
+    if (desde >= 3) return { parada: true, motivo: `o ERP está lento: há ${isFinite(desde) ? Math.floor(desde) + 'h' : 'muito tempo'} a carteira vem incompleta (${(ult.situacoesSemResposta || []).join(', ') || 'alguma situação'} sem resposta). As O.S. novas continuam entrando; fechar e reabrir O.S. pelo ERP está parado.` };
+  }
   return { parada: false };
 }
 function vigiarImportacao() {

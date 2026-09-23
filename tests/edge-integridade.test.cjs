@@ -272,3 +272,34 @@ test('pesos: dois ajustes válidos que tocam chaves diferentes não viram uma so
  assert.equal(b.status,409,JSON.stringify(b));
  assert.deepEqual({...e.db.pcp_config_global[0].config.performancePCP.criterios},{producao:60,limpeza:10,equipamentos:30});
 });
+test('ERP lento numa situação: o que chegou entra (O.S. nova e situação), e NADA é fechado com a carteira incompleta', async () => {
+ const aberta=row('mub-50',{numero:'50',origemMubisys:true,cliente:'Fora da lista parcial'});
+ const e=await edge('pcp-mubisys',{pcp_registros:[aberta,row('mub-51',{numero:'51',origemMubisys:true,cliente:'B',statusERP:'PRODUCAO'})]});
+ e.run(`erpGet=async url=>{const s=new URL(url).searchParams.get('status');if(s==='PAUSADO')throw Error('o ERP (Mubisys) nao respondeu em 48s');return s==='CONCLUIDO'?[{numero:'51',cliente:'B'},{numero:'52',cliente:'Nova'}]:[]}`);
+ const carteira=await e.run(`buscarCarteira('https://erp.invalid','key',{},'2026-09-23',50000)`);
+ assert.equal(Object.keys(carteira.falhas).join(),'PAUSADO');
+ assert.equal(Object.keys(carteira.tempos).sort().join(),'CONCLUIDO,PAUSADO,PENDENTE,PRODUCAO');
+ const r=await e.run('conciliarOuImportar(sb,'+JSON.stringify(carteira)+')');
+ assert.equal(r.carteiraCompleta,false);assert.equal(r.novas,1);assert.equal(r.arquivadas,0);
+ assert.equal(Array.from(r.situacoesSemResposta).join(),'PAUSADO');
+ const reg=id=>e.db.pcp_registros.find(x=>x.id===id).registro;
+ assert.equal(reg('mub-50').finalizadaEm,undefined,'fora da lista parcial NÃO é fechada');
+ assert.equal(reg('mub-50').erpSaiuDaCarteiraEm,undefined);
+ assert.equal(reg('mub-51').statusERP,'CONCLUIDO','a situação das que responderam entra');
+ assert.ok(e.db.pcp_registros.find(x=>x.id==='mub-52'),'a O.S. nova entra');
+});
+test('ERP sem resposta nenhuma: a rodada falha (não finge sucesso vazio)', async () => {
+ const e=await edge('pcp-mubisys',{pcp_registros:[]});
+ e.run(`erpGet=async()=>{throw Error('o ERP (Mubisys) nao respondeu em 48s')}`);
+ const carteira=await e.run(`buscarCarteira('https://erp.invalid','key',{},'2026-09-23',50000)`);
+ await assert.rejects(e.run('conciliarOuImportar(sb,'+JSON.stringify(carteira)+')'),/nao respondeu/);
+});
+test('batimento guarda desde quando a carteira não vem completa', async () => {
+ const e=await edge('pcp-mubisys',{pcp_meta:[{chave:'sync_status',valor:{em:'2026-09-23T10:20:00Z',ok:true,carteiraCompleta:true}}]});
+ await e.run(`gravarBatimento({em:'2026-09-23T11:20:00Z',ok:true,carteiraCompleta:false,situacoesSemResposta:['PAUSADO']})`);
+ let st=e.db.pcp_meta.find(x=>x.chave==='sync_status').valor;
+ assert.equal(st.ultimaCarteiraCompleta,'2026-09-23T10:20:00Z');
+ await e.run(`gravarBatimento({em:'2026-09-23T12:20:00Z',ok:true,carteiraCompleta:true})`);
+ st=e.db.pcp_meta.find(x=>x.chave==='sync_status').valor;
+ assert.equal(st.ultimaCarteiraCompleta,'2026-09-23T12:20:00Z');
+});

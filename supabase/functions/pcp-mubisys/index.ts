@@ -700,12 +700,24 @@ async function gravarImportadas(sb: any, remotas: any[]) {
 
 // Carteira do acompanhamento: concluída na produção ainda aguarda entrega.
 const STATUS_CARTEIRA = ['PRODUCAO', 'PENDENTE', 'PAUSADO', 'CONCLUIDO'];
-async function buscarCarteiraCompleta(base: string, publicKey: string, headers: any, fim: string) {
+/* A CARTEIRA SITUAÇÃO POR SITUAÇÃO, sem jogar fora o que chegou. Medido em
+   23/09/2026: a rodada horária leva de 16 a 59 s, e nas 24 h anteriores caiu 3
+   vezes aos 58 s porque UMA situação do ERP demorou -- e aí nada entrava, nem
+   a O.S. nova das situações que tinham respondido. Agora cada situação tem seu
+   teto (prazoMs), devolve o que chegou, o que falhou e quanto cada uma levou. */
+async function buscarCarteira(base: string, publicKey: string, headers: any, fim: string, prazoMs = 60000) {
+  const falhas: Record<string, string> = {}, tempos: Record<string, number> = {};
   const lotes = await Promise.all(STATUS_CARTEIRA.map(async status => {
+    const t0 = Date.now();
+    try { return await buscarSituacao(status); }
+    catch (e) { falhas[status] = (e as Error)?.message || String(e); return null; }
+    finally { tempos[status] = Date.now() - t0; }
+  }));
+  async function buscarSituacao(status: string) {
     const lista: any[] = [], vistos = new Set<string>();
     for (let page = 1; page <= 20; page++) {
       const q = new URLSearchParams({status, filtrodata:'CADASTRO', datainicial:'2020-01-01', datafinal:fim, per_page:'500', page:String(page)});
-      const data = await erpGet(`${base}/${publicKey}/ordem-servico?${q}`, headers, 60000);
+      const data = await erpGet(`${base}/${publicKey}/ordem-servico?${q}`, headers, prazoMs);
       if (![data,data?.data,data?.items,data?.results].some(Array.isArray)) throw new Error('Formato inesperado na carteira ERP; nenhuma baixa aplicada.');
       const pag = extrairLista(data).map(mapearOS);
       if (pag.some(o => !o.numero)) throw new Error('Carteira ERP incompleta: O.S. sem número.');
@@ -714,12 +726,34 @@ async function buscarCarteiraCompleta(base: string, publicKey: string, headers: 
       if (pag.length < 500) return lista;
     }
     throw new Error('Limite de páginas da carteira atingido; carteira mantida.');
-  }));
+  }
   // Uma O.S. pode aparecer em duas situações durante uma transição no ERP.
   const unicas = new Map<string, any>();
-  for (const lote of lotes) for (const o of lote) if (!unicas.has(o.numero)) unicas.set(o.numero,o);
-  if (!unicas.size) throw new Error('Carteira ERP vazia: aguardando conferência, sem arquivamento automático.');
-  return [...unicas.values()];
+  for (const lote of lotes) for (const o of (lote || [])) if (!unicas.has(o.numero)) unicas.set(o.numero,o);
+  return { remotas: [...unicas.values()], falhas, tempos };
+}
+async function buscarCarteiraCompleta(base: string, publicKey: string, headers: any, fim: string, prazoMs = 60000) {
+  const c = await buscarCarteira(base, publicKey, headers, fim, prazoMs);
+  const erro = Object.values(c.falhas)[0];
+  if (erro) throw new Error(erro);
+  if (!c.remotas.length) throw new Error('Carteira ERP vazia: aguardando conferência, sem arquivamento automático.');
+  return c.remotas;
+}
+/* CONCILIAR OU SÓ IMPORTAR. Com as quatro situações, concilia (fecha o que
+   saiu, reabre o que voltou). Com alguma faltando, NÃO concilia -- decidir
+   "saiu da carteira" com lista incompleta arquivaria O.S. em andamento -- mas
+   o que chegou entra: O.S. nova e situação do ERP das que responderam. */
+async function conciliarOuImportar(sb: any, carteira: any) {
+  const falhou = Object.keys(carteira.falhas || {});
+  if (!falhou.length) {
+    if (!carteira.remotas.length) throw new Error('Carteira ERP vazia: aguardando conferência, sem arquivamento automático.');
+    return await reconciliarCarteira(sb, carteira.remotas);
+  }
+  if (!carteira.remotas.length) throw new Error(String(Object.values(carteira.falhas)[0]));
+  const r = await gravarImportadas(sb, carteira.remotas);
+  return { ...r, restauradas: 0, arquivadas: 0, marcadasParaConferir: 0, conflitosCarteira: 0, carteiraCompleta: false,
+    situacoesSemResposta: falhou,
+    aviso: `O ERP não respondeu em ${falhou.join(', ')}: entrou o que chegou; fechar e reabrir O.S. espera a carteira completa.` };
 }
 
 async function reconciliarCarteira(sb: any, remotas: any[]) {
@@ -782,7 +816,12 @@ async function gravarBatimento(novo: any) {
     ? (anterior.ultimoSucesso
         ?? (anterior.ok !== false && anterior.em ? { em: anterior.em, novas: anterior.novas ?? 0 } : undefined))
     : { em: novo.em, novas: novo.novas ?? 0 };
-  const st = ultimoSucesso ? { ...novo, ultimoSucesso } : novo;
+  // Desde quando a carteira não vem completa: rodada parcial importa, mas não
+  // concilia -- se isso durar horas, a tela da gestão precisa acusar.
+  const ultimaCarteiraCompleta = novo.ok !== false && novo.carteiraCompleta === true
+    ? novo.em
+    : (anterior.ultimaCarteiraCompleta ?? (anterior.carteiraCompleta === true ? anterior.em : undefined));
+  const st = { ...novo, ...(ultimoSucesso ? { ultimoSucesso } : {}), ...(ultimaCarteiraCompleta ? { ultimaCarteiraCompleta } : {}) };
   await setMeta("sync_status", st);   // a ÚNICA escrita direta; o resto passa por aqui
   return st;
 }
@@ -1249,12 +1288,14 @@ Deno.serve(async (req: Request) => {
       const sobra = () => ATE - Date.now();
       try {
         // Prazo vem do orcamento: as tentativas cabem no que sobrar da rodada.
-        const remotas = await buscarCarteiraCompleta(creds.base, creds.publicKey, headers, datafinal);
-        const conciliacao = await reconciliarCarteira(sb, remotas);
+        // Teto de 50 s por situação: a rodada responde antes dos 60 s do agendador.
+        const carteira = await buscarCarteira(creds.base, creds.publicKey, headers, datafinal, 50_000);
+        const remotas = carteira.remotas;
+        const conciliacao: any = await conciliarOuImportar(sb, carteira);
         const {novas,jaExistiam} = conciliacao;
-        const parcial = {em:new Date().toISOString(),ok:true,...conciliacao,duplicatasRemovidas:0};
+        const parcial = {em:new Date().toISOString(),ok:true,...conciliacao,temposERP:carteira.tempos,duplicatasRemovidas:0};
         await gravarBatimento(parcial);
-        const baixa = {ok:conciliacao.conflitosCarteira===0,abertasNoPcp:remotas.length,conferidas:remotas.length,semNoticiaDoErp:0,baixadas:conciliacao.arquivadas,restauradas:conciliacao.restauradas,carteiraCompleta:true};
+        const baixa = {ok:conciliacao.conflitosCarteira===0,abertasNoPcp:remotas.length,conferidas:remotas.length,semNoticiaDoErp:0,baixadas:conciliacao.arquivadas,restauradas:conciliacao.restauradas,carteiraCompleta:conciliacao.carteiraCompleta!==false};
 
         // Renova o mes corrente de "entregues" (valor entregue da tela de
         // Entregas) na mesma hora: uma consulta a mais ao ERP por hora, e a
