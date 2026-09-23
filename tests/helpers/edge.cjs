@@ -4,19 +4,20 @@ const {webcrypto,createHmac}=require('node:crypto');
 const clone=v=>structuredClone(v);
 function banco(initial={}) {
  const db={pcp_registros:[],pcp_config_global:[{id:true,config:{instaladores:['Ana']},atualizado_em:'2026-09-19T10:00:00Z'}],equipe_contas:[],pcp_meta:[],...clone(initial)};
- const cliente={beforeWrite:null,rpc:async()=>({data:false,error:null}),from(table){
-  let op='read',value,filters=[],one=false,take=Infinity,ignorar=false;
+ const cliente={maxRows:1000,beforeWrite:null,rpc:async()=>({data:false,error:null}),from(table){
+  let op='read',value,filters=[],one=false,take=Infinity,ignorar=false,proj=null;
   const field=(r,k)=>k.includes('->>')?r[k.split('->>')[0]]?.[k.split('->>')[1]]:r[k];
-  const q={select(){return q},eq(k,v){filters.push(r=>field(r,k)===v);return q},gt(k,v){filters.push(r=>field(r,k)>v);return q},gte(k,v){filters.push(r=>field(r,k)>=v);return q},lte(k,v){filters.push(r=>field(r,k)<=v);return q},neq(k,v){filters.push(r=>field(r,k)!==v);return q},in(k,a){filters.push(r=>a.includes(field(r,k)));return q},contains(k,v){filters.push(r=>Object.entries(v).every(([p,a])=>a.every(x=>r[k]?.[p]?.includes(x))));return q},or(){return q},not(){return q},order(){return q},limit(n){take=n;return q},maybeSingle(){one=true;return q},single(){one=true;return q},update(v){op='update';value=clone(v);return q},insert(v){op='insert';value=clone(v);return q},upsert(v,opt){op='upsert';value=clone(v);ignorar=opt?.ignoreDuplicates;return q},then(resolve,reject){
+  const q={select(c){if(typeof c==='string')proj=c.split(',').map(x=>x.trim());return q},eq(k,v){filters.push(r=>field(r,k)===v);return q},gt(k,v){filters.push(r=>field(r,k)>v);return q},gte(k,v){filters.push(r=>field(r,k)>=v);return q},lte(k,v){filters.push(r=>field(r,k)<=v);return q},neq(k,v){filters.push(r=>field(r,k)!==v);return q},in(k,a){filters.push(r=>a.includes(field(r,k)));return q},contains(k,v){filters.push(r=>Object.entries(v).every(([p,a])=>a.every(x=>r[k]?.[p]?.includes(x))));return q},or(){return q},not(){return q},order(){return q},limit(n){take=n;return q},maybeSingle(){one=true;return q},single(){one=true;return q},update(v){op='update';value=clone(v);return q},insert(v){op='insert';value=clone(v);return q},upsert(v,opt){op='upsert';value=clone(v);ignorar=opt?.ignoreDuplicates;return q},then(resolve,reject){
    try {
     if(op!=='read' && cliente.beforeWrite) { const f=cliente.beforeWrite;cliente.beforeWrite=null;f(db,table); }
-    const rows=db[table] ||= [];let result=rows.filter(r=>filters.every(f=>f(r))).slice(0,take);
+    const rows=db[table] ||= [];let result=rows.filter(r=>filters.every(f=>f(r))).slice(0,op==='read'?Math.min(take,cliente.maxRows):take);
     if(op==='update') {for(const r of result)Object.assign(r,clone(value));}
     if(op==='insert'||op==='upsert') {result=[];for(const r of Array.isArray(value)?value:[value]) {
      const old=rows.find(x=>x.id===r.id && (!r.colecao || x.colecao===r.colecao));
      if(old && op==='insert') {resolve({data:null,error:{code:'23505',message:'duplicate key'}});return;}
      if(old){if(!ignorar)Object.assign(old,r);result.push(old);}else{const novo={apagado:false,atualizado_em:new Date().toISOString(),...r};rows.push(novo);result.push(novo);}
     }}
+    if(op==='read'&&proj&&proj.some(c=>c.includes('->>')))result=result.map(r=>{const o={...r};for(const c of proj){if(c.includes('->>')){const [a,b]=c.split('->>');o[b]=r[a]?.[b];}}return o;});
     resolve({data:clone(one?result[0]||null:result),count:result.length,error:null});
    } catch(e){reject(e);}
   }};return q;

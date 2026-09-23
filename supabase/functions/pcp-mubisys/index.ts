@@ -366,7 +366,7 @@ async function varrerMesEntregues(
       datainicial: `${mes}-01`, datafinal: fim, page: String(page), per_page: "500",
     });
     const prazo = opts.sobra
-      ? Math.min(40_000, Math.max(12_000, opts.sobra() - 10_000))
+      ? Math.min(60_000, Math.max(12_000, opts.sobra() - 10_000))
       : (opts.prazoMs ?? 45_000);
     const data = await erpGet(`${base}/${publicKey}/ordem-servico?${q}`, headers, prazo);
     const pag = extrairLista(data);
@@ -469,7 +469,10 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
   // As que estao ABERTAS aqui (nao apagadas, sem finalizacao).
   const { data: linhas, error } = await sb
     .from("pcp_registros").select("id, registro")
-    .eq("colecao", "os").eq("apagado", false);
+    .eq("colecao", "os").eq("apagado", false)
+    // Só as abertas vêm do banco: ler todas passaria das 1000 linhas que o banco
+    // devolve por consulta e cortaria calado (905 vivas em 23/09/2026).
+    .or("registro->>finalizadaEm.is.null,registro->>finalizadaEm.eq.");
   if (error) throw new Error(error.message);
   const abertas = (linhas ?? []).filter((l: any) => !String(l.registro?.finalizadaEm || "").trim());
 
@@ -760,8 +763,25 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
   const em = new Date().toISOString();
   const numeros = new Set(remotas.map(o => String(o.numero)));
   if (!numeros.size || remotas.some(o => !o.numero) || numeros.size !== remotas.length) throw new Error('Carteira inválida.');
-  const {data:linhas,error} = await sb.from('pcp_registros').select('id,registro,apagado,atualizado_em').eq('colecao','os');
-  if (error) throw new Error(error.message);
+  /* LEITURA PAGINADA. O banco devolve no máximo 1000 linhas por consulta e
+     corta calado (max_rows). Em 23/09/2026 eram 977 O.S.: dias depois, as que
+     ficassem de fora deixariam de ser conferidas contra o ERP sem erro
+     nenhum. Página de 500 por id, até acabar. */
+  const linhas: any[] = [];
+  let depois = '';
+  for (let pagina = 0; ; pagina++) {
+    if (pagina >= 200) throw new Error('Leitura das O.S. passou de 100 mil linhas; conciliação mantida.');
+    let q = sb.from('pcp_registros').select('id,registro,apagado,atualizado_em').eq('colecao','os').order('id').limit(500);
+    if (depois) q = q.gt('id', depois);
+    const {data, error} = await q;
+    if (error) throw new Error(error.message);
+    const lote = data || [];
+    linhas.push(...lote);
+    if (lote.length < 500) break;
+    const ultimo = String(lote[lote.length - 1].id);
+    if (ultimo <= depois) throw new Error('Paginação inconsistente nas O.S.; conciliação mantida.');
+    depois = ultimo;
+  }
   const abertas = (linhas || []).filter((l:any) => !l.apagado && !l.registro.finalizadaEm);
   if (abertas.length > 20 && numeros.size < abertas.length * 0.5) throw new Error('Carteira ERP caiu mais de 50%; mantida para conferência.');
   const restaurar = (linhas || []).filter((l:any) => numeros.has(String(l.registro.numero)) && (l.apagado || (l.registro.finalizadaEm && l.registro.baixaAutoERP?.em === l.registro.finalizadaEm) || (!l.registro.finalizadaEm && l.registro.erpSaiuDaCarteiraEm)));
@@ -1288,12 +1308,18 @@ Deno.serve(async (req: Request) => {
       const sobra = () => ATE - Date.now();
       try {
         // Prazo vem do orcamento: as tentativas cabem no que sobrar da rodada.
-        // Teto de 50 s por situação: a rodada responde antes dos 60 s do agendador.
-        const carteira = await buscarCarteira(creds.base, creds.publicKey, headers, datafinal, 50_000);
+        /* O teto sai do ORÇAMENTO (118 s), não dos 60 s do agendador: medido em
+           23/09, a function segue trabalhando e grava o batimento depois que o
+           agendador desiste (a rodada das 13:20 terminou aos 74 s). Deixa 40 s
+           para conciliar, gravar e renovar Entregas. */
+        const t0 = Date.now();
+        const carteira = await buscarCarteira(creds.base, creds.publicKey, headers, datafinal, Math.max(20_000, sobra() - 40_000));
+        const tCarteira = Date.now();
         const remotas = carteira.remotas;
         const conciliacao: any = await conciliarOuImportar(sb, carteira);
+        const tConciliacao = Date.now();
         const {novas,jaExistiam} = conciliacao;
-        const parcial = {em:new Date().toISOString(),ok:true,...conciliacao,temposERP:carteira.tempos,duplicatasRemovidas:0};
+        const parcial: any = {em:new Date().toISOString(),ok:true,...conciliacao,temposERP:carteira.tempos,duracoes:{carteiraMs:tCarteira-t0,conciliacaoMs:tConciliacao-tCarteira},duplicatasRemovidas:0};
         await gravarBatimento(parcial);
         const baixa = {ok:conciliacao.conflitosCarteira===0,abertasNoPcp:remotas.length,conferidas:remotas.length,semNoticiaDoErp:0,baixadas:conciliacao.arquivadas,restauradas:conciliacao.restauradas,carteiraCompleta:conciliacao.carteiraCompleta!==false};
 
@@ -1354,7 +1380,8 @@ Deno.serve(async (req: Request) => {
           }
         } catch (e) { entregues = { ...(entregues || {}), erro: String((e as Error)?.message || e) }; }
 
-        const st = { ...parcial, em: new Date().toISOString(), baixa, entregues };
+        // Quanto a rodada inteira levou (e Entregas), para a próxima lentidão ter nome.
+        const st = { ...parcial, em: new Date().toISOString(), baixa, entregues, duracoes: { ...parcial.duracoes, entreguesETotalMs: Date.now() - tConciliacao, totalMs: Date.now() - t0 } };
         await gravarBatimento(st);
         console.log(`[pcp-mubisys] ${novas} nova(s) de ${remotas.length}.`);
         return resp(st);

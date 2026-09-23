@@ -912,9 +912,22 @@ Deno.serve(async (req: Request) => {
         if (cracha && !ehMaquina && !["admin", "pcp"].includes(String(cracha.papel ?? ""))) {
           return resp({ error: "Valores só para a gestão do PCP." }, 403);
         }
-        const { data: nums, error: e1 } = await sb.from("pcp_registros")
-          .select("registro->>numero").eq("colecao", "os").eq("apagado", false);
-        if (e1) return resp({ error: e1.message }, 500);
+        /* Os números vêm PAGINADOS: o banco corta toda leitura em 1000 linhas,
+           calado (eram 905 O.S. vivas em 23/09/2026). Sem isto, a O.S. de
+           número 1001 em diante ficaria "sem valor" no card. */
+        const nums: any[] = [];
+        for (let depois = "", pagina = 0; ; pagina++) {
+          if (pagina >= 200) return resp({ error: "Leitura das O.S. passou do limite." }, 500);
+          let q = sb.from("pcp_registros").select("id, registro->>numero").eq("colecao", "os").eq("apagado", false).order("id").limit(1000);
+          if (depois) q = q.gt("id", depois);
+          const { data: lote, error: e1 } = await q;
+          if (e1) return resp({ error: e1.message }, 500);
+          nums.push(...(lote ?? []));
+          if ((lote ?? []).length < 1000) break;
+          const ultimo = String(lote[lote.length - 1].id);
+          if (ultimo <= depois) return resp({ error: "Paginação inconsistente nas O.S." }, 500);
+          depois = ultimo;
+        }
         const lista = [...new Set((nums ?? []).map((r: any) => String(r.numero || "").trim()).filter(Boolean))];
         const valores: Record<string, number> = {};
         // PostgREST corta em 1000 linhas por pedido: pergunta em fatias.

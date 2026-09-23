@@ -303,3 +303,24 @@ test('batimento guarda desde quando a carteira não vem completa', async () => {
  st=e.db.pcp_meta.find(x=>x.chave==='sync_status').valor;
  assert.equal(st.ultimaCarteiraCompleta,'2026-09-23T12:20:00Z');
 });
+
+test('conciliação lê TODAS as O.S. mesmo passando de 1000 (o banco corta calado aos 1000)', async () => {
+ const linhas=[];
+ for(let i=0;i<1100;i++){const n=String(10000+i);linhas.push(row('mub-'+n,{numero:n,origemMubisys:true,cliente:'C'+n}));}
+ // a última (fora das 1000 primeiras) saiu da carteira e não tem trabalho de gente: tem de ser vista e arquivada
+ const e=await edge('pcp-mubisys',{pcp_registros:linhas});
+ const carteira=linhas.slice(0,1099).map(l=>({numero:l.registro.numero,cliente:l.registro.cliente}));
+ const r=await e.run('reconciliarCarteira(sb,'+JSON.stringify(carteira)+')');
+ assert.equal(r.arquivadas,1);
+ assert.equal(e.db.pcp_registros[1099].registro.baixaAutoERP.status,'FORA DA CARTEIRA ABERTA');
+});
+
+test('valores das O.S.: a O.S. número 1001 em diante também recebe valor (o banco corta calado aos 1000)', async () => {
+ const os=[], ordens=[];
+ for(let i=0;i<1100;i++){const n=String(20000+i);os.push(row('mub-'+n,{numero:n,origemMubisys:true}));ordens.push({numero:n,valor:100+i,data:'2026-09-01'});}
+ const e=await edge('pcp-sync',{pcp_registros:os,painel_ordens:ordens});
+ const r=await e.call({action:'valores'},{papel:'pcp',nome:'Gestor'});
+ assert.equal(r.status,200);
+ assert.equal(r.valores['21099'],1199,'a última O.S. também tem valor');
+ assert.equal(Object.keys(r.valores).length,1100);
+});
