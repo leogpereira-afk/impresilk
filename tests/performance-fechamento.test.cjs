@@ -66,3 +66,26 @@ test('falta de valor impede fechamento; valor zero confirmado é válido',async(
  e.db.pcp_registros[0].registro.valorTotal=0;r=await e.call({action:'performancePeriodo',...periodo},who);
  assert.equal((await e.call({action:'performanceFechar',...periodo,hash:r.hash,requestId:'valor-zero-00001',motivo:'Entrega sem cobrança'},who)).ok,true);
 });
+
+/* ---------------- Revisão da avaliação individual (23/09/2026) ---------------- */
+test('fechamento sela os pesos da nota: trocar os pesos depois não reordena a revisão', async () => {
+ const d = dados();
+ d.pcp_config_global[0].config.performancePCP.criterios = {producao:70, limpeza:15, equipamentos:15};
+ const e = await edge('pcp-sync', d);
+ const fonte = await e.call({action:'performancePeriodo', ...periodo}, who);
+ assert.deepEqual({...fonte.criterios}, {producao:70, limpeza:15, equipamentos:15});
+ const r = await e.call({action:'performanceFechar', ...periodo, hash:fonte.hash, requestId:'request-pesos', motivo:'Fechamento com pesos', anterior:''}, who);
+ assert.equal(r.ok, true);
+ e.db.pcp_config_global[0].config.performancePCP.criterios = {producao:40, limpeza:30, equipamentos:30};
+ const hist = await e.call({action:'performanceFechamentos', ...periodo}, who);
+ assert.deepEqual({...hist.fechamentos[0].criterios}, {producao:70, limpeza:15, equipamentos:15}, 'a revisão guarda os pesos da época');
+ const atual = await e.call({action:'performancePeriodo', ...periodo}, who);
+ assert.notEqual(atual.hash, fonte.hash, 'pesos novos mudam o conteúdo: fechar com o hash velho dá 409');
+});
+test('pesos inválidos na configuração não entram no fechamento: vale o padrão', async () => {
+ const d = dados();
+ d.pcp_config_global[0].config.performancePCP.criterios = {producao:90, limpeza:20, equipamentos:20};
+ const e = await edge('pcp-sync', d);
+ const fonte = await e.call({action:'performancePeriodo', ...periodo}, who);
+ assert.deepEqual({...fonte.criterios}, {producao:60, limpeza:20, equipamentos:20});
+});

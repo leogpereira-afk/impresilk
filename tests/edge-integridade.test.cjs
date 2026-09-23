@@ -65,21 +65,29 @@ test('remarcação limpa confirmação anterior e liberação do veículo',async
  const r=await e.call({action:'upsert',os:{id:'1',rev:1,instalacao:{data:'2026-09-20'},confirmacao:'Confirmado',confEm:'2026-09-19T10:00:00Z',carroLiberado:true}},{papel:'pcp'});
  assert.equal(r.os.confirmacao,'');assert.equal(r.os.confEm,'');assert.equal(r.os.carroLiberado,false);
 });
-test('carteira completa restaura exclusão, importa pendente e arquiva fora do ERP sem perder equipe',async()=>{
+test('carteira completa restaura exclusão, importa pendente, arquiva o fantasma e só MARCA a O.S. com trabalho de gente',async()=>{
  const morta={...row('mub-1',{numero:'1',origemMubisys:true,equipe:['Ana'],fotosRetornoIds:['foto']}),apagado:true};
  const fora=row('mub-2',{numero:'2',origemMubisys:true,equipe:['Bia'],saidaEm:'2026-09-01T10:00:00Z'});
  const manual=row('local',{numero:'local',equipe:['Ana']});
- const e=await edge('pcp-mubisys',{pcp_registros:[morta,fora,manual]});
+ const fantasma=row('mub-4',{numero:'4',origemMubisys:true,instalacao:{data:'2026-09-01',periodo:'Manhã'}});
+ const e=await edge('pcp-mubisys',{pcp_registros:[morta,fora,manual,fantasma]});
  const r=await e.run(`reconciliarCarteira(sb,[{numero:'1',cliente:'Cliente'},{numero:'3',cliente:'Pendente'}])`);
- assert.equal(r.restauradas,1);assert.equal(r.arquivadas,1);assert.equal(r.novas,1);
+ assert.equal(r.restauradas,1);assert.equal(r.arquivadas,1);assert.equal(r.marcadasParaConferir,1);assert.equal(r.novas,1);
  assert.equal(e.db.pcp_registros[0].apagado,false);assert.deepEqual(e.db.pcp_registros[0].registro.equipe,['Ana']);
  assert.deepEqual(e.db.pcp_registros[0].registro.fotosRetornoIds,['foto']);
- assert.equal(e.db.pcp_registros[1].registro.baixaAutoERP.status,'FORA DA CARTEIRA ABERTA');
- assert.equal(e.db.pcp_registros[1].registro.saidaEm,'2026-09-01T10:00:00Z');
+ const f=e.db.pcp_registros[1].registro;
+ assert.equal(f.finalizadaEm,undefined,'equipe na rua: o ERP não fecha sozinho');
+ assert.ok(f.erpSaiuDaCarteiraEm,'fica marcada para a gestão confirmar');
+ assert.equal(f.saidaEm,'2026-09-01T10:00:00Z');
+ assert.equal(e.db.pcp_registros[3].registro.baixaAutoERP.status,'FORA DA CARTEIRA ABERTA','o fantasma (data só do ERP) segue a baixa');
  assert.equal(e.db.pcp_registros[2].registro.finalizadaEm,undefined);
- assert.equal(e.db.pcp_meta[0].valor.antes.length,2);
+ assert.equal(e.db.pcp_meta[0].valor.antes.length,3);
+ const marca=f.erpSaiuDaCarteiraEm;
  const deNovo=await e.run(`reconciliarCarteira(sb,[{numero:'1',cliente:'Cliente'},{numero:'3',cliente:'Pendente'}])`);
- assert.equal(deNovo.arquivadas,0);assert.equal(deNovo.restauradas,0);assert.equal(deNovo.novas,0);
+ assert.equal(deNovo.arquivadas,0);assert.equal(deNovo.restauradas,0);assert.equal(deNovo.novas,0);assert.equal(deNovo.marcadasParaConferir,0);
+ assert.equal(e.db.pcp_registros[1].registro.erpSaiuDaCarteiraEm,marca,'a marca diz DESDE QUANDO: não é regravada');
+ const volta=await e.run(`reconciliarCarteira(sb,[{numero:'1',cliente:'Cliente'},{numero:'2',cliente:'X'},{numero:'3',cliente:'Pendente'}])`);
+ assert.equal(volta.restauradas,1);assert.equal(e.db.pcp_registros[1].registro.erpSaiuDaCarteiraEm,undefined,'voltou à carteira: a marca sai');
 });
 test('conciliação recusa lista vazia',async()=>{
  const e=await edge('pcp-mubisys',{pcp_registros:[row('1',{numero:'1',origemMubisys:true})]});
@@ -103,4 +111,164 @@ test('conciliação preserva edição concorrente e informa conflito',async()=>{
  assert.equal(r.conflitosCarteira,1);assert.equal(r.arquivadas,0);
  assert.deepEqual(e.db.pcp_registros[0].registro.equipe,['Bia']);
  assert.equal(e.db.pcp_registros[0].registro.finalizadaEm,undefined);
+});
+
+/* ---------------- Conferência da volta (revisão de 23/09/2026) ----------------
+   Pesa na nota de cada instalador: só a gestão escreve, e o autor é o crachá. */
+const volta = extra => row('1', {tipo:'externo', equipe:['Ana'], finalizadaEm:'2026-09-19T12:00:00Z', ...extra});
+test('conta de grupo montagem (com senha) NÃO grava a própria conferência da volta', async () => {
+ const e = await edge('pcp-sync', {pcp_registros:[volta({})], equipe_contas:[{sistema:'pcp', usuario:'montagem', ativo:true}]});
+ const r = await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, retornoConf:{carroLimpo:'sim', equipamentosOk:'sim', por:'Léo', em:'2026-01-01'}}}, {papel:'montagem', nome:'Montagem', sub:'montagem'});
+ assert.equal(r.status, 200, JSON.stringify(r));
+ assert.equal(e.db.pcp_registros[0].registro.retornoConf, undefined, 'nada gravado, e sem 422 que trave a fila');
+});
+test('operação não apaga a conferência que a gestão fez', async () => {
+ const antes = {carroLimpo:'nao', equipamentosOk:'sim', obs:'', por:'Gestor', porId:'gestor', em:'2026-09-19T15:00:00Z'};
+ const e = await edge('pcp-sync', {pcp_registros:[volta({retornoConf:antes})]});
+ await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, retornoConf:{carroLimpo:'sim', equipamentosOk:'sim'}}}, {papel:'operacao', nome:'Op'});
+ assert.deepEqual({...e.db.pcp_registros[0].registro.retornoConf}, antes);
+});
+test('gestão confere: autor e hora vêm do crachá e do relógio do servidor, não do aparelho', async () => {
+ const e = await edge('pcp-sync', {pcp_registros:[volta({})]});
+ const r = await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, retornoConf:{carroLimpo:'sim', equipamentosOk:'nao', obs:'x'.repeat(400), por:'Outro', em:'2020-01-01'}}}, {papel:'pcp', nome:'Gestor', sub:'gestor-id'});
+ const rc = e.db.pcp_registros[0].registro.retornoConf;
+ assert.equal(r.status, 200);
+ assert.equal(rc.por, 'Gestor'); assert.equal(rc.porId, 'gestor-id');
+ assert.notEqual(rc.em, '2020-01-01'); assert.ok(Date.now() - Date.parse(rc.em) < 60000);
+ assert.equal(rc.obs.length, 300, 'observação cortada no teto, sem travar a fila');
+});
+test('editar só a observação não troca quem conferiu; "não conferido" nos dois apaga o autor', async () => {
+ const antes = {carroLimpo:'sim', equipamentosOk:'sim', obs:'', por:'Gestor', porId:'gestor', em:'2026-09-19T15:00:00Z'};
+ const e = await edge('pcp-sync', {pcp_registros:[volta({retornoConf:antes})]});
+ await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, retornoConf:{...antes, obs:'riscado no para-choque', por:'Outra'}}}, {papel:'admin', nome:'Outra'});
+ let rc = e.db.pcp_registros[0].registro.retornoConf;
+ assert.equal(rc.por, 'Gestor'); assert.equal(rc.em, antes.em); assert.equal(rc.obs, 'riscado no para-choque');
+ await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, retornoConf:{carroLimpo:'', equipamentosOk:''}}}, {papel:'admin', nome:'Outra'});
+ rc = e.db.pcp_registros[0].registro.retornoConf;
+ assert.equal(rc.por, ''); assert.equal(rc.em, '');
+});
+test('aparelho em versão antiga (sem o campo) não apaga a conferência gravada', async () => {
+ const antes = {carroLimpo:'nao', equipamentosOk:'nao', obs:'', por:'Gestor', porId:'gestor', em:'2026-09-19T15:00:00Z'};
+ const e = await edge('pcp-sync', {pcp_registros:[volta({retornoConf:antes})]});
+ const {retornoConf, ...semCampo} = e.db.pcp_registros[0].registro;
+ await e.call({action:'upsert', os:{...semCampo, observacoes:'nota nova'}}, {papel:'pcp', nome:'Gestor'});
+ assert.deepEqual({...e.db.pcp_registros[0].registro.retornoConf}, antes);
+});
+test('aba na versão anterior salvando equipe não apaga os pesos da nota', async () => {
+ const perf = {equipes:[], participacoes:[], criterios:{producao:40, limpeza:30, equipamentos:30}};
+ const e = await edge('pcp-sync', {pcp_config_global:[{id:true, config:{performancePCP:perf}, atualizado_em:'2026-09-19T10:00:00Z'}]});
+ const velho = {equipes:[{id:'eq1', nome:'Águias', emblema:'🦅', membros:[{chave:'Ana', nome:'Ana'}, {chave:'Bia', nome:'Bia'}]}], participacoes:[]};
+ const r = await e.call({action:'setCfg', baseCfg:{performancePCP:perf}, cfg:{performancePCP:velho}}, {papel:'pcp', nome:'Gestor'});
+ assert.equal(r.ok, true);
+ const gravado = e.db.pcp_config_global[0].config.performancePCP;
+ assert.equal(gravado.equipes.length, 1, 'a equipe entrou');
+ assert.deepEqual({...gravado.criterios}, perf.criterios, 'e os pesos ficaram');
+});
+test('"✓ Conferi" da gestão apaga o selo do ERP com carimbo do crachá; outro papel não apaga', async () => {
+ const base = {origemMubisys:true, numero:'9', cliente:'B', erpConferirEm:'2026-09-21T10:00:00Z', erpAlteracoes:[{em:'2026-09-21T10:00:00Z', campos:[{campo:'cliente', antes:'A', depois:'B'}]}]};
+ const e = await edge('pcp-sync', {pcp_registros:[row('mub-9', base)]});
+ await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, erpConferirEm:'', erpConferiuSelo:base.erpConferirEm}}, {papel:'operacao', nome:'Op'});
+ assert.equal(e.db.pcp_registros[0].registro.erpConferirEm, base.erpConferirEm, 'operação não apaga');
+ await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, erpConferirEm:'', erpConferiuSelo:base.erpConferirEm, erpConferidoPor:'Forjado'}}, {papel:'pcp', nome:'Gestor'});
+ const r = e.db.pcp_registros[0].registro;
+ assert.equal(r.erpConferirEm, ''); assert.equal(r.erpConferidoPor, 'Gestor');
+ await e.call({action:'upsert', os:{...r, erpConferirEm:'2020-01-01'}}, {papel:'pcp', nome:'Gestor'});
+ assert.equal(e.db.pcp_registros[0].registro.erpConferirEm, '', 'o aparelho não reacende o selo');
+});
+
+/* ---------------- Conexão com o ERP (23/09/2026) ---------------- */
+test('O.S. 23364: liberada, com equipe e agenda no dia, NÃO é arquivada quando sai da carteira do ERP', async () => {
+ const os=row('mub-23364',{numero:'23364',origemMubisys:true,liberadoPCP:true,aptoEm:'2026-09-20T10:00:00Z',equipe:['Ana','Bia'],instalacao:{data:'2026-09-22',periodo:'Manhã'}});
+ const e=await edge('pcp-mubisys',{pcp_registros:[os]});
+ const r=await e.run("reconciliarCarteira(sb,[{numero:'9',cliente:'Outra'}])");
+ assert.equal(r.arquivadas,0);assert.equal(r.marcadasParaConferir,1);
+ assert.equal(e.db.pcp_registros[0].registro.finalizadaEm,undefined);
+ assert.equal(e.db.pcp_registros[0].registro.arquivadaEm,undefined);
+});
+test('O.S. reaberta depois da baixa do ERP não é fechada de novo na hora seguinte', async () => {
+ const os=row('mub-7',{numero:'7',origemMubisys:true,baixaAutoERP:{em:'2026-09-20T10:00:00Z'},reabertaEm:'2026-09-21T10:00:00Z',reabertaPor:'Gestor'});
+ const e=await edge('pcp-mubisys',{pcp_registros:[os]});
+ const r=await e.run("reconciliarCarteira(sb,[{numero:'9',cliente:'Outra'}])");
+ assert.equal(r.arquivadas,0);assert.equal(e.db.pcp_registros[0].registro.finalizadaEm,undefined);
+});
+test('situação do ERP: vem da consulta, entra na O.S. nova e na existente sem somar ao rev nem acender o selo', async () => {
+ const e=await edge('pcp-mubisys',{pcp_registros:[row('mub-1',{numero:'1',origemMubisys:true,cliente:'A',statusERP:'PRODUCAO'})]});
+ e.run("erpGet=async url=>{const s=new URL(url).searchParams.get('status');return s==='CONCLUIDO'?[{numero:'1',cliente:'A'},{numero:'2',cliente:'B'}]:[]}");
+ const carteira=await e.run("buscarCarteiraCompleta('https://erp.invalid','key',{},'2026-09-23')");
+ assert.deepEqual(Array.from(carteira,x=>x.statusCarteira),['CONCLUIDO','CONCLUIDO']);
+ await e.run("gravarImportadas(sb,"+JSON.stringify(Array.from(carteira))+")");
+ const velha=e.db.pcp_registros.find(x=>x.id==='mub-1').registro, nova=e.db.pcp_registros.find(x=>x.id==='mub-2').registro;
+ assert.equal(velha.statusERP,'CONCLUIDO');assert.ok(velha.statusERPDesde);
+ assert.equal(velha.rev,1,'não vira conflito no aparelho');assert.equal(velha.erpConferirEm,undefined);
+ assert.equal(nova.statusERP,'CONCLUIDO');
+});
+test('aparelho com cópia velha não apaga a situação do ERP nem a marca "ERP fechou"', async () => {
+ const base={numero:'5',origemMubisys:true,statusERP:'CONCLUIDO',statusERPDesde:'2026-09-22T10:00:00Z',erpSaiuDaCarteiraEm:'2026-09-23T10:00:00Z'};
+ const e=await edge('pcp-sync',{pcp_registros:[row('mub-5',base)]});
+ const {statusERP,statusERPDesde,erpSaiuDaCarteiraEm,...velha}=e.db.pcp_registros[0].registro;
+ await e.call({action:'upsert',os:{...velha,obsPCP:'nota'}},{papel:'pcp',nome:'Gestor'});
+ const r=e.db.pcp_registros[0].registro;
+ assert.equal(r.statusERP,'CONCLUIDO');assert.equal(r.erpSaiuDaCarteiraEm,'2026-09-23T10:00:00Z');assert.equal(r.obsPCP,'nota');
+});
+test('reabrir carimba quem reabriu pelo crachá, no servidor', async () => {
+ const e=await edge('pcp-sync',{pcp_registros:[row('9',{tipo:'externo',finalizadaEm:'2026-09-20T10:00:00Z',finalizadoPor:'Mubisys · saiu da carteira aberta',arquivadaEm:'2026-09-20T10:00:00Z'})]});
+ await e.call({action:'upsert',os:{...e.db.pcp_registros[0].registro,finalizadaEm:'',finalizadoPor:''}},{papel:'pcp',nome:'Gestor'});
+ const r=e.db.pcp_registros[0].registro;
+ assert.equal(r.reabertaPor,'Gestor');assert.ok(r.reabertaEm);assert.equal(r.arquivadaEm,undefined);
+});
+test('"Voltar ao PCP" e o Desfazer do liberar numa O.S. do ERP sem equipe GRAVAM (não são esqueleto)', async () => {
+ const e=await edge('pcp-sync',{pcp_registros:[row('mub-7',{numero:'7',origemMubisys:true,liberadoPCP:true,aptoEm:'2026-09-23T10:00:00Z',paradoClienteEm:'2026-09-23T11:00:00Z',equipe:[],rev:3})]});
+ const atual=e.db.pcp_registros[0].registro;
+ const r=await e.call({action:'upsert',os:{...atual,liberadoPCP:false,aptoEm:'',aptoPor:'',paradoClienteEm:'',paradoClienteLog:[{de:atual.paradoClienteEm,ate:'2026-09-23T12:00:00Z',motivo:'voltou ao PCP'}]}},{papel:'pcp',nome:'Gestor'});
+ assert.equal(r.duplicataEvitada,undefined);
+ const g=e.db.pcp_registros[0].registro;
+ assert.equal(g.liberadoPCP,false);assert.equal(g.paradoClienteEm,'');assert.equal(g.paradoClienteLog.length,1);
+});
+test('esqueleto do ERP SEM rev sobre ficha trabalhada continua devolvendo a ficha do servidor', async () => {
+ const e=await edge('pcp-sync',{pcp_registros:[row('mub-8',{numero:'8',origemMubisys:true,liberadoPCP:true,equipe:['Ana'],rev:2})]});
+ const {rev,...semRev}=e.db.pcp_registros[0].registro;
+ const r=await e.call({action:'upsert',os:{...semRev,liberadoPCP:false,equipe:[]}},{papel:'pcp',nome:'Gestor'});
+ assert.equal(r.duplicataEvitada,true);assert.equal(e.db.pcp_registros[0].registro.liberadoPCP,true);
+});
+
+test('"Sobrescrever" com cópia velha (selo vazio, sem dizer qual viu) NÃO apaga um selo novo do ERP', async () => {
+ const base = {origemMubisys:true, numero:'9', cliente:'C', erpConferirEm:'2026-09-23T10:00:00Z', erpConferidoEm:'2026-09-21T11:00:00Z',
+  erpAlteracoes:[{em:'2026-09-21T10:00:00Z', campos:[{campo:'cliente', antes:'A', depois:'B'}]},{em:'2026-09-23T10:00:00Z', campos:[{campo:'cliente', antes:'B', depois:'C'}]}]};
+ const e = await edge('pcp-sync', {pcp_registros:[row('mub-9', base)]});
+ // a cópia do aparelho é de antes do selo novo: selo vazio e o marcador do Conferi ANTERIOR
+ await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, erpConferirEm:'', erpConferiuSelo:'2026-09-21T10:00:00Z'}}, {papel:'pcp', nome:'Gestor'});
+ const r = e.db.pcp_registros[0].registro;
+ assert.equal(r.erpConferirEm, '2026-09-23T10:00:00Z', 'o selo novo continua aceso');
+ assert.equal(r.erpConferiuSelo, undefined, 'o marcador não fica gravado');
+});
+
+test('duplicata de equipe que JÁ estava no banco não trava a confirmação de uma participação; a NOVA vira conflito 409', async () => {
+ const m=[{chave:'1',nome:'A'},{chave:'2',nome:'B'}];
+ const eq=(id)=>({id,nome:'Equipe '+id,emblema:'🦅',membros:m,ativo:true});
+ const perf={equipes:[eq('x'),eq('y')],participacoes:[]};
+ const e=await edge('pcp-sync',{pcp_config_global:[{id:true,config:{performancePCP:perf},atualizado_em:'2026-09-19T10:00:00Z'}]});
+ const confirmar={...perf,participacoes:[{id:'os1',membros:[{chave:'1',nome:'A',percentual:50},{chave:'2',nome:'B',percentual:50}]}]};
+ const r=await e.call({action:'setCfg',baseCfg:{performancePCP:perf},cfg:{performancePCP:confirmar}},{papel:'pcp',nome:'Gestor'});
+ assert.equal(r.ok,true,JSON.stringify(r));
+ const atual=e.db.pcp_config_global[0].config.performancePCP;
+ const outra={equipes:[eq('x'),eq('y'),{...eq('z'),membros:[{chave:'3',nome:'C'}]},{...eq('k'),membros:[{chave:'3',nome:'C'}]}],participacoes:atual.participacoes};
+ const n=await e.call({action:'setCfg',baseCfg:{performancePCP:atual},cfg:{performancePCP:outra}},{papel:'pcp',nome:'Gestor'});
+ assert.equal(n.status,409);assert.equal(n.conflitoCfg,true);
+});
+test('pesos da nota mudados em dois aparelhos viram conflito, não uma soma de 110', async () => {
+ const perf={equipes:[],participacoes:[],criterios:{producao:60,limpeza:20,equipamentos:20}};
+ const e=await edge('pcp-sync',{pcp_config_global:[{id:true,config:{performancePCP:perf},atualizado_em:'2026-09-19T10:00:00Z'}]});
+ const a=await e.call({action:'setCfg',baseCfg:{performancePCP:perf},cfg:{performancePCP:{...perf,criterios:{producao:50,limpeza:30,equipamentos:20}}}},{papel:'pcp',nome:'A'});
+ assert.equal(a.ok,true);
+ const b=await e.call({action:'setCfg',baseCfg:{performancePCP:perf},cfg:{performancePCP:{...perf,criterios:{producao:60,limpeza:10,equipamentos:30}}}},{papel:'pcp',nome:'B'});
+ assert.equal(b.status,409,JSON.stringify(b));assert.equal(b.conflitoCfg,true);
+ assert.deepEqual({...e.db.pcp_config_global[0].config.performancePCP.criterios},{producao:50,limpeza:30,equipamentos:20});
+});
+test('pesos: dois ajustes válidos que tocam chaves diferentes não viram uma soma torta (90) sem conflito', async () => {
+ const perf={equipes:[],participacoes:[],criterios:{producao:60,limpeza:20,equipamentos:20}};
+ const e=await edge('pcp-sync',{pcp_config_global:[{id:true,config:{performancePCP:perf},atualizado_em:'2026-09-19T10:00:00Z'}]});
+ await e.call({action:'setCfg',baseCfg:{performancePCP:perf},cfg:{performancePCP:{...perf,criterios:{producao:60,limpeza:10,equipamentos:30}}}},{papel:'pcp',nome:'A'});
+ const b=await e.call({action:'setCfg',baseCfg:{performancePCP:perf},cfg:{performancePCP:{...perf,criterios:{producao:50,limpeza:20,equipamentos:30}}}},{papel:'pcp',nome:'B'});
+ assert.equal(b.status,409,JSON.stringify(b));
+ assert.deepEqual({...e.db.pcp_config_global[0].config.performancePCP.criterios},{producao:60,limpeza:10,equipamentos:30});
 });

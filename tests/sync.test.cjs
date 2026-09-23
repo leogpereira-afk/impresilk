@@ -266,3 +266,47 @@ test('resumo antigo devolvido por falha do ERP não fica fresco por 30 dias',asy
  const {s}=store({entregues:{[mes]:pacote}});await s.pronto();
  assert.ok(s.entreguesMes(mes));assert.equal(s.entreguesFresco(mes),false);
 });
+
+/* A recusa do servidor com texto próprio (422) era lida como QUEDA DE REDE: o
+   laço parava com o item na frente e nada do que veio depois saía do aparelho.
+   Achado na revisão do ranking de equipes (logo que estoura o teto de 400 KB),
+   mas o defeito era da fila, para qualquer recusa 4xx. */
+test('setCfg recusado com 422 sai da fila, é avisado, e a O.S de trás é enviada', async () => {
+  const cfg = {action:'setCfg', cfg:{performancePCP:{equipes:[],participacoes:[]}}, baseCfg:{}};
+  const os = {action:'upsert', os:{id:'b', numero:'200', atualizadoEm:'2026-09-23'}};
+  const enviados = [];
+  const {s} = store({lista:[os.os], fila:[cfg, os], responder: body => {
+    enviados.push(body.action);
+    if (body.action === 'setCfg') return {http:422, error:'Logos das equipes somam mais que o limite de 400 KB.'};
+    return {ok:true, os:{...body.os, rev:1}};
+  }});
+  const recusas = []; s.on('item-recusado', e => recusas.push(e.motivo));
+  await s.pronto(); await s.trySync();
+  assert.ok(enviados.includes('upsert'), 'a O.S que estava atrás precisa sair do aparelho');
+  assert.equal(s.getQueue().length, 0);
+  assert.match(recusas.join(' '), /400 KB/, 'quem clicou precisa saber o motivo');
+});
+
+test('upsert recusado com 422 não trava a fila: conta como erro do item e segue', async () => {
+  const ruim = {action:'upsert', os:{id:'a', numero:'100', atualizadoEm:'2026-09-23'}};
+  const boa = {action:'upsert', os:{id:'b', numero:'200', atualizadoEm:'2026-09-23'}};
+  const enviados = [];
+  const {s} = store({lista:[ruim.os, boa.os], fila:[ruim, boa], responder: body => {
+    enviados.push(body.os && body.os.id);
+    if (body.os && body.os.id === 'a') return {http:422, error:'Conclusão sem evidência.'};
+    return {ok:true, os:{...body.os, rev:1}};
+  }});
+  await s.pronto(); await s.trySync();
+  assert.ok(enviados.includes('b'), 'a O.S boa de trás sai');
+  assert.equal(s.getQueue().length, 1, 'a recusada fica guardada, não é descartada');
+});
+
+test('5xx continua sendo tratado como rede: para o ciclo e guarda tudo', async () => {
+  const a = {action:'upsert', os:{id:'a', numero:'100', atualizadoEm:'2026-09-23'}};
+  const b = {action:'upsert', os:{id:'b', numero:'200', atualizadoEm:'2026-09-23'}};
+  const enviados = [];
+  const {s} = store({lista:[a.os, b.os], fila:[a, b], responder: body => { enviados.push(body.os.id); return {http:503, error:'fora do ar'}; }});
+  await s.pronto(); await s.trySync();
+  assert.equal(enviados.join(','), 'a', 'queda de rede não martela o servidor com o resto da fila');
+  assert.equal(s.getQueue().length, 2);
+});

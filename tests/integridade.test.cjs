@@ -36,3 +36,30 @@ test('saída e retorno atravessam meia-noite, preservam autor e rejeitam data in
 test('escopo da equipe compara nome completo normalizado sem correspondência parcial',async()=>{
  const {pertenceEquipe:p}=await regras;assert.equal(p({equipe:['João Silva']},'joao silva'),true);assert.equal(p({equipe:['João Silva']},'João'),false);
 });
+
+/* Selo "ERP mudou · conferir" (auditoria de 23/09/2026): só acende quando o ERP
+   muda um dado que já existia. */
+test('selo do ERP: valor que chega pela primeira vez e o valor em R$ não pedem conferência', async () => {
+ const {atualizarOrigemERP} = await regras;
+ const os = {origemMubisys:true, cliente:'A', cnpjCpf:'', valorTotal:100};
+ const r = atualizarOrigemERP(os, {cnpjCpf:'12.345.678/0001-90', valorTotal:250, vendedor:'Bia'}, '2026-09-20T10:00:00Z');
+ assert.equal(r.alteracoes.length, 3, 'as três mudanças ficam registradas');
+ assert.equal(r.registro.erpConferirEm, undefined, 'mas nenhuma pede conferência');
+ const r2 = atualizarOrigemERP(r.registro, {cliente:'B'}, '2026-09-21T10:00:00Z');
+ assert.equal(r2.registro.erpConferirEm, '2026-09-21T10:00:00Z', 'cliente trocado pede');
+});
+
+test('situação do ERP: aceita as quatro da carteira (com ou sem acento), ignora o resto e O.S. finalizada', async () => {
+ const {atualizarSituacaoERP}=await regras;
+ assert.equal(atualizarSituacaoERP({statusERP:'PRODUCAO'},'PRODUÇÃO','t'),null,'mesma situação: nada a gravar');
+ assert.equal(atualizarSituacaoERP({statusERP:'PRODUCAO'},'concluido','t').statusERP,'CONCLUIDO');
+ assert.equal(atualizarSituacaoERP({},'ENTREGUE','t'),null);
+ assert.equal(atualizarSituacaoERP({finalizadaEm:'x'},'CONCLUIDO','t'),null);
+});
+test('trabalho de gente: data e período vindos do ERP não contam; equipe, liberação, confirmação, parado e rua contam', async () => {
+ const {temTrabalhoHumano}=await regras;
+ assert.equal(temTrabalhoHumano({instalacao:{data:'2026-09-23',periodo:'Manhã'},previsaoEntrega:'2026-09-23'}),false);
+ for (const o of [{equipe:['Ana']},{liberadoPCP:true},{confirmacao:'Confirmado'},{paradoClienteEm:'x'},{horaSaida:'08:00'}]) assert.equal(temTrabalhoHumano(o),true,JSON.stringify(o));
+ assert.equal(temTrabalhoHumano({horaSaida:'08:00',horaRetorno:'12:00'}),false,'saída com retorno já passou');
+ assert.equal(temTrabalhoHumano({equipe:['  ']}),false,'nome em branco não é equipe');
+});

@@ -375,7 +375,11 @@ const STORE = (() => {
           servidor: (corpo && corpo.error) ? String(corpo.error) : ''
         });
       }
-      return res.json();
+      const corpo = await res.json();
+      // O servidor avisa quando o crachá guardado é de TOQUE NO NOME (só
+      // registra a execução). O app da gestão não pode seguir com ele.
+      if (fn === 'os' && corpo && corpo.soExecucao === true) _notifyListeners('so-execucao', {});
+      return corpo;
     } finally {
       clearTimeout(timer);
     }
@@ -537,7 +541,12 @@ const STORE = (() => {
            `limparCache` desiste com fila pendente, então nem sair e entrar
            resolvia — enquanto o indicador mandava fazer login de novo.
            Recusa definitiva sai da fila e é DITA; o resto do dia segue. */
-        if (e && e.status === 403) {
+        /* RECUSA DEFINITIVA DE CONFIGURAÇÃO (400/422) segue o mesmo caminho do
+           403: o servidor validou e disse não — um logo que estoura o teto,
+           pesos que não somam 100 — e vai dizer não de novo. Deixar o setCfg na
+           frente da fila travava todo o resto do aparelho. */
+        const recusaCfg = e && item.action === 'setCfg' && (e.status === 400 || e.status === 422);
+        if (e && (e.status === 403 || recusaCfg)) {
           _removeFromQueue(item);
           _failCount.delete(sig);
           // Recusado não pode continuar valendo NESTE aparelho como se tivesse
@@ -546,12 +555,23 @@ const STORE = (() => {
           // que nunca chegou lá (uma escala, por exemplo) ficava para sempre na
           // tela de quem tentou, e só na dele. A cópia local volta à do banco.
           if (item.action === 'setCfg') reverterCFG();
-          _notifyListeners('item-recusado', { item, motivo: e.servidor || msg || 'sem permissão para esta ação' });
+          _notifyListeners('item-recusado', { item, motivo: e.servidor || msg || 'sem permissão para esta ação', status: e.status });
           continue;
         }
         // Distingue falha de rede (parar o ciclo) de erro permanente do item
         // (incrementa contador e avisa sem descartar o trabalho).
-        const isNetwork = !msg.startsWith('HTTP ') || /HTTP 5\d\d/.test(msg);
+        /* PELO CÓDIGO DA RESPOSTA, NÃO PELO TEXTO. Desde que a mensagem do
+           servidor passou a viajar no erro (para quem clicou saber o motivo),
+           toda recusa 4xx com texto próprio deixou de começar com "HTTP " e
+           passou a ser lida como QUEDA DE REDE: o laço parava com o item na
+           frente, para sempre, e nada do que veio depois saía do aparelho — sem
+           aviso, porque o contador de falhas só anda para erro que não é de
+           rede. Rede é: sem resposta, 5xx, 408 (tempo esgotado) e 429 (pediu
+           calma). O resto é do item. */
+        const status = e && e.status;
+        const isNetwork = status
+          ? (status >= 500 || status === 408 || status === 429)
+          : (!msg.startsWith('HTTP ') || /HTTP 5\d\d/.test(msg));
         if (isNetwork) {
           consecutiveNetFails++;
           if (consecutiveNetFails >= 1) break; // sai do loop, tenta no próximo trySync

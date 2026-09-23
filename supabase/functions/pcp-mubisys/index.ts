@@ -1,4 +1,4 @@
-import { atualizarOrigemERP } from "../_shared/pcp-integridade.mjs";
+import { atualizarOrigemERP, atualizarSituacaoERP, temTrabalhoHumano } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-mubisys — integracao com o ERP (substitui mubisys.js + mubisys-sync.mjs)
 //
@@ -580,6 +580,8 @@ function montarOSImportada(remoto: any) {
   if (remoto.instalacao) os.instalacao = Object.assign(os.instalacao, remoto.instalacao);
   if (Array.isArray(remoto.itens) && remoto.itens.length) os.itens = remoto.itens;
   os.origemMubisys = true;
+  const sit = atualizarSituacaoERP(os, remoto.statusCarteira || remoto.statusERP, agora);
+  if (sit) { os.statusERP = sit.statusERP; os.statusERPDesde = sit.statusERPDesde; }
   return os;
 }
 
@@ -666,10 +668,15 @@ async function gravarImportadas(sb: any, remotas: any[]) {
       const em = new Date().toISOString();
       for (const linha of (jaTem ?? [])) {
         if (linha.apagado) continue;
-        const r = atualizarOrigemERP(linha.registro, porNumeroERP.get(String(linha.registro?.numero)) || {}, em);
-        if (!r.alteracoes.length) continue;
+        const remoto = porNumeroERP.get(String(linha.registro?.numero)) || {};
+        const r = atualizarOrigemERP(linha.registro, remoto, em);
+        // A situação do ERP anda sem somar ao rev: o pcp-sync a preserva contra a
+        // cópia do aparelho, então ela não precisa (nem deve) virar conflito.
+        const sit = atualizarSituacaoERP(r.registro, remoto.statusCarteira || remoto.statusERP, em);
+        if (!r.alteracoes.length && !sit) continue;
+        const registroNovo = sit || r.registro;
         const {data, error} = await sb.from("pcp_registros")
-          .update({registro:r.registro, atualizado_em:em})
+          .update({registro:registroNovo, atualizado_em:em})
           .eq("colecao","os").eq("id",linha.id).eq("apagado",false)
           .eq("atualizado_em",linha.atualizado_em).select("id");
         if (error) throw new Error(error.message);
@@ -703,7 +710,7 @@ async function buscarCarteiraCompleta(base: string, publicKey: string, headers: 
       const pag = extrairLista(data).map(mapearOS);
       if (pag.some(o => !o.numero)) throw new Error('Carteira ERP incompleta: O.S. sem número.');
       if (pag.length && pag.every(o => vistos.has(o.numero))) throw new Error('Paginação ERP repetida; carteira mantida.');
-      for (const o of pag) { vistos.add(o.numero); lista.push(o); }
+      for (const o of pag) { vistos.add(o.numero); lista.push({ ...o, statusCarteira: status }); }
       if (pag.length < 500) return lista;
     }
     throw new Error('Limite de páginas da carteira atingido; carteira mantida.');
@@ -723,21 +730,32 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
   if (error) throw new Error(error.message);
   const abertas = (linhas || []).filter((l:any) => !l.apagado && !l.registro.finalizadaEm);
   if (abertas.length > 20 && numeros.size < abertas.length * 0.5) throw new Error('Carteira ERP caiu mais de 50%; mantida para conferência.');
-  const restaurar = (linhas || []).filter((l:any) => numeros.has(String(l.registro.numero)) && (l.apagado || (l.registro.finalizadaEm && l.registro.baixaAutoERP?.em === l.registro.finalizadaEm)));
-  const arquivar = abertas.filter((l:any) => l.registro.origemMubisys && !numeros.has(String(l.registro.numero)));
+  const restaurar = (linhas || []).filter((l:any) => numeros.has(String(l.registro.numero)) && (l.apagado || (l.registro.finalizadaEm && l.registro.baixaAutoERP?.em === l.registro.finalizadaEm) || (!l.registro.finalizadaEm && l.registro.erpSaiuDaCarteiraEm)));
+  const fora = abertas.filter((l:any) => l.registro.origemMubisys && !numeros.has(String(l.registro.numero)));
+  /* O.S COM TRABALHO DE GENTE NÃO É FECHADA PELO ERP. Ela fica aberta com a
+     marca erpSaiuDaCarteiraEm, e o card pede "ERP fechou: confirmar". Sem
+     trabalho humano (o esqueleto que só o ERP preencheu), segue a baixa de
+     sempre. A marca só é gravada uma vez: ela diz DESDE QUANDO. */
+  const arquivar = fora.filter((l:any) => !temTrabalhoHumano(l.registro));
+  const marcar = fora.filter((l:any) => temTrabalhoHumano(l.registro) && !l.registro.erpSaiuDaCarteiraEm);
   // Cópia recuperável antes da primeira alteração. Não apaga execução/equipe.
-  const alvos = [...restaurar,...arquivar];
+  const alvos = [...restaurar,...arquivar,...marcar];
   if (alvos.length) {
     const {error:e} = await sb.from('pcp_meta').upsert({chave:`carteira-auditoria:${em}`,valor:{em,origem:'Mubisys · quatro situações',numeros:[...numeros],antes:alvos}},{onConflict:'chave'});
     if (e) throw new Error(e.message);
   }
-  let restauradas=0, arquivadas=0, conflitos=0;
+  let restauradas=0, arquivadas=0, marcadas=0, conflitos=0;
+  const marcarIds = new Set(marcar.map((l:any) => l.id));
   for (const l of alvos) {
     const volta = numeros.has(String(l.registro.numero));
     const r = {...l.registro,rev:(Number(l.registro.rev)||0)+1,atualizadoEm:em,atualizadoPor:'Mubisys · conciliação de carteira'};
     if (volta) {
-      if (r.baixaAutoERP?.em === r.finalizadaEm) { r.finalizadaEm='';r.finalizadoPor='';delete r.baixaAutoERP;delete r.arquivadaEm; }
+      if (r.finalizadaEm && r.baixaAutoERP?.em === r.finalizadaEm) { r.finalizadaEm='';r.finalizadoPor='';delete r.baixaAutoERP;delete r.arquivadaEm; }
+      delete r.erpSaiuDaCarteiraEm;
       r.erpCarteira={aberta:true,em};
+    } else if (marcarIds.has(l.id)) {
+      r.erpSaiuDaCarteiraEm=em;
+      r.erpCarteira={aberta:false,em};
     } else {
       r.finalizadaEm=em;r.finalizadoPor='Mubisys · saiu da carteira aberta';r.arquivadaEm=em;
       r.baixaAutoERP={em,status:'FORA DA CARTEIRA ABERTA',carteira:true};
@@ -746,10 +764,10 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
     const {data,error:e}=await sb.from('pcp_registros').update({registro:r,apagado:false,atualizado_em:em})
       .eq('colecao','os').eq('id',l.id).eq('atualizado_em',l.atualizado_em).select('id');
     if(e) throw new Error(e.message);
-    if(!data?.length) conflitos++;else if(volta) restauradas++;else arquivadas++;
+    if(!data?.length) conflitos++;else if(volta) restauradas++;else if(marcarIds.has(l.id)) marcadas++;else arquivadas++;
   }
   const importacao = await gravarImportadas(sb,remotas);
-  return {...importacao,restauradas,arquivadas,conflitosCarteira:conflitos,carteiraCompleta:true};
+  return {...importacao,restauradas,arquivadas,marcadasParaConferir:marcadas,conflitosCarteira:conflitos,carteiraCompleta:true};
 }
 
 /* O BATIMENTO GUARDA DUAS DATAS: a da ultima TENTATIVA e a da ultima que DEU

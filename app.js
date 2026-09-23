@@ -228,6 +228,31 @@ function toast(msg, type = '') {
   setTimeout(() => el.remove(), 3000);
 }
 
+/* Toast com DESFAZER: ação de um toque no card precisa de volta de um toque.
+   Fica 6 s (o toast comum some em 3, cedo demais para ler e decidir). */
+function toastDesfazer(msg, desfazer) {
+  const c = $('#toast-container');
+  const el = document.createElement('div');
+  el.className = 'toast success toast-acao';
+  el.setAttribute('role', 'status');
+  const t = document.createElement('span'); t.textContent = msg;
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Desfazer';
+  let feito = false;
+  b.onclick = () => { if (feito) return; feito = true; el.remove(); desfazer(); };
+  el.append(t, b);
+  c.appendChild(el);
+  setTimeout(() => el.remove(), 6000);
+}
+
+/* Retrabalho pendente com a O.S. filha, a mesma régua da aba Retrabalho. O
+   mapa de filhas é montado uma vez por pintura (renderActiveTab o zera). */
+let _filhasRetrab = null;
+function filhasRetrabDe(os) {
+  if (!_filhasRetrab) _filhasRetrab = OPERACAO.filhasDeRetrabalho(STORE.getAllOS());
+  return _filhasRetrab.get(String((os && os.numero) || '').trim()) || [];
+}
+function retrabPendente(os) { return OPERACAO.retrabalhoPendente(os, filhasRetrabDe(os)); }
+
 /* ══════════════════════════════════════════════════════════════════════════
    STATUS DERIVADO
    ══════════════════════════════════════════════════════════════════════════ */
@@ -277,6 +302,9 @@ const STEP_DEFS_INT = {
 };
 function statusLabelDe(os, st) {
   if (st === 'finalizada' && OPERACAO.encerradaERP(os)) return 'Encerrada no ERP';
+  // Confirmada em outro dia: o selo dizia "Confirmada" e o próximo passo, "Falta
+  // confirmar" -- as duas coisas eram verdade e a tela parecia se contradizer.
+  if (st === 'confirmada' && !os.horaSaida && !OPERACAO.confirmadaHoje(os)) return 'Confirmada · reconfirmar no dia';
   if (isInterno(os) && STATUS_LABEL_INT[st]) return STATUS_LABEL_INT[st];
   return STATUS_LABEL[st] || st;
 }
@@ -288,13 +316,28 @@ function stepperHTML(os, compact) {
   const idx = seq.indexOf(atual);
   const hist = Array.isArray(os.historico) ? os.historico : [];
   const interno = isInterno(os);
+  /* BAIXA DO ERP NÃO É PROVA DE EXECUÇÃO. Quando o ERP encerrou a O.S., cada
+     etapa mostra o que foi REGISTRADO no PCP, não o índice do status: marcar
+     ✓ em "Em rota" numa O.S. em que ninguém registrou saída afirmava uma
+     execução que o PCP não viu (auditoria de 23/09/2026). */
+  const erp = OPERACAO.encerradaERP(os);
+  const fato = {
+    aguardando_producao: true,
+    apto: !!os.liberadoPCP,
+    agendada: OPERACAO.agendaCompleta(os),
+    confirmada: os.confirmacao === 'Confirmado',
+    em_andamento: !!(os.horaSaida || os.saidaEm),
+    finalizada: true,
+  };
   const passos = seq.map((s, i) => {
-    const cls = i < idx ? 'done' : (i === idx ? 'cur' : 'todo');
+    let cls = i < idx ? 'done' : (i === idx ? 'cur' : 'todo');
+    if (erp && s !== 'finalizada') cls = fato[s] ? 'done' : 'todo nao-registrada';
     const d = (interno && STEP_DEFS_INT[s]) || STEP_DEFS[s];
     const h = hist.find(x => x.etapa === s);
     const quando = h && h.em ? ` — ${new Date(h.em).toLocaleDateString('pt-BR')}${h.por ? ' · ' + h.por : ''}` : '';
-    return `<span class="step ${cls}" title="${esc(statusLabelDe(os, s))}${quando}">
-      <span class="step-dot">${i < idx ? '✓' : d.icon}</span>
+    const titulo = erp && s !== 'finalizada' && !fato[s] ? statusLabelDe(os, s) + ': não registrada no PCP (a O.S. foi encerrada pelo ERP)' : statusLabelDe(os, s) + quando;
+    return `<span class="step ${cls}" title="${esc(titulo)}">
+      <span class="step-dot">${cls === 'done' ? '✓' : d.icon}</span>
       ${compact ? '' : `<span class="step-lbl">${esc(d.curto)}</span>`}
     </span>`;
   }).join('<span class="step-sep"></span>');
@@ -313,7 +356,7 @@ function proximoPasso(os) {
   }
   const inst = os.instalacao || {};
   if (!os.liberadoPCP)                                              return { label: 'PCP precisa liberar',     cta: '✓ Liberar PCP', acao: 'pcp' };
-  if (OPERACAO.paradoNoCliente(os))                              return { label: 'Parado: o cliente ainda não liberou a instalação', cta: '▶ Cliente liberou', acao: 'agenda' };
+  if (OPERACAO.paradoNoCliente(os))                              return { label: 'Parado: o cliente ainda não liberou a instalação', cta: '▶ Cliente liberou', acao: 'liberou' };
   if (!OPERACAO.agendaCompleta(os))                                return { label: 'Completar programação', cta: '📅 Agendar', acao: 'agenda' };
   if (os.confirmacao !== 'Confirmado' || (!os.horaSaida && !OPERACAO.confirmadaHoje(os))) return { label: 'Falta confirmar cliente', cta: '📞 Confirmar',  acao: 'confirmar' };
   if (!os.carroLiberado && !os.horaSaida)                          return { label: 'Liberar carro / saída',   cta: '🚗 Liberar saída', acao: 'saida' };
@@ -331,7 +374,11 @@ function registrarEtapa(os) {
   if (!Array.isArray(os.historico)) os.historico = [];
   const ultimo = os.historico[os.historico.length - 1];
   if (!ultimo || ultimo.etapa !== st) {
-    os.historico.push({ etapa: st, em: nowISO(), por: (STATE.user && STATE.user.nome) || '' });
+    /* Etapa "finalizada" é de quem finalizou e de quando: salvar a ficha de uma
+       O.S. que o ERP ou o espelho finalizou (a conferência da volta, por
+       exemplo) não pode registrar a gestão finalizando hoje. */
+    const fin = st === 'finalizada' && os.finalizadaEm;
+    os.historico.push({ etapa: st, em: fin ? os.finalizadaEm : nowISO(), por: fin ? (os.finalizadoPor || '') : ((STATE.user && STATE.user.nome) || '') });
   }
 }
 
@@ -504,7 +551,7 @@ function initLogin() {
   // Auto-login: só entra com sessão SE houver crachá guardado (a reforma de
   // 05/08 passou a exigir crachá para os dados). Sessão salva antes da reforma,
   // ou com crachá vencido, não pode entrar num app que só descartaria edições.
-  const saved = STORE.getUser();
+  let saved = STORE.getUser();
   const temCracha = typeof AUTH !== 'undefined' && AUTH.temCracha();
   // Crachá SEM usuário salvo é o caso da ENTRADA ÚNICA: quem entra pelo Painel
   // recebe aqui o crachá do PCP (mesmo endereço, mesmo localStorage), mas o
@@ -514,6 +561,22 @@ function initLogin() {
   // existe aqui — recebendo "usuário ou senha incorretos" sem ter errado nada.
   // O dono sai do próprio crachá; se ele estiver vencido, dono() devolve null e
   // a tela de login aparece, como deve.
+  /* CRACHÁ DE "TOQUE NO NOME" NÃO ABRE A GESTÃO. Ele nasce de um nome da lista,
+     sem senha, e o servidor só aceita dele a execução (CAMPOS_MONTAGEM): aqui,
+     liberar, programar, confirmar e finalizar respondiam "ok" e eram
+     descartados calados (auditoria de 23/09/2026). O lugar dele é o espelho.
+     Vale também com sessão salva: num tablet da gestão onde alguém tocou um
+     nome no espelho, o crachá guardado passou a ser o dele. */
+  const donoCracha = temCracha ? AUTH.dono() : null;
+  if (crachaEhToque()) {
+    STORE.setUser(null);
+    avisoCrachaDeToque(donoCracha && donoCracha.nome);
+    return;
+  }
+  /* Crachá de OUTRA pessoa que não a salva (tablet dividido, entrada pelo
+     Painel com outra conta): vale o dono do crachá -- é ele que o servidor vê.
+     Abrir com o nome salvo mostraria uma pessoa e gravaria como outra. */
+  if (saved && donoCracha && saved.usuario && donoCracha.usuario !== saved.usuario) { STORE.setUser(null); saved = null; }
   const doCracha = (!saved && temCracha) ? AUTH.dono() : null;
   if (doCracha) {
     STATE.user = { nome: doCracha.nome, papel: doCracha.papel, usuario: doCracha.usuario };
@@ -532,6 +595,35 @@ function initLogin() {
     // Sessão órfã (sem crachá): limpa e mostra o login em vez de um app morto.
     STORE.setUser(null);
   }
+}
+
+/* O CRACHÁ DESTE APARELHO É DE TOQUE NO NOME? O crachá novo diz
+   (montagemIndividual); o de antes de 19/09 não diz, e aí vale a marca que o
+   servidor deixou (a lista devolve soExecucao) -- guardada pelo fim do próprio
+   crachá, para não valer para o próximo. */
+const K_CRACHA_TOQUE = 'impresilk_pcp_cracha_toque';
+function crachaEhToque() {
+  if (typeof AUTH === 'undefined' || !AUTH.temCracha()) return false;
+  const d = AUTH.dono();
+  if (d && d.papel === 'montagem' && d.montagemIndividual) return true;
+  let marca = ''; try { marca = localStorage.getItem(K_CRACHA_TOQUE) || ''; } catch {}
+  return !!marca && marca === String(AUTH.cracha() || '').slice(-24);
+}
+function marcarCrachaDeToque() {
+  try { localStorage.setItem(K_CRACHA_TOQUE, String(AUTH.cracha() || '').slice(-24)); } catch {}
+}
+function avisoCrachaDeToque(nome) {
+  const box = $('#login-choose');
+  if (!box || $('#login-aviso-toque')) return;
+  const p = document.createElement('p');
+  p.id = 'login-aviso-toque';
+  p.className = 'login-aviso';
+  p.setAttribute('role', 'status');
+  const b = document.createElement('b'); b.textContent = nome || 'um instalador';
+  const a = document.createElement('a'); a.href = 'equipe.html'; a.className = 'btn-primary w-100'; a.textContent = 'Abrir o espelho de ' + (nome || 'quem entrou');
+  p.append('Este aparelho está com a entrada de ', b, ' pelo nome, que só registra a execução da instalação. Para usar a gestão, entre com usuário e senha.');
+  box.prepend(a);
+  box.prepend(p);
 }
 
 // Seletor inicial: Gestão (admin/usuário+senha) × Montagem (clicar no nome)
@@ -581,6 +673,11 @@ async function doLogin() {
   const mostrarErro = txt => { err.textContent = txt; err.classList.remove('hidden'); };
   if (!usuario || !pass) { mostrarErro('Preencha usuário e senha.'); return; }
 
+  /* Entrar na gestão por cima de um crachá de TOQUE: o cache é só o da equipe
+     do instalador (o servidor filtra) e a fila é o trabalho dele. Com fila,
+     primeiro o espelho envia; sem fila, o cache sai depois do login. */
+  const eraToque = crachaEhToque();
+  if (eraToque && STORE.getQueue().length) { mostrarErro('Este aparelho tem trabalho do espelho ainda não enviado. Abra o espelho e espere enviar antes de entrar na gestão.'); return; }
   _entrando = true;
   const bt = $('#login-btn'); const rot = bt.textContent;
   bt.disabled = true; bt.textContent = 'Entrando…';
@@ -606,6 +703,8 @@ async function doLogin() {
   _entrando = false; bt.disabled = false; bt.textContent = rot;
   err.classList.add('hidden');
   localStorage.setItem('impresilk_inst_lembrado', r.usuario);
+  if (eraToque) { STORE.limparCache(); }
+  try { localStorage.removeItem(K_CRACHA_TOQUE); } catch {}
   STATE.user = { nome: r.nome || r.usuario, papel: r.papel, usuario: r.usuario, trocarSenha: !!r.trocarSenha };
   STORE.setUser(STATE.user);
   enterApp();
@@ -870,12 +969,29 @@ function initTabs() {
          entrasse por "Parado Cliente" e depois clicasse em "PCP" continuaria
          vendo so os parados, achando que a carteira sumiu. */
       if (tab === 'pcp') STATE.pcpVista = t.dataset.vista ?? '';
+      /* Entrar pela lateral limpa a prioridade do dia: com uma prioridade
+         escolhida antes, o atalho "Parado Cliente" mostrava a prioridade, não
+         os parados (auditoria de 23/09/2026). */
+      if (tab === 'pcp') STATE._prioridade = '';
       if (tab === 'entregas') STATE._fEnt = null;
       STORE.pull(refreshAposPull);
       renderActiveTab();
       window.scrollTo({ top: 0, behavior: 'instant' });
     };
   });
+}
+
+/* A lateral acende a entrada que corresponde ao que está na tela: trocar a
+   vista pelos chips do PCP ("Parado Cliente", "Ativos"...) não mudava o
+   destaque da lateral, e as duas se desencontravam. */
+function marcarLateral() {
+  const tab = STATE.activeTab;
+  const vista = tab === 'pcp' ? (STATE.pcpVista || '') : '';
+  const tabs = $$('.tab');
+  const alvo = tabs.find(x => x.dataset.tab === tab && (x.dataset.vista ?? '') === vista)
+    || tabs.find(x => x.dataset.tab === tab && !x.dataset.vista);
+  if (!alvo) return;
+  tabs.forEach(x => x.classList.toggle('active', x === alvo));
 }
 
 function initTopbar() {
@@ -938,6 +1054,16 @@ function initSyncIndicator() {
   });
   // Tamanho da equipe (RH) chegou: quem mostra isso é o histórico de Entregas.
   STORE.on('equipe', () => { if (STATE.activeTab === 'entregas') renderActiveTab(); });
+  /* CRACHÁ TROCADO COM A ABA ABERTA. O espelho guarda o crachá do instalador no
+     mesmo lugar (as abas dividem o localStorage); esta aba seguiria com o nome
+     da gestão gravando com o crachá dele, e o servidor descartaria calado. A
+     página recarrega e cai na tela de entrada certa. */
+  STORE.on('so-execucao', () => { marcarCrachaDeToque(); STORE.setUser(null); location.reload(); });
+  window.addEventListener('storage', e => {
+    if (e.key !== 'impresilk_inst_cracha' || !STATE.user) return;
+    const d = AUTH.dono();
+    if (!d || d.montagemIndividual || (STATE.user.usuario && d.usuario !== STATE.user.usuario)) location.reload();
+  });
   STORE.on('quota', () => toast('Sem espaço no aparelho para guardar as O.S. Libere espaço (fotos/apps) e recarregue.', 'error'));
   // Chegou o valor das O.S: repinta as telas que mostram dinheiro.
   STORE.on('valores', () => { if (['entregas', 'performance'].includes(STATE.activeTab)) renderActiveTab(); });
@@ -978,10 +1104,16 @@ function initSyncIndicator() {
   STORE.on('conflito-cfg', mostrarConflitoCFG);
   if (STORE.conflitoCFG && STORE.conflitoCFG()) mostrarConflitoCFG(STORE.conflitoCFG());
   STORE.on('cfg', () => { aplicarPermissoes(); renderActiveTab(); });
-  STORE.on('item-recusado', ({ item, motivo }) => {
-    const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero
-      : item && item.action === 'setCfg' ? 'a alteração das configurações' : (item && item.action) || 'a alteração';
-    toast(`⛔ O servidor recusou ${ref}: ${motivo || 'sem permissão'}. Ela vale só neste aparelho — peça a um administrador. O resto da fila seguiu normalmente.`, 'error');
+  STORE.on('item-recusado', ({ item, motivo, status }) => {
+    /* Configuração recusada é DESFEITA no aparelho (reverterCFG): dizer que
+       "vale só neste aparelho" fazia a pessoa achar que o trabalho estava
+       guardado. E o administrador leva a mesma recusa quando o dado é inválido. */
+    if (item && item.action === 'setCfg') {
+      toast(`⛔ O servidor recusou a alteração das configurações, e ela foi desfeita: ${motivo || 'sem permissão'}. ${status === 403 ? 'Peça a um administrador.' : 'Corrija e salve de novo.'}`, 'error');
+      return;
+    }
+    const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : (item && item.action) || 'a alteração';
+    toast(`⛔ O servidor recusou ${ref}: ${motivo || 'sem permissão'}. A alteração ficou só neste aparelho; peça a um administrador. O resto da fila seguiu normalmente.`, 'error');
   });
   STORE.on('pull-truncado', () => toast('Lista de O.S pode estar incompleta — recarregue.', 'error'));
   // Crachá recusado: guarda o que dá e manda entrar de novo (o dado fica).
@@ -1024,7 +1156,18 @@ async function verificarNuvem() {
 function initConflictDialog() {
   STORE.onConflict((local, remote) => {
     const dlg = $('#conflict-dialog');
-    $('#conflict-msg').textContent = `Esta O.S (${remote.numero || remote.id}) foi alterada em outro aparelho.`;
+    /* Dizer QUEM mudou. O texto fixo culpava "outro aparelho" quando quem tinha
+       mudado era a conciliação do ERP -- e "Sobrescrever" reabria calado uma
+       O.S. que o servidor tinha como finalizada (auditoria de 23/09/2026). */
+    const quem = remote.atualizadoPor || '';
+    const quando = remote.atualizadoEm ? new Date(remote.atualizadoEm).toLocaleString('pt-BR') : '';
+    const doERP = /^Mubisys/i.test(quem);
+    const numero = remote.numero || remote.id;
+    let msg = doERP
+      ? `A O.S ${numero} foi atualizada pelo ERP (${quem}${quando ? ', ' + quando : ''}) enquanto você editava.`
+      : `A O.S ${numero} foi alterada ${quem ? 'por ' + quem + ' ' : ''}em outro aparelho${quando ? ' (' + quando + ')' : ''}.`;
+    if (remote.finalizadaEm && !local.finalizadaEm) msg += ' No servidor ela está FINALIZADA: "Sobrescrever" vai reabri-la.';
+    $('#conflict-msg').textContent = msg;
     dlg.classList.remove('hidden');
     $('#conflict-reload').onclick = () => {
       STORE.aceitarServidor(remote);
@@ -1042,6 +1185,7 @@ function initConflictDialog() {
 }
 
 function renderActiveTab() {
+  _filhasRetrab = null;   // o mapa de filhas do retrabalho vale por uma pintura
   switch (STATE.activeTab) {
     case 'painel':      renderPainel(); break;
     case 'pcp':         renderPCP(); break;
@@ -1170,6 +1314,9 @@ function saveDraft() {
   if (!_modalDraft) return;
   _modalDraft.atualizadoEm = nowISO();
   _modalDraft.atualizadoPor = STATE.user.nome;
+  // Programou a data: o período "parado no cliente" termina aqui, guardado no
+  // log. A gravação anterior (o store) diz se a agenda completou AGORA.
+  if (_modalDraft.paradoClienteEm) OPERACAO.fecharParadoPorAgenda(_modalDraft, OPERACAO.agendaCompleta(STORE.getOS(_modalDraft.id) || {}), nowISO(), STATE.user.nome);
   registrarEtapa(_modalDraft); // histórico de transições (lead time por etapa)
   STORE.saveOS(_modalDraft);
   _modalDirty = false;
@@ -1620,6 +1767,7 @@ function blocoExec(os, ro, done) {
         <div class="field"><label>Hora retorno</label><input type="time" data-f="horaRetorno" value="${esc(os.horaRetorno)}"></div>
         <div class="field"><label>KM retorno</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>
       </div>
+      ${conferenciaVoltaHTML(os, ro)}
       <div class="field-row">
         <div class="field"><label>Situação</label><select data-f="checkout.situacao"><option value="">— selecionar —</option>${sitOpts}${sitExtra}</select></div>
         <div class="field"><label>Obs de fechamento</label><input data-f="checkout.obs" value="${esc(co.obs)}"></div>
@@ -1633,6 +1781,42 @@ function blocoExec(os, ro, done) {
       </div>
     </div>
   </details>`;
+}
+
+/* ── CONFERÊNCIA DA VOLTA: carro e equipamentos ───────────────────────────
+   Pedido do dono (23/09/2026): "a limpeza do carro e a gestão dos equipamentos
+   têm que ter peso nesse critério de avaliação". Até aqui não havia registro
+   nenhum disso — só "Ferramentas conferidas" na SAÍDA. Esta conferência é
+   feita pela GESTÃO quando o carro volta: quem avalia não é quem é avaliado,
+   por isso fica travada para quem entra pelo nome (o servidor também não aceita
+   o campo vindo da montagem). "Não conferido" é uma resposta válida e não pesa
+   contra ninguém — é diferente de "não". */
+function conferenciaVoltaHTML(os, ro) {
+  if (!os || isInterno(os)) return '';
+  const c = os.retornoConf || {};
+  const gestao = ['admin', 'pcp'].includes(STATE.user && STATE.user.papel);
+  /* NÃO trava na O.S. finalizada. Revisão de 23/09/2026: a nota só lê O.S.
+     finalizada, e quase toda O.S. é finalizada ANTES de o carro voltar (pelo
+     instalador ou pela baixa do ERP). Travar aqui deixava conferir só o que o
+     PCP finaliza pela própria tela, e reabrir para conferir mudava a data da
+     entrega. A conferência é da gestão e não mexe na execução. */
+  const trava = !gestao || (typeof podeEditar === 'function' && !podeEditar());
+  const op = (campo, valor) => `<select data-f="retornoConf.${campo}" ${trava ? 'disabled' : ''}>
+      <option value="" ${!valor ? 'selected' : ''}>Não conferido</option>
+      <option value="sim" ${valor === 'sim' ? 'selected' : ''}>Sim</option>
+      <option value="nao" ${valor === 'nao' ? 'selected' : ''}>Não</option>
+    </select>`;
+  const respondida = c.carroLimpo === 'sim' || c.carroLimpo === 'nao' || c.equipamentosOk === 'sim' || c.equipamentosOk === 'nao';
+  return `<div class="conf-volta ${trava ? '' : 'lock-allow'}">
+      <div class="conf-volta-titulo">🔎 Conferência da volta <small>${gestao ? 'feita pela gestão · conta na nota de cada instalador' : 'feita pela gestão'}</small></div>
+      ${gestao && !trava ? '<p class="conf-volta-dica">Responda sim ou não em toda volta: em branco não conta como OK. A nota só usa carro e equipamentos quando 80% das voltas do período têm resposta.</p>' : ''}
+      <div class="field-row">
+        <div class="field"><label>🚗 Carro devolvido limpo</label>${op('carroLimpo', c.carroLimpo)}</div>
+        <div class="field"><label>🧰 Equipamentos devolvidos completos e em ordem</label>${op('equipamentosOk', c.equipamentosOk)}</div>
+      </div>
+      <div class="field"><label>O que faltou ou precisa de atenção</label><input data-f="retornoConf.obs" maxlength="300" value="${esc(c.obs || '')}" placeholder="ex.: faltou a escada de 6 m; banco traseiro com cola" ${trava ? 'disabled' : ''}></div>
+      ${respondida && c.por ? `<p class="conf-por-linha">Conferido por ${esc(c.por)}${c.em ? ' · ' + esc(new Date(c.em).toLocaleString('pt-BR')) : ''}</p>` : ''}
+    </div>`;
 }
 
 /* ── Campo de chips (autocomplete simples) ───────────────────────────────── */
@@ -1811,6 +1995,16 @@ function bindModalEvents(os, ro) {
       // Hora de saída/retorno sem dia não reconstrói o passado (carimbarMomento).
       if (el.dataset.f === 'horaSaida')   STORE.carimbarMomento(_modalDraft, 'horaSaida', 'saidaEm');
       if (el.dataset.f === 'horaRetorno') STORE.carimbarMomento(_modalDraft, 'horaRetorno', 'retornoEm');
+      // A conferência da volta leva o nome de quem conferiu e quando — é
+      // avaliação de pessoa, e avaliação sem autor não se sustenta. Só a
+      // RESPOSTA carimba: anotar a observação depois não troca quem conferiu, e
+      // voltar os dois para "não conferido" apaga o autor. (O servidor carimba
+      // de novo pelo crachá; este é o que a ficha mostra até sincronizar.)
+      if (el.dataset.f === 'retornoConf.carroLimpo' || el.dataset.f === 'retornoConf.equipamentosOk') {
+        const rc = _modalDraft.retornoConf || (_modalDraft.retornoConf = {});
+        if (!rc.carroLimpo && !rc.equipamentosOk) { rc.por = ''; rc.em = ''; }
+        else { rc.por = (STATE.user && STATE.user.nome) || ''; rc.em = nowISO(); }
+      }
       // Re-render leve em campos que afetam status/checklist/travas
       if (['confirmacao','instalacao.periodo','instalacao.data','liberadoPCP'].includes(el.dataset.f)) {
         saveDraft(); reRenderModalKeepOpen();
@@ -2290,19 +2484,18 @@ function osCardHTML(os) {
   const ctaBtn = pp
     ? (pp.acao === 'finalizar'
         ? `<button class="btn-success btn-sm edit-only card-finalizar" data-finalizar-os="${esc(os.id)}" title="Finalizar serviço">${esc(pp.cta)}</button>`
-        : `<button class="btn-primary btn-sm edit-only card-cta" data-cta-os="${esc(os.id)}" title="${esc(pp.label)}">${esc(pp.cta)}</button>`)
-    : `<span class="card-fin-tag" title="Serviço finalizado">✓ ${interno ? 'Retirado' : 'Finalizado'}</span>`;
+        : `<button class="btn-primary btn-sm edit-only card-cta" data-cta-os="${esc(os.id)}" data-cta-acao="${esc(pp.acao)}" title="${esc(pp.label)}">${esc(pp.cta)}</button>`)
+    : (OPERACAO.encerradaERP(os)
+        ? `<span class="card-fin-tag card-fin-erp" title="Encerrada pela baixa do ERP; a execução não foi registrada no PCP. A data é a da sincronização, não a da entrega.">Baixa do ERP</span>`
+        : `<span class="card-fin-tag" title="Serviço finalizado">✓ ${interno ? 'Retirado' : 'Finalizado'}</span>`);
   /* O BOTAO DA LIBERACAO DO CLIENTE. So aparece onde a duvida existe: O.S
      EXTERNA, ja liberada pelo PCP e ainda sem agenda -- que e exatamente o
      ponto em que "pronto e ninguem agendou" e "pronto e o cliente nao liberou"
      eram a mesma coisa na tela. O mesmo botao marca e desmarca, porque estado
      que so se liga e estado que ninguem desliga. */
-  const podeMarcarParado = !interno && !os.finalizadaEm && os.liberadoPCP && !OPERACAO.agendaCompleta(os);
-  const paradoBtn = podeMarcarParado
-    ? (os.paradoClienteEm
-        ? `<button class="btn-success btn-sm edit-only" data-parado-os="${esc(os.id)}" data-parado-acao="liberou" title="O cliente liberou: volta para a fila de agendamento">▶ Cliente liberou</button>`
-        : `<button class="btn-ghost btn-sm edit-only" data-parado-os="${esc(os.id)}" data-parado-acao="aguardar" title="Pronto, mas o cliente ainda não liberou a instalação">⏸ Parado no cliente</button>`)
-    : '';
+  /* (O botão "Parado no cliente / Cliente liberou" que morava aqui virou uma
+     linha do menu Etapa, visível sem abrir o recolhido -- e o "liberou" agora
+     guarda o período no log em vez de apagar a data.) */
   // Finalizada recente: opção de arquivar já (sem esperar os 7 dias automáticos);
   // arquivada manualmente: opção de desfazer.
   const diasFin = diasDesdeFinal(os);
@@ -2315,13 +2508,16 @@ function osCardHTML(os) {
     <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
       <div class="card-header card-header-os">
         <div class="card-meta">
-          <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${os.retrabalho && !os.finalizadaEm ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}${seloParado}${os.erpConferirEm ? ' <span class="badge sem-valor">ERP atualizado · conferir</span>' : ''}</div>
+          <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${(os.retrabalho && !os.finalizadaEm) || retrabPendente(os) ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}${seloParado}${os.statusERP === 'CONCLUIDO' && !os.liberadoPCP && !os.finalizadaEm ? ` <span class="tag-erp-pronta" title="O ERP diz que a produção terminou${os.statusERPDesde ? ' em ' + esc(fmtDataBR(os.statusERPDesde)) : ''}; falta liberar no PCP">🏭 ERP: produção concluída</span>` : ''}${erpMudancasAConferir(os).length ? ' <span class="badge sem-valor">ERP mudou · conferir</span>' : ''}</div>
           <span class="badge st-${st}">${statusLabelDe(os, st)}</span>
         </div>
         <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
         ${os.servico ? `<div class="card-servico" title="${esc(os.servico)}">${esc(os.servico)}</div>` : ''}
       </div>
-      <details class="card-detalhes"><summary>Detalhes e outras ações</summary>
+      ${erpFechouHTML(os)}
+      ${erpConferirHTML(os)}
+      ${etapaCardHTML(os)}
+      <details class="card-detalhes" data-card-det="detalhes" ${STATE._cardsAbertos && STATE._cardsAbertos.has(os.id + ':detalhes') ? 'open' : ''}><summary>Detalhes e outras ações</summary>
       <div class="card-tipo-row">
         <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏬 Cliente retira' : '🚚 Externo'}</span>
         ${os.finalizadaEm ? '' : `<button class="btn-xs btn-ghost edit-only card-toggle-tipo" data-toggle-tipo="${esc(os.id)}" title="Alternar entre Cliente retira e Externo">⇄ ${interno ? 'Tornar Externo' : 'Tornar Cliente retira'}</button>`}
@@ -2338,26 +2534,30 @@ function osCardHTML(os) {
       ${os.erpAlteracoes?.length ? `<details class="erp-historico"><summary>Alterações recebidas do Mubisys</summary>${os.erpAlteracoes.slice(-5).reverse().map(h => `<p><strong>${esc(new Date(h.em).toLocaleString('pt-BR'))}</strong><br>${h.campos.map(c => `${esc(c.campo)}: ${esc(c.antes ?? '—')} → ${esc(c.depois)}`).join('<br>')}</p>`).join('')}</details>` : ''}
       ${etapasBtns}
       <div class="card-acoes">
-        ${avisarBtn}
-        ${paradoBtn}
         ${arquivarBtn}
       </div>
       </details>
-      <div class="card-principal">${prazoPrincipalHTML(os)}<small>${esc(os.responsavelPCP || (os.equipe || []).join(', ') || 'Responsável a definir')}</small>${pp ? `<p>${esc(pp.label)}</p>` : ''}${ctaBtn}</div>
+      <div class="card-principal">${prazoPrincipalHTML(os)}<small>${esc(os.responsavelPCP || (os.equipe || []).join(', ') || 'Responsável a definir')}</small>${pp ? `<p>${esc(pp.label)}</p>` : ''}${ctaBtn}${avisarBtn}</div>
     </div>`;
 }
 
 function prazoPrincipalHTML(os) {
   const interno = isInterno(os);
   if (os.finalizadaEm) {
+    if (OPERACAO.encerradaERP(os)) return `<span class="prazo-tag prazo-erp" title="Data da sincronização com o ERP, não da entrega">Baixa do ERP ${esc(fmtDataBR(os.finalizadaEm))}</span>`;
     return `<span class="prazo-tag prazo-ok">Finalizada ${esc(fmtDataBR(os.finalizadaEm))}</span>`;
   }
   const instData = os.instalacao && os.instalacao.data;
   if (instData) {
     const dd = diasEntre(todayISO(), instData);
     const per = os.instalacao.periodo ? ' · ' + esc(os.instalacao.periodo) : '';
-    if (dd === 0) return `<span class="prazo-tag ${interno ? 'prazo-retira' : 'prazo-hoje'}">${interno ? 'Retirada HOJE' : 'HOJE'}${per}</span>`;
-    if (dd === 1) return `<span class="prazo-tag prazo-amanha">${interno ? 'Retirada AMANHÃ' : 'AMANHÃ'}${per}</span>`;
+    /* A importação põe a previsão de entrega do ERP em instalacao.data. Sem
+       equipe escalada ela é PREVISÃO, não instalação programada: "HOJE" num
+       card "Aguardando produção" afirmava uma visita que ninguém marcou. */
+    const prev = !interno && !OPERACAO.agendaCompleta(os) ? 'Previsão ' : '';
+    const dica = prev ? ' title="Data prevista no ERP; ninguém programou a instalação ainda"' : '';
+    if (dd === 0) return `<span class="prazo-tag ${interno ? 'prazo-retira' : (prev ? 'prazo-urgente' : 'prazo-hoje')}"${dica}>${interno ? 'Retirada HOJE' : prev + 'HOJE'}${per}</span>`;
+    if (dd === 1) return `<span class="prazo-tag prazo-amanha"${dica}>${interno ? 'Retirada AMANHÃ' : prev + 'AMANHÃ'}${per}</span>`;
   }
   if (interno && calcStatus(os) === 'apto') {
     const desde = os.aptoEm ? diasDesde(os.aptoEm) : null;
@@ -2383,54 +2583,6 @@ function prazoPrincipalHTML(os) {
   return '';
 }
 
-function osSeloPcp(os) {
-  const st = calcStatus(os);
-  if (os.retrabalho && !os.finalizadaEm) return '<span class="tag-retrab">retrabalho</span>';
-  if (estaAtrasada(os)) return '<span class="tag-atraso">atrasada</span>';
-  return `<span class="badge st-${st}">${statusLabelDe(os, st)}</span>`;
-}
-
-function osCardPcpHTML(os) {
-  const st = calcStatus(os);
-  const interno = isInterno(os);
-  const pp = proximoPasso(os);
-  const avisarBtn = interno && !os.finalizadaEm && st === 'apto'
-    ? `<button class="btn-ghost btn-sm card-avisar ${os.avisadoEm ? 'avisado' : ''}" data-avisar-os="${esc(os.id)}" title="${os.avisadoEm ? 'Cliente já avisado — clique para avisar de novo' : 'Avisar o cliente no WhatsApp'}">${os.avisadoEm ? 'Avisado ' + fmtDataBR(os.avisadoEm) : 'Avisar cliente'}</button>`
-    : '';
-  const ctaBtn = pp
-    ? (pp.acao === 'finalizar'
-        ? `<button class="btn-success btn-sm edit-only card-finalizar" data-finalizar-os="${esc(os.id)}">${esc(pp.cta)}</button>`
-        : `<button class="btn-primary btn-sm edit-only card-cta" data-cta-os="${esc(os.id)}">${esc(pp.cta)}</button>`)
-    : '';
-  const equipe = (os.equipe || []).length ? `<div class="card-equipe">${esc(os.equipe.join(', '))}</div>` : '';
-  return `
-    <div class="os-card os-card-pcp st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
-      <div class="card-meta">
-        <div class="card-numero">O.S ${esc(os.numero || '—')}</div>
-        ${osSeloPcp(os)}${os.erpConferirEm ? '<span class="badge sem-valor">Atualizado no ERP</span>' : ''}
-      </div>
-      <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
-      ${os.servico ? `<div class="card-servico">${esc(os.servico)}</div>` : ''}
-      <div class="card-tipo-row"><span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? 'Cliente retira' : 'Externo'}</span></div>
-      <div class="card-prazo">${prazoPrincipalHTML(os)}</div>
-      ${equipe}
-      <div class="card-acoes">${avisarBtn}${ctaBtn}</div>
-    </div>`;
-}
-
-function osRowPcpHTML(os) {
-  const interno = isInterno(os);
-  const equipe = (os.equipe || []).length ? esc(os.equipe.join(', ')) : '';
-  return `<div class="pcp-row st-${calcStatus(os)} ${alertaOS(os)}" data-os-id="${esc(os.id)}" tabindex="0">
-      <span class="pcp-row-os">O.S ${esc(os.numero || '—')}</span>
-      <span class="pcp-row-cli">${esc(os.cliente || 'Sem cliente')}</span>
-      <span class="pcp-row-svc">${esc(os.servico || '')}</span>
-      <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? 'Cliente retira' : 'Externo'}</span>
-      ${osSeloPcp(os)}${os.erpConferirEm ? '<span class="badge sem-valor">Atualizado no ERP</span>' : ''}
-      ${prazoPrincipalHTML(os)}
-      <span class="pcp-row-eq">${equipe}</span>
-    </div>`;
-}
 
 // Bloco compacto de tempo/datas no card. Junta tudo num só lugar para evitar
 // duplicidade: data do pedido, dias na empresa, contador de entrega, data
@@ -2446,7 +2598,7 @@ function cardTempoHTML(os) {
   if (os.finalizadaEm) {
     // Quando finalizada: mostra agenda (se existiu) + data da conclusão.
     if (os.instalacao && os.instalacao.data) {
-      tags.push(`<span class="prazo-tag prazo-info" title="Agendada">📅 ${fmtDataBR(os.instalacao.data)}</span>`);
+      tags.push(`<span class="prazo-tag prazo-info" title="${!isInterno(os) && !OPERACAO.agendaCompleta(os) ? 'Data prevista no ERP' : 'Agendada'}">📅 ${fmtDataBR(os.instalacao.data)}</span>`);
     }
     tags.push(`<span class="prazo-tag prazo-ok" title="Finalizada em">✅ ${fmtDataBR(os.finalizadaEm)}</span>`);
   } else {
@@ -2461,8 +2613,10 @@ function cardTempoHTML(os) {
       // Cliente retira fala outra língua: é RETIRADA hoje/amanhã, não instalação.
       const rt = isInterno(os);
       const per = os.instalacao.periodo ? ' · ' + esc(os.instalacao.periodo) : '';
-      if (dd === 0) { selo = 0; tags.unshift(`<span class="prazo-tag ${rt ? 'prazo-retira' : 'prazo-hoje'}" title="${rt ? 'Cliente retira hoje' : 'Instalação marcada para hoje'}">${rt ? '🛍 Retirada HOJE' : '📌 HOJE'}${per}</span>`); }
-      else if (dd === 1) { selo = 1; tags.unshift(`<span class="prazo-tag prazo-amanha" title="${rt ? 'Cliente retira amanhã' : 'Instalação marcada para amanhã'}">${rt ? '🛍 Retirada AMANHÃ' : 'AMANHÃ'}${per}</span>`); }
+      // Sem equipe escalada, a data é a PREVISÃO do ERP (o mesmo que o prazo principal diz).
+      const prev = !rt && !OPERACAO.agendaCompleta(os);
+      if (dd === 0) { selo = 0; tags.unshift(`<span class="prazo-tag ${rt ? 'prazo-retira' : 'prazo-hoje'}" title="${rt ? 'Cliente retira hoje' : (prev ? 'Data prevista no ERP; ninguém programou a instalação ainda' : 'Instalação marcada para hoje')}">${rt ? '🛍 Retirada HOJE' : (prev ? '📌 Previsão HOJE' : '📌 HOJE')}${per}</span>`); }
+      else if (dd === 1) { selo = 1; tags.unshift(`<span class="prazo-tag prazo-amanha" title="${rt ? 'Cliente retira amanhã' : (prev ? 'Data prevista no ERP; ninguém programou a instalação ainda' : 'Instalação marcada para amanhã')}">${rt ? '🛍 Retirada AMANHÃ' : (prev ? 'Previsão AMANHÃ' : 'AMANHÃ')}${per}</span>`); }
     }
 
     // Em aberto: dias na empresa
@@ -2506,7 +2660,7 @@ function bindCardClicks(container) {
       c.onkeydown = e => { if(e.target===c && (e.key==='Enter'||e.key===' ')){e.preventDefault();c.click();} };
     }
     c.onclick = e => {
-      if (e.target.closest('summary, details button, details input')) return;
+      if (e.target.closest('summary, details button, details input, .card-etapa, .card-erp-conferir')) return;
       const os = STORE.getOS(c.dataset.osId);
       if (os) openModal(os);
     };
@@ -2567,31 +2721,30 @@ function bindCardClicks(container) {
     };
   });
   // CTA dinâmico (próximo passo): abre a O.S no bloco relevante da etapa.
+  /* O PRÓXIMO PASSO AGE quando a ação é de um toque. Antes, "✓ Liberar PCP"
+     e "▶ Cliente liberou" só abriam a ficha -- o botão dizia uma coisa e fazia
+     outra, e o "liberou" daqui nem fechava o período parado. */
   $$('[data-cta-os]', container).forEach(b => {
-    b.onclick = (e) => {
-      e.stopPropagation();
-      const os = STORE.getOS(b.dataset.ctaOs);
-      if (os) openModal(os);
-    };
+    b.onclick = (e) => { e.stopPropagation(); agirProximoPasso(b.dataset.ctaOs, b.dataset.ctaAcao); };
   });
-  /* Marca / desmarca "esperando o cliente liberar". A DATA fica gravada, nao
-     so um sim/nao: e ela que permite responder depois quanto tempo o cliente
-     costuma segurar -- que era o motivo de separar a etapa. */
-  $$('[data-parado-os]', container).forEach(b => {
-    b.onclick = (e) => {
-      e.stopPropagation();
-      const os = STORE.getOS(b.dataset.paradoOs);
-      if (!os) return;
-      const liberou = b.dataset.paradoAcao === 'liberou';
-      os.paradoClienteEm  = liberou ? '' : nowISO();
-      os.paradoClientePor = liberou ? '' : STATE.user.nome;
-      os.atualizadoEm = nowISO();
-      os.atualizadoPor = STATE.user.nome;
-      registrarEtapa(os);
-      STORE.saveOS(os);
-      toast(liberou ? 'Cliente liberou — a O.S volta para a fila de agendamento'
-                    : 'Marcada como parada no cliente', 'success');
-      renderActiveTab();
+  $$('[data-erp-baixa]', container).forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); erpConfirmarBaixa(b.dataset.erpBaixa); };
+  });
+  $$('[data-erp-conferi]', container).forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); erpConferi(b.dataset.erpConferi); };
+  });
+  // Menu Etapa do card (ver etapasDoCard).
+  $$('[data-etapa-acao]', container).forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); moverEtapa(b.dataset.etapaId, b.dataset.etapaAcao); };
+  });
+  /* Recolhido do card fica como o usuário deixou. O sync redesenha a lista a
+     cada poucos segundos e fechava o que ele tinha acabado de abrir. */
+  $$('details[data-card-det]', container).forEach(d => {
+    d.ontoggle = () => {
+      const card = d.closest('[data-os-id]'); if (!card) return;
+      const k = card.dataset.osId + ':' + d.dataset.cardDet;
+      STATE._cardsAbertos = STATE._cardsAbertos || new Set();
+      if (d.open) STATE._cardsAbertos.add(k); else STATE._cardsAbertos.delete(k);
     };
   });
   // Alternar tipo Interno/Externo direto no card (triagem rápida).
@@ -2609,6 +2762,247 @@ function bindCardClicks(container) {
       toast(`Pedido marcado como ${novo === 'interno' ? 'Cliente retira 🏬' : 'Externo 🚚'}`, 'success');
       renderActiveTab();
     };
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ETAPA NO CARD
+   ─────────────────────────────────────────────────────────────────────────
+   Pedido do dono (23/09/2026): "no card tem que ter a opção de vincular as
+   etapas do painel esquerdo, parado cliente etc".
+
+   As abas da esquerda não são uma etiqueta gravada na O.S.: cada uma é o que
+   os campos dizem (liberada pelo PCP, programada, saiu, voltou, finalizou).
+   Uma etiqueta "etapa" solta mentiria no primeiro campo que mudasse. Então
+   mover pelo card é fazer a AÇÃO que leva até lá:
+     - o que é seguro num toque acontece no toque, diz para onde a O.S. foi e
+       oferece Desfazer (liberar do PCP, voltar ao PCP, parado, cliente liberou);
+     - o que precisa de dado (data, saída, retrabalho, finalização) abre a ficha
+       no bloco certo, ou o finalizar do card, que já confere o checklist.
+   Opção indisponível continua na lista e diz por quê: botão que some ensina
+   que a função não existe.
+   ══════════════════════════════════════════════════════════════════════════ */
+/* O QUE O ERP MUDOU E AINDA NÃO FOI CONFERIDO. Mesma régua do servidor
+   (pedeConferencia): valor que chegou pela primeira vez e o valor em R$ não
+   pedem conferência. Assim os selos acesos pela carga de 14/09 apagam sem
+   ninguém precisar gravar nada em produção. */
+const ERP_ROTULO = { cliente: 'Cliente', servico: 'Serviço', vendedor: 'Vendedor', dataEntrada: 'Entrada', cnpjCpf: 'CNPJ/CPF', valorTotal: 'Valor' };
+/* SITUAÇÃO DO ERP no card (statusERP, gravada pela importação horária). */
+const ERP_SITUACAO = { PRODUCAO: 'em produção', PENDENTE: 'pendente', PAUSADO: 'pausada', CONCLUIDO: 'produção concluída' };
+function erpSituacaoTxt(os) { return os && ERP_SITUACAO[os.statusERP] ? 'ERP: ' + ERP_SITUACAO[os.statusERP] : ''; }
+/* O ERP FECHOU uma O.S. em que alguém já trabalhou: a conciliação não fecha
+   mais sozinha, deixa a marca erpSaiuDaCarteiraEm. A gestão confirma a baixa
+   num toque (com justificativa carimbada, como toda baixa sem foto de retorno)
+   ou segue o fluxo normal e finaliza quando terminar. */
+function erpFechouHTML(os) {
+  if (!os || os.finalizadaEm || !os.erpSaiuDaCarteiraEm) return '';
+  const pode = ['admin', 'pcp'].includes(STATE.user && STATE.user.papel) && (typeof podeEditar !== 'function' || podeEditar());
+  return `<div class="card-erp-conferir card-erp-fechou"><div><b>O ERP fechou esta O.S.</b> em ${esc(fmtDataBR(os.erpSaiuDaCarteiraEm))} (saiu da carteira aberta). Se o serviço terminou, confirme a baixa; se não, siga e finalize quando terminar.</div>${pode ? `<button type="button" class="btn-ghost card-erp-ok" data-erp-baixa="${esc(os.id)}">Confirmar baixa</button>` : ''}</div>`;
+}
+function erpConfirmarBaixa(id) {
+  const os = STORE.getOS(id);
+  if (!os || os.finalizadaEm || !os.erpSaiuDaCarteiraEm) return;
+  if (!['admin', 'pcp'].includes(STATE.user && STATE.user.papel)) { toast('Só a gestão do PCP confirma a baixa do ERP.', 'error'); return; }
+  if (!confirm(`Confirmar a baixa do ERP da O.S ${os.numero || ''}? Ela vai para Finalizados como "Baixa do ERP" e a entrega fica para lançar em Entregas.`)) return;
+  const quem = STATE.user.nome, agora = nowISO();
+  const antes = JSON.parse(JSON.stringify({ finalizadaEm: os.finalizadaEm || '', finalizadoPor: os.finalizadoPor || '', baixaAutoERP: os.baixaAutoERP || null, justificativaConclusao: os.justificativaConclusao || '', historico: os.historico || [] }));
+  os.finalizadaEm = agora;
+  os.finalizadoPor = 'Mubisys · baixa confirmada por ' + quem;
+  os.baixaAutoERP = { em: agora, status: 'FORA DA CARTEIRA ABERTA', confirmadoPor: quem };
+  os.justificativaConclusao = 'Encerrada no ERP (saiu da carteira aberta); baixa confirmada pela gestão.';
+  os.atualizadoEm = agora; os.atualizadoPor = quem;
+  registrarEtapa(os); STORE.saveOS(os); renderActiveTab();
+  toastDesfazer(`Baixa do ERP confirmada · O.S ${os.numero || ''}`, () => {
+    const atual = STORE.getOS(id); if (!atual) return;
+    atual.finalizadaEm = antes.finalizadaEm; atual.finalizadoPor = antes.finalizadoPor; atual.justificativaConclusao = antes.justificativaConclusao;
+    if (antes.baixaAutoERP) atual.baixaAutoERP = antes.baixaAutoERP; else delete atual.baixaAutoERP;
+    atual.historico = antes.historico;
+    atual.atualizadoEm = nowISO(); atual.atualizadoPor = quem;
+    STORE.saveOS(atual); renderActiveTab(); toast('Desfeito', 'success');
+  });
+}
+function erpMudancasAConferir(os) {
+  if (!os || !os.erpConferirEm) return [];
+  const desde = os.erpConferidoEm || '';
+  const pede = a => a && a.campo !== 'valorTotal' && a.antes != null && String(a.antes).trim() !== '';
+  return (os.erpAlteracoes || []).filter(h => String(h.em || '') > desde).flatMap(h => (h.campos || []).filter(pede).map(c => ({ ...c, em: h.em })));
+}
+function erpConferirHTML(os) {
+  const m = erpMudancasAConferir(os);
+  if (!m.length) return '';
+  const pode = ['admin', 'pcp'].includes(STATE.user && STATE.user.papel) && (typeof podeEditar !== 'function' || podeEditar());
+  return `<div class="card-erp-conferir"><div><b>O ERP mudou</b> ${m.slice(-3).map(c => `${esc(ERP_ROTULO[c.campo] || c.campo)}: <s>${esc(c.antes)}</s> → ${esc(c.depois)}`).join(' · ')}</div>${pode ? `<button type="button" class="btn-ghost card-erp-ok" data-erp-conferi="${esc(os.id)}">✓ Conferi</button>` : ''}</div>`;
+}
+function erpConferi(id) {
+  const os = STORE.getOS(id);   // relê: o card pode estar velho
+  if (!os || !os.erpConferirEm) return;
+  if (!['admin', 'pcp'].includes(STATE.user && STATE.user.papel)) { toast('Só a gestão do PCP dá a mudança do ERP por conferida.', 'error'); return; }
+  os.erpConferiuSelo = os.erpConferirEm;   // qual selo foi visto: o servidor só apaga esse
+  os.erpConferirEm = ''; os.erpConferidoEm = nowISO(); os.erpConferidoPor = STATE.user.nome;   // o servidor recarimba pelo crachá
+  os.atualizadoEm = nowISO(); os.atualizadoPor = STATE.user.nome;
+  STORE.saveOS(os);
+  renderActiveTab();
+  // Sem "Desfazer": o servidor não deixa o aparelho reacender o selo, e um
+  // desfazer que só valesse aqui sumiria calado na próxima sincronização.
+  toast('Mudança do ERP conferida', 'success');
+}
+
+/* "Quem resolveu" alimenta o gráfico Retrabalho por técnico. Em O.S. finalizada
+   a ficha está travada, então a pergunta vem aqui, antes de gravar. */
+function escolherQuemResolveu(os, aoEscolher) {
+  const velho = document.getElementById('quem-resolveu-box'); if (velho) velho.remove();
+  const nomes = [...new Set([...OPERACAO.equipe(os), ...((STORE.getCFG().instaladores) || [])].map(n => String(n || '').trim()).filter(Boolean))];
+  const box = document.createElement('div');
+  box.id = 'quem-resolveu-box';
+  box.className = 'wpp-picker-overlay';
+  box.innerHTML = `<div class="wpp-picker retrab-box" role="dialog" aria-modal="true" aria-label="Quem resolveu o retrabalho">
+      <div class="wpp-picker-head"><strong>Quem resolveu o retrabalho da O.S ${esc(os.numero || '')}?</strong><button class="modal-close" data-qr-fechar>×</button></div>
+      <div class="wpp-picker-body"><p class="text-muted" style="font-size:.8rem;margin-bottom:8px">Conta no gráfico "Retrabalho por técnico".</p>
+      <div class="quem-resolveu-lista">${nomes.map(n => `<button type="button" class="btn-ghost" data-qr="${esc(n)}">${esc(n)}</button>`).join('')}<button type="button" class="btn-ghost" data-qr="">Não sei</button></div></div>
+    </div>`;
+  document.body.appendChild(box);
+  const fechar = () => box.remove();
+  box.querySelector('[data-qr-fechar]').onclick = fechar;
+  box.querySelectorAll('[data-qr]').forEach(b => { b.onclick = () => { fechar(); aoEscolher(b.dataset.qr); }; });
+}
+
+// O botão "próximo passo" faz o que diz -- o mesmo no card e na Execução.
+function agirProximoPasso(id, acao) {
+  const os = STORE.getOS(id);
+  if (!os) return;
+  if (acao === 'pcp') return moverEtapa(os.id, 'liberar');
+  if (acao === 'liberou') return moverEtapa(os.id, 'liberou');
+  if (acao === 'confirmar' || acao === 'agenda') return openModal(os, 'agenda');
+  if (acao === 'saida' || acao === 'exec') return openModal(os, 'exec');
+  if (acao === 'finalizar') return finalizarServicoDoCard(os.id);
+  openModal(os);
+}
+
+function etapasDoCard(os) {
+  const interno = isInterno(os), fin = !!os.finalizadaEm;
+  const lib = !!os.liberadoPCP, parado = OPERACAO.paradoNoCliente(os);
+  const agenda = OPERACAO.agendaCompleta(os);
+  const saiu = !!(os.horaSaida || os.saidaEm), voltou = !!(os.horaRetorno || os.retornoEm);
+  const st = calcStatus(os);
+  const filhasRetrab = filhasRetrabDe(os);
+  const retrab = retrabPendente(os);
+  const filhaAberta = filhasRetrab.find(f => !f.finalizadaEm);
+  const L = [];
+  // Equipe escalada numa O.S. não liberada não a vê no espelho (o espelho só
+  // lista liberadas): dito aqui, para ninguém esperar a equipe aparecer.
+  const escaladaInvisivel = !fin && !lib && OPERACAO.equipe(os).length > 0;
+  const sitERP = erpSituacaoTxt(os);
+  L.push({ aba: 'pcp', icone: '📋', nome: 'PCP', sub: (escaladaInvisivel ? 'aguardando produção · a equipe escalada ainda não vê esta O.S.' : 'aguardando produção') + (sitERP && !fin ? ' · ' + sitERP : ''), atual: !fin && !lib,
+    acao: !fin && lib && !(saiu && !voltou) ? 'voltar' : '', rotulo: '↩ Voltar ao PCP',
+    motivo: fin ? 'Finalizada: para reabrir, use a ficha.' : (lib && saiu && !voltou ? 'A equipe saiu e não voltou: registre o retorno antes.' : '') });
+  if (interno) {
+    L.push({ aba: 'pronto', icone: '🛍', nome: 'Pronto p/ retirada', sub: 'aguardando o cliente', atual: !fin && lib,
+      acao: !fin && !lib ? 'liberar' : '', rotulo: '✓ Liberar do PCP', motivo: fin ? 'Já foi retirado.' : '' });
+  } else {
+    const destino = !lib ? STATUS_LABEL[OPERACAO.status({ ...os, liberadoPCP: true })] : '';
+    L.push({ aba: 'instalacao', icone: '🚚', nome: 'Instalação', sub: lib && !parado && !saiu && !fin ? statusLabelDe(os, st) : 'programar e confirmar',
+      atual: !fin && lib && !parado && !saiu,
+      acao: fin || saiu ? '' : (!lib ? 'liberar' : parado ? 'liberou' : 'programar'),
+      rotulo: !lib ? '✓ Liberar do PCP' : parado ? '▶ Cliente liberou' : (agenda ? '📅 Reprogramar' : '📅 Programar'),
+      dica: !lib && destino ? 'vai para ' + destino : (parado ? 'volta para a fila de programar' : ''),
+      motivo: fin ? 'Finalizada.' : saiu ? 'A equipe já saiu.' : '' });
+    L.push({ aba: 'parado', icone: '⏸', nome: 'Parado Cliente', sub: 'o cliente ainda não liberou', atual: parado,
+      acao: !parado && !fin && !saiu && !agenda ? 'parado' : '', rotulo: '⏸ Marcar parado',
+      dica: !lib ? 'libera do PCP junto' : '',
+      motivo: parado ? '' : fin ? 'Finalizada.' : saiu ? 'A equipe já saiu.' : agenda ? 'Tem data marcada: tire a data na programação para marcar parado.' : '' });
+    L.push({ aba: 'execucao', icone: '⚡', nome: 'Execução', sub: saiu && !fin ? (voltou ? 'voltou · conferir e finalizar' : 'equipe na rua') : 'saída e retorno', atual: saiu && !fin,
+      acao: fin || !lib || !agenda ? '' : 'exec', rotulo: saiu ? '🔧 Abrir execução' : '🚗 Registrar saída',
+      motivo: fin ? 'Finalizada.' : !lib ? 'Libere do PCP primeiro.' : !agenda ? 'Programe a data primeiro.' : '' });
+  }
+  /* Retrabalho pendente sai daqui com "resolvido" -- inclusive em O.S.
+     finalizada, onde a ficha travada não deixava preencher a data. */
+  /* Retrabalho: com correção em O.S. filha, quem resolve é a filha (a mesma
+     régua da aba Retrabalho). Retirada não tem campo de retrabalho de
+     instalação: a ficha dela só tem PCP e Itens. */
+  L.push({ aba: 'retrabalho', icone: '🔧', nome: 'Retrabalho',
+    sub: filhaAberta ? `correção na O.S ${filhaAberta.numero || ''} (aberta)` : (retrab ? 'em aberto' : 'refazer parte do serviço'), atual: retrab,
+    acao: filhaAberta ? '' : retrab ? 'resolver' : (fin || interno ? '' : 'retrabalho'),
+    rotulo: retrab ? '✓ Retrabalho resolvido' : '🔴 Registrar retrabalho',
+    dica: retrab && !filhaAberta ? 'sai da vista Retrabalho' : '',
+    motivo: filhaAberta ? 'Resolve quando a O.S. de correção for finalizada.' : (!retrab && interno ? 'Retirada não tem retrabalho de instalação.' : (fin && !retrab ? 'Finalizada: retrabalho novo vira O.S. (aba Retrabalho).' : '')) });
+  L.push({ aba: 'finalizados', icone: interno ? '📦' : '🏁', nome: interno ? 'Retirado' : 'Finalizados', sub: fin ? statusLabelDe(os, st) : (os.erpSaiuDaCarteiraEm ? 'o ERP já fechou: confirme a baixa no aviso acima' : 'confere o checklist antes'), atual: fin,
+    acao: fin ? '' : 'finalizar', rotulo: interno ? '📦 Cliente retirou' : '🏁 Finalizar', motivo: '' });
+  return L;
+}
+function etapaCardHTML(os) {
+  const etapas = etapasDoCard(os);
+  const atual = etapas.filter(e => e.atual).map(e => e.nome).join(' + ') || 'sem etapa';
+  const pode = typeof podeEditar !== 'function' || podeEditar();
+  const aberto = STATE._cardsAbertos && STATE._cardsAbertos.has(os.id + ':etapa');
+  const linha = e => {
+    const botao = e.acao && pode
+      ? `<button type="button" class="btn-ghost card-etapa-acao" data-etapa-acao="${e.acao}" data-etapa-id="${esc(os.id)}">${esc(e.rotulo)}</button>${e.dica ? `<small class="card-etapa-dica">${esc(e.dica)}</small>` : ''}`
+      : (e.acao && !pode ? '<small class="card-etapa-motivo">Somente leitura.</small>' : (e.motivo ? `<small class="card-etapa-motivo">${esc(e.motivo)}</small>` : ''));
+    return `<li class="${e.atual ? 'atual' : ''}"><span class="card-etapa-nome"><span aria-hidden="true">${e.icone}</span> <b>${esc(e.nome)}</b>${e.atual ? '<span class="card-etapa-aqui">está aqui</span>' : ''}<small>${esc(e.sub || '')}</small></span><span class="card-etapa-lado">${botao}</span></li>`;
+  };
+  return `<details class="card-etapa" data-card-det="etapa" ${aberto ? 'open' : ''}><summary><span class="card-etapa-rot">Etapa</span> <b>${esc(atual)}</b><span class="card-etapa-mover">mover ▾</span></summary><ul class="card-etapa-menu">${etapas.map(linha).join('')}</ul></details>`;
+}
+function moverEtapa(id, acao, opcoes = {}) {
+  const os = STORE.getOS(id);   // relê: o card pode ter sido desenhado antes do último sync
+  if (!os) return;
+  if (typeof podeEditar === 'function' && !podeEditar()) { toast('Seu acesso é somente leitura.', 'error'); return; }
+  if (STATE._cardsAbertos) STATE._cardsAbertos.delete(id + ':etapa');
+  // O que precisa de dado abre a ficha no bloco certo.
+  if (acao === 'programar') return openModal(os, 'agenda');
+  if (acao === 'exec' || acao === 'retrabalho') return openModal(os, 'exec');
+  if (acao === 'finalizar') return finalizarServicoDoCard(id);
+  if (acao === 'resolver' && !os.resolvidoPor && !opcoes.quemResolveu) {
+    return escolherQuemResolveu(os, nome => moverEtapa(id, 'resolver', { quemResolveu: nome || '(não informado)' }));
+  }
+  const campos = ['liberadoPCP', 'aptoPor', 'aptoEm', 'paradoClienteEm', 'paradoClientePor', 'paradoClienteLog', 'dataResolvido', 'resolvidoPor', 'retrabalhoResolvidoMarca', 'historico'];
+  const antes = JSON.parse(JSON.stringify(Object.fromEntries(campos.map(k => [k, os[k] === undefined ? null : os[k]]))));
+  const quem = (STATE.user && STATE.user.nome) || '';
+  const agora = nowISO();
+  const saiuSemVoltar = (os.horaSaida || os.saidaEm) && !(os.horaRetorno || os.retornoEm);
+  let msg = '';
+  if (acao === 'liberar') {
+    if (os.liberadoPCP || os.finalizadaEm) return;
+    os.liberadoPCP = true; os.aptoPor = quem; os.aptoEm = agora;
+    msg = `O.S ${os.numero || ''} liberada do PCP → ${statusLabelDe(os, calcStatus(os))}`;
+  } else if (acao === 'voltar') {
+    if (!os.liberadoPCP || os.finalizadaEm) return;
+    if (saiuSemVoltar) { toast('A equipe saiu e não voltou: registre o retorno antes de voltar ao PCP.', 'error'); return; }
+    if (!confirm(`Voltar a O.S ${os.numero || ''} para o PCP (aguardando produção)?${OPERACAO.agendaCompleta(os) ? ' A programação fica guardada.' : ''}`)) return;
+    OPERACAO.fecharParado(os, agora, quem, 'voltou ao PCP');
+    os.liberadoPCP = false; os.aptoPor = ''; os.aptoEm = '';
+    msg = `O.S ${os.numero || ''} voltou para o PCP · aguardando produção`;
+  } else if (acao === 'parado') {
+    if (isInterno(os) || os.finalizadaEm || OPERACAO.paradoNoCliente(os) || OPERACAO.agendaCompleta(os) || os.horaSaida || os.saidaEm) return;
+    const liberouJunto = !os.liberadoPCP;
+    if (liberouJunto) { os.liberadoPCP = true; os.aptoPor = quem; os.aptoEm = agora; }
+    os.paradoClienteEm = agora; os.paradoClientePor = quem;
+    msg = `O.S ${os.numero || ''} parada no cliente${liberouJunto ? ' · liberada do PCP junto' : ''}`;
+  } else if (acao === 'resolver') {
+    _filhasRetrab = null;
+    if (!retrabPendente(os) || filhasRetrabDe(os).length) return;
+    // "Quem resolveu" é o técnico (alimenta o gráfico por técnico): não recebe
+    // o nome de quem marcou. Quem marcou fica no carimbo próprio.
+    os.dataResolvido = todayISO(); os.retrabalhoResolvidoMarca = { em: agora, por: quem };
+    if (!os.resolvidoPor && opcoes.quemResolveu && opcoes.quemResolveu !== '(não informado)') os.resolvidoPor = opcoes.quemResolveu;
+    msg = `Retrabalho da O.S ${os.numero || ''} resolvido${os.resolvidoPor ? ' por ' + os.resolvidoPor : ''}`;
+  } else if (acao === 'liberou') {
+    if (!OPERACAO.fecharParado(os, agora, quem, 'cliente liberou')) return;
+    msg = `Cliente liberou · O.S ${os.numero || ''} volta para programar`;
+  } else return;
+  os.atualizadoEm = agora; os.atualizadoPor = quem;
+  registrarEtapa(os);
+  STORE.saveOS(os);
+  renderActiveTab();
+  toastDesfazer(msg, () => {
+    const atual = STORE.getOS(id); if (!atual) return;
+    // Devolve os campos E o histórico de etapas como estavam: registrar uma
+    // etapa nova aqui faria a ficha dizer "0d nesta etapa" numa O.S. parada há
+    // semanas (revisão de 23/09/2026).
+    for (const k of campos) { if (antes[k] === null) delete atual[k]; else atual[k] = antes[k]; }
+    atual.atualizadoEm = nowISO(); atual.atualizadoPor = quem;
+    STORE.saveOS(atual);
+    renderActiveTab();
+    toast('Desfeito', 'success');
   });
 }
 
@@ -2680,7 +3074,7 @@ function estaArquivada(o) {
 
 function pcpBaseList() {
   const all = STORE.getAllOS().slice();
-  if (STATE.pcpVista === 'retrabalho') return all.filter(o => o.retrabalho && !o.dataResolvido);
+  if (STATE.pcpVista === 'retrabalho') return all.filter(retrabPendente);
   /* A MESMA REGUA DO CARD, nao uma parecida. Filtrar so por `paradoClienteEm`
      pareceria igual e criaria fantasma: a O.S marcada e depois agendada ficaria
      nesta vista para sempre, e ninguem saberia como tirar -- o botao de
@@ -2805,7 +3199,7 @@ function pcpAtualizarChips() {
   const fAll = applyFilter(porTipo(STORE.getAllOS().slice()), busca);
   setN('[data-pcp-vista=""]', fAll.filter(o => !o.finalizadaEm).length);
   setN('[data-pcp-vista="parado"]', fAll.filter(o => OPERACAO.paradoNoCliente(o)).length);
-  setN('[data-pcp-vista="retrabalho"]', fAll.filter(o => o.retrabalho && !o.dataResolvido).length);
+  setN('[data-pcp-vista="retrabalho"]', fAll.filter(retrabPendente).length);
   // Arquivados conta aparelho + o que a busca já trouxe do servidor — senão o
   // selo dizia 324 com a lista mostrando 564, e parecia bug.
   const vistosArq = new Set();
@@ -2991,10 +3385,12 @@ function renderPCP() {
   };
   $$('[data-pcp-vista]', el).forEach(b => {
     b.onclick = () => {
-      if (b.dataset.pcpVista === STATE.pcpVista) return; // clique redundante não reseta o status
+      if (b.dataset.pcpVista === STATE.pcpVista && !STATE._prioridade) return; // clique redundante não reseta o status
       STATE.pcpVista = b.dataset.pcpVista;
       STATE.pcpStatus = 'todos';
+      STATE._prioridade = '';   // escolher uma vista fecha a prioridade (senão o toque parecia morto)
       renderPCP();
+      marcarLateral();
     };
   });
   $$('[data-pcp-status]', el).forEach(b => {
@@ -3232,7 +3628,7 @@ function renderPainel() {
       <div id="painel-range" class="flex gap-8"></div>
       <button class="btn-ghost btn-sm" id="btn-salvar-vista" title="Memorizar quais blocos ficam abertos e o modo de período" style="margin-left:auto">💾 Salvar visão</button>
       <button class="btn-ghost btn-sm" id="btn-export-backup">⬇ Backup</button>
-      <button class="btn-ghost btn-sm" id="btn-import-backup">⬆ Restaurar</button>
+      <button class="btn-ghost btn-sm admin-only" id="btn-import-backup">⬆ Restaurar</button>
     </div>
     <div id="painel-content"></div>`;
 
@@ -3774,7 +4170,7 @@ function renderExecucao() {
       ${conferir ? `<span class="exec-chip exec-chip-atraso">${conferir} saída${conferir === 1 ? '' : 's'} a conferir</span>` : ''}
       ${atrasadas ? `<span class="exec-chip exec-chip-atraso">⏰ ${atrasadas} atrasada${atrasadas === 1 ? '' : 's'}</span>` : ''}
     </div>
-    <div class="os-list">${list.map(execItemHTML).join('') || emptyState('🛠', 'Nenhuma O.S em execução', 'As O.S confirmadas e em andamento aparecem aqui.')}</div>`;
+    <div class="os-list">${list.map(execItemHTML).join('') || emptyState('🛠', 'Nenhuma O.S para acompanhar', 'Aparecem aqui as O.S externas em aberto que o PCP já liberou ou que têm saída registrada.')}</div>`;
   wireFiltroPeriodo(el, '_fExec', () => renderExecucao());
 
   $$('[data-os-id]', el).forEach(item => {
@@ -3797,22 +4193,32 @@ function renderExecucao() {
     const os = STORE.getOS(b.dataset.id);
     if (os) openModal(os);
   });
+  $$('[data-inline="passo"]', el).forEach(b => b.onclick = () => agirProximoPasso(b.dataset.id, b.dataset.acao));
 }
 
 function execItemHTML(os) {
   const st = calcStatus(os);
   const naRua = OPERACAO.naRua(os);
   const conferir = ['sem-retorno','conferir'].includes(OPERACAO.situacaoSaida(os));
+  /* "🚗 Liberar" só quando dá para liberar. Antes ele aparecia em toda linha
+     sem carro liberado e falhava em quase todas (falta confirmar hoje, falta
+     programar); agora a linha diz o próximo passo -- a MESMA régua do card
+     (proximoPasso) -- e o botão faz esse passo. */
+  const pp = proximoPasso(os);
+  const podeLiberarCarro = !os.carroLiberado && !os.horaSaida && os.liberadoPCP && OPERACAO.agendaCompleta(os) && OPERACAO.confirmadaHoje(os);
+  const passo = pp && !podeLiberarCarro && pp.acao !== 'saida'
+    ? `<button class="btn-ghost btn-sm" data-inline="passo" data-acao="${esc(pp.acao)}" data-id="${esc(os.id)}" title="${esc(pp.label)}">${esc(pp.cta)}</button>` : '';
   return `
     <div class="os-list-item st-${st} ${alertaOS(os)}" data-os-id="${esc(os.id)}">
       <div class="list-info">
-        <div class="list-numero">O.S ${esc(os.numero || '—')} ${naRua ? '🚗 na rua' : ''}${conferir ? ' <span class="tag-atraso">Saída antiga ou sem data · conferir retorno</span>' : ''}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}</div>
+        <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge st-${st}">${esc(statusLabelDe(os, st))}</span>${OPERACAO.paradoNoCliente(os) ? ' <span class="tag-parado">⏸ parado no cliente</span>' : ''} ${naRua ? '🚗 na rua' : ''}${conferir ? ' <span class="tag-atraso">Saída antiga ou sem data · conferir retorno</span>' : ''}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}</div>
         <div class="list-cliente">${esc(os.cliente)} · ${esc(os.endereco || '')}</div>
         <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))} · 👷 ${esc((os.equipe||[]).join(', ') || '—')}</div>
+        ${pp && !podeLiberarCarro && !os.horaSaida ? `<div class="exec-proximo">Próximo passo: ${esc(pp.label)}</div>` : ''}
       </div>
       <div class="list-actions edit-only">
-        ${!os.carroLiberado ? `<button class="btn-primary btn-xs" data-inline="carro" data-id="${esc(os.id)}">🚗 Liberar</button>` : ''}
-        <button class="btn-ghost btn-xs" data-inline="checkout" data-id="${esc(os.id)}">Check‑out</button>
+        ${podeLiberarCarro ? `<button class="btn-primary btn-sm" data-inline="carro" data-id="${esc(os.id)}">🚗 Liberar carro</button>` : passo}
+        <button class="btn-ghost btn-sm" data-inline="checkout" data-id="${esc(os.id)}">Check‑out</button>
       </div>
     </div>`;
 }
@@ -4833,7 +5239,8 @@ function abrirInstrucoes() {
       <ol>
         <li><strong>PCP:</strong> cria/importa a O.S, define itens, clica <em>"✓ Liberar para instalação"</em>.</li>
         <li><strong>Agendamento:</strong> data + período (obrigatório) + equipe → confirma com o cliente.</li>
-        <li><strong>⏸ Parado no cliente</strong> (quando for o caso): a O.S está pronta e o cliente ainda não liberou a instalação. Clique no botão do card para marcar — ela some da fila de agendamento e passa a aparecer na vista <strong>Parado Cliente</strong>, que separa o que está parado <em>por culpa nossa</em> do que está parado esperando o cliente. Quando ele liberar, o mesmo card traz <em>"▶ Cliente liberou"</em> e ela volta para a fila.</li>
+        <li><strong>⏸ Parado no cliente</strong> (quando for o caso): a O.S está pronta e o cliente ainda não liberou a instalação. No card, toque em <strong>Etapa</strong> e escolha <em>"⏸ Marcar parado"</em>. Ela some da fila de agendamento e passa a aparecer na vista <strong>Parado Cliente</strong>, que separa o que está parado <em>por culpa nossa</em> do que está parado esperando o cliente. Quando ele liberar, a mesma lista traz <em>"▶ Cliente liberou"</em> e ela volta para a fila; o tempo que ficou parada fica guardado.</li>
+        <li><strong>Etapa no card:</strong> todo card tem a linha <strong>Etapa</strong>, com as etapas da barra lateral (PCP, Instalação, Parado Cliente, Execução, Retrabalho, Finalizados). O que é de um toque acontece no toque e o aviso traz <em>Desfazer</em>; o que precisa de dado (data, saída, retrabalho, finalização) abre a ficha no lugar certo. Etapa que ainda não dá diz por quê.</li>
         <li><strong>Embarque:</strong> confere embarque/produtos/ferramentas e registra o <strong>KM de saída</strong>.</li>
         <li><strong>Execução:</strong> libera o carro (após confirmar), tira fotos de saída.</li>
         <li><strong>Check‑out:</strong> registra situação, <strong>KM de retorno</strong> e finaliza. A O.S vai para <em>Finalizados</em>.</li>
@@ -4886,6 +5293,10 @@ function exportarBackup() {
 }
 
 function importarBackup() {
+  // Restaurar substitui a base inteira: só o administrador (o botão já some
+  // para os outros papéis; a trava fica aqui também, porque botão escondido
+  // não é porta fechada).
+  if (!STATE.user || STATE.user.papel !== 'admin') { toast('Só o administrador restaura backup.', 'error'); return; }
   const inp = document.createElement('input');
   inp.type = 'file'; inp.accept = 'application/json';
   inp.onchange = () => {

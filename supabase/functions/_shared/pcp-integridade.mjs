@@ -3,6 +3,30 @@ const igual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const objeto = v => v && typeof v === 'object' && !Array.isArray(v);
 const proprio = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k);
 export const CAMPOS_ERP = ['cliente','servico','vendedor','dataEntrada','cnpjCpf','valorTotal'];
+/* SITUAÇÃO DO ERP (statusERP). A carteira é buscada por situação (PRODUCAO,
+   PENDENTE, PAUSADO, CONCLUIDO) e a situação era jogada fora -- justamente o
+   dado que diz se a produção terminou (auditoria de 23/09/2026). Grava a
+   situação e DESDE QUANDO ela vale; não acende o selo "conferir" (a situação
+   anda toda semana e, sozinha, não pede ação). */
+export const SITUACOES_ERP = ['PRODUCAO', 'PENDENTE', 'PAUSADO', 'CONCLUIDO'];
+export function atualizarSituacaoERP(atual, situacao, em) {
+  const s = String(situacao || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase();
+  if (!atual || atual.finalizadaEm || !SITUACOES_ERP.includes(s) || atual.statusERP === s) return null;
+  return { ...atual, statusERP: s, statusERPDesde: em };
+}
+/* TRABALHO DE GENTE NA O.S. A conciliação horária arquivava toda O.S. que
+   saiu da carteira aberta do ERP -- inclusive liberada, com equipe, agenda e
+   confirmação (54 em 3 dias, 12 liberadas; a 23364 sumiu no dia da
+   instalação). Só marcas que uma PESSOA põe contam: a importação preenche
+   data e período com a previsão do ERP, então data não prova programação. */
+export function temTrabalhoHumano(o) {
+  if (!o) return false;
+  return !!(o.liberadoPCP || o.aptoEm || (o.equipe || []).some(n => String(n || '').trim())
+    || o.confirmacao === 'Confirmado' || o.paradoClienteEm
+    || ((o.horaSaida || o.saidaEm) && !(o.horaRetorno || o.retornoEm))
+    || (o.reabertaEm && String(o.reabertaEm) > String(o.baixaAutoERP?.em || '')));
+}
+export const pedeConferencia = a => a && a.campo !== 'valorTotal' && a.antes != null && String(a.antes).trim() !== '';
 export function atualizarOrigemERP(atual, remoto, em) {
   if (!atual?.origemMubisys || atual.finalizadaEm) return {registro: atual, alteracoes: []};
   const registro = {...atual}, alteracoes = [];
@@ -18,7 +42,12 @@ export function atualizarOrigemERP(atual, remoto, em) {
   }
   if (alteracoes.length) {
     registro.erpAlteracoes = [...(atual.erpAlteracoes || []), {em, campos: alteracoes}].slice(-20);
-    registro.erpConferirEm = em;
+    /* O SELO "conferir" só acende quando o ERP MUDOU um dado que já existia.
+       Valor que chega pela primeira vez (antes vazio) e o valor em R$ (o card do
+       PCP nem mostra) ficam registrados em erpAlteracoes, sem pedir conferência:
+       depois da carga de 14/09 o selo estava aceso em metade dos cards e, selo
+       em todo card, ninguém lê (auditoria de 23/09/2026). */
+    if (alteracoes.some(pedeConferencia)) registro.erpConferirEm = em;
     registro.atualizadoEm = em;
     registro.atualizadoPor = 'Mubisys · atualização de origem';
     registro.rev = (Number(atual.rev) || 0) + 1;
@@ -76,6 +105,25 @@ export function validarConclusao(os, anterior, papel) {
   if (faltas.length && !(['admin','pcp'].includes(papel) && String(os.justificativaConclusao || '').trim().length >= 15)) return 'Para concluir: ' + faltas.join(', ') + '. A gestão pode registrar uma justificativa de exceção.';
   return '';
 }
+/* NO MÁXIMO UMA EQUIPE ATIVA POR COMPOSIÇÃO. Dois aparelhos criando, cada um, a
+   mesma dupla passariam na trava do cliente e o ranking não saberia de quem é
+   cada entrega. Desativada não disputa: é histórico. Devolve as composições
+   repetidas; o setCfg recusa só a que NÃO existia antes -- duplicata que já
+   está no banco (a v124 não conferia) não pode travar confirmação nenhuma.
+   A chave de apelido é trocada pela da ficha quando o vínculo salvo diz
+   (vinculosRH); o resto do casamento apelido-ficha acontece no aparelho. */
+export function composicoesAtivasRepetidas(perf, vinculos) {
+  const norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const porApelido = new Map((Array.isArray(vinculos) ? vinculos : []).filter(v => v && v.apelido && v.chave).map(v => [norm(v.apelido), String(v.chave)]));
+  const chave = m => porApelido.get(norm(m && m.chave)) || String(m && m.chave);
+  const vistas = new Set(), repetidas = new Set();
+  for (const e of (perf && Array.isArray(perf.equipes) ? perf.equipes : [])) {
+    if (!e || e.ativo === false || !Array.isArray(e.membros)) continue;
+    const k = [...new Set(e.membros.map(chave))].sort().join('|');
+    if (vistas.has(k)) repetidas.add(k); else vistas.add(k);
+  }
+  return repetidas;
+}
 // Validação da apuração operacional; nenhum lançamento de folha é criado.
 export function validarPerformance(cfg) {
   if (cfg == null) return '';
@@ -84,8 +132,33 @@ export function validarPerformance(cfg) {
   const distintos = xs => new Set(xs.map(x=>x?.id)).size === xs.length;
   if (cfg.equipes.length > 300 || cfg.participacoes.length > 20000 || !distintos(cfg.equipes) || !distintos(cfg.participacoes)) return 'Registros de performance repetidos ou acima do limite.';
   const membrosOK = ms => Array.isArray(ms) && ms.length > 0 && ms.length <= 50 && ms.every(p=>p && texto(p.chave,150) && texto(p.nome,150)) && new Set(ms.map(p=>p.chave)).size === ms.length;
+  /* O LOGO DA EQUIPE é opcional e vem como imagem já reduzida no aparelho
+     (160x160). Só PNG, JPEG ou WebP em base64 — SVG fica de fora de propósito,
+     porque carrega script. Teto por logo e teto do conjunto: a configuração
+     global desce para todo tablet, e vinte logos de 200 KB transformariam cada
+     abertura do app num download de 4 MB. O emblema continua obrigatório: é o
+     que aparece quando a imagem não existe ou não carrega. */
+  const LOGO = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+  const LOGO_MAX = 40000, LOGOS_MAX = 400000;
+  let somaLogos = 0;
   for (const e of cfg.equipes) {
     if (!e || !texto(e.id,150) || !texto(e.nome,60) || !['🦅','🚀','🎯','🛡️','⚡','🦁','🏔️','🤝'].includes(e.emblema) || !membrosOK(e.membros)) return 'Equipe inválida. Confira nome, emblema e integrantes.';
+    if (e.logo != null && e.logo !== '') {
+      if (typeof e.logo !== 'string' || e.logo.length > LOGO_MAX || !LOGO.test(e.logo)) return 'Logo da equipe inválido: use PNG, JPEG ou WebP de até 40 KB.';
+      somaLogos += e.logo.length;
+    }
+    if (e.ativo != null && typeof e.ativo !== 'boolean') return 'Equipe inválida. Confira nome, emblema e integrantes.';
+  }
+  if (somaLogos > LOGOS_MAX) return 'Logos das equipes somam mais que o limite de 400 KB. Remova ou troque algum.';
+  /* (A regra "uma equipe ativa por composição" mora em
+     composicoesAtivasRepetidas: o setCfg recusa só a repetição NOVA.) */
+  /* OS PESOS DA AVALIAÇÃO (produção, limpeza do carro, equipamentos): inteiros
+     de 0 a 100 que somam 100. Opcional — sem eles vale o padrão da tela. */
+  if (cfg.criterios != null) {
+    const c = cfg.criterios, ks = ['producao','limpeza','equipamentos'];
+    if (typeof c !== 'object' || ks.some(k => !Number.isInteger(c[k]) || c[k] < 0 || c[k] > 100) || ks.reduce((s,k)=>s+c[k],0) !== 100 || Object.keys(c).some(k => !ks.includes(k))) {
+      return 'Pesos da avaliação inválidos: produção, limpeza e equipamentos, inteiros que somam 100.';
+    }
   }
   for (const p of cfg.participacoes) {
     if (!p || !texto(p.id,150) || !membrosOK(p.membros)) return 'Participação inválida.';

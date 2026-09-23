@@ -442,6 +442,17 @@ function lancarEntregaManual(osId) {
   box.id = 'lancar-box';
   box.className = 'wpp-picker-overlay';
   const eq = new Set(OPERACAO.equipe(os));
+  /* A CONFERÊNCIA DA VOLTA também mora aqui: a maioria das O.S. chega
+     finalizada pela baixa do ERP, e este é o momento em que a gestão pega
+     nelas. Sem isto, carro e equipamentos quase nunca teriam resposta e o
+     critério nunca entraria na nota (revisão de 23/09/2026). */
+  const gestao = ['admin', 'pcp'].includes(STATE.user && STATE.user.papel);
+  const rc = os.retornoConf || {};
+  const sel = (nome, valor) => `<select name="${nome}"><option value="" ${!valor ? 'selected' : ''}>Não conferido</option><option value="sim" ${valor === 'sim' ? 'selected' : ''}>Sim</option><option value="nao" ${valor === 'nao' ? 'selected' : ''}>Não</option></select>`;
+  const conferencia = gestao && !OPERACAO.interno(os) ? `<div class="field-row">
+            <div class="field"><label>🚗 Carro devolvido limpo</label>${sel('carroLimpo', rc.carroLimpo)}</div>
+            <div class="field"><label>🧰 Equipamentos completos e em ordem</label>${sel('equipamentosOk', rc.equipamentosOk)}</div>
+          </div>` : '';
   box.innerHTML = `
     <div class="wpp-picker retrab-box" role="dialog" aria-modal="true">
       <div class="wpp-picker-head"><strong>📦 Lançar entrega · O.S ${esc(os.numero || '—')}</strong><button class="modal-close" id="lancar-x">×</button></div>
@@ -450,6 +461,7 @@ function lancarEntregaManual(osId) {
         <form id="lancar-form" class="retrab-form">
           <div class="field"><label>Data da entrega <span class="req">*</span></label><input name="data" type="date" required value="${esc(OPERACAO.dia(os.finalizadaEm) || hojeISO())}"></div>
           <div class="field"><label>Equipe que instalou</label><div class="casa-chips">${(cfg.instaladores || []).map(n => `<label class="casa-chip ${eq.has(n) ? 'on' : ''}"><input type="checkbox" name="equipe" value="${esc(n)}" ${eq.has(n) ? 'checked' : ''}><span>${esc(n)}</span></label>`).join('')}</div></div>
+          ${conferencia}
           <button class="btn-primary w-100" type="submit">Continuar → pergunta do retrabalho</button>
         </form>
       </div>
@@ -464,9 +476,16 @@ function lancarEntregaManual(osId) {
     const data = String(fd.get('data') || '');
     if (!OPERACAO.dia(data)) { toast('Informe a data da entrega.', 'error'); return; }
     const equipe = fd.getAll('equipe').map(String).filter(Boolean);
+    const resp = v => (v === 'sim' || v === 'nao') ? v : '';
+    const carroLimpo = resp(fd.get('carroLimpo')), equipamentosOk = resp(fd.get('equipamentosOk'));
     fechar();
     perguntarRetrabalho(os, () => {
       if (equipe.length) os.equipe = equipe;
+      const antes = os.retornoConf || {};
+      if (conferencia && (carroLimpo !== resp(antes.carroLimpo) || equipamentosOk !== resp(antes.equipamentosOk))) {
+        const respondeu = carroLimpo || equipamentosOk;
+        os.retornoConf = {...antes, carroLimpo, equipamentosOk, por: respondeu ? ((STATE.user && STATE.user.nome) || '') : '', em: respondeu ? nowISO() : ''};
+      }
       os.entregaLancada = { em: nowISO(), por: (STATE.user && STATE.user.nome) || '', data };
       os.atualizadoEm = nowISO(); os.atualizadoPor = (STATE.user && STATE.user.nome) || '';
       STORE.saveOS(os);
@@ -2418,10 +2437,13 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
     const hora = String(fd.get('hora') || '');
     if (periodo === 'Horário' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(hora)) { toast('Período "Horário" pede a hora.', 'error'); return; }
     const equipe = fd.getAll('equipe').map(String).filter(Boolean);
+    const agendaAntes = OPERACAO.agendaCompleta(os);
     os.confirmacao = ''; os.confEm = ''; os.confPor = ''; os.confHora = ''; os.carroLiberado = false;
     os.instalacao = Object.assign({}, os.instalacao || {}, { data: dia, periodo, hora, duracaoDias: Math.max(1, Number(fd.get('dias')) || 1) });
     if (equipe.length) os.equipe = equipe;
     const veiculo = String(fd.get('veiculo') || ''); if (veiculo) os.veiculo = veiculo;
+    // Programou a data: o período "parado no cliente" termina aqui, guardado no log.
+    if (os.paradoClienteEm) OPERACAO.fecharParadoPorAgenda(os, agendaAntes, new Date().toISOString(), (STATE.user && STATE.user.nome) || '');
     os.atualizadoEm = new Date().toISOString();
     os.atualizadoPor = (STATE.user && STATE.user.nome) || '';
     STORE.saveOS(os);

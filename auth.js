@@ -64,7 +64,9 @@ const AUTH = (() => {
       if (typeof p.exp !== 'number' || p.exp < Math.floor(Date.now() / 1000)) return null;
       const usuario = String(p.sub || p.nome || '').trim();
       if (!usuario) return null;
-      return { usuario, nome: String(p.nome || usuario), papel: String(p.papel || '') };
+      // montagemIndividual: crachá de TOQUE NO NOME (sem senha). Só registra a
+      // execução; o app da gestão não abre com ele (ver initLogin).
+      return { usuario, nome: String(p.nome || usuario), papel: String(p.papel || ''), montagemIndividual: p.montagemIndividual === true };
     } catch { return null; }
   }
 

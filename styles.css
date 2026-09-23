@@ -1567,17 +1567,6 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .card-servico { margin-top:5px; font-size:.76rem; line-height:1.45; color:#64748b; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
 #panel-pcp .cards-grid { gap:12px; grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr)); }
 #panel-pcp .cards-grid.pcp-lista { display:flex; flex-direction:column; gap:0; background:#fff; border:1px solid #d7e1ee; border-radius:14px; overflow:hidden; }
-.pcp-row {
-  display:grid; grid-template-columns: 88px minmax(0,1.4fr) minmax(0,1fr) auto auto auto minmax(0,.8fr);
-  gap:10px; align-items:center; padding:10px 14px; min-height:48px;
-  border-bottom:1px solid #e8eef5; cursor:pointer; font-size:.82rem; color:#163654; background:#fff;
-}
-.pcp-row:last-child { border-bottom:0; }
-.pcp-row:hover { background:#f4f8fc; }
-.pcp-row-os { font-weight:750; font-variant-numeric:tabular-nums; }
-.pcp-row-cli { font-weight:650; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.pcp-row-svc { color:#64748b; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.pcp-row-eq { color:#526378; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.75rem; }
 #panel-pcp .os-card { --tipo-cor:#3b82f6; --prazo-fundo:#fff; border:1px solid #dfe6ee; border-top-width:3px; border-left:4px solid var(--tipo-cor); border-radius:16px; padding:14px; background:linear-gradient(180deg,var(--prazo-fundo),#fff 90px); box-shadow:0 3px 10px #24436107; }
 #panel-pcp .os-card.tipo-interno { --tipo-cor:#db2777; }
 #panel-pcp .os-card.urg-1, #panel-pcp .os-card.urg-2 { --prazo-fundo:#fffdf5; }
@@ -1587,18 +1576,8 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 #panel-pcp .os-card:hover { border-color:#adc7e2; box-shadow:0 8px 22px #24436112; transform:translateY(-2px); }
 #panel-pcp .card-numero { font-size:.86rem; color:#425d76; }
 #panel-pcp .card-meta .badge, #panel-pcp .tag-atraso, #panel-pcp .tag-retrab { font-size:.65rem; padding:4px 8px; }
-#panel-pcp .os-card-pcp .card-acoes { margin-top:10px; }
-#panel-pcp .os-card-pcp .card-cta, #panel-pcp .os-card-pcp .card-finalizar { width:100%; min-height:40px; border-radius:9px; font-size:.79rem; font-weight:700; box-shadow:none; }
-#panel-pcp .os-card-pcp .card-cta { background:#174a72; }
-#panel-pcp .os-card-pcp .card-cta:hover { background:#0f3859; }
-#panel-pcp .os-card-pcp .card-finalizar { background:#e8f7ef; border-color:#b6dfc7; color:#196842; }
-#panel-pcp .os-card-pcp .card-avisar { width:100%; min-height:36px; color:#9d174d; background:#fff2f9; border-color:#f4d0e5; }
-#panel-pcp .os-card-pcp .card-equipe { font-size:.75rem; color:#526378; margin-top:6px; }
-#panel-pcp .os-card-pcp .card-prazo { margin-top:8px; }
 @media(max-width:1100px) {
   .pcp-missoes { grid-template-columns:repeat(3,minmax(0,1fr)); }
-  .pcp-row { grid-template-columns: 80px minmax(0,1fr) auto; }
-  .pcp-row-svc, .pcp-row-eq { display:none; }
 }
 @media(max-width:700px) {
   .pcp-missoes { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
@@ -1607,9 +1586,6 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
   .pcp-carteira-heading { align-items:flex-start; flex-direction:column; gap:5px; }
   .pcp-carteira-heading #pcp-resultado { padding-left:0; border:0; }
   .pcp-controles .pcp-legenda { justify-self:start; }
-  .pcp-row { grid-template-columns: 1fr auto; }
-  .pcp-row-os { grid-column:1; }
-  .pcp-row-cli { grid-column:1; }
 }
 @media(max-width:360px) {
   .pcp-criar-acoes { flex-direction:column; }
@@ -2299,3 +2275,185 @@ body.tv-ligada { overflow:hidden; }
 @media print{.perf-report{padding:0}.perf-team-report header,.perf-member-list,.rel-ent-resumo-grid{break-inside:avoid}.perf-report .casa-tabela td{font-size:10px;padding:7px}.perf-report-section>h3,.perf-team-report summary{break-after:avoid}.rel-ent-indicador{border:1px solid #ccd8df}.perf-report-heading h3{font-size:20px}.perf-team-report details{display:block}.perf-team-report header small{font-size:10px}}
 
 .rel-ent-meses{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 4px}.rel-ent-meses button{min-height:42px;min-width:54px;border:1px solid #dae3e9;border-radius:22px;padding:9px 16px}.rel-ent-meses button.active{background:#207a6c;color:#fff;border-color:#207a6c}.rel-ent-meses button:disabled{opacity:.4;cursor:not-allowed}.rel-ent-meses button:focus-visible{outline:3px solid #3763cf;outline-offset:3px}
+
+/* ── Ranking das equipes (Performance › Equipes) ───────────────────────────
+   Pedido do dono (23/09/2026): enxugar as equipes, dar nome e logo, e um
+   ranking "bem bacana". Pódio para os três primeiros, lista compacta para o
+   resto. Mesmo verde (#2d8075) e azul-marinho (#173c50) da Performance. */
+.perf-ranking{margin:16px 0 22px;padding:20px 22px;background:var(--surface,#fff);border:1px solid var(--border,#d8e2e7);border-radius:18px}
+.perf-ranking-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.perf-ranking-head h3{margin:0 0 4px;font-size:1.15rem;color:var(--navy,#173c50)}
+.perf-ranking-head p{margin:0;font-size:.82rem;color:var(--muted,#617787);max-width:560px}
+.perf-ranking-ctrl{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.perf-ranking-ctrl .btn-primary{min-height:40px}
+
+/* O pódio: 2º à esquerda, 1º no centro e mais alto, 3º à direita. */
+/* O 1º TEM DE SER O MAIS ALTO, qualquer que seja o texto. Com alinhamento pelo
+   pé, um 3º colocado com uma linha a mais ("individual", "Dar nome e logo")
+   ficava mais alto que o campeão e o pódio se lia ao contrário. Agora todos
+   esticam até a mesma base e o 2º e o 3º descem um degrau fixo. */
+.perf-podio{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:stretch;margin:22px 0 18px}
+.perf-podio-item.pos-2{margin-top:26px}
+.perf-podio-item.pos-3{margin-top:46px}
+/* Com uma ou duas equipes no período o pódio encolhe e fica no centro, em vez
+   de deixar o campeão encostado num canto com duas colunas vazias ao lado. */
+.perf-podio.n1{grid-template-columns:minmax(0,300px);justify-content:center}
+.perf-podio.n2{grid-template-columns:repeat(2,minmax(0,280px));justify-content:center}
+.perf-podio-item{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:22px 16px 16px;border-radius:18px;border:1px solid #d8e2e7;background:linear-gradient(180deg,#f6faf9 0%,#fff 60%);overflow-wrap:anywhere}
+.perf-podio-item.pos-1{order:2;padding-top:30px;border-color:#e8c766;background:linear-gradient(180deg,#fff8e1 0%,#fff 62%);box-shadow:0 8px 24px rgba(212,170,50,.18)}
+.perf-podio-item.pos-2{order:1;border-color:#c7ced6;background:linear-gradient(180deg,#f3f5f8 0%,#fff 62%)}
+.perf-podio-item.pos-3{order:3;border-color:#dcb89a;background:linear-gradient(180deg,#fbf1e9 0%,#fff 62%)}
+.perf-medalha{position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:1.9rem;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.15))}
+.perf-podio-logo{width:72px;height:72px;border-radius:20px;display:inline-flex;align-items:center;justify-content:center;background:#eef5f3;font-size:2.4rem;object-fit:cover;border:2px solid #fff;box-shadow:0 2px 8px rgba(23,60,80,.12)}
+.perf-podio-item.pos-1 .perf-podio-logo{width:88px;height:88px;font-size:2.9rem}
+.perf-podio-item h3{margin:4px 0 0;font-size:1rem;color:var(--navy,#173c50);line-height:1.3}
+.perf-podio-membros{margin:0;font-size:.74rem;color:var(--muted,#617787);line-height:1.35}
+.perf-podio-num{display:flex;align-items:baseline;gap:6px;margin-top:4px}
+.perf-podio-num strong{font-size:2rem;line-height:1;color:var(--navy,#173c50);font-variant-numeric:tabular-nums}
+.perf-podio-item.pos-1 .perf-podio-num strong{font-size:2.4rem}
+.perf-podio-num span{font-size:.8rem;color:var(--muted,#617787)}
+.perf-podio-acoes{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:6px}
+.perf-podio-acoes .inline-link,.perf-rank-acoes .inline-link{min-height:40px;display:inline-flex;align-items:center}
+.perf-ranking .casa-chip-per{min-height:40px}
+
+/* Do 4º em diante: linha compacta. */
+.perf-rank-lista{list-style:none;margin:0;padding:0;border-top:1px solid #eef2f7}
+.perf-rank-linha{display:grid;grid-template-columns:44px 44px minmax(0,1fr) auto auto;align-items:center;gap:12px;min-height:60px;padding:8px 4px;border-bottom:1px solid #eef2f7}
+.perf-rank-pos{font-weight:800;color:#8aa0b1;font-variant-numeric:tabular-nums;text-align:center}
+.perf-rank-logo{width:40px;height:40px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;background:#eef5f3;font-size:1.35rem;object-fit:cover}
+.perf-rank-nome{display:flex;flex-direction:column;min-width:0}
+.perf-rank-nome strong{color:var(--navy,#173c50);font-size:.92rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.perf-rank-nome small{font-size:.74rem;color:var(--muted,#617787);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.perf-rank-num{white-space:nowrap;font-variant-numeric:tabular-nums}
+.perf-rank-num strong{font-size:1.15rem;color:var(--navy,#173c50)}
+.perf-rank-num small{color:var(--muted,#617787);font-size:.74rem}
+.perf-rank-acoes{display:flex;gap:10px;white-space:nowrap}
+
+.perf-sem-nome{font-size:.7rem;color:#8aa0b1;text-transform:uppercase;letter-spacing:.04em}
+.perf-a-conferir{font-size:.72rem;color:#9a6b00;background:#fff4d6;border-radius:999px;padding:2px 10px}
+.perf-nomear{font-weight:700;color:#2d8075}
+.perf-rank-vazio,.perf-rank-nota{font-size:.84rem;color:var(--muted,#617787);margin:8px 0}
+.perf-equipes-paradas{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:14px;padding-top:12px;border-top:1px dashed #d8e2e7;font-size:.8rem;color:var(--muted,#617787)}
+.perf-equipe-chip{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:4px 14px 4px 6px;border-radius:999px;border:1px solid #d8e2e7;background:#fff;color:var(--navy,#173c50);font-weight:650;cursor:pointer}
+.perf-equipe-chip[disabled]{cursor:default}
+.perf-chip-logo{width:30px;height:30px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;background:#eef5f3;font-size:1rem;object-fit:cover}
+
+/* Edição: o logo com pré-visualização grande. */
+.perf-logo-campo{border:1px solid #d8e2e7;border-radius:14px;padding:12px 14px;margin:12px 0}
+.perf-logo-linha{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.perf-logo-grande{width:96px;height:96px;border-radius:24px;display:inline-flex;align-items:center;justify-content:center;background:#eef5f3;font-size:3rem;object-fit:cover;border:1px solid #d8e2e7}
+.perf-logo-botoes{display:flex;flex-direction:column;gap:8px;align-items:flex-start;max-width:320px}
+.perf-logo-botoes small{font-size:.76rem;color:var(--muted,#617787)}
+.perf-logo-enviar{min-height:40px;display:inline-flex;align-items:center;cursor:pointer}
+.perf-logo-erro{min-height:1em;margin:6px 0 0;font-size:.8rem;color:#b3261e}
+.perf-equipe-acoes{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+img.perf-logo{object-fit:cover}
+
+@media (max-width:760px){
+  .perf-podio{grid-template-columns:1fr;gap:22px}
+  .perf-podio-item.pos-1,.perf-podio-item.pos-2,.perf-podio-item.pos-3{order:0;margin-top:0}
+  .perf-rank-linha{grid-template-columns:34px 40px minmax(0,1fr) auto;row-gap:4px}
+  .perf-rank-acoes{grid-column:3 / -1}
+}
+
+/* Conferência da volta (carro e equipamentos), na ficha da O.S. */
+.conf-volta{margin:12px 0;padding:12px 14px;border:1px solid #d7e1ee;border-radius:12px;background:#f7fafd}
+.conf-volta-titulo{font-weight:700;color:#163654;margin-bottom:8px}
+.conf-volta-titulo small{font-weight:500;color:var(--muted);margin-left:6px}
+.conf-volta select{min-height:40px}
+.conf-por-linha{font-size:.75rem;color:var(--muted);margin:6px 0 0}
+
+/* Ranking individual: foto da ficha do RH, selo da equipe e a composição da nota. */
+.perf-foto{display:inline-flex;align-items:center;justify-content:center;overflow:hidden;padding:0}
+.perf-foto .casa-avatar{width:100%;height:100%;border-radius:inherit;font-size:1.3rem;display:flex;align-items:center;justify-content:center;object-fit:cover}
+.perf-podio-logo.perf-foto{border-radius:999px}
+.perf-rank-logo.perf-foto{border-radius:999px}
+.perf-selo-equipe{display:inline-flex;align-items:center;gap:5px;font-size:.72rem;font-weight:650;color:#2d8075;background:#eef5f3;border-radius:999px;padding:2px 10px 2px 3px;margin:2px 0;max-width:100%}
+.perf-selo-logo{width:18px;height:18px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font-size:.72rem;object-fit:cover;background:#fff}
+.perf-crits{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:4px}
+.perf-rank-nome .perf-crits{justify-content:flex-start}
+.perf-crit{font-size:.7rem;color:#475569;background:#f1f5f9;border-radius:999px;padding:2px 8px;white-space:nowrap}
+.perf-crit b{color:#173c50;margin-left:2px}
+.perf-crit.sem{color:#94a3b8}
+.perf-parcial{font-size:.7rem;color:#9a6b00}
+.perf-sub{font-size:.74rem;color:var(--muted,#617787)}
+.perf-crit.media{background:#fff7e0}
+.perf-crit i{font-style:normal;font-size:.62rem;color:#9a6b00;margin-left:4px;text-transform:uppercase;letter-spacing:.03em}
+
+/* O aviso de média precisa ser lido inteiro: é o que explica a nota. */
+.perf-rank-nome small.perf-parcial{white-space:normal;overflow:visible}
+
+/* Acertos da revisão do ranking (23/09/2026). */
+/* O número do pódio não quebra no meio: no modo Valor, "R$ 12.794" partido em
+   dois era lido como "R$ 12". */
+.perf-podio-num{flex-wrap:wrap;justify-content:center}
+.perf-podio-num strong{white-space:nowrap;overflow-wrap:normal;font-size:clamp(1.35rem,4.2vw,2rem)}
+.perf-podio-item.pos-1 .perf-podio-num strong{font-size:clamp(1.5rem,4.8vw,2.4rem)}
+/* Composição sem nome é o próprio nome: não pode sumir em reticências. */
+.perf-rank-nome.sem-nome strong{white-space:normal;overflow:visible}
+.perf-rank-num{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+/* Diálogo de equipe: régua de dedo e o desativar longe do salvar. */
+.perf-equipe-acoes button,#perf-logo-remover,.perf-logo-enviar{min-height:44px}
+.perf-equipe-acoes .perf-perigo{margin-left:auto;color:#b3261e;border-color:#f2c4c0}
+.perf-desativadas{opacity:.75}
+/* No celular o pódio empilha mesmo com uma ou duas equipes (a regra .n1/.n2
+   tinha especificidade maior que a do media query). */
+@media (max-width:760px){
+  .perf-podio,.perf-podio.n1,.perf-podio.n2{grid-template-columns:1fr}
+  .perf-rank-num{align-items:flex-start}
+}
+.conf-volta-dica{font-size:.8rem;color:#43566b;margin:0 0 8px}
+/* Régua de toque da casa: os controles do ranking (inclusive "Pesos da nota") ficam com 40px. */
+.perf-ranking-ctrl :is(.btn-primary,.btn-ghost){min-height:40px}
+
+/* ── Etapa no card (23/09/2026) ────────────────────────────────────────────
+   Visível sem abrir "Detalhes": é a pergunta que o PCP faz a cada card. */
+.card-etapa{margin-top:10px;border:1px solid var(--border,#e4e7ec);border-radius:10px;background:#f8fafc}
+.card-etapa>summary{list-style:none;display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;cursor:pointer;font-size:.88rem;color:#24324a}
+.card-etapa>summary::-webkit-details-marker{display:none}
+.card-etapa-rot{font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted,#667085)}
+.card-etapa>summary b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-etapa-mover{font-size:.8rem;font-weight:650;color:#1d4ed8;white-space:nowrap}
+.card-etapa[open]>summary{border-bottom:1px solid var(--border,#e4e7ec)}
+.card-etapa-menu{list-style:none;margin:0;padding:4px 0}
+.card-etapa-menu li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 12px;min-height:44px}
+.card-etapa-menu li+li{border-top:1px dashed #e4e7ec}
+.card-etapa-menu li.atual{background:#eef4ff}
+.card-etapa-nome{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px;min-width:0;font-size:.86rem}
+.card-etapa-nome small{flex-basis:100%;color:var(--text-muted,#667085);font-size:.74rem}
+.card-etapa-aqui{font-size:.7rem;font-weight:700;color:#1d4ed8;background:#dbe7ff;border-radius:999px;padding:1px 8px}
+.card-etapa-lado{display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right;flex-shrink:0;max-width:55%}
+.card-etapa-acao{min-height:44px;padding:0 12px;font-size:.82rem;white-space:nowrap}
+.card-etapa-dica,.card-etapa-motivo{font-size:.72rem;color:var(--text-muted,#667085);line-height:1.25}
+.card-etapa-motivo{font-style:italic}
+/* Régua de toque: o "Detalhes e outras ações" tinha 32px. */
+.card-detalhes>summary{min-height:44px;display:flex;align-items:center}
+/* Toast com Desfazer: recebe toque (o container não recebe) e fica 6 s. */
+.toast.toast-acao{pointer-events:auto;display:flex;align-items:center;gap:12px;padding:4px 6px 4px 16px;animation:toastIn .2s ease,toastOut .3s ease 5.7s forwards}
+.toast-acao button{min-height:44px;padding:0 14px;border-radius:8px;border:1px solid rgba(255,255,255,.55);background:transparent;color:#fff;font-weight:700;cursor:pointer}
+.login-aviso{background:#fff7e6;border:1px solid #f5c26b;color:#5b3b00;border-radius:10px;padding:10px 12px;font-size:.85rem;margin:0 0 10px}
+#login-choose>a.btn-primary{display:flex;align-items:center;justify-content:center;min-height:44px;margin-bottom:12px;text-decoration:none}
+.card-erp-conferir{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;padding:6px 6px 6px 12px;border:1px solid #f1d7a8;background:#fffaf0;border-radius:10px;font-size:.78rem;color:#5b4200}
+.card-erp-conferir s{color:#8a6d3b}
+.card-erp-ok{min-height:44px;padding:0 12px;white-space:nowrap}
+.exec-proximo{font-size:.76rem;color:#8a4b00;margin-top:4px}
+/* Régua de toque da casa (auditoria de 23/09): botões de ação em lista e card
+   com 44px em qualquer largura, não só no celular. */
+.list-actions button,.card-acoes button,.card-etapa-btn,.card-tipo-row .card-toggle-tipo{min-height:44px}
+.pcp-controles .pcp-chip{min-height:40px}
+/* Baixa do ERP: finalizada, mas sem a execução registrada no PCP. */
+.card-fin-tag.card-fin-erp{background:#f1f5f9;color:#475569;border-color:#cbd5e1}
+.prazo-tag.prazo-erp{background:#f1f5f9;color:#475569}
+.step.nao-registrada .step-dot{background:#fff;border:1px dashed #94a3b8;color:#94a3b8}
+
+/* ERP: produção concluída (sugere liberar) e O.S. que o ERP fechou com trabalho em andamento. */
+.tag-erp-pronta{display:inline-block;font-size:.65rem;font-weight:700;padding:3px 8px;border-radius:999px;background:#e7f6ee;color:#17603a;border:1px solid #b8e0c8}
+.card-erp-fechou{border-color:#c9d6f2;background:#f3f7ff;color:#1e3a6b}
+
+.quem-resolveu-lista{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.quem-resolveu-lista button{min-height:44px}
+/* O display:flex do resumo tira o triângulo nativo: sem ele, "Detalhes e outras ações" parece texto comum. */
+.card-detalhes>summary{list-style:none}
+.card-detalhes>summary::-webkit-details-marker{display:none}
+.card-detalhes>summary::before{content:'▸';margin-right:6px;color:var(--text-muted,#667085)}
+.card-detalhes[open]>summary::before{content:'▾'}

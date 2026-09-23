@@ -73,7 +73,7 @@ const OPERACAO = (() => {
       if (!o.veiculo) p.push('Definir veículo');
       if (agendaCompleta(o) && !confirmadaHoje(o)) p.push('Confirmar cliente no dia');
     }
-    if (o.retrabalho && !o.dataResolvido) p.push('Resolver retrabalho');
+    if (retrabalhoPendente(o)) p.push('Resolver retrabalho');
     return p;
   }
   function taxaRetrabalho(lista, de = '', ate = '') {
@@ -172,8 +172,31 @@ const OPERACAO = (() => {
       semPrazo:abertas.filter(o => !prazo(o)),
       retirada:abertas.filter(o => interno(o) && o.liberadoPCP),
       semRetorno:abertas.filter(o => ['sem-retorno','conferir'].includes(situacaoSaida(o,hoje))),
-      retrabalho:lista.filter(o => o.retrabalho && !o.dataResolvido)
+      retrabalho:(m => lista.filter(o => retrabalhoPendente(o, m.get(String(o.numero || '').trim()))))(filhasDeRetrabalho(lista))
     };
+  }
+  /* O CARTÃO GRANDE DO ESPELHO ("Sua próxima instalação"). Era a primeira O.S.
+     não finalizada por data -- e a primeira por data costuma ser uma vencida há
+     meses que ninguém fechou, enquanto a de hoje ficava lá embaixo (auditoria
+     de 23/09/2026). Ordem: quem está na rua; o que é de hoje; a próxima data
+     futura. Vencida NUNCA vai para o cartão grande: ela aparece na lista, com
+     o aviso de confirmar com o PCP. */
+  function destaqueDoDia(lista, hoje = dia(new Date())) {
+    const abertas = (lista || []).filter(o => o && !o.finalizadaEm);
+    const rua = abertas.find(o => naRua(o, hoje));
+    if (rua) return rua;
+    /* Só o DIA DA INSTALAÇÃO conta (a agenda; na retirada, a data marcada),
+       nunca a previsão de entrega: "Sua próxima instalação" com botão de Rota
+       apontava O.S. sem data. Serviço que já voltou no último dia dele saiu da
+       frente: o da tarde não fica atrás do que terminou de manhã. */
+    const dias = o => interno(o) ? (dia(o?.instalacao?.data) ? [dia(o.instalacao.data)] : []) : diasAgenda(o);
+    const candidatas = abertas.map(o => {
+      const ds = dias(o), ultimo = ds[ds.length - 1];
+      if ((o.horaRetorno || o.retornoEm) && ultimo && ultimo <= hoje) return null;
+      const d = ds.find(x => x >= hoje);
+      return d ? { o, d } : null;
+    }).filter(Boolean).sort((a, b) => a.d.localeCompare(b.d));
+    return candidatas.length ? candidatas[0].o : null;
   }
   function periodoRapido(id, hoje = dia(new Date()), futuro = false) {
     if (id === 'todos') return {de:'',ate:''};
@@ -195,6 +218,52 @@ const OPERACAO = (() => {
     }
     return best;
   }
-  return {confirmadaHoje,pendencias,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
+  /* FECHA O PERÍODO "PARADO NO CLIENTE" GUARDANDO DE QUANDO A QUANDO.
+     Até 23/09/2026 o "Cliente liberou" APAGAVA a data -- e era ela que ia
+     responder quanto tempo o cliente costuma segurar a instalação, o motivo de
+     a etapa existir. Agora cada período vai para paradoClienteLog; a marca
+     viva continua sendo paradoClienteEm (o que paradoNoCliente lê). */
+  /* PROGRAMOU A DATA: o período parado termina. Só fecha com "agora" quando a
+     agenda ficou completa NESTA gravação. Marca antiga (agenda que já estava
+     completa, de antes de o log existir) fecha no dia em que o histórico diz
+     que a O.S. foi agendada; sem isso, "até" fica em branco. Fechar tudo com
+     hoje inventava períodos de semanas (revisão de 23/09/2026). */
+  function fecharParadoPorAgenda(os, agendaCompletaAntes, agora, por) {
+    if (!os || !os.paradoClienteEm || !agendaCompleta(os)) return false;
+    if (!agendaCompletaAntes && !os.finalizadaEm) return fecharParado(os, agora, por, 'programada');
+    const h = (os.historico || []).find(x => x && ['agendada', 'confirmada', 'em_andamento', 'finalizada'].includes(x.etapa) && String(x.em || '') >= String(os.paradoClienteEm));
+    return fecharParado(os, h ? h.em : '', por, 'legado');
+  }
+  /* RETRABALHO PENDENTE: marcado e sem data de resolvido -- vale também para
+     O.S. finalizada (o retrabalho costuma aparecer depois da entrega). Uma
+     régua só para a vista, o selo, as pendências e o menu Etapa. */
+  // Com O.S. filha (a correção que o ERP emite, com osOriginal apontado), vale
+  // a filha: pendente enquanto alguma filha estiver aberta. Sem filha, vale a
+  // data de resolvido. É a MESMA régua da aba Retrabalho (por par).
+  const retrabalhoPendente = (o, filhas) => {
+    if (!o || !o.retrabalho) return false;
+    const fs = Array.isArray(filhas) ? filhas : [];
+    return fs.length ? fs.some(f => !f.finalizadaEm) : !o.dataResolvido;
+  };
+  // numero da original -> filhas (O.S. com osOriginal apontando para ela).
+  function filhasDeRetrabalho(lista) {
+    const m = new Map();
+    for (const f of lista || []) {
+      const k = String((f && f.osOriginal) || '').trim();
+      if (!k) continue;
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(f);
+    }
+    return m;
+  }
+  function fecharParado(os, ate, por, motivo) {
+    if (!os || !os.paradoClienteEm) return false;
+    const log = Array.isArray(os.paradoClienteLog) ? os.paradoClienteLog.slice() : [];
+    log.push({ de: os.paradoClienteEm, ate: ate || '', marcouPor: os.paradoClientePor || '', fechouPor: por || '', motivo: motivo || '' });
+    os.paradoClienteLog = log.slice(-20);
+    os.paradoClienteEm = ''; os.paradoClientePor = '';
+    return true;
+  }
+  return {confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;

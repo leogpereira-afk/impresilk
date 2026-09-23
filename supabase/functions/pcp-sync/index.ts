@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, composicoesAtivasRepetidas } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -300,9 +300,23 @@ async function perfFonte(body:any) {
     const nomes=[...new Set((o.equipe||[]).map((n:any)=>String(n).trim()).filter(Boolean))];
     const membros=p?.membros || nomes.map((n,i)=>({chave:n,nome:n,percentual:(Math.floor(10000/nomes.length)+(i<10000%nomes.length?1:0))/100}));
     const confirmado=!!p && !validarPerformance({equipes:p.equipeId?[{id:p.equipeId,nome:p.equipeNome || "Equipe",emblema:p.emblema || "🤝",membros}]:[],participacoes:[p]});
-    return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,equipeId:p?.equipeId||"",equipeNome:p?.equipeNome||"",emblema:p?.emblema||"🤝",obs:p?.obs||"",por:p?.por||"",em:p?.em||"",retrabalho:!!o.retrabalho};
+    /* A CONFERÊNCIA DA VOLTA (carro e equipamentos) entra na base para pesar
+       na avaliação individual. Só "sim"/"nao" passam; o resto é "não
+       conferido" (null) e não pesa contra ninguém. */
+    const snv=(v:any)=>v==="sim"||v===true?"sim":(v==="nao"||v===false?"nao":null);
+    const rc=o.retornoConf&&typeof o.retornoConf==="object"?o.retornoConf:null;
+    const retornoConf=rc&&(snv(rc.carroLimpo)||snv(rc.equipamentosOk))?{carroLimpo:snv(rc.carroLimpo),equipamentosOk:snv(rc.equipamentosOk),por:String(rc.por||"").slice(0,120),porId:String(rc.porId||"").slice(0,120),em:String(rc.em||"").slice(0,40)}:null;
+    return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,equipeId:p?.equipeId||"",equipeNome:p?.equipeNome||"",emblema:p?.emblema||"🤝",obs:p?.obs||"",por:p?.por||"",em:p?.em||"",retrabalho:!!o.retrabalho,retornoConf};
   });
-  const conteudo={periodo,regra:"performance-1",registros};
+  /* performance-2: cada registro leva a conferência da volta, e a apuração
+     leva os PESOS DA NOTA em vigor. Eles entram no hash: quem fecha sela os
+     pesos que viu (trocá-los entre consultar e fechar dá 409), e uma revisão
+     fechada não muda de ordem quando a gestão mexe nos pesos depois. */
+  const pesosCfg=cfgAntes.config?.performancePCP?.criterios;
+  const criterios=pesosCfg && !validarPerformance({equipes:[],participacoes:[],criterios:pesosCfg})
+    ? {producao:pesosCfg.producao,limpeza:pesosCfg.limpeza,equipamentos:pesosCfg.equipamentos}
+    : {producao:60,limpeza:20,equipamentos:20};
+  const conteudo={periodo,regra:"performance-2",criterios,registros};
   return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP."};
 }
 async function perfFechamentos(periodo:any) {
@@ -604,6 +618,9 @@ Deno.serve(async (req: Request) => {
           return resp({
             os: linhas.map((r: any) => r.apagado || (soExecucao && !pertenceEquipe(r.registro, cracha.nome || cracha.sub)) ? { id: r.id, apagado: true } : podar(r.registro)),
             agora, incremental: true,
+            // O aparelho da gestão precisa saber que este crachá só registra a
+            // execução (crachá de toque antigo não traz montagemIndividual).
+            soExecucao,
             // 500 mudancas desde o cursor nao e "incremental": o cliente refaz completo.
             cheio: linhas.length >= 500,
             total: await contarRegs("os"),
@@ -651,7 +668,7 @@ Deno.serve(async (req: Request) => {
           total: await contarRegs("os"),
           nextAfter: linhas.length === PAGE ? linhas[linhas.length - 1].id : null,
           nextOffset: null,
-          agora, escopo, dias, faixa,
+          agora, escopo, dias, faixa, soExecucao,
         });
       }
 
@@ -699,7 +716,12 @@ Deno.serve(async (req: Request) => {
         // trabalhada no servidor (mesmo id canonico, atualizadoEm mais novo).
         // Esqueleto nunca vence ficha com trabalho — devolve a do servidor e o
         // pull realinha o aparelho.
-        if (os.origemMubisys && existing) {
+        /* Só o que chega SEM rev pode ser esqueleto: cache velho e reimportação
+           nascem sem ele. Gravação do app carrega o rev que leu (rev velho já
+           vira conflito logo abaixo). Sem esta condição, "Voltar ao PCP" e o
+           Desfazer de liberar/parado numa O.S. do ERP ainda sem equipe tinham
+           a cara de esqueleto e eram descartados calados (revisão de 23/09). */
+        if (os.origemMubisys && existing && typeof os.rev !== "number") {
           /* `paradoClienteEm` entra nas duas listas de proposito, ainda
              que hoje seja redundante: marcar "o cliente nao liberou" so
              aparece em O.S ja liberada pelo PCP, e `liberadoPCP` ja esta aqui.
@@ -744,16 +766,59 @@ Deno.serve(async (req: Request) => {
           }
         }
 
+        /* CONFERÊNCIA DA VOLTA (carro limpo, equipamentos): pesa na nota de cada
+           instalador, então só a gestão escreve e o autor é o CRACHÁ. Revisão
+           de 23/09/2026: "por" e "em" vinham do aparelho, e a conta de grupo
+           'montagem' (com senha) gravava a própria avaliação. Outro papel não
+           leva recusa -- um 422 trancaria a fila do aparelho --, só não muda o
+           que está gravado. Ausência não apaga (cliente antigo não conhece o
+           campo); apagar é responder "não conferido" nos dois. Resposta igual
+           à gravada mantém o carimbo de quem respondeu. */
+        {
+          const antes = existing?.retornoConf && typeof existing.retornoConf === "object" ? existing.retornoConf : null;
+          const gestao = !ehMaquina && ["admin", "pcp"].includes(String(cracha?.papel ?? ""));
+          if (!gestao || os.retornoConf == null) {
+            if (antes) os.retornoConf = antes; else delete os.retornoConf;
+          } else {
+            const sn = (x: any) => x === "sim" || x === "nao" ? x : "";
+            const rc = typeof os.retornoConf === "object" ? os.retornoConf : {};
+            const n: any = { carroLimpo: sn(rc.carroLimpo), equipamentosOk: sn(rc.equipamentosOk), obs: String(rc.obs ?? "").slice(0, 300) };
+            const mudou = n.carroLimpo !== sn(antes?.carroLimpo) || n.equipamentosOk !== sn(antes?.equipamentosOk);
+            if (!n.carroLimpo && !n.equipamentosOk) { n.por = ""; n.porId = ""; n.em = ""; }
+            else if (mudou) { n.por = cracha?.nome || cracha?.sub || ""; n.porId = String(cracha?.sub ?? ""); n.em = new Date().toISOString(); }
+            else { n.por = antes?.por || ""; n.porId = antes?.porId || ""; n.em = antes?.em || ""; }
+            os.retornoConf = n;
+          }
+        }
         if (existing?.origemMubisys) {
-          for (const campo of ['cliente','servico','vendedor','dataEntrada','cnpjCpf','valorTotal','erpAlteracoes','erpConferirEm']) {
+          /* "✓ Conferi" da gestão apaga o selo do ERP: é a única escrita que
+             estes campos aceitam do aparelho, e o carimbo é do crachá. O Conferi
+             diz QUAL selo foi visto (erpConferiuSelo). Só o estado não basta:
+             uma cópia velha com o selo vazio (o "Sobrescrever" do conflito)
+             apagaria um selo NOVO que ninguém viu (revisão de 23/09/2026). */
+          const conferiuERP = !!existing.erpConferirEm && !!os.erpConferiuSelo && os.erpConferiuSelo === existing.erpConferirEm && !ehMaquina && ["admin", "pcp"].includes(String(cracha?.papel ?? ""));
+          delete os.erpConferiuSelo;
+          for (const campo of ['cliente','servico','vendedor','dataEntrada','cnpjCpf','valorTotal','erpAlteracoes','erpConferirEm','erpConferidoEm','erpConferidoPor','statusERP','statusERPDesde','erpCarteira','erpSaiuDaCarteiraEm']) {
             if (campo in existing) os[campo] = existing[campo];
           }
+          if (conferiuERP) { os.erpConferirEm = ""; os.erpConferidoEm = new Date().toISOString(); os.erpConferidoPor = cracha?.nome || cracha?.sub || ""; }
         }
         if (os.carroLiberado && !existing?.carroLiberado) {
           const diaSP = (x: string) => Number.isFinite(Date.parse(x)) ? new Date(Date.parse(x)-3*3600*1000).toISOString().slice(0,10) : '';
           const diaSaida = diaSP(os.carroLiberadoEm || '');
           if (!diaSaida || os.confirmacao !== 'Confirmado' || diaSP(os.confEm || '') !== diaSaida)
             return resp({error:"Confirme o cliente no dia da saída antes de liberar o veículo."},422);
+        }
+        /* REABRIR FICA CARIMBADO NO SERVIDOR. Quem tira a finalização (o botão
+           Reabrir, o "Sobrescrever" do conflito, um aparelho com app antigo) deixa
+           reabertaEm/reabertaPor do crachá -- e a conciliação do ERP não fecha
+           de novo O.S. reaberta depois da última baixa (temTrabalhoHumano). Antes,
+           a O.S. reaberta voltava a ser "do ERP, fora da carteira" e era
+           arquivada outra vez na hora seguinte. */
+        if (existing?.finalizadaEm && !os.finalizadaEm) {
+          os.reabertaEm = new Date().toISOString();
+          os.reabertaPor = cracha?.nome || cracha?.sub || (ehMaquina ? "Integração" : "");
+          delete os.arquivadaEm;
         }
         // Preserva o atualizadoEm do autor: reescrever com o relogio do servidor
         // misturava duas fontes de tempo e o proprio autor levava "conflito".
@@ -1103,6 +1168,32 @@ Deno.serve(async (req: Request) => {
               if (!permitidas.has(k)) { delete base[k]; delete local[k]; delete remoto[k]; }
             }
           }
+          /* Aba na versão anterior não conhece os pesos da nota: regrava
+             performancePCP sem eles, e a mescla leria "apagou" (local sem a
+             chave, remoto igual à base) -- os pesos voltariam calados a
+             60/20/20. Nenhuma tela apaga os pesos de propósito (o editor
+             sempre grava os três), então ausência aqui é versão velha, não
+             decisão. */
+          if (base.performancePCP?.criterios && local.performancePCP && typeof local.performancePCP === "object" && !("criterios" in local.performancePCP)) {
+            local.performancePCP = { ...local.performancePCP, criterios: base.performancePCP.criterios };
+          }
+          /* OS PESOS SÃO UM VALOR SÓ. Mesclados chave a chave, dois ajustes válidos
+             (cada um somando 100) viravam uma soma torta sem conflito, e o
+             segundo levava 422 culpando o que ele digitou (revisão de 23/09).
+             Os dois lados mudaram para valores diferentes: conflito. Um lado só
+             mudou: vale o objeto inteiro desse lado. */
+          if (local.performancePCP && typeof local.performancePCP === "object" && remoto.performancePCP && typeof remoto.performancePCP === "object") {
+            const j = (x: any) => JSON.stringify(x ?? null);
+            const bC = base.performancePCP?.criterios, lC = local.performancePCP.criterios, rC = remoto.performancePCP.criterios;
+            const lMudou = j(lC) !== j(bC), rMudou = j(rC) !== j(bC);
+            if (lMudou && rMudou && j(lC) !== j(rC)) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:["performancePCP.criterios: os pesos da nota foram mudados em outro aparelho. Confira e salve de novo."]},409);
+            if (lMudou || rMudou) {
+              const vence = lMudou ? lC : rC;
+              base.performancePCP = { ...(base.performancePCP || {}), criterios: vence };
+              local.performancePCP = { ...local.performancePCP, criterios: vence };
+              remoto.performancePCP = { ...remoto.performancePCP, criterios: vence };
+            }
+          }
           const result = mesclarConfiguracao(base,local,remoto);
           if (result.conflitos.length) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:result.conflitos},409);
           const limpo = {...atual,...result.cfg};
@@ -1110,6 +1201,11 @@ Deno.serve(async (req: Request) => {
           if (JSON.stringify(limpo.performancePCP) !== JSON.stringify(atual.performancePCP)) {
             const erroPerf = validarPerformance(limpo.performancePCP);
             if (erroPerf) return resp({error:erroPerf},422);
+            // Repetição NOVA de equipe ativa vira conflito (409), não recusa: o
+            // 422 da v124 era lido como rede e travava a fila inteira.
+            const repetidasAntes = composicoesAtivasRepetidas(atual.performancePCP, atual.vinculosRH);
+            const novas = [...composicoesAtivasRepetidas(limpo.performancePCP, limpo.vinculosRH)].filter(k => !repetidasAntes.has(k));
+            if (novas.length) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:["performancePCP.equipes: duas equipes ativas com os mesmos integrantes. Desative uma delas."]},409);
             if(limpo.performancePCP) limpo.performancePCP.participacoes = limpo.performancePCP.participacoes.map((p:any)=>{
               const antes=atual.performancePCP?.participacoes?.find((x:any)=>x.id===p.id);
               return JSON.stringify(antes)===JSON.stringify(p) ? p : {...p,por:cracha?.nome || 'Gestão',em:new Date().toISOString()};

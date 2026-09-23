@@ -154,6 +154,9 @@ async function enter() {
   if (!dono) { initSelect(); return; }
   if (!EQ.comercial && ['admin','pcp'].includes(dono.papel)) {
     if (STORE.getQueue().length) { toast('Envie as alterações pendentes antes de autorizar este aparelho para outra pessoa.','error'); return; }
+    // O crachá deste aparelho passa a ser o do instalador: a gestão aberta em
+    // outra aba sai e pede para entrar de novo. Dito antes, não descoberto depois.
+    if (!confirm(`Autorizar este aparelho para ${EQ.instalador}? A gestão deste aparelho sai: para voltar a ela, entre de novo com usuário e senha.`)) return;
     _autorizandoEquipe = true;
     try {
       // Troca de identidade só após emitir o acesso restrito; nunca limpa fila pendente.
@@ -310,8 +313,8 @@ function minhasOS() {
 function renderList() {
   const el = $('#eq-list');
   const list = minhasOS();
-  // Próxima instalação = primeira ainda não finalizada (lista já ordenada por data).
-  const proxima = EQ.comercial ? null : list.find(o => !o.finalizadaEm);
+  // Cartão grande: na rua > hoje > próxima data. Vencida nunca (OPERACAO.destaqueDoDia).
+  const proxima = EQ.comercial ? null : OPERACAO.destaqueDoDia(list);
   const heroId = proxima ? proxima.id : null;
 
   let heroHtml = '';
@@ -348,7 +351,7 @@ function renderList() {
         const naRua = OPERACAO.naRua(os);
         return `<div class="os-list-item st-${st}${os.id===heroId?' is-hero':''}" data-os-id="${esc(os.id)}">
           <div class="list-info">
-            <div class="list-numero">O.S ${esc(os.numero||'—')} ${naRua?'🚗':''} ${os.finalizadaEm?'✓':''}</div>
+            <div class="list-numero">O.S ${esc(os.numero||'—')} ${naRua?'🚗':''} ${os.finalizadaEm?'✓':''}${OPERACAO.atrasada(os) && !(os.horaRetorno || os.retornoEm) ? ' <span class="tag-atraso">⏰ data vencida · confirme com o PCP</span>' : ''}${!os.finalizadaEm && (os.horaRetorno || os.retornoEm) ? ' <span class="badge">aguardando o PCP finalizar</span>' : ''}</div>
             <div class="list-cliente">${esc(os.cliente)} · ${esc(os.endereco||'')}</div>
             <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
           </div>
