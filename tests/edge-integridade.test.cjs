@@ -324,3 +324,58 @@ test('valores das O.S.: a O.S. número 1001 em diante também recebe valor (o ba
  assert.equal(r.valores['21099'],1199,'a última O.S. também tem valor');
  assert.equal(Object.keys(r.valores).length,1100);
 });
+/* DECISÃO (B) DO LÉO, 23/09/2026: "O instalador finaliza, e o espelho passa a
+   pedir a foto do serviço pronto." Antes, o servidor descartava calado o
+   finalizadaEm e os itens que vinham do crachá de toque: o instalador via
+   "finalizada", o PCP não via nada, e o retrabalho marcado item a item sumia. */
+const toque={nome:'Ana',papel:'montagem',montagemIndividual:true};
+const pronta=(extra={})=>row('1',{numero:'1',tipo:'externo',cliente:'Cliente',equipe:['Ana'],liberadoPCP:true,confirmacao:'Confirmado',
+  itens:[{item:'1',descricao:'Fachada',medidas:'3x1',valorUnit:'900',statusInst:''},{item:'2',descricao:'Placa',valorUnit:'100',statusInst:''}],...extra});
+test('toque no nome: finalizar sem a foto do serviço pronto é recusado e nada é gravado',async()=>{
+ const e=await edge('pcp-sync',{pcp_registros:[pronta()]});
+ const r=await e.call({action:'upsert',os:{id:'1',rev:1,finalizadaEm:'2026-09-23T15:00:00-03:00',finalizadoPor:'Ana',horaRetorno:'15:00',retornoEm:'2026-09-23T15:00:00'}},toque);
+ assert.equal(r.status,422);assert.match(r.error,/foto do serviço concluído/);
+ assert.equal(e.db.pcp_registros[0].registro.finalizadaEm,undefined);
+});
+test('toque no nome: não finaliza O.S. que o PCP não liberou nem a que o cliente não confirmou',async()=>{
+ const os={id:'1',rev:1,finalizadaEm:'2026-09-23T15:00:00-03:00',fotosRetornoIds:['f1'],horaRetorno:'15:00',retornoEm:'2026-09-23T15:00:00'};
+ let e=await edge('pcp-sync',{pcp_registros:[pronta({liberadoPCP:false})]});
+ let r=await e.call({action:'upsert',os},toque);assert.equal(r.status,422);assert.match(r.error,/PCP/);
+ e=await edge('pcp-sync',{pcp_registros:[pronta({confirmacao:''})]});
+ r=await e.call({action:'upsert',os},toque);assert.equal(r.status,422);assert.match(r.error,/cliente/);
+ assert.equal(e.db.pcp_registros[0].registro.finalizadaEm,undefined);
+});
+test('toque no nome: com foto e retorno a finalização chega ao banco, com o autor do crachá e os itens',async()=>{
+ const e=await edge('pcp-sync',{pcp_registros:[pronta()]});
+ const r=await e.call({action:'upsert',os:{id:'1',rev:1,cliente:'Forjado',finalizadaEm:'2026-09-23T15:05:00-03:00',finalizadoPor:'Outro nome',
+   fotosRetornoIds:['f1'],horaRetorno:'15:00',retornoEm:'2026-09-23T15:00:00',conferidoPor:'Ana',retrabalho:true,causa:'Medida errada',problema:'2: Medida errada',
+   checkout:{situacao:'Finalizado',confirmado:true},
+   itens:[{item:'1',descricao:'Fachada',medidas:'3x1',valorUnit:'1',statusInst:'ok',pronto:true},
+          {item:'2',descricao:'Placa',valorUnit:'100',statusInst:'retrab',motivo:'Medida errada',obsProb:'faltou 10cm',fotoProbId:'fp'},
+          {item:'3',descricao:'Item que o aparelho inventou'}]}},toque);
+ assert.equal(r.status,200);
+ const g=e.db.pcp_registros[0].registro;
+ assert.equal(g.finalizadaEm,'2026-09-23T15:05:00-03:00');assert.equal(g.finalizadoPor,'Ana');
+ assert.equal(g.cliente,'Cliente');assert.equal(g.conferidoPor,'Ana');assert.equal(g.retrabalho,true);assert.equal(g.causa,'Medida errada');
+ assert.equal(g.itens.length,2);
+ assert.equal(g.itens[0].statusInst,'ok');assert.equal(g.itens[0].pronto,true);assert.equal(g.itens[0].valorUnit,'900');
+ assert.equal(g.itens[1].statusInst,'retrab');assert.equal(g.itens[1].motivo,'Medida errada');assert.equal(g.itens[1].fotoProbId,'fp');
+});
+test('toque no nome: item que mudou de lugar não recebe a marca do outro',async()=>{
+ const e=await edge('pcp-sync',{pcp_registros:[pronta()]});
+ const r=await e.call({action:'upsert',os:{id:'1',rev:1,itens:[{item:'2',descricao:'Placa',statusInst:'retrab'},{item:'1',descricao:'Fachada',statusInst:'ok'}]}},toque);
+ assert.equal(r.status,200);
+ const g=e.db.pcp_registros[0].registro;assert.equal(g.itens[0].statusInst,'');assert.equal(g.itens[1].statusInst,'');
+});
+test('toque no nome: não reabre nem troca o autor de O.S. já finalizada',async()=>{
+ const e=await edge('pcp-sync',{pcp_registros:[pronta({finalizadaEm:'2026-09-23T10:00:00Z',finalizadoPor:'Gestor',fotosRetornoIds:['f0'],retornoEm:'2026-09-23T09:00:00'})]});
+ let r=await e.call({action:'upsert',os:{id:'1',rev:1,finalizadaEm:'',obsTecnicas:'x'}},toque);assert.equal(r.status,200);
+ let g=e.db.pcp_registros[0].registro;assert.equal(g.finalizadaEm,'2026-09-23T10:00:00Z');assert.equal(g.finalizadoPor,'Gestor');assert.equal(g.reabertaEm,undefined);
+ r=await e.call({action:'upsert',os:{id:'1',rev:2,finalizadaEm:'2026-09-23T18:00:00Z'}},toque);assert.equal(r.status,200);
+ g=e.db.pcp_registros[0].registro;assert.equal(g.finalizadaEm,'2026-09-23T10:00:00Z');assert.equal(g.finalizadoPor,'Gestor');
+});
+test('toque no nome: a foto do problema de um item pode ser aberta pela equipe',async()=>{
+ const e=await edge('pcp-sync',{pcp_registros:[pronta({itens:[{item:'1',descricao:'Fachada',fotoProbId:'fp'}]})]});
+ assert.notEqual((await e.call({action:'getPhoto',fileId:'fp'},toque)).status,403);
+ assert.equal((await e.call({action:'getPhoto',fileId:'de-outra-os'},toque)).status,403);
+});

@@ -1,15 +1,15 @@
 // sw.js — Service worker: deixa o app abrir offline (casca/shell em cache).
 // Os DADOS continuam sincronizando pela fila do store.js; aqui só cuidamos
 // dos arquivos estáticos para o app carregar sem internet.
-const CACHE = 'impresilk-shell-v126';
+const CACHE = 'impresilk-shell-v127';
 // ?v= nos arquivos do shell: a CDN do GitHub Pages (Fastly) segurou um casa.js
 // velho por mais de uma hora depois do deploy (14/09/2026) enquanto servia os
 // outros novos. Com a versão na URL, cada publicação é um endereço novo para a
 // CDN. Regra de deploy: CACHE aqui, APP_VERSAO no config.js e o ?v= no
 // index.html/equipe.html sobem JUNTOS.
 const SHELL = [
-  './', 'index.html', 'equipe.html', 'styles.css?v=v126',
-  'config.js?v=v126', 'logo.js?v=v126', 'frases.js?v=v126', 'store.js?v=v126', 'auth.js?v=v126', 'operacao.js?v=v126', 'app.js?v=v126', 'casa.js?v=v126', 'performance.js?v=v126', 'relatorios-entregas.js?v=v126', 'equipe.js?v=v126',
+  './', 'index.html', 'equipe.html', 'styles.css?v=v127',
+  'config.js?v=v127', 'logo.js?v=v127', 'frases.js?v=v127', 'store.js?v=v127', 'auth.js?v=v127', 'operacao.js?v=v127', 'app.js?v=v127', 'casa.js?v=v127', 'performance.js?v=v127', 'relatorios-entregas.js?v=v127', 'equipe.js?v=v127',
   'manifest.json', 'icon.svg', 'favicon.svg'
 ];
 

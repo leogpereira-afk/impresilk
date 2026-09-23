@@ -169,3 +169,57 @@ export function validarPerformance(cfg) {
   }
   return '';
 }
+/* O QUE O CRACHÁ DE TOQUE ESCREVE: só a execução (ver pcp-sync). Ele nasce de
+   um primeiro nome, sem senha; reescrever cliente, endereço ou vendedor não é
+   trabalho dele. Campo fora da lista é descartado, não recusado: recusar tudo
+   faria o aparelho na rua perder o check-in inteiro por um campo a mais.
+   conferidoPor, retrabalho e causa entraram com a decisão (B) do Léo
+   (23/09/2026): "O instalador finaliza, e o espelho passa a pedir a foto do
+   serviço pronto". Sem eles, a finalização do espelho chegava pela metade. */
+export const CAMPOS_MONTAGEM = new Set([
+  'id', 'rev', 'atualizadoEm', 'atualizadoPor',
+  'checkin', 'checkinGPS', 'checkout', 'conclusao',
+  'fotosCheckinIds', 'fotosRetornoIds',
+  'carroLiberado', 'carroLiberadoEm', 'carroLiberadoPor',
+  'obsTecnicas', 'instalacaoOK', 'problema', 'conferidoPor', 'retrabalho', 'causa',
+  'ferramentasConferidas', 'ferramentasConferidasPor',
+  'kmSaida', 'kmRetorno', 'horaSaida', 'horaRetorno', 'saidaEm', 'retornoEm',
+]);
+// Do item, só a marca da montagem: descrição, medida e valor são do PCP e do ERP.
+const CAMPOS_ITEM_MONTAGEM = ['statusInst', 'pronto', 'motivo', 'obsProb', 'fotoProbId'];
+/* MESCLA, NÃO FILTRA. O upsert SUBSTITUI a O.S. inteira; partir do que já está
+   gravado e deixar o crachá de toque mudar só os campos dele é o que protege
+   o resto. Devolve { os, erro }: erro preenchido vira 422 e os vem nulo.
+
+   ITENS: o item não tem id. Casa pela posição E pelo número e descrição; item
+   que mudou de lugar fica como está (a marca não pula para o vizinho), e item
+   que só o aparelho tem não é criado.
+
+   FINALIZAR: só O.S. que o PCP liberou e o cliente confirmou, as mesmas travas
+   do espelho. O autor é o crachá, nunca o nome que o aparelho escreveu. A hora
+   é a do aparelho (quem finalizou offline às 15h finalizou às 15h), a não ser
+   que venha do futuro. Reabrir não é do instalador: finalizada segue
+   finalizada, com o autor que tinha. */
+export function mesclarToqueNoNome(atual, veio, autor, agora) {
+  const m = { ...atual };
+  for (const k of Object.keys(veio || {})) if (CAMPOS_MONTAGEM.has(k)) m[k] = veio[k];
+  if (!proprio(veio, 'rev')) delete m.rev;
+  if (Array.isArray(veio?.itens) && Array.isArray(atual?.itens)) {
+    m.itens = atual.itens.map((it, i) => {
+      const v = veio.itens[i];
+      if (!objeto(it) || !objeto(v) || String(v.item ?? '') !== String(it.item ?? '') ||
+          String(v.descricao ?? '') !== String(it.descricao ?? '')) return it;
+      const r = { ...it };
+      for (const c of CAMPOS_ITEM_MONTAGEM) if (proprio(v, c)) r[c] = v[c];
+      return r;
+    });
+  }
+  if (!atual?.finalizadaEm && veio?.finalizadaEm) {
+    if (!atual.liberadoPCP) return { os: null, erro: 'O PCP ainda não liberou esta O.S. Fale com o PCP antes de finalizar.' };
+    if (atual.tipo !== 'interno' && atual.confirmacao !== 'Confirmado') return { os: null, erro: 'O cliente ainda não confirmou esta instalação. Fale com o PCP antes de finalizar.' };
+    const t = Date.parse(String(veio.finalizadaEm));
+    m.finalizadaEm = Number.isFinite(t) && t <= Date.parse(agora) + 10 * 60 * 1000 ? String(veio.finalizadaEm) : agora;
+    m.finalizadoPor = autor;
+  }
+  return { os: m, erro: '' };
+}

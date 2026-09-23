@@ -254,3 +254,44 @@ test('finalização externa exige evidência ou exceção escrita pela gestão',
  assert.match(t.run(`validarFinalizacao(${JSON.stringify(base)}).join(',')`),/foto do serviço concluído/);
  assert.equal(t.run(`validarFinalizacao(${JSON.stringify({...base,justificativaConclusao:'Cliente não permitiu fotografar o ambiente.'})}).length`),0);
 });
+
+/* DECISÃO (B) DO LÉO, 23/09/2026: "O instalador finaliza, e o espelho passa a
+   pedir a foto do serviço pronto." O botão do espelho tem de pedir o que o
+   servidor exige (validarConclusao): sem isso o instalador via "finalizada" e
+   a O.S. ficava presa na fila do aparelho com um 422. */
+function espelho(os) {
+  const nodes=new Map(), toasts=[], salvas=[];
+  function node(sel) {
+    if (!nodes.has(sel)) nodes.set(sel,{innerHTML:'',textContent:'',value:'',querySelector:node,querySelectorAll:()=>[],setAttribute(){},classList:{toggle(){},add(){},remove(){}}});
+    return nodes.get(sel);
+  }
+  const ctx=vm.createContext({console,Date,document:{querySelector:node,querySelectorAll:()=>[],addEventListener(){}},window:{},
+    localStorage:{getItem:()=>null,setItem(){}},
+    STORE:{getCFG:()=>({}),getAllOS:()=>[],saveOS:o=>salvas.push(JSON.parse(JSON.stringify(o))),pullPhoto:async()=>null,
+      carimbarMomento:(o,h,c)=>{const m=String(o[h]||'').match(/^(\d{1,2}):(\d{2})/);if(m)o[c]=`2026-09-23T${m[1].padStart(2,'0')}:${m[2]}:00`;}},
+    setTimeout(){},mostrarCelebracao(){}});
+  vm.runInContext(fs.readFileSync(path.join(root,'operacao.js'),'utf8'),ctx);
+  vm.runInContext(fs.readFileSync(path.join(process.env.PCP_BASELINE || root,'equipe.js'),'utf8'),ctx);
+  vm.runInContext('toast=(m,t)=>__toasts.push(m); fraseAleatoria=()=>""; EQ.instalador="Ana";',Object.assign(ctx,{__toasts:toasts}));
+  ctx.__os=os; vm.runInContext('_draft=__os; renderModal()',ctx);
+  return {node,toasts,salvas,run:c=>vm.runInContext(c,ctx)};
+}
+const naRua={id:'1',numero:'300',tipo:'externo',equipe:['Ana'],liberadoPCP:true,confirmacao:'Confirmado',instalacao:{data:'2026-09-23',periodo:'Manhã'},
+  horaSaida:'08:00',instalacaoOK:true,fotosCheckinIds:['c1'],itens:[{item:'1',descricao:'Fachada'}]};
+test('espelho: finalizar sem a foto do serviço pronto e sem a hora de retorno é barrado na tela',()=>{
+  const t=espelho({...naRua});
+  assert.match(t.node('#modal-os').innerHTML,/data-retorno/,'o espelho oferece a foto do serviço pronto');
+  t.node('#m-finalizar').onclick();
+  assert.match(t.toasts.join(' '),/foto do serviço pronto/);
+  assert.match(t.toasts.join(' '),/hora de retorno/);
+  assert.equal(t.run('_draft.finalizadaEm'),undefined);
+  assert.equal(t.salvas.length,0);
+});
+test('espelho: com a foto e a hora de retorno, o instalador finaliza e o fecho é o mesmo da gestão',()=>{
+  const t=espelho({...naRua,fotosRetornoIds:['r1'],horaRetorno:'15:10'});
+  t.node('#m-finalizar').onclick();
+  const g=t.salvas.at(-1);
+  assert.ok(g&&g.finalizadaEm,'gravou a finalização');
+  assert.equal(g.finalizadoPor,'Ana');assert.equal(g.retornoEm,'2026-09-23T15:10:00');
+  assert.equal(g.conferidoPor,'Ana');assert.equal(g.checkout.situacao,'Finalizado');assert.equal(g.checkout.confirmado,true);
+});

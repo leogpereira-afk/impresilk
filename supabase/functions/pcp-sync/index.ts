@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, composicoesAtivasRepetidas } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, composicoesAtivasRepetidas } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -437,15 +437,7 @@ Deno.serve(async (req: Request) => {
       : { data: null };
     ehToqueNoNome = papel === "montagem" && (cracha.montagemIndividual === true || !contaDoCracha);
 
-    const CAMPOS_MONTAGEM = new Set([
-      "id", "rev", "atualizadoEm", "atualizadoPor",
-      "checkin", "checkinGPS", "checkout", "conclusao",
-      "fotosCheckinIds", "fotosRetornoIds",
-      "carroLiberado", "carroLiberadoEm", "carroLiberadoPor",
-      "obsTecnicas", "instalacaoOK", "problema",
-      "ferramentasConferidas", "ferramentasConferidasPor",
-      "kmSaida", "kmRetorno", "horaSaida", "horaRetorno", "saidaEm", "retornoEm",
-    ]);
+    // A lista de campos e a mescla moram em _shared/pcp-integridade.mjs (CAMPOS_MONTAGEM).
     /* MESCLA, NAO FILTRA -- e a diferenca entre proteger e destruir.
        O upsert do PCP SUBSTITUI a O.S inteira (nao funde campo a campo). Entao
        "deixar passar so os campos de execucao" apagava cliente, endereco e
@@ -468,10 +460,9 @@ Deno.serve(async (req: Request) => {
         return resp({ error: "Quem entra pelo nome não cria O.S. Fale com o PCP." }, 403);
       }
       if (!pertenceEquipe(atual, cracha.nome || cracha.sub)) return resp({error:"Esta O.S. não está na sua equipe."},403);
-      const mesclado: Record<string, unknown> = { ...atual };
-      for (const k of Object.keys(veio)) if (CAMPOS_MONTAGEM.has(k)) mesclado[k] = veio[k];
-      if (!("rev" in veio)) delete mesclado.rev;
-      body.os = mesclado;
+      const mescla = mesclarToqueNoNome(atual, veio, String(cracha.nome || cracha.sub), new Date().toISOString());
+      if (mescla.erro) return resp({ error: mescla.erro }, 422);
+      body.os = mescla.os;
     }
 
     if (acao === "delete" && ehToqueNoNome) {
@@ -483,7 +474,7 @@ Deno.serve(async (req: Request) => {
     const {data,error} = await sb.from("pcp_registros").select("registro").eq("colecao","os").eq("apagado",false)
       .contains("registro",{equipe:[String(cracha.nome || cracha.sub)]});
     if (error) return resp({error:"Não foi possível conferir o vínculo da foto."},503);
-    const permitida = (data || []).some((r: any) => [r.registro.layoutFotoId,...(r.registro.fotosCheckinIds || []),...(r.registro.fotosRetornoIds || [])].includes(body.fileId));
+    const permitida = (data || []).some((r: any) => [r.registro.layoutFotoId,...(r.registro.fotosCheckinIds || []),...(r.registro.fotosRetornoIds || []),...(r.registro.itens || []).map((i: any) => i?.fotoProbId)].filter(Boolean).includes(body.fileId));
     if (!permitida) return resp({error:"Esta foto não está vinculada às O.S. da sua equipe."},403);
   }
 

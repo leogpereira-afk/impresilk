@@ -351,7 +351,7 @@ function renderList() {
         const naRua = OPERACAO.naRua(os);
         return `<div class="os-list-item st-${st}${os.id===heroId?' is-hero':''}" data-os-id="${esc(os.id)}">
           <div class="list-info">
-            <div class="list-numero">O.S ${esc(os.numero||'—')} ${naRua?'🚗':''} ${os.finalizadaEm?'✓':''}${OPERACAO.atrasada(os) && !(os.horaRetorno || os.retornoEm) ? ' <span class="tag-atraso">⏰ data vencida · confirme com o PCP</span>' : ''}${!os.finalizadaEm && (os.horaRetorno || os.retornoEm) ? ' <span class="badge">aguardando o PCP finalizar</span>' : ''}</div>
+            <div class="list-numero">O.S ${esc(os.numero||'—')} ${naRua?'🚗':''} ${os.finalizadaEm?'✓':''}${OPERACAO.atrasada(os) && !(os.horaRetorno || os.retornoEm) ? ' <span class="tag-atraso">⏰ data vencida · confirme com o PCP</span>' : ''}${!os.finalizadaEm && (os.horaRetorno || os.retornoEm) ? ' <span class="badge">voltou · falta finalizar</span>' : ''}</div>
             <div class="list-cliente">${esc(os.cliente)} · ${esc(os.endereco||'')}</div>
             <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
           </div>
@@ -487,6 +487,7 @@ function renderModal() {
   const instalados = itens.filter(i => i.statusInst === 'ok').length;
   const retrabN = itens.filter(i => i.statusInst === 'retrab').length;
   const fotos = os.fotosCheckinIds || [];
+  const fotosRet = os.fotosRetornoIds || [];
   const co = os.checkout || {};
   const causas = STORE.getCFG().causas_retrabalho || [];
   const ro = !!os.finalizadaEm; // O.S finalizada = somente leitura no espelho
@@ -608,6 +609,17 @@ function renderModal() {
             <input type="file" accept="image/*" capture="environment" multiple data-checkin>
           </div>
         </div>
+
+        <div class="field">
+          <label>Fotos do serviço pronto (≥1 p/ finalizar)</label>
+          <div class="fotos-grid">
+            ${fotosRet.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-img="${esc(fid)}">${ro ? '' : `<button class="foto-rm" data-rm-ret="${esc(fid)}">×</button>`}</div>`).join('')}
+          </div>
+          ${ro ? '' : `<div class="foto-box" style="margin-top:6px">
+            <span class="foto-hint">📷 Foto do serviço pronto</span>
+            <input type="file" accept="image/*" capture="environment" multiple data-retorno>
+          </div>`}
+        </div>
       </div>
     </details>
 
@@ -709,12 +721,24 @@ function bindModal(os, ro) {
     if (!_draft.liberadoPCP) f.push('PCP liberar');
     if (_draft.confirmacao !== 'Confirmado') f.push('confirmação do cliente');
     if (!_draft.instalacaoOK) f.push('Instalação OK');
-    if (!_draft.conferidoPor) f.push('conferido por');
     if (!(_draft.fotosCheckinIds||[]).length) f.push('≥1 foto de check‑in');
+    /* DECISÃO (B) DO LÉO, 23/09/2026: "O instalador finaliza, e o espelho passa
+       a pedir a foto do serviço pronto." O servidor recusa a finalização sem a
+       foto e sem a hora de retorno (validarConclusao); pedir aqui é o que evita
+       o instalador ver "finalizada" e a O.S. ficar presa na fila. */
+    if (!(_draft.fotosRetornoIds||[]).length) f.push('≥1 foto do serviço pronto');
+    if (_draft.horaRetorno && !_draft.retornoEm) STORE.carimbarMomento(_draft, 'horaRetorno', 'retornoEm');
+    if (!_draft.retornoEm) f.push('hora de retorno');
     const semMotivo = (_draft.itens||[]).filter(i => i.statusInst === 'retrab' && !i.motivo);
     if (semMotivo.length) f.push('motivo do retrabalho em: ' + semMotivo.map(i => i.item || 'item').join(', '));
     if (f.length) { toast('Falta: ' + f.join(', '), 'error'); return; }
+    // Quem finaliza responde pela conferência, se ninguém escreveu outro nome.
+    if (!String(_draft.conferidoPor || '').trim()) _draft.conferidoPor = EQ.instalador;
     _draft.finalizadaEm = nowISO(); _draft.finalizadoPor = EQ.instalador;
+    // Mesmo fecho do app de gestão (aplicarFinalizacao).
+    _draft.checkout = _draft.checkout || {};
+    if (!_draft.checkout.situacao) _draft.checkout.situacao = 'Finalizado';
+    if (!_draft.checkout.confirmado) _draft.checkout.confirmado = true;
     save(); reRender(); toast('Instalação finalizada 🏁', 'success');
     if (typeof mostrarCelebracao === 'function') {
       mostrarCelebracao({
@@ -743,6 +767,30 @@ function bindModal(os, ro) {
   $$('[data-rm]', root).forEach(b => b.onclick = () => {
     STORE.delFoto(b.dataset.rm);
     _draft.fotosCheckinIds = (_draft.fotosCheckinIds||[]).filter(x => x !== b.dataset.rm);
+    save(); reRender();
+  });
+
+  // Fotos do serviço pronto: a primeira carimba a hora de retorno, se faltar.
+  const ret = $('[data-retorno]', root);
+  if (ret) ret.onchange = async () => {
+    const files = Array.from(ret.files || []);
+    if (!files.length) return;
+    if (!_draft.fotosRetornoIds) _draft.fotosRetornoIds = [];
+    toast(`Enviando ${files.length} foto(s)…`);
+    for (const file of files) {
+      const id = await STORE.pushPhoto(file);
+      if (id) _draft.fotosRetornoIds.push(id);
+    }
+    if (!_draft.horaRetorno) {
+      const agora = new Date();
+      _draft.horaRetorno = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
+    }
+    STORE.carimbarMomento(_draft, 'horaRetorno', 'retornoEm');
+    save(); reRender();
+  };
+  $$('[data-rm-ret]', root).forEach(b => b.onclick = () => {
+    STORE.delFoto(b.dataset.rmRet);
+    _draft.fotosRetornoIds = (_draft.fotosRetornoIds||[]).filter(x => x !== b.dataset.rmRet);
     save(); reRender();
   });
 }
