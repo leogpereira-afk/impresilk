@@ -379,3 +379,27 @@ test('toque no nome: a foto do problema de um item pode ser aberta pela equipe',
  assert.notEqual((await e.call({action:'getPhoto',fileId:'fp'},toque)).status,403);
  assert.equal((await e.call({action:'getPhoto',fileId:'de-outra-os'},toque)).status,403);
 });
+/* A VOLTA DO CARRO (24/09/2026): "arrumado", "sem avaria" e as fotos da volta. */
+test('volta do carro: gestão grava arrumado, avaria e fotos; carimbo do crachá', async () => {
+ const e = await edge('pcp-sync', {pcp_registros:[volta({})]});
+ const r = await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, retornoConf:{carroLimpo:'sim', carroArrumado:'nao', equipamentosOk:'sim', semAvaria:'nao', obs:'caçamba cheia de sobra', fotos:['f1', '', 3, 'f2']}}}, {papel:'pcp', nome:'Gestor', sub:'g'});
+ assert.equal(r.status, 200);
+ const rc = e.db.pcp_registros[0].registro.retornoConf;
+ assert.equal(rc.carroArrumado, 'nao'); assert.equal(rc.semAvaria, 'nao'); assert.equal(rc.fotos.join(), 'f1,f2');
+ assert.equal(rc.por, 'Gestor');
+});
+test('volta do carro: aba na v127 (não conhece "arrumado") não apaga a resposta nem as fotos', async () => {
+ const antes = {carroLimpo:'sim', carroArrumado:'nao', equipamentosOk:'sim', semAvaria:'sim', obs:'', fotos:['f1'], por:'Gestor', porId:'g', em:'2026-09-24T15:00:00Z'};
+ const e = await edge('pcp-sync', {pcp_registros:[volta({retornoConf:antes})]});
+ await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, retornoConf:{carroLimpo:'sim', equipamentosOk:'sim', obs:'', por:'Gestor', em:antes.em}}}, {papel:'pcp', nome:'Outro'});
+ const rc = e.db.pcp_registros[0].registro.retornoConf;
+ assert.equal(rc.carroArrumado, 'nao'); assert.equal(rc.fotos.join(), 'f1');
+ assert.equal(rc.por, 'Gestor', 'nada mudou nas respostas, o autor fica');
+});
+test('volta do carro: mudar só o "arrumado" é conferência nova e troca o autor', async () => {
+ const antes = {carroLimpo:'sim', carroArrumado:'sim', equipamentosOk:'sim', semAvaria:'sim', obs:'', fotos:[], por:'Gestor', porId:'g', em:'2026-09-24T15:00:00Z'};
+ const e = await edge('pcp-sync', {pcp_registros:[volta({retornoConf:antes})]});
+ await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, retornoConf:{...antes, carroArrumado:'nao'}}}, {papel:'admin', nome:'Léo', sub:'leo'});
+ const rc = e.db.pcp_registros[0].registro.retornoConf;
+ assert.equal(rc.carroArrumado, 'nao'); assert.equal(rc.por, 'Léo'); assert.notEqual(rc.em, antes.em);
+});

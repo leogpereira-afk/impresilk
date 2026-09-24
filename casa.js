@@ -449,9 +449,9 @@ function lancarEntregaManual(osId) {
   const gestao = ['admin', 'pcp'].includes(STATE.user && STATE.user.papel);
   const rc = os.retornoConf || {};
   const sel = (nome, valor) => `<select name="${nome}"><option value="" ${!valor ? 'selected' : ''}>Não conferido</option><option value="sim" ${valor === 'sim' ? 'selected' : ''}>Sim</option><option value="nao" ${valor === 'nao' ? 'selected' : ''}>Não</option></select>`;
-  const conferencia = gestao && !OPERACAO.interno(os) ? `<div class="field-row">
-            <div class="field"><label>🚗 Carro devolvido limpo</label>${sel('carroLimpo', rc.carroLimpo)}</div>
-            <div class="field"><label>🧰 Equipamentos completos e em ordem</label>${sel('equipamentosOk', rc.equipamentosOk)}</div>
+  // As mesmas perguntas da fila Volta do carro e da ficha (OPERACAO.PERGUNTAS_VOLTA).
+  const conferencia = gestao && !OPERACAO.interno(os) ? `<div class="conf-volta-grade">
+            ${OPERACAO.PERGUNTAS_VOLTA.map(k => `<div class="field"><label>${esc(VOLTA_ROTULO[k])}</label>${sel(k, OPERACAO.respostaVolta(rc[k]))}</div>`).join('')}
           </div>` : '';
   box.innerHTML = `
     <div class="wpp-picker retrab-box" role="dialog" aria-modal="true">
@@ -477,14 +477,14 @@ function lancarEntregaManual(osId) {
     if (!OPERACAO.dia(data)) { toast('Informe a data da entrega.', 'error'); return; }
     const equipe = fd.getAll('equipe').map(String).filter(Boolean);
     const resp = v => (v === 'sim' || v === 'nao') ? v : '';
-    const carroLimpo = resp(fd.get('carroLimpo')), equipamentosOk = resp(fd.get('equipamentosOk'));
+    const respostas = Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, resp(fd.get(k))]));
     fechar();
     perguntarRetrabalho(os, () => {
       if (equipe.length) os.equipe = equipe;
       const antes = os.retornoConf || {};
-      if (conferencia && (carroLimpo !== resp(antes.carroLimpo) || equipamentosOk !== resp(antes.equipamentosOk))) {
-        const respondeu = carroLimpo || equipamentosOk;
-        os.retornoConf = {...antes, carroLimpo, equipamentosOk, por: respondeu ? ((STATE.user && STATE.user.nome) || '') : '', em: respondeu ? nowISO() : ''};
+      if (conferencia && OPERACAO.PERGUNTAS_VOLTA.some(k => respostas[k] !== resp(antes[k]))) {
+        const respondeu = OPERACAO.voltaRespondida(respostas);
+        os.retornoConf = {...antes, ...respostas, por: respondeu ? ((STATE.user && STATE.user.nome) || '') : '', em: respondeu ? nowISO() : ''};
       }
       os.entregaLancada = { em: nowISO(), por: (STATE.user && STATE.user.nome) || '', data };
       os.atualizadoEm = nowISO(); os.atualizadoPor = (STATE.user && STATE.user.nome) || '';

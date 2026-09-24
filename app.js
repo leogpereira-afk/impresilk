@@ -1792,12 +1792,26 @@ function blocoExec(os, ro, done) {
 
 /* ── CONFERÊNCIA DA VOLTA: carro e equipamentos ───────────────────────────
    Pedido do dono (23/09/2026): "a limpeza do carro e a gestão dos equipamentos
-   têm que ter peso nesse critério de avaliação". Até aqui não havia registro
-   nenhum disso — só "Ferramentas conferidas" na SAÍDA. Esta conferência é
-   feita pela GESTÃO quando o carro volta: quem avalia não é quem é avaliado,
-   por isso fica travada para quem entra pelo nome (o servidor também não aceita
-   o campo vindo da montagem). "Não conferido" é uma resposta válida e não pesa
-   contra ninguém — é diferente de "não". */
+   têm que ter peso nesse critério de avaliação". Esta conferência é feita pela
+   GESTÃO quando o carro volta: quem avalia não é quem é avaliado, por isso fica
+   travada para quem entra pelo nome (o servidor também não aceita o campo
+   vindo da montagem). "Não conferido" é uma resposta válida e não pesa contra
+   ninguém: é diferente de "não".
+
+   24/09/2026: "preciso de algo que avalie a volta do carro pelo PCP, se está
+   arrumado etc". Entraram "arrumado" (conta na nota junto com "limpo") e "sem
+   avaria" (não conta: avaria nem sempre é culpa da equipe, mas o PCP precisa
+   saber para agir). O lugar de conferir passou a ser a fila PCP › Volta do
+   carro, uma vez por volta; a ficha continua mostrando e deixando corrigir.
+   As perguntas são as de OPERACAO.PERGUNTAS_VOLTA: a fila, a ficha, a nota e o
+   servidor leem a mesma lista. */
+const VOLTA_ROTULO = {
+  carroLimpo: '🚗 Carro limpo, por dentro e por fora',
+  carroArrumado: '📦 Carro arrumado: material e ferramentas no lugar, sem lixo nem sobra solta',
+  equipamentosOk: '🧰 Equipamentos devolvidos completos e em ordem',
+  semAvaria: '🛡 Carro voltou sem avaria nova (lataria, vidro, pneu)',
+};
+const voltaGestao = () => ['admin', 'pcp'].includes(STATE.user && STATE.user.papel) && (typeof podeEditar !== 'function' || podeEditar());
 function conferenciaVoltaHTML(os, ro) {
   if (!os || isInterno(os)) return '';
   const c = os.retornoConf || {};
@@ -1807,23 +1821,172 @@ function conferenciaVoltaHTML(os, ro) {
      instalador ou pela baixa do ERP). Travar aqui deixava conferir só o que o
      PCP finaliza pela própria tela, e reabrir para conferir mudava a data da
      entrega. A conferência é da gestão e não mexe na execução. */
-  const trava = !gestao || (typeof podeEditar === 'function' && !podeEditar());
+  const trava = !voltaGestao();
   const op = (campo, valor) => `<select data-f="retornoConf.${campo}" ${trava ? 'disabled' : ''}>
       <option value="" ${!valor ? 'selected' : ''}>Não conferido</option>
       <option value="sim" ${valor === 'sim' ? 'selected' : ''}>Sim</option>
       <option value="nao" ${valor === 'nao' ? 'selected' : ''}>Não</option>
     </select>`;
-  const respondida = c.carroLimpo === 'sim' || c.carroLimpo === 'nao' || c.equipamentosOk === 'sim' || c.equipamentosOk === 'nao';
+  const respondida = OPERACAO.voltaRespondida(c);
+  const fotos = Array.isArray(c.fotos) ? c.fotos : [];
   return `<div class="conf-volta ${trava ? '' : 'lock-allow'}">
       <div class="conf-volta-titulo">🔎 Conferência da volta <small>${gestao ? 'feita pela gestão · conta na nota de cada instalador' : 'feita pela gestão'}</small></div>
-      ${gestao && !trava ? '<p class="conf-volta-dica">Responda sim ou não em toda volta: em branco não conta como OK. A nota só usa carro e equipamentos quando 80% das voltas do período têm resposta.</p>' : ''}
-      <div class="field-row">
-        <div class="field"><label>🚗 Carro devolvido limpo</label>${op('carroLimpo', c.carroLimpo)}</div>
-        <div class="field"><label>🧰 Equipamentos devolvidos completos e em ordem</label>${op('equipamentosOk', c.equipamentosOk)}</div>
+      ${gestao && !trava ? '<p class="conf-volta-dica">Mais rápido pela fila PCP › Volta do carro: uma conferência vale para todas as O.S. da mesma volta. Responda sim ou não: em branco não conta como OK.</p>' : ''}
+      <div class="conf-volta-grade">
+        ${OPERACAO.PERGUNTAS_VOLTA.map(k => `<div class="field"><label>${esc(VOLTA_ROTULO[k])}</label>${op(k, OPERACAO.respostaVolta(c[k]))}</div>`).join('')}
       </div>
       <div class="field"><label>O que faltou ou precisa de atenção</label><input data-f="retornoConf.obs" maxlength="300" value="${esc(c.obs || '')}" placeholder="ex.: faltou a escada de 6 m; banco traseiro com cola" ${trava ? 'disabled' : ''}></div>
+      ${fotos.length ? `<div class="fotos-grid">${fotos.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}" alt="foto da volta"></div>`).join('')}</div>` : ''}
       ${respondida && c.por ? `<p class="conf-por-linha">Conferido por ${esc(c.por)}${c.em ? ' · ' + esc(new Date(c.em).toLocaleString('pt-BR')) : ''}</p>` : ''}
     </div>`;
+}
+
+/* ══ FILA "VOLTA DO CARRO" (PCP) ══════════════════════════════════════════
+   A volta é o dia + o carro + a equipe (OPERACAO.voltasDoCarro): a equipe que
+   fez três O.S. no dia devolve o carro uma vez, e é conferida uma vez. Salvar
+   grava a mesma resposta em cada O.S. da volta, porque é por O.S. que a nota
+   pesa a participação de cada instalador. */
+const VOLTA_DIAS = [7, 30, 60]; // 60 = a janela que o aparelho guarda
+function voltaEstado() {
+  if (!STATE._volta) STATE._volta = { filtro: 'conferir', dias: 30 };
+  return STATE._volta;
+}
+function voltasDoRecorte() {
+  const est = voltaEstado();
+  const hoje = hojeISO();
+  const todas = OPERACAO.voltasDoCarro(STORE.getAllOS(), OPERACAO.somarDias(hoje, 1 - est.dias), hoje);
+  const q = String(STATE.filtroBusca || '').trim();
+  const casa = q ? todas.filter(g => applyFilter(g.os, q).length || normNome(`${g.veiculo} ${g.equipe.join(' ')}`).includes(normNome(q))) : todas;
+  return { todas: casa, lista: est.filtro === 'todas' ? casa : casa.filter(g => est.filtro === 'conferida' ? g.situacao === 'conferida' : g.situacao !== 'conferida') };
+}
+function voltaResumoHTML(g) {
+  if (g.situacao === 'conferir') return '<span class="volta-pendente">Ainda não conferida</span>';
+  if (!g.respostas) return `<span class="volta-pendente">${g.situacao === 'parcial' ? 'Conferida só em parte das O.S. da volta' : 'As O.S. desta volta têm respostas diferentes'}</span>`;
+  const rc = g.respostas;
+  const item = k => {
+    const r = OPERACAO.respostaVolta(rc[k]);
+    const nome = { carroLimpo: 'limpo', carroArrumado: 'arrumado', equipamentosOk: 'equipamentos', semAvaria: 'sem avaria' }[k];
+    return `<span class="volta-resp ${r === 'sim' ? 'ok' : r === 'nao' ? 'ruim' : ''}">${r === 'sim' ? '✓' : r === 'nao' ? '✗' : '·'} ${nome}</span>`;
+  };
+  return `${OPERACAO.PERGUNTAS_VOLTA.map(item).join('')}${rc.obs ? `<span class="volta-obs">“${esc(rc.obs)}”</span>` : ''}${rc.por ? `<span class="volta-por">${esc(rc.por)}${rc.em ? ' · ' + esc(new Date(rc.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })) : ''}</span>` : ''}`;
+}
+function voltasHTML() {
+  const est = voltaEstado();
+  const { todas, lista } = voltasDoRecorte();
+  const n = f => todas.filter(g => f === 'todas' ? true : f === 'conferida' ? g.situacao === 'conferida' : g.situacao !== 'conferida').length;
+  const chips = [['conferir', 'A conferir'], ['conferida', 'Conferidas'], ['todas', 'Todas']]
+    .map(([k, r]) => `<button class="pcp-chip ${est.filtro === k ? 'active' : ''}" aria-pressed="${est.filtro === k}" data-volta-filtro="${k}">${r} <span class="pcp-chip-n">${n(k)}</span></button>`).join('');
+  const dias = VOLTA_DIAS.map(d => `<option value="${d}" ${est.dias === d ? 'selected' : ''}>Últimos ${d} dias</option>`).join('');
+  const gestao = voltaGestao();
+  const cards = lista.map(g => {
+    const dia = fmtInstalacao({ data: g.dia });
+    return `<article class="volta-card st-${g.situacao}">
+      <div class="volta-topo">
+        <strong>${esc(dia)}</strong>
+        <span>🚗 ${esc(g.veiculo || 'carro não informado')}</span>
+        <span>👷 ${esc(g.equipe.join(', '))}</span>
+        <span class="badge volta-badge-${g.situacao}">${g.situacao === 'conferida' ? 'Conferida' : g.situacao === 'parcial' ? 'Em parte' : 'A conferir'}</span>
+      </div>
+      <div class="volta-os">${g.os.map(o => `<button class="inline-link" data-volta-os="${esc(o.id)}">O.S ${esc(o.numero || '—')}</button> <span class="text-muted">${esc(o.cliente || '')}</span>`).join('<br>')}</div>
+      <div class="volta-linha-resp">${voltaResumoHTML(g)}</div>
+      ${gestao ? `<button class="${g.situacao === 'conferida' ? 'btn-ghost' : 'btn-primary'} btn-sm volta-acao" data-volta-conferir="${esc(g.chave)}">${g.situacao === 'conferida' ? 'Rever' : 'Conferir a volta'}</button>` : ''}
+    </article>`;
+  }).join('');
+  const vazio = todas.length
+    ? emptyState('', est.filtro === 'conferir' ? 'Todas as voltas deste período foram conferidas' : 'Nenhuma volta neste filtro', 'Troque o filtro ou o período.')
+    : emptyState('', 'Nenhuma volta do carro neste período', 'Aparecem aqui as O.S. externas com retorno registrado ou entregues, agrupadas por dia, carro e equipe.');
+  return `<div class="volta-painel">
+    <div class="volta-cabeca">
+      <p>${gestao ? 'Confira cada volta uma vez: a resposta vale para todas as O.S. da volta e conta na nota de cada instalador (carro limpo e arrumado, equipamentos). Avaria não entra na nota.' : 'A conferência da volta é feita pela gestão (PCP).'}</p>
+      <div class="volta-filtros"><div class="pcp-chips">${chips}</div><label class="pcp-ordenacao"><span>Período</span><select id="volta-dias">${dias}</select></label></div>
+    </div>
+    <div class="volta-lista">${cards || vazio}</div>
+  </div>`;
+}
+function bindVoltas(root) {
+  $$('[data-volta-filtro]', root).forEach(b => b.onclick = () => { voltaEstado().filtro = b.dataset.voltaFiltro; pcpRenderCards(); });
+  const sel = $('#volta-dias', root);
+  if (sel) sel.onchange = () => { voltaEstado().dias = Number(sel.value) || 30; pcpRenderCards(); };
+  $$('[data-volta-os]', root).forEach(b => b.onclick = () => { const o = STORE.getOS(b.dataset.voltaOs); if (o) openModal(o, 'exec'); });
+  $$('[data-volta-conferir]', root).forEach(b => b.onclick = () => {
+    const g = voltasDoRecorte().todas.find(x => x.chave === b.dataset.voltaConferir);
+    if (g) abrirConferenciaVolta(g);
+  });
+}
+function abrirConferenciaVolta(g) {
+  if (!voltaGestao()) { toast('A conferência da volta é feita pela gestão (PCP).', 'error'); return; }
+  // Parte do que já foi respondido: da volta inteira, ou da primeira O.S. conferida.
+  const base = g.respostas || (g.os.find(o => OPERACAO.voltaRespondida(o.retornoConf)) || {}).retornoConf || {};
+  const resp = Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, OPERACAO.respostaVolta(base[k])]));
+  let obs = String(base.obs || '');
+  const fotos = Array.isArray(base.fotos) ? base.fotos.slice() : [];
+  let d = document.getElementById('volta-dialog');
+  if (!d) { d = document.createElement('dialog'); d.id = 'volta-dialog'; document.body.appendChild(d); }
+  const desenhar = () => {
+    d.innerHTML = `<div class="perf-dialog-head"><h2>Volta do carro · ${esc(fmtInstalacao({ data: g.dia }))}</h2><button type="button" class="btn-ghost" data-volta-fechar aria-label="Fechar">✕</button></div>
+      <p class="volta-dialog-sub">🚗 ${esc(g.veiculo || 'carro não informado')} · 👷 ${esc(g.equipe.join(', '))} · ${g.os.length === 1 ? 'O.S ' + esc(g.os[0].numero || '') : g.os.length + ' O.S: ' + esc(g.os.map(o => o.numero).join(', '))}</p>
+      ${g.situacao !== 'conferir' && !g.respostas ? '<p class="volta-aviso">As O.S. desta volta tinham respostas diferentes (ou só parte foi conferida). Salvar põe a mesma resposta em todas.</p>' : ''}
+      ${OPERACAO.PERGUNTAS_VOLTA.map(k => `<div class="volta-pergunta"><span>${esc(VOLTA_ROTULO[k])}</span>
+        <div class="seg" role="group" aria-label="${esc(VOLTA_ROTULO[k])}">
+          <button type="button" data-volta-r="${k}|sim" aria-pressed="${resp[k] === 'sim'}" class="seg-ok ${resp[k] === 'sim' ? 'active' : ''}">✅ Sim</button>
+          <button type="button" data-volta-r="${k}|nao" aria-pressed="${resp[k] === 'nao'}" class="seg-retrab ${resp[k] === 'nao' ? 'active' : ''}">🔴 Não</button>
+          <button type="button" data-volta-r="${k}|" aria-pressed="${!resp[k]}" class="${!resp[k] ? 'active' : ''}">Não conferido</button>
+        </div></div>`).join('')}
+      <p class="volta-dica">Avaria não entra na nota: nem sempre é culpa da equipe. Serve para o PCP agir (oficina, seguro).</p>
+      <label class="volta-campo">O que faltou ou precisa de atenção<input id="volta-obs" maxlength="300" value="${esc(obs)}" placeholder="ex.: faltou a escada de 6 m; sobra de lona na caçamba"></label>
+      <div class="volta-campo">Fotos da volta (opcional)
+        <div class="fotos-grid">${fotos.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}" alt="foto da volta"><button type="button" class="foto-rm" data-volta-foto-rm="${esc(fid)}" aria-label="Tirar a foto">×</button></div>`).join('')}</div>
+        <label class="foto-box"><span class="foto-hint">📷 Foto de como o carro voltou</span><input type="file" accept="image/*" capture="environment" multiple data-volta-foto></label>
+      </div>
+      <div class="volta-dialog-acoes"><button type="button" class="btn-ghost" data-volta-fechar>Cancelar</button><button type="button" class="btn-primary" id="volta-salvar">${g.os.length > 1 ? `Salvar para as ${g.os.length} O.S.` : 'Salvar'}</button></div>`;
+    $$('[data-volta-fechar]', d).forEach(b => b.onclick = () => d.close());
+    $$('[data-volta-r]', d).forEach(b => b.onclick = () => { const [k, v] = b.dataset.voltaR.split('|'); obs = $('#volta-obs', d).value; resp[k] = v; desenhar(); });
+    $$('[data-volta-foto-rm]', d).forEach(b => b.onclick = () => {
+      // Só desliga da volta: a mesma foto pode estar em outra O.S. da volta.
+      obs = $('#volta-obs', d).value;
+      fotos.splice(fotos.indexOf(b.dataset.voltaFotoRm), 1); desenhar();
+    });
+    const inp = $('[data-volta-foto]', d);
+    if (inp) inp.onchange = async () => {
+      obs = $('#volta-obs', d).value;
+      const files = Array.from(inp.files || []); if (!files.length) return;
+      toast(`Enviando ${files.length} foto(s)…`);
+      for (const f of files) { const id = await STORE.pushPhoto(f); if (id) fotos.push(id); }
+      desenhar();
+    };
+    $$('[data-foto-img]', d).forEach(async img => { const b64 = await STORE.pullPhoto(img.dataset.fotoImg); if (b64) img.src = b64; });
+    $('#volta-salvar', d).onclick = () => {
+      const n = salvarConferenciaVolta(g, { ...resp, obs: $('#volta-obs', d).value.trim().slice(0, 300), fotos: fotos.slice(0, 10) });
+      d.close();
+      toast(n ? `Volta conferida · ${n} O.S. ${n === 1 ? 'atualizada' : 'atualizadas'}` : 'Nada mudou nesta volta.', n ? 'success' : '');
+      pcpRenderCards();
+    };
+  };
+  desenhar();
+  if (!d.open) d.showModal();
+}
+// Grava a resposta em cada O.S. da volta. Devolve quantas mudaram.
+function salvarConferenciaVolta(g, resp) {
+  if (!voltaGestao()) return 0;
+  const quem = (STATE.user && STATE.user.nome) || '';
+  const agora = nowISO();
+  let n = 0;
+  for (const o of g.os) {
+    const os = STORE.getOS(o.id);   // relê: a fila pode ter sido desenhada antes do último sync
+    if (!os) continue;
+    const antes = os.retornoConf || {};
+    const rc = { ...antes, ...resp };
+    // Só a RESPOSTA carimba (mesma regra da ficha e do servidor).
+    const mudou = OPERACAO.PERGUNTAS_VOLTA.some(k => OPERACAO.respostaVolta(rc[k]) !== OPERACAO.respostaVolta(antes[k]));
+    if (!OPERACAO.voltaRespondida(rc)) { rc.por = ''; rc.em = ''; }
+    else if (mudou) { rc.por = quem; rc.em = agora; }
+    if (JSON.stringify(rc) === JSON.stringify(antes)) continue;
+    os.retornoConf = rc;
+    os.atualizadoEm = agora; os.atualizadoPor = quem;
+    STORE.saveOS(os);
+    n++;
+  }
+  return n;
 }
 
 /* ── Campo de chips (autocomplete simples) ───────────────────────────────── */
@@ -2007,9 +2170,9 @@ function bindModalEvents(os, ro) {
       // RESPOSTA carimba: anotar a observação depois não troca quem conferiu, e
       // voltar os dois para "não conferido" apaga o autor. (O servidor carimba
       // de novo pelo crachá; este é o que a ficha mostra até sincronizar.)
-      if (el.dataset.f === 'retornoConf.carroLimpo' || el.dataset.f === 'retornoConf.equipamentosOk') {
+      if (OPERACAO.PERGUNTAS_VOLTA.some(k => el.dataset.f === 'retornoConf.' + k)) {
         const rc = _modalDraft.retornoConf || (_modalDraft.retornoConf = {});
-        if (!rc.carroLimpo && !rc.equipamentosOk) { rc.por = ''; rc.em = ''; }
+        if (!OPERACAO.voltaRespondida(rc)) { rc.por = ''; rc.em = ''; }
         else { rc.por = (STATE.user && STATE.user.nome) || ''; rc.em = nowISO(); }
       }
       // Re-render leve em campos que afetam status/checklist/travas
@@ -3090,6 +3253,7 @@ function pcpBaseList() {
      mesma funcao que o selo e o proximo passo usam. Duas reguas para o mesmo
      estado e como a tela e o servidor discordarem: um dos dois esta mentindo. */
   if (STATE.pcpVista === 'parado') return all.filter(o => OPERACAO.paradoNoCliente(o));
+  if (STATE.pcpVista === 'voltas') return voltasDoRecorte().lista.flatMap(g => g.os);
   if (STATE.pcpVista === 'arquivados') {
     // Aparelho (janela local) + o que a busca sob demanda já trouxe do servidor.
     const vistos = new Set();
@@ -3207,6 +3371,7 @@ function pcpAtualizarChips() {
   setN('[data-pcp-vista=""]', fAll.filter(o => !o.finalizadaEm).length);
   setN('[data-pcp-vista="parado"]', fAll.filter(o => OPERACAO.paradoNoCliente(o)).length);
   setN('[data-pcp-vista="retrabalho"]', fAll.filter(retrabPendente).length);
+  setN('[data-pcp-vista="voltas"]', voltasDoRecorte().todas.filter(g => g.situacao !== 'conferida').length);
   // Arquivados conta aparelho + o que a busca já trouxe do servidor — senão o
   // selo dizia 324 com a lista mostrando 564, e parecia bug.
   const vistosArq = new Set();
@@ -3249,6 +3414,17 @@ function pcpRenderCards() {
     arqBuscar(pcpRenderCards);
     return;
   }
+  if (STATE.pcpVista === 'voltas' && !STATE._prioridade) {
+    grid.classList.add('pcp-lista', 'pcp-voltas');
+    grid.innerHTML = voltasHTML();
+    const resultado = $('#pcp-resultado');
+    if (resultado) { const n = voltasDoRecorte().lista.length; resultado.textContent = `${n} volta${n === 1 ? '' : 's'}`; }
+    bindVoltas(grid);
+    $$('[data-foto-img]', grid).forEach(async img => { const b64 = await STORE.pullPhoto(img.dataset.fotoImg); if (b64) img.src = b64; });
+    pcpAtualizarChips();
+    return;
+  }
+  grid.classList.remove('pcp-voltas');
   list = list.sort((PCP_SORTS[STATE.pcpSort] || PCP_SORTS.entrega).fn);
   const missao = STATE._prioridade;
   if (missao) {
@@ -3335,6 +3511,7 @@ function renderPCP() {
     ['',           '', 'Ativos'],
     ['parado',     '⏸', 'Parado Cliente'],
     ['retrabalho', '', 'Retrabalho'],
+    ['voltas',     '🚗', 'Volta do carro'],
     ['arquivados', '', 'Arquivados']
   ].map(([k, icone, lbl]) => `<button class="pcp-chip pcp-vista ${STATE.pcpVista === k ? 'active' : ''}" aria-pressed="${STATE.pcpVista === k}" data-pcp-vista="${k}">${chipLabel(icone, lbl)} <span class="pcp-chip-n">0</span></button>`).join('');
 
@@ -3352,18 +3529,18 @@ function renderPCP() {
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
           <input type="search" id="busca-pcp" aria-label="Buscar na carteira" placeholder="Buscar por O.S, cliente, endereço ou serviço" value="${esc(STATE.filtroBusca)}">
         </label>
-        <label class="pcp-ordenacao"><span>Ordenar por</span><select id="pcp-sort">${sorts}</select></label>
+        <label class="pcp-ordenacao" ${STATE.pcpVista === 'voltas' ? 'hidden' : ''}><span>Ordenar por</span><select id="pcp-sort">${sorts}</select></label>
         ${podeEditar() ? '<div class="pcp-criar-acoes"><button class="btn-primary" id="pcp-nova-ext">+ O.S externa</button><button class="btn-ghost" id="pcp-nova-int">+ O.S retirada</button></div>' : ''}
       </div>
       <div class="pcp-filtro-linha pcp-filtro-unica" role="group" aria-label="Tipo e etapa">
-        <div class="pcp-chips">${tipoChips}</div>
+        ${STATE.pcpVista === 'voltas' ? '' : `<div class="pcp-chips">${tipoChips}</div>`}
         ${STATE.pcpVista === '' ? `<div class="pcp-chips">${chips}</div>` : ''}
         ${STATE.pcpVista === 'arquivados' ? `<div id="arq-chips" class="pcp-arq-chips">${arqChipsHTML()}</div><span id="arq-nota" class="text-muted" style="font-size:.75rem"></span>` : ''}
       </div>
       <div class="pcp-controles-rodape">
         <button class="pcp-limpar" id="pcp-limpar-filtros" hidden>Limpar filtros</button>
       </div>
-    <details class="pcp-legenda" ${STATE.legendaAberta ? 'open' : ''}><summary>Entenda as cores dos cards</summary>
+    <details class="pcp-legenda" ${STATE.legendaAberta ? 'open' : ''} ${STATE.pcpVista === 'voltas' ? 'hidden' : ''}><summary>Entenda as cores dos cards</summary>
       <div class="leg-linhas">
         <span><span class="leg-sw" style="background:linear-gradient(90deg,#fffdf5,#fef3c7,#fed7aa,#fca5a5)"></span><strong>Fundo do card</strong> = prazo de entrega: quanto mais quente, mais perto. Faixa superior vermelha = atraso ou retrabalho; o aviso escrito identifica o motivo.</span>
         <span><span class="leg-sw" style="background:#3b82f6"></span>Borda esquerda azul = 🚚 Externo · <span class="leg-sw" style="background:#db2777"></span>magenta = 🏬 Cliente retira.</span>
@@ -5255,20 +5432,30 @@ function abrirInstrucoes() {
 
       <h2>A barra lateral</h2>
       <ul>
-        <li><strong>Operação</strong> — 📋 <strong>PCP</strong> (todas as O.S por data de entrega, com % preenchido e responsável), 🚚 <strong>Instalação</strong> (quadro <em>Kanban</em> por dia; o 🖨 gera o espelho), ⚡ <strong>Execução</strong> (o que está na rua agora), ⏸ <strong>Parado Cliente</strong>, 🔧 <strong>Retrabalho</strong> e 🏁 <strong>Finalizados</strong>.</li>
+        <li><strong>Operação</strong> — 📋 <strong>PCP</strong> (todas as O.S por data de entrega, com % preenchido e responsável), 🚚 <strong>Instalação</strong> (quadro <em>Kanban</em> por dia; o 🖨 gera o espelho), ⚡ <strong>Execução</strong> (o que está na rua agora), ⏸ <strong>Parado Cliente</strong>, 🔧 <strong>Retrabalho</strong>, 🏁 <strong>Finalizados</strong> e 🚗 <strong>Volta do carro</strong>.</li>
         <li><strong>Entrega</strong> — 📦 Entregas e 🏅 Performance.</li>
         <li><strong>Agenda</strong> — 📅 Calendário, ⏰ Plantões e 🗓️ Programação.</li>
         <li><strong>Casa</strong> — 📊 <strong>Painel</strong> (indicadores, ranking e tendências; clique nos números para abrir o detalhe) e ⚙️ <strong>Configurações</strong> (admin: listas, usuários, contatos e níveis de acesso).</li>
       </ul>
-      <p><strong>⏸ Parado Cliente é atalho, não tela separada:</strong> ele abre o próprio PCP já na vista certa. É a mesma lista que o botão da barra de vistas mostra — um caminho a mais para o mesmo lugar, não um segundo lugar.</p>
+      <p><strong>⏸ Parado Cliente e 🚗 Volta do carro são atalhos, não telas separadas:</strong> cada um abre o próprio PCP já na vista certa. É a mesma lista que o botão da barra de vistas mostra: um caminho a mais para o mesmo lugar, não um segundo lugar.</p>
 
       <h2>As vistas do PCP</h2>
-      <p>Logo acima dos cards há quatro botões, e o número em cada um conta o que aquela vista mostra:</p>
+      <p>Logo acima dos cards há cinco botões, e o número em cada um conta o que aquela vista mostra:</p>
       <ul>
         <li><strong>Ativos</strong> — a carteira em aberto. Só aqui aparecem os chips de etapa (Aguardando produção, Apto, Agendado…).</li>
         <li><strong>⏸ Parado Cliente</strong> — prontas, esperando o cliente liberar a instalação.</li>
         <li><strong>Retrabalho</strong> — voltou com problema e ainda não foi resolvido.</li>
+        <li><strong>🚗 Volta do carro</strong>: as voltas que a gestão ainda não conferiu (o número conta só essas).</li>
         <li><strong>Arquivados</strong> — o histórico finalizado, por ano e mês. A busca aqui vale para o histórico inteiro, não só para o recorte escolhido.</li>
+      </ul>
+
+      <h2>🚗 Volta do carro</h2>
+      <p>Quando a equipe devolve o carro, o PCP confere como ele voltou. A volta é o <strong>dia + o carro + a equipe</strong>: se a equipe fez três O.S. no dia, é uma volta só, e a resposta vale para as três. Entram as O.S. externas com retorno registrado ou já entregues; carro ainda na rua não aparece.</p>
+      <ul>
+        <li>Toque em <strong>Conferir a volta</strong> e responda <em>Sim</em>, <em>Não</em> ou <em>Não conferido</em> para: carro limpo, carro arrumado (material e ferramentas no lugar, sem lixo nem sobra solta), equipamentos completos e em ordem, e carro sem avaria nova. Se algo faltou, escreva no campo de atenção e, se quiser, tire uma foto.</li>
+        <li><strong>Limpo e arrumado</strong> contam juntos como o critério do carro na nota da Performance, e <strong>equipamentos</strong> conta como o seu. Um "não" em limpo ou em arrumado derruba o carro daquela volta. <strong>Avaria não entra na nota</strong> (nem sempre é culpa da equipe): serve para o PCP agir.</li>
+        <li>"Não conferido" não pesa contra ninguém. Mas o critério só entra na nota quando pelo menos 80% das voltas do período têm resposta, então confira todas.</li>
+        <li>Só a gestão (PCP e admin) confere; quem é avaliado não confere a própria volta. A resposta leva o nome de quem conferiu e a hora. Dá para rever depois pelo filtro <em>Conferidas</em>, e a ficha de cada O.S. também mostra e deixa corrigir.</li>
       </ul>
 
       <h2>Importar do PDF do ERP</h2>

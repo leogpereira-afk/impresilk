@@ -305,7 +305,10 @@ async function perfFonte(body:any) {
        conferido" (null) e não pesa contra ninguém. */
     const snv=(v:any)=>v==="sim"||v===true?"sim":(v==="nao"||v===false?"nao":null);
     const rc=o.retornoConf&&typeof o.retornoConf==="object"?o.retornoConf:null;
-    const retornoConf=rc&&(snv(rc.carroLimpo)||snv(rc.equipamentosOk))?{carroLimpo:snv(rc.carroLimpo),equipamentosOk:snv(rc.equipamentosOk),por:String(rc.por||"").slice(0,120),porId:String(rc.porId||"").slice(0,120),em:String(rc.em||"").slice(0,40)}:null;
+    /* 24/09/2026: "arrumado" (conta junto com "limpo") e "sem avaria" (não
+       conta, mas a tela mostra) vieram com a fila da volta do carro. */
+    const PERGUNTAS=["carroLimpo","carroArrumado","equipamentosOk","semAvaria"];
+    const retornoConf=rc&&PERGUNTAS.some(k=>snv(rc[k]))?{...Object.fromEntries(PERGUNTAS.map(k=>[k,snv(rc[k])])),por:String(rc.por||"").slice(0,120),porId:String(rc.porId||"").slice(0,120),em:String(rc.em||"").slice(0,40)}:null;
     return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,equipeId:p?.equipeId||"",equipeNome:p?.equipeNome||"",emblema:p?.emblema||"🤝",obs:p?.obs||"",por:p?.por||"",em:p?.em||"",retrabalho:!!o.retrabalho,retornoConf};
   });
   /* performance-2: cada registro leva a conferência da volta, e a apuração
@@ -771,11 +774,20 @@ Deno.serve(async (req: Request) => {
           if (!gestao || os.retornoConf == null) {
             if (antes) os.retornoConf = antes; else delete os.retornoConf;
           } else {
+            /* 24/09/2026: "arrumado" e "sem avaria" entraram com a fila da volta
+               do carro, e as fotos da volta. Campo que o aparelho NÃO mandou fica
+               como estava: a aba na v127 não conhece "arrumado" e, relida como
+               vazio, apagaria a resposta de quem já está na versão nova. */
             const sn = (x: any) => x === "sim" || x === "nao" ? x : "";
             const rc = typeof os.retornoConf === "object" ? os.retornoConf : {};
-            const n: any = { carroLimpo: sn(rc.carroLimpo), equipamentosOk: sn(rc.equipamentosOk), obs: String(rc.obs ?? "").slice(0, 300) };
-            const mudou = n.carroLimpo !== sn(antes?.carroLimpo) || n.equipamentosOk !== sn(antes?.equipamentosOk);
-            if (!n.carroLimpo && !n.equipamentosOk) { n.por = ""; n.porId = ""; n.em = ""; }
+            const PERGUNTAS = ["carroLimpo", "carroArrumado", "equipamentosOk", "semAvaria"];
+            const n: any = {};
+            for (const k of PERGUNTAS) n[k] = k in rc ? sn(rc[k]) : sn(antes?.[k]);
+            n.obs = String(("obs" in rc ? rc.obs : antes?.obs) ?? "").slice(0, 300);
+            const fotos = "fotos" in rc ? rc.fotos : antes?.fotos;
+            n.fotos = Array.isArray(fotos) ? fotos.filter((f: unknown) => typeof f === "string" && f).slice(0, 10) : [];
+            const mudou = PERGUNTAS.some((k) => n[k] !== sn(antes?.[k]));
+            if (!PERGUNTAS.some((k) => n[k])) { n.por = ""; n.porId = ""; n.em = ""; }
             else if (mudou) { n.por = cracha?.nome || cracha?.sub || ""; n.porId = String(cracha?.sub ?? ""); n.em = new Date().toISOString(); }
             else { n.por = antes?.por || ""; n.porId = antes?.porId || ""; n.em = antes?.em || ""; }
             os.retornoConf = n;

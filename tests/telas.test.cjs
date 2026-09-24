@@ -295,3 +295,49 @@ test('espelho: com a foto e a hora de retorno, o instalador finaliza e o fecho �
   assert.equal(g.finalizadoPor,'Ana');assert.equal(g.retornoEm,'2026-09-23T15:10:00');
   assert.equal(g.conferidoPor,'Ana');assert.equal(g.checkout.situacao,'Finalizado');assert.equal(g.checkout.confirmado,true);
 });
+
+/* FILA "VOLTA DO CARRO" (24/09/2026): "algo que avalie a volta do carro pelo
+   PCP, se está arrumado etc". Uma conferência por volta, gravada em cada O.S. */
+const voltaOS = (id, extra={}) => ({id, numero:'V'+id, cliente:'Cliente '+id, tipo:'externo', equipe:['Ana','Bia'], veiculo:'Strada',
+  liberadoPCP:true, instalacao:{data:hoje}, retornoEm:hoje+'T17:00:00', ...extra});
+test('volta do carro: quem não é gestão vê a fila mas não confere, nem pela função', () => {
+  const t = tela([voltaOS('1'), voltaOS('2')]);
+  t.run(`STATE.user={nome:'Montagem',papel:'montagem'}; globalThis.__salvas=[]; STORE.saveOS=o=>__salvas.push(o)`);
+  const html = t.run('voltasHTML()');
+  assert.match(html, /V1[^]*V2/, 'as duas O.S. aparecem na mesma volta');
+  assert.doesNotMatch(html, /data-volta-conferir/);
+  assert.equal(t.run(`salvarConferenciaVolta(voltasDoRecorte().todas[0], {carroLimpo:'sim'})`), 0);
+  assert.equal(t.run('__salvas.length'), 0);
+});
+test('volta do carro: a gestão confere uma vez e a resposta vai para cada O.S. da volta, com autor', () => {
+  const t = tela([voltaOS('1'), voltaOS('2'), voltaOS('3', {veiculo:'Saveiro'})]);
+  t.run(`globalThis.__salvas=[]; STORE.saveOS=o=>__salvas.push(JSON.parse(JSON.stringify(o)))`);
+  assert.equal(t.run('voltasDoRecorte().todas.length'), 2, 'outro carro é outra volta');
+  const html = t.run('voltasHTML()');
+  assert.match(html, /data-volta-conferir/);
+  const n = t.run(`salvarConferenciaVolta(voltasDoRecorte().todas.find(g=>g.os.length===2), {carroLimpo:'sim',carroArrumado:'nao',equipamentosOk:'sim',semAvaria:'',obs:'sobra de lona',fotos:[]})`);
+  assert.equal(n, 2);
+  const salvas = t.run('__salvas');
+  assert.equal(salvas.map(o => o.id).sort().join(), '1,2');
+  for (const o of salvas) {
+    assert.equal(o.retornoConf.carroArrumado, 'nao'); assert.equal(o.retornoConf.obs, 'sobra de lona');
+    assert.equal(o.retornoConf.por, 'Revisão'); assert.ok(o.retornoConf.em);
+  }
+});
+test('volta do carro: salvar a mesma resposta de novo não regrava nem troca o autor', () => {
+  const rc = {carroLimpo:'sim',carroArrumado:'sim',equipamentosOk:'sim',semAvaria:'sim',obs:'',fotos:[],por:'Gestor',em:'2026-09-09T18:00:00Z'};
+  const t = tela([voltaOS('1', {retornoConf:rc})]);
+  t.run(`globalThis.__salvas=[]; STORE.saveOS=o=>__salvas.push(o)`);
+  const g = 'voltasDoRecorte().todas[0]';
+  assert.equal(t.run(`${g}.situacao`), 'conferida');
+  assert.equal(t.run(`salvarConferenciaVolta(${g}, {carroLimpo:'sim',carroArrumado:'sim',equipamentosOk:'sim',semAvaria:'sim',obs:'',fotos:[]})`), 0);
+  assert.equal(t.run(`salvarConferenciaVolta(${g}, {carroLimpo:'sim',carroArrumado:'sim',equipamentosOk:'sim',semAvaria:'sim',obs:'anotei depois',fotos:[]})`), 1);
+  assert.equal(t.run('__salvas[0].retornoConf.por'), 'Gestor', 'anotação não é conferência nova');
+});
+test('volta do carro: a vista do PCP conta as voltas a conferir e a ficha mostra as quatro perguntas', () => {
+  const t = tela([voltaOS('1'), voltaOS('2', {veiculo:'Saveiro', retornoConf:{carroLimpo:'sim'}})]);
+  t.run("STATE.pcpVista='voltas'; voltaEstado().filtro='conferir'");
+  assert.equal(t.run('pcpBaseList().length'), 1);
+  const ficha = t.run(`conferenciaVoltaHTML(STORE.getOS('1'), false)`);
+  for (const k of ['carroLimpo','carroArrumado','equipamentosOk','semAvaria']) assert.match(ficha, new RegExp('retornoConf\\.' + k));
+});

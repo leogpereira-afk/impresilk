@@ -149,13 +149,22 @@ const PERF = (() => {
   };
   // "sim"/"nao" da ficha (ou booleano) -> true/false; qualquer outra coisa é "não conferido".
   const sn = v => v === true || v === 'sim' ? true : (v === false || v === 'nao' ? false : null);
+  /* O CARRO É LIMPO E ARRUMADO. "Arrumado" entrou em 24/09/2026 com a fila da
+     volta do carro ("se está arrumado etc", o Léo). Não virou critério novo: os
+     pesos gravados e as revisões fechadas continuam valendo. Um "não" em
+     qualquer dos dois derruba o carro daquela volta; volta antiga, só com
+     "limpo", vale pelo que foi respondido. */
+  const carroDaVolta = rc => {
+    const l = sn(rc && rc.carroLimpo), a = sn(rc && rc.carroArrumado);
+    return l === false || a === false ? false : (l || a ? true : null);
+  };
   const avaliar = (registros, criterios) => {
     const pesos = criteriosValidos(criterios);
     const pessoas = new Map();
     const cobertura = {limpeza:{conferidas:0,voltas:0}, equipamentos:{conferidas:0,voltas:0}};
     for (const r of registros || []) {
       if (validar(r.membros)) continue;
-      const limpo = sn(r.retornoConf && r.retornoConf.carroLimpo);
+      const limpo = carroDaVolta(r.retornoConf);
       const equip = sn(r.retornoConf && r.retornoConf.equipamentosOk);
       cobertura.limpeza.voltas++; cobertura.equipamentos.voltas++;
       if (limpo !== null) cobertura.limpeza.conferidas++;
@@ -231,7 +240,7 @@ const PERF = (() => {
     }
     return [...por.values()];
   };
-  return {unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,manterPesos,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,criteriosValidos,CRITERIOS_PADRAO,COBERTURA_MINIMA};
+  return {unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,manterPesos,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,criteriosValidos,carroDaVolta,CRITERIOS_PADRAO,COBERTURA_MINIMA};
 })();
 if (typeof module !== 'undefined') module.exports = PERF;
 
@@ -318,7 +327,8 @@ function perfChaveDeHoje(m) {
 function perfVoltaTxt(rc) {
   const v = x => x === 'sim' || x === true ? 'sim' : (x === 'nao' || x === false ? 'não' : 'sem resposta');
   const c = rc || {};
-  return `🚗 carro ${v(c.carroLimpo)} · 🧰 equip. ${v(c.equipamentosOk)}`;
+  const avaria = c.semAvaria === 'nao' || c.semAvaria === false ? ' · ⚠️ avaria' : '';
+  return `🚗 limpo ${v(c.carroLimpo)} · 📦 arrumado ${v(c.carroArrumado)} · 🧰 equip. ${v(c.equipamentosOk)}${avaria}`;
 }
 function perfUnirPessoas(regs) { return (regs || []).map(r => ({...r, membros: PERF.unirMembros(r.membros, perfChaveDeHoje)})); }
 function perfEquipeOS(os) { return PERF.unicos(OPERACAO.equipe(os).map(perfPessoa)); }
@@ -541,7 +551,7 @@ async function perfReduzirLogo(arquivo) {
  * gestão define aqui mesmo. As outras duas medidas ficam à mão para quem quer
  * olhar um critério só.
  */
-const PERF_CRIT_ROTULO = {producao:'Produção', limpeza:'Carro limpo', equipamentos:'Equipamentos'};
+const PERF_CRIT_ROTULO = {producao:'Produção', limpeza:'Carro (limpo e arrumado)', equipamentos:'Equipamentos'};
 function perfCriterios() { return PERF.criteriosValidos(perfConfig().criterios); }
 function perfEquipeDaPessoa(chave, salvas) {
   const suas = (salvas || []).filter(e => e.ativo !== false && (e.membros || []).some(m => String(m.chave) === String(chave)));
@@ -654,7 +664,7 @@ function perfEditarCriterios() {
     <p>Quanto cada critério vale na nota de 0 a 100. Os três somam 100.</p>
     ${['producao', 'limpeza', 'equipamentos'].map(k => `<label class="perf-peso"><span>${esc(PERF_CRIT_ROTULO[k])}</span><input type="number" name="${k}" min="0" max="100" step="1" required value="${atual[k]}"><span>%</span></label>`).join('')}
     <p id="perf-crit-soma" aria-live="polite"></p>
-    <p class="metricas-nota">Produção é o peso de cada pessoa nas entregas, comparado com quem mais produziu no período. Carro limpo e equipamentos são a parte das voltas conferidas pela gestão que saiu certa. Volta sem resposta conta pela média do período: ninguém perde nem ganha por a conferência não ter sido feita. O critério só entra na nota quando pelo menos 80% das voltas do período têm resposta; abaixo disso fica fora da nota de todos.</p>
+    <p class="metricas-nota">Produção é o peso de cada pessoa nas entregas, comparado com quem mais produziu no período. Carro (limpo e arrumado) e equipamentos são a parte das voltas conferidas pela gestão que saiu certa; a conferência se faz em PCP › Volta do carro. Volta sem resposta conta pela média do período: ninguém perde nem ganha por a conferência não ter sido feita. O critério só entra na nota quando pelo menos 80% das voltas do período têm resposta; abaixo disso fica fora da nota de todos.</p>
     <button class="btn-primary" type="submit">Salvar pesos</button>
   </form>`);
   const f = d.querySelector('form'), soma = d.querySelector('#perf-crit-soma');

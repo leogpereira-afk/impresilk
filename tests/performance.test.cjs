@@ -422,3 +422,21 @@ test('servidor: duas equipes ATIVAS com os mesmos integrantes são detectadas; d
   const porApelido = eq('z', true, [{chave:'Zé',nome:'Zé'},{chave:'2',nome:'B'}]), porFicha = eq('w', true, [{chave:'rh-jose',nome:'José'},{chave:'2',nome:'B'}]);
   assert.equal(composicoesAtivasRepetidas({equipes:[porApelido, porFicha]}, [{apelido:'Zé', chave:'rh-jose'}]).size, 1);
 });
+
+/* "SE ESTÁ ARRUMADO" (o Léo, 24/09/2026). Arrumado entra no critério do carro,
+   sem criar critério novo: um "não" em limpo OU arrumado derruba a volta. */
+test('avaliação: carro limpo mas desarrumado não é carro certo; volta antiga só com "limpo" vale', () => {
+  assert.equal(P.carroDaVolta({carroLimpo:'sim', carroArrumado:'nao'}), false);
+  assert.equal(P.carroDaVolta({carroLimpo:'nao', carroArrumado:'sim'}), false);
+  assert.equal(P.carroDaVolta({carroLimpo:'sim', carroArrumado:'sim'}), true);
+  assert.equal(P.carroDaVolta({carroLimpo:'sim'}), true, 'registro de antes do "arrumado"');
+  assert.equal(P.carroDaVolta({carroArrumado:'sim'}), true);
+  assert.equal(P.carroDaVolta({equipamentosOk:'sim'}), null, 'sem resposta do carro não é nota');
+  assert.equal(P.carroDaVolta(null), null);
+  const regs = [
+    {id:'1', membros:P.iguais([pe('Ana')]), retornoConf:{carroLimpo:'sim', carroArrumado:'nao'}},
+    {id:'2', membros:P.iguais([pe('Ana')]), retornoConf:{carroLimpo:'sim', carroArrumado:'sim'}},
+  ];
+  const {pessoas} = P.avaliar(regs, {producao:0,limpeza:100,equipamentos:0});
+  assert.equal(pessoas[0].componentes.limpeza, 50);
+});

@@ -264,6 +264,48 @@ const OPERACAO = (() => {
     os.paradoClienteEm = ''; os.paradoClientePor = '';
     return true;
   }
-  return {confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
+  /* A VOLTA DO CARRO. Pedido do Léo (24/09/2026): "preciso de algo que avalie
+     a volta do carro pelo PCP, se está arrumado etc". A conferência já existia
+     dentro da ficha de cada O.S., escondida e com duas perguntas; o carro volta
+     UMA vez com a equipe, mesmo quando ela fez três O.S. no dia. Então a volta é
+     o dia + o carro + a equipe, e a gestão confere uma vez para todas.
+
+     Entra quem de fato voltou: retorno registrado, ou O.S. entregue que conta
+     na nota (concluída por gente, ou baixa do ERP já lançada como entrega).
+     Carro ainda na rua não entra; retirada no balcão não usa carro; baixa do
+     ERP sem retorno nem lançamento não prova viagem nenhuma. */
+  const PERGUNTAS_VOLTA = ['carroLimpo', 'carroArrumado', 'equipamentosOk', 'semAvaria'];
+  const respostaVolta = v => v === 'sim' || v === true ? 'sim' : (v === 'nao' || v === false ? 'nao' : '');
+  const voltaRespondida = rc => !!rc && PERGUNTAS_VOLTA.some(k => respostaVolta(rc[k]));
+  function diaDaVolta(o) {
+    return dia(o?.retornoEm) || (o?.horaRetorno ? (dia(o.saidaEm) || dia(o.instalacao?.data)) : '') || dia(o?.finalizadaEm);
+  }
+  const voltou = o => !!(o && !interno(o) && equipe(o).length &&
+    (o.retornoEm || o.horaRetorno || (dia(o.finalizadaEm) && (concluida(o) || o.entregaLancada))));
+  const normal = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  function voltasDoCarro(lista, de = '', ate = '') {
+    const grupos = new Map();
+    for (const o of lista || []) {
+      if (!voltou(o)) continue;
+      const d = diaDaVolta(o);
+      if (!d || !emIntervalo(d, de, ate)) continue;
+      const time = equipe(o);
+      const chave = [d, normal(o.veiculo), time.map(normal).sort().join('+')].join('|');
+      const g = grupos.get(chave) || { chave, dia: d, veiculo: String(o.veiculo || '').trim(), equipe: time, os: [] };
+      g.os.push(o);
+      grupos.set(chave, g);
+    }
+    const lista2 = [...grupos.values()].map(g => {
+      const feitas = g.os.filter(o => voltaRespondida(o.retornoConf));
+      const situacao = feitas.length === g.os.length ? 'conferida' : feitas.length ? 'parcial' : 'conferir';
+      // As respostas da volta só são UMA quando todas as O.S. dizem o mesmo.
+      const assinatura = o => PERGUNTAS_VOLTA.map(k => respostaVolta(o.retornoConf?.[k])).join(',');
+      const iguais = feitas.length === g.os.length && new Set(g.os.map(assinatura)).size === 1;
+      return { ...g, situacao, respostas: iguais ? g.os[0].retornoConf : null };
+    });
+    const ordem = { conferir: 0, parcial: 1, conferida: 2 };
+    return lista2.sort((a, b) => ordem[a.situacao] - ordem[b.situacao] || b.dia.localeCompare(a.dia) || a.chave.localeCompare(b.chave));
+  }
+  return {PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,diaDaVolta,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;

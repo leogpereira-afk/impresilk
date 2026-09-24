@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Impresilk">
-  <link rel="stylesheet" href="styles.css?v=v127">
+  <link rel="stylesheet" href="styles.css?v=v128">
 </head>
 <body>
 
@@ -107,6 +107,8 @@
       <button class="tab" data-tab="pcp" data-vista="parado"><span class="nav-emoji" aria-hidden="true">⏸</span> Parado Cliente</button>
       <button class="tab" data-tab="retrabalho"><span class="nav-emoji" aria-hidden="true">🔧</span> Retrabalho</button>
       <button class="tab" data-tab="finalizados"><span class="nav-emoji" aria-hidden="true">🏁</span> Finalizados</button>
+      <!-- Atalho, como o "Parado Cliente": a fila da volta do carro é uma vista do PCP. -->
+      <button class="tab" data-tab="pcp" data-vista="voltas"><span class="nav-emoji" aria-hidden="true">🚗</span> Volta do carro</button>
       <p class="nav-grupo">Entrega</p>
       <button class="tab" data-tab="entregas"><span class="nav-emoji" aria-hidden="true">📦</span> Entregas</button>
       <button class="tab" data-tab="performance"><span class="nav-emoji" aria-hidden="true">🏅</span> Performance</button>
@@ -183,16 +185,16 @@
        importar O.S a partir do PDF do ERP. Passou a ser carregada na hora em
        que alguem clica em "Importar PDF" -- ver garantirPdfJs() no app.js. -->
 
-  <script src="config.js?v=v127"></script>
-  <script src="logo.js?v=v127"></script>
-  <script src="frases.js?v=v127"></script>
-  <script src="store.js?v=v127"></script>
-  <script src="auth.js?v=v127"></script>
-  <script src="operacao.js?v=v127"></script>
-  <script src="app.js?v=v127"></script>
-  <script src="casa.js?v=v127"></script>
-  <script src="relatorios-entregas.js?v=v127"></script>
-  <script src="performance.js?v=v127"></script>
+  <script src="config.js?v=v128"></script>
+  <script src="logo.js?v=v128"></script>
+  <script src="frases.js?v=v128"></script>
+  <script src="store.js?v=v128"></script>
+  <script src="auth.js?v=v128"></script>
+  <script src="operacao.js?v=v128"></script>
+  <script src="app.js?v=v128"></script>
+  <script src="casa.js?v=v128"></script>
+  <script src="relatorios-entregas.js?v=v128"></script>
+  <script src="performance.js?v=v128"></script>
   <script>
   /* Service worker + AVISO DE VERSÃO NOVA.
      O sw.js faz skipWaiting/claim, então a versão nova assume assim que o

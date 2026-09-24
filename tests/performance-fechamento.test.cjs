@@ -89,3 +89,14 @@ test('pesos inválidos na configuração não entram no fechamento: vale o padr�
  const fonte = await e.call({action:'performancePeriodo', ...periodo}, who);
  assert.deepEqual({...fonte.criterios}, {producao:60, limpeza:20, equipamentos:20});
 });
+/* 24/09/2026: "arrumado" entrou na conferência da volta. A base da nota vem
+   desta porta; se ela descartar o campo, a Performance ignora o "não" calada. */
+test('a base da nota leva "arrumado" e "sem avaria"; volta respondida só em "arrumado" não some',async()=>{
+ const d=dados(2);
+ d.pcp_registros[0].registro.retornoConf={carroLimpo:'sim',carroArrumado:'nao',equipamentosOk:'sim',semAvaria:'nao',por:'Gestor'};
+ d.pcp_registros[1].registro.retornoConf={carroArrumado:'sim'};
+ const e=await edge('pcp-sync',d),r=await e.call({action:'performancePeriodo',...periodo},who);
+ const [a,b]=r.registros;
+ assert.equal(a.retornoConf.carroArrumado,'nao');assert.equal(a.retornoConf.semAvaria,'nao');
+ assert.ok(b.retornoConf,'só "arrumado" respondido ainda é conferência');assert.equal(b.retornoConf.carroArrumado,'sim');
+});

@@ -92,3 +92,48 @@ test('pendências respeitam etapa, confirmação exige data do dia',()=>{
  assert.equal(O.confirmadaHoje({confirmacao:'Confirmado',confEm:'2026-09-19T12:00:00-03:00'},'2026-09-19'),true);
  assert.equal(O.confirmadaHoje({confirmacao:'Confirmado',confEm:'2026-09-18T12:00:00-03:00'},'2026-09-19'),false);
 });
+
+/* A VOLTA DO CARRO (pedido do Léo, 24/09/2026): "algo que avalie a volta do
+   carro pelo PCP, se está arrumado etc". A volta é o dia + o carro + a equipe. */
+test('volta do carro: carro ainda na rua, retirada, O.S. sem equipe e baixa do ERP sem viagem não entram', () => {
+  const na = os({id:'rua',horaSaida:'08:00',saidaEm:hoje+'T08:00:00'});
+  const retirada = os({id:'ret',tipo:'interno',finalizadaEm:hoje+'T10:00:00',finalizadoPor:'Bia'});
+  const semEquipe = os({id:'sem',equipe:[],retornoEm:hoje+'T12:00:00'});
+  const erp = os({id:'erp',finalizadaEm:hoje+'T09:00:00',finalizadoPor:'Mubisys (auto)'});
+  assert.equal(O.voltasDoCarro([na,retirada,semEquipe,erp]).length, 0);
+  const lancada = os({id:'lan',finalizadaEm:hoje+'T09:00:00',finalizadoPor:'Mubisys (auto)',entregaLancada:{data:hoje}});
+  assert.equal(O.voltasDoCarro([lancada]).length, 1, 'baixa do ERP lançada como entrega conta na nota, então entra');
+});
+test('volta do carro: mesmo dia, carro e equipe viram UMA volta; outro carro é outra volta', () => {
+  const a = os({id:'a',numero:'1',retornoEm:hoje+'T12:00:00',equipe:['Ana','Bia']});
+  const b = os({id:'b',numero:'2',finalizadaEm:hoje+'T16:00:00',finalizadoPor:'Ana',equipe:['bia','Ana '],veiculo:'carro 1'});
+  const c = os({id:'c',numero:'3',retornoEm:hoje+'T17:00:00',veiculo:'Carro 2'});
+  const v = O.voltasDoCarro([a,b,c]);
+  assert.equal(v.length, 2);
+  const junta = v.find(g => g.os.length === 2);
+  assert.equal(junta.os.map(o => o.id).sort().join(), 'a,b');
+  assert.equal(junta.dia, hoje);
+});
+test('volta do carro: situação e respostas; registro antigo só com "carro limpo" conta como conferido', () => {
+  const r = {carroLimpo:'sim',carroArrumado:'nao',equipamentosOk:'sim',semAvaria:'sim'};
+  const a = os({id:'a',retornoEm:hoje+'T12:00:00',retornoConf:r});
+  const b = os({id:'b',retornoEm:hoje+'T13:00:00'});
+  let [g] = O.voltasDoCarro([a,b]);
+  assert.equal(g.situacao, 'parcial'); assert.equal(g.respostas, null);
+  [g] = O.voltasDoCarro([a,{...b,retornoConf:{...r}}]);
+  assert.equal(g.situacao, 'conferida'); assert.equal(g.respostas.carroArrumado, 'nao');
+  [g] = O.voltasDoCarro([a,{...b,retornoConf:{...r,carroArrumado:'sim'}}]);
+  assert.equal(g.situacao, 'conferida'); assert.equal(g.respostas, null, 'respostas diferentes não viram uma só');
+  [g] = O.voltasDoCarro([os({retornoEm:hoje+'T12:00:00',retornoConf:{carroLimpo:'sim'}})]);
+  assert.equal(g.situacao, 'conferida');
+  [g] = O.voltasDoCarro([os({retornoEm:hoje+'T12:00:00',retornoConf:{obs:'só anotação'}})]);
+  assert.equal(g.situacao, 'conferir', 'observação sem resposta não é conferência');
+});
+test('volta do carro: a conferir primeiro, depois a mais recente; recorte por dia da volta', () => {
+  const velha = os({id:'v',retornoEm:'2026-09-01T12:00:00'});
+  const nova = os({id:'n',retornoEm:hoje+'T12:00:00',veiculo:'Carro 2',retornoConf:{carroLimpo:'sim'}});
+  const meio = os({id:'m',retornoEm:'2026-09-05T12:00:00',veiculo:'Carro 3'});
+  assert.deepEqual(O.voltasDoCarro([velha,nova,meio]).map(g => g.os[0].id), ['m','v','n']);
+  assert.deepEqual(O.voltasDoCarro([velha,nova,meio],'2026-09-04',hoje).map(g => g.os[0].id), ['m','n']);
+  assert.equal(O.diaDaVolta(os({horaRetorno:'17:00',saidaEm:'2026-09-08T08:00:00'})), '2026-09-08', 'retorno antigo sem data usa o dia da saída');
+});
