@@ -677,7 +677,8 @@ test('tendência: a comparação entre anos é do MESMO período', () => {
   const meses = [];
   for (let m = 1; m <= 12; m++) meses.push(mesR(`2025-${String(m).padStart(2, '0')}`, 100000));
   for (let m = 1; m <= 3; m++) meses.push(mesR(`2026-${String(m).padStart(2, '0')}`, 110000));
-  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-03')`);
+  // Hoje em abril: jan a mar são os meses fechados (o mês corrente fica fora).
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-04')`);
   const a26 = r.porAno.find(a => a.ano === '2026');
   assert.equal(a26.mesmoPeriodo, 330000);
   assert.equal(a26.variacao, 10, '330k contra os 300k de jan-mar de 2025 = +10%');
@@ -761,7 +762,7 @@ test('tendência: comparação com cobertura diferente vem marcada', () => {
     mesR('2025-01', 100000), mesR('2025-02', 100000),
     mesR('2026-01', 120000), mesR('2026-02', 120000), mesR('2026-03', 120000),
   ];
-  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-03')`);
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-04')`);
   const a26 = r.porAno.find(a => a.ano === '2026');
   assert.equal(a26.compara, '2025');
   assert.match(a26.avisoCobertura, /3 mês\(es\) contra 2/, '3 meses contra 2 tem de ser declarado');
@@ -1009,7 +1010,7 @@ test('seletor de O.S: o teto é dito, não cortado em silêncio', () => {
   const muitas = Array.from({ length: 340 }, (_, i) => ({ id: 'x' + i, numero: String(1000 + i), cliente: 'C' + i }));
   const html = t.run(`opcoesOSPlantao({ osIds: [] }, ${JSON.stringify(muitas)}, new Map())`);
   assert.equal((html.match(/name="osIds"/g) || []).length, 300, 'trezentas na lista');
-  assert.match(html, /40 fora da lista — use a busca/, 'o corte tem de ser dito');
+  assert.match(html, /40 fora da lista; use a busca/, 'o corte tem de ser dito');
 });
 
 test('seletor de O.S: o contador começa com o que já estava marcado', () => {
@@ -1269,4 +1270,103 @@ test('correção auditada do ERP vence cache auxiliar e valor zero continua vál
  const t=casa([]);
  assert.equal(t.run("valorDaOS({numero:'1',valorTotal:0,erpAlteracoes:[{campos:[{campo:'valorTotal'}]}]})"),0);
  assert.equal(t.run("valorDaOS({numero:'1',valorTotal:150,erpAlteracoes:[{campos:[{campo:'valorTotal'}]}]})"),150);
+});
+
+/* ── Correções da auditoria (25/09/2026) ───────────────────────────────── */
+const OSMANE = { id: '444444', chave: 'osmane-vieira', nome: 'Osmane Vieira', apelido: 'Osmane', ativo: true };
+
+test('bônus: apelido que casou sozinho com o RH entra no ranking, sem vínculo salvo', () => {
+  const t = casa([fin('a', { equipe: ['Osmane'] })], {}, { pessoas: [OSMANE], veiculos: [], ferias: [], ausencias: [] });
+  const rank = t.run(`rankingFinalizadas('${mes}', {})`);
+  assert.equal(rank.length, 1, 'o instalador solo casado pelo RH não pode sair "sem ficha"');
+  assert.equal(rank[0].id, '444444');
+  assert.equal(rank[0].nome, 'Osmane Vieira · ID 444444', 'o nome vem da ficha do RH');
+});
+
+test('bônus: vínculo salvo só pela chave (sem id) não vira linha em branco no ranking', () => {
+  const t = casa([fin('a', { equipe: ['Natan'] }), fin('b', { equipe: ['Paulo'] })],
+    { vinculosRH: [{ chave: 'natan-x', nome: 'Natan X', apelido: 'Natan' }, { chave: 'paulo-y', nome: 'Paulo Y', apelido: 'Paulo' }] });
+  assert.equal(t.run(`rankingFinalizadas('${mes}', {}).length`), 0, 'duas pessoas sem id somavam na mesma linha sem nome');
+});
+
+test('bônus: cada mês com seus pagamentos; trocar o mês não arrasta nem apaga o anterior', () => {
+  const t = casa([]);
+  const r = t.run(`(() => {
+    const b = { mes: '2026-09', orcamento: 1000, teto: 0, pontos: {}, itens: [{ id: '111111', nome: 'Natan', valor: 350, status: 'pago' }] };
+    const out = trocarMesBonus(b, '2026-10');
+    return { out: itensBonusDoMes(out).length, set: itensBonusDoMes(out, '2026-09').length, carimbo: out.itens[0].mes };
+  })()`);
+  assert.equal(r.out, 0, 'setembro pago não pode aparecer em outubro');
+  assert.equal(r.set, 1, 'e continua em setembro');
+  assert.equal(r.carimbo, '2026-09', 'item antigo recebe o mês em que foi gravado');
+});
+
+test('lançar entrega: nome da O.S fora da lista de instaladores continua na equipe', () => {
+  const os = { id: 'x1', numero: '900', tipo: 'externo', finalizadaEm: '2026-09-20T12:00:00', finalizadoPor: 'Mubisys · baixa', equipe: ['Natan', 'Osmane V.'] };
+  const t = casa([os]);
+  const r = t.run(`(() => {
+    let salvo = null, box = null, form = null;
+    STORE.getOS = () => (${JSON.stringify(os)});
+    STORE.saveOS = o => { salvo = o; };
+    STORE.pullPhoto = async () => null;
+    perguntarRetrabalho = (o, cb) => cb();
+    voltaEquipeHTML = () => '';
+    hojeISO = () => '2026-09-25'; nowISO = () => '2026-09-25T10:00:00Z';
+    renderEntregas = () => {};
+    confirm = () => true;
+    document.createElement = () => (box = { innerHTML: '', style: {}, querySelectorAll: () => [], remove() {} });
+    document.body.appendChild = () => {};
+    document.getElementById = id => id === 'lancar-form' ? (form = form || {}) : (id === 'lancar-x' ? {} : null);
+    // FormData lê o que a tela desenhou marcado: é isso que o Continuar envia.
+    FormData = class { constructor() {
+      this.eq = [...box.innerHTML.matchAll(/name="equipe" value="([^"]*)" checked/g)].map(m => m[1]);
+    } getAll(k) { return k === 'equipe' ? this.eq : []; } get(k) { return k === 'data' ? '2026-09-20' : ''; } };
+    lancarEntregaManual('x1');
+    form.onsubmit({ preventDefault() {}, target: form });
+    return { equipe: salvo && salvo.equipe, fora: /fora da lista/.test(box.innerHTML) };
+  })()`);
+  assert.deepEqual([...(r.equipe || [])], ['Natan', 'Osmane V.'], 'tocar Continuar sem mexer não pode tirar ninguém da O.S');
+  assert.ok(r.fora, 'quem está só na O.S aparece marcado como fora da lista');
+});
+
+test('tendência: o mês corrente, pela metade, não entra na comparação entre anos', () => {
+  const t = casa([]);
+  const meses = [mesR('2025-01', 100000), mesR('2025-02', 100000), mesR('2026-01', 100000), mesR('2026-02', 5000)];
+  const r = t.run(`tendenciaEntregas(${JSON.stringify({ meses, faltando: [] })}, '2026-02')`);
+  const a26 = r.porAno.find(a => a.ano === '2026');
+  assert.equal(a26.variacao, 0, 'fevereiro com 2 dias contra fevereiro cheio inventava queda');
+});
+
+test('retrabalho: a taxa diz o próprio numerador e não conta O.S. aberta nem baixa do ERP', () => {
+  const entregas = Array.from({ length: 12 }, (_, i) => fin('e' + i));
+  const html = casa([
+    ...entregas,
+    { id: 'aberta', numero: 'aberta', tipo: 'externo', retrabalho: true, dataRetrabalho: '2026-09-12', equipe: ['Natan'] },
+    fin('erp', { retrabalho: true, finalizadoPor: 'Mubisys · baixa', encerradaERP: true }),
+  ], FICHAS).run(`retrabalhoHTML({de:'2026-09-01',ate:'2026-09-30'})`);
+  assert.match(html, /<b>0%<\/b><small>0 de 12 entregas finalizadas voltaram/, 'a O.S. aberta não entra na taxa, e a linha diz de onde vem o número');
+});
+
+/* Orçamento trocado com o foco ainda no Teto não repinta a tela: Aprovar
+   gravava {...b} da pintura velha e devolvia o orçamento antigo ao cfg. */
+test('bônus: Aprovar depois de trocar o orçamento usa o orçamento novo e não desfaz a troca', () => {
+  const cfg = { ...FICHAS, bonusPCP: { mes, orcamento: 1000, teto: 0, pontos: {}, itens: [] } };
+  const t = casa([fin('1'), fin('2', { equipe: ['Paulo'] })], cfg, null, '2026-09-20T12:00:00');
+  const r = t.run(`(() => {
+    wireFiltroPeriodo = () => '';
+    const btns = {};
+    const fake = sel => { const m = sel.match(/^\\[data-(aprovar)\\]$/); if (!m) return []; return rankingFinalizadas('${mes}', {}).map(p => (btns[p.id] = { dataset: { aprovar: p.id } })); };
+    const el = { innerHTML: '', querySelectorAll: fake, querySelector: () => null, contains: () => true };
+    document.getElementById = id => (id === 'panel-performance' ? el : null);
+    document.activeElement = null;
+    renderPerformanceCasa();
+    // O orçamento muda depois da pintura (change do campo, sem repintar).
+    gravarBonusCasa({ ...lerBonusCasa(), orcamento: 2000 });
+    const id = Object.keys(btns)[0];
+    btns[id].onclick({ stopPropagation() {} });
+    const b = lerBonusCasa();
+    return { orcamento: b.orcamento, valor: b.itens[0] && b.itens[0].valor };
+  })()`);
+  assert.equal(r.orcamento, 2000, 'a troca do orçamento não pode sumir');
+  assert.equal(r.valor, 1000, 'metade das entregas de um orçamento de 2000');
 });

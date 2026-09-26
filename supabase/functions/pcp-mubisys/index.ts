@@ -804,6 +804,8 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
     const volta = numeros.has(String(l.registro.numero));
     const r = {...l.registro,rev:(Number(l.registro.rev)||0)+1,atualizadoEm:em,atualizadoPor:'Mubisys · conciliação de carteira'};
     if (volta) {
+      // Excluída que o ERP ainda lista volta à mesa: o card precisa poder dizer por quê.
+      if (l.apagado) r.restauradaPeloERPEm = em;
       if (r.finalizadaEm && r.baixaAutoERP?.em === r.finalizadaEm) { r.finalizadaEm='';r.finalizadoPor='';delete r.baixaAutoERP;delete r.arquivadaEm; }
       delete r.erpSaiuDaCarteiraEm;
       r.erpCarteira={aberta:true,em};
@@ -841,7 +843,14 @@ async function gravarBatimento(novo: any) {
   const ultimaCarteiraCompleta = novo.ok !== false && novo.carteiraCompleta === true
     ? novo.em
     : (anterior.ultimaCarteiraCompleta ?? (anterior.carteiraCompleta === true ? anterior.em : undefined));
-  const st = { ...novo, ...(ultimoSucesso ? { ultimoSucesso } : {}), ...(ultimaCarteiraCompleta ? { ultimaCarteiraCompleta } : {}) };
+  /* Todo texto do batimento passa por semCredencial: ele é lido pela ação
+     "saude", e uma etapa nova que guardar a mensagem crua de erro (Entregas
+     guardava) reabria o vazamento da chave. Campo a campo, não no JSON
+     inteiro: a regra da URL comeria as aspas. */
+  const limpar = (v: any): any => typeof v === "string" ? semCredencial(v)
+    : Array.isArray(v) ? v.map(limpar)
+    : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, limpar(x)])) : v;
+  const st = limpar({ ...novo, ...(ultimoSucesso ? { ultimoSucesso } : {}), ...(ultimaCarteiraCompleta ? { ultimaCarteiraCompleta } : {}) });
   await setMeta("sync_status", st);   // a ÚNICA escrita direta; o resto passa por aqui
   return st;
 }
@@ -955,6 +964,16 @@ Deno.serve(async (req: Request) => {
       && String(cracha.papel ?? "") !== "admin") {
     return resp({ error: "Só o administrador configura a integração." }, 403);
   }
+  /* A PORTA GÊMEA DO ERP É DO ADMINISTRADOR. Só as duas acima tinham trava:
+     com qualquer crachá do PCP (inclusive o de toque, que nasce de um nome sem
+     senha) o importarLote reescrevia cliente, CPF/CNPJ e valor de O.S. aberta,
+     e o listarOS entregava documento, telefone, endereço e valor da carteira
+     inteira. O app só chama estas ações na tela de admin; as três de Entregas
+     seguem com a trava admin/pcp delas. Robô (cron) e máquina não passam aqui. */
+  if (cracha && !ehMaquina && !ehCron && String(cracha.papel ?? "") !== "admin" &&
+      !["entreguesMes", "entreguesMeses", "entreguesResumo"].includes(action)) {
+    return resp({ error: "Só o administrador usa a integração com o ERP." }, 403);
+  }
 
   try {
     if (action === "salvarConfig") {
@@ -1031,7 +1050,7 @@ Deno.serve(async (req: Request) => {
           status: q1.get("status"),
         });
       } catch (e) {
-        return resp({ estado: "mudo", ms: Date.now() - inicio, erro: String((e as Error)?.message || e) });
+        return resp({ estado: "mudo", ms: Date.now() - inicio, erro: semCredencial((e as Error)?.message || e) });
       }
     }
 
@@ -1102,7 +1121,8 @@ Deno.serve(async (req: Request) => {
       try {
         os = await varrerMesEntregues(mes, creds.base, creds.publicKey, headers, { prazoMs: 45_000 });
       } catch (e) {
-        const motivo = (e as Error)?.message ?? String(e);
+        // A mensagem de erro de conexão do Deno cita a URL, com a chave no caminho.
+        const motivo = semCredencial((e as Error)?.message ?? String(e));
         if (cache?.em && Number(cache?.v) >= 2) {
           return resp({ ...cache, cache: true, velho: true, avisoErro: motivo });
         }
@@ -1378,7 +1398,7 @@ Deno.serve(async (req: Request) => {
               }
             }
           }
-        } catch (e) { entregues = { ...(entregues || {}), erro: String((e as Error)?.message || e) }; }
+        } catch (e) { entregues = { ...(entregues || {}), erro: semCredencial((e as Error)?.message || e) }; }
 
         // Quanto a rodada inteira levou (e Entregas), para a próxima lentidão ter nome.
         const st = { ...parcial, em: new Date().toISOString(), baixa, entregues, duracoes: { ...parcial.duracoes, entreguesETotalMs: Date.now() - tConciliacao, totalMs: Date.now() - t0 } };

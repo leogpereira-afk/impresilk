@@ -162,21 +162,44 @@ const PERF = (() => {
     const pesos = criteriosValidos(criterios);
     const pessoas = new Map();
     const cobertura = {limpeza:{conferidas:0,voltas:0}, equipamentos:{conferidas:0,voltas:0}};
-    for (const r of registros || []) {
-      if (validar(r.membros)) continue;
-      const limpo = carroDaVolta(r.retornoConf);
-      const equip = sn(r.retornoConf && r.retornoConf.equipamentosOk);
+    /* UMA VOLTA É UMA VIAGEM (performance-3, 25/09/2026). A fila Volta do
+       carro confere dia + carro + equipe uma vez só, e a nota contava cada
+       O.S. da viagem: três serviços pequenos com o carro sujo pesavam triplo,
+       e "cobriu 12 de 40 voltas" contava O.S. Agora as O.S. da mesma volta
+       (r.volta, a chave da fila) viram uma volta, e a fração de cada pessoa
+       nela é a média das frações dela nas O.S. da viagem. Registro sem a
+       chave (revisão fechada antes) é uma volta por O.S., a conta de antes.
+       Baixa do ERP sem viagem (r.voltou === false) não entra no carro: a
+       fila nunca a mostra para conferir, e ela só baixava a cobertura. */
+    const voltas = new Map();
+    (registros || []).forEach((r, i) => {
+      if (validar(r.membros)) return;
+      for (const p of r.membros) {
+        const k = String(p.chave);
+        const x = pessoas.get(k) || {chave:k,nome:p.nome,entregas:0,peso:0,pesoConferido:0,voltas:0,base:0,limpeza:{sim:0,total:0,n:0},equipamentos:{sim:0,total:0,n:0}};
+        const f = p.percentual / 100;
+        x.entregas++; x.peso += f; if (r.confirmado) x.pesoConferido += f;
+        pessoas.set(k, x);
+      }
+      if (r.voltou === false) return;
+      const chave = r.volta ? 'v:' + r.volta : 'r:' + i;
+      voltas.set(chave, [...(voltas.get(chave) || []), r]);
+    });
+    // Respostas diferentes na mesma volta: um "não" vale para a viagem.
+    const daViagem = xs => xs.includes(false) ? false : (xs.includes(true) ? true : null);
+    for (const g of voltas.values()) {
+      const limpo = daViagem(g.map(r => carroDaVolta(r.retornoConf)));
+      const equip = daViagem(g.map(r => sn(r.retornoConf && r.retornoConf.equipamentosOk)));
       cobertura.limpeza.voltas++; cobertura.equipamentos.voltas++;
       if (limpo !== null) cobertura.limpeza.conferidas++;
       if (equip !== null) cobertura.equipamentos.conferidas++;
-      for (const p of r.membros) {
-        const k = String(p.chave);
-        const x = pessoas.get(k) || {chave:k,nome:p.nome,entregas:0,peso:0,pesoConferido:0,limpeza:{sim:0,total:0,n:0},equipamentos:{sim:0,total:0,n:0}};
-        const f = p.percentual / 100;
-        x.entregas++; x.peso += f; if (r.confirmado) x.pesoConferido += f;
+      const frac = new Map();
+      for (const r of g) for (const p of r.membros) frac.set(String(p.chave), (frac.get(String(p.chave)) || 0) + p.percentual / 100);
+      for (const [k, soma] of frac) {
+        const x = pessoas.get(k), f = soma / g.length;
+        x.voltas++; x.base += f;
         if (limpo !== null) { x.limpeza.total += f; x.limpeza.n++; if (limpo) x.limpeza.sim += f; }
         if (equip !== null) { x.equipamentos.total += f; x.equipamentos.n++; if (equip) x.equipamentos.sim += f; }
-        pessoas.set(k, x);
       }
     }
     const lista = [...pessoas.values()];
@@ -203,7 +226,8 @@ const PERF = (() => {
       const imputados = [];
       for (const k of ['limpeza', 'equipamentos']) {
         if (mediaFrac[k] == null || !(x.peso > 0)) { comp[k] = null; continue; }
-        comp[k] = arred((x[k].sim + (x.peso - x[k].total) * mediaFrac[k]) / x.peso * 100);
+        // Base = o peso da pessoa nas VOLTAS (não nas O.S.); sem volta nenhuma, vale a média.
+        comp[k] = x.base > 0 ? arred((x[k].sim + (x.base - x[k].total) * mediaFrac[k]) / x.base * 100) : arred(mediaFrac[k] * 100);
         if (x[k].total === 0) imputados.push(k);
       }
       let soma = 0, usado = 0; const faltam = [];
@@ -257,10 +281,24 @@ function perfLista(){
   return fonte.registros.map(r=>({id:r.id,numero:r.numero,cliente:r.cliente,finalizadaEm:r.dia,equipe:r.membros.map(p=>p.nome),retrabalho:r.retrabalho,_perf:r}));
 }
 function perfOS(id){return perfLista().find(o=>o.id===id) || STORE.getOS(id);}
-function perfFonteTexto(){const f=perfFonteAtual();return f?(f.fechadoEm?'Fechamento preservado · revisão '+f.revisao+' · '+f.fechadoPor+' · '+new Date(f.fechadoEm).toLocaleString('pt-BR'):'Base compartilhada do PCP · consultada em '+new Date(f.consultadoEm).toLocaleString('pt-BR'))+'. '+f.fonte:'Prévia local incompleta. Aguarde a consulta ao servidor antes de apurar.';}
+/* A apuração do servidor é só da gestão do PCP (o pcp-sync recusa os outros
+   papéis). Para montagem e operação a tela era um alerta vermelho permanente
+   e um botão que sempre falhava; agora é uma prévia dita como prévia. */
+function perfConsultaServidor(){return typeof STATE==='undefined' || ['admin','pcp'].includes(String(STATE.user?.papel || ''));}
+// Erro de rede do navegador e tempo esgotado em português; mensagem termina com ponto.
+function perfErroTxt(e){const m=String(e && e.message || '');if(!m || e?.name==='TypeError' || e?.name==='AbortError' || /failed to fetch|load failed|networkerror|network request|abort|timeout|timed out/i.test(m))return 'Sem conexão com o servidor. Tente de novo.';return /[.!?]$/.test(m)?m:m+'.';}
+function perfFonteTexto(){const f=perfFonteAtual();if(!f && !perfConsultaServidor())return 'Prévia do aparelho. A apuração oficial é feita pela gestão do PCP.';return f?(f.fechadoEm?'Fechamento preservado · revisão '+f.revisao+' · '+f.fechadoPor+' · '+new Date(f.fechadoEm).toLocaleString('pt-BR'):'Base compartilhada do PCP · consultada em '+new Date(f.consultadoEm).toLocaleString('pt-BR'))+'. '+f.fonte:'Prévia local incompleta. Aguarde a consulta ao servidor antes de apurar.';}
 function perfFonteHTML(){
  const f=perfFonteAtual(),pendentes=STORE.getQueue?.().length || 0;
- return `<section class="perf-fonte"><h3>Base da apuração e fechamentos</h3><p>${esc(perfFonteTexto())}</p>${pendentes?`<p class="perf-coverage">${pendentes} alterações locais aguardam sincronização. O servidor ainda pode não conter essas alterações.</p>`:''}${perfRemoto.erro?`<p role="alert">${esc(perfRemoto.erro)}</p>`:''}<div class="perf-filtros"><button class="btn-ghost" id="perf-atualizar-fonte" ${perfRemoto.carregando?'disabled':''}>${perfRemoto.carregando?'Consultando servidor…':'Atualizar apuração'}</button><label>Versão da apuração <select id="perf-versao"><option value="">Dados atuais</option>${perfRemoto.fechamentos.map(r=>`<option value="${esc(r.id)}" ${r.id===perfRemoto.selecionado?'selected':''}>Revisão ${r.revisao} · ${esc(r.fechadoEm.slice(0,10))} · ${esc(r.fechadoPor)}</option>`).join('')}</select></label>${perfPodeEditar()?`<button class="btn-primary" id="perf-fechar" ${!f||f.fechadoEm||pendentes||perfRemoto.carregando?'disabled':''}>${perfRemoto.fechamentos.length?'Criar nova revisão':'Fechar período'}</button>`:''}</div>${f?.motivo?`<p>Motivo: ${esc(f.motivo)}</p>`:''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p></section>`;
+ if(!perfConsultaServidor())return `<section class="perf-fonte"><h3>Base da apuração</h3><p>${esc(perfFonteTexto())}</p></section>`;
+ /* Conferir voltas (ou mexer numa O.S.) depois da consulta não muda a nota
+    até nova consulta; sem este aviso parecia que a conferência não contou.
+    Só conta O.S. finalizada no período apurado e mexida por gente: a
+    importação do ERP e um card aberto de outro mês acendiam o aviso a cada
+    hora, e aviso sempre ligado ninguém lê. */
+ const per=periodoOuMes('_fPerf');
+ const consulta=Date.parse(f?.consultadoEm || ''),mudou=!!f && !f.fechadoEm && Number.isFinite(consulta) && (STORE.getAllOS?.() || []).some(o=>o.finalizadaEm && OPERACAO.emIntervalo(o.finalizadaEm,per.de,per.ate) && !/^Mubisys/i.test(String(o.atualizadoPor || '')) && Date.parse(o.atualizadoEm || '')>consulta);
+ return `<section class="perf-fonte"><h3>Base da apuração e fechamentos</h3><p>${esc(perfFonteTexto())}</p>${mudou?'<p class="perf-coverage">Houve mudanças nas O.S. depois desta consulta (voltas conferidas, por exemplo). Toque em Atualizar apuração para a nota contar com elas.</p>':''}${pendentes?`<p class="perf-coverage">${pendentes} alterações locais aguardam sincronização. O servidor ainda pode não conter essas alterações.</p>`:''}${perfRemoto.erro?`<p role="alert">${esc(perfRemoto.erro)}</p>`:''}<div class="perf-filtros"><button class="btn-ghost" id="perf-atualizar-fonte" ${perfRemoto.carregando?'disabled':''}>${perfRemoto.carregando?'Consultando servidor…':'Atualizar apuração'}</button><label>Versão da apuração <select id="perf-versao"><option value="">Dados atuais</option>${perfRemoto.fechamentos.map(r=>`<option value="${esc(r.id)}" ${r.id===perfRemoto.selecionado?'selected':''}>Revisão ${r.revisao} · ${esc(r.fechadoEm.slice(0,10))} · ${esc(r.fechadoPor)}</option>`).join('')}</select></label>${perfPodeEditar()?`<button class="btn-primary" id="perf-fechar" ${!f||f.fechadoEm||pendentes||perfRemoto.carregando?'disabled':''}>${perfRemoto.fechamentos.length?'Criar nova revisão':'Fechar período'}</button>`:''}</div>${f?.motivo?`<p>Motivo: ${esc(f.motivo)}</p>`:''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p></section>`;
 }
 async function perfCarregarFonte(){
  const chave=perfChave(),f=periodoOuMes('_fPerf');
@@ -273,7 +311,7 @@ async function perfCarregarFonte(){
    const [dados,historico]=await Promise.all([STORE.api({action:'performancePeriodo',...f}),STORE.api({action:'performanceFechamentos',...f}),typeof STORE.pullCFG==='function'?STORE.pullCFG().catch(()=>false):null]);
    if(!dados?.completo || !Array.isArray(dados.registros) || !Array.isArray(historico?.fechamentos))throw new Error(dados?.error||historico?.error||'Consulta incompleta. O fechamento permanece indisponível.');
    pedido.dados=dados;pedido.fechamentos=historico.fechamentos;
- }catch(e){pedido.erro=e.message || 'Não foi possível consultar o servidor.';}
+ }catch(e){pedido.erro=perfErroTxt(e);}
  finally{pedido.carregando=false;if(perfRemoto===pedido && perfChave()===chave)renderPerformanceCasa();}
 }
 function perfWireFonte(el){
@@ -281,7 +319,10 @@ function perfWireFonte(el){
  const versao=el.querySelector('#perf-versao');if(versao)versao.onchange=()=>{perfRemoto.selecionado=versao.value;renderPerformanceCasa();};
  const fechar=el.querySelector('#perf-fechar');if(fechar)fechar.onclick=()=>{
    const fonte=perfFonteAtual();if(!fonte || fonte.fechadoEm || STORE.getQueue().length)return;
-   if(!fonte.registros.length || fonte.registros.some(r=>!r.confirmado||r.valor==null))return toast('Confirme as participações e os valores de todas as entregas antes de fechar.','error');
+   // Diz QUAIS travam: com tudo confirmado, uma O.S. sem valor travava o fechamento sem nome.
+   const pend=fonte.registros.filter(r=>!r.confirmado),semValor=fonte.registros.filter(r=>r.valor==null);
+   if(!fonte.registros.length)return toast('Nenhuma entrega no período para fechar.','error');
+   if(pend.length || semValor.length)return toast([pend.length?`${pend.length} ${pend.length===1?'entrega sem participação confirmada':'entregas sem participação confirmada'}`:'',semValor.length?`${semValor.length} sem valor: O.S. ${semValor.slice(0,6).map(r=>r.numero || 's/n').join(', ')}${semValor.length>6?' e outras':''}`:''].filter(Boolean).join('. ')+'. Use o filtro Situação da lista para achar cada uma.','error');
    // Quem fecha sela os pesos do SERVIDOR. Se o aparelho mostra outros (alguém
    // mudou em outro tablet), o ranking visto não é o que seria selado.
    if(fonte.criterios && JSON.stringify(PERF.criteriosValidos(fonte.criterios))!==JSON.stringify(perfCriterios())){perfRemoto.dados=null;perfRemoto.tentado=false;renderPerformanceCasa();return toast('Os pesos da nota mudaram. Atualize e confira o ranking antes de fechar.','error');}
@@ -296,7 +337,7 @@ function perfWireFonte(el){
      }catch(e){d.querySelector('#perf-fechar-erro').textContent=e.message;}finally{btn.disabled=false;}
    };
  };
- if(typeof STORE.api==='function' && (perfRemoto.chave!==perfChave() || !perfRemoto.tentado))void perfCarregarFonte();
+ if(typeof STORE.api==='function' && perfConsultaServidor() && (perfRemoto.chave!==perfChave() || !perfRemoto.tentado))void perfCarregarFonte();
 }
 
 const PERF_EMBLEMAS = ['🦅','🚀','🎯','🛡️','⚡','🦁','🏔️','🤝'];
@@ -337,7 +378,9 @@ function perfRegistro(os,c) {
   const salvo = c.participacoes.find(p=>p.id===os.id);
   // Um registro confirmado mantém a composição e o nome da época.
   const membros = salvo ? salvo.membros : PERF.iguais(perfEquipeOS(os));
-  return {...(salvo || {}),id:os.id,os,membros,valor:valorDaOS(os),confirmado:!!salvo && !PERF.validar(membros),retornoConf:os.retornoConf || null};
+  // voltou e volta: os mesmos da base do servidor (perfFonte) e da fila Volta do carro.
+  // Conferido com typeof: aba com operacao.js antigo em cache não pode derrubar a tela.
+  return {...(salvo || {}),id:os.id,os,membros,valor:valorDaOS(os),confirmado:!!salvo && !PERF.validar(membros),retornoConf:os.retornoConf || null,voltou:typeof OPERACAO.voltou==='function'?OPERACAO.voltou(os):undefined,volta:typeof OPERACAO.chaveDaVolta==='function'?OPERACAO.chaveDaVolta(os):''};
 }
 async function perfSalvar(c) {
   const cfg = STORE.getCFG(); cfg.performancePCP = c; STORE.saveCFG(cfg);
@@ -592,8 +635,10 @@ function perfRankingPessoasHTML(regs, c) {
     const v = p.componentes[k];
     const media = (p.imputados || []).includes(k);
     const n = k === 'producao' ? null : p[k].n;
-    const dica = k === 'producao' ? '' : ` · ${n} de ${p.entregas} ${p.entregas === 1 ? 'volta conferida' : 'voltas conferidas'}${n < p.entregas && v != null ? '; as outras contam pela média do período' : ''}`;
-    return `<span class="perf-crit ${v == null ? 'sem' : ''} ${media ? 'media' : ''}" title="${esc(PERF_CRIT_ROTULO[k])} · peso ${av.pesos[k]}%${dica}">${esc(PERF_CRIT_ROTULO[k])} <b>${v == null ? 'fora' : fmt(v)}</b>${media ? '<i>média</i>' : (n != null && v != null && n < p.entregas ? `<i>${n}/${p.entregas}</i>` : '')}</span>`;
+    // Voltas da pessoa, não O.S.: três serviços na mesma viagem são uma volta.
+    const nv = p.voltas ?? p.entregas;
+    const dica = k === 'producao' ? '' : ` · ${n} de ${nv} ${nv === 1 ? 'volta conferida' : 'voltas conferidas'}${n < nv && v != null ? '; as outras contam pela média do período' : ''}`;
+    return `<span class="perf-crit ${v == null ? 'sem' : ''} ${media ? 'media' : ''}" title="${esc(PERF_CRIT_ROTULO[k])} · peso ${av.pesos[k]}%${dica}">${esc(PERF_CRIT_ROTULO[k])} <b>${v == null ? 'fora' : fmt(v)}</b>${media ? '<i>média</i>' : (n != null && v != null && n < nv ? `<i>${n}/${nv}</i>` : '')}</span>`;
   }).join('');
   const detalhe = p => medida === 'nota'
     ? `<div class="perf-crits">${partes(p)}</div>${(p.imputados || []).length ? `<small class="perf-parcial">sem volta conferida em ${p.imputados.map(k => PERF_CRIT_ROTULO[k].toLowerCase()).join(' e ')}: usa a média do período</small>` : ''}`
@@ -788,7 +833,10 @@ function performanceEquipesHTML() {
   const regs=perfUnirPessoas(lista.map(o=>perfRegistro(o,c))), resumo=PERF.resumir(regs), apurado=PERF.resumir(regs.filter(r=>r.confirmado));
   const confirmado=regs.filter(r=>r.confirmado).length, semEquipe=regs.filter(r=>!r.membros.length).length;
   const modo=STATE._perfModo || 'pessoas', pesquisa=STATE._perfBusca || '';
-  const linhas=regs;
+  /* Ordem fixa (entrega mais recente primeiro, depois o número): a lista vinha
+     na ordem do banco (id sorteado) ou do cache, e cada confirmação a
+     reembaralhava; a próxima linha fugia do dedo. */
+  const linhas=[...regs].sort((a,b)=>String(diaEntrega(b.os)||'').localeCompare(String(diaEntrega(a.os)||'')) || String(a.os.numero||'').localeCompare(String(b.os.numero||''),'pt-BR',{numeric:true}));
   const cards=(modo==='equipes'?resumo.equipes:resumo.pessoas).map(p=>{
     const cf=(modo==='equipes'?apurado.equipes:apurado.pessoas).find(x=>x.chave===p.chave);
     const valor=!cf?'Aguardando conferência':cf.semValor===cf.os?'Valor não disponível':dinheiroCasa(cf.valor)+(cf.semValor?' · parcial':'');
@@ -808,7 +856,7 @@ function performanceEquipesHTML() {
     <details class="perf-method"><summary>Como interpretar os indicadores</summary><p>Entregas conta as O.S. em que a pessoa participou; não some essa coluna entre pessoas. O.S. equivalentes divide cada entrega pelos percentuais, sem duplicação. Divisões sugeridas ainda não foram confirmadas. Valores rateados não são faturamento pessoal nem bônus. Qualidade, complexidade e retrabalho precisam de revisão. ${esc(perfFonteTexto())}</p></details>
     ${modo==='equipes' ? perfRankingEquipesHTML(regs, c) : perfRankingPessoasHTML(regs, c)}
     ${''/* Equipes são criadas, nomeadas e editadas no ranking de equipes (vista Equipes). */}
-    <section class="perf-entregas"><h3>Conferência por entrega</h3><div class="perf-filtros"><label>Situação <select id="perf-situacao"><option value="">Todas</option><option value="pendente">A conferir</option><option value="confirmada">Confirmadas</option><option value="sem-equipe">Sem equipe</option><option value="invalida">Participação inconsistente</option></select></label><button class="btn-ghost" id="perf-limpar">Limpar filtros da lista</button><span id="perf-recorte" role="status"></span></div><label>Buscar O.S., cliente ou pessoa · filtra a lista abaixo <input id="perf-busca-os" type="search" value="${esc(pesquisa)}" placeholder="Digite para localizar"></label><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / Cliente</th><th>Data</th><th>Equipe e participação</th><th>Participação e volta</th><th></th></tr></thead><tbody>${linhas.map(r=>`<tr data-perf-id="${esc(r.id)}"><td><button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button><small class="bloco">${esc(r.os.cliente)}</small></td><td>${esc(diaEntrega(r.os).split('-').reverse().join('/'))}</td><td>${r.equipeNome?`<strong>${esc(r.emblema)} ${esc(r.equipeNome)}</strong><br>`:''}${r.membros.map(p=>`${esc(p.nome)} · ${perfFormato(p.percentual)}%`).join('<br>') || 'Sem equipe'}</td><td><span class="badge">${r.confirmado?'Confirmada':!r.membros.length?'Sem equipe':PERF.validar(r.membros)?'Participação inconsistente':'Divisão sugerida'}</span>${r.os.retrabalho?'<small class="bloco">Serviço de retrabalho</small>':''}<small class="bloco perf-volta">${perfVoltaTxt(r.retornoConf)}</small></td><td>${perfPodeEditar()&&!perfFonteAtual()?.fechadoEm?`<button class="btn-ghost" data-perf-part="${esc(r.id)}">Conferir</button>`:''}</td></tr>`).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div></section></section>`;
+    <section class="perf-entregas"><h3>Conferência por entrega</h3><div class="perf-filtros"><label>Situação <select id="perf-situacao"><option value="">Todas</option><option value="pendente">A conferir</option><option value="confirmada">Confirmadas</option><option value="sem-equipe">Sem equipe</option><option value="invalida">Participação inconsistente</option>${perfPodeEditar()?'<option value="sem-valor">Sem valor</option>':''}</select></label><button class="btn-ghost" id="perf-limpar">Limpar filtros da lista</button><span id="perf-recorte" role="status"></span></div><label>Buscar O.S., cliente ou pessoa · filtra a lista abaixo <input id="perf-busca-os" type="search" value="${esc(pesquisa)}" placeholder="Digite para localizar"></label><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / Cliente</th><th>Data</th><th>Equipe e participação</th><th>Participação e volta</th><th></th></tr></thead><tbody>${linhas.map(r=>`<tr data-perf-id="${esc(r.id)}"><td><button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button><small class="bloco">${esc(r.os.cliente)}</small></td><td>${esc(diaEntrega(r.os).split('-').reverse().join('/'))}</td><td>${r.equipeNome?`<strong>${esc(r.emblema)} ${esc(r.equipeNome)}</strong><br>`:''}${r.membros.map(p=>`${esc(p.nome)} · ${perfFormato(p.percentual)}%`).join('<br>') || 'Sem equipe'}</td><td><span class="badge">${r.confirmado?'Confirmada':!r.membros.length?'Sem equipe':PERF.validar(r.membros)?'Participação inconsistente':'Divisão sugerida'}</span>${r.os.retrabalho?'<small class="bloco">Serviço de retrabalho</small>':''}<small class="bloco perf-volta">${perfVoltaTxt(r.retornoConf)}</small>${perfPodeEditar()?`<small class="bloco">${r.valor==null?'Sem valor':esc(dinheiroCasa(r.valor))}</small>`:''}</td><td>${perfPodeEditar()&&!perfFonteAtual()?.fechadoEm?`<button class="btn-ghost" data-perf-part="${esc(r.id)}">Conferir</button>`:''}</td></tr>`).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div></section></section>`;
 }
 function wirePerformanceEquipes(el) {
   perfWireFonte(el);
@@ -837,7 +885,7 @@ function wirePerformanceEquipes(el) {
       const rv=PERF.comEquipes([r],cfgAtual.equipes,perfOpcoesEquipe())[0];
       const grupo=rv.equipeId || 'avulsa:'+PERF.composicao(r.membros);
       const status=!r.membros.length?'sem-equipe':PERF.validar(r.membros)?'invalida':r.confirmado?'confirmada':'pendente';
-      const ok=(!situacao.value || (situacao.value==='pendente'?!r.confirmado:status===situacao.value)) && PERF.incluiPessoa(r.membros,STATE._perfPessoa) && (!STATE._perfGrupo || grupo===STATE._perfGrupo) && normCasa(tr.textContent).includes(normCasa(busca.value));
+      const ok=(!situacao.value || (situacao.value==='pendente'?!r.confirmado:situacao.value==='sem-valor'?r.valor==null:status===situacao.value)) && PERF.incluiPessoa(r.membros,STATE._perfPessoa) && (!STATE._perfGrupo || grupo===STATE._perfGrupo) && normCasa(tr.textContent).includes(normCasa(busca.value));
       tr.hidden=!ok;if(ok)n++;
     });
     el.querySelector('#perf-recorte').textContent=n+(n===1?' entrega na lista':' entregas na lista')+(STATE._perfPessoa || STATE._perfGrupo?' · participante/equipe selecionado':'')+'. Totais dos cards: período completo.';

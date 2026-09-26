@@ -10,7 +10,8 @@ test('montagem grava data completa e autor real sem modificar equipe ou origem',
  const e=await edge('pcp-sync',{pcp_registros:[row('1',{numero:'1',equipe:['Ana'],cliente:'Cliente',saidaEm:''})]});
  const r=await e.call({action:'upsert',os:{id:'1',rev:1,cliente:'Forjado',equipe:['Outra'],horaSaida:'23:30',saidaEm:'2026-09-19T23:30:00-03:00',atualizadoPor:'Outro'}},{nome:'Ana',papel:'montagem',montagemIndividual:true});
  assert.equal(r.status,200);assert.equal(r.os.saidaEm,'2026-09-19T23:30:00-03:00');assert.equal(r.os.saidaPor,'Ana');assert.equal(r.os.cliente,'Cliente');assert.deepEqual(r.os.equipe,['Ana']);
- const negado=await e.call({action:'upsert',os:{id:'1',rev:2}},{nome:'Outra',papel:'montagem'});assert.equal(negado.status,403);
+ // 422, não 403: o 403 tira o envio da fila do celular e o check-in some calado.
+ const negado=await e.call({action:'upsert',os:{id:'1',rev:2}},{nome:'Outra',papel:'montagem'});assert.equal(negado.status,422);assert.match(negado.error,/não está mais na sua equipe/);
 });
 test('montagem lista só suas O.S.; reatribuição incremental vira remoção do cache',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[row('1',{equipe:['Ana']}),row('2',{equipe:['Outra']})]});
@@ -331,19 +332,25 @@ test('valores das O.S.: a O.S. número 1001 em diante também recebe valor (o ba
 const toque={nome:'Ana',papel:'montagem',montagemIndividual:true};
 const pronta=(extra={})=>row('1',{numero:'1',tipo:'externo',cliente:'Cliente',equipe:['Ana'],liberadoPCP:true,confirmacao:'Confirmado',
   itens:[{item:'1',descricao:'Fachada',medidas:'3x1',valorUnit:'900',statusInst:''},{item:'2',descricao:'Placa',valorUnit:'100',statusInst:''}],...extra});
-test('toque no nome: finalizar sem a foto do serviço pronto é recusado e nada é gravado',async()=>{
+/* 25/09/2026: a regra ferida não recusa mais o envio inteiro do espelho (o 422
+   prendia check-in, fotos e itens na fila do celular). Só a finalização fica
+   de fora, com aviso; o resto grava. */
+test('toque no nome: finalizar sem a foto do serviço pronto não finaliza, e o resto do trabalho grava com aviso',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[pronta()]});
- const r=await e.call({action:'upsert',os:{id:'1',rev:1,finalizadaEm:'2026-09-23T15:00:00-03:00',finalizadoPor:'Ana',horaRetorno:'15:00',retornoEm:'2026-09-23T15:00:00'}},toque);
- assert.equal(r.status,422);assert.match(r.error,/foto do serviço concluído/);
- assert.equal(e.db.pcp_registros[0].registro.finalizadaEm,undefined);
+ const r=await e.call({action:'upsert',os:{id:'1',rev:1,finalizadaEm:'2026-09-23T15:00:00-03:00',finalizadoPor:'Ana',horaRetorno:'15:00',retornoEm:'2026-09-23T15:00:00',obsTecnicas:'parafuso extra'}},toque);
+ assert.equal(r.status,200);assert.match(r.avisos.join(' '),/foto do serviço concluído/);
+ const g=e.db.pcp_registros[0].registro;
+ assert.equal(g.finalizadaEm,undefined);assert.equal(g.finalizadoPor,undefined);assert.equal(g.obsTecnicas,'parafuso extra');
 });
-test('toque no nome: não finaliza O.S. que o PCP não liberou nem a que o cliente não confirmou',async()=>{
+test('toque no nome: não finaliza O.S. que o PCP não liberou nem a que o cliente não confirmou, mas grava as fotos',async()=>{
  const os={id:'1',rev:1,finalizadaEm:'2026-09-23T15:00:00-03:00',fotosRetornoIds:['f1'],horaRetorno:'15:00',retornoEm:'2026-09-23T15:00:00'};
  let e=await edge('pcp-sync',{pcp_registros:[pronta({liberadoPCP:false})]});
- let r=await e.call({action:'upsert',os},toque);assert.equal(r.status,422);assert.match(r.error,/PCP/);
+ let r=await e.call({action:'upsert',os},toque);assert.equal(r.status,200);assert.match(r.avisos.join(' '),/PCP ainda não liberou/);
+ assert.equal(e.db.pcp_registros[0].registro.finalizadaEm,undefined);assert.deepEqual(e.db.pcp_registros[0].registro.fotosRetornoIds,['f1']);
  e=await edge('pcp-sync',{pcp_registros:[pronta({confirmacao:''})]});
- r=await e.call({action:'upsert',os},toque);assert.equal(r.status,422);assert.match(r.error,/cliente/);
+ r=await e.call({action:'upsert',os},toque);assert.equal(r.status,200);assert.match(r.avisos.join(' '),/cliente ainda não confirmou/);
  assert.equal(e.db.pcp_registros[0].registro.finalizadaEm,undefined);
+ assert.equal(r.os.finalizadaEm,undefined,'a resposta volta sem a finalização: o celular vê que não fechou');
 });
 test('toque no nome: com foto e retorno a finalização chega ao banco, com o autor do crachá e os itens',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[pronta()]});
@@ -361,11 +368,18 @@ test('toque no nome: com foto e retorno a finalização chega ao banco, com o au
  assert.equal(g.itens[0].statusInst,'ok');assert.equal(g.itens[0].pronto,true);assert.equal(g.itens[0].valorUnit,'900');
  assert.equal(g.itens[1].statusInst,'retrab');assert.equal(g.itens[1].motivo,'Medida errada');assert.equal(g.itens[1].fotoProbId,'fp');
 });
-test('toque no nome: item que mudou de lugar não recebe a marca do outro',async()=>{
+test('toque no nome: item que mudou de lugar recebe a própria marca, nunca a do vizinho',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[pronta()]});
  const r=await e.call({action:'upsert',os:{id:'1',rev:1,itens:[{item:'2',descricao:'Placa',statusInst:'retrab'},{item:'1',descricao:'Fachada',statusInst:'ok'}]}},toque);
  assert.equal(r.status,200);
- const g=e.db.pcp_registros[0].registro;assert.equal(g.itens[0].statusInst,'');assert.equal(g.itens[1].statusInst,'');
+ const g=e.db.pcp_registros[0].registro;assert.equal(g.itens[0].statusInst,'ok');assert.equal(g.itens[1].statusInst,'retrab');
+});
+test('toque no nome: o PCP corrigiu a descrição do item com a equipe na rua; a marca vai pelo número, e a que não acha item vira aviso',async()=>{
+ const e=await edge('pcp-sync',{pcp_registros:[pronta({itens:[{item:'1',descricao:'Fachada ACM',statusInst:''},{item:'2',descricao:'Placa',statusInst:''}]})]});
+ const r=await e.call({action:'upsert',os:{id:'1',rev:1,itens:[{item:'1',descricao:'Fachada',statusInst:'retrab',motivo:'Descolou'},{item:'2',descricao:'Placa',statusInst:'ok'},{item:'9',descricao:'Sumiu',statusInst:'ok'}]}},toque);
+ assert.equal(r.status,200);
+ const g=e.db.pcp_registros[0].registro;assert.equal(g.itens[0].statusInst,'retrab');assert.equal(g.itens[0].motivo,'Descolou');assert.equal(g.itens[0].descricao,'Fachada ACM');
+ assert.equal(g.itens[1].statusInst,'ok');assert.equal(g.itens.length,2);assert.match(r.avisos.join(' '),/item 9 não foi gravada/);
 });
 test('toque no nome: não reabre nem troca o autor de O.S. já finalizada',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[pronta({finalizadaEm:'2026-09-23T10:00:00Z',finalizadoPor:'Gestor',fotosRetornoIds:['f0'],retornoEm:'2026-09-23T09:00:00'})]});
@@ -402,4 +416,105 @@ test('volta do carro: mudar só o "arrumado" é conferência nova e troca o auto
  await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, retornoConf:{...antes, carroArrumado:'nao'}}}, {papel:'admin', nome:'Léo', sub:'leo'});
  const rc = e.db.pcp_registros[0].registro.retornoConf;
  assert.equal(rc.carroArrumado, 'nao'); assert.equal(rc.por, 'Léo'); assert.notEqual(rc.em, antes.em);
+});
+/* LIMPEZA DO CARRO REGISTRADA PELA EQUIPE (voltaEquipe, 25/09/2026). O espelho
+   declara como o carro voltou; só quem entra pelo nome escreve, o autor é o
+   crachá, e a nota continua lendo só a conferência do PCP (retornoConf). */
+const declarada = (extra={}) => ({carroLimpo:'sim', carroArrumado:'sim', equipamentosOk:'sim', semAvaria:'sim', obs:'', fotos:['fc'],
+  dia:'2026-09-24', veiculo:'Strada', por:'Ana', porId:'Ana', em:'2026-09-24T21:00:00.000Z', recebidoEm:'2026-09-24T21:00:05.000Z', ...extra});
+test('limpeza do carro: equipe grava a declaração; autor do crachá; hora do futuro trocada; fotos no teto', async () => {
+ const e = await edge('pcp-sync', {pcp_registros:[pronta({retornoEm:'2026-09-24T17:00:00'})]});
+ const r = await e.call({action:'upsert', os:{id:'1', rev:1, voltaEquipe:{carroLimpo:'sim', carroArrumado:'nao', equipamentosOk:'sim', semAvaria:'sim',
+   obs:'x'.repeat(400), fotos:['f1','f2','f3','f4','f5','',3,'../x'], dia:'2026-09-24', veiculo:'Strada', por:'Outro', porId:'outro', em:'2099-01-01T00:00:00Z', recebidoEm:'2020-01-01'}}}, toque);
+ assert.equal(r.status, 200, JSON.stringify(r));
+ const ve = e.db.pcp_registros[0].registro.voltaEquipe;
+ assert.equal(ve.por, 'Ana'); assert.equal(ve.porId, 'Ana');
+ assert.notEqual(ve.em, '2099-01-01T00:00:00Z'); assert.ok(Math.abs(Date.now() - Date.parse(ve.em)) < 60000);
+ assert.equal(ve.fotos.join(), 'f1,f2,f3,f4'); assert.equal(ve.obs.length, 300);
+ assert.ok(ve.recebidoEm && ve.recebidoEm !== '2020-01-01');
+ assert.equal(ve.carroArrumado, 'nao'); assert.equal(ve.dia, '2026-09-24'); assert.equal(ve.veiculo, 'Strada');
+ assert.equal(r.os.voltaEquipe.por, 'Ana', 'a resposta devolve ao aparelho o que ficou gravado');
+ // Registrou offline às 18h: a hora do aparelho vale (no passado).
+ await e.call({action:'upsert', os:{id:'1', rev:2, voltaEquipe:{...ve, fotos:[...ve.fotos], carroArrumado:'sim', em:'2026-09-24T21:05:00.000Z'}}}, toque);
+ assert.equal(e.db.pcp_registros[0].registro.voltaEquipe.em, '2026-09-24T21:05:00.000Z');
+});
+test('limpeza do carro: equipe não escreve a nota nem apaga a declaração com envio vazio', async () => {
+ const antes = declarada();
+ const e = await edge('pcp-sync', {pcp_registros:[pronta({voltaEquipe:antes})]});
+ const r = await e.call({action:'upsert', os:{id:'1', rev:1, retornoConf:{carroLimpo:'sim', carroArrumado:'sim', equipamentosOk:'sim', semAvaria:'sim'}, voltaEquipe:{}}}, toque);
+ assert.equal(r.status, 200);
+ let g = e.db.pcp_registros[0].registro;
+ assert.equal(g.retornoConf, undefined, 'a conferência que conta na nota é do PCP');
+ assert.equal(JSON.stringify(g.voltaEquipe), JSON.stringify(antes), '{} não é declaração');
+ await e.call({action:'upsert', os:{id:'1', rev:2, obsTecnicas:'aparelho com app antigo'}}, toque);
+ g = e.db.pcp_registros[0].registro;
+ assert.equal(JSON.stringify(g.voltaEquipe), JSON.stringify(antes), 'ausência não apaga');
+ await e.call({action:'upsert', os:{id:'1', rev:3, voltaEquipe:{carroLimpo:'', carroArrumado:'', equipamentosOk:'', semAvaria:'', por:'Outro'}}}, toque);
+ assert.equal(JSON.stringify(e.db.pcp_registros[0].registro.voltaEquipe), JSON.stringify(antes), 'tudo em branco não apaga');
+});
+test('limpeza do carro: gestão, conta de grupo e máquina salvando a O.S. não apagam nem forjam a declaração', async () => {
+ const antes = declarada();
+ let e = await edge('pcp-sync', {pcp_registros:[volta({voltaEquipe:antes})], equipe_contas:[{sistema:'pcp', usuario:'montagem', ativo:true}]});
+ await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, retornoConf:{carroLimpo:'sim'}, voltaEquipe:{carroLimpo:'nao', carroArrumado:'nao', equipamentosOk:'nao', semAvaria:'nao', por:'Gestor'}}}, {papel:'pcp', nome:'Gestor'});
+ assert.equal(JSON.stringify(e.db.pcp_registros[0].registro.voltaEquipe), JSON.stringify(antes), 'gestão não reescreve');
+ assert.equal(e.db.pcp_registros[0].registro.retornoConf.carroLimpo, 'sim', 'e a conferência dela entra');
+ const {voltaEquipe, ...copiaVelha} = e.db.pcp_registros[0].registro;
+ await e.call({action:'upsert', os:{...copiaVelha, obsPCP:'nota'}}, {papel:'pcp', nome:'Gestor'});
+ assert.equal(JSON.stringify(e.db.pcp_registros[0].registro.voltaEquipe), JSON.stringify(antes), 'cópia velha sem o campo não apaga');
+ await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, voltaEquipe:null}}, {papel:'montagem', nome:'Montagem', sub:'montagem'});
+ assert.equal(JSON.stringify(e.db.pcp_registros[0].registro.voltaEquipe), JSON.stringify(antes), 'conta de grupo não apaga');
+ await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, voltaEquipe:{carroLimpo:'nao'}}});
+ assert.equal(JSON.stringify(e.db.pcp_registros[0].registro.voltaEquipe), JSON.stringify(antes), 'máquina não reescreve');
+ e = await edge('pcp-sync', {pcp_registros:[volta({})]});
+ await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, voltaEquipe:declarada({por:'Gestor'})}}, {papel:'pcp', nome:'Gestor'});
+ assert.equal(e.db.pcp_registros[0].registro.voltaEquipe, undefined, 'gestão não forja declaração da equipe');
+});
+test('limpeza do carro: depois que o PCP conferiu, a declaração não muda', async () => {
+ const rc = {carroLimpo:'sim', carroArrumado:'sim', equipamentosOk:'sim', semAvaria:'sim', obs:'', fotos:[], por:'Gestor', porId:'g', em:'2026-09-24T22:00:00Z'};
+ let e = await edge('pcp-sync', {pcp_registros:[pronta({retornoConf:rc})]});
+ const nova = {carroLimpo:'nao', carroArrumado:'nao', equipamentosOk:'nao', semAvaria:'nao', fotos:['fc']};
+ const r = await e.call({action:'upsert', os:{id:'1', rev:1, voltaEquipe:nova}}, toque);
+ assert.equal(r.status, 200, 'sem 422 que trave a fila do aparelho');
+ assert.equal(e.db.pcp_registros[0].registro.voltaEquipe, undefined);
+ assert.equal(e.db.pcp_registros[0].registro.retornoConf.por, 'Gestor');
+ const antes = declarada();
+ e = await edge('pcp-sync', {pcp_registros:[pronta({retornoConf:rc, voltaEquipe:antes})]});
+ await e.call({action:'upsert', os:{id:'1', rev:1, voltaEquipe:nova}}, toque);
+ assert.equal(JSON.stringify(e.db.pcp_registros[0].registro.voltaEquipe), JSON.stringify(antes));
+});
+test('limpeza do carro: O.S. finalizada aceita a declaração e continua finalizada com o mesmo autor', async () => {
+ const e = await edge('pcp-sync', {pcp_registros:[pronta({finalizadaEm:'2026-09-23T10:00:00Z', finalizadoPor:'Gestor', fotosRetornoIds:['f0'], retornoEm:'2026-09-23T09:00:00'})]});
+ const r = await e.call({action:'upsert', os:{id:'1', rev:1, finalizadaEm:'2026-09-23T10:00:00Z', finalizadoPor:'Ana',
+   voltaEquipe:{carroLimpo:'sim', carroArrumado:'sim', equipamentosOk:'sim', semAvaria:'sim', fotos:['fc'], dia:'2026-09-23', veiculo:'Strada', em:'2026-09-23T21:00:00.000Z'}}}, toque);
+ assert.equal(r.status, 200, JSON.stringify(r));
+ const g = e.db.pcp_registros[0].registro;
+ assert.equal(g.finalizadaEm, '2026-09-23T10:00:00Z'); assert.equal(g.finalizadoPor, 'Gestor'); assert.equal(g.reabertaEm, undefined);
+ assert.equal(g.voltaEquipe.por, 'Ana'); assert.equal(g.voltaEquipe.em, '2026-09-23T21:00:00.000Z');
+});
+test('limpeza do carro: o crachá de toque abre a foto do carro da volta, e só a da sua equipe', async () => {
+ const e = await edge('pcp-sync', {pcp_registros:[pronta({voltaEquipe:declarada()}), row('2', {numero:'2', equipe:['Outra'], voltaEquipe:declarada({fotos:['de-outra-os']})})]});
+ assert.notEqual((await e.call({action:'getPhoto', fileId:'fc'}, toque)).status, 403);
+ assert.equal((await e.call({action:'getPhoto', fileId:'de-outra-os'}, toque)).status, 403);
+ assert.equal((await e.call({action:'deletePhoto', fileId:'fc'}, toque)).status, 403, 'apagar tiraria a foto das outras O.S. da volta');
+});
+test('limpeza do carro: a nota ignora a declaração da equipe', async () => {
+ const ve = declarada({carroLimpo:'nao', carroArrumado:'nao', equipamentosOk:'nao', semAvaria:'nao'});
+ const e = await edge('pcp-sync', {pcp_registros:[row('1', {numero:'1', tipo:'externo', cliente:'C', finalizadaEm:'2026-09-10T14:00:00Z', equipe:['Ana'], valorTotal:100, voltaEquipe:ve})], painel_ordens:[]});
+ const r = await e.call({action:'performancePeriodo', de:'2026-09-01', ate:'2026-09-19'}, {papel:'pcp', nome:'Gestor'});
+ assert.equal(r.status, 200, JSON.stringify(r));
+ assert.equal(r.registros.length, 1);
+ assert.equal(r.registros[0].retornoConf, null, 'sem conferência do PCP, o critério fica "não conferido"');
+ assert.equal('voltaEquipe' in r.registros[0], false);
+ assert.doesNotMatch(JSON.stringify(r.registros), /voltaEquipe/);
+});
+test('limpeza do carro: as perguntas do servidor são as mesmas da tela (lista copiada falha calada)', async () => {
+ const fs = require('node:fs'), path = require('node:path');
+ const regras = await import('../supabase/functions/_shared/pcp-integridade.mjs');
+ const daTela = require('../operacao.js').PERGUNTAS_VOLTA.join();
+ assert.equal(regras.PERGUNTAS_VOLTA.join(), daTela);
+ assert.ok(regras.CAMPOS_MONTAGEM.has('voltaEquipe'), 'sem isto o crachá de toque descarta a limpeza calado');
+ const src = fs.readFileSync(path.join(__dirname, '../supabase/functions/pcp-sync/index.ts'), 'utf8');
+ const copias = [...src.matchAll(/\bPERGUNTAS\s*=\s*\[([^\]]*)\]/g)].map(m => m[1].replace(/["'\s]/g, ''));
+ assert.ok(copias.length >= 2, 'as listas da conferência no pcp-sync');
+ for (const c of copias) assert.equal(c, daTela);
 });

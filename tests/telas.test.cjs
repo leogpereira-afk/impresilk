@@ -251,7 +251,7 @@ test('retrabalho sem medição não se apresenta como zero; taxa tem coorte expl
 test('finalização externa exige evidência ou exceção escrita pela gestão',()=>{
  const t=tela([]);
  const base={tipo:'externo',liberadoPCP:true,confirmacao:'Confirmado',embarqueConferidoPor:'A',produtosConferidosPor:'A',ferramentasConferidas:true,carroLiberado:true,instalacaoOK:true,conferidoPor:'A',fotosCheckinIds:['f']};
- assert.match(t.run(`validarFinalizacao(${JSON.stringify(base)}).join(',')`),/foto do serviço concluído/);
+ assert.match(t.run(`validarFinalizacao(${JSON.stringify(base)}).join(',')`),/foto de retorno \(serviço pronto\)/);
  assert.equal(t.run(`validarFinalizacao(${JSON.stringify({...base,justificativaConclusao:'Cliente não permitiu fotografar o ambiente.'})}).length`),0);
 });
 
@@ -259,22 +259,26 @@ test('finalização externa exige evidência ou exceção escrita pela gestão',
    pedir a foto do serviço pronto." O botão do espelho tem de pedir o que o
    servidor exige (validarConclusao): sem isso o instalador via "finalizada" e
    a O.S. ficava presa na fila do aparelho com um 422. */
-function espelho(os) {
-  const nodes=new Map(), toasts=[], salvas=[];
+function espelho(os, lista=[]) {
+  const nodes=new Map(), toasts=[], salvas=[], fila=[];
   function node(sel) {
-    if (!nodes.has(sel)) nodes.set(sel,{innerHTML:'',textContent:'',value:'',querySelector:node,querySelectorAll:()=>[],setAttribute(){},classList:{toggle(){},add(){},remove(){}}});
+    // classList registra as chamadas: a trava os-locked é a armadilha da limpeza do carro.
+    if (!nodes.has(sel)) { const ops=[]; nodes.set(sel,{innerHTML:'',textContent:'',value:'',querySelector:node,querySelectorAll:()=>[],setAttribute(){},
+      classList:{ops,toggle(c,v){ops.push(['toggle',c,v]);},add(c){ops.push(['add',c]);},remove(c){ops.push(['remove',c]);}}}); }
     return nodes.get(sel);
   }
   const ctx=vm.createContext({console,Date,document:{querySelector:node,querySelectorAll:()=>[],addEventListener(){}},window:{},
     localStorage:{getItem:()=>null,setItem(){}},
-    STORE:{getCFG:()=>({}),getAllOS:()=>[],saveOS:o=>salvas.push(JSON.parse(JSON.stringify(o))),pullPhoto:async()=>null,
+    STORE:{getCFG:()=>({}),getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id)||null,getQueue:()=>fila,pushPhoto:async()=>'fc',
+      saveOS:o=>salvas.push(JSON.parse(JSON.stringify(o))),pullPhoto:async()=>null,
       carimbarMomento:(o,h,c)=>{const m=String(o[h]||'').match(/^(\d{1,2}):(\d{2})/);if(m)o[c]=`2026-09-23T${m[1].padStart(2,'0')}:${m[2]}:00`;}},
-    setTimeout(){},mostrarCelebracao(){}});
+    // confirm: o Finalizar pergunta antes (só a gestão reabre); aqui a resposta é sim.
+    setTimeout(){},mostrarCelebracao(){},confirm:()=>true});
   vm.runInContext(fs.readFileSync(path.join(root,'operacao.js'),'utf8'),ctx);
   vm.runInContext(fs.readFileSync(path.join(process.env.PCP_BASELINE || root,'equipe.js'),'utf8'),ctx);
   vm.runInContext('toast=(m,t)=>__toasts.push(m); fraseAleatoria=()=>""; EQ.instalador="Ana";',Object.assign(ctx,{__toasts:toasts}));
-  ctx.__os=os; vm.runInContext('_draft=__os; renderModal()',ctx);
-  return {node,toasts,salvas,run:c=>vm.runInContext(c,ctx)};
+  if (os) { ctx.__os=os; vm.runInContext('_draft=__os; renderModal()',ctx); }
+  return {node,toasts,salvas,fila,run:c=>vm.runInContext(c,ctx)};
 }
 const naRua={id:'1',numero:'300',tipo:'externo',equipe:['Ana'],liberadoPCP:true,confirmacao:'Confirmado',instalacao:{data:'2026-09-23',periodo:'Manhã'},
   horaSaida:'08:00',instalacaoOK:true,fotosCheckinIds:['c1'],itens:[{item:'1',descricao:'Fachada'}]};
@@ -335,9 +339,128 @@ test('volta do carro: salvar a mesma resposta de novo não regrava nem troca o a
   assert.equal(t.run('__salvas[0].retornoConf.por'), 'Gestor', 'anotação não é conferência nova');
 });
 test('volta do carro: a vista do PCP conta as voltas a conferir e a ficha mostra as quatro perguntas', () => {
-  const t = tela([voltaOS('1'), voltaOS('2', {veiculo:'Saveiro', retornoConf:{carroLimpo:'sim'}})]);
+  // Conferida = carro e equipamentos respondidos (o que a nota conta); só o carro fica "em parte".
+  const t = tela([voltaOS('1'), voltaOS('2', {veiculo:'Saveiro', retornoConf:{carroLimpo:'sim',equipamentosOk:'sim'}})]);
   t.run("STATE.pcpVista='voltas'; voltaEstado().filtro='conferir'");
   assert.equal(t.run('pcpBaseList().length'), 1);
   const ficha = t.run(`conferenciaVoltaHTML(STORE.getOS('1'), false)`);
   for (const k of ['carroLimpo','carroArrumado','equipamentosOk','semAvaria']) assert.match(ficha, new RegExp('retornoConf\\.' + k));
+});
+
+/* LIMPEZA DO CARRO NO ESPELHO (25/09/2026). A equipe registra como o carro
+   voltou; o registro é um só por volta e vai para cada O.S. dela. A O.S.
+   finalizada é somente leitura no espelho, e quase toda O.S. fecha antes de o
+   carro voltar: por isso o registro mora num cartão da lista. */
+const hojeReal = require('../operacao.js').dia(new Date());
+const voltaEsp = (id, extra={}) => ({id, numero:'L'+id, cliente:'Cliente '+id, tipo:'externo', equipe:['Ana','Bia'], veiculo:'Strada',
+  liberadoPCP:true, confirmacao:'Confirmado', instalacao:{data:hojeReal, periodo:'Manhã'}, horaSaida:'08:00',
+  horaRetorno:'15:00', retornoEm:hojeReal+'T15:00:00', fotosRetornoIds:['r'+id], ...extra});
+const tudoSim = "{carroLimpo:'sim',carroArrumado:'sim',equipamentosOk:'sim',semAvaria:'sim'}";
+test('espelho: a limpeza aparece como cartão e grava em cada O.S. da volta, inclusive a finalizada', () => {
+  const fin = voltaEsp('1', {finalizadaEm:hojeReal+'T15:05:00', finalizadoPor:'Ana'});
+  const t = espelho(null, [fin, voltaEsp('2')]);
+  t.run('renderList()');
+  let html = t.node('#eq-list').innerHTML;
+  assert.match(html, /data-limpeza="/);
+  assert.match(html, /Falta registrar como o carro voltou/);
+  assert.match(html, /Strada · hoje · O\.S L1, L2/);
+  const n = t.run(`salvarLimpezaCarro(limpezasPendentes()[0], {resp:{carroLimpo:'sim',carroArrumado:'sim',equipamentosOk:'nao',semAvaria:'sim'}, obs:' faltou a escada ', fotos:['fc']})`);
+  assert.equal(n, 2);
+  assert.equal(t.salvas.map(o => o.id).sort().join(), '1,2');
+  for (const o of t.salvas) {
+    assert.equal(o.voltaEquipe.equipamentosOk, 'nao'); assert.equal(o.voltaEquipe.obs, 'faltou a escada');
+    assert.equal(o.voltaEquipe.fotos.join(), 'fc'); assert.equal(o.voltaEquipe.veiculo, 'Strada'); assert.equal(o.voltaEquipe.dia, hojeReal);
+    assert.equal(o.retornoConf, undefined, 'a declaração não vira conferência');
+  }
+  assert.equal(t.salvas.find(o => o.id === '1').finalizadaEm, hojeReal+'T15:05:00', 'continua finalizada');
+  // Enquanto o upsert está na fila, a tela não diz "registrada".
+  t.fila.push({action:'upsert', os:{id:'2'}});
+  t.run('renderList()'); html = t.node('#eq-list').innerHTML;
+  assert.match(html, /Guardada no aparelho, vai quando tiver sinal/); assert.doesNotMatch(html, /registrada às/);
+  t.fila.length = 0;
+  t.run('renderList()');
+  assert.match(t.node('#eq-list').innerHTML, /✓ Limpeza registrada às \d\d:\d\d \(Ana\)/);
+});
+test('espelho: sem foto ou com pergunta em branco, a limpeza não é gravada', async () => {
+  const t = espelho(null, [voltaEsp('1'), voltaEsp('2')]);
+  t.run(`abrirLimpezaCarro(limpezasPendentes()[0].chave); marcarLimpeza('carroLimpo','sim'); marcarLimpeza('semAvaria','nao')`);
+  t.node('#lz-enviar').onclick();
+  assert.match(t.toasts.join(' '), /responder 2 perguntas/); assert.match(t.toasts.join(' '), /foto do carro/);
+  assert.equal(t.salvas.length, 0);
+  t.run(`marcarLimpeza('carroArrumado','sim'); marcarLimpeza('equipamentosOk','sim')`);
+  t.toasts.length = 0; t.node('#lz-enviar').onclick();
+  assert.match(t.toasts.join(' '), /foto do carro/); assert.doesNotMatch(t.toasts.join(' '), /pergunta/);
+  assert.equal(t.salvas.length, 0);
+  // A foto entra pela câmera da própria tela (pushPhoto devolve o fileId).
+  const cam = t.node('[data-lz-foto]'); cam.files = [{}]; await cam.onchange();
+  assert.equal(t.run('EQ.limpeza.est.fotos.join()'), 'fc');
+  t.toasts.length = 0; t.node('#lz-enviar').onclick();
+  assert.equal(t.salvas.length, 2); assert.match(t.toasts.join(' '), /Limpeza registrada · 2 O\.S/);
+  assert.equal(t.run('EQ.limpeza'), null, 'a tela fecha');
+});
+test('espelho: o que a limpeza grava cabe no crachá de toque e passa pelo saneamento do servidor', async () => {
+  const {CAMPOS_MONTAGEM, sanearVoltaEquipe} = await import('../supabase/functions/_shared/pcp-integridade.mjs');
+  const antes = voltaEsp('1', {finalizadaEm:hojeReal+'T15:05:00'});
+  const t = espelho(null, [JSON.parse(JSON.stringify(antes))]);
+  t.run(`salvarLimpezaCarro(limpezasPendentes()[0], {resp:${tudoSim}, obs:'', fotos:['foto_1727300000000_ab12cd']})`);
+  const depois = t.salvas[0];
+  const mudou = [...new Set([...Object.keys(antes), ...Object.keys(depois)])].filter(k => JSON.stringify(antes[k]) !== JSON.stringify(depois[k]));
+  assert.ok(mudou.includes('voltaEquipe'));
+  assert.deepEqual(mudou.filter(k => !CAMPOS_MONTAGEM.has(k)), [], 'campo fora de CAMPOS_MONTAGEM é descartado calado pelo servidor');
+  const s = sanearVoltaEquipe(depois.voltaEquipe, null, {nome:'Ana', sub:'Ana'}, new Date().toISOString());
+  for (const k of ['carroLimpo','carroArrumado','equipamentosOk','semAvaria','obs','dia','veiculo']) assert.equal(s[k], depois.voltaEquipe[k], k);
+  assert.equal(s.fotos.join(), depois.voltaEquipe.fotos.join(), 'o fileId do pushPhoto passa no filtro');
+});
+test('espelho: abrir a limpeza a partir da O.S. finalizada destrava a tela', () => {
+  const fin = voltaEsp('1', {finalizadaEm:hojeReal+'T15:05:00', finalizadoPor:'Ana'});
+  const t = espelho(JSON.parse(JSON.stringify(fin)), [fin]);
+  const modal = t.node('#modal-os');
+  assert.match(modal.innerHTML, /class="lock-allow limpeza-linha"><span>🧽 Limpeza do carro: falta registrar\.<\/span><button[^>]*data-limpeza-ficha=/,
+    'o atalho mora num .lock-allow: a O.S. finalizada trava o resto');
+  assert.deepEqual(modal.classList.ops.filter(o => o[1] === 'os-locked').at(-1), ['toggle','os-locked',true]);
+  t.run('abrirLimpezaCarro(limpezasPendentes()[0].chave)');
+  assert.deepEqual(modal.classList.ops.filter(o => o[1] === 'os-locked').at(-1), ['remove','os-locked'],
+    'com os-locked a câmera fica com pointer-events:none e a foto não sai');
+  assert.match(modal.innerHTML, /data-lz-foto/);
+  assert.equal(t.run('_draft'), null);
+});
+test('espelho: tocar Sim depois de escrever a observação não apaga o texto', () => {
+  const t = espelho(null, [voltaEsp('1')]);
+  t.run(`abrirLimpezaCarro(limpezasPendentes()[0].chave); marcarLimpeza('equipamentosOk','nao')`);
+  assert.match(t.node('#modal-os').innerHTML, /<input type="text" id="lz-obs"/);
+  const obs = t.node('#lz-obs'); obs.value = 'faltou a escada de 6 m'; obs.oninput();
+  t.run(`marcarLimpeza('carroLimpo','sim'); marcarLimpeza('equipamentosOk','sim')`);
+  assert.equal(t.run('EQ.limpeza.est.obs'), 'faltou a escada de 6 m');
+  assert.match(t.node('#modal-os').innerHTML, /value="faltou a escada de 6 m"/, 'continua visível: nada escondido é gravado');
+});
+test('volta do carro: a gestão vê o que a equipe registrou, sem miniatura na fila e sem pré-marcar a conferência', () => {
+  const ve = {carroLimpo:'sim',carroArrumado:'sim',equipamentosOk:'nao',semAvaria:'sim',obs:'faltou a escada',fotos:['fc'],dia:hoje,veiculo:'Strada',por:'Ana',porId:'Ana',em:hoje+'T21:05:00.000Z'};
+  const t = tela([voltaOS('1', {voltaEquipe:ve}), voltaOS('2', {voltaEquipe:{...ve}}), voltaOS('3', {veiculo:'Saveiro'})]);
+  const html = t.run('voltasHTML()');
+  assert.match(html, /Equipe registrou/); assert.match(html, /📷 1/); assert.match(html, /faltou a escada/);
+  assert.match(html, /volta-resp eq ruim">✗ equipamentos/, 'selo de contorno, não o do PCP');
+  assert.doesNotMatch(html, /data-foto-img/, 'a fila não baixa a JPEG de cada volta');
+  assert.match(html, /Equipe não registrou a limpeza/, 'a volta do Saveiro');
+  const g = 'voltasDoRecorte().todas.find(g=>g.os.length===2)';
+  const ini = JSON.parse(t.run(`JSON.stringify(respostasIniciaisVolta(${g}))`));
+  for (const k of ['carroLimpo','carroArrumado','equipamentosOk','semAvaria']) assert.equal(ini[k], '', k + ' não vem da equipe');
+  // O diálogo mostra o bloco da equipe com a miniatura, e nenhuma resposta marcada.
+  t.run(`globalThis.__dlg={innerHTML:'',open:true,querySelector:()=>({}),querySelectorAll:()=>[]}; document.getElementById=()=>__dlg; abrirConferenciaVolta(${g})`);
+  const dlg = t.run('__dlg.innerHTML');
+  assert.match(dlg, /O que a equipe registrou \(não conta na nota\)[^]*data-foto-img="fc"/);
+  assert.doesNotMatch(dlg, /data-volta-r="\w+\|(sim|nao)" aria-pressed="true"/);
+  // Salvar a conferência não mexe na declaração.
+  t.run(`globalThis.__salvas=[]; STORE.saveOS=o=>__salvas.push(JSON.parse(JSON.stringify(o)))`);
+  assert.equal(t.run(`salvarConferenciaVolta(${g}, {${tudoSim.slice(1,-1)},obs:'',fotos:[]})`), 2);
+  for (const o of t.run('__salvas')) { assert.equal(o.voltaEquipe.equipamentosOk, 'nao'); assert.equal(o.retornoConf.equipamentosOk, 'sim'); }
+  assert.match(t.run(`conferenciaVoltaHTML(STORE.getOS('1'), false)`), /Equipe registrou[^]*data-foto-img="fc"/, 'a ficha mostra com a foto');
+});
+test('espelho: O.S. que o PCP conferiu com a tela aberta não recebe a declaração (a gravação relê a O.S.)', () => {
+  const lista = [voltaEsp('1'), voltaEsp('2')];
+  const t = espelho(null, lista);
+  t.run('globalThis.__g = limpezasPendentes()[0]');
+  // O pull troca o objeto (não muda o antigo): quem grava pelo objeto velho da tela não vê a conferência.
+  lista[1] = {...lista[1], rev:5, retornoConf:{carroLimpo:'sim', por:'Gestor'}};
+  assert.equal(t.run(`salvarLimpezaCarro(__g, {resp:${tudoSim}, obs:'', fotos:['fc']})`), 1);
+  assert.equal(t.salvas.map(o => o.id).join(), '1');
 });

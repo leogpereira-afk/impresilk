@@ -87,8 +87,19 @@ function periodoQuickToRange(id) {
    a única pista era o indicador ao lado, e só depois de clicar. Agora são os
    mesmos chips que Entregas usa — alvo de dedo e o escolhido aceso. Uma função
    arruma as quatro abas de uma vez. */
+// O chip rápido ("Hoje", "Próximos 7 dias") vale a partir de HOJE. Guardamos o
+// id do chip e refazemos as datas a cada leitura: o tablet fica com a aba aberta
+// por dias, e datas fixas deixavam o filtro preso no dia em que a aba abriu.
+function periodoVivo(key) {
+  const f = STATE[key];
+  if (f && f.rapido) {
+    const p = OPERACAO.periodoRapido(f.rapido, hojeISO(), key === '_fProg');
+    if (p) { f.de = p.de; f.ate = p.ate; }
+  }
+  return f;
+}
 function filtroPeriodoHTML(key) {
-  const f = STATE[key] || { de: '', ate: '' };
+  const f = periodoVivo(key) || { de: '', ate: '' };
   const futuro = key === '_fProg';
   const hoje = OPERACAO.dia(new Date());
   const rapidos = [
@@ -119,16 +130,17 @@ function wireFiltroPeriodo(container, key, onChange) {
   if (!box) return;
   const get = () => (STATE[key] = STATE[key] || { de: '', ate: '' });
   const mudar = (campo, valor) => {
-    const f = {...get(), [campo]:valor};
+    // Data digitada à mão é fixa: o chip deixa de valer.
+    const f = {...get(), [campo]:valor, rapido: ''};
     if (f.de && f.ate && f.de > f.ate) { toast('A data inicial precisa ser anterior ou igual à final.', 'error'); onChange(); return; }
     STATE[key] = f; onChange();
   };
   box.querySelector('.pf-de').onchange = e => mudar('de',e.target.value);
   box.querySelector('.pf-ate').onchange = e => mudar('ate',e.target.value);
-  $$('[data-pq]', box).forEach(b => b.onclick = () => { STATE[key] = OPERACAO.periodoRapido(b.dataset.pq,hojeISO(),key === '_fProg'); onChange(); });
+  $$('[data-pq]', box).forEach(b => b.onclick = () => { STATE[key] = {...OPERACAO.periodoRapido(b.dataset.pq,hojeISO(),key === '_fProg'), rapido: b.dataset.pq}; onChange(); });
 }
 function dentroPeriodo(dataISO, key) {
-  const f = STATE[key];
+  const f = periodoVivo(key);
   if (!f || (!f.de && !f.ate)) return true;
   if (!dataISO) return false;
   const d = diaLocalISO(dataISO);
@@ -219,19 +231,36 @@ function parseBRNumber(str) {
   return isNaN(n) ? 0 : n;
 }
 
+/* O AVISO VAI PARA A CAMADA DE CIMA. Com um <dialog> aberto (volta do carro,
+   performance, foto grande) o toast ficava embaixo do ::backdrop, e o motivo
+   de uma recusa aparecia escurecido e atrás da janela. O contêiner muda para
+   dentro do diálogo aberto e volta ao body quando não há nenhum. Diálogo que é
+   removido leva o contêiner junto: aí ele nasce de novo. */
+function toastContainer() {
+  let c = document.getElementById('toast-container');
+  if (!c) { c = document.createElement('div'); c.id = 'toast-container'; }
+  const abertos = document.querySelectorAll('dialog[open]');
+  const alvo = abertos.length ? abertos[abertos.length - 1] : document.body;
+  if (c.parentNode !== alvo) alvo.appendChild(c);
+  return c;
+}
 function toast(msg, type = '') {
-  const c = $('#toast-container');
+  const c = toastContainer();
   const el = document.createElement('div');
   el.className = 'toast' + (type ? ' ' + type : '');
   el.textContent = msg;
   c.appendChild(el);
-  setTimeout(() => el.remove(), 3000);
+  // Erro fica o tempo de ler (a lista do "Falta:" e a recusa do servidor são
+  // longas; 3 s não dava) e sai com um toque.
+  const ms = type === 'error' ? Math.max(6000, String(msg).length * 60) : 3000;
+  el.onclick = () => el.remove();
+  setTimeout(() => el.remove(), ms);
 }
 
 /* Toast com DESFAZER: ação de um toque no card precisa de volta de um toque.
    Fica 6 s (o toast comum some em 3, cedo demais para ler e decidir). */
 function toastDesfazer(msg, desfazer) {
-  const c = $('#toast-container');
+  const c = toastContainer();
   const el = document.createElement('div');
   el.className = 'toast success toast-acao';
   el.setAttribute('role', 'status');
@@ -688,7 +717,7 @@ async function doLogin() {
     r = await AUTH.login(usuario, pass);
   } catch (e) {
     _entrando = false; bt.disabled = false; bt.textContent = rot;
-    if (e.status === 401 || e.status === 403) {
+    if (e.status === 401) {
       // A recusa é a mesma para usuário inexistente e senha errada (o servidor
       // não conta quais contas existem). Como o tropeço comum é digitar o nome
       // completo, a dica do usuário vem junto — senão a pessoa fica tentando
@@ -697,6 +726,10 @@ async function doLogin() {
         ' Confira o usuário: em geral é só o primeiro nome, minúsculo e sem acento.');
       return;
     }
+    // Com status, o servidor respondeu: a trava por tentativas (429) e o acesso
+    // desativado (403) trazem a própria explicação. Culpar a internet mandava a
+    // pessoa mexer no Wi-Fi com a porta trancada por 15 minutos.
+    if (e.status) { mostrarErro(e.erro || ('O servidor recusou a entrada (' + e.status + ').')); return; }
     mostrarErro('Não consegui falar com o servidor. Entrar precisa de internet — depois disso o app trabalha offline.');
     return;
   }
@@ -802,11 +835,7 @@ function enterApp() {
   if (logo && typeof LOGO_IMPRESILK !== 'undefined') logo.src = LOGO_IMPRESILK;
   const navLogo = $('#nav-logo');
   if (navLogo && typeof LOGO_IMPRESILK !== 'undefined') navLogo.src = LOGO_IMPRESILK;
-  const dataEl = $('#topbar-date');
-  if (dataEl) {
-    const d = new Date();
-    dataEl.textContent = `${DIAS_SEMANA[d.getDay()]}, ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
-  }
+  pintarDataTopo();
   aplicarPermissoes();
   initTabs();
   initTopbar();
@@ -844,14 +873,53 @@ function enterApp() {
 // Re-render pós-pull. Se o usuário está digitando na busca do PCP, atualiza só
 // a grade — reconstruir o painel destruía o <input>, derrubava o foco e fechava
 // o teclado no celular a cada sync com mudança.
+// A data do topo é repintada a cada sync: a aba fica aberta de um dia para o outro.
+function pintarDataTopo() {
+  const dataEl = $('#topbar-date');
+  if (!dataEl) return;
+  const d = new Date();
+  dataEl.textContent = `${DIAS_SEMANA[d.getDay()]}, ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+}
 function refreshAposPull() {
+  pintarDataTopo();
   const ae = document.activeElement;
   if (STATE.activeTab === 'pcp' && ae && ae.id === 'busca-pcp') { pcpRenderCards(); return; }
   // Finalizados tem busca em tempo real igual — atualiza só a lista.
   if (STATE.activeTab === 'finalizados' && ae && ae.id === 'busca-fin') { finRenderCards(); return; }
-  // Configurações: digitando em qualquer campo (add de lista, usuário, Mubisys),
-  // pula o re-render — a aba não exibe O.S, nada urgente se perde.
-  if (STATE.activeTab === 'controle' && ae && ['INPUT', 'TEXTAREA', 'SELECT'].includes(ae.tagName) && ae.closest('#panel-controle')) return;
+  atualizarFichaAberta();
+  // Configurações, Performance, Entregas: quem está num campo não perde o
+  // texto nem o foco; a repintura espera o dedo sair (repintarSeLivre).
+  repintarSeLivre();
+}
+
+/* FICHA ABERTA ACOMPANHA O SERVIDOR. A cópia de trabalho é tirada ao abrir;
+   com a ficha aberta enquanto o PCP liga para o cliente, a saída e as fotos
+   da equipe não apareciam, e a primeira gravação batia em conflito. Sem
+   edição pendente e sem dedo num campo da ficha, troca pela versão nova. */
+function atualizarFichaAberta() {
+  if (!STATE.modalOSId || !_modalDraft || _modalDirty || _saveDraftTimer) return;
+  const novo = STORE.getOS(STATE.modalOSId);
+  if (!novo || novo === _modalDraft || typeof novo.rev !== 'number' || novo.rev <= (Number(_modalDraft.rev) || 0)) return;
+  const ae = document.activeElement;
+  if (ae && ae.closest && ae.closest('#modal-os') && ['INPUT', 'TEXTAREA', 'SELECT'].includes(ae.tagName)) return;
+  _modalDraft = JSON.parse(JSON.stringify(novo));
+  _modalAgendaSalva = OPERACAO.agendaCompleta(novo);
+  reRenderModalKeepOpen();
+}
+
+/* REPINTAR SÓ QUANDO NINGUÉM ESTÁ NUM CAMPO. A chegada de 'cfg', 'valores'
+   e do pull repintava a aba inteira: o nome que o admin digitava em
+   Configurações sumia, o select de Técnico fechava, a busca da Performance
+   perdia o foco no tablet. É a mesma guarda que Entregas já usava, agora
+   para todas as abas: tenta de novo quando a pessoa soltar o campo. */
+let _repintarTimer = null;
+function repintarSeLivre() {
+  if (_repintarTimer) { clearTimeout(_repintarTimer); _repintarTimer = null; }
+  const ae = document.activeElement;
+  if (ae && ['INPUT', 'TEXTAREA', 'SELECT'].includes(ae.tagName) && ae.closest && ae.closest('#panel-' + STATE.activeTab)) {
+    _repintarTimer = setTimeout(repintarSeLivre, 1500);
+    return;
+  }
   renderActiveTab();
 }
 
@@ -981,6 +1049,9 @@ function initTabs() {
          os parados (auditoria de 23/09/2026). */
       if (tab === 'pcp') STATE._prioridade = '';
       if (tab === 'entregas') STATE._fEnt = null;
+      /* Voltar à Performance consulta o servidor de novo: a apuração lida uma
+         vez na sessão ficava parada (voltas conferidas depois não entravam). */
+      if (tab === 'performance' && typeof perfRemoto === 'object' && perfRemoto && !perfRemoto.carregando) perfRemoto.tentado = false;
       STORE.pull(refreshAposPull);
       renderActiveTab();
       window.scrollTo({ top: 0, behavior: 'instant' });
@@ -1023,8 +1094,10 @@ function initTopbar() {
     // Com fila pendente o cache NÃO é apagado (o trabalho só existe aqui), e
     // quem está saindo precisa saber disso antes de entregar o aparelho.
     const fila = STORE.getQueue().length;
-    if (fila && !confirm(
-      `Há ${fila} alteração(ões) ainda não enviadas para a nuvem.\n\n` +
+    // Sessão morta: o ✅ não vem sem entrar de novo, então o conselho muda.
+    if (fila && !confirm(_statusSync === 'sem-sessao'
+      ? `Sua sessão expirou. Saia e entre de novo: as ${fila} alteração(ões) ficam guardadas neste aparelho e sobem quando você entrar.\n\nSair agora?`
+      : `Há ${fila} alteração(ões) ainda não enviadas para a nuvem.\n\n` +
       'Se sair agora elas continuam guardadas NESTE aparelho (e o cache de O.S ' +
       'não será apagado). O ideal é reconectar e esperar o ✅.\n\nSair mesmo assim?'
     )) return;
@@ -1038,12 +1111,19 @@ function initTopbar() {
   };
 }
 
+let _statusSync = '';
 function initSyncIndicator() {
   const el = $('#sync-indicator');
   // Tocar mostra a legenda (no celular o "title" não aparece).
   el.style.cursor = 'pointer';
-  el.onclick = () => { if (el.title) toast(el.title); };
+  // "🔒 Entre de novo" precisa de porta: tocar nele leva ao Sair, que guarda a
+  // fila no aparelho e abre a tela de entrada. Antes o toque só repetia o texto.
+  el.onclick = () => {
+    if (_statusSync === 'sem-sessao') { const b = $('#btn-logout'); if (b) b.click(); return; }
+    if (el.title) toast(el.title);
+  };
   STORE.onSync((status, pending) => {
+    _statusSync = status;
     el.className = 'sync-indicator ' + status;
     if (status === 'ok') {
       el.textContent = '✅ Edições salvas';
@@ -1053,14 +1133,14 @@ function initSyncIndicator() {
       el.title = `${pending} alteração(ões) aguardando envio. Some sozinho quando reconectar.`;
     } else if (status === 'sem-sessao') {
       el.textContent = '🔒 Entre de novo';
-      el.title = 'Sua sessão expirou — o trabalho está guardado, mas entre de novo para enviar.';
+      el.title = 'Sua sessão expirou. O trabalho está guardado; toque aqui para entrar de novo e enviar.';
     } else {
       el.textContent = '⚠️ Offline';
-      el.title = 'Sem conexão — você pode continuar trabalhando; o envio acontece ao reconectar.';
+      el.title = 'Sem conexão. Você pode continuar trabalhando; o envio acontece ao reconectar.';
     }
   });
   // Tamanho da equipe (RH) chegou: quem mostra isso é o histórico de Entregas.
-  STORE.on('equipe', () => { if (STATE.activeTab === 'entregas') renderActiveTab(); });
+  STORE.on('equipe', () => { if (STATE.activeTab === 'entregas') repintarSeLivre(); });
   /* CRACHÁ TROCADO COM A ABA ABERTA. O espelho guarda o crachá do instalador no
      mesmo lugar (as abas dividem o localStorage); esta aba seguiria com o nome
      da gestão gravando com o crachá dele, e o servidor descartaria calado. A
@@ -1071,9 +1151,24 @@ function initSyncIndicator() {
     const d = AUTH.dono();
     if (!d || d.montagemIndividual || (STATE.user.usuario && d.usuario !== STATE.user.usuario)) location.reload();
   });
-  STORE.on('quota', () => toast('Sem espaço no aparelho para guardar as O.S. Libere espaço (fotos/apps) e recarregue.', 'error'));
+  // Com o cofre cheio a fila continua guardada (memória + IndexedDB): o aviso
+  // diz isso e pede para não limpar os dados do navegador, que a levariam.
+  STORE.on('quota', () => toast('Pouco espaço no aparelho. O trabalho segue guardado para envio: não limpe os dados do navegador; libere espaço (fotos, apps) e recarregue.', 'error'));
+  // Foto que não deu para ler ou guardar: o motivo vem do store.
+  STORE.on('foto-falhou', ({ motivo } = {}) => toast('⚠️ ' + (motivo || 'Uma foto não foi guardada. Tente de novo.'), 'error'));
+  // O servidor gravou a O.S. e deixou algo de fora: dizer o quê.
+  STORE.on('item-aviso', ({ item, avisos } = {}) => {
+    const ref = item && item.os && item.os.numero ? 'O.S ' + item.os.numero + ': ' : '';
+    toast('⚠️ ' + ref + (avisos || []).join(' '), 'error');
+  });
+  // Outra aba trocou a base do aparelho (saiu ou entrou outra pessoa): esta
+  // aba não grava mais no disco. Recarregar é o caminho seguro.
+  STORE.on('base-trocada', () => {
+    if (confirm('O app foi aberto de novo em outra aba. Recarregar agora? O que está na fila continua guardado.')) location.reload();
+    else toast('Recarregue a página antes de continuar: esta aba não guarda mais fotos.', 'error');
+  });
   // Chegou o valor das O.S: repinta as telas que mostram dinheiro.
-  STORE.on('valores', () => { if (['entregas', 'performance'].includes(STATE.activeTab)) renderActiveTab(); });
+  STORE.on('valores', () => { if (['entregas', 'performance'].includes(STATE.activeTab)) repintarSeLivre(); });
   /* ENTREGAS REPINTA EM LOTE, E NUNCA POR CIMA DE QUEM ESTÁ MEXENDO.
      Os meses chegam um a um do ERP e cada chegada reconstruía a tela inteira:
      o <select> de Técnico fechava sozinho se estivesse aberto, a data que a
@@ -1110,7 +1205,7 @@ function initSyncIndicator() {
   // a tela segue mostrando o que não foi salvo.
   STORE.on('conflito-cfg', mostrarConflitoCFG);
   if (STORE.conflitoCFG && STORE.conflitoCFG()) mostrarConflitoCFG(STORE.conflitoCFG());
-  STORE.on('cfg', () => { aplicarPermissoes(); renderActiveTab(); });
+  STORE.on('cfg', () => { aplicarPermissoes(); repintarSeLivre(); });
   STORE.on('item-recusado', ({ item, motivo, status }) => {
     /* Configuração recusada é DESFEITA no aparelho (reverterCFG): dizer que
        "vale só neste aparelho" fazia a pessoa achar que o trabalho estava
@@ -1122,7 +1217,7 @@ function initSyncIndicator() {
     const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : (item && item.action) || 'a alteração';
     toast(`⛔ O servidor recusou ${ref}: ${motivo || 'sem permissão'}. A alteração ficou só neste aparelho; peça a um administrador. O resto da fila seguiu normalmente.`, 'error');
   });
-  STORE.on('pull-truncado', () => toast('Lista de O.S pode estar incompleta — recarregue.', 'error'));
+  STORE.on('pull-truncado', () => toast('A lista de O.S pode estar incompleta. Recarregue.', 'error'));
   // Crachá recusado: guarda o que dá e manda entrar de novo (o dado fica).
   STORE.on('sem-sessao', () => {
     if (window._avisouSessao) return; window._avisouSessao = true;
@@ -1160,8 +1255,63 @@ async function verificarNuvem() {
   }
 }
 
+/* SOBRESCREVER NÃO APAGA O QUE A EQUIPE MANDOU DA RUA. "Sobrescrever (meu)"
+   envia a O.S. inteira do aparelho; a versão do PCP, aberta de manhã, não
+   tem as fotos, a saída e o retorno que o instalador mandou depois, e o
+   servidor grava o que chega. A edição do PCP vence no que ele mexeu; o que
+   é da execução e só existe no servidor entra junto. Devolve o que manteve.
+   Fora da lista o que é conferência (Instalação OK, conferido por,
+   ferramentas): vazio aqui pode ser o PCP que DESMARCOU, e trazer o valor do
+   servidor de volta liberava a finalização sem ninguém ver. Na dúvida, fica
+   desmarcado e alguém marca de novo. */
+const CAMPOS_EXECUCAO_RUA = ['checkin', 'checkinGPS', 'saidaEm', 'retornoEm', 'horaSaida', 'horaRetorno',
+  'kmSaida', 'kmRetorno', 'voltaEquipe'];
+const semValorRua = v => v == null || v === '' || v === false || (Array.isArray(v) && !v.length);
+function manterExecucaoDoServidor(local, remote) {
+  const mantido = { fotos: 0, saida: false };
+  if (!local || !remote) return mantido;
+  for (const k of ['fotosCheckinIds', 'fotosRetornoIds']) {
+    const meus = Array.isArray(local[k]) ? local[k] : [];
+    const novos = (Array.isArray(remote[k]) ? remote[k] : []).filter(id => id && !meus.includes(id));
+    if (novos.length) { local[k] = [...meus, ...novos]; mantido.fotos += novos.length; }
+  }
+  for (const k of CAMPOS_EXECUCAO_RUA) {
+    if (semValorRua(local[k]) && !semValorRua(remote[k])) {
+      local[k] = JSON.parse(JSON.stringify(remote[k]));
+      if (k === 'saidaEm' || k === 'horaSaida') mantido.saida = true;
+    }
+  }
+  // Marca do instalador no item: casa pela posição e pela descrição, como o servidor.
+  if (Array.isArray(local.itens) && Array.isArray(remote.itens)) {
+    local.itens.forEach((it, i) => {
+      const r = remote.itens[i];
+      if (!it || !r || String(r.item ?? '') !== String(it.item ?? '') || String(r.descricao ?? '') !== String(it.descricao ?? '')) return;
+      for (const k of ['statusInst', 'motivo', 'obsProb', 'fotoProbId']) {
+        if (semValorRua(it[k]) && !semValorRua(r[k])) { it[k] = r[k]; if (k === 'fotoProbId') mantido.fotos++; }
+      }
+    });
+  }
+  return mantido;
+}
+
 function initConflictDialog() {
+  /* UM CONFLITO DE CADA VEZ, NENHUM ESQUECIDO. Cada conflito reescrevia o
+     diálogo; o anterior ficava marcado na fila e pulado para sempre, com o
+     "⏳ 1 pendente" sem ninguém perguntar. Agora eles esperam a vez. */
+  const fila = [];
+  const proximo = () => {
+    fila.shift();
+    if (fila.length) mostrar(fila[0].local, fila[0].remote);
+    else $('#conflict-dialog').classList.add('hidden');
+  };
   STORE.onConflict((local, remote) => {
+    const i = fila.findIndex(c => c.remote && remote && c.remote.id === remote.id);
+    if (i >= 0) { fila[i] = { local, remote }; if (i === 0) mostrar(local, remote); return; }
+    fila.push({ local, remote });
+    if (fila.length === 1) mostrar(local, remote);
+    else if ($('#conflict-msg')) mostrar(fila[0].local, fila[0].remote);
+  });
+  function mostrar(local, remote) {
     const dlg = $('#conflict-dialog');
     /* Dizer QUEM mudou. O texto fixo culpava "outro aparelho" quando quem tinha
        mudado era a conciliação do ERP -- e "Sobrescrever" reabria calado uma
@@ -1174,21 +1324,29 @@ function initConflictDialog() {
       ? `A O.S ${numero} foi atualizada pelo ERP (${quem}${quando ? ', ' + quando : ''}) enquanto você editava.`
       : `A O.S ${numero} foi alterada ${quem ? 'por ' + quem + ' ' : ''}em outro aparelho${quando ? ' (' + quando + ')' : ''}.`;
     if (remote.finalizadaEm && !local.finalizadaEm) msg += ' No servidor ela está FINALIZADA: "Sobrescrever" vai reabri-la.';
+    const nFotosRua = ['fotosCheckinIds', 'fotosRetornoIds'].reduce((n, k) => n + (Array.isArray(remote[k]) ? remote[k].filter(id => !(local[k] || []).includes(id)).length : 0), 0);
+    if (nFotosRua || ((remote.saidaEm || remote.horaSaida) && !(local.saidaEm || local.horaSaida)))
+      msg += ` O servidor tem ${nFotosRua ? nFotosRua + ' foto(s) ' : ''}${nFotosRua && (remote.saidaEm || remote.horaSaida) ? 'e ' : ''}${(remote.saidaEm || remote.horaSaida) && !(local.saidaEm || local.horaSaida) ? 'a saída da equipe ' : ''}que você não tem: elas ficam mesmo se você sobrescrever.`;
+    if (fila.length > 1) msg += ` (Conflito 1 de ${fila.length}.)`;
     $('#conflict-msg').textContent = msg;
     dlg.classList.remove('hidden');
     $('#conflict-reload').onclick = () => {
       STORE.aceitarServidor(remote);
-      dlg.classList.add('hidden');
       if (STATE.modalOSId === remote.id) openModal(STORE.getOS(remote.id));
       renderActiveTab();
       toast('O.S recarregada do servidor', 'success');
+      proximo();
     };
     $('#conflict-overwrite').onclick = () => {
-      STORE.sobrescreverServidor(local);
-      dlg.classList.add('hidden');
+      // A mescla entra no objeto que o store escolhe enviar (pode ser o da
+      // lista, mais novo que esta cópia da fila), não nesta cópia.
+      const enviado = STORE.sobrescreverServidor(local, alvo => manterExecucaoDoServidor(alvo, remote)) || local;
+      // A ficha aberta desta O.S. passa a mostrar o que foi enviado (com as fotos da rua).
+      if (STATE.modalOSId === local.id && _modalDraft) { _modalDraft = JSON.parse(JSON.stringify(enviado)); _modalDirty = false; reRenderModalKeepOpen(); }
       toast('Sua versão foi enviada', 'success');
+      proximo();
     };
-  });
+  }
 }
 
 function renderActiveTab() {
@@ -1258,6 +1416,7 @@ const CANAL_OPTS   = ['WhatsApp', 'Telefone', 'E-mail', 'Presencial', 'Outro'];
 
 let _modalDraft = null;   // cópia de trabalho da O.S
 let _modalDirty = false;
+let _modalAgendaSalva = false; // a agenda estava completa na última gravação (parado no cliente)
 let _modalPrevPct = 0;    // % de preenchimento ao abrir (para celebrar ao chegar a 100%)
 let _modalReturnFocus = null; // elemento focado antes de abrir (restaurado no close)
 let _modalReturnFocusSel = null; // seletor p/ relocalizar o elemento após re-render
@@ -1266,7 +1425,11 @@ let _modalBlocoForcado = null; // bloco a abrir por escolha do usuário (botões
 function openModal(os, blocoForcado) {
   if (!os) { toast('O.S não encontrada.', 'error'); return; }
   _modalDraft = JSON.parse(JSON.stringify(os));
-  _modalDirty = false;
+  /* O.S. nova que já chega preenchida (importada do PDF) nasce suja: o
+     "Salvar O.S." só fecha, e fechar sem nada marcado não gravava, então a
+     importada sumia sem aviso. A "Nova O.S." em branco continua sem gravar. */
+  _modalDirty = !STORE.getOS(os.id) && !!(os.numero || os.cliente);
+  _modalAgendaSalva = OPERACAO.agendaCompleta(os);
   _modalPrevPct = fichaPercent(_modalDraft);
   STATE.modalOSId = os.id;
   _modalBlocoForcado = blocoForcado || null;
@@ -1315,6 +1478,14 @@ function _debouncedSaveDraft() {
     if (_modalDirty) saveDraft();
   }, 700);
 }
+// Aba indo para o fundo (WhatsApp aberto, tela bloqueada): grava já. O Chrome
+// do tablet descarta a aba no fundo, e o que estava no rascunho se perdia.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && _modalDraft && _modalDirty) {
+    if (_saveDraftTimer) { clearTimeout(_saveDraftTimer); _saveDraftTimer = null; }
+    saveDraft();
+  }
+});
 
 // Autosave: grava draft no store
 function saveDraft() {
@@ -1322,10 +1493,13 @@ function saveDraft() {
   _modalDraft.atualizadoEm = nowISO();
   _modalDraft.atualizadoPor = STATE.user.nome;
   // Programou a data: o período "parado no cliente" termina aqui, guardado no
-  // log. A gravação anterior (o store) diz se a agenda completou AGORA.
-  if (_modalDraft.paradoClienteEm) OPERACAO.fecharParadoPorAgenda(_modalDraft, OPERACAO.agendaCompleta(STORE.getOS(_modalDraft.id) || {}), nowISO(), STATE.user.nome);
+  // log. O "antes" é a última gravação DESTA ficha, guardada à parte: o store
+  // passa a guardar o próprio rascunho depois da 1ª gravação, e comparar o
+  // rascunho com ele mesmo fechava o período sem data final.
+  if (_modalDraft.paradoClienteEm) OPERACAO.fecharParadoPorAgenda(_modalDraft, _modalAgendaSalva, nowISO(), STATE.user.nome);
   registrarEtapa(_modalDraft); // histórico de transições (lead time por etapa)
   STORE.saveOS(_modalDraft);
+  _modalAgendaSalva = OPERACAO.agendaCompleta(_modalDraft);
   _modalDirty = false;
 
   // Motivação ao PCP: parabeniza quando o preenchimento chega a 100%.
@@ -1342,7 +1516,12 @@ function saveDraft() {
 
 // Atualiza um campo do draft (caminho com pontos)
 function setField(path, value) {
-  if (path.startsWith('instalacao.') && String(_modalDraft.instalacao?.[path.split('.')[1]] ?? '') !== String(value)) {
+  /* Remarcar zera a confirmação e o carro liberado, MENOS com a equipe na rua
+     (saiu e não voltou): aí mudar a hora ou estender a duração não é remarcar,
+     e zerar fazia a O.S. em andamento voltar a "Agendada" e o espelho recusar
+     o Finalizar por "confirmação do cliente", que o instalador não preenche. */
+  const naRua = !!(_modalDraft.horaSaida || _modalDraft.saidaEm) && !(_modalDraft.horaRetorno || _modalDraft.retornoEm);
+  if (path.startsWith('instalacao.') && !naRua && String(_modalDraft.instalacao?.[path.split('.')[1]] ?? '') !== String(value)) {
     _modalDraft.confirmacao = ''; _modalDraft.confEm = ''; _modalDraft.confPor = ''; _modalDraft.confHora = '';
     _modalDraft.carroLiberado = false;
   }
@@ -1454,8 +1633,11 @@ function renderModal() {
     <div class="fs-body" style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-ghost btn-sm" id="modal-pdf">🖨 PDF da ficha</button>
       <button class="btn-ghost btn-sm" id="modal-wpp">💬 Enviar via WhatsApp</button>
-      <button class="btn-danger btn-sm edit-only" id="modal-delete">🗑 Excluir O.S</button>
       <button class="btn-primary btn-sm" id="modal-save" style="margin-left:auto">💾 Salvar O.S.</button>
+      <!-- Excluir numa linha própria: colado no WhatsApp, um toque torto no tablet apagava a O.S. -->
+      <div class="edit-only" style="flex-basis:100%;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <button class="btn-danger btn-sm" id="modal-delete">🗑 Excluir O.S</button>
+      </div>
     </div>
   `;
 
@@ -1565,6 +1747,9 @@ function blocoItens(os, ro, done) {
 
   // Itens são estáticos (vêm do pedido/PDF). Só itens adicionados manualmente
   // (it.manual) ficam editáveis. A verificação usa ✓ (verificado) / ✗ (reprovado).
+  // O retrabalho que o instalador marcou no espelho (motivo, observação e a
+  // foto do problema) aparece embaixo do item: quem decide o retrabalho é o
+  // PCP, e a foto tirada em cima da escada não chegava a ninguém.
   const rows = itens.map((it, i) => {
     const lock = it.manual ? '' : 'readonly';
     return `
@@ -1579,7 +1764,8 @@ function blocoItens(os, ro, done) {
       </td>
       <td class="item-del-cell">${it.manual ? `<button class="btn-xs btn-danger edit-only" data-item-del="${i}" title="Remover item">× remover</button>` : ''}</td>
     </tr>
-    ${it.reprovado ? `<tr class="motivo-row"><td colspan="6" data-label="O que deu errado?"><input data-item="${i}.motivoReprovado" value="${esc(it.motivoReprovado || '')}" placeholder="❗ O que deu errado neste item?"></td></tr>` : ''}`;
+    ${it.reprovado ? `<tr class="motivo-row"><td colspan="6" data-label="O que deu errado?"><input data-item="${i}.motivoReprovado" value="${esc(it.motivoReprovado || '')}" placeholder="❗ O que deu errado neste item?"></td></tr>` : ''}
+    ${it.statusInst === 'retrab' ? `<tr class="motivo-row"><td colspan="6" data-label="Retrabalho na instalação">🔴 Retrabalho na instalação: ${esc(it.motivo || 'sem motivo')}${it.obsProb ? ` (${esc(it.obsProb)})` : ''}${it.fotoProbId ? `<div class="fotos-grid"><div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(it.fotoProbId)}" alt="foto do problema"></div></div>` : ''}</td></tr>` : ''}`;
   }).join('');
 
   return `
@@ -1643,7 +1829,7 @@ function blocoAgenda(os, ro, done) {
         <div class="field"><label>Duração (dias)</label><input type="number" min="1" data-f="instalacao.duracaoDias" value="${esc(inst.duracaoDias || 1)}"></div>
         <div class="field"><label>Responsável pelo agendamento</label>${chipsField('responsavelAgenda', os.responsavelAgenda || [], cfg.responsaveis, ro)}</div>
         <div class="field"><label>Veículo</label>
-          <select data-f="veiculo"><option value=""></option>${(cfg.veiculos||[]).map(v=>`<option ${os.veiculo===v?'selected':''}>${esc(v)}</option>`).join('')}</select>
+          <select data-f="veiculo"><option value=""></option>${veiculoOptionsFicha(os.veiculo, cfg)}</select>
         </div>
       </div>
       <div class="field">
@@ -1727,9 +1913,17 @@ function blocoExec(os, ro, done) {
         </div>
         <div class="foto-box edit-only" style="margin-top:6px">
           <span class="foto-hint">📷 Adicionar foto de saída</span>
-          <input type="file" accept="image/*" capture="environment" multiple data-foto-checkin-input ${ro?'disabled':''}>
+          <input type="file" accept="image/*" multiple data-foto-checkin-input ${ro?'disabled':''}>
         </div>
-        ${os.checkinGPS ? `<div class="gps-tag">📍 Local confirmado na saída · <a href="https://maps.google.com/?q=${os.checkinGPS.lat},${os.checkinGPS.lng}" target="_blank">ver no mapa</a> (±${os.checkinGPS.precisao||'?'}m)</div>` : ''}
+        ${(() => {
+          /* A coordenada vem do celular da montagem e o servidor guarda o campo
+             como chegou: só número entra no HTML. Texto ali rodaria script na
+             sessão da gestão (o crachá mora no localStorage dos 7 sistemas). */
+          const g = os.checkinGPS; if (!g) return '';
+          const lat = Number(g.lat), lng = Number(g.lng), pr = Math.round(Number(g.precisao));
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '';
+          return `<div class="gps-tag">📍 Local confirmado na saída · <a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" rel="noopener">ver no mapa</a> (±${Number.isFinite(pr) ? pr : '?'}m)</div>`;
+        })()}
       </div>
       <div class="field-row">
         <div class="field"><label>Hora saída</label><input type="time" data-f="horaSaida" value="${esc(os.horaSaida)}"></div>
@@ -1767,7 +1961,7 @@ function blocoExec(os, ro, done) {
         </div>
         <div class="foto-box edit-only" style="margin-top:6px">
           <span class="foto-hint">📷 Adicionar foto de retorno</span>
-          <input type="file" accept="image/*" capture="environment" multiple data-foto-retorno-input ${ro?'disabled':''}>
+          <input type="file" accept="image/*" multiple data-foto-retorno-input ${ro?'disabled':''}>
         </div>
       </div>
       <div class="field-row">
@@ -1811,6 +2005,8 @@ const VOLTA_ROTULO = {
   equipamentosOk: '🧰 Equipamentos devolvidos completos e em ordem',
   semAvaria: '🛡 Carro voltou sem avaria nova (lataria, vidro, pneu)',
 };
+// Rótulo curto dos selos (fila, diálogo, ficha e Lançar entrega).
+const VOLTA_CURTO = { carroLimpo: 'limpo', carroArrumado: 'arrumado', equipamentosOk: 'equipamentos', semAvaria: 'sem avaria' };
 const voltaGestao = () => ['admin', 'pcp'].includes(STATE.user && STATE.user.papel) && (typeof podeEditar !== 'function' || podeEditar());
 function conferenciaVoltaHTML(os, ro) {
   if (!os || isInterno(os)) return '';
@@ -1832,6 +2028,7 @@ function conferenciaVoltaHTML(os, ro) {
   return `<div class="conf-volta ${trava ? '' : 'lock-allow'}">
       <div class="conf-volta-titulo">🔎 Conferência da volta <small>${gestao ? 'feita pela gestão · conta na nota de cada instalador' : 'feita pela gestão'}</small></div>
       ${gestao && !trava ? '<p class="conf-volta-dica">Mais rápido pela fila PCP › Volta do carro: uma conferência vale para todas as O.S. da mesma volta. Responda sim ou não: em branco não conta como OK.</p>' : ''}
+      ${voltaEquipeHTML(os.voltaEquipe, { fotos: true })}
       <div class="conf-volta-grade">
         ${OPERACAO.PERGUNTAS_VOLTA.map(k => `<div class="field"><label>${esc(VOLTA_ROTULO[k])}</label>${op(k, OPERACAO.respostaVolta(c[k]))}</div>`).join('')}
       </div>
@@ -1839,6 +2036,39 @@ function conferenciaVoltaHTML(os, ro) {
       ${fotos.length ? `<div class="fotos-grid">${fotos.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}" alt="foto da volta"></div>`).join('')}</div>` : ''}
       ${respondida && c.por ? `<p class="conf-por-linha">Conferido por ${esc(c.por)}${c.em ? ' · ' + esc(new Date(c.em).toLocaleString('pt-BR')) : ''}</p>` : ''}
     </div>`;
+}
+/* O QUE A EQUIPE REGISTROU (voltaEquipe, 25/09/2026): a limpeza do carro que
+   a equipe declara no espelho, com foto. Só se MOSTRA: nunca pré-preenche a
+   resposta do PCP e não conta na nota (a nota lê só retornoConf). Os selos
+   são de contorno (.volta-resp.eq) para não parecerem a conferência do PCP.
+   `fotos: true` desenha as miniaturas (diálogo, ficha, Lançar entrega); sem
+   ele vai só a contagem: na fila, "Todas / 60 dias" seriam centenas de JPEGs
+   de 1280 px baixados de uma vez. `veiculo` avisa quando a gestão trocou o
+   carro depois do registro; `parte` diz em quantas O.S. da volta ele está. */
+function voltaEquipeHTML(ve, opt = {}) {
+  if (!OPERACAO.voltaRespondida(ve)) return '';
+  const selo = k => {
+    const r = OPERACAO.respostaVolta(ve[k]);
+    return `<span class="volta-resp eq ${r === 'sim' ? 'ok' : r === 'nao' ? 'ruim' : ''}">${r === 'sim' ? '✓' : r === 'nao' ? '✗' : '·'} ${VOLTA_CURTO[k]}</span>`;
+  };
+  const fotos = Array.isArray(ve.fotos) ? ve.fotos.filter(f => typeof f === 'string' && f) : [];
+  const quando = ve.em && Number.isFinite(Date.parse(ve.em)) ? new Date(ve.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  const outroCarro = opt.veiculo != null && ve.veiculo && normNome(ve.veiculo) !== normNome(opt.veiculo);
+  return `<div class="eq-registrou">
+      <span class="eq-registrou-rotulo">Equipe registrou${opt.parte ? ` (em ${esc(opt.parte)})` : ''}:</span>
+      ${OPERACAO.PERGUNTAS_VOLTA.map(selo).join('')}
+      ${ve.obs ? `<span class="volta-obs">“${esc(ve.obs)}”</span>` : ''}
+      ${ve.por || quando ? `<span class="volta-por">${esc(ve.por || '')}${quando ? ' ' + esc(quando) : ''}</span>` : ''}
+      ${outroCarro ? `<span class="volta-por">registrado para ${esc(ve.veiculo)}</span>` : ''}
+      ${fotos.length && !opt.fotos ? `<span class="volta-por">📷 ${fotos.length}</span>` : ''}
+      ${fotos.length && opt.fotos ? `<div class="fotos-grid eq-registrou-fotos">${fotos.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}" alt="foto do carro registrada pela equipe"></div>`).join('')}</div>` : ''}
+    </div>`;
+}
+// A linha da equipe na fila e no diálogo: com declaração, ou o aviso de que falta.
+function voltaEquipeDaVolta(g, fotos) {
+  if (!g.declaracao) return '<span class="volta-pendente">Equipe não registrou a limpeza</span>';
+  const parte = g.equipeDisse === 'parte' ? `${g.os.length - g.semDeclaracao.length} de ${g.os.length} O.S.` : '';
+  return voltaEquipeHTML(g.declaracao, { fotos, veiculo: g.veiculo, parte });
 }
 
 /* ══ FILA "VOLTA DO CARRO" (PCP) ══════════════════════════════════════════
@@ -1861,12 +2091,14 @@ function voltasDoRecorte() {
 }
 function voltaResumoHTML(g) {
   if (g.situacao === 'conferir') return '<span class="volta-pendente">Ainda não conferida</span>';
-  if (!g.respostas) return `<span class="volta-pendente">${g.situacao === 'parcial' ? 'Conferida só em parte das O.S. da volta' : 'As O.S. desta volta têm respostas diferentes'}</span>`;
+  /* "Em parte" tem dois motivos: faltam O.S. da volta, ou todas foram
+     tocadas mas sem a resposta que conta na nota (carro E equipamentos). */
+  const todasTocadas = g.os.every(o => OPERACAO.voltaRespondida(o.retornoConf));
+  if (!g.respostas) return `<span class="volta-pendente">${g.situacao === 'parcial' ? (todasTocadas ? 'Falta responder carro ou equipamentos' : 'Conferida só em parte das O.S. da volta') : 'As O.S. desta volta têm respostas diferentes'}</span>`;
   const rc = g.respostas;
   const item = k => {
     const r = OPERACAO.respostaVolta(rc[k]);
-    const nome = { carroLimpo: 'limpo', carroArrumado: 'arrumado', equipamentosOk: 'equipamentos', semAvaria: 'sem avaria' }[k];
-    return `<span class="volta-resp ${r === 'sim' ? 'ok' : r === 'nao' ? 'ruim' : ''}">${r === 'sim' ? '✓' : r === 'nao' ? '✗' : '·'} ${nome}</span>`;
+    return `<span class="volta-resp ${r === 'sim' ? 'ok' : r === 'nao' ? 'ruim' : ''}">${r === 'sim' ? '✓' : r === 'nao' ? '✗' : '·'} ${VOLTA_CURTO[k]}</span>`;
   };
   return `${OPERACAO.PERGUNTAS_VOLTA.map(item).join('')}${rc.obs ? `<span class="volta-obs">“${esc(rc.obs)}”</span>` : ''}${rc.por ? `<span class="volta-por">${esc(rc.por)}${rc.em ? ' · ' + esc(new Date(rc.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })) : ''}</span>` : ''}`;
 }
@@ -1888,6 +2120,7 @@ function voltasHTML() {
         <span class="badge volta-badge-${g.situacao}">${g.situacao === 'conferida' ? 'Conferida' : g.situacao === 'parcial' ? 'Em parte' : 'A conferir'}</span>
       </div>
       <div class="volta-os">${g.os.map(o => `<button class="inline-link" data-volta-os="${esc(o.id)}">O.S ${esc(o.numero || '—')}</button> <span class="text-muted">${esc(o.cliente || '')}</span>`).join('<br>')}</div>
+      <div class="volta-linha-resp volta-linha-eq">${voltaEquipeDaVolta(g, false)}</div>
       <div class="volta-linha-resp">${voltaResumoHTML(g)}</div>
       ${gestao ? `<button class="${g.situacao === 'conferida' ? 'btn-ghost' : 'btn-primary'} btn-sm volta-acao" data-volta-conferir="${esc(g.chave)}">${g.situacao === 'conferida' ? 'Rever' : 'Conferir a volta'}</button>` : ''}
     </article>`;
@@ -1899,6 +2132,7 @@ function voltasHTML() {
     <div class="volta-cabeca">
       <p>${gestao ? 'Confira cada volta uma vez: a resposta vale para todas as O.S. da volta e conta na nota de cada instalador (carro limpo e arrumado, equipamentos). Avaria não entra na nota.' : 'A conferência da volta é feita pela gestão (PCP).'}</p>
       <div class="volta-filtros"><div class="pcp-chips">${chips}</div><label class="pcp-ordenacao"><span>Período</span><select id="volta-dias">${dias}</select></label></div>
+      ${est.dias >= Math.max(...VOLTA_DIAS) ? `<p class="text-muted">Este aparelho guarda ${Math.max(...VOLTA_DIAS)} dias de O.S. finalizadas: volta mais antiga não aparece aqui e não entra na conferência.</p>` : ''}
     </div>
     <div class="volta-lista">${cards || vazio}</div>
   </div>`;
@@ -1913,18 +2147,34 @@ function bindVoltas(root) {
     if (g) abrirConferenciaVolta(g);
   });
 }
+/* O ponto de partida do diálogo: o que o PCP já respondeu, da volta inteira ou
+   da primeira O.S. conferida. Lê só retornoConf, nunca a declaração da equipe
+   (voltaEquipe): pré-marcar o que a equipe disse faria o PCP "conferir" sem
+   olhar o carro, e a nota passaria a ser a nota que a equipe se deu. */
+function respostasIniciaisVolta(g) {
+  const base = g.respostas || (g.os.find(o => OPERACAO.voltaRespondida(o.retornoConf)) || {}).retornoConf || {};
+  return {
+    ...Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, OPERACAO.respostaVolta(base[k])])),
+    obs: String(base.obs || ''),
+    fotos: Array.isArray(base.fotos) ? base.fotos.slice() : [],
+  };
+}
 function abrirConferenciaVolta(g) {
   if (!voltaGestao()) { toast('A conferência da volta é feita pela gestão (PCP).', 'error'); return; }
-  // Parte do que já foi respondido: da volta inteira, ou da primeira O.S. conferida.
-  const base = g.respostas || (g.os.find(o => OPERACAO.voltaRespondida(o.retornoConf)) || {}).retornoConf || {};
-  const resp = Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, OPERACAO.respostaVolta(base[k])]));
-  let obs = String(base.obs || '');
-  const fotos = Array.isArray(base.fotos) ? base.fotos.slice() : [];
+  const ini = respostasIniciaisVolta(g);
+  const resp = Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, ini[k]]));
+  let obs = ini.obs;
+  const fotos = ini.fotos;
+  let enviando = 0; // fotos ainda subindo: o Salvar espera, senão elas ficavam fora da volta
   let d = document.getElementById('volta-dialog');
   if (!d) { d = document.createElement('dialog'); d.id = 'volta-dialog'; document.body.appendChild(d); }
+  // O <dialog> é um só para todas as voltas: cada abertura leva a sua marca,
+  // e o envio de foto que termina depois de abrirem outra volta não redesenha.
+  const sessao = {}; d._voltaSessao = sessao;
   const desenhar = () => {
     d.innerHTML = `<div class="perf-dialog-head"><h2>Volta do carro · ${esc(fmtInstalacao({ data: g.dia }))}</h2><button type="button" class="btn-ghost" data-volta-fechar aria-label="Fechar">✕</button></div>
       <p class="volta-dialog-sub">🚗 ${esc(g.veiculo || 'carro não informado')} · 👷 ${esc(g.equipe.join(', '))} · ${g.os.length === 1 ? 'O.S ' + esc(g.os[0].numero || '') : g.os.length + ' O.S: ' + esc(g.os.map(o => o.numero).join(', '))}</p>
+      <div class="eq-registrou-bloco"><div class="eq-registrou-titulo">O que a equipe registrou (não conta na nota)</div>${voltaEquipeDaVolta(g, true)}</div>
       ${g.situacao !== 'conferir' && !g.respostas ? '<p class="volta-aviso">As O.S. desta volta tinham respostas diferentes (ou só parte foi conferida). Salvar põe a mesma resposta em todas.</p>' : ''}
       ${OPERACAO.PERGUNTAS_VOLTA.map(k => `<div class="volta-pergunta"><span>${esc(VOLTA_ROTULO[k])}</span>
         <div class="seg" role="group" aria-label="${esc(VOLTA_ROTULO[k])}">
@@ -1936,9 +2186,9 @@ function abrirConferenciaVolta(g) {
       <label class="volta-campo">O que faltou ou precisa de atenção<input id="volta-obs" maxlength="300" value="${esc(obs)}" placeholder="ex.: faltou a escada de 6 m; sobra de lona na caçamba"></label>
       <div class="volta-campo">Fotos da volta (opcional)
         <div class="fotos-grid">${fotos.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}" alt="foto da volta"><button type="button" class="foto-rm" data-volta-foto-rm="${esc(fid)}" aria-label="Tirar a foto">×</button></div>`).join('')}</div>
-        <label class="foto-box"><span class="foto-hint">📷 Foto de como o carro voltou</span><input type="file" accept="image/*" capture="environment" multiple data-volta-foto></label>
+        <label class="foto-box"><span class="foto-hint">📷 Foto de como o carro voltou</span><input type="file" accept="image/*" multiple data-volta-foto></label>
       </div>
-      <div class="volta-dialog-acoes"><button type="button" class="btn-ghost" data-volta-fechar>Cancelar</button><button type="button" class="btn-primary" id="volta-salvar">${g.os.length > 1 ? `Salvar para as ${g.os.length} O.S.` : 'Salvar'}</button></div>`;
+      <div class="volta-dialog-acoes"><button type="button" class="btn-ghost" data-volta-fechar>Cancelar</button><button type="button" class="btn-primary" id="volta-salvar" ${enviando ? 'disabled' : ''}>${enviando ? `Enviando ${enviando} foto(s)…` : g.os.length > 1 ? `Salvar para as ${g.os.length} O.S.` : 'Salvar'}</button></div>`;
     $$('[data-volta-fechar]', d).forEach(b => b.onclick = () => d.close());
     $$('[data-volta-r]', d).forEach(b => b.onclick = () => { const [k, v] = b.dataset.voltaR.split('|'); obs = $('#volta-obs', d).value; resp[k] = v; desenhar(); });
     $$('[data-volta-foto-rm]', d).forEach(b => b.onclick = () => {
@@ -1949,13 +2199,29 @@ function abrirConferenciaVolta(g) {
     const inp = $('[data-volta-foto]', d);
     if (inp) inp.onchange = async () => {
       obs = $('#volta-obs', d).value;
-      const files = Array.from(inp.files || []); if (!files.length) return;
-      toast(`Enviando ${files.length} foto(s)…`);
-      for (const f of files) { const id = await STORE.pushPhoto(f); if (id) fotos.push(id); }
+      let files = Array.from(inp.files || []); if (!files.length) return;
+      // Acima de 10 o corte era calado no Salvar: avisa na hora.
+      const cabe = Math.max(0, 10 - fotos.length - enviando);
+      if (files.length > cabe) { toast('Máximo de 10 fotos por volta.', 'error'); files = files.slice(0, cabe); }
+      if (!files.length) return;
+      enviando += files.length; desenhar();
+      // Foto que falha é dita pelo 'foto-falhou' do store, com o motivo certo.
+      for (const f of files) {
+        const id = await STORE.pushPhoto(f);
+        if (id) fotos.push(id);
+        enviando--;
+      }
+      // A observação é lida no FIM do envio: digitada enquanto a foto subia, ela sumia.
+      if (!d.open || d._voltaSessao !== sessao) return;
+      const campo = $('#volta-obs', d); if (campo) obs = campo.value;
       desenhar();
     };
-    $$('[data-foto-img]', d).forEach(async img => { const b64 = await STORE.pullPhoto(img.dataset.fotoImg); if (b64) img.src = b64; });
+    carregarFotos(d);
     $('#volta-salvar', d).onclick = () => {
+      if (enviando) return;
+      // Em branco não conta como OK: salvar pela metade tirava a volta de "A conferir" para sempre.
+      const faltam = ['carroLimpo', 'carroArrumado', 'equipamentosOk'].filter(k => !resp[k]).length;
+      if (faltam && !confirm(`Faltam ${faltam} pergunta(s) da nota do instalador. Salvar assim?`)) return;
       const n = salvarConferenciaVolta(g, { ...resp, obs: $('#volta-obs', d).value.trim().slice(0, 300), fotos: fotos.slice(0, 10) });
       d.close();
       toast(n ? `Volta conferida · ${n} O.S. ${n === 1 ? 'atualizada' : 'atualizadas'}` : 'Nada mudou nesta volta.', n ? 'success' : '');
@@ -2054,6 +2320,9 @@ function abrirPicker(field) {
       ${r.n > 0 ? `<span class="picker-n">${r.n}×</span>` : ''}
     </label>`).join('') || '<p class="text-muted">Cadastre opções em ⚙️ Configurações.</p>';
   $('#picker-novo').value = '';
+  // Equipe e responsável vêm do cadastro: o campo de nome novo nem aparece.
+  const addBox = document.querySelector('#picker-overlay .picker-add');
+  if (addBox) addBox.style.display = (field === 'equipe' || field === 'responsavelAgenda') ? 'none' : '';
   $('#picker-overlay').classList.remove('hidden');
 }
 
@@ -2072,9 +2341,17 @@ function initPicker() {
     const inp = $('#picker-novo');
     const val = inp.value.trim();
     if (!val) return;
-    // Já existe na lista? apenas marca.
-    const existente = $$('#picker-list input[type=checkbox]').find(c => c.value === val);
+    // Já existe na lista? apenas marca. Compara sem acento e sem caixa: "joao"
+    // é o João da lista, não uma pessoa nova.
+    const existente = $$('#picker-list input[type=checkbox]').find(c => normNome(c.value) === normNome(val));
     if (existente) { existente.checked = true; inp.value = ''; return; }
+    /* Pessoa não nasce no pop-up. Nome novo na Equipe não bate com nenhum
+       instalador: a O.S. some do espelho de todos, não conta na nota e, para
+       o PCP, o servidor nem guarda o nome na lista. Quem cadastra é o admin. */
+    if (_pickerField === 'equipe' || _pickerField === 'responsavelAgenda') {
+      toast('"' + val + '" não está na lista. Cadastre a pessoa em Configurações (admin) e escolha aqui.', 'error');
+      return;
+    }
     const label = document.createElement('label');
     label.className = 'picker-opt';
     label.innerHTML = `<input type="checkbox" value="${esc(val)}" checked><span>${esc(val)}</span>`;
@@ -2091,12 +2368,57 @@ function initPicker() {
 
   $('#picker-ok').onclick = () => {
     if (!_pickerField || !_modalDraft) { fecharPicker(); return; }
+    // Nome digitado e não adicionado: quem toca em OK espera que ele entre.
+    // Sumia calado. Passa pelo mesmo Adicionar (que recusa pessoa nova).
+    if ($('#picker-novo').value.trim()) {
+      $('#picker-add-btn').onclick();
+      if ($('#picker-novo').value.trim()) return; // recusado: o aviso já saiu
+    }
     const vals = $$('#picker-list input[type=checkbox]').filter(c => c.checked).map(c => c.value);
     _modalDraft[_pickerField] = vals;
     saveDraft();
     fecharPicker();
     reRenderModalKeepOpen();
   };
+}
+
+/* Veículo da ficha com a mesma fonte da Agenda (Ativos do RH + Configurações).
+   O carro escolhido pela Agenda que só existe nos Ativos aparecia em branco
+   aqui, como se ninguém tivesse escolhido. Valor fora das listas fica marcado. */
+function veiculoOptionsFicha(atual, cfg) {
+  const doCfg = (cfg.veiculos || []);
+  const doRH = typeof veiculosRH === 'function' ? (veiculosRH() || []).map(v => v.nome) : [];
+  const base = typeof optionsVeiculoCasa === 'function'
+    ? optionsVeiculoCasa(atual)
+    : doCfg.map(v => `<option ${atual === v ? 'selected' : ''}>${esc(v)}</option>`).join('');
+  const fora = atual && !doCfg.includes(atual) && !doRH.includes(atual);
+  return (fora ? `<option value="${esc(atual)}" selected>${esc(atual)}</option>` : '') + base;
+}
+
+/* REMARCAÇÃO É HISTÓRIA (agendaLog). Uma regra só para a ficha e para quem
+   programa por fora dela (Agenda, Calendário): chame ANTES de trocar
+   instalacao.data. Sem o log, a régua do tempo mostrava a O.S. no dia antigo
+   afirmando que tinha reconstruído pelo histórico. */
+function registrarRemarcacao(os, novaData) {
+  if (!os) return;
+  const v = novaData || '';
+  const antes = (os.instalacao || {}).data || '';
+  if (antes === v) return;
+  if (!Array.isArray(os.agendaLog)) os.agendaLog = [];
+  const log = os.agendaLog;
+  const ultimo = log[log.length - 1];
+  // Ajuste em cima do ajuste (mexeu, olhou o calendário, mexeu de novo)
+  // é UMA remarcação: corrige o destino e preserva o `de` original —
+  // que é o que permite reconstruir a agenda de antes dela.
+  if (ultimo && Date.now() - new Date(ultimo.em).getTime() < 120000) {
+    ultimo.data = v;
+    ultimo.em = nowISO();
+  } else {
+    // `de` guarda o que valia ANTES: sem isso, para um dia anterior à
+    // primeira remarcação a régua não saberia a agenda de então.
+    log.push({ de: antes, data: v, em: nowISO(), por: (STATE.user && STATE.user.nome) || '' });
+    if (log.length > 40) os.agendaLog = log.slice(-40);
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -2138,27 +2460,30 @@ function bindModalEvents(os, ro) {
       // Só data COMPLETA entra: `oninput` num campo de data dispara a cada
       // dígito e encheria o log de datas pela metade ("0002-08-05").
       if (el.dataset.f === 'instalacao.data' && _modalDraft &&
-          (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v))) {
-        const antes = (_modalDraft.instalacao || {}).data || '';
-        if (antes !== v) {
-          if (!Array.isArray(_modalDraft.agendaLog)) _modalDraft.agendaLog = [];
-          const log = _modalDraft.agendaLog;
-          const ultimo = log[log.length - 1];
-          // Ajuste em cima do ajuste (mexeu, olhou o calendário, mexeu de novo)
-          // é UMA remarcação: corrige o destino e preserva o `de` original —
-          // que é o que permite reconstruir a agenda de antes dela.
-          if (ultimo && Date.now() - new Date(ultimo.em).getTime() < 120000) {
-            ultimo.data = v || '';
-            ultimo.em = nowISO();
-          } else {
-            // `de` guarda o que valia ANTES: sem isso, para um dia anterior à
-            // primeira remarcação a régua não saberia a agenda de então.
-            log.push({ de: antes, data: v || '', em: nowISO(), por: (STATE.user && STATE.user.nome) || '' });
-            if (log.length > 40) _modalDraft.agendaLog = log.slice(-40);
-          }
-        }
-      }
+          (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v))) registrarRemarcacao(_modalDraft, v);
+      const confAntes = _modalDraft.confirmacao, carroAntes = !!_modalDraft.carroLiberado;
       setField(el.dataset.f, v);
+      // "Abrir Zap" e "Ver no Mapa" seguem o que está digitado, sem repintar a
+      // ficha (o teclado não cai). Antes abriam o número e o endereço antigos.
+      if (el.dataset.f === 'whatsapp' || el.dataset.f === 'endereco') {
+        const box = el.parentElement;
+        const dig = String(v || '').replace(/\D/g, '');
+        const href = el.dataset.f === 'whatsapp'
+          ? (dig.length >= 10 ? 'https://wa.me/' + ((dig.startsWith('55') && dig.length > 11) ? dig : '55' + dig) : '')
+          : (String(v || '').trim() ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(v) : '');
+        let a = box && box.querySelector('a.inline-link');
+        if (href && !a && box) {
+          a = document.createElement('a'); a.className = 'inline-link'; a.target = '_blank';
+          a.textContent = el.dataset.f === 'whatsapp' ? 'Abrir Zap ↗' : 'Ver no Mapa ↗';
+          box.appendChild(a);
+        }
+        if (a) { a.hidden = !href; if (href) a.href = href; }
+        const curto = el.dataset.f === 'whatsapp' && box && box.querySelector('.foto-hint');
+        if (curto) curto.hidden = !!href || !dig;
+      }
+      // Texto livre grava sozinho (como os itens): antes só gravava ao fechar,
+      // e o WhatsApp que descarta a aba ou o voltar do aparelho levavam tudo.
+      _debouncedSaveDraft();
       if (['instalacao.data','instalacao.periodo','instalacao.hora','instalacao.duracaoDias','veiculo'].includes(el.dataset.f)) {
         const alertas = $('#agenda-alertas',root); if(alertas) alertas.innerHTML=alertasAgendaHTML(_modalDraft);
       }
@@ -2178,6 +2503,13 @@ function bindModalEvents(os, ro) {
       // Re-render leve em campos que afetam status/checklist/travas
       if (['confirmacao','instalacao.periodo','instalacao.data','liberadoPCP'].includes(el.dataset.f)) {
         saveDraft(); reRenderModalKeepOpen();
+      } else if (confAntes !== _modalDraft.confirmacao || carroAntes !== !!_modalDraft.carroLiberado) {
+        /* Hora e duração também zeram a confirmação e o carro (setField), e a
+           tela seguia mostrando "Confirmado". Repinta e devolve o foco ao campo. */
+        const campo = el.dataset.f;
+        saveDraft(); reRenderModalKeepOpen();
+        const de = root.querySelector('[data-f="' + campo + '"]') || document.querySelector('#modal-os [data-f="' + campo + '"]');
+        if (de) try { de.focus(); } catch {}
       }
     };
   });
@@ -2309,7 +2641,9 @@ function bindModalEvents(os, ro) {
     toast('Liberado para instalação', 'success');
   };
   const cancelLib = $('#btn-cancelar-liberar');
+  // O "Cancelar" fica colado ao status no tablet: desfazer a liberação pergunta antes.
   if (cancelLib) cancelLib.onclick = () => {
+    if (!confirm('Cancelar a liberação do PCP desta O.S.?')) return;
     _modalDraft.liberadoPCP = false; _modalDraft.aptoPor = ''; _modalDraft.aptoEm = '';
     saveDraft(); reRenderModalKeepOpen();
   };
@@ -2329,10 +2663,13 @@ function bindModalEvents(os, ro) {
   // TRAVA 1 — Liberar carro / saída
   const carroBtn = $('#btn-liberar-carro');
   if (carroBtn) carroBtn.onclick = () => {
-    if (!_modalDraft.liberadoPCP || !OPERACAO.agendaCompleta(_modalDraft) || !OPERACAO.confirmadaHoje(_modalDraft)) {
-      toast('Libere o PCP, complete a programação e confirme o cliente hoje antes de liberar o carro.', 'error');
-      return;
-    }
+    // Diz a condição que falhou: de manhã, numa O.S. confirmada ontem, o botão
+    // parecia disponível e a recusa citava as três de uma vez.
+    const semCarro = !_modalDraft.liberadoPCP ? 'Falta liberar do PCP.'
+      : !OPERACAO.agendaCompleta(_modalDraft) ? 'Falta completar a programação (data, período e equipe).'
+      : !OPERACAO.confirmadaHoje(_modalDraft) ? 'Confirme o cliente hoje' + (_modalDraft.confEm ? ' (a confirmação é de ' + fmtDataBR(_modalDraft.confEm) + ').' : '.')
+      : '';
+    if (semCarro) { toast(semCarro, 'error'); return; }
     _modalDraft.carroLiberado = true;
     _modalDraft.carroLiberadoPor = STATE.user.nome;
     _modalDraft.carroLiberadoEm = nowISO();
@@ -2341,6 +2678,7 @@ function bindModalEvents(os, ro) {
   };
   const cancelCarro = $('#btn-cancelar-carro');
   if (cancelCarro) cancelCarro.onclick = () => {
+    if (!confirm('Cancelar o carro liberado desta O.S.?')) return;
     _modalDraft.carroLiberado = false; _modalDraft.carroLiberadoPor = ''; _modalDraft.carroLiberadoEm = '';
     saveDraft(); reRenderModalKeepOpen();
   };
@@ -2365,8 +2703,20 @@ function bindModalEvents(os, ro) {
     btn.onclick = () => {
       const novo = btn.dataset.setTipo === 'interno' ? 'interno' : 'externo';
       if (osTipo(_modalDraft) === novo) return;
+      /* Virar "Cliente retira" tira a O.S. da programação e troca o endereço
+         por "Retirada na fábrica" no celular da equipe. Com instalação já
+         marcada, um toque sem querer mandava a equipe não ir: pergunta antes. */
+      const d = _modalDraft;
+      if (novo === 'interno' && ((d.instalacao && d.instalacao.data) || (d.equipe || []).length || d.horaSaida) &&
+          !confirm('Esta O.S. tem instalação ' + ((d.instalacao && d.instalacao.data) ? 'em ' + fmtInstalacao(d.instalacao) : 'com equipe escolhida') +
+            '. Virar "Cliente retira" tira ela da programação e do celular da equipe.\n\nContinuar?')) return;
+      const antes = d.tipo;
       _modalDraft.tipo = novo;
       saveDraft(); reRenderModalKeepOpen();
+      toastDesfazer(novo === 'interno' ? 'Virou "Cliente retira"' : 'Virou instalação externa', () => {
+        if (!_modalDraft || _modalDraft.id !== d.id) { const o = STORE.getOS(d.id); if (!o) return; o.tipo = antes; STORE.saveOS(o); renderActiveTab(); return; }
+        _modalDraft.tipo = antes; saveDraft(); reRenderModalKeepOpen();
+      });
     };
   });
 
@@ -2392,6 +2742,10 @@ function bindModalEvents(os, ro) {
     // sem botão de saída — desarquivar exige finalizadaEm).
     _modalDraft.arquivadaEm = '';
     if (_modalDraft.checkout) { _modalDraft.checkout.situacao = ''; _modalDraft.checkout.confirmado = false; }
+    // A justificativa automática da baixa do ERP vale para aquele encerramento.
+    // Deixada, ela dispensava calada a foto e o retorno na próxima finalização,
+    // agora por uma pessoa, e a O.S. contava como concluída sem prova.
+    if (/^Encerrada no ERP/.test(String(_modalDraft.justificativaConclusao || ''))) _modalDraft.justificativaConclusao = '';
     saveDraft(); reRenderModalKeepOpen();
     toast('O.S reaberta', 'success');
   };
@@ -2438,20 +2792,30 @@ function bindModalEvents(os, ro) {
       if (fileId) draft.fotosCheckinIds.push(fileId);
     }
     // A foto de saída registra a saída: preenche a hora se ainda estiver vazia.
+    // Hora que acabou de ser preenchida com o relógio é do DIA DE HOJE
+    // (aoVivo), não do agendado: a O.S. vencida executada hoje saía como
+    // "sem retorno" no dia da agenda. Hora digitada antes segue a agenda.
+    let agoraMesmo = false;
     if (!draft.horaSaida) {
       const agora = new Date();
       draft.horaSaida = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
+      agoraMesmo = true;
     }
     // A hora sozinha não diz em QUE dia a equipe saiu (ver carimbarMomento).
-    STORE.carimbarMomento(draft, 'horaSaida', 'saidaEm');
+    STORE.carimbarMomento(draft, 'horaSaida', 'saidaEm', agoraMesmo);
     if (_modalDraft === draft) capturarLocalCheckin();
     persistirAposFoto(draft, ['fotosCheckinIds', 'horaSaida', 'saidaEm']);
   };
   $$('[data-foto-rm]', root).forEach(btn => {
     btn.onclick = () => {
       const fid = btn.dataset.fotoRm;
+      // O × fica no canto da miniatura, que agora abre a foto grande: um toque
+      // torto apagava a foto da rua do servidor, sem volta. Pergunta antes.
+      if (!confirm('Apagar esta foto? Ela sai do servidor e não volta.')) return;
       STORE.delFotoSync(fid);
       _modalDraft.fotosCheckinIds = (_modalDraft.fotosCheckinIds || []).filter(x => x !== fid);
+      // Anotada: o envio velho do celular da equipe soma as listas e traria a foto de volta.
+      _modalDraft.fotosTiradas = [...new Set([...(_modalDraft.fotosTiradas || []), fid])].slice(-100);
       saveDraft(); reRenderModalKeepOpen();
     };
   });
@@ -2468,27 +2832,61 @@ function bindModalEvents(os, ro) {
       const fileId = await STORE.pushPhoto(f);
       if (fileId) draft.fotosRetornoIds.push(fileId);
     }
+    let agoraMesmo = false;   // mesma regra da saída
     if (!draft.horaRetorno) {
       const agora = new Date();
       draft.horaRetorno = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
+      agoraMesmo = true;
     }
-    STORE.carimbarMomento(draft, 'horaRetorno', 'retornoEm');
+    STORE.carimbarMomento(draft, 'horaRetorno', 'retornoEm', agoraMesmo);
     persistirAposFoto(draft, ['fotosRetornoIds', 'horaRetorno', 'retornoEm']);
   };
   $$('[data-foto-rm-retorno]', root).forEach(btn => {
     btn.onclick = () => {
       const fid = btn.dataset.fotoRmRetorno;
+      if (!confirm('Apagar esta foto? Ela sai do servidor e não volta.')) return;
       STORE.delFotoSync(fid);
       _modalDraft.fotosRetornoIds = (_modalDraft.fotosRetornoIds || []).filter(x => x !== fid);
+      _modalDraft.fotosTiradas = [...new Set([...(_modalDraft.fotosTiradas || []), fid])].slice(-100);
       saveDraft(); reRenderModalKeepOpen();
     };
   });
 
   // Carrega imagens (lazy do IndexedDB/servidor)
+  carregarFotos(root);
+}
+
+/* MINIATURA QUE ABRE GRANDE. A gestão decide "Instalação OK", o retrabalho e
+   a volta do carro olhando a foto do instalador; 80 px no tablet não mostra
+   sujeira no banco nem o acabamento da lona. Foto que não chegou (offline, ou
+   ainda na fila do celular) diz isso em vez de virar um quadrado vazio.
+   <dialog> porque a volta do carro também é um <dialog>: só a camada de cima
+   passa por cima dele. */
+function carregarFotos(root) {
   $$('[data-foto-img]', root).forEach(async img => {
     const b64 = await STORE.pullPhoto(img.dataset.fotoImg);
     if (b64) img.src = b64;
+    else { img.alt = 'Foto ainda não chegou do celular'; img.title = img.alt; }
   });
+  $$('img.foto-thumb[data-foto-img]', root).forEach(img => {
+    img.onclick = () => { if (img.src) abrirFotoGrande(img.src, img.alt); };
+  });
+}
+function abrirFotoGrande(src, legenda) {
+  const dl = document.createElement('dialog');
+  dl.style.cssText = 'padding:12px;border:0;border-radius:12px;max-width:100vw;max-height:100vh;background:var(--surface)';
+  const img = document.createElement('img');
+  img.src = src; img.alt = legenda || 'foto';
+  img.style.cssText = 'display:block;max-width:calc(100vw - 48px);max-height:calc(100vh - 110px);object-fit:contain';
+  const bt = document.createElement('button');
+  bt.type = 'button'; bt.className = 'btn-primary'; bt.textContent = 'Fechar';
+  bt.style.cssText = 'min-height:44px;width:100%;margin-top:10px';
+  bt.onclick = () => dl.close();
+  dl.onclick = e => { if (e.target === dl) dl.close(); };
+  dl.onclose = () => dl.remove();
+  dl.append(img, bt);
+  document.body.appendChild(dl);
+  if (dl.showModal) dl.showModal(); else dl.setAttribute('open', '');
 }
 
 // Geolocalização automática no check‑in (espelho de gestão). Registra só uma vez.
@@ -2529,7 +2927,10 @@ function reRenderModalKeepOpen() {
    agrupa. A resposta fica carimbada (quem, quando) mesmo quando é "não". */
 const ETAPAS_ORIGEM = ['Medição', 'Arte', 'Produção', 'Instalação'];
 const CAUSAS_RAIZ = ['Erro humano', 'Material', 'Comunicação', 'Especificação', 'Outro'];
-function perguntarRetrabalho(os, aoResponder) {
+/* `volta`: quem chama pode trocar o "Voltar" (rótulo e o que fazer). O Lançar
+   entrega volta ao próprio formulário, com a data, a equipe e a conferência
+   que já estavam marcadas. */
+function perguntarRetrabalho(os, aoResponder, volta = {}) {
   const old = $('#retrab-pergunta'); if (old) old.remove();
   const box = document.createElement('div');
   box.id = 'retrab-pergunta';
@@ -2547,11 +2948,12 @@ function perguntarRetrabalho(os, aoResponder) {
           <button class="btn-success" id="retrab-nao" ${jaSim ? '' : 'autofocus'}>Não</button>
           <button class="btn-danger" id="retrab-sim">Sim, gerou</button>
         </div>
+        <button type="button" class="btn-ghost w-100" id="retrab-voltar" style="margin-top:8px">${esc(volta.rotulo || 'Voltar sem finalizar')}</button>
         <form id="retrab-form" class="retrab-form" ${jaSim ? '' : 'hidden'}>
           <div class="field"><label>Descrição do problema <span class="req">*</span> <span class="text-muted">(o que precisou ser refeito)</span></label><textarea name="problema" rows="2" required>${esc(os.problema || '')}</textarea></div>
           <div class="field-row">
-            <div class="field"><label>Etapa de origem <span class="req">*</span></label><select name="etapaOrigem" required><option value="">— escolher —</option>${opt(ETAPAS_ORIGEM, os.etapaOrigem)}</select></div>
-            <div class="field"><label>Causa raiz <span class="req">*</span></label><select name="causaRaiz" required><option value="">— escolher —</option>${opt(CAUSAS_RAIZ, os.causaRaiz)}</select></div>
+            <div class="field"><label>Etapa de origem <span class="req">*</span></label><select name="etapaOrigem" required><option value="">Escolher</option>${opt(ETAPAS_ORIGEM, os.etapaOrigem)}</select></div>
+            <div class="field"><label>Causa raiz <span class="req">*</span></label><select name="causaRaiz" required><option value="">Escolher</option>${opt(CAUSAS_RAIZ, os.causaRaiz)}</select></div>
           </div>
           <div class="field-row">
             <div class="field"><label>Responsável da etapa <span class="req">*</span> <span class="text-muted">(nome ou setor)</span></label><input name="responsavelEtapa" list="retrab-resp" required value="${esc(os.responsavelEtapa || '')}"><datalist id="retrab-resp">${setores.map(x => `<option value="${esc(x)}">`).join('')}${elenco.map(p => `<option value="${esc(p.nome)}">`).join('')}</datalist></div>
@@ -2562,9 +2964,22 @@ function perguntarRetrabalho(os, aoResponder) {
       </div>
     </div>`;
   document.body.appendChild(box);
-  // Sem × e sem fechar no fundo: a regra diz "não pode ser pulado".
+  // Sem × e sem fechar no fundo: a regra diz "não pode ser pulado". Voltar
+  // sem finalizar não pula a regra (não existe finalização sem resposta), e
+  // quem tocou 🏁 por engano não é obrigado a finalizar para sair.
+  $('#retrab-voltar', box).onclick = () => { box.remove(); if (typeof volta.aoVoltar === 'function') volta.aoVoltar(); };
   const carimbo = resposta => ({ em: nowISO(), por: (STATE.user && STATE.user.nome) || '', resposta });
   $('#retrab-nao', box).onclick = () => {
+    /* O.S. já marcada como retrabalho (o instalador marcou no espelho): "Não"
+       por hábito gravava "não gerou" ao lado do 🔴 e a base ficava
+       contraditória. Pergunta; confirmado, desmarca de verdade. */
+    const marcado = !!os.retrabalho || (os.checkout && os.checkout.situacao === 'Retrabalho');
+    if (marcado) {
+      if (!confirm('Esta O.S. está marcada como retrabalho. Responder Não desmarca o retrabalho. Continuar?')) return;
+      os.retrabalho = false;
+      if (os.checkout && os.checkout.situacao === 'Retrabalho') os.checkout.situacao = '';
+      os.problema = ''; os.etapaOrigem = ''; os.causaRaiz = ''; os.responsavelEtapa = '';
+    }
     os.retrabalhoPerguntado = carimbo('nao');
     box.remove(); aoResponder();
   };
@@ -2597,14 +3012,18 @@ function validarFinalizacao(os) {
   if (!os.produtosConferidosPor) f.push('produtos conferidos');
   if (!os.ferramentasConferidas) f.push('ferramentas conferidas');
   if (!os.carroLiberado && !os.horaSaida) f.push('liberar carro / saída');
-  // Processo 2 (Retorno · Execução)
-  if (!os.instalacaoOK) f.push('Instalação OK');
-  if (!os.conferidoPor) f.push('conferido por');
+  // Processo 2 (Retorno · Execução). "Instalação OK" e "conferido por" são o
+  // mesmo checkbox: uma falta só. E a foto leva o nome do campo da ficha
+  // ("Fotos de retorno"), senão o PCP procurava um campo que não existe.
+  if (!os.instalacaoOK || !os.conferidoPor) f.push('marcar Instalação OK');
   if (!(os.fotosCheckinIds || []).length) f.push('≥1 foto de saída');
   const excecao = ['admin','pcp'].includes(STATE.user?.papel) && String(os.justificativaConclusao || '').trim().length >= 15;
-  if (!excecao && !(os.fotosRetornoIds || []).length) f.push('foto do serviço concluído');
+  if (!excecao && !(os.fotosRetornoIds || []).length) f.push('foto de retorno (serviço pronto)');
   if (!excecao && !os.retornoEm) f.push('data e hora do retorno');
   if (os.retrabalho && !os.problema) f.push('descrição do problema (retrabalho)');
+  // Serviço de vários dias: a equipe voltou do 1º dia e marcou que volta. Não
+  // é hora de finalizar, senão a entrega conta no dia errado.
+  if (os.checkout && os.checkout.situacao === 'Mais um dia de trabalho') f.push('trocar a Situação para Finalizado (a equipe marcou mais um dia de trabalho)');
   return f;
 }
 
@@ -2646,6 +3065,11 @@ function osCardHTML(os) {
      tag fica ao lado de "⏰ atrasada" e "🔴 retrabalho", que e onde o olho ja
      procura o que esta errado. */
   const seloParado = OPERACAO.paradoNoCliente(os) ? ' <span class="tag-parado">⏸ parado no cliente</span>' : '';
+  /* O.S. excluída que a conciliação do ERP trouxe de volta (pcp-mubisys,
+     restauradaPeloERPEm): sem o selo, quem excluiu achava que o app desfez a
+     exclusão sozinho. */
+  const seloVoltouERP = os.restauradaPeloERPEm && !os.finalizadaEm
+    ? ` <span class="badge sem-valor" title="Voltou porque o ERP ainda lista esta O.S. Para sair de vez, baixe no ERP.">↩ voltou pelo ERP ${esc(fmtDataBR(os.restauradaPeloERPEm))}</span>` : '';
   const etapasBtns = `<div class="card-etapas">${etapasCard
     .map(([b, lbl]) => `<button class="card-etapa-btn ${etapaDone ? 'done' : ''}" data-etapa-os="${esc(os.id)}" data-etapa-bloco="${b}" title="Abrir em ${esc(lbl)}">${esc(lbl)}</button>`)
     .join('')}</div>`;
@@ -2678,7 +3102,7 @@ function osCardHTML(os) {
     <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
       <div class="card-header card-header-os">
         <div class="card-meta">
-          <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${(os.retrabalho && !os.finalizadaEm) || retrabPendente(os) ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}${seloParado}${os.statusERP === 'CONCLUIDO' && !os.liberadoPCP && !os.finalizadaEm ? ` <span class="tag-erp-pronta" title="O ERP diz que a produção terminou${os.statusERPDesde ? ' em ' + esc(fmtDataBR(os.statusERPDesde)) : ''}; falta liberar no PCP">🏭 ERP: produção concluída</span>` : ''}${erpMudancasAConferir(os).length ? ' <span class="badge sem-valor">ERP mudou · conferir</span>' : ''}</div>
+          <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${(os.retrabalho && !os.finalizadaEm) || retrabPendente(os) ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}${seloParado}${seloVoltouERP}${os.statusERP === 'CONCLUIDO' && !os.liberadoPCP && !os.finalizadaEm ? ` <span class="tag-erp-pronta" title="O ERP diz que a produção terminou${os.statusERPDesde ? ' em ' + esc(fmtDataBR(os.statusERPDesde)) : ''}; falta liberar no PCP">🏭 ERP: produção concluída</span>` : ''}${erpMudancasAConferir(os).length ? ' <span class="badge sem-valor">ERP mudou · conferir</span>' : ''}</div>
           <span class="badge st-${st}">${statusLabelDe(os, st)}</span>
         </div>
         <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
@@ -2868,6 +3292,9 @@ function bindCardClicks(container) {
       if (!os) return;
       const dig = String(os.whatsapp || '').replace(/\D/g, '');
       if (!dig) { toast('Sem WhatsApp cadastrado nesta O.S — preencha no bloco PCP & Cliente.', 'error'); return; }
+      // Mesma régua da ficha (10 dígitos ou mais): sem DDD o Zap abria um número
+      // que não existe e o card marcava "Avisado" com o cliente sem saber.
+      if (dig.length < 10) { toast('WhatsApp sem DDD nesta O.S.: corrija no bloco PCP & Cliente.', 'error'); return; }
       // Número do ERP pode já vir com DDI 55 — não duplicar (5555…). O guard
       // de comprimento preserva DDD 55 (RS) de número local com 10-11 dígitos.
       const num = (dig.startsWith('55') && dig.length > 11) ? dig : '55' + dig;
@@ -3188,13 +3615,22 @@ function finalizarServicoDoCard(osId) {
     return;
   }
   const concluir = () => {
+    // Um toque no card finaliza: a volta também é de um toque (a lista se
+    // redesenha com o sync e o dedo acerta o card do lado).
+    const campos = ['finalizadaEm', 'finalizadoPor', 'checkout', 'historico', 'retrabalhoPerguntado', 'retrabalho', 'problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho'];
+    const antes = JSON.parse(JSON.stringify(Object.fromEntries(campos.map(k => [k, os[k] === undefined ? null : os[k]]))));
     aplicarFinalizacao(os);
     os.atualizadoEm = nowISO();
     os.atualizadoPor = STATE.user.nome;
     registrarEtapa(os);
     STORE.saveOS(os);
-    toast('Serviço finalizado 🏁', 'success');
     renderActiveTab();
+    toastDesfazer(isInterno(os) ? 'Retirada registrada 📦' : 'Serviço finalizado 🏁', () => {
+      const atual = STORE.getOS(osId); if (!atual) return;
+      for (const k of campos) { if (antes[k] === null) delete atual[k]; else atual[k] = antes[k]; }
+      atual.atualizadoEm = nowISO(); atual.atualizadoPor = STATE.user.nome;
+      STORE.saveOS(atual); renderActiveTab(); toast('Desfeito', 'success');
+    });
   };
   // Retirada não é instalação: sem a pergunta. Instalação: sempre.
   if (isInterno(os)) concluir(); else perguntarRetrabalho(os, concluir);
@@ -3304,7 +3740,18 @@ function arqChipsHTML() {
   return `<div class="pcp-chips" role="group" aria-label="Ano">${anos}</div>
     <div class="pcp-chips" role="group" aria-label="Mês"><button class="pcp-chip ${a.mes === '' ? 'active' : ''}" data-arq-mes="">Ano inteiro</button>${meses}</div>`;
 }
-let _arqBuscaTimer = null, _arqChave = '';
+let _arqBuscaTimer = null, _arqChave = '', _arqNotaTxt = '';
+// Nota da busca no servidor. O texto fica guardado fora do DOM porque o span
+// nasce vazio a cada repintura: sem isso o aviso de lista cortada sumia no
+// primeiro toque em outro chip, e a lista incompleta passava por completa.
+// O servidor pagina por id, não por data: o corte não traz "as mais antigas".
+// Ele procura número, cliente, endereço e serviço (pcp-sync, escopo finalizadas).
+function notaServidorTxt(r, q, vazio) {
+  if (r.offline) return 'sem rede: só o que está neste aparelho';
+  if (r.truncou) return `servidor: só ${r.itens.length} vieram, pode faltar O.S; refine a busca`;
+  if (r.itens.length) return `${r.itens.length} do servidor`;
+  return q ? 'nada no servidor com esse termo' : vazio;
+}
 function arqPrecisaDoServidor() {
   const { de } = arqRecorte();
   const dias = (typeof STORE.JANELA_LOCAL_DIAS === 'number') ? STORE.JANELA_LOCAL_DIAS : 60;
@@ -3312,18 +3759,32 @@ function arqPrecisaDoServidor() {
   return !!String(STATE.filtroBusca || '').trim() || de < corte;
 }
 function arqBuscar(depois) {
-  if (!STORE.buscarHistorico || !arqPrecisaDoServidor()) { _arqChave = ''; return; }
+  if (!STORE.buscarHistorico || !arqPrecisaDoServidor()) {
+    _arqChave = ''; _arqNotaTxt = '';
+    const n = $('#arq-nota'); if (n) n.textContent = '';
+    return;
+  }
   const q = String(STATE.filtroBusca || '').trim();
   const { de, ate } = q ? { de: '', ate: '' } : arqRecorte();   // busca = histórico inteiro
   const chave = JSON.stringify([de, ate, q]);
   if (chave === _arqChave) return;
   clearTimeout(_arqBuscaTimer);
   _arqBuscaTimer = setTimeout(async () => {
-    _arqChave = chave;
-    const nota = $('#arq-nota'); if (nota) nota.textContent = 'buscando no servidor…';
-    const r = await STORE.buscarHistorico({ de, ate, q });
-    if (nota) nota.textContent = r.offline ? 'sem rede: só o que está neste aparelho'
-      : (r.truncou ? `servidor: mostrando as ${r.itens.length} mais antigas — refine a busca` : (r.itens.length ? `${r.itens.length} do servidor` : 'nada mais no servidor'));
+    _arqChave = chave;   // marca antes: a repintura durante a espera não dispara outra busca igual
+    const pintar = t => { _arqNotaTxt = t; const n = $('#arq-nota'); if (n) n.textContent = t; };
+    pintar('buscando no servidor…');
+    let r;
+    try { r = await STORE.buscarHistorico({ de, ate, q }); }
+    catch (e) {
+      // Timeout ou crachá vencido: sem soltar a chave, a nota ficava em
+      // "buscando" para sempre e a volta da rede não refazia a busca.
+      _arqChave = '';
+      pintar('o servidor não respondeu: toque no filtro para tentar de novo');
+      return;
+    }
+    if (r.offline) _arqChave = '';   // sem rede nada foi buscado: a próxima pintura tenta de novo
+    pintar(notaServidorTxt(r, q, 'nada mais no servidor'));
+    if (r.offline) return;           // lista igual; repintar aqui só giraria em falso
     if (typeof depois === 'function') depois();
   }, q ? 350 : 0);
 }
@@ -3436,7 +3897,7 @@ function pcpRenderCards() {
   // mensagem da vista sugeriria que não existe nada, contradizendo os números).
   const filtrosAtivos = (STATE.filtroBusca || '').trim() || STATE.pcpTipo !== 'todos' || !!STATE._prioridade;
   const vazio = STATE._prioridade
-    ? emptyState('', 'Nenhuma O.S nesta prioridade', 'Feche a prioridade para ver a carteira, ou limpe busca e tipo.')
+    ? emptyState('', 'Nenhuma O.S nesta prioridade', 'Feche a prioridade para ver a carteira.')
     : filtrosAtivos
     ? emptyState('', 'Nenhuma O.S neste filtro', 'Limpe a busca ou o filtro de tipo para ver as O.S desta vista.')
     : STATE.pcpVista === 'arquivados'
@@ -3449,7 +3910,10 @@ function pcpRenderCards() {
   grid.classList.remove('pcp-lista');
   grid.innerHTML = list.map(osCardHTML).join('') || vazio;
   const resultado = $('#pcp-resultado');
-  if (resultado) resultado.textContent = `${list.length} O.S ${list.length === 1 ? 'exibida' : 'exibidas'}`;
+  // A prioridade não herda busca nem tipo (regra testada em telas.test); dizer
+  // isso no contador, senão digitar um número e ver a grade parada parece defeito.
+  const semFiltro = missao && ((STATE.filtroBusca || '').trim() || STATE.pcpTipo !== 'todos');
+  if (resultado) resultado.textContent = `${list.length} O.S ${list.length === 1 ? 'exibida' : 'exibidas'}${semFiltro ? ' · busca e tipo não valem na prioridade' : ''}`;
   const limpar = $('#pcp-limpar-filtros');
   if (limpar) limpar.hidden = !((STATE.filtroBusca || '').trim() || STATE.pcpTipo !== 'todos' || (STATE.pcpVista === '' && STATE.pcpStatus !== 'todos'));
   bindCardClicks(grid);
@@ -3535,7 +3999,7 @@ function renderPCP() {
       <div class="pcp-filtro-linha pcp-filtro-unica" role="group" aria-label="Tipo e etapa">
         ${STATE.pcpVista === 'voltas' ? '' : `<div class="pcp-chips">${tipoChips}</div>`}
         ${STATE.pcpVista === '' ? `<div class="pcp-chips">${chips}</div>` : ''}
-        ${STATE.pcpVista === 'arquivados' ? `<div id="arq-chips" class="pcp-arq-chips">${arqChipsHTML()}</div><span id="arq-nota" class="text-muted" style="font-size:.75rem"></span>` : ''}
+        ${STATE.pcpVista === 'arquivados' ? `<div id="arq-chips" class="pcp-arq-chips">${arqChipsHTML()}</div><span id="arq-nota" class="text-muted" style="font-size:.75rem">${esc(_arqNotaTxt)}</span>` : ''}
       </div>
       <div class="pcp-controles-rodape">
         <button class="pcp-limpar" id="pcp-limpar-filtros" hidden>Limpar filtros</button>
@@ -3893,8 +4357,9 @@ function statsPorInstalador(finalizadas) {
   return porInst;
 }
 
-// Nota 0–10 do instalador: prioriza menos retrabalho, com bônus de check‑in.
-// Sem entregas → nota neutra 0. %retrab pesa 70%, check‑in 30%.
+// Índice de registros de 0 a 10 (NÃO é a nota da avaliação, que mora na Performance):
+// prioriza menos retrabalho, com bônus de check‑in. Sem entregas → 0.
+// %retrab pesa 70%, check‑in 30%. Na tela e no PDF ele se chama "Índice".
 function notaInstalador(d) {
   if (!d || !d.entregas) return 0;
   const semRetrab = 1 - (d.retrab / d.entregas);   // 0..1 (quanto menos retrab, maior)
@@ -3928,10 +4393,11 @@ function trendBlock(titulo, tipo, pares) {
 
 function renderPainelKPIs() {
   const el = $('#painel-content');
-  const todas = STORE.getAllOS().filter(osNoRange);
+  const base = osAnalise();   // aparelho + histórico já buscado (ver analiseCobertura)
+  const todas = base.filter(osNoRange);
   const {de,ate} = painelIntervalo();
-  const finalizadas = OPERACAO.conclusoes(STORE.getAllOS(),de,ate);
-  const recebidasERP = STORE.getAllOS().filter(o => OPERACAO.encerradaERP(o) && OPERACAO.emIntervalo(o.finalizadaEm,de,ate));
+  const finalizadas = OPERACAO.conclusoes(base,de,ate);
+  const recebidasERP = base.filter(o => OPERACAO.encerradaERP(o) && OPERACAO.emIntervalo(o.finalizadaEm,de,ate));
   const comRetrab = finalizadas.filter(o => o.retrabalho).length;
   const horas = finalizadas.filter(o => !isInterno(o)).map(horasExec).filter(h => h != null);
   const mediaH = horas.length ? (horas.reduce((a, b) => a + b, 0) / horas.length) : 0;
@@ -3974,19 +4440,21 @@ function renderPainelKPIs() {
   }).join('');
 
   // ── Comparativo com período anterior (mesmo tamanho) ─────────────────────
-  let prevTxt = '';
+  let prevTxt = '', deCobertura = de;
   if (STATE.painelModo === 'periodo' && STATE._painelDe && STATE._painelAte) {
     const de = parseLocalDate(STATE._painelDe), ate = parseLocalDate(STATE._painelAte);
     const dias = Math.round((ate - de) / 86400000) + 1;
     const pAte = new Date(de); pAte.setDate(de.getDate() - 1);
     const pDe = new Date(pAte); pDe.setDate(pAte.getDate() - (dias - 1));
     const pDeS = ymdLocal(pDe), pAteS = ymdLocal(pAte);
-    const prev = todasOS.filter(o => OPERACAO.diasAgenda(o).some(d => OPERACAO.emIntervalo(d,pDeS,pAteS)));
+    const prev = base.filter(o => !isInterno(o) && OPERACAO.diasAgenda(o).some(d => OPERACAO.emIntervalo(d,pDeS,pAteS)));
+    deCobertura = pDeS;   // o comparativo também precisa do período anterior inteiro
     const delta = todas.length - prev.length;
     const seta = delta > 0 ? '▲' : (delta < 0 ? '▼' : '▬');
     const cor = delta > 0 ? 'var(--green)' : (delta < 0 ? 'var(--red)' : 'var(--muted)');
     prevTxt = `<span class="prev-cmp" style="color:${cor}">${seta} ${Math.abs(delta)} vs período anterior (${prev.length})</span>`;
   }
+  const cobertura = analiseCobertura(deCobertura, ate, () => { if (STATE.activeTab === 'painel') repintarSeLivre(); });
 
   // ── Tendências ────────────────────────────────────────────────────────────
   const trendHTML = `
@@ -4013,6 +4481,7 @@ function renderPainelKPIs() {
       <div class="kpi-card clickable" data-detail="hoje"><div class="kpi-val">${agendadasHoje}</div><div class="kpi-lbl">Instalações em aberto hoje</div></div>
       <div class="kpi-card clickable" data-detail="aptas"><div class="kpi-val">${aptas}</div><div class="kpi-lbl">Aptas (aguardando)</div></div>
     </div>
+    ${cobertura.txt ? `<p class="metricas-nota"><strong>${esc(cobertura.txt)}</strong></p>` : ''}
     <p class="metricas-nota">Conclusões usam a data de finalização registrada pela equipe e incluem retiradas. Tempo inclui deslocamento; não mede horas produtivas. Os três últimos indicadores mostram a situação atual.</p>
     ${recebidasERP.length ? `<button class="btn-ghost erp-aviso" data-detail="erp">↻ ${recebidasERP.length} ${recebidasERP.length===1?'encerramento recebido':'encerramentos recebidos'} do ERP no período · conferir separadamente</button>` : ''}
     ${prevTxt ? `<div style="margin:-6px 0 10px">${prevTxt}</div>` : ''}
@@ -4080,14 +4549,14 @@ function renderPainelKPIs() {
   // Cliques em itens (cards KPI, linhas, tendências)
   $$('[data-detail]', el).forEach(node => { node.tabIndex=0; node.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();node.click();}};node.onclick = () => {
     STATE._painelDetail = node.dataset.detail;
-    renderPainelDetalhe(todas, todasOS, finalizadas, porInst);
+    renderPainelDetalhe(todas, todasOS, finalizadas, porInst, true);
   }; });
 
   // Serviços por funcionário
   $('#painel-func').onchange = e => {
     STATE._painelFunc = e.target.value;
     STATE._painelDetail = e.target.value ? ('func:' + e.target.value) : null;
-    renderPainelDetalhe(todas, todasOS, finalizadas, porInst);
+    renderPainelDetalhe(todas, todasOS, finalizadas, porInst, true);
   };
 
   // Comparativo de colaboradores
@@ -4100,7 +4569,7 @@ function renderPainelKPIs() {
 
   // Produtividade por funcionário (relatório mensal — item 7)
   const prodMesInp = $('#prod-mes', el);
-  const renderProdMes = () => { const out = $('#prod-mes-out', el); if (out) out.innerHTML = tabelaProdutividadeMes(prodMesInp.value); };
+  const renderProdMes = () => { const out = $('#prod-mes-out', el); if (out) out.innerHTML = tabelaProdutividadeMes(prodMesInp.value, () => { if (STATE.activeTab === 'painel') renderProdMes(); }); };
   if (prodMesInp) {
     prodMesInp.onchange = () => { STATE._prodMes = prodMesInp.value; renderProdMes(); };
     renderProdMes();
@@ -4125,7 +4594,10 @@ function osMiniList(list) {
     </div>`).join('')}</div>`;
 }
 
-function renderPainelDetalhe(todas, todasOS, finalizadas, porInst) {
+// rolar: só quando o detalhe foi pedido por toque. A repintura de cada
+// sincronização também passa aqui, e rolar nela puxava a página para baixo
+// enquanto o gestor arrastava a Linha do tempo.
+function renderPainelDetalhe(todas, todasOS, finalizadas, porInst, rolar) {
   const box = $('#painel-detail');
   if (!box) return;
   const d = STATE._painelDetail;
@@ -4157,7 +4629,7 @@ function renderPainelDetalhe(todas, todasOS, finalizadas, porInst) {
     ${osMiniList(list)}`;
   bindCardClicks(box);
   $('#detail-close').onclick = () => { STATE._painelDetail = null; STATE._painelFunc = ''; box.innerHTML = ''; const sf = $('#painel-func'); if (sf) sf.value = ''; };
-  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (rolar) box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function renderComparativo(finalizadas) {
@@ -4197,12 +4669,24 @@ function renderConferenciaDia() {
     pcp:lista.filter(o => !o.liberadoPCP),
     equipe:lista.filter(o => !OPERACAO.equipe(o).length),
     veiculo:lista.filter(o => !String(o.veiculo || '').trim()),
-    cliente:lista.filter(o => o.confirmacao !== 'Confirmado')
+    // Confirmação vale NO DIA (mesma regra do "Liberar carro" e do próximo
+    // passo): a de sexta não libera o carro de segunda. Quem já saiu não reconfirma.
+    cliente:lista.filter(o => o.confirmacao !== 'Confirmado' || (!o.horaSaida && !OPERACAO.confirmadaHoje(o, data))),
+    // Instalação que não saiu (chuva, cliente fechado) continua aberta com a data
+    // velha e sumia do dia: fica à parte até ganhar nova data.
+    vencidas:all.filter(o => {
+      if (o.finalizadaEm || OPERACAO.interno(o)) return false;
+      // Já saiu (ou foi e voltou): o serviço aconteceu, falta só finalizar.
+      // Convidar a remarcar zerava a confirmação de um serviço feito.
+      if (o.horaSaida || o.saidaEm || o.horaRetorno || o.retornoEm) return false;
+      const dias = OPERACAO.diasAgenda(o), ult = dias[dias.length - 1];
+      return !!ult && ult < data && ult >= OPERACAO.somarDias(data, -7);
+    })
   };
   const conflitos = OPERACAO.conflitos(all,data);
-  const defs=[['todas','Instalações previstas'],['pcp','PCP pendente'],['equipe','Sem equipe'],['veiculo','Sem veículo'],['cliente','Cliente a confirmar']];
+  const defs=[['todas','Instalações previstas'],['pcp','PCP pendente'],['equipe','Sem equipe'],['veiculo','Sem veículo'],['cliente','Cliente a confirmar'],['vencidas','Agenda passou, sem nova data']];
   const foco = STATE._progFoco || 'todas';
-  el.innerHTML = `<div class="gestao-head"><div><h2>Conferência do dia · ${fmtDataBR(data)}</h2><p>Somente instalações em aberto. Inclui as que continuam de dias anteriores. Confira os impedimentos antes de liberar a equipe.</p></div></div>
+  el.innerHTML = `<div class="gestao-head"><div><h2>Conferência do dia · ${fmtDataBR(data)}</h2><p>Somente instalações em aberto. Inclui serviços de vários dias em andamento. As que ficaram para trás nos últimos 7 dias aparecem à parte. Confira os impedimentos antes de liberar a equipe.</p></div></div>
     <div class="gestao-indicadores">${defs.map(([k,n]) => `<button class="gestao-indicador ${foco===k?'selecionado':''}" data-dia-grupo="${k}" aria-pressed="${foco===k}"><span>${n}</span><strong>${grupos[k].length}</strong></button>`).join('')}</div>
     ${conflitos.length ? `<details class="conflitos-agenda" open><summary>${conflitos.length} ${conflitos.length===1?'possível conflito':'possíveis conflitos'} de equipe ou veículo</summary><p>São cruzamentos no mesmo dia e período. Horários sem duração exigem conferência; vários serviços podem caber no mesmo turno.</p>${conflitos.map(c => `<div class="conflito-linha"><strong>${esc([...c.equipe,c.veiculo].filter(Boolean).join(' · '))}</strong><span>${[c.a,c.b].map(o => `<button class="btn-ghost btn-sm" data-os-id="${esc(o.id)}">O.S ${esc(o.numero||'—')} · ${esc(rotuloHora(o))}</button>`).join(' × ')}</span></div>`).join('')}</details>` : '<p class="metricas-nota">Nenhuma sobreposição encontrada entre os recursos cadastrados. Isso não comprova capacidade disponível: faltam duração e deslocamento por serviço.</p>'}
     <div class="gestao-detalhe">${osMiniList(grupos[foco] || lista)}</div>`;
@@ -4212,7 +4696,8 @@ function renderConferenciaDia() {
 
 function renderProgramacao() {
   const el = $('#panel-programacao');
-  if (!STATE._fProg) STATE._fProg = OPERACAO.periodoRapido('7',hojeISO(),true);
+  if (!STATE._fProg) STATE._fProg = {...OPERACAO.periodoRapido('7',hojeISO(),true), rapido: '7'};
+  periodoVivo('_fProg');
   el.innerHTML = `
     <div class="filter-bar">
       <div class="view-toggle">
@@ -4330,7 +4815,11 @@ function renderKanban() {
 function renderExecucao() {
   const el = $('#panel-execucao');
   const list = STORE.getAllOS().filter(o => !isInterno(o) && !o.finalizadaEm && (o.liberadoPCP || o.horaSaida || o.saidaEm))
-    .filter(o => dentroPeriodo(o.instalacao && o.instalacao.data, '_fExec'));
+    // Serviço de vários dias entra em qualquer dia da agenda, não só no de início;
+    // e saída sem retorno fica sempre, porque pede conferência seja qual for o filtro.
+    .filter(o => OPERACAO.situacaoSaida(o) !== ''
+      || OPERACAO.diasAgenda(o).some(d => dentroPeriodo(d, '_fExec'))
+      || dentroPeriodo(o.instalacao && o.instalacao.data, '_fExec'));
   // na-rua primeiro
   list.sort((a, b) => {
     const ra = OPERACAO.naRua(a) ? 0 : 1;
@@ -4412,7 +4901,7 @@ function execItemHTML(os) {
    ══════════════════════════════════════════════════════════════════════════ */
 function renderRetrabalho() {
   const el = $('#panel-retrabalho');
-  const todas = STORE.getAllOS();
+  const todas = osAnalise();   // original finalizada há mais de 60 dias pode estar no histórico já buscado
   const porNumero = new Map(todas.map(o => [String(o.numero || '').trim(), o]));
   // Pares original ↔ filha. Filha = O.S com osOriginal apontado (o ERP emite
   // uma O.S nova para o retrabalho). Original marcada sem filha também entra:
@@ -4503,7 +4992,7 @@ function renderRetrabalho() {
         const pendente = !(fi ? fi.finalizadaEm : (o && o.dataResolvido));
         const abre = o || fi;
         return `<tr class="os-list-item st-${pendente ? 'retrabalho' : 'finalizada'}" data-os-id="${esc(abre.id)}">
-          <td>${o ? `O.S ${esc(p.num)}` : `O.S ${esc(p.num)} <span class="text-muted">(não está no PCP)</span>`} ${pendente ? '<span class="badge st-retrabalho">pendente</span>' : '<span class="badge st-finalizada">resolvido</span>'}</td>
+          <td>${o ? `O.S ${esc(p.num)}` : `O.S ${esc(p.num)} <span class="text-muted">(fora do que este aparelho guarda)</span>`} ${pendente ? '<span class="badge st-retrabalho">pendente</span>' : '<span class="badge st-finalizada">resolvido</span>'}</td>
           <td>${fi ? `<button type="button" class="btn-ghost btn-xs" data-abrir-os="${esc(fi.id)}">O.S ${esc(fi.numero || '—')}</button>${fi.finalizadaEm ? ' <span class="badge st-finalizada">feita</span>' : ' <span class="badge st-agendada">aberta</span>'}` : '<span class="badge st-aguardando_producao">sem O.S de retrabalho</span>'}</td>
           <td>${esc((o || fi || {}).cliente || '')}</td>
           <td>${esc(motivo)}</td>
@@ -4551,6 +5040,41 @@ function finCorteLocal() {
   const dias = (typeof STORE.JANELA_LOCAL_DIAS === 'number') ? STORE.JANELA_LOCAL_DIAS : 60;
   return OPERACAO.somarDias(hojeISO(), -dias);
 }
+
+/* ANÁLISE ALÉM DA JANELA DO APARELHO. O aparelho guarda só as finalizadas dos
+   últimos STORE.JANELA_LOCAL_DIAS; Painel, Retrabalho e a participação do mês
+   contavam só isso e mostravam como total ("Ano" trazia 60 dias; junho dizia
+   "nenhuma instalação"). osAnalise junta o que já veio do servidor, e
+   analiseCobertura vai buscar quando o recorte começa antes da janela. */
+function osAnalise() {
+  const vistos = new Set();
+  return STORE.getAllOS().concat(STORE.historico ? STORE.historico() : [])
+    .filter(o => o && !vistos.has(o.id) && vistos.add(o.id));
+}
+const _analiseBuscas = new Map();   // "de|ate" -> { est, em }
+// Devolve { txt, pronto }: txt é o aviso para a tela ('' quando está completo);
+// pronto diz se já dá para confiar no número. depois() repinta quando chega.
+function analiseCobertura(de, ate, depois) {
+  const corte = finCorteLocal();
+  if (!STORE.buscarHistorico || (de && de >= corte)) return { txt: '', pronto: true };
+  const ateBusca = ate && ate < corte ? ate : corte;
+  const chave = (de || '') + '|' + ateBusca;
+  const antes = `Antes de ${fmtDataBR(corte)} este aparelho não guarda as finalizadas`;
+  const b = _analiseBuscas.get(chave);
+  // Falha e sem rede tentam de novo só depois de 1 min: a repintura da
+  // sincronização não pode virar uma busca por volta.
+  if (!b || ((b.est === 'sem-rede' || b.est === 'falhou') && Date.now() - b.em > 60000)) {
+    _analiseBuscas.set(chave, { est: 'buscando', em: Date.now() });
+    const fim = est => { _analiseBuscas.set(chave, { est, em: Date.now() }); if (typeof depois === 'function') depois(); };
+    Promise.resolve().then(() => STORE.buscarHistorico({ de: de || '', ate: ateBusca }))
+      .then(r => fim(r.offline ? 'sem-rede' : (r.truncou ? 'cortado' : 'ok')), () => fim('falhou'));
+    return { txt: antes + ': buscando no servidor…', pronto: false };
+  }
+  if (b.est === 'ok') return { txt: '', pronto: true };
+  if (b.est === 'cortado') return { txt: antes + ': o servidor mandou só parte, pode faltar O.S.', pronto: true };
+  if (b.est === 'buscando') return { txt: antes + ': buscando no servidor…', pronto: false };
+  return { txt: antes + ': conecte para buscar no servidor. Os números estão incompletos.', pronto: false };
+}
 // Periodo que comeca antes da janela local, "todos", ou busca digitada: o
 // aparelho nao tem como responder sozinho.
 function finPrecisaDoServidor() {
@@ -4558,20 +5082,32 @@ function finPrecisaDoServidor() {
   const termo = String(STATE.filtroFinalizados || '').trim();
   return !!termo || !f.de || f.de < finCorteLocal();
 }
-let _finBuscaTimer = null, _finBuscaChave = '';
+let _finBuscaTimer = null, _finBuscaChave = '', _finNotaTxt = '';
 function finBuscarNoServidor(depois) {
-  if (!STORE.buscarHistorico || !finPrecisaDoServidor()) return;
+  if (!STORE.buscarHistorico || !finPrecisaDoServidor()) {
+    _finBuscaChave = ''; _finNotaTxt = '';
+    const n = $('#fin-nota-servidor'); if (n) n.textContent = '';
+    return;
+  }
   const f = STATE._fFin || { de: '', ate: '' };
   const q = String(STATE.filtroFinalizados || '').trim();
   const chave = JSON.stringify([f.de, f.ate, q]);
   if (chave === _finBuscaChave) return;            // ja buscado para este recorte
   clearTimeout(_finBuscaTimer);
   _finBuscaTimer = setTimeout(async () => {
-    _finBuscaChave = chave;
-    const nota = $('#fin-nota-servidor'); if (nota) nota.textContent = 'buscando no servidor…';
-    const r = await STORE.buscarHistorico({ de: f.de, ate: f.ate, q });
-    if (nota) nota.textContent = r.offline ? 'sem rede: mostrando só o que está neste aparelho'
-      : (r.truncou ? `servidor: mostrando as ${r.itens.length} mais antigas encontradas — refine a busca` : (r.itens.length ? `${r.itens.length} do servidor` : ''));
+    _finBuscaChave = chave;   // mesma regra de Arquivados (notaServidorTxt)
+    const pintar = t => { _finNotaTxt = t; const n = $('#fin-nota-servidor'); if (n) n.textContent = t; };
+    pintar('buscando no servidor…');
+    let r;
+    try { r = await STORE.buscarHistorico({ de: f.de, ate: f.ate, q }); }
+    catch (e) {
+      _finBuscaChave = '';
+      pintar('o servidor não respondeu: troque o filtro para tentar de novo');
+      return;
+    }
+    if (r.offline) _finBuscaChave = '';
+    pintar(notaServidorTxt(r, q, ''));
+    if (r.offline) return;
     if (typeof depois === 'function') depois();
   }, q ? 350 : 0);
 }
@@ -4589,12 +5125,18 @@ function renderFinalizados() {
         <button id="fv-dash" class="${STATE.finView==='dash'?'active':''}">📊 Painel</button>
       </div>
       ${filtroPeriodoHTML('_fFin')}
-      <span id="fin-nota-servidor" class="text-muted" style="font-size:.75rem"></span>
+      <span id="fin-nota-servidor" class="text-muted" style="font-size:.75rem">${esc(_finNotaTxt)}</span>
       <button class="btn-ghost btn-sm" id="fin-pdf" title="Exportar relatório do período em PDF" style="margin-left:auto">📄 Relatório PDF</button>
     </div>
     <div id="fin-content"></div>`;
   wireFiltroPeriodo(el, '_fFin', () => renderFinalizados());
-  finBuscarNoServidor(() => { if (STATE.activeTab === 'finalizados') renderFinalizados(); });
+  // A resposta chega segundos depois; se a pessoa já está digitando na busca,
+  // remontar a aba derrubava o campo e fechava o teclado no meio da palavra.
+  finBuscarNoServidor(() => {
+    if (STATE.activeTab !== 'finalizados') return;
+    const foco = document.activeElement;
+    if (foco && foco.id === 'busca-fin') finRenderCards(); else renderFinalizados();
+  });
   $('#fv-lista').onclick = () => { STATE.finView = 'lista'; renderFinalizados(); };
   $('#fv-dash').onclick = () => { STATE.finView = 'dash'; renderFinalizados(); };
   $('#fin-pdf').onclick = () => exportarFinalizadosPDF(finFinalizadasPeriodo());
@@ -4660,7 +5202,7 @@ function finRenderDash() {
   }
 
   // — item 12: serviços por mês (últimos 6 meses, de TODAS as finalizadas) —
-  const todasFin = OPERACAO.conclusoes(STORE.getAllOS());
+  const todasFin = OPERACAO.conclusoes(osAnalise());
   const porMes = {};
   todasFin.forEach(o => { const k = mesLocalISO(o.finalizadaEm); if (k) porMes[k] = (porMes[k] || 0) + 1; });
   const mesesOrd = Object.keys(porMes).sort().slice(-6);
@@ -4743,7 +5285,8 @@ function finRenderDash() {
     </div>
 
     <div class="fin-bloco">
-      <h3 class="bloco-titulo">📅 Conclusões registradas por mês · histórico completo</h3>
+      <h3 class="bloco-titulo">📅 Conclusões registradas por mês · últimos 6 meses com dados</h3>
+      ${mesesOrd.length && mesesOrd[0] + '-01' < finCorteLocal() ? `<p class="metricas-nota">Antes de ${esc(fmtDataBR(finCorteLocal()))} entram só as O.S que já vieram do servidor. Escolha o período no filtro para buscar.</p>` : ''}
       <p class="metricas-nota">Encerramentos automáticos do ERP no período: ${periodo.length-list.length}. Ficam fora dos indicadores de entrega. Retiradas estão no total; os indicadores por instalador consideram somente instalações externas.</p>
       <div class="fin-mes-chart">${barras}</div>
     </div>
@@ -4806,6 +5349,7 @@ function exportarFinalizadosPDF(list) {
   }).join('');
 
   const w = window.open('', '_blank');
+  if (!w) { toast('O navegador bloqueou a janela do PDF. Permita pop-ups para este site.', 'error'); return; }
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Relatório de finalizados</title>
     <style>
       body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}
@@ -4829,7 +5373,7 @@ function exportarFinalizadosPDF(list) {
     </div>
     <h2>Participação nas instalações concluídas pela equipe</h2>
     <p>Uma O.S pode envolver várias pessoas. Índice de registros: 70% ausência de retrabalho e 30% presença de foto; não mede produtividade.</p>
-    <table><thead><tr><th>Colaborador</th><th>Entregas</th><th>Retrab.</th><th>Tempo méd.</th><th>Nota</th></tr></thead><tbody>${linhasInst || '<tr><td colspan="5">—</td></tr>'}</tbody></table>
+    <table><thead><tr><th>Colaborador</th><th>Entregas</th><th>Retrab.</th><th>Tempo méd.</th><th>Índice de registros</th></tr></thead><tbody>${linhasInst || '<tr><td colspan="5">—</td></tr>'}</tbody></table>
     <h2>Detalhe das O.S</h2>
     <table><thead><tr><th>Data</th><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Equipe</th><th>Situação</th></tr></thead><tbody>${linhasOS}</tbody></table>
     <script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script></body></html>`);
@@ -4844,7 +5388,7 @@ function abrirEspelhos() {
   const modal = $('#modal-os');
   const instaladores = STORE.getCFG().instaladores || [];
   const porPessoa = instaladores.length
-    ? `<p class="text-muted mt-12" style="font-size:.8rem">Ver exatamente o que cada instalador vê (para testar):</p>
+    ? `<p class="text-muted mt-12" style="font-size:.8rem">Espelho de cada instalador. Abrir aqui autoriza ESTE aparelho para ele e tira a gestão deste aparelho. Use no celular do instalador.</p>
        <div class="espelhos-pessoas">
          ${instaladores.map(n => `<a class="btn-ghost btn-sm" href="equipe.html#i=${encodeURIComponent(n)}" target="_blank" rel="noopener">👤 ${esc(n)}</a>`).join('')}
        </div>`
@@ -4855,7 +5399,7 @@ function abrirEspelhos() {
       <button class="modal-close" id="esp-fechar">×</button>
     </div>
     <div class="espelhos-box">
-      <p class="text-muted">Abra um espelho somente‑leitura para compartilhar com a equipe.</p>
+      <p class="text-muted">Abra o espelho no celular de quem vai usar. O espelho dos instaladores registra fotos e finaliza O.S; o comercial só consulta.</p>
       <div class="espelhos-opts">
         <a class="btn-primary w-100" href="equipe.html" target="_blank" rel="noopener">👷 Espelho dos Instaladores</a>
         <a class="btn-ghost w-100 mt-8" href="equipe.html#comercial" target="_blank" rel="noopener">💼 Espelho Comercial (vê todas)</a>
@@ -4883,6 +5427,10 @@ function renderControle() {
   const el = $('#panel-controle');
   const cfg = STORE.getCFG();
   const ro = !podeCadastrar();
+  // O servidor só aceita do papel pcp as chaves de operação (agenda, bônus,
+  // performance, vínculos, mensagem do dia): listas, contatos e custo que ele
+  // editasse com "Cadastrar" diziam "Adicionado" e eram desfeitos calados.
+  const roListas = ro || STATE.user.papel !== 'admin';
 
   // Listas simples em chips compactos, lado a lado num grid (antes cada nome
   // ocupava uma linha inteira da tela e a aba passava de 2.800px de altura).
@@ -4891,9 +5439,9 @@ function renderControle() {
       <h3>${label}</h3>
       <div class="cfg-list cfg-list-chips">
         ${(cfg[key] || []).map(v => `
-          <span class="cfg-chip">${esc(v)}${ro ? '' : `<button data-cfg-del="${key}|${esc(v)}" title="Remover">×</button>`}</span>`).join('') || '<p class="text-muted">Vazio</p>'}
+          <span class="cfg-chip">${esc(v)}${roListas ? '' : `<button data-cfg-del="${key}|${esc(v)}" title="Remover">×</button>`}</span>`).join('') || '<p class="text-muted">Vazio</p>'}
       </div>
-      ${ro ? '' : `<div class="flex gap-6 mt-8">
+      ${roListas ? '' : `<div class="flex gap-6 mt-8">
         <input class="w-100" data-cfg-input="${key}" placeholder="Adicionar ${esc(label.toLowerCase())}…">
         <button class="btn-primary btn-sm" data-cfg-add="${key}">+</button>
       </div>`}
@@ -4945,10 +5493,10 @@ function renderControle() {
             <span>${esc(c.nome)} <span class="text-muted">(${esc(c.departamento||'—')})</span> · ${esc(c.numero||'')}</span>
             <span class="flex gap-6">
               <a class="btn-xs btn-success" href="https://wa.me/55${String(c.numero||'').replace(/\D/g,'')}" target="_blank" rel="noopener" title="Abrir conversa">💬</a>
-              ${ro ? '' : `<button class="btn-xs btn-danger" data-cont-del="${i}">🗑</button>`}
+              ${roListas ? '' : `<button class="btn-xs btn-danger" data-cont-del="${i}">🗑</button>`}
             </span>
           </div>`).join('') || '<p class="text-muted">Nenhum contato cadastrado</p>'}
-        ${ro ? '' : `<div class="field-row3 mt-8">
+        ${roListas ? '' : `<div class="field-row3 mt-8">
           <input data-cont-nome placeholder="Nome">
           <input data-cont-dep placeholder="Departamento">
           <input data-cont-num placeholder="Número (DDD+nº)" inputmode="tel">
@@ -4981,8 +5529,8 @@ function renderControle() {
       <h3>🔁 Custo do retrabalho</h3>
       <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">A aba Retrabalho soma horas (saída→retorno) e km (retorno−saída) da O.S de retrabalho. Com estes dois valores, mostra em reais.</p>
       <div class="field-row">
-        <div class="field"><label>R$ por hora de equipe</label><input type="number" min="0" step="0.01" data-custo-campo="hora" value="${esc(cr.hora || '')}" placeholder="ex.: 45" ${ro ? 'disabled' : ''}></div>
-        <div class="field"><label>R$ por km rodado</label><input type="number" min="0" step="0.01" data-custo-campo="km" value="${esc(cr.km || '')}" placeholder="ex.: 1,20" ${ro ? 'disabled' : ''}></div>
+        <div class="field"><label>R$ por hora de equipe</label><input type="number" min="0" step="0.01" data-custo-campo="hora" value="${esc(cr.hora || '')}" placeholder="ex.: 45" ${roListas ? 'disabled' : ''}></div>
+        <div class="field"><label>R$ por km rodado</label><input type="number" min="0" step="0.01" data-custo-campo="km" value="${esc(cr.km || '')}" placeholder="ex.: 1,20" ${roListas ? 'disabled' : ''}></div>
       </div>
     </div>`;
 
@@ -5030,15 +5578,19 @@ function renderControle() {
       </div>
     </div>` : '';
 
+  // Cada gravação (e o eco do servidor) refaz a aba: sem guardar quais grupos
+  // estavam abertos, o grupo em uso fechava a cada "+" e a cada campo salvo.
+  const gruposAbertos = $$('details.cfg-grupo', el).map(d => d.open);
   // Ordem: administração no topo (Usuários, Níveis, Integração), depois
   // contatos e por fim as listas do dia a dia em grid compacto.
   el.innerHTML =
-    (ro ? '<p class="text-muted" style="margin-bottom:12px">Somente leitura — apenas Admin pode editar listas.</p>' : '') +
+    (roListas ? '<p class="text-muted" style="margin-bottom:12px">Listas, contatos e custo: só o admin edita.</p>' : '') +
     `<div class="casa-pagina-head"><div><h2>Configurações</h2><p>Conexão, pessoas e regras da operação, cada uma no seu lugar.</p></div></div>` +
     `<details class="cfg-grupo" open><summary>🔌 Conexões e sincronização</summary>${saudeHTML}${mubisysHTML}</details>` +
     `<details class="cfg-grupo"><summary>👥 Equipe e acesso</summary>${usuariosHTML}${niveisHTML}${contatosHTML}</details>` +
     `<details class="cfg-grupo"><summary>🛠 Regras e recursos da operação</summary>${custoHTML}<div class="cfg-grid">${listasHTML}</div></details>` +
     `<details class="cfg-grupo"><summary>💬 Mensagens da programação</summary>${mensagemHTML}</details>`;
+  if (gruposAbertos.length) $$('details.cfg-grupo', el).forEach((d, i) => { if (i < gruposAbertos.length) d.open = gruposAbertos[i]; });
 
   // Handlers da Integração Mubisys e do painel de saúde (admin)
   if (isAdmin) wireMubisys(el);
@@ -5067,13 +5619,15 @@ function renderControle() {
         niveis[papel].abas = ABAS_DISPONIVEIS.filter(a => set.has(a));
       });
       aplicarPermissoes(); // reflete a visibilidade das abas na hora
-      toast('Nível atualizado', 'success');
+      // Diz o que mudou: com 15 caixas por linha, um toque torto tirava uma aba
+      // de um papel e o único retorno era "Nível atualizado".
+      toast(`${papel}: ${ABAS_NOMES[aba] || aba} ${cb.checked ? 'liberada' : 'retirada'}`, 'success');
     });
     $$('[data-nivel-flag]', el).forEach(cb => cb.onchange = () => {
       const [papel, flag] = cb.dataset.nivelFlag.split('|');
       salvarNivel(niveis => { niveis[papel][flag] = cb.checked; });
       aplicarPermissoes();
-      toast('Nível atualizado', 'success');
+      toast(`${papel}: ${flag === 'editar' ? 'Editar' : flag === 'cadastrar' ? 'Cadastrar' : flag} ${cb.checked ? 'ligado' : 'desligado'}`, 'success');
     });
     const resetBtn = $('[data-nivel-reset]', el);
     if (resetBtn) resetBtn.onclick = () => {
@@ -5225,18 +5779,36 @@ function imprimirAnalisePCP(titulo,elemento,periodo,fonteApuracao) {
     <h1>${esc(titulo)} · Impresilk</h1><p>Período: ${esc(periodo.de || 'início do recorte carregado')} a ${esc(periodo.ate || 'fim do recorte carregado')} · Gerado em ${esc(new Date().toLocaleString('pt-BR'))}</p>
     <p>Fonte: ${esc(fonteApuracao || ('registros do PCP disponíveis neste aparelho. Última sincronização: '+em))}. ${STORE.getQueue().length} alterações locais aguardando envio.</p>
     ${copia.innerHTML}<footer>Conferir a cobertura e as medições indicadas. Esta análise não lança pagamentos.</footer>`;
-  $('#impressao-fechar',box).onclick = () => box.close();
-  $('#impressao-salvar',box).onclick = () => { document.body.classList.add('imprimindo-pcp'); window.print(); document.body.classList.remove('imprimindo-pcp'); };
+  // Navegador que não dispara afterprint: fechar a prévia também devolve a tela.
+  $('#impressao-fechar',box).onclick = () => { box.close(); document.body.classList.remove('imprimindo-pcp'); };
+  // No Safari do iPad e no Chrome do Android o print() volta antes de montar a
+  // impressão: tirar a classe na linha seguinte fazia o PDF sair com o app por
+  // trás. A classe só sai quando a impressão termina (afterprint).
+  $('#impressao-salvar',box).onclick = () => {
+    document.body.classList.add('imprimindo-pcp');
+    window.addEventListener('afterprint', () => document.body.classList.remove('imprimindo-pcp'), { once: true });
+    window.print();
+  };
   box.showModal();
 }
 
 function mostrarConflitoCFG(c) {
   let box = document.getElementById('cfg-conflito');
   if (!box) { box = document.createElement('dialog'); box.id = 'cfg-conflito'; document.body.appendChild(box); }
+  // Só os campos em conflito, lado a lado e legíveis: dois blocos de JSON da
+  // configuração inteira não deixavam revisar nada. Regravar a minha vence só
+  // no que este aparelho mudou (STORE.resolverCFG); a do servidor segue como
+  // botão principal porque a minha ainda desfaz o conflito do outro.
+  const valorDe = (obj, campo) => String(campo).split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
+  const mostra = v => v === undefined || v === '' ? '(vazio)' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+  // O servidor às vezes manda uma frase no lugar do nome do campo: vai inteira.
+  const linhas = (c.campos || []).map(k => /\s/.test(String(k))
+    ? `<tr><td colspan="3">${esc(k)}</td></tr>`
+    : `<tr><td>${esc(k)}</td><td>${esc(mostra(valorDe(c.local, k)))}</td><td>${esc(mostra(valorDe(c.remoto, k)))}</td></tr>`).join('');
   box.innerHTML = `<h2>Conferir alterações simultâneas</h2><p>Outro aparelho alterou os mesmos campos. Suas mudanças estão guardadas neste aparelho.</p>
-    <p>${(c.campos || []).map(esc).join(', ')}</p>
-    <div class="cfg-comparacao"><details><summary>Minha versão</summary><pre>${esc(JSON.stringify(c.local,null,2))}</pre></details><details><summary>Versão do servidor</summary><pre>${esc(JSON.stringify(c.remoto,null,2))}</pre></details></div>
-    <button class="btn-ghost" id="cfg-adiar">Conferir depois</button><button class="btn-ghost" id="cfg-remoto">Usar a versão do servidor</button><button class="btn-primary" id="cfg-local">Reaplicar minha versão revisada</button>`;
+    <table class="control-table"><thead><tr><th>Campo</th><th>Neste aparelho</th><th>No servidor</th></tr></thead><tbody>${linhas}</tbody></table>
+    <p class="text-muted">Regravar a minha troca só o que você mudou neste aparelho. O resto fica como o outro aparelho deixou.</p>
+    <button class="btn-ghost" id="cfg-adiar">Conferir depois</button><button class="btn-ghost" id="cfg-local">Regravar a minha</button><button class="btn-primary" id="cfg-remoto">Usar a do servidor</button>`;
   document.getElementById('cfg-adiar').onclick = () => box.close();
   document.getElementById('cfg-remoto').onclick = () => { STORE.resolverCFG(false); box.close(); };
   document.getElementById('cfg-local').onclick = () => { STORE.resolverCFG(true); box.close(); };
@@ -5406,15 +5978,16 @@ function abrirInstrucoes() {
       <h2>Visão geral</h2>
       <p>App <strong>offline‑first</strong>: funciona sem internet e sincroniza sozinho ao reconectar. O indicador no topo mostra o estado da sincronização:</p>
       <ul>
-        <li><strong>✅ Sincronizado</strong> — tudo salvo na nuvem.</li>
-        <li><strong>⏳ N pendente(s)</strong> — N alterações suas aguardando envio (passe o mouse para ver o detalhe). Some sozinho quando reconecta.</li>
-        <li><strong>⚠️ Offline</strong> — sem conexão; pode trabalhar normalmente que envia depois.</li>
+        <li><strong>✅ Edições salvas</strong>: nada deste aparelho esperando envio. Não cobre a importação do ERP (essa se confere em Configurações).</li>
+        <li><strong>⏳ N pendente(s)</strong>: N alterações suas aguardando envio. Toque no indicador para ver o detalhe. Some sozinho quando reconecta.</li>
+        <li><strong>⚠️ Offline</strong>: sem conexão; pode trabalhar normalmente que envia depois.</li>
+        <li><strong>🔒 Entre de novo</strong>: a sessão venceu. O que você fez está guardado neste aparelho, mas só é enviado depois de entrar de novo. Toque no indicador para entrar.</li>
       </ul>
 
       <h2>As 2 únicas travas</h2>
       <ul>
         <li><strong>🔒 Saída / liberar carro:</strong> só após <em>Confirmação = Confirmado</em> (POP EXI‑002).</li>
-        <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + conferências do embarque (embarque, produtos e ferramentas) + saída registrada + Instalação OK + conferido por + ≥1 foto de saída (+ descrição do problema, se retrabalho).<br>
+        <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + conferências do embarque (embarque, produtos e ferramentas) + saída registrada + Instalação OK + conferido por + ≥1 foto de saída + foto de retorno (serviço pronto) + data e hora do retorno (+ descrição do problema, se retrabalho). PCP e admin podem trocar a foto de retorno e a hora do retorno por uma exceção de encerramento com justificativa.<br>
           <em>Pedido interno (retirada) é diferente:</em> basta PCP liberado + ≥1 item — não há agenda, nem embarque, nem foto.</li>
       </ul>
       <p>Todo o resto é guia — nenhum campo trava por ordem. Preencha na ordem que quiser; a barra de <strong>% preenchida</strong> no topo da ficha mostra o quanto falta.</p>
@@ -5456,16 +6029,17 @@ function abrirInstrucoes() {
         <li><strong>Limpo e arrumado</strong> contam juntos como o critério do carro na nota da Performance, e <strong>equipamentos</strong> conta como o seu. Um "não" em limpo ou em arrumado derruba o carro daquela volta. <strong>Avaria não entra na nota</strong> (nem sempre é culpa da equipe): serve para o PCP agir.</li>
         <li>"Não conferido" não pesa contra ninguém. Mas o critério só entra na nota quando pelo menos 80% das voltas do período têm resposta, então confira todas.</li>
         <li>Só a gestão (PCP e admin) confere; quem é avaliado não confere a própria volta. A resposta leva o nome de quem conferiu e a hora. Dá para rever depois pelo filtro <em>Conferidas</em>, e a ficha de cada O.S. também mostra e deixa corrigir.</li>
+        <li>A equipe registra no celular (espelho do instalador) como o carro voltou, com foto. Aparece como <em>Equipe registrou</em> na fila, no Conferir, na ficha e no Lançar entrega, com selos de contorno. Não conta na nota e não substitui a conferência do PCP: o Conferir nunca vem marcado com o que a equipe disse. Volta sem registro mostra <em>Equipe não registrou a limpeza</em>.</li>
       </ul>
 
       <h2>Importar do PDF do ERP</h2>
       <p>Botão <code>📄 Importar PDF</code> no topo cria uma O.S já preenchida (puxa a data de "Entrega"). Dentro de uma O.S aberta dá para importar <em>só os itens</em>.</p>
 
       <h2>Espelhos &amp; WhatsApp</h2>
-      <p>O botão <strong>🪞 Espelhos</strong> (admin) abre as visões somente‑leitura para instaladores e comercial. Na ficha e no PDF do dia há envio rápido via WhatsApp para contatos cadastrados (nome · departamento · número) em ⚙️ Configurações.</p>
+      <p>O botão <strong>🪞 Espelhos</strong> (admin) abre os espelhos dos instaladores (registram fotos e finalizam O.S, use no celular deles) e o comercial (só consulta). Na ficha e no PDF do dia há envio rápido via WhatsApp para contatos cadastrados (nome · departamento · número) em ⚙️ Configurações.</p>
 
       <h2>Backup</h2>
-      <p>No <em>Painel</em> há <code>⬇ Backup</code> (baixa um .json) e <code>⬆ Restaurar</code>. A nuvem (Supabase) é a fonte da verdade; o backup é rede de segurança extra. <em>O Netlify saiu do caminho em agosto de 2026</em> — se alguma instrução antiga ainda falar em "Netlify Blobs", ela está velha.</p>
+      <p>No <em>Painel</em> há <code>⬇ Backup</code> (baixa um .json) e <code>⬆ Restaurar</code>. A nuvem (Supabase) é a fonte da verdade; o backup é rede de segurança extra. Restaurar só funciona com as alterações deste aparelho já enviadas, e fotos não vêm no arquivo.</p>
     </div>`;
   overlay.classList.remove('hidden');
   $('#instr-fechar').onclick = () => overlay.classList.add('hidden');
@@ -5482,7 +6056,9 @@ function exportarBackup() {
   a.href = url;
   a.download = `impresilk_backup_${ymdLocal(new Date())}.json`;
   a.click();
-  URL.revokeObjectURL(url);
+  // Revogar na mesma hora aborta o download no Safari do iPad; o toast dizia
+  // "exportado" de um arquivo que não foi salvo.
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
   toast('Backup exportado', 'success');
 }
 
@@ -5491,6 +6067,10 @@ function importarBackup() {
   // para os outros papéis; a trava fica aqui também, porque botão escondido
   // não é porta fechada).
   if (!STATE.user || STATE.user.papel !== 'admin') { toast('Só o administrador restaura backup.', 'error'); return; }
+  // Restaurar zera a fila de edições (menos as fotos): o que este aparelho
+  // ainda não enviou se perderia calado. Envia primeiro, restaura depois.
+  const pendentes = STORE.getQueue().filter(x => x.action !== 'putPhoto' && x.action !== 'deletePhoto').length;
+  if (pendentes) { toast(`Há ${pendentes} alteração(ões) deste aparelho sem enviar. Espere enviar antes de restaurar.`, 'error'); return; }
   const inp = document.createElement('input');
   inp.type = 'file'; inp.accept = 'application/json';
   inp.onchange = () => {
@@ -5500,10 +6080,20 @@ function importarBackup() {
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result);
-        if (!confirm(`Restaurar ${(data.os||[]).length} O.S? Isto substitui o cache local.`)) return;
+        const quando = data.exportadoEm ? ` de ${new Date(data.exportadoEm).toLocaleString('pt-BR')}` : '';
+        /* Quem restaura precisa saber o custo antes: O.S. do arquivo com versão
+           mais velha que a deste aparelho foi mexida depois do backup e vai
+           abrir "Conflito de edição", uma por uma. */
+        const revAqui = new Map(STORE.getAllOS().map(o => [o.id, Number(o.rev) || 0]));
+        const velhas = (data.os || []).filter(o => o && revAqui.has(o.id) && (Number(o.rev) || 0) < revAqui.get(o.id)).length;
+        const avisoVelhas = velhas ? `\n${velhas} O.S do arquivo são mais velhas que as deste aparelho e vão pedir conferência (conflito), uma por uma.` : '';
+        if (!confirm(`Restaurar ${(data.os||[]).length} O.S do arquivo${quando}?\nSubstitui as O.S deste aparelho e regrava na nuvem as que mudaram. Fotos não vêm no backup.${avisoVelhas}`)) return;
+        // Guarda cada O.S ANTES de trocar: a que o aparelho já tem idêntica não
+        // precisa ir de novo (era reenvio de tudo). A que mudou vai, e a mais
+        // nova no servidor cai no aviso de conflito de sempre.
+        const antes = new Map(STORE.getAllOS().map(o => [o.id, JSON.stringify(o)]));
         STORE.importarBackup(data);
-        // re-envia tudo pro servidor
-        (data.os || []).forEach(os => STORE.saveOS(os));
+        (data.os || []).forEach(os => { if (antes.get(os.id) !== JSON.stringify(os)) STORE.saveOS(os); });
         if (data.cfg) STORE.saveCFG(data.cfg);
         renderActiveTab();
         toast('Backup restaurado', 'success');
@@ -5523,37 +6113,58 @@ function kv(label, val) {
 }
 
 async function exportarFichaPDF(os) {
+  // A janela abre ANTES de baixar as fotos: depois dos awaits o toque já
+  // "venceu" e o bloqueador de pop-up do Safari barrava a janela; w vinha null,
+  // a função quebrava e nada aparecia na tela.
+  const w = window.open('', '_blank');
+  if (!w) { toast('O navegador bloqueou a janela do PDF. Permita pop-ups para este site.', 'error'); return; }
+  w.document.write('<p style="font-family:Arial,sans-serif;padding:24px">Preparando a ficha e as fotos…</p>');
+  // Coluna OK: o que o instalador marcou na rua (statusInst) vem antes do
+  // campo da produção; a O.S que voltou com retrabalho dizia só "✓" ou nada.
+  const okItem = i => i.statusInst === 'retrab'
+    ? '✗ ' + esc(i.motivo || 'retrabalho') + (i.obsProb ? ': ' + esc(i.obsProb) : '')
+    : (i.statusInst === 'ok' || i.pronto) ? '✓' : (i.reprovado ? '✗ ' + esc(i.motivoReprovado || 'reprovado') : '');
   const itens = (os.itens || []).map(i =>
-    `<tr><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.item)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.descricao)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.medidas)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.qtde)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${i.pronto?'✓':(i.reprovado?'✗ '+esc(i.motivoReprovado||'reprovado'):'')}</td></tr>`
+    `<tr><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.item)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.descricao)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.medidas)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${esc(i.qtde)}</td><td style="padding:3px 6px;border-bottom:1px solid #eee">${okItem(i)}</td></tr>`
   ).join('');
+  // Foto que não baixa (sem cache e sem rede) sumia calada e parecia que a
+  // equipe não fotografou: conta e avisa no PDF.
+  let fotosFalharam = 0;
 
   // Carrega as imagens anexadas (layout, embarque e check‑in) como base64
   async function imgTag(id, legenda) {
     if (!id) return '';
     try {
       const b64 = await STORE.pullPhoto(id);
-      if (!b64) return '';
+      // Lugar marcado com a legenda: sem ele a foto sumia do PDF e parecia
+      // que a equipe não fotografou.
+      if (!b64) { fotosFalharam++; return legenda ? `<figure style="margin:0 8px 12px 0;display:inline-block;vertical-align:top;width:120px;height:80px;border:1px dashed #bbb;border-radius:6px;text-align:center;font-size:11px;color:#666;padding-top:24px;box-sizing:border-box">${esc(legenda)}<br>foto não carregou</figure>` : ''; }
       const src = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
       return `<figure style="margin:0 8px 12px 0;display:inline-block;vertical-align:top">
         <img src="${src}" style="max-width:240px;max-height:240px;border:1px solid #ddd;border-radius:6px">
         ${legenda ? `<figcaption style="font-size:11px;color:#666;text-align:center;margin-top:2px">${esc(legenda)}</figcaption>` : ''}
       </figure>`;
-    } catch { return ''; }
+    } catch { fotosFalharam++; return ''; }
   }
 
   const layoutImg = await imgTag(os.layoutFotoId, 'Layout');
   const checkinImgs = (await Promise.all(
-    (os.fotosCheckinIds || []).map((id, i) => imgTag(id, `Saída ${i + 1}`))
+    (os.fotosCheckinIds || []).map((id, i) => imgTag(id, `Saída (check-in) ${i + 1}`))
   )).join('');
   const retornoImgs = (await Promise.all(
-    (os.fotosRetornoIds || []).map((id, i) => imgTag(id, `Retorno ${i + 1}`))
+    (os.fotosRetornoIds || []).map((id, i) => imgTag(id, `Retorno (serviço pronto) ${i + 1}`))
+  )).join('');
+  // Foto do problema que o instalador tirou no retrabalho do item.
+  const problemaImgs = (await Promise.all(
+    (os.itens || []).filter(i => i && i.fotoProbId).map(i => imgTag(i.fotoProbId, 'Problema: ' + (i.item || 'item')))
   )).join('');
 
-  const galeria = (layoutImg || checkinImgs || retornoImgs)
-    ? `<h2>5 · Anexos &amp; Fotos</h2><div style="margin-top:6px">${layoutImg}${checkinImgs}${retornoImgs}</div>`
+  const avisoFotos = fotosFalharam ? `<p style="color:#b45309;font-size:12px">${fotosFalharam} foto(s) não puderam ser baixadas neste aparelho.</p>` : '';
+  const galeria = (layoutImg || checkinImgs || retornoImgs || problemaImgs || avisoFotos)
+    ? `<h2>5 · Anexos &amp; Fotos</h2>${avisoFotos}<div style="margin-top:6px">${layoutImg}${checkinImgs}${retornoImgs}${problemaImgs}</div>`
     : '';
 
-  const w = window.open('', '_blank');
+  w.document.open();
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>O.S ${esc(os.numero)}</title>
     <style>body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;background:#f0f4fa;padding:6px 8px;margin:16px 0 4px;border-radius:6px}table{width:100%;border-collapse:collapse;font-size:13px}.date{font-size:15px;color:#0d9488;font-weight:700;margin-bottom:12px}</style>
     </head><body>
@@ -5585,7 +6196,7 @@ async function exportarFichaPDF(os) {
       ${kv('KM rodado', (os.kmSaida && os.kmRetorno && (+os.kmRetorno - +os.kmSaida) >= 0) ? (+os.kmRetorno - +os.kmSaida) + ' km' : '')}
       ${kv('Instalação OK', os.instalacaoOK?'Sim':'Não')}
       ${kv('Conferido por', os.conferidoPor)}${kv('Situação', os.checkout && os.checkout.situacao)}${kv('Retrabalho', os.retrabalho?'Sim':'')}${kv('Problema', os.problema)}${kv('Etapa de origem', os.etapaOrigem)}${kv('Causa raiz', os.causaRaiz)}${kv('Responsável da etapa', os.responsavelEtapa)}${kv('Causa', os.causa)}
-      ${kv('Obs técnicas', os.obsTecnicas)}${kv('Fotos check‑in', (os.fotosCheckinIds||[]).length+' foto(s)')}
+      ${kv('Obs técnicas', os.obsTecnicas)}${kv('Fotos check‑in', (os.fotosCheckinIds||[]).length+' foto(s)')}${kv('Fotos de retorno', (os.fotosRetornoIds||[]).length ? (os.fotosRetornoIds||[]).length+' foto(s)' : '')}
       ${os.checkinGPS ? kv('Local do check‑in', `${os.checkinGPS.lat}, ${os.checkinGPS.lng} (±${os.checkinGPS.precisao||'?'}m) — maps.google.com/?q=${os.checkinGPS.lat},${os.checkinGPS.lng}`) : ''}
       ${kv('Finalizada', os.finalizadaEm?`${new Date(os.finalizadaEm).toLocaleString('pt-BR')} — ${os.finalizadoPor||''}`:'')}
     </table>
@@ -5852,6 +6463,7 @@ function exportarDiaPDF(dia, lista) {
   }).join('');
 
   const w = window.open('', '_blank');
+  if (!w) { toast('O navegador bloqueou a janela do PDF. Permita pop-ups para este site.', 'error'); return; }
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Programação ${esc(titulo)}</title>
     <style>
       body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}
@@ -5919,6 +6531,7 @@ function relatorioServicosDia(dataISO) {
     </tr>`;
   }).join('');
   const w = window.open('', '_blank');
+  if (!w) { toast('O navegador bloqueou a janela do PDF. Permita pop-ups para este site.', 'error'); return; }
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Serviços ${esc(titulo)}</title>
     <style>body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}h1{font-size:20px;margin:0 0 4px}.date{font-size:15px;color:#0d9488;font-weight:700;margin-bottom:12px}
     table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;background:#f0f4fa;padding:6px;border-bottom:2px solid #ccc}td{padding:5px 6px;border-bottom:1px solid #eee}</style>
@@ -5935,13 +6548,22 @@ function relatorioServicosDia(dataISO) {
 // Conta quantas O.S cada instalador entregou (finalizou) no mês. mesISO = 'YYYY-MM'.
 // Uma O.S com 2 pessoas na equipe conta +1 para cada uma.
 function produtividadeMes(mesISO) {
-  return OPERACAO.mensal(STORE.getAllOS(),mesISO).pessoas;
+  return OPERACAO.mensal(osAnalise(),mesISO).pessoas;
+}
+function mesCobertura(mesISO, depois) {
+  const [y, m] = String(mesISO || '').split('-').map(Number);
+  if (!y || !m) return { txt: '', pronto: true };
+  const fim = new Date(y, m, 0);
+  return analiseCobertura(`${mesISO}-01`, ymdLocal(fim), depois);
 }
 
-function tabelaProdutividadeMes(mesISO) {
-  const r = OPERACAO.mensal(STORE.getAllOS(),mesISO), dados = r.pessoas;
-  if (!r.total) return '<p class="text-muted mt-8">Nenhuma instalação concluída pela equipe nesse mês.</p>';
-  return `<p class="metricas-nota">${r.total} O.S únicas · ${r.participacoes} participações · ${r.semEquipe} sem equipe. Uma O.S pode envolver várias pessoas. Retiradas e baixas automáticas do ERP ficam fora desta contagem.</p><table class="control-table" style="margin-top:8px">
+function tabelaProdutividadeMes(mesISO, depois) {
+  const r = OPERACAO.mensal(osAnalise(),mesISO), dados = r.pessoas;
+  // Mês fora da janela do aparelho: "nenhuma instalação" era falso.
+  const cob = mesCobertura(mesISO, depois);
+  const aviso = cob.txt ? `<p class="metricas-nota"><strong>${esc(cob.txt)}</strong></p>` : '';
+  if (!r.total) return aviso || '<p class="text-muted mt-8">Nenhuma instalação concluída pela equipe nesse mês.</p>';
+  return `${aviso}<p class="metricas-nota">${r.total} O.S únicas · ${r.participacoes} participações · ${r.semEquipe} sem equipe. Uma O.S pode envolver várias pessoas. Retiradas e baixas automáticas do ERP ficam fora desta contagem.</p><table class="control-table" style="margin-top:8px">
     <thead><tr><th>Instalador</th><th>Participações em O.S</th><th>O.S com retrabalho</th></tr></thead>
     <tbody>${dados.map(d => `<tr><td>${esc(d.nome)}</td><td>${d.entregas}</td><td>${d.retrab}</td></tr>`).join('')}
       <tr style="font-weight:700;border-top:2px solid #ccc"><td>O.S únicas concluídas</td><td>${r.total}</td><td>${r.retrabalho}</td></tr>
@@ -5949,13 +6571,17 @@ function tabelaProdutividadeMes(mesISO) {
 }
 
 function relatorioMensalPorPessoa(mesISO) {
-  const r = OPERACAO.mensal(STORE.getAllOS(),mesISO), dados = r.pessoas;
+  // PDF com meio mês apresentado como mês inteiro não sai: espera a busca.
+  const cob = mesCobertura(mesISO);
+  if (!cob.pronto) { toast(cob.txt, 'error'); return; }
+  const r = OPERACAO.mensal(osAnalise(),mesISO), dados = r.pessoas;
   if (!r.total) { toast('Nenhuma instalação concluída pela equipe nesse mês', 'error'); return; }
   const [y, m] = String(mesISO).split('-');
   const titulo = `${m}/${y}`;
   const total = r.total;
   const linhas = dados.map(d => `<tr><td>${esc(d.nome)}</td><td>${d.entregas}</td><td>${d.retrab}</td></tr>`).join('');
   const w = window.open('', '_blank');
+  if (!w) { toast('O navegador bloqueou a janela do PDF. Permita pop-ups para este site.', 'error'); return; }
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Produtividade ${esc(titulo)}</title>
     <style>body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}h1{font-size:20px;margin:0 0 4px}.date{font-size:15px;color:#0d9488;font-weight:700;margin-bottom:12px}
     table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;background:#f0f4fa;padding:6px;border-bottom:2px solid #ccc}td{padding:6px;border-bottom:1px solid #eee}tfoot td{font-weight:700;border-top:2px solid #ccc}</style>
@@ -6133,7 +6759,9 @@ function parsePDF(texto, itensPos) {
       const h = parseInt(entrega[2].split(':')[0], 10);
       os.instalacao.periodo = h >= 12 ? 'Tarde' : 'Manhã';
     } else {
-      os.instalacao.periodo = 'Manhã';
+      // Sem hora no PDF o período fica em branco (mesma regra da importação do
+      // ERP): "Manhã" inventada ia para a Mensagem do dia e para o cliente.
+      os.instalacao.periodo = '';
     }
   }
 
@@ -6198,8 +6826,18 @@ function importarPDF() {
       toast('Lendo PDF…');
       const { texto, itensPos } = await lerPDF(file);
       const os = parsePDF(texto, itensPos);
+      // A importação do ERP de hora em hora quase sempre já trouxe esta O.S:
+      // gravar o PDF criava uma segunda ficha com o mesmo número (dois cards,
+      // equipe numa e conferência na outra). Abre a que existe.
+      const num = String(os.numero || '').trim();
+      const ja = num && STORE.getAllOS().concat(STORE.historico ? STORE.historico() : [])
+        .find(o => String(o.numero || '').trim() === num);
+      if (ja) {
+        if (confirm(`A O.S ${num} já existe no PCP. Abrir a ficha que existe?\nPara trazer os itens do PDF, use "Importar itens do PDF" dentro dela.`)) openModal(ja);
+        return;
+      }
       openModal(os);
-      toast('O.S importada — confira os campos', 'success');
+      toast('O.S importada: confira os campos', 'success');
     } catch (e) {
       toast(e.message || 'Falha ao ler PDF — use cadastro manual', 'error');
       openModal(novaOS());
@@ -6221,9 +6859,12 @@ function importarItensPDF(draft) {
       if (!itens.length) { toast('Nenhum item reconhecido', 'warn'); return; }
       // Importar 2x o mesmo PDF duplicava a tabela: se já há itens, pergunta
       // se substitui; e renumera a partir do total para não repetir números.
+      // Duas perguntas: no tablet "Cancelar" quer dizer desistir, e antes ele
+      // adicionava os itens no fim, já gravados.
       let atuais = draft.itens || [];
-      if (atuais.length && confirm(`Esta O.S já tem ${atuais.length} item(ns). Substituir pelos ${itens.length} do PDF?\n(Cancelar = adicionar ao final)`)) {
-        atuais = [];
+      if (atuais.length) {
+        if (confirm(`Esta O.S já tem ${atuais.length} item(ns). Substituir pelos ${itens.length} do PDF?`)) atuais = [];
+        else if (!confirm(`Adicionar os ${itens.length} item(ns) do PDF no fim da lista?`)) return;
       }
       itens.forEach((it, k) => { it.item = String(atuais.length + k + 1); });
       draft.itens = atuais.concat(itens);

@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Impresilk">
-  <link rel="stylesheet" href="styles.css?v=v129">
+  <link rel="stylesheet" href="styles.css?v=v130">
 </head>
 <body>
 
@@ -77,9 +77,9 @@
         <button class="btn-ghost btn-sm" id="btn-equipe" title="Quem está na empresa hoje (fichas do RH)">👥 Equipe</button>
         <button class="btn-ghost btn-sm" id="btn-instrucoes" title="Como usar o sistema">❔ Instruções</button>
         <button class="btn-ghost btn-sm" id="btn-verificar" title="Conferir no servidor se as O.S foram salvas na nuvem">☁️ Verificar</button>
-        <span id="sync-indicator" class="sync-indicator ok" title="Status de sincronização">✅</span>
-        <button class="btn-ghost btn-sm" id="btn-senha" title="Trocar a minha senha">🔑</button>
-        <button class="btn-ghost btn-sm" id="btn-logout" title="Sair">⏻</button>
+        <button type="button" id="sync-indicator" class="sync-indicator ok" title="Status de sincronização">✅</button>
+        <button class="btn-ghost btn-sm" id="btn-senha" title="Trocar a minha senha" aria-label="Trocar a minha senha">🔑</button>
+        <button class="btn-ghost btn-sm" id="btn-logout" title="Sair" aria-label="Sair">⏻</button>
       </div>
     </header>
 
@@ -149,14 +149,19 @@
     <div class="picker-box">
       <div class="picker-head">
         <h3 id="picker-title">Selecionar</h3>
-        <button class="modal-close" id="picker-close">×</button>
+        <button type="button" class="modal-close" id="picker-close" aria-label="Fechar">×</button>
       </div>
       <div class="picker-list" id="picker-list"></div>
-      <div class="picker-add">
-        <input id="picker-novo" placeholder="+ adicionar novo">
-        <button class="btn-ghost btn-sm" id="picker-add-btn">Adicionar</button>
-      </div>
-      <button class="btn-primary w-100 mt-12" id="picker-ok">Confirmar</button>
+      <!-- FORM PARA O ENTER ADICIONAR. Enter num campo de formulário "clica" no
+           botão de envio: o Adicionar roda o mesmo onclick do app.js. O envio em
+           si não pode acontecer (recarregaria a página no meio da ficha):
+           onsubmit cancela e, sem ele, method="dialog" fora de um <dialog>
+           também não navega. -->
+      <form class="picker-add" method="dialog" onsubmit="return false">
+        <input type="text" id="picker-novo" placeholder="+ adicionar novo" enterkeyhint="done" autocomplete="off">
+        <button type="submit" class="btn-ghost btn-sm" id="picker-add-btn">Adicionar</button>
+      </form>
+      <button type="button" class="btn-primary w-100 mt-12" id="picker-ok">Confirmar</button>
     </div>
   </div>
 
@@ -166,8 +171,11 @@
       <h3>⚠️ Conflito de edição</h3>
       <p id="conflict-msg">Esta O.S foi alterada em outro aparelho.</p>
       <div class="conflict-actions">
-        <button class="btn-primary" id="conflict-reload">Recarregar (servidor)</button>
-        <button class="btn-danger" id="conflict-overwrite">Sobrescrever (meu)</button>
+        <!-- Cada botão diz o que se perde. Nenhum é o azul "de sempre": os dois
+             jogam alguma coisa fora, e quem tocava no azul achando que só
+             atualizava a tela perdia a própria edição. -->
+        <button type="button" class="btn-ghost" id="conflict-reload">Ficar com a versão do servidor<small>descarta o que eu mudei aqui</small></button>
+        <button type="button" class="btn-danger" id="conflict-overwrite">Sobrescrever com a minha versão<small>substitui a do servidor</small></button>
       </div>
     </div>
   </div>
@@ -185,16 +193,16 @@
        importar O.S a partir do PDF do ERP. Passou a ser carregada na hora em
        que alguem clica em "Importar PDF" -- ver garantirPdfJs() no app.js. -->
 
-  <script src="config.js?v=v129"></script>
-  <script src="logo.js?v=v129"></script>
-  <script src="frases.js?v=v129"></script>
-  <script src="store.js?v=v129"></script>
-  <script src="auth.js?v=v129"></script>
-  <script src="operacao.js?v=v129"></script>
-  <script src="app.js?v=v129"></script>
-  <script src="casa.js?v=v129"></script>
-  <script src="relatorios-entregas.js?v=v129"></script>
-  <script src="performance.js?v=v129"></script>
+  <script src="config.js?v=v130"></script>
+  <script src="logo.js?v=v130"></script>
+  <script src="frases.js?v=v130"></script>
+  <script src="store.js?v=v130"></script>
+  <script src="auth.js?v=v130"></script>
+  <script src="operacao.js?v=v130"></script>
+  <script src="app.js?v=v130"></script>
+  <script src="casa.js?v=v130"></script>
+  <script src="relatorios-entregas.js?v=v130"></script>
+  <script src="performance.js?v=v130"></script>
   <script>
   /* Service worker + AVISO DE VERSÃO NOVA.
      O sw.js faz skipWaiting/claim, então a versão nova assume assim que o

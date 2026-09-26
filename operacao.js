@@ -181,6 +181,12 @@ const OPERACAO = (() => {
      de 23/09/2026). Ordem: quem está na rua; o que é de hoje; a próxima data
      futura. Vencida NUNCA vai para o cartão grande: ela aparece na lista, com
      o aviso de confirmar com o PCP. */
+  const horaDoTurno = o => {
+    const i = o?.instalacao || {};
+    return i.periodo === 'Horário' ? (/^\d{2}:\d{2}/.test(i.hora || '') ? i.hora : '12:00')
+      // "Dia inteiro" começa de manhã; 23:59 é só para período em branco.
+      : i.periodo === 'Manhã' || i.periodo === 'Dia inteiro' ? '08:00' : i.periodo === 'Tarde' ? '13:00' : '23:59';
+  };
   function destaqueDoDia(lista, hoje = dia(new Date())) {
     const abertas = (lista || []).filter(o => o && !o.finalizadaEm);
     const rua = abertas.find(o => naRua(o, hoje));
@@ -190,12 +196,14 @@ const OPERACAO = (() => {
        apontava O.S. sem data. Serviço que já voltou no último dia dele saiu da
        frente: o da tarde não fica atrás do que terminou de manhã. */
     const dias = o => interno(o) ? (dia(o?.instalacao?.data) ? [dia(o.instalacao.data)] : []) : diasAgenda(o);
+    /* No mesmo dia, a da manhã antes da da tarde: sem o desempate valia a
+       ordem da lista, e o cartão com Rota apontava o cliente da tarde às 7h. */
     const candidatas = abertas.map(o => {
       const ds = dias(o), ultimo = ds[ds.length - 1];
       if ((o.horaRetorno || o.retornoEm) && ultimo && ultimo <= hoje) return null;
       const d = ds.find(x => x >= hoje);
       return d ? { o, d } : null;
-    }).filter(Boolean).sort((a, b) => a.d.localeCompare(b.d));
+    }).filter(Boolean).sort((a, b) => a.d.localeCompare(b.d) || horaDoTurno(a.o).localeCompare(horaDoTurno(b.o)));
     return candidatas.length ? candidatas[0].o : null;
   }
   function periodoRapido(id, hoje = dia(new Date()), futuro = false) {
@@ -277,12 +285,23 @@ const OPERACAO = (() => {
   const PERGUNTAS_VOLTA = ['carroLimpo', 'carroArrumado', 'equipamentosOk', 'semAvaria'];
   const respostaVolta = v => v === 'sim' || v === true ? 'sim' : (v === 'nao' || v === false ? 'nao' : '');
   const voltaRespondida = rc => !!rc && PERGUNTAS_VOLTA.some(k => respostaVolta(rc[k]));
+  /* CONFERIDA É O QUE A NOTA CONTA: carro (limpo ou arrumado) E equipamentos.
+     A fila dizia "todas conferidas" com só "sem avaria" respondido, e a
+     Performance dizia "FORA, falta conferir" sem caminho para entrar. Com só
+     parte respondida, a volta fica "em parte" e continua na fila. */
+  const voltaConferidaParaNota = rc => !!rc && !!(respostaVolta(rc.carroLimpo) || respostaVolta(rc.carroArrumado)) && !!respostaVolta(rc.equipamentosOk);
+  /* A data de entrega que a gestão lançou vale antes da data da baixa do ERP:
+     duas O.S. que o carro entregou no dia 20 e o ERP baixou nos dias 21 e 23
+     viravam duas voltas em dias em que o carro nem saiu. */
   function diaDaVolta(o) {
-    return dia(o?.retornoEm) || (o?.horaRetorno ? (dia(o.saidaEm) || dia(o.instalacao?.data)) : '') || dia(o?.finalizadaEm);
+    return dia(o?.retornoEm) || (o?.horaRetorno ? (dia(o.saidaEm) || dia(o.instalacao?.data)) : '') || dia(o?.entregaLancada?.data) || dia(o?.finalizadaEm);
   }
   const voltou = o => !!(o && !interno(o) && equipe(o).length &&
     (o.retornoEm || o.horaRetorno || (dia(o.finalizadaEm) && (concluida(o) || o.entregaLancada))));
   const normal = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  /* A CHAVE DA VOLTA: dia + carro + equipe. A base da nota no servidor
+     (pcp-sync, perfFonte) monta a mesma chave; um teste confere as duas. */
+  const chaveDaVolta = o => [diaDaVolta(o), normal(o?.veiculo), equipe(o).map(normal).sort().join('+')].join('|');
   function voltasDoCarro(lista, de = '', ate = '') {
     const grupos = new Map();
     for (const o of lista || []) {
@@ -290,22 +309,32 @@ const OPERACAO = (() => {
       const d = diaDaVolta(o);
       if (!d || !emIntervalo(d, de, ate)) continue;
       const time = equipe(o);
-      const chave = [d, normal(o.veiculo), time.map(normal).sort().join('+')].join('|');
+      const chave = chaveDaVolta(o);
       const g = grupos.get(chave) || { chave, dia: d, veiculo: String(o.veiculo || '').trim(), equipe: time, os: [] };
       g.os.push(o);
       grupos.set(chave, g);
     }
     const lista2 = [...grupos.values()].map(g => {
-      const feitas = g.os.filter(o => voltaRespondida(o.retornoConf));
-      const situacao = feitas.length === g.os.length ? 'conferida' : feitas.length ? 'parcial' : 'conferir';
+      const feitas = g.os.filter(o => voltaConferidaParaNota(o.retornoConf));
+      const tocadas = g.os.filter(o => voltaRespondida(o.retornoConf));
+      const situacao = feitas.length === g.os.length ? 'conferida' : tocadas.length ? 'parcial' : 'conferir';
       // As respostas da volta só são UMA quando todas as O.S. dizem o mesmo.
       const assinatura = o => PERGUNTAS_VOLTA.map(k => respostaVolta(o.retornoConf?.[k])).join(',');
       const iguais = feitas.length === g.os.length && new Set(g.os.map(assinatura)).size === 1;
-      return { ...g, situacao, respostas: iguais ? g.os[0].retornoConf : null };
+      /* O QUE A EQUIPE REGISTROU (voltaEquipe, 25/09/2026): a limpeza do carro
+         declarada no espelho. Vem ao lado, nunca no lugar: a situação continua
+         saindo só de retornoConf, porque a conferência é do PCP e é ela que
+         conta na nota. "parte" = O.S. que voltou depois do registro. */
+      const declaradas = g.os.filter(o => voltaRespondida(o.voltaEquipe));
+      const equipeDisse = declaradas.length === g.os.length ? 'toda' : declaradas.length ? 'parte' : 'nenhuma';
+      const quando = v => { const t = Date.parse(v && v.em || ''); return Number.isFinite(t) ? t : 0; };
+      const declaracao = declaradas.map(o => o.voltaEquipe).sort((a, b) => quando(b) - quando(a))[0] || null;
+      const semDeclaracao = g.os.filter(o => !voltaRespondida(o.voltaEquipe)).map(o => String(o.numero || 's/n'));
+      return { ...g, situacao, respostas: iguais ? g.os[0].retornoConf : null, equipeDisse, declaracao, semDeclaracao };
     });
     const ordem = { conferir: 0, parcial: 1, conferida: 2 };
     return lista2.sort((a, b) => ordem[a.situacao] - ordem[b.situacao] || b.dia.localeCompare(a.dia) || a.chave.localeCompare(b.chave));
   }
-  return {PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,diaDaVolta,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
+  return {PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;

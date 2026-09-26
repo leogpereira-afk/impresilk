@@ -53,6 +53,20 @@ function lerBonusCasa() {
   };
 }
 
+/* CADA MÊS COM SEUS PAGAMENTOS. Os itens do bônus eram uma lista só: ao trocar
+   a apuração de setembro para outubro, quem recebeu em setembro aparecia "Pago"
+   em outubro, o disponível descontava setembro e, para aprovar outubro, era
+   preciso Reabrir, o que apagava o registro de setembro. Agora o item grava o
+   mês; item antigo sem mês é do mês que estava aberto quando foi gravado, e a
+   troca de mês carimba esse mês nele antes de mudar. */
+function itensBonusDoMes(b, mes) {
+  const m = mes || b.mes;
+  return (b.itens || []).filter(x => (x.mes || b.mes) === m);
+}
+function trocarMesBonus(b, novo) {
+  return { ...b, mes: novo, itens: (b.itens || []).map(x => (x.mes ? x : { ...x, mes: b.mes })) };
+}
+
 function gravarBonusCasa(b) {
   const cfg = STORE.getCFG();
   cfg.bonusPCP = b;
@@ -119,17 +133,29 @@ function fichaPorId(id) {
   return lerVinculosCasa().find(v => v.id === chave) || null;
 }
 
+/* O BÔNUS SÓ ENXERGAVA O VÍNCULO FEITO À MÃO. O apelido que bate sozinho com a
+   ficha do RH (o caminho 2 de "UMA BASE SÓ", o mais comum) saía "sem ficha" no
+   bônus, sem chip para marcar, enquanto o quadro de ligação dizia que todo
+   apelido já tinha ficha: beco sem saída. A régua agora é a mesma de
+   fichaDoApelido: vínculo salvo manda, senão o casamento automático, desde que
+   a ficha tenha o id de 6 dígitos (é ele que o ponto grava). */
 function fichaPorApelido(apelido) {
   const a = String(apelido || '').trim();
   if (!a) return null;
   const hits = lerVinculosCasa().filter(v => normCasa(v.apelido) === normCasa(a));
-  return hits.length === 1 ? hits[0] : null;
+  if (hits.length) return hits.length === 1 ? hits[0] : null;
+  const p = typeof pessoaDoElenco === 'function' ? pessoaDoElenco(a) : null;
+  const id = p ? idPessoaCasa(p.id) : '';
+  return id ? { id, chave: p.chave || '', nome: p.nome || a, apelido: a } : null;
 }
 
 function rotuloPessoaCasa(id) {
   const f = fichaPorId(id);
   if (f) return `${f.nome || f.apelido || 'Sem nome'} · ID ${f.id}`;
   const chave = idPessoaCasa(id);
+  // Quem casou sozinho com o RH não tem vínculo salvo: o nome vem da ficha.
+  const p = chave ? pessoaRHPorId6(chave) : null;
+  if (p) return `${p.nome || p.apelido || 'Sem nome'} · ID ${chave}`;
   return chave ? `ID ${chave}` : '';
 }
 
@@ -150,7 +176,9 @@ function instaladoresDaOs(os, pontos) {
   const eq = OPERACAO.equipe(os);
   if (eq.length !== 1) return [];
   const f = fichaPorApelido(eq[0]);
-  return f ? [f.id] : [];
+  // Vínculo salvo só pela chave do RH (ficha sem CPF) tem id vazio: sem id não
+  // há ponto, senão várias pessoas caem juntas numa linha sem nome no ranking.
+  return f && f.id ? [f.id] : [];
 }
 
 function rankingFinalizadas(mes, pontos) {
@@ -158,6 +186,7 @@ function rankingFinalizadas(mes, pontos) {
   for (const os of osFinalizadasMes(mes)) {
     const ids = instaladoresDaOs(os, pontos);
     for (const id of ids) {
+      if (!id) continue;
       const d = map.get(id) || { id, nome: rotuloPessoaCasa(id), osCount: 0, retrab: 0, itens: [] };
       d.osCount += 1;
       if (os.retrabalho) d.retrab += 1;
@@ -252,6 +281,18 @@ function classificarEntregas(lista) {
   }
   return r;
 }
+/* O APARELHO SÓ GUARDA OS ÚLTIMOS N DIAS de finalizadas (store.js). Antes
+   disso, "não achei o card" quer dizer "não tenho cópia", e não "nunca passou
+   pelo PCP". Quem lê do aparelho usa este limite para não afirmar ausência. */
+function janelaLocalCasa() { return (typeof STORE.JANELA_LOCAL_DIAS === 'number') ? STORE.JANELA_LOCAL_DIAS : 60; }
+function limiteJanelaCasa() { return OPERACAO.somarDias(OPERACAO.dia(new Date()), -janelaLocalCasa()); }
+// Período que começa antes da janela (ou "Todos"): o quadro que lê o aparelho
+// conta menos do que a legenda promete. Diz isso em vez de afirmar "nenhum".
+function foraDaJanelaCasa(f) { return !f || !f.de || f.de < limiteJanelaCasa(); }
+function avisoJanelaCasa(f) {
+  return foraDaJanelaCasa(f) ? `<p class="metricas-nota">Este quadro lê só as O.S guardadas neste aparelho, dos últimos ${janelaLocalCasa()} dias. O período escolhido começa antes disso; o histórico completo está em Entregas.</p>` : '';
+}
+
 // Data que vale para o mês: a do lançamento manual, se houver; senão a finalização.
 function diaEntrega(o) {
   return (o.entregaLancada && OPERACAO.dia(o.entregaLancada.data)) || OPERACAO.dia(o.finalizadaEm);
@@ -441,7 +482,18 @@ function lancarEntregaManual(osId) {
   const box = document.createElement('div');
   box.id = 'lancar-box';
   box.className = 'wpp-picker-overlay';
-  const eq = new Set(OPERACAO.equipe(os));
+  /* OS CHIPS SÃO A UNIÃO da lista de instaladores com a equipe gravada na O.S.
+     Só a lista de Configurações virava chip: nome da O.S fora dela (variante
+     como "Osmane V.", ou quem saiu da lista) não aparecia e, no Continuar, a
+     equipe era regravada sem ele. A pessoa perdia a entrega sem aviso. Quem
+     está só na O.S entra marcado, com "fora da lista". */
+  const eq = new Set(OPERACAO.equipe(os).map(normCasa));
+  const lista = (cfg.instaladores || []).map(String).filter(Boolean);
+  const naLista = new Set(lista.map(normCasa));
+  const soNaOs = OPERACAO.equipe(os).filter((n, i, a) => !naLista.has(normCasa(n)) && a.findIndex(x => normCasa(x) === normCasa(n)) === i);
+  const chipEquipe = (n, fora) => { const on = eq.has(normCasa(n)); return `<label class="casa-chip ${on ? 'on' : ''}"><input type="checkbox" name="equipe" value="${esc(n)}" ${on ? 'checked' : ''}><span>${esc(n)}</span>${fora ? '<small>fora da lista</small>' : ''}</label>`; };
+  const chipsEquipe = lista.map(n => chipEquipe(n, false)).concat(soNaOs.map(n => chipEquipe(n, true))).join('')
+    || '<p class="text-muted" style="font-size:.8rem">Cadastre instaladores em Configurações.</p>';
   /* A CONFERÊNCIA DA VOLTA também mora aqui: a maioria das O.S. chega
      finalizada pela baixa do ERP, e este é o momento em que a gestão pega
      nelas. Sem isto, carro e equipamentos quase nunca teriam resposta e o
@@ -453,6 +505,12 @@ function lancarEntregaManual(osId) {
   const conferencia = gestao && !OPERACAO.interno(os) ? `<div class="conf-volta-grade">
             ${OPERACAO.PERGUNTAS_VOLTA.map(k => `<div class="field"><label>${esc(VOLTA_ROTULO[k])}</label>${sel(k, OPERACAO.respostaVolta(rc[k]))}</div>`).join('')}
           </div>` : '';
+  /* O QUE A EQUIPE REGISTROU no espelho (voltaEquipe): aparece ao lado, para
+     o PCP comparar. Os selects acima continuam saindo de retornoConf, nunca
+     daqui: a declaração da equipe não responde pela conferência nem conta na nota. */
+  const equipeRegistrou = OPERACAO.interno(os) ? ''
+    : OPERACAO.voltaRespondida(os.voltaEquipe) ? voltaEquipeHTML(os.voltaEquipe, { fotos: true })
+    : '<p class="text-muted" style="font-size:.8rem">A equipe não registrou a limpeza desta volta.</p>';
   box.innerHTML = `
     <div class="wpp-picker retrab-box" role="dialog" aria-modal="true">
       <div class="wpp-picker-head"><strong>📦 Lançar entrega · O.S ${esc(os.numero || '—')}</strong><button class="modal-close" id="lancar-x">×</button></div>
@@ -460,13 +518,16 @@ function lancarEntregaManual(osId) {
         <p class="text-muted" style="font-size:.8rem;margin-bottom:8px">${esc(os.cliente || '')} · ${esc(os.servico || '')}. O ERP baixou em ${esc(OPERACAO.dia(os.finalizadaEm) ? OPERACAO.dia(os.finalizadaEm).slice(8, 10) + '/' + OPERACAO.dia(os.finalizadaEm).slice(5, 7) : '—')}.</p>
         <form id="lancar-form" class="retrab-form">
           <div class="field"><label>Data da entrega <span class="req">*</span></label><input name="data" type="date" required value="${esc(OPERACAO.dia(os.finalizadaEm) || hojeISO())}"></div>
-          <div class="field"><label>Equipe que instalou</label><div class="casa-chips">${(cfg.instaladores || []).map(n => `<label class="casa-chip ${eq.has(n) ? 'on' : ''}"><input type="checkbox" name="equipe" value="${esc(n)}" ${eq.has(n) ? 'checked' : ''}><span>${esc(n)}</span></label>`).join('')}</div></div>
+          <div class="field"><label>Equipe que instalou</label><div class="casa-chips">${chipsEquipe}</div></div>
+          ${equipeRegistrou}
           ${conferencia}
           <button class="btn-primary w-100" type="submit">Continuar → pergunta do retrabalho</button>
         </form>
       </div>
     </div>`;
   document.body.appendChild(box);
+  // Miniaturas da foto do carro que a equipe registrou.
+  box.querySelectorAll('[data-foto-img]').forEach(async img => { const b64 = await STORE.pullPhoto(img.dataset.fotoImg); if (b64) img.src = b64; });
   const fechar = () => box.remove();
   document.getElementById('lancar-x').onclick = fechar;
   box.querySelectorAll('.casa-chip input').forEach(cb => { cb.onchange = () => cb.closest('.casa-chip').classList.toggle('on', cb.checked); });
@@ -478,8 +539,16 @@ function lancarEntregaManual(osId) {
     const equipe = fd.getAll('equipe').map(String).filter(Boolean);
     const resp = v => (v === 'sim' || v === 'nao') ? v : '';
     const respostas = Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, resp(fd.get(k))]));
-    fechar();
+    // Sem equipe a entrega não conta para ninguém e a conferência da volta
+    // fica numa O.S que a nota descarta. E ela sai da fila "a lançar": o erro
+    // não volta a aparecer. Pergunta antes.
+    if (!equipe.length && !OPERACAO.equipe(os).length && !OPERACAO.interno(os)
+      && !confirm('Lançar sem equipe? A entrega não conta para ninguém e a conferência da volta não entra na nota.')) return;
+    // Esconde (não apaga) o formulário: "Voltar" na pergunta do retrabalho
+    // devolve a data, a equipe e a conferência como estavam.
+    box.style.display = 'none';
     perguntarRetrabalho(os, () => {
+      fechar();
       if (equipe.length) os.equipe = equipe;
       const antes = os.retornoConf || {};
       if (conferencia && OPERACAO.PERGUNTAS_VOLTA.some(k => respostas[k] !== resp(antes[k]))) {
@@ -491,7 +560,7 @@ function lancarEntregaManual(osId) {
       STORE.saveOS(os);
       toast(`Entrega da O.S ${os.numero || ''} lançada.`, 'success');
       renderEntregas();
-    });
+    }, { rotulo: 'Voltar ao lançamento', aoVoltar: () => { box.style.display = ''; } });
   };
 }
 
@@ -610,7 +679,7 @@ function chipsPeriodoEntregas(f) {
     <label>Ano<select id="ent-ano">${anosEntregas().map(a => `<option value="${a}" ${String(a) === ano ? 'selected' : ''}>${a}</option>`).join('')}</select></label>
     <label>Mês<select id="ent-mes"><option value="">Ano inteiro</option>${MES_CURTO.map((m, i) => { const n = String(i + 1).padStart(2, '0'); return `<option value="${n}" ${n === mes ? 'selected' : ''} ${ano + '-' + n > hoje.slice(0, 7) ? 'disabled' : ''}>${m}</option>`; }).join('')}</select></label>
     <button type="button" class="btn-ghost btn-sm" data-per-de="${hoje.slice(0, 7)}-01" data-per-ate="${hoje}">Este mês</button>
-    <details class="ent-personalizar"><summary>Outras datas</summary><div class="periodo-filtro" data-pf="_fEnt"><label>De<input type="date" class="pf-de" value="${esc(f.de || '')}"></label><label>Até<input type="date" class="pf-ate" value="${esc(f.ate || '')}"></label></div></details>
+    <details class="ent-personalizar" ${STATE._entPersAberto ? 'open' : ''}><summary>Outras datas</summary><div class="periodo-filtro" data-pf="_fEnt"><label>De<input type="date" class="pf-de" value="${esc(f.de || '')}"></label><label>Até<input type="date" class="pf-ate" value="${esc(f.ate || '')}"></label></div></details>
     <span class="ent-intervalo">${esc(f.de ? f.de.split('-').reverse().join('/') : 'Início')} — ${esc(f.ate ? f.ate.split('-').reverse().join('/') : 'hoje')}</span>
   </div>`;
 }
@@ -782,8 +851,10 @@ function tendenciaEntregas(resumo, mesHoje) {
     /* MESMO PERÍODO: comparar um ano de nove meses com um de doze é a
        comparação errada, e é a que aparece sozinha se ninguém cuidar. O
        acumulado até o mesmo mês responde "estamos melhores que no ano passado
-       a esta altura?", que é a pergunta de quem olha. */
-    const ate = doAno.filter(l => Number(l.mes.slice(5, 7)) <= mesDoAno);
+       a esta altura?", que é a pergunta de quem olha.
+       SÓ MESES FECHADOS: o mês corrente está pela metade, e no dia 2 de janeiro
+       eram dois dias contra janeiro inteiro do ano anterior (uns -95%). */
+    const ate = doAno.filter(l => !hoje || Number(l.mes.slice(5, 7)) < mesDoAno);
     return {
       ano,
       valor: Math.round(valor * 100) / 100,
@@ -804,7 +875,7 @@ function tendenciaEntregas(resumo, mesHoje) {
   for (let i = 1; i < porAno.length; i++) {
     const a = porAno[i], b = porAno[i - 1];
     if (String(Number(b.ano) + 1) !== a.ano) { a.porQueNaoCompara = `não há ${Number(a.ano) - 1} carregado`; continue; }
-    if (!a.mesesMesmoPeriodo) { a.porQueNaoCompara = 'este ano não tem mês carregado no período'; continue; }
+    if (!a.mesesMesmoPeriodo) { a.porQueNaoCompara = hoje && mesDoAno === 1 ? 'ainda não há mês fechado neste ano' : 'este ano não tem mês carregado no período'; continue; }
     if (!b.mesesMesmoPeriodo || b.mesmoPeriodo <= 0) {
       a.porQueNaoCompara = `${b.ano} não tem nenhum mês carregado até o mesmo mês`;
       continue;
@@ -984,7 +1055,7 @@ function relatorioAnosHTML() {
           const parcial = k === hoje ? ' title="mês em andamento"' : '';
           return `<td class="num"${parcial}><button class="btn-link btn-mes-ent" data-mes-ent="${k}">${dinheiroCurto(l.valor)}${k === hoje ? '*' : ''}</button></td>`;
         }).join('')}
-        <td class="num"><strong>${dinheiroCurto(linha.valor)}</strong>${linha.semDado.length ? ` <span class="badge sem-valor" title="${linha.semDado.join(', ')}">${linha.semDado.length} sem dado</span>` : ''}</td>
+        <td class="num"><strong>${dinheiroCurto(linha.valor)}</strong>${linha.semDado.length ? ` <span class="badge sem-valor" title="${linha.semDado.join(', ')}">${linha.semDado.length} sem dado</span> <button class="btn-ghost btn-xs edit-only" data-carregar-ano="${esc(ano)}">completar</button>` : ''}</td>
         <td class="num">${equipeDoAnoHTML(ano)}</td>
       </tr>`;
     }).join('')}</tbody>
@@ -998,7 +1069,7 @@ function relatorioAnosHTML() {
     })), dinheiroCurto) || '<p class="text-muted">Sem dado de ano nenhum.</p>';
 
   const comparativo = `<div class="casa-tabela-wrap"><table class="casa-tabela">
-    <thead><tr><th>Ano</th><th class="num">Total do ano</th><th class="num">Até ${MES_CURTO[Number(hoje.slice(5, 7)) - 1]}</th><th class="num">vs. ano anterior</th><th class="num">No prazo</th></tr></thead>
+    <thead><tr><th>Ano</th><th class="num">Total do ano</th><th class="num">${Number(hoje.slice(5, 7)) > 1 ? 'Até ' + MES_CURTO[Number(hoje.slice(5, 7)) - 2] : 'Meses fechados'}</th><th class="num">vs. ano anterior</th><th class="num">No prazo</th></tr></thead>
     <tbody>${t.porAno.slice().reverse().map(a => {
       const v = a.variacao;
       const cor = v === undefined ? '' : (v >= 0 ? 'st-confirmada' : 'sem-valor');
@@ -1015,7 +1086,7 @@ function relatorioAnosHTML() {
       </tr>`;
     }).join('')}</tbody>
   </table></div>
-  <p class="text-muted" style="font-size:.8rem">A comparação é sempre do <strong>mesmo período</strong>: o acumulado até ${MES_CURTO[Number(hoje.slice(5, 7)) - 1]} de cada ano. Comparar um ano de ${Number(hoje.slice(5, 7))} meses com um de 12 responderia a pergunta errada.</p>`;
+  <p class="text-muted" style="font-size:.8rem">A comparação é sempre do <strong>mesmo período</strong>, só com meses fechados: ${Number(hoje.slice(5, 7)) > 1 ? `o acumulado até ${MES_CURTO[Number(hoje.slice(5, 7)) - 2]} de cada ano` : 'em janeiro ainda não há mês fechado para comparar'}. O mês corrente fica de fora porque está pela metade.</p>`;
 
   const kpiLinha = (rotulo, valor, nota) => `<div class="casa-kpi"><b>${valor}</b><small>${esc(rotulo)}${nota ? ` · ${esc(nota)}` : ''}</small></div>`;
   const tend = t.tendencia;
@@ -1246,10 +1317,14 @@ function renderEntregas() {
   // Lista do período: o que o ERP diz que foi entregue, com o estado no PCP.
   const per = entreguesERP(f.de || hoje.slice(0, 7) + '-01', f.ate || hoje);
   const kPer = kpiDe(per);
+  const limiteEntregas = limiteJanelaCasa();
   const estadoPCP = o => {
     const n = String(o.numero || '').trim();
     if (o.tipo === 'interno') return { rotulo: 'Retirada', classe: 'st-finalizada', dica: 'Só o valor conta; retirada não é entrega realizada' };
     const card = porNumero.get(n);
+    // Entrega mais velha que a janela do aparelho: o card pode existir no
+    // servidor. Dizer "fora do PCP" aqui culpava a equipe por um mês inteiro.
+    if (!card && o.data && o.data < limiteEntregas) return { rotulo: 'sem cópia no aparelho', classe: 'st-aguardando_producao', dica: `Entregue há mais de ${janelaLocalCasa()} dias; o aparelho guarda só os últimos ${janelaLocalCasa()}` };
     if (!card) return { rotulo: 'fora do PCP', classe: 'st-aguardando_producao', dica: 'O ERP entregou, mas esta O.S nunca passou pelo PCP' };
     if (card.entregaLancada) return { rotulo: 'lançada', classe: 'st-confirmada', dica: 'Baixa do ERP lançada à mão por ' + (card.entregaLancada.por || '') };
     if (registradas.has(n)) return { rotulo: 'registrada', classe: 'st-confirmada', dica: 'Entrega registrada no PCP' };
@@ -1259,7 +1334,8 @@ function renderEntregas() {
   };
   const lista = per.os
     .map(o => ({ erp: o, card: porNumero.get(String(o.numero || '').trim()) || null }))
-    .filter(x => !tecnico || (x.card && OPERACAO.equipe(x.card).includes(tecnico)))
+    // Técnico é a FICHA, não a grafia: "Osmane" e "Osmane V." são a mesma pessoa.
+    .filter(x => !tecnico || (x.card && OPERACAO.equipe(x.card).some(a => nomeExibicaoCasa(a).chave === tecnico)))
     .filter(x => !tipo || String((x.card && x.card.servico) || x.erp.servico || '').trim() === tipo)
     .sort((a, b) => String(b.erp.data).localeCompare(String(a.erp.data)) || String(b.erp.numero).localeCompare(String(a.erp.numero)));
   let totLista = 0, semValorLista = 0;
@@ -1267,10 +1343,18 @@ function renderEntregas() {
   // A tabela mostra no máximo 300 linhas; o resto está nos relatórios.
   const TETO_LINHAS = 300;
   const visiveis = lista.slice(0, TETO_LINHAS);
-  const aLancar = cls.aLancar.filter(o => OPERACAO.emIntervalo(o.finalizadaEm, f.de, f.ate))
+  /* A FILA NÃO SEGUE O PERÍODO. Filtrada pelo período, no dia 1º toda baixa do
+     mês anterior ainda não lançada sumia ("Nada pendente") e a instalação ficava
+     fora da contagem sem ninguém perceber. Pendência é pendência em qualquer mês. */
+  const aLancar = cls.aLancar.slice()
     .sort((a, b) => String(b.finalizadaEm).localeCompare(String(a.finalizadaEm)));
 
-  const tecnicos = [...new Set(todas.filter(o => o.finalizadaEm).flatMap(o => OPERACAO.equipe(o)))].sort((a, b) => a.localeCompare(b));
+  const tecMapa = new Map();
+  for (const ap of new Set(todas.filter(o => o.finalizadaEm).flatMap(o => OPERACAO.equipe(o)))) {
+    const n = nomeExibicaoCasa(ap);
+    if (!tecMapa.has(n.chave)) tecMapa.set(n.chave, n.nome);
+  }
+  const tecnicos = [...tecMapa.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   const tipos = typeof tiposServicoHist === 'function' ? tiposServicoHist() : [];
   const opt = (v, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(v)}</option>`;
   const dataBR = iso => { const d = OPERACAO.dia(iso); return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'; };
@@ -1298,7 +1382,12 @@ function renderEntregas() {
   // ruído, e dois números iguais lado a lado fazem duvidar dos dois.
   const periodoRepetido = (f.de === hoje.slice(0, 7) + '-01' && f.ate === hoje)
     || (f.de === hoje.slice(0, 4) + '-01-01' && f.ate === hoje);
-  const kpiPeriodo = periodoRepetido ? '' : kpiHTML(kPer, rotuloPeriodo(f.de, f.ate), 'escolhido');
+  /* Com Técnico ou Tipo ativos, o cartão do período segue a lista filtrada.
+     Antes mostrava a empresa inteira ao lado da lista de uma pessoa. */
+  const filtrado = !!(tecnico || tipo);
+  const kpiPeriodo = filtrado
+    ? kpiHTML(kpiDe({ os: lista.map(x => x.erp), faltando: per.faltando, comErro: per.comErro, meses: per.meses }), rotuloPeriodo(f.de, f.ate) + ' · com o filtro', 'escolhido')
+    : (periodoRepetido ? '' : kpiHTML(kPer, rotuloPeriodo(f.de, f.ate), 'escolhido'));
 
   const tabela = `<div class="casa-tabela-wrap"><table class="casa-tabela">
     <thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Entrega (ERP)</th><th class="num">Valor</th></tr></thead>
@@ -1313,8 +1402,27 @@ function renderEntregas() {
     <tfoot><tr><td colspan="5">${lista.length} O.S entregues no período${lista.length > TETO_LINHAS ? ` · mostrando as ${TETO_LINHAS} mais recentes` : ''}${semValorLista ? ` · ${semValorLista} sem valor` : ''}${per.faltando.length ? ` · carregando ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'}…` : ''}${per.comErro.length ? ` · <span class="badge sem-valor">${per.comErro.length} mês${per.comErro.length === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}${per.truncou ? ` · <span class="badge sem-valor">intervalo longo demais: entraram só os primeiros ${TETO_MESES} meses</span>` : ''}</td><td class="num">${dinheiroCasa(totLista)}</td></tr></tfoot>
   </table></div>`;
   const cardFn = typeof osCardHTML === 'function' ? osCardHTML : null;
-  const cards = cardFn ? `<div class="cards-grid">${visiveis.filter(x => x.card).map(x => cardFn(x.card)).join('')}</div>` : tabela;
+  /* Cards só existem para O.S com card no aparelho. As só do ERP, ou que já
+     saíram da janela, sumiam da visão sem contagem: num mês antigo a tela
+     ficava em branco. O rodapé diz quantas ficaram só na Tabela. */
+  const semCard = visiveis.filter(x => !x.card).length;
+  const cards = cardFn ? `<div class="cards-grid">${visiveis.filter(x => x.card).map(x => cardFn(x.card)).join('')}</div>
+    <p class="metricas-nota">${lista.length} O.S entregues no período · ${dinheiroCasa(totLista)}${semCard ? ` · ${semCard} sem card neste aparelho aparece${semCard === 1 ? '' : 'm'} só na Tabela` : ''}.</p>` : tabela;
+  /* A fila de lançamento é a única lista de tarefas desta tela. Com pendência
+     ela sobe para logo depois dos filtros; no fim da rolagem ninguém a via. */
+  const secaoLancar = `<section class="casa-prod-box casa-lancar">
+        <h3>Lançamento manual: baixadas pelo ERP fora do sistema · ${aLancar.length}</h3>
+        <p>O ERP marcou entregue, mas ninguém finalizou no PCP. Aparecem todas as pendentes, de qualquer período. Não conta como entrega realizada até alguém lançar: confirme data e equipe e responda se gerou retrabalho. Baixas anteriores a ${CORTE_LANCAMENTO_MANUAL.slice(8, 10)}/${CORTE_LANCAMENTO_MANUAL.slice(5, 7)}/${CORTE_LANCAMENTO_MANUAL.slice(0, 4)} já contam como entregues (decisão da direção).</p>
+        ${aLancar.length ? `<div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Baixa ERP</th><th class="num">Valor</th><th></th></tr></thead><tbody>${aLancar.map(os => `<tr>
+            <td><strong>${esc(os.numero || '—')}</strong></td><td>${esc(os.cliente || '')}</td><td>${esc(os.servico || '—')}</td><td>${esc(OPERACAO.equipe(os).join(', ') || 'sem equipe')}</td><td>${dataBR(os.finalizadaEm)}</td><td class="num">${valorTxt(valorDaOS(os))}</td>
+            <td>${OPERACAO.emIntervalo(diaEntrega(os), f.de, f.ate) ? '' : '<small class="text-muted">fora do período</small> '}<button class="btn-primary btn-xs edit-only" data-lancar-os="${esc(os.id)}">Lançar entrega</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="text-muted">Nada pendente de lançamento.</p>'}
+      </section>`;
 
+  /* A tela repinta a cada mês que chega do ERP. Sem guardar o estado, o quadro
+     com o progresso e o Parar fechava a cada ~10 s, "Outras datas" fechava entre
+     o De e o Até, e a grade ano × mês voltava para janeiro. */
+  const grade0 = el.querySelector('.casa-grade-meses');
+  const rolGrade = grade0 && grade0.parentElement ? grade0.parentElement.scrollLeft : 0;
   el.innerHTML = `
     <div class="casa-pagina">
       ${abasEntregasHTML('lista')}
@@ -1322,7 +1430,7 @@ function renderEntregas() {
         <div><h2>Entregas</h2><p>Acompanhe as O.S. entregues, os valores e a equipe responsável.</p></div>
       </div>
       <div class="casa-kpi-cards">${kpiPeriodo}${kpiHTML(kHoje, 'entregue hoje')}${kpiHTML(kMes, 'entregue no mês')}${kpiHTML(kAno, 'entregue no ano')}</div>
-      <details class="ent-dados"><summary>Origem dos valores e sincronização</summary>
+      <details class="ent-dados" ${STATE._entDadosAberto ? 'open' : ''}><summary>Origem dos valores e sincronização</summary>
       <p>Valores líquidos de desconto das O.S. marcadas como entregues no ERP, pela data de entrega. Não representam recebimentos ou lucro. Instalações realizadas dependem do registro no PCP; retiradas pelo cliente entram apenas nos valores.</p>
       <p class="metricas-nota">Registradas no PCP neste mês: <strong>${registradasMes}</strong> instalaç${registradasMes === 1 ? 'ão' : 'ões'}${cls.aLancar.length ? ` · a lançar: <strong>${cls.aLancar.length}</strong>` : ''}. Fonte do valor: ERP${STORE.entreguesMes(hoje.slice(0, 7)) ? `, atualizado ${new Date(STORE.entreguesMes(hoje.slice(0, 7)).em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' (carregando…)'}.</p>
       ${barraCargaEntregas()}
@@ -1330,24 +1438,25 @@ function renderEntregas() {
       <section class="ent-controles" aria-label="Filtros de entregas">
       ${chipsPeriodoEntregas(f)}
       <div class="casa-filtros">
-        <label>Técnico <select id="ent-tecnico"><option value="">Todos</option>${tecnicos.map(t => opt(t, tecnico)).join('')}</select></label>
+        <label>Técnico <select id="ent-tecnico"><option value="">Todos</option>${tecnicos.map(([chave, nome]) => `<option value="${esc(chave)}" ${chave === tecnico ? 'selected' : ''}>${esc(nome)}</option>`).join('')}</select></label>
         <label>Tipo de serviço <select id="ent-tipo"><option value="">Todos</option>${tipos.map(t => opt(t, tipo)).join('')}</select></label>
         <span class="casa-vista"><button class="btn-ghost btn-sm ${STATE._entVista === 'tabela' ? 'active' : ''}" data-ent-vista="tabela">Tabela</button><button class="btn-ghost btn-sm ${STATE._entVista === 'cards' ? 'active' : ''}" data-ent-vista="cards">Cards</button></span>
       </div>
       </section>
+      ${aLancar.length ? secaoLancar : ''}
       ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', vazioEntregas(per).titulo, vazioEntregas(per).dica)}
       ${lista.length ? prazoEntregasHTML(lista.map(x => x.erp), porNumero) : ''}
       ${relatoriosEntregasHTML(lista.map(x => x.erp), porNumero, estadoPCP)}
       ${relatorioAnosHTML()}
-      <section class="casa-prod-box casa-lancar">
-        <h3>Lançamento manual — baixadas pelo ERP fora do sistema · ${aLancar.length}</h3>
-        <p>O ERP marcou entregue, mas ninguém finalizou no PCP. Não conta como entrega realizada até alguém lançar: confirme data e equipe e responda se gerou retrabalho. Baixas anteriores a ${CORTE_LANCAMENTO_MANUAL.slice(8, 10)}/${CORTE_LANCAMENTO_MANUAL.slice(5, 7)}/${CORTE_LANCAMENTO_MANUAL.slice(0, 4)} já contam como entregues (decisão da direção).</p>
-        ${aLancar.length ? `<div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Baixa ERP</th><th class="num">Valor</th><th></th></tr></thead><tbody>${aLancar.map(os => `<tr>
-            <td><strong>${esc(os.numero || '—')}</strong></td><td>${esc(os.cliente || '')}</td><td>${esc(os.servico || '—')}</td><td>${esc(OPERACAO.equipe(os).join(', ') || 'sem equipe')}</td><td>${dataBR(os.finalizadaEm)}</td><td class="num">${valorTxt(valorDaOS(os))}</td>
-            <td><button class="btn-primary btn-xs edit-only" data-lancar-os="${esc(os.id)}">Lançar entrega</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="text-muted">Nada pendente de lançamento neste período.</p>'}
-      </section>
+      ${aLancar.length ? '' : secaoLancar}
     </div>`;
   wireAbasEntregas(el);
+  const dDados = el.querySelector('details.ent-dados');
+  if (dDados) dDados.ontoggle = () => { STATE._entDadosAberto = dDados.open; };
+  const dPers = el.querySelector('details.ent-personalizar');
+  if (dPers) dPers.ontoggle = () => { STATE._entPersAberto = dPers.open; };
+  const grade1 = el.querySelector('.casa-grade-meses');
+  if (rolGrade && grade1 && grade1.parentElement) grade1.parentElement.scrollLeft = rolGrade;
   wireFiltroPeriodo(el, '_fEnt', renderEntregas);
   const mudarMes = () => {
     const ano = el.querySelector('#ent-ano').value;
@@ -1386,6 +1495,20 @@ function renderEntregas() {
      disparar meia hora de ERP por engano ao abrir uma tela. */
   /* BAIXAR TUDO: a fila anda no store, sem depender deste render. Antes, sair
      da tela congelava o carregamento no meio. */
+  /* O resumo (grade ano × mês) fica 10 min em cache no store. Quando uma carga
+     termina, relê forçado: sem isto a grade ignorava o fim do "Baixar tudo" e
+     do "carregar ano" e seguia dizendo "nenhum mês carregado". */
+  const mesesDoResumo = () => {
+    const anos = STORE.anosEntregues ? STORE.anosEntregues() : [];
+    const mesHoje = OPERACAO.dia(new Date()).slice(0, 7);
+    const todos = [];
+    for (const ano of anos) for (let m = 1; m <= 12; m++) {
+      const k = `${ano}-${String(m).padStart(2, '0')}`;
+      if (k <= mesHoje) todos.push(k);
+    }
+    return todos;
+  };
+  const releResumo = () => { if (STORE.pullEntreguesResumo) STORE.pullEntreguesResumo(mesesDoResumo(), true); };
   el.querySelectorAll('[data-carga-tudo]').forEach(b => b.onclick = () => {
     const meses = mesesTodosEntregas();
     if (!meses.length || !STORE.carregarTudoEntregues) return;
@@ -1395,7 +1518,8 @@ function renderEntregas() {
         ? `Baixando ${faltam} mês(es). O que o servidor já tem vem agora; o resto leva 25-40 s cada, três por vez. Pode sair da tela.`
         : 'Conferindo os meses guardados.');
     }
-    STORE.carregarTudoEntregues(meses).catch(() => {});
+    STORE.carregarTudoEntregues(meses).then(releResumo).catch(() => {});
+    STATE._entDadosAberto = true;   // o progresso e o Parar moram neste quadro
     renderEntregas();
   });
   el.querySelectorAll('[data-carga-parar]').forEach(b => b.onclick = () => {
@@ -1410,7 +1534,19 @@ function renderEntregas() {
       const k = `${ano}-${String(m).padStart(2, '0')}`;
       if (k <= hoje) meses.push(k);
     }
-    if (typeof toast === 'function') toast(`Pedindo ${meses.length} meses de ${ano} ao ERP — de 25 a 40 s cada, três por vez. Pode sair da tela.`);
+    /* A FILA QUE ANDA SOZINHA. Lote + garantirEntregues pedia no máximo três
+       meses e parava: a fila só anda quando a tela pede aqueles meses, e a
+       grade nunca pede o ano clicado. O aviso prometia doze e vinham três. */
+    if (STORE.carregarTudoEntregues) {
+      const emCurso = STORE.progressoEntregues && STORE.progressoEntregues();
+      if (emCurso && !emCurso.fim) { if (typeof toast === 'function') toast('Já há uma carga em andamento. Espere terminar e toque de novo.'); return; }
+      if (typeof toast === 'function') toast(`Pedindo ${meses.length} meses de ${ano} ao ERP, de 25 a 40 s cada, três por vez. Pode sair da tela.`);
+      STORE.carregarTudoEntregues(meses).then(releResumo).catch(() => {});
+      STATE._entDadosAberto = true;
+      renderEntregas();
+      return;
+    }
+    if (typeof toast === 'function') toast(`Pedindo ${meses.length} meses de ${ano} ao ERP, de 25 a 40 s cada, três por vez.`);
     if (STORE.pullEntreguesLote) {
       STORE.pullEntreguesLote(meses).then(r => {
         if (r && r.faltando && r.faltando.length && STORE.garantirEntregues) STORE.garantirEntregues(r.faltando);
@@ -1526,8 +1662,11 @@ function produtividadeHTML() {
   return `<section class="casa-prod-box">
       <h3>Produtividade</h3>
       <p>Visão operacional da equipe registrada na O.S.; pode diferir das participações conferidas acima. O valor é integral por pessoa e não deve ser somado entre colaboradores. Para apuração, use o relatório de participações. Tempo = saída → retorno registrados na O.S.</p>
+      ${avisoJanelaCasa(f)}
       ${semEquipe ? `<p class="metricas-nota">${semEquipe} O.S no período sem equipe registrada — não contam para ninguém.</p>` : ''}
-      ${pessoas.length ? `<div class="casa-prod-grid">${cards}</div>` : emptyState('', 'Nenhuma entrega com equipe no período', 'A O.S precisa ter equipe e ser finalizada no PCP.')}
+      ${pessoas.length ? `<div class="casa-prod-grid">${cards}</div>` : foraDaJanelaCasa(f)
+        ? emptyState('', 'Nenhuma entrega com equipe nas O.S deste aparelho', `O aparelho guarda só os últimos ${janelaLocalCasa()} dias. O histórico está em Entregas.`)
+        : emptyState('', 'Nenhuma entrega com equipe no período', 'A O.S precisa ter equipe e ser finalizada no PCP.')}
     </section>`;
 }
 
@@ -1718,12 +1857,17 @@ function retrabalhoHTML(f) {
       <p class="text-muted" style="font-size:.78rem">Taxa é sobre as entregas da própria pessoa no período — com poucas entregas ela sobe fácil e não quer dizer muito.</p>`
     : '<p class="text-muted">Ninguém com retrabalho no período.</p>';
 
-  const totalEntregas = pessoas.reduce((s, p) => s + p.os, 0);
-  const taxa = totalEntregas ? (doPeriodo.length / totalEntregas * 100) : 0;
-  if (!doPeriodo.length) return '<p class="text-muted">Nenhum retrabalho registrado no período. 🎉</p>';
-  return `<div class="casa-kpi-cards">
+  /* A TAXA É A MESMA DA ABA RETRABALHO (OPERACAO.taxaRetrabalho): O.S afetadas
+     sobre O.S entregues. Dividir pela soma das participações baixava o número
+     para a metade ou um terço com equipes de duas ou três pessoas, e a Gestão e
+     a TV mostravam uma resposta diferente da aba Retrabalho. */
+  const ind = OPERACAO.taxaRetrabalho(todas, f.de, f.ate);
+  if (!doPeriodo.length) return foraDaJanelaCasa(f)
+    ? `<p class="text-muted">Nenhum retrabalho nas O.S guardadas neste aparelho. Ele guarda só os últimos ${janelaLocalCasa()} dias; o histórico está em Entregas.</p>`
+    : '<p class="text-muted">Nenhum retrabalho registrado no período. 🎉</p>';
+  return `${avisoJanelaCasa(f)}<div class="casa-kpi-cards">
       <div class="casa-kpi alerta"><b>${doPeriodo.length}</b><small>O.S de retrabalho no período</small></div>
-      <div class="casa-kpi"><b>${taxa.toFixed(1).replace('.', ',')}%</b><small>sobre ${totalEntregas} participações em entrega</small></div>
+      <div class="casa-kpi"><b>${ind.taxa == null ? 'sem entregas' : String(ind.taxa).replace('.', ',') + '%'}</b><small>${ind.afetadas} de ${ind.entregues} entregas finalizadas voltaram (a taxa não conta O.S. aberta nem baixa do ERP)</small></div>
       <div class="casa-kpi"><b>${fmtHorasCasa(horas || null)}</b><small>horas na rua refazendo${km ? ` · ${Math.round(km)} km` : ''}${semFilha ? ` · <span class="badge sem-valor">${semFilha} sem O.S de correção ligada</span>` : ''}</small></div>
       ${custo > 0 ? `<div class="casa-kpi alerta"><b>${dinheiroCasa(custo)}</b><small>custo estimado (hora + km de Configurações)</small></div>` : ''}
     </div>
@@ -1768,10 +1912,11 @@ function carrosHTML(f) {
   const lista = [...m.values()].sort((a, b) => b.os - a.os);
   if (!lista.length) {
     const foraDoPeriodo = STORE.getAllOS().filter(o => String(o.veiculo || '').trim()).length;
+    if (foraDaJanelaCasa(f)) return `<p class="text-muted">Nenhuma O.S com veículo entre as guardadas neste aparelho. Ele guarda só os últimos ${janelaLocalCasa()} dias.</p>`;
     return `<p class="text-muted">Nenhuma O.S com veículo neste período.${foraDoPeriodo ? ` Há ${foraDoPeriodo} O.S com veículo em outras datas — amplie o período acima para vê-las.` : ' O campo Veículo da O.S está em branco em todas — sem ele não dá para saber que carro rodou.'}</p>`;
   }
   const semUso = veiculosRH().filter(v => !lista.some(x => normCasa(x.nome) === normCasa(v.nome)));
-  return `${barrasCasa(lista.map(c => ({ rotulo: c.nome, valor: c.os, extra: c.km ? `${Math.round(c.km)} km` : '' })), v => `${v} O.S`)}
+  return `${avisoJanelaCasa(f)}${barrasCasa(lista.map(c => ({ rotulo: c.nome, valor: c.os, extra: c.km ? `${Math.round(c.km)} km` : '' })), v => `${v} O.S`)}
     <div class="casa-tabela-wrap"><table class="casa-tabela">
       <thead><tr><th>Veículo</th><th>Ficha (Ativos)</th><th class="num">O.S</th><th class="num">Km</th><th>Quem levou</th></tr></thead>
       <tbody>${lista.map(c => {
@@ -1797,7 +1942,7 @@ function ligacaoRHHTML() {
       <tbody>${pendentes.map(x => `<tr>
         <td><strong>${esc(x.apelido)}</strong></td>
         <td class="num">${x.n}</td>
-        <td><select data-lig-sel="${esc(x.apelido)}"><option value="">— escolher —</option>${optPessoas}</select></td>
+        <td><select data-lig-sel="${esc(x.apelido)}"><option value="">Escolher</option>${optPessoas}</select></td>
         <td><button class="btn-primary btn-xs edit-only" data-lig-ok="${esc(x.apelido)}">Ligar</button></td>
       </tr>`).join('')}</tbody></table></div>`
       : '<p class="text-muted">Todo apelido usado nas O.S já tem ficha. 👍</p>'}
@@ -1811,9 +1956,24 @@ function ligacaoRHHTML() {
    Tela cheia, letra grande, troca de painel sozinha. Esc ou o × sai. */
 function painelTVCasa(i, f) {
   const c = typeof perfConfig === 'function' ? perfConfig() : {equipes:[],participacoes:[]};
-  const entregas=classificarEntregas(STORE.getAllOS()).instalacoes.filter(o=>OPERACAO.emIntervalo(diaEntrega(o),f.de,f.ate));
-  const resumo=typeof PERF !== 'undefined' ? PERF.resumir(entregas.map(o=>perfRegistro(o,c))) : {pessoas:[],equipes:[]};
-  const lista = (ps,medida) => `<ol class="tv-lista">${ps.slice(0,8).map(p=>`<li class="tv-linha"><span class="tv-pos">${esc(p.emblema||'🤝')}</span><span class="tv-nome">${esc(p.nome)}</span><span class="tv-num">${medida(p)}</span></li>`).join('')}</ol>`;
+  /* A TV MOSTRA O MESMO RANKING DA TELA. Ela lia só o aparelho e não passava
+     pelas duas regras da tela (perfUnirPessoas e PERF.comEquipes): a equipe
+     "Horizonte" saía em duas linhas (com nome nas confirmadas, "Adriano +
+     Douglas" nas sugeridas), sem logo, e quem foi ligado ao RH depois aparecia
+     duas vezes. Agora a base é perfLista (a do servidor, quando carregada). */
+  const temPerf = typeof PERF !== 'undefined';
+  const base = typeof perfLista === 'function' ? perfLista() : classificarEntregas(STORE.getAllOS()).instalacoes;
+  const entregas = base.filter(o=>OPERACAO.emIntervalo(diaEntrega(o),f.de,f.ate));
+  const brutos = temPerf ? entregas.map(o=>perfRegistro(o,c)) : [];
+  const regs = typeof perfUnirPessoas === 'function' ? perfUnirPessoas(brutos) : brutos;
+  const opcoes = typeof perfOpcoesEquipe === 'function' ? perfOpcoesEquipe() : {};
+  const resumo = temPerf
+    ? { pessoas: PERF.resumir(regs).pessoas, equipes: PERF.resumir(PERF.comEquipes(regs, c.equipes || [], opcoes)).equipes }
+    : {pessoas:[],equipes:[]};
+  const icone = p => (typeof perfLogoValido === 'function' && perfLogoValido(p.logo)) ? perfLogoHTML(p, 'tv-foto') : `<span class="tv-pos">${esc(p.emblema||'🤝')}</span>`;
+  // Acima de 8 linhas a TV não cabe; diz quantas ficaram de fora em vez de cortar calada.
+  const lista = (ps,medida) => `<ol class="tv-lista">${ps.slice(0,8).map(p=>`<li class="tv-linha">${icone(p)}<span class="tv-nome">${esc(p.nome)}</span><span class="tv-num">${medida(p)}</span></li>`).join('')}</ol>${ps.length > 8 ? `<p class="metricas-nota">+${ps.length - 8} no ranking completo, na tela Performance.</p>` : ''}`;
+  const previa = typeof perfFonteAtual === 'function' && !perfFonteAtual();
   const nota='<p class="metricas-nota">Participação operacional; não é nota de mérito ou bonificação. Divisão igual quando ainda não confirmada.</p>';
   const paineis = [
     {titulo:'🤝 Equipes em ação',corpo:resumo.equipes.length?lista(resumo.equipes,p=>p.os+' O.S.'):'<p class="tv-vazio">Sem entregas com equipe neste período.</p>'},
@@ -1828,7 +1988,7 @@ function painelTVCasa(i, f) {
       <span class="tv-relogio">${new Date().toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
     </div>
     <div class="tv-corpo">${p.corpo}</div>
-    <div class="tv-rodape"><span>Impresilk · Instalação</span><span class="tv-pontos">${paineis.map((_, k) => `<i class="${k === n ? 'on' : ''}"></i>`).join('')}</span><span>${esc(rotuloPeriodoCasa(f))}</span></div>` };
+    <div class="tv-rodape"><span>Impresilk · Instalação</span><span class="tv-pontos">${paineis.map((_, k) => `<i class="${k === n ? 'on' : ''}"></i>`).join('')}</span><span>${esc(rotuloPeriodoCasa(f))}${previa ? ' · prévia do aparelho' : ''}</span></div>` };
 }
 function rotuloPeriodoCasa(f) {
   if (!f.de && !f.ate) return 'todos os períodos';
@@ -1837,7 +1997,21 @@ function rotuloPeriodoCasa(f) {
 }
 function abrirTVCasa() {
   const old = document.getElementById('tv-casa'); if (old) old.remove();
-  const f = periodoOuMes('_fPerf');
+  /* A TV FICA LIGADA DIAS. O período era lido uma vez só: ligada na segunda,
+     na quarta ainda mostrava "01/09 a 22/09", e na virada do mês ficava presa
+     no mês anterior. Se o período é o padrão (mês corrente até hoje), ele anda
+     sozinho a cada pintura; período escolhido à mão fica como está. */
+  const f0 = periodoOuMes('_fPerf');
+  const hojeTV = OPERACAO.dia(new Date());
+  const padrao = f0.de === hojeTV.slice(0, 7) + '-01' && f0.ate === hojeTV;
+  const periodoTV = () => {
+    if (!padrao) return f0;
+    const h = OPERACAO.dia(new Date());
+    // Grava no STATE também: a base do servidor (perfLista) é guardada pela
+    // chave do período, e chave velha com período novo mostraria dias faltando.
+    if (STATE._fPerf && STATE._fPerf.ate !== h) STATE._fPerf = { de: h.slice(0, 7) + '-01', ate: h };
+    return { de: h.slice(0, 7) + '-01', ate: h };
+  };
   let i = 0, timer = null;
   const box = document.createElement('div');
   box.id = 'tv-casa';
@@ -1845,7 +2019,7 @@ function abrirTVCasa() {
   document.body.appendChild(box);
   document.body.classList.add('tv-ligada');
   const pintar = () => {
-    const p = painelTVCasa(i, f);
+    const p = painelTVCasa(i, periodoTV());
     box.innerHTML = `<button class="tv-x" title="Sair (Esc)">×</button>
       <button class="tv-seta tv-esq" title="Anterior">‹</button>
       <button class="tv-seta tv-dir" title="Próximo">›</button>
@@ -1881,14 +2055,24 @@ function renderPerformanceCasa() {
   const fins = osFinalizadasMes(mes);
   const rank = rankingFinalizadas(mes, b.pontos);
   const totalOs = rank.reduce((s, x) => s + x.osCount, 0);
-  const fichas = lerVinculosCasa();
+  /* Chips do bônus: quem tem id de 6 dígitos, pelo vínculo salvo OU pela ficha
+     ativa do RH. Só o vínculo salvo deixava de fora quem casou sozinho com o RH.
+     Um chip por id: dois apelidos da mesma pessoa não viram dois chips, e ficha
+     sem id não vira chip que acende no toque e apaga na repintura. */
+  const fichas = [];
+  const idsFicha = new Set();
+  for (const x of [...lerVinculosCasa(), ...pessoasRHAtivas().map(p => ({ id: idPessoaCasa(p.id), chave: p.chave, nome: p.nome, apelido: p.apelido || '' }))]) {
+    if (!x.id || idsFicha.has(x.id)) continue;
+    idsFicha.add(x.id); fichas.push(x);
+  }
   const pendentes = apelidosSemFicha();
-  const aprovados = b.itens.filter(i => i.status === 'aprovado' || i.status === 'pago');
-  const pago = b.itens.filter(i => i.status === 'pago').reduce((s, i) => s + (Number(i.valor) || 0), 0);
+  const itensMes = itensBonusDoMes(b, mes);
+  const aprovados = itensMes.filter(i => i.status === 'aprovado' || i.status === 'pago');
+  const pago = itensMes.filter(i => i.status === 'pago').reduce((s, i) => s + (Number(i.valor) || 0), 0);
   const aprovado = aprovados.reduce((s, i) => s + (Number(i.valor) || 0), 0);
   const filtroId = STATE._perfFiltro || '';
   const rankRows = rank.map((p, i) => {
-    const item = itemDaPessoa(b.itens, p.id);
+    const item = itemDaPessoa(itensMes, p.id);
     const valor = item && item.status !== 'aberto' ? item.valor : propostaCasa(p.osCount, totalOs, b.orcamento, b.teto);
     const st = item ? item.status : 'aberto';
     const rotulo = st === 'pago' ? `Pago ${dinheiroCasa(valor)}` : st === 'aprovado' ? `Aprovado ${dinheiroCasa(valor)}` : (b.orcamento > 0 && valor > 0 ? dinheiroCasa(valor) : '—');
@@ -1909,11 +2093,11 @@ function renderPerformanceCasa() {
   const finsFiltro = filtroId ? fins.filter(os => instaladoresDaOs(os, b.pontos).includes(filtroId)) : fins;
   const apontar = finsFiltro.map(os => {
     const marcados = instaladoresDaOs(os, b.pontos);
-    const eqIds = OPERACAO.equipe(os).map(n => fichaPorApelido(n)).filter(Boolean).map(f2 => f2.id);
+    const eqIds = OPERACAO.equipe(os).map(n => fichaPorApelido(n)).filter(f2 => f2 && f2.id).map(f2 => f2.id);
     const primarios = new Set([...marcados, ...eqIds]);
     const principais = [];
     for (const id of primarios) {
-      const ficha = fichas.find(x => x.id === id) || { id, nome: '', apelido: '' };
+      const ficha = fichas.find(x => x.id === id) || { id, nome: (pessoaRHPorId6(id) || {}).nome || '', apelido: '' };
       principais.push(ficha);
     }
     const outras = fichas.filter(x => !primarios.has(x.id));
@@ -1922,7 +2106,7 @@ function renderPerformanceCasa() {
       chipFichaHTML(os.id, x, marcados.includes(x.id))
     ).join('');
     const chipsMais = mostrarOutras ? outras.map(x => chipFichaHTML(os.id, x, marcados.includes(x.id))).join('') : '';
-    const semFicha = OPERACAO.equipe(os).filter(n => !fichaPorApelido(n));
+    const semFicha = OPERACAO.equipe(os).filter(n => { const f2 = fichaPorApelido(n); return !(f2 && f2.id); });
     const d = OPERACAO.dia(os.finalizadaEm);
     const data = d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '';
     return `<li class="casa-apontar-os">
@@ -1933,7 +2117,7 @@ function renderPerformanceCasa() {
         ${os.retrabalho ? '<span class="badge st-retrabalho">Retrabalho</span>' : ''}
       </div>
       <div class="casa-pontos">${chipsMain}${semFicha.map(n =>
-        `<span class="sem-ficha">${esc(n)} · sem ficha</span>`
+        `<span class="sem-ficha">${esc(n)} · ${fichaPorApelido(n) ? 'sem ID no RH' : 'sem ficha'}</span>`
       ).join('')}${chipsMais ? `<details class="casa-mais-fichas"><summary>+ outra ficha</summary>${chipsMais}</details>` : ''}</div>
     </li>`;
   }).join('');
@@ -1972,6 +2156,13 @@ function renderPerformanceCasa() {
      recolhível continua recolhível, só mudou de aba. */
   const abaPerf = STATE._perfAba === 'relatorio' ? 'relatorio' : 'equipe';
   const pendRH = pendentes.length;
+  /* Os <details> soltos da apuração ("Como interpretar os indicadores", "Ver
+     O.S., percentuais...") fechavam a cada repintura: a apuração chega do
+     servidor, uma confirmação muda a nota, e o que a pessoa lia sumia. Guarda
+     quais estavam abertos (pelo texto do summary e a ordem) e reabre. */
+  const chaveDet = lista => { const n = new Map(); return lista.map(d => { const t = ((d.querySelector(':scope > summary') || {}).textContent || '').trim(); const i = n.get(t) || 0; n.set(t, i + 1); return t + '#' + i; }); };
+  const detAntes = [...el.querySelectorAll('details')];
+  const detAbertos = new Set(chaveDet(detAntes).filter((k, i) => detAntes[i].open));
   el.innerHTML = `
     <div class="casa-pagina casa-perf">
       <div class="casa-pagina-head">
@@ -1999,6 +2190,7 @@ function renderPerformanceCasa() {
         ${quadroCasa('perf-carros', '🚚 Carros mais usados', carrosHTML(f), false)}
       `}
     </div>`;
+  if (detAbertos.size) { const detDepois = [...el.querySelectorAll('details')]; chaveDet(detDepois).forEach((k, i) => { if (detAbertos.has(k)) detDepois[i].open = true; }); }
   wireFiltroPeriodo(el, '_fPerf', renderPerformanceCasa);
   wireQuadrosCasa(el);
   el.querySelectorAll('[data-perf-aba]').forEach(b => b.onclick = () => {
@@ -2007,11 +2199,22 @@ function renderPerformanceCasa() {
   if (typeof wirePerformanceEquipes === 'function') wirePerformanceEquipes(el);
   const tv = document.getElementById('perf-tv'); if (tv) tv.onclick = abrirTVCasa;
   const mesEl = document.getElementById('perf-mes');
-  if (mesEl) mesEl.onchange = () => { if (mesEl.value) { gravarBonusCasa({ ...b, mes: mesEl.value }); renderPerformanceCasa(); } };
+  if (mesEl) mesEl.onchange = () => { if (mesEl.value) { gravarBonusCasa(trocarMesBonus(lerBonusCasa(), mesEl.value)); renderPerformanceCasa(); } };
+  /* O change do Orçamento dispara no toque do Teto: redesenhar na hora
+     destruía o campo recém-tocado e era preciso tocar de novo. Grava já e
+     redesenha quando ninguém está com um campo da aba na mão. O do app.js
+     tenta de novo até o campo ficar livre; o daqui desistia e a tela ficava
+     com o orçamento velho. */
+  const repintarBonus = () => setTimeout(() => {
+    if (typeof repintarSeLivre === 'function') { repintarSeLivre(); return; }
+    const a = document.activeElement;
+    if (a && el.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
+    renderPerformanceCasa();
+  }, 0);
   const orcEl = document.getElementById('perf-orc');
-  if (orcEl) orcEl.onchange = () => { gravarBonusCasa({ ...b, orcamento: Math.max(0, Number(orcEl.value) || 0) }); renderPerformanceCasa(); };
+  if (orcEl) orcEl.onchange = () => { gravarBonusCasa({ ...lerBonusCasa(), orcamento: Math.max(0, Number(orcEl.value) || 0) }); repintarBonus(); };
   const tetoEl = document.getElementById('perf-teto');
-  if (tetoEl) tetoEl.onchange = () => { gravarBonusCasa({ ...b, teto: Math.max(0, Number(tetoEl.value) || 0) }); renderPerformanceCasa(); };
+  if (tetoEl) tetoEl.onchange = () => { gravarBonusCasa({ ...lerBonusCasa(), teto: Math.max(0, Number(tetoEl.value) || 0) }); repintarBonus(); };
   el.querySelectorAll('[data-lig-ok]').forEach(btn => {
     btn.onclick = () => {
       const ap = btn.dataset.ligOk;
@@ -2033,23 +2236,30 @@ function renderPerformanceCasa() {
   });
   const gravarPontosDaOs = osId => {
     const ids = [...el.querySelectorAll(`[data-ponto="${osId}"]`)].filter(cb => cb.checked).map(cb => cb.value);
-    const pontos = { ...b.pontos, [osId]: ids };
-    gravarBonusCasa({ ...b, pontos });
+    const bA = lerBonusCasa();
+    const pontos = { ...bA.pontos, [osId]: ids };
+    gravarBonusCasa({ ...bA, pontos });
     renderPerformanceCasa();
   };
   el.querySelectorAll('[data-ponto]').forEach(cb => {
     cb.onchange = () => gravarPontosDaOs(cb.dataset.ponto);
   });
-  const mesmaPessoa = (x, id) => x.id === id || (!x.id && chavePessoaCasa(x.nome) === id);
+  // Aprovar, pagar e reabrir mexem só nos itens DESTE mês: os de outro mês ficam.
+  /* E leem o bônus NA HORA DO TOQUE (lerBonusCasa), não o `b` da pintura: o
+     orçamento trocado com o foco ainda no Teto não repinta a tela, e gravar
+     {...b} devolvia ao cfg o orçamento e o teto antigos, calado, e aprovava o
+     valor calculado com eles. */
+  const mesmaPessoa = (x, id) => (x.mes || b.mes) === mes && (x.id === id || (!x.id && chavePessoaCasa(x.nome) === id));
   el.querySelectorAll('[data-aprovar]').forEach(btn => {
     btn.onclick = ev => {
       ev.stopPropagation();
       const id = btn.dataset.aprovar;
       const p = rank.find(x => x.id === id);
-      const valor = propostaCasa(p ? p.osCount : 0, totalOs, b.orcamento, b.teto);
+      const bA = lerBonusCasa();
+      const valor = propostaCasa(p ? p.osCount : 0, totalOs, bA.orcamento, bA.teto);
       if (valor <= 0) return;
-      const itens = b.itens.filter(x => !mesmaPessoa(x, id)).concat([{ id, nome: rotuloPessoaCasa(id), valor, status: 'aprovado' }]);
-      gravarBonusCasa({ ...b, itens });
+      const itens = bA.itens.filter(x => !mesmaPessoa(x, id)).concat([{ id, nome: rotuloPessoaCasa(id), valor, status: 'aprovado', mes }]);
+      gravarBonusCasa({ ...bA, itens });
       renderPerformanceCasa();
       toast('Proposta aprovada. Ainda não é pagamento na folha.', 'success');
     };
@@ -2058,8 +2268,9 @@ function renderPerformanceCasa() {
     btn.onclick = ev => {
       ev.stopPropagation();
       const id = btn.dataset.pagar;
-      const itens = b.itens.map(x => mesmaPessoa(x, id) && x.status === 'aprovado' ? { ...x, id, status: 'pago' } : x);
-      gravarBonusCasa({ ...b, itens });
+      const bA = lerBonusCasa();
+      const itens = bA.itens.map(x => mesmaPessoa(x, id) && x.status === 'aprovado' ? { ...x, id, status: 'pago' } : x);
+      gravarBonusCasa({ ...bA, itens });
       renderPerformanceCasa();
       toast('Bônus marcado como pago nesta apuração.', 'success');
     };
@@ -2068,7 +2279,12 @@ function renderPerformanceCasa() {
     btn.onclick = ev => {
       ev.stopPropagation();
       const id = btn.dataset.reabrir;
-      gravarBonusCasa({ ...b, itens: b.itens.filter(x => !mesmaPessoa(x, id)) });
+      // Reabrir apaga o registro. Num bônus já pago, um toque torto abria espaço
+      // para pagar duas vezes: pergunta antes.
+      const it = itemDaPessoa(itensMes, id);
+      if (it && it.status === 'pago' && !confirm(`${rotuloPessoaCasa(id)} está marcado como pago (${dinheiroCasa(it.valor)}). Reabrir apaga esse registro. Continuar?`)) return;
+      const bA = lerBonusCasa();
+      gravarBonusCasa({ ...bA, itens: bA.itens.filter(x => !mesmaPessoa(x, id)) });
       renderPerformanceCasa();
     };
   });
@@ -2387,6 +2603,8 @@ function renderAgendaCasa() {
   };
   el.querySelectorAll('[data-del-ev]').forEach(btn => {
     btn.onclick = () => {
+      // Botão pequeno, sem desfazer: um toque torto apagava o evento.
+      if (!confirm('Apagar este evento do calendário?')) return;
       const a = lerAgendaCasa();
       a.eventos = a.eventos.filter(e => e.id !== btn.dataset.delEv);
       gravarAgendaCasa(a);
@@ -2399,9 +2617,15 @@ function renderAgendaCasa() {
 /* ── Programar uma O.S num dia (usado no Calendário e na Programação) ──────
    Escreve na própria O.S (data, período, hora, duração, equipe, veículo) —
    a programação mora na O.S, não numa agenda paralela. */
+// A lista precisa dizer que a O.S já tem dia: sem isso o gestor tirava de
+// 30/09 uma O.S confirmada com o cliente achando que programava uma livre.
+function rotuloJaProgramadaCasa(o) {
+  const d = OPERACAO.diasAgenda(o)[0];
+  return (d ? ` · programada ${d.slice(8, 10)}/${d.slice(5, 7)}` : '') + (o.confirmacao === 'Confirmado' ? ' · confirmada' : '');
+}
 function formAddOSHTML(id, dia, candidatas) {
   return `<form id="${esc(id)}">
-      <label>Buscar O.S. ou cliente <input type="search" data-ag-busca placeholder="Número ou nome do cliente"></label><label>O.S <select name="osId" required><option value="">— escolher —</option>${candidatas.map(o => `<option value="${esc(o.id)}">${esc(o.numero || '—')} — ${esc((o.cliente || '').slice(0, 34))}${OPERACAO.prazo(o) ? ' · prazo ' + OPERACAO.prazo(o).slice(8, 10) + '/' + OPERACAO.prazo(o).slice(5, 7) : ''}</option>`).join('')}</select></label>
+      <label>Buscar O.S. ou cliente <input type="search" data-ag-busca placeholder="Número ou nome do cliente"></label><label>O.S <select name="osId" required><option value="">Escolher a O.S</option>${candidatas.map(o => `<option value="${esc(o.id)}">${esc(o.numero || '—')} · ${esc((o.cliente || '').slice(0, 34))}${OPERACAO.prazo(o) ? ' · prazo ' + OPERACAO.prazo(o).slice(8, 10) + '/' + OPERACAO.prazo(o).slice(5, 7) : ''}${esc(rotuloJaProgramadaCasa(o))}</option>`).join('')}</select></label>
       <div class="linha2">
         <label>Período <select name="periodo">${(typeof PERIODO_OPTS !== 'undefined' ? PERIODO_OPTS : ['Manhã', 'Tarde', 'Dia inteiro', 'Horário']).map(o => `<option>${esc(o)}</option>`).join('')}</select></label>
         <label>Hora de saída <input name="hora" type="time"></label>
@@ -2411,11 +2635,11 @@ function formAddOSHTML(id, dia, candidatas) {
         <label>Veículo <select name="veiculo"><option value="">— sem veículo —</option>${optionsVeiculoCasa('')}</select></label>
       </div>
       ${typeof perfModeloEquipeHTML === 'function' ? perfModeloEquipeHTML() : ''}
-      <label>Equipe <div class="casa-chips">${equipeEscalavel().doPCP.map(n => {
+      <div class="campo-grupo"><span>Equipe</span><div class="casa-chips">${equipeEscalavel().doPCP.map(n => {
         const p = fichaDoApelido(n);
         const a = p ? ausenciaRH(p, dia) : null;
         return `<label class="casa-chip ${a ? 'fora' : ''}" title="${a ? esc(a.motivo) : ''}"><input type="checkbox" name="equipe" value="${esc(n)}"><span>${esc(n)}</span>${a ? `<small>${esc(a.motivo)}</small>` : ''}</label>`;
-      }).join('') || '<span class="text-muted">Cadastre instaladores em Configurações.</span>'}</div></label>
+      }).join('') || '<span class="text-muted">Cadastre instaladores em Configurações.</span>'}</div></div>
       <button class="btn-primary btn-sm" type="submit">Programar em ${esc(dia.slice(8, 10) + '/' + dia.slice(5, 7))}</button>
     </form>`;
 }
@@ -2426,6 +2650,17 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
   const f = document.getElementById(id);
   if (!f) return;
   if (typeof perfWireModelo === 'function') perfWireModelo(f);
+  /* Ao escolher a O.S, os chips mostram a equipe que ela JÁ tem. Vinham sempre
+     desmarcados: marcar um ajudante "somando" trocava a equipe inteira por ele. */
+  const selOS = f.querySelector('[name="osId"]');
+  if (selOS) selOS.addEventListener('change', () => {
+    const o = STORE.getOS(selOS.value);
+    const eq = new Set((o ? OPERACAO.equipe(o) : []).map(normCasa));
+    f.querySelectorAll('.casa-chip input[name="equipe"]').forEach(cb => {
+      cb.checked = eq.has(normCasa(cb.value));
+      cb.closest('.casa-chip').classList.toggle('on', cb.checked);
+    });
+  });
   const buscaOS=f.querySelector('[data-ag-busca]');
   if(buscaOS) buscaOS.oninput=()=>f.querySelectorAll('[name="osId"] option').forEach(o=>{o.hidden=!!o.value && !o.selected && !normCasa(o.textContent).includes(normCasa(buscaOS.value));});
   f.onsubmit = ev => {
@@ -2437,10 +2672,21 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
     const hora = String(fd.get('hora') || '');
     if (periodo === 'Horário' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(hora)) { toast('Período "Horário" pede a hora.', 'error'); return; }
     const equipe = fd.getAll('equipe').map(String).filter(Boolean);
+    // Mover O.S que já tinha dia desfaz a confirmação do cliente e a liberação
+    // do carro. Isso acontecia calado; agora pergunta.
+    const diaAntes = OPERACAO.diasAgenda(os)[0];
+    if (diaAntes && diaAntes !== dia && !confirm(`A O.S ${os.numero || ''} está programada para ${diaAntes.slice(8, 10)}/${diaAntes.slice(5, 7)}${os.confirmacao === 'Confirmado' ? ' e confirmada com o cliente' : ''}. Mover para ${dia.slice(8, 10)}/${dia.slice(5, 7)}? A confirmação será desfeita.`)) return;
+    // Nome da O.S que não tem chip aqui (fora da lista de escala) não pode ser
+    // apagado por um formulário que nem o mostra.
+    const comChip = new Set([...f.querySelectorAll('.casa-chip input[name="equipe"]')].map(cb => normCasa(cb.value)));
+    const semChip = OPERACAO.equipe(os).filter(n => !comChip.has(normCasa(n)));
     const agendaAntes = OPERACAO.agendaCompleta(os);
     os.confirmacao = ''; os.confEm = ''; os.confPor = ''; os.confHora = ''; os.carroLiberado = false;
+    // A remarcação pela Agenda entra no agendaLog como a da ficha: sem ela a
+    // Linha do Tempo reescrevia o passado (o dia de antes aparecia vazio).
+    if (typeof registrarRemarcacao === 'function') registrarRemarcacao(os, dia);
     os.instalacao = Object.assign({}, os.instalacao || {}, { data: dia, periodo, hora, duracaoDias: Math.max(1, Number(fd.get('dias')) || 1) });
-    if (equipe.length) os.equipe = equipe;
+    if (equipe.length) os.equipe = [...equipe, ...semChip];
     const veiculo = String(fd.get('veiculo') || ''); if (veiculo) os.veiculo = veiculo;
     // Programou a data: o período "parado no cliente" termina aqui, guardado no log.
     if (os.paradoClienteEm) OPERACAO.fecharParadoPorAgenda(os, agendaAntes, new Date().toISOString(), (STATE.user && STATE.user.nome) || '');
@@ -2494,22 +2740,22 @@ function plantaoComOS(p) { return Array.isArray(p.osIds) ? p.osIds : []; }
  * decidiu, e uma escolha que some do campo de visão vira escolha desfeita por
  * engano. Inclui as que o aparelho não conhece mais — o vínculo é preservado,
  * nunca descartado em silêncio. */
-function opcoesOSPlantao(plantao, candidatas, porId) {
-  const jaLigadas = plantaoComOS(plantao);
-  const vistos = new Set();
-  const TETO = 300;
-  const item = (o, marcada, fechada) => {
-    vistos.add(o.id);
-    const prazo = OPERACAO.prazo(o);
-    const detalhe = fechada ? 'já finalizada' : (prazo ? 'prazo ' + prazo.slice(8, 10) + '/' + prazo.slice(5, 7) : 'sem prazo');
-    const busca = `${o.numero || ''} ${o.cliente || ''}`.toLowerCase();
-    return `<label class="os-pick-item${marcada ? ' on' : ''}" data-busca="${esc(busca)}">
+function buscaOSPlantao(o) { return `${o.numero || ''} ${o.cliente || ''}`.toLowerCase(); }
+function itemOSPlantaoHTML(o, marcada, fechada) {
+  const prazo = OPERACAO.prazo(o);
+  const detalhe = fechada ? 'já finalizada' : (prazo ? 'prazo ' + prazo.slice(8, 10) + '/' + prazo.slice(5, 7) : 'sem prazo');
+  return `<label class="os-pick-item${marcada ? ' on' : ''}" data-busca="${esc(buscaOSPlantao(o))}">
       <input type="checkbox" name="osIds" value="${esc(o.id)}" ${marcada ? 'checked' : ''}>
       <span class="os-pick-num">${esc(o.numero || '—')}</span>
       <span class="os-pick-cli">${esc((o.cliente || '').slice(0, 44))}</span>
       <span class="os-pick-det">${esc(detalhe)}</span>
     </label>`;
-  };
+}
+function opcoesOSPlantao(plantao, candidatas, porId) {
+  const jaLigadas = plantaoComOS(plantao);
+  const vistos = new Set();
+  const TETO = 300;
+  const item = (o, marcada, fechada) => { vistos.add(o.id); return itemOSPlantaoHTML(o, marcada, fechada); };
   const fixas = jaLigadas.map(id => porId.get(id)).filter(Boolean)
     .map(o => item(o, true, !!o.finalizadaEm)).join('');
   const orfas = jaLigadas.filter(id => !porId.has(id)).map(id =>
@@ -2525,7 +2771,7 @@ function opcoesOSPlantao(plantao, candidatas, porId) {
   return `<div class="casa-os-pick">
     <input type="search" class="os-pick-busca" placeholder="Buscar por número ou cliente" aria-label="Buscar O.S">
     <div class="os-pick-lista">${fixas}${orfas}${resto}</div>
-    <p class="text-muted os-pick-nota"><span class="os-pick-conta">${jaLigadas.length}</span> marcada${jaLigadas.length === 1 ? '' : 's'}${cortadas ? ` · as ${TETO} mais próximas do prazo (${cortadas} fora da lista — use a busca)` : ''}</p>
+    <p class="text-muted os-pick-nota"><span class="os-pick-conta">${jaLigadas.length}</span> marcada${jaLigadas.length === 1 ? '' : 's'}${cortadas ? `<span class="os-pick-corte"> · as ${TETO} mais próximas do prazo (${cortadas} fora da lista; use a busca)</span>` : ''}</p>
     <p class="os-pick-vazio" hidden>Nenhuma O.S com esse número ou cliente nesta lista.</p>
   </div>`;
 }
@@ -2596,18 +2842,18 @@ function renderPlantoesCasa() {
         <form id="pl-form" class="casa-form-grade">
           <input type="hidden" name="id" value="${esc(editando ? editando.id : '')}">
           <label>Data <input name="data" type="date" required value="${esc(f.data)}"></label>
-          <label class="larga">Tipo
+          <div class="larga campo-grupo"><span>Tipo</span>
             <span class="casa-radio-chips">${Object.entries(TIPOS_PLANTAO).map(([k, v]) =>
               `<label class="casa-radio-chip ${f.tipo === k ? 'on' : ''}"><input type="radio" name="tipo" value="${k}" ${f.tipo === k ? 'checked' : ''}><span class="casa-pill ${k}">${esc(v)}</span></label>`
-            ).join('')}</span></label>
-          <label>Quem <select name="quem" required><option value="">— escolher —</option>${optionsEquipeCasa(f.quem)}</select></label>
+            ).join('')}</span></div>
+          <label>Quem <select name="quem" required><option value="">Escolher</option>${optionsEquipeCasa(f.quem)}</select></label>
           <label>Início <input name="inicio" type="time" value="${esc(f.inicio)}" required></label>
           <label>Fim <input name="fim" type="time" value="${esc(f.fim)}" required></label>
           <label class="larga">Título <input name="titulo" required placeholder="Plantão de sábado" value="${esc(f.titulo)}"></label>
           <label class="larga">Observação <input name="obs" placeholder="opcional" value="${esc(f.obs)}"></label>
-          <label class="larga">O.S deste plantão
+          <div class="larga campo-grupo"><span>O.S deste plantão</span>
             ${opcoesOSPlantao(f, candidatas, porId)}
-            <small class="text-muted">Toque para marcar. Vincular aqui não programa a O.S — só anota o que este plantão atende.</small></label>
+            <small class="text-muted">Toque para marcar. Vincular aqui não programa a O.S. Só anota o que este plantão atende.</small></div>
           <div class="larga casa-dia-acoes">
             <button class="btn-primary btn-sm" type="submit">${editando ? 'Salvar alterações' : 'Registrar plantão'}</button>
             ${editando ? '<button class="btn-ghost btn-sm" type="button" id="pl-cancelar">Cancelar</button>' : ''}
@@ -2680,10 +2926,29 @@ function renderPlantoesCasa() {
       const nota = conta.parentElement;
       if (nota) nota.firstChild.nextSibling.textContent = n === 1 ? ' marcada' : ' marcadas';
     };
+    const ligarItem = i => {
+      i.querySelector('input').onchange = e => {
+        i.classList.toggle('on', e.target.checked);
+        atualizarConta();
+      };
+    };
     if (busca) {
       const vazio = box.querySelector('.os-pick-vazio');
+      const listaEl = box.querySelector('.os-pick-lista');
+      const noDom = new Set(itens.map(i => i.querySelector('input').value));
       busca.oninput = () => {
         const q = busca.value.trim().toLowerCase();
+        /* ACIMA DO TETO a O.S não estava no DOM, e a busca só procurava entre as
+           desenhadas: o aviso mandava buscar e a busca dizia "nenhuma". Agora a
+           busca percorre todas as candidatas e desenha as que casam. */
+        if (q && listaEl) {
+          for (const o of candidatas) {
+            if (noDom.has(o.id) || !buscaOSPlantao(o).includes(q)) continue;
+            listaEl.insertAdjacentHTML('beforeend', itemOSPlantaoHTML(o, false, false));
+            const novo = listaEl.lastElementChild;
+            noDom.add(o.id); itens.push(novo); ligarItem(novo);
+          }
+        }
         let visiveis = 0;
         for (const i of itens) {
           const marcada = i.querySelector('input').checked;
@@ -2695,12 +2960,7 @@ function renderPlantoesCasa() {
         if (vazio) vazio.hidden = visiveis > 0;
       };
     }
-    for (const i of itens) {
-      i.querySelector('input').onchange = e => {
-        i.classList.toggle('on', e.target.checked);
-        atualizarConta();
-      };
-    }
+    for (const i of itens) ligarItem(i);
   });
   /* Os chips de tipo são radios de verdade: o FormData não mudou. */
   el.querySelectorAll('.casa-radio-chip input').forEach(r => {
@@ -2857,7 +3117,9 @@ function abrirEquipeCasa() {
   const { presentes, ausentes, fora, sabeSituacao } = presencaRH(hoje);
   const escalados = new Map();
   for (const os of STORE.getAllOS()) {
-    if (!diasCasa(os).includes(hoje) || OPERACAO.encerradaERP(os)) continue;
+    // Quem já finalizou a O.S voltou; retirada é no balcão. Os dois apareciam
+    // "na rua" justo quando o gestor procurava quem pode atender uma urgência.
+    if (!diasCasa(os).includes(hoje) || OPERACAO.encerradaERP(os) || os.finalizadaEm || OPERACAO.interno(os)) continue;
     for (const ap of OPERACAO.equipe(os)) {
       const p = fichaDoApelido(ap);
       const k = (p && p.chave) || ap;
@@ -2873,7 +3135,7 @@ function abrirEquipeCasa() {
         <strong>${esc(p.nome)}</strong>
         <small>${esc([p.cargo, p.area].filter(Boolean).join(' · ') || p.setor || '—')}</small>
         ${extra ? `<small class="alerta-txt">${esc(extra)}</small>` : ''}
-        ${oss.length ? `<small class="eq-os">🚚 na rua: ${oss.map(o => 'O.S ' + esc(o.numero || '—')).join(', ')}</small>` : ''}
+        ${oss.length ? `<small class="eq-os">${oss.some(o => OPERACAO.naRua(o, hoje)) ? '🚚 na rua' : '📋 escalado hoje'}: ${oss.map(o => 'O.S ' + esc(o.numero || '—')).join(', ')}</small>` : ''}
       </span>
     </li>`;
   };
@@ -2886,7 +3148,8 @@ function abrirEquipeCasa() {
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   };
-  const naRua = presentes.filter(p => (escalados.get(p.chave) || []).length).length;
+  // Na rua é saída registrada sem retorno (OPERACAO.naRua), não só estar escalado.
+  const naRua = presentes.filter(p => (escalados.get(p.chave) || []).some(o => OPERACAO.naRua(o, hoje))).length;
   const old = document.getElementById('eq-box'); if (old) old.remove();
   const box = document.createElement('div');
   box.id = 'eq-box';
@@ -2897,7 +3160,7 @@ function abrirEquipeCasa() {
       <div class="wpp-picker-body">
         <div class="casa-kpi-cards">
           <div class="casa-kpi"><b>${presentes.length}</b><small>${sabeSituacao ? 'na empresa' : 'na lista do RH'}</small></div>
-          <div class="casa-kpi"><b>${naRua}</b><small>escalados na rua hoje</small></div>
+          <div class="casa-kpi"><b>${naRua}</b><small>na rua agora</small></div>
           <div class="casa-kpi ${sabeSituacao && ausentes.length ? 'alerta' : ''}"><b>${sabeSituacao ? ausentes.length : '—'}</b><small>${sabeSituacao ? 'fora hoje' : 'não conferido'}</small></div>
         </div>
         ${sabeSituacao

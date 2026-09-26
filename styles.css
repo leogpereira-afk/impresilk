@@ -1,5 +1,9 @@
 /* ── Reset & tokens ──────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* O CENTRO DO <dialog> MODAL É O `margin: auto` DO NAVEGADOR, e o reset acima o
+   zerava: volta do carro, equipes da Performance, conflito de configuração e
+   impressão abriam colados no canto de cima, por cima da barra. */
+dialog { margin: auto; }
 
 :root {
   --blue:    #1877f2;
@@ -40,7 +44,9 @@ html { font-size: 16px; -webkit-text-size-adjust: 100%; }
 .gestao-indicador small { font-size:.74rem; line-height:1.4; font-weight:400; color:#526378; }
 .gestao-indicador:hover { background:#edf4fb; border-color:#8bacce; }
 .gestao-indicador.selecionado { border-color:#286397; background:#edf5fd; box-shadow:inset 0 3px #286397; }
-.gestao-detalhe { margin-top:16px; max-height:480px; overflow:auto; overscroll-behavior:contain; }
+.gestao-detalhe { margin-top:16px; max-height:min(480px, 50vh); overflow:auto; }
+/* Sem overscroll-behavior:contain de propósito: a caixa ocupava dois terços do
+   tablet deitado e, com o dedo nela, a página parava no fim da lista. */
 .gestao-detalhe .os-list-item { background:#f8fafc; }
 .conflitos-agenda { background:#fff9ed; border:1px solid #ead2a6; border-radius:10px; padding:14px; margin:14px 0; }
 .conflitos-agenda summary { color:#80520d; font-weight:650; cursor:pointer; }
@@ -111,19 +117,32 @@ button, .btn, .tab, .os-card, .os-list-item, a, summary, label, input, select {
   .topbar-user #user-badge, .topbar-date { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .topbar-actions { flex:0 0 100%; width:100%; min-width:0; overflow-x:auto; margin-left:0; padding:2px 0; }
   .topbar-actions > * { flex-shrink:0; }
+  /* No iPad em pé a faixa rola para o lado e o fim dela fica fora da vista:
+     Trocar senha e Sair moravam justamente lá. Estado e saída vêm logo depois
+     do menu; o resto pode rolar. */
+  #app #btn-menu { order:-2; }
+  #app #sync-indicator, #app #btn-senha, #app #btn-logout { order:-1; }
 }
 
 /* Visibilidade só-admin */
 body.nao-admin .admin-only { display: none !important; }
 
+/* A pílula é tocável (mostra o que falta enviar): 40 px de alvo, como os outros
+   controles. O pior estado, crachá recusado (sem-sessao), não tinha cor e saía
+   mais discreto que "sem sinal"; agora é o único vermelho cheio. Sem sinal é
+   estado comum na rua e vira cinza, para o vermelho continuar querendo dizer
+   "o escritório não está recebendo". */
 .sync-indicator {
   font-size: .75rem; padding: 3px 10px; border-radius: 20px;
   font-weight: 600; white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center; min-height: 40px;
   transition: background .3s, color .3s;
 }
 .sync-indicator.ok     { background: #d1fae5; color: var(--green); }
 .sync-indicator.pending{ background: #fef3c7; color: var(--amber); }
-.sync-indicator.offline{ background: #fee2e2; color: var(--red);   }
+.sync-indicator.offline{ background: #e2e8f0; color: #334155; }
+.sync-indicator.sem-sessao { background: var(--red); color: #fff; }
+button.sync-indicator { border: none; cursor: pointer; }
 
 #user-badge {
   font-size: .8rem; font-weight: 600; color: var(--muted);
@@ -233,14 +252,15 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   font-size: .68rem; font-weight: 700; padding: 2px 7px; border-radius: 20px;
   white-space: nowrap; border: 1px solid transparent;
 }
-.prazo-hoje    { background: var(--amber); color: #fff; font-weight: 800; }
+.prazo-hoje    { background: #b45309; color: #fff; font-weight: 800; } /* âmbar claro dava 3,2:1 com branco */
 .prazo-retira  { background: #db2777; color: #fff; font-weight: 800; }
 .card-avisar.avisado { color: var(--green); border-color: #bbf7d0; }
 /* Banner global: importação do Mubisys parada (clicável → Configurações) */
 /* Mora DENTRO do <main> (ver vigiarImportacao). Preso no topo da coluna de
    conteúdo para não rolar para fora: é um aviso de que a fábrica está sem
-   O.S nova, tem de continuar à vista enquanto durar. */
-.alerta-importacao { background: #fee2e2; color: #b91c1c; font-size: .82rem; font-weight: 600; padding: 8px 16px; cursor: pointer; border-bottom: 1px solid #fecaca; position: sticky; top: 0; z-index: 5; }
+   O.S nova, tem de continuar à vista enquanto durar. O topo é o pé da barra
+   superior, que também é sticky: com top:0 o aviso rolava para trás dela. */
+.alerta-importacao { background: #fee2e2; color: #b91c1c; font-size: .82rem; font-weight: 600; padding: 8px 16px; cursor: pointer; border-bottom: 1px solid #fecaca; position: sticky; top: calc(var(--topbar-h) + env(safe-area-inset-top)); z-index: 5; }
 .prazo-amanha  { background: #fef3c7; color: #92400e; }
 .prazo-empresa { background: #f1f5f9; color: #475569; }
 .prazo-info    { background: #e0f2fe; color: #075985; }
@@ -303,13 +323,16 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   background: var(--surface);
   border-radius: var(--radius) var(--radius) 0 0;
   width: 100%; max-width: 760px;
-  max-height: 92vh; overflow-y: auto;
+  /* dvh: no Safari com a barra de endereço aberta, 92vh passa da parte visível
+     e o cabeçalho (com o × e o número da O.S) sai por cima da tela.
+     contain: rolar até o fim da ficha não continua rolando a lista de trás. */
+  max-height: 92vh; max-height: 92dvh; overflow-y: auto; overscroll-behavior: contain;
   padding: 0 0 calc(32px + env(safe-area-inset-bottom));
   box-shadow: 0 -4px 32px rgba(0,0,0,.18);
   position: relative;
 }
 @media (min-width: 640px) {
-  .modal { border-radius: var(--radius); max-height: 88vh; }
+  .modal { border-radius: var(--radius); max-height: 88vh; max-height: 88dvh; }
 }
 
 .modal-header {
@@ -324,9 +347,9 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 
 .modal-close {
   background: #f1f5f9; border: none; border-radius: 50%;
-  width: 32px; height: 32px; cursor: pointer; flex-shrink: 0;
+  width: 40px; height: 40px; cursor: pointer; flex-shrink: 0; /* régua de 40 px */
   display: flex; align-items: center; justify-content: center;
-  font-size: 1.1rem; color: var(--muted);
+  font-size: 1.2rem; color: var(--muted);
 }
 .modal-close:hover { background: #e2e8f0; }
 
@@ -402,6 +425,13 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   box-shadow: 0 0 0 3px rgba(24,119,242,.15);
 }
 .field textarea { resize: vertical; min-height: 64px; }
+/* Checkbox e rádio dentro de .field herdavam o width:100% e o padding dos campos
+   de texto: viravam um quadradinho de 13 px sozinho no meio da linha, com o
+   rótulo quebrado embaixo. É o caso do "Instalação OK", a trava do Finalizar. */
+.field input[type=checkbox], .field input[type=radio] { width: 20px; height: 20px; padding: 0; flex-shrink: 0; vertical-align: middle; }
+/* Régua de 40 px nos campos (a gestão preenche a ficha no tablet). O :where()
+   não soma especificidade: quem já pede mais (44 px no espelho) continua valendo. */
+.field :where(input:not([type=checkbox], [type=radio], [type=file]), select) { min-height: 40px; }
 #painel-range input, #prod-mes { width: auto; }
 .cfg-section input:not([type]) { min-width: 0; }
 
@@ -421,10 +451,11 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 }
 .chip {
   background: var(--bg); border: 1px solid var(--border);
-  border-radius: 20px; padding: 3px 10px; font-size: .78rem;
-  display: flex; align-items: center; gap: 4px;
+  border-radius: 20px; padding: 2px 2px 2px 12px; font-size: .78rem;
+  display: flex; align-items: center; gap: 2px; min-height: 40px;
 }
-.chip-rm { background: none; border: none; cursor: pointer; padding: 0; font-size: .8rem; color: var(--muted); }
+/* O × de tirar alguém da equipe media 7x15 px. */
+.chip-rm { background: none; border: none; cursor: pointer; padding: 0; font-size: 1rem; color: var(--muted); min-width: 36px; min-height: 36px; justify-content: center; border-radius: 50%; }
 .chips-input {
   border: none; outline: none; font-size: .82rem;
   flex: 1; min-width: 80px; background: transparent;
@@ -441,6 +472,7 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .items-table td { padding: 6px 8px; border-bottom: 1px solid #f0f4fa; vertical-align: middle; }
 .items-table tr:last-child td { border-bottom: none; }
 .items-table input { border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px; width: 100%; font-size: .8rem; }
+.items-table :where(input:not([type=checkbox], [type=radio])) { min-height: 40px; } /* eram 23 px */
 .items-table .pronto-check { width: 56px; text-align: center; }
 .item-progress {
   font-size: .78rem; font-weight: 600; color: var(--blue); text-align: right;
@@ -458,9 +490,9 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 }
 
 /* Verificação do item: ✓ verificado / ✗ reprovado */
-.verif-cell { width: 84px; text-align: center; white-space: nowrap; }
+.verif-cell { width: 96px; text-align: center; white-space: nowrap; }
 .verif-btn {
-  width: 30px; height: 30px; border-radius: 7px; cursor: pointer;
+  width: 40px; height: 40px; border-radius: 7px; cursor: pointer; justify-content: center;
   border: 1.5px solid var(--border); background: #fff; font-size: .95rem;
   font-weight: 700; color: var(--muted); margin: 0 2px; line-height: 1;
 }
@@ -543,6 +575,9 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   border: 1px solid var(--border); border-radius: var(--radius-s);
   padding: 8px; font-size: .88rem; width: 100%;
 }
+/* Motivo e detalhe do retrabalho ficam fora de .field, então a regra dos 16 px
+   não os pegava: o iPhone ampliava a página ao tocar e ela ficava ampliada. */
+.item-retrab select, .item-retrab input:not([type=file]) { font-size: 16px; min-height: 44px; }
 .item-foto { margin-top: 6px; }
 
 /* ── Foto (upload) ───────────────────────────────────────────────────────── */
@@ -559,7 +594,11 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 }
 .foto-box .foto-hint { color: var(--muted); font-size: .8rem; pointer-events: none; }
 
-.fotos-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+/* O × DE APAGAR FOTO TINHA 20 px encostado no canto da miniatura: difícil de
+   acertar de propósito e fácil de acertar sem querer. Agora 32 px visíveis com
+   40 px de área de toque (o ::after), mais para fora da foto; o respiro da
+   grade é o espaço que ele ocupa sem cobrir a vizinha. */
+.fotos-grid { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 8px 0 0; }
 .foto-thumb {
   width: 80px; height: 80px; object-fit: cover;
   border-radius: var(--radius-s); border: 2px solid var(--border);
@@ -567,12 +606,13 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 }
 .foto-thumb-wrap { position: relative; }
 .foto-rm {
-  position: absolute; top: -4px; right: -4px;
-  width: 20px; height: 20px; border-radius: 50%;
-  background: var(--red); color: #fff; border: none;
-  font-size: .7rem; cursor: pointer; display: flex;
+  position: absolute; top: -10px; right: -10px;
+  width: 32px; height: 32px; padding: 0; border-radius: 50%;
+  background: var(--red); color: #fff; border: 2px solid #fff;
+  font-size: 1rem; cursor: pointer; display: flex;
   align-items: center; justify-content: center;
 }
+.foto-rm::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; }
 
 /* ── Trava visual ────────────────────────────────────────────────────────── */
 .trava-msg {
@@ -829,7 +869,7 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .list-info { flex: 1; }
 .list-numero{ font-weight: 700; font-size: .9rem; }
 .list-cliente{ font-size: .78rem; color: var(--muted); }
-.list-date  { font-size: .75rem; color: var(--teal); font-weight: 600; margin-top: 2px; }
+.list-date  { font-size: .75rem; color: #0f766e; font-weight: 600; margin-top: 2px; } /* o --teal dava 3,4:1; este dá 5,5:1 (a data é o "quando") */
 .list-actions{ display: flex; gap: 6px; }
 
 /* ── Seção de configurações (admin) ──────────────────────────────────────── */
@@ -936,23 +976,33 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 }
 .conflict-box h3 { margin-bottom: 8px; font-size: 1rem; }
 .conflict-box p  { font-size: .85rem; color: var(--muted); margin-bottom: 16px; }
-.conflict-actions{ display: flex; gap: 8px; flex-wrap: wrap; }
+/* Os dois botões dizem o que se perde, e o texto é longo: um por linha. */
+.conflict-actions{ display: flex; flex-direction: column; gap: 8px; }
+.conflict-actions button { min-height: 44px; flex-direction: column; gap: 2px; justify-content: center; text-align: center; white-space: normal; padding: 8px 14px; }
+.conflict-actions button small { font-size: .78rem; font-weight: 500; opacity: .85; }
 
 /* ── Toast / notificação ─────────────────────────────────────────────────── */
+/* left:50% com translate deixava ao toast só METADE da tela: o "Falta: ..."
+   do Finalizar virava uma tripa de 6 linhas em 180 px. Agora usa a largura toda,
+   respeita a barra de gestos do iPhone e fica acima da tarja de versão nova
+   (950) e do pop-up de escolha (900), que o cobriam, inclusive o Desfazer. */
 #toast-container {
-  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-  z-index: 700; display: flex; flex-direction: column; gap: 8px;
+  position: fixed; left: 12px; right: 12px; bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 960; display: flex; flex-direction: column; gap: 8px;
   pointer-events: none; align-items: center;
 }
+body:has(#nova-versao) #toast-container { bottom: calc(84px + env(safe-area-inset-bottom)); }
 .toast {
   background: #1e293b; color: #f8fafc;
-  border-radius: var(--radius-s); padding: 10px 18px;
+  border-radius: var(--radius-s); padding: 10px 18px; max-width: min(560px, 100%);
   font-size: .85rem; font-weight: 600; box-shadow: var(--shadow-m);
   animation: toastIn .2s ease, toastOut .3s ease 2.7s forwards;
   pointer-events: none;
 }
 .toast.success { background: #166534; }
-.toast.error   { background: var(--red); }
+/* O erro não some sozinho aos 3 s: quem decide a saída é o JS (o app.js o
+   deixa 6 s ou mais e fecha com um toque, por isso recebe o toque). */
+.toast.error   { background: var(--red); animation: toastIn .2s ease; pointer-events: auto; cursor: pointer; }
 .toast.warn    { background: #92400e; }
 
 @keyframes toastIn  { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -1088,8 +1138,10 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .chip-add {
   border: 1px dashed var(--blue); color: var(--blue); background: #f5f9ff;
   border-radius: 20px; padding: 4px 12px; font-size: .8rem; font-weight: 600;
-  cursor: pointer;
+  cursor: pointer; min-height: 40px;
 }
+/* Rodapé do modal da O.S. na gestão (PDF, WhatsApp, Excluir, Salvar): 33 px. */
+#modal-os .btn-sm { min-height: 40px; }
 .picker-overlay {
   position: fixed; inset: 0; z-index: 900;
   background: rgba(15,23,42,.5); backdrop-filter: blur(3px);
@@ -1103,7 +1155,7 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 }
 .picker-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .picker-head h3 { margin: 0; font-size: 1.05rem; flex: 1; }
-.picker-list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.picker-list { overflow-y: auto; overscroll-behavior: contain; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .picker-opt {
   display: flex; align-items: center; gap: 10px; padding: 10px 8px;
   border-radius: var(--radius-s); cursor: pointer; font-size: .92rem;
@@ -1115,7 +1167,15 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .picker-opt.top span::after { content: ' ★'; color: var(--amber); font-size: .8rem; }
 .picker-n { font-size: .72rem; color: var(--muted); font-weight: 600; }
 .picker-add { display: flex; gap: 6px; margin-top: 10px; }
-.picker-add input { flex: 1; }
+/* O campo não tinha estilo nenhum (26 px, borda de outro sistema) e a fonte
+   abaixo de 16 px faz o iPhone ampliar a tela ao tocar. */
+.picker-add input {
+  flex: 1; min-width: 0; min-height: 40px; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-s);
+  font: inherit; font-size: 16px; background: #fff; color: var(--text);
+}
+.picker-add input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(24,119,242,.15); }
+.picker-add .btn-sm, #picker-ok { min-height: 40px; justify-content: center; }
 
 /* ── Toggle prominente (Ferramentas conferidas / Instalação OK / Retrabalho) ── */
 .check-toggle {
@@ -1239,11 +1299,15 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
   .pcp-criar-acoes button { flex:1; }
   .pcp-filtro-linha { grid-template-columns:minmax(0,1fr); gap:7px; }
   .pcp-filtro-label { padding-top:0; }
-  .pcp-controles .pcp-chip, .pcp-controles summary, .pcp-limpar { min-height:40px; }
-  .pcp-controles summary { display:flex; align-items:center; gap:6px; }
-  .pcp-controles summary::before { content:'▸'; }
-  .pcp-controles details[open] summary::before { content:'▾'; }
 }
+/* Régua de toque da carteira EM QUALQUER LARGURA: morava só no media query do
+   celular, e no tablet o Limpar filtros tinha 22 px e a legenda 15 px. O flex
+   tira o triângulo nativo do summary, por isso o ▸/▾ desenhado. */
+.pcp-controles summary, .pcp-limpar { min-height:40px; }
+.pcp-controles summary { display:flex; align-items:center; gap:6px; }
+.pcp-controles summary::-webkit-details-marker { display:none; }
+.pcp-controles summary::before { content:'▸'; }
+.pcp-controles details[open] summary::before { content:'▾'; }
 .leg-sw { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px; margin: 0 4px 0 2px; border: 1px solid var(--border); }
 
 .tag-atraso, .tag-retrab {
@@ -1253,7 +1317,7 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .tag-parado { background:#fef3c7; color:#92400e; border-radius:999px; padding:.05rem .4rem; font-size:.7rem; font-weight:600; white-space:nowrap; }
 /* Padrão de cores de status (item 14): Atrasado = vermelho · Retrabalho = âmbar */
 .tag-atraso { background: #fee2e2; color: var(--red); }
-.tag-retrab { background: #fef3c7; color: var(--amber); }
+.tag-retrab { background: #fef3c7; color: #92400e; } /* selo de urgência legível: 6,4:1 */
 
 /* ── Tag de geolocalização do check‑in ─────────────────────────────── */
 .gps-tag {
@@ -1284,6 +1348,47 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
   display: flex; align-items: center;
 }
 .os-list-item.is-hero { opacity: .55; }
+
+/* ── Limpeza do carro (espelho, 25/09/2026) ─────────────────────────────
+   Cartão na lista, linha na ficha e a tela de registro. Régua de toque fora
+   de media query: 48px no botão principal (sol, luva), 44px em linha e
+   navegação, 40px nos controles. */
+.limpeza-card {
+  background: #fff; border: 1px solid #fde68a; border-left: 6px solid var(--amber);
+  border-radius: var(--radius); padding: 14px 16px; margin-top: 12px;
+  display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-m);
+}
+.limpeza-card:first-child { margin-top: 0; }
+.limpeza-card + .proxima-card { margin-top: 12px; }
+.limpeza-card.st-feita { border-color: #bbf7d0; border-left-color: var(--green); box-shadow: none; }
+.limpeza-titulo { font-size: 1.05rem; font-weight: 800; color: #163654; }
+.limpeza-sub { font-size: .9rem; font-weight: 600; color: #43566b; }
+.limpeza-msg { font-size: .95rem; color: var(--text); line-height: 1.4; }
+.limpeza-card .btn-primary, .limpeza-card .btn-ghost {
+  min-height: 48px; padding: 0 16px; font-size: 1rem; font-weight: 700; border-radius: var(--radius-s); margin-top: 4px;
+}
+.limpeza-linha {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-height: 44px;
+  margin: 4px 0 10px; padding: 8px 12px; border-radius: var(--radius-s);
+  background: #fffbeb; border: 1px solid #fde68a; font-size: .88rem; font-weight: 600; color: #713f12;
+}
+.limpeza-linha span { flex: 1 1 180px; }
+.limpeza-linha .btn-primary { min-height: 44px; padding: 0 14px; font-size: .9rem; }
+#modal-os .limpeza-fechar { width: 44px; height: 44px; font-size: 1.3rem; }
+.volta-eq { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
+.volta-eq-pergunta { font-size: 1rem; font-weight: 700; color: #163654; }
+.volta-eq .seg { margin-top: 8px; }
+.volta-eq .seg button { min-height: 48px; font-size: 1rem; }
+.volta-eq-fotos { display: flex; flex-direction: column; gap: 8px; }
+.volta-eq-rotulo { font-size: .9rem; font-weight: 700; color: #163654; }
+.volta-eq .foto-box { min-height: 56px; display: flex; align-items: center; justify-content: center; }
+.volta-eq .foto-box .foto-hint { font-size: .95rem; }
+.volta-eq .fotos-grid { gap: 16px; padding: 10px 10px 0 0; }
+.volta-eq .foto-thumb { width: 96px; height: 96px; }
+.volta-eq .foto-rm { width: 40px; height: 40px; top: -10px; right: -10px; font-size: 1.1rem; }
+.volta-eq input[type=text] { min-height: 44px; font-size: 1rem; }
+.volta-eq-rodape { margin: 0; font-size: .85rem; color: var(--muted); }
+.volta-eq-enviar { min-height: 48px; font-size: 1.05rem; font-weight: 800; }
 
 /* ── Relatório de serviços do dia (barra) ──────────────────────────── */
 .rel-dia { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
@@ -1330,6 +1435,11 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 /* ── Fase 2: filtro de período + resumos ─────────────────────────────────── */
 .periodo-filtro { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .periodo-filtro input[type=date] { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: .82rem; }
+/* Barras de filtro do dia a dia (Instalação, Execução, Retrabalho, Finalizados,
+   Painel): eram os menores alvos da gestão, 27 a 36 px. */
+.periodo-filtro input[type=date], .rel-dia input[type=date], #rel-mes,
+.filter-bar select, .filter-bar input[type=search], .filter-bar .btn-sm,
+.view-toggle button { min-height: 40px; }
 .btn-xs { font-size: .72rem; padding: 3px 8px; }
 .exec-resumo { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 10px; }
 .exec-chip { font-size: .8rem; font-weight: 500; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; }
@@ -1414,11 +1524,131 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .equipe-app .list-date    { font-size: .86rem; margin-top: 4px; }
 .equipe-app .badge        { font-size: .76rem; padding: 5px 11px; }
 
-/* Botões da barra superior maiores e mais espaçados no app da equipe */
-.equipe-app .topbar-actions { gap: 10px; }
-.equipe-app .topbar-actions button {
-  min-height: 42px; min-width: 42px; padding: 8px 12px; font-size: 1rem;
+/* Barra superior do espelho em UMA linha. A quebra em duas (logo sozinha em
+   cima, ações embaixo) é da gestão, que tem nome, data e dez botões; aqui são
+   quatro itens e a segunda linha comia um sétimo da altura do celular. O nome
+   encolhe com reticências antes de empurrar os botões para fora. */
+.equipe-app { --topbar-h: 56px; }
+.equipe-app .topbar { flex-wrap: nowrap; padding-bottom: 0; }
+.equipe-app .topbar-actions {
+  flex: 1 1 auto; width: auto; min-width: 0; margin-left: auto; padding: 0;
+  justify-content: flex-end; overflow: visible; gap: 8px;
 }
+.equipe-app #user-badge { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.equipe-app .topbar-actions button {
+  min-height: 44px; min-width: 44px; padding: 8px 12px; font-size: 1rem; justify-content: center;
+}
+
+/* ── Espelho: régua de toque na ficha da O.S. ──────────────────────────────
+   Medido a 375 px (25/09/2026): Finalizar 34 px, Salvar e fechar 27, a caixa
+   "Instalação OK" 13, o link do Mapa 15, o × 32, Pendente/Instalado/Retrabalho
+   37, campos 37. Na rua é luva, sol e uma mão: 48 px no botão principal, 44 px
+   em linha e navegação, fora de media query. Os botões dos itens são pegos por
+   `.item-card .seg`, que não alcança a tela da limpeza do carro (.volta-eq,
+   que já tem os seus 48 px). */
+.equipe-app #modal-os .modal-close { width: 44px; height: 44px; font-size: 1.3rem; }
+.equipe-app #modal-os .modal-meta { font-size: .9rem; color: var(--text); }
+.equipe-app .card-fs summary { min-height: 48px; font-size: .95rem; }
+.equipe-app .item-card .seg button { min-height: 44px; min-width: 0; padding: 6px 4px; font-size: .9rem; line-height: 1.15; white-space: normal; justify-content: center; text-align: center; } /* encolhe e quebra em vez de empurrar a ficha para o lado a 360 px */
+.equipe-app #modal-os #m-carro { width: 100%; min-height: 48px; justify-content: center; font-size: 1rem; }
+.equipe-app #modal-os #m-save { min-height: 44px; justify-content: center; font-size: .95rem; }
+.equipe-app #modal-os #m-finalizar { min-height: 48px; justify-content: center; font-size: 1rem; font-weight: 800; }
+.equipe-app .inline-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: .95rem; }
+.equipe-app #sel-btn, .equipe-app .proxima-acoes .btn-primary, .equipe-app .proxima-acoes .btn-ghost { min-height: 48px; justify-content: center; }
+
+/* Campos: 44 px e fonte de 16 px em qualquer largura (abaixo de 16 o iPhone
+   amplia a página ao tocar). Rótulos maiores e mais escuros para o sol. */
+.equipe-app .field :where(input:not([type=checkbox], [type=radio], [type=file]), select) { min-height: 44px; }
+.equipe-app .field input, .equipe-app .field select, .equipe-app .field textarea { font-size: 16px; }
+.equipe-app .field label, .equipe-app .item-retrab label { font-size: .9rem; color: #334155; }
+.equipe-app #modal-os .text-muted, .equipe-app #modal-os .trava-msg { font-size: .9rem; }
+
+/* "Instalação OK" e "Check-out confirmado": o rótulo inteiro vira o alvo, no
+   desenho do .check-toggle da gestão, e fica verde quando marcado. Antes o
+   estado dependia de um quadrado de 13 px, e é a trava do Finalizar. */
+.equipe-app .field label:not(.check-toggle):has(> input[type=checkbox]) {
+  display: flex; align-items: center; gap: 10px; min-height: 48px;
+  padding: 10px 14px; border: 2px solid var(--border); border-radius: var(--radius-s);
+  background: var(--surface); color: var(--text); font-size: .95rem; font-weight: 700; cursor: pointer;
+}
+.equipe-app .field label:not(.check-toggle):has(> input[type=checkbox]:checked) { border-color: var(--green); background: #ecfdf5; color: var(--green); }
+.equipe-app .field label > input[type=checkbox] { width: 24px; height: 24px; accent-color: var(--green); }
+/* Na O.S. finalizada o rótulo grande não pode parecer que marca. */
+.equipe-app #modal-os.os-locked .field label:has(> input[type=checkbox]) { pointer-events: none; }
+
+/* Fotos: miniatura de 96 px e × de 40 px mais para fora, como na limpeza. */
+.equipe-app .fotos-grid { gap: 16px; padding: 10px 10px 0 0; }
+.equipe-app .foto-thumb { width: 96px; height: 96px; }
+.equipe-app .foto-rm { width: 40px; height: 40px; top: -10px; right: -10px; font-size: 1.1rem; }
+.equipe-app .foto-box { min-height: 56px; display: flex; align-items: center; justify-content: center; }
+.equipe-app .foto-box .foto-hint { font-size: .95rem; color: #334155; }
+
+/* FINALIZAR E SALVAR PRESOS NO PÉ DA FICHA. A ficha passa de 1.700 px numa tela
+   de 750, e o Finalizar só aparecia no fim da rolagem. Lado a lado, Salvar à
+   esquerda e Finalizar à direita (polegar); o texto do Finalizar quebra em duas
+   linhas se não couber, em vez de empurrar o vizinho. O padding vai com
+   !important porque o equipe.js escreve padding inline nesse bloco; a folga da
+   barra de gestos do iPhone passa do modal para ele. Não pega a tela da
+   limpeza do carro (.volta-eq), cujo último bloco é o formulário inteiro. */
+.equipe-app #modal-os:has(> .fs-body:last-child:not(.volta-eq)) { padding-bottom: 0; }
+.equipe-app #modal-os > .fs-body:last-child:not(.volta-eq) {
+  position: sticky; bottom: 0; z-index: 10;
+  display: flex; align-items: stretch; gap: 8px; margin-top: 12px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom)) !important;
+  background: var(--surface); border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 16px rgba(15,23,42,.08);
+}
+.equipe-app #modal-os > .fs-body:last-child:not(.volta-eq) > * { flex: 1 1 0; min-width: 0; width: auto; margin: 0; white-space: normal; text-align: center; }
+.equipe-app #modal-os > .fs-body:last-child:not(.volta-eq) > #m-save { order: -1; flex: 0 0 auto; white-space: nowrap; }
+
+/* Peças novas da ficha do espelho (mesma rodada): botão de ação de 48 px, hora
+   com "Saí agora"/"Agora" ao lado, câmera e galeria lado a lado, contatos como
+   botões, "Instalação OK" como interruptor e a lista do que falta, que mora no
+   pé preso junto do Finalizar e ocupa a linha inteira. */
+.equipe-app #modal-os .eq-acao { width: 100%; min-height: 48px; justify-content: center; font-size: 1rem; font-weight: 800; }
+.equipe-app #modal-os > .fs-body:last-child:not(.volta-eq) { flex-wrap: wrap; }
+.equipe-app #modal-os > .fs-body:last-child:not(.volta-eq) > .eq-falta { flex: 1 1 100%; flex-wrap: wrap; text-align: left; }
+/* A tarja de versão nova (fixa no pé) não pode cobrir o Finalizar da ficha aberta. */
+.equipe-app:has(#modal-overlay:not(.hidden)) #nova-versao { bottom: calc(96px + env(safe-area-inset-bottom)); }
+.eq-hora { display: flex; gap: 8px; align-items: stretch; }
+.eq-hora input { flex: 1 1 auto; min-width: 0; }
+.eq-hora .btn-ghost { flex: 0 0 auto; min-height: 44px; justify-content: center; }
+.eq-fotos-acoes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 6px; }
+.eq-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.eq-links .btn-ghost { flex: 1 1 auto; min-height: 44px; justify-content: center; background: #fff; color: #1e293b; text-decoration: none; }
+.eq-check {
+  display: flex; align-items: center; gap: 10px; min-height: 48px;
+  padding: 10px 14px; border: 2px solid var(--border); border-radius: var(--radius-s);
+  background: var(--surface); color: var(--text); font-size: .95rem; font-weight: 700; cursor: pointer;
+}
+.eq-check input { width: 24px; height: 24px; flex-shrink: 0; accent-color: var(--green); }
+.eq-check:has(input:checked) { border-color: var(--green); background: #ecfdf5; color: var(--green); }
+#modal-os.os-locked .eq-check { pointer-events: none; }
+/* Foto que ainda não subiu: borda tracejada e selo, para ninguém apagar do
+   celular achando que já está no escritório. */
+.foto-thumb-wrap.na-fila .foto-thumb { border: 2px dashed var(--amber); }
+.foto-thumb-wrap.na-fila::after {
+  content: '⏳ no celular'; position: absolute; left: 4px; bottom: 4px;
+  font-size: .7rem; font-weight: 700; color: #92400e; background: rgba(255,255,255,.92);
+  border-radius: 999px; padding: 1px 6px; pointer-events: none;
+}
+/* Avisos que não podem sumir como toast (acesso vencendo, recusa do
+   escritório): tarja no topo da lista até o problema acabar. */
+.eq-avisos { display: flex; flex-direction: column; gap: 8px; padding: 10px 16px 0; }
+.eq-avisos:empty { display: none; }
+.eq-aviso { flex-wrap: wrap; justify-content: space-between; font-size: .9rem; line-height: 1.35; }
+.eq-aviso span { flex: 1 1 220px; }
+.eq-aviso .btn-ghost { min-height: 44px; background: #fff; }
+/* "Sair deste celular" apaga as O.S. do aparelho: fica no pé da lista, longe
+   do nome e dos botões do dia a dia. */
+.eq-rodape { display: flex; justify-content: center; padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); }
+.eq-rodape .btn-ghost { min-height: 44px; }
+
+/* No espelho o aviso sobe para o topo: embaixo ele cobria o Finalizar e o
+   Salvar, que agora ficam no pé. Lá em cima não recebe toque, para não travar
+   o × da ficha enquanto está na tela. */
+.equipe-app #toast-container { top: calc(8px + env(safe-area-inset-top)); bottom: auto; }
+.equipe-app .toast.error { pointer-events: none; }
 
 /* Ações do card "próxima instalação" ocupam a largura toda e empilham
    confortavelmente em telas estreitas */
@@ -1463,7 +1693,7 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 }
 .prox-passo-tag {
   font-size: .64rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
-  background: #fef3c7; color: var(--amber); padding: 2px 7px; border-radius: 999px;
+  background: #fef3c7; color: #92400e; padding: 2px 7px; border-radius: 999px;
 }
 .prox-passo-modal {
   margin: 8px 16px 0; padding: 8px 12px; background: #fffbeb;
@@ -1550,7 +1780,7 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .pcp-missao.selecionado strong, .pcp-missao.selecionado .pcp-missao-nome, .pcp-missao.selecionado .pcp-missao-acao { color:#fff; }
 .pcp-missao:focus-visible { outline:3px solid #1877f2; outline-offset:3px; }
 .pcp-missao-dica { font-size:.78rem; color:#526378; margin:10px 2px 0; line-height:1.45; }
-.pcp-ver-carteira { border:0; background:none; color:#163654; font-weight:700; font-size:.78rem; text-decoration:underline; padding:0; min-height:auto; }
+.pcp-ver-carteira { border:0; background:none; color:#163654; font-weight:700; font-size:.78rem; text-decoration:underline; padding:0; min-height:40px; } /* é a saída do filtro de prioridade: tinha 14 px */
 .pcp-controles { gap:8px 14px; padding:14px 16px 10px; border-radius:16px; box-shadow:0 4px 14px #23486a04; }
 .pcp-carteira-heading { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
 .pcp-carteira-heading h2 { font-size:1.08rem; }
@@ -1692,7 +1922,7 @@ body.nav-aberta .nav-fundo { display: block; }
 .casa-apontar, .casa-rank-box, .casa-dia-painel {
   background:#fff; border:1px solid #d7e1ee; border-radius:14px; padding:14px 16px;
 }
-.casa-rank-box { position:sticky; top:12px; }
+.casa-rank-box { position:sticky; top:calc(var(--topbar-h) + env(safe-area-inset-top) + 12px); } /* abaixo da barra, não atrás */
 .casa-apontar-lista { list-style:none; display:grid; gap:12px; margin-top:10px; }
 .casa-apontar-os { padding-bottom:12px; border-bottom:1px solid #e8eef5; }
 .casa-apontar-os:last-child { border-bottom:0; padding-bottom:0; }
@@ -1713,7 +1943,7 @@ body.nav-aberta .nav-fundo { display: block; }
 .casa-mais-fichas { display:inline-flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .casa-mais-fichas summary { cursor:pointer; font-size:.78rem; color:#163654; font-weight:650; list-style:none; min-height:40px; display:inline-flex; align-items:center; }
 .casa-rank-tabela, .casa-tabela { width:100%; border-collapse:collapse; font-size:.82rem; }
-.casa-rank-tabela th, .casa-tabela th { text-align:left; font-size:.68rem; letter-spacing:.04em; text-transform:uppercase; color:#7a90a6; font-weight:700; padding:6px 8px; border-bottom:1px solid #e8eef5; }
+.casa-rank-tabela th, .casa-tabela th { text-align:left; font-size:.68rem; letter-spacing:.04em; text-transform:uppercase; color:#5b6f84; font-weight:700; padding:6px 8px; border-bottom:1px solid #e8eef5; }
 .casa-rank-tabela td, .casa-tabela td { padding:10px 8px; border-bottom:1px solid #eef3f8; vertical-align:middle; }
 .casa-rank-tabela tr:last-child td, .casa-tabela tr:last-child td { border-bottom:0; }
 .casa-rank-row { cursor:pointer; }
@@ -1738,13 +1968,13 @@ body.nav-aberta .nav-fundo { display: block; }
 .casa-dia { min-height: 88px; min-width: 0; overflow: hidden; border: 1px solid #e2e8f0; background: #fff; border-radius: 10px; text-align: left; padding: 8px; font-size: .78rem; display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
 .casa-dia.hoje { border-color:#28796a; box-shadow:inset 0 0 0 1px #28796a; }
 .casa-dia-num { font-weight:700; color:#163654; }
-.casa-dia-os { font-size:.6rem; color:#7a90a6; font-variant-numeric:tabular-nums; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.casa-dia-os { font-size:.6rem; color:#5b6f84; font-variant-numeric:tabular-nums; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .casa-dia.fora { opacity: .4; }
 .casa-dia.sel { outline:2px solid #163654; outline-offset:1px; }
 .casa-dia-pills { display:flex; flex-wrap:wrap; gap:3px; max-width:100%; }
 .casa-pill { font-size:.62rem; background:#e8eef5; color:#163654; border-radius:999px; padding:1px 6px; font-weight:650; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .casa-pill.navy { background:#163654; color:#fff; }
-.casa-pill.mute { background:#f1f5f9; color:#7a90a6; }
+.casa-pill.mute { background:#f1f5f9; color:#5b6f84; }
 
 @media (min-width: 900px) {
   #app:not(.hidden) {
@@ -1764,6 +1994,8 @@ body.nav-aberta .nav-fundo { display: block; }
      primeiros 56px da lateral sumiam e sobrava uma faixa vazia embaixo. */
   #tabs {
     position: sticky;
+    /* Presa no pé da barra superior: com top:0 o começo da lateral ficava
+       atrás da barra ao rolar e sobrava um vão do tamanho dela embaixo. */
     top: calc(var(--topbar-h) + env(safe-area-inset-top));
     height: calc(100vh - var(--topbar-h) - env(safe-area-inset-top));
     height: calc(100dvh - var(--topbar-h) - env(safe-area-inset-top));
@@ -1843,7 +2075,7 @@ body.nav-aberta .nav-fundo { display: block; }
 .casa-filtros label { display:flex; flex-direction:column; gap:4px; font-size:.78rem; color:#526378; }
 .casa-filtros select { min-height:40px; max-width:260px; }
 .casa-tabela { width:100%; border-collapse:collapse; font-size:.82rem; background:#fff; border:1px solid #d7e1ee; border-radius:14px; overflow:hidden; }
-.casa-tabela th { text-align:left; font-size:.68rem; letter-spacing:.06em; text-transform:uppercase; color:#7a90a6; padding:10px 12px; border-bottom:1px solid #d7e1ee; background:#f7fafd; }
+.casa-tabela th { text-align:left; font-size:.68rem; letter-spacing:.06em; text-transform:uppercase; color:#5b6f84; padding:10px 12px; border-bottom:1px solid #d7e1ee; background:#f7fafd; }
 .casa-tabela td { padding:9px 12px; border-bottom:1px solid #eef2f7; vertical-align:top; }
 .casa-tabela tr:last-child td { border-bottom:0; }
 .casa-tabela td.num, .casa-tabela th.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
@@ -1908,7 +2140,7 @@ img.casa-avatar { object-fit: cover; background:#e8eef5; }
 
 /* Chips de período (Entregas) */
 .casa-chips-periodo { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 4px; }
-.casa-chip-per { min-height:36px; padding:6px 14px; border-radius:999px; border:1px solid #d7e1ee; background:#fff; color:#163654; font-size:.8rem; font-weight:650; cursor:pointer; }
+.casa-chip-per { min-height:40px; padding:6px 14px; border-radius:999px; border:1px solid #d7e1ee; background:#fff; color:#163654; font-size:.8rem; font-weight:650; cursor:pointer; }
 .casa-chip-per:hover { border-color:#8bacce; }
 .casa-chip-per.on { background:#28796a; border-color:#28796a; color:#fff; }
 
@@ -2028,9 +2260,9 @@ body.tv-ligada { overflow:hidden; }
   font-size: .84rem; max-width: calc(100vw - 24px);
 }
 #nova-versao button { border: 0; cursor: pointer; font: inherit; border-radius: 999px; }
-#nv-recarregar { background: #28796a; color: #fff; padding: 7px 14px; font-weight: 650; min-height: 36px; }
+#nv-recarregar { background: #28796a; color: #fff; padding: 7px 14px; font-weight: 650; min-height: 40px; }
 #nv-recarregar:hover { background: #1f6255; }
-#nv-depois { background: transparent; color: #9fc4dd; font-size: 1.2rem; line-height: 1; padding: 4px 8px; min-height: 36px; }
+#nv-depois { background: transparent; color: #9fc4dd; font-size: 1.2rem; line-height: 1; padding: 4px 8px; min-height: 40px; min-width: 40px; justify-content: center; }
 @media (max-width: 480px) { #nova-versao { font-size: .78rem; padding-left: 14px; } }
 
 /* ── Vista Arquivados: chips de ano/mês e a tabela leve (14/09/2026) ── */
@@ -2104,7 +2336,7 @@ body.tv-ligada { overflow:hidden; }
    é o nível de baixo e não deve competir com os anos. O ano em foco aparece no
    fim da linha: sem ele, "mar" aceso não diz mar de quando. */
 .casa-chips-mes { margin-top: 6px; align-items: center; }
-.casa-chips-mes .casa-chip-per { font-size: .75rem; padding: 5px 11px; min-height: 36px; }
+.casa-chips-mes .casa-chip-per { font-size: .75rem; padding: 5px 11px; min-height: 40px; }
 .casa-chips-mes .casa-chip-per[disabled] { opacity: .38; cursor: default; }
 .casa-chips-mes .casa-chip-per[disabled]:hover { border-color: #d7e1ee; }
 .casa-chips-nota { font-size: .72rem; color: var(--muted); font-weight: 700; margin-left: 4px; }
@@ -2395,7 +2627,7 @@ img.perf-logo{object-fit:cover}
 .perf-rank-nome .perf-crits{justify-content:flex-start}
 .perf-crit{font-size:.7rem;color:#475569;background:#f1f5f9;border-radius:999px;padding:2px 8px;white-space:nowrap}
 .perf-crit b{color:#173c50;margin-left:2px}
-.perf-crit.sem{color:#94a3b8}
+.perf-crit.sem{color:#5b6f84} /* #94a3b8 sobre o cinza dava 2,3:1 */
 .perf-parcial{font-size:.7rem;color:#9a6b00}
 .perf-sub{font-size:.74rem;color:var(--muted,#617787)}
 .perf-crit.media{background:#fff7e0}
@@ -2461,7 +2693,7 @@ img.perf-logo{object-fit:cover}
 /* Régua de toque da casa (auditoria de 23/09): botões de ação em lista e card
    com 44px em qualquer largura, não só no celular. */
 .list-actions button,.card-acoes button,.card-etapa-btn,.card-tipo-row .card-toggle-tipo{min-height:44px}
-.pcp-controles .pcp-chip{min-height:40px}
+.pcp-chip,.pcp-controles .pcp-chip{min-height:40px} /* todos: também os da Volta do carro e dos Arquivados, que tinham 26 px */
 /* Baixa do ERP: finalizada, mas sem a execução registrada no PCP. */
 .card-fin-tag.card-fin-erp{background:#f1f5f9;color:#475569;border-color:#cbd5e1}
 .prazo-tag.prazo-erp{background:#f1f5f9;color:#475569}
@@ -2500,7 +2732,7 @@ img.perf-logo{object-fit:cover}
 .volta-resp.ruim { background:#fee2e2; color:#b91c1c; font-weight:600; }
 .volta-obs { color:#43566b; font-style:italic; }
 .volta-por, .volta-pendente { color:var(--muted); }
-.volta-acao { grid-column:2; grid-row:2 / span 2; align-self:center; min-height:40px; white-space:nowrap; }
+.volta-acao { grid-column:2; grid-row:2 / span 3; align-self:center; min-height:40px; white-space:nowrap; }
 #volta-dialog { border:1px solid #d8e2e7; border-radius:22px; padding:22px; width:min(620px, calc(100vw - 32px)); max-height:88vh; overflow:auto; color:var(--text); background:var(--surface); }
 #volta-dialog::backdrop { background:rgba(11,36,51,.52); }
 .volta-dialog-sub { margin:0 0 10px; color:#43566b; font-size:.88rem; }
@@ -2513,6 +2745,18 @@ img.perf-logo{object-fit:cover}
 .volta-dialog-acoes { display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
 .volta-dialog-acoes button { min-height:44px; }
 .conf-volta-grade { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px 12px; }
+/* O que a equipe registrou no espelho: selo de CONTORNO, sem preenchimento,
+   para não parecer a resposta do PCP. (A linha nova no cartão fez o botão
+   .volta-acao ocupar três linhas.) */
+.eq-registrou { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:.8rem; }
+.eq-registrou-rotulo { font-weight:700; color:#43566b; }
+.eq-registrou-fotos { flex-basis:100%; }
+.eq-registrou-bloco { margin:10px 0 0; padding:10px 12px; border:1px dashed #cbd5e1; border-radius:12px; background:#f8fafc; }
+.eq-registrou-titulo { font-size:.82rem; font-weight:700; color:#163654; margin-bottom:6px; }
+.conf-volta .eq-registrou { margin:6px 0 10px; }
+.volta-resp.eq { background:transparent; border:1px solid #cbd5e1; }
+.volta-resp.eq.ok { background:transparent; border-color:#86efac; color:#166534; }
+.volta-resp.eq.ruim { background:transparent; border-color:#fca5a5; color:#b91c1c; }
 @media (max-width:680px) {
   .volta-card { grid-template-columns:1fr; }
   .volta-topo .badge { margin-left:0; }
@@ -2520,3 +2764,81 @@ img.perf-logo{object-fit:cover}
   .conf-volta-grade { grid-template-columns:1fr; }
   #volta-dialog { padding:16px; }
 }
+
+/* ── Foto em tamanho grande (#foto-ver) ─────────────────────────────────────
+   A miniatura de 80-96 px corta as bordas (object-fit: cover): não dá para
+   conferir se o adesivo ficou alinhado nem se o carro voltou limpo. O diálogo é
+   criado pelo JS ao tocar numa .foto-thumb; aqui só o desenho: foto inteira,
+   fundo escuro e fechar de 48 px no canto. */
+#foto-ver { padding: 0; border: 0; background: transparent; max-width: 96vw; max-height: 92vh; max-height: 92dvh; overflow: visible; }
+#foto-ver::backdrop { background: rgba(10,22,38,.88); }
+#foto-ver img { display: block; max-width: 96vw; max-height: 92vh; max-height: 92dvh; object-fit: contain; border-radius: var(--radius-s); }
+#foto-ver .modal-close { position: fixed; top: calc(12px + env(safe-area-inset-top)); right: 12px; width: 48px; height: 48px; background: #fff; color: var(--text); font-size: 1.5rem; }
+
+/* ── Costura das frentes (25/09/2026). Tudo fora de media query: a régua de
+   toque vale no tablet da gestão (768 a 1180 px) e no celular da rua. ─────── */
+
+/* Espelho: o que falta para finalizar fica numa linha própria ACIMA de Salvar
+   e Finalizar. O #m-save tem order -1; sem o -2 o aviso caía entre os dois. */
+.equipe-app #modal-os > .fs-body.modal-acoes > .eq-falta { order: -2; padding: 6px 10px; }
+/* Linha da O.S. com gravação ainda só no celular. */
+.equipe-app .badge.eq-na-fila { background: #fef3c7; color: #92400e; }
+/* A O.S. do cartão grande repetida na lista: borda, não desbotada (a 55% de
+   opacidade parecia concluída). */
+.equipe-app .os-list-item.is-hero { opacity: 1; box-shadow: inset 0 0 0 2px #bfdbfe; }
+/* Finalizadas num bloco fechado no fim da lista. */
+.equipe-app .eq-finalizadas > .fs-body { padding: 8px 0 0; }
+/* Diálogo de conflito no celular: botão principal de 48 px. */
+.equipe-app .conflict-actions button { min-height: 48px; font-size: 1rem; font-weight: 700; }
+
+/* Ficha da O.S. na gestão (tablet). */
+#modal-os .modal-close, #picker-overlay .modal-close { width: 44px; height: 44px; }
+#modal-os :is(.btn-xs, .mark-opt, .tipo-opt, .chip-add) { min-height: 40px; }
+#modal-os .chip-rm { min-width: 40px; min-height: 40px; }
+#modal-os .items-table :where(input:not([type=checkbox], [type=radio])) { font-size: .9rem; }
+.foto-rm::after { inset: -10px; } /* área de toque de 40 px em volta do × de 20 px */
+.volta-os .inline-link { min-height: 44px; display: inline-flex; align-items: center; }
+.periodo-filtro .casa-chip-per { min-height: 40px; }
+/* Chips e ações do dia a dia ficavam com 22 a 34 px. */
+.pcp-controles .pcp-chip, .btn-sm, .btn-xs, .fin-sort { min-height: 40px; }
+.list-actions button { min-width: 40px; }
+.trend-row { min-height: 44px; }
+/* Configurações: o × de 15 px e o 🔑 e o 🗑 colados apagavam ou mudavam
+   permissão por engano. */
+.cfg-chip button { min-width: 40px; min-height: 40px; }
+#panel-controle .btn-xs { min-height: 40px; min-width: 40px; }
+#panel-controle .btn-xs + .btn-xs { margin-left: 10px; }
+.niveis-table input[type=checkbox] { width: 24px; height: 24px; }
+.cfg-grupo > summary { min-height: 44px; }
+
+/* Rótulo de grupo que não é <label> (casa.js: Equipe no Programar, Tipo e O.S
+   deste plantão). Mesmo desenho do label. */
+.campo-grupo { display: flex; flex-direction: column; gap: 4px; font-size: .78rem; color: #526378; }
+.casa-form-grade .campo-grupo.larga { grid-column: 1 / -1; }
+/* Casa (Entregas, Agenda, Plantões, Grade, Performance). */
+#panel-entregas .btn-sm, #panel-entregas .btn-xs { padding-inline: 12px; }
+.casa-grade-meses .btn-mes-ent { min-height: 44px; min-width: 44px; }
+.ent-personalizar input[type=date] { min-height: 40px; }
+.wpp-picker-head .modal-close, #eq-box .modal-close { width: 44px; height: 44px; }
+.casa-vista .btn-ghost, .casa-dia-nav > .btn-ghost { min-height: 44px; min-width: 44px; }
+.casa-rank-tabela .casa-rank-acao button { min-height: 40px; }
+.casa-rank-tabela .casa-rank-acao button + button { margin-left: 10px; }
+/* Logo da equipe no Modo TV (perfLogoHTML com a classe tv-foto). */
+.tv-linha img.tv-foto { object-fit: cover; border-radius: 12px; }
+
+/* Relatório de entregas e apuração da performance. */
+#panel-entregas :is(.rel-ent-grafico, .ent-controles) button,
+#panel-performance button,
+#perf-dialog button { min-height: 40px; }
+.rel-ent-abas button,
+.rel-ent-meses button,
+#panel-performance .casa-vista button { min-height: 44px; }
+#panel-performance .perf-entregas .inline-link { min-height: 40px; display: inline-flex; align-items: center; }
+/* Rótulos do gráfico legíveis a um braço do tablet (eram 12 unidades num
+   viewBox de 1040 desenhado em ~690 px). */
+.rel-ent-svg text { font-size: 16px; }
+/* O ponto do gráfico é um <g role="button"> com alvo transparente; o foco
+   aparece no círculo. */
+.rel-ent-svg g[role="button"] { cursor: pointer; }
+.rel-ent-svg g[role="button"]:focus { outline: none; }
+.rel-ent-svg g[role="button"]:focus circle { stroke: #122f43; stroke-width: 4; }

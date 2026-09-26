@@ -4,13 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1877f2">
-  <title>Impresilk — Espelho do Instalador</title>
+  <title>Impresilk · Espelho do Instalador</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon.svg">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Impresilk">
-  <link rel="stylesheet" href="styles.css?v=v129">
+  <link rel="stylesheet" href="styles.css?v=v130">
 </head>
 <body class="equipe-app">
 
@@ -30,17 +30,22 @@
 
   <!-- App -->
   <div id="eq-app" class="hidden">
+    <!-- O "Sair" não mora mais na barra: apaga o crachá e as O.S. do celular,
+         e ficava colado no nome, ao alcance de um toque de luva. -->
     <header class="topbar">
       <img class="logo-img" id="topbar-logo" alt="Impresilk">
       <div class="topbar-actions">
-        <button class="btn-ghost btn-sm" id="btn-verificar" title="Conferir se foi salvo na nuvem">☁️</button>
-        <span id="sync-indicator" class="sync-indicator ok">✅</span>
+        <button type="button" class="btn-ghost btn-sm" id="btn-verificar" title="Conferir se chegou ao escritório" aria-label="Conferir se chegou ao escritório">☁️</button>
+        <button type="button" id="sync-indicator" class="sync-indicator ok" aria-label="Tudo enviado">✅</button>
         <span id="user-badge"></span>
-        <button class="btn-ghost btn-sm" id="eq-trocar" title="Trocar instalador">⇄</button>
       </div>
     </header>
     <div id="frase-bar" class="frase-bar"></div>
+    <div id="eq-avisos" class="eq-avisos" aria-live="polite"></div>
     <main class="tab-panel active" id="eq-list" style="display:block"></main>
+    <div class="eq-rodape">
+      <button type="button" class="btn-ghost" id="eq-trocar">Sair deste celular</button>
+    </div>
   </div>
 
   <!-- Modal -->
@@ -49,13 +54,15 @@
   </div>
 
   <!-- Conflito -->
-  <div id="conflict-dialog" class="conflict-dialog hidden">
+  <!-- Conflito: o botão principal guarda o trabalho do instalador; descartar
+       é o secundário e pergunta antes, dizendo o que se perde (equipe.js). -->
+  <div id="conflict-dialog" class="conflict-dialog hidden" role="alertdialog" aria-labelledby="conflict-tit" aria-describedby="conflict-msg">
     <div class="conflict-box">
-      <h3>⚠️ Conflito de edição</h3>
-      <p id="conflict-msg">Esta O.S foi alterada em outro aparelho.</p>
+      <h3 id="conflict-tit">⚠️ O escritório mexeu nesta O.S</h3>
+      <p id="conflict-msg">O PCP alterou esta O.S enquanto você trabalhava.</p>
       <div class="conflict-actions">
-        <button class="btn-primary" id="conflict-reload">Recarregar (servidor)</button>
-        <button class="btn-danger" id="conflict-overwrite">Sobrescrever (meu)</button>
+        <button type="button" class="btn-primary" id="conflict-overwrite">Manter o que eu fiz</button>
+        <button type="button" class="btn-ghost" id="conflict-reload">Descartar o meu e ver o do escritório</button>
       </div>
     </div>
   </div>
@@ -67,13 +74,45 @@
     <div class="celebra-box" id="celebra-box"></div>
   </div>
 
-  <script src="config.js?v=v129"></script>
-  <script src="logo.js?v=v129"></script>
-  <script src="frases.js?v=v129"></script>
-  <script src="store.js?v=v129"></script>
-  <script src="auth.js?v=v129"></script>
-  <script src="operacao.js?v=v129"></script>
-  <script src="equipe.js?v=v129"></script>
-  <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
+  <script src="config.js?v=v130"></script>
+  <script src="logo.js?v=v130"></script>
+  <script src="frases.js?v=v130"></script>
+  <script src="store.js?v=v130"></script>
+  <script src="auth.js?v=v130"></script>
+  <script src="operacao.js?v=v130"></script>
+  <script src="equipe.js?v=v130"></script>
+  <script>
+  /* Service worker + AVISO DE VERSÃO NOVA (o mesmo da gestão, index.html).
+     O navegador só confere o sw.js numa navegação, e o espelho fica aberto
+     dias no bolso sem navegar: uma correção publicada não chegava, e o
+     celular seguia com o JS velho. Confere ao voltar para a tela e de hora em
+     hora; quando a troca acontece, mostra a tarja e só recarrega no toque,
+     depois de gravar o que estiver aberto na ficha. */
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').then(function (reg) {
+        setInterval(function () { reg.update().catch(function () {}); }, 3600000);
+        document.addEventListener('visibilitychange', function () {
+          if (!document.hidden) reg.update().catch(function () {});
+        });
+      }).catch(function () {});
+      var jaTinha = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (!jaTinha || document.getElementById('nova-versao')) return;
+        var d = document.createElement('div');
+        d.id = 'nova-versao';
+        d.innerHTML = '<span>✨ Saiu uma versão nova. Toque para atualizar: seu trabalho fica guardado.</span>' +
+          '<button type="button" id="nv-recarregar">Atualizar</button>' +
+          '<button type="button" id="nv-depois" aria-label="Fechar">×</button>';
+        document.body.appendChild(d);
+        d.querySelector('#nv-recarregar').onclick = function () {
+          try { if (_dirty) save(); } catch (e) {}
+          location.reload();
+        };
+        d.querySelector('#nv-depois').onclick = function () { d.remove(); };
+      });
+    });
+  }
+  </script>
 </body>
 </html>

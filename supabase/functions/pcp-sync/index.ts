@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, composicoesAtivasRepetidas } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, composicoesAtivasRepetidas, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -167,10 +167,14 @@ const resp = (data: unknown, status = 200) =>
 //
 // Em troca, TODA leitura que serve o app precisa filtrar apagado — senao a O.S
 // excluida continua na tela.
+// Falha de leitura LANÇA (vira 5xx, que o aparelho reenvia). Antes o erro era
+// ignorado e virava "não existe": um soluço do banco respondia ao instalador
+// "Quem entra pelo nome não cria O.S." (403) e o check-in saía da fila.
 async function getReg(colecao: string, id: string): Promise<any | null> {
-  const { data } = await sb
+  const { data, error } = await sb
     .from("pcp_registros").select("registro")
     .eq("colecao", colecao).eq("id", id).eq("apagado", false).maybeSingle();
+  if (error) throw new Error(error.message);
   return data?.registro ?? null;
 }
 
@@ -257,7 +261,10 @@ async function perfHash(v:any) {
   const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(JSON.stringify(v)));
   return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
 }
-async function perfFonte(body:any) {
+/* `estrito` é a trava de "a base mudou durante a consulta": vale para a
+   apuração, que sela um hash. O relatório de entregas só lê; com a equipe
+   sincronizando o dia inteiro, ele falhava sem motivo. */
+async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
   const periodo=perfPeriodo(body), inicio=new Date().toISOString();
   const cfgAntes=await getCfgComVersao();
   const lista:any[]=[]; let after="", terminou=false;
@@ -288,7 +295,7 @@ async function perfFonte(body:any) {
   const cfgDepois=await getCfgComVersao();
   const {data:mudancas,error:erroMudancas}=await sb.from("pcp_registros").select("id").eq("colecao","os").gte("atualizado_em",inicio).limit(1);
   if(erroMudancas)throw new Error(erroMudancas.message);
-  if(cfgAntes.versao!==cfgDepois.versao || mudancas?.length)throw new Error("A base mudou durante a consulta. Atualize para conferir novamente.");
+  if(estrito && (cfgAntes.versao!==cfgDepois.versao || mudancas?.length))throw new Error("A base mudou durante a consulta. Atualize para conferir novamente.");
   const participacoes=cfgAntes.config?.performancePCP?.participacoes || [];
   const num=(v:any)=>v==null||v===""?NaN:typeof v==="number"?v:Number(String(v).includes(",")?String(v).replace(/\./g,"").replace(",","."):v);
   const registros=lista.map(o=>{
@@ -309,7 +316,19 @@ async function perfFonte(body:any) {
        conta, mas a tela mostra) vieram com a fila da volta do carro. */
     const PERGUNTAS=["carroLimpo","carroArrumado","equipamentosOk","semAvaria"];
     const retornoConf=rc&&PERGUNTAS.some(k=>snv(rc[k]))?{...Object.fromEntries(PERGUNTAS.map(k=>[k,snv(rc[k])])),por:String(rc.por||"").slice(0,120),porId:String(rc.porId||"").slice(0,120),em:String(rc.em||"").slice(0,40)}:null;
-    return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,equipeId:p?.equipeId||"",equipeNome:p?.equipeNome||"",emblema:p?.emblema||"🤝",obs:p?.obs||"",por:p?.por||"",em:p?.em||"",retrabalho:!!o.retrabalho,retornoConf};
+    /* performance-3: A VOLTA DO CARRO É UMA POR VIAGEM, não uma por O.S. A
+       fila (OPERACAO.voltasDoCarro) agrupa por dia + carro + equipe e confere
+       uma vez; a nota contava cada O.S. da viagem, e três serviços pequenos no
+       mesmo carro sujo pesavam triplo. `volta` é a mesma chave da fila (dia da
+       volta como OPERACAO.diaDaVolta), e `voltou` é o mesmo filtro: baixa do
+       ERP sem retorno nem lançamento não prova viagem e não entra na conta do
+       carro (a fila nunca a mostra para conferir). */
+    const baixaERP=o.baixaAutoERP?.em===o.finalizadaEm || /^Mubisys\b/i.test(o.finalizadoPor || "");
+    const voltou=nomes.length>0 && !!(o.retornoEm || o.horaRetorno || !baixaERP || o.entregaLancada);
+    const norm=(x:any)=>String(x||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toLowerCase();
+    const diaVolta=perfDia(o.retornoEm) || (o.horaRetorno ? (perfDia(o.saidaEm) || perfDia(o.instalacao?.data)) : "") || (o.entregaLancada ? perfDia(o.entregaLancada.data) : "") || perfDia(o.finalizadaEm);
+    const volta=[diaVolta,norm(o.veiculo),nomes.map(norm).sort().join("+")].join("|");
+    return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,equipeId:p?.equipeId||"",equipeNome:p?.equipeNome||"",emblema:p?.emblema||"🤝",obs:p?.obs||"",por:p?.por||"",em:p?.em||"",retrabalho:!!o.retrabalho,retornoConf,voltou,volta};
   });
   /* performance-2: cada registro leva a conferência da volta, e a apuração
      leva os PESOS DA NOTA em vigor. Eles entram no hash: quem fecha sela os
@@ -319,7 +338,7 @@ async function perfFonte(body:any) {
   const criterios=pesosCfg && !validarPerformance({equipes:[],participacoes:[],criterios:pesosCfg})
     ? {producao:pesosCfg.producao,limpeza:pesosCfg.limpeza,equipamentos:pesosCfg.equipamentos}
     : {producao:60,limpeza:20,equipamentos:20};
-  const conteudo={periodo,regra:"performance-2",criterios,registros};
+  const conteudo={periodo,regra:"performance-3",criterios,registros};
   return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP."};
 }
 async function perfFechamentos(periodo:any) {
@@ -375,6 +394,8 @@ Deno.serve(async (req: Request) => {
   // admin via setCfg ou apagava O.S). A porta de MAQUINA (backup do Hub) segue
   // com poder total. Papeis com editar=true: admin/pcp/montagem/operacao.
   let ehToqueNoNome = false;
+  // O que foi deixado de fora de um envio do crachá de toque; volta no 200.
+  const avisosToque: string[] = [];
   if (cracha && !ehMaquina) {
     const papel = String(cracha.papel ?? "");
     const podeEditar = ["admin", "pcp", "montagem", "operacao"].includes(papel);
@@ -455,16 +476,38 @@ Deno.serve(async (req: Request) => {
        (O upsert recebe a O.S em `body.os`, e nao em `registro` como os outros
        sistemas da casa -- apontar para o campo errado nao daria erro nenhum,
        passaria tudo.) */
+    /* 403 TIRA O ENVIO DA FILA DO CELULAR, e o espelho não mostra nada: o
+       check-in e as fotos sumiam calados. Por isso só "criar O.S." é 403 (o
+       espelho nunca cria). O.S. que saiu da equipe ou foi excluída enquanto o
+       instalador estava sem sinal é 422: o envio fica guardado no aparelho e o
+       aviso aparece. Falha de leitura é 503 (rede: o aparelho reenvia).
+       Esses dois 422 levam `definitivo`: nenhum reenvio vai passar enquanto
+       a O.S. estiver excluída ou fora da equipe, e o envio parado na fila
+       travava o Sair, a troca de instalador e a entrada da gestão no celular.
+       O store tira da fila e o espelho guarda a cópia com o aviso fixo. */
     if (acao === "upsert" && ehToqueNoNome && body?.os) {
       const veio = body.os as Record<string, unknown>;
       const id = String(veio.id ?? "");
-      const atual = id ? await getReg("os", id) : null;
+      let atual: any = null, lapide: any = null;
+      try {
+        atual = id ? await getReg("os", id) : null;
+        if (!atual && id) {
+          const { data, error } = await sb.from("pcp_registros").select("id")
+            .eq("colecao", "os").eq("id", id).eq("apagado", true).maybeSingle();
+          if (error) throw new Error(error.message);
+          lapide = data;
+        }
+      } catch {
+        return resp({ error: "Não foi possível ler a O.S. agora. O envio fica guardado e vai de novo." }, 503);
+      }
+      if (lapide) return resp({ error: "Esta O.S. foi excluída pelo PCP. O que você registrou continua neste aparelho. Avise a gestão.", definitivo: true }, 422);
       if (!atual) {
         return resp({ error: "Quem entra pelo nome não cria O.S. Fale com o PCP." }, 403);
       }
-      if (!pertenceEquipe(atual, cracha.nome || cracha.sub)) return resp({error:"Esta O.S. não está na sua equipe."},403);
+      if (!pertenceEquipe(atual, cracha.nome || cracha.sub)) return resp({error:"Esta O.S. não está mais na sua equipe. O que você registrou continua neste aparelho. Avise a gestão.", definitivo: true},422);
       const mescla = mesclarToqueNoNome(atual, veio, String(cracha.nome || cracha.sub), new Date().toISOString());
       if (mescla.erro) return resp({ error: mescla.erro }, 422);
+      avisosToque.push(...(mescla.avisos || []), ...acertarMomentosToque(mescla.os, atual));
       body.os = mescla.os;
     }
 
@@ -477,9 +520,29 @@ Deno.serve(async (req: Request) => {
     const {data,error} = await sb.from("pcp_registros").select("registro").eq("colecao","os").eq("apagado",false)
       .contains("registro",{equipe:[String(cracha.nome || cracha.sub)]});
     if (error) return resp({error:"Não foi possível conferir o vínculo da foto."},503);
-    const permitida = (data || []).some((r: any) => [r.registro.layoutFotoId,...(r.registro.fotosCheckinIds || []),...(r.registro.fotosRetornoIds || []),...(r.registro.itens || []).map((i: any) => i?.fotoProbId)].filter(Boolean).includes(body.fileId));
-    if (!permitida) return resp({error:"Esta foto não está vinculada às O.S. da sua equipe."},403);
+    /* A foto do carro que a equipe registrou (voltaEquipe.fotos) vai em todas
+       as O.S. da volta: o colega do mesmo carro, em outro celular, precisa
+       abri-la, senão vê "registrada por Ana" com a miniatura quebrada. Só para
+       LER: apagar pelo crachá de toque tiraria a foto das outras O.S. da volta,
+       e o espelho nunca apaga essa foto (o × só a tira da lista). */
+    const fotosDaVolta = (r: any) => acao === "getPhoto" && Array.isArray(r.registro?.voltaEquipe?.fotos) ? r.registro.voltaEquipe.fotos : [];
+    /* APAGAR é mais estreito que abrir: o layout é do PCP, e a foto de O.S.
+       finalizada é a prova que validarConclusao exigiu. Quem entrou sem senha
+       apaga só foto de execução de O.S. ainda aberta. */
+    const apagando = acao === "deletePhoto";
+    /* E a trava vale pelo id, não pela O.S.: pôr o id da prova de uma O.S.
+       finalizada (ou do layout) na lista de uma O.S. aberta e depois pedir o
+       apagar passava, porque a aberta "tinha" a foto. Id que aparece em O.S.
+       finalizada, como layout, na limpeza do carro ou na conferência da volta
+       não é apagado por este crachá. */
+    const execucao = (r: any) => [...(r.registro.fotosCheckinIds || []),...(r.registro.fotosRetornoIds || []),...(r.registro.itens || []).map((i: any) => i?.fotoProbId)];
+    const protegida = apagando && (data || []).some((r: any) => [r.registro.layoutFotoId,...(r.registro.voltaEquipe?.fotos || []),...(r.registro.retornoConf?.fotos || []),...(r.registro.finalizadaEm ? execucao(r) : [])].filter(Boolean).includes(body.fileId));
+    const permitida = !protegida && (data || []).some((r: any) => !(apagando && r.registro.finalizadaEm) && [apagando ? "" : r.registro.layoutFotoId,...execucao(r),...fotosDaVolta(r)].filter(Boolean).includes(body.fileId));
+    if (!permitida) return resp({error:apagando ? "Esta foto não pode ser apagada por este aparelho." : "Esta foto não está vinculada às O.S. da sua equipe."},403);
   }
+
+  // Toda O.S. que sai desta porta para o crachá de toque passa por aqui.
+  const saida = (r: any) => ehToqueNoNome ? podarToque(r) : r;
 
   try {
     switch (acao) {
@@ -504,10 +567,10 @@ Deno.serve(async (req: Request) => {
           lerOrdens(),
           sb.from("painel_cache").select("valor,atualizado_em").eq("chave","fluxo_mensal").maybeSingle(),
           sb.from("pcp_meta").select("chave,valor").in("chave",meses.map(m=>"entregues:"+m)),
-          perfFonte({de,ate}),
+          perfFonte({de,ate},{estrito:false}),
         ]);
         if(fluxo.error || cache.error)throw new Error("Não foi possível ler as fontes do relatório.");
-        // perfFonte já verifica paginação e alterações concorrentes; só detalhes operacionais mínimos.
+        // perfFonte verifica a paginação; mudança concorrente não derruba o relatório (só lê).
         const pacotes=new Map((cache.data || []).map((r:any)=>[r.chave,r.valor]));
         const entradas=fluxo.data?.valor?.anos?.[ano]?.entradas;
         const numero=(v:any)=>v!==null && v!==undefined && v!=="" && Number.isFinite(Number(v))?Number(v):null;
@@ -599,7 +662,7 @@ Deno.serve(async (req: Request) => {
         const PAGE = 150;
         const agora = new Date().toISOString();
         const soExecucao = ehToqueNoNome;
-        const podar = (r: any) => { if (!soExecucao) return r; const { cnpjCpf, ...resto } = r ?? {}; return resto; };
+        const podar = saida;
 
         if (body.since) {
           const since = String(body.since);
@@ -635,7 +698,8 @@ Deno.serve(async (req: Request) => {
           if (body.de) q = q.gte("registro->>finalizadaEm", String(body.de));
           if (body.ate) q = q.lte("registro->>finalizadaEm", String(body.ate) + "T23:59:59.999Z");
           const termo = String(body.q ?? "").trim().replace(/[%,()*]/g, " ").trim();
-          if (termo) q = q.or(`registro->>numero.ilike.*${termo}*,registro->>cliente.ilike.*${termo}*`);
+          // A tela promete buscar também por endereço e serviço.
+          if (termo) q = q.or(`registro->>numero.ilike.*${termo}*,registro->>cliente.ilike.*${termo}*,registro->>endereco.ilike.*${termo}*,registro->>servico.ilike.*${termo}*`);
         }
         // `faixa`: a primeira e a ultima finalizacao que existem -- os chips de
         // ano da vista Arquivados nascem daqui, nao de um chute. Duas consultas
@@ -654,9 +718,9 @@ Deno.serve(async (req: Request) => {
         const { data, error } = await q;
         if (error) throw new Error(error.message);
         const linhas = data ?? [];
-        /* CPF/CNPJ NAO VAI PARA QUEM ENTROU PELO NOME (ver `podar`): o cracha
-           de toque sai de um primeiro nome, sem senha; precisa de cliente,
-           endereco e contato, nao do documento de ninguem. */
+        /* CPF/CNPJ E VALOR NAO VAO PARA QUEM ENTROU PELO NOME (ver podarToque):
+           o cracha de toque sai de um primeiro nome, sem senha; precisa de
+           cliente, endereco e contato, nao do documento de ninguem. */
         return resp({
           os: linhas.filter((r: any) => !soExecucao || pertenceEquipe(r.registro,cracha.nome || cracha.sub)).map((r: any) => podar(r.registro)),
           total: await contarRegs("os"),
@@ -681,22 +745,53 @@ Deno.serve(async (req: Request) => {
             !(os.fotosCheckinIds ?? []).length && !(os.fotosRetornoIds ?? []).length;
           if (os.id !== canonicalId && semTrabalho) {
             const canonico = await getReg("os", canonicalId);
-            if (canonico) return resp({ ok: true, os: canonico, duplicataEvitada: true });
+            if (canonico) return resp({ ok: true, os: saida(canonico), duplicataEvitada: true });
           }
         }
 
         const {data:linhaAtual,error:erroAtual} = await sb.from("pcp_registros").select("registro,atualizado_em,apagado").eq("colecao","os").eq("id",os.id).maybeSingle();
         if (erroAtual) throw new Error(erroAtual.message);
         const existing = linhaAtual?.registro ?? null;
+        /* REENVIO DA MESMA GRAVAÇÃO. Com sinal ruim a O.S. chega e grava, mas a
+           resposta não volta em 15 s; o aparelho reenvia o mesmo item com o rev
+           antigo, e isso abria "Conflito de edição" com a versão do próprio
+           autor. Mesmo atualizadoEm do autor e rev logo seguinte ao que ele
+           leu = é a gravação dele: responde como se tivesse gravado agora. */
+        if (existing && typeof os.rev === "number" && typeof existing.rev === "number" && existing.rev === os.rev + 1 &&
+            existing.atualizadoEm && existing.atualizadoEm === os.atualizadoEm) {
+          return resp({ ok: true, os: saida(existing), repetido: true });
+        }
         const erroConclusao = validarConclusao(os,existing,String(cracha?.papel || ''));
-        if (erroConclusao) return resp({error:erroConclusao},422);
+        /* Para o crachá de toque a conclusão sem prova não derruba o envio: a
+           finalização fica de fora, com aviso, e check-in, fotos e itens gravam.
+           O 422 prendia tudo na fila do celular. */
+        if (erroConclusao && ehToqueNoNome) {
+          delete os.finalizadaEm; delete os.finalizadoPor;
+          avisosToque.push("A O.S. não foi finalizada. " + erroConclusao);
+        } else if (erroConclusao) return resp({error:erroConclusao},422);
         if (os.finalizadaEm && !existing?.finalizadaEm && os.justificativaConclusao) {
           os.excecaoConclusao = {motivo:String(os.justificativaConclusao).trim(),por:cracha?.nome || cracha?.sub,em:new Date().toISOString()};
         }
         const erroMomento = validarMomentos(os);
         if (erroMomento) return resp({error:erroMomento},400);
+        /* Local do check-in: só os quatro campos que as telas gravam, com número
+           de verdade (a mesma régua do mesclarToqueNoNome). Qualquer outra forma
+           vira texto no mapa da gestão; fica o que já estava gravado. */
+        if (os.checkinGPS != null && os.checkinGPS !== "") {
+          const g = os.checkinGPS;
+          const ok = g && typeof g === "object" && !Array.isArray(g) && Number.isFinite(Number(g.lat)) && Number.isFinite(Number(g.lng));
+          os.checkinGPS = ok
+            ? { lat: Number(g.lat), lng: Number(g.lng), precisao: Number.isFinite(Number(g.precisao)) ? Number(g.precisao) : 0, ts: String(g.ts ?? "").slice(0, 40) }
+            : (existing?.checkinGPS ?? null);
+        }
         // Remarcar invalida a confirmação anterior; não inventa confirmação de hoje.
-        if (existing && JSON.stringify(existing.instalacao) !== JSON.stringify(os.instalacao) && !(os.confirmacao === "Confirmado" && os.confEm && os.confEm !== existing.confEm)) {
+        // Por conteúdo (canon): o jsonb devolve as chaves em outra ordem.
+        /* MENOS COM A EQUIPE NA RUA (saiu e não voltou), a mesma exceção do
+           setField do app.js: estender a duração com a equipe no cliente não é
+           remarcar. Zerar aqui fazia a O.S. em andamento voltar a "Agendada" e
+           o servidor recusar a finalização do espelho por falta de confirmação. */
+        const equipeNaRua = !!(existing && (existing.horaSaida || existing.saidaEm) && !(existing.horaRetorno || existing.retornoEm));
+        if (existing && !equipeNaRua && canon(existing.instalacao) !== canon(os.instalacao) && !(os.confirmacao === "Confirmado" && os.confEm && os.confEm !== existing.confEm)) {
           os.confirmacao = ''; os.confEm = ''; os.confHora = ''; os.confPor = '';
           os.carroLiberado = false; os.carroLiberadoEm = ''; os.carroLiberadoPor = '';
         }
@@ -732,7 +827,7 @@ Deno.serve(async (req: Request) => {
             (existing.fotosCheckinIds ?? []).length || (existing.fotosRetornoIds ?? []).length ||
             (existing.equipe ?? []).length || existing.confirmacao || existing.horaSaida ||
             existing.paradoClienteEm);
-          if (semTrabalho && comTrabalho) return resp({ ok: true, os: existing, duplicataEvitada: true });
+          if (semTrabalho && comTrabalho) return resp({ ok: true, os: saida(existing), duplicataEvitada: true });
         }
 
         // CONFLITO POR VERSAO DO SERVIDOR, nao por relogio de parede.
@@ -751,12 +846,12 @@ Deno.serve(async (req: Request) => {
         const revAtual = typeof existing?.rev === "number" ? existing.rev : 0;
         if (existing) {
           if (typeof os.rev === "number") {
-            if (revAtual !== os.rev) return resp({ conflito: true, servidor: existing });
+            if (revAtual !== os.rev) return resp({ conflito: true, servidor: saida(existing) });
           } else if (
             existing.atualizadoEm && os.atualizadoEm &&
             new Date(existing.atualizadoEm).getTime() > new Date(os.atualizadoEm).getTime()
           ) {
-            return resp({ conflito: true, servidor: existing });
+            return resp({ conflito: true, servidor: saida(existing) });
           }
         }
 
@@ -793,6 +888,26 @@ Deno.serve(async (req: Request) => {
             os.retornoConf = n;
           }
         }
+        /* LIMPEZA DO CARRO REGISTRADA PELA EQUIPE (voltaEquipe, 25/09/2026). O
+           espelho do instalador declara como o carro voltou; a gestão só lê.
+           Espelho da regra acima: só quem entra pelo nome escreve (tem nome de
+           pessoa, e a equipe já foi conferida na mescla), e o autor é o crachá.
+           Gestão, operação, a conta de grupo 'montagem' e a máquina ficam com o
+           que está gravado: a cópia velha da gestão salvando a volta não apaga
+           nem forja a declaração. Depois de o PCP conferir, ela não muda mais.
+           Nada aqui recusa: um 422 trancaria a fila do aparelho. */
+        {
+          const antes = existing?.voltaEquipe && typeof existing.voltaEquipe === "object" && !Array.isArray(existing.voltaEquipe) ? existing.voltaEquipe : null;
+          const pode = ehToqueNoNome && !!existing && existing.tipo !== "interno" && !voltaConferida(existing.retornoConf);
+          const r = pode
+            ? sanearVoltaEquipe(os.voltaEquipe, antes, { nome: String(cracha?.nome || cracha?.sub || ""), sub: String(cracha?.sub ?? "") }, new Date().toISOString())
+            : antes;
+          // Declaração do aparelho que ficou de fora por ser mais velha que a gravada: dito.
+          if (pode && r && r === antes && os.voltaEquipe && typeof os.voltaEquipe === "object" && canon(os.voltaEquipe) !== canon(antes)
+            && PERGUNTAS_VOLTA.some((k) => os.voltaEquipe[k] === "sim" || os.voltaEquipe[k] === "nao"))
+            avisosToque.push(`A limpeza do carro não foi trocada: ${antes.por || "a equipe"} registrou depois. Confira com o colega.`);
+          if (r) os.voltaEquipe = r; else delete os.voltaEquipe;
+        }
         if (existing?.origemMubisys) {
           /* "✓ Conferi" da gestão apaga o selo do ERP: é a única escrita que
              estes campos aceitam do aparelho, e o carimbo é do crachá. O Conferi
@@ -809,8 +924,14 @@ Deno.serve(async (req: Request) => {
         if (os.carroLiberado && !existing?.carroLiberado) {
           const diaSP = (x: string) => Number.isFinite(Date.parse(x)) ? new Date(Date.parse(x)-3*3600*1000).toISOString().slice(0,10) : '';
           const diaSaida = diaSP(os.carroLiberadoEm || '');
-          if (!diaSaida || os.confirmacao !== 'Confirmado' || diaSP(os.confEm || '') !== diaSaida)
-            return resp({error:"Confirme o cliente no dia da saída antes de liberar o veículo."},422);
+          if (!diaSaida || os.confirmacao !== 'Confirmado' || diaSP(os.confEm || '') !== diaSaida) {
+            /* O espelho manda a O.S. inteira num envio só: recusar aqui prendia
+               na fila, dali em diante, fotos, itens, retorno e finalização. Para
+               o crachá de toque só a liberação fica de fora, com aviso. */
+            if (!ehToqueNoNome) return resp({error:"Confirme o cliente no dia da saída antes de liberar o veículo."},422);
+            os.carroLiberado = !!existing?.carroLiberado; os.carroLiberadoEm = existing?.carroLiberadoEm || ''; os.carroLiberadoPor = existing?.carroLiberadoPor || '';
+            avisosToque.push("O carro não foi liberado: o cliente precisa ser confirmado no dia da saída. Fale com o PCP.");
+          }
         }
         /* REABRIR FICA CARIMBADO NO SERVIDOR. Quem tira a finalização (o botão
            Reabrir, o "Sobrescrever" do conflito, um aparelho com app antigo) deixa
@@ -832,7 +953,7 @@ Deno.serve(async (req: Request) => {
             const {data,error} = await sb.from("pcp_registros").update({registro:gravar,atualizado_em:new Date(Math.max(Date.now(),Date.parse(linhaAtual.atualizado_em)+1 || 0)).toISOString(),apagado:false})
               .eq("colecao","os").eq("id",os.id).eq("atualizado_em",linhaAtual.atualizado_em).select("id");
             if (error) throw new Error(error.message);
-            if (!data?.length) return resp({conflito:true,servidor:await getReg("os",os.id)});
+            if (!data?.length) return resp({conflito:true,servidor:saida(await getReg("os",os.id))});
           } else {
             const {error} = await sb.from("pcp_registros").insert({colecao:"os",id:os.id,registro:gravar,atualizado_em:new Date().toISOString(),apagado:false});
             if (error) throw new Error(error.message);
@@ -855,7 +976,7 @@ Deno.serve(async (req: Request) => {
                 .eq("registro->>numero", num).limit(1).maybeSingle();
               sobrevivente = data?.registro ?? null;
             }
-            if (sobrevivente) return resp({ ok: true, os: sobrevivente, duplicataEvitada: true });
+            if (sobrevivente) return resp({ ok: true, os: saida(sobrevivente), duplicataEvitada: true });
 
             // Ninguem VIVO com esse numero: quem o ocupa e uma lapide (a O.S foi
             // excluida e alguem esta criando outra com o mesmo numero). Devolver
@@ -870,32 +991,24 @@ Deno.serve(async (req: Request) => {
               const revMorta = typeof morta.registro?.rev === "number" ? morta.registro.rev : 0;
               const revivido = { ...os, id: morta.id, rev: revMorta + 1 };
               await setReg("os", morta.id, revivido);
-              return resp({ ok: true, os: revivido, duplicataEvitada: true });
+              return resp({ ok: true, os: saida(revivido), duplicataEvitada: true });
             }
           }
           throw e;
         }
-        return resp({ ok: true, os: gravar });
+        return resp({ ok: true, os: saida(gravar), ...(avisosToque.length ? { avisos: avisosToque } : {}) });
       }
 
       case "delete": {
         const id = body.id;
         if (!id) return resp({ error: "id ausente" }, 400);
-        const existing = await getReg("os", id);
-        // Apaga a LINHA primeiro (e confere o erro). Só depois remove as fotos
-        // do bucket — se a foto some mas a linha fica, o app finge que apagou.
+        /* A LÁPIDE GUARDA A O.S. E AS FOTOS. Excluir removia os arquivos do
+           bucket, mas a O.S. volta: a conciliação do ERP restaura a exclusão que
+           ainda está na carteira, e um aparelho offline com edição pendente a
+           ressuscita (setReg). Voltava com equipe e agenda e as imagens
+           quebradas. Os arquivos ficam; limpar foto de lápide antiga, se um dia
+           for preciso, é rotina à parte que lê todas as listas. */
         await delReg("os", id);
-        if (existing) {
-          const ids = [
-            ...(existing.fotosCheckinIds ?? []),
-            ...(existing.fotosRetornoIds ?? []),
-            existing.layoutFotoId,
-          ].filter(Boolean);
-          if (ids.length) {
-            const { error } = await sb.storage.from(BUCKET).remove(ids);
-            if (error) console.error("[pcp-sync] fotos órfãs no delete de", id, error.message);
-          }
-        }
         return resp({ ok: true });
       }
 
@@ -1163,6 +1276,11 @@ Deno.serve(async (req: Request) => {
         // Maquina/Hub recebe tudo (backup).
         if (cracha && !ehMaquina && String(cracha.papel ?? "") !== "admin") {
           const { usuarios: _u, funcionarios: _f, ...publico } = cfg;
+          /* Quem entrou pelo nome também não recebe bônus (orçamento, teto e
+             pontos de cada colega) nem a apuração da performance (percentuais,
+             participações e logos): a ação "valores" já recusa esse crachá, e
+             o espelho não usa nada disso. */
+          if (ehToqueNoNome) { delete publico.bonusPCP; delete publico.performancePCP; }
           return resp({ cfg: publico, versao });
         }
         return resp({ cfg, versao });
@@ -1173,11 +1291,20 @@ Deno.serve(async (req: Request) => {
         const visivel = (cfg: any) => {
           const {usuarios,funcionarios,...out} = cfg || {}; return out;
         };
+        /* A AGENDA DE CONTATOS É DO ADMIN. A mescla usava `visivel` para todo
+           mundo, e o contato que o admin cadastrava (funcionarios) nunca chegava
+           ao banco: sumia na troca de aparelho. O admin mescla funcionarios;
+           usuarios (senhas) continuam fora, e o pcp segue sem nenhum dos dois. */
+        const ehAdminCfg = String(cracha?.papel ?? "") === "admin" && !ehMaquina;
+        const paraMescla = (cfg: any) => {
+          if (!ehAdminCfg) return visivel(cfg);
+          const {usuarios,...out} = cfg || {}; return out;
+        };
         for (let tentativa=0;tentativa<3;tentativa++) {
           const {config,versao} = await getCfgComVersao();
           const atual = config || {};
           if (!body.baseCfg) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:["Configuração salva por versão antiga; revise antes de reaplicar."]},409);
-          const base = visivel(body.baseCfg), local = visivel(body.cfg), remoto = visivel(atual);
+          const base = paraMescla(body.baseCfg), local = paraMescla(body.cfg), remoto = paraMescla(atual);
           if (cracha?.papel === "pcp" && !ehMaquina) {
             const permitidas = new Set(["agendaPCP","bonusPCP","performancePCP","vinculosRH","mensagemDia"]);
             for (const k of new Set([...Object.keys(base),...Object.keys(local),...Object.keys(remoto)])) {
@@ -1242,8 +1369,19 @@ Deno.serve(async (req: Request) => {
         const { base64, mime, fileId } = body;
         if (!base64) return resp({ error: "base64 ausente" }, 400);
         const id = fileId || "foto_" + Date.now() + "_" + Math.random().toString(36).slice(2);
-        const { error } = await sb.storage.from(BUCKET).upload(id, b64ParaBytes(base64), {
-          contentType: mimeDaDataUrl(base64, mime || "image/jpeg"),
+        const bytes = b64ParaBytes(base64), tipo = mimeDaDataUrl(base64, mime || "image/jpeg");
+        /* TETO DO QUE UM CRACHÁ SOBE. O bucket é do projeto que o PCP divide
+           com o RH e o Brief, e foi criado sem limite. O app sobe JPEG de até
+           1280 px (STORE.pushPhoto, uns 300 KB) com id foto_<hora>_<sorteio>.
+           Tipo que o navegador executaria (html, svg), arquivo grande ou id
+           com caminho é recusado. A máquina (backup do Hub) segue livre. */
+        if (!ehMaquina) {
+          if (bytes.length > 2_000_000) return resp({ error: "Foto grande demais. Tire a foto de novo." }, 422);
+          if (!["image/jpeg", "image/png", "image/webp"].includes(tipo)) return resp({ error: "Tipo de arquivo não aceito. Envie uma foto." }, 422);
+          if (!/^foto_\d{10,}_[a-z0-9]{1,16}$/.test(id)) return resp({ error: "Identificação da foto inválida." }, 422);
+        }
+        const { error } = await sb.storage.from(BUCKET).upload(id, bytes, {
+          contentType: tipo,
           upsert: false,
         });
         if (error && !(String((error as any).statusCode) === "409" || /already exists|duplicate/i.test(error.message))) throw new Error("upload: " + error.message);
@@ -1266,11 +1404,13 @@ Deno.serve(async (req: Request) => {
         return resp({ base64: `data:${tipo};base64,${bytesParaB64(await data.arrayBuffer())}`, mime: tipo });
       }
 
+      // O batimento da importação é da gestão: quem entrou pelo nome só
+      // precisa saber que a porta responde.
       case "saude":
         return resp({
           ok: true,
           totalOS: await contarRegs("os"),
-          ultimaImportacao: await getMeta("sync_status"),
+          ...(ehToqueNoNome ? {} : { ultimaImportacao: await getMeta("sync_status") }),
         });
 
       default:

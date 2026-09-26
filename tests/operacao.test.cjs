@@ -114,7 +114,7 @@ test('volta do carro: mesmo dia, carro e equipe viram UMA volta; outro carro é 
   assert.equal(junta.os.map(o => o.id).sort().join(), 'a,b');
   assert.equal(junta.dia, hoje);
 });
-test('volta do carro: situação e respostas; registro antigo só com "carro limpo" conta como conferido', () => {
+test('volta do carro: situação e respostas; registro antigo sem "arrumado" conta como conferido', () => {
   const r = {carroLimpo:'sim',carroArrumado:'nao',equipamentosOk:'sim',semAvaria:'sim'};
   const a = os({id:'a',retornoEm:hoje+'T12:00:00',retornoConf:r});
   const b = os({id:'b',retornoEm:hoje+'T13:00:00'});
@@ -124,8 +124,14 @@ test('volta do carro: situação e respostas; registro antigo só com "carro lim
   assert.equal(g.situacao, 'conferida'); assert.equal(g.respostas.carroArrumado, 'nao');
   [g] = O.voltasDoCarro([a,{...b,retornoConf:{...r,carroArrumado:'sim'}}]);
   assert.equal(g.situacao, 'conferida'); assert.equal(g.respostas, null, 'respostas diferentes não viram uma só');
-  [g] = O.voltasDoCarro([os({retornoEm:hoje+'T12:00:00',retornoConf:{carroLimpo:'sim'}})]);
+  [g] = O.voltasDoCarro([os({retornoEm:hoje+'T12:00:00',retornoConf:{carroLimpo:'sim',equipamentosOk:'nao'}})]);
   assert.equal(g.situacao, 'conferida');
+  /* A fila e a nota contam igual (auditoria de 25/09/2026): só o carro, ou só
+     "sem avaria", não é volta conferida para a nota; fica "em parte". */
+  [g] = O.voltasDoCarro([os({retornoEm:hoje+'T12:00:00',retornoConf:{carroLimpo:'sim'}})]);
+  assert.equal(g.situacao, 'parcial');
+  [g] = O.voltasDoCarro([os({retornoEm:hoje+'T12:00:00',retornoConf:{semAvaria:'nao'}})]);
+  assert.equal(g.situacao, 'parcial');
   [g] = O.voltasDoCarro([os({retornoEm:hoje+'T12:00:00',retornoConf:{obs:'só anotação'}})]);
   assert.equal(g.situacao, 'conferir', 'observação sem resposta não é conferência');
 });
@@ -136,4 +142,37 @@ test('volta do carro: a conferir primeiro, depois a mais recente; recorte por di
   assert.deepEqual(O.voltasDoCarro([velha,nova,meio]).map(g => g.os[0].id), ['m','v','n']);
   assert.deepEqual(O.voltasDoCarro([velha,nova,meio],'2026-09-04',hoje).map(g => g.os[0].id), ['m','n']);
   assert.equal(O.diaDaVolta(os({horaRetorno:'17:00',saidaEm:'2026-09-08T08:00:00'})), '2026-09-08', 'retorno antigo sem data usa o dia da saída');
+});
+/* LIMPEZA DO CARRO (25/09/2026): a equipe declara no espelho como o carro
+   voltou (voltaEquipe). A declaração fica AO LADO da conferência do PCP. */
+test('limpeza do carro: declaração da equipe não vira conferência da gestão', () => {
+  const ve = {carroLimpo:'sim',carroArrumado:'sim',equipamentosOk:'sim',semAvaria:'sim',em:hoje+'T21:05:00Z',por:'Ana'};
+  const a = os({id:'a',numero:'1',retornoEm:hoje+'T12:00:00',voltaEquipe:ve});
+  const b = os({id:'b',numero:'2',retornoEm:hoje+'T15:00:00',voltaEquipe:{...ve}});
+  const [g] = O.voltasDoCarro([a,b]);
+  assert.equal(g.situacao, 'conferir', 'só o PCP confere: a declaração não fecha a volta');
+  assert.equal(g.respostas, null);
+  assert.equal(g.equipeDisse, 'toda');
+  assert.equal(g.declaracao.carroLimpo, 'sim');
+  assert.equal(g.semDeclaracao.length, 0);
+});
+test('limpeza do carro: O.S. que voltou depois do registro deixa a declaração em parte', () => {
+  const velha = {carroLimpo:'sim',carroArrumado:'nao',equipamentosOk:'sim',semAvaria:'sim',em:hoje+'T15:00:00Z'};
+  const nova = {...velha, carroArrumado:'sim', em:hoje+'T21:00:00Z'};
+  const a = os({id:'a',numero:'101',retornoEm:hoje+'T12:00:00',voltaEquipe:velha});
+  const b = os({id:'b',numero:'102',retornoEm:hoje+'T13:00:00',voltaEquipe:nova});
+  const c = os({id:'c',numero:'103',retornoEm:hoje+'T19:00:00'});
+  const [g] = O.voltasDoCarro([a,b,c]);
+  assert.equal(g.equipeDisse, 'parte');
+  assert.equal(g.semDeclaracao.join(), '103');
+  assert.equal(g.declaracao.carroArrumado, 'sim', 'vale a declaração mais recente');
+  const [so] = O.voltasDoCarro([c]);
+  assert.equal(so.equipeDisse, 'nenhuma'); assert.equal(so.declaracao, null);
+  const [vazia] = O.voltasDoCarro([os({retornoEm:hoje+'T12:00:00',voltaEquipe:{obs:'só texto'}})]);
+  assert.equal(vazia.equipeDisse, 'nenhuma', 'observação sem resposta não é declaração');
+});
+test('cartão grande: "Dia inteiro" vem antes da Tarde no mesmo dia', () => {
+  const tarde = os({id:'t', instalacao:{data:hoje, periodo:'Tarde'}});
+  const inteiro = os({id:'d', instalacao:{data:hoje, periodo:'Dia inteiro'}});
+  assert.equal(O.destaqueDoDia([tarde, inteiro], hoje).id, 'd');
 });

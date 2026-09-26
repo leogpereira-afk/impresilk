@@ -51,7 +51,13 @@ const AUTH = (() => {
   // validade é conferida porque entrar com crachá vencido daria um app que só
   // recusa. Papel roubado no navegador não concede nada: desde 05/08 o pcp-sync
   // confere papel no servidor.
-  function dono() {
+  //
+  // `venceEm` (segundos, o exp do crachá) deixa a tela avisar antes de vencer.
+  // `aceitarVencido`: o espelho do instalador segue trabalhando com o crachá
+  // vencido (o trabalho fica no aparelho) e precisa saber de quem ele é, para
+  // avisar e pedir nova autorização. Quem decide se entra é o servidor.
+  function dono(opts) {
+    const aceitarVencido = !!(opts && opts.aceitarVencido);
     const t = pegar();
     if (!t) return null;
     const partes = t.split('.');
@@ -61,12 +67,14 @@ const AUTH = (() => {
       while (b.length % 4) b += '=';
       const p = JSON.parse(decodeURIComponent(escape(atob(b))));
       if (p.sis !== SISTEMA) return null;
-      if (typeof p.exp !== 'number' || p.exp < Math.floor(Date.now() / 1000)) return null;
+      if (typeof p.exp !== 'number') return null;
+      const vencido = p.exp < Math.floor(Date.now() / 1000);
+      if (vencido && !aceitarVencido) return null;
       const usuario = String(p.sub || p.nome || '').trim();
       if (!usuario) return null;
       // montagemIndividual: crachá de TOQUE NO NOME (sem senha). Só registra a
       // execução; o app da gestão não abre com ele (ver initLogin).
-      return { usuario, nome: String(p.nome || usuario), papel: String(p.papel || ''), montagemIndividual: p.montagemIndividual === true };
+      return { usuario, nome: String(p.nome || usuario), papel: String(p.papel || ''), montagemIndividual: p.montagemIndividual === true, venceEm: p.exp, vencido };
     } catch { return null; }
   }
 

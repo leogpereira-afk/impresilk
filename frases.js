@@ -612,7 +612,7 @@ function fraseDoDia() {
 }
 
 function fraseFmt(f) {
-  return f ? `“${f.t}” — ${f.a}` : '';
+  return f ? `“${f.t}” (${f.a})` : '';
 }
 
 // ── UI compartilhada (barra de frase + celebração) ────────────────────
@@ -627,7 +627,7 @@ function iniciarFraseBar(intervaloMs) {
     bar.innerHTML =
       '<span class="frase-ico">💬</span>' +
       '<span><span class="frase-txt">' + _esc(f.t) + '</span> ' +
-      '<span class="frase-aut">— ' + _esc(f.a) + '</span></span>';
+      '<span class="frase-aut">(' + _esc(f.a) + ')</span></span>';
   }
   pintar(fraseDoDia());
   bar.onclick = function () {
@@ -673,7 +673,7 @@ function mostrarCelebracao(opts) {
     '<div class="cel-emoji">' + (opts.emoji || '🎉') + '</div>' +
     '<h3 class="cel-titulo">' + _esc(opts.titulo || 'Mandou bem!') + '</h3>' +
     '<div class="cel-frase">“' + _esc(f.t) + '”' +
-      '<span class="cel-aut">— ' + _esc(f.a) + '</span></div>' +
+      '<span class="cel-aut">' + _esc(f.a) + '</span></div>' +
     notasHtml +
     '<button class="btn-primary cel-fechar" id="cel-fechar-btn">Continuar 🚀</button>';
 

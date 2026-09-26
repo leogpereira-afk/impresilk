@@ -24,9 +24,13 @@ const STORE = (() => {
 
   // ── IndexedDB (fotos) ──────────────────────────────────────────────────────
   let _db = null;
+  // Outra aba apagou ou atualizou a base (ver onversionchange): esta aba ficou
+  // com a sessão anterior na memória e não reabre a base para não regravá-la.
+  let _baseFechada = false;
 
   function _openDB() {
     if (_db) return Promise.resolve(_db);
+    if (_baseFechada) return Promise.reject(new Error('A base deste app foi trocada em outra aba. Recarregue a página.'));
     return new Promise((resolve, reject) => {
       // Versão 2: entrou o armazém 'os'. Ver "O CACHE DAS O.S MORA AQUI".
       const req = indexedDB.open('impresilk_inst', 2);
@@ -35,7 +39,25 @@ const STORE = (() => {
         if (!db.objectStoreNames.contains('fotos')) db.createObjectStore('fotos', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('os'))    db.createObjectStore('os');
       };
-      req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+      req.onsuccess = e => {
+        const db = e.target.result;
+        _db = db;
+        /* OUTRA ABA PEDIU A BASE: SOLTAR A CONEXÃO. Sair ou autorizar o
+           aparelho para outra pessoa apaga a base (limparCache), e a gestão
+           aberta em outra aba segurava a conexão: o delete ficava bloqueado e
+           todo open seguinte esperava atrás dele. A foto não terminava de
+           gravar e o cache das O.S parava de ir para o disco. Esta aba não
+           reabre a base depois disso: ela guarda na memória as O.S da sessão
+           que saiu, e regravá-las na base nova as entregaria ao próximo
+           crachá. A tela recebe 'base-trocada' para pedir a recarga. */
+        db.onversionchange = () => {
+          try { db.close(); } catch {}
+          if (_db === db) _db = null;
+          _baseFechada = true;
+          _notifyListeners('base-trocada', {});
+        };
+        resolve(db);
+      };
       req.onerror   = e => reject(e.target.error);
     });
   }
@@ -61,6 +83,17 @@ const STORE = (() => {
   }
 
   async function delFoto(id) {
+    /* FOTO APAGADA ANTES DE SUBIR LEVA JUNTO O ENVIO PENDENTE. Sem sinal, o
+       instalador tirava a foto, via que ficou ruim e tocava no ×: o arquivo
+       saía do aparelho, mas o putPhoto ficava na fila para sempre (não havia
+       o que enviar). O indicador ficava em ⏳ e "Sair" e "autorizar para outra
+       pessoa" recusavam sem saída. A foto nunca chegou ao servidor, então não
+       há o que apagar lá. */
+    const q = getQueue();
+    if (q.some(x => x.action === 'putPhoto' && x.fileId === id)) {
+      _gravarFila(q.filter(x => !(x.action === 'putPhoto' && x.fileId === id)));
+      _failCount.delete('putPhoto:' + id);
+    }
     const db = await _openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction('fotos', 'readwrite');
@@ -78,14 +111,18 @@ const STORE = (() => {
     } catch { return fallback; }
   }
 
+  // Devolve se gravou: quem guarda o que não pode se perder (a fila) precisa
+  // saber, em vez de seguir como se tivesse gravado.
   function lsSet(key, value) {
     try {
       localStorage.setItem(key, JSON.stringify(value));
+      return true;
     } catch (e) {
       if (e && e.name === 'QuotaExceededError') {
         console.error('[store] QuotaExceededError em', key);
-        _notifyListeners('quota', null);
+        _notifyListeners('quota', { chave: key });
       }
+      return false;
     }
   }
 
@@ -131,7 +168,7 @@ const STORE = (() => {
         // Disco cheio de verdade (ou IndexedDB indisponível): avisa a tela em
         // vez de perder a gravação em silêncio, como acontecia antes.
         console.error('[store] falha ao gravar as O.S no IndexedDB', e);
-        _notifyListeners('quota', null);
+        if (!_baseFechada) _notifyListeners('quota', null);
       }
     }, 250);
   }
@@ -168,6 +205,14 @@ const STORE = (() => {
         } else {
           _osMem = Array.isArray(daBase) ? daBase : [];
         }
+        // Fila que não coube no localStorage na sessão anterior (ver _gravarFila).
+        const filaDisco = await new Promise(resolve => {
+          const tx  = db.transaction('os', 'readonly');
+          const req = tx.objectStore('os').get('fila');
+          req.onsuccess = e => resolve(e.target.result || null);
+          req.onerror   = () => resolve(null);
+        });
+        if (Array.isArray(filaDisco) && filaDisco.length) _restaurarFila(filaDisco);
       } catch (e) {
         // Sem IndexedDB: segue no localStorage, como antes.
         _semIDB = true;
@@ -200,6 +245,13 @@ const STORE = (() => {
          meses já carregada — e se a sessão terminasse sem um pull bem-sucedido
          (só olhou, ou estava sem rede), tudo se perdia. */
       if (!_semIDB) { try { localStorage.removeItem(K.ENTREGUES); } catch {} }
+      /* ARMAZENAMENTO PERSISTENTE. Sem ele, o navegador pode despejar a origem
+         inteira quando o aparelho aperta de espaço, e vão junto as fotos que
+         ainda não subiram. No Chrome o pedido não abre pergunta nenhuma. */
+      try {
+        const st = typeof navigator !== 'undefined' && navigator.storage;
+        if (st && st.persist && st.persisted) st.persisted().then(ja => ja || st.persist()).catch(() => {});
+      } catch {}
       return _osMem;
     })();
     return _prontoP;
@@ -262,19 +314,67 @@ const STORE = (() => {
   function saveCFG(cfg) {
     const baseCfg = getCFG();
     lsSet(K.CFG, cfg);
-    _enqueue({ action: 'setCfg', cfg, baseCfg });
+    // `em` separa uma gravação da outra na fila (ver _enqueue e _removeFromQueue).
+    _enqueue({ action: 'setCfg', cfg, baseCfg, em: Date.now() + '-' + Math.random().toString(36).slice(2, 8) });
     trySync();
   }
 
   // ── Fila offline ──────────────────────────────────────────────────────────
-  function getQueue() { return lsGet(K.FILA, []); }
+  /* A FILA NÃO SE PERDE CALADA QUANDO O localStorage ENCHE.
+     Os sistemas da casa dividem os ~5 MB da mesma origem. Com o cofre cheio,
+     `lsSet` engolia o erro e a ação do instalador não entrava na fila: o
+     indicador dizia ✅, "Sair" deixava apagar a base e o check-in ou a
+     finalização sumiam. Agora a fila que não coube fica em memória (getQueue
+     lê dela, então o envio, o "Sair" e o limparCache enxergam o item) e ganha
+     uma cópia no IndexedDB, que o pronto() devolve se o app fechar antes de o
+     cofre abrir espaço. */
+  let _filaMem = null;
+  function getQueue() {
+    // Cópia a cada leitura, como o localStorage faz: quem lê mexe no que leu.
+    if (_filaMem) return JSON.parse(JSON.stringify(_filaMem));
+    return lsGet(K.FILA, []);
+  }
+
+  function _gravarFila(q) {
+    if (lsSet(K.FILA, q)) {
+      if (_filaMem) { _filaMem = null; _filaNoDisco(null); }
+      return true;
+    }
+    _filaMem = JSON.parse(JSON.stringify(q || []));
+    _filaNoDisco(_filaMem);
+    return false;
+  }
+
+  // Cópia da fila no IndexedDB só enquanto o localStorage recusa; null apaga.
+  async function _filaNoDisco(q) {
+    if (_semIDB) return;
+    try {
+      const db = await _openDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('os', 'readwrite');
+        if (q) tx.objectStore('os').put(q, 'fila'); else tx.objectStore('os').delete('fila');
+        tx.oncomplete = resolve;
+        tx.onerror    = e => reject(e.target.error);
+      });
+    } catch (e) { console.error('[store] fila sem cópia no IndexedDB', e); }
+  }
+
+  /* Boot: a cópia do IndexedDB É a fila. Ela só existe quando a última
+     gravação no localStorage falhou, então a do localStorage é a última que
+     coube, mais velha. Juntar as duas devolvia à fila o que já tinha sido
+     aceito depois (a fila menor ainda não cabia e o localStorage ficava com a
+     antiga), e o reenvio com o rev velho virava conflito contra a própria
+     gravação. */
+  function _restaurarFila(doDisco) {
+    if (_gravarFila(doDisco)) _filaNoDisco(null);
+  }
 
   function _enqueue(item) {
     let q = getQueue();
     // Deduplica upserts da mesma O.S
     if (item.action === 'upsert') {
       const i = q.findIndex(x => x.action === 'upsert' && x.os.id === item.os.id);
-      if (i >= 0) { q[i] = item; lsSet(K.FILA, q); return; }
+      if (i >= 0) { q[i] = item; _gravarFila(q); return; }
     }
     // Quando deleta uma O.S, descarta upserts pendentes dela (não faz sentido
     // mandar uma versão "atualizada" de algo que vai ser apagado em seguida).
@@ -282,21 +382,31 @@ const STORE = (() => {
       q = q.filter(x => !(x.action === 'upsert' && x.os && x.os.id === item.id));
       // Se já existe um delete pra mesma id na fila, evita duplicar.
       if (q.some(x => x.action === 'delete' && x.id === item.id)) {
-        lsSet(K.FILA, q);
+        _gravarFila(q);
         return;
       }
+    }
+    /* UMA CONFIGURAÇÃO NA FILA, NÃO UMA POR CLIQUE. Cada setCfg leva a
+       configuração inteira duas vezes (cfg e baseCfg; com os logos das equipes,
+       centenas de KB), e cada confirmação de participação empilhava mais um no
+       localStorage que os sistemas da casa dividem. Fica o cfg do último com a
+       base do primeiro: a mescla do servidor vê as duas mudanças juntas. Se o
+       primeiro já estiver em voo, o trySync rebaseia este quando ele for aceito. */
+    if (item.action === 'setCfg') {
+      const i = q.findIndex(x => x.action === 'setCfg');
+      if (i >= 0) { q[i] = Object.assign({}, item, { baseCfg: q[i].baseCfg || item.baseCfg }); _gravarFila(q); return; }
     }
     // Deletar uma foto descarta o upload pendente dela (senão o servidor
     // recebe o put depois do delete e a foto "excluída" ressuscita lá).
     if (item.action === 'deletePhoto') {
       q = q.filter(x => !(x.action === 'putPhoto' && x.fileId === item.fileId));
       if (q.some(x => x.action === 'deletePhoto' && x.fileId === item.fileId)) {
-        lsSet(K.FILA, q);
+        _gravarFila(q);
         return;
       }
     }
     q.push(item);
-    lsSet(K.FILA, q);
+    _gravarFila(q);
   }
 
   // Assinatura estável de um item da fila (independe da referência do objeto).
@@ -324,12 +434,14 @@ const STORE = (() => {
         if (item.action === 'upsert' && x.os && item.os && x.os.atualizadoEm !== item.os.atualizadoEm) {
           return true;
         }
+        // Mesma regra para a configuração: a que foi salva durante o envio fica.
+        if (item.action === 'setCfg' && x.em !== item.em) return true;
         removido = true;
         return false;
       }
       return true;
     });
-    lsSet(K.FILA, q);
+    _gravarFila(q);
   }
 
   // ── Chamada à API ─────────────────────────────────────────────────────────
@@ -372,6 +484,7 @@ const STORE = (() => {
         throw Object.assign(new Error((corpo && corpo.error) ? String(corpo.error) : 'HTTP ' + res.status), {
           status: res.status,
           semSessao: !!(corpo && corpo.semSessao),
+          definitivo: !!(corpo && corpo.definitivo),
           servidor: (corpo && corpo.error) ? String(corpo.error) : ''
         });
       }
@@ -424,7 +537,7 @@ const STORE = (() => {
         mudou = true;
       }
     }
-    if (mudou) lsSet(K.FILA, q);
+    if (mudou) _gravarFila(q);
   }
 
   function _notifyListeners(event, data) {
@@ -444,6 +557,12 @@ const STORE = (() => {
   // avisa a tela; o trabalho permanece na fila para recuperação.
   const _failCount = new Map();
   const MAX_FAILS = 25;
+  // Recusa de validação (400/422) já dita nesta sessão: assinatura -> motivo.
+  const _recusaDita = new Map();
+  /* PRAZO PRÓPRIO PARA A FOTO. A foto vai como base64 dentro do JSON (200 a
+     500 KB). Com uma barra de sinal isso passa de 15 s, o prazo padrão: o envio
+     era abortado e recomeçava do zero a cada ciclo, sem nunca terminar. */
+  const PRAZO_FOTO_MS = 90000;
 
   async function trySync() {
     if (_syncing) return;
@@ -455,7 +574,14 @@ const STORE = (() => {
     _notifySync('pending', q.length);
 
     let consecutiveNetFails = 0;
-    for (const item of [...q]) {
+    /* O LEVE PRIMEIRO. A foto entra na fila antes da O.S que a cita, e o laço
+       para no primeiro erro de rede: com sinal fraco a foto estourava o prazo
+       e a saída, o carro liberado e a finalização (poucos KB) nem eram
+       tentados, o dia inteiro. As fotos vão por último; entre os demais a
+       ordem se mantém (o sort é estável). A gestão vê a referência da foto
+       uns minutos antes do arquivo, o que é melhor do que não ver a O.S. */
+    const ordem = [...q].sort((a, b) => (a.action === 'putPhoto') - (b.action === 'putPhoto'));
+    for (const item of ordem) {
       const sig = _sigFila(item);
       // Pula itens em conflito até o usuário resolver.
       if (_flagged.has(sig)) continue;
@@ -464,16 +590,21 @@ const STORE = (() => {
           let base64 = item.base64;
           if (!base64) { const f = await getFoto(item.fileId); base64 = f && f.base64; }
           if (!base64) {
-            if (!_failCount.has(sig)) _notifyListeners('item-pendente', {item,motivo:'Foto não encontrada no aparelho; confira o anexo.'});
-            _failCount.set(sig,1); continue;
+            // Sem o arquivo não há o que enviar: ficar na fila só prendia o
+            // "Sair" e o "autorizar" para sempre. Sai e é dito uma vez.
+            _removeFromQueue(item); _failCount.delete(sig);
+            _notifyListeners('foto-falhou', { item, motivo: 'Uma foto não estava mais neste aparelho e não foi enviada. Confira as fotos da O.S.' });
+            continue;
           }
-          const res = await api({ action: 'putPhoto', base64, mime: item.mime, fileId: item.fileId });
+          const res = await apiFn('os', { action: 'putPhoto', base64, mime: item.mime, fileId: item.fileId }, PRAZO_FOTO_MS);
           if (res && res.fileId) { _removeFromQueue(item); _failCount.delete(sig); }
         } else {
-          const res = await api(item);
+          // O motivo da última recusa é anotação do aparelho, não vai ao servidor.
+          const { recusa: _recusa, ...envio } = item;
+          const res = await api(envio);
           if (res && res.conflitoCfg) {
             _flagged.add(sig);
-            lsSet(K.CFGCONFLITO, {local:item.cfg, remoto:res.servidorCfg, campos:res.campos || []});
+            lsSet(K.CFGCONFLITO, {local:item.cfg, base:item.baseCfg || null, remoto:res.servidorCfg, campos:res.campos || []});
             _notifyListeners('conflito-cfg', lsGet(K.CFGCONFLITO));
             continue;
           }
@@ -484,10 +615,21 @@ const STORE = (() => {
           }
           _removeFromQueue(item);
           _failCount.delete(sig);
+          _recusaDita.delete(sig);
+          if (item.action === 'setCfg') {
+            // Configuração salva enquanto esta ia: a base dela passa a ser a
+            // que acabou de ser aceita (como se tivesse entrado na fila depois).
+            const q2 = getQueue(), resto = q2.find(x => x.action === 'setCfg');
+            if (resto) { resto.baseCfg = item.cfg; _gravarFila(q2); }
+          }
           if (item.action === 'setCfg' && res && res.cfg) {
             if (res.versao) lsSet(K.CFGVER, res.versao);
             if (!getQueue().some(x => x.action === 'setCfg')) {
-              lsSet(K.CFG, res.cfg); _notifyListeners('cfg', getCFG());
+              // A resposta costuma ser a própria config que acabou de ser salva:
+              // repintar a aba por ela apagava o que estava sendo digitado.
+              const antes = JSON.stringify(getCFG());
+              lsSet(K.CFG, _comCamposLocais(res.cfg));
+              if (JSON.stringify(getCFG()) !== antes) _notifyListeners('cfg', getCFG());
             }
           }
           if (item.action === 'upsert' && res && res.os) {
@@ -496,6 +638,13 @@ const STORE = (() => {
             if (idx >= 0) {
               let mudou = false;
               if (all[idx].atualizadoEm === item.os.atualizadoEm) {
+                /* O REV NOVO VAI PARA O OBJETO QUE SAI DA LISTA. O saveOS guarda
+                   na lista o PRÓPRIO rascunho da ficha aberta (_draft do espelho,
+                   _modalDraft da gestão). Trocar o objeto sem isto deixava o
+                   rascunho com o rev lido na abertura, e a gravação seguinte da
+                   mesma ficha levava "Conflito de edição" contra a própria
+                   escrita: marcar o item 2 depois do item 1, com sinal, bastava. */
+                if (typeof res.os.rev === 'number') all[idx].rev = res.os.rev;
                 all[idx] = res.os; mudou = true;
               }
               // O rev é adotado SEMPRE, inclusive se editaram durante o envio:
@@ -516,6 +665,14 @@ const STORE = (() => {
               if (mudou) _setAllOS(all);
             }
             _revNaFila(res.os);
+          }
+          /* GRAVOU, MAS NÃO TUDO. Para o crachá de toque o servidor grava o
+             resto e devolve em `avisos` o que ficou de fora (carro não
+             liberado, finalização não aceita, marca de item sem item). Sem
+             este evento o aparelho só via a O.S. voltar ao estado do
+             escritório, sem saber por quê. */
+          if (item.action === 'upsert' && res && Array.isArray(res.avisos) && res.avisos.length) {
+            _notifyListeners('item-aviso', { item, avisos: res.avisos.map(String) });
           }
         }
         consecutiveNetFails = 0;
@@ -546,7 +703,12 @@ const STORE = (() => {
            pesos que não somam 100 — e vai dizer não de novo. Deixar o setCfg na
            frente da fila travava todo o resto do aparelho. */
         const recusaCfg = e && item.action === 'setCfg' && (e.status === 400 || e.status === 422);
-        if (e && (e.status === 403 || recusaCfg)) {
+        /* O.S. EXCLUÍDA OU FORA DA EQUIPE (422 com `definitivo`) também: não
+           passa em reenvio nenhum, e o item parado travava o Sair, a troca de
+           instalador e a entrada da gestão neste aparelho. O espelho guarda a
+           cópia no aviso de recusa (registrarRecusa). */
+        const recusaDefinitiva = e && item.action === 'upsert' && e.definitivo && (e.status === 400 || e.status === 422);
+        if (e && (e.status === 403 || recusaCfg || recusaDefinitiva)) {
           _removeFromQueue(item);
           _failCount.delete(sig);
           // Recusado não pode continuar valendo NESTE aparelho como se tivesse
@@ -575,6 +737,26 @@ const STORE = (() => {
         if (isNetwork) {
           consecutiveNetFails++;
           if (consecutiveNetFails >= 1) break; // sai do loop, tenta no próximo trySync
+        } else if (item.action === 'upsert' && (status === 400 || status === 422)) {
+          /* RECUSA DE VALIDAÇÃO É DITA NA PRIMEIRA VEZ. O servidor responde na
+             hora com a frase certa ("O cliente ainda não confirmou esta
+             instalação", "O retorno não pode ser anterior à saída"), mas o
+             aviso só vinha na 25ª tentativa, uns 12 minutos com o app aberto:
+             quem abre o app por 2 minutos nunca via, e a O.S ficava presa com a
+             pílula dizendo que "some sozinho". O item FICA (pode passar depois
+             que o PCP corrigir) e o motivo vai gravado nele, para a tela poder
+             mostrar mesmo depois de reabrir o app. */
+          const motivo = e.servidor || msg;
+          const q2 = getQueue();
+          const alvo = q2.find(x => x.action === 'upsert' && x.os && x.os.id === item.os.id && x.os.atualizadoEm === item.os.atualizadoEm);
+          if (alvo && (!alvo.recusa || alvo.recusa.motivo !== motivo)) {
+            alvo.recusa = { status, motivo, em: new Date().toISOString() };
+            _gravarFila(q2);
+          }
+          if (_recusaDita.get(sig) !== motivo) {
+            _recusaDita.set(sig, motivo);
+            _notifyListeners('item-pendente', { item, motivo, status });
+          }
         } else {
           // Delete/deletePhoto NUNCA são descartados: são leves (~50 bytes) e
           // descartar ressuscitaria a O.S excluída no pull seguinte.
@@ -671,6 +853,18 @@ const STORE = (() => {
     return { updated: changed, incremental: true, mudancas: res.os.length };
   }
 
+  /* A FILA "A LANÇAR" NÃO SAI COM A JANELA. O.S. que o ERP baixou sem ninguém
+     finalizar no PCP (a partir do corte da direção, CORTE_LANCAMENTO_MANUAL no
+     casa.js) espera o lançamento manual. A lista completa só traz finalizadas
+     de JANELA_LOCAL_DIAS: passados 60 dias da baixa a pendência sumia da fila e
+     a instalação ficava fora da contagem sem ninguém ver. O que o aparelho já
+     tem fica; a exclusão chega pelo incremental (lápide), como sempre. */
+  function _esperaLancamento(o) {
+    if (!o || !o.finalizadaEm || o.entregaLancada || o.tipo === 'interno') return false;
+    const erp = (o.baixaAutoERP && o.baixaAutoERP.em === o.finalizadaEm) || /^Mubisys\b/i.test(o.finalizadoPor || '');
+    const corte = typeof CORTE_LANCAMENTO_MANUAL === 'string' ? CORTE_LANCAMENTO_MANUAL : '2026-09-15';
+    return erp && String(o.finalizadaEm).slice(0, 10) >= corte;
+  }
   async function _pullCompleto(onRefresh) {
     // So uma lista completa autoriza remover registros do cache. A coleta
     // nao altera a memoria; edicao feita durante a rede sera lida no merge.
@@ -714,7 +908,7 @@ const STORE = (() => {
     }
     // O que o servidor nao mandou sai daqui (poda por janela, lapide, ou
     // exclusao) -- menos o que este aparelho ainda nao conseguiu enviar.
-    for (const o of local) if (pendentes.has(o.id) && !remotas.has(o.id) && !excluidas.has(o.id)) resultado.push(o);
+    for (const o of local) if ((pendentes.has(o.id) || _esperaLancamento(o)) && !remotas.has(o.id) && !excluidas.has(o.id)) resultado.push(o);
     if (resultado.length !== local.length) changed = true;
     if (changed) {
       _setAllOS(resultado);
@@ -836,30 +1030,71 @@ const STORE = (() => {
   // vez de mesclar: o problema é justamente a chave a mais, que a mescla
   // preserva. `usuarios`/`funcionarios` ficam de fora porque o getCfg não os
   // manda para quem não é admin — apagá-los aqui seria perder cache à toa.
+  // O servidor não manda `usuarios` nem a agenda de `funcionarios` a quem não é
+  // admin, e a resposta do setCfg não traz nenhum dos dois nem para o admin.
+  // Adotar a cópia dele como veio apagava a agenda de contatos deste aparelho a
+  // cada configuração salva. Quem adota a config do servidor passa por aqui.
+  function _comCamposLocais(cfgServidor) {
+    const local = lsGet(K.CFG, {}) || {};
+    const novo = Object.assign({}, cfgServidor || {});
+    for (const campo of ['usuarios', 'funcionarios']) {
+      if (!(campo in novo) && campo in local) novo[campo] = local[campo];
+    }
+    return novo;
+  }
+
   async function reverterCFG() {
     try {
       const res = await api({ action: 'getCfg' });
       if (!res || !res.cfg) return;
-      const local = lsGet(K.CFG, {}) || {};
-      const novo = Object.assign({}, res.cfg);
-      for (const campo of ['usuarios', 'funcionarios']) {
-        if (!(campo in novo) && campo in local) novo[campo] = local[campo];
-      }
+      const novo = _comCamposLocais(res.cfg);
       lsSet(K.CFG, novo);
       _notifyListeners('cfg', novo);
     } catch { /* sem rede: o próximo pull resolve */ }
   }
 
   function conflitoCFG() { return lsGet(K.CFGCONFLITO, null); }
+  /* "REGRAVAR A MINHA" VALE PARA O QUE EU MUDEI. Regravava a configuração
+     inteira deste aparelho sobre a do servidor: tudo o que o outro aparelho
+     mudou em qualquer campo (escala, vínculo, participação) voltava ao valor
+     velho, calado. Agora a minha vence só onde eu mudei em relação à base que
+     eu tinha; o resto fica como está no servidor. Coleção com id (equipes,
+     participações) é comparada item a item, como a mescla do servidor.
+     Registro antigo, sem a base, segue a regra velha. */
+  const _igualCfg = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const _objCfg = x => x && typeof x === 'object' && !Array.isArray(x);
+  const _porIdCfg = a => Array.isArray(a) && a.every(x => _objCfg(x) && typeof x.id === 'string' && x.id);
+  function _minhaSobre(b, l, r) {
+    if (_igualCfg(l, b)) return r;
+    if (_objCfg(l) && _objCfg(r) && (_objCfg(b) || b === undefined)) {
+      const out = {};
+      for (const k of new Set([...Object.keys(b || {}), ...Object.keys(l), ...Object.keys(r)])) {
+        const v = _minhaSobre((b || {})[k], l[k], r[k]);
+        if (v !== undefined) out[k] = v;
+      }
+      return out;
+    }
+    if (_porIdCfg(l) && _porIdCfg(r) && (_porIdCfg(b) || b === undefined)) {
+      const bm = new Map((b || []).map(x => [x.id, x])), lm = new Map(l.map(x => [x.id, x])), rm = new Map(r.map(x => [x.id, x]));
+      return [...new Set([...rm.keys(), ...lm.keys(), ...bm.keys()])]
+        .map(id => _minhaSobre(bm.get(id), lm.get(id), rm.get(id))).filter(x => x !== undefined);
+    }
+    return l;
+  }
   function resolverCFG(manterLocal) {
     const conflito = conflitoCFG(); if (!conflito) return;
     // Salva cópia recuperável antes de qualquer escolha; mantém as outras filas.
     lsSet('impresilk_inst_cfgrecuperacao', {em:new Date().toISOString(),cfg:getCFG()});
     const local = getCFG();
-    lsSet(K.FILA, getQueue().filter(x => x.action !== 'setCfg'));
-    lsSet(K.CFG, conflito.remoto || {});
+    _gravarFila(getQueue().filter(x => x.action !== 'setCfg'));
+    lsSet(K.CFG, _comCamposLocais(conflito.remoto));
     localStorage.removeItem(K.CFGCONFLITO); _flagged.delete('setCfg');
-    if (manterLocal) saveCFG(local); // revisão explícita da pessoa; base é a remota exibida
+    if (manterLocal) {
+      // usuarios/funcionarios não vêm na cópia do servidor: ficam os daqui.
+      const novo = conflito.base ? _comCamposLocais(_minhaSobre(conflito.base, local, conflito.remoto)) : local;
+      for (const c of ['usuarios', 'funcionarios']) if (c in local) novo[c] = local[c];
+      saveCFG(novo); // revisão explícita da pessoa; base é a remota exibida
+    }
     else _notifyListeners('cfg', getCFG());
     trySync();
   }
@@ -1383,44 +1618,70 @@ const STORE = (() => {
       const img = new Image();
       const url = URL.createObjectURL(file);
       img.onload = () => {
-        const MAX = 1280;
-        let { width, height } = img;
-        if (width > MAX || height > MAX) {
-          const ratio = Math.min(MAX / width, MAX / height);
-          width  = Math.round(width  * ratio);
-          height = Math.round(height * ratio);
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width  = width;
-        canvas.height = height;
-        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-        URL.revokeObjectURL(url);
-        resolve(canvas.toDataURL('image/jpeg', 0.75));
+        // Celular sem memória para a foto grande: o canvas falha em vez de
+        // devolver a imagem. Vira null, que o pushPhoto avisa.
+        try {
+          const MAX = 1280;
+          let { width, height } = img;
+          if (width > MAX || height > MAX) {
+            const ratio = Math.min(MAX / width, MAX / height);
+            width  = Math.round(width  * ratio);
+            height = Math.round(height * ratio);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width  = width;
+          canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+          URL.revokeObjectURL(url);
+          resolve(canvas.toDataURL('image/jpeg', 0.75));
+        } catch { URL.revokeObjectURL(url); resolve(null); }
       };
       img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
       img.src = url;
     });
   }
 
+  /* A FOTO VOLTA NA HORA; O ENVIO É DA FILA.
+     Antes o pushPhoto esperava o upload (até 15 s por foto) para devolver o
+     id, e só então a tela ligava a foto à O.S. Com sinal fraco, 3 fotos eram
+     45 s de "Enviando": se o instalador fechava a ficha ou abria outra nesse
+     meio tempo, a foto caía na O.S errada ou em nenhuma. E se o celular
+     fechasse a aba durante a espera, a foto guardada não estava nem na fila.
+     Agora ela é guardada, entra na fila e o id volta logo; a fila sobe o
+     arquivo (o servidor aceita o mesmo id duas vezes).
+     Foto que não deu para ler ou guardar devolve null e é DITA ('foto-falhou'):
+     antes sumia calada, e o instalador achava que era só lentidão. */
   async function pushPhoto(file) {
     const base64 = await compressImage(file);
-    if (!base64) return null;
+    if (!base64) {
+      _notifyListeners('foto-falhou', { motivo: 'Não deu para ler esta foto. Tire de novo pela câmera.' });
+      return null;
+    }
     const mime   = 'image/jpeg';
     const fileId = 'foto_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
 
-    // Salva local (IndexedDB)
-    await putFoto(fileId, base64, mime);
-
-    // Tenta enviar ao servidor
-    if (navigator.onLine) {
-      try {
-        const res = await api({ action: 'putPhoto', base64, mime, fileId });
-        return res.fileId || fileId;
-      } catch {}
+    try {
+      await putFoto(fileId, base64, mime);
+    } catch (e) {
+      // Sem espaço no aparelho para guardar: com sinal, sobe direto (a tela
+      // espera, mas a foto não se perde); sem sinal, é dito.
+      console.error('[store] foto não coube no aparelho', e);
+      if (_baseFechada) {
+        _notifyListeners('foto-falhou', { motivo: 'O app foi aberto em outra aba. Recarregue a página e tire a foto de novo.' });
+        return null;
+      }
+      if (navigator.onLine) {
+        try {
+          const res = await apiFn('os', { action: 'putPhoto', base64, mime, fileId }, PRAZO_FOTO_MS);
+          if (res && res.fileId) return res.fileId;
+        } catch {}
+      }
+      _notifyListeners('foto-falhou', { motivo: 'Celular sem espaço para guardar a foto. Libere espaço e tire de novo.' });
+      return null;
     }
 
-    // Falhou → enfileira só o fileId (o base64 já está no IndexedDB)
     _enqueue({ action: 'putPhoto', mime, fileId });
+    trySync();
     return fileId;
   }
 
@@ -1496,6 +1757,7 @@ const STORE = (() => {
     try {
       localStorage.removeItem(K.OS);
       localStorage.removeItem(K.FILA);
+      _filaMem = null;
       localStorage.removeItem(K.LASTSYNC);
       localStorage.removeItem(K.VALORES);
       localStorage.removeItem(K.ELENCO);
@@ -1533,13 +1795,32 @@ const STORE = (() => {
     _setAllOS(all);
     // Remove item da fila para esta O.S e libera a flag de conflito.
     const q = getQueue().filter(x => !(x.action === 'upsert' && x.os.id === remoteOS.id));
-    lsSet(K.FILA, q);
+    _gravarFila(q);
     _flagged.delete('upsert:' + remoteOS.id);
     _conflitoRemoto.delete(remoteOS.id);
   }
 
   // Força sobrescrita: grava o local e re-enfileira
-  function sobrescreverServidor(localOS) {
+  function sobrescreverServidor(localOS, mesclar) {
+    /* VAI A VERSÃO MAIS NOVA DESTE APARELHO, NÃO A DA HORA DO CONFLITO. O
+       `localOS` é a cópia que estava na fila quando o conflito apareceu. Quem
+       seguiu trabalhando na ficha antes de tocar no botão (mais fotos, a
+       finalização) tinha essas gravações trocadas pela cópia velha. A lista
+       tem preferência no empate porque o objeto dela costuma ser o rascunho da
+       ficha aberta: o rev adotado abaixo chega a ele, e a gravação seguinte da
+       mesma ficha não bate no mesmo conflito. */
+    const naLista = getAllOS().find(o => o.id === localOS.id);
+    const naFila  = (getQueue().find(x => x.action === 'upsert' && x.os && x.os.id === localOS.id) || {}).os;
+    const t = o => new Date((o && o.atualizadoEm) || 0).getTime();
+    let alvo = localOS;
+    if (naFila && t(naFila) > t(alvo)) alvo = naFila;
+    if (naLista && t(naLista) >= t(alvo)) alvo = naLista;
+    localOS = alvo;
+    // A mescla com o servidor (fotos e saída da rua) vai no objeto que SAI
+    // daqui. Feita antes, na cópia da hora do conflito, ela era trocada pelo
+    // objeto da lista no empate e o envio ia sem as fotos que o diálogo
+    // prometeu manter.
+    if (typeof mesclar === 'function') mesclar(localOS);
     // Atualiza timestamp para ser mais novo
     localOS.atualizadoEm = new Date().toISOString();
     // ...e adota o rev que o servidor mostrou no banner. Forçar é dizer "minha
@@ -1551,6 +1832,7 @@ const STORE = (() => {
     _conflitoRemoto.delete(localOS.id);
     _flagged.delete('upsert:' + localOS.id);
     saveOS(localOS);
+    return localOS;
   }
 
   // ── Reconexão automática ───────────────────────────────────────────────────
@@ -1573,7 +1855,9 @@ const STORE = (() => {
     if (data.cfg) lsSet(K.CFG, data.cfg);
     // Limpa a fila pendente — referências a IDs que sumiram no backup virariam
     // erros eternos no servidor; o pull seguinte re-sincroniza o que faltar.
-    lsSet(K.FILA, []);
+    // MENOS AS FOTOS: foto que ainda não subiu só existe neste aparelho, e o
+    // arquivo do backup não a traz. Zerar o envio dela a perdia para sempre.
+    _gravarFila(getQueue().filter(x => x.action === 'putPhoto' || x.action === 'deletePhoto'));
     _flagged.clear();
     _failCount.clear();
   }
@@ -1592,7 +1876,13 @@ const STORE = (() => {
   //
   // Grava ISO LOCAL (sem Z) de propósito: quem lê usa diaLocalISO, que parseia
   // como hora local — assim o dia volta igual ao que foi gravado.
-  function carimbarMomento(os, campoHora, campoStamp) {
+  //
+  // `aoVivo` (opcional): a hora foi carimbada NO ATO (a equipe tocou agora, no
+  // espelho ou no botão da gestão). Aí o dia é hoje, e não o da agenda: a O.S
+  // vencida executada hoje saía como "sem retorno" num dia em que ninguém saiu,
+  // e o serviço de vários dias punha a volta do carro no primeiro dia. Sem o
+  // parâmetro vale a regra da agenda, que é a certa para hora digitada depois.
+  function carimbarMomento(os, campoHora, campoStamp, aoVivo) {
     if (!os) return;
     const m = String(os[campoHora] || '').match(/^(\d{1,2}):(\d{2})/);
     if (!m) { delete os[campoStamp]; return; }
@@ -1601,8 +1891,21 @@ const STORE = (() => {
     const agendado = String((os.instalacao && os.instalacao.data) || '');
     const d = new Date();
     const hoje = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const dia = jaTem || (/^\d{4}-\d{2}-\d{2}$/.test(agendado) ? agendado : hoje);
+    const dia = jaTem || (aoVivo === true ? hoje : (/^\d{4}-\d{2}-\d{2}$/.test(agendado) ? agendado : hoje));
     os[campoStamp] = `${dia}T${m[1].padStart(2, '0')}:${m[2]}:00`;
+    /* VIRADA DA MEIA-NOITE. Instalação noturna (loja, shopping, fachada) que
+       volta depois da meia-noite: saída 22:00 e retorno 01:30 ganhavam o mesmo
+       dia, o retorno ficava ANTES da saída, o servidor recusava a O.S inteira
+       (400) e a finalização, as fotos e o retorno ficavam presos no celular.
+       Retorno recém-carimbado antes da saída é do dia seguinte, a mesma
+       virada que OPERACAO.horas já faz. Só quando o dia não veio de antes. */
+    const saida = String(os.saidaEm || '');
+    if (campoStamp === 'retornoEm' && !jaTem && /^\d{4}-\d{2}-\d{2}T/.test(saida) && os[campoStamp] < saida.slice(0, 19)) {
+      const [a, mm, dd] = dia.split('-').map(Number);
+      const seg = new Date(a, mm - 1, dd + 1);
+      const diaSeg = `${seg.getFullYear()}-${String(seg.getMonth() + 1).padStart(2, '0')}-${String(seg.getDate()).padStart(2, '0')}`;
+      os[campoStamp] = `${diaSeg}T${m[1].padStart(2, '0')}:${m[2]}:00`;
+    }
   }
 
   // ── UUID v4 cripto-seguro (fallback p/ Math.random em ambientes antigos) ──
