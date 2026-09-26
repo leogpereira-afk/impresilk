@@ -1594,20 +1594,19 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 /* ── Lateral da Produção ─────────────────────────────────────────────────── */
 .nav-marca {
   display:flex; align-items:center; gap:8px;
-  padding:6px 10px 16px; color:#fff;
+  padding:0 8px 14px; color:#fff;
   font-weight:750; letter-spacing:-.02em; font-size:.95rem;
 }
-.nav-marca img { height:26px; width:auto; filter:brightness(0) invert(1); }
+.nav-marca img { height:26px; width:auto; max-width:190px; object-fit:contain; filter:brightness(0) invert(1); }
 .nav-ico { width:16px; height:16px; flex-shrink:0; opacity:.85; }
 .nav-grupo {
-  margin: 16px 10px 6px;
-  font-size: .62rem;
-  font-weight: 800;
-  letter-spacing: 1.6px;
+  margin: 14px 10px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
   text-transform: uppercase;
-  color: #8aa6bf;
+  color: var(--muted);
 }
-.nav-grupo:first-of-type { margin-top: 4px; }
 .nav-fundo {
   display: none;
   position: fixed; inset: 0;
@@ -1617,30 +1616,45 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 body.nav-aberta .nav-fundo { display: block; }
 #btn-menu { display: none; }
 .app-body { min-width: 0; }
-/* Barra lateral no padrão dos outros sistemas da casa (RH/Painel): fundo
-   claro, emoji por item, grupo em caixa alta, ativo em verde com a barra à
-   esquerda. Pedido do dono em 14/09/2026 -- antes era navy com ícones SVG. */
+/* Barra lateral no padrão da Central do Léo (pedido do dono em 25/09/2026,
+   para todos os sistemas que têm a lateral): 218px, fundo branco com a linha
+   à direita, item de 36px em 13px, emoji numa coluna de 20px, grupo em 10px
+   caixa alta sem negrito pesado, ativo na cor da marca do PCP (o azul do
+   botão "+ Nova O.S") com a barra de 3px à esquerda. No dedo, 44px.
+   Antes (14/09) era o verde do RH/Painel, com item de 44px em .9rem. */
 #tabs {
   background: #fff;
-  color: #475569;
+  color: var(--muted);
   border-right: 1px solid var(--border);
 }
 #tabs .nav-marca { color: #163654; }
 #tabs .nav-marca img { filter: none; }
-#tabs .nav-grupo { color: #2563eb; letter-spacing: 1.4px; font-size: .66rem; margin: 14px 12px 6px; }
 #tabs .tab {
-  color: #475569;
-  font-weight: 600;
-  font-size: .9rem;
-  min-height: 44px;
-  border-radius: 12px;
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px;
+  display: flex; align-items: center; gap: 9px;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  text-align: left;
+  transition: background .15s, color .15s, box-shadow .15s;
 }
-#tabs .tab .nav-emoji { width: 22px; text-align: center; font-size: 1.05rem; line-height: 1; flex-shrink: 0; }
-#tabs .tab:hover { background: #f1f5f9; color: #1e293b; box-shadow: none; }
-#tabs .tab.active { background: #ecfdf5; color: #1e293b; box-shadow: inset 3px 0 0 #28796a; }
+#tabs .tab .nav-emoji {
+  width: 20px; flex-shrink: 0;
+  display: flex; justify-content: center;
+  text-align: center; font-size: 15px; line-height: 1;
+}
+#tabs .tab:hover { background: var(--bg); color: var(--text); box-shadow: none; }
+/* Texto no azul escuro da marca (5,3:1 sobre o fundo claro); a barra no azul
+   do botão. O azul claro puro ficaria em 3,8:1 no texto de 13px. */
+#tabs .tab.active { background: #eaf3fe; color: var(--blue-d); font-weight: 600; box-shadow: inset 3px 0 var(--blue); }
 #tabs .tab.hidden { display: none; }
+@media (pointer: coarse) {
+  #tabs .tab { min-height: 44px; }
+}
 
 .casa-pagina { display:flex; flex-direction:column; gap:14px; padding-bottom:24px; }
 .casa-pagina-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
@@ -1735,34 +1749,41 @@ body.nav-aberta .nav-fundo { display: block; }
 @media (min-width: 900px) {
   #app:not(.hidden) {
     display: grid;
-    grid-template-columns: 228px 1fr;
+    grid-template-columns: 218px 1fr;
     grid-template-rows: auto auto 1fr;
   }
   .topbar, .frase-bar { grid-column: 1 / -1; }
   .app-body {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: 228px 1fr;
+    grid-template-columns: 218px 1fr;
     min-height: 0;
   }
+  /* Presa na altura da tela, logo abaixo da barra do topo (que também é
+     sticky). Com top:0 ela grudava ATRÁS da barra do topo ao rolar: os
+     primeiros 56px da lateral sumiam e sobrava uma faixa vazia embaixo. */
   #tabs {
     position: sticky;
-    top: 0;
+    top: calc(var(--topbar-h) + env(safe-area-inset-top));
+    height: calc(100vh - var(--topbar-h) - env(safe-area-inset-top));
     height: calc(100dvh - var(--topbar-h) - env(safe-area-inset-top));
     flex-direction: column;
     align-items: stretch;
+    gap: 2px;
     overflow-y: auto;
     overflow-x: hidden;
     border-right: 1px solid var(--border);
     border-bottom: none;
-    padding: 10px 8px 28px;
+    padding: 18px 12px;
     background: #fff;
+    scrollbar-width: thin;
   }
+  #tabs::-webkit-scrollbar { display: block; width: 6px; }
+  #tabs::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
   #tabs .tab {
     display: flex;
     width: 100%;
     justify-content: flex-start;
-    border-radius: 10px;
   }
   #tabs .tab.hidden { display: none; }
   main { min-width: 0; }
