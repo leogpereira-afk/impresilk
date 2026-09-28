@@ -94,6 +94,17 @@ for fn in "${FUNCOES[@]}"; do
     args+=(-F "file=@$arq;filename=$rel;type=$tipo")
   done < <(find "$fn" -type f \( -name '*.ts' -o -name '*.mjs' -o -name '*.js' -o -name '*.json' \) | sort)
 
+  # E O _shared, QUE FICA FORA DA PASTA. pcp-sync e pcp-mubisys importam
+  # `../_shared/pcp-integridade.mjs`; sem ele o Supabase recusa a publicacao com
+  # "Module not found" (28/09/2026, na primeira rodada depois de trocar o token).
+  # O painel ja manda os dois tipos (.ts e .mjs) pelo mesmo motivo.
+  for dep in _shared/*.ts; do
+    [ -f "$dep" ] && args+=(-F "file=@$dep;filename=../$dep;type=application/typescript")
+  done
+  for dep in _shared/*.mjs; do
+    [ -f "$dep" ] && args+=(-F "file=@$dep;filename=../$dep;type=application/javascript")
+  done
+
   # verify_jwt=false de proposito: o preflight CORS chega sem token e o gateway
   # barraria antes de a function rodar. Quem confere o cracha (EQUIPE_JWT_SECRET)
   # e a propria function -- o gateway do Supabase nao conhece esse cracha.
