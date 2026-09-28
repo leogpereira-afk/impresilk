@@ -6,8 +6,8 @@
 // abrisse o código-fonte. Quem autoriza agora é o CRACHÁ da pessoa (store.js),
 // assinado por um segredo que só o servidor conhece. O token antigo foi girado.
 
-// Backend: Supabase (Edge Functions). Antes eram Netlify Functions em
-// /.netlify/functions/. O contrato das ações é o MESMO — só mudou o endereço.
+// Backend: Supabase (Edge Functions). O store.js e o auth.js chamam as
+// functions a partir deste endereço.
 //
 // Os nomes levam prefixo "pcp-" porque o projeto do Supabase é compartilhado
 // com o RH e o Brief: uma function chamada "sync" seria a do RH. O app continua

@@ -4,7 +4,7 @@ name: Deploy (GitHub Pages)
 # Functions pcp-sync / pcp-mubisys), chamado direto pelo navegador.
 #
 # App vanilla, sem build: o passo abaixo so separa o que e SITE do que e
-# ferramenta de repositorio (netlify/, supabase/, scripts/, guias), para nao
+# ferramenta de repositorio (supabase/, scripts/, guias), para nao
 # publicar codigo de servidor junto com a pagina.
 #
 # Nao precisa de 404.html: o app e multipagina (index.html + equipe.html), os
@@ -41,7 +41,7 @@ jobs:
       # que o Pages respondia com 404, e Entregas, Performance, Calendario,
       # Plantoes e Programacao abriram VAZIOS por dias sem ninguem perceber --
       # o app engole a funcao ausente em silencio. Tudo que e site mora na raiz;
-      # o que nao e (netlify/, supabase/, scripts/, tests/, guias) fica fora
+      # o que nao e (supabase/, scripts/, tests/, guias) fica fora
       # porque nao esta na raiz ou nao tem essas extensoes.
       - name: Separar os arquivos do site
         run: |

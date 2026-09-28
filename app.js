@@ -1229,7 +1229,7 @@ function initSyncIndicator() {
 }
 
 // Confirma de fato com o servidor: força o envio da fila e consulta quantas O.S
-// estão salvas na nuvem. Responde a "será que salvou mesmo no Netlify?".
+// estão salvas na nuvem. Responde a "será que salvou mesmo no servidor?".
 async function verificarNuvem() {
   const vBtn = $('#btn-verificar');
   if (vBtn) { vBtn.disabled = true; vBtn.textContent = '☁️ …'; }

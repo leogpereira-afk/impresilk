@@ -451,18 +451,16 @@ const STORE = (() => {
 
   // Chama uma função do backend (os, mubisys, …) com timeout.
   //
-  // O endereço vem do config.js: hoje são Edge Functions do Supabase, antes eram
-  // Netlify Functions. O resto do app não sabe da diferença — continua pedindo
-  // 'os' e 'mubisys', e a tradução para o nome real acontece aqui.
+  // O endereço vem do config.js (API_BASE): Edge Functions do Supabase. O resto
+  // do app continua pedindo 'os' e 'mubisys', e a tradução para o nome real
+  // (API_FN) acontece aqui.
   async function apiFn(fn, body, timeoutMs = 15000) {
     // Timeout: em sinal fraco, navigator.onLine pode ser true mas o fetch trava.
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       const alvo = (typeof API_FN === 'object' && API_FN[fn]) || fn;
-      const url = (typeof API_BASE === 'string' && API_BASE)
-        ? API_BASE + '/' + alvo
-        : '/.netlify/functions/' + fn; // volta ao Netlify se o config for antigo
+      const url = API_BASE + '/' + alvo;
       const res = await fetch(url, {
         method:  'POST',
         // Crachá lido na hora da chamada (muda quando a pessoa entra ou sai).

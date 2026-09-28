@@ -34,6 +34,7 @@ function store({ lista = [], fila = [], cfg = null, responder = () => ({ os: [] 
     localStorage: { getItem: k => ls.has(k) ? ls.get(k) : null, setItem: (k, v) => ls.set(k, v), removeItem: k => ls.delete(k) },
     indexedDB: { open() { const req = {}; queueMicrotask(() => req.onsuccess({ target: { result: idb.db } })); return req; }, deleteDatabase() {} },
     setTimeout: () => 1, clearTimeout() {}, AbortController,
+    API_BASE: 'http://teste', // na página, vem do config.js (carregado antes do store.js)
     fetch: async (_url, req) => { const b = JSON.parse(req.body); enviados.push(b); const r = await responder(b); return { ok: !(r.http >= 400), status: r.http || 200, json: async () => r }; }
   });
   vm.runInContext(fs.readFileSync(path.join(RAIZ, 'store.js'), 'utf8'), ctx);

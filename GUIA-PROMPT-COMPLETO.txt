@@ -23,7 +23,7 @@ CONTEXTO DO PROJETO  (preencha antes de começar)
 - Papéis de usuário: [ex.: admin, planejamento, execução, comercial]
 - Quem executa em campo: [ex.: instaladores, técnicos, entregadores]
 - Stack: HTML/CSS/JS puro, sem build (recomendado) ou framework de sua preferência
-- Provedor serverless: [Netlify (padrão deste guia) | Vercel | Cloudflare]
+- Provedor serverless: [Supabase (padrão deste guia) | Vercel | Cloudflare]
 - Idioma da interface: [ex.: pt-BR]
 
 ═══════════════════════════════════════════════════════════════════════
@@ -37,7 +37,7 @@ TRÊS APPS sobre o MESMO modelo de dados e a MESMA camada de sync:
 
 CAMADAS:
   CLIENTE: localStorage (dados) + IndexedDB (fotos) + FILA (ações pendentes)
-  NUVEM:   1 função serverless roteadora (POST {action,...}) sobre key-value store
+  NUVEM:   1 Edge Function do Supabase, roteadora (POST {action,...}), sobre o Postgres
   PONTE:   Service Worker network-first + cache versionado da casca
 
 ARQUIVOS:
@@ -45,12 +45,13 @@ ARQUIVOS:
   equipe.html, equipe.js        → espelho + comercial
   styles.css                    → design system compartilhado pelos dois apps
   store.js                      → camada única de persistência e sync
-  config.js                     → token do cliente (auth leve)
+  config.js                     → endereço do backend (API_BASE/API_FN; nada secreto)
   sw.js                         → service worker (offline)
   manifest.json                 → PWA
-  netlify/functions/os.js       → backend roteador
-  netlify/functions/<import>.js → (opcional) importação agendada de ERP externo
-  netlify.toml                  → deploy
+  supabase/functions/*-sync     → backend roteador (Edge Function)
+  supabase/functions/*-<import> → (opcional) importação agendada de ERP externo
+  supabase/migrations/*.sql     → tabelas, bucket e agendamento no banco
+  .github/workflows/deploy.yml  → deploy do site (GitHub Pages)
   (opcional) frases.js          → conteúdo estático (frases motivacionais)
 
 ═══════════════════════════════════════════════════════════════════════
@@ -112,7 +113,7 @@ Objeto STORE (IIFE) com:
 [E] trySync(): flag _syncing; pula itens em conflito (_flagged); distingue falha de
     REDE (para o ciclo, retenta depois) de erro PERMANENTE (contador _failCount,
     descarta após MAX_FAILS=25 e emite 'item-descartado'); reemite status ok/pending/offline.
-[F] pull(onRefresh): 'list' PAGINADO (offset/nextOffset, guard anti-loop); merge por
+[F] pull(onRefresh): 'list' PAGINADO (after/nextAfter, guard anti-loop); merge por
     timestamp (só sobrescreve local se remoto mais novo); remove local o que sumiu do
     servidor MAS preserva o que está na fila; atualiza lastSync.
 [G] pullCFG(): se há setCfg pendente, não sobrescreve (local é mais novo).
@@ -120,25 +121,29 @@ Objeto STORE (IIFE) com:
     envia; offline enfileira só o fileId); pullPhoto (cache local→nuvem).
 [I] Identidade: getUser/setUser, getExecutor/setExecutor, getLastSync.
 [J] Conflito manual: aceitarServidor(remote), sobrescreverServidor(local).
-[K] API: api(body)=apiFn('os',body); apiFn(fn,body,timeout=15000) com header x-token=TOKEN
-    e AbortController de 15s; aceitar 409 sem lançar.
+[K] API: api(body)=apiFn('os',body); apiFn(fn,body,timeout=15000): POST em API_BASE + '/' +
+    API_FN[fn] (config.js) com o crachá (Authorization: Bearer) e AbortController de 15s;
+    aceitar 409 sem lançar.
 [L] Reconexão: window 'online'→trySync(); 'offline'→status offline.
 [M] Eventos: onSync(status,pending), onConflict(local,remote), on(event,fn).
 [N] Backup: exportarBackup()/importarBackup() (importar limpa a fila).
 [O] uuid() v4 cripto-seguro com fallback.
 
 ═══════════════════════════════════════════════════════════════════════
-ARQUIVO: netlify/functions/os.js  (backend roteador sobre key-value store)
+ARQUIVO: supabase/functions/<prefixo>-sync/index.ts  (backend roteador, Edge Function)
 ═══════════════════════════════════════════════════════════════════════
-- blobStore(name): usa env BLOBS_SITE_ID+BLOBS_TOKEN se existirem (modo MANUAL),
-  senão getStore(name) (modo automático). Stores: "os", "fotos", "cfg".
-- handler: só POST (senão 405); parseia JSON (senão 400); valida token
-  (header x-token OU body.token == process.env.TOKEN, senão 401).
-- ações: ping; list (PAGINADO, PAGE=150, lista só chaves→ordena→fatia→baixa fatia,
-  responde {os,total,nextOffset|null}); upsert (conflito por timestamp: se servidor
-  mais novo → {conflito:true,servidor} sem gravar, senão grava com atualizadoEm
-  carimbado → {ok:true,os}); delete (apaga registro + fotos ligadas); getCfg/setCfg;
-  putPhoto/getPhoto. resp(data,status) sempre JSON.
+- banco: createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY), do ambiente da function.
+  Tabelas (migrações): registros (colecao + id, registro jsonb), config global (uma
+  linha só) e metadados; fotos num bucket privado do Storage.
+- handler (Deno.serve): OPTIONS → preflight CORS; só POST (senão 405); parseia JSON
+  (senão 400); autoriza pelo crachá (Authorization: Bearer, JWT conferido com o segredo
+  do servidor) ou pelo x-token de máquina (header x-token OU body.token == secret),
+  senão 401.
+- ações: ping; list (PAGINADO NO BANCO, PAGE=150, ordenado por id, responde
+  {os,total,nextAfter|null}; próxima página com after); upsert (conflito por timestamp:
+  se servidor mais novo → {conflito:true,servidor} sem gravar, senão grava com
+  atualizadoEm carimbado → {ok:true,os}); delete (apaga registro + fotos ligadas);
+  getCfg/setCfg; putPhoto/getPhoto. resp(data,status) sempre JSON (com CORS).
 
 ═══════════════════════════════════════════════════════════════════════
 ARQUIVO: app.js  (app de GESTÃO)
@@ -234,20 +239,22 @@ ARQUIVO: sw.js  (Service Worker, offline)
 - const CACHE = 'app-shell-v1' (VERSIONADO; subir o número a cada deploy de mudança).
 - SHELL: todos os estáticos (html, css, js, manifest, ícone, libs CDN com allSettled).
 - install: cachear shell + skipWaiting. activate: apagar caches != CACHE + clients.claim.
-- fetch: só GET; NUNCA cachear /.netlify/functions/ (dados são da fila do cliente);
+- fetch: só GET; NUNCA cachear a API (host do Supabase; dados são da fila do cliente);
   network-first (online busca fresco e atualiza cache; offline serve cache; navegação
   cai no index.html / equipe.html).
 
 ═══════════════════════════════════════════════════════════════════════
-ARQUIVO: config.js  +  netlify.toml  +  manifest.json
+ARQUIVO: config.js  +  deploy.yml  +  supabase/migrations  +  manifest.json
 ═══════════════════════════════════════════════════════════════════════
-config.js: const TOKEN='<senha-secreta>'; comentário avisando que o MESMO valor tem de
-  estar como env var TOKEN no provedor. AVISO honesto: o token vai ao navegador (visível
-  no DevTools) — protege contra acesso casual/bots, NÃO é segurança forte; p/ dados
-  sensíveis usar login real (sessão/JWT) com segredo só no servidor.
-netlify.toml: [build] publish="."; [functions] directory="netlify/functions";
-  (opcional) [functions."<import>"] schedule="@hourly"; headers X-Frame-Options=DENY +
-  X-Content-Type-Options=nosniff.
+config.js: const API_BASE='https://<projeto>.supabase.co/functions/v1'; const API_FN=
+  {os:'<prefixo>-sync'} (nome lógico → nome da function). NADA secreto: o arquivo vai ao
+  navegador (visível no DevTools). Quem autoriza é o crachá da pessoa (login real, JWT
+  assinado por segredo que só o servidor conhece).
+.github/workflows/deploy.yml: a cada push na main roda os testes, copia POR GLOB só os
+  arquivos do site (*.html *.css *.js manifest.json *.svg da raiz) para dist/ e publica
+  no GitHub Pages. Sem build.
+supabase/migrations/*.sql: tabelas com o prefixo do sistema (RLS ligada), bucket privado
+  das fotos e (opcional) o job da importação (pg_cron + pg_net).
 manifest.json: name, short_name, start_url ".", scope "./", display "standalone",
   orientation "portrait", theme/background color, ícone (SVG maskable).
 
@@ -257,8 +264,9 @@ FEATURES EXTRAS (implementar conforme o contexto)
 - Foto: compressão + IndexedDB + upload assíncrono via putPhoto; ids no registro.
 - WhatsApp: links wa.me/55<dígitos> no contato do cliente e no card hero do executor.
 - Geolocalização: check-in automático no campo (lat/lng/precisão/ts), captura única.
-- Importação de ERP (opcional): função agendada @hourly que puxa de uma fonte externa
-  e desduplica pelo identificador de NEGÓCIO (não pelo id interno) antes de gravar.
+- Importação de ERP (opcional): função agendada de hora em hora (pg_cron) que puxa de
+  uma fonte externa e desduplica pelo identificador de NEGÓCIO (não pelo id interno)
+  antes de gravar.
 - Backup: exportar/importar JSON (admin).
 - Conflito: ao receber {conflito:true}, oferecer [Recarregar servidor] ou [Manter o meu].
 - Toasts de status; barra de status de sync (ok/pending/offline) visível.
@@ -266,47 +274,48 @@ FEATURES EXTRAS (implementar conforme o contexto)
 - (opcional) Gamificação: barra de progresso da ficha + celebração ao completar.
 
 ═══════════════════════════════════════════════════════════════════════
-CONFIGURAÇÃO DO BANCO (NETLIFY BLOBS) — isto QUEBRA na prática
+CONFIGURAÇÃO DO BANCO (SUPABASE) — isto QUEBRA na prática
 ═══════════════════════════════════════════════════════════════════════
-- Modo MANUAL (env BLOBS_SITE_ID+BLOBS_TOKEN) ou AUTOMÁTICO (getStore sem args).
-- O automático só funciona se o site tiver contexto de Blobs provisionado; senão dá
-  "MissingBlobsEnvironmentError" → use o modo MANUAL.
-- Configurar manual: gerar Personal Access Token (User settings → Applications), pegar
-  o Site ID (Site details), criar env vars BLOBS_TOKEN e BLOBS_SITE_ID (scopes Functions
-  + Runtime), NÃO apagar a env TOKEN, e REDEPLOYAR.
-- Diagnóstico por erro no action:list:
-  • "BlobsInternalError ...401"  → BLOBS_TOKEN vencido → gerar novo → redeploy.
-  • "MissingBlobsEnvironmentError"→ faltam env vars → criar (modo manual) → redeploy.
-  • "Não autorizado"             → TOKEN errado/ausente ou deploy em andamento.
-  • ping ok mas list falha       → app/auth ok, problema é só no Blobs.
-- LEMBRE: tokens manuais EXPIRAM; sync para "do nada" (aparelho novo vazio, aparelho
-  antigo "ok" pelo cache local). Suspeite primeiro de BLOBS_TOKEN vencido.
+- PROJETO COMPARTILHADO: tudo deste sistema leva prefixo (tabelas, bucket, functions).
+  "create table if not exists" NÃO avisa: sem prefixo, reutiliza a tabela de outro
+  sistema calado; publicar uma function "sync" sobrescreve a do outro.
+- RLS ligada nas tabelas e bucket privado; as functions usam a chave de serviço
+  (SUPABASE_SERVICE_ROLE_KEY), que fica só no servidor.
+- Publicar as functions com verify_jwt=false: o preflight CORS chega sem token e o
+  gateway barraria antes; quem confere o crachá é a própria function.
+- Diagnóstico por erro:
+  • 401 "Entre no sistema."      → crachá ausente/vencido ou x-token errado.
+  • action:"diag"                → diz se o banco e o bucket estão de pé.
+  • ping ok mas list falha       → app/auth ok, problema é só no banco (tabela/migração).
 
 ═══════════════════════════════════════════════════════════════════════
 DEPLOY  +  VERIFICAÇÃO
 ═══════════════════════════════════════════════════════════════════════
-DEPLOY: GitHub (branch main) → Netlify (Import from GitHub; branch main; base directory
-  vazio ou subpasta se o netlify.toml estiver nela; build vazio; publish "."); criar env
-  var TOKEN (= config.js) → redeploy; ativar Blobs; cada push redeploya; a cada mudança,
-  subir o número do CACHE no sw.js.
+DEPLOY: GitHub (branch main) → o deploy.yml publica o site no GitHub Pages a cada push
+  (o Pages é habilitado uma vez no repositório); Supabase: rodar as migrações em ordem,
+  criar os secrets das functions (segredo do crachá, x-token de máquina) e publicar as
+  functions com ./scripts/publicar-functions.sh (SUPABASE_ACCESS_TOKEN) — o push NÃO
+  republica functions; a cada mudança, subir o número do CACHE no sw.js.
 VERIFICAÇÃO (curl):
-  curl -s -o /dev/null -w "%{http_code}\n" https://SEUSITE.netlify.app/            # 200
-  curl -s https://SEUSITE.netlify.app/sw.js | grep "CACHE ="                       # versão
-  curl -s -X POST https://SEUSITE.netlify.app/.netlify/functions/os \
-    -H "Content-Type: application/json" -H "x-token: SUA-SENHA" \
+  curl -s -o /dev/null -w "%{http_code}\n" https://USUARIO.github.io/REPO/         # 200
+  curl -s https://USUARIO.github.io/REPO/sw.js | grep "CACHE ="                    # versão
+  curl -s -X POST https://PROJETO.supabase.co/functions/v1/PREFIXO-sync \
+    -H "Content-Type: application/json" -H "x-token: TOKEN-DE-MAQUINA" \
     -d '{"action":"ping"}'                                                          # {"ok":true}
-  curl ... -d '{"action":"list","offset":0}'                                        # {"os":[...]}
+  curl ... -d '{"action":"list"}'                                                   # {"os":[...]}
 
 ═══════════════════════════════════════════════════════════════════════
 ARMADILHAS (custaram tempo na prática)
 ═══════════════════════════════════════════════════════════════════════
-1. URL/base directory errados → 404 no site inteiro. Confirme o subdomínio REAL.
-2. TOKEN diferente entre config.js e a env var → 401 em todas as chamadas.
+1. Arquivo do site fora do pacote do Pages → 404 calado, tela vazia. Copie POR GLOB.
+2. Segredo em arquivo do repositório (config.js, migração) → é público; precisa ser GIRADO.
 3. Esquecer de subir o CACHE → usuários presos em versão antiga.
-4. Resposta da função > ~6 MB → por isso 'list' é PAGINADO; nunca devolva tudo de uma vez.
-5. BLOBS_TOKEN vencido → 401 do Blobs; sync para silenciosa (mascarada pelo cache local).
-6. Apagar BLOBS_* achando que há contexto automático quando não há → MissingBlobs.
-7. Mudar env var sem redeployar → não vale; sempre Trigger deploy depois.
+4. O banco corta CALADO em 1000 linhas por consulta → por isso 'list' é PAGINADO; nunca
+   leia nem devolva tudo de uma vez.
+5. Importação agendada parada → a lista congela sem erro na tela (mascarada pelo cache
+   local); só o painel de saúde denuncia.
+6. Tabela/function sem prefixo em projeto compartilhado → reutiliza/sobrescreve a de outro.
+7. Function mudada no git sem publicar → o servidor segue na versão velha, calado.
 8. Limpar cache de um aparelho antes dele sincronizar → perde a fila local (dados offline).
 9. Status pulando etapa → calcStatus deve exigir a etapa anterior completa.
 10. Edição de O.S finalizada → travar via .os-locked e ro no espelho.
@@ -315,8 +324,8 @@ ARMADILHAS (custaram tempo na prática)
 ENTREGA
 ═══════════════════════════════════════════════════════════════════════
 Implemente os arquivos com comentários explicando o PORQUÊ de cada decisão.
-Comece por: modelo de dados + calcStatus → store.js → os.js → app.js (gestão) →
-equipe.js (espelho) → styles.css → sw.js/manifest → deploy. Mantenha o contrato de
-ações estável para trocar o backend depois (Blobs → Firebase/Supabase/KV) sem mexer
-no cliente. Garanta uso confortável no CELULAR (campo, sol, uma mão).
+Comece por: modelo de dados + calcStatus → store.js → Edge Function (-sync) → app.js
+(gestão) → equipe.js (espelho) → styles.css → sw.js/manifest → deploy. Mantenha o
+contrato de ações estável para trocar o backend depois sem mexer no cliente (só o
+endereço no config.js muda). Garanta uso confortável no CELULAR (campo, sol, uma mão).
 ```

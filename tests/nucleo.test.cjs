@@ -35,6 +35,7 @@ function store({ lista = [], fila = [], responder = () => ({ os: [] }), cheio = 
     },
     indexedDB: { open() { const req = {}; queueMicrotask(() => req.onsuccess({ target: { result: idb.db } })); return req; }, deleteDatabase() {} },
     setTimeout: () => 1, clearTimeout() {}, AbortController,
+    API_BASE: 'http://teste', // na página, vem do config.js (carregado antes do store.js)
     fetch: async (_url, req) => { const r = await responder(JSON.parse(req.body)); return { ok: !(r.http >= 400), status: r.http || 200, json: async () => r }; }
   }, extra));
   vm.runInContext(fs.readFileSync(path.join(RAIZ, 'store.js'), 'utf8'), ctx);
