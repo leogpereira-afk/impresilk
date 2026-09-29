@@ -940,7 +940,7 @@ test('performance: as duas abas existem e nenhuma seção se perde', () => {
     el2.innerHTML`);
   // Equipe: produtividade, ligação com o RH e bônus.
   assert.match(equipe, /Produtividade/);
-  assert.match(equipe, /Ligar apelido do PCP/);
+  assert.match(equipe, /Conferir nomes do PCP/);
   assert.match(equipe, /Bônus por ponto/);
   assert.ok(!/Carros mais usados/.test(equipe), 'carros é relatório');
   // Relatório: retrabalho e carros, com o filtro de período junto.
@@ -1369,4 +1369,39 @@ test('bônus: Aprovar depois de trocar o orçamento usa o orçamento novo e não
   })()`);
   assert.equal(r.orcamento, 2000, 'a troca do orçamento não pode sumir');
   assert.equal(r.valor, 1000, 'metade das entregas de um orçamento de 2000');
+});
+
+/* CONFERÊNCIA PCP × RH (pedido do Léo, 29/09/2026): "conferir pra puxar o
+   funcionário do RH tem que bater com o PCP, conferir se está linkado, tem
+   alguns funcionários juntos". */
+const ELENCO_CONF = {
+  ...ELENCO,
+  pessoas: [
+    ...ELENCO.pessoas,
+    { chave: 'adriano-nunes', id: '555555', nome: 'Adriano Nunes Araújo', apelido: '', ativo: true, cargo: '', area: 'Montagem' },
+    { chave: 'adriano-pinheiro', id: '666666', nome: 'Adriano Pinheiro Lima', apelido: '', ativo: true, cargo: '', area: 'Montagem' },
+    { chave: 'charles-dias', id: '777777', nome: 'Charles Alves Dias', apelido: '', ativo: true, cargo: '', area: 'Acabamento' },
+  ],
+};
+test('lista do plantão não mostra a mesma pessoa duas vezes (nome do PCP e nome do RH)', () => {
+  const t = casa([], { instaladores: ['Natan', 'Charlinho'], vinculosRH: [{ apelido: 'Charlinho', chave: 'charles-dias', id: '777777', nome: 'Charles Alves Dias' }] }, ELENCO_CONF);
+  const rh = t.run("equipeEscalavel().doRH.map(p => p.nome).join('|')");
+  assert.ok(!rh.includes('Charles Alves Dias'), 'Charlinho do PCP já é o Charles do RH');
+  assert.ok(!rh.includes('Natan da Silva'), 'Natan já está na lista do PCP');
+  assert.match(rh, /Ana Dias/, 'quem não está no PCP continua vindo do RH');
+});
+test('conferência: todo nome do PCP aparece com a ficha, como ligou e os alertas', () => {
+  const lista = [fin('a', { equipe: ['Natan', 'Adriano'] }), fin('b', { equipe: ['Lucas', 'Lucas Lima'] }), fin('c', { equipe: ['Paulo', 'Pantera'] })];
+  const cfg = { instaladores: ['Natan', 'Lucas', 'Pantera', 'Charlinho'], vinculosRH: [{ apelido: 'Charlinho', chave: 'charles-dias', id: '777777', nome: 'Charles Alves Dias' }] };
+  const t = casa(lista, cfg, ELENCO_CONF);
+  const linha = ap => t.run(`conferenciaRH().find(l => l.apelido === ${JSON.stringify(ap)})`);
+  assert.equal(linha('Pantera').como, 'sem-ficha');
+  assert.equal(linha('Adriano').como, 'ambiguo');
+  assert.equal(linha('Adriano').candidatos.map(p => p.nome).join('|'), 'Adriano Nunes Araújo|Adriano Pinheiro Lima');
+  assert.equal(linha('Natan').como, 'auto'); assert.equal(linha('Natan').pessoa.nome, 'Natan da Silva');
+  assert.equal(linha('Charlinho').como, 'salvo'); assert.equal(linha('Charlinho').n, 0, 'só na lista, sem O.S.');
+  assert.equal(linha('Lucas').juntos.join('|'), 'Lucas Lima', 'dois nomes na mesma ficha ficam à vista');
+  assert.equal(linha('Paulo').inativa, true);
+  assert.deepEqual([...t.run('conferenciaRH()').slice(0, 2).map(l => l.como)].sort().join(), 'ambiguo,sem-ficha', 'o que falta resolver vem primeiro');
+  assert.equal(t.run('pendentesConferenciaRH()'), 2);
 });

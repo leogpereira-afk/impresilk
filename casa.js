@@ -389,6 +389,63 @@ function apelidosSemFicha() {
     .map(([apelido, n]) => ({ apelido, n }))
     .sort((a, b) => b.n - a.n || a.apelido.localeCompare(b.apelido));
 }
+/* CONFERÊNCIA PCP × RH (pedido do Léo, 29/09/2026: "conferir pra puxar o
+   funcionário do RH tem que bater com o PCP, conferir se está linkado, tem
+   alguns funcionários juntos"). O quadro mostrava só quem estava SEM ficha: a
+   ligação automática, a mais comum, ficava invisível, e uma ligação errada
+   não tinha como ser vista nem trocada. Agora cada nome usado no PCP (lista
+   de instaladores + equipes das O.S.) aparece com a ficha a que chega, como
+   chegou, e os alertas:
+   - sem ficha: nenhuma pessoa do RH;
+   - ambíguo: o nome serve para mais de uma pessoa (os dois Adrianos) e por
+     isso não liga sozinho;
+   - juntos: dois nomes do PCP chegam à mesma ficha. Pode ser a mesma pessoa
+     escrita de dois jeitos (certo) ou duas pessoas grudadas (errado); quem
+     sabe é o PCP, então a tela mostra lado a lado;
+   - fora da ativa: a ficha está inativa no RH. */
+function candidatosRH(apelido) {
+  const toks = normCasa(apelido).split(/\s+/).filter(Boolean);
+  if (!toks.length) return [];
+  return pessoasRH().filter(p => {
+    const n = normCasa(p.nome).split(/\s+/);
+    return normCasa(p.apelido) === toks.join(' ') || toks.every((t, i) => n[i] === t);
+  });
+}
+function conferenciaRH() {
+  const conta = new Map();
+  const soma = (nome, n) => {
+    const ap = String(nome || '').trim();
+    if (!ap) return null;
+    const k = normCasa(ap);
+    const x = conta.get(k) || { apelido: ap, n: 0, naLista: false };
+    x.n += n;
+    conta.set(k, x);
+    return x;
+  };
+  for (const os of STORE.getAllOS()) for (const ap of OPERACAO.equipe(os)) soma(ap, 1);
+  for (const nome of (STORE.getCFG().instaladores || [])) { const x = soma(nome, 0); if (x) x.naLista = true; }
+  const salvos = lerVinculosCasa();
+  const linhas = [...conta.values()].map(x => {
+    const pessoa = fichaDoApelido(x.apelido);
+    const salvo = salvos.some(v => normCasa(v.apelido) === normCasa(x.apelido));
+    const candidatos = pessoa ? [] : candidatosRH(x.apelido);
+    const como = pessoa ? (salvo ? 'salvo' : 'auto') : candidatos.length > 1 ? 'ambiguo' : 'sem-ficha';
+    return { ...x, pessoa, como, candidatos, inativa: !!(pessoa && pessoa.ativo === false), juntos: [] };
+  });
+  const chaveFicha = p => p ? String(p.chave || p.id || normCasa(p.nome)) : '';
+  const porFicha = new Map();
+  for (const l of linhas) if (l.pessoa) {
+    const k = chaveFicha(l.pessoa);
+    if (!porFicha.has(k)) porFicha.set(k, []);
+    porFicha.get(k).push(l.apelido);
+  }
+  for (const l of linhas) if (l.pessoa) l.juntos = porFicha.get(chaveFicha(l.pessoa)).filter(a => a !== l.apelido);
+  // O que falta resolver primeiro; depois o que pede um olhar; o resto, pelo uso.
+  const peso = l => (l.como === 'sem-ficha' || l.como === 'ambiguo') ? 0 : (l.juntos.length || l.inativa) ? 1 : 2;
+  return linhas.sort((a, b) => peso(a) - peso(b) || b.n - a.n || a.apelido.localeCompare(b.apelido));
+}
+const pendentesConferenciaRH = () => conferenciaRH().filter(l => l.como === 'sem-ficha' || l.como === 'ambiguo').length;
+
 // Substitui o vínculo DESTE apelido. Outros apelidos da mesma pessoa ficam:
 // o ERP escreve o nome de jeitos diferentes e todos têm de achar a ficha.
 // Só devolve true depois de conferir que o vínculo sobreviveu à releitura —
@@ -1928,28 +1985,37 @@ function carrosHTML(f) {
     ${semUso.length ? `<p class="text-muted" style="font-size:.8rem">Cadastrados no Ativos e sem nenhuma O.S no período: ${esc(semUso.map(v => v.nome).join(', '))}.</p>` : ''}`;
 }
 
-/* ── Ligar o apelido da O.S à ficha do RH, pela tela ───────────────────────
-   O PCP escreve apelido; o RH tem a ficha. O que casa sozinho já casou — aqui
-   ficam só os que não casaram, com a lista do RH ao lado. */
+/* ── Conferir e ligar o nome do PCP à ficha do RH, pela tela ─────────────
+   Todos os nomes que o PCP usa, cada um com a ficha a que chega. O que falta
+   resolver vem primeiro; qualquer ligação (automática ou salva) pode ser
+   trocada ali mesmo. Ver conferenciaRH(). */
 function ligacaoRHHTML() {
-  const pendentes = apelidosSemFicha();
+  const linhas = conferenciaRH();
   const ativos = pessoasRHAtivas();
-  const ligados = lerVinculosCasa();
-  const optPessoas = ativos.map(p => `<option value="${esc(p.chave)}">${esc(p.nome)}${p.cargo ? ' — ' + esc(p.cargo) : ''}</option>`).join('');
-  return `<p>Apelido escrito na O.S que ainda não achou ficha. Escolha a pessoa e ligue — a partir daí a foto, o cargo e o nome completo aparecem sozinhos, aqui e na mensagem do dia.</p>
-    ${pendentes.length ? `<div class="casa-tabela-wrap"><table class="casa-tabela">
-      <thead><tr><th>Apelido na O.S</th><th class="num">O.S</th><th>Pessoa do RH</th><th></th></tr></thead>
-      <tbody>${pendentes.map(x => `<tr>
-        <td><strong>${esc(x.apelido)}</strong></td>
-        <td class="num">${x.n}</td>
-        <td><select data-lig-sel="${esc(x.apelido)}"><option value="">Escolher</option>${optPessoas}</select></td>
-        <td><button class="btn-primary btn-xs edit-only" data-lig-ok="${esc(x.apelido)}">Ligar</button></td>
-      </tr>`).join('')}</tbody></table></div>`
-      : '<p class="text-muted">Todo apelido usado nas O.S já tem ficha. 👍</p>'}
-    ${ligados.length ? `<details class="casa-mais-fichas" style="margin-top:10px"><summary>Ligações salvas à mão · ${ligados.length}</summary>
-      <ul class="casa-os">${ligados.map(v => `<li>${esc(v.apelido)} → ${esc(v.nome || v.chave || v.id)} <button class="btn-ghost btn-xs" data-del-ficha="${esc(v.apelido)}" type="button">Desligar</button></li>`).join('')}</ul>
-    </details>` : ''}
-    <p class="text-muted" style="font-size:.8rem">${ativos.length} pessoas ativas no RH${pessoasRH().length > ativos.length ? ` · ${pessoasRH().length - ativos.length} inativa(s) fora da lista` : ''}. Quem sai da empresa sai daqui sozinho.</p>`;
+  const pend = linhas.filter(l => l.como === 'sem-ficha' || l.como === 'ambiguo').length;
+  const juntos = linhas.filter(l => l.juntos.length).length;
+  const optPessoas = atual => ativos.map(p => `<option value="${esc(p.chave)}" ${atual && atual.chave === p.chave ? 'selected' : ''}>${esc(p.nome)}${p.cargo ? ' · ' + esc(p.cargo) : ''}</option>`).join('');
+  const situacao = l => {
+    if (l.como === 'sem-ficha') return '<span class="badge sem-valor">Sem ficha no RH</span>';
+    if (l.como === 'ambiguo') return `<span class="badge sem-valor">Ambíguo</span><small class="bloco">Serve para ${esc(l.candidatos.map(p => p.nome).join(' e '))}. Escolha quem é.</small>`;
+    const como = l.como === 'salvo' ? 'Ligado à mão' : 'Ligado pelo nome';
+    return `<span class="badge">${como}</span>${l.inativa ? ' <span class="badge sem-valor">Fora da ativa no RH</span>' : ''}${l.juntos.length ? `<small class="bloco">Mesma pessoa que: ${esc(l.juntos.join(', '))}. Se forem pessoas diferentes, troque.</small>` : ''}`;
+  };
+  const ficha = l => l.pessoa ? `<strong>${esc(l.pessoa.nome)}</strong>${l.pessoa.cargo || l.pessoa.area ? `<small class="bloco">${esc([l.pessoa.cargo, l.pessoa.area].filter(Boolean).join(' · '))}</small>` : ''}` : '<span class="text-muted">Nenhuma</span>';
+  return `<p>Cada nome que o PCP usa (lista de instaladores e equipes das O.S.) e a ficha do RH a que ele chega. O que falta resolver vem primeiro. Qualquer ligação pode ser trocada aqui: a partir dela, a foto, o cargo e o nome completo aparecem sozinhos, aqui e na mensagem do dia.</p>
+    <p class="text-muted" style="font-size:.8rem">${linhas.length} nomes · ${pend ? `<strong>${pend} sem ficha ou ambíguo${pend === 1 ? '' : 's'}</strong>` : 'todos com ficha'}${juntos ? ` · ${juntos} nomes dividem a ficha com outro` : ''}.</p>
+    ${linhas.length ? `<div class="casa-tabela-wrap"><table class="casa-tabela">
+      <thead><tr><th>Nome no PCP</th><th class="num">O.S</th><th>Ficha do RH</th><th>Situação</th><th>Ligar a</th></tr></thead>
+      <tbody>${linhas.map(l => `<tr>
+        <td><strong>${esc(l.apelido)}</strong>${l.naLista ? '<small class="bloco">na lista de instaladores</small>' : ''}</td>
+        <td class="num">${l.n}</td>
+        <td>${ficha(l)}</td>
+        <td>${situacao(l)}</td>
+        <td><select data-lig-sel="${esc(l.apelido)}" aria-label="Pessoa do RH para ${esc(l.apelido)}"><option value="">Escolher</option>${optPessoas(l.pessoa)}</select>
+          <button class="btn-primary btn-xs edit-only" data-lig-ok="${esc(l.apelido)}">${l.pessoa ? 'Trocar' : 'Ligar'}</button>
+          ${l.como === 'salvo' ? `<button class="btn-ghost btn-xs edit-only" data-del-ficha="${esc(l.apelido)}" type="button" title="Tira a ligação feita à mão; o nome volta a casar sozinho, se casar">Desligar</button>` : ''}</td>
+      </tr>`).join('')}</tbody></table></div>` : '<p class="text-muted">Nenhum nome no PCP ainda.</p>'}
+    <p class="text-muted" style="font-size:.8rem">${ativos.length} pessoas ativas no RH${pessoasRH().length > ativos.length ? ` · ${pessoasRH().length - ativos.length} inativa(s) fora da lista de escolha` : ''}. Quem sai da empresa sai daqui sozinho.</p>`;
 }
 
 /* ── Modo TV: ranking na tela da fábrica ───────────────────────────────────
@@ -2155,7 +2221,7 @@ function renderPerformanceCasa() {
      as duas leem o mesmo recorte. Nada foi escondido: o que era quadro
      recolhível continua recolhível, só mudou de aba. */
   const abaPerf = STATE._perfAba === 'relatorio' ? 'relatorio' : 'equipe';
-  const pendRH = pendentes.length;
+  const pendRH = pendentesConferenciaRH();
   /* Os <details> soltos da apuração ("Como interpretar os indicadores", "Ver
      O.S., percentuais...") fechavam a cada repintura: a apuração chega do
      servidor, uma confirmação muda a nota, e o que a pessoa lia sumia. Guarda
@@ -2178,7 +2244,7 @@ function renderPerformanceCasa() {
       ${typeof perfFonteHTML==='function'?perfFonteHTML():''}
       ${abaPerf === 'equipe' ? `
         ${typeof performanceEquipesHTML === 'function' ? performanceEquipesHTML() : produtividadeHTML()}
-        ${quadroCasa('perf-rh', `🔗 Ligar apelido do PCP à ficha do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), pendRH > 0)}
+        ${quadroCasa('perf-rh', `🔗 Conferir nomes do PCP × fichas do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), pendRH > 0)}
         ${quadroCasa('perf-plantoes', '🗓 Plantões vinculados às O.S.', plantaoPerformanceHTML(), false)}
         ${quadroCasa('perf-bonus', '💰 Bônus por ponto <small>— regra própria, independente dos percentuais acima</small>', bonusHTML, false)}
       ` : `
@@ -2326,7 +2392,13 @@ function equipeEscalavel() {
     return !p || p.ativo !== false;
   });
   const jaTem = new Set(doPCP.map(normCasa));
-  const doRH = pessoasRHAtivas().filter(p => !jaTem.has(normCasa(p.nome)) && (!p.apelido || !jaTem.has(normCasa(p.apelido))));
+  /* A MESMA PESSOA NÃO ENTRA DUAS VEZES. Comparar só o texto deixava
+     "Charles" (PCP) e "Charles Alves Dias" (RH) como duas pessoas, e o mesmo
+     com todo nome do PCP ligado à ficha por vínculo ou pelo começo do nome
+     (conferência de 29/09/2026). Agora conta a FICHA a que o nome do PCP chega. */
+  const fichasDoPCP = new Set(doPCP.map(n => fichaDoApelido(n)).filter(Boolean).map(p => p.chave || p.id).filter(Boolean));
+  const doRH = pessoasRHAtivas().filter(p => !fichasDoPCP.has(p.chave) && !(p.id && fichasDoPCP.has(p.id))
+    && !jaTem.has(normCasa(p.nome)) && (!p.apelido || !jaTem.has(normCasa(p.apelido))));
   return { doPCP, doRH };
 }
 function optionsEquipeCasa(selecionado) {

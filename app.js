@@ -5413,6 +5413,15 @@ function abrirEspelhos() {
 /* ══════════════════════════════════════════════════════════════════════════
    ABA: PAINEL DE CONTROLE (gerencia o CFG)
    ══════════════════════════════════════════════════════════════════════════ */
+/* A FICHA DO RH AO LADO DO NOME (conferência de 29/09/2026): a lista de
+   instaladores é texto do PCP; é aqui que ela é editada, então é aqui que se
+   vê a quem cada nome chega no RH. */
+function fichaRHDoChip(nome) {
+  const p = typeof fichaDoApelido === 'function' ? fichaDoApelido(nome) : null;
+  return p
+    ? `<small class="cfg-chip-rh" title="Ficha do RH">→ ${esc(p.nome)}</small>`
+    : '<small class="cfg-chip-rh sem" title="Nenhuma ficha do RH para este nome">sem ficha no RH</small>';
+}
 const CFG_LISTAS = [
   { key: 'instaladores',      label: 'Instaladores' },
   { key: 'veiculos',          label: 'Veículos' },
@@ -5439,8 +5448,9 @@ function renderControle() {
       <h3>${label}</h3>
       <div class="cfg-list cfg-list-chips">
         ${(cfg[key] || []).map(v => `
-          <span class="cfg-chip">${esc(v)}${roListas ? '' : `<button data-cfg-del="${key}|${esc(v)}" title="Remover">×</button>`}</span>`).join('') || '<p class="text-muted">Vazio</p>'}
+          <span class="cfg-chip">${esc(v)}${key === 'instaladores' ? fichaRHDoChip(v) : ''}${roListas ? '' : `<button data-cfg-del="${key}|${esc(v)}" title="Remover">×</button>`}</span>`).join('') || '<p class="text-muted">Vazio</p>'}
       </div>
+      ${key === 'instaladores' ? '<p class="text-muted" style="font-size:.75rem;margin-top:6px">Ao lado de cada nome, a ficha do RH a que ele chega. Para conferir ou trocar: Performance › Conferir nomes do PCP × fichas do RH.</p>' : ''}
       ${roListas ? '' : `<div class="flex gap-6 mt-8">
         <input class="w-100" data-cfg-input="${key}" placeholder="Adicionar ${esc(label.toLowerCase())}…">
         <button class="btn-primary btn-sm" data-cfg-add="${key}">+</button>

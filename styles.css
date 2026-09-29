@@ -2842,3 +2842,7 @@ img.perf-logo{object-fit:cover}
 .rel-ent-svg g[role="button"] { cursor: pointer; }
 .rel-ent-svg g[role="button"]:focus { outline: none; }
 .rel-ent-svg g[role="button"]:focus circle { stroke: #122f43; stroke-width: 4; }
+
+/* Ficha do RH ao lado de cada instalador nas Configurações (29/09/2026). */
+.cfg-chip-rh{font-size:.72rem;color:var(--muted);margin-left:6px;font-weight:500}
+.cfg-chip-rh.sem{color:var(--red)}
