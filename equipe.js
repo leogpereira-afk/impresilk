@@ -849,7 +849,7 @@ function renderModalComercial() {
     <div style="padding:12px 16px;background:#eff6ff;border-bottom:1px solid var(--border)">
       <div class="list-date" style="font-size:.95rem">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
       <div class="text-sm" style="margin-top:4px">📍 ${esc(os.endereco||'')}</div>
-      <div class="text-sm">👷 ${esc((os.equipe||[]).join(', '))} ${os.veiculo?'· 🚗 '+esc(os.veiculo):''}</div>
+      <div class="text-sm">👷 ${esc((os.equipe||[]).join(', '))} ${os.veiculo?(OPERACAO.semCarro(os)?'· 🏠 Sem carro (instalação interna)':'· 🚗 '+esc(os.veiculo)):''}</div>
       ${contatoHTML(os)}
     </div>
 
@@ -1014,12 +1014,12 @@ function renderModal() {
       <div class="fs-body">
         ${(!ro && !os.carroLiberado && !confirmadoHoje) ? `<div class="trava-msg">🔒 ${esc(msgConfirmacao(os))}</div>` : ''}
         ${os.carroLiberado
-          ? `<div class="liberar-status">🚗 Carro liberado · ${esc(os.carroLiberadoPor||'')}</div>`
-          : `<button type="button" class="btn-primary" id="m-carro" ${(!confirmadoHoje||ro)?'disabled style="opacity:.5"':''}>🚗 Liberar carro</button>`}
+          ? `<div class="liberar-status">${OPERACAO.semCarro(os) ? '🏠 Saída liberada (sem carro)' : '🚗 Carro liberado'} · ${esc(os.carroLiberadoPor||'')}</div>`
+          : `<button type="button" class="btn-primary" id="m-carro" ${(!confirmadoHoje||ro)?'disabled style="opacity:.5"':''}>${OPERACAO.semCarro(os) ? '🏠 Liberar saída (sem carro)' : '🚗 Liberar carro'}</button>`}
         <div class="field-row">
           <div class="field"><label for="m-hora-saida">Hora saída</label>
             <div class="eq-hora"><input id="m-hora-saida" type="time" data-f="horaSaida" value="${esc(os.horaSaida)}">${(ro || os.horaSaida) ? '' : `<button type="button" class="btn-ghost" id="m-sai-agora" ${(os.carroLiberado || confirmadoHoje) ? '' : 'disabled style="opacity:.5"'}>Saí agora</button>`}</div></div>
-          <div class="field"><label for="m-km-saida">KM saída</label><input id="m-km-saida" type="number" inputmode="numeric" data-f="kmSaida" value="${esc(os.kmSaida)}" placeholder="km do veículo"></div>
+          ${OPERACAO.semCarro(os) ? '' : `<div class="field"><label for="m-km-saida">KM saída</label><input id="m-km-saida" type="number" inputmode="numeric" data-f="kmSaida" value="${esc(os.kmSaida)}" placeholder="km do veículo"></div>`}
         </div>
       </div>
     </details>`;
@@ -1080,7 +1080,7 @@ function renderModal() {
         <div class="field-row">
           <div class="field"><label for="m-hora-ret">Hora retorno</label>
             <div class="eq-hora"><input id="m-hora-ret" type="time" data-f="horaRetorno" value="${esc(os.horaRetorno)}">${(ro || os.horaRetorno) ? '' : '<button type="button" class="btn-ghost" id="m-retorno-agora">Agora</button>'}</div></div>
-          <div class="field"><label for="m-km-ret">KM retorno</label><input id="m-km-ret" type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>
+          ${OPERACAO.semCarro(os) ? '' : `<div class="field"><label for="m-km-ret">KM retorno</label><input id="m-km-ret" type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>`}
         </div>
         ${limpezaLinhaHTML(os)}
       </div>
@@ -1108,7 +1108,7 @@ function renderModal() {
     <div style="padding:12px 16px;background:#eff6ff;border-bottom:1px solid var(--border)">
       <div class="list-date" style="font-size:.95rem">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
       <div class="text-sm" style="margin-top:4px">📍 ${interno ? 'Retirada na fábrica' : esc(os.endereco||'')}</div>
-      <div class="text-sm">👷 ${esc((os.equipe||[]).join(', '))} ${os.veiculo?'· 🚗 '+esc(os.veiculo):''}</div>
+      <div class="text-sm">👷 ${esc((os.equipe||[]).join(', '))} ${os.veiculo?(OPERACAO.semCarro(os)?'· 🏠 Sem carro (instalação interna)':'· 🚗 '+esc(os.veiculo)):''}</div>
       <div class="lock-allow">${contatoHTML(os, !interno)}</div>
     </div>
 

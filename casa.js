@@ -1956,7 +1956,7 @@ function carrosHTML(f) {
   const m = new Map();
   for (const os of STORE.getAllOS()) {
     const nome = String(os.veiculo || '').trim();
-    if (!nome) continue;
+    if (!nome || OPERACAO.semCarro(os)) continue; // instalação interna não é carro
     const dia = OPERACAO.dia(os.instalacao && os.instalacao.data) || diaEntrega(os);
     if (!OPERACAO.emIntervalo(dia, f.de, f.ate)) continue;
     const d = m.get(nome) || { nome, os: 0, km: 0, pessoas: new Set() };
@@ -2429,8 +2429,11 @@ function optionsEquipeCasa(selecionado) {
 }
 function optionsVeiculoCasa(selecionado) {
   const doAtivos = veiculosRH();
+  /* SEM CARRO (pedido do Léo, 29/09/2026): "tem vezes que não precisa de
+     carro". Primeira opção da lista; ver OPERACAO.SEM_CARRO. */
+  const semCarro = `<optgroup label="Sem carro"><option value="${esc(OPERACAO.SEM_CARRO)}" ${OPERACAO.semCarro({ veiculo: selecionado }) ? 'selected' : ''}>🏠 ${esc(OPERACAO.SEM_CARRO)} (sem carro)</option></optgroup>`;
   const doCfg = (STORE.getCFG().veiculos || []).filter(v => !doAtivos.some(x => normCasa(x.nome) === normCasa(v)));
-  return `${doAtivos.map(v => `<option value="${esc(v.nome)}" ${v.nome === selecionado ? 'selected' : ''}>${esc(v.nome)}${v.lugares ? ` · ${v.lugares} lugares` : ''}${v.placa ? ` · ${v.placa}` : ''}</option>`).join('')}
+  return `${semCarro}${doAtivos.map(v => `<option value="${esc(v.nome)}" ${v.nome === selecionado ? 'selected' : ''}>${esc(v.nome)}${v.lugares ? ` · ${v.lugares} lugares` : ''}${v.placa ? ` · ${v.placa}` : ''}</option>`).join('')}
     ${doCfg.length ? `<optgroup label="Só no PCP (cadastrar no Ativos)">${doCfg.map(v => `<option value="${esc(v)}" ${v === selecionado ? 'selected' : ''}>${esc(v)}</option>`).join('')}</optgroup>` : ''}`;
 }
 // Aviso quando a pessoa escalada está de férias/atestado no dia. Sem acesso à
@@ -3146,7 +3149,7 @@ function renderGradeCasa() {
         <div class="casa-kpi-cards">
           <div class="casa-kpi"><b>${lista.length}</b><small>O.S neste dia</small></div>
           <div class="casa-kpi"><b>${escalados.length}</b><small>pessoas escaladas</small></div>
-          <div class="casa-kpi"><b>${new Set(lista.map(o => o.veiculo).filter(Boolean)).size}</b><small>veículos programados</small></div>
+          <div class="casa-kpi"><b>${new Set(lista.filter(o => !OPERACAO.semCarro(o)).map(o => o.veiculo).filter(Boolean)).size}</b><small>veículos programados</small></div>
           <div class="casa-kpi ${valorDia.semValor ? 'alerta' : ''}"><b>${dinheiroCasa(valorDia.total)}</b><small>valor programado${valorDia.semValor ? ` · ${valorDia.semValor} sem valor` : ''}</small></div>
         </div>
         ${conflitos.length ? `<p class="metricas-nota alerta-ausencia">⚠️ ${conflitos.length} possível conflito: ${esc(conflitos.map(c => [...c.equipe, c.veiculo].filter(Boolean).join(', ')).join(' · '))} em mais de uma O.S no mesmo turno.</p>` : ''}

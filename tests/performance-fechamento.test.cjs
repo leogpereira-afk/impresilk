@@ -100,3 +100,13 @@ test('a base da nota leva "arrumado" e "sem avaria"; volta respondida só em "ar
  assert.equal(a.retornoConf.carroArrumado,'nao');assert.equal(a.retornoConf.semAvaria,'nao');
  assert.ok(b.retornoConf,'só "arrumado" respondido ainda é conferência');assert.equal(b.retornoConf.carroArrumado,'sim');
 });
+/* SEM CARRO (29/09/2026): instalação interna não tem volta do carro na nota. */
+test('instalação interna (sem carro) não conta como volta do carro na base da nota',async()=>{
+ const d=dados(2);
+ d.pcp_registros[0].registro.veiculo='Instalação interna';d.pcp_registros[0].registro.retornoEm='2026-09-10T17:00:00';
+ d.pcp_registros[1].registro.veiculo='Strada 10';d.pcp_registros[1].registro.retornoEm='2026-09-10T17:00:00';
+ const e=await edge('pcp-sync',d),r=await e.call({action:'performancePeriodo',...periodo},who);
+ const [a,b]=r.registros;
+ assert.equal(a.voltou,false,'sem carro não é volta do carro');
+ assert.equal(b.voltou,true);
+});

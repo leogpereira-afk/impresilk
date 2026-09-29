@@ -324,8 +324,12 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
        ERP sem retorno nem lançamento não prova viagem e não entra na conta do
        carro (a fila nunca a mostra para conferir). */
     const baixaERP=o.baixaAutoERP?.em===o.finalizadaEm || /^Mubisys\b/i.test(o.finalizadoPor || "");
-    const voltou=nomes.length>0 && !!(o.retornoEm || o.horaRetorno || !baixaERP || o.entregaLancada);
     const norm=(x:any)=>String(x||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toLowerCase();
+    /* SEM CARRO ("Instalação interna", 29/09/2026): a equipe foi sem carro, então
+       não há volta do carro para conferir nem para pesar na nota. O mesmo nome
+       de OPERACAO.SEM_CARRO na tela. */
+    const semCarro=norm(o.veiculo)==="instalacao interna";
+    const voltou=nomes.length>0 && !semCarro && !!(o.retornoEm || o.horaRetorno || !baixaERP || o.entregaLancada);
     const diaVolta=perfDia(o.retornoEm) || (o.horaRetorno ? (perfDia(o.saidaEm) || perfDia(o.instalacao?.data)) : "") || (o.entregaLancada ? perfDia(o.entregaLancada.data) : "") || perfDia(o.finalizadaEm);
     const volta=[diaVolta,norm(o.veiculo),nomes.map(norm).sort().join("+")].join("|");
     return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,equipeId:p?.equipeId||"",equipeNome:p?.equipeNome||"",emblema:p?.emblema||"🤝",obs:p?.obs||"",por:p?.por||"",em:p?.em||"",retrabalho:!!o.retrabalho,retornoConf,voltou,volta};

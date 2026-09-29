@@ -176,3 +176,19 @@ test('cartão grande: "Dia inteiro" vem antes da Tarde no mesmo dia', () => {
   const inteiro = os({id:'d', instalacao:{data:hoje, periodo:'Dia inteiro'}});
   assert.equal(O.destaqueDoDia([tarde, inteiro], hoje).id, 'd');
 });
+
+/* SEM CARRO (pedido do Léo, 29/09/2026: "preciso que tenha a opção instalação
+   interna, porque tem vezes que não precisa de carro"). É um valor do veículo,
+   não o tipo 'interno' (cliente retira). */
+test('instalação interna (sem carro): não disputa carro, não vira volta do carro, não pede veículo', () => {
+  const a = os({id:'a', equipe:['Ana'], veiculo:'Instalação interna'});
+  const b = os({id:'b', equipe:['Bia'], veiculo:'instalacao interna'});
+  assert.equal(O.semCarro(a), true); assert.equal(O.semCarro(b), true, 'sem acento e minúsculo também');
+  assert.equal(O.semCarro(os({veiculo:'Strada 10'})), false);
+  assert.equal(O.conflitos([a, b], hoje).length, 0, 'duas instalações internas no mesmo turno não disputam carro');
+  assert.equal(O.conflitos([a, os({id:'c', equipe:['Ana'], veiculo:'Instalação interna'})], hoje).length, 1, 'a mesma pessoa em duas continua conflito');
+  const voltou = os({id:'v', veiculo:'Instalação interna', retornoEm:hoje+'T17:00:00'});
+  assert.equal(O.voltasDoCarro([voltou]).length, 0, 'sem carro não entra na fila da volta do carro');
+  assert.ok(!O.pendencias(os({veiculo:'Instalação interna'})).includes('Definir veículo'));
+  assert.equal(O.SEM_CARRO, 'Instalação interna');
+});

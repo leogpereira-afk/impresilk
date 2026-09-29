@@ -1405,3 +1405,11 @@ test('conferência: todo nome do PCP aparece com a ficha, como ligou e os alerta
   assert.deepEqual([...t.run('conferenciaRH()').slice(0, 2).map(l => l.como)].sort().join(), 'ambiguo,sem-ficha', 'o que falta resolver vem primeiro');
   assert.equal(t.run('pendentesConferenciaRH()'), 2);
 });
+test('lista de veículos: "Instalação interna (sem carro)" é a primeira opção e fica marcada quando escolhida', () => {
+  const t = casa([], { veiculos: ['Fiat Uno'] }, ELENCO);
+  const html = t.run("optionsVeiculoCasa('Instalação interna')");
+  assert.match(html, /<optgroup label="Sem carro"><option value="Instalação interna" selected>/);
+  assert.equal((html.match(/value="Instalação interna"/g) || []).length, 1, 'uma vez só');
+  assert.doesNotMatch(t.run("optionsVeiculoCasa('Strada')"), /value="Instalação interna" selected/);
+  assert.match(t.run('carrosHTML({de:"2026-01-01",ate:"2026-12-31"})') || '', /^(?![\s\S]*Instalação interna)/, 'sem carro não entra na lista de carros');
+});

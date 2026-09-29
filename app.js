@@ -388,7 +388,9 @@ function proximoPasso(os) {
   if (OPERACAO.paradoNoCliente(os))                              return { label: 'Parado: o cliente ainda não liberou a instalação', cta: '▶ Cliente liberou', acao: 'liberou' };
   if (!OPERACAO.agendaCompleta(os))                                return { label: 'Completar programação', cta: '📅 Agendar', acao: 'agenda' };
   if (os.confirmacao !== 'Confirmado' || (!os.horaSaida && !OPERACAO.confirmadaHoje(os))) return { label: 'Falta confirmar cliente', cta: '📞 Confirmar',  acao: 'confirmar' };
-  if (!os.carroLiberado && !os.horaSaida)                          return { label: 'Liberar carro / saída',   cta: '🚗 Liberar saída', acao: 'saida' };
+  if (!os.carroLiberado && !os.horaSaida)                          return OPERACAO.semCarro(os)
+    ? { label: 'Liberar a saída (instalação interna, sem carro)', cta: '🏠 Liberar saída', acao: 'saida' }
+    : { label: 'Liberar carro / saída',   cta: '🚗 Liberar saída', acao: 'saida' };
   if (!os.horaSaida) return {label:'Registrar a saída da equipe',cta:'🚗 Registrar saída',acao:'saida'};
   const faltas = validarFinalizacao(os);
   if (faltas.length) return { label: 'Conferir execução: ' + faltas.length + ' pendências para concluir', cta: '🔧 Conferir execução', acao: 'exec' };
@@ -1902,9 +1904,9 @@ function blocoExec(os, ro, done) {
       ${!confirmado ? `<div class="trava-msg">🔒 Confirme o horário com o cliente (POP EXI‑002) antes de liberar o carro / sair.</div>` : ''}
       <div class="edit-only">
         ${os.carroLiberado
-          ? `<div class="liberar-status">🚗 Carro liberado por ${esc(os.carroLiberadoPor||'—')}${os.carroLiberadoEm?' · '+new Date(os.carroLiberadoEm).toLocaleString('pt-BR'):''}
+          ? `<div class="liberar-status">${OPERACAO.semCarro(os) ? '🏠 Saída liberada (sem carro)' : '🚗 Carro liberado'} por ${esc(os.carroLiberadoPor||'—')}${os.carroLiberadoEm?' · '+new Date(os.carroLiberadoEm).toLocaleString('pt-BR'):''}
                <button class="btn-xs btn-ghost" id="btn-cancelar-carro" style="margin-left:auto">Cancelar</button></div>`
-          : `<button class="btn-primary btn-sm" id="btn-liberar-carro" ${!confirmado?'disabled style="opacity:.5"':''}>🚗 Liberar carro / Saída</button>`}
+          : `<button class="btn-primary btn-sm" id="btn-liberar-carro" ${!confirmado?'disabled style="opacity:.5"':''}>${OPERACAO.semCarro(os) ? '🏠 Liberar saída (sem carro)' : '🚗 Liberar carro / Saída'}</button>`}
       </div>
       <div class="field">
         <label>Fotos de saída (≥1 p/ finalizar · carimba a hora de saída)</label>
@@ -1927,7 +1929,7 @@ function blocoExec(os, ro, done) {
       </div>
       <div class="field-row">
         <div class="field"><label>Hora saída</label><input type="time" data-f="horaSaida" value="${esc(os.horaSaida)}"></div>
-        <div class="field"><label>KM saída</label><input type="number" inputmode="numeric" data-f="kmSaida" value="${esc(os.kmSaida)}" placeholder="km do veículo"></div>
+        ${OPERACAO.semCarro(os) ? '' : `<div class="field"><label>KM saída</label><input type="number" inputmode="numeric" data-f="kmSaida" value="${esc(os.kmSaida)}" placeholder="km do veículo"></div>`}
       </div>
 
       <!-- ── Processo 2: Retorno · Execução ─────────────────────── -->
@@ -1966,7 +1968,7 @@ function blocoExec(os, ro, done) {
       </div>
       <div class="field-row">
         <div class="field"><label>Hora retorno</label><input type="time" data-f="horaRetorno" value="${esc(os.horaRetorno)}"></div>
-        <div class="field"><label>KM retorno</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>
+        ${OPERACAO.semCarro(os) ? '' : `<div class="field"><label>KM retorno</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>`}
       </div>
       ${conferenciaVoltaHTML(os, ro)}
       <div class="field-row">
@@ -2391,7 +2393,7 @@ function veiculoOptionsFicha(atual, cfg) {
   const base = typeof optionsVeiculoCasa === 'function'
     ? optionsVeiculoCasa(atual)
     : doCfg.map(v => `<option ${atual === v ? 'selected' : ''}>${esc(v)}</option>`).join('');
-  const fora = atual && !doCfg.includes(atual) && !doRH.includes(atual);
+  const fora = atual && !doCfg.includes(atual) && !doRH.includes(atual) && !OPERACAO.semCarro({ veiculo: atual });
   return (fora ? `<option value="${esc(atual)}" selected>${esc(atual)}</option>` : '') + base;
 }
 
@@ -2501,7 +2503,8 @@ function bindModalEvents(os, ro) {
         else { rc.por = (STATE.user && STATE.user.nome) || ''; rc.em = nowISO(); }
       }
       // Re-render leve em campos que afetam status/checklist/travas
-      if (['confirmacao','instalacao.periodo','instalacao.data','liberadoPCP'].includes(el.dataset.f)) {
+      // veiculo: "Instalação interna" tira o KM e troca "Liberar carro" por "Liberar saída" na hora.
+      if (['confirmacao','instalacao.periodo','instalacao.data','liberadoPCP','veiculo'].includes(el.dataset.f)) {
         saveDraft(); reRenderModalKeepOpen();
       } else if (confAntes !== _modalDraft.confirmacao || carroAntes !== !!_modalDraft.carroLiberado) {
         /* Hora e duração também zeram a confirmação e o carro (setField), e a
@@ -4458,7 +4461,7 @@ function renderPainelKPIs() {
 
   // ── Tendências ────────────────────────────────────────────────────────────
   const trendHTML = `
-    ${trendBlock('🚚 Carro mais utilizado', 'veiculo', contar(todas, o => o.veiculo))}
+    ${trendBlock('🚚 Carro mais utilizado', 'veiculo', contar(todas.filter(o => !OPERACAO.semCarro(o)), o => o.veiculo))}
     ${trendBlock('🛠 Ferramentas mais usadas', 'ferramenta', contar(todas, o => o.ferramentas))}
     ${trendBlock('📅 Períodos programados', 'periodo', contar(todas, o => (o.instalacao && o.instalacao.periodo)))}
     ${trendBlock('📦 Insumos mais utilizados', 'suprimento', contar(todas, o => o.suprimentos))}`;
@@ -4890,7 +4893,7 @@ function execItemHTML(os) {
         ${pp && !podeLiberarCarro && !os.horaSaida ? `<div class="exec-proximo">Próximo passo: ${esc(pp.label)}</div>` : ''}
       </div>
       <div class="list-actions edit-only">
-        ${podeLiberarCarro ? `<button class="btn-primary btn-sm" data-inline="carro" data-id="${esc(os.id)}">🚗 Liberar carro</button>` : passo}
+        ${podeLiberarCarro ? `<button class="btn-primary btn-sm" data-inline="carro" data-id="${esc(os.id)}">${OPERACAO.semCarro(os) ? '🏠 Liberar saída' : '🚗 Liberar carro'}</button>` : passo}
         <button class="btn-ghost btn-sm" data-inline="checkout" data-id="${esc(os.id)}">Check‑out</button>
       </div>
     </div>`;
@@ -6299,6 +6302,8 @@ function veiculoDoElenco(nome) {
   return vs.find(v => normNome(v.nome) === n) || vs.find(v => normNome(v.nome).replace(/\s+/g, '') === n.replace(/\s+/g, '')) || null;
 }
 function rotuloVeiculoMsg(nomeNaOS) {
+  // Sem carro: a mensagem diz que é instalação interna, não "Veículo: ...".
+  if (OPERACAO.semCarro({ veiculo: nomeNaOS })) return { emoji: '🏠', texto: 'Instalação interna (sem carro)' };
   const v = veiculoDoElenco(nomeNaOS);
   if (!v) return { emoji: '🚗', texto: String(nomeNaOS || '').trim() };
   const partes = [];

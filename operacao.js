@@ -157,7 +157,8 @@ const OPERACAO = (() => {
     for (let i=0; i<os.length; i++) for (let j=i+1; j<os.length; j++) {
       const a=os[i], b=os[j]; if (a.id === b.id || !mesmoTurno(a,b)) continue;
       const nomes = equipe(a).filter(n => equipe(b).includes(n));
-      const carro = String(a.veiculo || '').trim();
+      // "Instalação interna" não é carro: duas no mesmo turno não disputam nada.
+      const carro = semCarro(a) ? '' : String(a.veiculo || '').trim();
       if (nomes.length || (carro && carro === String(b.veiculo || '').trim())) {
         out.push({a,b,equipe:nomes,veiculo:carro && carro === String(b.veiculo || '').trim() ? carro : ''});
       }
@@ -296,8 +297,18 @@ const OPERACAO = (() => {
   function diaDaVolta(o) {
     return dia(o?.retornoEm) || (o?.horaRetorno ? (dia(o.saidaEm) || dia(o.instalacao?.data)) : '') || dia(o?.entregaLancada?.data) || dia(o?.finalizadaEm);
   }
-  const voltou = o => !!(o && !interno(o) && equipe(o).length &&
+  const voltou = o => !!(o && !interno(o) && !semCarro(o) && equipe(o).length &&
     (o.retornoEm || o.horaRetorno || (dia(o.finalizadaEm) && (concluida(o) || o.entregaLancada))));
+  /* SEM CARRO (pedido do Léo, 29/09/2026: "preciso que tenha a opção
+     instalação interna, porque tem vezes que não precisa de carro"). É um
+     valor do campo VEÍCULO, não um tipo de O.S.: a instalação continua sendo
+     de instalação (equipe, agenda, confirmação, saída e retorno), só não usa
+     carro. NÃO CONFUNDIR com o tipo 'interno' (cliente retira). Sem carro:
+     não disputa carro com outra O.S., não pede veículo, não entra na fila da
+     volta do carro nem na nota do carro. O servidor (base da nota) usa o
+     mesmo nome. */
+  const SEM_CARRO = 'Instalação interna';
+  const semCarro = o => !!o && normal(o.veiculo) === normal(SEM_CARRO);
   const normal = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
   /* A CHAVE DA VOLTA: dia + carro + equipe. A base da nota no servidor
      (pcp-sync, perfFonte) monta a mesma chave; um teste confere as duas. */
@@ -335,6 +346,6 @@ const OPERACAO = (() => {
     const ordem = { conferir: 0, parcial: 1, conferida: 2 };
     return lista2.sort((a, b) => ordem[a.situacao] - ordem[b.situacao] || b.dia.localeCompare(a.dia) || a.chave.localeCompare(b.chave));
   }
-  return {PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
+  return {SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
