@@ -1,4 +1,5 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens } from "../_shared/pcp-integridade.mjs";
+import { REGRAS } from "../_shared/pcp-regras.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -670,8 +671,11 @@ Deno.serve(async (req: Request) => {
     if (!permitida) return resp({error:apagando ? "Esta foto não pode ser apagada por este aparelho." : "Esta foto não está vinculada às O.S. da sua equipe."},403);
   }
 
-  // Toda O.S. que sai desta porta para o crachá de toque passa por aqui.
-  const saida = (r: any) => ehToqueNoNome ? podarToque(r) : r;
+  // Toda O.S. que sai desta porta para o crachá de toque passa por aqui. O ID
+  // e o login de quem digitou o prazo e o retorno previstos (F15) só descem
+  // para a gestão (admin, pcp) e a máquina.
+  const gestaoVeTudo = ehMaquina || ["admin", "pcp"].includes(String(cracha?.papel ?? ""));
+  const saida = (r: any) => ehToqueNoNome ? podarToque(r) : gestaoVeTudo ? r : podarCarimbosF15(r);
 
   /* QUEM ASSINA A ENTRADA DO DIARIO: o cracha, nunca o corpo do pedido. Um
      `porId` que viesse do aparelho seria o aparelho dizendo quem ele e --
@@ -772,6 +776,12 @@ Deno.serve(async (req: Request) => {
         if(acao==="performancePeriodo")return resp(await perfFonte(body));
         const fechamentos=await perfFechamentos(periodo);
         if(acao==="performanceFechamentos")return resp({fechamentos});
+        /* Fechamento só de período que já chegou: um "até" no futuro viraria o
+           último dia fechado e travaria toda regra nova até lá, sem saída pela
+           tela (fechamento é só de acréscimo). A tela chama esta ação na hora,
+           fora da fila, então o 422 aqui não prende nada e mostra a causa. */
+        const hojeFechar=perfDia(new Date().toISOString());
+        if(periodo.ate>hojeFechar)return resp({error:`O fechamento vai no máximo até hoje (${hojeFechar.split("-").reverse().join("/")}). Escolha um período que termine hoje ou antes.`},422);
         const requestId=String(body.requestId || "");
         if(!/^[a-zA-Z0-9-]{10,80}$/.test(requestId))return resp({error:"Identificação do fechamento inválida."},422);
         const repetido=fechamentos.find((r:any)=>r.requestId===requestId);if(repetido)return resp({ok:true,fechamento:repetido});
@@ -787,6 +797,86 @@ Deno.serve(async (req: Request) => {
         const {error}=await sb.from("pcp_registros").insert({colecao:"performance_fechamentos",id,registro,apagado:false,atualizado_em:registro.fechadoEm});
         if(error){if(error.code==="23505")return resp({error:"O período recebeu outra revisão. Atualize antes de fechar."},409);throw new Error(error.message);}
         return resp({ok:true,fechamento:registro});
+      }
+
+      /* REGRAS DO PROGRAMA DAS EQUIPES (F05, 29/09/2026). Coleção própria
+         (performance_regras), SÓ DE INSERÇÃO: versão nova nunca edita a
+         antiga. Só admin e pcp leem e criam (a regra decide comissão e
+         ranking; nada disso desce ao crachá sem senha nem à montagem), e o
+         list das O.S. nunca a traz (filtra colecao='os'). A validação é a de
+         _shared/pcp-regras.mjs, a mesma do formulário. O autor é o do
+         crachá; id, versão e hora são daqui. A regra vale a partir de uma
+         DATA e é recusada se cair em período já fechado (409), porque mês
+         fechado não se recalcula. 422 aqui não prende fila nenhuma: a tela
+         chama esta ação na hora, com rede, e mostra a causa. */
+      case "performanceRegras":
+      case "performanceRegraNova": {
+        const papelRegra = String(cracha?.papel ?? "");
+        if (acao === "performanceRegraNova" && (!cracha || ehMaquina || ehToqueNoNome || !["admin", "pcp"].includes(papelRegra)))
+          return resp({ error: "Só a gestão do PCP (admin ou pcp) cria versão da regra do programa." }, 403);
+        if (!ehMaquina && (ehToqueNoNome || !["admin", "pcp"].includes(papelRegra)))
+          return resp({ error: "Regras do programa restritas à gestão do PCP." }, 403);
+        const lerVersoes = async () => {
+          const { data, error } = await sb.from("pcp_registros").select("id,registro")
+            .eq("colecao", "performance_regras").eq("apagado", false).order("id").limit(1000);
+          if (error) throw new Error(error.message);
+          if ((data || []).length >= 1000) throw new Error("Limite de versões da regra atingido.");
+          return (data || []).map((r: any) => r.registro).filter((r: any) => r && typeof r === "object")
+            .sort((a: any, b: any) => (Number(b.versao) || 0) - (Number(a.versao) || 0));
+        };
+        // O último dia já fechado: o maior `ate` dos fechamentos gravados.
+        const lerFechadoAte = async () => {
+          const { data, error } = await sb.from("pcp_registros").select("registro->>ate")
+            .eq("colecao", "performance_fechamentos").eq("apagado", false).limit(1000);
+          if (error) throw new Error(error.message);
+          if ((data || []).length >= 1000) throw new Error("Limite de fechamentos atingido na leitura.");
+          return (data || []).map((r: any) => String(r.ate ?? "")).filter((d: string) => REGRAS.dataValida(d)).sort().pop() || "";
+        };
+        const [versoes, fechadoAte] = await Promise.all([lerVersoes(), lerFechadoAte()]);
+        if (acao === "performanceRegras") {
+          const vigente = REGRAS.regraVigente(versoes, perfDia(new Date().toISOString()));
+          return resp({ versoes, fechadoAte, embutida: REGRAS.REGRA_EMBUTIDA, vigenteHoje: vigente ? vigente.id : null });
+        }
+        const requestId = String(body.requestId || "");
+        if (!/^[a-zA-Z0-9-]{10,80}$/.test(requestId)) return resp({ error: "Identificação do pedido inválida." }, 422);
+        /* Mesmo pedido de novo (rede caiu na resposta): a mesma versão, sem
+           gravar outra. Mas só se o CONTEÚDO for o mesmo: mesmo pedido com outra
+           comissão, outra data ou outro motivo (corrigido depois de um erro de
+           rede) é 409, para a tela nunca dizer "gravada" sobre um valor que não
+           foi o gravado. A regra pedida é completada com a mesma base da
+           gravação original (a versão anterior a ela, ou a embutida). */
+        const repetida = versoes.find((v: any) => v.requestId === requestId);
+        if (repetida) {
+          const baseRep = versoes.find((v: any) => Number(v.versao) === Number(repetida.versao) - 1) || REGRAS.REGRA_EMBUTIDA;
+          const pedida = JSON.stringify(REGRAS.normalizarRegra(REGRAS.completarRegra(body.regra, baseRep)));
+          const gravada = JSON.stringify(REGRAS.normalizarRegra(repetida));
+          if (pedida !== gravada || String(body.motivo || "").trim() !== String(repetida.motivo || ""))
+            return resp({ error: `Este pedido já gravou a versão ${repetida.versao} com outros valores. Recarregue as regras e crie outra versão, se precisar.` }, 409);
+          return resp({ ok: true, regra: repetida, repetida: true });
+        }
+        const ultima = versoes[0] || null;
+        if (String(ultima?.id || "") !== String(body.anterior || ""))
+          return resp({ error: "Outra versão da regra foi criada. Recarregue as regras e confira antes de gravar." }, 409);
+        const motivo = String(body.motivo || "").trim();
+        if (motivo.length < 5 || motivo.length > 300)
+          return resp({ error: "Informe o motivo da nova versão, de 5 a 300 caracteres." }, 422);
+        const regra = REGRAS.completarRegra(body.regra, ultima || REGRAS.REGRA_EMBUTIDA);
+        const erroRegra = REGRAS.validarRegra(regra);
+        if (erroRegra) return resp({ error: erroRegra }, 422);
+        if (REGRAS.fechamentoBloqueia(regra.validaDesde, fechadoAte))
+          return resp({ error: `A data ${REGRAS.dataBR(regra.validaDesde)} cai em período já fechado (até ${REGRAS.dataBR(fechadoAte)}). Escolha uma data depois de ${REGRAS.dataBR(fechadoAte)}.` }, 409);
+        const autor = await autorAuditoria();
+        const versao = (Number(ultima?.versao) || 0) + 1, criadaEm = new Date().toISOString();
+        const registro = { ...regra, id: crypto.randomUUID(), versao, requestId, motivo, criadaEm,
+          autor: { nome: String(autor.nome || "").slice(0, 120), login: String(autor.login || "").slice(0, 120), papel: String(autor.papel || ""), porId: ehIdPessoa(autor.porId) ? String(autor.porId) : "" } };
+        // A linha leva o número da versão: duas gravações ao mesmo tempo batem na chave (23505).
+        const { error } = await sb.from("pcp_registros").insert({ colecao: "performance_regras", id: "v" + String(versao).padStart(6, "0"), registro, apagado: false, atualizado_em: criadaEm });
+        if (error) {
+          if (error.code === "23505") return resp({ error: "Outra versão da regra foi criada ao mesmo tempo. Recarregue as regras e confira antes de gravar." }, 409);
+          throw new Error(error.message);
+        }
+        await auditar("regras", "regra-nova", { campos: ["performanceRegras"], antes: { performanceRegras: ultima }, depois: { performanceRegras: registro } });
+        return resp({ ok: true, regra: registro });
       }
 
       case "ping":
@@ -994,7 +1084,7 @@ Deno.serve(async (req: Request) => {
           const comTrabalho = !!(existing.liberadoPCP || existing.finalizadaEm ||
             (existing.fotosCheckinIds ?? []).length || (existing.fotosRetornoIds ?? []).length ||
             (existing.equipe ?? []).length || existing.confirmacao || existing.horaSaida ||
-            existing.paradoClienteEm);
+            existing.paradoClienteEm || temCampoGestao(existing));
           if (semTrabalho && comTrabalho) return resp({ ok: true, os: saida(existing), duplicataEvitada: true });
         }
 
@@ -1021,6 +1111,60 @@ Deno.serve(async (req: Request) => {
           ) {
             return resp({ conflito: true, servidor: saida(existing) });
           }
+        }
+
+        /* TROCA O CONTEUDO DE `os` NO LUGAR: o resto do upsert le este mesmo
+           objeto. */
+        const trocarOS = (novo: any) => { for (const k of Object.keys(os)) if (!(k in novo)) delete os[k]; Object.assign(os, novo); };
+        const papelUp = String(cracha?.papel ?? "");
+        /* CODIGO FIXO DO ITEM (E1): item sem codigo ganha o dele nesta
+           gravacao (sem gravacao em lote); a aba antiga que manda a lista sem
+           codigo recebe de volta o codigo gravado, casando pelo casamento de
+           hoje. Vale para todos, toque e maquina inclusive. Nada aqui recusa. */
+        trocarOS(preservarItens(os, existing).os);
+        /* CAMPOS DA GESTAO (F01): ausente fica o gravado, valor novo ainda nao
+           entra, null explicito de admin/pcp limpa. O toque ja parte do gravado
+           (mesclarToqueNoNome) e nao limpa; a maquina fica com o gravado. */
+        // O que o aparelho mandou de prazo e retorno (F15), antes da preservacao.
+        const veioRetorno = Object.prototype.hasOwnProperty.call(os, "retornoPrevisto") ? os.retornoPrevisto : undefined;
+        const veioPrazo = Object.prototype.hasOwnProperty.call(os, "prazoCombinado") ? os.prazoCombinado : undefined;
+        trocarOS(preservarAusentes(os, existing, { podeLimpar: !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp) }));
+        /* PRAZO COMBINADO E RETORNO PREVISTO (F15). Regras em _shared: o
+           retorno previsto so admin e pcp digitam, carimbado por dia; o prazo
+           nasce uma vez (primeira data agendada), nao anda com a remarcacao e
+           so a gestao corrige, com motivo. Fora de instalacao: nao zera a
+           confirmacao nem o carro. Nada aqui e 422: o que nao entra vira aviso.
+           Roda primeiro sem ler o RH; so quando algo muda busca o autor. */
+        {
+          const gestaoF15 = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
+          const agoraF15 = new Date().toISOString();
+          /* O historico de remarcacoes so cresce, e so quando a data muda (o
+             prazo das O.S. sem prazo gravado e lido dele): o que o aparelho
+             reescreveu no trecho gravado nao entra. */
+          trocarOS(guardarAgendaLog(os, existing, { por: String(cracha?.nome || cracha?.sub || ""), agora: agoraF15, maquina: ehMaquina }));
+          const rodarF15 = (autor: any) => {
+            const rp = carimbarRetornoPrevisto(veioRetorno, os, existing, autor, agoraF15, { pode: gestaoF15, avisar: !ehMaquina && !ehToqueNoNome });
+            const pc = carimbarPrazoCombinado(veioPrazo, rp.os, existing, autor, agoraF15, { podeCorrigir: gestaoF15, toque: ehToqueNoNome, avisar: !ehMaquina && !ehToqueNoNome });
+            return { os: pc.os, avisos: [...rp.avisos, ...pc.avisos] };
+          };
+          let f15 = rodarF15({ nome: String(cracha?.nome || cracha?.sub || ""), login: String(cracha?.sub ?? ""), porId: "" });
+          if (canon(f15.os.retornoPrevisto) !== canon(os.retornoPrevisto) || canon(f15.os.prazoCombinado) !== canon(os.prazoCombinado))
+            f15 = rodarF15(await autorAuditoria());
+          trocarOS(f15.os);
+          avisosToque.push(...f15.avisos);
+        }
+        /* ENTREGA LANCADA (F01): carimbo do servidor (por, porConta, porId, em).
+           Lanca quem tem o botao e entrou com senha; o toque sem senha, a
+           maquina e o comercial ficam com o gravado. Nada aqui e 422: data
+           invalida fica de fora com aviso. */
+        {
+          const podeLancar = !ehMaquina && !ehToqueNoNome && ["admin", "pcp", "operacao", "montagem"].includes(papelUp);
+          const autorEntrega = podeLancar ? (entregaLancadaMudou(os, existing) ? await autorAuditoria() : { nome: "", login: "", porId: "" }) : null;
+          // Desfazer so por pedido explicito ({ desfazer: true }) e so da gestao (revisao da F01).
+          const podeDesfazer = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
+          const el = carimbarEntregaLancada(os, existing, autorEntrega, new Date().toISOString(), { podeDesfazer });
+          trocarOS(el.os);
+          if (el.aviso) avisosToque.push(el.aviso);
         }
 
         /* CONFERÊNCIA DA VOLTA (carro limpo, equipamentos): pesa na nota de cada
@@ -1115,7 +1259,14 @@ Deno.serve(async (req: Request) => {
         // Preserva o atualizadoEm do autor: reescrever com o relogio do servidor
         // misturava duas fontes de tempo e o proprio autor levava "conflito".
         // (Ele segue valendo para EXIBIR "alterado em"; quem decide conflito e o rev.)
-        const gravar = { ...carimbarExecucao(os, existing, cracha?.nome || cracha?.sub || "Integração", new Date().toISOString()), rev: revAtual + 1 };
+        /* O ID DE QUEM MARCOU (F01): o carimbo de nome novo que É do cracha
+           ganha o ID do RH resolvido pelo cracha (a mesma regua do diario); a
+           marca que volta (Desfazer, Sobrescrever) reusa o ID do par que o
+           servidor ja carimbou; nome de outra pessoa fica sem ID. O que o
+           aparelho mandou como ID nunca entra. Sem carimbo novo, nem le o RH. */
+        const executado = carimbarExecucao(os, existing, cracha?.nome || cracha?.sub || "Integração", new Date().toISOString());
+        const autorCarimbo = carimbosQueMudaram(executado, existing).length ? await autorAuditoria() : { nome: "", login: "", porId: "" };
+        const gravar = { ...carimbarIds(executado, existing, autorCarimbo), rev: revAtual + 1 };
         try {
           if (linhaAtual) {
             const {data,error} = await sb.from("pcp_registros").update({registro:gravar,atualizado_em:new Date(Math.max(Date.now(),Date.parse(linhaAtual.atualizado_em)+1 || 0)).toISOString(),apagado:false})
@@ -1157,7 +1308,10 @@ Deno.serve(async (req: Request) => {
               .eq("registro->>numero", num).limit(1).maybeSingle();
             if (morta?.id) {
               const revMorta = typeof morta.registro?.rev === "number" ? morta.registro.rev : 0;
-              const revivido = { ...os, id: morta.id, rev: revMorta + 1 };
+              /* Parte de `gravar`, que ja passou pelo carimbarExecucao e pelo
+                 carimbarIds: o <campo>Id que o aparelho mandou nao entra por
+                 aqui (revisao da F01). */
+              const revivido = { ...gravar, id: morta.id, rev: revMorta + 1 };
               await setReg("os", morta.id, revivido);
               const dm = diffAuditavel(morta.registro, revivido);
               await auditar(String(morta.id), "restaurar", { campos: ["apagado", ...(dm?.campos ?? [])], antes: { apagado: true, ...(dm?.antes ?? {}) }, depois: { apagado: false, ...(dm?.depois ?? {}) } }, num);

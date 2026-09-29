@@ -23,8 +23,439 @@ export function temTrabalhoHumano(o) {
   if (!o) return false;
   return !!(o.liberadoPCP || o.aptoEm || (o.equipe || []).some(n => String(n || '').trim())
     || o.confirmacao === 'Confirmado' || o.paradoClienteEm
-    || ((o.horaSaida || o.saidaEm) && !(o.horaRetorno || o.retornoEm))
+    || equipeNaRua(o)
     || (o.reabertaEm && String(o.reabertaEm) > String(o.baixaAutoERP?.em || '')));
+}
+// Saiu e não voltou: a mesma marca do temTrabalhoHumano e da exceção de remarcar do pcp-sync.
+export const equipeNaRua = o => !!(o && (o.horaSaida || o.saidaEm) && !(o.horaRetorno || o.retornoEm));
+/* ÚLTIMO DIA DA AGENDA: a mesma conta do OPERACAO.prazo (operacao.js). Serviço
+   de 3 dias que começou ontem termina amanhã; o interno é de um dia só. */
+export function ultimoDiaAgenda(o) {
+  const d = String(o?.instalacao?.data ?? '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(Date.parse(d + 'T12:00:00Z'))) return '';
+  const dur = Math.min(366, Math.max(1, Math.floor(Number(o?.instalacao?.duracaoDias) || 1)));
+  const t = new Date(d + 'T12:00:00Z');
+  t.setUTCDate(t.getUTCDate() + (o?.tipo === 'interno' ? 0 : dur - 1));
+  return t.toISOString().slice(0, 10);
+}
+/* A BAIXA DO ERP NÃO TIRA DA MESA O SERVIÇO QUE A EQUIPE AINDA ESTÁ FAZENDO
+   (revisão da F01, 29/09/2026). O ERP marca ENTREGUE quando o material sai da
+   fábrica. Olhar só o PRIMEIRO dia da agenda fechava, no meio do serviço, a
+   instalação de vários dias; e a equipe na rua (saiu e não voltou) tinha a O.S.
+   finalizada pelo ERP. Uma regra só, usada na escolha das candidatas e na
+   releitura antes de gravar. Devolve a causa, ou '' quando pode baixar. */
+export function motivoAgendaViva(o, hojeLocal) {
+  if (equipeNaRua(o)) return 'a equipe está na rua (saiu e não voltou)';
+  const ultimo = ultimoDiaAgenda(o);
+  if (ultimo && ultimo >= String(hojeLocal ?? '')) return 'a agenda da equipe ainda não terminou';
+  return '';
+}
+/* CAMPOS DA GESTÃO NA O.S. (F01, 29/09/2026). Lista ÚNICA dos campos que as
+   próximas fatias põem dentro da O.S. (alocação F08, prazo e retorno F15,
+   ocorrências e abonos F17/F18, cancelamento e O.S. original F24). Ela nasce
+   antes deles de propósito: a baixa do ERP, o esqueleto da reimportação e a
+   tela de uma versão que ainda não conhece o campo gravam a O.S. INTEIRA, e
+   apagariam a alocação calados. Nesta fatia nenhum valor novo é aceito:
+   a porta só preserva o gravado e deixa a gestão limpar de propósito.
+   Cada fatia que abre um campo o faz com uma regra própria, DEPOIS desta
+   (F15: carimbarRetornoPrevisto e carimbarPrazoCombinado).
+   Toda a lista entra no diário (CAMPOS_AUDITADOS). */
+export const CAMPOS_GESTAO = ['alocacao', 'alocacaoLog', 'prazoCombinado', 'retornoPrevisto', 'retornoConferido', 'ocorrencias', 'abonos', 'cancelamento', 'osOriginalId'];
+// O log da alocação é histórico: nem a gestão o apaga com null. O prazo
+// combinado também não: mudar o prazo exige motivo, e o único caminho é o
+// pedido { corrigir: true, data, motivo } (revisão da F15).
+const GESTAO_SO_ACRESCIMO = new Set(['alocacaoLog', 'prazoCombinado']);
+const vazioGestao = v => v == null || v === '' || (Array.isArray(v) && !v.length) || (objeto(v) && !Object.keys(v).length);
+// Algum campo da gestão preenchido = a O.S. tem trabalho (o esqueleto do ERP não passa por cima).
+export const temCampoGestao = o => !!o && CAMPOS_GESTAO.some(c => !vazioGestao(o[c]));
+/* AUSENTE NÃO É APAGAR; VAZIO PRESENTE É. O campo que não veio fica como
+   estava gravado: tela que não conhece o campo não o manda. O campo que veio
+   VAZIO (null, '', [] ou {}), de quem pode limpar (a gestão: admin e pcp), é
+   limpeza de propósito (desfazer um cancelamento, trocar para "Cliente
+   retira", tirar o retorno previsto) e grava null. O '' é o jeito da casa de
+   desfazer (aptoPor = '', finalizadoPor = ''): tratá-lo como "não mexe"
+   engolia o desfazer calado (revisão da F01). Valor novo ainda não entra
+   (F01): fica o gravado, e o que não estava gravado não nasce do aparelho. */
+export function preservarAusentes(os, antes, { podeLimpar = false } = {}, campos = CAMPOS_GESTAO) {
+  const r = { ...os };
+  for (const c of campos) {
+    const tinha = proprio(antes, c);
+    if (podeLimpar && proprio(os, c) && vazioGestao(os[c]) && !GESTAO_SO_ACRESCIMO.has(c)) {
+      if (tinha) r[c] = null; else delete r[c];
+      continue;
+    }
+    if (tinha) r[c] = antes[c]; else delete r[c];
+  }
+  return r;
+}
+/* PRAZO COMBINADO E RETORNO PREVISTO (F15, 29/09/2026). Decisões do dono:
+   - O PRAZO é a PRIMEIRA data agendada no PCP, congelada. O ERP não define
+     prazo: a importação põe a previsão do ERP em instalacao.data, e essa data
+     não é agenda de ninguém. Remarcar não move o prazo (a remarcação pedida
+     pelo cliente vira abono, na F17).
+   - O RETORNO PREVISTO é a hora DIGITADA pela gestão, por dia da agenda, sem
+     padrão por período. Sem hora digitada, não há perda por retorno antecipado.
+   Os dois moram no topo da O.S., fora de instalacao: mexer em instalacao zera
+   a confirmação do cliente e o carro liberado. A mesma régua de leitura está
+   no operacao.js (OPERACAO.prazoCombinadoDe e retornosPrevistos), e um teste
+   confere as duas cópias. */
+const DIA_F15 = /^\d{4}-\d{2}-\d{2}$/;
+const HORA_F15 = /^([01]\d|2[0-3]):[0-5]\d$/;
+// Dia de calendário que existe, entre 2000 e 2100: "0002-08-05" (o ano pela
+// metade que o campo de data manda enquanto se digita) não vira prazo.
+export function diaPlausivel(v) {
+  const s = String(v ?? '').trim().slice(0, 10);
+  if (!DIA_F15.test(s) || s < '2000-01-01' || s > '2100-12-31') return '';
+  const t = Date.parse(s + 'T12:00:00Z');
+  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === s ? s : '';
+}
+/* A PRIMEIRA DATA AGENDADA NO PCP, na leitura. Ordem:
+   1. o prazo gravado (a O.S. nova o grava quando ganha a primeira data; a
+      antiga o grava de passagem, na primeira gravação que mudaria o prazo
+      lido: carimbarPrazoCombinado);
+   2. a marca "sem prazo" (fonte PRAZO_SEM_AGENDA): a O.S. já estava entregue
+      quando ganhou data ou equipe no PCP; não há prazo combinado, e a leitura
+      não deriva outro;
+   3. o histórico de remarcações (agendaLog): o `de` da primeira remarcação
+      (o que valia antes dela) ou a primeira data remarcada. O `de` que é a
+      previsão do ERP numa O.S. importada (do ERP ou do PDF do ERP) não conta:
+      era o que a importação pôs, não o que o PCP combinou;
+   4. a data atual, quando é agenda de gente (agendaDeGente).
+   Sem nada disso, null: a O.S. ainda não tem prazo combinado.
+   O histórico guarda as últimas 40 remarcações; com mais que isso, o começo
+   se perde (limite conhecido, raro; a O.S. que passa por lá grava o prazo
+   antes de perder). */
+export const PRAZO_SEM_AGENDA = 'semAgenda';
+/* A data atual é agenda de gente: O.S. feita no PCP, equipe escalada, ou data
+   diferente da previsão do ERP. A previsão que o ERP pôs em instalacao.data,
+   sem equipe, não é agenda de ninguém. */
+export function agendaDeGente(o) {
+  const atual = diaPlausivel(o?.instalacao?.data);
+  if (!atual) return '';
+  const doERP = !!(o?.origemMubisys || o?.origemPDF);
+  const comEquipe = (Array.isArray(o?.equipe) ? o.equipe : []).some(x => String(x ?? '').trim());
+  return !doERP || comEquipe || atual !== diaPlausivel(o?.previsaoEntrega) ? atual : '';
+}
+export function prazoCombinadoDe(o) {
+  const pc = o?.prazoCombinado;
+  const gravado = diaPlausivel(objeto(pc) ? pc.data : pc);
+  if (gravado) return { data: gravado, fonte: objeto(pc) && pc.fonte ? String(pc.fonte) : 'agenda', derivado: false };
+  if (objeto(pc) && pc.fonte === PRAZO_SEM_AGENDA) return null;
+  const doERP = !!(o?.origemMubisys || o?.origemPDF);
+  const previsaoERP = diaPlausivel(o?.previsaoEntrega);
+  const log = (Array.isArray(o?.agendaLog) ? o.agendaLog : []).filter(objeto);
+  if (log.length) {
+    const de = diaPlausivel(log[0].de);
+    if (de && !(doERP && de === previsaoERP)) return { data: de, fonte: 'agendaLog', derivado: true };
+    for (const x of log) { const d = diaPlausivel(x.data); if (d) return { data: d, fonte: 'agendaLog', derivado: true }; }
+  }
+  const atual = agendaDeGente(o);
+  return atual ? { data: atual, fonte: 'agenda', derivado: true } : null;
+}
+/* OS RETORNOS PREVISTOS, um por dia da agenda: [{dia, hora, saida}] em ordem
+   de dia (hora = retorno previsto; saida = saída prevista, opcional). Aceita
+   também o formato de um dia só ({dia, hora}). Entrada sem dia ou sem hora
+   válida fica de fora. */
+export function retornosPrevistos(o) {
+  const v = o?.retornoPrevisto;
+  const lista = Array.isArray(v) ? v : objeto(v) ? [v] : [];
+  const porDia = new Map();
+  for (const e of lista) {
+    if (!objeto(e)) continue;
+    const dia = diaPlausivel(e.dia), hora = HORA_F15.test(String(e.hora ?? '')) ? String(e.hora) : '';
+    if (!dia || !hora) continue;
+    const saida = HORA_F15.test(String(e.saida ?? '')) && String(e.saida) < hora ? String(e.saida) : '';
+    porDia.set(dia, { ...e, dia, hora, saida });
+  }
+  return [...porDia.values()].sort((a, b) => a.dia.localeCompare(b.dia));
+}
+// Os dias da agenda (a mesma conta do OPERACAO.diasAgenda): o retorno previsto só vale neles.
+export function diasAgendaF15(o) {
+  const d = diaPlausivel(o?.instalacao?.data);
+  if (!d || o?.tipo === 'interno') return [];
+  const dur = Math.min(366, Math.max(1, Math.floor(Number(o?.instalacao?.duracaoDias) || 1)));
+  const t = new Date(d + 'T12:00:00Z'), out = [];
+  for (let i = 0; i < dur; i++) { out.push(t.toISOString().slice(0, 10)); t.setUTCDate(t.getUTCDate() + 1); }
+  return out;
+}
+const carimboF15 = (autor, agora) => ({
+  por: String(autor?.nome ?? '').slice(0, 120), porConta: String(autor?.login ?? '').slice(0, 120),
+  porId: ehIdPessoa(autor?.porId) ? String(autor.porId).trim() : '', em: String(agora ?? ''),
+});
+const diaBR = d => d ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : '';
+/* GRAVAR O RETORNO PREVISTO (roda depois do preservarAusentes). `veio` é o
+   que o aparelho mandou (undefined = não mandou). Só admin e pcp gravam
+   (`pode`); para os outros fica o gravado, e quem tem senha ouve o porquê
+   (`avisar`). O vazio de propósito já foi tratado pelo preservarAusentes.
+   Cada dia leva o carimbo do servidor (por, porConta, porId, em); o dia que
+   voltou igual mantém o carimbo de quem digitou. Dia fora do formato ou com a
+   saída depois do retorno não entra e não apaga o gravado daquele dia: vira
+   aviso, nunca 422 (um 422 prende a fila do aparelho). Devolve { os, avisos }. */
+export function carimbarRetornoPrevisto(veio, os, antes, autor, agora, { pode = false, avisar = false } = {}) {
+  const r = { ...os }, avisos = [];
+  if (veio === undefined || vazioGestao(veio)) return { os: r, avisos };
+  const gravados = retornosPrevistos(antes);
+  const semCarimbo = l => canon(l.map(e => ({ dia: e.dia, hora: e.hora, saida: e.saida || '' })));
+  if (!pode) {
+    if (avisar && semCarimbo(retornosPrevistos({ retornoPrevisto: veio })) !== semCarimbo(gravados))
+      avisos.push('O retorno previsto não foi trocado: só a gestão do PCP (admin ou pcp) digita o retorno previsto.');
+    return { os: r, avisos };
+  }
+  const lista = Array.isArray(veio) ? veio : objeto(veio) ? [veio] : null;
+  if (!lista) { avisos.push('O retorno previsto não foi gravado: formato inválido.'); return { os: r, avisos }; }
+  const antesPorDia = new Map(gravados.map(e => [e.dia, e]));
+  const agenda = diasAgendaF15(r);
+  const porDia = new Map();
+  let lixo = 0;
+  for (const e of lista.slice(0, 62)) {
+    if (!objeto(e)) { lixo++; continue; }
+    const dia = diaPlausivel(e.dia);
+    const hora = String(e.hora ?? '').trim(), saida = String(e.saida ?? '').trim();
+    if (!dia) { lixo++; avisos.push('Um retorno previsto sem dia válido ficou de fora.'); continue; }
+    // Dia sem retorno digitado: não há retorno previsto nele (sem perda).
+    if (!hora) continue;
+    const manter = () => { if (antesPorDia.has(dia)) porDia.set(dia, antesPorDia.get(dia)); };
+    if (!HORA_F15.test(hora) || (saida && !HORA_F15.test(saida))) {
+      avisos.push(`O retorno previsto de ${diaBR(dia)} não foi gravado: hora inválida.`); manter(); continue;
+    }
+    if (saida && saida >= hora) {
+      avisos.push(`O retorno previsto de ${diaBR(dia)} não foi gravado: a saída prevista (${saida}) precisa ser antes do retorno (${hora}).`); manter(); continue;
+    }
+    const velho = antesPorDia.get(dia);
+    if (velho && velho.hora === hora && (velho.saida || '') === saida) { porDia.set(dia, velho); continue; }
+    // Hora nova só num dia da agenda: a digitada num dia que a O.S. já não tem
+    // (a data mudou com a ficha aberta) sumiria da tela e não valeria em dia nenhum.
+    if (!agenda.includes(dia)) {
+      avisos.push(`O retorno previsto de ${diaBR(dia)} não foi gravado: o dia não está na agenda da O.S.`); manter(); continue;
+    }
+    porDia.set(dia, { dia, hora, saida, ...carimboF15(autor, agora) });
+  }
+  const nova = [...porDia.values()].sort((a, b) => a.dia.localeCompare(b.dia));
+  // Envio que só trouxe lixo não apaga o que estava gravado.
+  if (!nova.length && lixo) return { os: r, avisos };
+  if (nova.length) r.retornoPrevisto = nova;
+  else if (proprio(antes, 'retornoPrevisto')) r.retornoPrevisto = null;
+  else delete r.retornoPrevisto;
+  return { os: r, avisos };
+}
+/* GRAVAR O PRAZO COMBINADO (roda depois do preservarAusentes e do
+   guardarAgendaLog). Revisão da F15 (29/09/2026):
+   - CONGELADO DESDE O NASCIMENTO. O gravado não anda com a agenda, nem da
+     mesma conta logo depois (a conta pcp é uma só no PC da fábrica: agendar,
+     ligar para o cliente e remarcar a pedido dele é justamente o abono).
+     Erro de digitação se conserta pela correção com motivo.
+   - NASCE da data que a O.S. tem AGORA, quando ela vira agenda de gente
+     (agendaDeGente), nunca do histórico que o aparelho mandou.
+   - O.S. ANTIGA (sem prazo gravado, com prazo lido): a gravação que mudaria o
+     prazo lido (remarcar, limpar a data, tirar a equipe) grava antes o prazo
+     lido da versão GRAVADA, com lidoDe. Só a O.S. que está sendo mexida é
+     gravada, sem gravação em lote.
+   - ENTREGUE ANTES DE AGENDAR (finalizada, baixada pelo ERP ou com entrega
+     lançada): não há prazo combinado depois da entrega. Grava a marca "sem
+     prazo" (PRAZO_SEM_AGENDA), para a leitura não derivar a previsão do ERP.
+   - CORRIGIR é pedido explícito, { corrigir: true, data, motivo }, só de admin
+     e pcp, com motivo de 15 letras ou mais; fica no diário com o antes e o
+     depois. Valor do aparelho que não é pedido de correção nunca entra; o
+     crachá de toque não faz nascer nem corrige. null e '' não apagam
+     (preservarAusentes).
+   A origem (ERP, PDF) e a previsão do ERP valem as da versão gravada: o
+   aparelho que as tira não faz a previsão virar agenda.
+   Devolve { os, avisos }. */
+export const MOTIVO_PRAZO_MIN = 15;
+export const pedeCorrecaoPrazo = v => objeto(v) && v.corrigir === true;
+// Entregue: finalizada, ou baixada pelo ERP ou com entrega lançada e não reaberta depois.
+const entregueF15 = o => !!(o && (o.finalizadaEm
+  || (!o.reabertaEm && (o.baixaAutoERP || (objeto(o.entregaLancada) ? o.entregaLancada.data : o.entregaLancada)))));
+export function carimbarPrazoCombinado(veio, os, antes, autor, agora, { podeCorrigir = false, toque = false, avisar = false } = {}) {
+  const r = { ...os }, avisos = [];
+  const gravadoCru = proprio(os, 'prazoCombinado') ? os.prazoCombinado : undefined;
+  const gravado = objeto(gravadoCru) && diaPlausivel(gravadoCru.data) ? gravadoCru : null;
+  const temGravado = !!diaPlausivel(objeto(gravadoCru) ? gravadoCru.data : gravadoCru);
+  const semAgenda = !temGravado && objeto(gravadoCru) && gravadoCru.fonte === PRAZO_SEM_AGENDA;
+  if (pedeCorrecaoPrazo(veio) && !toque) {
+    const data = diaPlausivel(veio.data), motivo = String(veio.motivo ?? '').trim().slice(0, 300);
+    const igual = gravado && gravado.fonte === 'correcao' && gravado.data === data && String(gravado.motivo ?? '') === motivo;
+    if (igual) return { os: r, avisos };
+    if (!podeCorrigir) { if (avisar) avisos.push('O prazo combinado não foi corrigido: só a gestão do PCP (admin ou pcp) corrige o prazo.'); }
+    else if (!data) avisos.push('O prazo combinado não foi corrigido: a data não é válida.');
+    else if (motivo.length < MOTIVO_PRAZO_MIN) avisos.push(`O prazo combinado não foi corrigido: escreva o motivo com ${MOTIVO_PRAZO_MIN} letras ou mais.`);
+    else {
+      const original = diaPlausivel(gravado?.original) || (temGravado ? diaPlausivel(objeto(gravadoCru) ? gravadoCru.data : gravadoCru) : '')
+        || (semAgenda ? '' : prazoCombinadoDe(antes || r)?.data || '');
+      r.prazoCombinado = { data, fonte: 'correcao', motivo, ...(original ? { original } : {}), ...carimboF15(autor, agora) };
+      return { os: r, avisos };
+    }
+  }
+  if (temGravado || semAgenda || toque) return { os: r, avisos };
+  const fixo = antes ? { origemMubisys: antes.origemMubisys || r.origemMubisys, origemPDF: antes.origemPDF || r.origemPDF, previsaoEntrega: proprio(antes, 'previsaoEntrega') ? antes.previsaoEntrega : r.previsaoEntrega } : {};
+  const lidoAntes = antes ? prazoCombinadoDe({ ...antes, prazoCombinado: null }) : null;
+  const depois = { ...r, ...fixo, prazoCombinado: null };
+  if (lidoAntes) {
+    if (prazoCombinadoDe(depois)?.data !== lidoAntes.data)
+      r.prazoCombinado = { data: lidoAntes.data, fonte: 'agenda', lidoDe: lidoAntes.fonte, ...carimboF15(autor, agora) };
+    return { os: r, avisos };
+  }
+  const nasce = agendaDeGente(depois);
+  if (!nasce) return { os: r, avisos };
+  if (entregueF15(antes) || entregueF15(r)) {
+    r.prazoCombinado = { data: '', fonte: PRAZO_SEM_AGENDA, motivo: 'A O.S. já estava entregue quando ganhou data ou equipe no PCP.', ...carimboF15(autor, agora) };
+    return { os: r, avisos };
+  }
+  r.prazoCombinado = { data: nasce, fonte: 'agenda', ...carimboF15(autor, agora) };
+  return { os: r, avisos };
+}
+/* O HISTÓRICO DE REMARCAÇÕES (agendaLog) SÓ CRESCE, e só quando a data muda.
+   O prazo das O.S. sem prazo gravado é lido dele, então ele não pode ser
+   reescrito pelo aparelho (revisão da F15: montagem e operação moviam o prazo
+   reescrevendo o histórico, sem diário). Regra:
+   - o trecho gravado não muda;
+   - só entra entrada nova quando instalacao.data muda neste envio, e ela
+     começa na data GRAVADA (`de`) e termina na data nova. As remarcações que o
+     aparelho fez sem rede entram quando formam uma cadeia da data gravada até
+     a nova (com o `em` do aparelho, se não for do futuro); senão entra uma
+     entrada só, com o carimbo do servidor. `por` é sempre o crachá;
+   - O.S. nova: entra o histórico que o aparelho montou antes de a O.S.
+     existir no servidor, se ele terminar na data que chega;
+   - a máquina (integração) não escreve histórico.
+   Guarda as últimas 40, como a tela. Devolve a O.S. */
+export const AGENDA_LOG_MAX = 40;
+const DIA_OU_VAZIO = v => v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v);
+export function guardarAgendaLog(os, antes, { por = '', agora = '', maquina = false } = {}) {
+  const r = { ...os };
+  const gravado = antes && Array.isArray(antes.agendaLog) ? antes.agendaLog : null;
+  const B = String(r?.instalacao?.data ?? '');
+  const A = antes ? String(antes?.instalacao?.data ?? '') : null;
+  const tAgora = Date.parse(String(agora ?? ''));
+  const emOk = em => { const t = Date.parse(String(em ?? '')); return Number.isFinite(t) && (!Number.isFinite(tAgora) || t <= tAgora + 5 * 60000); };
+  const limpa = e => ({ de: String(e.de ?? ''), data: String(e.data ?? ''), em: emOk(e.em) ? String(e.em) : String(agora ?? ''), por: String(por ?? '').slice(0, 120) });
+  // A cadeia que o aparelho mandou, do fim para trás, até a data gravada (A) ou, na O.S. nova, até onde ela se encadeia.
+  const cadeia = () => {
+    const N = (Array.isArray(os?.agendaLog) ? os.agendaLog : []).filter(objeto);
+    const fim = N.length - 1;
+    if (fim < 0 || String(N[fim].data ?? '') !== B) return null;
+    for (let i = fim; i >= 0 && fim - i < AGENDA_LOG_MAX; i--) {
+      const e = N[i];
+      if (!DIA_OU_VAZIO(String(e.de ?? '')) || !DIA_OU_VAZIO(String(e.data ?? ''))) return null;
+      if (A !== null && String(e.de ?? '') === A) return N.slice(i, fim + 1).map(limpa);
+      if (i === 0 || String(N[i - 1].data ?? '') !== String(e.de ?? '')) return A === null ? N.slice(i, fim + 1).map(limpa) : null;
+    }
+    return null;
+  };
+  let novos = [];
+  if (A === null) novos = cadeia() || [];
+  else if (!maquina && A !== B) novos = cadeia() || [{ de: A, data: B, em: String(agora ?? ''), por: String(por ?? '').slice(0, 120) }];
+  const lista = [...(gravado || []), ...novos].slice(-AGENDA_LOG_MAX);
+  if (lista.length || gravado) r.agendaLog = lista;
+  else delete r.agendaLog;
+  return r;
+}
+/* ENTREGA LANÇADA À MÃO (F01). Quem lança é quem tem o botão "Lançar entrega"
+   e entrou com senha (admin, pcp, operação e a conta de montagem); o toque sem
+   senha não lança. O carimbo é do servidor: `autor` sai do crachá (nome,
+   login, ID do RH) e nada de por/porId/em que o aparelho escreveu entra. Só a
+   data é do formulário. A mesma data regravada mantém o carimbo de quem
+   lançou; ausente mantém o gravado. Data que não é dia válido não derruba o
+   envio: fica a gravada, com aviso.
+   NULL NÃO DESFAZ (revisão da F01). O esqueleto da O.S. (novaOS) nasce com
+   entregaLancada: null, e toda cópia que não viu o lançamento o manda: o
+   "Sobrescrever" de um tablet apagava a entrega do PCP. Desfazer é um pedido
+   EXPLÍCITO, { desfazer: true }, e só de admin e pcp (`podeDesfazer`).
+   `autor` null = quem enviou não pode lançar. Devolve { os, aviso }. */
+const DIA_ISO = /^\d{4}-\d{2}-\d{2}$/;
+const pedeDesfazer = v => objeto(v) && v.desfazer === true;
+export const entregaLancadaMudou = (os, antes) => proprio(os, 'entregaLancada') && objeto(os.entregaLancada) && !pedeDesfazer(os.entregaLancada)
+  && String(os.entregaLancada.data ?? '') !== String(antes?.entregaLancada?.data ?? '');
+export function carimbarEntregaLancada(os, antes, autor, em, { podeDesfazer = false } = {}) {
+  const r = { ...os };
+  const manter = () => { if (proprio(antes, 'entregaLancada')) r.entregaLancada = antes.entregaLancada; else delete r.entregaLancada; };
+  if (!proprio(os, 'entregaLancada')) { manter(); return { os: r, aviso: '' }; }
+  const v = os.entregaLancada, gravada = objeto(antes?.entregaLancada) ? antes.entregaLancada : null;
+  if (!autor) {
+    if (!(v == null && !gravada)) manter();
+    return { os: r, aviso: '' };
+  }
+  if (pedeDesfazer(v)) {
+    if (podeDesfazer && gravada) r.entregaLancada = null; else manter();
+    return { os: r, aviso: '' };
+  }
+  // Vazio é "não sei do lançamento", não "desfaça": fica o gravado.
+  if (v == null || v === '') { if (gravada) r.entregaLancada = gravada; return { os: r, aviso: '' }; }
+  const data = objeto(v) ? String(v.data ?? '').trim() : '';
+  if (!DIA_ISO.test(data) || !Number.isFinite(Date.parse(data + 'T12:00:00Z'))) {
+    manter();
+    return { os: r, aviso: 'A entrega não foi lançada: a data não é válida. Ficou a que estava gravada.' };
+  }
+  if (gravada && gravada.data === data) { r.entregaLancada = gravada; return { os: r, aviso: '' }; }
+  r.entregaLancada = {
+    data, por: String(autor.nome ?? '').slice(0, 120), porConta: String(autor.login ?? '').slice(0, 120),
+    porId: ehIdPessoa(autor.porId) ? String(autor.porId).trim() : '', em,
+  };
+  return { os: r, aviso: '' };
+}
+/* O ID DE QUEM MARCOU (F01). Cada carimbo de nome da ficha ganha, ao lado, o
+   ID do RH (<campo>Id). O ID nunca vem do aparelho. O par diz qual hora
+   acompanha o nome: refazer com o mesmo nome em outra hora é marca nova.
+
+   O ID PERTENCE AO PAR (nome, hora), NÃO A QUEM ENVIOU (revisão da F01). Dar o
+   ID do crachá a todo carimbo que "mudou" colava o ID de quem clicou no nome
+   de outra pessoa: o Desfazer de "Voltar ao PCP" devolve aptoPor e aptoEm de
+   quem liberou; o "Sobrescrever" com cópia antiga revive a liberação do carro
+   de outro; o "Conferido por" do espelho é texto livre. Agora:
+   - o servidor guarda, em `idsDosCarimbos`, os pares (nome, hora) que ele
+     mesmo carimbou e o ID de cada um (os últimos por campo);
+   - par conhecido (a marca que volta com o Desfazer) reusa o ID dele;
+   - marca nova só ganha o ID do crachá quando o nome É o do crachá (nome ou
+     login; "... por <nome do crachá>" da baixa confirmada também);
+   - nome de outra pessoa, sem par conhecido: ID vazio, nunca adivinhado;
+   - marca que ninguém carimbou aqui (o pcp-mubisys escreve finalizadoPor por
+     fora) não herda o ID gravado ao lado: sem par conhecido, ID vazio.
+   A memória também nunca vem do aparelho: parte sempre do gravado. */
+export const MEMORIA_IDS = 'idsDosCarimbos';
+const MEMORIA_POR_CAMPO = 4;
+const ehDoCracha = (nome, autor) => {
+  const n = normPessoa(nome);
+  return !!n && [autor?.nome, autor?.login].map(normPessoa).filter(Boolean)
+    .some(c => n === c || n.endsWith(' por ' + c));
+};
+export const CARIMBOS_COM_ID = {
+  aptoPor: 'aptoEm', confPor: 'confEm', carroLiberadoPor: 'carroLiberadoEm', finalizadoPor: 'finalizadaEm',
+  paradoClientePor: 'paradoClienteEm', reabertaPor: 'reabertaEm', erpConferidoPor: 'erpConferidoEm',
+  saidaPor: 'saidaRecebidoEm', retornoPor: 'retornoRecebidoEm',
+  embarqueConferidoPor: '', produtosConferidosPor: '', ferramentasConferidasPor: '', conferidoPor: '',
+};
+const textoCarimbo = v => String(v ?? '').trim();
+const carimboMudou = (os, antes, c) => {
+  const par = CARIMBOS_COM_ID[c];
+  return textoCarimbo(os?.[c]) !== textoCarimbo(antes?.[c]) || (!!par && textoCarimbo(os?.[par]) !== textoCarimbo(antes?.[par]));
+};
+export const carimbosQueMudaram = (os, antes) => Object.keys(CARIMBOS_COM_ID).filter(c => textoCarimbo(os?.[c]) && carimboMudou(os, antes, c));
+/* `autor` = { nome, login, porId } do crachá (autorAuditoria do pcp-sync). */
+export function carimbarIds(os, antes, autor = {}) {
+  const r = { ...os };
+  const id = ehIdPessoa(autor?.porId) ? String(autor.porId).trim() : '';
+  const memAntes = objeto(antes?.[MEMORIA_IDS]) ? antes[MEMORIA_IDS] : {};
+  const memoria = {};
+  for (const c of Object.keys(CARIMBOS_COM_ID)) {
+    const k = c + 'Id', par = CARIMBOS_COM_ID[c];
+    const lista = (Array.isArray(memAntes[c]) ? memAntes[c] : [])
+      .filter(p => objeto(p) && ehIdPessoa(p.id) && typeof p.nome === 'string')
+      .map(p => ({ nome: p.nome, em: String(p.em ?? ''), id: String(p.id) }));
+    const nome = textoCarimbo(os?.[c]);
+    let v = '';
+    if (nome) {
+      const chave = normPessoa(nome), em = par ? textoCarimbo(os?.[par]) : '';
+      const conhecido = lista.find(p => p.nome === chave && p.em === em);
+      if (conhecido) v = conhecido.id;
+      else if (carimboMudou(os, antes, c) && ehDoCracha(nome, autor) && id) {
+        v = id;
+        lista.push({ nome: chave, em, id });
+      }
+    }
+    if (v || proprio(antes, k) || proprio(os, k)) r[k] = v; else delete r[k];
+    if (lista.length) memoria[c] = lista.slice(-MEMORIA_POR_CAMPO);
+  }
+  if (Object.keys(memoria).length) r[MEMORIA_IDS] = memoria; else delete r[MEMORIA_IDS];
+  return r;
 }
 export const pedeConferencia = a => a && a.campo !== 'valorTotal' && a.antes != null && String(a.antes).trim() !== '';
 export function atualizarOrigemERP(atual, remoto, em) {
@@ -469,6 +900,157 @@ export const CAMPOS_MONTAGEM = new Set([
   'kmSaida', 'kmRetorno', 'horaSaida', 'horaRetorno', 'saidaEm', 'retornoEm',
   'voltaEquipe', 'fotosTiradas',
 ]);
+/* CÓDIGO FIXO DO ITEM (E1 do plano de entrega por item, 29/09/2026). O item
+   não tinha id: a marca casava pelo número e pela descrição, e 10 O.S. reais
+   têm esse par repetido. Agora cada item tem `uid`, dado uma vez e nunca
+   reaproveitado:
+   - item do ERP: '<numero>:<posicao>:<k>' na importação (k conta a posição
+     repetida). É determinístico: importar de novo dá o mesmo código;
+   - item manual ou do PDF: 'm-' + aleatório, gerado no aparelho (funciona
+     sem rede; OPERACAO.novoUidItem);
+   - item antigo sem código: o servidor carimba na PRÓXIMA gravação normal da
+     O.S. (preservarItens), sem gravação em lote. Item do ERP ganha o mesmo
+     código que a importação daria; o resto, 's-' + aleatório.
+   Depois de dado, o código não depende da posição na lista. A cópia do
+   casamento no aparelho está em operacao.js (OPERACAO.casarItens), e um
+   teste confere as duas (tests/itens-uid.test.cjs). */
+const UID_ITEM = /^[\w:.-]{1,80}$/;
+export const uidItemValido = v => typeof v === 'string' && UID_ITEM.test(v);
+const pedacoUid = v => String(v ?? '').trim().replace(/[^\w.-]+/g, '_').slice(0, 30) || '0';
+export const uidDoERP = (numero, posicao, k) => `${pedacoUid(numero)}:${pedacoUid(posicao)}:${k}`;
+// 's-' (servidor) ou 'm-' (aparelho) + 12 letras e números sorteados.
+export function sortearUid(prefixo = 's-') {
+  const c = globalThis.crypto, b = new Uint8Array(12);
+  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
+  else for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256);
+  return prefixo + [...b].map(x => (x % 36).toString(36)).join('');
+}
+/* O ITEM DO ERP COM CÓDIGO. Quem já tem código válido fica com ele; os outros
+   ganham '<numero>:<posicao>:<k>', na ordem da lista, sem repetir código que
+   já está nela. Devolve uma lista nova (os itens também são cópias). */
+export function carimbarUidsERP(numero, itens) {
+  if (!Array.isArray(itens)) return itens;
+  const usados = new Set(itens.filter(it => objeto(it) && uidItemValido(it.uid)).map(it => it.uid));
+  const vezes = new Map();
+  return itens.map(it => {
+    if (!objeto(it)) return it;
+    const pos = String(it.item ?? '');
+    const k = (vezes.get(pos) || 0) + 1;
+    vezes.set(pos, k);
+    if (uidItemValido(it.uid)) return { ...it };
+    let uid = uidDoERP(numero, pos, k);
+    if (usados.has(uid)) uid = sortearUid('s-');
+    usados.add(uid);
+    return { ...it, uid };
+  });
+}
+/* O CASAMENTO DE ITEM, um só para o servidor e para o aparelho. Devolve, para
+   cada item de `novos`, a posição do mesmo item em `antes`, ou -1.
+   1. Pelo código: item que tem código só casa pelo código. Código que o outro
+      lado não tem é outro item (o "Substituir" do PDF, o item que o PCP
+      removeu): não cai para o número nem para a descrição.
+   2. O item sem código (aba antiga, item de antes da E1) casa pelo casamento
+      de antes, em rodadas, e só com item do mesmo lado (do ERP com do ERP,
+      manual com manual: o item do PDF nunca herda o código de um item do
+      ERP que saiu): número, descrição, medida e quantidade iguais, quando a
+      combinação é única dos dois lados; depois número e descrição iguais, na
+      ordem (nunca pela posição na lista, que muda quando um item antes dele
+      sai: isso trocava os códigos do par repetido); depois o número, quando
+      só um item de `antes` o tem e só um livre também; depois a descrição,
+      com a mesma regra. A marca nunca pula para o vizinho.
+      Limite conhecido: aba antiga que remove um item manual e cria outro
+      manual com o mesmo número (ou a mesma descrição) na mesma gravação dá ao
+      novo o código do removido. Some quando o rascunho aberto adotar o código
+      da resposta do servidor (pré-requisito da E3 no plano). */
+export function casarItens(antes, novos) {
+  const A = Array.isArray(antes) ? antes : [], N = Array.isArray(novos) ? novos : [];
+  const par = N.map(() => -1), usadoA = new Set(), comUid = new Set();
+  const txt = v => String(v ?? '');
+  const porUid = new Map();
+  A.forEach((a, i) => { if (objeto(a) && uidItemValido(a.uid) && !porUid.has(a.uid)) porUid.set(a.uid, i); });
+  N.forEach((n, j) => {
+    if (!objeto(n) || !uidItemValido(n.uid)) return;
+    comUid.add(j);
+    const i = porUid.get(n.uid);
+    if (i !== undefined && !usadoA.has(i)) { par[j] = i; usadoA.add(i); }
+  });
+  const livresN = () => N.map((_, j) => j).filter(j => par[j] < 0 && !comUid.has(j) && objeto(N[j]));
+  const livresA = () => A.map((_, i) => i).filter(i => !usadoA.has(i) && objeto(A[i]));
+  const casar = (i, j) => { par[j] = i; usadoA.add(i); };
+  // Item do ERP só casa com item do ERP, e manual com manual: o item do PDF
+  // ou o manual novo de uma aba antiga nunca herda o código de quem saiu.
+  const mesmoLado = (i, j) => !!A[i].manual === !!N[j].manual;
+  const igual = (i, j, campos) => mesmoLado(i, j) && campos.every(c => txt(N[j][c]) === txt(A[i][c]));
+  const INTEIRO = ['item', 'descricao', 'medidas', 'qtde'], NOME = ['item', 'descricao'];
+  // 1a. Número, descrição, medida e quantidade iguais, quando só um de cada
+  // lado tem essa combinação: separa o par repetido de medidas diferentes
+  // mesmo que um item antes dele (ou um do par) tenha saído da lista.
+  for (const i of livresA()) {
+    const js = livresN().filter(j => igual(i, j, INTEIRO));
+    if (js.length === 1 && livresA().filter(k => igual(k, js[0], INTEIRO)).length === 1) casar(i, js[0]);
+  }
+  // 1b. Número e descrição iguais, na ordem (nunca pela posição na lista: a
+  // posição muda quando um item antes dele sai).
+  for (const i of livresA()) {
+    const js = livresN().filter(j => igual(i, j, NOME));
+    if (js.length) casar(i, js[0]);
+  }
+  for (const campo of ['item', 'descricao']) {
+    for (const i of livresA()) {
+      const v = txt(A[i][campo]);
+      if (!v || A.filter(o => objeto(o) && txt(o[campo]) === v).length !== 1) continue;
+      const js = livresN().filter(j => txt(N[j][campo]) === v && mesmoLado(i, j));
+      if (js.length === 1) casar(i, js[0]);
+    }
+  }
+  return par;
+}
+/* O QUE SÓ O SERVIDOR GUARDA NO ITEM. Aba antiga não conhece estes campos e
+   manda o item sem eles: o servidor os recoloca, casando pelo casamento de
+   hoje. A E3 acrescenta aqui as entregas do item. */
+export const CAMPOS_ITEM_SERVIDOR = ['uid'];
+/* PRESERVAR OS ITENS (roda em toda gravação de O.S. no pcp-sync, depois das
+   travas de conflito). Para cada item que chegou:
+   - casado com um item gravado (casarItens): o campo de CAMPOS_ITEM_SERVIDOR
+     que não veio volta do gravado (código fora do formato conta como não
+     veio);
+   - sem código válido, ou com o código repetido de outro item da mesma lista
+     (item copiado): ganha código novo. Item do ERP (O.S. do ERP, item não
+     manual) ganha o da importação; o resto, 's-' + aleatório.
+   Nada fora da lista que chegou é criado nem removido. `sortear` só existe
+   para o teste. Devolve { os, carimbados, recolocados }. */
+export function preservarItens(os, antes, { sortear = sortearUid } = {}) {
+  if (!objeto(os) || !Array.isArray(os.itens)) return { os, carimbados: 0, recolocados: 0 };
+  const gravados = Array.isArray(antes?.itens) ? antes.itens : [];
+  const par = casarItens(gravados, os.itens);
+  let recolocados = 0, carimbados = 0;
+  const itens = os.itens.map((it, j) => {
+    if (!objeto(it)) return it;
+    const r = { ...it };
+    if (!uidItemValido(r.uid)) delete r.uid;
+    const g = par[j] >= 0 ? gravados[par[j]] : null;
+    if (g) for (const c of CAMPOS_ITEM_SERVIDOR) {
+      if (proprio(r, c) || !proprio(g, c) || (c === 'uid' && !uidItemValido(g.uid))) continue;
+      r[c] = g[c]; recolocados++;
+    }
+    return r;
+  });
+  const vistos = new Set(), todos = new Set(itens.filter(it => objeto(it) && it.uid).map(it => it.uid));
+  const doERP = !!(os.origemMubisys || antes?.origemMubisys);
+  const numero = String(os.numero ?? antes?.numero ?? '').trim();
+  const vezes = new Map();
+  for (const it of itens) {
+    if (!objeto(it)) continue;
+    const pos = String(it.item ?? '');
+    const k = it.manual ? 0 : (vezes.get(pos) || 0) + 1;
+    if (!it.manual) vezes.set(pos, k);
+    if (it.uid && !vistos.has(it.uid)) { vistos.add(it.uid); continue; }
+    let uid = doERP && numero && !it.manual ? uidDoERP(numero, pos, k) : '';
+    for (let t = 0; !uid || todos.has(uid); t++) uid = t < 5 ? sortear('s-') : sortearUid('s-') + t;
+    it.uid = uid; todos.add(uid); vistos.add(uid); carimbados++;
+  }
+  return { os: { ...os, itens }, carimbados, recolocados };
+}
 // Do item, só a marca da montagem: descrição, medida e valor são do PCP e do ERP.
 const CAMPOS_ITEM_MONTAGEM = ['statusInst', 'pronto', 'motivo', 'obsProb', 'fotoProbId'];
 const LISTAS_FOTO = ['fotosCheckinIds', 'fotosRetornoIds'];
@@ -493,9 +1075,10 @@ const cortar = v => typeof v === 'string' && v.length > TEXTO_MAX ? v.slice(0, T
    cópia velha só não sabia dele). Cópia em dia troca a lista, porque o × do
    espelho tira foto da lista.
 
-   ITENS: o item não tem id. Casa pelo número e descrição em qualquer posição;
-   se o PCP mudou a descrição, pelo número (quando só um tem aquele número);
-   depois pela descrição. A marca nunca pula para o vizinho, e item que só o
+   ITENS: casa pelo código do item (uid, E1). O item sem código (aba antiga)
+   casa pelo número e descrição em qualquer posição; se o PCP mudou a
+   descrição, pelo número (quando só um tem aquele número); depois pela
+   descrição (casarItens). A marca nunca pula para o vizinho, e item que só o
    aparelho tem não é criado; marca que não achou item vira aviso.
 
    FINALIZAR: só O.S. que o PCP liberou e o cliente confirmou, as mesmas travas
@@ -550,21 +1133,14 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
   }
   m.rev = revAtual;
   if (Array.isArray(veio?.itens) && Array.isArray(atual?.itens)) {
-    const usados = new Set();
-    const livres = () => veio.itens.map((v, j) => ({ v, j })).filter(x => !usados.has(x.j) && objeto(x.v));
     const txt = v => String(v ?? '');
-    const unico = (xs, f) => xs.filter(f).length === 1 ? xs.find(f) : null;
-    const achar = it => {
-      const xs = livres();
-      const a = xs.find(x => txt(x.v.item) === txt(it.item) && txt(x.v.descricao) === txt(it.descricao))
-        || (txt(it.item) && atual.itens.filter(o => objeto(o) && txt(o.item) === txt(it.item)).length === 1 ? unico(xs, x => txt(x.v.item) === txt(it.item)) : null)
-        || (txt(it.descricao) && atual.itens.filter(o => objeto(o) && txt(o.descricao) === txt(it.descricao)).length === 1 ? unico(xs, x => txt(x.v.descricao) === txt(it.descricao)) : null);
-      if (a) usados.add(a.j);
-      return a ? a.v : null;
-    };
-    m.itens = atual.itens.map(it => {
+    // O código do item manda (E1); sem código, o casamento de antes (casarItens).
+    const par = casarItens(atual.itens, veio.itens);
+    const usados = new Set(par.map((i, j) => i >= 0 ? j : -1).filter(j => j >= 0));
+    const doGravado = new Map(par.map((i, j) => [i, j]).filter(([i]) => i >= 0));
+    m.itens = atual.itens.map((it, i) => {
       if (!objeto(it)) return it;
-      const v = achar(it);
+      const v = doGravado.has(i) ? veio.itens[doGravado.get(i)] : null;
       if (!v) return it;
       const r = { ...it };
       for (const c of CAMPOS_ITEM_MONTAGEM) {
@@ -625,16 +1201,48 @@ export function acertarMomentosToque(os, anterior) {
    nem do dinheiro de ninguém. Vale para TODA saída de O.S. (lista, resposta do
    upsert, janela de conflito); a mescla parte do que está gravado, então o que
    não desce não se perde na volta. erpAlteracoes sai inteiro: guarda o antes e
-   o depois do CPF/CNPJ e do valor. */
+   o depois do CPF/CNPJ e do valor.
+   Os IDs do RH dos carimbos (<campo>Id, a memória idsDosCarimbos e o porId e
+   porConta da entrega lançada) também não descem: o ID são os 6 primeiros
+   dígitos do CPF de quem é da gestão (revisão da F01). O nome continua. */
 export function podarToque(r) {
   if (!objeto(r)) return r;
-  const { cnpjCpf: _c, valorTotal: _v, erpAlteracoes: _h, ...resto } = r;
-  if (Array.isArray(resto.itens)) resto.itens = resto.itens.map(it => {
+  const { cnpjCpf: _c, valorTotal: _v, erpAlteracoes: _h, [MEMORIA_IDS]: _m, ...resto } = r;
+  for (const c of Object.keys(CARIMBOS_COM_ID)) delete resto[c + 'Id'];
+  if (objeto(resto.entregaLancada)) {
+    const { porId: _pi, porConta: _pc, ...el } = resto.entregaLancada;
+    resto.entregaLancada = el;
+  }
+  const semF15 = podarCarimbosF15(resto);
+  if (Array.isArray(semF15.itens)) semF15.itens = semF15.itens.map(it => {
     if (!objeto(it)) return it;
     const { valorUnit: _u, subtotal: _s, ...x } = it;
     return x;
   });
-  return resto;
+  return semF15;
+}
+/* O ID E O LOGIN DE QUEM DIGITOU O PRAZO E O RETORNO PREVISTOS (F15) só
+   descem para a gestão (admin, pcp) e para a máquina. Para os outros papéis
+   (montagem com senha, operação, comercial) e para o toque, desce o nome de
+   quem digitou: o ID são os 6 primeiros dígitos do CPF (revisão da F15). A
+   volta sem eles não apaga nada: o campo da gestão fica o gravado. */
+export function podarCarimbosF15(r) {
+  if (!objeto(r)) return r;
+  const out = { ...r };
+  if (objeto(out.prazoCombinado)) {
+    const { porId: _pi, porConta: _pc, ...pc } = out.prazoCombinado;
+    out.prazoCombinado = pc;
+  }
+  if (Array.isArray(out.retornoPrevisto)) out.retornoPrevisto = out.retornoPrevisto.map(e => {
+    if (!objeto(e)) return e;
+    const { porId: _pi, porConta: _pc, ...x } = e;
+    return x;
+  });
+  else if (objeto(out.retornoPrevisto)) {
+    const { porId: _pi, porConta: _pc, ...x } = out.retornoPrevisto;
+    out.retornoPrevisto = x;
+  }
+  return out;
 }
 /* COMPARAR POR CONTEÚDO, NÃO POR TEXTO. O jsonb do banco reordena as chaves
    (por tamanho): {data, periodo, hora} volta como {data, hora, periodo}. A
@@ -714,6 +1322,11 @@ export const CAMPOS_AUDITADOS = [
   // o número busca o valor no Painel; a baixa do ERP e a justificativa decidem
   // se a entrega conta e se a prova faltou (revisão da F03).
   'tipo', 'numero', 'baixaAutoERP', 'justificativaConclusao',
+  // Os campos da gestão dentro da O.S. (F01): a limpeza de propósito fica com autor.
+  ...CAMPOS_GESTAO,
+  // O prazo das O.S. sem prazo gravado é lido do histórico de remarcações e
+  // da origem (ERP ou PDF do ERP): mexer neles fica com autor (revisão da F15).
+  'agendaLog', 'origemPDF',
 ];
 // Campo com ponto é caminho: 'instalacao.data' lê os.instalacao.data.
 const lerCaminho = (o, caminho) => caminho.split('.').reduce((v, k) => (objeto(v) ? v[k] : undefined), o);
@@ -740,12 +1353,19 @@ function semDocumento(v) {
    jsonb reordena chaves). Devolve null quando nada mudou, ou
    { campos, antes, depois } com o valor cru de cada lado (null quando vazio
    do lado de lá). */
+/* O código do item (uid, E1) que o servidor carimba não é mudança de ninguém:
+   na comparação da lista de itens ele não conta. O que se guarda é cru. */
+const semUidItens = (c, v) => c === 'itens' && Array.isArray(v) ? v.map(it => {
+  if (!objeto(it)) return it;
+  const { uid: _u, ...x } = it;
+  return x;
+}) : v;
 export function diffAuditavel(antes, depois, campos = CAMPOS_AUDITADOS) {
   const a = objeto(antes) ? antes : {}, d = objeto(depois) ? depois : {};
   const out = { campos: [], antes: {}, depois: {} };
   for (const c of campos) {
     const va = lerCaminho(a, c), vd = lerCaminho(d, c);
-    if (canon(semVazio(va)) === canon(semVazio(vd))) continue;
+    if (canon(semVazio(semUidItens(c, va))) === canon(semVazio(semUidItens(c, vd)))) continue;
     out.campos.push(c);
     out.antes[c] = semDocumento(va ?? null);
     out.depois[c] = semDocumento(vd ?? null);

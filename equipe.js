@@ -10,6 +10,16 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 function nowISO() { return new Date().toISOString(); }
+/* O CÓDIGO DO ITEM (E1) vem do operacao.js. Se o cache servir o operacao.js
+   de uma versão anterior (o último recurso do sw.js serve o arquivo antigo
+   quando o novo não chega), a ficha não pode quebrar: sem as funções novas,
+   vale o casamento de antes, pela posição e pelo número do item. */
+const uidItemOk = v => typeof OPERACAO.uidItemValido === 'function' ? OPERACAO.uidItemValido(v) : typeof v === 'string' && /^[\w:.-]{1,80}$/.test(v);
+function casarItensSeguro(antes, novos) {
+  if (typeof OPERACAO.casarItens === 'function') return OPERACAO.casarItens(antes, novos);
+  const A = Array.isArray(antes) ? antes : [];
+  return (Array.isArray(novos) ? novos : []).map((it, i) => it && A[i] && String(A[i].item ?? '') === String(it.item ?? '') ? i : -1);
+}
 
 function parseLocalDate(str) {
   if (!str) return null;
@@ -26,6 +36,12 @@ function fmtInstalacao(inst) {
 }
 // 'AAAA-MM-DD' (ou ISO) → 'DD/MM'.
 function diaCurto(v) { const d = OPERACAO.dia(v); return d ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : ''; }
+/* O retorno previsto que a gestão digitou (F15). Só leitura: quem digita é o
+   PCP, e a hora que a equipe anota em "Hora retorno" continua sendo a dela. */
+function retornoPrevistoLinhaHTML(os) {
+  const rp = typeof OPERACAO.retornoPrevistoParaMostrar === 'function' ? OPERACAO.retornoPrevistoParaMostrar(os) : null;
+  return rp ? `<p class="eq-retorno-previsto">Retorno previsto pelo PCP: <strong>${esc(rp.hora)}</strong> · ${esc(diaCurto(rp.dia))}</p>` : '';
+}
 
 function calcStatus(os) {
   return OPERACAO.status(os);
@@ -60,6 +76,14 @@ function toast(msg, type = '') {
 const EQ = { instalador: null, modalId: null, comercial: false, limpeza: null,
   vencido: false, donoDaFila: null, pronto: false, tentouFinalizar: null, pedirAutorizacao: false, recusas: null };
 let _draft = null, _dirty = false;
+/* O ITEM DO TOQUE (E1): pelo código do item (uid) quando o cartão tem código;
+   código que saiu da lista não cai no item que ficou na mesma posição. Item
+   antigo, ainda sem código, vai pela posição, como antes. */
+function itemDoRascunho(idx, uid) {
+  const itens = (_draft && Array.isArray(_draft.itens)) ? _draft.itens : [];
+  if (uid) return itens.find(it => it && it.uid === uid) || null;
+  return itens[+idx] || null;
+}
 
 const normNome = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 // Hora local 'HH:MM'.
@@ -463,9 +487,12 @@ function juntarFotos(meu, remote) {
     const r = (remote[k] || []).filter(id => !apagando.has(id));
     meu[k] = [...new Set([...(meu[k] || []), ...r])];
   }
+  // A foto do problema volta para o MESMO item: pelo código (uid, E1), e no
+  // item sem código pelo número e descrição, como o servidor.
+  const par = casarItensSeguro(remote.itens || [], meu.itens || []);
   (meu.itens || []).forEach((it, i) => {
-    const r = (remote.itens || [])[i];
-    if (it && r && !it.fotoProbId && r.fotoProbId && !apagando.has(r.fotoProbId) && String(r.item ?? '') === String(it.item ?? '')) it.fotoProbId = r.fotoProbId;
+    const r = par[i] >= 0 ? remote.itens[par[i]] : null;
+    if (it && r && !it.fotoProbId && r.fotoProbId && !apagando.has(r.fotoProbId)) it.fotoProbId = r.fotoProbId;
   });
   return meu;
 }
@@ -474,7 +501,8 @@ function oQueSePerde(local, remote) {
   const tem = new Set([...(remote.fotosCheckinIds || []), ...(remote.fotosRetornoIds || []), ...(remote.itens || []).map(i => i && i.fotoProbId)]);
   const fotos = [...(local.fotosCheckinIds || []), ...(local.fotosRetornoIds || []), ...(local.itens || []).map(i => i && i.fotoProbId)]
     .filter(id => id && !tem.has(id)).length;
-  const itens = (local.itens || []).filter((it, i) => it && (it.statusInst || '') !== ((remote.itens || [])[i] || {}).statusInst && it.statusInst).length;
+  const par = casarItensSeguro(remote.itens || [], local.itens || []);
+  const itens = (local.itens || []).filter((it, i) => it && it.statusInst && it.statusInst !== ((par[i] >= 0 ? remote.itens[par[i]] : null) || {}).statusInst).length;
   const p = [];
   if (fotos) p.push(fotos === 1 ? '1 foto' : fotos + ' fotos');
   if (itens) p.push(itens === 1 ? '1 item marcado' : itens + ' itens marcados');
@@ -1010,18 +1038,20 @@ function renderModal() {
 
   const itensCards = itens.map((it, i) => {
     const st = it.statusInst || '';
+    // O código do item (uid, E1) vai em cada controle: o handler acha o item por ele.
+    const u = `data-iuid="${esc(uidItemOk(it.uid) ? it.uid : '')}"`;
     const cls = st === 'retrab' ? 'st-retrab' : (st === 'ok' ? 'st-ok' : '');
     const retrabBox = st === 'retrab' ? `
       <div class="item-retrab">
         <label for="m-imotivo-${i}">Motivo do problema</label>
-        <select id="m-imotivo-${i}" data-imotivo="${i}"><option value="">Escolher o motivo</option>${causas.map(c=>`<option ${it.motivo===c?'selected':''}>${esc(c)}</option>`).join('')}</select>
+        <select id="m-imotivo-${i}" data-imotivo="${i}" ${u}><option value="">Escolher o motivo</option>${causas.map(c=>`<option ${it.motivo===c?'selected':''}>${esc(c)}</option>`).join('')}</select>
         <label for="m-iobs-${i}">O que faltou / detalhe</label>
-        <input id="m-iobs-${i}" type="text" data-iobs="${i}" value="${esc(it.obsProb)}" placeholder="ex.: medida errada, faltou peça…">
+        <input id="m-iobs-${i}" type="text" data-iobs="${i}" ${u} value="${esc(it.obsProb)}" placeholder="ex.: medida errada, faltou peça…">
         <div class="item-foto">
-          ${it.fotoProbId ? thumb(it.fotoProbId, `data-irm="${i}"`) : ''}
+          ${it.fotoProbId ? thumb(it.fotoProbId, `data-irm="${i}" ${u}`) : ''}
           ${ro ? '' : `<div class="eq-fotos-acoes">
-            <label class="foto-box"><span class="foto-hint">📷 Foto do problema</span><input type="file" accept="image/*" capture="environment" data-ifoto="${i}"></label>
-            <label class="foto-box"><span class="foto-hint">🖼 Da galeria</span><input type="file" accept="image/*" data-ifoto="${i}"></label>
+            <label class="foto-box"><span class="foto-hint">📷 Foto do problema</span><input type="file" accept="image/*" capture="environment" data-ifoto="${i}" ${u}></label>
+            <label class="foto-box"><span class="foto-hint">🖼 Da galeria</span><input type="file" accept="image/*" data-ifoto="${i}" ${u}></label>
           </div>`}
         </div>
       </div>` : '';
@@ -1032,9 +1062,9 @@ function renderModal() {
           <div class="item-card-sub">${esc(it.descricao||'')}${it.medidas?` · ${esc(it.medidas)}`:''}</div>
         </div>
         <div class="seg">
-          <button type="button" data-iset="${i}|"       ${ro?'disabled':''} class="${st===''?'active':''}">Pendente</button>
-          <button type="button" data-iset="${i}|ok"     ${ro?'disabled':''} class="seg-ok ${st==='ok'?'active':''}">✅ Instalado</button>
-          <button type="button" data-iset="${i}|retrab" ${ro?'disabled':''} class="seg-retrab ${st==='retrab'?'active':''}">🔴 Retrabalho</button>
+          <button type="button" data-iset="${i}|" ${u} ${ro?'disabled':''} class="${st===''?'active':''}">Pendente</button>
+          <button type="button" data-iset="${i}|ok" ${u} ${ro?'disabled':''} class="seg-ok ${st==='ok'?'active':''}">✅ Instalado</button>
+          <button type="button" data-iset="${i}|retrab" ${u} ${ro?'disabled':''} class="seg-retrab ${st==='retrab'?'active':''}">🔴 Retrabalho</button>
         </div>
         ${retrabBox}
       </div>`;
@@ -1116,6 +1146,7 @@ function renderModal() {
             <div class="eq-hora"><input id="m-hora-ret" type="time" data-f="horaRetorno" value="${esc(os.horaRetorno)}">${(ro || os.horaRetorno) ? '' : '<button type="button" class="btn-ghost" id="m-retorno-agora">Agora</button>'}</div></div>
           ${OPERACAO.semCarro(os) ? '' : `<div class="field"><label for="m-km-ret">KM retorno</label><input id="m-km-ret" type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>`}
         </div>
+        ${retornoPrevistoLinhaHTML(os)}
         ${limpezaLinhaHTML(os)}
       </div>
     </details>`;
@@ -1251,7 +1282,7 @@ function bindModal(os, ro) {
   // Status por item (Pendente / Instalado / Retrabalho)
   $$('[data-iset]', root).forEach(btn => btn.onclick = () => {
     const [i, val] = btn.dataset.iset.split('|');
-    const it = _draft.itens[+i]; if (!it) return;
+    const it = itemDoRascunho(i, btn.dataset.iuid); if (!it) return;
     it.statusInst = val;
     /* O INSTALADO LIGA O ✓ VERIFICADO DA GESTÃO; PENDENTE E RETRABALHO NÃO O
        DESLIGAM (diagnóstico de 29/09/2026: o toque em Pendente apagava a
@@ -1261,23 +1292,30 @@ function bindModal(os, ro) {
     save(); reRender();
   });
   $$('[data-imotivo]', root).forEach(sel => sel.onchange = () => {
-    const it = _draft.itens[+sel.dataset.imotivo]; if (!it) return;
+    const it = itemDoRascunho(sel.dataset.imotivo, sel.dataset.iuid); if (!it) return;
     it.motivo = sel.value; rollupRetrab(); save();
   });
   /* O detalhe do retrabalho vai para o rascunho a cada tecla: gravava só no
      change, e a foto do problema que terminava de subir redesenhava a ficha e
      apagava o que estava sendo digitado. */
   $$('[data-iobs]', root).forEach(inp => {
-    inp.oninput = () => { const it = _draft.itens[+inp.dataset.iobs]; if (!it) return; it.obsProb = inp.value; _dirty = true; };
-    inp.onchange = () => { const it = _draft.itens[+inp.dataset.iobs]; if (!it) return; it.obsProb = inp.value; rollupRetrab(); save(); };
+    inp.oninput = () => { const it = itemDoRascunho(inp.dataset.iobs, inp.dataset.iuid); if (!it) return; it.obsProb = inp.value; _dirty = true; };
+    inp.onchange = () => { const it = itemDoRascunho(inp.dataset.iobs, inp.dataset.iuid); if (!it) return; it.obsProb = inp.value; rollupRetrab(); save(); };
   });
   $$('[data-ifoto]', root).forEach(inp => inp.onchange = async () => {
     const i = +inp.dataset.ifoto;
-    const ref = _draft.itens[i]; if (!ref) return;
+    const ref = itemDoRascunho(i, inp.dataset.iuid); if (!ref) return;
     const file = (inp.files || [])[0]; if (!file) return;
-    // O item não tem id: casa pela posição e pelo número (a regra do servidor).
+    /* A foto termina de subir depois: vai para o MESMO item na cópia que
+       estiver valendo, pelo código (uid, E1); o item sem código casa pela
+       posição, pelo número e pela descrição, a regra de antes. */
     const mesmo = it => it && String(it.item ?? '') === String(ref.item ?? '') && String(it.descricao ?? '') === String(ref.descricao ?? '');
-    await anexarFotos([file], (o, id) => { const it = (o.itens || [])[i]; if (mesmo(it)) it.fotoProbId = id; }, o => rollupRetrab(o));
+    const achar = o => {
+      const lista = o.itens || [];
+      if (uidItemOk(ref.uid)) return lista.find(it => it && it.uid === ref.uid) || null;
+      return mesmo(lista[i]) ? lista[i] : null;
+    };
+    await anexarFotos([file], (o, id) => { const it = achar(o); if (it) it.fotoProbId = id; }, o => rollupRetrab(o));
   });
   /* APAGAR FOTO TIRA TAMBÉM O ENVIO PENDENTE. delFoto só apagava do aparelho e
      deixava o putPhoto na fila apontando para uma foto que não existe mais: a
@@ -1291,7 +1329,7 @@ function bindModal(os, ro) {
     return true;
   };
   $$('[data-irm]', root).forEach(b => b.onclick = () => {
-    const it = _draft.itens[+b.dataset.irm]; if (!it) return;
+    const it = itemDoRascunho(b.dataset.irm, b.dataset.iuid); if (!it) return;
     if (!apagarFoto(it.fotoProbId)) return;
     it.fotoProbId = ''; save(); reRender();
   });

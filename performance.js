@@ -392,6 +392,8 @@ function perfWireFonte(el){
    // Diz QUAIS travam: com tudo confirmado, uma O.S. sem valor travava o fechamento sem nome.
    const pend=fonte.registros.filter(r=>!r.confirmado),semValor=fonte.registros.filter(r=>r.valor==null);
    if(!fonte.registros.length)return toast('Nenhuma entrega no período para fechar.','error');
+   // O servidor recusa fechar um período que ainda não terminou: avisa antes de abrir a confirmação.
+   if(String(fonte.periodo?.ate || '')>perfHojeISO())return toast(`O fechamento vai no máximo até hoje (${perfHojeISO().split('-').reverse().join('/')}). Escolha um período que termine hoje ou antes.`,'error');
    if(pend.length || semValor.length)return toast([pend.length?`${pend.length} ${pend.length===1?'entrega sem participação confirmada':'entregas sem participação confirmada'}`:'',semValor.length?`${semValor.length} sem valor: O.S. ${semValor.slice(0,6).map(r=>r.numero || 's/n').join(', ')}${semValor.length>6?' e outras':''}`:''].filter(Boolean).join('. ')+'. Use o filtro Situação da lista para achar cada uma.','error');
    // Quem fecha sela os pesos do SERVIDOR. Se o aparelho mostra outros (alguém
    // mudou em outro tablet), o ranking visto não é o que seria selado.
@@ -1121,4 +1123,198 @@ function performanceRelatorioHTML() {
   const tabela=(titulo,linhas,equipe=false)=>`<section class="perf-report-section"><h3>${titulo}</h3><p class="metricas-nota">${equipe?'Cada entrega conta uma vez na equipe.':'O.S. equivalentes somam os percentuais confirmados: duas participações de 50% equivalem a uma O.S.'}</p><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>${equipe?'Equipe':'Pessoa'}</th><th>Entregas</th><th>Confirmadas</th><th>A conferir</th>${equipe?'':'<th>O.S. equivalentes confirmadas</th>'}<th>Valor confirmado${equipe?'':' rateado'}</th></tr></thead><tbody>${linhas.map(p=>{const cf=(equipe?confirmado.equipes:confirmado.pessoas).find(x=>x.chave===p.chave);return `<tr><td><strong>${esc(p.nome)}</strong></td><td>${p.os}</td><td>${p.confirmadas}</td><td>${p.os-p.confirmadas}</td>${equipe?'':`<td>${perfFormato(cf?.equivalentes || 0)}</td>`}<td>${!cf?'—':cf.semValor===cf.os?'Sem valor':dinheiroCasa(cf.valor)+(cf.semValor?' (parcial)':'')}</td></tr>`;}).join('') || `<tr><td colspan="${equipe?5:6}">Sem participantes registrados neste período.</td></tr>`}</tbody></table></div></section>`;
   const equipes=grupos.map(g=>`<article class="perf-team-report${perfCorClasse(g)}"><header>${perfLogoHTML(g,'perf-emblema')}<div><h4>${esc(g.nome)}</h4><p>${g.membros.length} participantes no período · ${g.registros.length} entrega${g.registros.length===1?'':'s'}</p></div><strong>${valorTexto(g.valor,g.confirmadas-g.semValor,g.confirmadas)}<small>valor confirmado da equipe</small></strong></header><div class="perf-team-numbers"><span><b>${g.confirmadas}</b> ${g.confirmadas===1?'confirmada':'confirmadas'}</span><span><b>${g.registros.length-g.confirmadas}</b> a conferir</span><span><b>${g.retrabalhos}</b> com marca de retrabalho</span></div><div class="perf-member-list">${g.membros.map(m=>`<span><strong>${esc(m.nome)}</strong><small>${m.entregas} entrega${m.entregas===1?'':'s'} · ${m.confirmadas} ${m.confirmadas===1?'confirmada':'confirmadas'} · ${perfFormato(m.equivalentes)} O.S. equivalentes</small></span>`).join('')}</div><details><summary>Ver O.S., percentuais e dados de conferência</summary><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / cliente</th><th>Entrega</th><th>Participação nesta O.S.</th><th>Valor da O.S.</th><th>Conferência</th></tr></thead><tbody>${g.registros.map(r=>`<tr><td><button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os?.numero || r.id)}</button><small class="bloco">${esc(r.os?.cliente || '')}</small>${r.os?.retrabalho?'<small class="bloco">Retrabalho marcado</small>':''}</td><td>${fmtDia(diaEntrega(r.os))}</td><td>${r.membros.map(m=>`${esc(m.nome)} · <strong>${perfFormato(m.percentual)}%</strong>`).join('<br>')}</td><td>${r.valor==null?'Sem valor':dinheiroCasa(r.valor)}<small class="bloco">${esc(r.origemValor || 'Base da apuração')}</small></td><td>${r.confirmado?'Confirmada':'Divisão sugerida'}${r.por?`<small class="bloco">${esc(r.por)} · ${fmtDia(r.em)}</small>`:''}${r.obs?`<small class="bloco">${esc(r.obs)}</small>`:''}</td></tr>`).join('')}</tbody></table></div></details></article>`).join('');
   return `<section class="perf-report"><header class="perf-report-heading"><div><span class="perf-report-eyebrow">PRODUÇÃO · PESSOAS · EQUIPES</span><h3>Relatório de performance</h3><p>${fmtDia(f.de)} a ${fmtDia(f.ate)} · ${resumo.pessoas.length} participantes · ${grupos.length} ${grupos.length===1?'equipe / composição utilizada':'equipes / composições utilizadas'}</p></div><span class="perf-report-state">${perfFonteAtual()?.fechadoEm?'Fechamento preservado':'Apuração em acompanhamento'}</span></header><div class="perf-summary"><div><b>${regs.length}</b><span>entregas no período</span></div><div><b>${cobertura}%</b><span>com participação confirmada (${confirmados.length})</span></div><div><b>${semEquipe}</b><span>sem equipe informada</span></div></div><div class="perf-report-value"><span>Valor das entregas com participação confirmada</span><strong>${valorTexto(valor,confirmados.length-semValor,confirmados.length)}</strong><small>${semValor} entrega(s) confirmada(s) sem valor. Valores por pessoa são rateados; não representam pagamento ou bônus.</small></div><p class="perf-coverage">${!regs.length?'Nenhuma instalação registrada neste período.':confirmados.length<regs.length?`Apuração parcial: ${regs.length-confirmados.length} ${regs.length-confirmados.length===1?'participação':'participações'} a conferir, incluindo ${semEquipe} sem equipe e ${inconsistentes} inconsistentes.`:'Participações conferidas. Quantidade de entregas não mede sozinha qualidade, esforço ou complexidade.'}</p><section class="perf-report-section"><h3>Equipes e composição real do período</h3><p class="metricas-nota">Participantes das entregas, incluindo avulsos. Os percentuais variam por O.S.; o cadastro atual da equipe não reescreve o histórico.</p>${equipes || '<p>Nenhuma equipe com participação válida registrada no período.</p>'}</section>${tabela('Participação por pessoa',resumo.pessoas)}${tabela('Resumo das equipes',resumo.equipes,true)}<details class="perf-report-section perf-report-pendencias"><summary>Entregas que ainda não permitem apuração por pessoa</summary><p>${semEquipe} sem equipe · ${inconsistentes} com percentuais inconsistentes.</p><ul>${regs.filter(r=>PERF.validar(r.membros)).map(r=>`<li>O.S. <button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button> · ${esc(r.os.cliente)} · ${r.membros.length?'rever percentuais':'informar participantes'}</li>`).join('') || '<li>Nenhuma pendência de composição.</li>'}</ul></details><p class="metricas-nota">Entregas inclui participações sugeridas e confirmadas. A mesma O.S. pode aparecer para mais de uma pessoa; não some a coluna entre colaboradores. Valores incluem somente participações confirmadas, sem duplicar o valor entre pessoas. Não representam lucro, recebimento ou bônus. Retrabalho indica a marca registrada, não uma avaliação automática do colaborador. ${esc(perfFonteTexto())}</p></section>`;
+}
+
+/* ================= REGRAS DO PROGRAMA (F05, 29/09/2026) =================
+   Aba Performance > Regras, só para admin e pcp (as mesmas que o servidor
+   atende). Cada versão vale a partir de uma DATA e nunca é editada: mudar é
+   criar a próxima. O formulário usa o MESMO validador do servidor
+   (REGRAS.validarRegra, cópia de _shared/pcp-regras.mjs) e mostra o exemplo
+   ao vivo enquanto se digita. Sem rede, a tela usa a cópia guardada no
+   aparelho; sem cópia, a regra embutida, dita como provisória. */
+let perfRegrasEstado = {carregando:false, erro:'', tentado:false, disco:false};
+function perfRegrasPode() { return typeof STATE !== 'undefined' && ['admin','pcp'].includes(String(STATE.user?.papel || '')); }
+function perfRegrasFonte() {
+  const loc = typeof STORE.regrasLocais === 'function' ? STORE.regrasLocais() : null;
+  return {versoes:loc && Array.isArray(loc.versoes) ? loc.versoes : [], fechadoAte:String(loc?.fechadoAte || ''), em:String(loc?.em || ''), temCopia:!!loc};
+}
+function perfHojeISO() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function perfPct(bp) { return String(Number(bp) / 100).replace('.', ',') + '%'; }
+// "60", "60,5" ou "60.5" em 0,01%. Vazio ou texto vira NaN, que o validador recusa com a frase certa.
+function perfPctBp(v) { const t = String(v ?? '').trim().replace(',', '.'); if (!t || !/^-?\d+(\.\d+)?$/.test(t)) return NaN; return Math.round(Number(t) * 100); }
+function perfCentavos(c) { return dinheiroCasa((Number(c) || 0) / 100); }
+/* O EXEMPLO AO VIVO: dupla, O.S. de R$ 10.000 no prazo. Sai do motor de
+   divisão e da comissão da regra; a O.S. que não pontua não paga ninguém. */
+function perfRegraExemploHTML(regra) {
+  if (!regra || REGRAS.validarRegra(regra)) return '<p class="perf-coverage">Corrija a regra para ver o exemplo.</p>';
+  const valor = 1000000;
+  const linha = (n, rotulo) => {
+    const ex = REGRAS.exemplo(regra, n, valor), lider = ex.partes[0], aj = ex.partes.slice(1);
+    const ajTxt = !aj.length ? '' : new Set(aj.map(p => p.centavos)).size === 1
+      ? `, ${aj.length === 1 ? 'ajudante' : 'cada ajudante'} ${perfCentavos(aj[0].centavos)}`
+      : ', ' + aj.map((p, i) => `ajudante ${i+1} ${perfCentavos(p.centavos)}`).join(', ');
+    return `<li><strong>${rotulo}</strong>, O.S. de ${perfCentavos(valor)} no prazo: comissão total ${perfCentavos(ex.comissaoCentavos)}, ${n === 1 ? 'quem foi sozinho' : 'líder'} ${perfCentavos(lider.centavos)}${ajTxt}.</li>`;
+  };
+  const v = regra.volta, base = valor;
+  return `<div class="perf-regra-exemplo" aria-live="polite"><h4>Exemplo</h4><ul>${linha(2,'Dupla')}${linha(3,'Trio')}${linha(4,'Equipe de 4')}${linha(1,'Sozinho')}</ul>
+    <p>O.S. com ${regra.perdas.map(p => REGRAS.ROTULOS[p]).join(', ') || 'nenhuma perda marcada'}: não pontua e não paga comissão.</p>
+    <p>Volta do carro, sobre o valor válido da volta: carro limpo e arrumado ${v.carroLimpoBp ? '+' + perfPct(v.carroLimpoBp) : 'sem bônus'} (${perfCentavos(base)} vira ${perfCentavos(base + Math.round(base * REGRAS.ajusteDaVolta(regra, {carroCerto:true}) / 10000))}); equipamento faltante ou danificado ${v.equipamentoFaltaBp ? '-' + perfPct(v.equipamentoFaltaBp) : 'sem redutor'} (vira ${perfCentavos(base + Math.round(base * REGRAS.ajusteDaVolta(regra, {equipamentoOk:false}) / 10000))}); volta não conferida fica como está.</p></div>`;
+}
+function perfRegraResumoHTML(r) {
+  const t = r.divisao.tabela, trio = t[3] || t['3'], dupla = t[2] || t['2'];
+  return `<dl class="perf-regra-lista">
+    <dt>Vale a partir de</dt><dd>${esc(REGRAS.dataBR(r.validaDesde))}</dd>
+    <dt>Divisão dentro da equipe</dt><dd>1 pessoa: 100%. Dupla: líder ${perfPct(dupla[0])}, ajudante ${perfPct(dupla[1])}. Trio: líder ${perfPct(trio[0])}, ajudantes ${perfPct(trio[1])} e ${perfPct(trio[2])}. 4 ou mais: líder ${perfPct(r.divisao.maisLider)} e o resto igual entre os ajudantes.</dd>
+    <dt>Entre equipes</dt><dd>Proporcional ao número de pessoas de cada equipe.</dd>
+    <dt>Comissão</dt><dd>${perfPct(r.comissaoBp)} do valor da O.S., só na O.S. que pontua (no prazo, sem retrabalho, sem retorno antecipado).</dd>
+    <dt>Tolerância do retorno</dt><dd>${r.toleranciaRetornoMin} minuto${r.toleranciaRetornoMin === 1 ? '' : 's'} antes do horário previsto não contam como retorno antecipado.</dd>
+    <dt>Volta do carro</dt><dd>Carro limpo e arrumado: +${perfPct(r.volta.carroLimpoBp)}. Equipamento faltante ou danificado: -${perfPct(r.volta.equipamentoFaltaBp)}. Volta não conferida: neutra.</dd>
+    <dt>Desempate</dt><dd>${(t => t.charAt(0).toUpperCase() + t.slice(1))(r.desempate.map(d => REGRAS.ROTULOS[d]).join(', depois '))}.</dd>
+  </dl>`;
+}
+function perfRegrasHTML() {
+  if (!perfRegrasPode()) return '<section class="perf-regras"><p>As regras do programa são da gestão do PCP.</p></section>';
+  const f = perfRegrasFonte(), hoje = perfHojeISO();
+  const vigente = REGRAS.regraVigente(f.versoes, hoje);
+  const proxima = [REGRAS.REGRA_EMBUTIDA, ...f.versoes].filter(v => !REGRAS.validarRegra(v) && v.validaDesde > hoje).sort((a, b) => a.validaDesde < b.validaDesde ? -1 : a.validaDesde > b.validaDesde ? 1 : b.versao - a.versao)[0];
+  const mostrada = vigente || proxima || REGRAS.REGRA_EMBUTIDA;
+  // A embutida é o piso: continua valendo nos dias antes da primeira versão gravada.
+  const provisoria = mostrada.id === REGRAS.REGRA_EMBUTIDA.id;
+  const origem = perfRegrasEstado.carregando ? 'Consultando o servidor…'
+    : f.temCopia ? `Cópia do servidor de ${esc(new Date(f.em).toLocaleString('pt-BR'))}.`
+    : 'Sem cópia das regras neste aparelho: mostrando a regra embutida, provisória, até consultar o servidor.';
+  const titulo = vigente ? 'Regra em vigor hoje' : 'Próxima regra (ainda não vale hoje)';
+  const historico = f.versoes.map(v => `<details class="perf-regra-versao"><summary>Versão ${esc(v.versao)} · vale a partir de ${esc(REGRAS.dataBR(v.validaDesde))} · ${esc(v.autor?.nome || 'sem autor')}${v.id === mostrada.id ? ' · <span class="badge">mostrada acima</span>' : ''}</summary><p>Criada em ${esc(new Date(v.criadaEm).toLocaleString('pt-BR'))}${v.autor?.login ? ' por ' + esc(v.autor.login) : ''}. Motivo: ${esc(v.motivo || '')}</p>${REGRAS.validarRegra(v) ? '<p role="alert">Versão com dado inválido no banco: não vale.</p>' : perfRegraResumoHTML(v)}</details>`).join('');
+  return `<section class="perf-regras">
+    <p class="metricas-nota">Cada versão vale a partir de uma data e nunca é editada: para mudar, crie a próxima. Mês já fechado não muda. ${origem}${f.fechadoAte ? ` Fechado até ${esc(REGRAS.dataBR(f.fechadoAte))}.` : ''}</p>
+    ${perfRegrasEstado.erro ? `<p role="alert">${esc(perfRegrasEstado.erro)}</p>` : ''}
+    <article class="perf-regra-atual"><header><h3>${titulo}</h3>${provisoria ? `<span class="badge sem-valor">${f.versoes.length ? 'Provisória: regra embutida, vale até o início da primeira versão gravada' : 'Provisória: regra embutida, nenhuma versão gravada'}</span>` : `<span class="badge">Versão ${esc(mostrada.versao)}</span>`}</header>
+      ${perfRegraResumoHTML(mostrada)}${perfRegraExemploHTML(mostrada)}</article>
+    <div class="perf-filtros"><button class="btn-ghost" id="perf-regras-atualizar" ${perfRegrasEstado.carregando ? 'disabled' : ''}>Atualizar regras</button><button class="btn-primary" id="perf-regra-nova" ${perfRegrasEstado.carregando || !f.temCopia ? 'disabled' : ''}>Criar nova versão</button>${!f.temCopia ? '<small>Para criar versão, consulte o servidor antes (precisa de conexão).</small>' : ''}</div>
+    <section class="perf-regras-historico"><h3>Versões gravadas</h3>${historico || '<p>Nenhuma versão gravada ainda. Vale a regra embutida, provisória.</p>'}${f.versoes.length ? `<p class="metricas-nota">Antes da primeira versão gravada, de ${esc(REGRAS.dataBR(REGRAS.REGRA_EMBUTIDA.validaDesde))} em diante, vale a regra embutida.</p>` : ''}</section>
+  </section>`;
+}
+async function perfCarregarRegras() {
+  if (perfRegrasEstado.carregando || !perfRegrasPode()) return;
+  perfRegrasEstado = {...perfRegrasEstado, carregando:true, erro:'', tentado:true};
+  try { await STORE.pullRegras(); }
+  catch (e) { perfRegrasEstado.erro = 'Não foi possível consultar as regras. ' + perfErroTxt(e) + (perfRegrasFonte().temCopia ? ' Mostrando a cópia deste aparelho.' : ''); }
+  finally { perfRegrasEstado.carregando = false; if (STATE._perfAba === 'regras') renderPerformanceCasa(); }
+}
+/* O FORMULÁRIO vira a regra que vai ao servidor. Percentuais digitados em %,
+   gravados em 0,01%. O que a tela não edita (perdas, desempate, entre
+   equipes) segue da versão base. */
+function perfRegraDoForm(form, base) {
+  const g = n => form.querySelector(`[name="${n}"]`)?.value;
+  const lider2 = perfPctBp(g('lider2')), lider3 = perfPctBp(g('lider3')), aj3 = perfPctBp(g('ajudante3'));
+  return REGRAS.completarRegra({
+    validaDesde:String(g('validaDesde') || ''),
+    divisao:{tabela:{1:[10000], 2:[lider2, 10000 - lider2], 3:[lider3, aj3, 10000 - lider3 - aj3]}, maisLider:perfPctBp(g('lider4'))},
+    comissaoBp:perfPctBp(g('comissao')),
+    toleranciaRetornoMin:/^\d+$/.test(String(g('tolerancia') || '').trim()) ? Number(String(g('tolerancia')).trim()) : NaN,
+    volta:{carroLimpoBp:perfPctBp(g('carroLimpo')), equipamentoFaltaBp:perfPctBp(g('equipamento')), naoConferida:'neutra'},
+  }, base);
+}
+function perfRegraErroForm(regra, fechadoAte) {
+  const e = REGRAS.validarRegra(regra);
+  if (e) return e;
+  if (REGRAS.fechamentoBloqueia(regra.validaDesde, fechadoAte)) return `A data ${REGRAS.dataBR(regra.validaDesde)} cai em período já fechado (até ${REGRAS.dataBR(fechadoAte)}). Escolha uma data depois de ${REGRAS.dataBR(fechadoAte)}.`;
+  return '';
+}
+/* O PRIMEIRO DIA DO PROGRAMA: o início da embutida ou da versão gravada mais
+   antiga, o que vier antes. Data de versão antes dele põe no programa dias que
+   hoje estão fora (setembro, por exemplo). */
+function perfRegraInicioPrograma(versoes) {
+  return (versoes || []).filter(v => v && !REGRAS.validarRegra(v)).map(v => v.validaDesde).concat(REGRAS.REGRA_EMBUTIDA.validaDesde).sort()[0];
+}
+function perfRegraAvisoData(validaDesde, versoes) {
+  const inicio = perfRegraInicioPrograma(versoes);
+  return REGRAS.dataValida(validaDesde) && validaDesde < inicio
+    ? `Atenção: o programa começa em ${REGRAS.dataBR(inicio)}. Esta data põe no programa dias antes disso, que hoje estão fora dele.` : '';
+}
+function perfDiaSeguinte(dia) { const [a, m, d] = String(dia).split('-').map(Number); const x = new Date(a, m - 1, d + 1); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`; }
+/* A DATA SUGERIDA: o maior entre amanhã, o dia seguinte ao último fechado e o
+   início da embutida. Nunca sugere dia fora do programa nem mês fechado. */
+function perfRegraDataSugerida(fechadoAte, hoje) {
+  return [perfDiaSeguinte(hoje), REGRAS.dataValida(fechadoAte) ? perfDiaSeguinte(fechadoAte) : '', REGRAS.REGRA_EMBUTIDA.validaDesde].filter(Boolean).sort().pop();
+}
+/* A CONFIRMAÇÃO diz o que o servidor GRAVOU (a versão devolvida), não o que foi digitado. */
+function perfRegraConfirmacao(r, repetida) {
+  const t = r.divisao.tabela, dupla = t[2] || t['2'], trio = t[3] || t['3'];
+  return `Versão ${r.versao} ${repetida ? 'já estava gravada' : 'gravada'}: comissão ${perfPct(r.comissaoBp)}, dupla ${perfPct(dupla[0])} e ${perfPct(dupla[1])}, trio ${perfPct(trio[0])}, ${perfPct(trio[1])} e ${perfPct(trio[2])}, 4 ou mais com líder ${perfPct(r.divisao.maisLider)}. Vale a partir de ${REGRAS.dataBR(r.validaDesde)}.`;
+}
+function perfNovaRegra() {
+  const f = perfRegrasFonte();
+  if (!perfRegrasPode() || !f.temCopia) return;
+  const base = f.versoes[0] || REGRAS.REGRA_EMBUTIDA, anterior = f.versoes[0]?.id || '';
+  /* Um pedido por conteúdo: depois de uma tentativa que falhou, mexer em
+     qualquer campo gera outro requestId (o servidor recusa o mesmo pedido com
+     outros valores; sem mexer, o reenvio devolve a mesma versão). */
+  let requestId = STORE.uuid(), tentou = false;
+  const t = base.divisao.tabela, dupla = t[2] || t['2'], trio = t[3] || t['3'];
+  const pct = bp => String(bp / 100).replace('.', ',');
+  const minimo = f.fechadoAte ? perfDiaSeguinte(f.fechadoAte) : '';
+  const sugerida = perfRegraDataSugerida(f.fechadoAte, perfHojeISO());
+  const campo = (nome, rotulo, valor, sufixo, dica) => `<label>${rotulo} <span class="perf-regra-campo"><input name="${nome}" inputmode="decimal" value="${esc(valor)}" required> ${sufixo}</span>${dica ? `<small>${dica}</small>` : ''}</label>`;
+  const d = perfDialog('Nova versão da regra', `<form id="perf-regra-form" novalidate>
+    <p class="metricas-nota">A versão ${esc((Number(base.versao) || 0) + 1)} vale a partir da data escolhida, até a próxima. As versões anteriores ficam como estão.</p>
+    <label>Vale a partir de <input type="date" name="validaDesde" value="${esc(sugerida)}" ${minimo ? `min="${esc(minimo)}"` : ''} required></label>
+    <p class="perf-regra-aviso" id="perf-regra-aviso" aria-live="polite"></p>
+    <fieldset><legend>Divisão dentro da equipe</legend>
+      ${campo('lider2', 'Dupla: líder', pct(dupla[0]), '%', 'O ajudante fica com o resto.')}
+      ${campo('lider3', 'Trio: líder', pct(trio[0]), '%')}
+      ${campo('ajudante3', 'Trio: primeiro ajudante', pct(trio[1]), '%', 'O segundo ajudante fica com o resto.')}
+      ${campo('lider4', '4 ou mais: líder', pct(base.divisao.maisLider), '%', 'O resto é dividido igual entre os ajudantes.')}
+    </fieldset>
+    <fieldset><legend>Comissão e perdas</legend>
+      ${campo('comissao', 'Comissão sobre a O.S. que pontua', pct(base.comissaoBp), '%', 'De 0% a 10%.')}
+      ${campo('tolerancia', 'Tolerância do retorno antecipado', String(base.toleranciaRetornoMin), 'min')}
+    </fieldset>
+    <fieldset><legend>Volta do carro (sobre o valor válido da volta)</legend>
+      ${campo('carroLimpo', 'Bônus: carro limpo e arrumado', pct(base.volta.carroLimpoBp), '%')}
+      ${campo('equipamento', 'Redutor: equipamento faltante ou danificado', pct(base.volta.equipamentoFaltaBp), '%', 'Volta não conferida fica neutra.')}
+    </fieldset>
+    <label>Motivo da nova versão <textarea name="motivo" minlength="5" maxlength="300" required></textarea></label>
+    <p role="alert" id="perf-regra-erro"></p>
+    <div id="perf-regra-previa"></div>
+    <button class="btn-primary" type="submit">Gravar nova versão</button>
+  </form>`);
+  const form = d.querySelector('#perf-regra-form'), erroEl = d.querySelector('#perf-regra-erro'), previa = d.querySelector('#perf-regra-previa'), btn = form.querySelector('[type="submit"]'), avisoEl = d.querySelector('#perf-regra-aviso');
+  const conferir = () => {
+    const regra = perfRegraDoForm(form, base), erro = perfRegraErroForm(regra, f.fechadoAte);
+    if (avisoEl) avisoEl.textContent = perfRegraAvisoData(regra.validaDesde, f.versoes);
+    const motivo = String(form.querySelector('[name="motivo"]').value || '').trim();
+    erroEl.textContent = erro || (motivo.length < 5 ? 'Escreva o motivo da nova versão (pelo menos 5 letras).' : '');
+    previa.innerHTML = perfRegraExemploHTML(erro ? null : regra);
+    btn.disabled = !!erroEl.textContent;
+    return {regra, erro:erroEl.textContent, motivo};
+  };
+  form.addEventListener('input', () => { if (tentou) { requestId = STORE.uuid(); tentou = false; } conferir(); });
+  conferir();
+  form.onsubmit = async ev => {
+    ev.preventDefault();
+    const {regra, erro, motivo} = conferir();
+    if (erro) return;
+    btn.disabled = true;
+    tentou = true;
+    try {
+      const r = await STORE.api({action:'performanceRegraNova', regra, motivo, anterior, requestId});
+      if (!r?.ok || !r.regra) throw new Error(r?.error || 'Não foi possível gravar a nova versão.');
+      tentou = false;
+      d.close();
+      toast(perfRegraConfirmacao(r.regra, r.repetida), 'success');
+      await perfCarregarRegras();
+    } catch (e) { erroEl.textContent = perfErroTxt(e); btn.disabled = false; }
+  };
+}
+function wirePerfRegras(el) {
+  if (!perfRegrasPode()) return;
+  const at = el.querySelector('#perf-regras-atualizar'); if (at) at.onclick = perfCarregarRegras;
+  const nova = el.querySelector('#perf-regra-nova'); if (nova) nova.onclick = perfNovaRegra;
+  // Primeiro a cópia do disco (abre sem rede); depois o servidor, uma vez por visita.
+  if (!perfRegrasEstado.disco && typeof STORE.lerRegrasDisco === 'function') {
+    perfRegrasEstado.disco = true;
+    STORE.lerRegrasDisco().then(r => { if (r && STATE._perfAba === 'regras') renderPerformanceCasa(); }).catch(() => {});
+  }
+  if (!perfRegrasEstado.tentado && typeof STORE.pullRegras === 'function' && (typeof navigator === 'undefined' || navigator.onLine !== false)) void perfCarregarRegras();
 }

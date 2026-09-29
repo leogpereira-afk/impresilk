@@ -968,6 +968,62 @@ const STORE = (() => {
     return { entradas: res.entradas, cortado: !!res.cortado };
   }
 
+  /* REGRAS DO PROGRAMA DAS EQUIPES (F05). Só da gestão (admin e pcp): o
+     servidor recusa os outros papéis, e este aparelho também não as serve a
+     eles, nem as que ficaram no disco de uma sessão anterior. A cópia no
+     IndexedDB é para a aba Regras e a prévia funcionarem sem rede; sem cópia,
+     a tela usa a regra embutida marcada como provisória. Nunca desce ao
+     crachá sem senha (o equipe.html nem pede) e sai no limparCache. */
+  const PAPEIS_REGRAS = ['admin', 'pcp'];
+  let _regras = null;   // {versoes, fechadoAte, em}
+  const _podeRegras = () => PAPEIS_REGRAS.includes(_papelAtual());
+  function regrasLocais() { return _podeRegras() && _regras ? _regras : null; }
+  async function lerRegrasDisco() {
+    if (!_podeRegras()) return null;
+    if (_regras || _semIDB) return _regras;
+    try {
+      const db = await _openDB();
+      const r = await new Promise((resolve, reject) => {
+        const tx  = db.transaction('os', 'readonly');
+        const req = tx.objectStore('os').get('regras');
+        req.onsuccess = e => resolve(e.target.result || null);
+        req.onerror   = e => reject(e.target.error);
+      });
+      if (!_regras && r && Array.isArray(r.versoes)) _regras = r;
+    } catch { /* sem disco: a tela segue com a embutida */ }
+    return regrasLocais();
+  }
+  async function pullRegras() {
+    if (!_podeRegras()) return null;
+    const res = await api({ action: 'performanceRegras' });
+    if (!res || !Array.isArray(res.versoes)) throw new Error((res && res.error) || 'Resposta inesperada do servidor.');
+    _regras = { versoes: res.versoes, fechadoAte: String(res.fechadoAte || ''), em: new Date().toISOString() };
+    if (!_semIDB) {
+      try {
+        const db = await _openDB();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('os', 'readwrite');
+          tx.objectStore('os').put(_regras, 'regras');
+          tx.oncomplete = resolve;
+          tx.onerror    = e => reject(e.target.error);
+        });
+      } catch (e) { console.warn('[store] regras não gravaram no IndexedDB', e); }
+    }
+    return _regras;
+  }
+  async function _apagarRegrasDisco() {
+    if (_semIDB) return;
+    try {
+      const db = await _openDB();
+      await new Promise(resolve => {
+        const tx = db.transaction('os', 'readwrite');
+        tx.objectStore('os').delete('regras');
+        tx.oncomplete = resolve;
+        tx.onerror = resolve;   // sair nunca trava por causa do cache
+      });
+    } catch { /* base já fechada/apagada */ }
+  }
+
   /* ── MAESTRO: um relogio so para toda a sincronizacao ──────────────────────
      Antes eram tres timers e uma rajada no boot; agora um ciclo, que nunca roda
      por cima de si mesmo e sabe tres coisas que os timers nao sabiam:
@@ -1774,6 +1830,9 @@ const STORE = (() => {
       localStorage.removeItem(K.ENTREGUES);
       if (_entreguesTimer) { clearTimeout(_entreguesTimer); _entreguesTimer = null; }
       _apagarEntreguesDisco();
+      // As regras do programa (comissão, divisão) também: são da gestão.
+      _regras = null;
+      _apagarRegrasDisco();
     } catch {}
     if (getQueue().length) return false;
     try {
@@ -1968,6 +2027,8 @@ const STORE = (() => {
     iniciarMaestro, sincronizarAgora, buscarHistorico, historico, faixaHistorico, JANELA_LOCAL_DIAS,
     // Diário de auditoria (só gestão, sob demanda)
     auditoriaOS,
+    // Regras do programa (só gestão; cópia local para a prévia offline)
+    regrasLocais, lerRegrasDisco, pullRegras,
     // Fotos
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos

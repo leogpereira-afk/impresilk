@@ -1728,6 +1728,16 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 
 /* ── Bloco de confirmação compacto ───────────────────────────────────────── */
 .conf-block { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 4px; }
+/* Prazo combinado e retorno previsto (F15): fora de instalacao, no bloco Agenda. */
+.prazo-retorno { border-top: 1px solid var(--border); padding: 10px 0; margin: 4px 0 10px; }
+.prazo-linha { font-size: .85rem; margin: 0 0 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.prazo-corrigir { margin: 0 0 8px; font-size: .85rem; }
+.prazo-corrigir summary { cursor: pointer; color: var(--muted, #666); min-height: 40px; display: flex; align-items: center; }
+.retorno-titulo { font-size: .85rem; font-weight: 600; margin: 6px 0; }
+.retorno-dia { padding: 6px 0; border-top: 1px dashed var(--border); }
+.retorno-dia > strong { font-size: .82rem; }
+.retorno-aviso { color: #80520d; font-size: .8rem; margin: 4px 0 0; }
+.eq-retorno-previsto { font-size: .85rem; margin: 6px 0; color: var(--muted); }
 .conf-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .conf-head strong { font-size: .85rem; }
 .conf-ref {
@@ -2912,3 +2922,29 @@ img.perf-logo{object-fit:cover}
 .perf-animal-logo{width:28px;height:28px;border-radius:6px;object-fit:contain;background:#fff;flex-shrink:0}
 .perf-cor-amostra{display:inline-block;width:22px;height:22px;border-radius:999px;background:var(--equipe-cor);flex-shrink:0}
 #perf-equipe-lider{min-height:44px}
+
+/* REGRAS DO PROGRAMA (F05, 29/09/2026): aba Performance > Regras e o
+   formulário da nova versão. Mesma casa da base da apuração (.perf-fonte). */
+.perf-regras{display:grid;gap:18px;margin:18px 0}
+.perf-regra-atual{padding:20px 24px;background:var(--surface,#fff);border:1px solid var(--border,#d8e2e7);border-radius:14px;line-height:1.55}
+.perf-regra-atual>header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.perf-regra-atual h3,.perf-regras-historico h3{margin:0;font-size:1.05rem}
+.perf-regra-lista{display:grid;grid-template-columns:minmax(150px,220px) 1fr;gap:8px 16px;margin:16px 0}
+.perf-regra-lista dt{font-weight:600}
+.perf-regra-lista dd{margin:0;overflow-wrap:anywhere}
+.perf-regra-exemplo{padding:14px 16px;background:#eff8f5;border-radius:12px;color:#1f4f47}
+.perf-regra-exemplo h4{margin:0 0 8px;font-size:.95rem}
+.perf-regra-exemplo ul{margin:0 0 8px;padding-left:20px}
+.perf-regra-exemplo p{margin:6px 0 0;font-size:.9rem}
+.perf-regra-versao{padding:12px 16px;margin:10px 0;background:var(--surface,#fff);border:1px solid var(--border,#d8e2e7);border-radius:12px}
+.perf-regra-versao summary{cursor:pointer;font-weight:600;min-height:44px;display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+#perf-regra-form fieldset{border:1px solid var(--border,#d8e2e7);border-radius:12px;padding:10px 16px;margin:16px 0}
+#perf-regra-form fieldset label{display:grid;gap:6px;margin:12px 0}
+#perf-regra-form legend{font-weight:600;padding:0 6px}
+.perf-regra-campo{display:flex;align-items:center;gap:8px}
+.perf-regra-campo input{width:110px}
+#perf-regra-erro:empty{display:none}
+#perf-regra-erro{color:#9b2c2c;font-weight:600}
+#perf-regra-aviso:empty{display:none}
+#perf-regra-aviso{margin:6px 0 0;padding:8px 12px;background:#fff6e0;border-radius:10px;color:#7a4a00;font-weight:600}
+@media(max-width:680px){.perf-regra-lista{grid-template-columns:1fr}.perf-regra-lista dd{margin-bottom:8px}.perf-regra-atual{padding:16px}}

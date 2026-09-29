@@ -51,6 +51,24 @@ function esc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+/* O CÓDIGO DO ITEM (E1) vem do operacao.js. Se o cache servir o operacao.js
+   de uma versão anterior (o último recurso do sw.js serve o arquivo antigo
+   quando o novo não chega), a ficha não pode quebrar: sem as funções novas,
+   vale o casamento de antes (pela posição e pelo número do item), e o item
+   novo ganha código daqui mesmo. */
+const uidItemOk = v => typeof OPERACAO.uidItemValido === 'function' ? OPERACAO.uidItemValido(v) : typeof v === 'string' && /^[\w:.-]{1,80}$/.test(v);
+function casarItensSeguro(antes, novos) {
+  if (typeof OPERACAO.casarItens === 'function') return OPERACAO.casarItens(antes, novos);
+  const A = Array.isArray(antes) ? antes : [];
+  return (Array.isArray(novos) ? novos : []).map((it, i) => it && A[i] && String(A[i].item ?? '') === String(it.item ?? '') ? i : -1);
+}
+function novoUidItemSeguro() {
+  if (typeof OPERACAO.novoUidItem === 'function') return OPERACAO.novoUidItem();
+  const c = typeof crypto !== 'undefined' ? crypto : null, b = new Uint8Array(12);
+  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
+  else for (let k = 0; k < b.length; k++) b[k] = Math.floor(Math.random() * 256);
+  return 'm-' + Array.from(b, x => (x % 36).toString(36)).join('');
+}
 
 // Estado vazio padronizado (ícone + título + dica opcional).
 function emptyState(icon, titulo, dica) {
@@ -1283,11 +1301,14 @@ function manterExecucaoDoServidor(local, remote) {
       if (k === 'saidaEm' || k === 'horaSaida') mantido.saida = true;
     }
   }
-  // Marca do instalador no item: casa pela posição e pela descrição, como o servidor.
+  /* Marca do instalador no item: casa pelo código do item (uid, E1) e, no
+     item sem código, pelo número e pela descrição, como o servidor
+     (OPERACAO.casarItens). Item que o PCP removeu não passa a marca ao vizinho. */
   if (Array.isArray(local.itens) && Array.isArray(remote.itens)) {
+    const par = casarItensSeguro(remote.itens, local.itens);
     local.itens.forEach((it, i) => {
-      const r = remote.itens[i];
-      if (!it || !r || String(r.item ?? '') !== String(it.item ?? '') || String(r.descricao ?? '') !== String(it.descricao ?? '')) return;
+      const r = par[i] >= 0 ? remote.itens[par[i]] : null;
+      if (!it || !r) return;
       for (const k of ['statusInst', 'motivo', 'obsProb', 'fotoProbId']) {
         if (semValorRua(it[k]) && !semValorRua(r[k])) { it[k] = r[k]; if (k === 'fotoProbId') mantido.fotos++; }
       }
@@ -1682,6 +1703,8 @@ const AUD_ROTULOS = {
   finalizadaEm: 'Finalizada em', finalizadoPor: 'Finalizada por', reabertaEm: 'Reaberta em', reabertaPor: 'Reaberta por',
   entregaLancada: 'Entrega lançada', retrabalho: 'Retrabalho', causa: 'Causa', causaRaiz: 'Causa raiz', etapaOrigem: 'Etapa de origem',
   tipo: 'Tipo', numero: 'Número da O.S.', baixaAutoERP: 'Baixa pelo ERP', justificativaConclusao: 'Justificativa da conclusão',
+  prazoCombinado: 'Prazo combinado', retornoPrevisto: 'Retorno previsto',
+  agendaLog: 'Histórico de remarcações', origemPDF: 'Lida do PDF do ERP',
   apagado: 'Excluída'
 };
 // Por dentro dos campos que são objeto (conferência da volta, limpeza do
@@ -1692,7 +1715,8 @@ const AUD_SUBROTULOS = {
   obs: 'Observação', dia: 'Dia', veiculo: 'Veículo', motivo: 'Motivo', data: 'Data', status: 'Situação',
   por: 'Por', em: 'Em', recebidoEm: 'Recebido em', confirmadoPor: 'Confirmado por', fotos: 'Fotos'
 };
-const AUD_SUBOCULTAS = new Set(['porId']);
+// porConta (o login de quem lançou a entrega) também: "Por conta" leria outra coisa.
+const AUD_SUBOCULTAS = new Set(['porId', 'porConta']);
 const AUD_PAPEIS = { maquina: 'integração' };
 function audTexto(v) {
   if (typeof v === 'boolean') return v ? 'sim' : 'não';
@@ -1712,6 +1736,20 @@ function audValor(campo, v) {
   if (campo === 'equipe' && Array.isArray(v)) return v.map(n => OPERACAO.nomePessoa(n)).join(', ');
   if (campo === 'tipo') return v === 'interno' ? 'Cliente retira' : v === 'externo' ? 'Externo' : String(v);
   if (campo.startsWith('fotos') && Array.isArray(v)) return v.length + (v.length === 1 ? ' foto' : ' fotos');
+  // F15: um dia por linha ("30/09: saída 08:00, retorno 17:00").
+  if (campo === 'retornoPrevisto') return (Array.isArray(v) ? v : [v]).filter(e => e && typeof e === 'object')
+    .map(e => `${audTexto(e.dia)}: ${e.saida ? 'saída ' + e.saida + ', ' : ''}retorno ${e.hora || '(vazio)'}`).join(' | ') || '(vazio)';
+  if (campo === 'prazoCombinado' && v && typeof v === 'object') {
+    if (v.fonte === OPERACAO.PRAZO_SEM_AGENDA) return 'sem prazo' + (v.motivo ? ' · ' + v.motivo : '');
+    return [audTexto(v.data), v.fonte === 'correcao' ? 'corrigido' + (v.motivo ? ': ' + v.motivo : '')
+      : v.lidoDe ? 'primeira data agendada, lida da versão gravada' : 'primeira data agendada'].join(' · ');
+  }
+  // Histórico de remarcações: quantas, e a última ("30/09/2026 para 02/10/2026").
+  if (campo === 'agendaLog' && Array.isArray(v)) {
+    const xs = v.filter(e => e && typeof e === 'object');
+    const u = xs[xs.length - 1];
+    return `${xs.length} ${xs.length === 1 ? 'remarcação' : 'remarcações'}` + (u ? `, a última de ${u.de ? audTexto(u.de) : 'sem data'} para ${u.data ? audTexto(u.data) : 'sem data'}` : '');
+  }
   if (Array.isArray(v) && v.every(x => typeof x !== 'object' || x === null)) return v.map(audTexto).join(', ');
   if (campo === 'itens' && Array.isArray(v)) return v.map(it => [it && (it.descricao || it.item), it && it.statusInst, it && it.subtotal != null && it.subtotal !== '' ? 'R$ ' + it.subtotal : ''].filter(Boolean).join(' · ')).join(' | ');
   // Objeto: só o que tem valor, em uma linha, com rótulo em português. O
@@ -1847,6 +1885,20 @@ function blocoPCP(os, ro, done) {
 }
 
 /* ── Bloco 2: Serviço & Itens ────────────────────────────────────────────── */
+/* O ITEM DO CLIQUE (E1): pelo código do item quando a linha tem código; o
+   código que saiu da lista não cai no item que ficou na mesma posição. Item
+   antigo, ainda sem código, vai pela posição, como antes. */
+function itemDoDraft(lista, idx, uid) {
+  const itens = Array.isArray(lista) ? lista : [];
+  if (uid) return itens.find(it => it && it.uid === uid) || null;
+  return itens[+idx] || null;
+}
+// Item manual novo: número = maior existente + 1 (length+1 duplicava após
+// remoções) e código próprio do aparelho (E1).
+function novoItemManual(lista) {
+  const prox = Math.max(0, ...(lista || []).map(i => parseInt(i && i.item, 10) || 0)) + 1;
+  return { uid: novoUidItemSeguro(), item: String(prox), descricao: '', medidas: '', qtde: '1', valorUnit: '0', subtotal: 0, pronto: false, reprovado: false, motivoReprovado: '', manual: true };
+}
 function blocoItens(os, ro, done) {
   const cfg = STORE.getCFG();
   const itens = os.itens || [];
@@ -1861,21 +1913,24 @@ function blocoItens(os, ro, done) {
   // O retrabalho que o instalador marcou no espelho (motivo, observação e a
   // foto do problema) aparece embaixo do item: quem decide o retrabalho é o
   // PCP, e a foto tirada em cima da escada não chegava a ninguém.
+  // O código do item (uid, E1) vai em cada controle: o handler acha o item
+  // por ele (itemDoDraft). Item antigo, ainda sem código, vai pela posição.
   const rows = itens.map((it, i) => {
     const lock = it.manual ? '' : 'readonly';
+    const u = `data-iuid="${esc(uidItemOk(it.uid) ? it.uid : '')}"`;
     return `
-    <tr data-item-row="${i}" class="${it.pronto ? 'item-ok' : ''} ${it.reprovado ? 'item-reprov' : ''}">
-      <td data-label="Item"><input data-item="${i}.item" value="${esc(it.item)}" ${lock}></td>
-      <td data-label="Descrição"><input data-item="${i}.descricao" value="${esc(it.descricao)}" ${lock}></td>
-      <td data-label="Medidas"><input data-item="${i}.medidas" value="${esc(it.medidas)}" ${lock}></td>
-      <td data-label="Qtde"><input data-item="${i}.qtde" value="${esc(it.qtde)}" inputmode="numeric" ${lock}></td>
+    <tr data-item-row="${i}" ${u} class="${it.pronto ? 'item-ok' : ''} ${it.reprovado ? 'item-reprov' : ''}">
+      <td data-label="Item"><input data-item="${i}.item" ${u} value="${esc(it.item)}" ${lock}></td>
+      <td data-label="Descrição"><input data-item="${i}.descricao" ${u} value="${esc(it.descricao)}" ${lock}></td>
+      <td data-label="Medidas"><input data-item="${i}.medidas" ${u} value="${esc(it.medidas)}" ${lock}></td>
+      <td data-label="Qtde"><input data-item="${i}.qtde" ${u} value="${esc(it.qtde)}" inputmode="numeric" ${lock}></td>
       <td class="verif-cell" data-label="Verificação">
-        <button type="button" class="verif-btn verif-ok ${it.pronto ? 'on' : ''}" data-item-verif="${i}.ok" title="Verificado" ${ro ? 'disabled' : ''}>✓</button>
-        <button type="button" class="verif-btn verif-no ${it.reprovado ? 'on' : ''}" data-item-verif="${i}.no" title="Reprovado" ${ro ? 'disabled' : ''}>✗</button>
+        <button type="button" class="verif-btn verif-ok ${it.pronto ? 'on' : ''}" data-item-verif="${i}.ok" ${u} title="Verificado" ${ro ? 'disabled' : ''}>✓</button>
+        <button type="button" class="verif-btn verif-no ${it.reprovado ? 'on' : ''}" data-item-verif="${i}.no" ${u} title="Reprovado" ${ro ? 'disabled' : ''}>✗</button>
       </td>
-      <td class="item-del-cell">${it.manual ? `<button class="btn-xs btn-danger edit-only" data-item-del="${i}" title="Remover item">× remover</button>` : ''}</td>
+      <td class="item-del-cell">${it.manual ? `<button class="btn-xs btn-danger edit-only" data-item-del="${i}" ${u} title="Remover item">× remover</button>` : ''}</td>
     </tr>
-    ${it.reprovado ? `<tr class="motivo-row"><td colspan="6" data-label="O que deu errado?"><input data-item="${i}.motivoReprovado" value="${esc(it.motivoReprovado || '')}" placeholder="❗ O que deu errado neste item?"></td></tr>` : ''}
+    ${it.reprovado ? `<tr class="motivo-row"><td colspan="6" data-label="O que deu errado?"><input data-item="${i}.motivoReprovado" ${u} value="${esc(it.motivoReprovado || '')}" placeholder="❗ O que deu errado neste item?"></td></tr>` : ''}
     ${it.statusInst === 'retrab' ? `<tr class="motivo-row"><td colspan="6" data-label="Retrabalho na instalação">🔴 Retrabalho na instalação: ${esc(it.motivo || 'sem motivo')}${it.obsProb ? ` (${esc(it.obsProb)})` : ''}${it.fotoProbId ? `<div class="fotos-grid"><div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(it.fotoProbId)}" alt="foto do problema"></div></div>` : ''}</td></tr>` : ''}`;
   }).join('');
 
@@ -1916,6 +1971,101 @@ function alertasAgendaHTML(os) {
   return `<div class="conflitos-agenda"><strong>Conferir disponibilidade antes da saída</strong><p>Possível uso simultâneo de equipe ou veículo. Confira duração e deslocamento.</p>${conflitos.map(c => `<div class="conflito-linha">${esc(fmtDataBR(c.dia))} · O.S ${esc((c.a.id===os.id?c.b:c.a).numero || '—')} · ${esc([...c.equipe,c.veiculo].filter(Boolean).join(', '))}</div>`).join('')}</div>`;
 }
 
+/* ── PRAZO COMBINADO E RETORNO PREVISTO (F15, 29/09/2026) ──────────────────
+   Decisões do dono: o prazo é a PRIMEIRA data agendada no PCP, congelada (o
+   servidor grava quando a O.S. ganha a primeira data; a O.S. antiga tem o
+   prazo lido do histórico de remarcações). O retorno previsto é a hora
+   DIGITADA pela gestão, por dia da agenda; sem hora digitada, não há perda.
+   Os dois ficam fora de `instalacao` e não passam pelo setField: mexer neles
+   não zera a confirmação do cliente nem o carro liberado. Só admin e pcp
+   digitam; o servidor carimba quem e quando e guarda no diário. */
+const podeDigitarPrevisto = () => ['admin', 'pcp'].includes(String((STATE.user || {}).papel || ''));
+// As linhas cruas da ficha (inclusive a que só tem a saída digitada), por dia.
+function linhasRetornoPrevisto(os) {
+  const v = os && os.retornoPrevisto;
+  return (Array.isArray(v) ? v : v && typeof v === 'object' ? [v] : []).filter(e => e && typeof e === 'object' && OPERACAO.dia(e.dia));
+}
+/* Troca a saída ou o retorno previsto de UM dia no rascunho. Dia que saiu da
+   agenda (remarcada) sai da lista na próxima edição; dia sem saída e sem
+   retorno sai também. Lista vazia vira null: a gestão limpando de propósito. */
+function definirRetornoPrevisto(os, dia, campo, valor) {
+  if (!os || !['saida', 'hora'].includes(campo) || !OPERACAO.dia(dia)) return false;
+  const dias = OPERACAO.diasAgenda(os);
+  // Dia que não está na agenda (a data mudou com a ficha aberta): a hora
+  // sumiria da tela e não valeria em dia nenhum. Quem chama repinta o bloco.
+  if (!dias.includes(dia)) return false;
+  const linhas = linhasRetornoPrevisto(os);
+  const velho = linhas.find(e => e.dia === dia) || { dia, hora: '', saida: '' };
+  const lista = linhas.filter(e => e.dia !== dia && dias.includes(e.dia)).map(e => ({ ...e }));
+  const novo = { ...velho, dia, [campo]: String(valor || '').trim() };
+  if (novo.hora || novo.saida) lista.push(novo);
+  lista.sort((a, b) => a.dia.localeCompare(b.dia));
+  os.retornoPrevisto = lista.length ? lista : null;
+  return true;
+}
+/* Pede ao servidor a correção do prazo (só admin e pcp, motivo de 15 letras
+   ou mais). Devolve a causa quando não dá, ou ''. Remarcação pedida pelo
+   cliente não se corrige aqui: vira abono. */
+function pedirCorrecaoPrazo(os, data, motivo) {
+  if (!podeDigitarPrevisto()) return 'Só a gestão do PCP (admin ou pcp) corrige o prazo combinado.';
+  const d = OPERACAO.diaPlausivel(data);
+  if (!d) return 'Escolha a data do prazo corrigido.';
+  const m = String(motivo || '').trim();
+  if (m.length < 15) return 'Escreva o motivo da correção com 15 letras ou mais.';
+  const atual = OPERACAO.prazoCombinadoDe(os);
+  if (atual && atual.data === d) return 'O prazo combinado já é ' + fmtDataBR(d) + '.';
+  os.prazoCombinado = { corrigir: true, data: d, motivo: m.slice(0, 300), fonte: 'correcao' };
+  return '';
+}
+/* O aviso e o "digitado por" de um dia. Ficam num rodapé próprio: digitar a
+   hora repinta só ele, e não o campo (repintar o campo de hora no meio da
+   digitação gravava outra hora no Chrome do PC da fábrica). */
+function retornoRodapeHTML(os, d) {
+  const e = linhasRetornoPrevisto(os).find(x => x.dia === d) || {};
+  const saida = String(e.saida || ''), hora = String(e.hora || '');
+  const aviso = saida && !hora ? 'Digite o retorno previsto: a saída sozinha não vale.'
+    : saida && hora && saida >= hora ? 'A saída prevista precisa ser antes do retorno.' : '';
+  const quem = e.por && hora ? `<small class="text-muted">digitado por ${esc(e.por)}${e.em ? ' em ' + esc(fmtDataBR(e.em)) : ''}</small>` : '';
+  return `${aviso ? `<p class="retorno-aviso" role="alert">${esc(aviso)}</p>` : ''}${quem}`;
+}
+function prazoRetornoHTML(os, ro) {
+  const pc = OPERACAO.prazoCombinadoDe(os);
+  const agendaAtual = OPERACAO.dia(os.instalacao && os.instalacao.data);
+  const gestao = podeDigitarPrevisto() && !ro;
+  const pedido = os.prazoCombinado && os.prazoCombinado.corrigir;
+  const origem = !pc ? '' : pedido ? 'correção enviada, o servidor confirma ao sincronizar'
+    : pc.fonte === 'correcao' ? 'corrigido' + (os.prazoCombinado && os.prazoCombinado.motivo ? ': ' + os.prazoCombinado.motivo : '')
+    : pc.derivado && pc.fonte === 'agendaLog' ? 'primeira data do histórico de remarcações'
+    : 'primeira data agendada';
+  const semPrazo = !pc && !pedido && os.prazoCombinado && typeof os.prazoCombinado === 'object' && os.prazoCombinado.fonte === OPERACAO.PRAZO_SEM_AGENDA;
+  const prazo = pc
+    ? `<p class="prazo-linha">Prazo combinado: <strong>${esc(fmtDataBR(pc.data))}</strong> <span class="text-muted">· ${esc(origem)}</span>${agendaAtual && agendaAtual !== pc.data ? ` <span class="badge sem-valor" title="Remarcar não muda o prazo combinado. Remarcação pedida pelo cliente vira abono.">agenda atual ${esc(fmtDataBR(agendaAtual))}</span>` : ''}</p>`
+    : semPrazo ? '<p class="prazo-linha text-muted">Prazo combinado: <strong>sem prazo</strong>. A O.S. já estava entregue quando ganhou data ou equipe no PCP.</p>'
+    : '<p class="prazo-linha text-muted">Prazo combinado: nasce com a primeira data agendada no PCP. A previsão do ERP não conta.</p>';
+  const corrigir = gestao && (pc || semPrazo) ? `<details class="prazo-corrigir"><summary>Corrigir o prazo</summary>
+      <p class="text-muted">Só para prazo gravado errado. Remarcação pedida pelo cliente não se corrige aqui: vira abono.</p>
+      <div class="field-row"><div class="field"><label for="prazo-corr-data">Prazo correto</label><input type="date" id="prazo-corr-data" value="${esc(pc ? pc.data : agendaAtual)}"></div>
+      <div class="field"><label for="prazo-corr-motivo">Motivo (15 letras ou mais)</label><input id="prazo-corr-motivo" maxlength="300"></div></div>
+      <button type="button" class="btn-ghost btn-sm" id="btn-prazo-corrigir">Gravar correção</button></details>` : '';
+  const dias = OPERACAO.diasAgenda(os);
+  const linhas = linhasRetornoPrevisto(os);
+  const semana = d => { const x = parseLocalDate(d); return x ? DIAS_SEMANA[x.getDay()] + ' ' : ''; };
+  const dia = d => {
+    const e = linhas.find(x => x.dia === d) || {};
+    const saida = String(e.saida || ''), hora = String(e.hora || '');
+    const campos = gestao
+      ? `<div class="field"><label for="rp-saida-${esc(d)}">Saída prevista</label><input type="time" id="rp-saida-${esc(d)}" data-rp-dia="${esc(d)}" data-rp-campo="saida" value="${esc(saida)}"></div>
+         <div class="field"><label for="rp-hora-${esc(d)}">Retorno previsto</label><input type="time" id="rp-hora-${esc(d)}" data-rp-dia="${esc(d)}" data-rp-campo="hora" value="${esc(hora)}"></div>`
+      : `<p>${hora ? `${saida ? 'Saída ' + esc(saida) + ' · ' : ''}Retorno previsto <strong>${esc(hora)}</strong>` : '<span class="text-muted">Sem retorno previsto digitado.</span>'}</p>`;
+    return `<div class="retorno-dia"><strong>${esc(semana(d) + fmtDataBR(d))}</strong><div class="field-row">${campos}</div><div id="rp-rodape-${esc(d)}">${retornoRodapeHTML(os, d)}</div></div>`;
+  };
+  const retornos = dias.length
+    ? dias.map(dia).join('')
+    : '<p class="text-muted">Defina a data da instalação para digitar o retorno previsto.</p>';
+  return `${prazo}${corrigir}
+    <div class="retorno-previsto"><p class="retorno-titulo">Retorno previsto <span class="text-muted">· digitado pela gestão; sem hora digitada, não há perda por retorno antecipado</span></p>${retornos}</div>`;
+}
+
 function blocoAgenda(os, ro, done) {
   const cfg = STORE.getCFG();
   const inst = os.instalacao || {};
@@ -1947,6 +2097,7 @@ function blocoAgenda(os, ro, done) {
         <label>Equipe</label>
         ${chipsField('equipe', os.equipe || [], cfg.instaladores, ro)}
       </div>
+      ${isInterno(os) ? '' : `<div class="prazo-retorno" id="prazo-retorno">${prazoRetornoHTML(os, ro)}</div>`}
       <div class="field"><label>Obs agenda</label><textarea data-f="obsAgenda">${esc(os.obsAgenda)}</textarea></div>
       <div id="agenda-alertas" aria-live="polite">${alertasAgendaHTML(os)}</div>
 
@@ -2580,6 +2731,44 @@ function veiculoOptionsFicha(atual, cfg) {
    programa por fora dela (Agenda, Calendário): chame ANTES de trocar
    instalacao.data. Sem o log, a régua do tempo mostrava a O.S. no dia antigo
    afirmando que tinha reconstruído pelo histórico. */
+/* Retorno previsto e correção do prazo (F15). O retorno fica fora do
+   setField, para não zerar a confirmação do cliente nem o carro liberado.
+   Digitar a hora NÃO repinta a ficha: no Chrome o campo de hora dispara
+   "change" a cada parte completa, e trocar o campo no meio da digitação
+   gravava outra hora (1-7-3-0 virava 00:03). Grava com atraso (a hora
+   intermediária não vira envio) e repinta só o rodapé do dia e os alertas. */
+function ligarPrazoRetorno(root, ro) {
+  $$('[data-rp-dia]', root).forEach(el => {
+    el.onchange = () => {
+      if (ro || !podeDigitarPrevisto() || !_modalDraft) return;
+      const d = el.dataset.rpDia;
+      if (!definirRetornoPrevisto(_modalDraft, d, el.dataset.rpCampo, el.value)) {
+        toast('Esse dia já não está na agenda da O.S. Digite o retorno no dia certo.', 'error');
+        repintarPrazoRetorno(root, ro);
+        return;
+      }
+      markDirty(); _debouncedSaveDraft();
+      const rod = document.getElementById('rp-rodape-' + d);
+      if (rod) rod.innerHTML = retornoRodapeHTML(_modalDraft, d);
+      const alertas = $('#agenda-alertas', root); if (alertas) alertas.innerHTML = alertasAgendaHTML(_modalDraft);
+    };
+  });
+  const corrPrazo = $('#btn-prazo-corrigir', root);
+  if (corrPrazo) corrPrazo.onclick = () => {
+    const erro = pedirCorrecaoPrazo(_modalDraft, ($('#prazo-corr-data', root) || {}).value, ($('#prazo-corr-motivo', root) || {}).value);
+    if (erro) { toast(erro, 'error'); return; }
+    markDirty(); saveDraft(); reRenderModalKeepOpen();
+    toast('Correção do prazo enviada. Fica no histórico de alterações.', 'success');
+  };
+}
+// A data ou a duração mudou: o bloco do prazo e do retorno ganha os dias novos.
+function repintarPrazoRetorno(root, ro) {
+  const box = $('#prazo-retorno', root);
+  if (!box || !_modalDraft) return;
+  box.innerHTML = prazoRetornoHTML(_modalDraft, ro);
+  ligarPrazoRetorno(box, ro);
+}
+
 function registrarRemarcacao(os, novaData) {
   if (!os) return;
   const v = novaData || '';
@@ -2668,6 +2857,8 @@ function bindModalEvents(os, ro) {
       if (['instalacao.data','instalacao.periodo','instalacao.hora','instalacao.duracaoDias','veiculo'].includes(el.dataset.f)) {
         const alertas = $('#agenda-alertas',root); if(alertas) alertas.innerHTML=alertasAgendaHTML(_modalDraft);
       }
+      // Os dias do retorno previsto seguem a data e a duração (F15).
+      if (el.dataset.f === 'instalacao.data' || el.dataset.f === 'instalacao.duracaoDias') repintarPrazoRetorno(root, ro);
       // Hora de saída/retorno sem dia não reconstrói o passado (carimbarMomento).
       if (el.dataset.f === 'horaSaida')   STORE.carimbarMomento(_modalDraft, 'horaSaida', 'saidaEm');
       if (el.dataset.f === 'horaRetorno') STORE.carimbarMomento(_modalDraft, 'horaRetorno', 'retornoEm');
@@ -2735,7 +2926,8 @@ function bindModalEvents(os, ro) {
   $$('[data-item]', root).forEach(el => {
     el.oninput = () => {
       const [idx, key] = el.dataset.item.split('.');
-      const it = _modalDraft.itens[+idx];
+      const it = itemDoDraft(_modalDraft.itens, idx, el.dataset.iuid);
+      if (!it) return;
       it[key] = el.value;
       if (key === 'qtde' || key === 'valorUnit') {
         it.subtotal = (parseBRNumber(it.qtde) * parseBRNumber(it.valorUnit));
@@ -2750,7 +2942,7 @@ function bindModalEvents(os, ro) {
     el.onclick = () => {
       if (ro) return;
       const [idx, kind] = el.dataset.itemVerif.split('.');
-      const it = _modalDraft.itens[+idx];
+      const it = itemDoDraft(_modalDraft.itens, idx, el.dataset.iuid);
       if (!it) return;
       if (kind === 'ok') {
         it.pronto = !it.pronto;
@@ -2766,10 +2958,11 @@ function bindModalEvents(os, ro) {
   $$('[data-item-del]', root).forEach(el => {
     el.onclick = () => {
       if (ro) return;
-      const it = _modalDraft.itens[+el.dataset.itemDel];
+      const it = itemDoDraft(_modalDraft.itens, el.dataset.itemDel, el.dataset.iuid);
       if (!it) return;
       if (!confirm(`Remover o item "${it.descricao || it.item || ''}"?`)) return;
-      _modalDraft.itens.splice(+el.dataset.itemDel, 1);
+      const pos = _modalDraft.itens.indexOf(it);
+      if (pos >= 0) _modalDraft.itens.splice(pos, 1);
       saveDraft(); reRenderModalKeepOpen();
     };
   });
@@ -2787,9 +2980,7 @@ function bindModalEvents(os, ro) {
   });
   const addItem = $('#btn-add-item');
   if (addItem) addItem.onclick = () => {
-    // Número = maior existente + 1 (length+1 duplicava após remoções).
-    const prox = Math.max(0, ..._modalDraft.itens.map(i => parseInt(i.item, 10) || 0)) + 1;
-    _modalDraft.itens.push({ item: String(prox), descricao: '', medidas: '', qtde: '1', valorUnit: '0', subtotal: 0, pronto: false, reprovado: false, motivoReprovado: '', manual: true });
+    _modalDraft.itens.push(novoItemManual(_modalDraft.itens));
     // Não persiste ainda: o item vazio contaria no checklist. O onblur da
     // descrição salva quando o usuário digitar algo.
     markDirty();
@@ -2829,6 +3020,8 @@ function bindModalEvents(os, ro) {
     _modalDraft.liberadoPCP = false; _modalDraft.aptoPor = ''; _modalDraft.aptoEm = '';
     saveDraft(); reRenderModalKeepOpen();
   };
+
+  ligarPrazoRetorno(root, ro);
 
   // Confirmei agora
   const confBtn = $('#btn-confirmei');
@@ -3095,10 +3288,16 @@ function capturarLocalCheckin() {
 }
 
 function reRenderModalKeepOpen() {
-  // preserva o estado dos <details> abertos
-  const opens = $$('#modal-os .card-fs').map(d => d.open);
+  /* Preserva os blocos abertos PELA CHAVE (data-bloco), não pela posição
+     (F01, 29/09/2026): um bloco que aparece ou some no meio (a alocação que
+     vem antes da agenda) fazia o índice abrir o bloco vizinho. Bloco novo,
+     que não existia antes do render, fica como o render o desenhou. */
+  const abertos = new Map($$('#modal-os .card-fs').filter(d => d.dataset && d.dataset.bloco).map(d => [d.dataset.bloco, d.open]));
   renderModal();
-  $$('#modal-os .card-fs').forEach((d, i) => { if (opens[i] != null) d.open = opens[i]; });
+  $$('#modal-os .card-fs').forEach(d => {
+    const k = d.dataset && d.dataset.bloco;
+    if (k && abertos.has(k)) d.open = abertos.get(k);
+  });
 }
 
 /* ── PERGUNTA OBRIGATÓRIA: "Este serviço gerou retrabalho?" ──────────────────
@@ -7014,6 +7213,10 @@ function parsePDF(texto, itensPos) {
   const entrega = texto.match(/Entrega[:\s]*([\d]{2}\/[\d]{2}\/[\d]{4})(?:\s*(?:às|as)?\s*([\d]{2}:[\d]{2}))?/i);
   if (entrega) {
     os.instalacao.data = converterDataBR(entrega[1]);
+    /* A data de entrega do PDF é a previsão do ERP, não agenda do PCP (F15):
+       marcada assim, ela não vira o prazo combinado ao gravar. O prazo nasce
+       quando o PCP troca a data ou escala a equipe. */
+    if (os.instalacao.data) { os.previsaoEntrega = os.previsaoEntrega || os.instalacao.data; os.origemPDF = true; }
     if (entrega[2]) {
       os.instalacao.hora = entrega[2];
       const h = parseInt(entrega[2].split(':')[0], 10);
@@ -7058,6 +7261,8 @@ function parseItensPDF(texto) {
       const pre = linha.slice(0, medida.index).replace(/^\d+\s*/, '').replace(/\.\.\./g, '').trim();
       if (pre) desc = (desc + ' ' + pre).trim();
       itens.push({
+        // Código próprio do item (E1): o "Substituir" não herda a marca do velho.
+        uid: novoUidItemSeguro(),
         item: String(n++),
         descricao: desc || 'Item',
         medidas: `${medida[1]}x${medida[2]}`,
@@ -7126,7 +7331,7 @@ function importarItensPDF(draft) {
         if (confirm(`Esta O.S já tem ${atuais.length} item(ns). Substituir pelos ${itens.length} do PDF?`)) atuais = [];
         else if (!confirm(`Adicionar os ${itens.length} item(ns) do PDF no fim da lista?`)) return;
       }
-      itens.forEach((it, k) => { it.item = String(atuais.length + k + 1); });
+      itens.forEach((it, k) => { it.item = String(atuais.length + k + 1); if (!uidItemOk(it.uid)) it.uid = novoUidItemSeguro(); });
       draft.itens = atuais.concat(itens);
       saveDraft(); reRenderModalKeepOpen();
       toast(`${itens.length} item(ns) importado(s)`, 'success');

@@ -1,4 +1,4 @@
-import { atualizarOrigemERP, atualizarSituacaoERP, temTrabalhoHumano } from "../_shared/pcp-integridade.mjs";
+import { atualizarOrigemERP, atualizarSituacaoERP, temTrabalhoHumano, motivoAgendaViva, carimbarUidsERP } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-mubisys — integracao com o ERP (substitui mubisys.js + mubisys-sync.mjs)
 //
@@ -173,9 +173,10 @@ function mapearOS(o: any) {
   // Logistica define o tipo: "Cliente retira" -> interno; o resto -> externo.
   const logistica = String(pick(o, "logistica", "tipo_logistica", "tipo_entrega", "modalidade_entrega", "entrega_tipo") || "");
   const dataAprov = isoData(pick(o, "data_aprovacao", "data_cadastro"));
+  const numero = String(pick(o, "sequencial_ordem", "numero", "numeroOS", "codigo") || "");
   return {
     tipo: /retir/i.test(logistica) ? "interno" : "externo",
-    numero: String(pick(o, "sequencial_ordem", "numero", "numeroOS", "codigo") || ""),
+    numero,
     // Situacao da O.S no ERP. E o que permite a BAIXA AUTOMATICA: quando o
     // pedido sai de producao la, ele nao pode continuar ocupando a mesa aqui.
     statusERP: String(pick(o, "status", "situacao", "status_os") || "").trim().toUpperCase(),
@@ -205,7 +206,9 @@ function mapearOS(o: any) {
     endereco: montarEndereco(endereco),
     observacao: pick(o, "observacao_geral", "observacao_producao"),
     instalacao: { data: entregaIso, hora: entregaHr, periodo: definirPeriodo(entregaHr) },
-    itens: (o.itens || o.produtos || o.items || []).map(mapearItem),
+    /* CODIGO FIXO DO ITEM (E1): '<numero>:<posicao>:<k>'. Determinístico:
+       a mesma O.S. importada de novo dá o mesmo código a cada item. */
+    itens: carimbarUidsERP(numero, (o.itens || o.produtos || o.items || []).map(mapearItem)),
     _origemMubisys: true,
   };
 }
@@ -468,7 +471,7 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
 
   // As que estao ABERTAS aqui (nao apagadas, sem finalizacao).
   const { data: linhas, error } = await sb
-    .from("pcp_registros").select("id, registro")
+    .from("pcp_registros").select("id, registro, atualizado_em")
     .eq("colecao", "os").eq("apagado", false)
     // Só as abertas vêm do banco: ler todas passaria das 1000 linhas que o banco
     // devolve por consulta e cortaria calado (905 vivas em 23/09/2026).
@@ -490,12 +493,14 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
     const st = statusPorNumero.get(num);
     if (st === undefined) { semNoticia++; divergencias.push({id:l.id, numero:num, motivo:"Sem retorno do ERP nesta consulta"}); continue; }  // o ERP nao falou dela: nao mexe
     if (!STATUS_FINAIS.has(st)) continue;              // segue viva la
-    // A EQUIPE TEM VISITA MARCADA: nao tira da mesa. O ERP costuma marcar
-    // ENTREGUE quando o material sai da fabrica, e a instalacao ainda esta por
-    // vir -- baixar aqui sumiria com a agenda de quem vai subir no andaime.
-    const dataAgenda = String(l.registro?.instalacao?.data || "").trim();
-    if (dataAgenda && dataAgenda >= hojeLocal) { agendadas++; continue; }
-    alvos.push({ id: l.id, registro: l.registro, statusERP: st });
+    // A EQUIPE TEM VISITA MARCADA OU ESTA NA RUA: nao tira da mesa. O ERP
+    // costuma marcar ENTREGUE quando o material sai da fabrica, e a instalacao
+    // ainda esta por vir ou em andamento -- baixar aqui sumiria com a agenda
+    // de quem vai subir no andaime. Conta pelo ULTIMO dia da agenda (servico
+    // de varios dias), e a equipe que saiu e nao voltou tambem segura
+    // (motivoAgendaViva, a mesma regra da releitura; revisao da F01).
+    if (motivoAgendaViva(l.registro, hojeLocal)) { agendadas++; continue; }
+    alvos.push({ id: l.id, registro: l.registro, atualizado_em: l.atualizado_em, statusERP: st });
   }
 
   const resumo = {
@@ -511,6 +516,7 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
     exemplos: alvos.slice(0, 8).map((a: any) => `${a.registro.numero} ${String(a.registro.cliente || "").slice(0, 28)} [${a.statusERP}]`),
     simulado: !!simular,
     freado: false as boolean | string,
+    desistencias: [] as any[],
   };
 
   if (simular) return resumo;
@@ -526,28 +532,72 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
     resumo.freado = `${alvos.length} candidatas: baixando ${lote.length} agora, o restante nas próximas rodadas.`;
   }
 
-  const agora = new Date().toISOString();
-  const linhasBaixa = lote.map((a: any) => ({
-    colecao: "os",
-    id: a.id,
-    registro: {
-      ...a.registro,
-      finalizadaEm: agora,
-      finalizadoPor: `Mubisys (baixa automática · ${a.statusERP})`,
-      baixaAutoERP: { em: agora, status: a.statusERP },
-      atualizadoEm: agora,
-      atualizadoPor: "Mubisys (auto)",
-    },
-    atualizado_em: agora,
-    apagado: false,
-  }));
-  for (let i = 0; i < linhasBaixa.length; i += 100) {
-    const { error: e2 } = await sb.from("pcp_registros")
-      .upsert(linhasBaixa.slice(i, i + 100), { onConflict: "colecao,id" });
-    if (e2) throw new Error(e2.message);
-  }
-  resumo.baixadas = linhasBaixa.length;
+  const r = await gravarBaixas(sb, lote, hojeLocal);
+  resumo.baixadas = r.baixadas;
+  resumo.desistencias = r.desistencias;
   return resumo;
+}
+
+/* A BAIXA GRAVA COM TRAVA DE VERSAO (F01, 29/09/2026), como a conciliacao ja
+   fazia. Antes era um upsert do registro LIDO antes de esperar o ERP: o que a
+   gestao gravasse nesse meio (equipe, agenda, a alocacao que vem na F08) era
+   apagado calado. Agora cada O.S. e gravada so se a linha ainda e a que foi
+   lida (atualizado_em). Mudou no meio: rele, confere de novo as regras da
+   baixa (viva, aberta, agenda terminada, equipe de volta) e repete UMA vez sobre o registro
+   novo. Mudou de novo, ou deixou de ser candidata: desiste desta O.S. neste
+   ciclo, com a causa no resumo e no log; a proxima rodada a retoma.
+   A baixa sobe o rev: a copia velha de um aparelho vira conflito, em vez de
+   passar por cima da finalizacao. */
+async function gravarBaixas(sb: any, lote: any[], hojeLocal: string) {
+  const desistencias: any[] = [];
+  let baixadas = 0;
+  const motivoParaNaoBaixar = (linha: any) => {
+    if (!linha || linha.apagado) return "excluída no PCP enquanto esperava o ERP";
+    if (String(linha.registro?.finalizadaEm || "").trim()) return "finalizada no PCP enquanto esperava o ERP";
+    const viva = motivoAgendaViva(linha.registro, hojeLocal);
+    if (viva) return viva + " (mudou no PCP enquanto esperava o ERP)";
+    return "";
+  };
+  for (const a of lote) {
+    let linha: any = { registro: a.registro, atualizado_em: a.atualizado_em, apagado: false };
+    let motivo = "";
+    for (let tentativa = 0; tentativa < 2; tentativa++) {
+      if (tentativa) {
+        const { data, error } = await sb.from("pcp_registros").select("registro, apagado, atualizado_em")
+          .eq("colecao", "os").eq("id", a.id).maybeSingle();
+        if (error) { motivo = "não foi possível reler a O.S.: " + error.message; break; }
+        motivo = motivoParaNaoBaixar(data);
+        if (motivo) break;
+        linha = data;
+      }
+      const agora = new Date().toISOString();
+      const registro = {
+        ...linha.registro,
+        finalizadaEm: agora,
+        finalizadoPor: `Mubisys (baixa automática · ${a.statusERP})`,
+        // Finalizacao da maquina nao e de pessoa: o ID de quem finalizou antes nao fica ao lado.
+        finalizadoPorId: "",
+        baixaAutoERP: { em: agora, status: a.statusERP },
+        atualizadoEm: agora,
+        atualizadoPor: "Mubisys (auto)",
+        rev: (Number(linha.registro?.rev) || 0) + 1,
+      };
+      const carimbo = new Date(Math.max(Date.now(), (Date.parse(linha.atualizado_em) || 0) + 1)).toISOString();
+      // Sem o carimbo lido nao ha trava: a gravacao falha e a O.S. e relida.
+      const { data: gravou, error } = await sb.from("pcp_registros").update({ registro, atualizado_em: carimbo, apagado: false })
+        .eq("colecao", "os").eq("id", a.id).eq("apagado", false)
+        .eq("atualizado_em", String(linha.atualizado_em ?? "")).select("id");
+      if (error) throw new Error(error.message);
+      if (gravou?.length) { baixadas++; motivo = ""; break; }
+      motivo = tentativa ? "alterada no PCP duas vezes durante a baixa" : "alterada no PCP durante a baixa";
+    }
+    if (motivo) {
+      const numero = String(a.registro?.numero || "");
+      desistencias.push({ id: a.id, numero, motivo });
+      console.warn(`[pcp-mubisys] baixa desistiu da O.S. ${numero} (${a.id}): ${motivo}. A próxima rodada tenta de novo.`);
+    }
+  }
+  return { baixadas, desistencias };
 }
 
 // Esqueleto identico ao novaOS() do app, preenchido com os campos do Mubisys.
@@ -581,7 +631,8 @@ function montarOSImportada(remoto: any) {
   if (remoto.tipo === "interno" || remoto.tipo === "externo") os.tipo = remoto.tipo;
   if (remoto.observacao) os.obsPCP = remoto.observacao;
   if (remoto.instalacao) os.instalacao = Object.assign(os.instalacao, remoto.instalacao);
-  if (Array.isArray(remoto.itens) && remoto.itens.length) os.itens = remoto.itens;
+  // Item sem código ganha o da importação (E1); o que já tem fica com ele.
+  if (Array.isArray(remoto.itens) && remoto.itens.length) os.itens = carimbarUidsERP(os.numero, remoto.itens);
   os.origemMubisys = true;
   const sit = atualizarSituacaoERP(os, remoto.statusCarteira || remoto.statusERP, agora);
   if (sit) { os.statusERP = sit.statusERP; os.statusERPDesde = sit.statusERPDesde; }
@@ -806,14 +857,14 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
     if (volta) {
       // Excluída que o ERP ainda lista volta à mesa: o card precisa poder dizer por quê.
       if (l.apagado) r.restauradaPeloERPEm = em;
-      if (r.finalizadaEm && r.baixaAutoERP?.em === r.finalizadaEm) { r.finalizadaEm='';r.finalizadoPor='';delete r.baixaAutoERP;delete r.arquivadaEm; }
+      if (r.finalizadaEm && r.baixaAutoERP?.em === r.finalizadaEm) { r.finalizadaEm='';r.finalizadoPor='';r.finalizadoPorId='';delete r.baixaAutoERP;delete r.arquivadaEm; }
       delete r.erpSaiuDaCarteiraEm;
       r.erpCarteira={aberta:true,em};
     } else if (marcarIds.has(l.id)) {
       r.erpSaiuDaCarteiraEm=em;
       r.erpCarteira={aberta:false,em};
     } else {
-      r.finalizadaEm=em;r.finalizadoPor='Mubisys · saiu da carteira aberta';r.arquivadaEm=em;
+      r.finalizadaEm=em;r.finalizadoPor='Mubisys · saiu da carteira aberta';r.finalizadoPorId='';r.arquivadaEm=em;
       r.baixaAutoERP={em,status:'FORA DA CARTEIRA ABERTA',carteira:true};
       r.erpCarteira={aberta:false,em};
     }

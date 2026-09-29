@@ -27,9 +27,10 @@ function banco(initial={}) {
 async function edge(tipo,initial={}) {
  const {db,cliente}=banco(initial);let handler;
  const regras=await import('../../supabase/functions/_shared/pcp-integridade.mjs');
+ const {REGRAS}=await import('../../supabase/functions/_shared/pcp-regras.mjs');
  const ctx=vm.createContext({console,URL,URLSearchParams,Request,Response,TextEncoder,TextDecoder,atob,btoa,crypto:webcrypto,setTimeout,clearTimeout,
   Deno:{env:{get:k=>({PCP_TOKEN:'machine-test',EQUIPE_JWT_SECRET:'test-secret',SUPABASE_URL:'https://example.invalid',SUPABASE_SERVICE_ROLE_KEY:'test'}[k]||'')},serve:fn=>handler=fn},
-  createClient:()=>cliente,...regras});
+  createClient:()=>cliente,...regras,REGRAS});
  const file=path.join(__dirname,'../../supabase/functions',tipo,'index.ts');
  const src=fs.readFileSync(file,'utf8').replace(/^import .*?;\s*$/mg,'').replace(/^export (?=(?:async )?function|const|let)/mg,'');
  vm.runInContext(stripTypeScriptTypes(src,{mode:'transform'}),ctx);

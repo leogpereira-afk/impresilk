@@ -261,9 +261,93 @@ const OPERACAO = (() => {
       participacoes:[...mapa.values()].reduce((s,d) => s+d.entregas,0),
       pessoas:[...mapa.values()].sort((a,b) => b.entregas-a.entregas || a.nome.localeCompare(b.nome))};
   }
+  /* PRAZO COMBINADO E RETORNO PREVISTO (F15, 29/09/2026). Cópia da régua de
+     _shared/pcp-integridade.mjs (prazoCombinadoDe, retornosPrevistos); um teste
+     confere as duas. O prazo é a PRIMEIRA data agendada no PCP, congelada; o
+     ERP não define prazo (a importação põe a previsão do ERP em
+     instalacao.data, e isso não é agenda de ninguém). O retorno previsto é a
+     hora digitada pela gestão, por dia da agenda; sem hora, não há perda. */
+  const HORA_F15 = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const objF15 = v => !!v && typeof v === 'object' && !Array.isArray(v);
+  function diaPlausivel(v) {
+    const s = String(v ?? '').trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || s < '2000-01-01' || s > '2100-12-31') return '';
+    const t = Date.parse(s + 'T12:00:00Z');
+    return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === s ? s : '';
+  }
+  // A data atual é agenda de gente: O.S. feita no PCP, equipe escalada, ou data diferente da previsão do ERP.
+  function agendaDeGente(o) {
+    const atual = diaPlausivel(o?.instalacao?.data);
+    if (!atual) return '';
+    const doERP = !!(o?.origemMubisys || o?.origemPDF);
+    const comEquipe = (Array.isArray(o?.equipe) ? o.equipe : []).some(x => String(x ?? '').trim());
+    return !doERP || comEquipe || atual !== diaPlausivel(o?.previsaoEntrega) ? atual : '';
+  }
+  // A marca "sem prazo": a O.S. já estava entregue quando ganhou data ou equipe no PCP.
+  const PRAZO_SEM_AGENDA = 'semAgenda';
+  function prazoCombinadoDe(o) {
+    const pc = o?.prazoCombinado;
+    const gravado = diaPlausivel(objF15(pc) ? pc.data : pc);
+    if (gravado) return { data: gravado, fonte: objF15(pc) && pc.fonte ? String(pc.fonte) : 'agenda', derivado: false };
+    if (objF15(pc) && pc.fonte === PRAZO_SEM_AGENDA) return null;
+    const doERP = !!(o?.origemMubisys || o?.origemPDF);
+    const previsaoERP = diaPlausivel(o?.previsaoEntrega);
+    const log = (Array.isArray(o?.agendaLog) ? o.agendaLog : []).filter(objF15);
+    if (log.length) {
+      const de = diaPlausivel(log[0].de);
+      if (de && !(doERP && de === previsaoERP)) return { data: de, fonte: 'agendaLog', derivado: true };
+      for (const x of log) { const d = diaPlausivel(x.data); if (d) return { data: d, fonte: 'agendaLog', derivado: true }; }
+    }
+    const atual = agendaDeGente(o);
+    return atual ? { data: atual, fonte: 'agenda', derivado: true } : null;
+  }
+  function retornosPrevistos(o) {
+    const v = o?.retornoPrevisto;
+    const lista = Array.isArray(v) ? v : objF15(v) ? [v] : [];
+    const porDia = new Map();
+    for (const e of lista) {
+      if (!objF15(e)) continue;
+      const d = diaPlausivel(e.dia), hora = HORA_F15.test(String(e.hora ?? '')) ? String(e.hora) : '';
+      if (!d || !hora) continue;
+      const saida = HORA_F15.test(String(e.saida ?? '')) && String(e.saida) < hora ? String(e.saida) : '';
+      porDia.set(d, { ...e, dia: d, hora, saida });
+    }
+    return [...porDia.values()].sort((a, b) => a.dia.localeCompare(b.dia));
+  }
+  const retornoPrevistoDoDia = (o, d) => retornosPrevistos(o).find(e => e.dia === dia(d)) || null;
+  /* A SAÍDA PREVISTA do dia: a digitada junto do retorno; no primeiro dia, na
+     falta dela, a hora marcada em "Horário". A hora de Manhã/Tarde não conta:
+     é padrão, não dado (106 O.S. com '00:00'). */
+  function saidaPrevista(o, d) {
+    const e = retornoPrevistoDoDia(o, d);
+    if (e && e.saida) return e.saida;
+    const i = o?.instalacao || {};
+    if (i.periodo === 'Horário' && HORA_F15.test(String(i.hora || '')) && dia(i.data) === dia(d)) return String(i.hora);
+    return '';
+  }
+  // Da saída prevista ao retorno previsto, só quando os dois existem e a saída vem antes.
+  function janelaPrevista(o, d) {
+    const e = retornoPrevistoDoDia(o, d), saida = saidaPrevista(o, d);
+    return e && saida && saida < e.hora ? { saida, retorno: e.hora } : null;
+  }
+  /* O retorno previsto que o espelho mostra (só leitura): o de hoje, quando
+     hoje é dia da agenda; senão o do dia da saída (a saidaEm não é zerada no
+     "Mais um dia de trabalho", então ela não escolhe o dia numa O.S. de vários
+     dias); senão o do primeiro dia da agenda. */
+  function retornoPrevistoParaMostrar(o, hoje = dia(new Date())) {
+    const dias = diasAgenda(o);
+    const d = dias.includes(hoje) ? hoje : dia(o?.saidaEm) || dias[0] || '';
+    return d ? retornoPrevistoDoDia(o, d) : null;
+  }
   // Sem duração em horas/roteiro não é possível afirmar sobrecarga ou capacidade.
   // Manhã e tarde distintas não colidem. Os demais cruzamentos pedem conferência.
-  function mesmoTurno(a, b) {
+  /* F15: quando as DUAS O.S. têm saída prevista e retorno previsto naquele dia,
+     o conflito é pelo intervalo (8h-10h e 10h-12h não colidem; 8h-11h e
+     10h-12h colidem), e "Horário" deixa de colidir com tudo. Faltando um dos
+     dois lados, vale o turno, como antes. */
+  function mesmoTurno(a, b, d = '') {
+    const ja = d ? janelaPrevista(a, d) : null, jb = d ? janelaPrevista(b, d) : null;
+    if (ja && jb) return ja.saida < jb.retorno && jb.saida < ja.retorno;
     const turno = o => {
       const i = o.instalacao || {};
       if (i.periodo === 'Horário' && /^([01]\d|2[0-3]):[0-5]\d$/.test(i.hora || '')) return +i.hora.slice(0,2) < 12 ? 'Manhã' : 'Tarde';
@@ -277,7 +361,7 @@ const OPERACAO = (() => {
   function conflitos(lista, data) {
     const os = programadas(lista, data, data), out = [];
     for (let i=0; i<os.length; i++) for (let j=i+1; j<os.length; j++) {
-      const a=os[i], b=os[j]; if (a.id === b.id || !mesmoTurno(a,b)) continue;
+      const a=os[i], b=os[j]; if (a.id === b.id || !mesmoTurno(a,b,data)) continue;
       const deB = new Set(equipe(b).map(chavePessoa));
       const nomes = equipe(a).filter(n => deB.has(chavePessoa(n))).map(nomePessoa);
       // "Instalação interna" não é carro: duas no mesmo turno não disputam nada.
@@ -470,7 +554,70 @@ const OPERACAO = (() => {
     const ordem = { conferir: 0, parcial: 1, conferida: 2 };
     return lista2.sort((a, b) => ordem[a.situacao] - ordem[b.situacao] || b.dia.localeCompare(a.dia) || a.chave.localeCompare(b.chave));
   }
-  return {ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
+  /* CÓDIGO FIXO DO ITEM (E1, 29/09/2026). Cópia do casamento do servidor
+     (_shared/pcp-integridade.mjs: casarItens e uidItemValido); um teste
+     confere as duas (tests/itens-uid.test.cjs). O item novo feito aqui
+     (manual ou do PDF) nasce com 'm-' + aleatório: funciona sem rede, e dois
+     aparelhos não geram o mesmo. Item antigo sem código não ganha código no
+     aparelho: quem carimba é o servidor, na próxima gravação da O.S. */
+  const UID_ITEM = /^[\w:.-]{1,80}$/;
+  const uidItemValido = v => typeof v === 'string' && UID_ITEM.test(v);
+  function novoUidItem() {
+    const c = typeof crypto !== 'undefined' ? crypto : null, b = new Uint8Array(12);
+    if (c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
+    else for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256);
+    return 'm-' + Array.from(b, x => (x % 36).toString(36)).join('');
+  }
+  /* Para cada item de `novos`, a posição do mesmo item em `antes`, ou -1.
+     Item com código só casa pelo código; sem código, e só com item do mesmo
+     lado (ERP com ERP, manual com manual): número, descrição, medida e
+     quantidade quando únicos; depois número e descrição, na ordem (nunca
+     pela posição); depois só o número, depois só a descrição, quando únicos. */
+  function casarItens(antes, novos) {
+    const objeto = v => !!v && typeof v === 'object' && !Array.isArray(v);
+    const A = Array.isArray(antes) ? antes : [], N = Array.isArray(novos) ? novos : [];
+    const par = N.map(() => -1), usadoA = new Set(), comUid = new Set();
+    const txt = v => String(v ?? '');
+    const porUid = new Map();
+    A.forEach((a, i) => { if (objeto(a) && uidItemValido(a.uid) && !porUid.has(a.uid)) porUid.set(a.uid, i); });
+    N.forEach((n, j) => {
+      if (!objeto(n) || !uidItemValido(n.uid)) return;
+      comUid.add(j);
+      const i = porUid.get(n.uid);
+      if (i !== undefined && !usadoA.has(i)) { par[j] = i; usadoA.add(i); }
+    });
+    const livresN = () => N.map((_, j) => j).filter(j => par[j] < 0 && !comUid.has(j) && objeto(N[j]));
+    const livresA = () => A.map((_, i) => i).filter(i => !usadoA.has(i) && objeto(A[i]));
+    const casar = (i, j) => { par[j] = i; usadoA.add(i); };
+    // Item do ERP só casa com item do ERP, e manual com manual: o item do PDF
+    // ou o manual novo de uma aba antiga nunca herda o código de quem saiu.
+    const mesmoLado = (i, j) => !!A[i].manual === !!N[j].manual;
+    const igual = (i, j, campos) => mesmoLado(i, j) && campos.every(c => txt(N[j][c]) === txt(A[i][c]));
+    const INTEIRO = ['item', 'descricao', 'medidas', 'qtde'], NOME = ['item', 'descricao'];
+    // 1a. Número, descrição, medida e quantidade iguais, quando só um de cada
+    // lado tem essa combinação: separa o par repetido de medidas diferentes
+    // mesmo que um item antes dele (ou um do par) tenha saído da lista.
+    for (const i of livresA()) {
+      const js = livresN().filter(j => igual(i, j, INTEIRO));
+      if (js.length === 1 && livresA().filter(k => igual(k, js[0], INTEIRO)).length === 1) casar(i, js[0]);
+    }
+    // 1b. Número e descrição iguais, na ordem (nunca pela posição na lista: a
+    // posição muda quando um item antes dele sai).
+    for (const i of livresA()) {
+      const js = livresN().filter(j => igual(i, j, NOME));
+      if (js.length) casar(i, js[0]);
+    }
+    for (const campo of ['item', 'descricao']) {
+      for (const i of livresA()) {
+        const v = txt(A[i][campo]);
+        if (!v || A.filter(o => objeto(o) && txt(o[campo]) === v).length !== 1) continue;
+        const js = livresN().filter(j => txt(N[j][campo]) === v && mesmoLado(i, j));
+        if (js.length === 1) casar(i, js[0]);
+      }
+    }
+    return par;
+  }
+  return {uidItemValido,novoUidItem,casarItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
 // Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega

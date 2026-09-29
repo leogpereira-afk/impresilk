@@ -2272,7 +2272,13 @@ function renderPerformanceCasa() {
      é o que se lê de vez em quando. O filtro de período serve as duas, porque
      as duas leem o mesmo recorte. Nada foi escondido: o que era quadro
      recolhível continua recolhível, só mudou de aba. */
-  const abaPerf = STATE._perfAba === 'relatorio' ? 'relatorio' : 'equipe';
+  /* REGRAS (F05, 29/09/2026): a regra do programa (divisão, comissão, bônus
+     e redutor da volta) é da gestão. A aba só existe para admin e pcp, os
+     mesmos que o servidor atende; outro papel que chegue com 'regras'
+     guardado cai na Equipe. Sem o regras.js carregado (cache quebrado), a
+     aba some em vez de derrubar a tela. */
+  const podeRegras = ['admin', 'pcp'].includes(String(STATE.user?.papel || '')) && typeof perfRegrasHTML === 'function' && typeof REGRAS !== 'undefined';
+  const abaPerf = STATE._perfAba === 'relatorio' ? 'relatorio' : STATE._perfAba === 'regras' && podeRegras ? 'regras' : 'equipe';
   const pendRH = pendentesConferenciaRH();
   /* Os <details> soltos da apuração ("Como interpretar os indicadores", "Ver
      O.S., percentuais...") fechavam a cada repintura: a apuração chega do
@@ -2286,14 +2292,17 @@ function renderPerformanceCasa() {
       <div class="casa-pagina-head">
         <div><h2>Performance</h2><p>${abaPerf === 'equipe'
           ? 'Entregas, equipes e participação de cada pessoa. Uma apuração que você pode conferir.'
+          : abaPerf === 'regras'
+          ? 'Regras do programa das equipes: divisão, comissão e volta do carro, com o exemplo de cada versão.'
           : 'Compare participações confirmadas, identifique pendências e consulte os detalhes da operação.'}</p></div>
         <span class="casa-vista">
           <button class="btn-ghost btn-sm ${abaPerf === 'equipe' ? 'active' : ''}" data-perf-aba="equipe">Equipe</button>
           <button class="btn-ghost btn-sm ${abaPerf === 'relatorio' ? 'active' : ''}" data-perf-aba="relatorio">Relatório</button>
+          ${podeRegras ? `<button class="btn-ghost btn-sm ${abaPerf === 'regras' ? 'active' : ''}" data-perf-aba="regras">Regras</button>` : ''}
           <button class="btn-primary btn-sm" id="perf-tv" title="Ranking em tela cheia para a TV da fábrica">📺 Modo TV</button>
         </span>
       </div>
-      ${typeof perfFonteHTML==='function'?perfFonteHTML():''}
+      ${abaPerf === 'regras' ? perfRegrasHTML() : `${typeof perfFonteHTML==='function'?perfFonteHTML():''}
       ${abaPerf === 'equipe' ? `
         ${typeof performanceEquipesHTML === 'function' ? performanceEquipesHTML() : produtividadeHTML()}
         ${quadroCasa('perf-rh', `🔗 Conferir nomes do PCP × fichas do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), pendRH > 0)}
@@ -2306,15 +2315,19 @@ function renderPerformanceCasa() {
         ${quadroCasa('perf-gente', '👷 Indicadores operacionais <small>— horas e registros do período</small>', produtividadeHTML(), false)}
         ${quadroCasa('perf-retrab', '🔧 Retrabalho <small>— de onde veio, de quem e de que tipo</small>', retrabalhoHTML(f), false)}
         ${quadroCasa('perf-carros', '🚚 Carros mais usados', carrosHTML(f), false)}
-      `}
+      `}`}
     </div>`;
   if (detAbertos.size) { const detDepois = [...el.querySelectorAll('details')]; chaveDet(detDepois).forEach((k, i) => { if (detAbertos.has(k)) detDepois[i].open = true; }); }
   wireFiltroPeriodo(el, '_fPerf', renderPerformanceCasa);
   wireQuadrosCasa(el);
   el.querySelectorAll('[data-perf-aba]').forEach(b => b.onclick = () => {
-    STATE._perfAba = b.dataset.perfAba; renderPerformanceCasa();
+    STATE._perfAba = b.dataset.perfAba;
+    // Entrar na aba Regras consulta o servidor de novo (outra versão pode ter sido criada).
+    if (b.dataset.perfAba === 'regras' && typeof perfRegrasEstado === 'object') perfRegrasEstado.tentado = false;
+    renderPerformanceCasa();
   });
-  if (typeof wirePerformanceEquipes === 'function') wirePerformanceEquipes(el);
+  if (abaPerf === 'regras') { if (typeof wirePerfRegras === 'function') wirePerfRegras(el); }
+  else if (typeof wirePerformanceEquipes === 'function') wirePerformanceEquipes(el);
   const tv = document.getElementById('perf-tv'); if (tv) tv.onclick = abrirTVCasa;
   const mesEl = document.getElementById('perf-mes');
   if (mesEl) mesEl.onchange = () => { if (mesEl.value) { gravarBonusCasa(trocarMesBonus(lerBonusCasa(), mesEl.value)); renderPerformanceCasa(); } };
