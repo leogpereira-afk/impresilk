@@ -2948,3 +2948,37 @@ img.perf-logo{object-fit:cover}
 #perf-regra-aviso:empty{display:none}
 #perf-regra-aviso{margin:6px 0 0;padding:8px 12px;background:#fff6e0;border-radius:10px;color:#7a4a00;font-weight:600}
 @media(max-width:680px){.perf-regra-lista{grid-template-columns:1fr}.perf-regra-lista dd{margin-bottom:8px}.perf-regra-atual{padding:16px}}
+
+/* ── COMPACTO (pedido do Léo, 29/09/2026: "um espaço enorme ocupando nada,
+   isso não é legal e atrapalha o serviço"). Entregas e Performance
+   gastavam meia tela com caixas de uma linha antes do que interessa: filtros
+   em duas faixas, a base da apuração em bloco alto e três cartões de um
+   número cada. Agora cada coisa ocupa uma faixa só e o conteúdo sobe. */
+#panel-entregas .casa-pagina { gap: 10px; }
+#panel-entregas .casa-pagina-head h2 { margin-bottom: 2px; }
+#panel-entregas .casa-kpi-cards { gap: 8px; }
+#panel-entregas .casa-kpi { padding: 8px 12px; border-radius: 12px; }
+#panel-entregas .casa-kpi b { font-size: 1.15rem; }
+.ent-controles { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; padding: 10px 14px; border-radius: 12px; }
+.ent-periodo { gap: 8px; }
+.ent-periodo select, .ent-controles .casa-filtros select { min-height: 38px; padding-top: 6px; padding-bottom: 6px; }
+.ent-periodo label, #panel-entregas .ent-controles .casa-filtros label { font-size: 12px; gap: 3px; }
+.ent-intervalo { margin-left: 0; }
+#panel-entregas .ent-controles .casa-filtros { margin: 0; padding-top: 0; border-top: 0; gap: 8px; flex: 1 1 auto; }
+.ent-personalizar summary, .ent-dados summary { padding: 6px 0; }
+.perf-fonte { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 10px 14px; margin: 10px 0; line-height: 1.4; border-radius: 12px; }
+.perf-fonte h3 { margin: 0; font-size: .92rem; flex: 0 0 auto; }
+.perf-fonte p { margin: 0; font-size: .8rem; flex: 1 1 280px; }
+.perf-fonte .perf-filtros { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 0 0 auto; }
+.perf-fonte .perf-filtros label { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: .8rem; }
+.perf-fonte .perf-filtros select, .perf-fonte .perf-filtros button { min-height: 36px; padding-top: 6px; padding-bottom: 6px; }
+.perf-fonte .metricas-nota { flex-basis: 100%; margin: 0; font-size: .72rem; }
+.perf-summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.perf-summary > div { flex: 0 1 auto; padding: 6px 14px; border-radius: 999px; gap: 8px; }
+.perf-summary b { font-size: 1.05rem; }
+.perf-summary span { font-size: .8rem; }
+@media (max-width: 600px) {
+  .ent-controles { padding: 10px; }
+  .perf-fonte .perf-filtros { flex: 1 1 100%; }
+  .perf-summary > div { flex: 1 1 100%; border-radius: 12px; }
+}
