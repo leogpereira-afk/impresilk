@@ -413,14 +413,36 @@ test('pódio com empate que não cabe em três vira lista, sem escolher por orde
   assert.equal(r2.resto.map(x=>x.nome).join(','), 'D');
 });
 
-test('servidor: duas equipes ATIVAS com os mesmos integrantes são detectadas; desativada não disputa; vínculo do RH une apelido e ficha', async () => {
-  const {composicoesAtivasRepetidas} = await import('../supabase/functions/_shared/pcp-integridade.mjs');
+/* TROCADOS DE PROPÓSITO NA F06 (29/09/2026). Os dois testes daqui fixavam
+   "uma equipe ativa por composição" (composicoesAtivasRepetidas, v124, e a
+   comparação por ID da revisão da F04). Com as dez equipes fixas a regra saiu:
+   duas fixas podem ter a mesma gente, e a entrega só é deduzida quando UMA
+   ativa tem aquela composição (equipeDoRegistro, alocacaoSugerida). A sucessora,
+   conferirEquipesAtivas, recusa o NOME repetido e AVISA de pessoa em duas
+   equipes, com a mesma régua (slug e ID da mesma ficha são a mesma pessoa).
+   Casos em tests/equipes.test.cjs; aqui fica o que os antigos cobriam. */
+test('servidor: pessoa em duas equipes ATIVAS é achada; desativada não conta; slug e ID são a mesma pessoa com a régua', async () => {
+  const {conferirEquipesAtivas, resolverPessoas} = await import('../supabase/functions/_shared/pcp-integridade.mjs');
   const m = [{chave:'1',nome:'A'},{chave:'2',nome:'B'}];
   const eq = (id, ativo, membros = [...m].reverse()) => ({id, nome:'Equipe '+id, emblema:'🦅', membros, ativo});
-  assert.equal(composicoesAtivasRepetidas({equipes:[eq('x',true), eq('y',true)]}).size, 1);
-  assert.equal(composicoesAtivasRepetidas({equipes:[eq('x',true), eq('y',false)]}).size, 0);
-  const porApelido = eq('z', true, [{chave:'Zé',nome:'Zé'},{chave:'2',nome:'B'}]), porFicha = eq('w', true, [{chave:'rh-jose',nome:'José'},{chave:'2',nome:'B'}]);
-  assert.equal(composicoesAtivasRepetidas({equipes:[porApelido, porFicha]}, [{apelido:'Zé', chave:'rh-jose'}]).size, 1);
+  assert.equal(conferirEquipesAtivas({equipes:[eq('x',true), eq('y',true)]}).pessoasEmDuas.size, 2);
+  assert.equal(conferirEquipesAtivas({equipes:[eq('x',true), eq('y',false)]}).pessoasEmDuas.size, 0);
+  assert.equal(conferirEquipesAtivas({equipes:[eq('x',true), eq('y',true)]}).nomes.size, 0, 'a mesma gente com nomes diferentes não é nome repetido');
+  const pessoas = resolverPessoas({pessoas:[
+    {chave:'carla-lima', id:'100003', nome:'Carla Souza Lima', apelido:''},
+    {chave:'paulo-teixeira', id:'200009', nome:'Paulo Teixeira', apelido:''},
+  ]});
+  const porNome = (id, membros) => ({id, nome:'Equipe '+id, emblema:'🦅', ativo:true, membros:membros.map(chave => ({chave, nome:chave}))});
+  const perf = {equipes:[porNome('a', ['carla-lima']), porNome('b', ['100003'])]};
+  assert.deepEqual(conferirEquipesAtivas(perf, pessoas).pessoasEmDuas.get('100003'), ['a', 'b'], 'slug e ID são a mesma pessoa');
+  assert.equal(conferirEquipesAtivas(perf).pessoasEmDuas.size, 0, 'sem a régua (RH fora do ar), segue a chave crua');
+  // Nome sem ficha não vira ninguém: continua pela chave crua e não junta com outro.
+  assert.equal(conferirEquipesAtivas({equipes:[porNome('c', ['Fulano']), porNome('d', ['100003'])]}, pessoas).pessoasEmDuas.size, 0);
+  const fs = require('node:fs'), path = require('node:path');
+  const fonte = fs.readFileSync(path.join(__dirname, '..', 'supabase/functions/pcp-sync/index.ts'), 'utf8');
+  assert.match(fonte, /conferirEquipesAtivas\(atual\.performancePCP, regua\(atual\)\)/);
+  assert.match(fonte, /conferirEquipesAtivas\(limpo\.performancePCP, regua\(limpo\)\)/);
+  assert.doesNotMatch(fonte, /composicoesAtivasRepetidas/, 'a regra da composição única saiu do setCfg');
 });
 
 /* "SE ESTÁ ARRUMADO" (o Léo, 24/09/2026). Arrumado entra no critério do carro,

@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, composicoesAtivasRepetidas, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -208,6 +208,50 @@ async function contarRegs(colecao: string): Promise<number> {
     .from("pcp_registros").select("id", { count: "exact", head: true })
     .eq("colecao", colecao).eq("apagado", false);
   return count ?? 0;
+}
+
+// ---------------------------------------------------------------- diario
+/* DIARIO DE AUDITORIA (F03, 29/09/2026): quem mudou o que, e quando. A regra
+   do que entra mora em _shared/pcp-integridade.mjs (CAMPOS_AUDITADOS,
+   diffAuditavel); aqui fica so a gravacao.
+
+   SO INSERCAO, NA MESMA TABELA, COLECAO PROPRIA ('auditoria'). Nenhuma porta
+   de leitura do app olha essa colecao: o list (completo e incremental), o
+   getReg e as consultas da performance filtram colecao='os'. O diario so sai
+   pela acao auditoriaOS, que e da gestao. Assim ele nunca desce ao aparelho
+   (os 7 sistemas dividem 5 MB de localStorage) nem ao cracha sem senha.
+
+   FALHAR AQUI NAO DERRUBA A GRAVACAO DA O.S. O diario e testemunha, nao
+   porteiro: perder um check-in porque o diario nao gravou seria o pior dos
+   dois mundos. A falha vira aviso no log e um contador que a acao `saude`
+   mostra -- em memoria (vale ate a funcao reciclar) e, quando o banco deixa,
+   em pcp_meta 'auditoria_falhas', que sobrevive ao reciclar. Log que ninguem
+   abre nao e log: o contador e o que a tela de Conexoes e o vigia leem. */
+const FALHAS_AUDITORIA = { total: 0, ultimaEm: "", ultimoErro: "" };
+async function gravarAuditoria(registro: any): Promise<boolean> {
+  try {
+    const { error } = await sb.from("pcp_registros").insert({
+      colecao: "auditoria", id: registro.id, registro, apagado: false, atualizado_em: registro.em || new Date().toISOString(),
+    });
+    if (error) throw new Error(error.message);
+    return true;
+  } catch (e) {
+    await falhaAuditoria(String((e as Error)?.message ?? e), registro?.osId);
+    return false;
+  }
+}
+async function falhaAuditoria(msg: string, osId?: string) {
+  const em = new Date().toISOString(), erro = msg.slice(0, 200);
+  console.warn("[pcp-sync] diario de auditoria nao gravou:", osId ?? "", erro);
+  FALHAS_AUDITORIA.total++; FALHAS_AUDITORIA.ultimaEm = em; FALHAS_AUDITORIA.ultimoErro = erro;
+  // Melhor esforco: se o banco recusou o diario, pode recusar isto tambem.
+  // Ler-somar-gravar pode perder uma conta em corrida; e aviso, nao razao.
+  try {
+    const antes = await getMeta("auditoria_falhas");
+    await sb.from("pcp_meta").upsert(
+      { chave: "auditoria_falhas", valor: { total: (Number(antes?.total) || 0) + 1, ultimaEm: em, ultimoErro: erro, osId: String(osId ?? "") }, atualizado_em: em },
+      { onConflict: "chave" });
+  } catch { /* o contador em memoria ja contou */ }
 }
 
 // ---------------------------------------------------------------- meta / cfg
@@ -628,6 +672,43 @@ Deno.serve(async (req: Request) => {
 
   // Toda O.S. que sai desta porta para o crachá de toque passa por aqui.
   const saida = (r: any) => ehToqueNoNome ? podarToque(r) : r;
+
+  /* QUEM ASSINA A ENTRADA DO DIARIO: o cracha, nunca o corpo do pedido. Um
+     `porId` que viesse do aparelho seria o aparelho dizendo quem ele e --
+     justamente o que o diario existe para nao aceitar.
+     - Toque: a MESMA regua da trava de equipe (idDoCracha): o vinculo de hoje
+       vence o id antigo do cracha. Sem RH no ar, o id assinado no cracha.
+     - Gestao: o cracha nao traz ID; so a ficha unica cujo apelido e o login
+       (idDaGestao). Nome de exibicao e comeco de nome nunca dao identidade:
+       sem essa ficha, porId vazio e o login basta (revisao da F03). */
+  let _autorAud: any = null;
+  const autorAuditoria = async () => {
+    if (_autorAud) return _autorAud;
+    if (!cracha) return (_autorAud = { nome: "Integração", login: "", papel: "maquina", porId: "" });
+    const login = String(cracha.sub ?? "").trim(), nome = String(cracha.nome || login).trim();
+    let porId = "";
+    if (ehToqueNoNome) {
+      try { porId = idDoCracha(quemToque(), await pessoasReq()); }
+      catch { porId = ehIdPessoa(cracha.id) ? String(cracha.id).trim() : ""; }
+    } else if (ehIdPessoa(cracha.id)) {
+      porId = String(cracha.id).trim();
+    } else {
+      try { porId = idDaGestao(login, await pessoasReq()); } catch { porId = ""; }
+    }
+    return (_autorAud = { nome, login, papel: String(cracha.papel ?? ""), porId });
+  };
+  const origemAuditoria = ehMaquina ? "maquina" : ehToqueNoNome ? "toque" : "tela";
+  // Nunca lanca: qualquer erro daqui vira falha contada, e a gravacao segue.
+  const auditar = async (osId: string, acao: string, diff: any, numero?: string) => {
+    if (!diff || !diff.campos?.length) return;
+    try {
+      const registro = entradaAuditoria({ id: crypto.randomUUID(), osId, numero: String(numero ?? ""), acao, diff,
+        autor: await autorAuditoria(), origem: origemAuditoria, em: new Date().toISOString() });
+      await gravarAuditoria(registro);
+    } catch (e) {
+      await falhaAuditoria(String((e as Error)?.message ?? e), osId).catch(() => {});
+    }
+  };
 
   try {
     switch (acao) {
@@ -1078,10 +1159,21 @@ Deno.serve(async (req: Request) => {
               const revMorta = typeof morta.registro?.rev === "number" ? morta.registro.rev : 0;
               const revivido = { ...os, id: morta.id, rev: revMorta + 1 };
               await setReg("os", morta.id, revivido);
+              const dm = diffAuditavel(morta.registro, revivido);
+              await auditar(String(morta.id), "restaurar", { campos: ["apagado", ...(dm?.campos ?? [])], antes: { apagado: true, ...(dm?.antes ?? {}) }, depois: { apagado: false, ...(dm?.depois ?? {}) } }, num);
               return resp({ ok: true, os: saida(revivido), duplicataEvitada: true });
             }
           }
           throw e;
+        }
+        /* DIARIO: o que mudou entre o que estava gravado e o que acabou de
+           gravar (depois de todas as regras acima, nao o que o aparelho mandou).
+           Lapide que volta a viver conta como 'apagado: true -> false'. */
+        {
+          const eraLapide = !!linhaAtual?.apagado;
+          const diff = diffAuditavel(existing, gravar);
+          const d = eraLapide ? { campos: ["apagado", ...(diff?.campos ?? [])], antes: { apagado: true, ...(diff?.antes ?? {}) }, depois: { apagado: false, ...(diff?.depois ?? {}) } } : diff;
+          await auditar(String(os.id), eraLapide ? "restaurar" : existing ? "alterar" : "criar", d, gravar.numero);
         }
         return resp({ ok: true, os: saida(gravar), ...(avisosToque.length ? { avisos: avisosToque } : {}) });
       }
@@ -1095,7 +1187,19 @@ Deno.serve(async (req: Request) => {
            ressuscita (setReg). Voltava com equipe e agenda e as imagens
            quebradas. Os arquivos ficam; limpar foto de lápide antiga, se um dia
            for preciso, é rotina à parte que lê todas as listas. */
+        /* A LÁPIDE GANHA AUTOR (diário, F03). Lê a linha antes para saber se
+           havia O.S. viva: apagar de novo a lápide, ou um id que nunca existiu,
+           não é alteração. Falha dessa leitura não barra o delete (antes ele
+           nem lia); aí a entrada é gravada sem saber se já era lápide. */
+        let antesDel: any = undefined;
+        try {
+          const { data, error } = await sb.from("pcp_registros").select("registro,apagado").eq("colecao", "os").eq("id", String(id)).maybeSingle();
+          if (!error) antesDel = data ?? null;
+        } catch { antesDel = undefined; }
         await delReg("os", id);
+        if (antesDel === undefined || (antesDel && !antesDel.apagado)) {
+          await auditar(String(id), "excluir", { campos: ["apagado"], antes: { apagado: false }, depois: { apagado: true } }, antesDel?.registro?.numero);
+        }
         return resp({ ok: true });
       }
 
@@ -1424,6 +1528,11 @@ Deno.serve(async (req: Request) => {
           if (base.performancePCP?.criterios && local.performancePCP && typeof local.performancePCP === "object" && !("criterios" in local.performancePCP)) {
             local.performancePCP = { ...local.performancePCP, criterios: base.performancePCP.criterios };
           }
+          // A mesma coisa com animal, cor e líder de cada equipe (F06): a aba v133
+          // que só renomeia a equipe não pode apagar os três.
+          if (local.performancePCP && typeof local.performancePCP === "object") {
+            local.performancePCP = preservarCamposEquipe(base.performancePCP, { ...local.performancePCP });
+          }
           /* OS PESOS SÃO UM VALOR SÓ. Mesclados chave a chave, dois ajustes válidos
              (cada um somando 100) viravam uma soma torta sem conflito, e o
              segundo levava 422 culpando o que ele digitou (revisão de 23/09).
@@ -1445,26 +1554,59 @@ Deno.serve(async (req: Request) => {
           if (result.conflitos.length) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:result.conflitos},409);
           const limpo = {...atual,...result.cfg};
           for (const k of Object.keys(remoto)) if (!(k in result.cfg)) delete limpo[k];
+          /* Avisos do que foi gravado pela metade (animal, cor ou líder
+             ignorados; pessoa fixa em duas equipes). Voltam na resposta, e o
+             aparelho mostra (store.js, 'item-aviso'). */
+          const avisosCfg: string[] = [];
           if (JSON.stringify(limpo.performancePCP) !== JSON.stringify(atual.performancePCP)) {
+            // Uma leitura das fichas do RH para os dois lados; sem RH, fica a
+            // chave crua e a conferência segue do mesmo jeito que antes.
+            const fichas = await fichasRH().catch(() => null);
+            const regua = (c: any) => fichas ? resolverPessoas({ pessoas: fichas, vinculos: c.vinculosRH, lista: c.instaladores }) : null;
+            // Animal, cor e líder inválidos são ignorados com aviso, nunca 422
+            // (o 422 desfaz a configuração inteira no aparelho da aba antiga).
+            const saneado = sanearEquipes(limpo.performancePCP, atual.performancePCP, regua(limpo));
+            limpo.performancePCP = saneado.perf; avisosCfg.push(...saneado.avisos);
             const erroPerf = validarPerformance(limpo.performancePCP);
             if (erroPerf) return resp({error:erroPerf},422);
-            // Repetição NOVA de equipe ativa vira conflito (409), não recusa: o
-            // 422 da v124 era lido como rede e travava a fila inteira.
-            const repetidasAntes = composicoesAtivasRepetidas(atual.performancePCP, atual.vinculosRH);
-            const novas = [...composicoesAtivasRepetidas(limpo.performancePCP, limpo.vinculosRH)].filter(k => !repetidasAntes.has(k));
-            if (novas.length) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:["performancePCP.equipes: duas equipes ativas com os mesmos integrantes. Desative uma delas."]},409);
+            /* EQUIPES FIXAS (F06): a regra "uma equipe ativa por composição"
+               saiu; o que não pode repetir entre as ativas é o NOME. Repetição
+               NOVA vira conflito (409), não recusa: o 422 da v124 era lido como
+               rede e travava a fila inteira. A que já estava no banco não trava
+               nada. Pessoa fixa em duas equipes ativas grava, com aviso. */
+            const antes = conferirEquipesAtivas(atual.performancePCP, regua(atual));
+            const depois = conferirEquipesAtivas(limpo.performancePCP, regua(limpo));
+            const reguaLimpo = regua(limpo);
+            const nomesNovos = [...depois.nomes.keys()].filter(k => !antes.nomes.has(k));
+            if (nomesNovos.length) {
+              const nomeDe = (id: string) => String((limpo.performancePCP.equipes.find((e: any) => e && e.id === id) || {}).nome || id);
+              return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:nomesNovos.map(k => `performancePCP.equipes: já existe uma equipe ativa chamada "${nomeDe(depois.nomes.get(k)[0])}". Use outro nome ou desative a outra.`)},409);
+            }
+            for (const [id, eqs] of depois.pessoasEmDuas) {
+              const eram = antes.pessoasEmDuas.get(id) || [];
+              if (eqs.every((x: string) => eram.includes(x))) continue;
+              const equipesDela = eqs.map((x: string) => limpo.performancePCP.equipes.find((e: any) => e && e.id === x)).filter(Boolean);
+              // A chave do membro fica como veio (slug, apelido ou ID): o nome sai pela mesma conversão.
+              const membro = equipesDela.flatMap((e: any) => e.membros || []).find((m: any) => m && idDoMembro(m, reguaLimpo) === id);
+              avisosCfg.push(`${membro?.nome || "ID " + id} aparece em mais de uma equipe ativa (${equipesDela.map((e: any) => e.nome).join(" e ")}). Confira o cadastro.`);
+            }
             if(limpo.performancePCP) limpo.performancePCP.participacoes = limpo.performancePCP.participacoes.map((p:any)=>{
               const antes=atual.performancePCP?.participacoes?.find((x:any)=>x.id===p.id);
               return JSON.stringify(antes)===JSON.stringify(p) ? p : {...p,por:cracha?.nome || 'Gestão',em:new Date().toISOString()};
             });
           }
-          if (JSON.stringify(limpo) === JSON.stringify(atual)) return resp({ok:true,cfg:visivel(atual),versao});
+          const comAvisos = avisosCfg.length ? { avisos: avisosCfg } : {};
+          if (JSON.stringify(limpo) === JSON.stringify(atual)) return resp({ok:true,cfg:visivel(atual),versao,...comAvisos});
           const novaVersao = new Date(Math.max(Date.now(),Date.parse(versao || '')+1 || 0)).toISOString();
           const query = sb.from("pcp_config_global");
           const {data,error} = versao ? await query.update({config:limpo,atualizado_em:novaVersao}).eq("id",true).eq("atualizado_em",versao).select("id")
             : await query.insert({id:true,config:limpo,atualizado_em:novaVersao}).select("id");
           if (error) { if (error.code === "23505") continue; throw new Error(error.message); }
-          if (data?.length) return resp({ok:true,cfg:visivel(limpo),versao:novaVersao});
+          if (data?.length) {
+            // Diário: quem instala, quem é quem no RH, equipes, pesos e percentuais.
+            await auditar("cfg", "configuracao", diffCfgAuditavel(atual, limpo));
+            return resp({ok:true,cfg:visivel(limpo),versao:novaVersao,...comAvisos});
+          }
         }
         return resp({error:"Outro aparelho está salvando. Sua alteração continua na fila; tente novamente."},503);
       }
@@ -1510,12 +1652,50 @@ Deno.serve(async (req: Request) => {
 
       // O batimento da importação é da gestão: quem entrou pelo nome só
       // precisa saber que a porta responde.
-      case "saude":
+      case "saude": {
+        /* `auditoria`: quantas vezes o diário não gravou (o maior entre o
+           contador guardado no banco e o desta instância, que pode ter contado
+           uma falha que nem o banco aceitou). Zero aqui é "nenhuma falha
+           registrada", não prova de diário completo: a importação do ERP ainda
+           grava direto, fora do diário. */
+        let auditoria: any = undefined;
+        if (!ehToqueNoNome) {
+          const salvo = await getMeta("auditoria_falhas").catch(() => null);
+          const doBanco = Number(salvo?.total) || 0;
+          const usarMem = FALHAS_AUDITORIA.total > doBanco || !salvo;
+          auditoria = {
+            falhas: Math.max(doBanco, FALHAS_AUDITORIA.total),
+            ultimaFalhaEm: (usarMem ? FALHAS_AUDITORIA.ultimaEm : salvo?.ultimaEm) || "",
+            ultimoErro: (usarMem ? FALHAS_AUDITORIA.ultimoErro : salvo?.ultimoErro) || "",
+          };
+        }
         return resp({
           ok: true,
           totalOS: await contarRegs("os"),
-          ...(ehToqueNoNome ? {} : { ultimaImportacao: await getMeta("sync_status") }),
+          ...(ehToqueNoNome ? {} : { ultimaImportacao: await getMeta("sync_status"), auditoria }),
         });
+      }
+
+      /* HISTÓRICO DE ALTERAÇÕES DE UMA O.S. (diário, F03). Só a gestão (admin
+         e pcp) e a máquina (backup do Hub): o diário guarda valor em R$ e o
+         antes e o depois de tudo. Montagem, operação e o crachá de toque
+         levam 403, e nada disso passa pelo list. `osId: 'cfg'` é o diário da
+         configuração. Lido sob demanda, quando a ficha abre a seção. */
+      case "auditoriaOS": {
+        if (!ehMaquina && !["admin", "pcp"].includes(String(cracha?.papel ?? ""))) {
+          return resp({ error: "Histórico de alterações restrito à gestão do PCP." }, 403);
+        }
+        const osId = String(body.osId ?? "").trim();
+        if (!osId || osId.length > 200) return resp({ error: "Informe a O.S." }, 400);
+        const TETO = 500;
+        const { data, error } = await sb.from("pcp_registros").select("registro")
+          .eq("colecao", "auditoria").eq("registro->>osId", osId)
+          .order("atualizado_em", { ascending: false }).limit(TETO);
+        if (error) throw new Error(error.message);
+        const entradas = ((data ?? []) as any[]).map((r) => r.registro).filter(Boolean)
+          .sort((a: any, b: any) => String(b.em || "").localeCompare(String(a.em || "")));
+        return resp({ osId, entradas, cortado: entradas.length >= TETO });
+      }
 
       default:
         return resp({ error: `Ação desconhecida: ${body.action}` }, 400);

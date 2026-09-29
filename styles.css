@@ -28,6 +28,25 @@ dialog { margin: auto; }
 
   --topbar-h: 56px;
   --tabs-h:   48px;
+
+  /* A PALETA DAS EQUIPES FIXAS (F06). A equipe guarda só a CHAVE (azul,
+     vermelho...), conferida nos dois lados contra a lista fechada; o hex mora
+     só aqui. Tons escuros o bastante para o ícone e o texto branco. */
+  --equipe-azul:     #1d4ed8;
+  --equipe-vermelho: #dc2626;
+  --equipe-laranja:  #c2410c;
+  --equipe-amarelo:  #ca8a04;
+  --equipe-verde:    #15803d;
+  --equipe-turquesa: #0f766e;
+  --equipe-roxo:     #7c3aed;
+  --equipe-rosa:     #be185d;
+  --equipe-marrom:   #7c2d12;
+  --equipe-grafite:  #475569;
+  /* Tiradas das logos das equipes (29/09/2026): Águia, Onça, Lobo-Guará, Touro. */
+  --equipe-marinho:   #1e2d55;
+  --equipe-ocre:      #a16207;
+  --equipe-terracota: #b4432b;
+  --equipe-vinho:     #7f1d1d;
 }
 
 html { font-size: 16px; -webkit-text-size-adjust: 100%; }
@@ -2850,3 +2869,46 @@ img.perf-logo{object-fit:cover}
 /* Ficha do RH ao lado de cada instalador nas Configurações (29/09/2026). */
 .cfg-chip-rh{font-size:.72rem;color:var(--muted);margin-left:6px;font-weight:500}
 .cfg-chip-rh.sem{color:var(--red)}
+
+/* ── EQUIPES FIXAS: COR E ANIMAL (F06, 29/09/2026) ───────────────────────────
+   A cor entra só por classe (perf-cor-<chave>), nunca por style=: a chave vem
+   da configuração global, e texto livre ali viraria CSS injetado em todo
+   tablet. perf-com-cor marca quem tem cor válida. Águia e Falcão, Pantera e
+   Onça dividem o ícone; a cor e o nome separam. */
+.perf-cor-azul{--equipe-cor:var(--equipe-azul)}
+.perf-cor-vermelho{--equipe-cor:var(--equipe-vermelho)}
+.perf-cor-laranja{--equipe-cor:var(--equipe-laranja)}
+.perf-cor-amarelo{--equipe-cor:var(--equipe-amarelo)}
+.perf-cor-verde{--equipe-cor:var(--equipe-verde)}
+.perf-cor-turquesa{--equipe-cor:var(--equipe-turquesa)}
+.perf-cor-roxo{--equipe-cor:var(--equipe-roxo)}
+.perf-cor-rosa{--equipe-cor:var(--equipe-rosa)}
+.perf-cor-marrom{--equipe-cor:var(--equipe-marrom)}
+.perf-cor-grafite{--equipe-cor:var(--equipe-grafite)}
+.perf-cor-marinho{--equipe-cor:var(--equipe-marinho)}
+.perf-cor-ocre{--equipe-cor:var(--equipe-ocre)}
+.perf-cor-terracota{--equipe-cor:var(--equipe-terracota)}
+.perf-cor-vinho{--equipe-cor:var(--equipe-vinho)}
+.perf-podio-item.perf-com-cor{border-top:5px solid var(--equipe-cor)}
+.perf-rank-linha.perf-com-cor{box-shadow:inset 4px 0 0 var(--equipe-cor)}
+.perf-equipe-chip.perf-com-cor{border-color:var(--equipe-cor);box-shadow:inset 0 0 0 1px var(--equipe-cor)}
+.perf-selo-equipe.perf-com-cor{box-shadow:inset 0 0 0 1px var(--equipe-cor)}
+.perf-team-report.perf-com-cor{border-left:6px solid var(--equipe-cor)}
+/* O ícone do animal sobre a cor da equipe (o logo em imagem cobre o fundo). */
+.perf-com-cor span.perf-podio-logo,.perf-com-cor span.perf-rank-logo,.perf-com-cor span.perf-chip-logo,.perf-com-cor span.perf-selo-logo,.perf-com-cor span.perf-emblema{background:var(--equipe-cor)}
+
+/* Edição da equipe: animal e cor como botões de rádio com área de toque de 44 px. */
+.perf-animais,.perf-cores{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:8px;border:0;padding:10px 0;margin:0}
+.perf-animais legend,.perf-cores legend{font-weight:650;margin-bottom:6px}
+.perf-animais label,.perf-cores label{cursor:pointer;position:relative}
+.perf-animais input,.perf-cores input{position:absolute;opacity:0;width:1px;height:1px}
+.perf-animais span,.perf-cores span{display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 10px;border:2px solid #d8e2e7;border-radius:12px;font-size:.88rem;background:#fff}
+.perf-animais b{font-size:1.4rem;font-weight:400;line-height:1}
+.perf-animais input:checked+span,.perf-cores input:checked+span{border-color:#2d8075;background:#e7f3ef}
+.perf-animais input:focus-visible+span,.perf-cores input:focus-visible+span{outline:3px solid #4f9cb6}
+/* O botão com display próprio (.btn-ghost) passava por cima do atributo hidden:
+   o "Remover imagem" aparecia sem imagem nenhuma enviada. */
+.perf-logo-botoes [hidden]{display:none!important}
+.perf-animal-logo{width:28px;height:28px;border-radius:6px;object-fit:contain;background:#fff;flex-shrink:0}
+.perf-cor-amostra{display:inline-block;width:22px;height:22px;border-radius:999px;background:var(--equipe-cor);flex-shrink:0}
+#perf-equipe-lider{min-height:44px}

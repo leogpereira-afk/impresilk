@@ -669,7 +669,10 @@ const STORE = (() => {
              liberado, finalização não aceita, marca de item sem item). Sem
              este evento o aparelho só via a O.S. voltar ao estado do
              escritório, sem saber por quê. */
-          if (item.action === 'upsert' && res && Array.isArray(res.avisos) && res.avisos.length) {
+          /* A configuração também grava pela metade (F06): animal, cor ou líder
+             de equipe fora da lista são ignorados com aviso, e a pessoa fixa em
+             duas equipes ativas é avisada. Sem isto a gestão via a cor "sumir". */
+          if ((item.action === 'upsert' || item.action === 'setCfg') && res && Array.isArray(res.avisos) && res.avisos.length) {
             _notifyListeners('item-aviso', { item, avisos: res.avisos.map(String) });
           }
         }
@@ -950,6 +953,19 @@ const STORE = (() => {
     }
     _notifyListeners('historico', { n: itens.length, truncou });
     return { itens, truncou };
+  }
+
+  /* HISTÓRICO DE ALTERAÇÕES DE UMA O.S. (diário do servidor, F03). Sob
+     demanda, quando a ficha abre a seção, e NUNCA guardado no aparelho: o
+     diário tem o antes e o depois de tudo (inclusive R$), é só da gestão, e
+     os 7 sistemas dividem 5 MB de localStorage. Sem rede responde `offline`
+     em vez de lista vazia: vazio diria "ninguém mexeu", e não é verdade.
+     Erro do servidor (403, 5xx) sobe para a tela dizer a causa. */
+  async function auditoriaOS(osId) {
+    if (!navigator.onLine) return { entradas: [], offline: true };
+    const res = await api({ action: 'auditoriaOS', osId: String(osId || '') });
+    if (!res || !Array.isArray(res.entradas)) throw new Error((res && res.error) || 'Resposta inesperada do servidor.');
+    return { entradas: res.entradas, cortado: !!res.cortado };
   }
 
   /* ── MAESTRO: um relogio so para toda a sincronizacao ──────────────────────
@@ -1950,6 +1966,8 @@ const STORE = (() => {
     pullEntreguesResumo, resumoEntregues,
     pullEquipeHistorico, equipeHistorico,
     iniciarMaestro, sincronizarAgora, buscarHistorico, historico, faixaHistorico, JANELA_LOCAL_DIAS,
+    // Diário de auditoria (só gestão, sob demanda)
+    auditoriaOS,
     // Fotos
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos

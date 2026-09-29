@@ -1253,7 +1253,10 @@ function bindModal(os, ro) {
     const [i, val] = btn.dataset.iset.split('|');
     const it = _draft.itens[+i]; if (!it) return;
     it.statusInst = val;
-    it.pronto = (val === 'ok');           // compatibilidade com a gestão
+    /* O INSTALADO LIGA O ✓ VERIFICADO DA GESTÃO; PENDENTE E RETRABALHO NÃO O
+       DESLIGAM (diagnóstico de 29/09/2026: o toque em Pendente apagava a
+       conferência da produção). Quem desmarca o Verificado é a gestão. */
+    if (val === 'ok') it.pronto = true;
     rollupRetrab();
     save(); reRender();
   });

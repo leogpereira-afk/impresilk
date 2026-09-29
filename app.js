@@ -1451,6 +1451,7 @@ function openModal(os, blocoForcado) {
 
 function closeModal() {
   if (_modalDirty) saveDraft();
+  _audOS = null;   // o histórico relê do servidor na próxima abertura
   $('#modal-overlay').classList.add('hidden');
   STATE.modalOSId = null;
   _modalDraft = null;
@@ -1631,6 +1632,7 @@ function renderModal() {
     ${blocosHTML}
     ${!interno && !finalizada && ['admin','pcp'].includes(STATE.user.papel) ? `<details class="cfg-grupo"><summary>Exceção de encerramento</summary><p>Use apenas quando não for possível obter a foto final ou a data do retorno. O motivo e o responsável ficam registrados.</p><label>Justificativa (mínimo 15 caracteres)<textarea data-f="justificativaConclusao">${esc(os.justificativaConclusao || '')}</textarea></label></details>` : ''}
     ${os.erpAlteracoes?.length ? `<details class="cfg-grupo"><summary>Histórico de atualização do Mubisys</summary>${os.erpAlteracoes.slice(-10).reverse().map(h => `<p><strong>${esc(new Date(h.em).toLocaleString('pt-BR'))}</strong><br>${h.campos.map(c => `${esc(c.campo)}: ${esc(c.antes ?? '—')} → ${esc(c.depois)}`).join('<br>')}</p>`).join('')}</details>` : ''}
+    ${['admin','pcp'].includes(STATE.user.papel) ? `<details class="cfg-grupo lock-allow" id="os-auditoria"><summary>Histórico de alterações</summary><div class="os-auditoria-corpo"></div></details>` : ''}
 
     <div class="fs-body" style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-ghost btn-sm" id="modal-pdf">🖨 PDF da ficha</button>
@@ -1659,6 +1661,113 @@ function renderModal() {
   $$('#modal-os .card-fs').forEach(d => { d.open = (d.dataset.bloco === blocoAlvo); });
 
   bindModalEvents(os, ro);
+  ligarHistoricoAlteracoes(os);
+}
+
+/* ── HISTÓRICO DE ALTERAÇÕES DA O.S. (diário do servidor, F03) ─────────────
+   Quem mudou o quê, e quando: o servidor escreve (o autor é o crachá, não o
+   aparelho) e só a gestão lê. Carrega SOB DEMANDA, ao abrir a seção, e fica
+   só na memória desta ficha aberta: nada vai para o localStorage. A ficha se
+   repinta a cada campo editado; o estado guardado aqui faz a seção voltar
+   aberta e com o que já carregou, sem nova ida ao servidor. */
+let _audOS = null;   // { osId, aberto, carregando, entradas, cortado, offline, erro }
+const AUD_ROTULOS = {
+  equipe: 'Equipe', veiculo: 'Veículo',
+  'instalacao.data': 'Data da instalação', 'instalacao.periodo': 'Período', 'instalacao.hora': 'Hora', 'instalacao.duracaoDias': 'Duração (dias)',
+  previsaoEntrega: 'Previsão de entrega', valorTotal: 'Valor total', itens: 'Itens',
+  liberadoPCP: 'Liberada pelo PCP', confirmacao: 'Confirmação do cliente', carroLiberado: 'Carro liberado',
+  horaSaida: 'Hora de saída', horaRetorno: 'Hora de retorno', saidaEm: 'Saída registrada', retornoEm: 'Retorno registrado',
+  fotosCheckinIds: 'Fotos do check-in', fotosRetornoIds: 'Fotos do serviço pronto', layoutFotoId: 'Layout',
+  retornoConf: 'Conferência da volta', voltaEquipe: 'Limpeza do carro (equipe)', excecaoConclusao: 'Exceção de encerramento',
+  finalizadaEm: 'Finalizada em', finalizadoPor: 'Finalizada por', reabertaEm: 'Reaberta em', reabertaPor: 'Reaberta por',
+  entregaLancada: 'Entrega lançada', retrabalho: 'Retrabalho', causa: 'Causa', causaRaiz: 'Causa raiz', etapaOrigem: 'Etapa de origem',
+  tipo: 'Tipo', numero: 'Número da O.S.', baixaAutoERP: 'Baixa pelo ERP', justificativaConclusao: 'Justificativa da conclusão',
+  apagado: 'Excluída'
+};
+// Por dentro dos campos que são objeto (conferência da volta, limpeza do
+// carro, exceção, entrega lançada, baixa do ERP): rótulo em português. O ID
+// interno de quem conferiu não aparece; o nome já diz quem foi.
+const AUD_SUBROTULOS = {
+  carroLimpo: 'Carro limpo', carroArrumado: 'Carro arrumado', equipamentosOk: 'Equipamentos ok', semAvaria: 'Sem avaria',
+  obs: 'Observação', dia: 'Dia', veiculo: 'Veículo', motivo: 'Motivo', data: 'Data', status: 'Situação',
+  por: 'Por', em: 'Em', recebidoEm: 'Recebido em', confirmadoPor: 'Confirmado por', fotos: 'Fotos'
+};
+const AUD_SUBOCULTAS = new Set(['porId']);
+const AUD_PAPEIS = { maquina: 'integração' };
+function audTexto(v) {
+  if (typeof v === 'boolean') return v ? 'sim' : 'não';
+  const t = String(v);
+  if (t === 'nao') return 'não';
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t) && Number.isFinite(Date.parse(t))) return new Date(t).toLocaleString('pt-BR');
+  const dia = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+  if (dia) return `${dia[3]}/${dia[2]}/${dia[1]}`;
+  return t;
+}
+const AUD_ACOES = { criar: 'Criou a O.S.', alterar: 'Alterou', excluir: 'Excluiu a O.S.', restaurar: 'Restaurou a O.S.', configuracao: 'Alterou a configuração' };
+const AUD_ORIGENS = { tela: 'pela tela da gestão', toque: 'pelo celular da equipe', maquina: 'pela integração' };
+function audValor(campo, v) {
+  if (v == null || v === '' || (Array.isArray(v) && !v.length)) return '(vazio)';
+  if (typeof v === 'boolean') return v ? 'sim' : 'não';
+  if (campo === 'valorTotal' && Number.isFinite(Number(v))) return Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  if (campo === 'equipe' && Array.isArray(v)) return v.map(n => OPERACAO.nomePessoa(n)).join(', ');
+  if (campo === 'tipo') return v === 'interno' ? 'Cliente retira' : v === 'externo' ? 'Externo' : String(v);
+  if (campo.startsWith('fotos') && Array.isArray(v)) return v.length + (v.length === 1 ? ' foto' : ' fotos');
+  if (Array.isArray(v) && v.every(x => typeof x !== 'object' || x === null)) return v.map(audTexto).join(', ');
+  if (campo === 'itens' && Array.isArray(v)) return v.map(it => [it && (it.descricao || it.item), it && it.statusInst, it && it.subtotal != null && it.subtotal !== '' ? 'R$ ' + it.subtotal : ''].filter(Boolean).join(' · ')).join(' | ');
+  // Objeto: só o que tem valor, em uma linha, com rótulo em português. O
+  // diário guarda o objeto inteiro.
+  const rotulo = k => AUD_SUBROTULOS[k] || (k.charAt(0).toUpperCase() + k.slice(1).replace(/([A-Z])/g, ' $1').toLowerCase());
+  const plano = o => Object.entries(o || {})
+    .filter(([k, x]) => !AUD_SUBOCULTAS.has(k) && x != null && x !== '' && !(Array.isArray(x) && !x.length) && (typeof x !== 'object' || (k === 'fotos' && Array.isArray(x))))
+    .map(([k, x]) => rotulo(k) + ': ' + (k === 'fotos' ? x.length : audTexto(x))).join(', ');
+  return typeof v === 'object' ? (plano(v) || '(vazio)') : audTexto(v);
+}
+function htmlHistoricoAlteracoes(st) {
+  if (!st || st.carregando) return '<p class="text-muted">Carregando o histórico…</p>';
+  if (st.offline) return '<p class="text-muted">Sem conexão. O histórico fica no servidor: feche e abra a seção de novo quando houver sinal.</p>';
+  if (st.erro) return `<p class="text-muted">Não foi possível carregar o histórico: ${esc(st.erro)}</p><button type="button" class="btn-ghost btn-sm" data-aud-recarregar>Tentar de novo</button>`;
+  const entradas = Array.isArray(st.entradas) ? st.entradas : [];
+  const recarregar = '<button type="button" class="btn-ghost btn-sm" data-aud-recarregar>Atualizar</button>';
+  // Zero não é "ninguém mexeu": o diário só existe a partir desta versão.
+  if (!entradas.length) return `<p class="text-muted">Nenhuma alteração registrada. O histórico começou a ser gravado nesta versão; o que foi feito antes dela não aparece aqui.</p>${recarregar}`;
+  const linhas = entradas.map(a => {
+    const autor = a.autor || {};
+    const quem = [autor.nome || autor.login || 'Sem autor', autor.papel ? `(${AUD_PAPEIS[autor.papel] || autor.papel})` : ''].filter(Boolean).join(' ');
+    const quando = a.em && Number.isFinite(Date.parse(a.em)) ? new Date(a.em).toLocaleString('pt-BR') : '';
+    const campos = (a.campos || []).map(c => `<li><strong>${esc(AUD_ROTULOS[c] || c)}</strong>: ${esc(audValor(c, a.antes && a.antes[c]))} → ${esc(audValor(c, a.depois && a.depois[c]))}</li>`).join('');
+    return `<div class="aud-entrada"><p><strong>${esc(quando)}</strong> · ${esc(quem)} ${esc(AUD_ORIGENS[a.origem] || '')}<br>${esc(AUD_ACOES[a.acao] || 'Alterou')}</p><ul>${campos}</ul></div>`;
+  }).join('');
+  return linhas + (st.cortado ? '<p class="text-muted">Mostrando as 500 alterações mais recentes.</p>' : '') + recarregar;
+}
+function ligarHistoricoAlteracoes(os) {
+  const det = $('#os-auditoria');
+  if (!det || !os) return;
+  if (!_audOS || _audOS.osId !== os.id) _audOS = { osId: os.id, aberto: false, entradas: null };
+  const st = _audOS;
+  const pintar = () => {
+    const corpo = $('#os-auditoria .os-auditoria-corpo');
+    if (!corpo || _audOS !== st) return;
+    corpo.innerHTML = htmlHistoricoAlteracoes(st);
+    $$('[data-aud-recarregar]', corpo).forEach(b => { b.onclick = () => { st.entradas = null; st.erro = ''; carregar(); }; });
+  };
+  const carregar = async () => {
+    if (st.carregando) return;
+    st.carregando = true; st.erro = ''; st.offline = false; pintar();
+    try {
+      const r = await STORE.auditoriaOS(os.id);
+      st.offline = !!r.offline; st.entradas = r.offline ? null : r.entradas; st.cortado = !!r.cortado;
+    } catch (e) {
+      st.erro = (e && e.message) || 'erro desconhecido';
+    } finally {
+      st.carregando = false;
+    }
+    pintar();
+  };
+  det.addEventListener('toggle', () => {
+    st.aberto = det.open;
+    if (det.open && !st.entradas && !st.carregando) carregar();
+  });
+  if (st.aberto) { det.open = true; pintar(); }
 }
 
 /* ── Bloco 1: PCP & Cliente ──────────────────────────────────────────────── */

@@ -243,17 +243,29 @@ test('"Sobrescrever" com cópia velha (selo vazio, sem dizer qual viu) NÃO apag
  assert.equal(r.erpConferiuSelo, undefined, 'o marcador não fica gravado');
 });
 
-test('duplicata de equipe que JÁ estava no banco não trava a confirmação de uma participação; a NOVA vira conflito 409', async () => {
+/* TROCADO DE PROPÓSITO NA F06 (29/09/2026). Este teste fixava "uma equipe
+   ativa por composição": a NOVA dupla com a mesma gente dava 409. Com as dez
+   equipes fixas a regra saiu (duas fixas podem dividir gente enquanto o
+   cadastro é arrumado; a entrega só é deduzida quando UMA ativa tem aquela
+   composição). O que repete agora é o NOME: a duplicata que já estava no
+   banco continua sem travar nada, e a nova vira 409. */
+test('duplicata de equipe que JÁ estava no banco não trava a confirmação de uma participação; o NOME repetido novo vira conflito 409', async () => {
  const m=[{chave:'1',nome:'A'},{chave:'2',nome:'B'}];
- const eq=(id)=>({id,nome:'Equipe '+id,emblema:'🦅',membros:m,ativo:true});
- const perf={equipes:[eq('x'),eq('y')],participacoes:[]};
+ const eq=(id,nome='Equipe '+id)=>({id,nome,emblema:'🦅',membros:m,ativo:true});
+ const perf={equipes:[eq('x','Águia'),eq('y','Águia')],participacoes:[]};
  const e=await edge('pcp-sync',{pcp_config_global:[{id:true,config:{performancePCP:perf},atualizado_em:'2026-09-19T10:00:00Z'}]});
  const confirmar={...perf,participacoes:[{id:'os1',membros:[{chave:'1',nome:'A',percentual:50},{chave:'2',nome:'B',percentual:50}]}]};
  const r=await e.call({action:'setCfg',baseCfg:{performancePCP:perf},cfg:{performancePCP:confirmar}},{papel:'pcp',nome:'Gestor'});
  assert.equal(r.ok,true,JSON.stringify(r));
  const atual=e.db.pcp_config_global[0].config.performancePCP;
- const outra={equipes:[eq('x'),eq('y'),{...eq('z'),membros:[{chave:'3',nome:'C'}]},{...eq('k'),membros:[{chave:'3',nome:'C'}]}],participacoes:atual.participacoes};
- const n=await e.call({action:'setCfg',baseCfg:{performancePCP:atual},cfg:{performancePCP:outra}},{papel:'pcp',nome:'Gestor'});
+ // A mesma gente com nomes diferentes agora passa (com aviso de pessoa em duas equipes).
+ const mesmaGente={equipes:[...atual.equipes,{...eq('z','Tigre'),membros:[{chave:'3',nome:'C'}]},{...eq('k','Touro'),membros:[{chave:'3',nome:'C'}]}],participacoes:atual.participacoes};
+ const g=await e.call({action:'setCfg',baseCfg:{performancePCP:atual},cfg:{performancePCP:mesmaGente}},{papel:'pcp',nome:'Gestor'});
+ assert.equal(g.ok,true,JSON.stringify(g));
+ assert.ok((g.avisos||[]).some(a=>/Tigre/.test(a)&&/Touro/.test(a)));
+ const depois=e.db.pcp_config_global[0].config.performancePCP;
+ const outra={equipes:[...depois.equipes,{...eq('w','TIGRE'),membros:[{chave:'4',nome:'D'}]}],participacoes:depois.participacoes};
+ const n=await e.call({action:'setCfg',baseCfg:{performancePCP:depois},cfg:{performancePCP:outra}},{papel:'pcp',nome:'Gestor'});
  assert.equal(n.status,409);assert.equal(n.conflitoCfg,true);
 });
 test('pesos da nota mudados em dois aparelhos viram conflito, não uma soma de 110', async () => {
@@ -517,4 +529,20 @@ test('limpeza do carro: as perguntas do servidor são as mesmas da tela (lista c
  const copias = [...src.matchAll(/\bPERGUNTAS\s*=\s*\[([^\]]*)\]/g)].map(m => m[1].replace(/["'\s]/g, ''));
  assert.ok(copias.length >= 2, 'as listas da conferência no pcp-sync');
  for (const c of copias) assert.equal(c, daTela);
+});
+/* O TOQUE NÃO APAGA O ✓ VERIFICADO DA GESTÃO (diagnóstico de 29/09/2026). No
+   celular, Pendente e Retrabalho mandavam pronto=false e o servidor copiava:
+   a conferência da produção sumia com um toque. Agora o toque só liga. */
+test('toque em Pendente ou Retrabalho não desliga o Verificado; Instalado liga', async () => {
+  const base = {numero:'1', tipo:'externo', cliente:'Cliente', equipe:['Ana'], liberadoPCP:true,
+    itens:[{item:'1', descricao:'Fachada', pronto:true, statusInst:''}, {item:'2', descricao:'Placa', pronto:false, statusInst:''}]};
+  const e = await edge('pcp-sync', {pcp_registros:[row('1', base)]});
+  const reg = () => e.db.pcp_registros[0].registro;
+  const r1 = await e.call({action:'upsert', os:{...reg(), itens:reg().itens.map((it, i) => i === 0 ? {...it, statusInst:'pendente', pronto:false} : it)}}, toque);
+  assert.equal(r1.status, 200, r1.error);
+  assert.equal(reg().itens[0].pronto, true, 'Pendente não apaga o Verificado');
+  assert.equal(reg().itens[0].statusInst, 'pendente');
+  const r2 = await e.call({action:'upsert', os:{...reg(), itens:reg().itens.map((it, i) => i === 1 ? {...it, statusInst:'ok', pronto:true} : it)}}, toque);
+  assert.equal(r2.status, 200, r2.error);
+  assert.equal(reg().itens[1].pronto, true, 'Instalado liga');
 });

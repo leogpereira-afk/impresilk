@@ -41,7 +41,7 @@ const PERF = (() => {
       }
       // A equipe leva cada O.S. uma vez, mesmo com participação individual.
       const k = r.equipeId || ('avulsa:'+composicao(r.membros));
-      const x = equipes.get(k) || {chave:k,nome:r.equipeNome || r.membros.map(p=>p.nome).join(' + '),emblema:r.emblema || '🤝',logo:r.logo || '',salva:!!r.equipeId,membros:r.membros.map(p=>({chave:p.chave,nome:p.nome})),os:0,valor:0,semValor:0,confirmadas:0};
+      const x = equipes.get(k) || {chave:k,nome:r.equipeNome || r.membros.map(p=>p.nome).join(' + '),emblema:r.emblema || '🤝',logo:r.logo || '',animal:r.animal || '',cor:r.cor || '',salva:!!r.equipeId,membros:r.membros.map(p=>({chave:p.chave,nome:p.nome})),os:0,valor:0,semValor:0,confirmadas:0};
       x.os++; if(r.confirmado) x.confirmadas++; if(r.valor == null) x.semValor++; else x.valor+=r.valor;
       equipes.set(k,x);
     }
@@ -54,13 +54,72 @@ const PERF = (() => {
     for(const r of registros){
       if(validar(r.membros))continue;
       const chave=r.equipeId || 'avulsa:'+composicao(r.membros);
-      const g=grupos.get(chave)||{chave,nome:r.equipeNome || 'Composição avulsa',emblema:r.emblema||'🤝',logo:r.logo||'',registros:[],membros:new Map(),confirmadas:0,valor:0,semValor:0,retrabalhos:0};
+      const g=grupos.get(chave)||{chave,nome:r.equipeNome || 'Composição avulsa',emblema:r.emblema||'🤝',logo:r.logo||'',animal:r.animal||'',cor:r.cor||'',registros:[],membros:new Map(),confirmadas:0,valor:0,semValor:0,retrabalhos:0};
       g.registros.push(r);if(r.os?.retrabalho || r.retrabalho)g.retrabalhos++;
       if(r.confirmado){g.confirmadas++;if(r.valor==null)g.semValor++;else g.valor+=r.valor;}
       for(const m of r.membros){const pessoa=g.membros.get(m.chave)||{chave:m.chave,nome:m.nome,entregas:0,confirmadas:0,equivalentes:0};pessoa.entregas++;if(r.confirmado){pessoa.confirmadas++;pessoa.equivalentes+=m.percentual/100;}g.membros.set(m.chave,pessoa);}
       grupos.set(chave,g);
     }
     return [...grupos.values()].map(g=>({...g,membros:[...g.membros.values()]})).sort((a,b)=>b.registros.length-a.registros.length || a.nome.localeCompare(b.nome));
+  };
+  /* AS DEZ EQUIPES FIXAS (F06, 29/09/2026). Pedido do dono: "10 equipes
+     fixas (Águia, Leão, Pantera, Lobo, Tigre, Falcão, Carcará, Onça,
+     Lobo-Guará, Touro) com cor fixa, ícone do animal, líder e integrantes
+     fixos". Listas FECHADAS, com cópia em _shared/pcp-integridade.mjs
+     (ANIMAIS_EQUIPE, CORES_EQUIPE), que confere o que chega;
+     tests/equipes-listas.test.cjs cobra as duas iguais.
+     A cor é CHAVE da paleta, nunca hex: vira a classe perf-cor-<chave>, e o hex
+     mora só no styles.css. Chave fora da lista não vira classe nem style=.
+     Águia e Falcão, Pantera e Onça dividem o ícone: a cor e o rótulo separam.
+     A equipe Pantera não tem relação com a pessoa de apelido Pantera: equipe é
+     pelo id da equipe, pessoa pelo ID do RH. */
+  const ANIMAIS = [
+    {id:'aguia', rotulo:'Águia', icone:'🦅'},
+    {id:'leao', rotulo:'Leão', icone:'🦁'},
+    {id:'pantera', rotulo:'Pantera', icone:'🐆'},
+    {id:'lobo', rotulo:'Lobo', icone:'🐺'},
+    {id:'tigre', rotulo:'Tigre', icone:'🐯'},
+    {id:'falcao', rotulo:'Falcão', icone:'🦅'},
+    {id:'carcara', rotulo:'Carcará', icone:'🐦'},
+    {id:'onca', rotulo:'Onça', icone:'🐆'},
+    {id:'lobo-guara', rotulo:'Lobo-Guará', icone:'🦊'},
+    {id:'touro', rotulo:'Touro', icone:'🐂'},
+  ];
+  const CORES = [
+    {id:'azul', rotulo:'Azul'}, {id:'vermelho', rotulo:'Vermelho'}, {id:'laranja', rotulo:'Laranja'},
+    {id:'amarelo', rotulo:'Amarelo'}, {id:'verde', rotulo:'Verde'}, {id:'turquesa', rotulo:'Turquesa'},
+    {id:'roxo', rotulo:'Roxo'}, {id:'rosa', rotulo:'Rosa'}, {id:'marrom', rotulo:'Marrom'}, {id:'grafite', rotulo:'Grafite'},
+    {id:'marinho', rotulo:'Azul-marinho'}, {id:'ocre', rotulo:'Ocre'}, {id:'terracota', rotulo:'Terracota'}, {id:'vinho', rotulo:'Vinho'},
+  ];
+  /* A LOGO E A COR DE CADA ANIMAL (logos mandadas pelo Léo em 29/09/2026).
+     A logo é arquivo do site (equipe-<animal>.webp, na casca do sw.js), não
+     da configuração: não pesa na sincronização e abre offline. Logo enviada
+     na própria equipe continua valendo mais. A cor é só a SUGESTÃO que a tela
+     marca ao escolher o animal; a equipe grava a chave que ficar marcada. */
+  const LOGO_ANIMAL = Object.freeze({aguia:'equipe-aguia.webp', leao:'equipe-leao.webp', pantera:'equipe-pantera.webp', lobo:'equipe-lobo.webp', tigre:'equipe-tigre.webp', falcao:'equipe-falcao.webp', carcara:'equipe-carcara.webp', onca:'equipe-onca.webp', 'lobo-guara':'equipe-lobo-guara.webp', touro:'equipe-touro.webp'});
+  const COR_ANIMAL = Object.freeze({aguia:'marinho', leao:'laranja', pantera:'turquesa', lobo:'verde', tigre:'amarelo', falcao:'vermelho', carcara:'marrom', onca:'ocre', 'lobo-guara':'terracota', touro:'vinho'});
+  // Os emblemas de antes das equipes fixas continuam aceitos (equipe antiga).
+  const EMBLEMAS = ['🦅','🚀','🎯','🛡️','⚡','🦁','🏔️','🤝'];
+  const animalDe = k => ANIMAIS.find(a => a.id === k) || null;
+  const corValida = k => CORES.some(c => c.id === k);
+  // O ícone que a equipe mostra quando não há logo: o do animal, senão o emblema antigo.
+  const iconeEquipe = e => (animalDe(e && e.animal) || {}).icone || (e && e.emblema) || '🤝';
+  // A mesma normalização do servidor (nomeEquipeNorm): acento, caixa, hífen e espaço não mudam o nome.
+  const nomeEquipeNorm = s => String(s == null ? '' : s).replace(/[-_]+/g, ' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  /* A REGRA ENTRE AS ATIVAS, a mesma de conferirEquipesAtivas no servidor:
+     `nomes` são os nomes repetidos (o servidor recusa o novo) e `pessoasEmDuas`
+     quem é fixo em duas ou mais (o servidor avisa). `resolver(m)` dá o ID de
+     hoje do membro (slug antigo e ID da mesma ficha são a mesma pessoa). */
+  const conferirEquipes = (equipes, resolver) => {
+    const porNome = new Map(), porPessoa = new Map();
+    for (const e of Array.isArray(equipes) ? equipes : []) {
+      if (!e || e.ativo === false) continue;
+      const k = nomeEquipeNorm(e.nome);
+      if (k) porNome.set(k, [...(porNome.get(k) || []), e.id]);
+      const ids = new Set((e.membros || []).map(m => String((resolver ? resolver(m) : '') || (m && m.chave) || '')).filter(Boolean));
+      for (const id of ids) porPessoa.set(id, [...(porPessoa.get(id) || []), e.id]);
+    }
+    return {nomes:new Map([...porNome].filter(([, ids]) => ids.length > 1)), pessoasEmDuas:new Map([...porPessoa].filter(([, ids]) => ids.length > 1))};
   };
   /* A EQUIPE DE UM REGISTRO. Pelo id quando a participação confirmada já diz
      qual foi (vale mesmo que a equipe tenha sido desativada depois: é
@@ -75,6 +134,12 @@ const PERF = (() => {
   const composicaoCom = (membros, resolver) => resolver
     ? unicos((membros || []).map(m => ({...m, chave: String(resolver(m) || m.chave)}))).map(p => p.chave).sort().join('|')
     : composicao(membros);
+  /* EXATAMENTE UMA (F06, 29/09/2026). Com as dez equipes fixas, duas ativas
+     podem ter a mesma gente (a regra "uma equipe ativa por composição" saiu).
+     Com duas, `find` devolvia a primeira da lista: a entrega ia para quem
+     estivesse antes no cadastro, e a ordem do cadastro não é mérito. Duas ou
+     mais: nenhuma, e a entrega fica avulsa até alguém confirmar a equipe. A
+     mesma regra do motor de divisão (DIVISAO.alocacaoSugerida). */
   const equipeDoRegistro = (r, salvas, resolver) => {
     const lista = Array.isArray(salvas) ? salvas : [];
     if (r && r.equipeId) return lista.find(e => e.id === r.equipeId) || null;
@@ -83,7 +148,8 @@ const PERF = (() => {
     if (r && r.confirmado) return null;
     const k = composicaoCom(r && r.membros, resolver);
     if (!k) return null;
-    return lista.find(e => e.ativo !== false && composicaoCom(e.membros, resolver) === k) || null;
+    const iguais = lista.filter(e => e && e.ativo !== false && composicaoCom(e.membros, resolver) === k);
+    return iguais.length === 1 ? iguais[0] : null;
   };
   /* Cópias só para exibir: o registro original (que alimenta a apuração e o
      hash do fechamento) não é tocado. O nome que aparece é o ATUAL da equipe —
@@ -95,8 +161,11 @@ const PERF = (() => {
     return (registros || []).map(r => {
       const e = equipeDoRegistro(r, salvas, o.resolver);
       if (!e) return r;
+      /* Cor e animal são de HOJE e o fechamento não os guarda: numa revisão
+         fechada ficam de fora, para trocar a cor da equipe não repintar o
+         mês fechado nem o PDF dele. */
       if (o.historico) return {...r, logo: e.logo || r.logo || ''};
-      return {...r, equipeId:e.id, equipeNome:e.nome, emblema:e.emblema || '🤝', logo:e.logo || ''};
+      return {...r, equipeId:e.id, equipeNome:e.nome, emblema:e.emblema || '🤝', logo:e.logo || '', animal:animalDe(e.animal) ? e.animal : '', cor:corValida(e.cor) ? e.cor : ''};
     });
   };
   /* POSIÇÃO COM EMPATE. Duas equipes com 6 entregas dividem o 1º lugar e a
@@ -264,7 +333,8 @@ const PERF = (() => {
     }
     return [...por.values()];
   };
-  return {unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,manterPesos,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,criteriosValidos,carroDaVolta,CRITERIOS_PADRAO,COBERTURA_MINIMA};
+  return {unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,manterPesos,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,criteriosValidos,carroDaVolta,CRITERIOS_PADRAO,COBERTURA_MINIMA,
+    ANIMAIS,CORES,EMBLEMAS,LOGO_ANIMAL,COR_ANIMAL,animalDe,corValida,iconeEquipe,nomeEquipeNorm,conferirEquipes};
 })();
 if (typeof module !== 'undefined') module.exports = PERF;
 
@@ -340,7 +410,8 @@ function perfWireFonte(el){
  if(typeof STORE.api==='function' && perfConsultaServidor() && (perfRemoto.chave!==perfChave() || !perfRemoto.tentado))void perfCarregarFonte();
 }
 
-const PERF_EMBLEMAS = ['🦅','🚀','🎯','🛡️','⚡','🦁','🏔️','🤝'];
+// Emblemas de antes das equipes fixas: continuam aceitos e exibidos na equipe antiga.
+const PERF_EMBLEMAS = PERF.EMBLEMAS;
 function perfConfig() {
   const c = STORE.getCFG().performancePCP || {};
   const base = {equipes:Array.isArray(c.equipes)?c.equipes:[],participacoes:Array.isArray(c.participacoes)?c.participacoes:[]};
@@ -348,7 +419,28 @@ function perfConfig() {
   if (c.criterios) base.criterios = c.criterios;
   return base;
 }
-function perfPessoa(n) { const p = nomeExibicaoCasa(n); return {chave:String(p.chave),nome:p.nome,apelido:n}; }
+/* A CHAVE DA PESSOA É O ID DO RH (F06, 29/09/2026). Até a v133 a chave era o
+   slug da ficha ('carla-lima'), e o servidor compara pelo ID de 6 dígitos:
+   a mesma pessoa em dois formatos virava duas. Sem ID (terceiro sem ficha),
+   fica a chave de antes, o próprio nome. */
+function perfPessoa(n) { const p = nomeExibicaoCasa(n); const id = /^\d{6}$/.test(String(p.id || '')) ? String(p.id) : ''; return {chave:id || String(p.chave),nome:p.nome,apelido:n}; }
+/* O ID DE HOJE DE UM MEMBRO GRAVADO (equipe ou participação). A equipe salva
+   até a v133 guarda o slug da ficha ou o apelido; a leitura aceita os dois.
+   Slug vai pela própria ficha (a mesma pessoa, sem adivinhar). Apelido só é
+   resolvido quando a chave É o apelido (ou o nome): chave de ficha de quem
+   saiu do elenco nunca é resolvida pelo nome, senão iria parar num xará. */
+function perfIdMembro(m) {
+  const k = String(m && m.chave != null ? m.chave : '').trim();
+  if (!k || /^\d{6}$/.test(k)) return k;
+  const rh = typeof pessoasRH === 'function' ? pessoasRH() : [];
+  const ficha = rh.find(p => String(p.chave) === k && /^\d{6}$/.test(String(p.id || '')));
+  if (ficha) return String(ficha.id);
+  if (k !== String((m && (m.apelido || m.nome)) || '')) return k;
+  const p = perfPessoa(m.apelido || m.nome || k);
+  return /^\d{6}$/.test(p.chave) ? p.chave : k;
+}
+// Classe da cor da equipe, só para chave da paleta (nunca style=, nunca texto livre).
+function perfCorClasse(e) { return e && PERF.corValida(e.cor) ? ` perf-cor-${e.cor} perf-com-cor` : ''; }
 // Chave de ficha do RH fica como está (resolver pelo nome completo pode não
 // achar a ficha); chave de apelido é trocada pela identidade de hoje.
 function perfChaveDeHoje(m) {
@@ -356,8 +448,11 @@ function perfChaveDeHoje(m) {
   // Só a chave de APELIDO é trocada (ela é igual ao próprio apelido, ou ao nome
   // em registro antigo). Chave de ficha nunca é: a de quem saiu do elenco iria
   // parar em outra pessoa que hoje responde pelo mesmo apelido.
-  if (k !== String((m && (m.apelido || m.nome)) || '')) return null;
   const rh = typeof pessoasRH === 'function' ? pessoasRH() : [];
+  // Slug da ficha (participação gravada até a v133) vira o ID da mesma ficha.
+  const ficha = rh.find(p => String(p.chave) === k && /^\d{6}$/.test(String(p.id || '')) && String(p.id) !== k);
+  if (ficha) { const p = perfPessoa(String(ficha.id)); return {...p, chave:String(ficha.id)}; }
+  if (k !== String((m && (m.apelido || m.nome)) || '')) return null;
   if (rh.some(p => String(p.chave) === k || String(p.id) === k)) return null;
   const p = perfPessoa(m.apelido || m.nome || k);
   return p.chave === k ? null : p;
@@ -371,6 +466,10 @@ function perfVoltaTxt(rc) {
   const avaria = c.semAvaria === 'nao' || c.semAvaria === false ? ' · ⚠️ avaria' : '';
   return `🚗 limpo ${v(c.carroLimpo)} · 📦 arrumado ${v(c.carroArrumado)} · 🧰 equip. ${v(c.equipamentosOk)}${avaria}`;
 }
+/* Os integrantes de uma equipe salva, pelo ID de hoje. O servidor guarda a
+   chave como veio (a aba v133 grava o slug da ficha): quem desenha as caixas
+   converte, senão a mesma pessoa aparecia duas vezes (slug marcado e ID). */
+function perfMembrosDeHoje(ms) { return PERF.unicos((ms || []).map(m => { const k = perfIdMembro(m); return k === String(m.chave) ? {...m} : {...m, chave:k}; })); }
 function perfUnirPessoas(regs) { return (regs || []).map(r => ({...r, membros: PERF.unirMembros(r.membros, perfChaveDeHoje)})); }
 function perfEquipeOS(os) { return PERF.unicos(OPERACAO.equipe(os).map(perfPessoa)); }
 function perfRegistro(os,c) {
@@ -406,42 +505,100 @@ function perfWireBusca(box) {
   if(busca) busca.oninput=()=>box.querySelectorAll('.perf-member').forEach(n=>{n.hidden=!n.querySelector('input').checked && !normCasa(n.textContent).includes(normCasa(busca.value));});
 }
 function perfMarcados(box) { return [...box.querySelectorAll('input[name="membro"]:checked')].map(e=>({chave:e.value,nome:e.dataset.nome,apelido:e.dataset.apelido})); }
+/* A PESSOA EM DUAS EQUIPES ATIVAS (F06). Não trava: as equipes fixas podem
+   dividir gente enquanto o cadastro é arrumado. Mas é dito, na tela e pelo
+   servidor, para ninguém descobrir só no ranking. */
+function perfAvisoEmDuas(equipes, id) {
+  const eq = (equipes || []).find(x => x.id === id);
+  if (!eq || eq.ativo === false) return '';
+  const {pessoasEmDuas} = PERF.conferirEquipes(equipes, perfIdMembro);
+  const partes = [];
+  for (const [pid, ids] of pessoasEmDuas) {
+    if (!ids.includes(id)) continue;
+    const m = (eq.membros || []).find(x => perfIdMembro(x) === pid);
+    const outras = ids.filter(x => x !== id).map(x => ((equipes || []).find(q => q.id === x) || {}).nome).filter(Boolean);
+    partes.push(`${m ? m.nome : pid} também está em ${outras.join(', ')}`);
+  }
+  return partes.length ? `Atenção: ${partes.join('; ')}. A mesma pessoa em duas equipes ativas: confira o cadastro.` : '';
+}
+/* ------------------------------------------------ EQUIPE FIXA (F06)
+ * Nome, animal, cor, líder e integrantes. O animal e a cor vêm de listas
+ * fechadas (PERF.ANIMAIS, PERF.CORES) que o servidor confere de novo; a cor é
+ * uma chave da paleta, pintada por classe. Líder é o ID do RH de um dos
+ * integrantes. A tela grava SEMPRE os três campos (vazio quando não há): o
+ * servidor lê campo ausente como aba antiga (v133) e preserva o que havia.
+ */
 function perfEditarEquipe(id,membrosIniciais=[]) {
   if(!perfPodeEditar()) return;
-  const c=perfConfig(), e=c.equipes.find(e=>e.id===id) || {nome:'',emblema:'🦅',membros:membrosIniciais};
+  const c=perfConfig(), e=c.equipes.find(e=>e.id===id) || {nome:'',emblema:'🤝',membros:membrosIniciais};
+  /* A LEITURA ACEITA A CHAVE ANTIGA: equipe salva até a v133 guarda o slug do
+     RH ou o apelido. Aqui cada membro já abre pelo ID de hoje, para marcar a
+     caixa certa e para o líder ser escolhido entre IDs. */
+  const membrosDeHoje=perfMembrosDeHoje(e.membros);
   let logo = perfLogoValido(e.logo) ? e.logo : '';
+  const animalAtual=PERF.animalDe(e.animal)?e.animal:'', corAtual=PERF.corValida(e.cor)?e.cor:'';
+  const ehId=v=>/^\d{6}$/.test(String(v||''));
   const d=perfDialog(id?'Editar equipe':'Criar equipe',`<form id="perf-equipe-form">
-    <label>Nome da equipe <input name="nome" maxlength="60" required value="${esc(e.nome)}" placeholder="Ex.: Horizonte, Impulso, Precisão"></label>
+    <label>Nome da equipe <input name="nome" maxlength="60" required value="${esc(e.nome)}" placeholder="Ex.: Águia, Leão, Pantera"></label>
+    <fieldset class="perf-animais"><legend>Animal da equipe</legend>${PERF.ANIMAIS.map(a=>`<label><input type="radio" name="animal" value="${esc(a.id)}" required ${a.id===animalAtual?'checked':''}><span>${PERF.LOGO_ANIMAL[a.id]?`<img class="perf-animal-logo" src="${esc(PERF.LOGO_ANIMAL[a.id])}" alt="" loading="lazy">`:`<b aria-hidden="true">${esc(a.icone)}</b>`}${esc(a.rotulo)}</span></label>`).join('')}</fieldset>
+    <fieldset class="perf-cores"><legend>Cor da equipe</legend>${PERF.CORES.map(k=>`<label class="perf-cor-${esc(k.id)}"><input type="radio" name="cor" value="${esc(k.id)}" required ${k.id===corAtual?'checked':''}><span><i class="perf-cor-amostra" aria-hidden="true"></i>${esc(k.rotulo)}</span></label>`).join('')}</fieldset>
     <fieldset class="perf-logo-campo"><legend>Logo da equipe</legend>
       <div class="perf-logo-linha">
-        <span id="perf-logo-previa">${perfLogoHTML({logo, emblema:e.emblema}, 'perf-logo-grande')}</span>
+        <span id="perf-logo-previa">${perfLogoHTML({logo, animal:animalAtual, emblema:e.emblema}, 'perf-logo-grande')}</span>
         <div class="perf-logo-botoes">
           <label class="btn-ghost perf-logo-enviar">📷 Enviar imagem<input type="file" accept="image/png,image/jpeg,image/webp,image/*" id="perf-logo-arquivo" hidden></label>
           <button type="button" class="btn-ghost" id="perf-logo-remover" ${logo?'':'hidden'}>Remover imagem</button>
-          <small>Vira um quadrado de 160 px, reduzido no próprio aparelho. Sem imagem, vale o emblema abaixo.</small>
+          <small>Vira um quadrado de 160 px, reduzido no próprio aparelho. Sem imagem, vale a logo do animal.</small>
           <small id="perf-logo-uso"></small>
         </div>
       </div>
       <p role="alert" id="perf-logo-erro" class="perf-logo-erro"></p>
     </fieldset>
-    <fieldset class="perf-emblemas"><legend>Emblema (quando não houver imagem)</legend>${PERF_EMBLEMAS.map(x=>`<label><input type="radio" name="emblema" value="${x}" ${x===e.emblema?'checked':''}><span>${x}</span></label>`).join('')}</fieldset>
-    ${perfEscolherMembrosHTML(e.membros)}
-    <p class="metricas-nota">A equipe é um modelo reutilizável. Alterar integrantes aqui não muda entregas já confirmadas. Entregas feitas por exatamente estes integrantes passam a aparecer com este nome.</p>
+    ${perfEscolherMembrosHTML(membrosDeHoje)}
+    <label>Líder da equipe <select name="lider" id="perf-equipe-lider"></select><small id="perf-lider-nota"></small></label>
+    <p class="metricas-nota">Equipe fixa: nome, animal, cor, líder e integrantes. Mudar aqui não altera entregas já confirmadas nem revisões fechadas, que guardam o nome da época. Uma entrega feita por exatamente estes integrantes aparece com este nome quando nenhuma outra equipe ativa tem a mesma composição.</p>
     <div class="perf-equipe-acoes">
       <button class="btn-primary" type="submit">Salvar equipe</button>
       ${id ? `<button type="button" class="btn-ghost ${e.ativo===false?'':'perf-perigo'}" id="perf-equipe-ativo">${e.ativo===false?'Reativar equipe':'Desativar equipe'}</button>` : ''}
     </div>
   </form>`);
   perfWireBusca(d);
+  const form=d.querySelector('form');
   const previa=d.querySelector('#perf-logo-previa'), remover=d.querySelector('#perf-logo-remover'), erro=d.querySelector('#perf-logo-erro');
-  const emblemaAtual=()=>String(new FormData(d.querySelector('form')).get('emblema')||e.emblema||'🤝');
+  const animalEscolhido=()=>String(new FormData(form).get('animal')||'');
   const uso=d.querySelector('#perf-logo-uso');
   // Soma dos logos de TODAS as equipes (as desativadas também contam: ficam na configuração).
   const somaCom=()=>perfSomaLogos(perfConfig().equipes.filter(x=>x.id!==id))+(logo?logo.length:0);
-  const repintar=()=>{previa.innerHTML=perfLogoHTML({logo,emblema:emblemaAtual()},'perf-logo-grande');remover.hidden=!logo;
+  const repintar=()=>{previa.innerHTML=perfLogoHTML({logo,animal:animalEscolhido(),emblema:e.emblema},'perf-logo-grande');remover.hidden=!logo;
     const t=somaCom();uso.textContent=`Logos de todas as equipes: ${Math.ceil(t/1024)} de ${PERF_LOGOS_MAX/1000} KB`;uso.classList.toggle('perf-logo-erro',t>PERF_LOGOS_MAX);};
   repintar();
-  d.querySelectorAll('input[name="emblema"]').forEach(r=>r.onchange=repintar);
+  /* ESCOLHER O ANIMAL SUGERE O RESTO: a cor da logo e, com o nome em branco
+     (ou ainda igual ao animal anterior), o nome. O que a pessoa já trocou à
+     mão não é sobrescrito. */
+  let animalAntes=animalAtual;
+  d.querySelectorAll('input[name="animal"]').forEach(r=>r.onchange=()=>{
+    const novo=animalEscolhido(), fd=new FormData(form), corMarcada=String(fd.get('cor')||'');
+    const sugAntes=PERF.COR_ANIMAL[animalAntes]||'', sugNova=PERF.COR_ANIMAL[novo]||'';
+    if(sugNova && (!corMarcada || corMarcada===sugAntes)){const cr=form.querySelector(`input[name="cor"][value="${sugNova}"]`);if(cr)cr.checked=true;}
+    const nomeEl=form.querySelector('input[name="nome"]'), rotAntes=(PERF.animalDe(animalAntes)||{}).rotulo||'';
+    if(nomeEl && (!nomeEl.value.trim() || nomeEl.value.trim()===rotAntes)) nomeEl.value=(PERF.animalDe(novo)||{}).rotulo||nomeEl.value;
+    animalAntes=novo; repintar();
+  });
+  /* O LÍDER SAI DOS INTEGRANTES MARCADOS, e só quem tem ficha do RH (o líder
+     é gravado pelo ID). Desmarcar o líder limpa a escolha; com um único
+     integrante com ficha, ele já vem escolhido. */
+  const liderSel=d.querySelector('#perf-equipe-lider'), liderNota=d.querySelector('#perf-lider-nota');
+  let liderEscolhido=ehId(e.liderPadraoId)?String(e.liderPadraoId):'';
+  const desenharLider=()=>{
+    const ms=perfMarcados(d), comId=ms.filter(m=>ehId(m.chave));
+    if(!comId.some(m=>m.chave===liderEscolhido)) liderEscolhido=comId.length===1?comId[0].chave:'';
+    liderSel.innerHTML=`<option value="">${comId.length?'Escolha o líder':'Nenhum integrante com ficha do RH'}</option>`+ms.map(m=>{const ok=ehId(m.chave);return `<option value="${ok?esc(m.chave):''}" ${ok?'':'disabled'} ${ok&&m.chave===liderEscolhido?'selected':''}>${esc(m.nome)}${ok?'':' (sem ficha do RH)'}</option>`;}).join('');
+    liderSel.required=comId.length>0;
+    liderNota.textContent=comId.length?'':'O líder é escolhido entre os integrantes com ficha do RH.';
+  };
+  liderSel.onchange=()=>{liderEscolhido=liderSel.value;};
+  d.querySelectorAll('input[name="membro"]').forEach(cb=>cb.addEventListener('change',desenharLider));
+  desenharLider();
   d.querySelector('#perf-logo-arquivo').onchange=async ev=>{
     const arq=ev.target.files && ev.target.files[0]; if(!arq) return;
     erro.textContent='Reduzindo a imagem…';
@@ -450,6 +607,8 @@ function perfEditarEquipe(id,membrosIniciais=[]) {
     finally{ev.target.value='';}
   };
   remover.onclick=()=>{logo='';repintar();};
+  // NOME REPETIDO entre as ativas: a mesma regra do servidor (que responde 409 ao novo).
+  const mesmoNome=(equipes,nome,outroId)=>equipes.find(x=>x.id!==outroId && x.ativo!==false && PERF.nomeEquipeNorm(x.nome)===PERF.nomeEquipeNorm(nome));
   /* DESATIVAR, NÃO APAGAR: a equipe some das escolhas mas continua dona do
      histórico — entrega confirmada com ela não pode ficar sem nome. */
   const alternar=d.querySelector('#perf-equipe-ativo');
@@ -458,42 +617,51 @@ function perfEditarEquipe(id,membrosIniciais=[]) {
     if(!agora) return;
     if(JSON.stringify(agora)!==JSON.stringify(e)) return toast('Esta equipe mudou enquanto você editava. Reabra a edição para conferir.','error');
     // Desativar grava só o estado: o que foi mudado no formulário se perderia calado.
-    const fdAgora=new FormData(d.querySelector('form'));
-    const editado=String(fdAgora.get('nome')||'').trim()!==e.nome || String(fdAgora.get('emblema')||e.emblema)!==e.emblema || (logo||'')!==(e.logo||'') || PERF.composicao(perfMarcados(d))!==PERF.composicao(e.membros);
+    const fdAgora=new FormData(form);
+    const editado=String(fdAgora.get('nome')||'').trim()!==e.nome || String(fdAgora.get('animal')||'')!==animalAtual || String(fdAgora.get('cor')||'')!==corAtual || String(fdAgora.get('lider')||'')!==(ehId(e.liderPadraoId)?String(e.liderPadraoId):'') || (logo||'')!==(e.logo||'') || PERF.composicao(perfMarcados(d))!==PERF.composicao(membrosDeHoje);
     if(editado && !confirm('Há mudanças não salvas neste formulário. Elas serão descartadas. Continuar?')) return;
     if(agora.ativo!==false && !confirm(`Desativar "${agora.nome}"? Ela some das escolhas e as entregas destes integrantes deixam de aparecer com este nome. O histórico já confirmado com ela continua.`)) return;
     if(agora.ativo===false){
-      const res=perfOpcoesEquipe().resolver, k=PERF.composicaoCom(agora.membros,res);
-      const gemea=atual.equipes.find(x=>x.id!==id && x.ativo!==false && PERF.composicaoCom(x.membros,res)===k);
-      if(gemea) return toast(`Estes integrantes já formam a equipe "${gemea.nome}". Desative-a antes de reativar esta.`,'error');
+      const dup=mesmoNome(atual.equipes,agora.nome,id);
+      if(dup) return toast(`Já existe uma equipe ativa chamada "${dup.nome}". Renomeie ou desative a outra antes de reativar esta.`,'error');
     }
     if(perfSomaLogos(atual.equipes)>PERF_LOGOS_MAX) return toast('Os logos das equipes passam de 400 KB. Remova o logo de alguma equipe antes.','error');
-    atual.equipes=atual.equipes.map(x=>x.id===id?{...x,ativo:x.ativo===false}:x);perfSalvar(atual);d.close();renderPerformanceCasa();
+    atual.equipes=atual.equipes.map(x=>x.id===id?{...x,ativo:x.ativo===false}:x);
+    const aviso=perfAvisoEmDuas(atual.equipes,id);
+    perfSalvar(atual);d.close();renderPerformanceCasa();
+    if(aviso) toast(aviso,'error');
   };
-  d.querySelector('form').onsubmit=ev=>{
+  form.onsubmit=ev=>{
     ev.preventDefault();const fd=new FormData(ev.target), membros=perfMarcados(d);
     if(!membros.length) return toast('Escolha os integrantes.','error');
     const nome=String(fd.get('nome')||'').trim(); if(!nome) return;
+    const animal=String(fd.get('animal')||''), cor=String(fd.get('cor')||''), lider=String(fd.get('lider')||'');
+    if(!PERF.animalDe(animal)) return toast('Escolha o animal da equipe.','error');
+    if(!PERF.corValida(cor)) return toast('Escolha a cor da equipe.','error');
+    const comId=membros.filter(m=>ehId(m.chave));
+    if(comId.length && !comId.some(m=>m.chave===lider)) return toast('Escolha o líder entre os integrantes.','error');
     const atual=perfConfig();
     if(id && JSON.stringify(atual.equipes.find(x=>x.id===id))!==JSON.stringify(e)) return toast('Esta equipe mudou enquanto você editava. Reabra a edição para conferir.','error');
-    /* A mesma composição não pode virar duas equipes: o ranking não saberia
-       de quem é cada entrega. */
-    const novo={...e,id:id || STORE.uuid(),nome,emblema:String(fd.get('emblema')||'🤝'),membros,ativo:e.ativo===false?false:true};
+    // O emblema acompanha o animal: a aba antiga (v133) só sabe mostrar o emblema.
+    const novo={...e,id:id || STORE.uuid(),nome,animal,cor,liderPadraoId:comId.some(m=>m.chave===lider)?lider:'',emblema:PERF.animalDe(animal).icone,membros,ativo:e.ativo===false?false:true};
     if(logo) novo.logo=logo; else delete novo.logo;
-    /* Duas equipes ATIVAS com os mesmos integrantes: o ranking não saberia de
-       quem é cada entrega. Equipe desativada não disputa nada — pode ser
-       renomeada e ganhar logo à vontade (o servidor aplica a mesma regra). */
+    /* Duas equipes ATIVAS com o mesmo nome seriam a mesma equipe parecendo
+       duas no ranking. Com a mesma gente pode (as fixas dividem gente enquanto
+       o cadastro é arrumado): aí a entrega só é deduzida quando uma equipe
+       ativa, e só uma, tem aquela composição. Desativada não disputa nome. */
     if(novo.ativo!==false){
-      const res=perfOpcoesEquipe().resolver, k=PERF.composicaoCom(membros,res);
-      const gemea=atual.equipes.find(x=>x.id!==novo.id && x.ativo!==false && PERF.composicaoCom(x.membros,res)===k);
-      if(gemea) return toast(`Estes integrantes já formam a equipe "${gemea.nome}". Edite-a em vez de criar outra.`,'error');
+      const dup=mesmoNome(atual.equipes,nome,novo.id);
+      if(dup) return toast(`Já existe uma equipe ativa chamada "${dup.nome}". Use outro nome ou desative a outra.`,'error');
     }
     /* O teto da soma dos logos é conferido AQUI, antes de gravar: se só o
        servidor recusasse, a tela diria "salva" e o aparelho carregaria uma
        configuração que nunca chega lá. */
     const soma=perfSomaLogos(atual.equipes.filter(x=>x.id!==novo.id).concat(novo));
     if(soma>PERF_LOGOS_MAX) return toast(`Os logos das equipes somariam ${Math.ceil(soma/1024)} KB, acima do limite de 400 KB. Remova o logo de uma equipe (as desativadas também contam) ou use uma imagem mais simples.`,'error');
-    atual.equipes=atual.equipes.filter(x=>x.id!==novo.id).concat(novo);perfSalvar(atual);d.close();renderPerformanceCasa();
+    atual.equipes=atual.equipes.filter(x=>x.id!==novo.id).concat(novo);
+    const aviso=perfAvisoEmDuas(atual.equipes,novo.id);
+    perfSalvar(atual);d.close();renderPerformanceCasa();
+    if(aviso) toast(aviso,'error');
   };
 }
 function perfEditarParticipacao(id) {
@@ -507,8 +675,13 @@ function perfEditarParticipacao(id) {
   // a equipe criada depois. Não confirmada junta os apelidos da mesma pessoa, como
   // a lista mostra; confirmada fica como foi gravada.
   const equipeSugerida = r.equipeId || (PERF.equipeDoRegistro(r, c.equipes, perfOpcoesEquipe().resolver) || {}).id || '';
-  let membros=(r.confirmado ? r.membros : perfUnirPessoas([r])[0].membros).map(p=>({...p}));
-  const d=perfDialog('Participação · O.S. '+(os.numero||''),`<p>${esc(os.cliente||'')} · ${esc(os.servico||'')}</p><form id="perf-part-form"><label>Usar uma equipe <select name="equipe"><option value="">Participação individual / avulsa</option>${c.equipes.filter(e=>e.ativo!==false || e.id===equipeSugerida).map(e=>`<option value="${esc(e.id)}" ${e.id===equipeSugerida?'selected':''}>${esc(e.emblema)} ${esc(e.nome)}</option>`).join('')}</select></label><p class="metricas-nota">Confirme quem trabalhou nesta entrega. A escolha não altera a programação da O.S.</p><div id="perf-part-members">${perfEscolherMembrosHTML(membros)}</div><div id="perf-pesos"></div><button type="button" class="btn-ghost" id="perf-igual">Dividir igualmente</button><p id="perf-soma" aria-live="polite"></p><label>Observação da apuração <input name="obs" maxlength="300" value="${esc(r.obs||'')}" placeholder="Motivo de um ajuste, participação extra…"></label><button class="btn-primary" type="submit">Confirmar participação</button></form>`);
+  /* Confirmada com a chave de até a v133 (slug da ficha, que a aba presa na
+     v133 continua gravando): a chave passa ao ID de hoje, com o NOME e o
+     percentual gravados. Sem isto a mesma pessoa vinha duas vezes (slug
+     marcado, ID desmarcado) e dava para confirmar a entrega com ela em dobro. */
+  const chaveDeHoje=m=>{const t=perfChaveDeHoje(m);return t?{chave:t.chave,nome:m.nome}:null;};
+  let membros=(r.confirmado ? PERF.unirMembros(r.membros,chaveDeHoje) : perfUnirPessoas([r])[0].membros).map(p=>({...p}));
+  const d=perfDialog('Participação · O.S. '+(os.numero||''),`<p>${esc(os.cliente||'')} · ${esc(os.servico||'')}</p><form id="perf-part-form"><label>Usar uma equipe <select name="equipe"><option value="">Participação individual / avulsa</option>${c.equipes.filter(e=>e.ativo!==false || e.id===equipeSugerida).map(e=>`<option value="${esc(e.id)}" ${e.id===equipeSugerida?'selected':''}>${esc(PERF.iconeEquipe(e))} ${esc(e.nome)}</option>`).join('')}</select></label><p class="metricas-nota">Confirme quem trabalhou nesta entrega. A escolha não altera a programação da O.S.</p><div id="perf-part-members">${perfEscolherMembrosHTML(membros)}</div><div id="perf-pesos"></div><button type="button" class="btn-ghost" id="perf-igual">Dividir igualmente</button><p id="perf-soma" aria-live="polite"></p><label>Observação da apuração <input name="obs" maxlength="300" value="${esc(r.obs||'')}" placeholder="Motivo de um ajuste, participação extra…"></label><button class="btn-primary" type="submit">Confirmar participação</button></form>`);
   const desenharPesos=()=>{
     d.querySelector('#perf-pesos').innerHTML=membros.map(p=>`<label class="perf-peso"><span>${esc(p.nome)}</span><input aria-label="Percentual de ${esc(p.nome)}" type="number" min="0.01" max="100" step="0.01" required data-chave="${esc(p.chave)}" value="${p.percentual}"><span>%</span></label>`).join('');
     const total=()=>{d.querySelector('#perf-soma').textContent='Total: '+perfFormato(membros.reduce((s,p)=>s+Number(p.percentual||0),0))+'% · precisa somar 100%';};
@@ -517,13 +690,14 @@ function perfEditarParticipacao(id) {
   const ligarMembros=()=>{perfWireBusca(d);d.querySelectorAll('[name="membro"]').forEach(cb=>cb.onchange=()=>{membros=PERF.manterPesos(membros,perfMarcados(d));desenharPesos();});};
   d.querySelector('[name="equipe"]').onchange=ev=>{
     const equipe=c.equipes.find(e=>e.id===ev.target.value);if(!equipe) return;
-    membros=PERF.iguais(equipe.membros);d.querySelector('#perf-part-members').innerHTML=perfEscolherMembrosHTML(membros);ligarMembros();desenharPesos();
+    membros=PERF.iguais(perfMembrosDeHoje(equipe.membros));d.querySelector('#perf-part-members').innerHTML=perfEscolherMembrosHTML(membros);ligarMembros();desenharPesos();
   };
   d.querySelector('#perf-igual').onclick=()=>{membros=PERF.iguais(membros);desenharPesos();};ligarMembros();desenharPesos();
   d.querySelector('form').onsubmit=ev=>{
     ev.preventDefault();const erro=PERF.validar(membros);if(erro)return toast(erro,'error');
     const fd=new FormData(ev.target), equipe=c.equipes.find(e=>e.id===fd.get('equipe'));
-    const novo={id,numero:String(os.numero||''),membros:membros.map(p=>({...p})),equipeId:equipe?.id||'',equipeNome:equipe?.nome||'',emblema:equipe?.emblema||'🤝',obs:String(fd.get('obs')||'').trim(),em:new Date().toISOString(),por:STATE.user?.nome||''};
+    // O emblema gravado é o ícone da época (o do animal, na equipe fixa): o fechamento guarda nome e emblema, não a cor.
+    const novo={id,numero:String(os.numero||''),membros:membros.map(p=>({...p})),equipeId:equipe?.id||'',equipeNome:equipe?.nome||'',emblema:equipe?PERF.iconeEquipe(equipe):'🤝',obs:String(fd.get('obs')||'').trim(),em:new Date().toISOString(),por:STATE.user?.nome||''};
     const atual=perfConfig();
     if(JSON.stringify(atual.participacoes.find(p=>p.id===id))!==JSON.stringify(c.participacoes.find(p=>p.id===id))) return toast('Esta participação mudou enquanto você editava. Reabra a conferência.','error');
     atual.participacoes=atual.participacoes.filter(p=>p.id!==id).concat(novo);perfSalvar(atual);d.close();renderPerformanceCasa();
@@ -538,7 +712,7 @@ function perfEditarParticipacao(id) {
 /* As opções da regra de equipe na tela: a chave de cada pessoa resolvida
    agora (ficha do RH ou apelido) e, numa revisão fechada, o histórico intacto. */
 function perfOpcoesEquipe() {
-  return { resolver: m => perfPessoa(m.apelido || m.nome).chave, historico: !!(perfFonteAtual() && perfFonteAtual().fechadoEm) };
+  return { resolver: m => perfIdMembro(m), historico: !!(perfFonteAtual() && perfFonteAtual().fechadoEm) };
 }
 const PERF_LOGOS_MAX = 400000;
 function perfSomaLogos(equipes) { return (equipes || []).reduce((t, e) => t + (perfLogoValido(e.logo) ? e.logo.length : 0), 0); }
@@ -550,7 +724,11 @@ function perfLogoHTML(e, classe) {
   // Só renderiza imagem que passou na mesma régua do servidor: nada de SVG
   // (carrega script) nem de endereço externo.
   if (e && perfLogoValido(e.logo)) return `<img class="${cls} perf-logo" src="${esc(e.logo)}" alt="" loading="lazy">`;
-  return `<span class="${cls}" aria-hidden="true">${esc((e && e.emblema) || '🤝')}</span>`;
+  // Sem imagem própria: a logo do animal (arquivo do site, lista fechada).
+  const doAnimal = e && Object.prototype.hasOwnProperty.call(PERF.LOGO_ANIMAL, e.animal) ? PERF.LOGO_ANIMAL[e.animal] : '';
+  if (doAnimal) return `<img class="${cls} perf-logo" src="${esc(doAnimal)}" alt="" loading="lazy">`;
+  // Sem logo nenhuma: o ícone do animal ou o emblema antigo.
+  return `<span class="${cls}" aria-hidden="true">${esc(PERF.iconeEquipe(e))}</span>`;
 }
 async function perfReduzirLogo(arquivo) {
   if (!arquivo || !/^image\//.test(arquivo.type || '')) throw new Error('Escolha um arquivo de imagem.');
@@ -597,7 +775,9 @@ async function perfReduzirLogo(arquivo) {
 const PERF_CRIT_ROTULO = {producao:'Produção', limpeza:'Carro (limpo e arrumado)', equipamentos:'Equipamentos'};
 function perfCriterios() { return PERF.criteriosValidos(perfConfig().criterios); }
 function perfEquipeDaPessoa(chave, salvas) {
-  const suas = (salvas || []).filter(e => e.ativo !== false && (e.membros || []).some(m => String(m.chave) === String(chave)));
+  // Pelo ID de hoje dos dois lados: a equipe salva pelo slug antigo também acha a pessoa.
+  const alvo = perfIdMembro({chave});
+  const suas = (salvas || []).filter(e => e.ativo !== false && (e.membros || []).some(m => perfIdMembro(m) === alvo));
   return suas;
 }
 function perfRankingPessoasHTML(regs, c) {
@@ -628,7 +808,7 @@ function perfRankingPessoasHTML(regs, c) {
   const selo = p => {
     const eqs = perfEquipeDaPessoa(p.chave, c.equipes);
     if (!eqs.length) return '';
-    return `<span class="perf-selo-equipe" title="${esc(eqs.map(e => e.nome).join(', '))}">${perfLogoHTML(eqs[0], 'perf-selo-logo')}${esc(eqs[0].nome)}${eqs.length > 1 ? ` +${eqs.length - 1}` : ''}</span>`;
+    return `<span class="perf-selo-equipe${perfCorClasse(eqs[0])}" title="${esc(eqs.map(e => e.nome).join(', '))}">${perfLogoHTML(eqs[0], 'perf-selo-logo')}${esc(eqs[0].nome)}${eqs.length > 1 ? ` +${eqs.length - 1}` : ''}</span>`;
   };
   // A composição da nota, dita, para ninguém ter de adivinhar de onde veio.
   const partes = p => ['producao', 'limpeza', 'equipamentos'].filter(k => av.pesos[k] > 0).map(k => {
@@ -781,7 +961,8 @@ function perfRankingEquipesHTML(regs, c) {
   const apelido = x => x.salva ? '' : `<small class="perf-sem-nome">${(x.membros || []).length > 1 ? 'composição sem nome' : 'individual'}</small>`;
   perfUltimoRanking = new Map(todas.map(x => [x.chave, x.membros || []]));
   const {podio, resto} = perfCortarPodio(linhas);
-  const podioHTML = podio.map(x => `<article class="perf-podio-item pos-${x.posicao}">
+  // A cor e o animal da equipe fixa: a cor só como classe da paleta.
+  const podioHTML = podio.map(x => `<article class="perf-podio-item pos-${x.posicao}${perfCorClasse(x)}">
       <span class="perf-medalha" aria-label="${x.posicao}º lugar">${PERF_MEDALHAS[x.posicao] || x.posicao + 'º'}</span>
       ${perfLogoHTML(x, 'perf-podio-logo')}
       <h3>${esc(x.nome)}</h3>${apelido(x)}
@@ -790,7 +971,7 @@ function perfRankingEquipesHTML(regs, c) {
       ${aConferir(x)}
       <div class="perf-podio-acoes">${acoes(x)}</div>
     </article>`).join('');
-  const restoHTML = resto.map(x => `<li class="perf-rank-linha">
+  const restoHTML = resto.map(x => `<li class="perf-rank-linha${perfCorClasse(x)}">
       <span class="perf-rank-pos">${PERF_MEDALHAS[x.posicao] || x.posicao + 'º'}</span>
       ${perfLogoHTML(x, 'perf-rank-logo')}
       <div class="perf-rank-nome ${x.salva ? '' : 'sem-nome'}"><strong>${esc(x.nome)}</strong>${apelido(x)}${x.salva ? `<small>${membrosTxt(x)}</small>` : ''}</div>
@@ -822,8 +1003,8 @@ function perfRankingEquipesHTML(regs, c) {
     ${podio.length ? `<div class="perf-podio n${podio.length}">${podioHTML}</div>` : ''}
     ${resto.length ? `<ol class="perf-rank-lista">${restoHTML}</ol>` : ''}
     ${semValor.length ? `<p class="perf-rank-nota">${semValor.length} equipe${semValor.length === 1 ? '' : 's'} com entrega mas sem valor confirmado ficam fora deste ranking, e não como zero.</p>` : ''}
-    ${paradas.length ? `<div class="perf-equipes-paradas"><span>Sem entrega no período:</span>${paradas.map(e => `<button class="perf-equipe-chip" ${pode ? `data-perf-equipe="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}
-    ${desativadas.length ? `<div class="perf-equipes-paradas perf-desativadas"><span>Desativadas:</span>${desativadas.map(e => `<button class="perf-equipe-chip" ${pode ? `data-perf-equipe="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}
+    ${paradas.length ? `<div class="perf-equipes-paradas"><span>Sem entrega no período:</span>${paradas.map(e => `<button class="perf-equipe-chip${perfCorClasse(e)}" ${pode ? `data-perf-equipe="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}
+    ${desativadas.length ? `<div class="perf-equipes-paradas perf-desativadas"><span>Desativadas:</span>${desativadas.map(e => `<button class="perf-equipe-chip${perfCorClasse(e)}" ${pode ? `data-perf-equipe="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}
   </section>`;
 }
 
@@ -845,7 +1026,7 @@ function performanceEquipesHTML() {
   const sugestoes=new Map();
   for(const os of STORE.getAllOS()) {
     const membros=perfEquipeOS(os);if(membros.length<2)continue;
-    const k=PERF.composicao(membros);if(c.equipes.some(e=>PERF.composicao(e.membros)===k))continue;
+    const k=PERF.composicao(membros);if(c.equipes.some(e=>PERF.composicaoCom(e.membros,perfIdMembro)===k))continue;
     const x=sugestoes.get(k)||{membros,n:0};x.n++;sugestoes.set(k,x);
   }
   const sugeridas=[...sugestoes.values()].sort((a,b)=>b.n-a.n).slice(0,4);
@@ -870,7 +1051,7 @@ function wirePerformanceEquipes(el) {
   // Nomear uma composição abre a criação já com os integrantes marcados.
   el.querySelectorAll('[data-perf-nomear]').forEach(b=>b.onclick=()=>perfEditarEquipe('',(perfUltimoRanking.get(b.dataset.perfNomear)||[]).map(m=>({...m,apelido:m.apelido||m.nome}))));
   const c=perfConfig(), grupos=new Map();
-  for(const os of STORE.getAllOS()){const membros=perfEquipeOS(os),k=PERF.composicao(membros);if(membros.length<2 || c.equipes.some(e=>PERF.composicao(e.membros)===k))continue;const g=grupos.get(k)||{membros,n:0};g.n++;grupos.set(k,g);}
+  for(const os of STORE.getAllOS()){const membros=perfEquipeOS(os),k=PERF.composicao(membros);if(membros.length<2 || c.equipes.some(e=>PERF.composicaoCom(e.membros,perfIdMembro)===k))continue;const g=grupos.get(k)||{membros,n:0};g.n++;grupos.set(k,g);}
   const sugeridas=[...grupos.values()].sort((a,b)=>b.n-a.n).slice(0,4);
   el.querySelectorAll('[data-perf-sugestao]').forEach(b=>b.onclick=()=>perfEditarEquipe('',sugeridas[Number(b.dataset.perfSugestao)].membros));
   const busca=el.querySelector('#perf-busca-os'), situacao=el.querySelector('#perf-situacao');
@@ -909,15 +1090,17 @@ function wirePerformanceEquipes(el) {
   bindCardClicks(el);
 }
 function perfModeloEquipeHTML() {
-  return `<label>Equipe salva <select data-perf-modelo><option value="">Escolher pessoas individualmente</option>${perfConfig().equipes.filter(e=>e.ativo!==false).map(e=>`<option value="${esc(e.id)}">${esc(e.emblema)} ${esc(e.nome)}</option>`).join('')}</select><small>Você pode acrescentar ou retirar pessoas abaixo.</small></label>`;
+  return `<label>Equipe salva <select data-perf-modelo><option value="">Escolher pessoas individualmente</option>${perfConfig().equipes.filter(e=>e.ativo!==false).map(e=>`<option value="${esc(e.id)}">${esc(PERF.iconeEquipe(e))} ${esc(e.nome)}</option>`).join('')}</select><small>Você pode acrescentar ou retirar pessoas abaixo.</small></label>`;
 }
 function perfWireModelo(form) {
   const sel=form.querySelector('[data-perf-modelo]');if(!sel)return;
   sel.onchange=()=>{
     const e=perfConfig().equipes.find(e=>e.id===sel.value);if(!e)return;
-    const faltando=e.membros.filter(p=>![...form.querySelectorAll('[name="equipe"]')].some(cb=>perfPessoa(cb.value).chave===p.chave));
+    // Pelo ID de hoje dos dois lados (a equipe salva até a v133 guarda o slug do RH).
+    const ids=e.membros.map(perfIdMembro), doCb=cb=>perfIdMembro({chave:perfPessoa(cb.value).chave});
+    const faltando=ids.filter(id=>![...form.querySelectorAll('[name="equipe"]')].some(cb=>doCb(cb)===id));
     if(faltando.length){toast('Equipe possui integrante indisponível no cadastro atual. Confira a seleção individual.','error');return;}
-    form.querySelectorAll('[name="equipe"]').forEach(cb=>{cb.checked=e.membros.some(p=>p.chave===perfPessoa(cb.value).chave);cb.closest('.casa-chip').classList.toggle('on',cb.checked);});
+    form.querySelectorAll('[name="equipe"]').forEach(cb=>{cb.checked=ids.includes(doCb(cb));cb.closest('.casa-chip').classList.toggle('on',cb.checked);});
   };
 }
 
@@ -936,6 +1119,6 @@ function performanceRelatorioHTML() {
   const fmtDia=v=>String(v||'').slice(0,10).split('-').reverse().join('/');
   const valorTexto=(n,conhecidas,total)=>!total?'A conferir':!conhecidas?'Sem valor':dinheiroCasa(n)+(conhecidas<total?' · parcial':'');
   const tabela=(titulo,linhas,equipe=false)=>`<section class="perf-report-section"><h3>${titulo}</h3><p class="metricas-nota">${equipe?'Cada entrega conta uma vez na equipe.':'O.S. equivalentes somam os percentuais confirmados: duas participações de 50% equivalem a uma O.S.'}</p><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>${equipe?'Equipe':'Pessoa'}</th><th>Entregas</th><th>Confirmadas</th><th>A conferir</th>${equipe?'':'<th>O.S. equivalentes confirmadas</th>'}<th>Valor confirmado${equipe?'':' rateado'}</th></tr></thead><tbody>${linhas.map(p=>{const cf=(equipe?confirmado.equipes:confirmado.pessoas).find(x=>x.chave===p.chave);return `<tr><td><strong>${esc(p.nome)}</strong></td><td>${p.os}</td><td>${p.confirmadas}</td><td>${p.os-p.confirmadas}</td>${equipe?'':`<td>${perfFormato(cf?.equivalentes || 0)}</td>`}<td>${!cf?'—':cf.semValor===cf.os?'Sem valor':dinheiroCasa(cf.valor)+(cf.semValor?' (parcial)':'')}</td></tr>`;}).join('') || `<tr><td colspan="${equipe?5:6}">Sem participantes registrados neste período.</td></tr>`}</tbody></table></div></section>`;
-  const equipes=grupos.map(g=>`<article class="perf-team-report"><header>${perfLogoHTML(g,'perf-emblema')}<div><h4>${esc(g.nome)}</h4><p>${g.membros.length} participantes no período · ${g.registros.length} entrega${g.registros.length===1?'':'s'}</p></div><strong>${valorTexto(g.valor,g.confirmadas-g.semValor,g.confirmadas)}<small>valor confirmado da equipe</small></strong></header><div class="perf-team-numbers"><span><b>${g.confirmadas}</b> ${g.confirmadas===1?'confirmada':'confirmadas'}</span><span><b>${g.registros.length-g.confirmadas}</b> a conferir</span><span><b>${g.retrabalhos}</b> com marca de retrabalho</span></div><div class="perf-member-list">${g.membros.map(m=>`<span><strong>${esc(m.nome)}</strong><small>${m.entregas} entrega${m.entregas===1?'':'s'} · ${m.confirmadas} ${m.confirmadas===1?'confirmada':'confirmadas'} · ${perfFormato(m.equivalentes)} O.S. equivalentes</small></span>`).join('')}</div><details><summary>Ver O.S., percentuais e dados de conferência</summary><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / cliente</th><th>Entrega</th><th>Participação nesta O.S.</th><th>Valor da O.S.</th><th>Conferência</th></tr></thead><tbody>${g.registros.map(r=>`<tr><td><button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os?.numero || r.id)}</button><small class="bloco">${esc(r.os?.cliente || '')}</small>${r.os?.retrabalho?'<small class="bloco">Retrabalho marcado</small>':''}</td><td>${fmtDia(diaEntrega(r.os))}</td><td>${r.membros.map(m=>`${esc(m.nome)} · <strong>${perfFormato(m.percentual)}%</strong>`).join('<br>')}</td><td>${r.valor==null?'Sem valor':dinheiroCasa(r.valor)}<small class="bloco">${esc(r.origemValor || 'Base da apuração')}</small></td><td>${r.confirmado?'Confirmada':'Divisão sugerida'}${r.por?`<small class="bloco">${esc(r.por)} · ${fmtDia(r.em)}</small>`:''}${r.obs?`<small class="bloco">${esc(r.obs)}</small>`:''}</td></tr>`).join('')}</tbody></table></div></details></article>`).join('');
+  const equipes=grupos.map(g=>`<article class="perf-team-report${perfCorClasse(g)}"><header>${perfLogoHTML(g,'perf-emblema')}<div><h4>${esc(g.nome)}</h4><p>${g.membros.length} participantes no período · ${g.registros.length} entrega${g.registros.length===1?'':'s'}</p></div><strong>${valorTexto(g.valor,g.confirmadas-g.semValor,g.confirmadas)}<small>valor confirmado da equipe</small></strong></header><div class="perf-team-numbers"><span><b>${g.confirmadas}</b> ${g.confirmadas===1?'confirmada':'confirmadas'}</span><span><b>${g.registros.length-g.confirmadas}</b> a conferir</span><span><b>${g.retrabalhos}</b> com marca de retrabalho</span></div><div class="perf-member-list">${g.membros.map(m=>`<span><strong>${esc(m.nome)}</strong><small>${m.entregas} entrega${m.entregas===1?'':'s'} · ${m.confirmadas} ${m.confirmadas===1?'confirmada':'confirmadas'} · ${perfFormato(m.equivalentes)} O.S. equivalentes</small></span>`).join('')}</div><details><summary>Ver O.S., percentuais e dados de conferência</summary><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / cliente</th><th>Entrega</th><th>Participação nesta O.S.</th><th>Valor da O.S.</th><th>Conferência</th></tr></thead><tbody>${g.registros.map(r=>`<tr><td><button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os?.numero || r.id)}</button><small class="bloco">${esc(r.os?.cliente || '')}</small>${r.os?.retrabalho?'<small class="bloco">Retrabalho marcado</small>':''}</td><td>${fmtDia(diaEntrega(r.os))}</td><td>${r.membros.map(m=>`${esc(m.nome)} · <strong>${perfFormato(m.percentual)}%</strong>`).join('<br>')}</td><td>${r.valor==null?'Sem valor':dinheiroCasa(r.valor)}<small class="bloco">${esc(r.origemValor || 'Base da apuração')}</small></td><td>${r.confirmado?'Confirmada':'Divisão sugerida'}${r.por?`<small class="bloco">${esc(r.por)} · ${fmtDia(r.em)}</small>`:''}${r.obs?`<small class="bloco">${esc(r.obs)}</small>`:''}</td></tr>`).join('')}</tbody></table></div></details></article>`).join('');
   return `<section class="perf-report"><header class="perf-report-heading"><div><span class="perf-report-eyebrow">PRODUÇÃO · PESSOAS · EQUIPES</span><h3>Relatório de performance</h3><p>${fmtDia(f.de)} a ${fmtDia(f.ate)} · ${resumo.pessoas.length} participantes · ${grupos.length} ${grupos.length===1?'equipe / composição utilizada':'equipes / composições utilizadas'}</p></div><span class="perf-report-state">${perfFonteAtual()?.fechadoEm?'Fechamento preservado':'Apuração em acompanhamento'}</span></header><div class="perf-summary"><div><b>${regs.length}</b><span>entregas no período</span></div><div><b>${cobertura}%</b><span>com participação confirmada (${confirmados.length})</span></div><div><b>${semEquipe}</b><span>sem equipe informada</span></div></div><div class="perf-report-value"><span>Valor das entregas com participação confirmada</span><strong>${valorTexto(valor,confirmados.length-semValor,confirmados.length)}</strong><small>${semValor} entrega(s) confirmada(s) sem valor. Valores por pessoa são rateados; não representam pagamento ou bônus.</small></div><p class="perf-coverage">${!regs.length?'Nenhuma instalação registrada neste período.':confirmados.length<regs.length?`Apuração parcial: ${regs.length-confirmados.length} ${regs.length-confirmados.length===1?'participação':'participações'} a conferir, incluindo ${semEquipe} sem equipe e ${inconsistentes} inconsistentes.`:'Participações conferidas. Quantidade de entregas não mede sozinha qualidade, esforço ou complexidade.'}</p><section class="perf-report-section"><h3>Equipes e composição real do período</h3><p class="metricas-nota">Participantes das entregas, incluindo avulsos. Os percentuais variam por O.S.; o cadastro atual da equipe não reescreve o histórico.</p>${equipes || '<p>Nenhuma equipe com participação válida registrada no período.</p>'}</section>${tabela('Participação por pessoa',resumo.pessoas)}${tabela('Resumo das equipes',resumo.equipes,true)}<details class="perf-report-section perf-report-pendencias"><summary>Entregas que ainda não permitem apuração por pessoa</summary><p>${semEquipe} sem equipe · ${inconsistentes} com percentuais inconsistentes.</p><ul>${regs.filter(r=>PERF.validar(r.membros)).map(r=>`<li>O.S. <button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button> · ${esc(r.os.cliente)} · ${r.membros.length?'rever percentuais':'informar participantes'}</li>`).join('') || '<li>Nenhuma pendência de composição.</li>'}</ul></details><p class="metricas-nota">Entregas inclui participações sugeridas e confirmadas. A mesma O.S. pode aparecer para mais de uma pessoa; não some a coluna entre colaboradores. Valores incluem somente participações confirmadas, sem duplicar o valor entre pessoas. Não representam lucro, recebimento ou bônus. Retrabalho indica a marca registrada, não uma avaliação automática do colaborador. ${esc(perfFonteTexto())}</p></section>`;
 }

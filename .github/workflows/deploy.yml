@@ -47,10 +47,17 @@ jobs:
         run: |
           mkdir -p dist
           cp *.html *.css *.js manifest.json *.svg dist/
+          # Logos das equipes (29/09/2026): imagem do site, na raiz, na casca do sw.js.
+          cp *.webp dist/
           rm -f dist/*.config.js dist/*.test.js
           echo "publicando:"; ls dist
-          for f in index.html equipe.html app.js casa.js performance.js operacao.js store.js sw.js; do
+          for f in index.html equipe.html app.js casa.js performance.js operacao.js store.js sw.js divisao.js; do
             test -f "dist/$f" || { echo "FALTA $f no site"; exit 1; }
+          done
+          # Todo arquivo que o sw.js guarda para o offline tem de estar no site:
+          # um que falte faz o install do service worker abortar em todo aparelho.
+          for f in $(grep -o "'[a-z0-9.-]*\.\(js\|css\|webp\|svg\|json\|html\)[?']" sw.js | tr -d "'?" | sort -u); do
+            test -f "dist/$f" || { echo "FALTA $f (listado no sw.js)"; exit 1; }
           done
 
       # Sem "enablement": o token do Actions publica no Pages mas nao pode
