@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
@@ -277,17 +277,44 @@ async function getCfg(): Promise<any> {
    de instaladores, pela regua de _shared/pcp-integridade.mjs. Uma leitura do
    RH por minuto, nao por request. */
 let _fichasRH: { ate: number; fichas: any[] } | null = null;
+/* CONTRATOS DE FREELANCER DO RH (F07, caminho B): o prestador que instala
+   entra na régua pelo contrato, com o ID do CPF do contrato. Só os campos que
+   a régua usa; o CPF inteiro fica neste servidor (juntarFreelancers). */
+async function contratosFreelancerRH(): Promise<any[]> {
+  const { data, error } = await sb.from("registros")
+    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>funcao, registro->>situacao, registro->>contratoFim")
+    .eq("colecao", "freelancers").eq("apagado", false);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as any[];
+}
 async function fichasRH(): Promise<any[]> {
   if (_fichasRH && _fichasRH.ate > Date.now()) return _fichasRH.fichas;
   const { data, error } = await sb.from("registros")
-    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>dataDesligamento")
+    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>dataDesligamento, registro->>statusId")
     .eq("colecao", "colaboradores").eq("apagado", false);
   if (error) throw new Error(error.message);
-  const fichas = ((data ?? []) as any[]).map((g) => {
+  // `ativo` com a mesma regra do elenco: ficha inativa com contrato ativo do
+  // mesmo CPF cede lugar ao contrato nos dois lados (juntarFreelancers).
+  const FORA = new Set(["inativo", "abandono", "externo"]);
+  const brutas = ((data ?? []) as any[]).map((g) => {
     const d = String(g.cpf || "").replace(/\D/g, "");
     return { chave: String(g.id || ""), id: d.length === 11 ? d.slice(0, 6) : "", nome: String(g.nome || "").trim(),
-             apelido: String(g.apelido || "").trim(), desligado: !!String(g.dataDesligamento || "").trim() };
+             apelido: String(g.apelido || "").trim(), desligado: !!String(g.dataDesligamento || "").trim(),
+             // A data da saída confere a divisão de O.S. antiga de quem saiu depois (F08). Não desce para aparelho nenhum.
+             desligadoEm: String(g.dataDesligamento || "").trim().slice(0, 10),
+             ativo: !FORA.has(String(g.statusId || "").trim()), cpf: d, statusId: String(g.statusId || "").trim() };
   }).filter((p) => p.nome);
+  // Freelancer entra na conta de ambiguidade: "Lucas" com um Lucas na ficha e
+  // outro no contrato não escolhe nenhum dos dois.
+  const junta = juntarFreelancers(brutas, await contratosFreelancerRH(), { hoje: perfDia(new Date().toISOString()) });
+  const fichas = [
+    ...brutas.filter((p) => !junta.fichasFora.has(p.chave)).map(({ cpf: _cpf, statusId: _st, ...p }) => junta.repetidos.has(p.id) ? { ...p, idRepetido: true } : p),
+    /* O fim do contrato e a situação dele conferem a divisão de O.S. antiga
+       do freelancer cujo contrato venceu depois (F08). Ficam no servidor: a
+       régua não desce para aparelho nenhum. */
+    ...junta.contratos.map((c: any) => ({ chave: c.chave, id: c.id, nome: c.nome, apelido: c.apelido, desligado: c.desligado, freelancer: true,
+      contratoFim: c.contratoFim, situacaoContrato: c.situacaoContrato, ...(c.idRepetido ? { idRepetido: true } : {}) })),
+  ];
   _fichasRH = { ate: Date.now() + 60_000, fichas };
   return fichas;
 }
@@ -375,6 +402,7 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
   const participacoes=cfgAntes.config?.performancePCP?.participacoes || [];
   // A equipe pela PESSOA (ID): a mesma régua do aparelho (OPERACAO.equipe).
   const pessoasPerf=await pessoasDoPCP(cfgAntes.config);
+  const equipesPerf:any[]=Array.isArray(cfgAntes.config?.performancePCP?.equipes)?cfgAntes.config.performancePCP.equipes:[];
   const num=(v:any)=>v==null||v===""?NaN:typeof v==="number"?v:Number(String(v).includes(",")?String(v).replace(/\./g,"").replace(",","."):v);
   const registros=lista.map(o=>{
     const p=participacoes.find((x:any)=>x.id===o.id);
@@ -387,8 +415,28 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
        ficha segue como era (chave = o próprio nome). */
     const vistosEq=new Set<string>(), nomes:string[]=[];
     for(const n of (Array.isArray(o.equipe)?o.equipe:[])){const x=String(n??"").trim();if(!x)continue;const k=pessoasPerf.chave(x);if(vistosEq.has(k))continue;vistosEq.add(k);nomes.push(x);}
-    const membros=p?.membros || nomes.map((n,i)=>({chave:pessoasPerf.idDe(n)||n,nome:pessoasPerf.nome(n),percentual:(Math.floor(10000/nomes.length)+(i<10000%nomes.length?1:0))/100}));
-    const confirmado=!!p && !validarPerformance({equipes:p.equipeId?[{id:p.equipeId,nome:p.equipeNome || "Equipe",emblema:p.emblema || "🤝",membros}]:[],participacoes:[p]});
+    /* A DIVISÃO DENTRO DA O.S. (F08) vem primeiro: confirmada quando é
+       válida, não está desatualizada e tem a mesma gente de os.equipe
+       (alocacaoConfirmada, a mesma régua do aparelho). O percentual de cada
+       pessoa é o FINAL do motor (quem ficou com 0% não entra). Divisão
+       desatualizada ou inválida: a sugestão sai de os.equipe e nunca conta
+       como confirmada, nem com participação antiga. Sem divisão na O.S., a
+       participação antiga do blob continua valendo como era. */
+    const aloc=o.alocacao&&typeof o.alocacao==="object"&&!Array.isArray(o.alocacao)?o.alocacao:null;
+    const alocOk=!!aloc&&alocacaoConfirmada(o);
+    /* A participação antiga só vale na O.S. que nunca teve divisão, ou
+       confirmada depois da última mudança dela (participacaoVale): a divisão
+       limpa de propósito não ressuscita a conferência velha do blob. */
+    const pAntiga=participacaoVale(o,p);
+    const sugestao=()=>nomes.map((n,i)=>({chave:pessoasPerf.idDe(n)||n,nome:pessoasPerf.nome(n),percentual:(Math.floor(10000/nomes.length)+(i<10000%nomes.length?1:0))/100}));
+    const membros=alocOk
+      ? finaisAlocacao(aloc).filter((f:any)=>f.cota>0).map((f:any)=>({chave:f.pessoaId,nome:pessoasPerf.nome(f.pessoaId),percentual:f.cota/100}))
+      : pAntiga?.membros || sugestao();
+    const eqAloc=alocOk&&aloc.grupos.length===1&&aloc.grupos[0].equipeId?equipesPerf.find((e:any)=>e&&e.id===aloc.grupos[0].equipeId)||null:null;
+    const confirmado=alocOk
+      ? !validarPerformance({equipes:[],participacoes:[{id:o.id,membros}]})
+      : !!pAntiga && !validarPerformance({equipes:pAntiga.equipeId?[{id:pAntiga.equipeId,nome:pAntiga.equipeNome || "Equipe",emblema:pAntiga.emblema || "🤝",membros}]:[],participacoes:[pAntiga]});
+    const fonte=alocOk?"alocacao":pAntiga?"participacao":aloc?(aloc.conferirRH===true?"alocacao-conferir-rh":"alocacao-desatualizada"):"sugestao";
     /* A CONFERÊNCIA DA VOLTA (carro e equipamentos) entra na base para pesar
        na avaliação individual. Só "sim"/"nao" passam; o resto é "não
        conferido" (null) e não pesa contra ninguém. */
@@ -414,7 +462,9 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     const voltou=nomes.length>0 && !semCarro && !!(o.retornoEm || o.horaRetorno || !baixaERP || o.entregaLancada);
     const diaVolta=perfDia(o.retornoEm) || (o.horaRetorno ? (perfDia(o.saidaEm) || perfDia(o.instalacao?.data)) : "") || (o.entregaLancada ? perfDia(o.entregaLancada.data) : "") || perfDia(o.finalizadaEm);
     const volta=[diaVolta,norm(o.veiculo),nomes.map((n:string)=>pessoasPerf.chave(n)).sort().join("+")].join("|");
-    return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,equipeId:p?.equipeId||"",equipeNome:p?.equipeNome||"",emblema:p?.emblema||"🤝",obs:p?.obs||"",por:p?.por||"",em:p?.em||"",retrabalho:!!o.retrabalho,retornoConf,voltou,volta};
+    const quem=alocOk?{equipeId:eqAloc?String(eqAloc.id):"",equipeNome:eqAloc?String(eqAloc.nome||""):"",emblema:eqAloc?.emblema||"🤝",obs:"",por:String(aloc.por||""),em:String(aloc.em||"")}
+      :{equipeId:pAntiga?.equipeId||"",equipeNome:pAntiga?.equipeNome||"",emblema:pAntiga?.emblema||"🤝",obs:pAntiga?.obs||"",por:pAntiga?.por||"",em:pAntiga?.em||""};
+    return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf,voltou,volta};
   });
   /* performance-2: cada registro leva a conferência da volta, e a apuração
      leva os PESOS DA NOTA em vigor. Eles entram no hash: quem fecha sela os
@@ -675,7 +725,11 @@ Deno.serve(async (req: Request) => {
   // e o login de quem digitou o prazo e o retorno previstos (F15) só descem
   // para a gestão (admin, pcp) e a máquina.
   const gestaoVeTudo = ehMaquina || ["admin", "pcp"].includes(String(cracha?.papel ?? ""));
-  const saida = (r: any) => ehToqueNoNome ? podarToque(r) : gestaoVeTudo ? r : podarCarimbosF15(r);
+  /* A DIVISÃO DA EQUIPE (alocacao, F08): a montagem com senha também não
+     recebe os percentuais nem o histórico deles (o celular não mostra
+     divisão); os outros papéis recebem sem o ID de quem gravou. */
+  const ehMontagem = String(cracha?.papel ?? "") === "montagem";
+  const saida = (r: any) => ehToqueNoNome ? podarToque(r) : gestaoVeTudo ? r : podarCarimbosF15(ehMontagem ? podarAlocacao(r) : podarIdsAlocacao(r));
 
   /* QUEM ASSINA A ENTRADA DO DIARIO: o cracha, nunca o corpo do pedido. Um
      `porId` que viesse do aparelho seria o aparelho dizendo quem ele e --
@@ -1017,7 +1071,16 @@ Deno.serve(async (req: Request) => {
            leu = é a gravação dele: responde como se tivesse gravado agora. */
         if (existing && typeof os.rev === "number" && typeof existing.rev === "number" && existing.rev === os.rev + 1 &&
             existing.atualizadoEm && existing.atualizadoEm === os.atualizadoEm) {
-          return resp({ ok: true, os: saida(existing), repetido: true });
+          /* A divisão que o aparelho reenviou e não é a gravada foi descartada
+             na primeira vez (a resposta se perdeu): diz de novo, para ele repor. */
+          const reenviouDescartada = !ehToqueNoNome && alocacaoMudou(os.alocacao, existing.alocacao);
+          // As marcas de entrega que caíram na primeira vez (E3): diz de novo.
+          const marcasFora = ehToqueNoNome ? [] : entregasNaoGravadas(os, existing);
+          const desc = [...(reenviouDescartada ? ["alocacao"] : []), ...(marcasFora.length ? ["entregas"] : [])];
+          return resp({ ok: true, os: saida(existing), repetido: true,
+            ...(desc.length ? { descartado: desc } : {}),
+            ...(reenviouDescartada ? { descartadoMotivo: { alocacao: "A divisão enviada não é a que ficou gravada no servidor." } } : {}),
+            ...(marcasFora.length ? { entregasRecusadas: marcasFora } : {}) });
         }
         const erroConclusao = validarConclusao(os,existing,String(cracha?.papel || ''));
         /* Para o crachá de toque a conclusão sem prova não derruba o envio: a
@@ -1084,7 +1147,7 @@ Deno.serve(async (req: Request) => {
           const comTrabalho = !!(existing.liberadoPCP || existing.finalizadaEm ||
             (existing.fotosCheckinIds ?? []).length || (existing.fotosRetornoIds ?? []).length ||
             (existing.equipe ?? []).length || existing.confirmacao || existing.horaSaida ||
-            existing.paradoClienteEm || temCampoGestao(existing));
+            existing.paradoClienteEm || temCampoGestao(existing) || temEntregaItem(existing));
           if (semTrabalho && comTrabalho) return resp({ ok: true, os: saida(existing), duplicataEvitada: true });
         }
 
@@ -1122,13 +1185,66 @@ Deno.serve(async (req: Request) => {
            codigo recebe de volta o codigo gravado, casando pelo casamento de
            hoje. Vale para todos, toque e maquina inclusive. Nada aqui recusa. */
         trocarOS(preservarItens(os, existing).os);
+        /* MARCAS DE ENTREGA POR ITEM (E3). Regras em _shared
+           (guardarEntregasItens): só acréscimo, parte do gravado; marca nova
+           só de admin, pcp e operação com senha (balcão), conferida pelo motor
+           da E2 (permissão, saldo, dia, teto); autor, ID e hora do crachá e
+           do servidor; id repetido ignorado; item com marca não sai da lista.
+           O toque (a mescla já partiu do gravado) e a máquina não marcam. O
+           que não passa vira aviso, nunca 422. O autor só é lido do RH quando
+           entra marca nova. */
+        /* A marca recusada volta na resposta (`descartado` com os ids), para o
+           aparelho tirá-la da cópia e da fila: senão a mesma cópia a mandava
+           de novo e, com o saldo liberado, ela entrava calada. */
+        let entregasRecusadas: any[] = [];
+        {
+          const papelEnt = ehMaquina ? "maquina" : ehToqueNoNome ? "toque" : papelUp;
+          const agoraEnt = new Date().toISOString();
+          const rodarEnt = (autor: any) => guardarEntregasItens(os, existing, { papel: papelEnt, avisar: !ehMaquina, autor, agora: agoraEnt });
+          let ge = rodarEnt({ nome: String(cracha?.nome || cracha?.sub || ""), porId: "" });
+          if (ge.eventos.length) ge = rodarEnt(await autorAuditoria());
+          trocarOS(ge.os);
+          avisosToque.push(...ge.avisos);
+          if (!ehMaquina && ge.recusadas.length) entregasRecusadas = ge.recusadas;
+        }
         /* CAMPOS DA GESTAO (F01): ausente fica o gravado, valor novo ainda nao
            entra, null explicito de admin/pcp limpa. O toque ja parte do gravado
            (mesclarToqueNoNome) e nao limpa; a maquina fica com o gravado. */
         // O que o aparelho mandou de prazo e retorno (F15), antes da preservacao.
         const veioRetorno = Object.prototype.hasOwnProperty.call(os, "retornoPrevisto") ? os.retornoPrevisto : undefined;
         const veioPrazo = Object.prototype.hasOwnProperty.call(os, "prazoCombinado") ? os.prazoCombinado : undefined;
+        // A divisão da equipe que o aparelho mandou (F08), antes da preservação.
+        const veioAlocacao = Object.prototype.hasOwnProperty.call(os, "alocacao") ? os.alocacao : undefined;
         trocarOS(preservarAusentes(os, existing, { podeLimpar: !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp) }));
+        /* A DIVISÃO DA EQUIPE DENTRO DA O.S. (F08). Regras em _shared
+           (sanearAlocacao): só admin e pcp mudam; conferida pelo motor e pela
+           chave estrangeira (equipe no cadastro, pessoa no RH); o final é
+           recalculado aqui; os.equipe sai dela; inválida é descartada com
+           aviso e `descartado` na resposta, nunca 422. O RH e o cadastro só
+           são lidos quando a gestão mandou uma divisão diferente da gravada
+           (ou quando a gravada espera a conferência do RH). Roda ANTES do
+           prazo combinado (F15): a equipe que sai da divisão é a que o F15
+           tem de ver (O.S. já entregue que ganha equipe só pela divisão fica
+           "sem prazo", como a que ganha pela lista). */
+        let descarteAlocacao: any = null;
+        {
+          const podeAloc = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
+          // A divisão gravada com o RH fora do ar é conferida na próxima gravação da gestão.
+          const conferir = podeAloc && (alocacaoMudou(veioAlocacao, existing?.alocacao) || existing?.alocacao?.conferirRH === true);
+          let pessoasAloc: any = null, equipesAloc: any[] = [];
+          if (conferir) {
+            try { pessoasAloc = await pessoasReq(); } catch { pessoasAloc = null; }
+            equipesAloc = ((await getCfg()) ?? {})?.performancePCP?.equipes ?? [];
+          }
+          const agoraAloc = new Date().toISOString();
+          const rodarAloc = (autor: any) => sanearAlocacao(veioAlocacao, os, existing, { pode: podeAloc, avisar: !ehMaquina && !ehToqueNoNome,
+            autor, agora: agoraAloc, equipes: equipesAloc, pessoas: pessoasAloc });
+          let ra = rodarAloc({ nome: String(cracha?.nome || cracha?.sub || (ehMaquina ? "Integração" : "")), porId: "" });
+          if (ra.mudou) ra = rodarAloc(await autorAuditoria());
+          trocarOS(ra.os);
+          avisosToque.push(...ra.avisos);
+          if (ra.descartado) descarteAlocacao = { ...ra.descartado, diario: diarioDescarteAlocacao(existing, veioAlocacao, ra.descartado.motivo) };
+        }
         /* PRAZO COMBINADO E RETORNO PREVISTO (F15). Regras em _shared: o
            retorno previsto so admin e pcp digitam, carimbado por dia; o prazo
            nasce uma vez (primeira data agendada), nao anda com a remarcacao e
@@ -1166,7 +1282,6 @@ Deno.serve(async (req: Request) => {
           trocarOS(el.os);
           if (el.aviso) avisosToque.push(el.aviso);
         }
-
         /* CONFERÊNCIA DA VOLTA (carro limpo, equipamentos): pesa na nota de cada
            instalador, então só a gestão escreve e o autor é o CRACHÁ. Revisão
            de 23/09/2026: "por" e "em" vinham do aparelho, e a conta de grupo
@@ -1328,8 +1443,15 @@ Deno.serve(async (req: Request) => {
           const diff = diffAuditavel(existing, gravar);
           const d = eraLapide ? { campos: ["apagado", ...(diff?.campos ?? [])], antes: { apagado: true, ...(diff?.antes ?? {}) }, depois: { apagado: false, ...(diff?.depois ?? {}) } } : diff;
           await auditar(String(os.id), eraLapide ? "restaurar" : existing ? "alterar" : "criar", d, gravar.numero);
+          if (descarteAlocacao) await auditar(String(os.id), "descartar", descarteAlocacao.diario, gravar.numero);
         }
-        return resp({ ok: true, os: saida(gravar), ...(avisosToque.length ? { avisos: avisosToque } : {}) });
+        /* `descartado`: o aparelho volta à divisão (e à lista) da resposta e
+           mostra o aviso fixo. O resto da gravação passou. */
+        const descartado = [...(descarteAlocacao ? ["alocacao"] : []), ...(entregasRecusadas.length ? ["entregas"] : [])];
+        return resp({ ok: true, os: saida(gravar), ...(avisosToque.length ? { avisos: avisosToque } : {}),
+          ...(descartado.length ? { descartado } : {}),
+          ...(descarteAlocacao ? { descartadoMotivo: { alocacao: descarteAlocacao.motivo } } : {}),
+          ...(entregasRecusadas.length ? { entregasRecusadas } : {}) });
       }
 
       case "delete": {
@@ -1515,6 +1637,11 @@ Deno.serve(async (req: Request) => {
       }
 
       case "elenco": {
+        /* "Atualizar elenco" (F07): a pessoa acabou de ser cadastrada no RH em
+           outra aba. A régua do servidor guarda as fichas por 60 s; sem jogar
+           o cache fora, a O.S. gravada com o ID novo seria recusada ao crachá
+           dela no minuto seguinte. Ler de novo é tudo o que o pedido causa. */
+        if (body.forcar === true) _fichasRH = null;
         // DUAS REGUAS NA MESMA PORTA. Quem entra pela montagem NAO DIGITA SENHA
         // -- basta escolher o nome na lista. Esse cracha pode saber quem sao os
         // colegas (a mensagem do dia precisa do nome completo, e a foto e o
@@ -1580,6 +1707,55 @@ Deno.serve(async (req: Request) => {
                      apelido: String(g.apelido || "").trim(), ativo: false, desligado: true };
           })
           .filter((g: any) => g.id);
+        /* FREELANCER PELO CONTRATO DO RH (F07, caminho B). O contrato ativo
+           entra nas escolhas com a tag `freelancer`; o encerrado ou vencido so
+           da nome ao historico (antigos). O fim e a situacao do contrato sao
+           do RH e so sobem para admin/pcp, como a situacao da ficha. O CPF
+           inteiro fica aqui: juntarFreelancers compara e devolve so o ID.
+           Ex-colaborador que voltou como freelancer (mesmo CPF) conta uma vez. */
+        /* SÓ PARA QUEM PEDE (body.freelancers, mandado pela tela da F07). A
+           tela antiga (v135) não conhece o freelancer: contaria o contrato
+           como gente da fábrica no "Equipe hoje". Sem o pedido, a porta
+           responde como antes, e a ordem de publicar tela e servidor deixa de
+           importar. A régua do servidor (fichasRH) conhece os contratos sempre. */
+        const querContratos = body.freelancers === true;
+        /* Tag, CPF pendente e ID repetido são cadastro do RH e servem a quem
+           ESCOLHE gente no seletor: admin, pcp e operação (que monta equipe na
+           gestão). A montagem (toque e conta de grupo) não escolhe gente:
+           recebe o contrato com ID como pessoa comum, sem as marcas, e não
+           recebe o contrato sem ID, que não serve ao celular. */
+        const veContrato = verFichaRH || String(cracha?.papel ?? "") === "operacao";
+        const cpfPorChave = new Map<string, string>(), statusPorChave = new Map<string, string>();
+        for (const r of (col ?? []) as any[]) {
+          const g = r.registro || {};
+          cpfPorChave.set(String(g.id || ""), String(g.cpf || "").replace(/\D/g, ""));
+          statusPorChave.set(String(g.id || ""), String(g.statusId || "").trim());
+        }
+        let contratosRH: any[] = [];
+        if (querContratos) {
+          try { contratosRH = await contratosFreelancerRH(); }
+          catch (e) { return resp({ error: (e as Error).message }, 500); }
+        }
+        const junta = juntarFreelancers([...pessoas, ...antigos].map((p: any) => ({ ...p, cpf: cpfPorChave.get(p.chave) || "", statusId: statusPorChave.get(p.chave) || "" })),
+          contratosRH, { hoje: perfDia(new Date().toISOString()) });
+        const marcar = (p: any) => veContrato && junta.repetidos.has(p.id) ? { ...p, idRepetido: true } : p;
+        const contratoParaTela = (c: any) => ({
+          chave: c.chave, id: c.id, nome: c.nome, apelido: c.apelido, setor: "", area: "", cargo: veContrato ? c.funcao : "",
+          statusId: "", status: "", ativo: true, foto: "",
+          ...(veContrato ? { freelancer: true } : {}),
+          ...(veContrato && c.semCpf ? { semCpf: true } : {}), ...(veContrato && c.cpfInvalido ? { cpfInvalido: true } : {}),
+          ...(veContrato && c.idRepetido ? { idRepetido: true } : {}),
+          ...(verFichaRH ? { contratoFim: c.contratoFim, situacaoContrato: c.situacaoContrato } : {}),
+        });
+        const pessoasComContrato = [
+          ...pessoas.filter((p: any) => !junta.fichasFora.has(p.chave)).map(marcar),
+          ...junta.contratos.filter((c: any) => c.ativo && (veContrato || c.id)).map(contratoParaTela),
+        ].sort((a: any, b: any) => a.nome.localeCompare(b.nome));
+        const antigosComContrato = [
+          ...antigos.filter((p: any) => !junta.fichasFora.has(p.chave)).map(marcar),
+          ...junta.contratos.filter((c: any) => !c.ativo && c.id).map((c: any) => ({ chave: c.chave, id: c.id, nome: c.nome,
+            apelido: c.apelido, ativo: false, desligado: true, freelancer: true, ...(c.idRepetido ? { idRepetido: true } : {}) })),
+        ];
         // Presenca: ferias e ausencias vem CRUAS (o dia local quem sabe e a
         // tela; aqui e UTC). Janela curta para o pacote nao inchar.
         const hojeUTC = new Date().toISOString().slice(0, 10);
@@ -1625,8 +1801,10 @@ Deno.serve(async (req: Request) => {
         // por que ela veio vazia e esta porta, entao e ela que precisa contar.
         // Quem entrou sem senha nao recebe a lista de quem ja saiu (o celular
         // dele so mostra as O.S. da propria equipe, que sao de agora).
-        return resp({ pessoas, antigos: verFichaRH ? antigos : [], veiculos, hoje: hojeUTC, em: new Date().toISOString(), fichaRH: verFichaRH,
-                      ferias: verFichaRH ? ferias : [], ausencias: verFichaRH ? ausencias : [] });
+        // `avisos`: ID repetido entre ficha e contrato, ou pessoa com ficha e
+        // contrato ativos ao mesmo tempo. Conferência do RH: só admin/pcp.
+        return resp({ pessoas: pessoasComContrato, antigos: verFichaRH ? antigosComContrato : [], veiculos, hoje: hojeUTC, em: new Date().toISOString(), fichaRH: verFichaRH,
+                      ferias: verFichaRH ? ferias : [], ausencias: verFichaRH ? ausencias : [], avisos: verFichaRH ? junta.avisos : [] });
       }
 
       case "getCfg": {
@@ -1643,6 +1821,12 @@ Deno.serve(async (req: Request) => {
              participações e logos): a ação "valores" já recusa esse crachá, e
              o espelho não usa nada disso. */
           if (ehToqueNoNome) { delete publico.bonusPCP; delete publico.performancePCP; }
+          /* A montagem com senha também não recebe as participações (os
+             percentuais de cada colega, F08); as equipes continuam descendo. */
+          else if (ehMontagem && publico.performancePCP && typeof publico.performancePCP === "object") {
+            const { participacoes: _p, ...perf } = publico.performancePCP;
+            publico.performancePCP = perf;
+          }
           return resp({ cfg: publico, versao });
         }
         return resp({ cfg, versao });

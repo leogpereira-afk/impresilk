@@ -62,6 +62,9 @@ function casarItensSeguro(antes, novos) {
   const A = Array.isArray(antes) ? antes : [];
   return (Array.isArray(novos) ? novos : []).map((it, i) => it && A[i] && String(A[i].item ?? '') === String(it.item ?? '') ? i : -1);
 }
+function adotarUidsSeguro(alvo, fonte) {
+  return typeof OPERACAO.adotarUidsItens === 'function' && alvo && fonte && alvo !== fonte ? OPERACAO.adotarUidsItens(alvo, fonte) : 0;
+}
 function novoUidItemSeguro() {
   if (typeof OPERACAO.novoUidItem === 'function') return OPERACAO.novoUidItem();
   const c = typeof crypto !== 'undefined' ? crypto : null, b = new Uint8Array(12);
@@ -917,8 +920,13 @@ function refreshAposPull() {
    da equipe não apareciam, e a primeira gravação batia em conflito. Sem
    edição pendente e sem dedo num campo da ficha, troca pela versão nova. */
 function atualizarFichaAberta() {
-  if (!STATE.modalOSId || !_modalDraft || _modalDirty || _saveDraftTimer) return;
+  if (!STATE.modalOSId || !_modalDraft) return;
   const novo = STORE.getOS(STATE.modalOSId);
+  /* O código do item que o servidor deu (E1) entra no rascunho mesmo com
+     edição pendente: só o código que falta, nada mais muda. Sem ele a
+     próxima gravação iria sem código, e o servidor casaria pelo número. */
+  adotarUidsSeguro(_modalDraft, novo);
+  if (_modalDirty || _saveDraftTimer) return;
   if (!novo || novo === _modalDraft || typeof novo.rev !== 'number' || novo.rev <= (Number(_modalDraft.rev) || 0)) return;
   const ae = document.activeElement;
   if (ae && ae.closest && ae.closest('#modal-os') && ['INPUT', 'TEXTAREA', 'SELECT'].includes(ae.tagName)) return;
@@ -1181,6 +1189,10 @@ function initSyncIndicator() {
     const ref = item && item.os && item.os.numero ? 'O.S ' + item.os.numero + ': ' : '';
     toast('⚠️ ' + ref + (avisos || []).join(' '), 'error');
   });
+  /* A DIVISÃO DA EQUIPE RECUSADA (F08): o aparelho já voltou à versão do
+     servidor; o aviso fica fixo no topo até alguém tocar em "Entendi". */
+  STORE.on('alocacao-descartada', () => { pintarAvisosAlocacao(); repintarSeLivre(); });
+  pintarAvisosAlocacao();
   // Outra aba trocou a base do aparelho (saiu ou entrou outra pessoa): esta
   // aba não grava mais no disco. Recarregar é o caminho seguro.
   STORE.on('base-trocada', () => {
@@ -1290,6 +1302,15 @@ const semValorRua = v => v == null || v === '' || v === false || (Array.isArray(
 function manterExecucaoDoServidor(local, remote) {
   const mantido = { fotos: 0, saida: false };
   if (!local || !remote) return mantido;
+  /* A DIVISÃO DA EQUIPE (alocacao e o histórico dela, F08) é a do servidor:
+     o conflito não é sobre ela, e a cópia velha deste aparelho regravaria
+     uma divisão que outro tablet já trocou (ou ressuscitaria uma que a
+     gestão limpou). A lista os.equipe continua a deste aparelho; se ela
+     divergir da divisão, o servidor marca a divisão como desatualizada. */
+  for (const k of ['alocacao', 'alocacaoLog']) {
+    if (Object.prototype.hasOwnProperty.call(remote, k)) local[k] = JSON.parse(JSON.stringify(remote[k]));
+    else delete local[k];
+  }
   for (const k of ['fotosCheckinIds', 'fotosRetornoIds']) {
     const meus = Array.isArray(local[k]) ? local[k] : [];
     const novos = (Array.isArray(remote[k]) ? remote[k] : []).filter(id => id && !meus.includes(id));
@@ -1695,7 +1716,7 @@ let _audOS = null;   // { osId, aberto, carregando, entradas, cortado, offline, 
 const AUD_ROTULOS = {
   equipe: 'Equipe', veiculo: 'Veículo',
   'instalacao.data': 'Data da instalação', 'instalacao.periodo': 'Período', 'instalacao.hora': 'Hora', 'instalacao.duracaoDias': 'Duração (dias)',
-  previsaoEntrega: 'Previsão de entrega', valorTotal: 'Valor total', itens: 'Itens',
+  previsaoEntrega: 'Previsão de entrega', valorTotal: 'Valor total', itens: 'Itens', 'itens.entregas': 'Entrega por item',
   liberadoPCP: 'Liberada pelo PCP', confirmacao: 'Confirmação do cliente', carroLiberado: 'Carro liberado',
   horaSaida: 'Hora de saída', horaRetorno: 'Hora de retorno', saidaEm: 'Saída registrada', retornoEm: 'Retorno registrado',
   fotosCheckinIds: 'Fotos do check-in', fotosRetornoIds: 'Fotos do serviço pronto', layoutFotoId: 'Layout',
@@ -1705,6 +1726,7 @@ const AUD_ROTULOS = {
   tipo: 'Tipo', numero: 'Número da O.S.', baixaAutoERP: 'Baixa pelo ERP', justificativaConclusao: 'Justificativa da conclusão',
   prazoCombinado: 'Prazo combinado', retornoPrevisto: 'Retorno previsto',
   agendaLog: 'Histórico de remarcações', origemPDF: 'Lida do PDF do ERP',
+  alocacao: 'Divisão da equipe', alocacaoLog: 'Histórico da divisão',
   apagado: 'Excluída'
 };
 // Por dentro dos campos que são objeto (conferência da volta, limpeza do
@@ -1713,7 +1735,8 @@ const AUD_ROTULOS = {
 const AUD_SUBROTULOS = {
   carroLimpo: 'Carro limpo', carroArrumado: 'Carro arrumado', equipamentosOk: 'Equipamentos ok', semAvaria: 'Sem avaria',
   obs: 'Observação', dia: 'Dia', veiculo: 'Veículo', motivo: 'Motivo', data: 'Data', status: 'Situação',
-  por: 'Por', em: 'Em', recebidoEm: 'Recebido em', confirmadoPor: 'Confirmado por', fotos: 'Fotos'
+  por: 'Por', em: 'Em', recebidoEm: 'Recebido em', confirmadoPor: 'Confirmado por', fotos: 'Fotos',
+  descartada: 'Recusada'
 };
 // porConta (o login de quem lançou a entrega) também: "Por conta" leria outra coisa.
 const AUD_SUBOCULTAS = new Set(['porId', 'porConta']);
@@ -1727,7 +1750,23 @@ function audTexto(v) {
   if (dia) return `${dia[3]}/${dia[2]}/${dia[1]}`;
   return t;
 }
-const AUD_ACOES = { criar: 'Criou a O.S.', alterar: 'Alterou', excluir: 'Excluiu a O.S.', restaurar: 'Restaurou a O.S.', configuracao: 'Alterou a configuração' };
+const AUD_ACOES = { criar: 'Criou a O.S.', alterar: 'Alterou', excluir: 'Excluiu a O.S.', restaurar: 'Restaurou a O.S.', configuracao: 'Alterou a configuração',
+  descartar: 'Tentou alterar a divisão da equipe (recusado)' };
+/* A DIVISÃO DA EQUIPE (F08) no histórico: cada pessoa com o percentual FINAL
+   (o nome pela régua de hoje, nunca o ID de quem gravou), a equipe e as
+   marcas. A recusa mostra o motivo e o que foi proposto. */
+const AUD_ACOES_DIVISAO = { criar: 'criou', alterar: 'alterou', limpar: 'limpou', desatualizar: 'ficou desatualizada', reatualizar: 'voltou a valer', conferir: 'conferida no RH' };
+function audDivisao(v) {
+  const grupos = Array.isArray(v && v.grupos) ? v.grupos : [];
+  const finais = typeof DIVISAO !== 'undefined' && DIVISAO && typeof DIVISAO.finais === 'function' ? DIVISAO.finais({grupos})
+    : (Array.isArray(v && v.final) ? v.final.filter(f => f && typeof f === 'object' && Number.isFinite(f.cota)) : []);
+  const pct = c => (c / 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + '%';
+  const pessoas = finais.map(f => `${OPERACAO.nomePessoa(f.pessoaId)} ${pct(f.cota)}`).join(', ');
+  const equipes = typeof STORE !== 'undefined' && STORE.getCFG ? (((STORE.getCFG() || {}).performancePCP || {}).equipes || []) : [];
+  const nomes = grupos.map(g => g && g.equipeId ? String((equipes.find(e => e && e.id === g.equipeId) || {}).nome || '') : '').filter(Boolean);
+  const marcas = [v && v.manual ? 'editada à mão' : '', v && v.desatualizada ? 'desatualizada' : '', v && v.conferirRH ? 'pessoas a conferir no RH' : ''].filter(Boolean);
+  return [nomes.length ? nomes.join(' + ') : '', pessoas || '(sem pessoas)', ...marcas].filter(Boolean).join(' · ');
+}
 const AUD_ORIGENS = { tela: 'pela tela da gestão', toque: 'pelo celular da equipe', maquina: 'pela integração' };
 function audValor(campo, v) {
   if (v == null || v === '' || (Array.isArray(v) && !v.length)) return '(vazio)';
@@ -1735,6 +1774,25 @@ function audValor(campo, v) {
   if (campo === 'valorTotal' && Number.isFinite(Number(v))) return Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   if (campo === 'equipe' && Array.isArray(v)) return v.map(n => OPERACAO.nomePessoa(n)).join(', ');
   if (campo === 'tipo') return v === 'interno' ? 'Cliente retira' : v === 'externo' ? 'Externo' : String(v);
+  if (campo === 'alocacao' && v && typeof v === 'object') {
+    if (v.descartada != null) return 'Recusada: ' + String(v.descartada || 'sem motivo') + (Array.isArray(v.grupos) && v.grupos.length ? ' · proposta: ' + audDivisao(v) : '');
+    return audDivisao(v);
+  }
+  if (campo === 'alocacaoLog' && v && typeof v === 'object' && !Array.isArray(v)) {
+    const n = Number(v.linhas) || 0;
+    const novas = (Array.isArray(v.novas) ? v.novas : []).filter(e => e && typeof e === 'object')
+      .map(e => [AUD_ACOES_DIVISAO[e.acao] || 'mudou', e.por ? 'por ' + e.por : ''].filter(Boolean).join(' '));
+    return `${n} ${n === 1 ? 'registro' : 'registros'}` + (novas.length ? ` (novo: ${novas.join('; ')})` : '');
+  }
+  // Entrega por item (E3): quantas marcas, e uma linha por marca nova (sem R$).
+  if (campo === 'itens.entregas' && v && typeof v === 'object' && !Array.isArray(v)) {
+    const n = Number(v.marcas) || 0;
+    const tipos = { entregue: 'entregue', retirado: 'retirado', problema: 'problema', cancelado: 'item cancelado', desfeito: 'marca desfeita' };
+    const novos = (Array.isArray(v.novos) ? v.novos : []).filter(l => l && typeof l === 'object')
+      .map(l => [l.item ? 'item ' + l.item : 'item', tipos[l.tipo] || String(l.tipo || ''), Number.isInteger(l.qtde) ? l.qtde + (l.qtde === 1 ? ' unidade' : ' unidades') : '',
+        l.dia ? 'em ' + audTexto(l.dia) : '', l.motivo ? 'motivo: ' + l.motivo : ''].filter(Boolean).join(' '));
+    return `${n} ${n === 1 ? 'marca' : 'marcas'}` + (novos.length ? ` (${novos.length === 1 ? 'nova' : 'novas'}: ${novos.join('; ')})` : '');
+  }
   if (campo.startsWith('fotos') && Array.isArray(v)) return v.length + (v.length === 1 ? ' foto' : ' fotos');
   // F15: um dia por linha ("30/09: saída 08:00, retorno 17:00").
   if (campo === 'retornoPrevisto') return (Array.isArray(v) ? v : [v]).filter(e => e && typeof e === 'object')
@@ -2575,49 +2633,116 @@ function tiposServicoHist() {
    lista sem ficha no RH (terceiro ainda sem cadastro) aparece marcado e
    segue como nome até ganhar ficha. Nome antigo já gravado na O.S. ("Lucas")
    aparece marcado na linha da pessoa e, ao confirmar, vira o ID dela. */
+/* FREELANCER NO SELETOR (F07, caminho B, decisão do dono de 29/09/2026).
+   O prestador vem do CONTRATO de freelancer do RH, com o ID do CPF do
+   contrato, e aparece no grupo "Freelancers" com a tag. Cadastro que não pode
+   pontuar aparece travado, com o motivo, em vez de sumir calado: contrato sem
+   CPF (não há ID) e ID que ficha e contrato dividem (o ponto iria para a
+   pessoa errada). A busca acha por nome, apelido e pelos 6 dígitos do ID; o
+   CPF inteiro nunca chega ao aparelho. */
+const RH_CONTRATOS_FREELANCER = 'https://leogpereira-afk.github.io/impresilkrh/freelancers';
+const MOTIVO_SEM_CPF = 'Contrato de freelancer sem CPF: o RH precisa preencher o CPF para ele entrar na equipe.';
+const MOTIVO_ID_REPETIDO = 'ID repetido entre ficha e contrato de freelancer: o RH precisa conferir o CPF.';
+const MOTIVO_CPF_INVALIDO = 'Contrato de freelancer com CPF que não confere: o RH precisa corrigir o CPF para ele entrar na equipe.';
 function opcoesEquipe(atuais) {
   const cfg = STORE.getCFG();
   const freq = {};
   STORE.getAllOS().forEach(o => OPERACAO.equipe(o).forEach(x => { const k = OPERACAO.chavePessoa(x); freq[k] = (freq[k] || 0) + 1; }));
   const vistos = new Set(), out = [];
-  const add = (valor, grupo) => {
+  const add = (valor, grupo, rh) => {
     const k = OPERACAO.chavePessoa(valor);
     if (!k || vistos.has(k)) return;
     vistos.add(k);
     const p = OPERACAO.pessoaDe(valor);
     const ficha = p && !p.semFicha ? p : null;
+    const freelancer = !!(ficha && ficha.freelancer);
     out.push({ valor: p ? p.id : String(valor).trim(), chave: k, nome: OPERACAO.nomePessoa(valor),
-      completo: ficha ? ficha.nome : '', id: p ? p.id : '', grupo: p ? grupo : 'Sem ficha no RH', n: freq[k] || 0 });
+      completo: ficha ? ficha.nome : '', apelido: ficha ? String(ficha.apelido || '') : '', id: p ? p.id : '',
+      grupo: p ? grupo : 'Sem ficha no RH', freelancer, rh: rh || (ficha && ficha.chave) || '',
+      bloqueio: p && OPERACAO.idRepetido(p.id) ? MOTIVO_ID_REPETIDO : '', n: freq[k] || 0 });
+  };
+  // Cadastro que não pode ser escolhido: uma linha por cadastro, travada.
+  const travado = (p, motivo) => {
+    const rh = 'rh:' + String(p.chave || p.nome);
+    if (vistos.has(rh)) return;
+    vistos.add(rh);
+    out.push({ valor: p.id || '', chave: p.id || rh, nome: String(p.nome || ''), completo: String(p.nome || ''),
+      apelido: String(p.apelido || ''), id: p.id || '', grupo: p.freelancer ? 'Freelancers' : (p.area || 'Sem área'),
+      freelancer: !!p.freelancer, rh: String(p.chave || ''), bloqueio: motivo, n: p.id ? (freq[p.id] || 0) : 0 });
   };
   (Array.isArray(cfg.instaladores) ? cfg.instaladores : []).forEach(n => add(n, 'Instaladores'));
-  (STORE.elenco().pessoas || []).filter(p => p.ativo !== false && OPERACAO.ehIdPessoa(p.id))
-    .slice().sort((a, b) => String(a.area || '~').localeCompare(String(b.area || '~'), 'pt-BR') || String(a.nome).localeCompare(String(b.nome), 'pt-BR'))
-    .forEach(p => add(p.id, p.area || 'Sem área'));
+  const ordem = p => p.freelancer ? '~~' : (p.area || '~');
+  const repetidos = new Set();
+  /* ID repetido que JÁ está na O.S.: UMA linha só, marcada, com o ID (os
+     cadastros ficam no texto). Uma linha por cadastro, as duas marcadas com o
+     mesmo valor, fazia "desmarcar a Rita" gravar o ID de novo pela linha do
+     Renan. Desmarcar esta linha tira o ID da O.S. */
+  const naOS = new Set((atuais || []).map(OPERACAO.chavePessoa));
+  const linhaDoId = new Map();
+  (STORE.elenco().pessoas || []).filter(p => p.ativo !== false && (OPERACAO.ehIdPessoa(p.id) || (p.freelancer && p.semCpf)))
+    .slice().sort((a, b) => ordem(a).localeCompare(ordem(b), 'pt-BR') || String(a.nome).localeCompare(String(b.nome), 'pt-BR'))
+    .forEach(p => {
+      if (!OPERACAO.ehIdPessoa(p.id)) return travado(p, p.cpfInvalido ? MOTIVO_CPF_INVALIDO : MOTIVO_SEM_CPF);
+      if (p.idRepetido || OPERACAO.idRepetido(p.id)) {
+        repetidos.add(p.id);
+        if (!naOS.has(p.id)) return travado(p, MOTIVO_ID_REPETIDO);
+        const ja = linhaDoId.get(p.id);
+        if (!ja && vistos.has(p.id)) return;   // o ID já tem linha (lista de instaladores)
+        if (ja) { ja.nome += ' ou ' + String(p.nome || ''); ja.apelido += ' ' + String(p.apelido || ''); return; }
+        const linha = { valor: p.id, chave: p.id, nome: String(p.nome || ''), completo: '', apelido: String(p.apelido || ''), id: p.id,
+          grupo: p.freelancer ? 'Freelancers' : (p.area || 'Sem área'), freelancer: false, rh: '', bloqueio: MOTIVO_ID_REPETIDO, n: freq[p.id] || 0 };
+        linhaDoId.set(p.id, linha); vistos.add(p.id);
+        out.push(linha);
+        return;
+      }
+      add(p.id, p.freelancer ? 'Freelancers' : (p.area || 'Sem área'), p.chave);
+    });
+  // O ID repetido já tem as linhas travadas de cada cadastro.
+  repetidos.forEach(id => vistos.add(id));
   // O que já está na O.S. e não apareceu acima (ficha inativa, nome antigo sem
   // ficha): continua marcado, para não sumir calado ao confirmar.
   (atuais || []).forEach(v => add(v, 'Já na O.S.'));
   return out;
 }
-function abrirPickerEquipe() {
-  const atuais = (() => { const v = _modalDraft.equipe; return Array.isArray(v) ? v.slice() : (v ? [v] : []); })();
-  const marcadas = new Set(atuais.map(OPERACAO.chavePessoa));
+/* `marcadosAgora` e `novas` vêm do "Atualizar elenco": o que estava marcado
+   continua marcado, e quem entrou no RH agora aparece destacado. */
+function abrirPickerEquipe(marcadosAgora, novas) {
+  const daOS = (() => { const v = _modalDraft.equipe; return Array.isArray(v) ? v.slice() : (v ? [v] : []); })();
+  const marcadosLista = Array.isArray(marcadosAgora) ? marcadosAgora.filter(Boolean) : daOS;
+  const atuais = [...daOS, ...marcadosLista];
+  const marcadas = new Set(marcadosLista.map(OPERACAO.chavePessoa));
   const opcoes = opcoesEquipe(atuais);
   let grupo = '';
   const linhas = opcoes.map(o => {
     const cab = o.grupo !== grupo ? `<div class="picker-grupo">${esc(o.grupo)}</div>` : '';
     grupo = o.grupo;
-    const sub = o.completo ? `${o.completo} · ID ${o.id}` : (o.id ? `ID ${o.id}` : '⚠️ sem ficha no RH: grava o nome');
-    const busca = normNome([o.nome, o.completo, o.id].join(' '));
-    return `${cab}<label class="picker-opt" data-busca="${esc(busca)}">
-      <input type="checkbox" value="${esc(o.valor)}" ${marcadas.has(o.chave) ? 'checked' : ''}>
-      <span class="picker-pessoa">${esc(o.nome)}<small>${esc(sub)}</small></span>
+    const sub = o.bloqueio ? '⚠️ ' + (o.id ? `ID ${o.id} · ` : '') + o.bloqueio
+      : o.completo ? `${o.completo} · ID ${o.id}` : (o.id ? `ID ${o.id}` : '⚠️ sem ficha no RH: grava o nome');
+    const busca = normNome([o.nome, o.completo, o.apelido, o.id].join(' '));
+    const nova = !!(novas && o.rh && novas.has(o.rh));
+    // Travado não entra; o que já estava na O.S. continua marcado e pode sair.
+    const marcado = !!(o.valor && marcadas.has(o.chave));
+    return `${cab}<label class="picker-opt${o.bloqueio ? ' bloqueado' : ''}${nova ? ' nova' : ''}" data-busca="${esc(busca)}">
+      <input type="checkbox" value="${esc(o.valor)}" ${marcado ? 'checked' : ''} ${o.bloqueio && !marcado ? 'disabled' : ''}>
+      <span class="picker-pessoa">${esc(o.nome)}${o.freelancer ? ' <span class="tag-freelancer">Freelancer</span>' : ''}${nova ? ' <span class="tag-nova">nova</span>' : ''}<small>${esc(sub)}</small></span>
       ${o.n > 0 ? `<span class="picker-n">${o.n}×</span>` : ''}
     </label>`;
   }).join('');
+  const avisos = (STORE.elenco().avisos || []).map(a => `<p class="picker-aviso">⚠️ ${esc(a)}</p>`).join('');
+  /* Pessoa nova nasce no RH, nunca aqui (o PCP não escreve no RH). O link
+     abre a tela de contratos de freelancer em outra aba; de volta, "Atualizar
+     elenco" relê a lista sem o cache do servidor. */
+  const acoes = `<div class="picker-acoes">
+      <a class="btn-ghost btn-sm" data-picker-cadastrar href="${esc(RH_CONTRATOS_FREELANCER)}" target="_blank" rel="noopener">Cadastrar novo no RH ↗</a>
+      <button type="button" class="btn-ghost btn-sm" data-picker-atualizar>Atualizar elenco</button>
+    </div>
+    <p class="picker-dica text-muted">Freelancer entra pelo contrato no RH, com CPF (precisa de acesso ao RH). Depois toque em Atualizar elenco.</p>`;
   $('#picker-title').textContent = 'Equipe';
   $('#picker-list').innerHTML = opcoes.length
-    ? `<input type="search" class="picker-busca" placeholder="Buscar por nome ou ID" autocomplete="off" aria-label="Buscar pessoa">${linhas}`
-    : '<p class="text-muted">Sem pessoas do RH neste aparelho ainda. Atualize e tente de novo.</p>';
+    ? `${avisos}${acoes}<input type="search" class="picker-busca" placeholder="Buscar por nome, apelido ou ID" autocomplete="off" aria-label="Buscar pessoa">${linhas}`
+    : `${acoes}<p class="text-muted">Sem pessoas do RH neste aparelho ainda. Toque em Atualizar elenco.</p>`;
+  const atualizar = document.querySelector('#picker-list [data-picker-atualizar]');
+  if (atualizar) atualizar.onclick = () => atualizarElencoDoPicker();
   const busca = document.querySelector('#picker-list .picker-busca');
   if (busca) busca.oninput = () => {
     const q = normNome(busca.value);
@@ -2632,6 +2757,27 @@ function abrirPickerEquipe() {
   const addBox = document.querySelector('#picker-overlay .picker-add');
   if (addBox) addBox.style.display = 'none';
   $('#picker-overlay').classList.remove('hidden');
+}
+/* "Atualizar elenco": relê o RH na hora (o servidor passa por cima da cópia
+   de 60 s), mantém o que estava marcado e destaca quem é novo. Sem internet,
+   diz que não atualizou em vez de fingir que a pessoa não existe. */
+async function atualizarElencoDoPicker() {
+  if (!STORE || typeof STORE.pullElenco !== 'function') return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    toast('Sem internet: o elenco não foi atualizado. A pessoa nova aparece quando a conexão voltar.', 'error');
+    return;
+  }
+  const antes = new Set((STORE.elenco().pessoas || []).map(p => p.chave));
+  const ok = await STORE.pullElenco(true, { semCache: true });
+  if (!ok) { toast('Não foi possível atualizar o elenco agora. Tente de novo.', 'error'); return; }
+  if (OPERACAO.esquecerPessoas) OPERACAO.esquecerPessoas();
+  const novas = new Set((STORE.elenco().pessoas || []).map(p => p.chave).filter(c => c && !antes.has(c)));
+  if (_pickerField !== 'equipe' || !_modalDraft) return;   // o seletor fechou no meio
+  // As caixas são lidas DEPOIS da resposta: o que a gestão marcou com o
+  // pedido no ar continua marcado no redesenho.
+  const marcados = $$('#picker-list input[type=checkbox]').filter(c => c.checked).map(c => c.value);
+  abrirPickerEquipe(marcados, novas);
+  toast(novas.size ? `Elenco atualizado: ${novas.size} pessoa${novas.size === 1 ? '' : 's'} nova${novas.size === 1 ? '' : 's'}.` : 'Elenco atualizado. Nenhuma pessoa nova.');
 }
 
 let _pickerField = null;
@@ -2681,7 +2827,7 @@ function initPicker() {
        instalador: a O.S. some do espelho de todos, não conta na nota e, para
        o PCP, o servidor nem guarda o nome na lista. Quem cadastra é o admin. */
     if (_pickerField === 'equipe' || _pickerField === 'responsavelAgenda') {
-      toast('"' + val + '" não está na lista. Cadastre a pessoa em Configurações (admin) e escolha aqui.', 'error');
+      toast('"' + val + '" não está na lista. Cadastre a pessoa no RH e toque em Atualizar elenco.', 'error');
       return;
     }
     const label = document.createElement('label');
@@ -2706,7 +2852,8 @@ function initPicker() {
       $('#picker-add-btn').onclick();
       if ($('#picker-novo').value.trim()) return; // recusado: o aviso já saiu
     }
-    const vals = $$('#picker-list input[type=checkbox]').filter(c => c.checked).map(c => c.value);
+    // Sem repetir: o ID repetido tem uma linha travada por cadastro (F07).
+    const vals = [...new Set($$('#picker-list input[type=checkbox]').filter(c => c.checked).map(c => c.value).filter(Boolean))];
     _modalDraft[_pickerField] = vals;
     saveDraft();
     fecharPicker();
@@ -5821,10 +5968,11 @@ function fichaRHDoChip(nome) {
    nome dela aponta para uma ficha. Digitar fica só para terceiro sem ficha. */
 function instaladorDoRHHTML(cfg) {
   const naLista = new Set((cfg.instaladores || []).map(OPERACAO.chavePessoa));
-  const livres = (STORE.elenco().pessoas || []).filter(p => p.ativo !== false && OPERACAO.ehIdPessoa(p.id) && !naLista.has(p.id));
+  // ID repetido entre ficha e contrato (F07) não entra: o nome da lista não o alcançaria.
+  const livres = (STORE.elenco().pessoas || []).filter(p => p.ativo !== false && OPERACAO.ehIdPessoa(p.id) && !naLista.has(p.id) && !p.idRepetido && !OPERACAO.idRepetido(p.id));
   if (!livres.length) return '';
   const porArea = new Map();
-  for (const p of livres) { const k = p.area || 'Sem área'; if (!porArea.has(k)) porArea.set(k, []); porArea.get(k).push(p); }
+  for (const p of livres) { const k = p.freelancer ? 'Freelancers' : (p.area || 'Sem área'); if (!porArea.has(k)) porArea.set(k, []); porArea.get(k).push(p); }
   const grupos = [...porArea.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR')).map(([area, ps]) =>
     `<optgroup label="${esc(area)}">${ps.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')).map(p => `<option value="${esc(p.id)}">${esc(p.nome)} · ID ${esc(p.id)}</option>`).join('')}</optgroup>`).join('');
   return `<div class="flex gap-6 mt-8"><select class="w-100" data-cfg-rh aria-label="Pessoa do RH"><option value="">Adicionar pessoa do RH…</option>${grupos}</select><button class="btn-primary btn-sm" data-cfg-rh-add>+</button></div>`;
@@ -6243,6 +6391,24 @@ function imprimirAnalisePCP(titulo,elemento,periodo,fonteApuracao) {
     window.print();
   };
   box.showModal();
+}
+
+/* AVISO FIXO DA DIVISÃO RECUSADA (F08). Uma linha por O.S., com o motivo que
+   o servidor deu; "Entendi" dispensa só aquela. */
+function pintarAvisosAlocacao() {
+  const lista = typeof STORE.avisosAlocacao === 'function' ? STORE.avisosAlocacao() : [];
+  let box = document.getElementById('aviso-alocacao');
+  if (!lista.length) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'aviso-alocacao';
+    box.className = 'aviso-alocacao';
+    box.setAttribute('role', 'alert');
+    const main = document.querySelector('#app main') || document.body;
+    main.insertBefore(box, main.firstChild);
+  }
+  box.innerHTML = lista.map(a => `<div class="trava-msg"><span>⚠️ A divisão da equipe da O.S. ${esc(a.numero || a.id)} não foi gravada. ${esc(a.motivo)} Este aparelho voltou à divisão que está no servidor.</span><button type="button" class="btn-ghost" data-aloc-ok="${esc(a.id)}">Entendi</button></div>`).join('');
+  box.querySelectorAll('[data-aloc-ok]').forEach(b => { b.onclick = () => { STORE.dispensarAvisoAlocacao(b.getAttribute('data-aloc-ok')); pintarAvisosAlocacao(); }; });
 }
 
 function mostrarConflitoCFG(c) {

@@ -378,7 +378,27 @@ function alocacaoSugerida(fonte, opcoes) {
   const a = montar([{equipeId:equipe ? String(equipe.id) : null, liderId:lider, membros:ids.map(id => ({pessoaId:id, freelancer:freelancer(id)}))}], o.regra);
   return {...base, alocacao:a, origem:motivo || (equipe ? 'equipe' : 'legado'), equipeId:equipe ? String(equipe.id) : null, semLider:!lider, equipesIguais, aviso};
 }
+/* A MESMA GENTE (F08): os.equipe (a lista plana) e a divisão têm as mesmas
+   pessoas, sem olhar a ordem nem repetição. É o que o servidor confere para
+   marcar a divisão `desatualizada` quando uma aba antiga troca os.equipe sem
+   mandar a divisão. */
+function mesmaGente(equipe, aloc) {
+  const a = new Set(lista(equipe).map(x => String(x == null ? '' : x).trim()).filter(Boolean));
+  const b = new Set(derivarEquipe(aloc));
+  return a.size === b.size && [...a].every(x => b.has(x));
+}
+/* CONFIRMADA (F08): a divisão gravada na O.S. conta como participação
+   confirmada da performance só quando é válida, não está marcada
+   `desatualizada` e tem a mesma gente de os.equipe. Fora disso ela é só
+   sugestão e nunca confirma nada. A divisão gravada com o RH fora do ar
+   (conferirRH) também não confirma enquanto as pessoas não forem conferidas.
+   A mesma conta no aparelho (performance.js) e no servidor (perfFonte). */
+function alocacaoConfirmada(os) {
+  const a = os && os.alocacao;
+  if (!a || typeof a !== 'object' || Array.isArray(a) || a.desatualizada === true || a.conferirRH === true || validar(a)) return false;
+  return mesmaGente(os.equipe, a);
+}
 /* ==== FIM DO MOTOR ==== */
-return {TOTAL, REGRA_PADRAO, regraValida, padrao, entreEquipes, finais, montar, editar, travar, restaurarPadrao, trocarLider, validar, derivarEquipe, ratearCentavosLider, alocacaoSugerida};
+return {TOTAL, REGRA_PADRAO, regraValida, padrao, entreEquipes, finais, montar, editar, travar, restaurarPadrao, trocarLider, validar, derivarEquipe, ratearCentavosLider, alocacaoSugerida, mesmaGente, alocacaoConfirmada};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = DIVISAO;

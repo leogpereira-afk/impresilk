@@ -355,6 +355,8 @@ function presencaRH(dia) {
   const presentes = [], ausentes = [], fora = [];
   const sabeSituacao = temFichaRH();
   for (const p of pessoasRH()) {
+    // Freelancer é contrato, não quadro (F07): não entra na presença da fábrica.
+    if (p.freelancer) continue;
     if (p.ativo === false) { fora.push(p); continue; }
     const a = sabeSituacao ? ausenciaRH(p, dia) : null;
     if (a) ausentes.push({ p, ...a }); else presentes.push(p);
@@ -435,8 +437,11 @@ function pessoasDosChips(os) {
     vistos.add(k);
     const p = OPERACAO.pessoaDe(n);
     // A dica diz A QUEM o chip leva (nome completo e ID): marcar grava o ID.
-    out.push({ valor: OPERACAO.idPessoa(n) || String(n).trim(), rotulo: OPERACAO.nomePessoa(n), chave: k, fora,
-      dica: p && p.nome ? `${p.nome} · ID ${p.id}` : 'Sem ficha no RH: grava o nome' });
+    // Freelancer (contrato do RH, F07) leva a tag no chip e na dica.
+    const freelancer = !!(p && p.freelancer);
+    const repetido = !!(p && p.id && OPERACAO.idRepetido && OPERACAO.idRepetido(p.id));
+    out.push({ valor: OPERACAO.idPessoa(n) || String(n).trim(), rotulo: OPERACAO.nomePessoa(n), chave: k, fora, freelancer,
+      dica: p && p.nome ? `${p.nome} · ID ${p.id}${freelancer ? ' · Freelancer' : ''}${repetido ? ' · ID repetido no RH: confira o CPF' : ''}` : 'Sem ficha no RH: grava o nome' });
   };
   (STORE.getCFG().instaladores || []).map(String).filter(Boolean).forEach(n => add(n, false));
   OPERACAO.equipe(os || {}).forEach(n => add(n, true));
@@ -504,6 +509,8 @@ function ligarApelidoRH(apelido, chave) {
   const p = pessoaRHPorChave(chave);
   const ap = String(apelido || '').trim();
   if (!p || !ap) return false;
+  // ID que ficha e contrato de freelancer dividem não vira vínculo (F07).
+  if (p.idRepetido || (p.id && OPERACAO.idRepetido && OPERACAO.idRepetido(p.id))) return false;
   const lista = lerVinculosCasa().filter(v => normCasa(v.apelido) !== normCasa(ap));
   lista.push({ id: p.id, chave: p.chave, nome: p.nome, apelido: ap });
   gravarVinculosCasa(lista);
@@ -596,7 +603,7 @@ function lancarEntregaManual(osId) {
      está só na O.S entra marcado, com "fora da lista". */
   // Pela pessoa (ID): o chip grava o ID do RH e mostra o nome.
   const eq = new Set(OPERACAO.equipe(os).map(OPERACAO.chavePessoa));
-  const chipEquipe = p => { const on = eq.has(p.chave); return `<label class="casa-chip ${on ? 'on' : ''}" title="${esc(p.dica)}"><input type="checkbox" name="equipe" value="${esc(p.valor)}" ${on ? 'checked' : ''}><span>${esc(p.rotulo)}</span>${p.fora ? '<small>fora da lista</small>' : ''}</label>`; };
+  const chipEquipe = p => { const on = eq.has(p.chave); return `<label class="casa-chip ${on ? 'on' : ''}" title="${esc(p.dica)}"><input type="checkbox" name="equipe" value="${esc(p.valor)}" ${on ? 'checked' : ''}><span>${esc(p.rotulo)}</span>${p.freelancer ? '<small class="tag-freelancer">Freelancer</small>' : ''}${p.fora ? '<small>fora da lista</small>' : ''}</label>`; };
   const chipsEquipe = pessoasDosChips(os).map(chipEquipe).join('')
     || '<p class="text-muted" style="font-size:.8rem">Cadastre instaladores em Configurações.</p>';
   /* A CONFERÊNCIA DA VOLTA também mora aqui: a maioria das O.S. chega
@@ -2043,7 +2050,14 @@ function ligacaoRHHTML() {
   const pend = linhas.filter(l => l.como === 'sem-ficha' || l.como === 'ambiguo').length;
   const juntos = linhas.filter(l => l.juntos.length).length;
   const soAuto = linhas.filter(l => l.naLista && l.como === 'auto' && l.pessoa && l.pessoa.id).length;
-  const optPessoas = atual => ativos.map(p => `<option value="${esc(p.chave)}" ${atual && atual.chave === p.chave ? 'selected' : ''}>${esc(p.nome)}${p.cargo ? ' · ' + esc(p.cargo) : ''}</option>`).join('');
+  /* Cadastro que não separa a pessoa não vira vínculo (F07): ID que ficha e
+     contrato de freelancer dividem, ou contrato ainda sem ID. Aparece
+     desabilitado, com o motivo, como no seletor da equipe. */
+  const travaLig = p => p.idRepetido || (p.id && OPERACAO.idRepetido && OPERACAO.idRepetido(p.id)) ? 'ID repetido no RH: confira o CPF'
+    : p.freelancer && !/^\d{6}$/.test(String(p.id || '')) ? (p.cpfInvalido ? 'CPF do contrato não confere' : 'contrato sem CPF') : '';
+  const optPessoas = atual => ativos.map(p => { const trava = travaLig(p); return `<option value="${esc(p.chave)}" ${!trava && atual && atual.chave === p.chave ? 'selected' : ''} ${trava ? 'disabled' : ''}>${esc(p.nome)}${p.cargo ? ' · ' + esc(p.cargo) : ''}${p.freelancer ? ' · Freelancer' : ''}${trava ? ' · ' + esc(trava) : ''}</option>`; }).join('');
+  // ID repetido entre ficha e contrato de freelancer (F07): o servidor avisa.
+  const avisosRH = (elencoRH().avisos || []).map(a => `<p class="metricas-nota">⚠️ ${esc(a)}</p>`).join('');
   const situacao = l => {
     if (l.como === 'sem-ficha') return '<span class="badge sem-valor">Sem ficha no RH</span>';
     if (l.como === 'ambiguo') return `<span class="badge sem-valor">Ambíguo</span><small class="bloco">Serve para ${esc(l.candidatos.map(p => p.nome).join(' e '))}. Escolha quem é.</small>`;
@@ -2053,6 +2067,7 @@ function ligacaoRHHTML() {
   };
   const ficha = l => l.pessoa ? `<strong>${esc(l.pessoa.nome)}</strong>${l.pessoa.cargo || l.pessoa.area ? `<small class="bloco">${esc([l.pessoa.cargo, l.pessoa.area].filter(Boolean).join(' · '))}</small>` : ''}` : '<span class="text-muted">Nenhuma</span>';
   return `<p>Cada nome que o PCP usa (lista de instaladores e equipes das O.S.) e a ficha do RH a que ele chega. O que falta resolver vem primeiro. Qualquer ligação pode ser trocada aqui: a partir dela, a foto, o cargo e o nome completo aparecem sozinhos, aqui e na mensagem do dia.</p>
+    ${avisosRH}
     <p class="text-muted" style="font-size:.8rem">${linhas.length} nomes · ${pend ? `<strong>${pend} sem ficha ou ambíguo${pend === 1 ? '' : 's'}</strong>` : 'todos com ficha'}${juntos ? ` · ${juntos} nomes dividem a ficha com outro` : ''}.</p>
     ${soAuto ? `<p class="metricas-nota">📌 ${soAuto} ${soAuto === 1 ? 'nome da lista de instaladores está ligado' : 'nomes da lista de instaladores estão ligados'} só pelo nome. Se entrar no RH alguém com o mesmo começo de nome, a ligação some e o celular dessa pessoa deixa de ver as O.S. gravadas pelo ID. <button class="btn-primary btn-xs edit-only" data-lig-fixar type="button">Fixar ${soAuto === 1 ? 'a ligação' : `as ${soAuto} ligações`}</button></p>` : ''}
     ${linhas.length ? `<div class="casa-tabela-wrap"><table class="casa-tabela">
@@ -2067,7 +2082,7 @@ function ligacaoRHHTML() {
           ${l.como === 'salvo' || l.como === 'terceiro' ? `<button class="btn-ghost btn-xs edit-only" data-del-ficha="${esc(l.apelido)}" type="button" title="Tira a decisão salva; o nome volta a casar sozinho, se casar">Desligar</button>` : ''}
           ${l.como === 'sem-ficha' || l.como === 'ambiguo' ? `<button class="btn-ghost btn-xs edit-only" data-lig-terceiro="${esc(l.apelido)}" type="button" title="Marca que este nome é de um terceiro, sem ficha no RH">É terceiro</button>` : ''}</td>
       </tr>`).join('')}</tbody></table></div>` : '<p class="text-muted">Nenhum nome no PCP ainda.</p>'}
-    <p class="text-muted" style="font-size:.8rem">${ativos.length} pessoas ativas no RH${pessoasRH().length > ativos.length ? ` · ${pessoasRH().length - ativos.length} inativa(s) fora da lista de escolha` : ''}. Quem sai da empresa sai daqui sozinho.</p>`;
+    <p class="text-muted" style="font-size:.8rem">${ativos.length} pessoas ativas no RH${ativos.some(p => p.freelancer) ? ` (${ativos.filter(p => p.freelancer).length} por contrato de freelancer)` : ''}${pessoasRH().length > ativos.length ? ` · ${pessoasRH().length - ativos.length} inativa(s) fora da lista de escolha` : ''}. Quem sai da empresa sai daqui sozinho.</p>`;
 }
 
 /* ── Modo TV: ranking na tela da fábrica ───────────────────────────────────
@@ -2352,7 +2367,7 @@ function renderPerformanceCasa() {
       const sel = el.querySelector(`[data-lig-sel="${CSS.escape(ap)}"]`);
       if (!sel || !sel.value) { toast('Escolha a pessoa do RH.', 'error'); return; }
       const p = pessoaRHPorChave(sel.value);
-      if (!ligarApelidoRH(ap, sel.value)) { toast('Não consegui ligar este apelido — confira se a ficha do RH tem CPF cadastrado.', 'error'); return; }
+      if (!ligarApelidoRH(ap, sel.value)) { toast('Não consegui ligar este apelido. Confira se a ficha do RH tem CPF e se o ID não está repetido entre ficha e contrato de freelancer.', 'error'); return; }
       renderPerformanceCasa();
       toast(`${ap} → ${p.nome}. Foto e cargo já aparecem.`, 'success');
     };

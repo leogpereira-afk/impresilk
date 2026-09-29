@@ -474,14 +474,41 @@ function perfVoltaTxt(rc) {
 function perfMembrosDeHoje(ms) { return PERF.unicos((ms || []).map(m => { const k = perfIdMembro(m); return k === String(m.chave) ? {...m} : {...m, chave:k}; })); }
 function perfUnirPessoas(regs) { return (regs || []).map(r => ({...r, membros: PERF.unirMembros(r.membros, perfChaveDeHoje)})); }
 function perfEquipeOS(os) { return PERF.unicos(OPERACAO.equipe(os).map(perfPessoa)); }
+function perfParticipacaoVale(os, p) {
+  if (!p) return null;
+  if (os.alocacao && typeof os.alocacao === 'object' && !Array.isArray(os.alocacao)) return null;
+  const log = Array.isArray(os.alocacaoLog) ? os.alocacaoLog.filter(e => e && typeof e === 'object') : [];
+  const ultima = log.length ? String(log[log.length - 1].em || '') || '9999' : (Object.prototype.hasOwnProperty.call(os, 'alocacao') ? '9999' : '');
+  return !ultima || String(p.em || '') > ultima ? p : null;
+}
 function perfRegistro(os,c) {
   if(os._perf)return {...os._perf,os,membros:os._perf.confirmado?os._perf.membros:os._perf.membros.map(p=>({...perfPessoa(OPERACAO.ehIdPessoa(p.chave)?p.chave:p.nome),percentual:p.percentual}))};
-  const salvo = c.participacoes.find(p=>p.id===os.id);
+  const extra = {retornoConf:os.retornoConf || null,voltou:typeof OPERACAO.voltou==='function'?OPERACAO.voltou(os):undefined,volta:typeof OPERACAO.chaveDaVolta==='function'?OPERACAO.chaveDaVolta(os):''};
+  /* A DIVISÃO DENTRO DA O.S. (F08) vem primeiro, com a mesma régua do
+     servidor (perfFonte): confirmada só quando é válida, não está
+     desatualizada e tem a mesma gente de os.equipe. O percentual é o final do
+     motor. Desatualizada ou inválida: sugestão pela equipe da O.S., nunca
+     confirmada. Sem divisão, a participação antiga continua valendo (leitura).
+     divisao.js só existe no index.html: sem ele, fica a regra antiga. */
+  const aloc = os.alocacao && typeof os.alocacao === 'object' && !Array.isArray(os.alocacao) ? os.alocacao : null;
+  if (aloc && typeof DIVISAO !== 'undefined' && DIVISAO && typeof DIVISAO.alocacaoConfirmada === 'function') {
+    if (DIVISAO.alocacaoConfirmada(os)) {
+      const membros = DIVISAO.finais(aloc).filter(f => f.cota > 0).map(f => ({...perfPessoa(f.pessoaId), percentual:f.cota / 100}));
+      const eq = aloc.grupos.length === 1 && aloc.grupos[0].equipeId ? (c.equipes || []).find(e => e && e.id === aloc.grupos[0].equipeId) : null;
+      return {id:os.id,os,membros,valor:valorDaOS(os),confirmado:!PERF.validar(membros),fonte:'alocacao',equipeId:eq ? eq.id : '',equipeNome:eq ? eq.nome : '',emblema:(eq && eq.emblema) || '🤝',por:aloc.por || '',em:aloc.em || '',...extra};
+    }
+    return {id:os.id,os,membros:PERF.iguais(perfEquipeOS(os)),valor:valorDaOS(os),confirmado:false,fonte:aloc.conferirRH === true ? 'alocacao-conferir-rh' : 'alocacao-desatualizada',...extra};
+  }
+  /* A participação do blob só vale na O.S. que nunca teve divisão, ou quando
+     foi confirmada DEPOIS da última mudança da divisão: a divisão limpa de
+     propósito (alocacao null, com histórico) não ressuscita a conferência
+     velha, fica como sugestão. A mesma conta do servidor (perfFonte). */
+  const salvo = perfParticipacaoVale(os, c.participacoes.find(p=>p.id===os.id));
   // Um registro confirmado mantém a composição e o nome da época.
   const membros = salvo ? salvo.membros : PERF.iguais(perfEquipeOS(os));
   // voltou e volta: os mesmos da base do servidor (perfFonte) e da fila Volta do carro.
   // Conferido com typeof: aba com operacao.js antigo em cache não pode derrubar a tela.
-  return {...(salvo || {}),id:os.id,os,membros,valor:valorDaOS(os),confirmado:!!salvo && !PERF.validar(membros),retornoConf:os.retornoConf || null,voltou:typeof OPERACAO.voltou==='function'?OPERACAO.voltou(os):undefined,volta:typeof OPERACAO.chaveDaVolta==='function'?OPERACAO.chaveDaVolta(os):''};
+  return {...(salvo || {}),id:os.id,os,membros,valor:valorDaOS(os),confirmado:!!salvo && !PERF.validar(membros),fonte:salvo ? 'participacao' : 'sugestao',...extra};
 }
 async function perfSalvar(c) {
   const cfg = STORE.getCFG(); cfg.performancePCP = c; STORE.saveCFG(cfg);

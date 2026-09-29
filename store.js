@@ -15,7 +15,8 @@ const STORE = (() => {
     ENTREGUES:  'impresilk_inst_entregues',
     CURSOR:     'impresilk_inst_cursor_v2',   // carimbo do servidor do ultimo pull
     CFGCONFLITO:'impresilk_inst_cfgconflito',
-    CFGVER:     'impresilk_inst_cfgver'    // versao da config que o aparelho tem
+    CFGVER:     'impresilk_inst_cfgver',   // versao da config que o aparelho tem
+    ALOCDESC:   'impresilk_inst_alocdescarte' // divisões de equipe recusadas pelo servidor (aviso fixo, F08)
   };
   // O que o aparelho GUARDA: abertas + finalizadas nos ultimos N dias (ordem do
   // dono, 14/09/2026). O resto so vem por busca. E a unica regua: o servidor
@@ -538,6 +539,114 @@ const STORE = (() => {
     if (mudou) _gravarFila(q);
   }
 
+  /* O CÓDIGO DO ITEM QUE O SERVIDOR DEU (E1, pré-requisito da E3). O item
+     antigo ganha o código na primeira gravação da O.S. no servidor; o
+     rascunho aberto (_modalDraft da gestão, _draft do celular), a cópia da
+     lista e os envios da fila adotam esse código. Sem isto a ficha aberta
+     seguia mandando o item sem código, e o servidor casava pelo número e
+     pela descrição: o item novo podia herdar o código (e as entregas) do
+     removido. Só o código que falta entra (OPERACAO.adotarUidsItens). Sem o
+     operacao.js novo (cache misto), fica como antes. */
+  function _adotarUids(alvo, servidor) {
+    try {
+      return typeof OPERACAO !== 'undefined' && OPERACAO && typeof OPERACAO.adotarUidsItens === 'function'
+        ? OPERACAO.adotarUidsItens(alvo, servidor) : 0;
+    } catch (e) { return 0; }
+  }
+  function _uidsNaFila(osServidor) {
+    if (!osServidor || !osServidor.id || !Array.isArray(osServidor.itens)) return;
+    const q = getQueue();
+    let mudou = false;
+    for (const it of q) {
+      if (it.action === 'upsert' && it.os && it.os.id === osServidor.id && _adotarUids(it.os, osServidor) > 0) mudou = true;
+    }
+    if (mudou) _gravarFila(q);
+  }
+
+  /* DIVISÃO DA EQUIPE DESCARTADA PELO SERVIDOR (F08). A gravação passou, mas
+     a divisão (os.alocacao) não: o servidor responde `descartado` e manda de
+     volta a versão gravada. O aparelho repõe a divisão, o histórico dela e a
+     lista os.equipe na cópia local e nos envios da fila que levavam a mesma
+     divisão recusada (senão o próximo envio a mandaria de novo), e guarda o
+     aviso até alguém dispensar: o toast some, e a divisão que a pessoa montou
+     não voltaria sem ninguém perceber. */
+  const _canonJ = v => Array.isArray(v) ? '[' + v.map(_canonJ).join(',') + ']'
+    : v && typeof v === 'object' ? '{' + Object.keys(v).filter(k => v[k] !== undefined).sort().map(k => JSON.stringify(k) + ':' + _canonJ(v[k])).join(',') + '}'
+    : JSON.stringify(v === undefined ? null : v);
+  /* Só o que ainda é o que foi enviado: a divisão (e a lista) que a pessoa
+     mexeu de novo enquanto o envio ia fica, e vai no próximo envio. */
+  function _reporDoServidor(alvo, servidor, enviado) {
+    if (_canonJ(alvo.alocacao) !== _canonJ(enviado.alocacao)) return false;
+    const campos = ['alocacao', 'alocacaoLog'];
+    if (_canonJ(alvo.equipe) === _canonJ(enviado.equipe)) campos.push('equipe');
+    for (const k of campos) {
+      if (servidor && Object.prototype.hasOwnProperty.call(servidor, k)) alvo[k] = JSON.parse(JSON.stringify(servidor[k]));
+      else delete alvo[k];
+    }
+    return true;
+  }
+  function _reporAlocacao(item, res) {
+    const servidor = res.os, enviado = item.os || {};
+    const all = getAllOS(), idx = all.findIndex(o => o.id === servidor.id);
+    if (idx >= 0 && _reporDoServidor(all[idx], servidor, enviado)) _setAllOS(all);
+    const q = getQueue();
+    let mudou = false;
+    for (const it of q) {
+      if (it.action === 'upsert' && it.os && it.os.id === servidor.id && _reporDoServidor(it.os, servidor, enviado)) mudou = true;
+    }
+    if (mudou) _gravarFila(q);
+    const motivo = String((res.descartadoMotivo && res.descartadoMotivo.alocacao) || 'O servidor não aceitou a divisão da equipe.');
+    const aviso = { id: String(servidor.id), numero: String(servidor.numero || (item.os && item.os.numero) || ''), motivo, em: new Date().toISOString() };
+    const lista = avisosAlocacao().filter(a => a.id !== aviso.id);
+    lista.push(aviso);
+    lsSet(K.ALOCDESC, lista.slice(-20));
+    _notifyListeners('alocacao-descartada', aviso);
+  }
+  /* MARCA DE ENTREGA DESCARTADA PELO SERVIDOR (E3). A gravação passou, mas a
+     marca de entrega do item (item.entregas) não: saldo, dia, papel. O
+     servidor responde `descartado` com os ids em `entregasRecusadas`, e o
+     aparelho tira essas marcas da cópia da lista (que é o próprio rascunho da
+     ficha aberta) e dos envios da fila. Sem isto a mesma cópia mandava a
+     marca de novo na próxima gravação e, com o saldo liberado, ela entrava
+     calada, com a hora daquela gravação. Marcar de novo é ação nova (id novo).
+     O aviso do motivo vai pelo `item-aviso` de sempre. */
+  function _tirarMarcas(alvo, ids) {
+    let n = 0;
+    if (!ids || !ids.size) return 0;
+    for (const it of (alvo && Array.isArray(alvo.itens) ? alvo.itens : [])) {
+      if (!it || typeof it !== 'object' || !Array.isArray(it.entregas)) continue;
+      const fica = it.entregas.filter(e => !(e && typeof e === 'object' && ids.has(String(e.id == null ? '' : e.id).trim())));
+      if (fica.length === it.entregas.length) continue;
+      n += it.entregas.length - fica.length;
+      if (fica.length) it.entregas = fica; else delete it.entregas;
+    }
+    return n;
+  }
+  function _idsRecusados(res) {
+    const lista = res && Array.isArray(res.descartado) && res.descartado.includes('entregas') && Array.isArray(res.entregasRecusadas) ? res.entregasRecusadas : [];
+    return new Set(lista.filter(r => r && typeof r === 'object').map(r => String(r.id == null ? '' : r.id).trim()));
+  }
+  function _tirarEntregasRecusadas(item, res) {
+    const lista = Array.isArray(res.entregasRecusadas) ? res.entregasRecusadas : [];
+    const ids = _idsRecusados(res);
+    const osId = (res.os && res.os.id) || (item.os && item.os.id);
+    if (!ids.size || !osId) return;
+    const all = getAllOS(), idx = all.findIndex(o => o.id === osId);
+    if (idx >= 0 && _tirarMarcas(all[idx], ids) > 0) _setAllOS(all);
+    const q = getQueue();
+    let mudou = false;
+    for (const it of q) if (it.action === 'upsert' && it.os && it.os.id === osId && _tirarMarcas(it.os, ids) > 0) mudou = true;
+    if (mudou) _gravarFila(q);
+    _notifyListeners('entregas-descartadas', { id: String(osId), recusadas: lista.slice(0, 200) });
+  }
+  function avisosAlocacao() {
+    const v = lsGet(K.ALOCDESC, []);
+    return Array.isArray(v) ? v.filter(a => a && a.id) : [];
+  }
+  function dispensarAvisoAlocacao(id) {
+    lsSet(K.ALOCDESC, id == null ? [] : avisosAlocacao().filter(a => a.id !== String(id)));
+  }
+
   function _notifyListeners(event, data) {
     (_genericListeners[event] || []).forEach(fn => { try { fn(data); } catch {} });
   }
@@ -634,7 +743,13 @@ const STORE = (() => {
             const all = getAllOS();
             const idx = all.findIndex(o => o.id === res.os.id);
             if (idx >= 0) {
-              let mudou = false;
+              /* O CÓDIGO DO ITEM (E1) VAI PARA O OBJETO QUE SAI DA LISTA, como o
+                 rev logo abaixo: ele é o próprio rascunho da ficha aberta. */
+              let mudou = _adotarUids(all[idx], res.os) > 0;
+              /* A MARCA DE ENTREGA RECUSADA (E3) SAI DO OBJETO DA LISTA ANTES
+                 DA TROCA: ele é o rascunho da ficha aberta, que a próxima
+                 gravação manda de novo mesmo depois de a lista virar res.os. */
+              if (_tirarMarcas(all[idx], _idsRecusados(res)) > 0) mudou = true;
               if (all[idx].atualizadoEm === item.os.atualizadoEm) {
                 /* O REV NOVO VAI PARA O OBJETO QUE SAI DA LISTA. O saveOS guarda
                    na lista o PRÓPRIO rascunho da ficha aberta (_draft do espelho,
@@ -663,6 +778,9 @@ const STORE = (() => {
               if (mudou) _setAllOS(all);
             }
             _revNaFila(res.os);
+            _uidsNaFila(res.os);
+            if (Array.isArray(res.descartado) && res.descartado.includes('alocacao')) _reporAlocacao(item, res);
+            if (Array.isArray(res.descartado) && res.descartado.includes('entregas')) _tirarEntregasRecusadas(item, res);
           }
           /* GRAVOU, MAS NÃO TUDO. Para o crachá de toque o servidor grava o
              resto e devolve em `avisos` o que ficou de fora (carro não
@@ -1588,7 +1706,7 @@ const STORE = (() => {
   // MORA NO INDEXEDDB, não no localStorage: desde 14/09/2026 o pacote traz a
   // FOTO da ficha (30 fotos ≈ 400 KB) e os 7 sistemas dividem 5 MB de
   // localStorage por origem — jogar isso lá estourava a cota de todo mundo.
-  const ELENCO_VAZIO = { em: '', pessoas: [], antigos: [], veiculos: [], ferias: [], ausencias: [], fichaRH: false, papel: '' };
+  const ELENCO_VAZIO = { em: '', pessoas: [], antigos: [], veiculos: [], ferias: [], ausencias: [], avisos: [], fichaRH: false, papel: '' };
   let _elenco = ELENCO_VAZIO;
   function elenco() { return _elenco || ELENCO_VAZIO; }
 
@@ -1608,12 +1726,30 @@ const STORE = (() => {
   function _papelAtual() { const u = getUser(); return String((u && u.papel) || ''); }
   function _podarElenco(pac) {
     const base = Object.assign({}, ELENCO_VAZIO, pac || {});
-    if (_vePapelFicha(_papelAtual())) return base;
+    const papel = _papelAtual();
+    if (_vePapelFicha(papel)) return base;
+    /* Freelancer (F07): a tag, o CPF pendente e o ID repetido servem a quem
+       escolhe gente no seletor (admin, pcp e operação), como no servidor. A
+       montagem fica com o contrato com ID como pessoa comum, e sem o contrato
+       sem ID, que não serve ao celular. */
+    const veContrato = papel === 'operacao';
+    const semId = p => p && p.freelancer === true && !/^\d{6}$/.test(String(p.id || '').trim());
     return Object.assign(base, {
       fichaRH: false,
       ferias: [],
       ausencias: [],
-      pessoas: (base.pessoas || []).map(p => Object.assign({}, p, { statusId: '', status: '' })),
+      avisos: [],
+      // Quem já saiu (e o contrato encerrado ou vencido) só desce para
+      // admin/pcp: o pacote que a gestão deixou no tablet não passa à montagem.
+      antigos: [],
+      // O fim e a situação do contrato de freelancer (F07) são do RH, como a
+      // situação da ficha.
+      pessoas: (base.pessoas || []).filter(p => veContrato || !semId(p)).map(p => {
+        const q = Object.assign({}, p, { statusId: '', status: '' });
+        delete q.contratoFim; delete q.situacaoContrato;
+        if (!veContrato) { if (q.freelancer === true) q.cargo = ''; delete q.freelancer; delete q.semCpf; delete q.cpfInvalido; delete q.idRepetido; }
+        return q;
+      }),
     });
   }
   async function _lerElencoDisco() {
@@ -1654,18 +1790,24 @@ const STORE = (() => {
   /* `leve`: o espelho do instalador só precisa de ID e nome (a equipe da O.S.
      grava o ID do RH desde 29/09/2026): sem as fotos, ~10 KB em vez de ~500.
      Pacote leve não serve à gestão, que baixa o completo na volta seguinte. */
+  /* `semCache` (F07, "Atualizar elenco" do seletor da equipe): a pessoa foi
+     cadastrada no RH agora; o servidor relê as fichas em vez de usar a cópia
+     de 60 s. Devolve true quando o pacote novo chegou. */
   async function pullElenco(forcar, opts) {
     const leve = !!(opts && opts.leve);
-    if (!navigator.onLine) return;
+    const semCache = !!(opts && opts.semCache);
+    if (!navigator.onLine) return false;
     const idade = _elenco.em ? Date.now() - new Date(_elenco.em).getTime() : Infinity;
     // Papel diferente do que baixou o pacote = pacote velho, por mais novo que
     // seja o relógio: a gestão enxerga o que a montagem não pode, e vice-versa.
     // Sem isto, o crachá novo passaria até 30 min servindo a régua do anterior.
     const trocouPapel = String(_elenco.papel || '') !== _papelAtual();
     const faltaFoto = !!_elenco.leve && !leve;
-    if (!forcar && !trocouPapel && !faltaFoto && idade < 30 * 60000) return;
+    if (!forcar && !trocouPapel && !faltaFoto && idade < 30 * 60000) return false;
     try {
-      const res = await api(leve ? { action: 'elenco', leve: true } : { action: 'elenco' });
+      // `freelancers`: esta tela conhece o contrato de freelancer (F07). Sem o
+      // pedido, o servidor responde como para a tela antiga, sem contratos.
+      const res = await api(Object.assign({ action: 'elenco', freelancers: true }, leve ? { leve: true } : {}, semCache ? { forcar: true } : {}));
       if (res && Array.isArray(res.pessoas)) {
         _elenco = {
           em: res.em || new Date().toISOString(),
@@ -1675,6 +1817,8 @@ const STORE = (() => {
           veiculos: res.veiculos || [],
           ferias: res.ferias || [],
           ausencias: res.ausencias || [],
+          // ID repetido entre ficha e contrato de freelancer (F07): só admin/pcp.
+          avisos: Array.isArray(res.avisos) ? res.avisos : [],
           // O servidor só manda férias/ausências para admin/pcp. `fichaRH:false`
           // quer dizer "veio vazio porque você não pode ver", e não "não há
           // ninguém fora" — a tela precisa saber a diferença. Pacote antigo (sem
@@ -1685,8 +1829,10 @@ const STORE = (() => {
         };
         await _gravarElencoDisco(_elenco);
         _notifyListeners('elenco', _elenco);
+        return true;
       }
     } catch (e) { /* sem sessão: o pull normal avisa */ }
+    return false;
   }
 
   // ── Fotos ─────────────────────────────────────────────────────────────────
@@ -1833,6 +1979,8 @@ const STORE = (() => {
       // As regras do programa (comissão, divisão) também: são da gestão.
       _regras = null;
       _apagarRegrasDisco();
+      // O aviso da divisão recusada leva nomes e percentuais: é da gestão.
+      localStorage.removeItem(K.ALOCDESC);
     } catch {}
     if (getQueue().length) return false;
     try {
@@ -2033,6 +2181,8 @@ const STORE = (() => {
     pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos
     onSync, onConflict, on, conflitoCFG, resolverCFG,
+    // Divisão da equipe recusada pelo servidor (aviso fixo, F08)
+    avisosAlocacao, dispensarAvisoAlocacao,
     // Conflito manual
     aceitarServidor, sobrescreverServidor,
     // Fila

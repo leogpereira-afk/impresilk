@@ -1,4 +1,8 @@
 // Regras puras usadas pelas portas de dados e pelos testes de regressão.
+// O motor de divisão (F04) confere e recalcula a alocação dentro da O.S. (F08).
+import { DIVISAO } from './pcp-divisao.mjs';
+// O motor da entrega por item (E2) confere a marca que chega (E3).
+import { ENTREGA_ITEM } from './pcp-entrega-item.mjs';
 const igual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const objeto = v => v && typeof v === 'object' && !Array.isArray(v);
 const proprio = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k);
@@ -24,8 +28,15 @@ export function temTrabalhoHumano(o) {
   return !!(o.liberadoPCP || o.aptoEm || (o.equipe || []).some(n => String(n || '').trim())
     || o.confirmacao === 'Confirmado' || o.paradoClienteEm
     || equipeNaRua(o)
-    || (o.reabertaEm && String(o.reabertaEm) > String(o.baixaAutoERP?.em || '')));
+    || (o.reabertaEm && String(o.reabertaEm) > String(o.baixaAutoERP?.em || ''))
+    || temEntregaItem(o));
 }
+/* MARCA DE ENTREGA POR ITEM (E3): alguém entregou, retirou ou apontou
+   problema num item. A O.S. com entrega parcial saiu da carteira do ERP e
+   continua com saldo: arquivá-la apagaria da mesa o que ainda falta entregar.
+   Qualquer marca gravada conta (a lista só cresce; a desfeita também é gente). */
+export const temEntregaItem = o => !!o && Array.isArray(o.itens)
+  && o.itens.some(it => objeto(it) && Array.isArray(it.entregas) && it.entregas.length > 0);
 // Saiu e não voltou: a mesma marca do temTrabalhoHumano e da exceção de remarcar do pcp-sync.
 export const equipeNaRua = o => !!(o && (o.horaSaida || o.saidaEm) && !(o.horaRetorno || o.retornoEm));
 /* ÚLTIMO DIA DA AGENDA: a mesma conta do OPERACAO.prazo (operacao.js). Serviço
@@ -533,10 +544,32 @@ export const normPessoa = s => String(s ?? '').normalize('NFD').replace(/[\u0300
 export const ehIdPessoa = v => /^\d{6}$/.test(String(v ?? '').trim());
 const id6 = v => { const d = String(v ?? '').replace(/\D/g, ''); return d.length === 6 ? d : d.length === 11 ? d.slice(0, 6) : ''; };
 export function resolverPessoas(dados = {}) {
-  const fichas = (Array.isArray(dados.pessoas) ? dados.pessoas : []).filter(p => p && ehIdPessoa(p.id));
+  const todas = Array.isArray(dados.pessoas) ? dados.pessoas : [];
+  const fichas = todas.filter(p => p && ehIdPessoa(p.id));
+  /* Contrato de freelancer ainda sem ID (sem CPF, ou CPF que não confere, F07)
+     conta na ambiguidade e nunca é o resultado: "Lucas" com a ficha do Lucas e
+     o contrato do Lucas Prado sem CPF já não é de ninguém, e não muda de dono
+     no dia em que o RH preenche o CPF do contrato. */
+  const semId = todas.filter(p => p && p.freelancer === true && !ehIdPessoa(p.id) && String(p.nome || '').trim());
+  const candidatas = semId.length ? [...fichas, ...semId] : fichas;
   const porId = new Map();
   for (const p of fichas) if (!porId.has(p.id)) porId.set(p.id, p);
   const porChaveRH = new Map(fichas.filter(p => p.chave).map(p => [String(p.chave), p]));
+  /* ID REPETIDO ENTRE FICHA E CONTRATO DE FREELANCER (F07, caminho B). O
+     ID sai dos 6 primeiros dígitos do CPF, e a ficha de Colaboradores e o
+     contrato de freelancer do RH são cadastros diferentes: dois CPFs podem
+     começar igual. O servidor junta a MESMA pessoa (CPF inteiro igual) antes
+     de mandar e marca `idRepetido` no resto; a régua também percebe o par
+     sozinha. ID repetido nunca é o resultado de um nome: melhor "sem ficha"
+     do que o ponto indo para a pessoa errada. Contrato com contrato do mesmo
+     ID é a mesma pessoa renovada, não repetição. */
+  const repetidos = new Set(fichas.filter(p => p.idRepetido === true).map(p => p.id));
+  const tipoDoId = new Map();
+  for (const p of fichas) {
+    const t = p.freelancer === true ? 'contrato' : 'ficha';
+    if (tipoDoId.has(p.id) && tipoDoId.get(p.id) !== t) repetidos.add(p.id);
+    else if (!tipoDoId.has(p.id)) tipoDoId.set(p.id, t);
+  }
   // Casamento automático com a régua de sempre do PCP -- apelido do RH, nome
   // completo, ou começo de nome que só uma ficha tem --, contado entre TODAS
   // as fichas, inclusive quem já saiu. Quem saiu nunca é o resultado: "Elias"
@@ -546,12 +579,22 @@ export function resolverPessoas(dados = {}) {
   // ficha de propósito.
   const auto = texto => {
     const ap = normPessoa(texto), tokens = ap.split(' ');
-    const um = achadas => achadas.length === 1 && !achadas[0].desligado ? achadas[0] : null;
-    const porApelido = fichas.filter(p => normPessoa(p.apelido) === ap);
-    if (porApelido.length) return um(porApelido);
-    const porNome = fichas.filter(p => normPessoa(p.nome) === ap);
+    const um = achadas => achadas.length === 1 && ehIdPessoa(achadas[0].id) && !achadas[0].desligado && !repetidos.has(achadas[0].id) ? achadas[0] : null;
+    const porPrefixo = lista => lista.filter(p => { const n = normPessoa(p.nome).split(' '); return tokens.every((t, i) => n[i] === t); });
+    const porApelido = candidatas.filter(p => normPessoa(p.apelido) === ap);
+    if (porApelido.length) {
+      /* O apelido do CONTRATO não passa por cima do nome de outra pessoa
+         (F07): o RH só barra apelido igual ao de outro cadastro, não ao
+         primeiro nome de alguém. "Lucas" com a ficha do Lucas Ferreira e o
+         contrato do Lucas Prado de apelido "lucas" é ambíguo; senão o
+         histórico e o crachá do empregado passavam para o freelancer. */
+      const alvo = porApelido.length === 1 && porApelido[0].freelancer === true ? porApelido[0] : null;
+      if (alvo && porPrefixo(candidatas).some(p => p !== alvo && (!ehIdPessoa(p.id) || p.id !== alvo.id))) return null;
+      return um(porApelido);
+    }
+    const porNome = candidatas.filter(p => normPessoa(p.nome) === ap);
     if (porNome.length) return um(porNome);
-    return um(fichas.filter(p => { const n = normPessoa(p.nome).split(' '); return tokens.every((t, i) => n[i] === t); }));
+    return um(porPrefixo(candidatas));
   };
   // Vínculo salvo (Performance → "Conferir nomes do PCP × fichas do RH"):
   // decisão de gente, vale mais que o casamento. `semFicha` é a decisão de que
@@ -574,7 +617,9 @@ export function resolverPessoas(dados = {}) {
     if (!s) return '';
     if (ehIdPessoa(s)) return s;
     const ap = normPessoa(s);
-    if (!memo.has(ap)) memo.set(ap, salvos.has(ap) ? salvos.get(ap) : (auto(s)?.id || ''));
+    // Vínculo salvo que aponta para ID repetido (ficha e contrato, F07) não
+    // resolve: o ID não separa as duas pessoas, e o ponto iria para a errada.
+    if (!memo.has(ap)) { const id = salvos.has(ap) ? salvos.get(ap) : (auto(s)?.id || ''); memo.set(ap, id && repetidos.has(id) ? '' : id); }
     return memo.get(ap);
   };
   const chave = entrada => { const s = String(entrada ?? '').trim(); return s ? (idDe(s) || 'nome:' + normPessoa(s)) : ''; };
@@ -601,7 +646,103 @@ export function resolverPessoas(dados = {}) {
     return rotulos.get(id);
   };
   const pessoa = entrada => { const id = idDe(entrada); return id ? (porId.get(id) || { id, chave: '', nome: '', semFicha: true }) : null; };
-  return { idDe, chave, nome, pessoa, fixado, fichas };
+  const repetido = id => repetidos.has(String(id ?? '').trim());
+  return { idDe, chave, nome, pessoa, fixado, fichas, repetido };
+}
+
+/* FREELANCER PELO CONTRATO DO RH (F07, caminho B, decisão do dono de
+   29/09/2026). Quem instala como freelancer mora no CONTRATO de freelancer do
+   RH (coleção 'freelancers'), nunca numa ficha de Colaboradores: a tela de
+   contratos existe para o prestador não entrar no quadro, na folha nem no
+   organograma. O ID de 6 dígitos sai do CPF do contrato, como o da ficha.
+   Só o servidor vê o CPF inteiro, e é aqui, com ele, que se separa:
+   - MESMA PESSOA (CPF inteiro igual): o ex-colaborador que voltou como
+     freelancer tem ficha desligada e contrato ativo com o mesmo ID. Conta uma
+     vez só: vale o cadastro na ativa (contrato ativo com ficha fora da ativa
+     = o contrato; ficha na ativa = a ficha, com aviso se o contrato também
+     está ativo). Dois contratos do mesmo CPF (renovação em cadastro novo)
+     também são um: fica o ativo, depois o de fim mais tarde.
+   - PESSOAS DIFERENTES com os mesmos 6 primeiros dígitos: ID repetido. Os
+     dois cadastros ficam marcados, a gestão recebe o aviso e nenhum nome leva
+     a esse ID até o RH conferir (a régua acima trava).
+   O que sai daqui NUNCA leva o CPF: só o ID, que já é o que a O.S. grava. */
+const soDigitosCpf = v => String(v ?? '').replace(/\D/g, '');
+/* O MESMO CPF VÁLIDO DO RH (impresilkrh, _shared/freelancerContrato.ts,
+   cpfValido): 11 dígitos, os dois verificadores certos, e nunca todos iguais.
+   Contrato com CPF que não confere não ganha ID aqui, como lá não ganha: o
+   ID de um número errado seria o de outra pessoa, e "000.000.000-00" em dois
+   prestadores juntaria os dois num só. */
+export function cpfValido(v) {
+  const n = soDigitosCpf(v);
+  if (n.length !== 11 || /^(\d)\1{10}$/.test(n)) return false;
+  const dv = (base, peso) => {
+    let soma = 0;
+    for (let i = 0; i < base.length; i++) soma += Number(base[i]) * (peso - i);
+    const r = (soma * 10) % 11;
+    return r === 10 ? 0 : r;
+  };
+  return dv(n.slice(0, 9), 10) === Number(n[9]) && dv(n.slice(0, 10), 11) === Number(n[10]);
+}
+export function contratoAtivo(c, hoje = '') {
+  if (!c || String(c.situacao || '') === 'encerrado') return false;
+  const fim = String(c.contratoFim || '').slice(0, 10);
+  return !/^\d{4}-\d{2}-\d{2}$/.test(fim) || !hoje || fim >= hoje;
+}
+export function juntarFreelancers(fichas, contratos, { hoje = '' } = {}) {
+  const avisos = [], repetidos = new Set(), fichasFora = new Set();
+  const lista = (Array.isArray(contratos) ? contratos : [])
+    .filter(c => c && typeof c === 'object' && String(c.nome || '').trim() && String(c.id || '').trim())
+    .map(c => {
+      const cpf = soDigitosCpf(c.cpf), ok = cpfValido(cpf), ativo = contratoAtivo(c, hoje);
+      return { cpf: ok ? cpf : '', entrada: {
+        chave: 'freelancer:' + String(c.id).trim(), id: ok ? cpf.slice(0, 6) : '', nome: String(c.nome).trim(),
+        apelido: String(c.apelido || '').trim(), funcao: String(c.funcao || '').trim(), freelancer: true,
+        ativo, desligado: !ativo, contratoFim: String(c.contratoFim || '').slice(0, 10),
+        situacaoContrato: String(c.situacao || '') === 'encerrado' ? 'encerrado' : ativo ? 'ativo' : 'vencido',
+        ...(ok ? {} : { semCpf: true, ...(cpf ? { cpfInvalido: true } : {}) }) } };
+    });
+  // Renovação em cadastro novo: um contrato por CPF.
+  const porCpf = new Map(), semCpf = [];
+  for (const c of lista) {
+    if (!c.cpf) { semCpf.push(c); continue; }
+    const a = porCpf.get(c.cpf);
+    const melhor = !a || (c.entrada.ativo && !a.entrada.ativo)
+      || (c.entrada.ativo === a.entrada.ativo && c.entrada.contratoFim > a.entrada.contratoFim);
+    if (melhor) porCpf.set(c.cpf, c);
+  }
+  const comId = (Array.isArray(fichas) ? fichas : []).filter(f => f && /^\d{6}$/.test(String(f.id || '')));
+  /* Ficha com a situação "freelancer" no RH não está na ativa quando há
+     contrato de freelancer ativo do mesmo CPF: a pessoa é freelancer, e a
+     fonte do freelancer é o contrato (decisão do dono), com a tag e o fim do
+     contrato. Sem contrato, a ficha continua valendo como sempre. */
+  const naAtiva = f => !f.desligado && f.ativo !== false && String(f.statusId || '').trim() !== 'freelancer';
+  const ficam = [];
+  for (const c of porCpf.values()) {
+    const mesma = comId.filter(f => soDigitosCpf(f.cpf) === c.cpf);
+    if (mesma.length) {
+      if (c.entrada.ativo && !mesma.some(naAtiva)) { mesma.forEach(f => fichasFora.add(String(f.chave))); ficam.push(c); }
+      // Ficha e contrato ativos: vale a ficha até o RH acertar a SITUAÇÃO da
+      // ficha. O aviso nunca manda encerrar o contrato, que é a fonte do freelancer.
+      else if (c.entrada.ativo) avisos.push(`${c.entrada.nome} tem ficha na ativa em Colaboradores e contrato de freelancer ativo no RH. No PCP vale a ficha até o RH ajustar a situação dela: se a pessoa é freelancer, mude a situação da ficha para Freelancer (ou registre o desligamento) e o contrato passa a valer.`);
+      continue;
+    }
+    ficam.push(c);
+  }
+  // Mesmos 6 dígitos, CPFs diferentes: entre ficha e contrato, ou entre dois contratos.
+  const porId = new Map();
+  for (const f of comId) if (!fichasFora.has(String(f.chave))) { const l = porId.get(f.id) || []; l.push({ nome: String(f.nome || ''), cpf: soDigitosCpf(f.cpf) }); porId.set(f.id, l); }
+  const contratosPorId = new Map();
+  for (const c of ficam) { const l = contratosPorId.get(c.entrada.id) || []; l.push(c); contratosPorId.set(c.entrada.id, l); }
+  for (const [id, cs] of contratosPorId) {
+    const outros = porId.get(id) || [];
+    const cpfs = new Set([...outros.map(o => o.cpf), ...cs.map(c => c.cpf)]);
+    if (cpfs.size < 2) continue;
+    repetidos.add(id);
+    const nomes = [...outros.map(o => `na ficha de ${o.nome}`), ...cs.map(c => `no contrato de freelancer de ${c.entrada.nome}`)];
+    avisos.push(`O ID ${id} aparece em ${nomes.join(' e ')}, com CPFs diferentes. Ninguém é escolhido por esse ID até o RH conferir os CPFs.`);
+  }
+  const contratos2 = [...ficam, ...semCpf].map(c => repetidos.has(c.entrada.id) ? { ...c.entrada, idRepetido: true } : c.entrada);
+  return { contratos: contratos2, fichasFora, repetidos, avisos };
 }
 
 /* A O.S. É DA EQUIPE DE QUEM? Pelo ID. O nome do crachá (o da lista de
@@ -958,10 +1099,11 @@ export function carimbarUidsERP(numero, itens) {
       sai: isso trocava os códigos do par repetido); depois o número, quando
       só um item de `antes` o tem e só um livre também; depois a descrição,
       com a mesma regra. A marca nunca pula para o vizinho.
-      Limite conhecido: aba antiga que remove um item manual e cria outro
-      manual com o mesmo número (ou a mesma descrição) na mesma gravação dá ao
-      novo o código do removido. Some quando o rascunho aberto adotar o código
-      da resposta do servidor (pré-requisito da E3 no plano). */
+      Aba antiga que remove um item manual e cria outro manual com o mesmo
+      número (ou a mesma descrição) na mesma gravação: aqui o novo casaria com
+      o removido. Quem fecha isso é o preservarItens (E3): item com entrega só
+      passa o código ao mesmo produto, e a lista que já leu os códigos do
+      servidor só passa o código ao mesmo item sem mudança. */
 export function casarItens(antes, novos) {
   const A = Array.isArray(antes) ? antes : [], N = Array.isArray(novos) ? novos : [];
   const par = N.map(() => -1), usadoA = new Set(), comUid = new Set();
@@ -1007,8 +1149,14 @@ export function casarItens(antes, novos) {
 }
 /* O QUE SÓ O SERVIDOR GUARDA NO ITEM. Aba antiga não conhece estes campos e
    manda o item sem eles: o servidor os recoloca, casando pelo casamento de
-   hoje. A E3 acrescenta aqui as entregas do item. */
-export const CAMPOS_ITEM_SERVIDOR = ['uid'];
+   hoje. As marcas de entrega (E3) moram aqui também; a regra de quem grava
+   marca nova é a guardarEntregasItens. */
+export const CAMPOS_ITEM_SERVIDOR = ['uid', 'entregas'];
+// O mesmo item, sem mudança nenhuma: lado, número, descrição, medida e quantidade.
+const mesmoItem = (a, b) => !!a.manual === !!b.manual && ['item', 'descricao', 'medidas', 'qtde'].every(c => String(a[c] ?? '') === String(b[c] ?? ''));
+// O mesmo produto: lado e descrição. Número, medida e quantidade a gestão corrige.
+const mesmoProduto = (a, b) => !!a.manual === !!b.manual && String(a.descricao ?? '').trim() === String(b.descricao ?? '').trim();
+const temEntregas = g => objeto(g) && Array.isArray(g.entregas) && g.entregas.length > 0;
 /* PRESERVAR OS ITENS (roda em toda gravação de O.S. no pcp-sync, depois das
    travas de conflito). Para cada item que chegou:
    - casado com um item gravado (casarItens): o campo de CAMPOS_ITEM_SERVIDOR
@@ -1017,12 +1165,50 @@ export const CAMPOS_ITEM_SERVIDOR = ['uid'];
    - sem código válido, ou com o código repetido de outro item da mesma lista
      (item copiado): ganha código novo. Item do ERP (O.S. do ERP, item não
      manual) ganha o da importação; o resto, 's-' + aleatório.
+   O ITEM SEM CÓDIGO NÃO HERDA O CÓDIGO DE OUTRO ITEM (E3). O casamento pelo
+   número e pela descrição não separa "o mesmo item editado" de "item novo
+   no lugar do removido" (a aba antiga que tira a placa 2 e cria o totem 2
+   na mesma gravação). Duas réguas, uma sobre a outra:
+   - item gravado COM ENTREGA só passa o código (e com ele as marcas e o
+     dinheiro) ao mesmo produto (lado e descrição), com ou sem códigos na
+     lista. Fora disso o item que chegou ganha código próprio, e a
+     guardarEntregasItens devolve o item com entrega ao lugar dele, com aviso;
+   - a lista que LEU os códigos do servidor (traz um código 's-' ou do ERP
+     que o servidor conhece: o aparelho não gera esses, só 'm-') só passa o
+     código ao mesmo item sem mudança nenhuma. Quem leu a lista carimbada tem
+     o código em todo item que leu; o item sem código dela é item novo de aba
+     antiga. O 'm-' não conta: a aba v135 dá 'm-' ao item que ela cria e não
+     adota o código da resposta, e contar o 'm-' trocava o código do item
+     antigo a cada gravação da ficha aberta (revisão da E3).
+   O item recusado pelo gravado tenta de novo com os outros gravados, e o
+   item com entrega que nenhum da lista pode herdar nem entra no casamento:
+   a aba que edita a descrição de um item com entrega não troca o código do
+   item novo a cada gravação.
    Nada fora da lista que chegou é criado nem removido. `sortear` só existe
    para o teste. Devolve { os, carimbados, recolocados }. */
 export function preservarItens(os, antes, { sortear = sortearUid } = {}) {
   if (!objeto(os) || !Array.isArray(os.itens)) return { os, carimbados: 0, recolocados: 0 };
   const gravados = Array.isArray(antes?.itens) ? antes.itens : [];
-  const par = casarItens(gravados, os.itens);
+  const conhecidos = new Set(gravados.filter(g => objeto(g) && uidItemValido(g.uid)).map(g => g.uid));
+  const leuCodigos = os.itens.some(it => objeto(it) && uidItemValido(it.uid) && !it.uid.startsWith('m-') && conhecidos.has(it.uid));
+  const recusa = (g, n) => objeto(n) && !uidItemValido(n.uid) && uidItemValido(g.uid) &&
+    (leuCodigos ? !mesmoItem(g, n) : temEntregas(g) && !mesmoProduto(g, n));
+  /* O item com entrega que nenhum item da lista pode herdar (nem o código dele
+     veio, nem o mesmo produto sem código) sai do casamento desde já: senão ele
+     e o item novo com o mesmo número se anulavam na regra do número, e o item
+     novo trocava de código a cada gravação. */
+  const uidsVeio = new Set(os.itens.filter(it => objeto(it) && uidItemValido(it.uid)).map(it => it.uid));
+  const semCodigo = os.itens.filter(it => objeto(it) && !uidItemValido(it.uid));
+  const mascara = gravados.map(g => objeto(g) && temEntregas(g) && uidItemValido(g.uid) && !uidsVeio.has(g.uid) &&
+    !semCodigo.some(n => mesmoProduto(g, n)) ? null : g);
+  let par = casarItens(mascara, os.itens);
+  for (let volta = 0; volta <= gravados.length; volta++) {
+    const fora = par.map((i, j) => i >= 0 && recusa(mascara[i], os.itens[j]) ? i : -1).filter(i => i >= 0);
+    if (!fora.length) break;
+    for (const i of fora) mascara[i] = null;
+    par = casarItens(mascara, os.itens);
+  }
+  par = par.map((i, j) => i >= 0 && recusa(gravados[i], os.itens[j]) ? -1 : i);
   let recolocados = 0, carimbados = 0;
   const itens = os.itens.map((it, j) => {
     if (!objeto(it)) return it;
@@ -1036,6 +1222,8 @@ export function preservarItens(os, antes, { sortear = sortearUid } = {}) {
     return r;
   });
   const vistos = new Set(), todos = new Set(itens.filter(it => objeto(it) && it.uid).map(it => it.uid));
+  // O código do gravado recusado não volta pelo carimbo (o do ERP sai da posição).
+  mascara.forEach((m, i) => { if (m === null && !par.includes(i) && uidItemValido(gravados[i]?.uid)) todos.add(gravados[i].uid); });
   const doERP = !!(os.origemMubisys || antes?.origemMubisys);
   const numero = String(os.numero ?? antes?.numero ?? '').trim();
   const vezes = new Map();
@@ -1050,6 +1238,120 @@ export function preservarItens(os, antes, { sortear = sortearUid } = {}) {
     it.uid = uid; todos.add(uid); vistos.add(uid); carimbados++;
   }
   return { os: { ...os, itens }, carimbados, recolocados };
+}
+/* PORTA DAS MARCAS DE ENTREGA POR ITEM (E3 do plano de entrega por item,
+   29/09/2026). Roda em toda gravação de O.S. no pcp-sync, depois do
+   preservarItens (o item já tem o código). Decisões do dono:
+   - marca nova (item.entregas) só de admin e pcp e de operação com senha
+     (balcão); cancelar e desfazer só admin e pcp. A permissão, o saldo, o
+     dia (nunca depois de hoje), o teto e o formato são do motor da E2
+     (ENTREGA_ITEM.validarEvento, a mesma régua que a tela usa). O crachá sem
+     senha ainda não marca (E5), a montagem e a máquina não marcam;
+   - SÓ ACRÉSCIMO: a marca gravada não muda e não some. O item parte das
+     marcas GRAVADAS, e o aparelho só acrescenta. Aba antiga sem o campo, ou
+     com a marca mexida, fica com o gravado;
+   - id já gravado (neste item ou em outro da O.S.) é ignorado sem aviso: é a
+     fila offline mandando de novo, ou o item copiado na tela;
+   - porId, por e em são do crachá e do relógio do servidor; o via sai do
+     papel (o motor). O que o aparelho escreveu neles não entra;
+   - marca que não passa é DESCARTADA com aviso, nunca 422 (422 prende a fila
+     do aparelho). O resto da gravação segue;
+   - item que tem marca não sai da lista: o servidor o devolve ao lugar dele
+     e avisa. O saldo de um item que não vai mais se tira com Cancelar item;
+   - O.S. finalizada antes e depois desta gravação não recebe marca (o motor
+     recusa: a entrega implícita já contou). Finalizar junto com a marca, na
+     mesma gravação, vale (o Finalizar da E4 marca o saldo e fecha).
+   Opções: papel (o do crachá; 'toque' e 'maquina' para as portas sem conta),
+   avisar (quem ouve o aviso), autor {nome, porId}, agora (ISO do servidor).
+   Devolve { os, avisos, eventos, recusadas }: `eventos` são as marcas novas
+   gravadas, uma linha compacta cada (a do diário); `recusadas` são as marcas
+   descartadas ({ id, uid, motivo }), que a resposta devolve em `descartado`
+   para o aparelho tirá-las da cópia e da fila. Sem isso a marca recusada
+   voltava na gravação seguinte da mesma cópia e, com o saldo liberado,
+   entrava calada, com a hora de agora e o dia antigo (revisão da E3). Nunca
+   lança. */
+const TETO_AVISOS_ENTREGA = 5;
+function rotuloItem(it) {
+  // Só o produto: o texto livre depois de ' - ' (dia, local, evento) fica de fora.
+  const d = String(it?.descricao ?? '').split(' - ')[0].trim().slice(0, 40);
+  const n = String(it?.item ?? '').trim().slice(0, 10);
+  return (n ? 'item ' + n : 'item') + (d ? ` (${d})` : '');
+}
+// A linha do diário para uma marca: sem R$, sem o texto de quem retirou.
+function linhaEntrega(it, e) {
+  const t = (v, n) => String(v ?? '').slice(0, n);
+  return {
+    id: t(e.id, 64), uid: t(it?.uid, 80), item: t(it?.item, 20), tipo: t(e.tipo, 20),
+    ...(Number.isInteger(e.qtde) ? { qtde: e.qtde } : {}), dia: t(e.dia, 10),
+    ...(e.alvo ? { alvo: t(e.alvo, 64) } : {}), ...(e.motivo ? { motivo: t(e.motivo, 200) } : {}),
+    via: t(e.via, 10), por: t(e.por, 80), porId: ehIdPessoa(e.porId) ? String(e.porId).trim() : '',
+  };
+}
+const marcasDe = it => objeto(it) && Array.isArray(it.entregas) ? it.entregas : [];
+export function guardarEntregasItens(os, antes, { papel = '', avisar = false, autor = {}, agora = '' } = {}) {
+  const avisos = [], eventos = [], recusas = [], recusadas = [];
+  if (!objeto(os)) return { os, avisos, eventos, recusadas };
+  const gravados = Array.isArray(antes?.itens) ? antes.itens : [];
+  const porUid = new Map();
+  for (const g of gravados) if (objeto(g) && uidItemValido(g.uid) && !porUid.has(g.uid)) porUid.set(g.uid, g);
+  const idsOS = new Set();
+  for (const g of gravados) for (const e of marcasDe(g)) if (objeto(e)) idsOS.add(String(e.id ?? '').trim());
+  const hoje = ENTREGA_ITEM.diaSP(agora) || ENTREGA_ITEM.diaSP(Date.now());
+  // Finalizada antes E depois desta gravação: o motor recusa. Finalizando agora, ou reabrindo, vale.
+  const osCtx = { ...os, finalizadaEm: antes?.finalizadaEm && os.finalizadaEm ? os.finalizadaEm : '' };
+  const carimbo = { por: String(autor?.nome ?? '').trim().slice(0, 80), porId: ehIdPessoa(autor?.porId) ? String(autor.porId).trim() : '', em: String(agora ?? '') };
+  const lista = Array.isArray(os.itens) ? os.itens : [];
+  const itens = lista.map(it => {
+    if (!objeto(it)) return it;
+    const g = uidItemValido(it.uid) ? porUid.get(it.uid) : null;
+    // Parte do GRAVADO: o que o aparelho mandou da marca antiga não vale.
+    const item = { ...it, entregas: marcasDe(g).slice() };
+    const doItem = new Set(item.entregas.filter(objeto).map(e => String(e.id ?? '').trim()));
+    for (const e of marcasDe(it)) {
+      if (!objeto(e)) continue;
+      const id = String(e.id ?? '').trim();
+      if (doItem.has(id) || idsOS.has(id)) continue;
+      const v = ENTREGA_ITEM.validarEvento(e, item, { papel, os: osCtx, hoje });
+      if (v.repetido) continue;
+      if (!v.ok) {
+        recusas.push(`A marca de entrega do ${rotuloItem(it)} não foi gravada: ${v.erro}`);
+        recusadas.push({ id: id.slice(0, 64), uid: String(it.uid ?? '').slice(0, 80), motivo: String(v.erro ?? '').slice(0, 200) });
+        continue;
+      }
+      const marca = { ...v.evento, ...carimbo };
+      item.entregas.push(marca); doItem.add(marca.id); idsOS.add(marca.id);
+      eventos.push(linhaEntrega(it, marca));
+    }
+    if (!item.entregas.length) delete item.entregas;
+    return item;
+  });
+  // Item com marca que o aparelho tirou da lista: volta ao lugar dele.
+  const presentes = new Set(itens.filter(objeto).map(it => it.uid));
+  let voltaram = 0;
+  gravados.forEach((g, i) => {
+    if (!marcasDe(g).length || !uidItemValido(g.uid) || presentes.has(g.uid)) return;
+    itens.splice(Math.min(i, itens.length), 0, { ...g });
+    presentes.add(g.uid); voltaram++;
+    avisos.push(`O ${rotuloItem(g)} já tem marca de entrega e continua na O.S.: item com entrega não sai da lista. Para tirar o saldo que falta, a gestão usa Cancelar item.`);
+  });
+  avisos.push(...recusas.slice(0, TETO_AVISOS_ENTREGA));
+  if (recusas.length > TETO_AVISOS_ENTREGA) avisos.push(`Mais ${recusas.length - TETO_AVISOS_ENTREGA} marcas de entrega não foram gravadas.`);
+  const r = Array.isArray(os.itens) || voltaram ? { ...os, itens } : { ...os };
+  return { os: r, avisos: avisar ? avisos : [], eventos, recusadas: recusadas.slice(0, 200) };
+}
+/* A MARCA QUE O APARELHO MANDOU E NÃO FICOU GRAVADA. Para o reenvio da mesma
+   gravação (a resposta se perdeu): o servidor responde sem gravar de novo, e
+   diz de novo quais marcas caíram, para o aparelho tirá-las da cópia. */
+export function entregasNaoGravadas(os, gravado) {
+  const ids = new Set();
+  for (const g of Array.isArray(gravado?.itens) ? gravado.itens : []) for (const e of marcasDe(g)) if (objeto(e)) ids.add(String(e.id ?? '').trim());
+  const fora = [];
+  for (const it of Array.isArray(os?.itens) ? os.itens : []) for (const e of marcasDe(it)) {
+    if (!objeto(e)) continue;
+    const id = String(e.id ?? '').trim();
+    if (!ids.has(id)) fora.push({ id: id.slice(0, 64), uid: String(it.uid ?? '').slice(0, 80), motivo: 'A marca não ficou gravada no servidor.' });
+  }
+  return fora.slice(0, 200);
 }
 // Do item, só a marca da montagem: descrição, medida e valor são do PCP e do ERP.
 const CAMPOS_ITEM_MONTAGEM = ['statusInst', 'pronto', 'motivo', 'obsProb', 'fotoProbId'];
@@ -1138,10 +1440,17 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
     const par = casarItens(atual.itens, veio.itens);
     const usados = new Set(par.map((i, j) => i >= 0 ? j : -1).filter(j => j >= 0));
     const doGravado = new Map(par.map((i, j) => [i, j]).filter(([i]) => i >= 0));
+    /* MARCA DE ENTREGA POR ITEM (item.entregas) o crachá sem senha ainda não
+       grava (entra na E5, como entrega declarada): a mescla parte do gravado
+       e o campo não está em CAMPOS_ITEM_MONTAGEM. A marca nova que o celular
+       mandou não some calada: vira aviso. */
+    const entregaNaoGravada = [];
     m.itens = atual.itens.map((it, i) => {
       if (!objeto(it)) return it;
       const v = doGravado.has(i) ? veio.itens[doGravado.get(i)] : null;
       if (!v) return it;
+      const jaTem = new Set((Array.isArray(it.entregas) ? it.entregas : []).filter(objeto).map(e => String(e.id ?? '')));
+      if (Array.isArray(v.entregas) && v.entregas.some(e => objeto(e) && !jaTem.has(String(e.id ?? '')))) entregaNaoGravada.push(it);
       const r = { ...it };
       for (const c of CAMPOS_ITEM_MONTAGEM) {
         if (!proprio(v, c) || (velha && vazio(v[c]) && !vazio(it[c]))) continue;
@@ -1154,6 +1463,7 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
     });
     const perdidas = veio.itens.filter((v, j) => !usados.has(j) && objeto(v) && CAMPOS_ITEM_MONTAGEM.some(c => !vazio(v[c])));
     if (perdidas.length) avisos.push(`${perdidas.length === 1 ? 'A marca do item ' + txt(perdidas[0].item || perdidas[0].descricao) + ' não foi gravada' : perdidas.length + ' marcas de item não foram gravadas'}: o PCP mudou a lista de itens. Confira os itens com o PCP.`);
+    if (entregaNaoGravada.length) avisos.push(`${entregaNaoGravada.length === 1 ? 'A marca de entrega do ' + rotuloItem(entregaNaoGravada[0]) + ' não foi gravada' : entregaNaoGravada.length + ' marcas de entrega de item não foram gravadas'}: pelo celular a entrega por item ainda não vale. Fale com o PCP.`);
   }
   if (!atual?.finalizadaEm && veio?.finalizadaEm) {
     const t = Date.parse(String(veio.finalizadaEm)), reaberta = Date.parse(String(atual?.reabertaEm || ''));
@@ -1202,12 +1512,16 @@ export function acertarMomentosToque(os, anterior) {
    upsert, janela de conflito); a mescla parte do que está gravado, então o que
    não desce não se perde na volta. erpAlteracoes sai inteiro: guarda o antes e
    o depois do CPF/CNPJ e do valor.
-   Os IDs do RH dos carimbos (<campo>Id, a memória idsDosCarimbos e o porId e
-   porConta da entrega lançada) também não descem: o ID são os 6 primeiros
-   dígitos do CPF de quem é da gestão (revisão da F01). O nome continua. */
+   Os IDs do RH dos carimbos (<campo>Id, a memória idsDosCarimbos, o porId e
+   porConta da entrega lançada e o porId das marcas de entrega por item)
+   também não descem: o ID são os 6 primeiros dígitos do CPF de quem é da
+   gestão (revisão da F01). O nome continua. */
 export function podarToque(r) {
   if (!objeto(r)) return r;
-  const { cnpjCpf: _c, valorTotal: _v, erpAlteracoes: _h, [MEMORIA_IDS]: _m, ...resto } = r;
+  /* A divisão da equipe (alocacao, F08) e o histórico dela (alocacaoLog)
+     também não descem: são os percentuais de cada colega, e o log guarda o
+     antes e o depois deles. A mescla parte do gravado: nada se perde. */
+  const { cnpjCpf: _c, valorTotal: _v, erpAlteracoes: _h, [MEMORIA_IDS]: _m, alocacao: _a, alocacaoLog: _al, ...resto } = r;
   for (const c of Object.keys(CARIMBOS_COM_ID)) delete resto[c + 'Id'];
   if (objeto(resto.entregaLancada)) {
     const { porId: _pi, porConta: _pc, ...el } = resto.entregaLancada;
@@ -1241,6 +1555,13 @@ export function podarCarimbosF15(r) {
   else if (objeto(out.retornoPrevisto)) {
     const { porId: _pi, porConta: _pc, ...x } = out.retornoPrevisto;
     out.retornoPrevisto = x;
+  }
+  /* A MARCA DE ENTREGA POR ITEM (E3) desce com o nome de quem marcou, sem o
+     ID: a mesma régua. A volta sem ele não apaga nada, porque marca gravada
+     não muda (guardarEntregasItens parte do gravado). */
+  if (Array.isArray(out.itens) && out.itens.some(it => objeto(it) && Array.isArray(it.entregas))) {
+    out.itens = out.itens.map(it => !objeto(it) || !Array.isArray(it.entregas) ? it
+      : { ...it, entregas: it.entregas.map(e => { if (!objeto(e)) return e; const { porId: _pi, ...x } = e; return x; }) });
   }
   return out;
 }
@@ -1311,6 +1632,9 @@ export const CAMPOS_AUDITADOS = [
   'equipe', 'veiculo',
   'instalacao.data', 'instalacao.periodo', 'instalacao.hora', 'instalacao.duracaoDias',
   'previsaoEntrega', 'valorTotal', 'itens',
+  // As marcas de entrega por item (E3): uma linha compacta por marca nova,
+  // no lugar do antes e depois da lista inteira de itens.
+  'itens.entregas',
   'liberadoPCP', 'confirmacao', 'carroLiberado',
   'horaSaida', 'horaRetorno', 'saidaEm', 'retornoEm',
   'fotosCheckinIds', 'fotosRetornoIds', 'layoutFotoId',
@@ -1354,19 +1678,58 @@ function semDocumento(v) {
    { campos, antes, depois } com o valor cru de cada lado (null quando vazio
    do lado de lá). */
 /* O código do item (uid, E1) que o servidor carimba não é mudança de ninguém:
-   na comparação da lista de itens ele não conta. O que se guarda é cru. */
+   na comparação da lista de itens ele não conta. As marcas de entrega (E3)
+   também não: elas têm linha própria ('itens.entregas'), e a lista de itens
+   entra no diário sem elas. Fora isso, o que se guarda é cru. */
+const semEntregas = it => { if (!objeto(it)) return it; const { entregas: _e, ...x } = it; return x; };
 const semUidItens = (c, v) => c === 'itens' && Array.isArray(v) ? v.map(it => {
   if (!objeto(it)) return it;
-  const { uid: _u, ...x } = it;
+  const { uid: _u, entregas: _e, ...x } = it;
   return x;
 }) : v;
+/* As marcas de entrega da O.S. por id, na ordem, com o item de cada uma. */
+function marcasDaOS(o) {
+  const m = new Map();
+  for (const it of Array.isArray(o.itens) ? o.itens : []) {
+    for (const e of marcasDe(it)) {
+      const id = objeto(e) ? String(e.id ?? '') : '';
+      if (id && !m.has(id)) m.set(id, linhaEntrega(it, e));
+    }
+  }
+  return m;
+}
 export function diffAuditavel(antes, depois, campos = CAMPOS_AUDITADOS) {
   const a = objeto(antes) ? antes : {}, d = objeto(depois) ? depois : {};
   const out = { campos: [], antes: {}, depois: {} };
   for (const c of campos) {
+    /* MARCA DE ENTREGA POR ITEM: uma linha por marca nova (uid, tipo,
+       quantidade, dia, autor), sem R$. O lado de antes diz quantas havia. */
+    if (c === 'itens.entregas') {
+      const ma = marcasDaOS(a), md = marcasDaOS(d);
+      const novos = [...md.entries()].filter(([id]) => !ma.has(id)).map(([, l]) => l);
+      if (!novos.length && [...ma.keys()].every(id => md.has(id))) continue;
+      out.campos.push(c);
+      out.antes[c] = { marcas: ma.size };
+      out.depois[c] = { marcas: md.size, novos };
+      continue;
+    }
     const va = lerCaminho(a, c), vd = lerCaminho(d, c);
     if (canon(semVazio(semUidItens(c, va))) === canon(semVazio(semUidItens(c, vd)))) continue;
     out.campos.push(c);
+    if (c === 'itens') {
+      out.antes[c] = semDocumento(Array.isArray(va) ? va.map(semEntregas) : va ?? null);
+      out.depois[c] = semDocumento(Array.isArray(vd) ? vd.map(semEntregas) : vd ?? null);
+      continue;
+    }
+    /* O HISTÓRICO DA DIVISÃO (alocacaoLog, F08) só cresce, até 40 linhas: o
+       diário guarda o tamanho de cada lado e as linhas novas, não a lista
+       inteira duas vezes a cada ajuste de percentual. */
+    if (c === 'alocacaoLog' && Array.isArray(vd)) {
+      const velhas = new Set((Array.isArray(va) ? va : []).map(canon));
+      out.antes[c] = { linhas: Array.isArray(va) ? va.length : 0 };
+      out.depois[c] = { linhas: vd.length, novas: semDocumento(vd.filter(x => !velhas.has(canon(x)))) };
+      continue;
+    }
     out.antes[c] = semDocumento(va ?? null);
     out.depois[c] = semDocumento(vd ?? null);
   }
@@ -1408,3 +1771,276 @@ export function entradaAuditoria({ id, osId, numero, acao, diff, autor, origem, 
     em: textoAud(em, 40), origem: ['tela', 'toque', 'maquina'].includes(origem) ? origem : 'tela',
   };
 }
+/* ALOCAÇÃO DENTRO DA O.S. (F08, 29/09/2026). A divisão da equipe mora na
+   própria O.S. (os.alocacao, formato do motor DIVISAO: grupos com a cota de
+   cada equipe, a cota de cada pessoa dentro dela, o líder e a marca de
+   freelancer; tudo em 0,01%). Regras desta porta:
+   - só admin e pcp (com senha) mudam. Operação, montagem, toque, máquina e
+     ERP ficam com o gravado;
+   - o que chega é conferido pelo motor (validar) e pela chave estrangeira:
+     a equipe existe no cadastro; a pessoa existe nas fichas ou nos contratos
+     de freelancer do RH (ficha desligada ou contrato vencido vale quando a
+     O.S. é de antes da saída ou do fim do contrato). RH fora do ar: aceita e
+     marca `conferirRH`, que não confirma na performance até a próxima
+     gravação da gestão com o RH no ar conferir as pessoas;
+   - quem está em os.equipe só pelo nome, sem ID no RH, trava a divisão (ela
+     tiraria essa pessoa da O.S. calada);
+   - a divisão que traz o carimbo (`em`) de uma versão que não é a gravada é
+     cópia velha (Sobrescrever de aba antiga) e é descartada;
+   - o FINAL de cada pessoa é recalculado aqui, e o que veio do aparelho é
+     ignorado; a marca de freelancer sai do RH quando ele responde;
+   - os.equipe passa a ser DERIVADA da divisão (lista plana de IDs): o
+     celular, os conflitos, a volta do carro, o RH e o Painel leem ela;
+   - alocação inválida é DESCARTADA com aviso, nunca 422 (422 prende a fila
+     do aparelho). O aparelho recebe `descartado` e volta à versão gravada;
+   - aba antiga que muda os.equipe sem mandar a divisão: fica a lista nova e
+     a divisão é marcada `desatualizada` (não conta como confirmada);
+   - alocacaoLog é só de acréscimo (teto 40), montado aqui com autor, antes
+     e depois. O que o aparelho manda nele nunca entra. */
+export const ALOCACAO_LOG_MAX = 40;
+/* O que a gestão edita: as duas camadas de cotas, papéis, cadeados e o selo
+   "editado à mão". O final, as marcas (desatualizada, conferirRH), o carimbo
+   e a marca de freelancer (que vem do RH) são do servidor e não contam como
+   mudança. A tela v135, que devolve a divisão como recebeu, não muda nada. */
+const nucleoAlocacao = a => !objeto(a) ? a : {
+  grupos: Array.isArray(a.grupos) ? a.grupos.map(g => !objeto(g) ? g : {
+    equipeId: g.equipeId ?? null, cota: g.cota, liderId: g.liderId ?? null, fixo: g.fixo === true,
+    membros: Array.isArray(g.membros) ? g.membros.map(m => !objeto(m) ? m : { pessoaId: m.pessoaId, papel: m.papel ?? '', cota: m.cota, fixo: m.fixo === true }) : g.membros,
+  }) : a.grupos,
+  manual: a.manual === true,
+};
+// `veio` undefined = o aparelho não mandou o campo (fica o gravado). O vazio
+// ('', {}, [], null) é "sem divisão" dos dois lados, como no preservarAusentes:
+// limpar com '' e reenviar a limpeza não é mudança nem descarte.
+const nucleoOuNada = v => vazioGestao(v) ? null : nucleoAlocacao(v);
+export const alocacaoMudou = (veio, antes) => veio !== undefined && canon(nucleoOuNada(veio)) !== canon(nucleoOuNada(antes));
+const listaAloc = v => Array.isArray(v) ? v : [];
+// O que o log e o diário guardam da divisão: equipes, cotas e papéis.
+const resumoAlocacao = a => objeto(a) && Array.isArray(a.grupos) ? {
+  grupos: a.grupos.slice(0, 10).map(g => ({
+    equipeId: objeto(g) && g.equipeId != null ? String(g.equipeId).slice(0, 150) : null,
+    cota: objeto(g) && Number.isInteger(g.cota) ? g.cota : null,
+    liderId: objeto(g) && g.liderId != null ? String(g.liderId).slice(0, 20) : null,
+    membros: listaAloc(objeto(g) ? g.membros : null).slice(0, 50).map(m => ({
+      pessoaId: String(objeto(m) ? m.pessoaId ?? '' : '').slice(0, 20),
+      papel: String(objeto(m) ? m.papel ?? '' : '').slice(0, 10),
+      cota: objeto(m) && Number.isInteger(m.cota) ? m.cota : null,
+    })),
+  })),
+} : null;
+const diaSP = v => {
+  if (!v) return '';
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  return Number.isFinite(+d) ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d) : '';
+};
+/* O DIA DO TRABALHO, para a ficha desligada. O.S. finalizada: o mesmo dia da
+   apuração (perfFonte), a entrega lançada e, sem ela, a finalização. Antes de
+   finalizar: a saída, o retorno e a agenda de gente (agendaDeGente); a
+   previsão que o ERP pôs em instalacao.data não é dia de trabalho de ninguém. */
+export const diaDaOS = o => o?.finalizadaEm
+  ? diaSP(o?.entregaLancada?.data) || diaSP(o.finalizadaEm)
+  : diaSP(o?.entregaLancada?.data) || diaSP(o?.saidaEm) || diaSP(o?.retornoEm) || agendaDeGente(o);
+/* A PESSOA EXISTE NO RH? Pelo ID, nas fichas e nos contratos de freelancer
+   que a régua recebeu (desligados inclusive). ID repetido entre dois CPFs
+   não é de ninguém. Quem saiu vale só para O.S. do dia da saída ou de antes
+   (as pendências de setembro de quem saiu depois). A saída da ficha é a data
+   do desligamento; a do contrato de freelancer é o fim do contrato
+   (contratoFim). Contrato ENCERRADO no RH antes do fim combinado não tem a
+   data do encerramento (o RH não guarda): só vale quando o fim combinado já
+   passou, e então o fim é a saída. */
+function saidaDoCadastro(p, hoje) {
+  if (p.freelancer !== true) return String(p.desligadoEm || '').slice(0, 10);
+  const fim = String(p.contratoFim || '').slice(0, 10);
+  if (!DIA_ISO.test(fim)) return '';
+  if (p.situacaoContrato === 'encerrado' && !(hoje && fim <= hoje)) return '';
+  return fim;
+}
+function conferirPessoaAlocacao(id, pessoas, dia, hoje = '') {
+  const achadas = listaAloc(pessoas && pessoas.fichas).filter(p => p && String(p.id) === id);
+  if (!achadas.length) return { erro: `A pessoa de ID ${id} não está nas fichas nem nos contratos de freelancer do RH.` };
+  if ((typeof pessoas.repetido === 'function' && pessoas.repetido(id)) || achadas.some(p => p.idRepetido === true))
+    return { erro: `O ID ${id} aparece em dois cadastros do RH com CPFs diferentes. Confira no RH antes de dividir.` };
+  const ativa = achadas.find(p => !p.desligado);
+  if (ativa) return { freelancer: ativa.freelancer === true };
+  const saida = p => saidaDoCadastro(p, hoje);
+  const vale = achadas.find(p => DIA_ISO.test(saida(p)) && dia && dia <= saida(p));
+  if (vale) return { freelancer: vale.freelancer === true };
+  const nome = String(achadas[0].nome || '').trim().split(/\s+/)[0] || 'ID ' + id;
+  const quando = achadas.map(saida).filter(d => DIA_ISO.test(d)).sort().pop();
+  if (quando) return { erro: dia
+    ? `${nome} (ID ${id}) saiu em ${diaBR(quando)}/${quando.slice(0, 4)}, antes da data desta O.S.`
+    : `${nome} (ID ${id}) saiu em ${diaBR(quando)}/${quando.slice(0, 4)}, e esta O.S. ainda não tem o dia do trabalho (entrega, saída ou agenda) para conferir.` };
+  const encerrado = achadas.some(p => p.freelancer === true && p.situacaoContrato === 'encerrado');
+  return { erro: encerrado
+    ? `${nome} (ID ${id}) teve o contrato de freelancer encerrado no RH antes do fim combinado, e o RH não guarda o dia do encerramento.`
+    : `${nome} (ID ${id}) não está mais na casa, e o RH não tem a data da saída.` };
+}
+/* AS PESSOAS DA DIVISÃO, conferidas no RH: a primeira que não passa dá o
+   motivo; as que passam levam a marca de freelancer do RH. */
+function conferirPessoasDivisao(grupos, pessoas, dia, hoje) {
+  const freelancer = new Map();
+  for (const g of listaAloc(grupos)) {
+    for (const m of listaAloc(objeto(g) ? g.membros : null)) {
+      const c = conferirPessoaAlocacao(String(objeto(m) ? m.pessoaId ?? '' : ''), pessoas, dia, hoje);
+      if (c.erro) return { motivo: c.erro, freelancer };
+      freelancer.set(m.pessoaId, c.freelancer);
+    }
+  }
+  return { motivo: '', freelancer };
+}
+/* A DIVISÃO QUE O APARELHO MANDOU, conferida. `veio` é o valor cru (antes do
+   preservarAusentes); `os` já passou por ele; `antes` é o gravado.
+   Opções: pode (admin e pcp com senha), avisar (quem ouve o aviso: não a
+   máquina), autor {nome, porId}, agora, equipes (cadastro de hoje), pessoas
+   (régua do RH; null = o RH não respondeu).
+   Devolve { os, avisos, descartado: null | { motivo }, mudou }. Nunca lança. */
+/* QUEM ESTÁ NA O.S. SÓ PELO NOME e não tem ID no RH (o terceiro sem ficha,
+   o freelancer antes do CPF): a divisão não o alcança (o motor exige ID), e
+   gravá-la trocaria os.equipe pela lista derivada, tirando essa pessoa da
+   O.S. calada (o celular dela perde a O.S., a volta do carro muda de chave e
+   o RH e o Painel deixam de contar quem trabalhou). A regra do próprio motor
+   (alocacaoSugerida): faltando alguém, não sai divisão. Confere a lista que
+   veio e a gravada; nome que o RH resolve para um ID passa. */
+function semIdNaEquipe(listas, pessoas, rhFora) {
+  for (const x of listas.flatMap(listaAloc)) {
+    const t = String(x ?? '').trim();
+    if (!t || ehIdPessoa(t)) continue;
+    if (!rhFora && ehIdPessoa(pessoas.idDe(t))) continue;
+    const quem = t.slice(0, 40);
+    return rhFora
+      ? `O RH não respondeu, e "${quem}" está na equipe desta O.S. só pelo nome. Tente de novo quando o RH responder.`
+      : `"${quem}" está na equipe desta O.S. só pelo nome e não tem ID no RH. Resolva o cadastro antes de dividir.`;
+  }
+  return '';
+}
+export function sanearAlocacao(veio, os, antes, { pode = false, avisar = false, autor = {}, agora = '', equipes = [], pessoas = null } = {}) {
+  const r = { ...os };
+  const avisos = [];
+  const a0 = objeto(antes) && proprio(antes, 'alocacao') ? antes.alocacao : undefined;
+  const log0 = objeto(antes) && Array.isArray(antes.alocacaoLog) ? antes.alocacaoLog : null;
+  const carimbo = { por: String(autor?.nome ?? '').slice(0, 120), porId: ehIdPessoa(autor?.porId) ? String(autor.porId).trim() : '', em: String(agora ?? '') };
+  const hoje = diaSP(agora);
+  const rhFora = !pessoas || typeof pessoas.idDe !== 'function';
+  let a = a0, motivo = '', entrada = null;
+  if (alocacaoMudou(veio, a0)) {
+    /* CÓPIA VELHA: a divisão que veio traz o carimbo do servidor (`em`) de
+       uma versão que não é a gravada. É a aba presa numa versão antiga que
+       tocou em Sobrescrever e reenviou a cópia local inteira: gravá-la
+       apagaria calada a divisão de outro aparelho. A tela da gestão edita a
+       partir da divisão gravada e devolve o `em` dela; divisão nova vai sem
+       `em`. */
+    const emVeio = objeto(veio) && typeof veio.em === 'string' ? veio.em.trim() : '';
+    if (emVeio && !(objeto(a0) && String(a0.em ?? '') === emVeio))
+      motivo = 'A divisão deste aparelho é de uma versão anterior à que está gravada no servidor.';
+    else if (!pode) motivo = 'Só a gestão (admin e PCP) muda a divisão da equipe.';
+    else if (vazioGestao(veio)) {
+      // Limpar de propósito: a O.S. volta a não ter divisão; os.equipe fica a que veio.
+      if (a0 != null) { a = null; entrada = { acao: 'limpar', antes: resumoAlocacao(a0), depois: null }; }
+    } else {
+      const ids = new Set(listaAloc(equipes).filter(e => objeto(e) && e.id != null).map(e => String(e.id)));
+      motivo = DIVISAO.validar(veio);
+      if (!motivo) {
+        const g = veio.grupos.find(x => x.equipeId != null && !ids.has(x.equipeId));
+        if (g) motivo = `A equipe "${String(g.equipeId).slice(0, 40)}" não está no cadastro de equipes.`;
+      }
+      if (!motivo) motivo = semIdNaEquipe([r.equipe, objeto(antes) ? antes.equipe : null], pessoas, rhFora);
+      let freelancer = new Map();
+      if (!motivo && !rhFora) {
+        const c = conferirPessoasDivisao(veio.grupos, pessoas, diaDaOS(r) || diaDaOS(antes), hoje);
+        motivo = c.motivo; freelancer = c.freelancer;
+      }
+      if (!motivo) {
+        const grupos = veio.grupos.map(g => ({
+          equipeId: g.equipeId ?? null, cota: g.cota, liderId: g.liderId, ...(g.fixo === true ? { fixo: true } : {}),
+          membros: g.membros.map(m => ({ pessoaId: m.pessoaId, papel: m.papel,
+            freelancer: rhFora ? m.freelancer === true : freelancer.get(m.pessoaId) === true, cota: m.cota, ...(m.fixo === true ? { fixo: true } : {}) })),
+        }));
+        // O FINAL É DAQUI: o que o aparelho mandou em `final` não entra.
+        a = { grupos, final: DIVISAO.finais({ grupos }), manual: veio.manual === true, ...carimbo, ...(rhFora ? { conferirRH: true } : {}) };
+        r.equipe = DIVISAO.derivarEquipe(a);
+        entrada = { acao: a0 ? 'alterar' : 'criar', antes: resumoAlocacao(a0), depois: resumoAlocacao(a) };
+        if (rhFora && avisar) avisos.push('O RH não respondeu agora: a divisão da equipe foi gravada e fica marcada para conferir as pessoas. Até lá ela não conta na performance.');
+      }
+    }
+    // A lista que veio saiu da divisão recusada: fica a gravada.
+    if (motivo && objeto(veio) && Array.isArray(os?.equipe) && objeto(antes) && DIVISAO.mesmaGente(os.equipe, veio)) {
+      if (proprio(antes, 'equipe')) r.equipe = antes.equipe; else delete r.equipe;
+    }
+  } else if (pode && objeto(a0) && a0.conferirRH === true && !rhFora && !DIVISAO.validar(a0)) {
+    /* A DIVISÃO GRAVADA COM O RH FORA DO AR é conferida na primeira gravação
+       da gestão com o RH no ar. Passou: sai a marca, a marca de freelancer
+       vem do RH e o histórico ganha a linha 'conferir' (o carimbo da divisão
+       fica o de quem a fez). Não passou: continua marcada, não conta na
+       performance e a gestão recebe o motivo. */
+    const c = conferirPessoasDivisao(a0.grupos, pessoas, diaDaOS(r) || diaDaOS(antes), hoje);
+    if (!c.motivo) {
+      const { conferirRH: _c, ...x } = a0;
+      const grupos = x.grupos.map(g => ({ ...g, membros: g.membros.map(m => ({ ...m, freelancer: c.freelancer.get(m.pessoaId) === true })) }));
+      a = { ...x, grupos, final: DIVISAO.finais({ grupos }) };
+      entrada = { acao: 'conferir', antes: resumoAlocacao(a0), depois: resumoAlocacao(a) };
+    } else if (avisar) {
+      avisos.push(`A divisão da equipe foi gravada com o RH fora do ar e não passou na conferência: ${c.motivo} Ela não conta na performance até a gestão refazer a divisão.`);
+    }
+  }
+  if (motivo && avisar) avisos.push(`A divisão da equipe não foi gravada. ${motivo} ${a0 ? 'Continua valendo a divisão que estava gravada.' : 'A O.S. segue sem divisão gravada.'}`);
+  /* DESATUALIZADA: a divisão válida que ficou com gente diferente de
+     os.equipe (aba antiga que trocou a equipe sem mandar a divisão). A lista
+     nova fica; a divisão vira sugestão até a gestão refazer. Voltar à mesma
+     gente tira a marca. */
+  if (objeto(a) && !DIVISAO.validar(a)) {
+    const velha = !DIVISAO.mesmaGente(r.equipe, a);
+    if (velha !== (a.desatualizada === true)) {
+      if (velha) a = { ...a, desatualizada: true };
+      else { const { desatualizada: _d, ...x } = a; a = x; }
+      if (!entrada) entrada = { acao: velha ? 'desatualizar' : 'reatualizar',
+        antes: { equipe: DIVISAO.derivarEquipe(a) }, depois: { equipe: listaAloc(r.equipe).map(x => String(x ?? '').slice(0, 60)).slice(0, 50) } };
+    }
+  }
+  if (a === undefined) delete r.alocacao; else r.alocacao = a;
+  // O LOG: o gravado e, quando algo mudou aqui, uma linha a mais. Nunca o do aparelho.
+  if (entrada) r.alocacaoLog = [...(log0 || []), { ...entrada, ...carimbo }].slice(-ALOCACAO_LOG_MAX);
+  else if (objeto(antes) && proprio(antes, 'alocacaoLog')) r.alocacaoLog = antes.alocacaoLog;
+  else delete r.alocacaoLog;
+  return { os: r, avisos, descartado: motivo ? { motivo } : null, mudou: !!entrada };
+}
+// O DESCARTE ENTRA NO DIÁRIO: o que estava gravado e o que foi recusado, com o motivo.
+export const diarioDescarteAlocacao = (antes, veio, motivo) => ({
+  campos: ['alocacao'],
+  antes: { alocacao: objeto(antes) && antes.alocacao != null ? antes.alocacao : null },
+  depois: { alocacao: { descartada: String(motivo ?? '').slice(0, 300), ...(resumoAlocacao(veio) || {}) } },
+});
+/* A DIVISÃO FORA DA GESTÃO. A montagem (com senha ou pelo toque) não recebe
+   os percentuais nem o histórico deles: o celular do instalador não mostra
+   divisão. Os outros papéis (operação, comercial) recebem a divisão sem o ID
+   do RH de quem gravou, como nos carimbos da F15. A volta sem os campos não
+   apaga nada: ausente fica o gravado. */
+export function podarAlocacao(r) {
+  if (!objeto(r)) return r;
+  const { alocacao: _a, alocacaoLog: _l, ...x } = r;
+  return x;
+}
+export function podarIdsAlocacao(r) {
+  if (!objeto(r)) return r;
+  const out = { ...r };
+  if (objeto(out.alocacao) && 'porId' in out.alocacao) { const { porId: _p, ...a } = out.alocacao; out.alocacao = a; }
+  if (Array.isArray(out.alocacaoLog)) out.alocacaoLog = out.alocacaoLog.map(e => { if (!objeto(e)) return e; const { porId: _p, ...x } = e; return x; });
+  return out;
+}
+/* A PARTICIPAÇÃO ANTIGA (blob performancePCP.participacoes) só vale na O.S.
+   que nunca teve divisão, ou quando foi confirmada DEPOIS da última mudança
+   da divisão. A divisão limpa de propósito (alocacao null, com histórico)
+   deixa a O.S. como sugestão: a limpeza não ressuscita a conferência velha.
+   A mesma conta no aparelho (performance.js, perfParticipacaoVale). */
+export function participacaoVale(os, p) {
+  if (!p) return null;
+  if (objeto(os?.alocacao)) return null;
+  const log = Array.isArray(os?.alocacaoLog) ? os.alocacaoLog.filter(objeto) : [];
+  const ultima = log.length ? String(log[log.length - 1].em || '') || '9999' : (objeto(os) && proprio(os, 'alocacao') ? '9999' : '');
+  return !ultima || String(p.em || '') > ultima ? p : null;
+}
+/* CONFIRMADA PARA A PERFORMANCE: a regra única do motor (alocacaoConfirmada),
+   exposta aqui para o pcp-sync. */
+export const alocacaoConfirmada = os => DIVISAO.alocacaoConfirmada(os);
+export const finaisAlocacao = a => DIVISAO.finais(a);

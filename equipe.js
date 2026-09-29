@@ -848,8 +848,12 @@ function reRender() {
    objeto da lista, então comparar rev não via mudança e a ficha seguia
    "finalizada" ou com o carro liberado. Nesse caso vale a cópia do store. */
 function atualizarModalAberto(doAviso) {
-  if (EQ.comercial || !EQ.modalId || !_draft || _dirty) return;
+  if (EQ.comercial || !EQ.modalId || !_draft) return;
   const novo = STORE.getOS(EQ.modalId);
+  /* O código do item que o servidor deu (E1) entra no rascunho mesmo com
+     marca pendente: só o código que falta, nada mais muda. */
+  if (novo && novo !== _draft && typeof OPERACAO.adotarUidsItens === 'function') OPERACAO.adotarUidsItens(_draft, novo);
+  if (_dirty) return;
   if (!novo || novo === _draft || typeof novo.rev !== 'number') return;
   if (!doAviso && novo.rev <= (Number(_draft.rev) || 0)) return;
   const ae = document.activeElement;

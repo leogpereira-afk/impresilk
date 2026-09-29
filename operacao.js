@@ -34,10 +34,32 @@ const OPERACAO = (() => {
   const ehIdPessoa = v => /^\d{6}$/.test(String(v ?? '').trim());
   const id6 = v => { const d = String(v ?? '').replace(/\D/g, ''); return d.length === 6 ? d : d.length === 11 ? d.slice(0, 6) : ''; };
   function resolverPessoas(dados = {}) {
-    const fichas = (Array.isArray(dados.pessoas) ? dados.pessoas : []).filter(p => p && ehIdPessoa(p.id));
+    const todas = Array.isArray(dados.pessoas) ? dados.pessoas : [];
+    const fichas = todas.filter(p => p && ehIdPessoa(p.id));
+    /* Contrato de freelancer ainda sem ID (sem CPF, ou CPF que não confere, F07)
+       conta na ambiguidade e nunca é o resultado: "Lucas" com a ficha do Lucas e
+       o contrato do Lucas Prado sem CPF já não é de ninguém, e não muda de dono
+       no dia em que o RH preenche o CPF do contrato. */
+    const semId = todas.filter(p => p && p.freelancer === true && !ehIdPessoa(p.id) && String(p.nome || '').trim());
+    const candidatas = semId.length ? [...fichas, ...semId] : fichas;
     const porId = new Map();
     for (const p of fichas) if (!porId.has(p.id)) porId.set(p.id, p);
     const porChaveRH = new Map(fichas.filter(p => p.chave).map(p => [String(p.chave), p]));
+    /* ID REPETIDO ENTRE FICHA E CONTRATO DE FREELANCER (F07, caminho B). O
+       ID sai dos 6 primeiros dígitos do CPF, e a ficha de Colaboradores e o
+       contrato de freelancer do RH são cadastros diferentes: dois CPFs podem
+       começar igual. O servidor junta a MESMA pessoa (CPF inteiro igual) antes
+       de mandar e marca `idRepetido` no resto; a régua também percebe o par
+       sozinha. ID repetido nunca é o resultado de um nome: melhor "sem ficha"
+       do que o ponto indo para a pessoa errada. Contrato com contrato do mesmo
+       ID é a mesma pessoa renovada, não repetição. */
+    const repetidos = new Set(fichas.filter(p => p.idRepetido === true).map(p => p.id));
+    const tipoDoId = new Map();
+    for (const p of fichas) {
+      const t = p.freelancer === true ? 'contrato' : 'ficha';
+      if (tipoDoId.has(p.id) && tipoDoId.get(p.id) !== t) repetidos.add(p.id);
+      else if (!tipoDoId.has(p.id)) tipoDoId.set(p.id, t);
+    }
     // Casamento automático com a régua de sempre do PCP -- apelido do RH, nome
     // completo, ou começo de nome que só uma ficha tem --, contado entre TODAS
     // as fichas, inclusive quem já saiu. Quem saiu nunca é o resultado: "Elias"
@@ -47,12 +69,22 @@ const OPERACAO = (() => {
     // ficha de propósito.
     const auto = texto => {
       const ap = normPessoa(texto), tokens = ap.split(' ');
-      const um = achadas => achadas.length === 1 && !achadas[0].desligado ? achadas[0] : null;
-      const porApelido = fichas.filter(p => normPessoa(p.apelido) === ap);
-      if (porApelido.length) return um(porApelido);
-      const porNome = fichas.filter(p => normPessoa(p.nome) === ap);
+      const um = achadas => achadas.length === 1 && ehIdPessoa(achadas[0].id) && !achadas[0].desligado && !repetidos.has(achadas[0].id) ? achadas[0] : null;
+      const porPrefixo = lista => lista.filter(p => { const n = normPessoa(p.nome).split(' '); return tokens.every((t, i) => n[i] === t); });
+      const porApelido = candidatas.filter(p => normPessoa(p.apelido) === ap);
+      if (porApelido.length) {
+        /* O apelido do CONTRATO não passa por cima do nome de outra pessoa
+           (F07): o RH só barra apelido igual ao de outro cadastro, não ao
+           primeiro nome de alguém. "Lucas" com a ficha do Lucas Ferreira e o
+           contrato do Lucas Prado de apelido "lucas" é ambíguo; senão o
+           histórico e o crachá do empregado passavam para o freelancer. */
+        const alvo = porApelido.length === 1 && porApelido[0].freelancer === true ? porApelido[0] : null;
+        if (alvo && porPrefixo(candidatas).some(p => p !== alvo && (!ehIdPessoa(p.id) || p.id !== alvo.id))) return null;
+        return um(porApelido);
+      }
+      const porNome = candidatas.filter(p => normPessoa(p.nome) === ap);
       if (porNome.length) return um(porNome);
-      return um(fichas.filter(p => { const n = normPessoa(p.nome).split(' '); return tokens.every((t, i) => n[i] === t); }));
+      return um(porPrefixo(candidatas));
     };
     // Vínculo salvo (Performance → "Conferir nomes do PCP × fichas do RH"):
     // decisão de gente, vale mais que o casamento. `semFicha` é a decisão de que
@@ -75,7 +107,9 @@ const OPERACAO = (() => {
       if (!s) return '';
       if (ehIdPessoa(s)) return s;
       const ap = normPessoa(s);
-      if (!memo.has(ap)) memo.set(ap, salvos.has(ap) ? salvos.get(ap) : (auto(s)?.id || ''));
+      // Vínculo salvo que aponta para ID repetido (ficha e contrato, F07) não
+      // resolve: o ID não separa as duas pessoas, e o ponto iria para a errada.
+      if (!memo.has(ap)) { const id = salvos.has(ap) ? salvos.get(ap) : (auto(s)?.id || ''); memo.set(ap, id && repetidos.has(id) ? '' : id); }
       return memo.get(ap);
     };
     const chave = entrada => { const s = String(entrada ?? '').trim(); return s ? (idDe(s) || 'nome:' + normPessoa(s)) : ''; };
@@ -102,7 +136,8 @@ const OPERACAO = (() => {
       return rotulos.get(id);
     };
     const pessoa = entrada => { const id = idDe(entrada); return id ? (porId.get(id) || { id, chave: '', nome: '', semFicha: true }) : null; };
-    return { idDe, chave, nome, pessoa, fixado, fichas };
+    const repetido = id => repetidos.has(String(id ?? '').trim());
+    return { idDe, chave, nome, pessoa, fixado, fichas, repetido };
   }
   // A tela diz de onde vêm as fichas (elenco do RH + CFG); o resolvedor vale
   // até o fim da volta síncrona, como o cache de vínculos do casa.js. Sem
@@ -124,6 +159,8 @@ const OPERACAO = (() => {
   const nomePessoa = v => pessoas().nome(v);
   const pessoaDe = v => pessoas().pessoa(v);
   const pessoaFixada = v => pessoas().fixado(v);
+  // ID que ficha e contrato de freelancer dividem (F07): não é escolha.
+  const idRepetido = v => { const r = pessoas(); const id = r.idDe(v); return !!id && r.repetido(id); };
   // A equipe da O.S.: as ENTRADAS gravadas (ID ou nome antigo), uma por pessoa
   // -- "Lucas" e "Lucas Natalino" na mesma O.S. são uma pessoa só.
   const equipe = o => {
@@ -617,7 +654,38 @@ const OPERACAO = (() => {
     }
     return par;
   }
-  return {uidItemValido,novoUidItem,casarItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco};
+  /* O RASCUNHO ABERTO ADOTA O CÓDIGO DA RESPOSTA (pré-requisito da E3). A
+     ficha aberta antes de o servidor carimbar os códigos (item antigo, sem
+     código) seguia mandando a lista sem código; com a marca de entrega
+     presa ao código, o item novo de uma gravação podia herdar o código (e
+     as entregas) de um item removido. Aqui o item SEM código de `alvo` (o
+     rascunho, a cópia da lista ou o envio na fila) recebe o código do mesmo
+     item em `fonte` (a O.S. que o servidor devolveu), pelo casamento de
+     sempre, e SÓ quando é o mesmo item sem mudança nenhuma (lado, número,
+     descrição, medida e quantidade), a mesma régua do servidor para a lista
+     que já conhece os códigos. Sem essa régua, a placa 2 removida e o totem
+     2 criado durante o envio davam ao totem o código da placa. Item mexido
+     durante o envio fica sem código e o servidor o trata como item novo.
+     Nada mais muda: nunca um código trocado, nunca um código que outro item
+     do rascunho já tem. Devolve quantos códigos entraram. */
+  function adotarUidsItens(alvo, fonte) {
+    const objeto = v => !!v && typeof v === 'object' && !Array.isArray(v);
+    if (!objeto(alvo) || !objeto(fonte) || alvo === fonte || !Array.isArray(alvo.itens) || !Array.isArray(fonte.itens)) return 0;
+    if (!alvo.itens.some(it => objeto(it) && !uidItemValido(it.uid))) return 0;
+    const usados = new Set(alvo.itens.filter(it => objeto(it) && uidItemValido(it.uid)).map(it => it.uid));
+    const par = casarItens(fonte.itens, alvo.itens);
+    const txt = v => String(v ?? '');
+    const mesmoItem = (a, b) => !!a.manual === !!b.manual && ['item', 'descricao', 'medidas', 'qtde'].every(c => txt(a[c]) === txt(b[c]));
+    let n = 0;
+    alvo.itens.forEach((it, j) => {
+      if (!objeto(it) || uidItemValido(it.uid) || par[j] < 0 || !objeto(fonte.itens[par[j]]) || !mesmoItem(it, fonte.itens[par[j]])) return;
+      const uid = fonte.itens[par[j]].uid;
+      if (!uidItemValido(uid) || usados.has(uid)) return;
+      it.uid = uid; usados.add(uid); n++;
+    });
+    return n;
+  }
+  return {uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
 // Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega
