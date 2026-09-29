@@ -278,7 +278,7 @@ function perfFonteAtual(){
 function perfLista(){
   const fonte=perfFonteAtual();
   if(!fonte)return classificarEntregas(STORE.getAllOS()).instalacoes;
-  return fonte.registros.map(r=>({id:r.id,numero:r.numero,cliente:r.cliente,finalizadaEm:r.dia,equipe:r.membros.map(p=>p.nome),retrabalho:r.retrabalho,_perf:r}));
+  return fonte.registros.map(r=>({id:r.id,numero:r.numero,cliente:r.cliente,finalizadaEm:r.dia,equipe:r.membros.map(p=>OPERACAO.ehIdPessoa(p.chave)?p.chave:p.nome),retrabalho:r.retrabalho,_perf:r}));
 }
 function perfOS(id){return perfLista().find(o=>o.id===id) || STORE.getOS(id);}
 /* A apuração do servidor é só da gestão do PCP (o pcp-sync recusa os outros
@@ -374,7 +374,7 @@ function perfVoltaTxt(rc) {
 function perfUnirPessoas(regs) { return (regs || []).map(r => ({...r, membros: PERF.unirMembros(r.membros, perfChaveDeHoje)})); }
 function perfEquipeOS(os) { return PERF.unicos(OPERACAO.equipe(os).map(perfPessoa)); }
 function perfRegistro(os,c) {
-  if(os._perf)return {...os._perf,os,membros:os._perf.confirmado?os._perf.membros:os._perf.membros.map(p=>({...perfPessoa(p.nome),percentual:p.percentual}))};
+  if(os._perf)return {...os._perf,os,membros:os._perf.confirmado?os._perf.membros:os._perf.membros.map(p=>({...perfPessoa(OPERACAO.ehIdPessoa(p.chave)?p.chave:p.nome),percentual:p.percentual}))};
   const salvo = c.participacoes.find(p=>p.id===os.id);
   // Um registro confirmado mantém a composição e o nome da época.
   const membros = salvo ? salvo.membros : PERF.iguais(perfEquipeOS(os));

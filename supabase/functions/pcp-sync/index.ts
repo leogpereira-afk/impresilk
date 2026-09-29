@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, composicoesAtivasRepetidas, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, composicoesAtivasRepetidas, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -69,12 +69,14 @@ const b64urlSign = (bytes: Uint8Array) => {
   let s = ""; for (const b of bytes) s += String.fromCharCode(b);
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 };
-async function assinarCrachaMontagem(nome: string): Promise<string> {
+async function assinarCrachaMontagem(nome: string, id = ""): Promise<string> {
   const enc = new TextEncoder();
   const chave = await crypto.subtle.importKey(
     "raw", enc.encode(JWT_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const agora = Math.floor(Date.now() / 1000);
-  const corpo = { sis: "pcp", sub: nome, nome, papel: "montagem", montagemIndividual:true, iat: agora, exp: agora + 30 * 86400 };
+  // `id` = a pessoa do RH que a gestao escolheu (6 digitos). `sub` segue
+  // sendo o nome da lista: e por ele que acesso_revogado confere a porta.
+  const corpo = { sis: "pcp", sub: nome, nome, ...(ehIdPessoa(id) ? { id } : {}), papel: "montagem", montagemIndividual:true, iat: agora, exp: agora + 30 * 86400 };
   const cab = b64urlSign(enc.encode(JSON.stringify({ alg: "HS256", typ: "JWT" })));
   const meio = `${cab}.${b64urlSign(enc.encode(JSON.stringify(corpo)))}`;
   const sig = new Uint8Array(await crypto.subtle.sign("HMAC", chave, enc.encode(meio)));
@@ -102,6 +104,9 @@ const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: fal
 // e maior que o de um cracha durar ate expirar. Banco fora do ar tambem aceita,
 // e nao guarda no cache.
 const CACHE_REVOG = new Map<string, { ate: number; revogado: boolean }>();
+// O.S. da equipe de cada crachá de toque, para a trava das fotos: a lista do
+// espelho abre várias miniaturas seguidas, e cada uma varria todas as O.S.
+const CACHE_FOTOS_EQUIPE = new Map<string, { ate: number; ids: string[] }>();
 const CACHE_REVOG_MS = 60_000; // uma consulta por pessoa por minuto, nao por request
 
 async function crachaRevogado(cracha: any): Promise<boolean> {
@@ -219,6 +224,32 @@ async function getCfg(): Promise<any> {
 // Config com o carimbo: o cliente manda `seVersao` e, se nada mudou, recebe
 // 40 bytes em vez da config inteira. Ela mudou pela ultima vez em 18/08 e era
 // baixada a cada 30 s por todo aparelho.
+/* PESSOA PELO ID (ordem do dono, 29/09/2026: "usar o ID em todo o sistema e
+   padrao pra nao ter erro"). A O.S. nova grava o ID do RH (6 primeiros
+   digitos do CPF) na equipe; a antiga guarda o nome que o PCP digitava. Esta
+   porta chega a MESMA pessoa que o aparelho: fichas do RH (desligado entra
+   so para dar nome ao historico, nunca para casar), vinculos salvos e lista
+   de instaladores, pela regua de _shared/pcp-integridade.mjs. Uma leitura do
+   RH por minuto, nao por request. */
+let _fichasRH: { ate: number; fichas: any[] } | null = null;
+async function fichasRH(): Promise<any[]> {
+  if (_fichasRH && _fichasRH.ate > Date.now()) return _fichasRH.fichas;
+  const { data, error } = await sb.from("registros")
+    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>dataDesligamento")
+    .eq("colecao", "colaboradores").eq("apagado", false);
+  if (error) throw new Error(error.message);
+  const fichas = ((data ?? []) as any[]).map((g) => {
+    const d = String(g.cpf || "").replace(/\D/g, "");
+    return { chave: String(g.id || ""), id: d.length === 11 ? d.slice(0, 6) : "", nome: String(g.nome || "").trim(),
+             apelido: String(g.apelido || "").trim(), desligado: !!String(g.dataDesligamento || "").trim() };
+  }).filter((p) => p.nome);
+  _fichasRH = { ate: Date.now() + 60_000, fichas };
+  return fichas;
+}
+async function pessoasDoPCP(config?: any) {
+  const cfg = config ?? (await getCfg()) ?? {};
+  return resolverPessoas({ pessoas: await fichasRH(), vinculos: cfg.vinculosRH, lista: cfg.instaladores });
+}
 async function getCfgComVersao(): Promise<{ config: any; versao: string }> {
   const { data } = await sb.from("pcp_config_global").select("config, atualizado_em").eq("id", true).maybeSingle();
   return { config: data?.config ?? null, versao: String(data?.atualizado_em ?? "") };
@@ -297,6 +328,8 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
   if(erroMudancas)throw new Error(erroMudancas.message);
   if(estrito && (cfgAntes.versao!==cfgDepois.versao || mudancas?.length))throw new Error("A base mudou durante a consulta. Atualize para conferir novamente.");
   const participacoes=cfgAntes.config?.performancePCP?.participacoes || [];
+  // A equipe pela PESSOA (ID): a mesma régua do aparelho (OPERACAO.equipe).
+  const pessoasPerf=await pessoasDoPCP(cfgAntes.config);
   const num=(v:any)=>v==null||v===""?NaN:typeof v==="number"?v:Number(String(v).includes(",")?String(v).replace(/\./g,"").replace(",","."):v);
   const registros=lista.map(o=>{
     const p=participacoes.find((x:any)=>x.id===o.id);
@@ -304,8 +337,12 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     const mudou=o.erpAlteracoes?.some((h:any)=>h.campos?.some((x:any)=>x.campo==="valorTotal"));
     if(!mudou && Number.isFinite(valores[String(o.numero)])){valor=valores[String(o.numero)];origem="Painel / ERP";}
     if(!Number.isFinite(valor)||valor<0){const itens=(o.itens||[]).map((x:any)=>num(x.subtotal)).filter((v:number)=>Number.isFinite(v)&&v>0);valor=itens.length?itens.reduce((a:number,b:number)=>a+b,0):null;origem="Itens da O.S.";}
-    const nomes=[...new Set((o.equipe||[]).map((n:any)=>String(n).trim()).filter(Boolean))];
-    const membros=p?.membros || nomes.map((n,i)=>({chave:n,nome:n,percentual:(Math.floor(10000/nomes.length)+(i<10000%nomes.length?1:0))/100}));
+    /* "Lucas" antigo e o ID dele na mesma O.S. são um membro só. O membro não
+       confirmado leva o ID como chave e o nome de exibição; nome antigo sem
+       ficha segue como era (chave = o próprio nome). */
+    const vistosEq=new Set<string>(), nomes:string[]=[];
+    for(const n of (Array.isArray(o.equipe)?o.equipe:[])){const x=String(n??"").trim();if(!x)continue;const k=pessoasPerf.chave(x);if(vistosEq.has(k))continue;vistosEq.add(k);nomes.push(x);}
+    const membros=p?.membros || nomes.map((n,i)=>({chave:pessoasPerf.idDe(n)||n,nome:pessoasPerf.nome(n),percentual:(Math.floor(10000/nomes.length)+(i<10000%nomes.length?1:0))/100}));
     const confirmado=!!p && !validarPerformance({equipes:p.equipeId?[{id:p.equipeId,nome:p.equipeNome || "Equipe",emblema:p.emblema || "🤝",membros}]:[],participacoes:[p]});
     /* A CONFERÊNCIA DA VOLTA (carro e equipamentos) entra na base para pesar
        na avaliação individual. Só "sim"/"nao" passam; o resto é "não
@@ -331,7 +368,7 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     const semCarro=norm(o.veiculo)==="instalacao interna";
     const voltou=nomes.length>0 && !semCarro && !!(o.retornoEm || o.horaRetorno || !baixaERP || o.entregaLancada);
     const diaVolta=perfDia(o.retornoEm) || (o.horaRetorno ? (perfDia(o.saidaEm) || perfDia(o.instalacao?.data)) : "") || (o.entregaLancada ? perfDia(o.entregaLancada.data) : "") || perfDia(o.finalizadaEm);
-    const volta=[diaVolta,norm(o.veiculo),nomes.map(norm).sort().join("+")].join("|");
+    const volta=[diaVolta,norm(o.veiculo),nomes.map((n:string)=>pessoasPerf.chave(n)).sort().join("+")].join("|");
     return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,equipeId:p?.equipeId||"",equipeNome:p?.equipeNome||"",emblema:p?.emblema||"🤝",obs:p?.obs||"",por:p?.por||"",em:p?.em||"",retrabalho:!!o.retrabalho,retornoConf,voltou,volta};
   });
   /* performance-2: cada registro leva a conferência da volta, e a apuração
@@ -390,7 +427,15 @@ Deno.serve(async (req: Request) => {
     const nome = String(body.nome || '').trim();
     const bate = (cfg.instaladores || []).find((n: string) => n.trim().toLowerCase() === nome.toLowerCase());
     if (!bate) return resp({error:"Instalador não cadastrado."},400);
-    return resp({token:await assinarCrachaMontagem(bate),nome:bate,papel:"montagem"});
+    let idBate = "", aviso = "";
+    try {
+      const r = await pessoasDoPCP(cfg);
+      idBate = r.idDe(bate);
+      // Nome da lista sem ficha e sem decisao salva: a O.S. gravada pelo ID
+      // nao aparece para ele. A gestao fica sabendo na hora de autorizar.
+      if (!idBate && !r.fixado(bate)) aviso = `"${bate}" não está ligado a uma ficha do RH: as O.S. gravadas pelo ID não aparecem para ele. Ligue em Performance › Conferir nomes do PCP × fichas do RH.`;
+    } catch { idBate = ""; }
+    return resp({token:await assinarCrachaMontagem(bate, idBate),nome:bate,id:idBate,papel:"montagem",...(aviso ? { aviso } : {})});
   }
 
   // AUTORIZACAO POR PAPEL no SERVIDOR (05/08 fechou o token publico, mas o
@@ -398,6 +443,11 @@ Deno.serve(async (req: Request) => {
   // admin via setCfg ou apagava O.S). A porta de MAQUINA (backup do Hub) segue
   // com poder total. Papeis com editar=true: admin/pcp/montagem/operacao.
   let ehToqueNoNome = false;
+  /* Quem é o crachá de toque: o ID que a gestão autorizou (crachá novo) e o
+     nome da lista. A régua de pessoas é montada uma vez por request. */
+  const quemToque = () => ({ id: String(cracha?.id ?? ""), nome: String(cracha?.nome || cracha?.sub || "") });
+  let _pessoasReq: any = null;
+  const pessoasReq = async () => (_pessoasReq ??= await pessoasDoPCP());
   // O que foi deixado de fora de um envio do crachá de toque; volta no 200.
   const avisosToque: string[] = [];
   if (cracha && !ehMaquina) {
@@ -508,7 +558,11 @@ Deno.serve(async (req: Request) => {
       if (!atual) {
         return resp({ error: "Quem entra pelo nome não cria O.S. Fale com o PCP." }, 403);
       }
-      if (!pertenceEquipe(atual, cracha.nome || cracha.sub)) return resp({error:"Esta O.S. não está mais na sua equipe. O que você registrou continua neste aparelho. Avise a gestão.", definitivo: true},422);
+      let pessoasUp: any = null;
+      try { pessoasUp = await pessoasReq(); } catch {
+        return resp({ error: "Não foi possível conferir a equipe agora. O envio fica guardado e vai de novo." }, 503);
+      }
+      if (!pertenceEquipe(atual, quemToque(), pessoasUp)) return resp({error:"Esta O.S. não está mais na sua equipe. O que você registrou continua neste aparelho. Avise a gestão.", definitivo: true},422);
       const mescla = mesclarToqueNoNome(atual, veio, String(cracha.nome || cracha.sub), new Date().toISOString());
       if (mescla.erro) return resp({ error: mescla.erro }, 422);
       avisosToque.push(...(mescla.avisos || []), ...acertarMomentosToque(mescla.os, atual));
@@ -521,9 +575,36 @@ Deno.serve(async (req: Request) => {
   }
 
   if (ehToqueNoNome && ["getPhoto","deletePhoto"].includes(acao)) {
-    const {data,error} = await sb.from("pcp_registros").select("registro").eq("colecao","os").eq("apagado",false)
-      .contains("registro",{equipe:[String(cracha.nome || cracha.sub)]});
-    if (error) return resp({error:"Não foi possível conferir o vínculo da foto."},503);
+    /* PELO ID: a O.S. nova guarda o ID na equipe, e o filtro do banco pelo
+       nome não a acharia. Lê só a equipe de todas (leve), confere pela mesma
+       régua do upsert e só então traz as O.S. da equipe. */
+    const data: any[] = [];
+    try {
+      const pessoas = await pessoasReq(), quem = quemToque();
+      const chaveCache = quem.id + "|" + quem.nome.toLowerCase();
+      const guardadas = CACHE_FOTOS_EQUIPE.get(chaveCache);
+      let minhas: string[] = guardadas && guardadas.ate > Date.now() ? guardadas.ids : [];
+      if (!guardadas || guardadas.ate <= Date.now()) {
+        let cursor = "";
+        for (let pag = 0; pag < 100; pag++) {
+          let q = sb.from("pcp_registros").select("id, equipe:registro->equipe").eq("colecao","os").eq("apagado",false).order("id").limit(1000);
+          if (cursor) q = q.gt("id", cursor);
+          const { data: lote, error } = await q;
+          if (error) throw new Error(error.message);
+          for (const r of (lote ?? []) as any[]) if (pertenceEquipe({ equipe: Array.isArray(r.equipe) ? r.equipe : [] }, quem, pessoas)) minhas.push(String(r.id));
+          if (!lote || lote.length < 1000) break;
+          cursor = String(lote[lote.length - 1].id);
+        }
+        CACHE_FOTOS_EQUIPE.set(chaveCache, { ate: Date.now() + 60_000, ids: minhas });
+      }
+      for (let i = 0; i < minhas.length; i += 200) {
+        const { data: regs, error } = await sb.from("pcp_registros").select("registro").eq("colecao","os").eq("apagado",false).in("id", minhas.slice(i, i + 200));
+        if (error) throw new Error(error.message);
+        data.push(...(regs ?? []));
+      }
+    } catch {
+      return resp({error:"Não foi possível conferir o vínculo da foto."},503);
+    }
     /* A foto do carro que a equipe registrou (voltaEquipe.fotos) vai em todas
        as O.S. da volta: o colega do mesmo carro, em outro celular, precisa
        abri-la, senão vê "registrada por Ana" com a miniatura quebrada. Só para
@@ -667,6 +748,8 @@ Deno.serve(async (req: Request) => {
         const agora = new Date().toISOString();
         const soExecucao = ehToqueNoNome;
         const podar = saida;
+        const pessoasPull = soExecucao ? await pessoasReq() : null;
+        const daEquipe = (reg: any) => pertenceEquipe(reg, quemToque(), pessoasPull);
 
         if (body.since) {
           const since = String(body.since);
@@ -677,7 +760,7 @@ Deno.serve(async (req: Request) => {
           if (error) throw new Error(error.message);
           const linhas = data ?? [];
           return resp({
-            os: linhas.map((r: any) => r.apagado || (soExecucao && !pertenceEquipe(r.registro, cracha.nome || cracha.sub)) ? { id: r.id, apagado: true } : podar(r.registro)),
+            os: linhas.map((r: any) => r.apagado || (soExecucao && !daEquipe(r.registro)) ? { id: r.id, apagado: true } : podar(r.registro)),
             agora, incremental: true,
             // O aparelho da gestão precisa saber que este crachá só registra a
             // execução (crachá de toque antigo não traz montagemIndividual).
@@ -726,7 +809,7 @@ Deno.serve(async (req: Request) => {
            o cracha de toque sai de um primeiro nome, sem senha; precisa de
            cliente, endereco e contato, nao do documento de ninguem. */
         return resp({
-          os: linhas.filter((r: any) => !soExecucao || pertenceEquipe(r.registro,cracha.nome || cracha.sub)).map((r: any) => podar(r.registro)),
+          os: linhas.filter((r: any) => !soExecucao || daEquipe(r.registro)).map((r: any) => podar(r.registro)),
           total: await contarRegs("os"),
           nextAfter: linhas.length === PAGE ? linhas[linhas.length - 1].id : null,
           nextOffset: null,
@@ -1220,10 +1303,25 @@ Deno.serve(async (req: Request) => {
               statusId: verFichaRH ? st : "",
               status: verFichaRH ? (situacoes[st] || st) : "",
               ativo: !FORA.has(st),
-              foto: foto.startsWith("data:image") && foto.length < 200000 ? foto : "",
+              // `leve` (espelho do instalador): só quem é quem, sem a foto.
+              foto: !body.leve && foto.startsWith("data:image") && foto.length < 200000 ? foto : "",
             };
           })
           .sort((a: any, b: any) => a.nome.localeCompare(b.nome));
+        /* QUEM JA SAIU, SO PARA DAR NOME AO HISTORICO. A O.S. nova grava o ID
+           da pessoa (ordem do dono, 29/09/2026); quando ela sai da empresa, a
+           O.S. antiga continua com o ID e precisa de nome. Vai o minimo:
+           id, chave, nome e apelido. Nunca entra nas escolhas nem no
+           casamento de nome antigo (desligado:true). */
+        const antigos = (col ?? [])
+          .map((r: any) => r.registro || {})
+          .filter((g: any) => String(g.nome || "").trim() && String(g.dataDesligamento || "").trim())
+          .map((g: any) => {
+            const d = String(g.cpf || "").replace(/\D/g, "");
+            return { chave: String(g.id || ""), id: d.length === 11 ? d.slice(0, 6) : "", nome: String(g.nome).trim(),
+                     apelido: String(g.apelido || "").trim(), ativo: false, desligado: true };
+          })
+          .filter((g: any) => g.id);
         // Presenca: ferias e ausencias vem CRUAS (o dia local quem sabe e a
         // tela; aqui e UTC). Janela curta para o pacote nao inchar.
         const hojeUTC = new Date().toISOString().slice(0, 10);
@@ -1267,7 +1365,9 @@ Deno.serve(async (req: Request) => {
         // Equipe escrevia "0 fora hoje" para quem entrou sem senha, com uma
         // pessoa de atestado na fabrica. Lista vazia nao e resposta; quem sabe
         // por que ela veio vazia e esta porta, entao e ela que precisa contar.
-        return resp({ pessoas, veiculos, hoje: hojeUTC, em: new Date().toISOString(), fichaRH: verFichaRH,
+        // Quem entrou sem senha nao recebe a lista de quem ja saiu (o celular
+        // dele so mostra as O.S. da propria equipe, que sao de agora).
+        return resp({ pessoas, antigos: verFichaRH ? antigos : [], veiculos, hoje: hojeUTC, em: new Date().toISOString(), fichaRH: verFichaRH,
                       ferias: verFichaRH ? ferias : [], ausencias: verFichaRH ? ausencias : [] });
       }
 

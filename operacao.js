@@ -19,7 +19,127 @@ const OPERACAO = (() => {
     return localISO(d);
   }
   const interno = o => o?.tipo === 'interno';
-  const equipe = o => [...new Set((Array.isArray(o?.equipe) ? o.equipe : []).map(n => String(n).trim()).filter(Boolean))];
+  /* PESSOA = FICHA DO RH. O ID MANDA; O NOME SÓ SE EXIBE.
+     Ordem do dono (29/09/2026): "vamos usar o ID em todo o sistema e padrão
+     pra não ter erro". O ID é o da casa: os 6 primeiros dígitos do CPF, único
+     entre as fichas do RH. A O.S. nova grava o ID na equipe; a antiga guarda o
+     nome que o PCP digitava ("Lucas", "Adlando", "Lucas Natalino"), e é AQUI,
+     num lugar só, que esse nome vira pessoa: vínculo salvo primeiro, casamento
+     único com o RH depois. O que não resolve vira "nome:<texto>", separado de
+     todo mundo: melhor uma linha sem ficha do que duas pessoas somadas numa.
+     Tudo que compara, conta ou agrupa gente passa por `chavePessoa`; tudo que
+     mostra passa por `nomePessoa`. O servidor tem a mesma régua em
+     _shared/pcp-integridade.mjs, e um teste confere as duas. */
+  const normPessoa = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const ehIdPessoa = v => /^\d{6}$/.test(String(v ?? '').trim());
+  const id6 = v => { const d = String(v ?? '').replace(/\D/g, ''); return d.length === 6 ? d : d.length === 11 ? d.slice(0, 6) : ''; };
+  function resolverPessoas(dados = {}) {
+    const fichas = (Array.isArray(dados.pessoas) ? dados.pessoas : []).filter(p => p && ehIdPessoa(p.id));
+    const porId = new Map();
+    for (const p of fichas) if (!porId.has(p.id)) porId.set(p.id, p);
+    const porChaveRH = new Map(fichas.filter(p => p.chave).map(p => [String(p.chave), p]));
+    // Casamento automático com a régua de sempre do PCP -- apelido do RH, nome
+    // completo, ou começo de nome que só uma ficha tem --, contado entre TODAS
+    // as fichas, inclusive quem já saiu. Quem saiu nunca é o resultado: "Elias"
+    // com um Elias desligado e outro na casa é ambíguo, e não do que ficou --
+    // senão o crachá antigo do que saiu passava a abrir as O.S. do xará
+    // (revisão de 29/09/2026). "Adriano" sozinho, com dois Adrianos, fica sem
+    // ficha de propósito.
+    const auto = texto => {
+      const ap = normPessoa(texto), tokens = ap.split(' ');
+      const um = achadas => achadas.length === 1 && !achadas[0].desligado ? achadas[0] : null;
+      const porApelido = fichas.filter(p => normPessoa(p.apelido) === ap);
+      if (porApelido.length) return um(porApelido);
+      const porNome = fichas.filter(p => normPessoa(p.nome) === ap);
+      if (porNome.length) return um(porNome);
+      return um(fichas.filter(p => { const n = normPessoa(p.nome).split(' '); return tokens.every((t, i) => n[i] === t); }));
+    };
+    // Vínculo salvo (Performance → "Conferir nomes do PCP × fichas do RH"):
+    // decisão de gente, vale mais que o casamento. `semFicha` é a decisão de que
+    // o nome NÃO é ninguém do RH (terceiro): ele nunca casa sozinho com um xará.
+    // Dois vínculos diferentes para o mesmo nome = ambíguo, e ambíguo não escolhe.
+    const vinculos = (Array.isArray(dados.vinculos) ? dados.vinculos : []).filter(v => v && typeof v === 'object');
+    const salvos = new Map();
+    for (const v of vinculos) {
+      const ap = normPessoa(v.apelido || v.nomePCP);
+      const p = porId.get(id6(v.id || v.idPessoa)) || porChaveRH.get(String(v.chave || '').trim());
+      const id = v.semFicha === true ? '' : (p ? p.id : id6(v.id || v.idPessoa));
+      if (!ap || (!id && v.semFicha !== true)) continue;
+      salvos.set(ap, salvos.has(ap) && salvos.get(ap) !== id ? '' : id);
+    }
+    // Nome com decisão salva (vínculo ou "sem ficha") não muda quando o RH muda.
+    const fixado = entrada => salvos.has(normPessoa(entrada));
+    const memo = new Map();
+    const idDe = entrada => {
+      const s = String(entrada ?? '').trim();
+      if (!s) return '';
+      if (ehIdPessoa(s)) return s;
+      const ap = normPessoa(s);
+      if (!memo.has(ap)) memo.set(ap, salvos.has(ap) ? salvos.get(ap) : (auto(s)?.id || ''));
+      return memo.get(ap);
+    };
+    const chave = entrada => { const s = String(entrada ?? '').trim(); return s ? (idDe(s) || 'nome:' + normPessoa(s)) : ''; };
+    // Nome de exibição: a palavra que o PCP já usa (lista de instaladores,
+    // depois vínculo salvo); senão o menor começo do nome completo que só
+    // aquela ficha tem ("Lucas Gabriel", "Hélio").
+    const rotulos = new Map();
+    for (const n of Array.isArray(dados.lista) ? dados.lista : []) { const id = idDe(n); if (id && !rotulos.has(id)) rotulos.set(id, String(n).trim()); }
+    for (const v of vinculos) { const id = idDe(v.apelido || v.nomePCP); if (id && !rotulos.has(id)) rotulos.set(id, String(v.apelido || v.nomePCP).trim()); }
+    const curto = p => {
+      const palavras = String(p.nome || '').trim().split(/\s+/).filter(Boolean);
+      const alvo = palavras.map(normPessoa);
+      for (let k = 1; k <= palavras.length; k++) {
+        const pre = alvo.slice(0, k).join(' ');
+        if (!fichas.some(q => q.id !== p.id && normPessoa(q.nome).split(' ').slice(0, k).join(' ') === pre)) return palavras.slice(0, k).join(' ');
+      }
+      return palavras.join(' ') || 'ID ' + p.id;
+    };
+    const nome = entrada => {
+      const s = String(entrada ?? '').trim();
+      const id = idDe(s);
+      if (!id) return s;
+      if (!rotulos.has(id)) { const p = porId.get(id); rotulos.set(id, p ? curto(p) : ehIdPessoa(s) ? 'ID ' + s : s); }
+      return rotulos.get(id);
+    };
+    const pessoa = entrada => { const id = idDe(entrada); return id ? (porId.get(id) || { id, chave: '', nome: '', semFicha: true }) : null; };
+    return { idDe, chave, nome, pessoa, fixado, fichas };
+  }
+  // A tela diz de onde vêm as fichas (elenco do RH + CFG); o resolvedor vale
+  // até o fim da volta síncrona, como o cache de vínculos do casa.js. Sem
+  // fonte (teste, página que não liga), nome continua valendo como nome.
+  let _fontePessoas = null, _resolvedor = null;
+  const esquecerPessoas = () => { _resolvedor = null; };
+  const usarPessoas = fonte => { _fontePessoas = typeof fonte === 'function' ? fonte : null; esquecerPessoas(); };
+  function pessoas() {
+    if (!_resolvedor) {
+      let dados = {};
+      try { dados = _fontePessoas ? (_fontePessoas() || {}) : {}; } catch (e) { dados = {}; }
+      _resolvedor = resolverPessoas(dados);
+      Promise.resolve().then(esquecerPessoas);
+    }
+    return _resolvedor;
+  }
+  const idPessoa = v => pessoas().idDe(v);
+  const chavePessoa = v => pessoas().chave(v);
+  const nomePessoa = v => pessoas().nome(v);
+  const pessoaDe = v => pessoas().pessoa(v);
+  const pessoaFixada = v => pessoas().fixado(v);
+  // A equipe da O.S.: as ENTRADAS gravadas (ID ou nome antigo), uma por pessoa
+  // -- "Lucas" e "Lucas Natalino" na mesma O.S. são uma pessoa só.
+  const equipe = o => {
+    const vistos = new Set(), out = [];
+    for (const x of Array.isArray(o?.equipe) ? o.equipe : []) {
+      const s = String(x ?? '').trim();
+      if (!s) continue;
+      const k = chavePessoa(s);
+      if (vistos.has(k)) continue;
+      vistos.add(k); out.push(s);
+    }
+    return out;
+  };
+  const equipeNomes = o => equipe(o).map(nomePessoa);
+  // Texto da equipe para tela e mensagem: nomes de exibição, nunca o ID cru.
+  const equipeTexto = (o, sep = ', ') => equipeNomes(o).join(sep);
   const duracao = o => Math.min(366,Math.max(1,Math.floor(Number(o?.instalacao?.duracaoDias)||1)));
   // Em instalação de vários dias, a conclusão prevista é o último dia.
   const prazo = o => dia(o?.instalacao?.data) ? somarDias(dia(o.instalacao.data),interno(o)?0:duracao(o)-1) : dia(o?.previsaoEntrega);
@@ -130,9 +250,11 @@ const OPERACAO = (() => {
   function mensal(lista, mes) {
     const fins = conclusoes(lista).filter(o => !interno(o) && dia(o.finalizadaEm).slice(0,7) === mes);
     const mapa = new Map();
-    for (const o of fins) for (const nome of equipe(o)) {
-      const d = mapa.get(nome) || {nome, entregas:0, retrab:0};
-      d.entregas++; if (o.retrabalho) d.retrab++; mapa.set(nome, d);
+    // Por pessoa (ID), não por texto: "Lucas" antigo e o ID dele somam juntos.
+    for (const o of fins) for (const x of equipe(o)) {
+      const k = chavePessoa(x);
+      const d = mapa.get(k) || {id:idPessoa(x), nome:nomePessoa(x), entregas:0, retrab:0};
+      d.entregas++; if (o.retrabalho) d.retrab++; mapa.set(k, d);
     }
     return {total:fins.length, retrabalho:fins.filter(o => o.retrabalho).length,
       semEquipe:fins.filter(o => !equipe(o).length).length,
@@ -156,7 +278,8 @@ const OPERACAO = (() => {
     const os = programadas(lista, data, data), out = [];
     for (let i=0; i<os.length; i++) for (let j=i+1; j<os.length; j++) {
       const a=os[i], b=os[j]; if (a.id === b.id || !mesmoTurno(a,b)) continue;
-      const nomes = equipe(a).filter(n => equipe(b).includes(n));
+      const deB = new Set(equipe(b).map(chavePessoa));
+      const nomes = equipe(a).filter(n => deB.has(chavePessoa(n))).map(nomePessoa);
       // "Instalação interna" não é carro: duas no mesmo turno não disputam nada.
       const carro = semCarro(a) ? '' : String(a.veiculo || '').trim();
       if (nomes.length || (carro && carro === String(b.veiculo || '').trim())) {
@@ -312,7 +435,7 @@ const OPERACAO = (() => {
   const normal = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
   /* A CHAVE DA VOLTA: dia + carro + equipe. A base da nota no servidor
      (pcp-sync, perfFonte) monta a mesma chave; um teste confere as duas. */
-  const chaveDaVolta = o => [diaDaVolta(o), normal(o?.veiculo), equipe(o).map(normal).sort().join('+')].join('|');
+  const chaveDaVolta = o => [diaDaVolta(o), normal(o?.veiculo), equipe(o).map(chavePessoa).sort().join('+')].join('|');
   function voltasDoCarro(lista, de = '', ate = '') {
     const grupos = new Map();
     for (const o of lista || []) {
@@ -321,7 +444,8 @@ const OPERACAO = (() => {
       if (!d || !emIntervalo(d, de, ate)) continue;
       const time = equipe(o);
       const chave = chaveDaVolta(o);
-      const g = grupos.get(chave) || { chave, dia: d, veiculo: String(o.veiculo || '').trim(), equipe: time, os: [] };
+      // `equipe` é para mostrar (nomes de exibição); a chave já é pela pessoa.
+      const g = grupos.get(chave) || { chave, dia: d, veiculo: String(o.veiculo || '').trim(), equipe: time.map(nomePessoa), os: [] };
       g.os.push(o);
       grupos.set(chave, g);
     }
@@ -346,6 +470,14 @@ const OPERACAO = (() => {
     const ordem = { conferir: 0, parcial: 1, conferida: 2 };
     return lista2.sort((a, b) => ordem[a.situacao] - ordem[b.situacao] || b.dia.localeCompare(a.dia) || a.chave.localeCompare(b.chave));
   }
-  return {SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
+  return {ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,periodoRapido,missaoFoco};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
+// Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega
+// antes). No teste não há STORE: nome continua valendo como nome.
+if (typeof STORE !== 'undefined' && STORE && typeof STORE.elenco === 'function') {
+  OPERACAO.usarPessoas(() => {
+    const el = STORE.elenco() || {}, cfg = STORE.getCFG() || {};
+    return { pessoas: [...(el.pessoas || []), ...(el.antigos || [])], vinculos: cfg.vinculosRH, lista: cfg.instaladores };
+  });
+}

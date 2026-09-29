@@ -106,14 +106,17 @@ function lerVinculosCasa() {
     const apelido = String(v.apelido || v.nomePCP || '').trim();
     const chave = String(v.chave || '').trim();
     const id = idPessoaCasa(v.id || v.idPessoa);
+    // `semFicha`: a decisão de que o nome é de um terceiro, não de alguém do
+    // RH -- ele nunca casa sozinho com um xará (29/09/2026).
+    const semFicha = v.semFicha === true;
     // Sem apelido não há o que ligar; sem NENHUM identificador da pessoa
     // (nem chave do RH, nem id de 6 dígitos) o vínculo não aponta para lugar
     // nenhum. Qualquer um dos dois basta.
-    if (!apelido || (!chave && !id)) continue;
+    if (!apelido || (!semFicha && !chave && !id)) continue;
     const k = normCasa(apelido);
     if (vistos.has(k)) continue;
     vistos.add(k);
-    saida.push({ id, chave, nome: String(v.nome || '').trim(), apelido });
+    saida.push(semFicha ? { id: '', chave: '', nome: '', apelido, semFicha: true } : { id, chave, nome: String(v.nome || '').trim(), apelido });
   }
   _vincCache = saida;
   Promise.resolve().then(esquecerVinculosCasa);
@@ -125,6 +128,7 @@ function gravarVinculosCasa(lista) {
   cfg.vinculosRH = lista;
   STORE.saveCFG(cfg);
   esquecerVinculosCasa();   // quem grava e relê na mesma volta vê o novo
+  OPERACAO.esquecerPessoas();
 }
 
 function fichaPorId(id) {
@@ -143,7 +147,7 @@ function fichaPorApelido(apelido) {
   const a = String(apelido || '').trim();
   if (!a) return null;
   const hits = lerVinculosCasa().filter(v => normCasa(v.apelido) === normCasa(a));
-  if (hits.length) return hits.length === 1 ? hits[0] : null;
+  if (hits.length) return hits.length === 1 && !hits[0].semFicha ? hits[0] : null;
   const p = typeof pessoaDoElenco === 'function' ? pessoaDoElenco(a) : null;
   const id = p ? idPessoaCasa(p.id) : '';
   return id ? { id, chave: p.chave || '', nome: p.nome || a, apelido: a } : null;
@@ -360,16 +364,27 @@ function presencaRH(dia) {
 }
 
 // Apelido escrito na O.S → ficha do RH (vínculo salvo, senão casamento automático).
+/* A ENTRADA DA EQUIPE É O ID (29/09/2026) OU O NOME ANTIGO: a mesma régua de
+   OPERACAO.pessoaDe -- vínculo salvo, depois casamento único com o RH -- que
+   o servidor também usa. Um lugar só decide quem é quem. */
 function fichaDoApelido(apelido) {
   const a = String(apelido || '').trim();
   if (!a) return null;
   const salvo = lerVinculosCasa().find(v => normCasa(v.apelido) === normCasa(a));
   if (salvo) {
+    if (salvo.semFicha) return null;   // decidido: terceiro, não é ninguém do RH
+    // Vínculo salvo manda (inclusive para ficha sem CPF, que não tem ID).
     const p = pessoaRHPorChave(salvo.chave) || pessoaRHPorId6(salvo.id);
     if (p) return p;
     return { chave: salvo.chave || '', id: salvo.id, nome: salvo.nome || a, apelido: a, foto: '', cargo: '', area: '', ativo: true, manual: true };
   }
-  return (typeof pessoaDoElenco === 'function' ? pessoaDoElenco(a) : null);
+  const p = OPERACAO.pessoaDe(a);
+  if (!p) return null;
+  if (!p.semFicha) return p;
+  // ID que não está no elenco (quem saiu antes da lista dos antigos, ou elenco
+  // ainda não baixado): o vínculo salvo sabe o nome; senão, o próprio ID.
+  const v = lerVinculosCasa().find(x => x.id === p.id);
+  return { chave: (v && v.chave) || '', id: p.id, nome: (v && v.nome) || 'ID ' + p.id, apelido: OPERACAO.ehIdPessoa(a) ? '' : a, foto: '', cargo: '', area: '', ativo: false, manual: true, semFicha: true };
 }
 function normCasa(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim(); }
 
@@ -403,6 +418,30 @@ function apelidosSemFicha() {
      escrita de dois jeitos (certo) ou duas pessoas grudadas (errado); quem
      sabe é o PCP, então a tela mostra lado a lado;
    - fora da ativa: a ficha está inativa no RH. */
+// Uma entrada por PESSOA: o nome antigo e o ID da mesma pessoa em O.S.
+// diferentes contam uma vez ("pessoas escaladas", aviso de ausência).
+function umaPorPessoa(entradas) {
+  const vistos = new Set();
+  return (entradas || []).filter(x => { const k = OPERACAO.chavePessoa(x); if (!k || vistos.has(k)) return false; vistos.add(k); return true; });
+}
+/* CHIPS DE PESSOA: a lista de instaladores e quem mais está na O.S., como
+   PESSOAS -- valor = ID do RH quando há ficha, rótulo = nome de exibição.
+   Marcar o chip grava o ID (ordem do dono, 29/09/2026). */
+function pessoasDosChips(os) {
+  const vistos = new Set(), out = [];
+  const add = (n, fora) => {
+    const k = OPERACAO.chavePessoa(n);
+    if (!k || vistos.has(k)) return;
+    vistos.add(k);
+    const p = OPERACAO.pessoaDe(n);
+    // A dica diz A QUEM o chip leva (nome completo e ID): marcar grava o ID.
+    out.push({ valor: OPERACAO.idPessoa(n) || String(n).trim(), rotulo: OPERACAO.nomePessoa(n), chave: k, fora,
+      dica: p && p.nome ? `${p.nome} · ID ${p.id}` : 'Sem ficha no RH: grava o nome' });
+  };
+  (STORE.getCFG().instaladores || []).map(String).filter(Boolean).forEach(n => add(n, false));
+  OPERACAO.equipe(os || {}).forEach(n => add(n, true));
+  return out;
+}
 function candidatosRH(apelido) {
   const toks = normCasa(apelido).split(/\s+/).filter(Boolean);
   if (!toks.length) return [];
@@ -422,14 +461,25 @@ function conferenciaRH() {
     conta.set(k, x);
     return x;
   };
-  for (const os of STORE.getAllOS()) for (const ap of OPERACAO.equipe(os)) soma(ap, 1);
+  // Cada NOME escrito conta (dois nomes da mesma pessoa na mesma O.S. são o
+  // "juntos" que a tela mostra). O ID já é a pessoa: não entra na conferência.
+  for (const os of STORE.getAllOS()) {
+    const vistos = new Set();
+    for (const x of Array.isArray(os.equipe) ? os.equipe : []) {
+      const ap = String(x ?? '').trim();
+      if (!ap || OPERACAO.ehIdPessoa(ap) || vistos.has(normCasa(ap))) continue;
+      vistos.add(normCasa(ap));
+      soma(ap, 1);
+    }
+  }
   for (const nome of (STORE.getCFG().instaladores || [])) { const x = soma(nome, 0); if (x) x.naLista = true; }
   const salvos = lerVinculosCasa();
   const linhas = [...conta.values()].map(x => {
     const pessoa = fichaDoApelido(x.apelido);
-    const salvo = salvos.some(v => normCasa(v.apelido) === normCasa(x.apelido));
+    const decisao = salvos.find(v => normCasa(v.apelido) === normCasa(x.apelido));
+    const salvo = !!decisao && !decisao.semFicha;
     const candidatos = pessoa ? [] : candidatosRH(x.apelido);
-    const como = pessoa ? (salvo ? 'salvo' : 'auto') : candidatos.length > 1 ? 'ambiguo' : 'sem-ficha';
+    const como = pessoa ? (salvo ? 'salvo' : 'auto') : decisao ? 'terceiro' : candidatos.length > 1 ? 'ambiguo' : 'sem-ficha';
     return { ...x, pessoa, como, candidatos, inativa: !!(pessoa && pessoa.ativo === false), juntos: [] };
   });
   const chaveFicha = p => p ? String(p.chave || p.id || normCasa(p.nome)) : '';
@@ -544,12 +594,10 @@ function lancarEntregaManual(osId) {
      como "Osmane V.", ou quem saiu da lista) não aparecia e, no Continuar, a
      equipe era regravada sem ele. A pessoa perdia a entrega sem aviso. Quem
      está só na O.S entra marcado, com "fora da lista". */
-  const eq = new Set(OPERACAO.equipe(os).map(normCasa));
-  const lista = (cfg.instaladores || []).map(String).filter(Boolean);
-  const naLista = new Set(lista.map(normCasa));
-  const soNaOs = OPERACAO.equipe(os).filter((n, i, a) => !naLista.has(normCasa(n)) && a.findIndex(x => normCasa(x) === normCasa(n)) === i);
-  const chipEquipe = (n, fora) => { const on = eq.has(normCasa(n)); return `<label class="casa-chip ${on ? 'on' : ''}"><input type="checkbox" name="equipe" value="${esc(n)}" ${on ? 'checked' : ''}><span>${esc(n)}</span>${fora ? '<small>fora da lista</small>' : ''}</label>`; };
-  const chipsEquipe = lista.map(n => chipEquipe(n, false)).concat(soNaOs.map(n => chipEquipe(n, true))).join('')
+  // Pela pessoa (ID): o chip grava o ID do RH e mostra o nome.
+  const eq = new Set(OPERACAO.equipe(os).map(OPERACAO.chavePessoa));
+  const chipEquipe = p => { const on = eq.has(p.chave); return `<label class="casa-chip ${on ? 'on' : ''}" title="${esc(p.dica)}"><input type="checkbox" name="equipe" value="${esc(p.valor)}" ${on ? 'checked' : ''}><span>${esc(p.rotulo)}</span>${p.fora ? '<small>fora da lista</small>' : ''}</label>`; };
+  const chipsEquipe = pessoasDosChips(os).map(chipEquipe).join('')
     || '<p class="text-muted" style="font-size:.8rem">Cadastre instaladores em Configurações.</p>';
   /* A CONFERÊNCIA DA VOLTA também mora aqui: a maioria das O.S. chega
      finalizada pela baixa do ERP, e este é o momento em que a gestão pega
@@ -1452,7 +1500,7 @@ function renderEntregas() {
         <td><strong>${esc(erp.numero || '—')}</strong> <span class="badge ${st.classe}" title="${esc(st.dica)}">${esc(st.rotulo)}</span>${card && card.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</td>
         <td>${esc(erp.cliente || (card && card.cliente) || '')}</td>
         <td>${esc((card && card.servico) || erp.servico || '—')}</td>
-        <td>${esc(card ? (OPERACAO.equipe(card).join(', ') || (erp.tipo === 'interno' ? 'balcão' : 'sem equipe')) : '—')}</td>
+        <td>${esc(card ? (OPERACAO.equipeTexto(card, ', ') || (erp.tipo === 'interno' ? 'balcão' : 'sem equipe')) : '—')}</td>
         <td>${dataBR(erp.data)}</td>
         <td class="num">${valorTxt(erp.valor)}</td>
       </tr>`; }).join('')}</tbody>
@@ -1471,7 +1519,7 @@ function renderEntregas() {
         <h3>Lançamento manual: baixadas pelo ERP fora do sistema · ${aLancar.length}</h3>
         <p>O ERP marcou entregue, mas ninguém finalizou no PCP. Aparecem todas as pendentes, de qualquer período. Não conta como entrega realizada até alguém lançar: confirme data e equipe e responda se gerou retrabalho. Baixas anteriores a ${CORTE_LANCAMENTO_MANUAL.slice(8, 10)}/${CORTE_LANCAMENTO_MANUAL.slice(5, 7)}/${CORTE_LANCAMENTO_MANUAL.slice(0, 4)} já contam como entregues (decisão da direção).</p>
         ${aLancar.length ? `<div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Baixa ERP</th><th class="num">Valor</th><th></th></tr></thead><tbody>${aLancar.map(os => `<tr>
-            <td><strong>${esc(os.numero || '—')}</strong></td><td>${esc(os.cliente || '')}</td><td>${esc(os.servico || '—')}</td><td>${esc(OPERACAO.equipe(os).join(', ') || 'sem equipe')}</td><td>${dataBR(os.finalizadaEm)}</td><td class="num">${valorTxt(valorDaOS(os))}</td>
+            <td><strong>${esc(os.numero || '—')}</strong></td><td>${esc(os.cliente || '')}</td><td>${esc(os.servico || '—')}</td><td>${esc(OPERACAO.equipeTexto(os, ', ') || 'sem equipe')}</td><td>${dataBR(os.finalizadaEm)}</td><td class="num">${valorTxt(valorDaOS(os))}</td>
             <td>${OPERACAO.emIntervalo(diaEntrega(os), f.de, f.ate) ? '' : '<small class="text-muted">fora do período</small> '}<button class="btn-primary btn-xs edit-only" data-lancar-os="${esc(os.id)}">Lançar entrega</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="text-muted">Nada pendente de lançamento.</p>'}
       </section>`;
 
@@ -1659,7 +1707,7 @@ function agruparPorPessoaCasa(lista) {
       const p = nomeExibicaoCasa(ap);
       if (vistos.has(p.chave)) continue; vistos.add(p.chave);
       const d = m.get(p.chave) || { ...p, os: 0, valor: 0, semValor: 0, horas: [], retrab: 0, erp: 0, apelidos: new Set() };
-      d.os++; d.apelidos.add(ap);
+      d.os++; if (!OPERACAO.ehIdPessoa(ap)) d.apelidos.add(ap);
       if (v == null) d.semValor++; else d.valor += v;
       if (h != null) d.horas.push(h);
       if (os.retrabalho) d.retrab++;
@@ -1963,7 +2011,7 @@ function carrosHTML(f) {
     d.os++;
     const a = Number(os.kmSaida), b = Number(os.kmRetorno);
     if (Number.isFinite(a) && Number.isFinite(b) && b > a) d.km += b - a;
-    for (const p of OPERACAO.equipe(os)) d.pessoas.add(p);
+    for (const p of OPERACAO.equipe(os)) d.pessoas.add(OPERACAO.nomePessoa(p));
     m.set(nome, d);
   }
   const lista = [...m.values()].sort((a, b) => b.os - a.os);
@@ -1994,16 +2042,19 @@ function ligacaoRHHTML() {
   const ativos = pessoasRHAtivas();
   const pend = linhas.filter(l => l.como === 'sem-ficha' || l.como === 'ambiguo').length;
   const juntos = linhas.filter(l => l.juntos.length).length;
+  const soAuto = linhas.filter(l => l.naLista && l.como === 'auto' && l.pessoa && l.pessoa.id).length;
   const optPessoas = atual => ativos.map(p => `<option value="${esc(p.chave)}" ${atual && atual.chave === p.chave ? 'selected' : ''}>${esc(p.nome)}${p.cargo ? ' · ' + esc(p.cargo) : ''}</option>`).join('');
   const situacao = l => {
     if (l.como === 'sem-ficha') return '<span class="badge sem-valor">Sem ficha no RH</span>';
     if (l.como === 'ambiguo') return `<span class="badge sem-valor">Ambíguo</span><small class="bloco">Serve para ${esc(l.candidatos.map(p => p.nome).join(' e '))}. Escolha quem é.</small>`;
+    if (l.como === 'terceiro') return '<span class="badge">Terceiro, sem ficha</span><small class="bloco">Decidido: não casa com ninguém do RH.</small>';
     const como = l.como === 'salvo' ? 'Ligado à mão' : 'Ligado pelo nome';
     return `<span class="badge">${como}</span>${l.inativa ? ' <span class="badge sem-valor">Fora da ativa no RH</span>' : ''}${l.juntos.length ? `<small class="bloco">Mesma pessoa que: ${esc(l.juntos.join(', '))}. Se forem pessoas diferentes, troque.</small>` : ''}`;
   };
   const ficha = l => l.pessoa ? `<strong>${esc(l.pessoa.nome)}</strong>${l.pessoa.cargo || l.pessoa.area ? `<small class="bloco">${esc([l.pessoa.cargo, l.pessoa.area].filter(Boolean).join(' · '))}</small>` : ''}` : '<span class="text-muted">Nenhuma</span>';
   return `<p>Cada nome que o PCP usa (lista de instaladores e equipes das O.S.) e a ficha do RH a que ele chega. O que falta resolver vem primeiro. Qualquer ligação pode ser trocada aqui: a partir dela, a foto, o cargo e o nome completo aparecem sozinhos, aqui e na mensagem do dia.</p>
     <p class="text-muted" style="font-size:.8rem">${linhas.length} nomes · ${pend ? `<strong>${pend} sem ficha ou ambíguo${pend === 1 ? '' : 's'}</strong>` : 'todos com ficha'}${juntos ? ` · ${juntos} nomes dividem a ficha com outro` : ''}.</p>
+    ${soAuto ? `<p class="metricas-nota">📌 ${soAuto} ${soAuto === 1 ? 'nome da lista de instaladores está ligado' : 'nomes da lista de instaladores estão ligados'} só pelo nome. Se entrar no RH alguém com o mesmo começo de nome, a ligação some e o celular dessa pessoa deixa de ver as O.S. gravadas pelo ID. <button class="btn-primary btn-xs edit-only" data-lig-fixar type="button">Fixar ${soAuto === 1 ? 'a ligação' : `as ${soAuto} ligações`}</button></p>` : ''}
     ${linhas.length ? `<div class="casa-tabela-wrap"><table class="casa-tabela">
       <thead><tr><th>Nome no PCP</th><th class="num">O.S</th><th>Ficha do RH</th><th>Situação</th><th>Ligar a</th></tr></thead>
       <tbody>${linhas.map(l => `<tr>
@@ -2013,7 +2064,8 @@ function ligacaoRHHTML() {
         <td>${situacao(l)}</td>
         <td><select data-lig-sel="${esc(l.apelido)}" aria-label="Pessoa do RH para ${esc(l.apelido)}"><option value="">Escolher</option>${optPessoas(l.pessoa)}</select>
           <button class="btn-primary btn-xs edit-only" data-lig-ok="${esc(l.apelido)}">${l.pessoa ? 'Trocar' : 'Ligar'}</button>
-          ${l.como === 'salvo' ? `<button class="btn-ghost btn-xs edit-only" data-del-ficha="${esc(l.apelido)}" type="button" title="Tira a ligação feita à mão; o nome volta a casar sozinho, se casar">Desligar</button>` : ''}</td>
+          ${l.como === 'salvo' || l.como === 'terceiro' ? `<button class="btn-ghost btn-xs edit-only" data-del-ficha="${esc(l.apelido)}" type="button" title="Tira a decisão salva; o nome volta a casar sozinho, se casar">Desligar</button>` : ''}
+          ${l.como === 'sem-ficha' || l.como === 'ambiguo' ? `<button class="btn-ghost btn-xs edit-only" data-lig-terceiro="${esc(l.apelido)}" type="button" title="Marca que este nome é de um terceiro, sem ficha no RH">É terceiro</button>` : ''}</td>
       </tr>`).join('')}</tbody></table></div>` : '<p class="text-muted">Nenhum nome no PCP ainda.</p>'}
     <p class="text-muted" style="font-size:.8rem">${ativos.length} pessoas ativas no RH${pessoasRH().length > ativos.length ? ` · ${pessoasRH().length - ativos.length} inativa(s) fora da lista de escolha` : ''}. Quem sai da empresa sai daqui sozinho.</p>`;
 }
@@ -2292,6 +2344,24 @@ function renderPerformanceCasa() {
       toast(`${ap} → ${p.nome}. Foto e cargo já aparecem.`, 'success');
     };
   });
+  const fixar = el.querySelector('[data-lig-fixar]');
+  if (fixar) fixar.onclick = () => {
+    // Congela o casamento de HOJE (já conferido na tabela) como vínculo salvo.
+    const novos = conferenciaRH().filter(l => l.naLista && l.como === 'auto' && l.pessoa && l.pessoa.id);
+    const lista = lerVinculosCasa().filter(v => !novos.some(l => normCasa(l.apelido) === normCasa(v.apelido)));
+    for (const l of novos) lista.push({ id: l.pessoa.id, chave: l.pessoa.chave || '', nome: l.pessoa.nome || '', apelido: l.apelido });
+    gravarVinculosCasa(lista);
+    renderPerformanceCasa();
+    toast(`${novos.length} ${novos.length === 1 ? 'ligação fixada' : 'ligações fixadas'}.`, 'success');
+  };
+  el.querySelectorAll('[data-lig-terceiro]').forEach(btn => {
+    btn.onclick = () => {
+      const ap = btn.dataset.ligTerceiro;
+      if (!confirm(`"${ap}" é um terceiro, sem ficha no RH? O nome fica gravado como nome e não casa com ninguém do RH.`)) return;
+      gravarVinculosCasa([...lerVinculosCasa().filter(v => normCasa(v.apelido) !== normCasa(ap)), { id: '', chave: '', nome: '', apelido: ap, semFicha: true }]);
+      renderPerformanceCasa();
+    };
+  });
   el.querySelectorAll('[data-del-ficha]').forEach(btn => {
     btn.onclick = () => {
       // Apaga só ESTE apelido. Outro apelido da mesma pessoa continua ligado —
@@ -2403,29 +2473,36 @@ function equipeEscalavel() {
 }
 function optionsEquipeCasa(selecionado) {
   const { doPCP, doRH } = equipeEscalavel();
-  const op = n => `<option value="${esc(n)}" ${n === selecionado ? 'selected' : ''}>${esc(n)}</option>`;
-  /* QUEM JÁ ESTÁ GRAVADO TEM DE CABER NA LISTA.
-     O campo "Quem" era texto livre e virou select fechado com `required`. Quem
-     foi desligado, inativado, ou teve o nome corrigido no RH deixou de ter
-     opção: ao reabrir um plantão antigo o navegador selecionava a vazia e o
-     Salvar só devolvia "Selecione um item da lista" — sem dizer o motivo, com
-     o nome certo visível na tabela logo abaixo. As saídas eram falsear quem
-     fez o sobreaviso ou apagar o plantão. */
+  /* O PLANTÃO GRAVA O ID DO RH (ordem do dono, 29/09/2026); o nome só aparece.
+     Plantão antigo guarda o nome: ele cai na opção da mesma pessoa.
+     QUEM JÁ ESTÁ GRAVADO TEM DE CABER NA LISTA. O campo "Quem" era texto
+     livre e virou select fechado com `required`. Quem foi desligado,
+     inativado, ou teve o nome corrigido no RH deixou de ter opção: ao reabrir
+     um plantão antigo o navegador selecionava a vazia e o Salvar só devolvia
+     "Selecione um item da lista". As saídas eram falsear quem fez o
+     sobreaviso ou apagar o plantão. */
   const alvo = String(selecionado || '').trim();
-  const naLista = alvo && (doPCP.some(n => normCasa(n) === normCasa(alvo))
-    || doRH.some(p => normCasa(p.nome) === normCasa(alvo)));
-  const gravado = alvo && !naLista
-    ? `<optgroup label="Registrado neste plantão"><option value="${esc(alvo)}" selected>${esc(alvo)} · fora da lista atual do RH</option></optgroup>`
-    : '';
+  const kAlvo = alvo ? OPERACAO.chavePessoa(alvo) : '';
+  let achou = false;
+  const op = (valor, rotulo) => {
+    const on = !achou && !!kAlvo && OPERACAO.chavePessoa(valor) === kAlvo;
+    if (on) achou = true;
+    return `<option value="${esc(valor)}" ${on ? 'selected' : ''}>${esc(rotulo)}</option>`;
+  };
+  const pcp = doPCP.map(n => op(OPERACAO.idPessoa(n) || n, OPERACAO.nomePessoa(n))).join('');
   const porArea = new Map();
   for (const p of doRH) {
     const k = p.area || p.setor || 'Sem área';
     if (!porArea.has(k)) porArea.set(k, []);
     porArea.get(k).push(p);
   }
-  return `${gravado}${doPCP.length ? `<optgroup label="Instalação (PCP)">${doPCP.map(op).join('')}</optgroup>` : ''}
-    ${[...porArea.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([area, ps]) =>
-      `<optgroup label="${esc(area)}">${ps.map(p => op(p.nome)).join('')}</optgroup>`).join('')}`;
+  const rh = [...porArea.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([area, ps]) =>
+    `<optgroup label="${esc(area)}">${ps.map(p => op(OPERACAO.ehIdPessoa(p.id) ? p.id : p.nome, p.nome)).join('')}</optgroup>`).join('');
+  const gravado = alvo && !achou
+    ? `<optgroup label="Registrado neste plantão"><option value="${esc(alvo)}" selected>${esc(OPERACAO.nomePessoa(alvo))} · fora da lista atual do RH</option></optgroup>`
+    : '';
+  return `${gravado}${pcp ? `<optgroup label="Instalação (PCP)">${pcp}</optgroup>` : ''}
+    ${rh}`;
 }
 function optionsVeiculoCasa(selecionado) {
   const doAtivos = veiculosRH();
@@ -2454,7 +2531,7 @@ function avisoAusenciaCasa(nomes, dia) {
 const TIPOS_PLANTAO = { diarista: 'Diarista', sobreaviso: 'Sobreaviso', folga: 'Folga' };
 function pillPlantao(p) {
   const t = TIPOS_PLANTAO[p.tipo] ? p.tipo : '';
-  return `<span class="casa-pill ${t || 'navy'}" title="${esc(p.quem || '')}${p.obs ? ' — ' + esc(p.obs) : ''}">${t ? esc(TIPOS_PLANTAO[t]) : 'plantão'}</span>`;
+  return `<span class="casa-pill ${t || 'navy'}" title="${esc(OPERACAO.nomePessoa(p.quem || ''))}${p.obs ? ' — ' + esc(p.obs) : ''}">${t ? esc(TIPOS_PLANTAO[t]) : 'plantão'}</span>`;
 }
 
 /* OS CHIPS DO CALENDÁRIO — o mesmo controle que Entregas já usa.
@@ -2573,7 +2650,7 @@ function renderAgendaCasa() {
     .sort((a, b) => (OPERACAO.prazo(a) || '9999').localeCompare(OPERACAO.prazo(b) || '9999') || String(b.numero).localeCompare(String(a.numero)));
   const conflitosDia = OPERACAO.conflitos(todas, sel);
   const statusHTML = os => { const st = OPERACAO.status(os); return `<span class="badge st-${st}">${esc(typeof statusLabelDe === 'function' ? statusLabelDe(os, st) : st)}</span>`; };
-  const escalados = [...new Set(osDia.flatMap(o => OPERACAO.equipe(o)))];
+  const escalados = umaPorPessoa(osDia.flatMap(o => OPERACAO.equipe(o)));
 
   el.innerHTML = `
     <div class="casa-pagina">
@@ -2601,9 +2678,9 @@ function renderAgendaCasa() {
           ${avisoAusenciaCasa(escalados, sel)}
           <div>${osDia.map(os => `<div class="casa-dia-item" data-os-id="${esc(os.id)}">
               <div class="l1"><span>⏰ ${esc(typeof rotuloHora === 'function' ? rotuloHora(os) : '')}</span><span>O.S ${esc(os.numero || '—')}</span><span>${esc(os.cliente || '')}</span>${statusHTML(os)}</div>
-              <div class="l2"><span>👥 ${esc(OPERACAO.equipe(os).join(', ') || 'sem equipe')}</span><span>🚗 ${esc(os.veiculo || 'sem veículo')}</span>${os.servico ? `<span>${esc(os.servico)}</span>` : ''}</div>
+              <div class="l2"><span>👥 ${esc(OPERACAO.equipeTexto(os, ', ') || 'sem equipe')}</span><span>🚗 ${esc(os.veiculo || 'sem veículo')}</span>${os.servico ? `<span>${esc(os.servico)}</span>` : ''}</div>
             </div>`).join('') || '<p class="text-muted">Nenhuma O.S neste dia.</p>'}</div>
-          ${plDia.length ? `<ul class="casa-os">${plDia.map(p => `<li>${pillPlantao(p)} ${esc(p.quem)} · ${esc(p.inicio)}–${esc(p.fim)}${p.titulo ? ' · ' + esc(p.titulo) : ''}</li>`).join('')}</ul>` : ''}
+          ${plDia.length ? `<ul class="casa-os">${plDia.map(p => `<li>${pillPlantao(p)} ${esc(OPERACAO.nomePessoa(p.quem))} · ${esc(p.inicio)}–${esc(p.fim)}${p.titulo ? ' · ' + esc(p.titulo) : ''}</li>`).join('')}</ul>` : ''}
           ${evDia.length ? `<ul class="casa-os">${evDia.map(e => `<li>${esc(e.titulo)} <button class="btn-ghost btn-xs edit-only" data-del-ev="${esc(e.id)}">Apagar</button></li>`).join('')}</ul>` : ''}
           <div class="casa-dia-acoes">
             <button class="btn-ghost btn-sm" id="ag-wpp" ${osDia.length ? '' : 'disabled'} title="Mensagem da programação do dia">💬 Mensagem do dia</button>
@@ -2713,7 +2790,9 @@ function formAddOSHTML(id, dia, candidatas) {
       <div class="campo-grupo"><span>Equipe</span><div class="casa-chips">${equipeEscalavel().doPCP.map(n => {
         const p = fichaDoApelido(n);
         const a = p ? ausenciaRH(p, dia) : null;
-        return `<label class="casa-chip ${a ? 'fora' : ''}" title="${a ? esc(a.motivo) : ''}"><input type="checkbox" name="equipe" value="${esc(n)}"><span>${esc(n)}</span>${a ? `<small>${esc(a.motivo)}</small>` : ''}</label>`;
+        // O chip grava o ID do RH (quando há ficha) e mostra o nome.
+        const quem = p && p.nome && p.id ? `${p.nome} · ID ${p.id}` : 'Sem ficha no RH: grava o nome';
+        return `<label class="casa-chip ${a ? 'fora' : ''}" title="${esc(a ? a.motivo + ' · ' + quem : quem)}"><input type="checkbox" name="equipe" value="${esc(OPERACAO.idPessoa(n) || n)}"><span>${esc(OPERACAO.nomePessoa(n))}</span>${a ? `<small>${esc(a.motivo)}</small>` : ''}</label>`;
       }).join('') || '<span class="text-muted">Cadastre instaladores em Configurações.</span>'}</div></div>
       <button class="btn-primary btn-sm" type="submit">Programar em ${esc(dia.slice(8, 10) + '/' + dia.slice(5, 7))}</button>
     </form>`;
@@ -2730,9 +2809,9 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
   const selOS = f.querySelector('[name="osId"]');
   if (selOS) selOS.addEventListener('change', () => {
     const o = STORE.getOS(selOS.value);
-    const eq = new Set((o ? OPERACAO.equipe(o) : []).map(normCasa));
+    const eq = new Set((o ? OPERACAO.equipe(o) : []).map(OPERACAO.chavePessoa));
     f.querySelectorAll('.casa-chip input[name="equipe"]').forEach(cb => {
-      cb.checked = eq.has(normCasa(cb.value));
+      cb.checked = eq.has(OPERACAO.chavePessoa(cb.value));
       cb.closest('.casa-chip').classList.toggle('on', cb.checked);
     });
   });
@@ -2753,8 +2832,8 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
     if (diaAntes && diaAntes !== dia && !confirm(`A O.S ${os.numero || ''} está programada para ${diaAntes.slice(8, 10)}/${diaAntes.slice(5, 7)}${os.confirmacao === 'Confirmado' ? ' e confirmada com o cliente' : ''}. Mover para ${dia.slice(8, 10)}/${dia.slice(5, 7)}? A confirmação será desfeita.`)) return;
     // Nome da O.S que não tem chip aqui (fora da lista de escala) não pode ser
     // apagado por um formulário que nem o mostra.
-    const comChip = new Set([...f.querySelectorAll('.casa-chip input[name="equipe"]')].map(cb => normCasa(cb.value)));
-    const semChip = OPERACAO.equipe(os).filter(n => !comChip.has(normCasa(n)));
+    const comChip = new Set([...f.querySelectorAll('.casa-chip input[name="equipe"]')].map(cb => OPERACAO.chavePessoa(cb.value)));
+    const semChip = OPERACAO.equipe(os).filter(n => !comChip.has(OPERACAO.chavePessoa(n)));
     const agendaAntes = OPERACAO.agendaCompleta(os);
     os.confirmacao = ''; os.confEm = ''; os.confPor = ''; os.confHora = ''; os.carroLiberado = false;
     // A remarcação pela Agenda entra no agendaLog como a da ficha: sem ela a
@@ -2784,7 +2863,7 @@ function plantaoPerformanceHTML() {
   const pl = lerAgendaCasa().plantoes.filter(p => !p.cancelado && p.data.startsWith(mes));
   const vinculados = pl.filter(p => plantaoComOS(p).length);
   return `<p>${pl.length} plantões registrados em ${esc(rotuloMesCasa(mes))}; ${vinculados.length} com vínculo a O.S. A participação no plantão não atribui pontos automaticamente.</p>
-    ${vinculados.map(p => `<p><strong>${esc(p.quem)}</strong> · ${esc(p.data)} · ${esc(p.inicio)}–${esc(p.fim)}<br>${plantaoComOS(p).map(id => { const o = STORE.getAllOS().find(x => x.id === id); return o ? `O.S. ${esc(o.numero)}` : 'O.S. fora do recorte'; }).join(' · ')}</p>`).join('')}
+    ${vinculados.map(p => `<p><strong>${esc(OPERACAO.nomePessoa(p.quem))}</strong> · ${esc(p.data)} · ${esc(p.inicio)}–${esc(p.fim)}<br>${plantaoComOS(p).map(id => { const o = STORE.getAllOS().find(x => x.id === id); return o ? `O.S. ${esc(o.numero)}` : 'O.S. fora do recorte'; }).join(' · ')}</p>`).join('')}
     <p class="metricas-nota">Cadastre ou altere vínculos na aba Plantões. Hora extra, remuneração e registros do RH continuam separados desta apuração.</p>`;
 }
 
@@ -2907,7 +2986,7 @@ function renderPlantoesCasa() {
         </span>
       </div>
       <div class="casa-kpi-cards">
-        <div class="casa-kpi"><b>${doDia.length}</b><small>plantão hoje${doDia.length ? ' · ' + esc(doDia.map(p => (fichaDoApelido(p.quem) || { nome: p.quem }).nome.split(' ')[0]).join(', ') ) : ''}</small></div>
+        <div class="casa-kpi"><b>${doDia.length}</b><small>plantão hoje${doDia.length ? ' · ' + esc(doDia.map(p => OPERACAO.nomePessoa(p.quem)).join(', ') ) : ''}</small></div>
         <div class="casa-kpi"><b>${contagem.diarista}</b><small>diaristas no mês</small></div>
         <div class="casa-kpi"><b>${contagem.sobreaviso}</b><small>sobreavisos no mês</small></div>
         <div class="casa-kpi"><b>${contagem.folga}</b><small>folgas no mês</small></div>
@@ -3092,7 +3171,7 @@ function renderGradeCasa() {
   const conflitos = OPERACAO.conflitos(todas, dia);
   const candidatas = todas.filter(o => !o.finalizadaEm && !OPERACAO.interno(o) && !diasCasa(o).includes(dia))
     .sort((a, b) => (OPERACAO.prazo(a) || '9999').localeCompare(OPERACAO.prazo(b) || '9999') || String(b.numero).localeCompare(String(a.numero)));
-  const escalados = [...new Set(lista.flatMap(o => OPERACAO.equipe(o)))];
+  const escalados = umaPorPessoa(lista.flatMap(o => OPERACAO.equipe(o)));
   const valorDia = somaValores(lista);
 
   const linha = os => {
@@ -3102,7 +3181,7 @@ function renderGradeCasa() {
       <td class="num"><strong>${esc(typeof rotuloHora === 'function' ? rotuloHora(os) : '')}</strong></td>
       <td><strong>${esc(os.numero || '—')}</strong><small class="bloco">${esc(os.servico || '')}</small></td>
       <td>${esc(os.cliente || '')}<small class="bloco">${esc(os.endereco || '')}</small></td>
-      <td>${esc(OPERACAO.equipe(os).map(n => { const p = fichaDoApelido(n); return p ? rotuloCurtoRH(p) : n; }).join(', ') || '—')}</td>
+      <td>${esc(OPERACAO.equipeTexto(os, ', ') || '—')}</td>
       <td>${os.veiculo ? `${veic.emoji} ${esc(os.veiculo)}` : '<span class="badge sem-valor">sem veículo</span>'}</td>
       <td><span class="badge st-${st}">${esc(typeof statusLabelDe === 'function' ? statusLabelDe(os, st) : st)}</span></td>
     </tr>`;
@@ -3154,7 +3233,7 @@ function renderGradeCasa() {
         </div>
         ${conflitos.length ? `<p class="metricas-nota alerta-ausencia">⚠️ ${conflitos.length} possível conflito: ${esc(conflitos.map(c => [...c.equipe, c.veiculo].filter(Boolean).join(', ')).join(' · '))} em mais de uma O.S no mesmo turno.</p>` : ''}
         ${avisoAusenciaCasa(escalados, dia)}
-        ${plDia.length ? `<p class="metricas-nota">Plantão hoje: ${plDia.map(p => `${pillPlantao(p)} ${esc(p.quem)} (${esc(p.inicio)}–${esc(p.fim)})`).join(' · ')}</p>` : ''}
+        ${plDia.length ? `<p class="metricas-nota">Plantão hoje: ${plDia.map(p => `${pillPlantao(p)} ${esc(OPERACAO.nomePessoa(p.quem))} (${esc(p.inicio)}–${esc(p.fim)})`).join(' · ')}</p>` : ''}
         ${lista.length
           ? `<div class="casa-tabela-wrap"><table class="casa-tabela">
               <thead><tr><th>Hora</th><th>O.S</th><th>Cliente</th><th>Equipe</th><th>Veículo</th><th>Status</th></tr></thead>

@@ -93,9 +93,108 @@ export function carimbarExecucao(os, anterior, autor, em) {
   }
   return r;
 }
-export function pertenceEquipe(os, nome) {
-  const normal = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
-  return !!nome && (os?.equipe || []).some(n => normal(n) === normal(nome));
+/* PESSOA = FICHA DO RH; O ID MANDA, O NOME SÓ SE EXIBE (ordem do dono,
+   29/09/2026). CÓPIA da régua de operacao.js (resolverPessoas): o aparelho e
+   esta porta precisam chegar à MESMA pessoa a partir do mesmo nome antigo, e
+   tests/pessoas-id.test.cjs roda as duas sobre os mesmos casos. Mudou lá,
+   muda aqui. */
+export const normPessoa = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+export const ehIdPessoa = v => /^\d{6}$/.test(String(v ?? '').trim());
+const id6 = v => { const d = String(v ?? '').replace(/\D/g, ''); return d.length === 6 ? d : d.length === 11 ? d.slice(0, 6) : ''; };
+export function resolverPessoas(dados = {}) {
+  const fichas = (Array.isArray(dados.pessoas) ? dados.pessoas : []).filter(p => p && ehIdPessoa(p.id));
+  const porId = new Map();
+  for (const p of fichas) if (!porId.has(p.id)) porId.set(p.id, p);
+  const porChaveRH = new Map(fichas.filter(p => p.chave).map(p => [String(p.chave), p]));
+  // Casamento automático com a régua de sempre do PCP -- apelido do RH, nome
+  // completo, ou começo de nome que só uma ficha tem --, contado entre TODAS
+  // as fichas, inclusive quem já saiu. Quem saiu nunca é o resultado: "Elias"
+  // com um Elias desligado e outro na casa é ambíguo, e não do que ficou --
+  // senão o crachá antigo do que saiu passava a abrir as O.S. do xará
+  // (revisão de 29/09/2026). "Adriano" sozinho, com dois Adrianos, fica sem
+  // ficha de propósito.
+  const auto = texto => {
+    const ap = normPessoa(texto), tokens = ap.split(' ');
+    const um = achadas => achadas.length === 1 && !achadas[0].desligado ? achadas[0] : null;
+    const porApelido = fichas.filter(p => normPessoa(p.apelido) === ap);
+    if (porApelido.length) return um(porApelido);
+    const porNome = fichas.filter(p => normPessoa(p.nome) === ap);
+    if (porNome.length) return um(porNome);
+    return um(fichas.filter(p => { const n = normPessoa(p.nome).split(' '); return tokens.every((t, i) => n[i] === t); }));
+  };
+  // Vínculo salvo (Performance → "Conferir nomes do PCP × fichas do RH"):
+  // decisão de gente, vale mais que o casamento. `semFicha` é a decisão de que
+  // o nome NÃO é ninguém do RH (terceiro): ele nunca casa sozinho com um xará.
+  // Dois vínculos diferentes para o mesmo nome = ambíguo, e ambíguo não escolhe.
+  const vinculos = (Array.isArray(dados.vinculos) ? dados.vinculos : []).filter(v => v && typeof v === 'object');
+  const salvos = new Map();
+  for (const v of vinculos) {
+    const ap = normPessoa(v.apelido || v.nomePCP);
+    const p = porId.get(id6(v.id || v.idPessoa)) || porChaveRH.get(String(v.chave || '').trim());
+    const id = v.semFicha === true ? '' : (p ? p.id : id6(v.id || v.idPessoa));
+    if (!ap || (!id && v.semFicha !== true)) continue;
+    salvos.set(ap, salvos.has(ap) && salvos.get(ap) !== id ? '' : id);
+  }
+  // Nome com decisão salva (vínculo ou "sem ficha") não muda quando o RH muda.
+  const fixado = entrada => salvos.has(normPessoa(entrada));
+  const memo = new Map();
+  const idDe = entrada => {
+    const s = String(entrada ?? '').trim();
+    if (!s) return '';
+    if (ehIdPessoa(s)) return s;
+    const ap = normPessoa(s);
+    if (!memo.has(ap)) memo.set(ap, salvos.has(ap) ? salvos.get(ap) : (auto(s)?.id || ''));
+    return memo.get(ap);
+  };
+  const chave = entrada => { const s = String(entrada ?? '').trim(); return s ? (idDe(s) || 'nome:' + normPessoa(s)) : ''; };
+  // Nome de exibição: a palavra que o PCP já usa (lista de instaladores,
+  // depois vínculo salvo); senão o menor começo do nome completo que só
+  // aquela ficha tem ("Lucas Gabriel", "Hélio").
+  const rotulos = new Map();
+  for (const n of Array.isArray(dados.lista) ? dados.lista : []) { const id = idDe(n); if (id && !rotulos.has(id)) rotulos.set(id, String(n).trim()); }
+  for (const v of vinculos) { const id = idDe(v.apelido || v.nomePCP); if (id && !rotulos.has(id)) rotulos.set(id, String(v.apelido || v.nomePCP).trim()); }
+  const curto = p => {
+    const palavras = String(p.nome || '').trim().split(/\s+/).filter(Boolean);
+    const alvo = palavras.map(normPessoa);
+    for (let k = 1; k <= palavras.length; k++) {
+      const pre = alvo.slice(0, k).join(' ');
+      if (!fichas.some(q => q.id !== p.id && normPessoa(q.nome).split(' ').slice(0, k).join(' ') === pre)) return palavras.slice(0, k).join(' ');
+    }
+    return palavras.join(' ') || 'ID ' + p.id;
+  };
+  const nome = entrada => {
+    const s = String(entrada ?? '').trim();
+    const id = idDe(s);
+    if (!id) return s;
+    if (!rotulos.has(id)) { const p = porId.get(id); rotulos.set(id, p ? curto(p) : ehIdPessoa(s) ? 'ID ' + s : s); }
+    return rotulos.get(id);
+  };
+  const pessoa = entrada => { const id = idDe(entrada); return id ? (porId.get(id) || { id, chave: '', nome: '', semFicha: true }) : null; };
+  return { idDe, chave, nome, pessoa, fixado, fichas };
+}
+
+/* A O.S. É DA EQUIPE DE QUEM? Pelo ID. O nome do crachá (o da lista de
+   instaladores) passa pela régua de HOJE -- vínculo corrigido vale na hora --,
+   e o `id` que o crachá novo traz só entra quando o nome deixou de levar a
+   alguém (entrou um xará e o nome ficou ambíguo). Entrada da O.S. com ID
+   compara ID; nome antigo compara pela pessoa a que ele leva e, sem ficha,
+   pelo texto -- como sempre foi. Sem resolvedor (chamada antiga), só o texto. */
+export function pertenceEquipe(os, quem, pessoas) {
+  const q = typeof quem === 'object' && quem ? quem : { nome: quem };
+  const nome = String(q.nome || q.sub || '').trim();
+  const r = pessoas && typeof pessoas.chave === 'function' ? pessoas : null;
+  // Nome com decisão salva (vínculo ou "sem ficha") não cai no `id` antigo.
+  const fixo = !!(r && nome && typeof r.fixado === 'function' && r.fixado(nome));
+  const alvo = (r && nome ? r.idDe(nome) : '') || (!fixo && ehIdPessoa(q.id) ? String(q.id).trim() : '');
+  const texto = normPessoa(nome);
+  if (!alvo && !texto) return false;
+  return (Array.isArray(os?.equipe) ? os.equipe : []).some(n => {
+    const s = String(n ?? '').trim();
+    if (!s) return false;
+    const id = ehIdPessoa(s) ? s : (r ? r.idDe(s) : '');
+    if (alvo && id) return id === alvo;
+    return !!texto && !ehIdPessoa(s) && normPessoa(s) === texto;
+  });
 }
 export function validarConclusao(os, anterior, papel) {
   if (!os.finalizadaEm || anterior?.finalizadaEm || os.tipo === 'interno') return '';

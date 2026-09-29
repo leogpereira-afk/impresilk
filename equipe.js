@@ -236,8 +236,10 @@ async function enter() {
     _autorizandoEquipe = true;
     try {
       // Troca de identidade só após emitir o acesso restrito; nunca limpa fila pendente.
-      await AUTH.entrarMontagem(EQ.instalador);
+      const ent = await AUTH.entrarMontagem(EQ.instalador);
       STORE.limparCache(); STORE.setUser(null); STORE.setInstalador(EQ.instalador);
+      // Nome da lista sem ficha do RH: a O.S. gravada pelo ID não aparece aqui.
+      if (ent && ent.aviso) toast(ent.aviso, 'error');
       EQ.vencido = false;
     } catch (e) { toast(e.message || 'Não foi possível autorizar.','error'); return; }
     finally { _autorizandoEquipe = false; }
@@ -354,6 +356,12 @@ function puxar() {
   Promise.resolve(STORE.pull(() => { renderList(); atualizarModalAberto(); }))
     .then(() => { renderList(); baixarLayouts(); }, () => renderList());
   STORE.trySync();
+  /* QUEM É QUEM NA EQUIPE. A O.S. grava o ID do RH; o nome dos colegas e a
+     conta de "a O.S. é minha" saem do elenco (leve: só ID e nome, sem foto).
+     Guarda no aparelho e renova a cada 30 min, como na gestão. */
+  if (typeof STORE.pullElenco === 'function') {
+    Promise.resolve(STORE.pullElenco(false, { leve: true })).then(() => { OPERACAO.esquecerPessoas(); renderList(); atualizarModalAberto(); }, () => {});
+  }
 }
 
 /* O LAYOUT VAI PARA O CELULAR ANTES DE FALTAR SINAL. A arte só era baixada ao
@@ -559,10 +567,36 @@ async function verificarNuvem() {
 }
 
 /* ── Lista de O.S do instalador ──────────────────────────────────────────── */
+/* A O.S. É MINHA? Pela pessoa, não pelo texto (ordem do dono, 29/09/2026):
+   a O.S. nova guarda o ID do RH; a antiga, o nome. O crachá novo traz o ID
+   que a gestão escolheu; o antigo, só o nome da lista -- que vira pessoa pela
+   mesma régua do servidor. */
+function quemSouEu() {
+  const dono = typeof AUTH !== 'undefined' && AUTH.dono ? AUTH.dono({ aceitarVencido: true }) : null;
+  const meu = !!(dono && normNome(dono.nome) === normNome(EQ.instalador));
+  // A régua de hoje primeiro (como no servidor); o ID do crachá só quando o
+  // nome não leva a ninguém neste aparelho (elenco ainda não baixado).
+  const pelaRegra = OPERACAO.idPessoa(EQ.instalador);
+  const id = pelaRegra || (meu && dono.id ? dono.id : '');
+  const toque = !!(meu && dono.papel === 'montagem' && dono.montagemIndividual);
+  return { id, toque, chave: id || OPERACAO.chavePessoa(EQ.instalador) };
+}
+/* Pela PESSOA, como sempre pelo nome: o cache do aparelho pode guardar O.S.
+   de outra equipe (fila pendente na troca de instalador, lançamento à espera),
+   e o filtro daqui é o que as esconde. Só a O.S. com um ID que este aparelho
+   ainda não sabe de quem é (sem elenco, crachá antigo) fica por conta do
+   servidor, que ao crachá de toque só manda as O.S. da equipe dele. */
+function souDaEquipe(o, eu = quemSouEu()) {
+  const ent = OPERACAO.equipe(o);
+  if (eu.chave && ent.some(x => OPERACAO.chavePessoa(x) === eu.chave)) return true;
+  if (ent.some(x => !OPERACAO.ehIdPessoa(x) && normNome(x) === normNome(EQ.instalador))) return true;
+  return eu.toque && !eu.id && ent.some(x => OPERACAO.ehIdPessoa(x) && !OPERACAO.pessoaDe(x)?.nome);
+}
 function minhasOS() {
   // Comercial vê todas as O.S liberadas; instalador vê só as suas.
+  const eu = quemSouEu();
   return STORE.getAllOS()
-    .filter(o => o.liberadoPCP && (EQ.comercial || (o.equipe || []).includes(EQ.instalador)))
+    .filter(o => o.liberadoPCP && (EQ.comercial || souDaEquipe(o, eu)))
     .sort((a, b) => (a.instalacao?.data || '').localeCompare(b.instalacao?.data || ''));
 }
 // O.S. com gravação ainda só neste celular, e fotos que ainda não subiram.
@@ -849,7 +883,7 @@ function renderModalComercial() {
     <div style="padding:12px 16px;background:#eff6ff;border-bottom:1px solid var(--border)">
       <div class="list-date" style="font-size:.95rem">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
       <div class="text-sm" style="margin-top:4px">📍 ${esc(os.endereco||'')}</div>
-      <div class="text-sm">👷 ${esc((os.equipe||[]).join(', '))} ${os.veiculo?(OPERACAO.semCarro(os)?'· 🏠 Sem carro (instalação interna)':'· 🚗 '+esc(os.veiculo)):''}</div>
+      <div class="text-sm">👷 ${esc(OPERACAO.equipeTexto(os, ', '))} ${os.veiculo?(OPERACAO.semCarro(os)?'· 🏠 Sem carro (instalação interna)':'· 🚗 '+esc(os.veiculo)):''}</div>
       ${contatoHTML(os)}
     </div>
 
@@ -1108,7 +1142,7 @@ function renderModal() {
     <div style="padding:12px 16px;background:#eff6ff;border-bottom:1px solid var(--border)">
       <div class="list-date" style="font-size:.95rem">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
       <div class="text-sm" style="margin-top:4px">📍 ${interno ? 'Retirada na fábrica' : esc(os.endereco||'')}</div>
-      <div class="text-sm">👷 ${esc((os.equipe||[]).join(', '))} ${os.veiculo?(OPERACAO.semCarro(os)?'· 🏠 Sem carro (instalação interna)':'· 🚗 '+esc(os.veiculo)):''}</div>
+      <div class="text-sm">👷 ${esc(OPERACAO.equipeTexto(os, ', '))} ${os.veiculo?(OPERACAO.semCarro(os)?'· 🏠 Sem carro (instalação interna)':'· 🚗 '+esc(os.veiculo)):''}</div>
       <div class="lock-allow">${contatoHTML(os, !interno)}</div>
     </div>
 

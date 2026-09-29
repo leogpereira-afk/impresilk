@@ -1941,7 +1941,7 @@ function blocoExec(os, ro, done) {
         <div class="field"><label>Problema</label><input data-f="problema" value="${esc(os.problema)}"></div>
         <div class="field-row">
           <div class="field"><label>Causa</label><select data-f="causa"><option value=""></option>${causaOpts}</select></div>
-          <div class="field"><label>Quem resolveu</label><input data-f="resolvidoPor" value="${esc(os.resolvidoPor)}"></div>
+          <div class="field"><label>Quem resolveu</label><input data-f="resolvidoPor" value="${esc(OPERACAO.nomePessoa(os.resolvidoPor))}"></div>
         </div>
         <div class="field-row">
           <div class="field"><label>Etapa de origem</label><select data-f="etapaOrigem"><option value=""></option>${ETAPAS_ORIGEM.map(v => `<option ${os.etapaOrigem === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
@@ -2261,8 +2261,11 @@ function salvarConferenciaVolta(g, resp) {
 // Campo de múltipla escolha via pop-up (ferramentas, suprimentos, equipe, etc.)
 function chipsField(field, values, options, ro) {
   const arr = Array.isArray(values) ? values : (values ? [values] : []);
+  // Equipe grava o ID do RH: o chip mostra o nome, e o ID fica na dica.
+  const rotulo = v => field === 'equipe' ? OPERACAO.nomePessoa(v) : v;
+  const dica = v => { if (field !== 'equipe') return ''; const p = OPERACAO.pessoaDe(v); return p ? ` title="${esc((p.nome ? p.nome + ' · ' : '') + 'ID ' + p.id)}"` : ' title="Sem ficha no RH"'; };
   const chips = arr.length
-    ? arr.map((v, i) => `<span class="chip">${esc(v)}<button class="chip-rm edit-only" data-chip-field="${esc(field)}" data-chip-idx="${i}">×</button></span>`).join('')
+    ? arr.map((v, i) => `<span class="chip"${dica(v)}>${esc(rotulo(v))}<button class="chip-rm edit-only" data-chip-field="${esc(field)}" data-chip-idx="${i}">×</button></span>`).join('')
     : '<span class="foto-hint">Nenhum selecionado</span>';
   return `
     <div class="chips-wrap" data-chips="${field}">
@@ -2305,9 +2308,76 @@ function tiposServicoHist() {
   return Object.keys(freq).sort((a, b) => freq[b] - freq[a] || a.localeCompare(b));
 }
 
+/* EQUIPE PELO ID DO RH (ordem do dono, 29/09/2026: "vamos usar o ID em todo
+   o sistema e padrão pra não ter erro"). O pop-up mostra as pessoas do RH --
+   primeiro quem está na lista de instaladores, depois o resto da casa por
+   área -- e o que a O.S. grava é o ID (6 primeiros dígitos do CPF). Nome da
+   lista sem ficha no RH (terceiro ainda sem cadastro) aparece marcado e
+   segue como nome até ganhar ficha. Nome antigo já gravado na O.S. ("Lucas")
+   aparece marcado na linha da pessoa e, ao confirmar, vira o ID dela. */
+function opcoesEquipe(atuais) {
+  const cfg = STORE.getCFG();
+  const freq = {};
+  STORE.getAllOS().forEach(o => OPERACAO.equipe(o).forEach(x => { const k = OPERACAO.chavePessoa(x); freq[k] = (freq[k] || 0) + 1; }));
+  const vistos = new Set(), out = [];
+  const add = (valor, grupo) => {
+    const k = OPERACAO.chavePessoa(valor);
+    if (!k || vistos.has(k)) return;
+    vistos.add(k);
+    const p = OPERACAO.pessoaDe(valor);
+    const ficha = p && !p.semFicha ? p : null;
+    out.push({ valor: p ? p.id : String(valor).trim(), chave: k, nome: OPERACAO.nomePessoa(valor),
+      completo: ficha ? ficha.nome : '', id: p ? p.id : '', grupo: p ? grupo : 'Sem ficha no RH', n: freq[k] || 0 });
+  };
+  (Array.isArray(cfg.instaladores) ? cfg.instaladores : []).forEach(n => add(n, 'Instaladores'));
+  (STORE.elenco().pessoas || []).filter(p => p.ativo !== false && OPERACAO.ehIdPessoa(p.id))
+    .slice().sort((a, b) => String(a.area || '~').localeCompare(String(b.area || '~'), 'pt-BR') || String(a.nome).localeCompare(String(b.nome), 'pt-BR'))
+    .forEach(p => add(p.id, p.area || 'Sem área'));
+  // O que já está na O.S. e não apareceu acima (ficha inativa, nome antigo sem
+  // ficha): continua marcado, para não sumir calado ao confirmar.
+  (atuais || []).forEach(v => add(v, 'Já na O.S.'));
+  return out;
+}
+function abrirPickerEquipe() {
+  const atuais = (() => { const v = _modalDraft.equipe; return Array.isArray(v) ? v.slice() : (v ? [v] : []); })();
+  const marcadas = new Set(atuais.map(OPERACAO.chavePessoa));
+  const opcoes = opcoesEquipe(atuais);
+  let grupo = '';
+  const linhas = opcoes.map(o => {
+    const cab = o.grupo !== grupo ? `<div class="picker-grupo">${esc(o.grupo)}</div>` : '';
+    grupo = o.grupo;
+    const sub = o.completo ? `${o.completo} · ID ${o.id}` : (o.id ? `ID ${o.id}` : '⚠️ sem ficha no RH: grava o nome');
+    const busca = normNome([o.nome, o.completo, o.id].join(' '));
+    return `${cab}<label class="picker-opt" data-busca="${esc(busca)}">
+      <input type="checkbox" value="${esc(o.valor)}" ${marcadas.has(o.chave) ? 'checked' : ''}>
+      <span class="picker-pessoa">${esc(o.nome)}<small>${esc(sub)}</small></span>
+      ${o.n > 0 ? `<span class="picker-n">${o.n}×</span>` : ''}
+    </label>`;
+  }).join('');
+  $('#picker-title').textContent = 'Equipe';
+  $('#picker-list').innerHTML = opcoes.length
+    ? `<input type="search" class="picker-busca" placeholder="Buscar por nome ou ID" autocomplete="off" aria-label="Buscar pessoa">${linhas}`
+    : '<p class="text-muted">Sem pessoas do RH neste aparelho ainda. Atualize e tente de novo.</p>';
+  const busca = document.querySelector('#picker-list .picker-busca');
+  if (busca) busca.oninput = () => {
+    const q = normNome(busca.value);
+    $$('#picker-list .picker-opt').forEach(l => { l.style.display = !q || l.dataset.busca.includes(q) ? '' : 'none'; });
+    $$('#picker-list .picker-grupo').forEach(g => {
+      let el = g.nextElementSibling, algum = false;
+      while (el && !el.classList.contains('picker-grupo')) { if (el.style.display !== 'none') algum = true; el = el.nextElementSibling; }
+      g.style.display = algum ? '' : 'none';
+    });
+  };
+  $('#picker-novo').value = '';
+  const addBox = document.querySelector('#picker-overlay .picker-add');
+  if (addBox) addBox.style.display = 'none';
+  $('#picker-overlay').classList.remove('hidden');
+}
+
 let _pickerField = null;
 function abrirPicker(field) {
   _pickerField = field;
+  if (field === 'equipe') return abrirPickerEquipe();
   const { label, opcoes } = pickerConfig(field);
   const atuais = (() => { const v = _modalDraft[field]; return Array.isArray(v) ? v.slice() : (v ? [v] : []); })();
   const ranked = ordenarMaisUsados(field, opcoes);
@@ -3121,7 +3191,7 @@ function osCardHTML(os) {
       </div>
       ${os.finalizadaEm ? stepperHTML(os, true) : ''}
       ${cardTempoHTML(os)}
-      ${(os.equipe||[]).length ? `<div class="card-equipe">👷 ${esc(os.equipe.join(', '))}</div>` : ''}
+      ${(os.equipe||[]).length ? `<div class="card-equipe">👷 ${esc(OPERACAO.equipeTexto(os, ', '))}</div>` : ''}
       <div class="card-pct" title="${pct}% da ficha preenchida">
         <div class="card-pct-bar"><div class="card-pct-fill" style="width:${pct}%"></div></div>
         <span class="card-pct-num">Ficha ${pct}%</span>
@@ -3134,7 +3204,7 @@ function osCardHTML(os) {
         ${arquivarBtn}
       </div>
       </details>
-      <div class="card-principal">${prazoPrincipalHTML(os)}<small>${esc(os.responsavelPCP || (os.equipe || []).join(', ') || 'Responsável a definir')}</small>${pp ? `<p>${esc(pp.label)}</p>` : ''}${ctaBtn}${avisarBtn}</div>
+      <div class="card-principal">${prazoPrincipalHTML(os)}<small>${esc(os.responsavelPCP || OPERACAO.equipeTexto(os, ', ') || 'Responsável a definir')}</small>${pp ? `<p>${esc(pp.label)}</p>` : ''}${ctaBtn}${avisarBtn}</div>
     </div>`;
 }
 
@@ -3451,14 +3521,18 @@ function erpConferi(id) {
    a ficha está travada, então a pergunta vem aqui, antes de gravar. */
 function escolherQuemResolveu(os, aoEscolher) {
   const velho = document.getElementById('quem-resolveu-box'); if (velho) velho.remove();
-  const nomes = [...new Set([...OPERACAO.equipe(os), ...((STORE.getCFG().instaladores) || [])].map(n => String(n || '').trim()).filter(Boolean))];
+  // Pessoas (ID quando há ficha), sem repetir quem aparece com dois nomes.
+  const vistos = new Set();
+  const nomes = [...OPERACAO.equipe(os), ...((STORE.getCFG().instaladores) || [])].map(n => String(n || '').trim()).filter(Boolean)
+    .filter(n => { const k = OPERACAO.chavePessoa(n); if (vistos.has(k)) return false; vistos.add(k); return true; })
+    .map(n => ({ valor: OPERACAO.idPessoa(n) || n, rotulo: OPERACAO.nomePessoa(n) }));
   const box = document.createElement('div');
   box.id = 'quem-resolveu-box';
   box.className = 'wpp-picker-overlay';
   box.innerHTML = `<div class="wpp-picker retrab-box" role="dialog" aria-modal="true" aria-label="Quem resolveu o retrabalho">
       <div class="wpp-picker-head"><strong>Quem resolveu o retrabalho da O.S ${esc(os.numero || '')}?</strong><button class="modal-close" data-qr-fechar>×</button></div>
       <div class="wpp-picker-body"><p class="text-muted" style="font-size:.8rem;margin-bottom:8px">Conta no gráfico "Retrabalho por técnico".</p>
-      <div class="quem-resolveu-lista">${nomes.map(n => `<button type="button" class="btn-ghost" data-qr="${esc(n)}">${esc(n)}</button>`).join('')}<button type="button" class="btn-ghost" data-qr="">Não sei</button></div></div>
+      <div class="quem-resolveu-lista">${nomes.map(n => `<button type="button" class="btn-ghost" data-qr="${esc(n.valor)}">${esc(n.rotulo)}</button>`).join('')}<button type="button" class="btn-ghost" data-qr="">Não sei</button></div></div>
     </div>`;
   document.body.appendChild(box);
   const fechar = () => box.remove();
@@ -3584,7 +3658,7 @@ function moverEtapa(id, acao, opcoes = {}) {
     // o nome de quem marcou. Quem marcou fica no carimbo próprio.
     os.dataResolvido = todayISO(); os.retrabalhoResolvidoMarca = { em: agora, por: quem };
     if (!os.resolvidoPor && opcoes.quemResolveu && opcoes.quemResolveu !== '(não informado)') os.resolvidoPor = opcoes.quemResolveu;
-    msg = `Retrabalho da O.S ${os.numero || ''} resolvido${os.resolvidoPor ? ' por ' + os.resolvidoPor : ''}`;
+    msg = `Retrabalho da O.S ${os.numero || ''} resolvido${os.resolvidoPor ? ' por ' + OPERACAO.nomePessoa(os.resolvidoPor) : ''}`;
   } else if (acao === 'liberou') {
     if (!OPERACAO.fecharParado(os, agora, quem, 'cliente liberou')) return;
     msg = `Cliente liberou · O.S ${os.numero || ''} volta para programar`;
@@ -3798,7 +3872,7 @@ function arqListaHTML(list) {
       <td>${esc(os.cliente || 'Sem cliente')}${os.servico ? `<br><small class="text-muted">${esc(os.servico)}</small>` : ''}</td>
       <td>${osTipo(os) === 'interno' ? '🏬 retira' : '🚚 externa'}</td>
       <td class="num">${dt(os.finalizadaEm)}</td>
-      <td>${esc((os.equipe || []).join(', ') || '—')}</td>
+      <td>${esc(OPERACAO.equipeTexto(os, ', ') || '—')}</td>
       <td>${os.retrabalho ? '<span class="badge st-retrabalho">retrabalho</span>' : ''}${OPERACAO.encerradaERP(os) ? '<span class="badge st-aguardando_producao" title="Baixa automática do ERP">ERP</span>' : ''}</td>
     </tr>`).join('');
   return `<div class="casa-tabela-wrap"><table class="casa-tabela pcp-arq-tabela">
@@ -4158,10 +4232,10 @@ function fotografiaLT(offset, todas) {
       .sort((a, b) => String((a.instalacao || {}).periodo || 'zz').localeCompare(String((b.instalacao || {}).periodo || 'zz')));
     const entregas = todas.filter(o => !o.finalizadaEm && dataEntregaOS(o) === diaISO && !(o.instalacao && o.instalacao.data === diaISO));
     const retiradas = todas.filter(o => isInterno(o) && !o.finalizadaEm && o.liberadoPCP);
-    const equipes = [...new Set(agendadas.flatMap(o => o.equipe || []))];
+    const equipes = [...new Set(agendadas.flatMap(o => OPERACAO.equipeNomes(o)))];
     return `
       <div class="lt-resumo">📐 <strong>Estruturado para ${rotDia}</strong> <span class="text-muted">(em ${offset} dia${offset > 1 ? 's' : ''})</span>${equipes.length ? `<br>👷 Escalados: ${equipes.map(esc).join(', ')}` : ''}</div>
-      ${sec('📅 Instalações previstas', agendadas.map(o => item(o, `${esc((o.instalacao || {}).periodo || 'sem período')}${(o.equipe || []).length ? ' · 👷 ' + esc(o.equipe.join(', ')) : ' · <strong>⚠ sem equipe</strong>'}`)), 'Nenhuma programação registrada para este dia')}
+      ${sec('📅 Instalações previstas', agendadas.map(o => item(o, `${esc((o.instalacao || {}).periodo || 'sem período')}${(o.equipe || []).length ? ' · 👷 ' + esc(OPERACAO.equipeTexto(o, ', ')) : ' · <strong>⚠ sem equipe</strong>'}`)), 'Nenhuma programação registrada para este dia')}
       ${sec('📦 Entregas prometidas vencendo no dia', entregas.map(o => item(o)), 'Nenhuma entrega vencendo')}
       ${sec('🛍 Estarão aguardando retirada (se não forem retirados antes)', retiradas.map(o => item(o)), 'Nenhum pedido pronto aguardando')}`;
   }
@@ -4200,7 +4274,7 @@ function fotografiaLT(offset, todas) {
     const saiu = offset === 0 ? (o.horaSaida || '') : horaDe(o.saidaEm, o.horaSaida);
     const voltouNoDia = o.retornoEm ? diaLocalISO(o.retornoEm) === diaISO : !!o.horaRetorno;
     const voltou = voltouNoDia ? (offset === 0 ? o.horaRetorno : horaDe(o.retornoEm, o.horaRetorno)) : '';
-    return `👷 ${esc((o.equipe || []).join(', ') || '—')} · saiu ${esc(saiu)}${voltou ? ' → voltou ' + esc(voltou) : ''}`;
+    return `👷 ${esc(OPERACAO.equipeTexto(o, ', ') || '—')} · saiu ${esc(saiu)}${voltou ? ' → voltou ' + esc(voltou) : ''}`;
   };
   const nota = t => `<div class="text-muted lt-vazio" style="margin-top:6px">${t}</div>`;
   return `
@@ -4344,11 +4418,19 @@ function horasExec(os) {
   return OPERACAO.horas(os);
 }
 
+// A pessoa `quem` (ID, nome da lista ou nome antigo) está na equipe da O.S.?
+// Pela pessoa, nunca pelo texto: "Lucas" acha a O.S. gravada com o ID dele.
+function naEquipe(os, quem) {
+  const k = OPERACAO.chavePessoa(quem);
+  return !!k && OPERACAO.equipe(os).some(x => OPERACAO.chavePessoa(x) === k || OPERACAO.nomePessoa(x) === String(quem || '').trim());
+}
 // Estatísticas de um conjunto de O.S finalizadas, por pessoa da equipe
 function statsPorInstalador(finalizadas) {
   const porInst = {};
   finalizadas.filter(o => OPERACAO.concluida(o) && !isInterno(o)).forEach(os => {
-    OPERACAO.equipe(os).forEach(nome => {
+    // Por pessoa: a O.S. gravada por ID e a antiga pelo nome somam na mesma
+    // linha, com o nome de exibição (único por pessoa) como rótulo.
+    OPERACAO.equipe(os).map(OPERACAO.nomePessoa).forEach(nome => {
       if (!porInst[nome]) porInst[nome] = { entregas: 0, retrab: 0, checkin: 0, horas: [] };
       porInst[nome].entregas++;
       if (os.retrabalho) porInst[nome].retrab++;
@@ -4424,7 +4506,7 @@ function renderPainelKPIs() {
   const execCards = emRua.map(os => `
     <div class="exec-now-card st-em_andamento" data-os-id="${esc(os.id)}">
       <div class="enc-top"><strong>O.S ${esc(os.numero||'—')}</strong> · ${esc(os.cliente||'')}</div>
-      <div class="enc-sub">👷 ${esc((os.equipe||[]).join(', ')||'—')}${os.horaSaida?` · 🚗 saída ${esc(os.horaSaida)}`:''}</div>
+      <div class="enc-sub">👷 ${esc(OPERACAO.equipeTexto(os, ', ')||'—')}${os.horaSaida?` · 🚗 saída ${esc(os.horaSaida)}`:''}</div>
     </div>`).join('');
 
   // ── Ranking de operadores (preenchimento do sistema) ─────────────────────
@@ -4592,7 +4674,7 @@ function osMiniList(list) {
       <div class="list-info">
         <div class="list-numero">O.S ${esc(os.numero||'—')} <span class="badge st-${calcStatus(os)}">${statusLabelDe(os, calcStatus(os))}</span></div>
         <div class="list-cliente">${esc(os.cliente||'Sem cliente')}${os.servico?' — '+esc(os.servico):''}</div>
-        <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))}${(os.equipe||[]).length?' · 👷 '+esc(os.equipe.join(', ')):''}</div>
+        <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))}${(os.equipe||[]).length?' · 👷 '+esc(OPERACAO.equipeTexto(os, ', ')):''}</div>
       </div>
     </div>`).join('')}</div>`;
 }
@@ -4614,9 +4696,9 @@ function renderPainelDetalhe(todas, todasOS, finalizadas, porInst, rolar) {
   else if (d === 'emrua')       { titulo = 'Em execução agora'; list = todasOS.filter(o => OPERACAO.naRua(o)); }
   else if (d === 'hoje')        { titulo = 'Instalações em aberto hoje'; list = OPERACAO.programadas(todasOS,hojeISO(),hojeISO()); }
   else if (d === 'aptas')       { titulo = 'Aptas (aguardando)'; list = todasOS.filter(o => calcStatus(o) === 'apto'); }
-  else if (d.startsWith('inst:')) { const n = d.slice(5); titulo = 'Serviços de ' + n; list = finalizadas.filter(o => (o.equipe||[]).includes(n)); }
+  else if (d.startsWith('inst:')) { const n = d.slice(5); titulo = 'Serviços de ' + n; list = finalizadas.filter(o => naEquipe(o, n)); }
   else if (d.startsWith('oper:')) { const n = d.slice(5); titulo = 'O.S preenchidas por ' + n; list = todasOS.filter(o => (o.atualizadoPor||o.aptoPor||o.criadoPor) === n); }
-  else if (d.startsWith('func:')) { const n = d.slice(5); titulo = 'Todos os serviços de ' + n; list = todasOS.filter(o => (o.equipe||[]).includes(n) || (o.atualizadoPor||o.criadoPor) === n); }
+  else if (d.startsWith('func:')) { const n = d.slice(5); titulo = 'Todos os serviços de ' + n; list = todasOS.filter(o => naEquipe(o, n) || (o.atualizadoPor||o.criadoPor) === n); }
   else if (d.startsWith('trend:')) {
     const [, tipo, ...rest] = d.split(':'); const val = rest.join(':');
     titulo = `${val}`;
@@ -4786,7 +4868,7 @@ function renderKanban() {
         <div class="kanban-os">O.S ${esc(os.numero || '—')}</div>
         <div class="kanban-cliente">${esc(os.cliente || 'Sem cliente')}</div>
         <div class="kanban-pendencias">${esc([!os.liberadoPCP && 'PCP pendente',!OPERACAO.equipe(os).length && 'Sem equipe',!os.veiculo && 'Sem veículo'].filter(Boolean).join(' · ') || statusLabelDe(os,st))}</div>
-        ${(os.equipe||[]).length ? `<div class="kanban-equipe">👷 ${esc(os.equipe.join(', '))}</div>` : ''}
+        ${(os.equipe||[]).length ? `<div class="kanban-equipe">👷 ${esc(OPERACAO.equipeTexto(os, ', '))}</div>` : ''}
       </div>`;
     }).join('');
     return `<div class="kanban-col ${key===hojeStr?'today':''}">
@@ -4889,7 +4971,7 @@ function execItemHTML(os) {
       <div class="list-info">
         <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge st-${st}">${esc(statusLabelDe(os, st))}</span>${OPERACAO.paradoNoCliente(os) ? ' <span class="tag-parado">⏸ parado no cliente</span>' : ''} ${naRua ? '🚗 na rua' : ''}${conferir ? ' <span class="tag-atraso">Saída antiga ou sem data · conferir retorno</span>' : ''}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}</div>
         <div class="list-cliente">${esc(os.cliente)} · ${esc(os.endereco || '')}</div>
-        <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))} · 👷 ${esc((os.equipe||[]).join(', ') || '—')}</div>
+        <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))} · 👷 ${esc(OPERACAO.equipeTexto(os, ', ') || '—')}</div>
         ${pp && !podeLiberarCarro && !os.horaSaida ? `<div class="exec-proximo">Próximo passo: ${esc(pp.label)}</div>` : ''}
       </div>
       <div class="list-actions edit-only">
@@ -4962,7 +5044,7 @@ function renderRetrabalho() {
 
   // Barras: por técnico (equipe da filha, senão quem resolveu) e por serviço da original.
   const conta = (chaves) => { const m = new Map(); for (const k of chaves) if (k) m.set(k, (m.get(k) || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8); };
-  const porTecnico = conta(lista.flatMap(p => p.filha && OPERACAO.equipe(p.filha).length ? OPERACAO.equipe(p.filha) : (p.orig && p.orig.resolvidoPor ? [p.orig.resolvidoPor] : [])));
+  const porTecnico = conta(lista.flatMap(p => p.filha && OPERACAO.equipe(p.filha).length ? OPERACAO.equipeNomes(p.filha) : (p.orig && p.orig.resolvidoPor ? [OPERACAO.nomePessoa(p.orig.resolvidoPor)] : [])));
   const porEtapa = conta(lista.map(p => p.orig ? String(p.orig.etapaOrigem || '').trim() : ''));
   const porCausa = conta(lista.map(p => p.orig ? String(p.orig.causaRaiz || p.orig.causa || '').trim() : ''));
   const semTaxonomia = lista.filter(p => p.orig && !(p.orig.etapaOrigem && p.orig.causaRaiz)).length;
@@ -4988,7 +5070,7 @@ function renderRetrabalho() {
       <tbody>${lista.map((p, i) => {
         const c = custos[i];
         const o = p.orig, fi = p.filha;
-        const tec = fi && OPERACAO.equipe(fi).length ? OPERACAO.equipe(fi).join(', ') : (o && o.resolvidoPor) || '—';
+        const tec = fi && OPERACAO.equipe(fi).length ? OPERACAO.equipeTexto(fi, ', ') : (o && o.resolvidoPor && OPERACAO.nomePessoa(o.resolvidoPor)) || '—';
         const motivo = o ? [o.problema, o.etapaOrigem && ('origem: ' + o.etapaOrigem), o.causaRaiz || o.causa, o.responsavelEtapa && ('resp.: ' + o.responsavelEtapa)].filter(Boolean).join(' · ') || '—' : '—';
         const custoTxt = c.reais != null ? brMoney(c.reais) : (c.horas != null || c.km != null ? `${fmtH(c.horas)}${c.km != null ? ' · ' + Math.round(c.km) + ' km' : ''}` : '<span class="badge sem-valor">sem viagem</span>');
         const d = dataPar(p);
@@ -5166,7 +5248,7 @@ function finRenderCards() {
       <div class="list-info">
         <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge st-finalizada">${statusLabelDe(os,'finalizada')}</span>${teveRetrabalho ? ' <span class="badge st-retrabalho" title="Houve retrabalho neste serviço">↻ Retrabalho</span>' : ''}${estaArquivada(os) ? ' <span class="badge" title="Está na vista Arquivados do PCP">🗄 Arquivada</span>' : ''}</div>
         <div class="list-cliente">${esc(os.cliente || 'Sem cliente')}${os.servico ? ' — ' + esc(os.servico) : ''}</div>
-        <div class="list-date">${OPERACAO.encerradaERP(os) ? '↻ Recebida do ERP em' : '🏁 Conclusão registrada em'} ${esc(dataF)}${(os.equipe||[]).length ? ' · 👷 ' + esc(os.equipe.join(', ')) : ''}${OPERACAO.encerradaERP(os) ? ' · '+esc(os.baixaAutoERP?.status || 'encerramento')+' · não comprova entrega nesta data' : ''}</div>
+        <div class="list-date">${OPERACAO.encerradaERP(os) ? '↻ Recebida do ERP em' : '🏁 Conclusão registrada em'} ${esc(dataF)}${(os.equipe||[]).length ? ' · 👷 ' + esc(OPERACAO.equipeTexto(os, ', ')) : ''}${OPERACAO.encerradaERP(os) ? ' · '+esc(os.baixaAutoERP?.status || 'encerramento')+' · não comprova entrega nesta data' : ''}</div>
       </div>
       ${podeArquivar ? `<button class="btn-ghost btn-sm edit-only" data-arquivar-os="${esc(os.id)}" title="Mandar agora para a vista Arquivados">🗄</button>` : ''}
     </div>`;
@@ -5340,7 +5422,7 @@ function exportarFinalizadosPDF(list) {
     return `<tr>
       <td>${esc(dataF)}</td><td><strong>${esc(os.numero||'—')}</strong></td>
       <td>${esc(os.cliente||'')}</td><td>${esc(os.servico||'')}</td>
-      <td>${esc((os.equipe||[]).join(', '))}</td><td>${esc(sit)}</td>
+      <td>${esc(OPERACAO.equipeTexto(os, ', '))}</td><td>${esc(sit)}</td>
     </tr>`;
   }).join('');
 
@@ -5422,8 +5504,37 @@ function abrirEspelhos() {
 function fichaRHDoChip(nome) {
   const p = typeof fichaDoApelido === 'function' ? fichaDoApelido(nome) : null;
   return p
-    ? `<small class="cfg-chip-rh" title="Ficha do RH">→ ${esc(p.nome)}</small>`
+    ? `<small class="cfg-chip-rh" title="Ficha do RH">→ ${esc(p.nome)}${p.id ? ' · ID ' + esc(p.id) : ''}</small>`
     : '<small class="cfg-chip-rh sem" title="Nenhuma ficha do RH para este nome">sem ficha no RH</small>';
+}
+/* INSTALADOR NOVO VEM DO RH (ordem do dono, 29/09/2026: "usar o ID em todo o
+   sistema"). Escolhe a pessoa; entra na lista o nome de exibição e, junto, o
+   vínculo nome -> ID: a lista continua sendo a porta do toque no nome, e cada
+   nome dela aponta para uma ficha. Digitar fica só para terceiro sem ficha. */
+function instaladorDoRHHTML(cfg) {
+  const naLista = new Set((cfg.instaladores || []).map(OPERACAO.chavePessoa));
+  const livres = (STORE.elenco().pessoas || []).filter(p => p.ativo !== false && OPERACAO.ehIdPessoa(p.id) && !naLista.has(p.id));
+  if (!livres.length) return '';
+  const porArea = new Map();
+  for (const p of livres) { const k = p.area || 'Sem área'; if (!porArea.has(k)) porArea.set(k, []); porArea.get(k).push(p); }
+  const grupos = [...porArea.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR')).map(([area, ps]) =>
+    `<optgroup label="${esc(area)}">${ps.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')).map(p => `<option value="${esc(p.id)}">${esc(p.nome)} · ID ${esc(p.id)}</option>`).join('')}</optgroup>`).join('');
+  return `<div class="flex gap-6 mt-8"><select class="w-100" data-cfg-rh aria-label="Pessoa do RH"><option value="">Adicionar pessoa do RH…</option>${grupos}</select><button class="btn-primary btn-sm" data-cfg-rh-add>+</button></div>`;
+}
+function adicionarInstaladorDoRH(id) {
+  const p = (STORE.elenco().pessoas || []).find(x => x.id === id);
+  if (!p) return '';
+  const nome = OPERACAO.nomePessoa(id);
+  const c = STORE.getCFG();
+  if (!Array.isArray(c.instaladores)) c.instaladores = [];
+  if (!c.instaladores.some(x => OPERACAO.chavePessoa(x) === id)) c.instaladores.push(nome);
+  const v = (Array.isArray(c.vinculosRH) ? c.vinculosRH : []).filter(x => x && normNome(x.apelido || x.nomePCP) !== normNome(nome));
+  v.push({ id: p.id, chave: p.chave, nome: p.nome, apelido: nome });
+  c.vinculosRH = v;
+  STORE.saveCFG(c);
+  OPERACAO.esquecerPessoas();
+  if (typeof esquecerVinculosCasa === 'function') esquecerVinculosCasa();
+  return nome;
 }
 const CFG_LISTAS = [
   { key: 'instaladores',      label: 'Instaladores' },
@@ -5453,9 +5564,10 @@ function renderControle() {
         ${(cfg[key] || []).map(v => `
           <span class="cfg-chip">${esc(v)}${key === 'instaladores' ? fichaRHDoChip(v) : ''}${roListas ? '' : `<button data-cfg-del="${key}|${esc(v)}" title="Remover">×</button>`}</span>`).join('') || '<p class="text-muted">Vazio</p>'}
       </div>
-      ${key === 'instaladores' ? '<p class="text-muted" style="font-size:.75rem;margin-top:6px">Ao lado de cada nome, a ficha do RH a que ele chega. Para conferir ou trocar: Performance › Conferir nomes do PCP × fichas do RH.</p>' : ''}
+      ${key === 'instaladores' ? '<p class="text-muted" style="font-size:.75rem;margin-top:6px">Ao lado de cada nome, a ficha do RH e o ID a que ele chega. A O.S. grava o ID. Para conferir ou trocar: Performance › Conferir nomes do PCP × fichas do RH.</p>' : ''}
+      ${key === 'instaladores' && !roListas ? instaladorDoRHHTML(cfg) : ''}
       ${roListas ? '' : `<div class="flex gap-6 mt-8">
-        <input class="w-100" data-cfg-input="${key}" placeholder="Adicionar ${esc(label.toLowerCase())}…">
+        <input class="w-100" data-cfg-input="${key}" placeholder="${key === 'instaladores' ? 'Terceiro sem ficha no RH (nome)…' : `Adicionar ${esc(label.toLowerCase())}…`}">
         <button class="btn-primary btn-sm" data-cfg-add="${key}">+</button>
       </div>`}
     </div>`).join('');
@@ -5692,8 +5804,21 @@ function renderControle() {
     if (!val.trim()) return;
     const c = STORE.getCFG();
     if (!c[key]) c[key] = [];
+    /* O campo digitado dos instaladores é o do TERCEIRO SEM FICHA: o nome fica
+       marcado como "sem ficha" e nunca casa sozinho com um xará do RH (um
+       "Charles" terceirizado virava o Charles da ficha). Quem é do RH entra
+       pela lista acima, com o ID. */
+    if (key === 'instaladores') {
+      const nome = val.trim();
+      const p = OPERACAO.pessoaDe(nome);
+      if (p && p.nome && !confirm(`"${nome}" casa com ${p.nome} (ID ${p.id}) no RH. Para ele, use "Adicionar pessoa do RH". Cadastrar "${nome}" como terceiro, sem ficha, mesmo assim?`)) return;
+      const v = (Array.isArray(c.vinculosRH) ? c.vinculosRH : []).filter(x => x && normNome(x.apelido || x.nomePCP) !== normNome(nome));
+      v.push({ id: '', chave: '', nome: '', apelido: nome, semFicha: true });
+      c.vinculosRH = v;
+    }
     if (!c[key].includes(val.trim())) c[key].push(val.trim());
-    STORE.saveCFG(c); renderControle(); toast('Adicionado', 'success');
+    STORE.saveCFG(c); OPERACAO.esquecerPessoas(); if (typeof esquecerVinculosCasa === 'function') esquecerVinculosCasa();
+    renderControle(); toast('Adicionado', 'success');
     // Devolve o foco ao mesmo campo: cadastrar vários em sequência sem
     // precisar clicar de novo a cada item (o re-render destrói o input).
     const inp = $(`[data-cfg-input="${key}"]`);
@@ -5706,6 +5831,13 @@ function renderControle() {
   $$('[data-cfg-input]', el).forEach(inp => inp.onkeydown = e => {
     if (e.key === 'Enter') addToList(inp.dataset.cfgInput, inp.value);
   });
+  const selRH = $('[data-cfg-rh]', el), addRH = $('[data-cfg-rh-add]', el);
+  if (selRH && addRH) addRH.onclick = () => {
+    if (!selRH.value) return;
+    const nome = adicionarInstaladorDoRH(selRH.value);
+    if (!nome) { toast('Pessoa não encontrada no RH deste aparelho. Atualize e tente de novo.', 'error'); return; }
+    renderControle(); toast(`${nome} entrou na lista de instaladores`, 'success');
+  };
   $$('[data-cfg-del]', el).forEach(b => b.onclick = () => {
     const [key, val] = b.dataset.cfgDel.split('|');
     const lst = CFG_LISTAS.find(l => l.key === key);
@@ -6195,7 +6327,7 @@ async function exportarFichaPDF(os) {
     <table style="margin-top:6px"><thead><tr><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">Item</th><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">Descrição</th><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">Medidas</th><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">Qtde</th><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">OK</th></tr></thead><tbody>${itens}</tbody></table>
 
     <h2>3 · Agendamento &amp; Confirmação</h2><table>
-      ${kv('Data', fmtInstalacao(os.instalacao))}${kv('Equipe', (os.equipe||[]).join(', '))}
+      ${kv('Data', fmtInstalacao(os.instalacao))}${kv('Equipe', OPERACAO.equipeTexto(os, ', '))}
       ${kv('Veículo', os.veiculo)}${kv('Responsável pelo agendamento', Array.isArray(os.responsavelAgenda) ? os.responsavelAgenda.join(', ') : os.responsavelAgenda)}${kv('Obs', os.obsAgenda)}
       ${kv('Confirmação', os.confirmacao)}${kv('Canal', os.confCanal)}${kv('Confirmado por', os.confPor)}
       ${kv('Acompanha (cliente)', os.confAcompanha)}${kv('Contato acompanhante', os.confAcompanhaContato)}
@@ -6277,6 +6409,9 @@ function pessoaDoElenco(apelido) {
   const ap = normNome(apelido);
   if (!ap) return null;
   const pessoas = STORE.elenco().pessoas || [];
+  // A equipe nova grava o ID do RH: acha a ficha por ele (quem já saiu vem
+  // na lista dos antigos, só com nome).
+  if (OPERACAO.ehIdPessoa(ap)) return pessoas.find(p => p.id === ap) || (STORE.elenco().antigos || []).find(p => p.id === ap) || null;
   // Como o PCP escreve: "Osmane" (apelido do RH), "Adriano Pinheiro" (início
   // do nome, que separa os dois Adrianos). Um só nome sem apelido no RH fica
   // ambíguo de propósito -- melhor sair só o apelido do que o nome errado.
@@ -6291,8 +6426,9 @@ function pessoaDoElenco(apelido) {
 }
 function rotuloPessoaMsg(apelido) {
   const p = pessoaDoElenco(apelido);
-  if (!p) return String(apelido || '').trim();
-  const ap = String(apelido || '').trim();
+  if (!p) return OPERACAO.nomePessoa(apelido);
+  // ID gravado na equipe: o rótulo é o nome de exibição, nunca o número.
+  const ap = OPERACAO.ehIdPessoa(apelido) ? OPERACAO.nomePessoa(apelido) : String(apelido || '').trim();
   return normNome(ap) === normNome(p.nome) ? p.nome : `${ap} (${p.nome})`;
 }
 function veiculoDoElenco(nome) {
@@ -6405,7 +6541,7 @@ function montarTextoWhatsApp(os) {
   return `*O.S ${os.numero || '—'}* — ${os.cliente || ''}\n` +
     `📅 ${fmtInstalacao(os.instalacao)}\n` +
     `📍 ${os.endereco || ''}\n` +
-    `👷 ${(os.equipe || []).join(', ') || '—'}\n` +
+    `👷 ${OPERACAO.equipeTexto(os, ', ') || '—'}\n` +
     (os.confirmacao ? `✅ ${os.confirmacao}\n` : '') +
     (os.finalizadaEm ? `🏁 Finalizada${co.situacao ? ' — ' + co.situacao : ''}\n` : '') +
     `\n_Obs: gere o PDF (🖨) e anexe na conversa, se precisar do documento completo._`;
@@ -6459,7 +6595,7 @@ function exportarDiaPDF(dia, lista) {
     <td style="padding:5px 8px;border-bottom:1px solid #eee"><strong>${esc(os.numero||'—')}</strong></td>
     <td style="padding:5px 8px;border-bottom:1px solid #eee">${esc(os.cliente)}</td>
     <td style="padding:5px 8px;border-bottom:1px solid #eee">${esc(os.endereco||'')}</td>
-    <td style="padding:5px 8px;border-bottom:1px solid #eee">${esc((os.equipe||[]).join(', '))}</td>
+    <td style="padding:5px 8px;border-bottom:1px solid #eee">${esc(OPERACAO.equipeTexto(os, ', '))}</td>
   </tr>`).join('');
 
   // Espelho do instalador: equipamentos (ferramentas) + suprimentos por O.S
@@ -6469,7 +6605,7 @@ function exportarDiaPDF(dia, lista) {
     return `<div class="esp-os">
       <div class="esp-head"><strong>⏰ ${esc(rotuloHora(os))}</strong> · O.S ${esc(os.numero||'—')} — ${esc(os.cliente||'')}</div>
       <div class="esp-end">📍 ${esc(os.endereco||'—')}</div>
-      <div class="esp-eq">👷 ${esc((os.equipe||[]).join(', ')||'—')}${os.veiculo?` · 🚚 ${esc(os.veiculo)}`:''}</div>
+      <div class="esp-eq">👷 ${esc(OPERACAO.equipeTexto(os, ', ')||'—')}${os.veiculo?` · 🚚 ${esc(os.veiculo)}`:''}</div>
       <div class="esp-cols">
         <div><span class="esp-lbl">🛠 Equipamentos</span>${ferr.length?`<ul>${ferr.map(f=>`<li>${esc(f)}</li>`).join('')}</ul>`:'<p class="esp-vazio">—</p>'}</div>
         <div><span class="esp-lbl">📦 Suprimentos</span>${sup.length?`<ul>${sup.map(s=>`<li>${esc(s)}</li>`).join('')}</ul>`:'<p class="esp-vazio">—</p>'}</div>
@@ -6540,7 +6676,7 @@ function relatorioServicosDia(dataISO) {
       <td>${esc(os.numero || '—')}</td>
       <td>${esc(os.cliente || '')}</td>
       <td>${esc(os.endereco || '')}</td>
-      <td>${esc((os.equipe || []).join(', '))}</td>
+      <td>${esc(OPERACAO.equipeTexto(os, ', '))}</td>
       <td>${esc(os.veiculo || '')}</td>
       <td>${esc(statusLabelDe(os, st))}</td>
     </tr>`;
@@ -6617,7 +6753,7 @@ function abrirWhatsAppDia(dia, lista) {
   const titulo = d ? `${DIAS_SEMANA[d.getDay()]} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}` : dia;
   let txt = `*Programação ${titulo}*\n\n`;
   lista.forEach(os => {
-    txt += `*O.S ${os.numero||'—'}* — ${os.cliente||''}\n📍 ${os.endereco||''}\n⏰ ${os.instalacao?.periodo||''} · 👷 ${(os.equipe||[]).join(', ')||'—'}\n\n`;
+    txt += `*O.S ${os.numero||'—'}* — ${os.cliente||''}\n📍 ${os.endereco||''}\n⏰ ${os.instalacao?.periodo||''} · 👷 ${OPERACAO.equipeTexto(os, ', ')||'—'}\n\n`;
   });
   window.open(`https://wa.me/?text=${encodeURIComponent(txt)}`, '_blank');
 }

@@ -40,7 +40,16 @@ async function previewApi(body){
  }
  return {ok:true,os:[],totalOS:lista.length,ultimaImportacao:{em:new Date().toISOString(),ok:true,novas:0,atualizadas:1,baixa:{ok:true,semNoticiaDoErp:0,divergencias:[]}}};
 }
-const STORE={getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id),getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>({pessoas:[],veiculos:[],ferias:[],ausencias:[]}), valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>{}, entreguesMes:()=>null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>{},trySync:async()=>{},pronto:async()=>lista,api:previewApi,apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){}};
+// Pessoas FICTÍCIAS do RH (a equipe grava o ID de 6 dígitos desde a v133).
+const ELENCO_PREVIA={pessoas:[
+ {chave:'ana-souza',id:'900001',nome:'Ana Paula Souza',apelido:'ana',area:'Montagem Interna',cargo:'Instaladora',ativo:true,foto:''},
+ {chave:'bia-costa',id:'900002',nome:'Beatriz Costa Lima',apelido:'',area:'Montagem Interna',cargo:'Instaladora',ativo:true,foto:''},
+ {chave:'carlos-lima',id:'900004',nome:'Carlos Lima Prado',apelido:'',area:'Serralheria',cargo:'Serralheiro',ativo:true,foto:''},
+ {chave:'carlos-melo',id:'900005',nome:'Carlos Melo Dias',apelido:'',area:'Serralheria',cargo:'Serralheiro',ativo:true,foto:''}],
+ antigos:[{chave:'davi-antigo',id:'900006',nome:'Davi Antigo Nunes',apelido:'',ativo:false,desligado:true}],veiculos:[],ferias:[],ausencias:[]};
+cfg.vinculosRH=[{apelido:'Bia',id:'900002',chave:'bia-costa',nome:'Beatriz Costa Lima'}];
+lista.push(base('112',{cliente:'Mercado Bairro · teste (equipe por ID)',instalacao:{data:deslocar(1),periodo:'Tarde'},equipe:['900004','Ana'],veiculo:'Carro 1'}));
+const STORE={getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id),getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>ELENCO_PREVIA, valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>{}, entreguesMes:()=>null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>{},trySync:async()=>{},pronto:async()=>lista,api:previewApi,apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){}};
 `;
 const boot=`
 document.addEventListener('DOMContentLoaded',()=>{

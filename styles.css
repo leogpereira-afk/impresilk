@@ -1166,6 +1166,10 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .picker-opt.top { background: #f5f9ff; }
 .picker-opt.top span::after { content: ' ★'; color: var(--amber); font-size: .8rem; }
 .picker-n { font-size: .72rem; color: var(--muted); font-weight: 600; }
+/* Equipe pelo ID do RH: grupo (lista de instaladores, áreas) e o nome completo com o ID. */
+.picker-grupo { font-size: .72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; padding: 10px 8px 4px; }
+.picker-pessoa small { display: block; font-size: .74rem; color: var(--muted); font-weight: 400; }
+.picker-busca { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; font-size: .9rem; }
 .picker-add { display: flex; gap: 6px; margin-top: 10px; }
 /* O campo não tinha estilo nenhum (26 px, borda de outro sistema) e a fonte
    abaixo de 16 px faz o iPhone ampliar a tela ao tocar. */

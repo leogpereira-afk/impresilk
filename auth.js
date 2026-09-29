@@ -74,7 +74,8 @@ const AUTH = (() => {
       if (!usuario) return null;
       // montagemIndividual: crachá de TOQUE NO NOME (sem senha). Só registra a
       // execução; o app da gestão não abre com ele (ver initLogin).
-      return { usuario, nome: String(p.nome || usuario), papel: String(p.papel || ''), montagemIndividual: p.montagemIndividual === true, venceEm: p.exp, vencido };
+      // `id`: a pessoa do RH que a gestão escolheu ao autorizar o aparelho (crachá novo).
+      return { usuario, nome: String(p.nome || usuario), id: /^\d{6}$/.test(String(p.id || '')) ? String(p.id) : '', papel: String(p.papel || ''), montagemIndividual: p.montagemIndividual === true, venceEm: p.exp, vencido };
     } catch { return null; }
   }
 

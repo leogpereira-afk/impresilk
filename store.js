@@ -1516,7 +1516,7 @@ const STORE = (() => {
   // MORA NO INDEXEDDB, não no localStorage: desde 14/09/2026 o pacote traz a
   // FOTO da ficha (30 fotos ≈ 400 KB) e os 7 sistemas dividem 5 MB de
   // localStorage por origem — jogar isso lá estourava a cota de todo mundo.
-  const ELENCO_VAZIO = { em: '', pessoas: [], veiculos: [], ferias: [], ausencias: [], fichaRH: false, papel: '' };
+  const ELENCO_VAZIO = { em: '', pessoas: [], antigos: [], veiculos: [], ferias: [], ausencias: [], fichaRH: false, papel: '' };
   let _elenco = ELENCO_VAZIO;
   function elenco() { return _elenco || ELENCO_VAZIO; }
 
@@ -1579,20 +1579,27 @@ const STORE = (() => {
       });
     } catch { /* base já fechada/apagada: nada a apagar */ }
   }
-  async function pullElenco(forcar) {
+  /* `leve`: o espelho do instalador só precisa de ID e nome (a equipe da O.S.
+     grava o ID do RH desde 29/09/2026): sem as fotos, ~10 KB em vez de ~500.
+     Pacote leve não serve à gestão, que baixa o completo na volta seguinte. */
+  async function pullElenco(forcar, opts) {
+    const leve = !!(opts && opts.leve);
     if (!navigator.onLine) return;
     const idade = _elenco.em ? Date.now() - new Date(_elenco.em).getTime() : Infinity;
     // Papel diferente do que baixou o pacote = pacote velho, por mais novo que
     // seja o relógio: a gestão enxerga o que a montagem não pode, e vice-versa.
     // Sem isto, o crachá novo passaria até 30 min servindo a régua do anterior.
     const trocouPapel = String(_elenco.papel || '') !== _papelAtual();
-    if (!forcar && !trocouPapel && idade < 30 * 60000) return;
+    const faltaFoto = !!_elenco.leve && !leve;
+    if (!forcar && !trocouPapel && !faltaFoto && idade < 30 * 60000) return;
     try {
-      const res = await api({ action: 'elenco' });
+      const res = await api(leve ? { action: 'elenco', leve: true } : { action: 'elenco' });
       if (res && Array.isArray(res.pessoas)) {
         _elenco = {
           em: res.em || new Date().toISOString(),
           pessoas: res.pessoas,
+          // Quem já saiu: só id e nome, para a O.S. antiga gravada por ID.
+          antigos: Array.isArray(res.antigos) ? res.antigos : [],
           veiculos: res.veiculos || [],
           ferias: res.ferias || [],
           ausencias: res.ausencias || [],
@@ -1602,6 +1609,7 @@ const STORE = (() => {
           // o campo) trazia a ficha, então ausente vale como true.
           fichaRH: res.fichaRH !== false,
           papel: _papelAtual(),   // carimbo de quem baixou — ver _podarElenco
+          leve,
         };
         await _gravarElencoDisco(_elenco);
         _notifyListeners('elenco', _elenco);
