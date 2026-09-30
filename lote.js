@@ -35,7 +35,17 @@
      segue na ficha (fotos e retorno) ou na baixa do ERP;
    - não marca parte em O.S. já finalizada (o motor recusa marca em O.S.
      finalizada): para isso, reabrir pela ficha;
-   - a baixa cancelada no ERP fica fora (a marca de cancelada é da F16).
+   - a O.S. cancelada fica fora, a do ERP e a da gestão (F16,
+     OPERACAO.cancelada), e o cabeçalho a conta;
+   - não entrega nem lança a O.S. que está na lista "ERP diz entregue, PCP
+     tem saldo" (E7) sem a decisão da gestão: a linha manda decidir em
+     Entregas;
+   - NÃO CANCELA O.S. (PENDÊNCIA: a F16 pediu o cancelamento pelo lote; fica
+     para depois). Cancelar é na ficha, com o motivo.
+   JUNÇÃO DA v142 (F14 com F16 e E7): a data sugerida é a mesma do Lançar
+   entrega (diaSugeridoDaBaixaERP, casa.js) e a do dia em que a O.S. já conta
+   (diaEntrega); o Desfazer não pede para tirar o lançamento de O.S.
+   cancelada, e diz o aviso que o servidor devolver.
    Textos para quem usa: português, sem travessão. */
 const LOTE = (() => {
   const BASE = 'impresilk_lote', LOJA = 'rascunhos', VERSAO = 1;
@@ -170,6 +180,22 @@ const LOTE = (() => {
 
   /* ─────────────────────────────── QUAIS O.S. ──────────────────────────── */
   const canceladaERP = o => temMotor() ? ENTREGA_ITEM.canceladaNoERP(o) : false;
+  /* A CANCELADA (F16): no ERP ou pela gestão ("Cancelar O.S." da ficha, com o
+     pedido ainda na fila deste aparelho também). Fica fora do lote. */
+  const cancelada = o => !!o && ((typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(o)) || canceladaERP(o));
+  /* ERP DIZ ENTREGUE, PCP TEM SALDO (E7): a O.S. aberta com o aviso do ERP e
+     entrega parcial marcada, sem o "Manter aberta" da gestão para este aviso.
+     Ela está na lista de Entregas (erpSaldoNaOS, casa.js), e a decisão é
+     dela: o lote não oferece "Todos os itens entregues" nem marca a parte.
+     Devolve o aviso ({aviso, resumo}) ou null. */
+  function erpPendente(o) {
+    if (!o || OPERACAO.dia(o.finalizadaEm) || typeof erpSaldoNaOS !== 'function') return null;
+    let s = null;
+    try { s = erpSaldoNaOS(o); } catch (e) { return null; }
+    return s && !s.mantida ? s : null;
+  }
+  const ERP_DECIDIR = 'decida em Entregas, ERP diz entregue';
+  const ERRO_ERP_DECIDIR = 'O ERP diz entregue e o PCP tem saldo nesta O.S.: decida em Entregas, na lista "ERP diz entregue, PCP tem saldo". O lote não marca a entrega dela.';
   /* O LANÇAMENTO QUE VALE: o pedido de Desfazer que ainda está na fila
      ({desfazer: true}) não é lançamento (OPERACAO.entregaLancadaValida). */
   const lancada = o => typeof OPERACAO.entregaLancadaValida === 'function' ? OPERACAO.entregaLancadaValida(o)
@@ -181,17 +207,21 @@ const LOTE = (() => {
   const aberta = o => !OPERACAO.dia(o && o.finalizadaEm);
   const baixaERP = o => OPERACAO.encerradaERP(o);
   /* A DATA DA ENTREGA QUE A LINHA SUGERE. A lançada; a da finalização do PCP
-     (a que já vale: sugerir outra mudaria o dia da entrega calado); a da
-     baixa do ERP de antes do corte (ela já conta nesse dia, diaEntrega:
-     sugerir outra mudaria o mês da entrega); e, na baixa do ERP a lançar, o
-     retorno registrado ou o último dia da agenda até a baixa: o ERP baixa 2 a
-     4 dias depois da entrega real. */
+     e a da baixa do ERP de antes do corte, que já contam num dia (diaEntrega,
+     casa.js: sugerir outro mudaria o dia, ou o mês, da entrega calado; na
+     baixa do ERP é o dia da E7, diaDaBaixaERP); e, na baixa do ERP a lançar,
+     a MESMA régua do Lançar entrega (diaSugeridoDaBaixaERP, junção da v142):
+     o dia real da E7 (a data do ERP ou a última marca), e na baixa neutra da
+     F16 o retorno registrado ou o último dia da agenda até a baixa (o ERP
+     baixa 2 a 4 dias depois da entrega real). Uma régua só por O.S. */
   function diaSugerido(o) {
     const lancado = OPERACAO.dia((lancada(o) || {}).data);
     if (lancado) return lancado;
     const fim = OPERACAO.dia(o && o.finalizadaEm);
     if (!fim) return '';
-    if (!baixaERP(o) || antesDoCorte(o)) return fim;
+    if (!baixaERP(o) || antesDoCorte(o)) return (typeof diaEntrega === 'function' && OPERACAO.dia(diaEntrega(o))) || fim;
+    if (typeof diaSugeridoDaBaixaERP === 'function') return OPERACAO.dia(diaSugeridoDaBaixaERP(o)) || fim;
+    // Cache misto (casa.js de antes da v142): a régua de antes.
     const ret = OPERACAO.dia(o.retornoEm);
     if (ret && ret <= fim) return ret;
     return OPERACAO.diasAgenda(o).filter(d => d <= fim).pop() || fim;
@@ -203,16 +233,14 @@ const LOTE = (() => {
      baixa: a baixa costuma chegar 2 a 4 dias depois da entrega, e o dia da
      baixa não é o da entrega), e as O.S. abertas com agenda no dia e equipe,
      liberação ou saída. Retirada no balcão não tem volta. */
-  function osDoDia(todas, dia) {
-    const out = [];
-    for (const o of todas || []) {
-      if (!o || OPERACAO.interno(o) || canceladaERP(o)) continue;
-      if (!aberta(o)) {
-        if (baixaERP(o) && !lancada(o) ? diaSugerido(o) === dia : diaLinha(o) === dia) out.push(o);
-      } else if (OPERACAO.diasAgenda(o).includes(dia) && (o.liberadoPCP || OPERACAO.equipe(o).length || o.horaSaida || o.saidaEm)) out.push(o);
-    }
-    return out;
+  function noDia(o, dia) {
+    if (!o || OPERACAO.interno(o)) return false;
+    if (!aberta(o)) return baixaERP(o) && !lancada(o) ? diaSugerido(o) === dia : diaLinha(o) === dia;
+    return OPERACAO.diasAgenda(o).includes(dia) && !!(o.liberadoPCP || OPERACAO.equipe(o).length || o.horaSaida || o.saidaEm);
   }
+  // A cancelada (no ERP ou pela gestão) fica fora; canceladasDoDia a conta para o cabeçalho.
+  const osDoDia = (todas, dia) => (todas || []).filter(o => noDia(o, dia) && !cancelada(o));
+  const canceladasDoDia = (todas, dia) => (todas || []).filter(o => noDia(o, dia) && cancelada(o)).length;
   /* A PARTICIPAÇÃO ANTIGA QUE AINDA VALE (o blob performancePCP.participacoes),
      pela régua da Performance: perfParticipacaoVale e os percentuais certos
      (PERF.validar). A O.S. com ela já está confirmada. As participações são
@@ -243,27 +271,29 @@ const LOTE = (() => {
   /* PENDÊNCIAS DO MÊS: as instalações entregues no mês sem divisão
      confirmada (nem participação antiga que valha) e as baixas do ERP a
      lançar (a mesma regra da fila de Entregas, classificarEntregas). A
-     cancelada no ERP fica fora e é contada no cabeçalho. `aLancar` e
+     cancelada (F16: no ERP ou pela gestão) fica fora e é contada no
+     cabeçalho: a classificarEntregas já a separa em `canceladas`. `aLancar` e
      `semDivisao` são as duas contas do cabeçalho, pela mesma régua. */
   function osPendentes(todas, mes) {
     const cls = classificarEntregas(todas || []);
     const noMes = o => String(diaSugerido(o) || '').slice(0, 7) === mes;
     const out = [], vistas = new Set();
-    let canceladas = 0, aLancar = 0;
+    let aLancar = 0;
+    const canceladas = [...lista(cls.canceladas), ...cls.aLancar.filter(cancelada)]
+      .filter((o, i, xs) => o && !OPERACAO.interno(o) && OPERACAO.dia(o.finalizadaEm) && noMes(o) && xs.indexOf(o) === i).length;
     for (const o of cls.aLancar) {
-      if (!noMes(o)) continue;
-      if (canceladaERP(o)) { canceladas++; continue; }
+      if (!noMes(o) || cancelada(o)) continue;
       if (!vistas.has(o.id)) { vistas.add(o.id); out.push(o); aLancar++; }
     }
     for (const o of cls.instalacoes) {
-      if (!noMes(o) || canceladaERP(o) || vistas.has(o.id)) continue;
+      if (!noMes(o) || cancelada(o) || vistas.has(o.id)) continue;
       if (confirmadaNaOS(o)) continue;
       vistas.add(o.id); out.push(o);
     }
     return {os: out, canceladas, aLancar, semDivisao: out.length - aLancar};
   }
   function osDaTela(todas) {
-    if (est.modo === 'dia') return {os: osDoDia(todas, est.dia), canceladas: 0};
+    if (est.modo === 'dia') return {os: osDoDia(todas, est.dia), canceladas: canceladasDoDia(todas, est.dia)};
     return osPendentes(todas, est.mes);
   }
   // Os grupos da tela: a volta (dia, carro, equipe), sem exigir equipe.
@@ -436,7 +466,8 @@ const LOTE = (() => {
     if (!diaOk(l.data)) trava.push('data da entrega');
     else if (l.data > hoje()) trava.push('data da entrega depois de hoje');
     if (!respostaDaLinha(o, l)) trava.push('resposta do retrabalho');
-    if (aberta(o)) {
+    if (aberta(o) && erpPendente(o)) trava.push(ERP_DECIDIR);
+    else if (aberta(o)) {
       if (!l.entrega) trava.push('entrega dos itens (todos ou a parte)');
       else if (l.entrega === 'parte' && !Object.values(l.parte || {}).some(q => Number(q) > 0)) trava.push('quantidade entregue da parte');
     }
@@ -794,7 +825,10 @@ const LOTE = (() => {
     }
     if (m.lancamento) {
       const el = lancada(atual), antes = objeto(a.entregaLancada) ? a.entregaLancada : null;
-      if (el && el.data === (d.entregaLancada || {}).data) { volta.entregaLancada = antes ? {data: antes.data} : {desfazer: true}; algo = true; }
+      /* A O.S. CANCELADA depois do lote (F16): o servidor não muda o
+         lançamento dela, nem para desfazer. O Desfazer não pede e diz. */
+      if (cancelada(atual)) { if (el && el.data === (d.entregaLancada || {}).data) notas.push('a O.S. foi cancelada depois do lote e o lançamento fica; para desfazê-lo, desfaça antes o cancelamento na ficha'); }
+      else if (el && el.data === (d.entregaLancada || {}).data) { volta.entregaLancada = antes ? {data: antes.data} : {desfazer: true}; algo = true; }
       else if (antes ? !(el && el.data === antes.data) : !!el) notas.push('o lançamento mudou depois do lote e ficou como está');
     }
     if (lista(it.marcas).length && temMotor()) {
@@ -874,8 +908,11 @@ const LOTE = (() => {
         volta.atualizadoPor = nomeUsuario();
         const r = await gravarEsperando(S, volta, {...o, semEsperar: mudas >= 2});
         mudas = r.semResposta ? mudas + 1 : 0;
+        // O que o servidor deixou de fora do Desfazer (o lançamento de O.S. cancelada, uma marca) é dito, como no Salvar.
+        const avisosD = r.estado === 'gravada' ? avisosDaResposta(r) : [];
         // `enviado`: o atualizadoEm do Desfazer, para a confirmação que chega depois (e o "na fila" que ainda não é feito).
-        it.desfazer = {estado: r.estado, ...(r.motivo ? {motivo: r.motivo} : {}), ...(notas.length ? {notas} : {}), enviado: volta.atualizadoEm, em: agoraISO()};
+        it.desfazer = {estado: r.estado === 'gravada' && avisosD.length ? 'gravada-aviso' : r.estado, ...(r.motivo ? {motivo: r.motivo} : {}), ...(notas.length ? {notas} : {}),
+          ...(avisosD.length ? {avisos: avisosD} : {}), enviado: volta.atualizadoEm, em: agoraISO()};
         const l = est.rascunho && est.rascunho.linhas[it.id];
         if (l) { l.visto = assinatura(S.getOS(it.id) || volta); delete l.salvaEm; }
         await gravarRelatorios();
@@ -932,11 +969,14 @@ const LOTE = (() => {
         x.l.retrabalho = {resposta: 'nao', em: agoraISO(), por: nomeUsuario()};
         break;
       case 'retrabalho-resposta': if (precisa()) { const r = ds.resposta; if (objeto(r) && (r.resposta === 'sim' || r.resposta === 'nao')) x.l.retrabalho = copia(r); else erro = 'Resposta do retrabalho inválida.'; } break;
-      case 'entrega-todos': if (precisa()) { x.l.entrega = x.l.entrega === 'todos' && aberta(x.o) ? '' : 'todos'; if (!x.l.entrega) x.l.confirmada = false; } break;
+      case 'entrega-todos':
+        if (precisa() && aberta(x.o) && erpPendente(x.o)) { erro = ERRO_ERP_DECIDIR; x.l.entrega = ''; x.l.confirmada = false; break; }
+        if (x) { x.l.entrega = x.l.entrega === 'todos' && aberta(x.o) ? '' : 'todos'; if (!x.l.entrega) x.l.confirmada = false; } break;
       case 'itens': if (precisa()) est.itensAberto = est.itensAberto === x.o.id ? '' : x.o.id; break;
       case 'parte':
         if (!precisa()) break;
         if (!aberta(x.o)) { erro = 'O.S. finalizada: a entrega de cada item já conta pela finalização. Para marcar só uma parte, reabra a O.S. pela ficha.'; break; }
+        if (erpPendente(x.o)) { erro = ERRO_ERP_DECIDIR; break; }
         x.l.parte = {...(x.l.parte || {}), [String(ds.uid)]: Math.max(0, Math.floor(Number(ds.valor) || 0))};
         x.l.entrega = 'parte';
         break;
@@ -1095,7 +1135,7 @@ const LOTE = (() => {
           <li>No computador: setas entre as linhas, Enter confirma a linha em foco, Ctrl+Enter salva. Dentro de um campo, só o Ctrl+Enter vale.</li>
           <li>O rascunho fica guardado neste navegador (por modo e dia) e volta ao reabrir a tela. Sair do app apaga o rascunho.</li>
         </ul>
-        <p><strong>O que o lote ainda não faz:</strong> não finaliza O.S. aberta (a finalização segue na ficha, com fotos e retorno, ou na baixa do ERP); não marca parte de O.S. já finalizada (reabra pela ficha); a baixa cancelada no ERP fica fora do lote; a baixa do ERP lançada aqui continua sem prova (sem foto nem retorno), e a tela diz isso.</p>
+        <p><strong>O que o lote ainda não faz:</strong> não finaliza O.S. aberta (a finalização segue na ficha, com fotos e retorno, ou na baixa do ERP); não marca parte de O.S. já finalizada (reabra pela ficha); a O.S. cancelada (no ERP ou pela gestão) fica fora do lote, e cancelar é na ficha, com o motivo; a O.S. que o ERP diz entregue com saldo no PCP se decide em Entregas, na lista "ERP diz entregue, PCP tem saldo"; a baixa do ERP lançada aqui continua sem prova (sem foto nem retorno), e a tela diz isso.</p>
         ${aberto ? '<button type="button" class="btn-primary btn-sm" data-lote-acao="entendi">Entendi</button>' : ''}
       </div>
     </details>`;
@@ -1123,6 +1163,7 @@ const LOTE = (() => {
   }
   function itensHTML(o, l) {
     const xs = itensDe(o);
+    if (aberta(o) && erpPendente(o)) return `<div class="lote-itens"><p class="lote-itens-dica">O ERP diz entregue e o PCP tem saldo: a gestão decide em Entregas (entregar o saldo na data do ERP, ou manter aberta). O lote não marca a entrega desta O.S.</p>${saldoItensHTML(o, false)}</div>`;
     if (!aberta(o)) return `<div class="lote-itens"><p class="lote-itens-dica">O.S. finalizada: cada item já conta pela finalização${baixaERP(o) ? ' (baixa do ERP, sem prova)' : ''}. Para marcar só uma parte, reabra a O.S. pela ficha.</p>${saldoItensHTML(o, false)}</div>`;
     const fis = xs.filter(x => !x.servico);
     if (!fis.length) return '<div class="lote-itens"><p class="lote-itens-vazio">Esta O.S. não tem itens para marcar.</p></div>';
@@ -1136,6 +1177,8 @@ const LOTE = (() => {
     return `<div class="lote-itens"><p class="lote-itens-dica">Marque o que foi entregue agora. O que ficar sem marca continua a entregar, e a O.S. segue aberta (entrega parcial). A marca vai pelo motor da entrega por item, como lote.</p>
       <ul class="lote-parte">${fis.map(x => `<li><span class="lote-item-nome">${escL(texto(x.it.descricao || x.it.item) || 'Item')}</span> <small>${escL(x.s.rotulo)}</small> ${campo(x)}</li>`).join('')}</ul></div>`;
   }
+  // O motivo, o que ficou (notas) e o aviso do servidor no Desfazer de uma O.S.
+  const extraDesfazer = d => { const partes = [d.motivo, ...lista(d.notas), ...lista(d.avisos)].map(texto).filter(Boolean); return partes.length ? ' (' + escL(partes.join('; ')) + ')' : ''; };
   function linhaHTML(o, g, rg, ultimo) {
     const l = linhaDe(o, g);
     const f = faltasDaLinha(o, l, g, rg);
@@ -1144,7 +1187,10 @@ const LOTE = (() => {
     const r = ultimo ? ultimo.itens.find(i => i.id === o.id) : null;
     const v = typeof valorDaOS === 'function' ? valorDaOS(o) : o.valorTotal;
     const valor = v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) && typeof dinheiroCasa === 'function' ? dinheiroCasa(Number(v)) : '';
-    const entregaBtn = aberta(o)
+    const e7 = aberta(o) ? erpPendente(o) : null;
+    const entregaBtn = e7
+      ? `<span class="lote-b estatico lote-erp-decidir">${escL(typeof textoERPDiz === 'function' ? textoERPDiz(e7.aviso) : 'O ERP diz entregue')}: decida em Entregas</span><button type="button" class="lote-b" data-lote-acao="erp-lista" data-os="${escL(o.id)}" data-lote-k="erp:${escL(o.id)}">Abrir a lista</button>`
+      : aberta(o)
       ? `<button type="button" class="lote-b ${l.entrega === 'todos' ? 'on' : ''}" aria-pressed="${l.entrega === 'todos'}" data-lote-acao="entrega-todos" data-os="${escL(o.id)}" data-lote-k="todos:${escL(o.id)}">✓ Todos os itens entregues</button>`
       : `<span class="lote-b on estatico" title="A O.S. já está encerrada: cada item conta pela finalização">✓ Todos os itens entregues</span>`;
     const retrab = `<div class="lote-retrab" role="group" aria-label="Gerou retrabalho?"><span>Retrabalho?</span>
@@ -1152,13 +1198,13 @@ const LOTE = (() => {
         <button type="button" class="lote-b sim ${resp === 'sim' ? 'on' : ''}" aria-pressed="${resp === 'sim'}" data-lote-acao="retrabalho-sim" data-os="${escL(o.id)}" data-lote-k="sim:${escL(o.id)}">Sim…</button></div>`;
     const declHTML = decl.length ? `<div class="lote-decl"><span>📝 A equipe declarou pelo celular: ${escL(decl.map(d => d.tipo === 'finalizacao' ? 'a finalização' : `${d.qtde} ${d.tipo === 'retirado' ? 'retirado' : 'entregue'}${d.qtde === 1 ? '' : 's'}`).join(', '))}${decl[0].por ? ` (${escL(decl[0].por)})` : ''}.</span>
         <button type="button" class="lote-b ${l.conferir ? 'on' : ''}" aria-pressed="${l.conferir}" data-lote-acao="conferir" data-os="${escL(o.id)}" data-lote-k="conf:${escL(o.id)}">${l.conferir ? '✓ Conferido' : 'Conferir o declarado'}</button></div>` : '';
-    const resultado = r ? `<p class="lote-res st-${escL(r.estado)}">${escL(ESTADO_TEXTO[r.estado] || r.estado)}${r.motivo ? ': ' + escL(r.motivo) : ''}${lista(r.avisos).length ? ' · ' + escL(r.avisos.join(' ')) : ''}${r.desfazer ? ` · Desfazer: ${escL(ESTADO_TEXTO[r.desfazer.estado] || r.desfazer.estado)}${r.desfazer.motivo ? ' (' + escL(r.desfazer.motivo) + ')' : ''}` : ''}</p>` : '';
+    const resultado = r ? `<p class="lote-res st-${escL(r.estado)}">${escL(ESTADO_TEXTO[r.estado] || r.estado)}${r.motivo ? ': ' + escL(r.motivo) : ''}${lista(r.avisos).length ? ' · ' + escL(r.avisos.join(' ')) : ''}${r.desfazer ? ` · Desfazer: ${escL(ESTADO_TEXTO[r.desfazer.estado] || r.desfazer.estado)}${extraDesfazer(r.desfazer)}` : ''}</p>` : '';
     return `<div class="lote-linha${l.confirmada ? ' confirmada' : ''}${f.trava.length ? ' com-falta' : ''}${est.foco === o.id ? ' em-foco' : ''}" data-lote-linha="${escL(o.id)}" tabindex="0" aria-label="O.S. ${escL(o.numero || '')}, ${escL(o.cliente || '')}${l.confirmada ? ', confirmada' : ''}">
       <div class="lote-l-os"><button type="button" class="inline-link" data-lote-acao="ficha" data-os="${escL(o.id)}"><strong>O.S ${escL(o.numero || '—')}</strong></button> <span class="lote-l-cli">${escL(o.cliente || '')}</span>
         <small>${escL(o.servico || '')}${valor ? ' · ' + escL(valor) : ''}</small> ${seloOrigem(o)}</div>
       <label class="lote-l-data">Entrega <input type="date" value="${escL(l.data)}" max="${escL(hoje())}" data-lote-campo="data" data-os="${escL(o.id)}" data-lote-k="data:${escL(o.id)}"></label>
       ${retrab}
-      <div class="lote-l-entrega">${entregaBtn}<button type="button" class="lote-b" aria-expanded="${est.itensAberto === o.id}" data-lote-acao="itens" data-os="${escL(o.id)}" data-lote-k="itens:${escL(o.id)}">${aberta(o) ? 'Marcar a parte' : 'Ver os itens'}</button></div>
+      <div class="lote-l-entrega">${entregaBtn}<button type="button" class="lote-b" aria-expanded="${est.itensAberto === o.id}" data-lote-acao="itens" data-os="${escL(o.id)}" data-lote-k="itens:${escL(o.id)}">${aberta(o) && !e7 ? 'Marcar a parte' : 'Ver os itens'}</button></div>
       ${declHTML}
       ${baixaERP(o) ? saldoItensHTML(o, true) : ''}
       <p class="lote-faltas">${f.trava.length ? `<span class="trava">Falta: ${escL(f.trava.join(', '))}.</span> ` : ''}${f.nota.length ? `<span class="nota">Ainda: ${escL(f.nota.join(', '))}.</span>` : ''}${!f.trava.length && !f.nota.length ? '<span class="nota">Tudo preenchido.</span>' : ''}</p>
@@ -1230,7 +1276,7 @@ const LOTE = (() => {
     const quando = new Date(rel.em).toLocaleString('pt-BR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
     return `<section class="lote-rel" aria-label="Último lote salvo">
       <p><strong>Último lote (${escL(quando)}):</strong> ${escL(conta || 'nenhuma linha')}.</p>
-      <ul>${rel.itens.map(i => `<li class="st-${escL(i.estado)}"><strong>O.S ${escL(i.numero || '')}</strong> ${escL(i.cliente || '')}: ${escL(ESTADO_TEXTO[i.estado] || i.estado)}${i.motivo ? '. ' + escL(i.motivo) : ''}${lista(i.avisos).length ? ' ' + escL(i.avisos.join(' ')) : ''}${i.desfazer ? ` · Desfazer: ${escL(ESTADO_TEXTO[i.desfazer.estado] || i.desfazer.estado)}${i.desfazer.motivo ? ' (' + escL(i.desfazer.motivo) + ')' : ''}` : ''}</li>`).join('')}</ul>
+      <ul>${rel.itens.map(i => `<li class="st-${escL(i.estado)}"><strong>O.S ${escL(i.numero || '')}</strong> ${escL(i.cliente || '')}: ${escL(ESTADO_TEXTO[i.estado] || i.estado)}${i.motivo ? '. ' + escL(i.motivo) : ''}${lista(i.avisos).length ? ' ' + escL(i.avisos.join(' ')) : ''}${i.desfazer ? ` · Desfazer: ${escL(ESTADO_TEXTO[i.desfazer.estado] || i.desfazer.estado)}${extraDesfazer(i.desfazer)}` : ''}</li>`).join('')}</ul>
       ${pode ? `<button type="button" class="btn-ghost" data-lote-acao="desfazer-lote" data-rel="${escL(rel.id)}" ${est.salvando ? 'disabled' : ''}>↩ Desfazer este lote</button>` : ''}
     </section>`;
   }
@@ -1253,7 +1299,7 @@ const LOTE = (() => {
     const onde = est.modo === 'dia'
       ? `${c.linhas} O.S. em ${voltas} no dia ${escL(dataBR(est.dia))}`
       : `${t.semDivisao} ${t.semDivisao === 1 ? 'instalação entregue sem divisão' : 'instalações entregues sem divisão'} e ${t.aLancar} ${t.aLancar === 1 ? 'baixa' : 'baixas'} do ERP a lançar em ${escL(rotuloMes(est.mes))}, em ${voltas}`;
-    return `${onde} · <strong>${c.conf}</strong> ${c.conf === 1 ? 'confirmada' : 'confirmadas'}${c.falta ? ` · ${c.falta} com falta` : ''}${t.canceladas ? ` · ${t.canceladas} ${t.canceladas === 1 ? 'cancelada' : 'canceladas'} no ERP fora do lote` : ''}`;
+    return `${onde} · <strong>${c.conf}</strong> ${c.conf === 1 ? 'confirmada' : 'confirmadas'}${c.falta ? ` · ${c.falta} com falta` : ''}${t.canceladas ? ` · ${t.canceladas} ${t.canceladas === 1 ? 'cancelada' : 'canceladas'} (no ERP ou pela gestão) fora do lote` : ''}`;
   }
   const rodapeHTML = c => `<span>${est.progresso ? escL(est.progresso) : `${c.conf} ${c.conf === 1 ? 'linha confirmada' : 'linhas confirmadas'} para salvar`}</span>
         <button type="button" class="btn-primary" data-lote-acao="salvar" ${est.salvando || !c.conf ? 'disabled' : ''}>Salvar o lote <kbd>Ctrl+Enter</kbd></button>`;
@@ -1396,6 +1442,7 @@ const LOTE = (() => {
       if (acao === 'salvar') { void salvarPelaTela(); return; }
       if (acao === 'desfazer-lote') { void desfazerPelaTela(ds.rel); return; }
       if (acao === 'retrabalho-sim') { marcarFoco(focoAntes); abrirRetrabalho(ds.os); return; }
+      if (acao === 'erp-lista') { if (typeof abrirListaErpSaldo === 'function') abrirListaErpSaldo(); return; }
       const itensAntes = est.itensAberto, alocAntes = est.alocAberto;
       const erro = executar({acao, os: ds.os, grupo: ds.grupo, k: ds.k, v: ds.v});
       if (erro && typeof toast === 'function') toast(erro, 'error');
@@ -1466,6 +1513,7 @@ const LOTE = (() => {
   if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') document.addEventListener('keydown', ev => { teclado(ev); });
 
   return {abrir, render, executar, salvar, desfazer, teclado, estado: () => est, faltasDaLinha, montarGravacao, assinatura, osDoDia, osPendentes, gruposDe,
+    diaSugerido, erpPendente,
     linha: osId => { const x = achar(osId); return x ? x.l : null; }, grupo: chave => { const x = acharGrupo(chave); return x ? x.rg : null; },
     gruposDaTela: () => { const S = loja(); return gruposDe(osDaTela(S && typeof S.getAllOS === 'function' ? S.getAllOS() : []).os); },
     gravando: () => _cadeia, relatorios: () => est.relatorios, chaveAloc, abrirRetrabalho,

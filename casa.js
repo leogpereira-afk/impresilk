@@ -337,14 +337,39 @@ function diaEntrega(o) {
    encerrada pelo ERP: a finalizada no PCP conta no dia em que alguém a
    finalizou, como sempre. */
 function diaDaBaixaERP(o) {
-  const fim = OPERACAO.dia(o && o.finalizadaEm);
-  if (!o || typeof o !== 'object' || typeof ENTREGA_ITEM === 'undefined' || !ENTREGA_ITEM || typeof ENTREGA_ITEM.resumoOS !== 'function') return fim;
-  try { if (ENTREGA_ITEM.canceladaNoERP(o)) return fim; } catch { return fim; }
+  return diaRealDaBaixaERP(o) || OPERACAO.dia(o && o.finalizadaEm);
+}
+/* O DIA REAL DA ENTREGA NA BAIXA DO ERP (junção da v142): os passos 1 e 2
+   acima, ou '' quando só se sabe o dia em que a baixa rodou. É a baixa
+   NEUTRA da F16: o dia da baixa é o da sincronização, não o da entrega, e o
+   status não julga o prazo por ele. */
+function diaRealDaBaixaERP(o) {
+  if (!o || typeof o !== 'object' || typeof ENTREGA_ITEM === 'undefined' || !ENTREGA_ITEM || typeof ENTREGA_ITEM.resumoOS !== 'function') return '';
+  try { if (ENTREGA_ITEM.canceladaNoERP(o)) return ''; } catch { return ''; }
   const m = o.erpComSaldo && typeof o.erpComSaldo === 'object' && !Array.isArray(o.erpComSaldo) ? o.erpComSaldo : null;
   const dec = o.erpSaldoDecisao;
   const mantida = !!(m && dec && typeof dec === 'object' && dec.tipo === 'manter' && String(dec.selo || '') === String(m.selo || ''));
   const doERP = m && !mantida && /^\d{4}-\d{2}-\d{2}$/.test(String(m.dataEntregue || '')) ? String(m.dataEntregue) : '';
-  return doERP || ultimoDiaDeMarcaCasa(o) || fim;
+  return doERP || ultimoDiaDeMarcaCasa(o);
+}
+/* A DATA QUE SE PROPÕE PARA LANÇAR A BAIXA DO ERP (junção da v142): uma
+   régua só, no Lançar entrega e no Fechar o dia (lote.js), para a mesma O.S.
+   não ter uma data em cada tela. A ordem:
+     1. o dia real da E7 (diaRealDaBaixaERP: a data do ERP, ou a última marca
+        com todo item marcado);
+     2. na baixa neutra (F16: o dia da baixa é o da sincronização), o retorno
+        registrado até a baixa, ou o último dia da agenda até a baixa: o ERP
+        costuma baixar 2 a 4 dias depois da entrega real;
+     3. só então o dia da baixa.
+   Sem finalização: ''. */
+function diaSugeridoDaBaixaERP(o) {
+  const fim = OPERACAO.dia(o && o.finalizadaEm);
+  if (!fim) return '';
+  const real = diaRealDaBaixaERP(o);
+  if (real) return real;
+  const ret = OPERACAO.dia(o.retornoEm);
+  if (ret && ret <= fim) return ret;
+  return OPERACAO.diasAgenda(o).filter(d => d <= fim).pop() || fim;
 }
 // O último dia de marca, só quando TODO item físico está entregue, retirado ou cancelado por marca.
 function ultimoDiaDeMarcaCasa(o) {
@@ -783,16 +808,19 @@ function lancarEntregaManual(osId) {
   const equipeRegistrou = OPERACAO.interno(os) ? ''
     : OPERACAO.voltaRespondida(os.voltaEquipe) ? voltaEquipeHTML(os.voltaEquipe, { fotos: true })
     : '<p class="text-muted" style="font-size:.8rem">A equipe não registrou a limpeza desta volta.</p>';
-  /* O dia que o Lançar propõe e cita é o da entrega que o ERP baixou
-     (diaDaBaixaERP, revisão da E7), e não o dia em que a baixa rodou. */
+  /* O dia que o Lançar cita é o da entrega que o ERP baixou (diaDaBaixaERP,
+     revisão da E7), e não o dia em que a baixa rodou. O que ele PROPÕE é o
+     do Fechar o dia (diaSugeridoDaBaixaERP, junção da v142): na baixa neutra
+     (F16), o retorno ou a agenda até a baixa, e não o dia da sincronização. */
   const diaBaixa = diaDaBaixaERP(os);
+  const diaProposto = diaSugeridoDaBaixaERP(os) || diaBaixa;
   box.innerHTML = `
     <div class="wpp-picker retrab-box" role="dialog" aria-modal="true">
       <div class="wpp-picker-head"><strong>📦 Lançar entrega · O.S ${esc(os.numero || '—')}</strong><button class="modal-close" id="lancar-x">×</button></div>
       <div class="wpp-picker-body">
         <p class="text-muted" style="font-size:.8rem;margin-bottom:8px">${esc(os.cliente || '')} · ${esc(os.servico || '')}. O ERP baixou em ${esc(diaBaixa ? diaBaixa.slice(8, 10) + '/' + diaBaixa.slice(5, 7) : '—')}.</p>
         <form id="lancar-form" class="retrab-form">
-          <div class="field"><label>Data da entrega <span class="req">*</span></label><input name="data" type="date" required value="${esc(diaBaixa || hojeISO())}"></div>
+          <div class="field"><label>Data da entrega <span class="req">*</span></label><input name="data" type="date" required value="${esc(diaProposto || hojeISO())}"></div>
           <div class="field"><label>Equipe que instalou</label>${componente ? '<div class="aloc-host" id="lancar-aloc"></div>' : `<div class="casa-chips">${chipsEquipe}</div>`}</div>
           ${equipeRegistrou}
           ${conferencia}
@@ -809,7 +837,7 @@ function lancarEntregaManual(osId) {
        julgar o prazo (o status da baixa a lançar) até a data mudar. */
     const campoData = typeof box.querySelector === 'function' ? box.querySelector('#lancar-form input[name="data"]') : null;
     ALOCUI.iniciar(chaveAloc, { os, equipes: equipesCadastradasCasa(), papel, modo: ALOCUI.modoPara(papel, os), dica: ALOCUI.dicaModo(papel, os), semAntigo: true, reiniciar: true,
-      dia: diaBaixa || hojeISO(), valor: typeof valorDaOS === 'function' ? valorDaOS(os) : os.valorTotal, versoes: versoesRegrasCasa() });
+      dia: diaProposto || hojeISO(), valor: typeof valorDaOS === 'function' ? valorDaOS(os) : os.valorTotal, versoes: versoesRegrasCasa() });
     ALOCUI.montar(document.getElementById('lancar-aloc'), chaveAloc);
     if (campoData && typeof ALOCUI.definirDataEntrega === 'function') campoData.onchange = () => ALOCUI.definirDataEntrega(chaveAloc, campoData.value);
   }

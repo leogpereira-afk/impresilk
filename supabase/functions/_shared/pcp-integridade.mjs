@@ -556,11 +556,16 @@ export function carimbarEntregaLancada(os, antes, autor, em, { podeDesfazer = fa
     if (!(v == null && !gravada)) manter();
     return { os: r, aviso: '' };
   }
+  /* O pedido de Desfazer ({ desfazer: true }, o do Desfazer do lote da F14)
+     numa cancelada também fica o gravado, e o aviso diz o que não foi feito
+     (junção da v142): "não foi lançada" não é a resposta de um desfazer. */
   if (cancelada) {
     const dataVeio = objeto(v) ? String(v.data ?? '').trim() : '';
-    const muda = pedeDesfazer(v) ? !!gravada : !!dataVeio && !(gravada && gravada.data === dataVeio);
+    const desfazer = pedeDesfazer(v);
+    const muda = desfazer ? !!gravada : !!dataVeio && !(gravada && gravada.data === dataVeio);
     manter();
-    return { os: r, aviso: muda ? 'A entrega não foi lançada: a O.S. está cancelada. Para lançar, desfaça o cancelamento da O.S.' : '' };
+    return { os: r, aviso: !muda ? '' : desfazer ? 'O lançamento da entrega não foi desfeito: a O.S. está cancelada. Para desfazer, desfaça o cancelamento da O.S.'
+      : 'A entrega não foi lançada: a O.S. está cancelada. Para lançar, desfaça o cancelamento da O.S.' };
   }
   if (pedeDesfazer(v)) {
     if (podeDesfazer && gravada) r.entregaLancada = null; else manter();
