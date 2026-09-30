@@ -388,7 +388,7 @@ function fichaDoApelido(apelido) {
   const v = lerVinculosCasa().find(x => x.id === p.id);
   return { chave: (v && v.chave) || '', id: p.id, nome: (v && v.nome) || 'ID ' + p.id, apelido: OPERACAO.ehIdPessoa(a) ? '' : a, foto: '', cargo: '', area: '', ativo: false, manual: true, semFicha: true };
 }
-function normCasa(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim(); }
+function normCasa(s) { return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
 
 // Apelidos usados nas O.S que ainda não acharam ficha — o que a tela oferece
 // para ligar. Vínculo invisível manda dinheiro errado: aqui ele fica à vista.
@@ -792,7 +792,7 @@ function chipsPeriodoEntregas(f) {
     <label>Mês<select id="ent-mes"><option value="">Ano inteiro</option>${MES_CURTO.map((m, i) => { const n = String(i + 1).padStart(2, '0'); return `<option value="${n}" ${n === mes ? 'selected' : ''} ${ano + '-' + n > hoje.slice(0, 7) ? 'disabled' : ''}>${m}</option>`; }).join('')}</select></label>
     <button type="button" class="btn-ghost btn-sm" data-per-de="${hoje.slice(0, 7)}-01" data-per-ate="${hoje}">Este mês</button>
     <details class="ent-personalizar" ${STATE._entPersAberto ? 'open' : ''}><summary>Outras datas</summary><div class="periodo-filtro" data-pf="_fEnt"><label>De<input type="date" class="pf-de" value="${esc(f.de || '')}"></label><label>Até<input type="date" class="pf-ate" value="${esc(f.ate || '')}"></label></div></details>
-    <span class="ent-intervalo">${esc(f.de ? f.de.split('-').reverse().join('/') : 'Início')} — ${esc(f.ate ? f.ate.split('-').reverse().join('/') : 'hoje')}</span>
+    <span class="ent-intervalo">${f.de ? 'De ' + esc(f.de.split('-').reverse().join('/')) : 'Do início'} a ${esc(f.ate ? f.ate.split('-').reverse().join('/') : 'hoje')}</span>
   </div>`;
 }
 
@@ -1172,7 +1172,7 @@ function relatorioAnosHTML() {
       </tr>`;
     }).join('')}</tbody>
   </table></div>
-  <p class="text-muted" style="font-size:.8rem">Toque num mês para abrir o período dele acima. <strong>*</strong> mês em andamento. Traço é mês sem pacote guardado — não é venda zero.${t.semDado.length ? ` Faltam <strong>${t.semDado.length}</strong> mês${t.semDado.length === 1 ? '' : 'es'} no servidor; cada um leva 25-40 s para o ERP montar.` : ''}</p>`;
+  <p class="text-muted" style="font-size:.8rem">Toque num mês para abrir o período dele acima. <strong>*</strong> mês em andamento. Traço é mês sem pacote guardado, e não é venda zero.${t.semDado.length ? ` Faltam <strong>${t.semDado.length}</strong> mês${t.semDado.length === 1 ? '' : 'es'} no servidor; cada um leva 25-40 s para o ERP montar.` : ''}</p>`;
 
   const barrasAno = barrasCasa(
     t.porAno.slice().reverse().map(a => ({
@@ -1190,7 +1190,7 @@ function relatorioAnosHTML() {
         <td class="num">${dinheiroCasa(a.valor)}</td>
         <td class="num">${a.mesesMesmoPeriodo
           ? `${dinheiroCasa(a.mesmoPeriodo)} <small class="text-muted">${a.mesesMesmoPeriodo} m</small>`
-          : '<span class="text-muted" title="nenhum mês deste período está carregado — não é venda zero">—</span>'}</td>
+          : '<span class="text-muted" title="nenhum mês deste período está carregado; não é venda zero">—</span>'}</td>
         <td class="num">${v === undefined
           ? `<span class="text-muted" title="${esc(a.porQueNaoCompara || 'sem ano anterior carregado para comparar')}">sem base</span>`
           : `<span class="badge ${cor}">${v > 0 ? '+' : ''}${String(v).replace('.', ',')}%</span> <small class="text-muted">vs ${esc(a.compara)}</small>`}</td>
@@ -1217,8 +1217,8 @@ function relatorioAnosHTML() {
   const corpo = aba === 'meses' ? grade : `${kpis}
     ${quadroCasa('ent-anos-comp', '📊 Ano a ano, no mesmo período', comparativo, true)}
     ${quadroCasa('ent-anos-barras', '📈 Total por ano', barrasAno, false)}
-    ${quadroCasa('ent-anos-sazonal', '🗓️ Como costuma ser cada mês <small>— média dos anos</small>', sazonalHTML, false)}
-    ${quadroCasa('ent-anos-equipe', '👥 Quanta gente a casa tinha <small>— do RH, por área</small>', equipeHistoricoHTML(t), true)}`;
+    ${quadroCasa('ent-anos-sazonal', '🗓️ Como costuma ser cada mês <small>média dos anos</small>', sazonalHTML, false)}
+    ${quadroCasa('ent-anos-equipe', '👥 Quanta gente a casa tinha <small>do RH, por área</small>', equipeHistoricoHTML(t), true)}`;
 
   return `<section class="casa-relatorios">
     <div class="casa-pagina-head" style="align-items:center">
@@ -1348,16 +1348,16 @@ function relatoriosEntregasHTML(lista, porNumero, estadoPCP) {
       ${kpiLinha('clientes atendidos', String(todosClientes), `top 10 = ${total ? Math.round(top10 / total * 100) : 0}% do valor`)}
     </div>
     ${quadroCasa('ent-meses', '📅 Mês a mês', mesesHTML, true)}
-    ${quadroCasa('ent-tipos', '🛠️ Por tipo de serviço <small>— onde o dinheiro entra</small>', tiposHTML, true)}
+    ${quadroCasa('ent-tipos', '🛠️ Por tipo de serviço <small>onde o dinheiro entra</small>', tiposHTML, true)}
     ${quadroCasa('ent-clientes', '🏢 Maiores clientes do período', clientesHTML, false)}
-    ${quadroCasa('ent-dow', '📆 Dia da semana <small>— onde o volume cai</small>', dowHTML, false)}
+    ${quadroCasa('ent-dow', '📆 Dia da semana <small>onde o volume cai</small>', dowHTML, false)}
     ${quadroCasa('ent-tipo-entrega', '📦 Instalação × retirada',
       `<div class="casa-kpi-cards">
         ${kpiLinha('instalações', String(instal.length), dinheiroCurto(somaI))}
         ${kpiLinha('retiradas no balcão', String(retiradas.length), dinheiroCurto(somaR))}
         ${kpiLinha('participação da retirada', (lista.length ? Math.round(retiradas.length / lista.length * 100) : 0) + '%', total ? Math.round(somaR / total * 100) + '% do valor' : '')}
       </div>
-      <p class="text-muted" style="font-size:.8rem">Retirada soma valor, mas não conta como entrega realizada — não é instalação.</p>`, false)}
+      <p class="text-muted" style="font-size:.8rem">Retirada soma valor, mas não conta como entrega realizada, porque não é instalação.</p>`, false)}
     ${quadroCasa('ent-registro', '✅ Como o PCP registrou',
       `${estadosHTML}
       <p class="text-muted" style="font-size:.8rem">${foraDoPCP ? `<strong>${foraDoPCP}</strong> O.S o ERP entregou sem nunca passar pelo PCP. ` : ''}${aLancarN ? `<strong>${aLancarN}</strong> esperam lançamento manual. ` : ''}Quanto mais "registrada", melhor está o registro da equipe.</p>`, false)}
@@ -1389,10 +1389,126 @@ function vazioEntregas(per) {
   }
   if (per.comErro.length) {
     return { titulo: 'O ERP não respondeu neste período',
-             dica: `${per.comErro.length} mês${per.comErro.length === 1 ? ' não veio' : 'es não vieram'} do Mubisys. Não quer dizer que não houve entrega — quer dizer que não deu para perguntar. Tente de novo em alguns minutos.` };
+             dica: `${per.comErro.length} mês${per.comErro.length === 1 ? ' não veio' : 'es não vieram'} do Mubisys. Não quer dizer que não houve entrega; quer dizer que não deu para perguntar. Tente de novo em alguns minutos.` };
   }
   return { titulo: 'Nenhuma entrega no período segundo o ERP',
            dica: 'O ERP não tem O.S com status ENTREGUE e data de entrega neste intervalo.' };
+}
+
+/* ── A FILA DE LANÇAMENTO VIRA UMA FAIXA (revisão de experiência, 29/09/2026)
+   No print do dono eram 57 linhas, cada uma com um botão azul "Lançar
+   entrega" e "sem equipe" repetido, e a fila empurrava para longe a lista do
+   período, que é o que a tela promete ("Acompanhe as O.S. entregues"). Agora
+   ela é uma faixa de duas linhas logo abaixo dos cartões: quantas esperam, o
+   valor parado, a mais antiga, e um botão que abre a lista sob demanda.
+   A REGRA NÃO MUDOU: são todas as pendentes de classificarEntregas, de
+   qualquer período, e nenhuma conta como entrega antes de lançada. O que
+   mudou é só onde e como aparece. */
+const FILA_LANCAR_PRIMEIRAS = 10;
+// Dias corridos entre a baixa e hoje, pelo calendário (sem fuso no meio).
+function idadeBaixaCasa(dia, hoje) {
+  if (!dia || !hoje) return null;
+  const utc = d => Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)));
+  const n = Math.round((utc(hoje) - utc(dia)) / 864e5);
+  return Number.isFinite(n) ? Math.max(0, n) : null;
+}
+function idadeTxtCasa(n) {
+  if (n === null || n === undefined) return '';
+  return n === 0 ? 'hoje' : n === 1 ? 'há 1 dia' : `há ${n} dias`;
+}
+/* A partir de uma semana parada a idade ganha cor: é o ponto em que a baixa
+   deixa de ser "de ontem" e passa a ser esquecida. Só a cor muda; a ordem e a
+   contagem são as mesmas. */
+const FILA_LANCAR_VELHA = 7;
+function filaLancarHTML(aLancar, f, hoje) {
+  if (!aLancar.length) return '<p class="ent-fila-vazia"><span aria-hidden="true">✓</span> Nada pendente de lançamento.</p>';
+  const dataBR = d => d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—';
+  const baixa = os => OPERACAO.dia(os.finalizadaEm) || '';
+  const valorOk = v => v !== null && v !== undefined && Number.isFinite(Number(v));
+  let total = 0, semValor = 0;
+  for (const os of aLancar) { const v = valorDaOS(os); if (valorOk(v)) total += Number(v); else semValor++; }
+  const antiga = aLancar.map(baixa).filter(Boolean).sort()[0] || '';
+  const idadeAntiga = idadeBaixaCasa(antiga, hoje);
+  const aberta = !!STATE._entFilaAberta;
+  const n = aLancar.length;
+  const corte = CORTE_LANCAMENTO_MANUAL.split('-').reverse().join('/');
+
+  /* O RESUMO: três fatos e o botão. É o que fica na tela o tempo todo; a
+     lista é para quem vai lançar. */
+  const resumo = `<p class="ent-fila-resumo">
+      <span class="ent-fila-fato"><strong>${n} ${n === 1 ? 'baixa do ERP espera' : 'baixas do ERP esperam'}</strong> lançamento</span>
+      <span class="ent-fila-fato"><strong>${dinheiroCasa(total)}</strong> ${n === 1 ? 'parado' : 'parados'}${semValor ? ` <span class="badge sem-valor">${semValor} sem valor</span>` : ''}</span>
+      ${antiga ? `<span class="ent-fila-fato">a mais antiga é ${idadeAntiga ? `de <strong>${dataBR(antiga)}</strong>, ${idadeTxtCasa(idadeAntiga)}` : 'de hoje'}</span>` : ''}
+    </p>`;
+  /* A EXPLICAÇÃO LONGA FOI PARA "COMO FUNCIONA". Nenhuma informação saiu:
+     a frase de cima diz o essencial, e o resto (qualquer período, o que se
+     confirma ao lançar, o retrabalho e o corte da direção) mora no quadro. */
+  const como = `<details class="ent-fila-como" ${STATE._entFilaComoAberto ? 'open' : ''}><summary>Como funciona</summary>
+      <ul>
+        <li>Aparecem todas as baixas pendentes, de qualquer período, e não só as do período escolhido nos filtros. As de fora dele vêm marcadas "fora do período".</li>
+        <li>Ao lançar, confirme a data da entrega e a equipe que instalou e responda se gerou retrabalho.</li>
+        <li>Baixas anteriores a ${corte} já contam como entregues (decisão da direção) e não entram nesta fila.</li>
+      </ul>
+    </details>`;
+
+  let lista = '';
+  if (aberta) {
+    /* ORDEM: a mais antiga primeiro (é a que está esquecida há mais tempo) ou
+       a de maior valor (é a que mais pesa no mês). A escolha fica no STATE,
+       porque a tela repinta sozinha a cada mês que chega do ERP. */
+    const ordem = STATE._entFilaOrdem === 'valor' ? 'valor' : 'antigas';
+    const porAntiga = (a, b) => baixa(a).localeCompare(baixa(b)) || String(a.numero || '').localeCompare(String(b.numero || ''));
+    const ordenada = aLancar.slice().sort(ordem === 'valor'
+      ? (a, b) => { const va = valorDaOS(a), vb = valorDaOS(b); return (valorOk(vb) ? Number(vb) : -Infinity) - (valorOk(va) ? Number(va) : -Infinity) || porAntiga(a, b); }
+      : porAntiga);
+    const todas = !!STATE._entFilaTodas || n <= FILA_LANCAR_PRIMEIRAS;
+    const visiveis = todas ? ordenada : ordenada.slice(0, FILA_LANCAR_PRIMEIRAS);
+    /* A COLUNA TÉCNICOS SÓ EXISTE SE ALGUMA TIVER EQUIPE. Baixa do ERP quase
+       nunca traz equipe, e "sem equipe" repetido em 50 linhas é ruído que
+       esconde a exceção. Quem não tem equipe ganha um traço apagado. */
+    const comEquipe = aLancar.some(os => OPERACAO.equipe(os).length);
+    const linha = os => {
+      const d = baixa(os), idade = idadeBaixaCasa(d, hoje);
+      const eq = OPERACAO.equipeTexto(os, ', ');
+      const v = valorDaOS(os);
+      const fora = !OPERACAO.emIntervalo(diaEntrega(os), f.de, f.ate);
+      return `<tr>
+          <td class="ent-fila-os"><span class="ent-fila-id"><strong>${esc(os.numero || '—')}</strong> ${esc(os.cliente || '')}</span>${os.servico ? `<small>${esc(os.servico)}</small>` : ''}</td>
+          ${comEquipe ? `<td class="ent-fila-tec${eq ? '' : ' vazio'}">${eq ? esc(eq) : '<span class="ent-fila-traco" title="Sem equipe na O.S.">—</span>'}</td>` : ''}
+          <td class="ent-fila-baixa">${dataBR(d)} <small class="ent-fila-idade${idade !== null && idade >= FILA_LANCAR_VELHA ? ' velha' : ''}">${idadeTxtCasa(idade)}</small>${fora ? ' <small class="text-muted ent-fila-fora">fora do período</small>' : ''}</td>
+          <td class="num ent-fila-valor">${valorOk(v) ? dinheiroCasa(Number(v)) : '<span class="badge sem-valor">sem valor</span>'}</td>
+          <td class="ent-fila-acao"><button type="button" class="btn-ghost btn-sm edit-only ent-fila-lancar" data-lancar-os="${esc(os.id)}" aria-label="Lançar a entrega da O.S ${esc(os.numero || '')}">Lançar</button></td>
+        </tr>`;
+    };
+    const botaoOrdem = (v, rot) => `<button type="button" class="btn-ghost btn-sm ${ordem === v ? 'active' : ''}" data-ent-fila-ordem="${v}" aria-pressed="${ordem === v}">${rot}</button>`;
+    lista = `<div class="ent-fila-corpo" id="ent-fila-lista">
+        <div class="ent-fila-ferramentas">
+          <span class="ent-fila-ordem-rot" id="ent-fila-ordem-rot">Ordenar</span>
+          <span class="casa-vista" role="group" aria-labelledby="ent-fila-ordem-rot">${botaoOrdem('antigas', 'Mais antigas')}${botaoOrdem('valor', 'Maior valor')}</span>
+          <span class="ent-fila-contagem">${todas ? `${n} ${n === 1 ? 'baixa' : 'baixas'}` : `${FILA_LANCAR_PRIMEIRAS} de ${n}`}</span>
+        </div>
+        <div class="casa-tabela-wrap"><table class="casa-tabela ent-fila-tabela">
+          <thead><tr><th>O.S e cliente</th>${comEquipe ? '<th>Técnicos</th>' : ''}<th>Baixa ERP</th><th class="num">Valor</th><th><span class="sr-only">Ação</span></th></tr></thead>
+          <tbody>${visiveis.map(linha).join('')}</tbody>
+        </table></div>
+        ${n > FILA_LANCAR_PRIMEIRAS ? `<button type="button" class="btn-ghost ent-fila-mais" data-ent-fila-todas>${STATE._entFilaTodas ? `Mostrar só as ${FILA_LANCAR_PRIMEIRAS} primeiras` : `Mostrar todas (${n})`}</button>` : ''}
+      </div>`;
+  }
+  // A classe casa-lancar fica: é por ela que "Abrir o lançamento", na Performance, desce até aqui.
+  return `<section class="ent-fila casa-lancar${aberta ? ' aberta' : ''}" aria-label="Baixas do ERP a lançar">
+      <div class="ent-fila-faixa">
+        <span class="ent-fila-icone" aria-hidden="true">!</span>
+        <div class="ent-fila-texto">
+          ${resumo}
+          <div class="ent-fila-linha2">
+            <p class="ent-fila-frase">O ERP deu baixa, mas ninguém finalizou no PCP. Só conta como entrega depois de lançada.</p>
+            ${como}
+          </div>
+        </div>
+        <button type="button" class="btn-ghost ent-fila-botao" data-ent-fila aria-expanded="${aberta}"${aberta ? ' aria-controls="ent-fila-lista"' : ''}>${aberta ? 'Esconder a fila' : 'Ver a fila'}</button>
+      </div>
+      ${lista}
+    </section>`;
 }
 
 function renderEntregas() {
@@ -1457,9 +1573,9 @@ function renderEntregas() {
   const visiveis = lista.slice(0, TETO_LINHAS);
   /* A FILA NÃO SEGUE O PERÍODO. Filtrada pelo período, no dia 1º toda baixa do
      mês anterior ainda não lançada sumia ("Nada pendente") e a instalação ficava
-     fora da contagem sem ninguém perceber. Pendência é pendência em qualquer mês. */
-  const aLancar = cls.aLancar.slice()
-    .sort((a, b) => String(b.finalizadaEm).localeCompare(String(a.finalizadaEm)));
+     fora da contagem sem ninguém perceber. Pendência é pendência em qualquer mês.
+     A ordem (mais antigas ou maior valor) é escolha da tela: filaLancarHTML. */
+  const aLancar = cls.aLancar.slice();
 
   const tecMapa = new Map();
   for (const ap of new Set(todas.filter(o => o.finalizadaEm).flatMap(o => OPERACAO.equipe(o)))) {
@@ -1498,17 +1614,37 @@ function renderEntregas() {
      Antes mostrava a empresa inteira ao lado da lista de uma pessoa. */
   const filtrado = !!(tecnico || tipo);
   const kpiPeriodo = filtrado
-    ? kpiHTML(kpiDe({ os: lista.map(x => x.erp), faltando: per.faltando, comErro: per.comErro, meses: per.meses }), rotuloPeriodo(f.de, f.ate) + ' · com o filtro', 'escolhido')
-    : (periodoRepetido ? '' : kpiHTML(kPer, rotuloPeriodo(f.de, f.ate), 'escolhido'));
+    ? kpiHTML(kpiDe({ os: lista.map(x => x.erp), faltando: per.faltando, comErro: per.comErro, meses: per.meses }), rotuloPeriodo(f.de, f.ate) + ' · com o filtro', 'escolhido ent-kpi-principal')
+    : (periodoRepetido ? '' : kpiHTML(kPer, rotuloPeriodo(f.de, f.ate), 'escolhido ent-kpi-principal'));
+  /* A HIERARQUIA DOS CARTÕES (revisão de experiência, 29/09/2026). Eram
+     quatro números do mesmo tamanho, e "R$ 0,00 entregue hoje" pesava o mesmo
+     que o ano. Agora o período escolhido é o cartão grande; quando o período
+     é o mês corrente (ou o ano), o cartão grande é o do mês (ou do ano), que
+     é o mesmo número, e ele não se repete ao lado. Hoje, mês e ano ficam
+     compactos ao lado. Os avisos (sem valor, carregando, sem resposta do ERP)
+     continuam em todos, grandes ou pequenos. */
+  const principalMes = !kpiPeriodo && f.de === hoje.slice(0, 7) + '-01';
+  const principalAno = !kpiPeriodo && !principalMes;
+  const kpiPrincipal = kpiPeriodo
+    || (principalMes ? kpiHTML(kMes, rotuloPeriodo(f.de, f.ate), 'ent-kpi-principal') : kpiHTML(kAno, rotuloPeriodo(f.de, f.ate), 'ent-kpi-principal'));
+  /* Hoje sem entrega (e sem mês faltando ou falhando) é uma linha leve: um
+     "R$ 0,00" grande não diz nada, e de manhã ele é a regra, não a notícia. */
+  const hojeNada = !kHoje.n && !kHoje.faltando && !kHoje.comErro;
+  const kpiHoje = hojeNada
+    ? '<div class="casa-kpi ent-kpi-sec ent-kpi-nada"><span>Nada entregue hoje</span></div>'
+    : kpiHTML(kHoje, 'entregue hoje', 'ent-kpi-sec');
+  const kpiSecundarios = kpiHoje
+    + (principalMes ? '' : kpiHTML(kMes, 'entregue no mês', 'ent-kpi-sec'))
+    + (principalAno ? '' : kpiHTML(kAno, 'entregue no ano', 'ent-kpi-sec'));
 
-  const tabela = `<div class="casa-tabela-wrap"><table class="casa-tabela">
+  const tabela = `<div class="casa-tabela-wrap"><table class="casa-tabela ent-lista-tabela">
     <thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Entrega (ERP)</th><th class="num">Valor</th></tr></thead>
-    <tbody>${visiveis.map(({ erp, card }) => { const st = estadoPCP(erp); return `<tr ${card ? `data-os-id="${esc(card.id)}"` : ''}>
-        <td><strong>${esc(erp.numero || '—')}</strong> <span class="badge ${st.classe}" title="${esc(st.dica)}">${esc(st.rotulo)}</span>${card && card.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</td>
-        <td>${esc(erp.cliente || (card && card.cliente) || '')}</td>
-        <td>${esc((card && card.servico) || erp.servico || '—')}</td>
-        <td>${esc(card ? (OPERACAO.equipeTexto(card, ', ') || (erp.tipo === 'interno' ? 'balcão' : 'sem equipe')) : '—')}</td>
-        <td>${dataBR(erp.data)}</td>
+    <tbody>${visiveis.map(({ erp, card }) => { const st = estadoPCP(erp); const eqTxt = card ? OPERACAO.equipeTexto(card, ', ') : ''; return `<tr ${card ? `data-os-id="${esc(card.id)}"` : ''}>
+        <td class="ent-l-os"><strong>${esc(erp.numero || '—')}</strong> <span class="badge ${st.classe}" title="${esc(st.dica)}">${esc(st.rotulo)}</span>${card && card.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</td>
+        <td class="ent-l-cli">${esc(erp.cliente || (card && card.cliente) || '')}</td>
+        <td class="ent-l-serv">${esc((card && card.servico) || erp.servico || '—')}</td>
+        <td class="ent-l-tec">${card ? (eqTxt ? esc(eqTxt) : `<span class="ent-sem-equipe">${erp.tipo === 'interno' ? 'balcão' : 'sem equipe'}</span>`) : '—'}</td>
+        <td class="ent-l-data">${dataBR(erp.data)}</td>
         <td class="num">${valorTxt(erp.valor)}</td>
       </tr>`; }).join('')}</tbody>
     <tfoot><tr><td colspan="5">${lista.length} O.S entregues no período${lista.length > TETO_LINHAS ? ` · mostrando as ${TETO_LINHAS} mais recentes` : ''}${semValorLista ? ` · ${semValorLista} sem valor` : ''}${per.faltando.length ? ` · carregando ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'}…` : ''}${per.comErro.length ? ` · <span class="badge sem-valor">${per.comErro.length} mês${per.comErro.length === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}${per.truncou ? ` · <span class="badge sem-valor">intervalo longo demais: entraram só os primeiros ${TETO_MESES} meses</span>` : ''}</td><td class="num">${dinheiroCasa(totLista)}</td></tr></tfoot>
@@ -1520,15 +1656,10 @@ function renderEntregas() {
   const semCard = visiveis.filter(x => !x.card).length;
   const cards = cardFn ? `<div class="cards-grid">${visiveis.filter(x => x.card).map(x => cardFn(x.card)).join('')}</div>
     <p class="metricas-nota">${lista.length} O.S entregues no período · ${dinheiroCasa(totLista)}${semCard ? ` · ${semCard} sem card neste aparelho aparece${semCard === 1 ? '' : 'm'} só na Tabela` : ''}.</p>` : tabela;
-  /* A fila de lançamento é a única lista de tarefas desta tela. Com pendência
-     ela sobe para logo depois dos filtros; no fim da rolagem ninguém a via. */
-  const secaoLancar = `<section class="casa-prod-box casa-lancar">
-        <h3>Lançamento manual: baixadas pelo ERP fora do sistema · ${aLancar.length}</h3>
-        <p>O ERP marcou entregue, mas ninguém finalizou no PCP. Aparecem todas as pendentes, de qualquer período. Não conta como entrega realizada até alguém lançar: confirme data e equipe e responda se gerou retrabalho. Baixas anteriores a ${CORTE_LANCAMENTO_MANUAL.slice(8, 10)}/${CORTE_LANCAMENTO_MANUAL.slice(5, 7)}/${CORTE_LANCAMENTO_MANUAL.slice(0, 4)} já contam como entregues (decisão da direção).</p>
-        ${aLancar.length ? `<div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Baixa ERP</th><th class="num">Valor</th><th></th></tr></thead><tbody>${aLancar.map(os => `<tr>
-            <td><strong>${esc(os.numero || '—')}</strong></td><td>${esc(os.cliente || '')}</td><td>${esc(os.servico || '—')}</td><td>${esc(OPERACAO.equipeTexto(os, ', ') || 'sem equipe')}</td><td>${dataBR(os.finalizadaEm)}</td><td class="num">${valorTxt(valorDaOS(os))}</td>
-            <td>${OPERACAO.emIntervalo(diaEntrega(os), f.de, f.ate) ? '' : '<small class="text-muted">fora do período</small> '}<button class="btn-primary btn-xs edit-only" data-lancar-os="${esc(os.id)}">Lançar entrega</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="text-muted">Nada pendente de lançamento.</p>'}
-      </section>`;
+  /* A fila de lançamento é a única lista de tarefas desta tela. Ficava no
+     fim da rolagem e ninguém a via; depois subiu inteira para cima da lista e
+     passou a esconder a lista. Agora é uma faixa compacta logo abaixo dos
+     cartões, que abre a lista sob demanda (filaLancarHTML). */
 
   /* A tela repinta a cada mês que chega do ERP. Sem guardar o estado, o quadro
      com o progresso e o Parar fechava a cada ~10 s, "Outras datas" fechava entre
@@ -1541,12 +1672,13 @@ function renderEntregas() {
       <div class="casa-pagina-head">
         <div><h2>Entregas</h2><p>Acompanhe as O.S. entregues, os valores e a equipe responsável.</p></div>
       </div>
-      <div class="casa-kpi-cards">${kpiPeriodo}${kpiHTML(kHoje, 'entregue hoje')}${kpiHTML(kMes, 'entregue no mês')}${kpiHTML(kAno, 'entregue no ano')}</div>
+      <div class="ent-kpis">${kpiPrincipal}<div class="ent-kpi-secs">${kpiSecundarios}</div></div>
       <details class="ent-dados" ${STATE._entDadosAberto ? 'open' : ''}><summary>Origem dos valores e sincronização</summary>
       <p>Valores líquidos de desconto das O.S. marcadas como entregues no ERP, pela data de entrega. Não representam recebimentos ou lucro. Instalações realizadas dependem do registro no PCP; retiradas pelo cliente entram apenas nos valores.</p>
       <p class="metricas-nota">Registradas no PCP neste mês: <strong>${registradasMes}</strong> instalaç${registradasMes === 1 ? 'ão' : 'ões'}${cls.aLancar.length ? ` · a lançar: <strong>${cls.aLancar.length}</strong>` : ''}. Fonte do valor: ERP${STORE.entreguesMes(hoje.slice(0, 7)) ? `, atualizado ${new Date(STORE.entreguesMes(hoje.slice(0, 7)).em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' (carregando…)'}.</p>
       ${barraCargaEntregas()}
       </details>
+      ${filaLancarHTML(aLancar, f, hoje)}
       <section class="ent-controles" aria-label="Filtros de entregas">
       ${chipsPeriodoEntregas(f)}
       <div class="casa-filtros">
@@ -1555,16 +1687,30 @@ function renderEntregas() {
         <span class="casa-vista"><button class="btn-ghost btn-sm ${STATE._entVista === 'tabela' ? 'active' : ''}" data-ent-vista="tabela">Tabela</button><button class="btn-ghost btn-sm ${STATE._entVista === 'cards' ? 'active' : ''}" data-ent-vista="cards">Cards</button></span>
       </div>
       </section>
-      ${aLancar.length ? secaoLancar : ''}
       ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', vazioEntregas(per).titulo, vazioEntregas(per).dica)}
       ${lista.length ? prazoEntregasHTML(lista.map(x => x.erp), porNumero) : ''}
       ${relatoriosEntregasHTML(lista.map(x => x.erp), porNumero, estadoPCP)}
       ${relatorioAnosHTML()}
-      ${aLancar.length ? '' : secaoLancar}
     </div>`;
   wireAbasEntregas(el);
   const dDados = el.querySelector('details.ent-dados');
   if (dDados) dDados.ontoggle = () => { STATE._entDadosAberto = dDados.open; };
+  /* A FILA ABERTA, A ORDEM E O "MOSTRAR TODAS" moram no STATE pelo mesmo
+     motivo do quadro acima: a tela repinta sozinha a cada mês que chega do
+     ERP, e a fila fecharia no meio do lançamento. Depois de um toque, o foco
+     volta ao mesmo botão (a repintura troca o elemento, e o teclado perdia o
+     lugar). */
+  const repintarFila = foco => { STATE._entFoco = foco; renderEntregas(); };
+  el.querySelectorAll('[data-ent-fila]').forEach(b => b.onclick = () => { STATE._entFilaAberta = !STATE._entFilaAberta; repintarFila('[data-ent-fila]'); });
+  el.querySelectorAll('[data-ent-fila-ordem]').forEach(b => b.onclick = () => { STATE._entFilaOrdem = b.dataset.entFilaOrdem; repintarFila(`[data-ent-fila-ordem="${b.dataset.entFilaOrdem}"]`); });
+  el.querySelectorAll('[data-ent-fila-todas]').forEach(b => b.onclick = () => { STATE._entFilaTodas = !STATE._entFilaTodas; repintarFila('[data-ent-fila-todas]'); });
+  const dComo = el.querySelector('details.ent-fila-como');
+  if (dComo) dComo.ontoggle = () => { STATE._entFilaComoAberto = dComo.open; };
+  if (STATE._entFoco) {
+    const alvo = el.querySelector(STATE._entFoco);
+    STATE._entFoco = '';
+    if (alvo && typeof alvo.focus === 'function') alvo.focus();
+  }
   const dPers = el.querySelector('details.ent-personalizar');
   if (dPers) dPers.ontoggle = () => { STATE._entPersAberto = dPers.open; };
   const grade1 = el.querySelector('.casa-grade-meses');
@@ -2103,14 +2249,34 @@ function painelTVCasa(i, f) {
   const resumo = temPerf
     ? { pessoas: PERF.resumir(regs).pessoas, equipes: PERF.resumir(PERF.comEquipes(regs, c.equipes || [], opcoes)).equipes }
     : {pessoas:[],equipes:[]};
-  const icone = p => (typeof perfLogoValido === 'function' && perfLogoValido(p.logo)) ? perfLogoHTML(p, 'tv-foto') : `<span class="tv-pos">${esc(p.emblema||'🤝')}</span>`;
-  // Acima de 8 linhas a TV não cabe; diz quantas ficaram de fora em vez de cortar calada.
-  const lista = (ps,medida) => `<ol class="tv-lista">${ps.slice(0,8).map(p=>`<li class="tv-linha">${icone(p)}<span class="tv-nome">${esc(p.nome)}</span><span class="tv-num">${medida(p)}</span></li>`).join('')}</ol>${ps.length > 8 ? `<p class="metricas-nota">+${ps.length - 8} no ranking completo, na tela Performance.</p>` : ''}`;
+  /* O ROSTO DE CADA LINHA: a logo da equipe (a enviada ou a do animal, pela
+     mesma régua da tela) e a foto da ficha do RH para a pessoa. Antes a
+     pessoa aparecia com o emblema 🤝 e a equipe fixa sem a logo do animal. */
+  const temLogo = typeof perfLogoHTML === 'function';
+  const rostoEquipe = (p, cls) => temLogo ? perfLogoHTML(p, cls) : `<span class="tv-pos">${esc(p.emblema||'🤝')}</span>`;
+  const rostoPessoa = (p, cls) => `<span class="${cls} perf-foto">${avatarRH(pessoasRH().find(x => [x.chave, x.id].includes(p.chave)) || { nome: p.nome })}</span>`;
+  const corDe = p => typeof perfCorClasse === 'function' ? perfCorClasse(p) : '';
+  /* O PÓDIO DA TELA NA TV (revisão de experiência, 29/09/2026): as mesmas
+     peças da Performance (perfPodioHTML e o corte de perfCortarPodio, com
+     empate), sem botões, e do 4º em diante a lista de sempre. Sem o
+     performance.js carregado, fica só a lista. */
+  const temPodio = temPerf && typeof perfPodioHTML === 'function' && typeof perfCortarPodio === 'function';
+  const linhaTV = (p, rosto, num) => `<li class="tv-linha${corDe(p)}">${p.posicao ? `<span class="tv-pos">${p.posicao}º</span>` : ''}${rosto(p, 'tv-foto')}<span class="tv-nome">${esc(p.nome)}</span><span class="tv-num">${esc(num(p))}</span></li>`;
+  // Acima do que cabe a TV não mostra; diz quantas ficaram de fora em vez de cortar calada.
+  const mais = n => n > 0 ? `<p class="metricas-nota">+${n} no ranking completo, na tela Performance.</p>` : '';
+  const lista = (ps, rosto, num) => `<ol class="tv-lista">${ps.slice(0,8).map(p => linhaTV(p, rosto, num)).join('')}</ol>${mais(ps.length - 8)}`;
+  const ranking = (ps, medida, rosto, clsPodio, num, unidade) => {
+    if (!temPodio) return lista(ps, rosto, p => num(p) + ' ' + unidade);
+    const { podio, resto } = perfCortarPodio(PERF.ranquear(ps, medida));
+    const pod = perfPodioHTML(podio.map(p => ({ posicao: p.posicao, nome: p.nome, visual: rosto(p, clsPodio), classe: corDe(p), numero: num(p), unidade })), { animar: true, classe: clsPodio === 'perf-podio-logo' ? 'perf-podio-tv perf-podio-equipes' : 'perf-podio-tv', rotulo: 'Pódio' });
+    const cabe = podio.length ? 3 : 8;
+    return pod + (resto.length ? `<ol class="tv-lista tv-lista-resto">${resto.slice(0, cabe).map(p => linhaTV(p, rosto, x => num(x) + ' ' + unidade)).join('')}</ol>` : '') + mais(resto.length - cabe);
+  };
   const previa = typeof perfFonteAtual === 'function' && !perfFonteAtual();
   const nota='<p class="metricas-nota">Participação operacional; não é nota de mérito ou bonificação. Divisão igual quando ainda não confirmada.</p>';
   const paineis = [
-    {titulo:'🤝 Equipes em ação',corpo:resumo.equipes.length?lista(resumo.equipes,p=>p.os+' O.S.'):'<p class="tv-vazio">Sem entregas com equipe neste período.</p>'},
-    {titulo:'📦 Participação nas entregas',corpo:(resumo.pessoas.length?lista(resumo.pessoas,p=>perfFormato(p.equivalentes)+' O.S. equivalentes'):'<p class="tv-vazio">Sem participação registrada.</p>')+nota},
+    {titulo:'🤝 Equipes em ação',corpo:resumo.equipes.length?ranking(resumo.equipes,p=>p.os,rostoEquipe,'perf-podio-logo',p=>String(p.os),'O.S.'):'<p class="tv-vazio">Sem entregas com equipe neste período.</p>'},
+    {titulo:'📦 Participação nas entregas',corpo:(resumo.pessoas.length?ranking(resumo.pessoas,p=>p.equivalentes,rostoPessoa,'perf-podio-foto',p=>perfFormato(p.equivalentes),'O.S. equivalentes'):'<p class="tv-vazio">Sem participação registrada.</p>')+nota},
     {titulo:'🚚 Carros mais usados',corpo:carrosHTML(f)},
     {titulo:'🔧 Retrabalho no período',corpo:retrabalhoHTML(f)},
   ];
@@ -2287,6 +2453,12 @@ function renderPerformanceCasa() {
      é o que se lê de vez em quando. O filtro de período serve as duas, porque
      as duas leem o mesmo recorte. Nada foi escondido: o que era quadro
      recolhível continua recolhível, só mudou de aba. */
+  /* A BASE E O FECHAMENTO VÃO PARA O FIM (revisão de experiência,
+     29/09/2026): a página abria pelo encanamento (versão, Atualizar, Fechar
+     período) e o ranking vinha depois. Agora vem o que se lê (faixa de
+     cobertura, pódio, conferência) e a base fica num quadro recolhível logo
+     depois da apuração, antes dos outros quadros. O Modo TV deixou de ser o
+     botão azul: é de vez em quando, não a ação da página. */
   /* REGRAS (F05, 29/09/2026): a regra do programa (divisão, comissão, bônus
      e redutor da volta) é da gestão. A aba só existe para admin e pcp, os
      mesmos que o servidor atende; outro papel que chegue com 'regras'
@@ -2314,21 +2486,23 @@ function renderPerformanceCasa() {
           <button class="btn-ghost btn-sm ${abaPerf === 'equipe' ? 'active' : ''}" data-perf-aba="equipe">Equipe</button>
           <button class="btn-ghost btn-sm ${abaPerf === 'relatorio' ? 'active' : ''}" data-perf-aba="relatorio">Relatório</button>
           ${podeRegras ? `<button class="btn-ghost btn-sm ${abaPerf === 'regras' ? 'active' : ''}" data-perf-aba="regras">Regras</button>` : ''}
-          <button class="btn-primary btn-sm" id="perf-tv" title="Ranking em tela cheia para a TV da fábrica">📺 Modo TV</button>
+          <button class="btn-ghost btn-sm" id="perf-tv" title="Ranking em tela cheia para a TV da fábrica">📺 Modo TV</button>
         </span>
       </div>
-      ${abaPerf === 'regras' ? perfRegrasHTML() : `${typeof perfFonteHTML==='function'?perfFonteHTML():''}
+      ${abaPerf === 'regras' ? perfRegrasHTML() : `
       ${abaPerf === 'equipe' ? `
         ${typeof performanceEquipesHTML === 'function' ? performanceEquipesHTML() : produtividadeHTML()}
+        ${typeof perfFonteHTML === 'function' ? perfFonteHTML() : ''}
         ${quadroCasa('perf-rh', `🔗 Conferir nomes do PCP × fichas do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), pendRH > 0)}
         ${quadroCasa('perf-plantoes', '🗓 Plantões vinculados às O.S.', plantaoPerformanceHTML(), false)}
-        ${quadroCasa('perf-bonus', '💰 Bônus por ponto <small>— regra própria, independente dos percentuais acima</small>', bonusHTML, false)}
+        ${quadroCasa('perf-bonus', '💰 Bônus por ponto <small>regra própria, independente dos percentuais acima</small>', bonusHTML, false)}
       ` : `
         <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}<button class="btn-ghost" id="perf-rel-pdf">📄 PDF resumido</button><button class="btn-ghost" id="perf-rel-detalhado">PDF com O.S.</button></div>
         ${typeof performanceRelatorioHTML === 'function' ? performanceRelatorioHTML() : ''}
-        ${quadroCasa('perf-entregues', '📦 Serviços entregues <small>— ano a ano e mês a mês</small>', servicosEntreguesHTML(), false)}
-        ${quadroCasa('perf-gente', '👷 Indicadores operacionais <small>— horas e registros do período</small>', produtividadeHTML(), false)}
-        ${quadroCasa('perf-retrab', '🔧 Retrabalho <small>— de onde veio, de quem e de que tipo</small>', retrabalhoHTML(f), false)}
+        ${typeof perfFonteHTML === 'function' ? perfFonteHTML() : ''}
+        ${quadroCasa('perf-entregues', '📦 Serviços entregues <small>ano a ano e mês a mês</small>', servicosEntreguesHTML(), false)}
+        ${quadroCasa('perf-gente', '👷 Indicadores operacionais <small>horas e registros do período</small>', produtividadeHTML(), false)}
+        ${quadroCasa('perf-retrab', '🔧 Retrabalho <small>de onde veio, de quem e de que tipo</small>', retrabalhoHTML(f), false)}
         ${quadroCasa('perf-carros', '🚚 Carros mais usados', carrosHTML(f), false)}
       `}`}
     </div>`;

@@ -358,17 +358,70 @@ function perfConsultaServidor(){return typeof STATE==='undefined' || ['admin','p
 // Erro de rede do navegador e tempo esgotado em português; mensagem termina com ponto.
 function perfErroTxt(e){const m=String(e && e.message || '');if(!m || e?.name==='TypeError' || e?.name==='AbortError' || /failed to fetch|load failed|networkerror|network request|abort|timeout|timed out/i.test(m))return 'Sem conexão com o servidor. Tente de novo.';return /[.!?]$/.test(m)?m:m+'.';}
 function perfFonteTexto(){const f=perfFonteAtual();if(!f && !perfConsultaServidor())return 'Prévia do aparelho. A apuração oficial é feita pela gestão do PCP.';return f?(f.fechadoEm?'Fechamento preservado · revisão '+f.revisao+' · '+f.fechadoPor+' · '+new Date(f.fechadoEm).toLocaleString('pt-BR'):'Base compartilhada do PCP · consultada em '+new Date(f.consultadoEm).toLocaleString('pt-BR'))+'. '+f.fonte:'Prévia local incompleta. Aguarde a consulta ao servidor antes de apurar.';}
+/* ------------------------------------------------------ BASE E FECHAMENTO
+ * Revisão de experiência (29/09/2026, pedido do dono: "olhar como um
+ * especialista ... e o ranking ficar top"). A página abria pelo encanamento
+ * (versão, Atualizar, Fechar período) e o ranking vinha depois. Agora a base
+ * mora NO FIM, num quadro recolhível que lembra se ficou aberto, e o que ela
+ * tem de urgente (mudança depois da consulta, alteração presa no aparelho,
+ * erro) sobe para a faixa de qualidade dos dados, no topo (perfCoberturaHTML).
+ * Os ids de antes (perf-atualizar-fonte, perf-versao, perf-fechar) continuam:
+ * a fiação e os testes dependem deles.
+ *
+ * FECHAR NÃO É MAIS O BOTÃO AZUL DO TOPO. Com entrega sem confirmação o
+ * fechamento é recusado; o botão principal convidava a um clique que só dava
+ * erro. Agora é secundário e, quando não pode, fica desligado com o motivo
+ * escrito ao lado: as mesmas travas que o clique confere (o clique continua
+ * conferindo, porque a tela pode estar velha).
+ */
+/* Conferir voltas (ou mexer numa O.S.) depois da consulta não muda a nota
+   até nova consulta; sem este aviso parecia que a conferência não contou.
+   Só conta O.S. finalizada no período apurado e mexida por gente: a
+   importação do ERP e um card aberto de outro mês acendiam o aviso a cada
+   hora, e aviso sempre ligado ninguém lê. */
+function perfMudouDepois(f){
+ const per=periodoOuMes('_fPerf'),consulta=Date.parse(f?.consultadoEm || '');
+ return !!f && !f.fechadoEm && Number.isFinite(consulta) && (STORE.getAllOS?.() || []).some(o=>o.finalizadaEm && OPERACAO.emIntervalo(o.finalizadaEm,per.de,per.ate) && !/^Mubisys/i.test(String(o.atualizadoPor || '')) && Date.parse(o.atualizadoEm || '')>consulta);
+}
+/* OS AVISOS DA BASE, num lugar só: a faixa do topo (comAcao: com o botão de
+   atualizar e o role="alert", para o leitor de tela ouvir uma vez) e o quadro
+   Base e fechamento (sem os dois). */
+function perfAvisosHTML(comAcao){
+ if(!perfConsultaServidor())return `<p class="perf-aviso neutro">${esc(perfFonteTexto())}</p>`;
+ const f=perfFonteAtual(),pendentes=STORE.getQueue?.().length || 0,out=[];
+ const atualizar=comAcao && !perfRemoto.carregando?' <button type="button" class="btn-ghost btn-sm" data-perf-atualizar>Atualizar apuração</button>':'';
+ // Sem a base do servidor, a faixa diz que o que se vê é prévia (o quadro já diz na primeira linha).
+ if(comAcao && !f && perfRemoto.carregando)out.push('<p class="perf-aviso neutro">Consultando a apuração no servidor…</p>');
+ else if(comAcao && !f && !perfRemoto.erro)out.push(`<p class="perf-aviso neutro">${esc(perfFonteTexto())}</p>`);
+ if(perfMudouDepois(f))out.push(`<p class="perf-aviso">Houve mudanças nas O.S. depois desta consulta (voltas conferidas, por exemplo). Toque em Atualizar apuração para a nota contar com elas.${atualizar}</p>`);
+ if(pendentes)out.push(`<p class="perf-aviso">${pendentes} alterações locais aguardam sincronização. O servidor ainda pode não conter essas alterações.</p>`);
+ if(perfRemoto.erro)out.push(`<p class="perf-aviso erro"${comAcao?' role="alert"':''}>${esc(perfRemoto.erro)}${atualizar}</p>`);
+ return out.join('');
+}
+// Por que o Fechar está desligado, em uma frase. Vazio = pode fechar.
+function perfFechamentoBloqueio(f,pendentes){
+ if(perfRemoto.carregando)return 'Consultando o servidor.';
+ if(!f)return 'A apuração do servidor ainda não chegou. Toque em Atualizar apuração.';
+ if(f.fechadoEm)return 'Você está vendo uma revisão fechada. Para criar outra, escolha Dados atuais em Versão da apuração.';
+ if(pendentes)return `${pendentes} ${pendentes===1?'alteração deste aparelho aguarda':'alterações deste aparelho aguardam'} sincronização.`;
+ const regs=Array.isArray(f.registros)?f.registros:[];
+ if(!regs.length)return 'Nenhuma entrega no período para fechar.';
+ const hoje=perfHojeISO();
+ if(String(f.periodo?.ate || '')>hoje)return `O fechamento vai no máximo até hoje (${hoje.split('-').reverse().join('/')}). Escolha um período que termine hoje ou antes.`;
+ const pend=regs.filter(r=>!r.confirmado).length,semValor=regs.filter(r=>r.valor==null);
+ if(!pend && !semValor.length)return '';
+ return 'Para fechar, falta: '+[pend?`${pend} ${pend===1?'entrega sem participação confirmada':'entregas sem participação confirmada'}`:'',semValor.length?`${semValor.length} sem valor (O.S. ${semValor.slice(0,6).map(r=>r.numero || 's/n').join(', ')}${semValor.length>6?' e outras':''})`:''].filter(Boolean).join('; ')+'. Use o filtro Situação da lista para achar cada uma.';
+}
 function perfFonteHTML(){
  const f=perfFonteAtual(),pendentes=STORE.getQueue?.().length || 0;
- if(!perfConsultaServidor())return `<section class="perf-fonte"><h3>Base da apuração</h3><p>${esc(perfFonteTexto())}</p></section>`;
- /* Conferir voltas (ou mexer numa O.S.) depois da consulta não muda a nota
-    até nova consulta; sem este aviso parecia que a conferência não contou.
-    Só conta O.S. finalizada no período apurado e mexida por gente: a
-    importação do ERP e um card aberto de outro mês acendiam o aviso a cada
-    hora, e aviso sempre ligado ninguém lê. */
- const per=periodoOuMes('_fPerf');
- const consulta=Date.parse(f?.consultadoEm || ''),mudou=!!f && !f.fechadoEm && Number.isFinite(consulta) && (STORE.getAllOS?.() || []).some(o=>o.finalizadaEm && OPERACAO.emIntervalo(o.finalizadaEm,per.de,per.ate) && !/^Mubisys/i.test(String(o.atualizadoPor || '')) && Date.parse(o.atualizadoEm || '')>consulta);
- return `<section class="perf-fonte"><h3>Base da apuração e fechamentos</h3><p>${esc(perfFonteTexto())}</p>${mudou?'<p class="perf-coverage">Houve mudanças nas O.S. depois desta consulta (voltas conferidas, por exemplo). Toque em Atualizar apuração para a nota contar com elas.</p>':''}${pendentes?`<p class="perf-coverage">${pendentes} alterações locais aguardam sincronização. O servidor ainda pode não conter essas alterações.</p>`:''}${perfRemoto.erro?`<p role="alert">${esc(perfRemoto.erro)}</p>`:''}<div class="perf-filtros"><button class="btn-ghost" id="perf-atualizar-fonte" ${perfRemoto.carregando?'disabled':''}>${perfRemoto.carregando?'Consultando servidor…':'Atualizar apuração'}</button><label>Versão da apuração <select id="perf-versao"><option value="">Dados atuais</option>${perfRemoto.fechamentos.map(r=>`<option value="${esc(r.id)}" ${r.id===perfRemoto.selecionado?'selected':''}>Revisão ${r.revisao} · ${esc(r.fechadoEm.slice(0,10))} · ${esc(r.fechadoPor)}</option>`).join('')}</select></label>${perfPodeEditar()?`<button class="btn-primary" id="perf-fechar" ${!f||f.fechadoEm||pendentes||perfRemoto.carregando?'disabled':''}>${perfRemoto.fechamentos.length?'Criar nova revisão':'Fechar período'}</button>`:''}</div>${f?.motivo?`<p>Motivo: ${esc(f.motivo)}</p>`:''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p></section>`;
+ // Aberto ou fechado como a pessoa deixou (a mesma memória dos outros quadros da casa).
+ const aberto=typeof quadroAberto==='function' && quadroAberto('perf-base',false);
+ const quadro=(titulo,corpo)=>`<details class="casa-quadro perf-base" data-quadro="perf-base"${aberto?' open':''}><summary>${titulo}</summary><div class="casa-quadro-corpo">${corpo}</div></details>`;
+ if(!perfConsultaServidor())return quadro('🗂 Base da apuração',`<p class="perf-base-fonte">${esc(perfFonteTexto())}</p>`);
+ const pode=perfPodeEditar(),bloqueio=pode?perfFechamentoBloqueio(f,pendentes):'';
+ return quadro('🗂 Base e fechamento <small>atualizar, versão e fechar período</small>',`<p class="perf-base-fonte">${esc(perfFonteTexto())}</p>${perfAvisosHTML(false)}
+   <div class="perf-base-acoes"><button type="button" class="btn-ghost" id="perf-atualizar-fonte" ${perfRemoto.carregando?'disabled':''}>${perfRemoto.carregando?'Consultando servidor…':'Atualizar apuração'}</button><label>Versão da apuração <select id="perf-versao"><option value="">Dados atuais</option>${perfRemoto.fechamentos.map(r=>`<option value="${esc(r.id)}" ${r.id===perfRemoto.selecionado?'selected':''}>Revisão ${r.revisao} · ${esc(r.fechadoEm.slice(0,10))} · ${esc(r.fechadoPor)}</option>`).join('')}</select></label>${pode?`<button type="button" class="btn-ghost" id="perf-fechar" ${bloqueio?'disabled aria-describedby="perf-fechar-motivo"':''}>${perfRemoto.fechamentos.length?'Criar nova revisão':'Fechar período'}</button>`:''}</div>
+   ${bloqueio?`<p class="perf-fechar-motivo" id="perf-fechar-motivo">${esc(bloqueio)}</p>`:''}${f?.motivo?`<p class="perf-base-fonte">Motivo: ${esc(f.motivo)}</p>`:''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p>`);
 }
 async function perfCarregarFonte(){
  const chave=perfChave(),f=periodoOuMes('_fPerf');
@@ -794,6 +847,135 @@ async function perfReduzirLogo(arquivo) {
   }
 }
 
+/* ------------------------------------------------------ PEÇAS DA VITRINE
+ * Revisão de experiência (29/09/2026). As peças abaixo desenham a faixa de
+ * cobertura, o selo de situação, a barra e o pódio, e servem às duas vistas
+ * (Pessoas e Equipes) e ao Modo TV, para as três falarem a mesma língua.
+ * NENHUMA FAZ CONTA: só desenham o que PERF já apurou.
+ */
+/* A PORCENTAGEM QUE NÃO MENTE NO ARREDONDAMENTO: 162 de 163 não pode virar
+   "100%", nem 1 de 300 virar "0%". */
+function perfPctTxt(n, total) {
+  if (!total) return '0%';
+  let p = Math.round(n / total * 100);
+  if (n < total) p = Math.min(p, 99);
+  if (n > 0) p = Math.max(p, 1);
+  return p + '%';
+}
+/* A BARRA SEM style=. A largura é atributo de um <rect> de SVG (número
+   calculado aqui, nunca texto vindo de dado) e a cor vem por classe: o
+   ranking não leva style= (tests/equipes.test.cjs confere). Desenho só: o
+   número ao lado é quem informa, por isso aria-hidden. */
+function perfBarraHTML(fracao, classe) {
+  const f = Number.isFinite(fracao) ? Math.max(0, Math.min(1, fracao)) : 0;
+  const w = Math.round(f * 1000);
+  return `<svg class="perf-barra${classe || ''}" viewBox="0 0 1000 10" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="perf-barra-trilho" width="1000" height="10"/>${w ? `<rect class="perf-barra-valor" width="${w}" height="10"/>` : ''}</svg>`;
+}
+/* A SITUAÇÃO DO RANKING, ao lado do título: quem olha o pódio precisa saber
+   se ele já vale ou se ainda vai mudar. Parcial = há entrega sem equipe (quem
+   trabalhou nela ainda não aparece); em conferência = há divisão só
+   sugerida; fechado = revisão selada no servidor. */
+function perfSituacao(regs) {
+  const f = perfFonteAtual();
+  if (f && f.fechadoEm) return {tipo:'ok', texto:`Fechado · revisão ${f.revisao}`};
+  const total = (regs || []).length;
+  if (!total) return null;
+  const sem = regs.filter(r => !r.membros.length).length, conf = regs.filter(r => r.confirmado).length;
+  if (sem) return {tipo:'parcial', texto:`Parcial: ${perfPctTxt(total - sem, total)} das entregas com equipe`};
+  if (conf < total) return {tipo:'conferir', texto:`Em conferência: ${conf} de ${total} confirmadas`};
+  return {tipo:'ok', texto:'Tudo conferido'};
+}
+function perfSituacaoHTML(s) { return s ? `<span class="perf-situacao ${s.tipo}">${esc(s.texto)}</span>` : ''; }
+/* O CONTROLE SEGMENTADO (Nota | Produção | Valor): botões de alternância com
+   aria-pressed, para o leitor de tela dizer qual está ligado. */
+function perfSegHTML(atual, opcoes, attr, rotulo) {
+  return `<div class="perf-seg" role="group" aria-label="${esc(rotulo)}">${opcoes.map(([v, t]) => `<button type="button" class="${v === atual ? 'on' : ''}" aria-pressed="${v === atual}" data-${attr}="${esc(v)}">${esc(t)}</button>`).join('')}</div>`;
+}
+/* O PÓDIO. Ordem clássica na tela: 2º à esquerda, 1º no centro e mais alto,
+   3º à direita. No HTML a ordem é a do ranking (o leitor de tela ouve 1º, 2º,
+   3º, e no celular o pódio empilha nessa ordem); só o lugar na tela muda, por
+   classe. A ALTURA do degrau vem da POSIÇÃO (empate divide o degrau e a
+   medalha) e o LUGAR vem da ordem: com 1º, 2º e 2º o campeão fica no centro.
+   Quem corta o pódio continua sendo perfCortarPodio (empate que não cabe em
+   três vira lista). `animar` sobe os degraus uma vez; repintar a mesma tela
+   (a cada sincronização) não repete o espetáculo. */
+function perfPodioHTML(itens, opcoes) {
+  const o = opcoes || {};
+  if (!itens || !itens.length) return '';
+  const lugar = i => i === 0 ? 'centro' : i === 1 ? 'esq' : 'dir';
+  return `<ol class="perf-podio n${itens.length}${o.animar ? ' perf-animar' : ''}${o.classe ? ' ' + o.classe : ''}" aria-label="${esc(o.rotulo || 'Pódio')}">${itens.map((x, i) => `<li class="perf-podio-item pos-${Math.min(3, x.posicao)} lugar-${lugar(i)}${x.classe || ''}">
+      <div class="perf-podio-topo">
+        <span class="perf-podio-visual">${x.visual}<span class="perf-medalha" aria-hidden="true">${PERF_MEDALHAS[x.posicao] || ''}</span></span>
+        <h4 class="perf-podio-nome"><span class="perf-sr">${x.posicao}º lugar: </span>${esc(x.nome)}</h4>
+        <div class="perf-podio-selo">${x.selo || ''}</div>
+        <p class="perf-podio-num"><strong>${esc(x.numero)}</strong><span>${esc(x.unidade)}</span></p>
+        <p class="perf-podio-linha">${x.linha || ''}</p>
+        <div class="perf-podio-aviso">${x.aviso || ''}</div>
+        ${x.extra ? `<div class="perf-podio-extra">${x.extra}</div>` : ''}
+        ${x.acoes ? `<div class="perf-podio-acoes">${x.acoes}</div>` : ''}
+      </div>
+      <div class="perf-degrau" aria-hidden="true"><span>${x.posicao}º</span></div>
+    </li>`).join('')}</ol>`;
+}
+let perfPodiosVistos = new Set();
+function perfAnimarPodio(chave) { if (perfPodiosVistos.has(chave)) return false; perfPodiosVistos.add(chave); return true; }
+/* A FAIXA DE COBERTURA. Três cartões (instalações, confirmadas, sem equipe),
+   uma faixa amarela e um texto solto diziam a mesma coisa em três lugares.
+   Agora é UMA faixa: quantas entregas têm equipe (a barra), quantas estão
+   confirmadas e a ação. Com tudo coberto ela encolhe para uma linha verde:
+   dado bom não precisa gritar.
+   "COMPLETAR EQUIPES" LEVA À CONFERÊNCIA DESTA TELA, filtrada em "Sem
+   equipe": é lá (botão Conferir) que se diz quem fez cada entrega. A fila de
+   lançamento de Entregas só recebe as baixas do ERP ainda não lançadas, e
+   essas nem entram na apuração até alguém lançar; quando existem no período,
+   a faixa diz quantas e leva até lá. */
+function perfCoberturaHTML(regs, f) {
+  const total = regs.length, sem = regs.filter(r => !r.membros.length).length, com = total - sem;
+  const conf = regs.filter(r => r.confirmado).length;
+  const incons = regs.filter(r => r.membros.length && PERF.validar(r.membros)).length;
+  const fechada = !!(perfFonteAtual() && perfFonteAtual().fechadoEm);
+  const pode = perfPodeEditar() && !fechada;
+  const pendLancar = (((typeof classificarEntregas === 'function' ? classificarEntregas(STORE.getAllOS()) : null) || {}).aLancar || [])
+    .filter(o => OPERACAO.emIntervalo(diaEntrega(o), f.de, f.ate)).length;
+  const lancar = pendLancar ? `<p class="perf-cob-extra">${pendLancar} ${pendLancar === 1 ? 'baixa do ERP deste período espera lançamento em Entregas e ainda não conta' : 'baixas do ERP deste período esperam lançamento em Entregas e ainda não contam'} aqui. <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento</button></p>` : '';
+  const avisos = perfAvisosHTML(true);
+  if (!total) return `<section class="perf-cobertura perf-cob-linha" aria-label="Cobertura das equipes"><p>Nenhuma entrega finalizada neste período.</p>${lancar}${avisos}</section>`;
+  if (!sem) {
+    const falta = total - conf;
+    return `<section class="perf-cobertura perf-cob-linha perf-cob-ok" aria-label="Cobertura das equipes"><p><span class="perf-cob-icone" aria-hidden="true">✓</span> Todas as ${total} entregas do período têm equipe · ${falta ? `${conf} de ${total} confirmadas` : 'todas confirmadas'}${incons ? ` · ${incons} com percentuais inconsistentes` : ''}${falta && !fechada ? ` <button type="button" class="inline-link" data-perf-filtrar="pendente">${pode ? 'Conferir' : 'Ver'} as ${falta} a conferir</button>` : ''}</p>${lancar}${avisos}</section>`;
+  }
+  const sug = com - conf;
+  // Barra empilhada: confirmadas por cima das que têm equipe; o trilho é o que falta.
+  const barra = `<svg class="perf-cob-barra" viewBox="0 0 1000 14" preserveAspectRatio="none" role="img" aria-label="${com} de ${total} entregas com equipe, ${conf} confirmadas" focusable="false"><rect class="trilho" width="1000" height="14"/>${com ? `<rect class="sug" width="${Math.round(com / total * 1000)}" height="14"/>` : ''}${conf ? `<rect class="conf" width="${Math.round(conf / total * 1000)}" height="14"/>` : ''}</svg>`;
+  return `<section class="perf-cobertura perf-cob-parcial" aria-labelledby="perf-cob-titulo">
+    <div class="perf-cob-cabeca">
+      <div class="perf-cob-texto"><h3 id="perf-cob-titulo">Equipe nas entregas</h3>
+        <p class="perf-cob-num"><strong>${com} de ${total}</strong> entregas com equipe <b>(${perfPctTxt(com, total)})</b></p></div>
+      <button type="button" class="${pode ? 'btn-primary' : 'btn-ghost'} btn-sm perf-cob-acao" data-perf-filtrar="sem-equipe">${pode ? 'Completar equipes' : 'Ver as sem equipe'}</button>
+    </div>
+    ${barra}
+    <ul class="perf-cob-legenda">
+      <li class="conf"><b>${conf}</b> ${conf === 1 ? 'confirmada' : 'confirmadas'}</li>
+      <li class="sug"><b>${sug}</b> com equipe, a conferir${incons ? ` (${incons} com percentuais inconsistentes)` : ''}</li>
+      <li class="sem"><b>${sem}</b> sem equipe</li>
+    </ul>
+    <p class="perf-cob-dica">Enquanto houver entrega sem equipe o ranking é parcial: quem trabalhou nela ainda não aparece.</p>
+    ${lancar}${avisos}
+  </section>`;
+}
+/* O LANÇAMENTO FICA EM ENTREGAS. Abre a aba pelo mesmo botão da lateral (que
+   repinta e consulta), na lista e não nos relatórios, e desce até a fila
+   "Lançamento manual". A fila em Entregas agora é uma faixa fechada; quem
+   chega por aqui veio lançar, então ela já abre. */
+function perfAbrirLancamento() {
+  const aba = document.querySelector('.tab[data-tab="entregas"]:not([data-vista])');
+  if (!aba) return;
+  STATE._entAba = '';
+  STATE._entFilaAberta = true;
+  aba.click();
+  setTimeout(() => { const alvo = document.querySelector('#panel-entregas .casa-lancar'); if (alvo) alvo.scrollIntoView({behavior:'smooth', block:'start'}); }, 80);
+}
+
 /* ------------------------------------------------- RANKING INDIVIDUAL
  * "O peso é individual" (o dono, 23/09/2026). O ranking que vale é o da
  * pessoa, pela NOTA: produção pelo peso de cada entrega (não pela contagem),
@@ -802,6 +984,10 @@ async function perfReduzirLogo(arquivo) {
  * olhar um critério só.
  */
 const PERF_CRIT_ROTULO = {producao:'Produção', limpeza:'Carro (limpo e arrumado)', equipamentos:'Equipamentos'};
+/* Na etiqueta de cada pessoa o rótulo curto: "Carro (limpo e arrumado)" em
+   cada linha dobrava a altura da tabela. O nome inteiro fica na dica da
+   etiqueta e na linha dos pesos, logo abaixo do título. */
+const PERF_CRIT_CURTO = {producao:'Produção', limpeza:'Carro', equipamentos:'Equipamentos'};
 function perfCriterios() { return PERF.criteriosValidos(perfConfig().criterios); }
 function perfEquipeDaPessoa(chave, salvas) {
   // Pelo ID de hoje dos dois lados: a equipe salva pelo slug antigo também acha a pessoa.
@@ -817,6 +1003,8 @@ function perfRankingPessoasHTML(regs, c) {
   const av = PERF.avaliar(regs, fechada ? (fonte.criterios || {producao:100, limpeza:0, equipamentos:0}) : perfCriterios());
   const apurado = PERF.resumir(regs.filter(r => r.confirmado)).pessoas;
   const valorDe = new Map(apurado.map(x => [String(x.chave), x]));
+  // Entregas e confirmações de cada um (sugeridas incluídas): de onde sai o selo "a conferir".
+  const contagem = new Map(PERF.resumir(regs).pessoas.map(x => [String(x.chave), x]));
   let linhas, fora = [];
   if (medida === 'valor') {
     const com = av.pessoas.filter(p => { const v = valorDe.get(String(p.chave)); return v && v.os > v.semValor; });
@@ -830,9 +1018,15 @@ function perfRankingPessoasHTML(regs, c) {
     linhas = PERF.ranquear(com, p => p.nota);
   }
   const fmt = n => perfFormato(n);
-  const numero = p => medida === 'valor' ? dinheiroCasa(p.valorConf) : (medida === 'peso' ? fmt(p.peso) : fmt(p.nota));
+  const medidaDe = p => medida === 'valor' ? p.valorConf : (medida === 'peso' ? p.peso : p.nota);
+  const numero = p => medida === 'valor' ? dinheiroCasa(p.valorConf) : fmt(medidaDe(p));
   const semValorP = p => { const v = valorDe.get(String(p.chave)); return v ? v.semValor : 0; };
   const rotulo = p => medida === 'valor' ? ('rateado e confirmado' + (semValorP(p) ? ` · parcial (${semValorP(p)} sem valor)` : '')) : (medida === 'peso' ? 'O.S. equivalentes' : 'pontos de 100');
+  // Só o valor CONFIRMADO, rateado; sem confirmação não vira zero, vira "sem valor confirmado".
+  const valorTxt = p => { const v = valorDe.get(String(p.chave)); return v && v.os > v.semValor ? dinheiroCasa(v.valor) + (v.semValor ? ' (parcial)' : '') : ''; };
+  const aConferir = p => { const n = contagem.get(String(p.chave)); return n ? n.os - n.confirmadas : 0; };
+  const selinho = p => { const n = aConferir(p); return n ? `<span class="perf-a-conferir">${n} a conferir</span>` : ''; };
+  const entregasTxt = p => `${p.entregas} ${p.entregas === 1 ? 'entrega' : 'entregas'}`;
   const foto = (p, cls) => `<span class="${cls} perf-foto">${avatarRH(pessoasRH().find(x => [x.chave, x.id].includes(p.chave)) || {nome: p.nome})}</span>`;
   const selo = p => {
     const eqs = perfEquipeDaPessoa(p.chave, c.equipes);
@@ -847,67 +1041,94 @@ function perfRankingPessoasHTML(regs, c) {
     // Voltas da pessoa, não O.S.: três serviços na mesma viagem são uma volta.
     const nv = p.voltas ?? p.entregas;
     const dica = k === 'producao' ? '' : ` · ${n} de ${nv} ${nv === 1 ? 'volta conferida' : 'voltas conferidas'}${n < nv && v != null ? '; as outras contam pela média do período' : ''}`;
-    return `<span class="perf-crit ${v == null ? 'sem' : ''} ${media ? 'media' : ''}" title="${esc(PERF_CRIT_ROTULO[k])} · peso ${av.pesos[k]}%${dica}">${esc(PERF_CRIT_ROTULO[k])} <b>${v == null ? 'fora' : fmt(v)}</b>${media ? '<i>média</i>' : (n != null && v != null && n < nv ? `<i>${n}/${nv}</i>` : '')}</span>`;
+    return `<span class="perf-crit ${v == null ? 'sem' : ''} ${media ? 'media' : ''}" title="${esc(PERF_CRIT_ROTULO[k])} · peso ${av.pesos[k]}%${dica}">${esc(PERF_CRIT_CURTO[k])} <b>${v == null ? 'fora' : fmt(v)}</b>${media ? '<i>média</i>' : (n != null && v != null && n < nv ? `<i>${n}/${nv}</i>` : '')}</span>`;
   }).join('');
   const detalhe = p => medida === 'nota'
     ? `<div class="perf-crits">${partes(p)}</div>${(p.imputados || []).length ? `<small class="perf-parcial">sem volta conferida em ${p.imputados.map(k => PERF_CRIT_ROTULO[k].toLowerCase()).join(' e ')}: usa a média do período</small>` : ''}`
     : `<small class="perf-sub">${p.entregas} ${p.entregas === 1 ? 'entrega' : 'entregas'} · ${fmt(p.peso)} ${p.peso === 1 ? 'equivalente' : 'equivalentes'}${p.pesoConferido < p.peso ? ` · ${fmt(p.pesoConferido)} ${p.pesoConferido === 1 ? 'confirmada' : 'confirmadas'}` : ''}</small>`;
   const {podio, resto} = perfCortarPodio(linhas);
-  const acoes = p => `<button class="inline-link" data-perf-pessoa="${esc(p.chave)}">Ver entregas</button>`;
-  const podioHTML = podio.map(p => `<article class="perf-podio-item pos-${p.posicao}">
-      <span class="perf-medalha" aria-label="${p.posicao}º lugar">${PERF_MEDALHAS[p.posicao] || p.posicao + 'º'}</span>
-      ${foto(p, 'perf-podio-logo')}
-      <h3>${esc(p.nome)}</h3>${selo(p)}
-      <div class="perf-podio-num"><strong>${numero(p)}</strong><span>${rotulo(p)}</span></div>
-      ${detalhe(p)}
-      <div class="perf-podio-acoes">${acoes(p)}</div>
-    </article>`).join('');
-  const restoHTML = resto.map(p => `<li class="perf-rank-linha">
-      <span class="perf-rank-pos">${PERF_MEDALHAS[p.posicao] || p.posicao + 'º'}</span>
-      ${foto(p, 'perf-rank-logo')}
-      <div class="perf-rank-nome"><strong>${esc(p.nome)}</strong>${selo(p)}${detalhe(p)}</div>
-      <span class="perf-rank-num"><strong>${numero(p)}</strong> <small>${rotulo(p)}</small></span>
-      <span class="perf-rank-acoes">${acoes(p)}</span>
-    </li>`).join('');
+  const acoes = p => `<button type="button" class="inline-link" data-perf-pessoa="${esc(p.chave)}">Ver entregas</button>`;
+  const situacao = perfSituacao(regs);
+  const podioHTML = perfPodioHTML(podio.map(p => ({
+    posicao: p.posicao, nome: p.nome, visual: foto(p, 'perf-podio-foto'), selo: selo(p),
+    numero: numero(p), unidade: rotulo(p),
+    linha: esc(entregasTxt(p)) + (medida !== 'valor' && valorTxt(p) ? ' · ' + esc(valorTxt(p)) : ''),
+    aviso: selinho(p),
+    // No pódio, só os três critérios (a nota de "usa a média" está na etiqueta "média" de cada um).
+    extra: medida === 'nota' ? `<div class="perf-crits">${partes(p)}</div>` : '',
+    acoes: acoes(p),
+  })), {
+    rotulo: 'Pódio do ranking individual',
+    classe: situacao && situacao.tipo === 'parcial' ? 'perf-podio-parcial' : '',
+    animar: perfAnimarPodio(['pessoas', medida, perfChave(), ...podio.map(p => p.chave + ':' + p.posicao)].join('|')),
+  });
+  /* A TABELA DO 4º EM DIANTE (ou de todos, quando o empate não cabe no pódio):
+     a barra mostra a distância para o 1º, na cor da equipe da pessoa. */
+  const topo = linhas.reduce((m, p) => Math.max(m, Number(medidaDe(p)) || 0), 0);
+  const colMedida = medida === 'valor' ? 'Valor confirmado' : (medida === 'peso' ? 'Produção' : 'Nota');
+  const comValor = medida !== 'valor';
+  const posTxt = p => PERF_MEDALHAS[p.posicao] ? `<span aria-hidden="true">${PERF_MEDALHAS[p.posicao]}</span><span class="perf-sr">${p.posicao}º</span>` : `${p.posicao}º`;
+  const linhaHTML = p => {
+    const eqs = perfEquipeDaPessoa(p.chave, c.equipes);
+    return `<tr>
+      <td class="perf-td-pos">${posTxt(p)}</td>
+      <td class="perf-td-quem"><div class="perf-quem">${foto(p, 'perf-tab-foto')}<div class="perf-quem-txt"><strong>${esc(p.nome)}</strong>${selo(p)}${detalhe(p)}</div></div></td>
+      <td class="perf-td-medida" data-rot="${colMedida}"><div class="perf-medida">${perfBarraHTML(topo > 0 ? medidaDe(p) / topo : 0, perfCorClasse(eqs[0]))}<strong>${esc(numero(p))}</strong></div>${medida === 'valor' && semValorP(p) ? `<small class="perf-parcial">parcial (${semValorP(p)} sem valor)</small>` : ''}</td>
+      <td class="perf-td-num" data-rot="Entregas"><b>${p.entregas}</b>${selinho(p)}</td>
+      ${comValor ? `<td class="perf-td-num" data-rot="Valor confirmado">${valorTxt(p) ? esc(valorTxt(p)) : '<span class="perf-nada">sem valor confirmado</span>'}</td>` : ''}
+      <td class="perf-td-acao">${acoes(p)}</td>
+    </tr>`;
+  };
+  const tabela = resto.length ? `<div class="perf-tabela-wrap"><table class="perf-tabela">
+      <caption class="perf-sr">Ranking individual por ${colMedida.toLowerCase()}${podio.length ? `, do ${podio.length + 1}º lugar em diante` : ''}</caption>
+      <thead><tr><th scope="col" class="perf-th-pos">Pos.</th><th scope="col">Pessoa</th><th scope="col" class="perf-th-medida">${colMedida}${medida === 'nota' ? ' <small>(0 a 100)</small>' : medida === 'peso' ? ' <small>(O.S. equivalentes)</small>' : ' <small>(rateado)</small>'}</th><th scope="col" class="perf-th-num">Entregas</th>${comValor ? '<th scope="col" class="perf-th-num">Valor confirmado</th>' : ''}<th scope="col"><span class="perf-sr">Ações</span></th></tr></thead>
+      <tbody>${resto.map(linhaHTML).join('')}</tbody></table></div>` : '';
   const pode = perfPodeEditar();
   /* Quanto da conferência existe, dito por critério. Abaixo de 80% o critério
-     fica fora da nota de todos — e a tela diz quantas voltas faltam. */
+     fica fora da nota de todos, e isso muda a nota: fica À VISTA, não dentro
+     do "Como a nota é calculada". A cobertura que está boa vai lá dentro. */
   const voltas = n => `${n} ${n === 1 ? 'volta' : 'voltas'}`;
   const crits = ['limpeza', 'equipamentos'].filter(k => av.pesos[k] > 0 && av.cobertura[k].voltas);
   const mesmaConta = crits.length === 2 && av.cobertura.limpeza.conferidas === av.cobertura.equipamentos.conferidas;
   const grupos = mesmaConta ? [crits] : crits.map(k => [k]);
-  const coberturaTxt = grupos.map(ks => {
-    const c = av.cobertura[ks[0]];
+  const coberturaOk = [], coberturaFora = [];
+  for (const ks of grupos) {
+    const cb = av.cobertura[ks[0]];
     const rot = ks.map((k, i) => i ? PERF_CRIT_ROTULO[k].toLowerCase() : PERF_CRIT_ROTULO[k]).join(' e ');
     const plural = ks.length > 1;
-    if (c.ok) return ` ${rot}: ${c.conferidas} de ${voltas(c.voltas)} com resposta.`;
-    const precisa = Math.ceil(c.voltas * av.coberturaMinima);
-    return fechada
-      ? ` ${rot} ${plural ? 'ficaram' : 'ficou'} fora da nota nesta revisão: só ${c.conferidas} de ${voltas(c.voltas)} tinham resposta quando o período foi fechado.`
-      : ` ${rot} ${plural ? 'estão' : 'está'} FORA da nota de todos: a conferência cobriu ${c.conferidas} de ${voltas(c.voltas)} (precisa de ${precisa}).`;
-  }).join('');
+    if (cb.ok) { coberturaOk.push(`${rot}: ${cb.conferidas} de ${voltas(cb.voltas)} com resposta.`); continue; }
+    const precisa = Math.ceil(cb.voltas * av.coberturaMinima);
+    coberturaFora.push(fechada
+      ? `${rot} ${plural ? 'ficaram' : 'ficou'} fora da nota nesta revisão: só ${cb.conferidas} de ${voltas(cb.voltas)} tinham resposta quando o período foi fechado.`
+      : `${rot} ${plural ? 'estão' : 'está'} FORA da nota de todos: a conferência cobriu ${cb.conferidas} de ${voltas(cb.voltas)} (precisa de ${precisa}).`);
+  }
   const pesosTxt = ['producao', 'limpeza', 'equipamentos'].map(k => `${PERF_CRIT_ROTULO[k]} ${av.pesos[k]}%`).join(' · ');
   const vazio = !av.pessoas.length
     ? '<p class="perf-rank-vazio">Nenhuma entrega com participantes neste período.</p>'
     : (!linhas.length ? `<p class="perf-rank-vazio">${medida === 'valor' ? 'Ninguém tem valor CONFIRMADO neste período ainda. Confirme as participações na lista abaixo.' : 'Sem dado suficiente para a nota neste período.'}</p>` : '');
-  return `<section class="perf-ranking">
+  const lead = medida === 'nota'
+    ? `Nota de 0 a 100 · ${fechada ? 'pesos desta revisão: ' : ''}${esc(pesosTxt)}`
+    : medida === 'peso' ? 'Soma do peso de cada um nas entregas. Aparecer em mais entregas divididas não soma mais que fazer o mesmo sozinho.'
+    : 'Valor das entregas rateado pelo peso de cada um. Só participações confirmadas. Não é bônus.';
+  const como = medida === 'nota' ? `<details class="perf-como"><summary>Como a nota é calculada</summary><div>
+      <p>Produção conta o PESO de cada um em cada entrega: seis entregas divididas ao meio valem três, e quem mais produziu no período vale 100. Carro e equipamentos vêm da conferência da volta; volta sem resposta conta pela média do período, para ninguém ganhar nem perder por a conferência não ter sido feita.</p>
+      <p>Um critério só entra na nota quando pelo menos 80% das voltas do período têm resposta.${coberturaOk.length ? ' ' + esc(coberturaOk.join(' ')) : ''}</p>
+      <p>Nos detalhes de cada pessoa, "7/8" são as voltas dela que foram conferidas e "média" quer dizer que nenhuma foi; "fora" é critério que não entrou na nota.</p>
+    </div></details>` : '';
+  return `<section class="perf-ranking" aria-labelledby="perf-rank-titulo">
     <header class="perf-ranking-head">
-      <div><h3>Ranking individual</h3><p>${medida === 'nota'
-        ? `Nota de 0 a 100 · ${fechada ? 'pesos desta revisão: ' : ''}${esc(pesosTxt)}. Produção conta o PESO de cada um em cada entrega: seis entregas divididas ao meio valem três. Carro e equipamentos vêm da conferência da volta; volta sem resposta conta pela média do período.${coberturaTxt}`
-        : medida === 'peso' ? 'Soma do peso de cada um nas entregas. Aparecer em mais entregas divididas não soma mais que fazer o mesmo sozinho.'
-        : 'Valor das entregas rateado pelo peso de cada um. Só participações confirmadas. Não é bônus.'}</p></div>
+      <div class="perf-ranking-titulo"><h3 id="perf-rank-titulo">Ranking individual</h3>${perfSituacaoHTML(situacao)}</div>
       <div class="perf-ranking-ctrl">
-        <span class="casa-chips-periodo">
-          <button type="button" class="casa-chip-per ${medida === 'nota' ? 'on' : ''}" data-perf-pessoa-medida="nota">Nota</button>
-          <button type="button" class="casa-chip-per ${medida === 'peso' ? 'on' : ''}" data-perf-pessoa-medida="peso">Produção</button>
-          <button type="button" class="casa-chip-per ${medida === 'valor' ? 'on' : ''}" data-perf-pessoa-medida="valor">Valor</button>
-        </span>
-        ${pode && !fechada ? '<button class="btn-ghost btn-sm" id="perf-criterios">⚖️ Pesos da nota</button>' : ''}
+        ${perfSegHTML(medida, [['nota', 'Nota'], ['peso', 'Produção'], ['valor', 'Valor']], 'perf-pessoa-medida', 'Ordenar o ranking por')}
+        ${pode && !fechada ? '<button type="button" class="btn-ghost btn-sm" id="perf-criterios">⚖️ Pesos da nota</button>' : ''}
       </div>
     </header>
+    <p class="perf-ranking-lead">${lead}</p>
+    ${medida === 'nota' && coberturaFora.length ? `<p class="perf-aviso">${esc(coberturaFora.join(' '))}</p>` : ''}
+    ${como}
     ${vazio}
-    ${podio.length ? `<div class="perf-podio n${podio.length}">${podioHTML}</div>` : ''}
-    ${resto.length ? `<ol class="perf-rank-lista">${restoHTML}</ol>` : ''}
+    ${podioHTML}
+    ${tabela}
     ${fora.length ? `<p class="perf-rank-nota">${fora.length} ${fora.length === 1 ? 'pessoa fica' : 'pessoas ficam'} fora deste ranking por falta de dado, e não com zero: ${fora.map(p => esc(p.nome)).join(', ')}.</p>` : ''}
   </section>`;
 }
@@ -975,38 +1196,57 @@ function perfRankingEquipesHTML(regs, c) {
   const numero = x => medida === 'valor' ? dinheiroCasa(x.valorConf) : String(x.os);
   const semValorDe = x => { const v = valorDe.get(x.chave); return v ? v.semValor : 0; };
   const rotulo = x => medida === 'valor' ? ('confirmado' + (semValorDe(x) ? ` · parcial (${semValorDe(x)} sem valor)` : '')) : (x.os === 1 ? 'entrega' : 'entregas');
-  const aConferir = x => medida === 'entregas' && x.os > x.confirmadas ? `<small class="perf-a-conferir">${x.os - x.confirmadas} a conferir</small>` : '';
-  // Equipe salva mostra os integrantes do CADASTRO; a primeira entrega do
-  // período pode ter tido um ajudante avulso que não é da equipe.
-  const membrosTxt = x => { const e = c.equipes.find(q => q.id === x.chave); return ((e && e.membros) || x.membros || []).map(m => esc(m.nome)).join(' · '); };
+  // A outra medida, pequena, embaixo do número: no modo Entregas, o valor (só o confirmado).
+  const linha = x => {
+    if (medida === 'valor') return `${x.os} ${x.os === 1 ? 'entrega' : 'entregas'}`;
+    const v = valorDe.get(x.chave);
+    if (!v) return 'valor a conferir';
+    return v.os > v.semValor ? esc(dinheiroCasa(v.valor)) + ' confirmado' + (v.semValor ? ' (parcial)' : '') : 'sem valor nas confirmadas';
+  };
+  const aConferir = x => medida === 'entregas' && x.os > x.confirmadas ? `<span class="perf-a-conferir">${x.os - x.confirmadas} a conferir</span>` : '';
+  /* Equipe salva mostra os integrantes do CADASTRO; a primeira entrega do
+     período pode ter tido um ajudante avulso que não é da equipe. Os rostos
+     vêm da ficha do RH (foto quando há), pelo ID de hoje de cada um. */
+  const membrosDe = x => { const e = c.equipes.find(q => q.id === x.chave); return (e && e.membros) || x.membros || []; };
+  const membrosTxt = x => membrosDe(x).map(m => esc(m.nome)).join(' · ');
+  const rh = typeof pessoasRH === 'function' ? pessoasRH() : [];
+  const fichaDe = m => { const id = String(perfIdMembro(m)); return rh.find(p => String(p.id) === id || String(p.chave) === id || String(p.chave) === String(m.chave)); };
+  const rostos = x => { const ms = membrosDe(x); return ms.length ? `<span class="perf-rostos" aria-hidden="true">${ms.slice(0, 5).map(m => avatarRH(fichaDe(m) || {nome: m.nome}, 'mini')).join('')}${ms.length > 5 ? `<span class="perf-rostos-mais">+${ms.length - 5}</span>` : ''}</span>` : ''; };
   const acoes = x => {
-    const ver = `<button class="inline-link" data-perf-grupo="${esc(x.chave)}">Ver entregas</button>`;
+    const ver = `<button type="button" class="inline-link" data-perf-grupo="${esc(x.chave)}">Ver entregas</button>`;
     if (!pode) return ver;
     const salva = c.equipes.find(e => e.id === x.chave);
     return ver + (salva
-      ? ` <button class="inline-link" data-perf-equipe="${esc(salva.id)}">Editar</button>`
-      : ` <button class="inline-link perf-nomear" data-perf-nomear="${esc(x.chave)}">Dar nome e logo</button>`);
+      ? ` <button type="button" class="inline-link" data-perf-equipe="${esc(salva.id)}">Editar</button>`
+      : ` <button type="button" class="inline-link perf-nomear" data-perf-nomear="${esc(x.chave)}">Dar nome e logo</button>`);
   };
   const apelido = x => x.salva ? '' : `<small class="perf-sem-nome">${(x.membros || []).length > 1 ? 'composição sem nome' : 'individual'}</small>`;
   perfUltimoRanking = new Map(todas.map(x => [x.chave, x.membros || []]));
   const {podio, resto} = perfCortarPodio(linhas);
-  // A cor e o animal da equipe fixa: a cor só como classe da paleta.
-  const podioHTML = podio.map(x => `<article class="perf-podio-item pos-${x.posicao}${perfCorClasse(x)}">
-      <span class="perf-medalha" aria-label="${x.posicao}º lugar">${PERF_MEDALHAS[x.posicao] || x.posicao + 'º'}</span>
-      ${perfLogoHTML(x, 'perf-podio-logo')}
-      <h3>${esc(x.nome)}</h3>${apelido(x)}
-      ${x.salva ? `<p class="perf-podio-membros">${membrosTxt(x)}</p>` : ''}
-      <div class="perf-podio-num"><strong>${numero(x)}</strong><span>${rotulo(x)}</span></div>
-      ${aConferir(x)}
-      <div class="perf-podio-acoes">${acoes(x)}</div>
-    </article>`).join('');
-  const restoHTML = resto.map(x => `<li class="perf-rank-linha${perfCorClasse(x)}">
-      <span class="perf-rank-pos">${PERF_MEDALHAS[x.posicao] || x.posicao + 'º'}</span>
-      ${perfLogoHTML(x, 'perf-rank-logo')}
-      <div class="perf-rank-nome ${x.salva ? '' : 'sem-nome'}"><strong>${esc(x.nome)}</strong>${apelido(x)}${x.salva ? `<small>${membrosTxt(x)}</small>` : ''}</div>
-      <span class="perf-rank-num"><strong>${numero(x)}</strong> <small>${rotulo(x)}</small>${aConferir(x)}</span>
-      <span class="perf-rank-acoes">${acoes(x)}</span>
-    </li>`).join('');
+  const situacao = perfSituacao(regs);
+  // A cor e o animal da equipe fixa: a cor só como classe da paleta, uma vez por equipe.
+  const podioHTML = perfPodioHTML(podio.map(x => ({
+    posicao: x.posicao, nome: x.nome, visual: perfLogoHTML(x, 'perf-podio-logo'), classe: perfCorClasse(x), selo: apelido(x),
+    numero: numero(x), unidade: rotulo(x), linha: linha(x),
+    aviso: aConferir(x),
+    extra: rostos(x) + `<p class="perf-podio-membros">${x.salva ? membrosTxt(x) : ''}</p>`,
+    acoes: acoes(x),
+  })), {
+    rotulo: 'Pódio das equipes',
+    classe: 'perf-podio-equipes' + (situacao && situacao.tipo === 'parcial' ? ' perf-podio-parcial' : ''),
+    animar: perfAnimarPodio(['equipes', medida, perfChave(), ...podio.map(x => x.chave + ':' + x.posicao)].join('|')),
+  });
+  /* DO 4º EM DIANTE, UM CARTÃO POR EQUIPE: a faixa na cor da equipe, a logo
+     grande, os rostos de quem é da equipe, o número e a distância para o 1º. */
+  const topo = linhas.reduce((m, x) => Math.max(m, Number(medida === 'valor' ? x.valorConf : x.os) || 0), 0);
+  const cartoes = resto.length ? `<ol class="perf-equipes-cartoes" aria-label="Equipes${podio.length ? `, do ${podio.length + 1}º lugar em diante` : ''}">${resto.map(x => `<li class="perf-equipe-cartao${perfCorClasse(x)}">
+      <div class="perf-cartao-topo"><span class="perf-cartao-pos">${PERF_MEDALHAS[x.posicao] ? `<span aria-hidden="true">${PERF_MEDALHAS[x.posicao]}</span><span class="perf-sr">${x.posicao}º lugar</span>` : `${x.posicao}º`}</span>${perfLogoHTML(x, 'perf-cartao-logo')}<div class="perf-cartao-nome ${x.salva ? '' : 'sem-nome'}"><h4>${esc(x.nome)}</h4>${apelido(x)}</div></div>
+      <p class="perf-cartao-num"><strong>${esc(numero(x))}</strong> <span>${esc(rotulo(x))}</span></p>
+      ${perfBarraHTML(topo > 0 ? (medida === 'valor' ? x.valorConf : x.os) / topo : 0)}
+      <p class="perf-cartao-linha">${linha(x)} ${aConferir(x)}</p>
+      <div class="perf-cartao-gente">${rostos(x)}${x.salva ? `<small>${membrosTxt(x)}</small>` : ''}</div>
+      <div class="perf-cartao-acoes">${acoes(x)}</div>
+    </li>`).join('')}</ol>` : '';
   // Equipes cadastradas que não aparecem no ranking deste período: ainda
   // precisam de um lugar para serem vistas e editadas.
   const noRanking = new Set(todas.map(x => x.chave));
@@ -1017,56 +1257,51 @@ function perfRankingEquipesHTML(regs, c) {
     : (medida === 'valor' && !linhas.length
       ? '<p class="perf-rank-vazio">Nenhuma equipe tem valor CONFIRMADO neste período ainda. O ranking por valor só usa participações conferidas. Confirme na lista de entregas abaixo.</p>'
       : '');
-  return `<section class="perf-ranking">
+  return `<section class="perf-ranking" aria-labelledby="perf-rank-titulo">
     <header class="perf-ranking-head">
-      <div><h3>Ranking das equipes</h3><p>Compara composições: cada entrega conta uma vez na equipe que a fez. A avaliação de cada pessoa é INDIVIDUAL, pelo peso dela em cada entrega. Ela está na vista Pessoas. Entregas incluem divisões sugeridas, ainda a conferir. Mostra volume, não qualidade. E não é bônus.</p></div>
+      <div class="perf-ranking-titulo"><h3 id="perf-rank-titulo">Ranking das equipes</h3>${perfSituacaoHTML(situacao)}</div>
       <div class="perf-ranking-ctrl">
-        <span class="casa-chips-periodo">
-          <button type="button" class="casa-chip-per ${medida === 'entregas' ? 'on' : ''}" data-perf-rank-medida="entregas">Entregas</button>
-          <button type="button" class="casa-chip-per ${medida === 'valor' ? 'on' : ''}" data-perf-rank-medida="valor">Valor confirmado</button>
-        </span>
-        ${pode ? '<button class="btn-primary btn-sm" id="perf-nova-equipe">+ Nova equipe</button>' : ''}
+        ${perfSegHTML(medida, [['entregas', 'Entregas'], ['valor', 'Valor confirmado']], 'perf-rank-medida', 'Ordenar o ranking por')}
+        ${pode ? '<button type="button" class="btn-ghost btn-sm" id="perf-nova-equipe">+ Nova equipe</button>' : ''}
       </div>
     </header>
+    <p class="perf-ranking-lead">Cada entrega conta uma vez na equipe que a fez, confirmada ou sugerida. Mostra volume, não qualidade, e não é bônus. A avaliação de cada pessoa é individual e está na vista Pessoas.</p>
     ${vazio}
-    ${podio.length ? `<div class="perf-podio n${podio.length}">${podioHTML}</div>` : ''}
-    ${resto.length ? `<ol class="perf-rank-lista">${restoHTML}</ol>` : ''}
+    ${podioHTML}
+    ${cartoes}
     ${semValor.length ? `<p class="perf-rank-nota">${semValor.length} equipe${semValor.length === 1 ? '' : 's'} com entrega mas sem valor confirmado ficam fora deste ranking, e não como zero.</p>` : ''}
-    ${paradas.length ? `<div class="perf-equipes-paradas"><span>Sem entrega no período:</span>${paradas.map(e => `<button class="perf-equipe-chip${perfCorClasse(e)}" ${pode ? `data-perf-equipe="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}
-    ${desativadas.length ? `<div class="perf-equipes-paradas perf-desativadas"><span>Desativadas:</span>${desativadas.map(e => `<button class="perf-equipe-chip${perfCorClasse(e)}" ${pode ? `data-perf-equipe="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}
+    ${paradas.length ? `<div class="perf-equipes-paradas"><span>Sem entrega no período:</span>${paradas.map(e => `<button type="button" class="perf-equipe-chip${perfCorClasse(e)}" ${pode ? `data-perf-equipe="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}
+    ${desativadas.length ? `<div class="perf-equipes-paradas perf-desativadas"><span>Desativadas:</span>${desativadas.map(e => `<button type="button" class="perf-equipe-chip${perfCorClasse(e)}" ${pode ? `data-perf-equipe="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}
   </section>`;
 }
 
+/* ------------------------------------------------------- A ABA EQUIPE
+ * A ORDEM DA PÁGINA (revisão de experiência, 29/09/2026): o período, UMA
+ * faixa de qualidade dos dados, o ranking (pódio e tabela), a conferência de
+ * cada entrega e, no fim (casa.js), Base e fechamento. Os cartões antigos de
+ * pessoa e as sugestões de equipe eram montados aqui e nunca exibidos: saíram.
+ */
 function performanceEquipesHTML() {
   const c=perfConfig(), f=periodoOuMes('_fPerf');
   const lista=perfLista().filter(o=>OPERACAO.emIntervalo(diaEntrega(o),f.de,f.ate));
-  const regs=perfUnirPessoas(lista.map(o=>perfRegistro(o,c))), resumo=PERF.resumir(regs), apurado=PERF.resumir(regs.filter(r=>r.confirmado));
-  const confirmado=regs.filter(r=>r.confirmado).length, semEquipe=regs.filter(r=>!r.membros.length).length;
-  const modo=STATE._perfModo || 'pessoas', pesquisa=STATE._perfBusca || '';
+  const regs=perfUnirPessoas(lista.map(o=>perfRegistro(o,c)));
+  const modo=STATE._perfModo==='equipes'?'equipes':'pessoas', pesquisa=STATE._perfBusca || '';
+  const podeConferir=perfPodeEditar()&&!perfFonteAtual()?.fechadoEm, verValor=perfPodeEditar();
   /* Ordem fixa (entrega mais recente primeiro, depois o número): a lista vinha
      na ordem do banco (id sorteado) ou do cache, e cada confirmação a
      reembaralhava; a próxima linha fugia do dedo. */
   const linhas=[...regs].sort((a,b)=>String(diaEntrega(b.os)||'').localeCompare(String(diaEntrega(a.os)||'')) || String(a.os.numero||'').localeCompare(String(b.os.numero||''),'pt-BR',{numeric:true}));
-  const cards=(modo==='equipes'?resumo.equipes:resumo.pessoas).map(p=>{
-    const cf=(modo==='equipes'?apurado.equipes:apurado.pessoas).find(x=>x.chave===p.chave);
-    const valor=!cf?'Aguardando conferência':cf.semValor===cf.os?'Valor não disponível':dinheiroCasa(cf.valor)+(cf.semValor?' · parcial':'');
-    return `<article class="perf-score"><div class="perf-score-head">${modo==='equipes'?`<span class="perf-emblema">${esc(p.emblema)}</span>`:avatarRH(pessoasRH().find(x=>[x.chave,x.id].includes(p.chave))||{nome:p.nome})}<h3>${esc(p.nome)}</h3><div class="perf-count"><strong>${p.os}</strong><span>entregas</span></div></div><p class="perf-status">${p.confirmadas} confirmadas · ${p.os-p.confirmadas} a conferir</p><p><strong>${valor}</strong><br>Valor confirmado${modo==='pessoas'?' · rateado':''}</p><details><summary>Entender a participação</summary><p>${modo==='equipes'?'Cada O.S. é contada uma vez na equipe.':perfFormato(cf?.equivalentes || 0)+' O.S. equivalentes confirmadas após rateio.'} Entregas inclui sugestões; valores incluem apenas confirmações. Não representa bônus.</p></details><button class="inline-link" ${modo==='pessoas'?`data-perf-pessoa="${esc(p.chave)}"`:`data-perf-grupo="${esc(p.chave)}"`}>Ver entregas →</button></article>`;
-  }).join('');
-  const sugestoes=new Map();
-  for(const os of STORE.getAllOS()) {
-    const membros=perfEquipeOS(os);if(membros.length<2)continue;
-    const k=PERF.composicao(membros);if(c.equipes.some(e=>PERF.composicaoCom(e.membros,perfIdMembro)===k))continue;
-    const x=sugestoes.get(k)||{membros,n:0};x.n++;sugestoes.set(k,x);
-  }
-  const sugeridas=[...sugestoes.values()].sort((a,b)=>b.n-a.n).slice(0,4);
-  return `<section class="perf-workspace"><div class="filter-bar">${filtroPeriodoHTML('_fPerf')}<button class="btn-ghost" id="perf-pdf">📄 Relatório PDF</button></div>
-    <div class="perf-summary"><div><b>${lista.length}</b><span>instalações no período</span></div><div><b>${confirmado}/${lista.length}</b><span>entregas com participação confirmada</span></div><div><b>${semEquipe}</b><span>sem equipe informada</span></div></div>
-    <div class="perf-toolbar"><div class="casa-vista"><button class="btn-ghost ${modo==='pessoas'?'active':''}" data-perf-modo="pessoas">👤 Pessoas</button><button class="btn-ghost ${modo==='equipes'?'active':''}" data-perf-modo="equipes">🤝 Equipes</button></div><span>Entregas com participação registrada ou sugerida</span></div>
-    <p class="perf-coverage">${semEquipe ? `${semEquipe} de ${lista.length} entregas sem equipe: a comparação por pessoa está incompleta.` : 'Todas as entregas do período têm participantes.'} ${lista.length-confirmado} apurações aguardam confirmação.</p>
-    <details class="perf-method"><summary>Como interpretar os indicadores</summary><p>Entregas conta as O.S. em que a pessoa participou; não some essa coluna entre pessoas. O.S. equivalentes divide cada entrega pelos percentuais, sem duplicação. Divisões sugeridas ainda não foram confirmadas. Valores rateados não são faturamento pessoal nem bônus. Qualidade, complexidade e retrabalho precisam de revisão. ${esc(perfFonteTexto())}</p></details>
+  // A situação com cor própria: verde confirmada, âmbar sugerida, vermelho sem equipe ou inconsistente.
+  const situacao=r=>r.confirmado?['ok','Confirmada']:!r.membros.length?['sem','Sem equipe']:PERF.validar(r.membros)?['erro','Participação inconsistente']:['sug','Divisão sugerida'];
+  const vista=v=>`<button type="button" class="btn-ghost ${modo===v?'active':''}" aria-pressed="${modo===v}" data-perf-modo="${v}">${v==='pessoas'?'👤 Pessoas':'🤝 Equipes'}</button>`;
+  return `<section class="perf-workspace"><div class="filter-bar">${filtroPeriodoHTML('_fPerf')}<button type="button" class="btn-ghost" id="perf-pdf">📄 Relatório PDF</button></div>
+    ${perfCoberturaHTML(regs, f)}
+    <div class="perf-toolbar"><span class="perf-toolbar-rot" id="perf-vista-rot">Ranking de</span><div class="casa-vista" role="group" aria-labelledby="perf-vista-rot">${vista('pessoas')}${vista('equipes')}</div></div>
     ${modo==='equipes' ? perfRankingEquipesHTML(regs, c) : perfRankingPessoasHTML(regs, c)}
-    ${''/* Equipes são criadas, nomeadas e editadas no ranking de equipes (vista Equipes). */}
-    <section class="perf-entregas"><h3>Conferência por entrega</h3><div class="perf-filtros"><label>Situação <select id="perf-situacao"><option value="">Todas</option><option value="pendente">A conferir</option><option value="confirmada">Confirmadas</option><option value="sem-equipe">Sem equipe</option><option value="invalida">Participação inconsistente</option>${perfPodeEditar()?'<option value="sem-valor">Sem valor</option>':''}</select></label><button class="btn-ghost" id="perf-limpar">Limpar filtros da lista</button><span id="perf-recorte" role="status"></span></div><label>Buscar O.S., cliente ou pessoa · filtra a lista abaixo <input id="perf-busca-os" type="search" value="${esc(pesquisa)}" placeholder="Digite para localizar"></label><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / Cliente</th><th>Data</th><th>Equipe e participação</th><th>Participação e volta</th><th></th></tr></thead><tbody>${linhas.map(r=>`<tr data-perf-id="${esc(r.id)}"><td><button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button><small class="bloco">${esc(r.os.cliente)}</small></td><td>${esc(diaEntrega(r.os).split('-').reverse().join('/'))}</td><td>${r.equipeNome?`<strong>${esc(r.emblema)} ${esc(r.equipeNome)}</strong><br>`:''}${r.membros.map(p=>`${esc(p.nome)} · ${perfFormato(p.percentual)}%`).join('<br>') || 'Sem equipe'}</td><td><span class="badge">${r.confirmado?'Confirmada':!r.membros.length?'Sem equipe':PERF.validar(r.membros)?'Participação inconsistente':'Divisão sugerida'}</span>${r.os.retrabalho?'<small class="bloco">Serviço de retrabalho</small>':''}<small class="bloco perf-volta">${perfVoltaTxt(r.retornoConf)}</small>${perfPodeEditar()?`<small class="bloco">${r.valor==null?'Sem valor':esc(dinheiroCasa(r.valor))}</small>`:''}</td><td>${perfPodeEditar()&&!perfFonteAtual()?.fechadoEm?`<button class="btn-ghost" data-perf-part="${esc(r.id)}">Conferir</button>`:''}</td></tr>`).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div></section></section>`;
+    <details class="perf-method"><summary>Como interpretar os indicadores</summary><p>Entregas conta as O.S. em que a pessoa participou; não some essa coluna entre pessoas. O.S. equivalentes divide cada entrega pelos percentuais, sem duplicação. Divisões sugeridas ainda não foram confirmadas. Valores rateados não são faturamento pessoal nem bônus. Qualidade, complexidade e retrabalho precisam de revisão. ${esc(perfFonteTexto())}</p></details>
+    <section class="perf-entregas" aria-labelledby="perf-entregas-titulo"><div class="perf-entregas-cabeca"><h3 id="perf-entregas-titulo">Conferência por entrega</h3><p>Quem fez cada entrega e com qual percentual. É daqui que o ranking tira os nomes.</p></div>
+      <div class="perf-filtros"><label>Situação <select id="perf-situacao"><option value="">Todas</option><option value="pendente">A conferir</option><option value="confirmada">Confirmadas</option><option value="sem-equipe">Sem equipe</option><option value="invalida">Participação inconsistente</option>${verValor?'<option value="sem-valor">Sem valor</option>':''}</select></label><label class="perf-busca">Buscar O.S., cliente ou pessoa <input id="perf-busca-os" type="search" value="${esc(pesquisa)}" placeholder="Digite para localizar"></label><button type="button" class="btn-ghost" id="perf-limpar">Limpar filtros</button><span id="perf-recorte" role="status"></span></div>
+      <div class="casa-tabela-wrap"><table class="casa-tabela perf-conf-tabela"><thead><tr><th scope="col">O.S. / Cliente</th><th scope="col">Data</th><th scope="col">Equipe e percentuais</th><th scope="col">Situação e volta</th><th scope="col"><span class="perf-sr">Ações</span></th></tr></thead><tbody>${linhas.map(r=>{const st=situacao(r);return `<tr data-perf-id="${esc(r.id)}"><td><button type="button" class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button><small class="bloco">${esc(r.os.cliente)}</small></td><td>${esc(diaEntrega(r.os).split('-').reverse().join('/'))}</td><td>${r.equipeNome?`<strong>${esc(r.emblema)} ${esc(r.equipeNome)}</strong><br>`:''}${r.membros.map(p=>`${esc(p.nome)} · ${perfFormato(p.percentual)}%`).join('<br>') || '<span class="perf-nada">Sem equipe</span>'}</td><td><span class="badge perf-st-${st[0]}">${st[1]}</span>${r.os.retrabalho?'<small class="bloco">Serviço de retrabalho</small>':''}<small class="bloco perf-volta">${perfVoltaTxt(r.retornoConf)}</small>${verValor?`<small class="bloco">${r.valor==null?'Sem valor':esc(dinheiroCasa(r.valor))}</small>`:''}</td><td>${podeConferir?`<button type="button" class="btn-ghost btn-sm" data-perf-part="${esc(r.id)}">Conferir</button>`:''}</td></tr>`;}).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div></section></section>`;
 }
 function wirePerformanceEquipes(el) {
   perfWireFonte(el);
@@ -1098,10 +1333,21 @@ function wirePerformanceEquipes(el) {
       const ok=(!situacao.value || (situacao.value==='pendente'?!r.confirmado:situacao.value==='sem-valor'?r.valor==null:status===situacao.value)) && PERF.incluiPessoa(r.membros,STATE._perfPessoa) && (!STATE._perfGrupo || grupo===STATE._perfGrupo) && normCasa(tr.textContent).includes(normCasa(busca.value));
       tr.hidden=!ok;if(ok)n++;
     });
-    el.querySelector('#perf-recorte').textContent=n+(n===1?' entrega na lista':' entregas na lista')+(STATE._perfPessoa || STATE._perfGrupo?' · participante/equipe selecionado':'')+'. Totais dos cards: período completo.';
+    el.querySelector('#perf-recorte').textContent=n+(n===1?' entrega na lista':' entregas na lista')+(STATE._perfPessoa || STATE._perfGrupo?' · participante/equipe selecionado':'')+'. Os números do ranking valem para o período inteiro.';
   };
   el.querySelectorAll('[data-perf-pessoa],[data-perf-grupo]').forEach(b=>b.onclick=()=>{STATE._perfPessoa=b.dataset.perfPessoa||'';STATE._perfGrupo=b.dataset.perfGrupo||'';busca.value='';situacao.value='';filtrar();el.querySelector('.perf-entregas').scrollIntoView({behavior:'smooth',block:'start'});});
   if(busca){situacao.value=STATE._perfSituacao||'';busca.oninput=filtrar;situacao.onchange=filtrar;el.querySelector('#perf-limpar').onclick=()=>{STATE._perfPessoa='';STATE._perfGrupo='';busca.value='';situacao.value='';filtrar();};filtrar();}
+  /* A FAIXA DE COBERTURA manda para a lista já filtrada ("Completar equipes"
+     mostra as sem equipe, com o Conferir de cada uma) e o foco vai para o
+     filtro, para quem usa teclado continuar dali. */
+  el.querySelectorAll('[data-perf-filtrar]').forEach(b=>b.onclick=()=>{
+    if(!busca)return;
+    STATE._perfPessoa='';STATE._perfGrupo='';busca.value='';situacao.value=b.dataset.perfFiltrar;filtrar();
+    el.querySelector('.perf-entregas').scrollIntoView({behavior:'smooth',block:'start'});
+    try{situacao.focus({preventScroll:true});}catch(e){situacao.focus();}
+  });
+  el.querySelectorAll('[data-perf-atualizar]').forEach(b=>b.onclick=perfCarregarFonte);
+  el.querySelectorAll('[data-perf-lancar]').forEach(b=>b.onclick=perfAbrirLancamento);
   const relPdf=el.querySelector('#perf-rel-pdf');if(relPdf)relPdf.onclick=()=>{const copy=el.querySelector('.perf-report').cloneNode(true);copy.querySelectorAll('.perf-team-report details,.perf-report-pendencias').forEach(n=>n.remove());imprimirAnalisePCP('Performance · resumo de pessoas e equipes',copy,periodoOuMes('_fPerf'),perfFonteTexto());};
   const detalhado=el.querySelector('#perf-rel-detalhado');if(detalhado)detalhado.onclick=()=>{
     const copy=el.querySelector('.perf-report').cloneNode(true);

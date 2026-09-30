@@ -6945,7 +6945,9 @@ function montarMensagemDia(dia, lista) {
     txt += `${emojiServico(os.servico)} Serviço: ${os.servico || '—'}\n`;
     txt += `👥 Equipe: ${listarPessoasMsg(os.equipe)}\n`;
     txt += os.veiculo ? `${veic.emoji} Veículo: ${veic.texto}\n` : `🚗 Veículo: a definir\n`;
-    if (os.endereco) txt += `📍 ${os.endereco}\n`;
+    /* SEM ENDEREÇO (pedido do Léo, 29/09/2026). O endereço da O.S. vem do
+       CADASTRO do cliente no ERP (o do CNPJ), não do local da instalação: ir
+       no grupo da equipe mandava gente para a sede do cliente. */
     txt += `\n`;
   }
   txt += `${sep}\n`;
@@ -7014,7 +7016,7 @@ function montarTextoWhatsApp(os) {
   const co = os.checkout || {};
   return `*O.S ${os.numero || '—'}* — ${os.cliente || ''}\n` +
     `📅 ${fmtInstalacao(os.instalacao)}\n` +
-    `📍 ${os.endereco || ''}\n` +
+    // Sem o endereço do cadastro do cliente (o do CNPJ): não é o local da instalação.
     `👷 ${OPERACAO.equipeTexto(os, ', ') || '—'}\n` +
     (os.confirmacao ? `✅ ${os.confirmacao}\n` : '') +
     (os.finalizadaEm ? `🏁 Finalizada${co.situacao ? ' — ' + co.situacao : ''}\n` : '') +
@@ -7227,7 +7229,8 @@ function abrirWhatsAppDia(dia, lista) {
   const titulo = d ? `${DIAS_SEMANA[d.getDay()]} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}` : dia;
   let txt = `*Programação ${titulo}*\n\n`;
   lista.forEach(os => {
-    txt += `*O.S ${os.numero||'—'}* — ${os.cliente||''}\n📍 ${os.endereco||''}\n⏰ ${os.instalacao?.periodo||''} · 👷 ${OPERACAO.equipeTexto(os, ', ')||'—'}\n\n`;
+    // Sem o endereço do cadastro do cliente (o do CNPJ): não é o local da instalação.
+    txt += `*O.S ${os.numero||'—'}* — ${os.cliente||''}\n⏰ ${os.instalacao?.periodo||''} · 👷 ${OPERACAO.equipeTexto(os, ', ')||'—'}\n\n`;
   });
   window.open(`https://wa.me/?text=${encodeURIComponent(txt)}`, '_blank');
 }
