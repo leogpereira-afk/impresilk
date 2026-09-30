@@ -3350,6 +3350,22 @@ img.perf-logo{object-fit:cover}
    quer dizer que ela não conta para ninguém), mas apagado: repetido em toda
    linha a lançar, em letra cheia, virava a coluna mais escura da tabela. */
 .ent-sem-equipe{font-size:.76rem;color:#8595a6}
+/* ERP DIZ ENTREGUE, PCP TEM SALDO (E7): a mesma moldura de aviso da fila de
+   lançamento, uma linha por O.S. com as duas decisões ao lado. Só admin e
+   pcp veem (casa.js). */
+#panel-entregas .erp-saldo{margin:0;border:1px solid #f0d9a6;border-radius:12px;background:linear-gradient(180deg,#fffaf0,var(--surface,#fff) 80%);padding:10px 14px 12px}
+.erp-saldo-cab{display:flex;align-items:flex-start;gap:10px 14px}
+.erp-saldo-cab h3{margin:0 0 2px;font-size:.95rem;color:#7a4a00}
+.erp-saldo-n{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;margin-left:4px;padding:0 6px;border-radius:11px;background:#c77d0a;color:#fff;font-size:.75rem;vertical-align:1px}
+.erp-saldo-lista{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:8px}
+.erp-saldo-item{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"os acoes" "fatos acoes";gap:4px 14px;align-items:center;padding:10px 12px;border:1px solid #e3e9f0;border-radius:12px;background:var(--surface,#fff)}
+.erp-saldo-os{grid-area:os;min-width:0;color:var(--text)}
+.erp-saldo-os strong{margin-right:4px;color:#163654}
+.erp-saldo-os small{display:block;margin-top:1px;font-size:.74rem;color:#6b7c8f}
+.erp-saldo-fatos{grid-area:fatos;margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:2px 14px;font-size:.8rem;line-height:1.5;color:#3d4b5a}
+.erp-saldo-fatos b{font-weight:700;color:#5d7283}
+.erp-saldo-acoes{grid-area:acoes;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+#panel-entregas .erp-saldo-acoes button{min-height:40px;padding:0 14px;font-weight:650}
 @media (max-width:860px){
   .ent-kpis{grid-template-columns:1fr}
 }
@@ -3364,6 +3380,12 @@ img.perf-logo{object-fit:cover}
   .ent-fila-texto{flex-basis:100%}
   .ent-fila-resumo{gap:2px 12px}
   #panel-entregas .ent-fila-botao{flex:1 1 100%;justify-content:center}
+  /* E7 no celular: a O.S., os fatos e as duas decisões uma embaixo da outra. */
+  #panel-entregas .erp-saldo{padding:10px 12px}
+  .erp-saldo-cab .ent-fila-icone{display:none}
+  .erp-saldo-item{grid-template-columns:minmax(0,1fr);grid-template-areas:"os" "fatos" "acoes"}
+  .erp-saldo-acoes{justify-content:stretch}
+  #panel-entregas .erp-saldo-acoes button{flex:1 1 100%;justify-content:center}
   .ent-fila-corpo{padding:8px 10px 12px}
   .ent-fila-contagem{margin-left:0}
   /* A LINHA VIRA CARTÃO: a tabela de cinco colunas não cabe em 375 px e

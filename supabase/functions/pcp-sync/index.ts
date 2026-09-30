@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas } from "../_shared/pcp-status.mjs";
 // ============================================================================
@@ -1295,6 +1295,20 @@ Deno.serve(async (req: Request) => {
         // A divisão da equipe que o aparelho mandou (F08), antes da preservação.
         const veioAlocacao = Object.prototype.hasOwnProperty.call(os, "alocacao") ? os.alocacao : undefined;
         trocarOS(preservarAusentes(os, existing, { podeLimpar: !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp) }));
+        /* ERP DIZ ENTREGUE, PCP TEM SALDO (E7). Regras em _shared
+           (guardarSaldoERP): a marca da baixa (erpComSaldo) é só do servidor,
+           e a cópia do aparelho não a cria nem a apaga; o "Manter aberta"
+           (erpSaldoDecisao) só admin e pcp gravam, com autor e ID do crachá.
+           O que não entra vira aviso, nunca 422. Só lê o RH quando decide. */
+        {
+          const gestaoE7 = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
+          const agoraE7 = new Date().toISOString();
+          const rodarE7 = (autor: any) => guardarSaldoERP(os, existing, { pode: gestaoE7, avisar: !ehMaquina, autor, agora: agoraE7 });
+          let g7 = rodarE7({ nome: String(cracha?.nome || cracha?.sub || ""), porId: "" });
+          if (g7.decidiu) g7 = rodarE7(await autorAuditoria());
+          trocarOS(g7.os);
+          if (g7.aviso) avisosToque.push(g7.aviso);
+        }
         /* A DIVISÃO DA EQUIPE DENTRO DA O.S. (F08). Regras em _shared
            (sanearAlocacao): só admin e pcp mudam; conferida pelo motor e pela
            chave estrangeira (equipe no cadastro, pessoa no RH); o final é

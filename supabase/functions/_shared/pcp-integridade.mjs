@@ -61,6 +61,94 @@ export function motivoAgendaViva(o, hojeLocal) {
   if (ultimo && ultimo >= String(hojeLocal ?? '')) return 'a agenda da equipe ainda não terminou';
   return '';
 }
+/* ── ERP DIZ ENTREGUE, PCP TEM SALDO (E7, 30/09/2026) ──────────────────────
+   Decisão do dono: quando o ERP dá a O.S. como encerrada e o PCP tem entrega
+   PARCIAL marcada (alguma unidade já foi por marca, inclusive a DECLARADA pelo
+   celular, e ainda sobra item a entregar), o PCP segura a O.S. e a gestão
+   decide. Sem marca parcial, a baixa segue exatamente como antes: a baixa só
+   poupa quando há marca parcial explícita.
+   O QUE CADA SITUAÇÃO DO ERP FAZ COM A O.S. PARCIAL:
+     ENTREGUE, FINALIZADO  poupada (fica aberta), com a marca erpComSaldo, que
+                           põe a O.S. na lista "ERP diz entregue, PCP tem saldo"
+                           da tela Entregas
+     CONCLUIDO             poupada sem a marca: é produção concluída, não
+                           entrega (e está na carteira aberta, que a reabriria)
+     CANCELADO             baixada como antes: o motor lê o saldo como
+                           cancelado e o entregue fica no dia dele
+   A marca é do SERVIDOR (a baixa grava, o aparelho não cria, não muda e não
+   apaga: guardarSaldoERP). O selo (situação e data do ERP) diz a que aviso do
+   ERP ela se refere: a decisão "manter aberta" vale para aquele selo e a O.S.
+   volta à lista quando o ERP disser outra coisa. */
+const situacaoERP = s => String(s ?? '').normalize('NFD').replace(/\p{M}/gu, '').trim().toUpperCase();
+export const SITUACOES_ERP_ENTREGUE = ['ENTREGUE', 'FINALIZADO'];
+// A O.S. aberta com entrega parcial marcada: o resumo do motor, ou null.
+export function entregaParcialMarcada(o) {
+  if (!objeto(o) || String(o.finalizadaEm ?? '').trim()) return null;
+  let r;
+  try { r = ENTREGA_ITEM.resumoOS(o); } catch { return null; }
+  return r && r.situacao === 'parcial' ? r : null;
+}
+function textoParcial(r) {
+  const itens = r.entregues + r.parciais;
+  const decl = r.unidadesDeclaradas > 0 ? `, ${r.unidadesDeclaradas} unidade${r.unidadesDeclaradas === 1 ? '' : 's'} declarada${r.unidadesDeclaradas === 1 ? '' : 's'} pelo celular` : '';
+  return `entrega parcial marcada no PCP: ${itens} de ${r.itensTotal} ite${r.itensTotal === 1 ? 'm' : 'ns'} com entrega, ${r.saldoItens} unidade${r.saldoItens === 1 ? '' : 's'} de saldo${decl}`;
+}
+/* O QUE A BAIXA FAZ COM ESTA O.S. (a O.S. que o ERP deu em situação final).
+   { acao: 'baixar' | 'poupar', marcar, parcial (o resumo, quando há), causa }.
+   Sem marca parcial: 'baixar' e causa vazia, como sempre foi. */
+export function decisaoBaixaERP(o, statusERP) {
+  const st = situacaoERP(statusERP);
+  const r = entregaParcialMarcada(o);
+  if (!r) return { acao: 'baixar', marcar: false, parcial: null, causa: '' };
+  if (st === 'CANCELADO') return { acao: 'baixar', marcar: false, parcial: r, causa: `${textoParcial(r)}; o ERP cancelou: o saldo vira cancelado e o entregue fica` };
+  if (SITUACOES_ERP_ENTREGUE.includes(st)) return { acao: 'poupar', marcar: true, parcial: r, causa: `${textoParcial(r)}; o ERP diz ${st}: o PCP segura e a gestão decide em Entregas` };
+  return { acao: 'poupar', marcar: false, parcial: r, causa: `${textoParcial(r)}; o ERP diz ${st || 'encerrada'} (produção, não entrega): segue aberta` };
+}
+export const seloSaldoERP = (status, dataEntregue) => `${situacaoERP(status)}|${/^\d{4}-\d{2}-\d{2}$/.test(String(dataEntregue ?? '')) ? dataEntregue : ''}`;
+/* A MARCA DA BAIXA NA O.S. PARCIAL. Devolve o registro novo, ou null quando a
+   marca já diz o mesmo (a baixa é idempotente: a mesma resposta do ERP não
+   grava de novo). `desde` é a primeira vez que o ERP disse ESTA situação:
+   mudou a situação (FINALIZADO e depois ENTREGUE), `desde` recomeça (revisão
+   da E7). Sem a data de entrega do ERP, a tela usa o dia de `desde` como o
+   dia do ENTREGUE, e herdar o do FINALIZADO dava o dia de outro aviso. Só a
+   data mudando (ENTREGUE em 25/09 e depois em 27/09) mantém o `desde`. */
+export function marcarErpComSaldo(o, { status = '', dataEntregue = '', agora = '' } = {}) {
+  if (!objeto(o)) return null;
+  const st = situacaoERP(status);
+  const data = /^\d{4}-\d{2}-\d{2}$/.test(String(dataEntregue ?? '')) ? String(dataEntregue) : '';
+  const selo = seloSaldoERP(st, data);
+  const antes = objeto(o.erpComSaldo) ? o.erpComSaldo : null;
+  if (antes && antes.selo === selo) return null;
+  const mesmaSituacao = !!antes && situacaoERP(antes.status) === st;
+  return { ...o, erpComSaldo: { status: st, dataEntregue: data, selo, desde: String((mesmaSituacao && antes.desde) || agora), em: String(agora) } };
+}
+/* A PORTA DO APARELHO (pcp-sync). erpComSaldo é só do servidor: fica o
+   gravado, sempre. erpSaldoDecisao é o "Manter aberta" da gestão: o aparelho
+   manda {tipo:'manter', selo} e o servidor carimba quem (ID do RH) e quando.
+   Só admin e pcp decidem; o resto fica com o gravado, com aviso. A mesma
+   decisão para o mesmo selo não recarimba. Ausente não apaga. */
+export const DECISOES_SALDO_ERP = ['manter'];
+export function guardarSaldoERP(os, antes, { pode = false, avisar = false, autor = {}, agora = '' } = {}) {
+  if (!objeto(os)) return { os, aviso: '', decidiu: false };
+  const out = { ...os };
+  if (objeto(antes?.erpComSaldo)) out.erpComSaldo = antes.erpComSaldo; else delete out.erpComSaldo;
+  const gravada = objeto(antes?.erpSaldoDecisao) ? antes.erpSaldoDecisao : null;
+  const pedido = proprio(os, 'erpSaldoDecisao') ? os.erpSaldoDecisao : undefined;
+  if (gravada) out.erpSaldoDecisao = gravada; else delete out.erpSaldoDecisao;
+  const fica = aviso => ({ os: out, aviso: avisar ? aviso : '', decidiu: false });
+  if (!objeto(pedido)) return fica('');
+  const tipo = String(pedido.tipo ?? '').trim(), selo = String(pedido.selo ?? '').trim();
+  if (gravada && gravada.tipo === tipo && gravada.selo === selo) return fica('');
+  /* Decisão já carimbada (tem `em`) é eco de uma cópia, não decisão nova: a
+     cópia velha de uma aba não pode refazer, em nome de quem salvou, a
+     decisão que outra pessoa trocou depois. A tela manda só {tipo, selo}. */
+  if (String(pedido.em ?? '').trim()) return fica('');
+  if (!pode) return fica('A decisão sobre o saldo que o ERP deu como entregue é da gestão (admin e PCP): não foi gravada.');
+  if (!DECISOES_SALDO_ERP.includes(tipo) || !/^[A-Z]{1,20}\|(\d{4}-\d{2}-\d{2})?$/.test(selo)) return fica('A decisão sobre o saldo do ERP veio incompleta: não foi gravada.');
+  out.erpSaldoDecisao = { tipo, selo, por: String(autor?.nome ?? '').trim().slice(0, 80),
+    porId: ehIdPessoa(autor?.porId) ? String(autor.porId).trim() : '', em: String(agora ?? '') };
+  return { os: out, aviso: '', decidiu: true };
+}
 /* CAMPOS DA GESTÃO NA O.S. (F01, 29/09/2026). Lista ÚNICA dos campos que as
    próximas fatias põem dentro da O.S. (alocação F08, prazo e retorno F15,
    ocorrências e abonos F17/F18, cancelamento e O.S. original F24). Ela nasce
@@ -1775,6 +1863,8 @@ export const CAMPOS_AUDITADOS = [
   // O prazo das O.S. sem prazo gravado é lido do histórico de remarcações e
   // da origem (ERP ou PDF do ERP): mexer neles fica com autor (revisão da F15).
   'agendaLog', 'origemPDF',
+  // O "Manter aberta" da gestão na O.S. que o ERP deu como entregue com saldo no PCP (E7).
+  'erpSaldoDecisao',
 ];
 // Campo com ponto é caminho: 'instalacao.data' lê os.instalacao.data.
 const lerCaminho = (o, caminho) => caminho.split('.').reduce((v, k) => (objeto(v) ? v[k] : undefined), o);

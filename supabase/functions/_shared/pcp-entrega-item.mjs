@@ -45,6 +45,11 @@ const DIA_MINIMO = '2020-01-01';
    crachá (pcp-sync, assinarCrachaMontagem). Fora disso, vale o dia de hoje. */
 const DIAS_DECLARACAO = 30;
 const PROBLEMA_NA_DECLARACAO = 'Este item está com problema marcado pela gestão; fale com o PCP.';
+/* A marca em LOTE ('lote': o "Entregar o saldo" da lista do ERP, E7) não
+   passa por cima do problema aberto (revisão da E7): a cópia velha de um PC,
+   no "Sobrescrever", mandava o saldo em lote no item que outro aparelho pôs
+   com problema, o saldo ia a 0 com o problema aberto e o item ficava preso. */
+const PROBLEMA_NO_LOTE = 'Este item está com problema aberto: o saldo dele não entra no lote. Resolva o problema no item.';
 /* QUEM MARCA O QUÊ (decisão do dono, 29/09/2026): admin e pcp tudo; operação
    com senha (balcão) entrega, retira e aponta problema; cancelar e desfazer só
    admin e pcp. O celular (E5, 30/09/2026): o crachá sem senha ('toque'; no
@@ -279,6 +284,8 @@ function validarEvento(evento, item, ctx) {
     /* Problema aberto pela gestão segura o saldo, e a declaração não o
        fecha (revisão da E5): quem resolve é a gestão. */
     if (declarado && c.problema) return nao(PROBLEMA_NA_DECLARACAO);
+    // Nem a marca em lote (revisão da E7): o problema se resolve no item.
+    if (via === 'lote' && c.problema) return nao(PROBLEMA_NO_LOTE);
     const saldo = c.Q - c.acum;
     if (saldo <= 0) return nao('Este item já foi todo entregue.');
     const bruto = evento.qtde;

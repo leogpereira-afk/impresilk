@@ -1042,6 +1042,30 @@ const STORE = (() => {
       ? (revR > revL || (revR === revL && new Date(remote.atualizadoEm || 0) > new Date(atual.atualizadoEm || 0)))
       : new Date(remote.atualizadoEm || 0) > new Date(atual.atualizadoEm || 0));
   };
+  /* O CAMPO DO SERVIDOR COM O MESMO REV (revisão da E7). A marca da baixa
+     do ERP (erpComSaldo, "ERP diz entregue, PCP tem saldo") é gravada pelo
+     servidor sem subir o rev e sem mexer no atualizadoEm: subir o rev poria
+     em conflito a ficha aberta, e mexer no atualizadoEm fazia o reenvio da
+     mesma gravação virar conflito. Com isso a regra acima não a adota (mesmo
+     rev, mesmo atualizadoEm; e o PC com o relógio adiantado nunca a via).
+     Então, com o MESMO rev, o aparelho copia para a cópia local SÓ os campos
+     que o servidor controla, quando diferem, inclusive com gravação na fila:
+     o resto da O.S. (a edição pendente) e a fila ficam como estão. A cópia é
+     no próprio objeto da lista, que pode ser o rascunho da ficha aberta.
+     erpSaldoDecisao não entra: o servidor só a grava subindo o rev, e copiá-la
+     aqui apagaria o "Manter aberta" que ainda está na fila. */
+  const CAMPOS_DO_SERVIDOR = ['erpComSaldo'];
+  function _camposDoServidor(remote, atual) {
+    if (!remote || !atual || typeof remote.rev !== 'number' || remote.rev !== atual.rev) return false;
+    let mudou = false;
+    for (const k of CAMPOS_DO_SERVIDOR) {
+      const r = remote[k] == null ? undefined : remote[k], l = atual[k] == null ? undefined : atual[k];
+      if (JSON.stringify(r) === JSON.stringify(l)) continue;
+      if (r === undefined) delete atual[k]; else atual[k] = JSON.parse(JSON.stringify(r));
+      mudou = true;
+    }
+    return mudou;
+  }
 
   async function _pullIncremental(since, onRefresh) {
     const res = await api({ action: 'list', since });
@@ -1066,9 +1090,10 @@ const STORE = (() => {
         _osHistorico.delete(r.id);
         continue;
       }
-      if (excluidas.has(r.id) || pendentes.has(r.id)) continue;
+      if (excluidas.has(r.id)) continue;
       const atual = porId.get(r.id);
-      if (_revMaisNova(r, atual)) { porId.set(r.id, r); changed = true; }
+      if (!pendentes.has(r.id) && _revMaisNova(r, atual)) { porId.set(r.id, r); changed = true; }
+      else if (_camposDoServidor(r, atual)) changed = true;
     }
     if (changed) { _setAllOS([...porId.values()]); if (typeof onRefresh === 'function') onRefresh(); }
     lsSet(K.CURSOR, { em: res.agora || new Date().toISOString(), modo: 'incremental' });
@@ -1131,7 +1156,7 @@ const STORE = (() => {
       if (excluidas.has(id)) continue;
       const atual = porId.get(id);
       if (!pendentes.has(id) && _revMaisNova(remote, atual)) { resultado.push(remote); changed = true; }
-      else resultado.push(atual || remote);
+      else { if (_camposDoServidor(remote, atual)) changed = true; resultado.push(atual || remote); }
     }
     // O que o servidor nao mandou sai daqui (poda por janela, lapide, ou
     // exclusao) -- menos o que este aparelho ainda nao conseguiu enviar.

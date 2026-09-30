@@ -1271,7 +1271,15 @@ function perfCoberturaHTML(regs, f) {
   const verValor = perfPodeEditar();
   const pendLancar = (((typeof classificarEntregas === 'function' ? classificarEntregas(STORE.getAllOS()) : null) || {}).aLancar || [])
     .filter(o => OPERACAO.emIntervalo(diaEntrega(o), f.de, f.ate)).length;
-  const lancar = pendLancar ? `<p class="perf-cob-extra">${pendLancar} ${pendLancar === 1 ? 'baixa do ERP deste período espera lançamento em Entregas e ainda não conta' : 'baixas do ERP deste período esperam lançamento em Entregas e ainda não contam'} aqui. <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento</button></p>` : '';
+  /* A O.S. QUE O PCP SEGUROU (revisão da E7). O ERP disse entregue, o PCP
+     tem entrega parcial marcada, e a baixa a deixou aberta para a gestão
+     decidir em Entregas: ela não é instalação nem "a lançar", e sem esta
+     linha sumia das contas do período sem aviso nenhum. Conta pela data do
+     aviso do ERP (a da entrega; sem ela, o dia em que a baixa viu). */
+  const segurasERP = (typeof listaErpComSaldo === 'function' ? listaErpComSaldo(STORE.getAllOS()) : [])
+    .filter(x => OPERACAO.emIntervalo(x.aviso.data || OPERACAO.dia(x.aviso.desde), f.de, f.ate)).length;
+  const lancar = (pendLancar ? `<p class="perf-cob-extra">${pendLancar} ${pendLancar === 1 ? 'baixa do ERP deste período espera lançamento em Entregas e ainda não conta' : 'baixas do ERP deste período esperam lançamento em Entregas e ainda não contam'} aqui. <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento</button></p>` : '')
+    + (segurasERP ? `<p class="perf-cob-extra perf-cob-erp-saldo">${segurasERP} ${segurasERP === 1 ? 'entrega o ERP diz entregue e o PCP ainda tem saldo' : 'entregas o ERP diz entregues e o PCP ainda tem saldo'}; decida em Entregas. <button type="button" class="inline-link" data-perf-erp-saldo>Abrir a lista</button></p>` : '');
   const avisos = perfAvisosHTML(true);
   if (!total) return `<section class="perf-cobertura perf-cob-linha" aria-label="Cobertura das equipes"><p>Nenhuma entrega finalizada neste período.</p>${lancar}${avisos}</section>`;
   // As marcas das sugeridas: a divisão que uma aba antiga deixou para trás, a que espera o RH e a quebrada.
@@ -1701,6 +1709,7 @@ function wirePerformanceEquipes(el) {
   });
   el.querySelectorAll('[data-perf-atualizar]').forEach(b=>b.onclick=perfCarregarFonte);
   el.querySelectorAll('[data-perf-lancar]').forEach(b=>b.onclick=perfAbrirLancamento);
+  el.querySelectorAll('[data-perf-erp-saldo]').forEach(b=>b.onclick=()=>{ if (typeof abrirListaErpSaldo === 'function') abrirListaErpSaldo(); });
   const relPdf=el.querySelector('#perf-rel-pdf');if(relPdf)relPdf.onclick=()=>{const copy=el.querySelector('.perf-report').cloneNode(true);copy.querySelectorAll('.perf-team-report details,.perf-report-pendencias').forEach(n=>n.remove());imprimirAnalisePCP('Performance · resumo de pessoas e equipes',copy,periodoOuMes('_fPerf'),perfFonteTexto());};
   const detalhado=el.querySelector('#perf-rel-detalhado');if(detalhado)detalhado.onclick=()=>{
     const copy=el.querySelector('.perf-report').cloneNode(true);

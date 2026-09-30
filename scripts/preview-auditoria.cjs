@@ -204,6 +204,18 @@ for(let m=1;m<=Number(hoje.slice(5,7));m++){
  }
  PV_ERP[mes]={v:3,os,em:new Date().toISOString()};
 }
+/* ERP DIZ ENTREGUE, PCP TEM SALDO (E7, 30/09/2026): três O.S. abertas com
+   entrega parcial marcada que o ERP deu como encerradas. A E7A foi poupada
+   pela baixa (ENTREGUE com data, uma unidade declarada pelo celular); a E7B
+   (FINALIZADO sem data de entrega, um item com problema) manda marcar na
+   ficha; a E7C saiu da carteira aberta e o pacote de entregues do ERP a traz
+   com a data. Aparecem em Entregas para admin e pcp (#aba=entregas). Fictícias. */
+const pvItens=(id,marcas)=>[1,2,3,4,5].map(k=>({uid:id+':'+k+':1',item:String(k),descricao:['Placa ACM 2x1','Adesivo de vitrine','Totem de sinalização','Lona com estrutura','Letreiro luminoso'][k-1],qtde:k===1?'10':'1',subtotal:'400.00',...(marcas[k]?{entregas:marcas[k]}:{})}));
+const pvE7=(id,erp,extra={})=>base(id,{cliente:'Cliente fictício '+id+' · entrega parcial',servico:'Fachada em ACM',instalacao:{data:deslocar(-6),periodo:'Manhã'},horaSaida:'08:00',horaRetorno:'17:00',saidaEm:deslocar(-6)+'T08:00:00',retornoEm:deslocar(-6)+'T17:00:00',...erp,...extra});
+lista.push(pvE7('E7A',{erpComSaldo:{status:'ENTREGUE',dataEntregue:deslocar(-3),selo:'ENTREGUE|'+deslocar(-3),desde:deslocar(-2)+'T13:20:00.000Z',em:deslocar(-2)+'T13:20:00.000Z'}},{itens:pvItens('E7A',{1:[pvMarca('pv-7a1','entregue',6,deslocar(-6))],2:[pvDecl('pv-7a2',1,deslocar(-6))]})}));
+lista.push(pvE7('E7B',{erpComSaldo:{status:'FINALIZADO',dataEntregue:'',selo:'FINALIZADO|',desde:deslocar(-1)+'T13:20:00.000Z',em:deslocar(-1)+'T13:20:00.000Z'}},{itens:pvItens('E7B',{1:[pvMarca('pv-7b1','entregue',10,deslocar(-5))],4:[pvMarca('pv-7b4','problema',0,deslocar(-4),{motivo:'Estrutura amassada no transporte'})]})}));
+lista.push(pvE7('E7C',{erpSaiuDaCarteiraEm:deslocar(-1)+'T13:20:00.000Z'},{itens:pvItens('E7C',{2:[pvMarca('pv-7c2','entregue',1,deslocar(-5))],3:[pvMarca('pv-7c3','entregue',1,deslocar(-5))]})}));
+{const d=deslocar(-2);if(PV_ERP[d.slice(0,7)])PV_ERP[d.slice(0,7)].os.push({numero:'T-E7C',cliente:'Cliente fictício E7C · entrega parcial',servico:'Fachada em ACM',data:d,valor:2000,tipo:'externo',previsao:d});}
 const STORE={JANELA_LOCAL_DIAS:60,historico:()=>[...pvHist.values()],faixaHistorico:async()=>({de:deslocar(-120),ate:hoje}),
  buscarHistorico:async q=>{const itens=PV_ANTIGAS.filter(o=>(!q.de||o.finalizadaEm.slice(0,10)>=q.de)&&(!q.ate||o.finalizadaEm.slice(0,10)<=q.ate));for(const o of itens)pvHist.set(o.id,structuredClone(o));return {itens,truncou:false};},
  getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id)||pvHist.get(id)||null,getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>ELENCO_PREVIA, valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>true, entreguesMes:m=>PV_ERP[m]||null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>false,trySync:async()=>{},pronto:async()=>lista,api:previewApi,conferirNomes:async(nomes,ids)=>{const r=OPERACAO.resolverPessoas({pessoas:[...ELENCO_PREVIA.pessoas,...ELENCO_PREVIA.antigos],vinculos:cfg.vinculosRH,lista:cfg.instaladores});return {nomes:nomes.map(n=>({nome:n,id:r.idDe(n),fixado:r.fixado(n)})),os:Object.fromEntries(ids.map(i=>[i,'viva'])),fechados:[]};},apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{if(pvHist.has(o.id))pvHist.set(o.id,structuredClone(o));lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){},

@@ -1,4 +1,4 @@
-import { atualizarOrigemERP, atualizarSituacaoERP, temTrabalhoHumano, motivoAgendaViva, carimbarUidsERP } from "../_shared/pcp-integridade.mjs";
+import { atualizarOrigemERP, atualizarSituacaoERP, temTrabalhoHumano, motivoAgendaViva, carimbarUidsERP, decisaoBaixaERP, marcarErpComSaldo } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-mubisys — integracao com o ERP (substitui mubisys.js + mubisys-sync.mjs)
 //
@@ -467,7 +467,12 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
   if (!doErp.length) return { ok: false, motivo: "o ERP nao devolveu nenhuma O.S nesta janela", baixadas: 0 };
 
   const statusPorNumero = new Map<string, string>();
-  for (const o of doErp) if (o.numero) statusPorNumero.set(String(o.numero), o.statusERP || "");
+  // A data da entrega que o ERP informa (data_entregue): é o dia do saldo na lista da E7.
+  const entreguePorNumero = new Map<string, string>();
+  for (const o of doErp) if (o.numero) {
+    statusPorNumero.set(String(o.numero), o.statusERP || "");
+    entreguePorNumero.set(String(o.numero), o.dataEntregue || "");
+  }
 
   // As que estao ABERTAS aqui (nao apagadas, sem finalizacao).
   const { data: linhas, error } = await sb
@@ -484,6 +489,8 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
   const hojeLocal = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
 
   const alvos: any[] = [];
+  // O.S. com entrega parcial marcada que o ERP deu como encerrada (E7): poupadas.
+  const comSaldo: any[] = [];
   let semNoticia = 0;
   const divergencias: any[] = [];
   let agendadas = 0;
@@ -500,7 +507,15 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
     // de varios dias), e a equipe que saiu e nao voltou tambem segura
     // (motivoAgendaViva, a mesma regra da releitura; revisao da F01).
     if (motivoAgendaViva(l.registro, hojeLocal)) { agendadas++; continue; }
-    alvos.push({ id: l.id, registro: l.registro, atualizado_em: l.atualizado_em, statusERP: st });
+    const alvo = { id: l.id, registro: l.registro, atualizado_em: l.atualizado_em, statusERP: st, dataEntregue: entreguePorNumero.get(num) || "" };
+    /* ENTREGA PARCIAL MARCADA NO PCP (E7): o PCP sabe mais que o ERP. A O.S.
+       é poupada, como a de agenda viva, e (com o ERP dizendo ENTREGUE ou
+       FINALIZADO) ganha a marca que a põe na lista "ERP diz entregue, PCP tem
+       saldo". Sem marca parcial, ou com o ERP cancelando, segue a baixa de
+       sempre. gravarBaixas decide de novo sobre o registro relido. */
+    const dec = decisaoBaixaERP(l.registro, st);
+    if (dec.acao === "poupar") { comSaldo.push({ ...alvo, causa: dec.causa }); continue; }
+    alvos.push(alvo);
   }
 
   const resumo = {
@@ -510,6 +525,13 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
     semNoticiaDoErp: semNoticia,
     divergencias,
     poupadasComAgenda: agendadas,
+    // E7: poupadas por entrega parcial marcada no PCP, cada uma com a causa.
+    poupadasComSaldo: comSaldo.length,
+    comSaldo: comSaldo.slice(0, 20).map((a: any) => ({ numero: String(a.registro?.numero || ""), status: a.statusERP, causa: a.causa })),
+    // Gravadas nesta rodada com a marca da lista (as que já tinham o mesmo aviso não regravam).
+    marcadasComSaldo: 0,
+    // O.S. parcial cancelada no ERP: baixada como sempre; o saldo vira cancelado e o entregue fica.
+    canceladasComEntrega: [] as any[],
     baixadas: 0,
     candidatas: alvos.length,
     porStatus: alvos.reduce((acc: any, a: any) => { acc[a.statusERP] = (acc[a.statusERP] || 0) + 1; return acc; }, {}),
@@ -532,9 +554,15 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
     resumo.freado = `${alvos.length} candidatas: baixando ${lote.length} agora, o restante nas próximas rodadas.`;
   }
 
-  const r = await gravarBaixas(sb, lote, hojeLocal);
+  // As poupadas com saldo não entram no teto: a marca não fecha nada, só põe na lista.
+  const r = await gravarBaixas(sb, [...lote, ...comSaldo], hojeLocal);
   resumo.baixadas = r.baixadas;
   resumo.desistencias = r.desistencias;
+  resumo.marcadasComSaldo = r.marcadas;
+  resumo.canceladasComEntrega = r.canceladasComEntrega;
+  // A contagem final segue o que aconteceu de fato (a releitura pode mudar a decisão).
+  resumo.poupadasComSaldo = r.poupadas.length;
+  resumo.comSaldo = r.poupadas.slice(0, 20);
   return resumo;
 }
 
@@ -547,10 +575,24 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
    novo. Mudou de novo, ou deixou de ser candidata: desiste desta O.S. neste
    ciclo, com a causa no resumo e no log; a proxima rodada a retoma.
    A baixa sobe o rev: a copia velha de um aparelho vira conflito, em vez de
-   passar por cima da finalizacao. */
+   passar por cima da finalizacao.
+   ENTREGA PARCIAL (E7): a decisao (baixar ou poupar) e refeita a cada
+   tentativa sobre o registro DAQUELA tentativa. Chegou uma marca parcial do
+   aparelho no meio da baixa: a gravacao falha na trava, a O.S. e relida, e
+   com a marca nova ela passa a ser poupada, com a marca preservada. A marca
+   da lista (erpComSaldo) grava com a mesma trava, mas NAO sobe o rev: ela
+   nao fecha nada, o pcp-sync a guarda contra a copia do aparelho, e subir o
+   rev poria em conflito a ficha que a gestao tem aberta.
+   REVISAO DA E7: a marca tambem NAO mexe no atualizadoEm nem no
+   atualizadoPor (ficam os gravados, de quem editou por ultimo). Com o
+   atualizadoEm da maquina, o reenvio da mesma gravacao (a resposta que se
+   perdeu) virava conflito contra a propria escrita, e o PC com o relogio
+   adiantado nunca puxava a marca (store.js compara rev e atualizadoEm). O
+   carimbo da LINHA (atualizado_em) anda: o pull incremental acha a O.S., e
+   o aparelho copia SO a marca com o mesmo rev (store.js, _camposDoServidor). */
 async function gravarBaixas(sb: any, lote: any[], hojeLocal: string) {
-  const desistencias: any[] = [];
-  let baixadas = 0;
+  const desistencias: any[] = [], poupadas: any[] = [], canceladasComEntrega: any[] = [];
+  let baixadas = 0, marcadas = 0;
   const motivoParaNaoBaixar = (linha: any) => {
     if (!linha || linha.apagado) return "excluída no PCP enquanto esperava o ERP";
     if (String(linha.registro?.finalizadaEm || "").trim()) return "finalizada no PCP enquanto esperava o ERP";
@@ -561,6 +603,7 @@ async function gravarBaixas(sb: any, lote: any[], hojeLocal: string) {
   for (const a of lote) {
     let linha: any = { registro: a.registro, atualizado_em: a.atualizado_em, apagado: false };
     let motivo = "";
+    let dec: any = null;
     for (let tentativa = 0; tentativa < 2; tentativa++) {
       if (tentativa) {
         const { data, error } = await sb.from("pcp_registros").select("registro, apagado, atualizado_em")
@@ -571,33 +614,48 @@ async function gravarBaixas(sb: any, lote: any[], hojeLocal: string) {
         linha = data;
       }
       const agora = new Date().toISOString();
-      const registro = {
-        ...linha.registro,
-        finalizadaEm: agora,
-        finalizadoPor: `Mubisys (baixa automática · ${a.statusERP})`,
-        // Finalizacao da maquina nao e de pessoa: o ID de quem finalizou antes nao fica ao lado.
-        finalizadoPorId: "",
-        baixaAutoERP: { em: agora, status: a.statusERP },
-        atualizadoEm: agora,
-        atualizadoPor: "Mubisys (auto)",
-        rev: (Number(linha.registro?.rev) || 0) + 1,
-      };
+      dec = decisaoBaixaERP(linha.registro, a.statusERP);
+      let registro: any;
+      if (dec.acao === "poupar") {
+        // Poupada sem marca (CONCLUIDO), ou já marcada com o mesmo aviso do ERP: nada a gravar.
+        registro = dec.marcar ? marcarErpComSaldo(linha.registro, { status: a.statusERP, dataEntregue: a.dataEntregue, agora }) : null;
+        if (!registro) { motivo = ""; break; }
+      } else {
+        registro = {
+          ...linha.registro,
+          finalizadaEm: agora,
+          finalizadoPor: `Mubisys (baixa automática · ${a.statusERP})`,
+          // Finalizacao da maquina nao e de pessoa: o ID de quem finalizou antes nao fica ao lado.
+          finalizadoPorId: "",
+          baixaAutoERP: { em: agora, status: a.statusERP },
+          atualizadoEm: agora,
+          atualizadoPor: "Mubisys (auto)",
+          rev: (Number(linha.registro?.rev) || 0) + 1,
+        };
+      }
       const carimbo = new Date(Math.max(Date.now(), (Date.parse(linha.atualizado_em) || 0) + 1)).toISOString();
       // Sem o carimbo lido nao ha trava: a gravacao falha e a O.S. e relida.
       const { data: gravou, error } = await sb.from("pcp_registros").update({ registro, atualizado_em: carimbo, apagado: false })
         .eq("colecao", "os").eq("id", a.id).eq("apagado", false)
         .eq("atualizado_em", String(linha.atualizado_em ?? "")).select("id");
       if (error) throw new Error(error.message);
-      if (gravou?.length) { baixadas++; motivo = ""; break; }
+      if (gravou?.length) { if (dec.acao === "poupar") marcadas++; else baixadas++; motivo = ""; break; }
       motivo = tentativa ? "alterada no PCP duas vezes durante a baixa" : "alterada no PCP durante a baixa";
     }
+    const numero = String(linha.registro?.numero || a.registro?.numero || "");
     if (motivo) {
-      const numero = String(a.registro?.numero || "");
       desistencias.push({ id: a.id, numero, motivo });
       console.warn(`[pcp-mubisys] baixa desistiu da O.S. ${numero} (${a.id}): ${motivo}. A próxima rodada tenta de novo.`);
+    } else if (dec?.acao === "poupar") {
+      // O log da baixa diz a causa (E7).
+      poupadas.push({ numero, status: a.statusERP, causa: dec.causa });
+      console.log(`[pcp-mubisys] baixa poupou a O.S. ${numero} (${a.id}) [${a.statusERP}]: ${dec.causa}.`);
+    } else if (dec?.parcial) {
+      canceladasComEntrega.push({ numero, status: a.statusERP, causa: dec.causa });
+      console.log(`[pcp-mubisys] baixa da O.S. ${numero} (${a.id}) [${a.statusERP}]: ${dec.causa}.`);
     }
   }
-  return { baixadas, desistencias };
+  return { baixadas, desistencias, poupadas, marcadas, canceladasComEntrega };
 }
 
 // Esqueleto identico ao novaOS() do app, preenchido com os campos do Mubisys.
@@ -835,7 +893,9 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
   }
   const abertas = (linhas || []).filter((l:any) => !l.apagado && !l.registro.finalizadaEm);
   if (abertas.length > 20 && numeros.size < abertas.length * 0.5) throw new Error('Carteira ERP caiu mais de 50%; mantida para conferência.');
-  const restaurar = (linhas || []).filter((l:any) => numeros.has(String(l.registro.numero)) && (l.apagado || (l.registro.finalizadaEm && l.registro.baixaAutoERP?.em === l.registro.finalizadaEm) || (!l.registro.finalizadaEm && l.registro.erpSaiuDaCarteiraEm)));
+  /* A marca da E7 (erpComSaldo: "ERP diz entregue, PCP tem saldo") sai quando a
+     O.S. volta à carteira aberta: o ERP reabriu, e o aviso de entregue não vale mais. */
+  const restaurar = (linhas || []).filter((l:any) => numeros.has(String(l.registro.numero)) && (l.apagado || (l.registro.finalizadaEm && l.registro.baixaAutoERP?.em === l.registro.finalizadaEm) || (!l.registro.finalizadaEm && (l.registro.erpSaiuDaCarteiraEm || l.registro.erpComSaldo))));
   const fora = abertas.filter((l:any) => l.registro.origemMubisys && !numeros.has(String(l.registro.numero)));
   /* O.S COM TRABALHO DE GENTE NÃO É FECHADA PELO ERP. Ela fica aberta com a
      marca erpSaiuDaCarteiraEm, e o card pede "ERP fechou: confirmar". Sem
@@ -859,6 +919,7 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
       if (l.apagado) r.restauradaPeloERPEm = em;
       if (r.finalizadaEm && r.baixaAutoERP?.em === r.finalizadaEm) { r.finalizadaEm='';r.finalizadoPor='';r.finalizadoPorId='';delete r.baixaAutoERP;delete r.arquivadaEm; }
       delete r.erpSaiuDaCarteiraEm;
+      delete r.erpComSaldo;
       r.erpCarteira={aberta:true,em};
     } else if (marcarIds.has(l.id)) {
       r.erpSaiuDaCarteiraEm=em;
