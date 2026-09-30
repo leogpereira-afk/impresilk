@@ -126,6 +126,19 @@ lista.push(base('E4B',{cliente:'Cliente fictício E4 · retira na fábrica',tipo
  {uid:'E4B:1:1',item:'1',descricao:'Banner 3x1',qtde:'3',entregas:[pvMarca('pv-r1','retirado',1,deslocar(-1),{via:'balcao',retirou:'Fulano Fictício'})]},
  {uid:'E4B:2:1',item:'2',descricao:'',qtde:'1'}]}));
 lista.push(base('E4C',{cliente:'Cliente fictício E4 · 38 itens',itens:Array.from({length:38},(_,k)=>({uid:'E4C:'+(k+1)+':1',item:String(k+1),descricao:k===6?'':k===7?'Item':'Peça de sinalização '+(k+1),qtde:String(1+(k%4)),...(k%5===0?{entregas:[pvMarca('pv-c'+k,'entregue',1,deslocar(-1))]}:{})}))}));
+/* ENTREGA DECLARADA PELO CELULAR (E5, 30/09/2026): o equipe.html (a Ana, no
+   celular) com uma placa em parte declarada pela equipe, um totem marcado
+   pelo PCP, itens a entregar e o serviço; e a O.S. interna (Retirado). Na
+   gestão, #ficha=E5A mostra o selo "declarado pela equipe". Fictícias.
+   No celular: equipe.html#ficha=E5A (&parte=E5A:1:1 abre o campo da parte). */
+const pvDecl=(id,qtde,dia)=>({id,tipo:'entregue',qtde,dia,via:'toque',declarado:true,por:'Ana',em:dia+'T15:00:00Z'});
+lista.push(base('E5A',{cliente:'Cliente fictício E5 · entrega pelo celular',horaSaida:'08:00',saidaEm:hoje+'T08:00:00',fotosCheckinIds:[],itens:[
+ {uid:'E5A:1:1',item:'1',descricao:'Placa ACM 2x1',medidas:'2,00x1,00',qtde:'10',statusInst:'',entregas:[pvDecl('pv-d1',6,hoje)]},
+ {uid:'E5A:2:1',item:'2',descricao:'Adesivo de vitrine',medidas:'1,20x0,80',qtde:'1'},
+ {uid:'E5A:3:1',item:'3',descricao:'Totem de sinalização',medidas:'0,60x1,80',qtde:'2',statusInst:'ok',pronto:true,entregas:[pvMarca('pv-d2','entregue',2,deslocar(-1))]},
+ {uid:'E5A:4:1',item:'4',descricao:'Servicos de instalação',qtde:'1'}]}));
+lista.push(base('E5B',{cliente:'Cliente fictício E5 · retira na fábrica',tipo:'interno',instalacao:{data:hoje},itens:[
+ {uid:'E5B:1:1',item:'1',descricao:'Banner 3x1',qtde:'3'},{uid:'E5B:2:1',item:'2',descricao:'Wind banner',qtde:'1',statusInst:'ok',pronto:true,entregas:[pvDecl('pv-d3',1,hoje)]}]}));
 /* A FILA DE LANÇAMENTO COMO NO PRINT DO DONO (revisão de Entregas, 29/09/2026).
    No ar a fila passou de 50 baixas do ERP esperando lançamento, quase todas sem
    equipe. Aqui são 56 (57 com a 109, que já estava na prévia), com valor
@@ -160,7 +173,8 @@ for(let m=1;m<=Number(hoje.slice(5,7));m++){
  }
  PV_ERP[mes]={v:3,os,em:new Date().toISOString()};
 }
-const STORE={getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id),getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>ELENCO_PREVIA, valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>{}, entreguesMes:m=>PV_ERP[m]||null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>{},trySync:async()=>{},pronto:async()=>lista,api:previewApi,apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){}};
+const STORE={getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id),getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>ELENCO_PREVIA, valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>{}, entreguesMes:m=>PV_ERP[m]||null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>{},trySync:async()=>{},pronto:async()=>lista,api:previewApi,apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){},
+ /* o que o celular (equipe.html) chama */ setInstalador(){},setUser(){},limparCache(){},avisosEntregas:()=>[],dispensarAvisoEntregas(){},delFotoSync(){}};
 `;
 const boot=`
 document.addEventListener('DOMContentLoaded',()=>{
@@ -188,6 +202,23 @@ document.addEventListener('DOMContentLoaded',()=>{
  if(pv.get('ficha'))setTimeout(()=>{openModal(STORE.getOS(pv.get('ficha')),pv.get('bloco')||'itens');},700);
  if(pv.get('rolar'))setTimeout(()=>{const alvo=document.querySelector(pv.get('rolar'));if(alvo)alvo.scrollIntoView({block:'start'});},900);
 });`;
+/* O CELULAR NA PRÉVIA: a Ana entra pelo crachá fictício do fixture (AUTH.dono);
+   #ficha=E5A abre a ficha no bloco dos itens (&bloco= outro bloco, &desce=px
+   rola mais), &parte=<código do item> abre o campo "Entregar parte". Só
+   existe aqui, com dados fictícios. */
+const bootEquipe=`
+document.addEventListener('DOMContentLoaded', () => {
+ STORE.getInstalador=()=>'Ana';
+ initSelect();
+ // Sem timer: o fixture responde na hora, e a foto sem janela não espera timer de iframe.
+ const pv=new URLSearchParams(location.hash.slice(1));
+ if(!pv.get('ficha'))return;
+ openModal(STORE.getOS(pv.get('ficha')));
+ if(pv.get('parte')){EQ.parte='u:'+pv.get('parte');reRender();}
+ // O cabeçalho da ficha fica preso no topo: rola até o bloco e devolve a altura dele.
+ const b=document.querySelector('#modal-os [data-bloco="'+(pv.get('bloco')||'itens')+'"]'),m=document.querySelector('#modal-os'),h=document.querySelector('#modal-os .modal-header');
+ if(b&&m){b.scrollIntoView({block:'start'});m.scrollTop+=Number(pv.get('desce')||0)-(h?h.offsetHeight:0)-8;}
+});`;
 http.createServer((req,res)=>{
   const name=new URL(req.url,'http://localhost').pathname.slice(1)||'index.html';
   res.setHeader('Cache-Control','no-store');
@@ -197,5 +228,7 @@ http.createServer((req,res)=>{
   let body=fs.readFileSync(path.join(root,name));
   if(name==='index.html') body=body.toString().replace(/<script src="(?:config|store|auth)\.js(?:\?[^\"]*)?"><\/script>/g,'').replace(/<script src="operacao.js(?:\?[^"]*)?">/,'<script src="fixture.js"></script><script src="operacao.js">').replace(/<script>(?:if\('serviceWorker'|\s*\/\*\s*Service worker)[^]*?<\/script>/,'');
   if(name==='app.js')body=body.toString().replace("document.addEventListener('DOMContentLoaded', initLogin);",boot);
+  if(name==='equipe.html') body=body.toString().replace(/<script src="(?:config|store|auth)\.js(?:\?[^\"]*)?"><\/script>/g,'').replace(/<script src="operacao.js(?:\?[^"]*)?">/,'<script src="fixture.js"></script><script src="operacao.js">').replace(/<script>\s*\/\*\s*Service worker[^]*?<\/script>/,'');
+  if(name==='equipe.js')body=body.toString().replace("document.addEventListener('DOMContentLoaded', initSelect);",bootEquipe);
   const ext=path.extname(name);res.setHeader('Content-Type',({'.json':'application/manifest+json','.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.webp':'image/webp'})[ext]);res.end(body);
 }).listen(Number(process.env.PORT) || 4201,'127.0.0.1',()=>console.log('Prévia com dados fictícios: http://127.0.0.1:4201'));

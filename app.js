@@ -1809,7 +1809,7 @@ function audValor(campo, v) {
     const tipos = { entregue: 'entregue', retirado: 'retirado', problema: 'problema', cancelado: 'item cancelado', desfeito: 'marca desfeita' };
     const novos = (Array.isArray(v.novos) ? v.novos : []).filter(l => l && typeof l === 'object')
       .map(l => [l.item ? 'item ' + l.item : 'item', tipos[l.tipo] || String(l.tipo || ''), Number.isInteger(l.qtde) ? l.qtde + (l.qtde === 1 ? ' unidade' : ' unidades') : '',
-        l.dia ? 'em ' + audTexto(l.dia) : '', l.motivo ? 'motivo: ' + l.motivo : ''].filter(Boolean).join(' '));
+        l.dia ? 'em ' + audTexto(l.dia) : '', l.declarado || l.via === 'toque' ? '(declarado pela equipe)' : '', l.motivo ? 'motivo: ' + l.motivo : ''].filter(Boolean).join(' '));
     return `${n} ${n === 1 ? 'marca' : 'marcas'}` + (novos.length ? ` (${novos.length === 1 ? 'nova' : 'novas'}: ${novos.join('; ')})` : '');
   }
   if (campo.startsWith('fotos') && Array.isArray(v)) return v.length + (v.length === 1 ? ' foto' : ' fotos');
@@ -1983,9 +1983,11 @@ function novoItemManual(lista) {
    recusada aqui com a frase que o servidor daria. Decisões do dono: marca-se
    o item inteiro, e "Entregar parte" só aparece quando a quantidade é um
    número inteiro maior que 1; admin, pcp e operação com senha marcam;
-   cancelar e desfazer são só de admin e pcp; o crachá sem senha não marca
-   nesta fatia (E5). Nenhuma marca mostra R$: o valor por item é conta do
-   servidor (E6). Sem o entrega-item.js (cache misto de versões), a ficha
+   cancelar e desfazer são só de admin e pcp. O celular (E5: crachá sem senha
+   e montagem com senha) só entrega e retira, e a marca dele é DECLARADA: o
+   selo diz "declarado pela equipe", à parte de "entregue", até a conferência
+   do Fechar o dia (F14). Nenhuma marca mostra R$: o valor por item é conta
+   do servidor (E6). Sem o entrega-item.js (cache misto de versões), a ficha
    abre como antes, sem a coluna. */
 const temMotorEntrega = () => typeof ENTREGA_ITEM !== 'undefined' && !!ENTREGA_ITEM && typeof ENTREGA_ITEM.validarEvento === 'function';
 // O dia da marca no calendário da fábrica (o servidor recusa dia depois de hoje em São Paulo).
@@ -2149,7 +2151,10 @@ function executarEntregaItem(acao, uid, idx, dados = {}) {
   saveDraft(); reRenderModalKeepOpen();
   const rot = rotuloItemEntrega(it);
   const qualDesfeita = desfeita ? ` (${ACOES_ENTREGA_NOME[desfeita.tipo] || desfeita.tipo} em ${ddmmEntrega(desfeita.dia)})` : '';
-  const msg = { entregue: `${rot}: ${v.evento.qtde} entregue${v.evento.qtde === 1 ? '' : 's'} hoje`, retirado: `${rot}: ${v.evento.qtde} retirado${v.evento.qtde === 1 ? '' : 's'} hoje`,
+  const msg = v.evento.declarado
+    // A montagem com senha declara (E5): a gestão confere no Fechar o dia.
+    ? `${rot}: ${v.evento.qtde} ${conf.tipo === 'retirado' ? 'retirado' : 'entregue'}${v.evento.qtde === 1 ? '' : 's'} hoje, declarado pela equipe; a gestão confere no Fechar o dia`
+    : { entregue: `${rot}: ${v.evento.qtde} entregue${v.evento.qtde === 1 ? '' : 's'} hoje`, retirado: `${rot}: ${v.evento.qtde} retirado${v.evento.qtde === 1 ? '' : 's'} hoje`,
     problema: `${rot}: problema anotado; o saldo fica segurado`, cancelado: `${rot}: saldo cancelado`, desfeito: `${rot}: marca desfeita${qualDesfeita}` }[conf.tipo];
   toast(msg + (podeMarcarEntrega('desfeito') || conf.tipo === 'desfeito' ? '' : '. Para desfazer, fale com o PCP.'), 'success');
   return '';
@@ -2230,18 +2235,30 @@ function ligarEntregasDaFicha(root, ro) {
 }
 
 /* A SITUAÇÃO DO ITEM, sem R$: 'a entregar', 'parcial 6 de 10', 'entregue
-   29/09 por Ana', 'retirado', 'com problema', 'cancelado'. */
+   29/09 por Ana', 'retirado', 'com problema', 'cancelado'.
+   DECLARADO PELA EQUIPE (E5): a unidade que só o celular declarou conta no
+   saldo, mas não é entregue conferido. Quando tudo o que foi é declaração,
+   o selo inteiro diz "declarado pela equipe" (outra cor, borda tracejada);
+   quando só uma parte é, um segundo selo diz quantas. Quem confere é o
+   Fechar o dia (F14). */
+const DICA_DECLARADO = 'Declarado pelo celular: conta no saldo do item, mas só vale como entregue depois de conferido no Fechar o dia.';
 function seloEntregaItemHTML(it, s, os) {
   const interna = isInterno(os);
   // No selo, só o primeiro nome (a coluna é estreita); o nome inteiro vai na dica.
   const u = s.ultimo, quem = quemMarcou(u).split(' ')[0], dia = ddmmEntrega(s.dia);
+  const decl = !s.servico && s.declarado > 0 ? s.declarado : 0;
+  const soDeclarado = decl > 0 && decl >= s.entregue && !s.implicito && ['parcial', 'entregue', 'retirado'].includes(s.situacao);
   let txt = '', cls = '';
-  if (s.servico) { cls = 'st-servico'; txt = s.dia ? `serviço: ${s.situacao} ${dia}` : 'serviço: vai com a entrega'; }
+  if (s.servico) { cls = 'st-servico'; txt = s.dia ? `serviço: ${s.situacao}${s.declarado ? ' (declarado)' : ''} ${dia}` : 'serviço: vai com a entrega'; }
   else if (s.situacao === 'a entregar') { cls = 'st-aentregar'; txt = (interna ? 'a retirar' : 'a entregar') + (s.qtde > 1 ? ` (${s.qtde})` : ''); }
+  else if (soDeclarado) {
+    cls = 'st-declarado';
+    txt = `declarado pela equipe${s.situacao === 'parcial' ? `: ${s.entregue} de ${s.qtde} ·` : ''}${dia ? ' ' + dia : ''}${quem ? ' por ' + quem : ''}`;
+  }
   else if (s.situacao === 'parcial') { cls = 'st-parcial'; txt = `${s.rotulo}${dia ? ' · ' + dia : ''}${quem ? ' por ' + quem : ''}`; }
   else if (s.situacao === 'entregue' || s.situacao === 'retirado') {
     cls = 'st-entregue';
-    const origem = s.marca === 'implicito' ? ' na finalização' : s.marca === 'sem prova' ? ' pela baixa do ERP' : (quem ? ' por ' + quem : '');
+    const origem = s.marca === 'implicito' ? ' na finalização' : s.marca === 'sem prova' ? ' pela baixa do ERP' : (quem && !(u && u.declarado) ? ' por ' + quem : '');
     txt = `${s.situacao}${dia ? ' ' + dia : ''}${origem}`;
   } else if (s.situacao === 'problema') { cls = 'st-problema'; txt = `com problema${s.problema && s.problema.motivo ? ': ' + s.problema.motivo : ''}${s.entregue > 0 ? ` (${s.entregue} de ${s.qtde} já foram)` : ''}`; }
   else if (s.situacao === 'cancelado') { cls = 'st-cancelado'; txt = `cancelado${s.cancelado && s.cancelado.motivo ? ': ' + s.cancelado.motivo : ' no ERP'}${s.entregue > 0 ? ` (${s.entregue} de ${s.qtde} já foram)` : ''}`; }
@@ -2249,8 +2266,9 @@ function seloEntregaItemHTML(it, s, os) {
   const retirou = u && u.tipo === 'retirado' && Array.isArray(it.entregas) ? (it.entregas.find(e => idMarca(e) === u.id) || {}).retirou : '';
   const neg = saldoNegativoItem(it);
   const gestao = podeMarcarEntrega('desfeito');
-  const dica = u ? `Última marca: ${ACOES_ENTREGA_NOME[u.tipo] || u.tipo} em ${ddmmEntrega(u.dia)}${quemMarcou(u) ? ' por ' + quemMarcou(u) : ''}` : '';
-  return `<span class="ent-selo ${cls}"${dica ? ` title="${esc(dica)}"` : ''}>${esc(txt)}${retirou ? ` · levou: ${esc(retirou)}` : ''}</span>${neg < 0 ? `<span class="ent-selo st-negativo" role="note">⚠ Saldo ${neg}: a quantidade (${ENTREGA_ITEM.qtdeNum(it)}) ficou abaixo do que já foi entregue (${entregueSemTeto(it)}). ${gestao ? 'Corrija a quantidade ou desfaça a marca a mais.' : 'Avise o PCP.'}</span>` : ''}`;
+  const dica = soDeclarado ? DICA_DECLARADO : u ? `Última marca: ${ACOES_ENTREGA_NOME[u.tipo] || u.tipo}${u.declarado ? ' (declarada pela equipe)' : ''} em ${ddmmEntrega(u.dia)}${quemMarcou(u) ? ' por ' + quemMarcou(u) : ''}` : '';
+  const seloDecl = decl > 0 && !soDeclarado ? `<span class="ent-selo st-declarado" title="${esc(DICA_DECLARADO)}">${esc(s.qtde > 1 ? `${decl} de ${s.qtde} declarado${decl === 1 ? '' : 's'} pela equipe` : 'declarado pela equipe')}</span>` : '';
+  return `<span class="ent-selo ${cls}"${dica ? ` title="${esc(dica)}"` : ''}>${esc(txt)}${retirou ? ` · levou: ${esc(retirou)}` : ''}</span>${seloDecl}${neg < 0 ? `<span class="ent-selo st-negativo" role="note">⚠ Saldo ${neg}: a quantidade (${ENTREGA_ITEM.qtdeNum(it)}) ficou abaixo do que já foi entregue (${entregueSemTeto(it)}). ${gestao ? 'Corrija a quantidade ou desfaça a marca a mais.' : 'Avise o PCP.'}</span>` : ''}`;
 }
 /* A LINHA ENTREGA, logo abaixo do item: a ficha tem 760 px, e uma sétima
    coluna espremia a descrição a meia palavra ("Placa AC"). Na linha de baixo
@@ -2278,6 +2296,7 @@ function resumoEntregaFichaTexto(os) {
   const interna = isInterno(os);
   const partes = [`${r.entregues} de ${r.itensTotal - r.cancelados} ${interna ? 'retirados' : 'entregues'}`];
   if (r.parciais) partes.push(`${r.parciais} em parte`);
+  if (r.declarados) partes.push(`${r.declarados} declarado${r.declarados === 1 ? '' : 's'} pela equipe (a conferir)`);
   if (r.problema) partes.push(`${r.problema} com problema`);
   if (r.cancelados) partes.push(`${r.cancelados} cancelado${r.cancelados === 1 ? '' : 's'}`);
   if (!os.finalizadaEm && r.saldoItens > 0) partes.push(`saldo ${r.saldoItens}`);
@@ -2308,6 +2327,7 @@ function seloEntregaCardHTML(os) {
     }
     out.push(`<span class="tag-entrega" title="${esc(dica)}">📦 Entrega parcial ${esc(conta)}</span>`);
   } else if (r.situacao === 'completa' && r.entregues > 0) out.push(`<span class="tag-entrega tag-entrega-ok" title="Todos os itens têm marca de entrega">📦 Itens entregues: falta finalizar</span>`);
+  if (r.declarados) out.push(`<span class="tag-entrega tag-entrega-decl" title="${esc(DICA_DECLARADO)}">📝 ${r.declarados} declarado${r.declarados === 1 ? '' : 's'} pela equipe</span>`);
   if (r.problema) out.push(`<span class="tag-entrega tag-entrega-prob" title="Item com problema de entrega: o saldo fica segurado">⚠ ${r.problema} item${r.problema === 1 ? '' : 's'} com problema</span>`);
   if (itens.some(it => saldoNegativoItem(it) < 0)) out.push(`<span class="tag-entrega tag-entrega-prob" title="A quantidade de um item ficou abaixo do que já foi entregue: confira na ficha">⚠ quantidade abaixo do entregue</span>`);
   return out.length ? ' ' + out.join(' ') : '';
@@ -2341,8 +2361,9 @@ function saldoAFinalizar(os) {
 /* Marca o saldo de cada item pendente, no objeto que vai ser gravado, ANTES
    do finalizadaEm (o motor recusa marca em O.S. finalizada; o servidor aceita
    marca e finalização na mesma gravação). Tudo ou nada: se um item não passa,
-   nenhum é marcado e a O.S. não finaliza. Quem não marca (montagem com senha)
-   finaliza como hoje. O item com problema aberto não entra (saldoAFinalizar).
+   nenhum é marcado e a O.S. não finaliza. A montagem com senha marca o saldo
+   como DECLARADO (E5); quem não marca finaliza como hoje. O item com problema
+   aberto não entra (saldoAFinalizar).
    Devolve { erro, marcadas, eventos }: `eventos` são as marcas criadas
    ({ uid, idx, id }), para o Desfazer do card desfazer as mesmas. */
 function marcarSaldoNaFinalizacao(os, { simular = false } = {}) {

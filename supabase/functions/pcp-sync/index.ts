@@ -567,6 +567,9 @@ Deno.serve(async (req: Request) => {
   const pessoasReq = async () => (_pessoasReq ??= await pessoasDoPCP());
   // O que foi deixado de fora de um envio do crachá de toque; volta no 200.
   const avisosToque: string[] = [];
+  /* A entrega declarada pelo celular que não achou item (o PCP tirou o item
+     da lista): volta em `descartado` junto com as recusadas pelo motor (E5). */
+  let entregasForaToque: any[] = [];
   if (cracha && !ehMaquina) {
     const papel = String(cracha.papel ?? "");
     const podeEditar = ["admin", "pcp", "montagem", "operacao"].includes(papel);
@@ -683,6 +686,7 @@ Deno.serve(async (req: Request) => {
       const mescla = mesclarToqueNoNome(atual, veio, String(cracha.nome || cracha.sub), new Date().toISOString());
       if (mescla.erro) return resp({ error: mescla.erro }, 422);
       avisosToque.push(...(mescla.avisos || []), ...acertarMomentosToque(mescla.os, atual));
+      entregasForaToque = Array.isArray(mescla.entregasFora) ? mescla.entregasFora : [];
       body.os = mescla.os;
     }
 
@@ -1220,12 +1224,14 @@ Deno.serve(async (req: Request) => {
         trocarOS(preservarItens(os, existing).os);
         /* MARCAS DE ENTREGA POR ITEM (E3). Regras em _shared
            (guardarEntregasItens): só acréscimo, parte do gravado; marca nova
-           só de admin, pcp e operação com senha (balcão), conferida pelo motor
+           de admin, pcp e operação com senha (balcão), conferida pelo motor
            da E2 (permissão, saldo, dia, teto); autor, ID e hora do crachá e
            do servidor; id repetido ignorado; item com marca não sai da lista.
-           O toque (a mescla já partiu do gravado) e a máquina não marcam. O
-           que não passa vira aviso, nunca 422. O autor só é lido do RH quando
-           entra marca nova. */
+           O celular (E5: o toque, cuja mescla já partiu do gravado e trouxe
+           só as marcas de id novo, e a montagem com senha) só entrega e
+           retira, e a marca sai DECLARADA; a máquina não marca. O que não
+           passa vira aviso, nunca 422. O autor só é lido do RH quando entra
+           marca nova, e é o crachá DESTE envio. */
         /* A marca recusada volta na resposta (`descartado` com os ids), para o
            aparelho tirá-la da cópia e da fila: senão a mesma cópia a mandava
            de novo e, com o saldo liberado, ela entrava calada. */
@@ -1239,6 +1245,7 @@ Deno.serve(async (req: Request) => {
           trocarOS(ge.os);
           avisosToque.push(...ge.avisos);
           if (!ehMaquina && ge.recusadas.length) entregasRecusadas = ge.recusadas;
+          if (ehToqueNoNome && entregasForaToque.length) entregasRecusadas = [...entregasRecusadas, ...entregasForaToque].slice(0, 200);
         }
         /* CAMPOS DA GESTAO (F01): ausente fica o gravado, valor novo ainda nao
            entra, null explicito de admin/pcp limpa. O toque ja parte do gravado
