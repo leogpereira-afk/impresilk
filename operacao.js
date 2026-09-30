@@ -773,6 +773,27 @@ const OPERACAO = (() => {
     const ordem = { conferir: 0, parcial: 1, conferida: 2 };
     return lista2.sort((a, b) => ordem[a.situacao] - ordem[b.situacao] || b.dia.localeCompare(a.dia) || a.chave.localeCompare(b.chave));
   }
+  /* O AGRUPAMENTO DO FECHAR O DIA (F14): a mesma chave da volta (dia + carro
+     + equipe, pela pessoa), SEM exigir equipe nem retorno. O lote junta a
+     baixa do ERP sem equipe e a O.S. ainda aberta do dia, que a fila da
+     volta do carro deixa de fora; é no lote que a equipe entra. `diaDe(o)`
+     escolhe o dia de cada O.S. (padrão: diaDaVolta); O.S. sem dia fica de
+     fora. Só leitura. */
+  function agruparPorVolta(lista, diaDe = diaDaVolta) {
+    const grupos = new Map();
+    for (const o of lista || []) {
+      if (!o) continue;
+      const d = dia(diaDe(o));
+      if (!d) continue;
+      const time = equipe(o);
+      const pessoasDaVolta = time.map(chavePessoa).sort();
+      const chave = [d, normal(o.veiculo), pessoasDaVolta.join('+')].join('|');
+      const g = grupos.get(chave) || { chave, dia: d, veiculo: String(o.veiculo || '').trim(), semCarro: semCarro(o), equipe: time.map(nomePessoa), pessoas: pessoasDaVolta, os: [] };
+      g.os.push(o);
+      grupos.set(chave, g);
+    }
+    return [...grupos.values()].sort((a, b) => a.dia.localeCompare(b.dia) || a.veiculo.localeCompare(b.veiculo) || a.chave.localeCompare(b.chave));
+  }
   /* CÓDIGO FIXO DO ITEM (E1, 29/09/2026). Cópia do casamento do servidor
      (_shared/pcp-integridade.mjs: casarItens e uidItemValido); um teste
      confere as duas (tests/itens-uid.test.cjs). O item novo feito aqui
@@ -867,7 +888,7 @@ const OPERACAO = (() => {
     });
     return n;
   }
-  return {uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco};
+  return {uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
 // Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega

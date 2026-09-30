@@ -249,6 +249,55 @@ export function carimbarRetornoPrevisto(veio, os, antes, autor, agora, { pode = 
   else delete r.retornoPrevisto;
   return { os: r, avisos };
 }
+/* A CHEGADA CONFERIDA DO CARRO (F14, retornoConferido). É o check-in da
+   gestão no Fechar o dia: o Thiago confere a hora em que o carro chegou, uma
+   vez por volta, e o lote grava {dia, hora, fonte} em cada O.S. da volta. É
+   a régua do retorno antecipado (F17): a hora digitada pelo instalador nunca
+   decide. Regras (roda depois do preservarAusentes, que já pôs o gravado no
+   lugar do ausente e limpou o vazio da gestão):
+   - só admin e pcp gravam (`pode`); para os outros fica o gravado, e quem
+     tem senha ouve o porquê (`avisar`). O toque parte do gravado na mescla;
+   - o carimbo é do servidor: por, porConta e porId do crachá, recebidoEm do
+     relógio daqui. O `em` (a hora da conferência, que pode ter sido feita sem
+     rede) vem do aparelho só se for uma data válida e não depois de agora;
+   - o mesmo dia e a mesma hora mantêm o carimbo de quem conferiu;
+   - CÓPIA VELHA NÃO APAGA (F01): o que volta com o recebidoEm de uma versão
+     que não é a gravada é a cópia de outra versão (aba antiga, Sobrescrever)
+     e fica o gravado. A conferência nova vai sem recebidoEm;
+   - dia ou hora inválidos: fica o gravado, com aviso. Nada aqui é 422.
+   Devolve { os, avisos }. */
+export const FONTES_RETORNO_CONFERIDO = ['lote', 'ficha'];
+export function carimbarRetornoConferido(veio, os, antes, autor, agora, { pode = false, avisar = false } = {}) {
+  const r = { ...os }, avisos = [];
+  if (veio === undefined || vazioGestao(veio)) return { os: r, avisos };
+  const gravado = objeto(antes?.retornoConferido) ? antes.retornoConferido : null;
+  const manter = () => { if (gravado) r.retornoConferido = gravado; else if (proprio(antes, 'retornoConferido')) r.retornoConferido = antes.retornoConferido; else delete r.retornoConferido; };
+  const v = objeto(veio) ? veio : {};
+  const dia = diaPlausivel(v.dia), hora = HORA_F15.test(String(v.hora ?? '').trim()) ? String(v.hora).trim() : '';
+  const igual = !!gravado && dia === String(gravado.dia ?? '') && hora === String(gravado.hora ?? '');
+  if (igual) { r.retornoConferido = gravado; return { os: r, avisos }; }
+  if (!pode) {
+    if (avisar) avisos.push('A chegada conferida do carro não foi trocada: só a gestão do PCP (admin ou pcp) confere a chegada.');
+    manter(); return { os: r, avisos };
+  }
+  const recebido = String(v.recebidoEm ?? '').trim();
+  if (recebido && recebido !== String(gravado?.recebidoEm ?? '')) {
+    if (avisar) avisos.push('A chegada conferida não foi trocada: este aparelho mandou a de uma versão anterior à gravada no servidor.');
+    manter(); return { os: r, avisos };
+  }
+  if (!objeto(veio) || !dia || !hora) {
+    avisos.push('A chegada conferida do carro não foi gravada: dia ou hora inválidos. Ficou a que estava gravada.');
+    manter(); return { os: r, avisos };
+  }
+  const tEm = Date.parse(String(v.em ?? '')), tAgora = Date.parse(String(agora ?? ''));
+  const em = Number.isFinite(tEm) && Number.isFinite(tAgora) && tEm <= tAgora ? new Date(tEm).toISOString() : String(agora ?? '');
+  r.retornoConferido = {
+    dia, hora, fonte: FONTES_RETORNO_CONFERIDO.includes(v.fonte) ? v.fonte : 'ficha',
+    por: String(autor?.nome ?? '').slice(0, 120), porConta: String(autor?.login ?? '').slice(0, 120),
+    porId: ehIdPessoa(autor?.porId) ? String(autor.porId).trim() : '', em, recebidoEm: String(agora ?? ''),
+  };
+  return { os: r, avisos };
+}
 /* GRAVAR O PRAZO COMBINADO (roda depois do preservarAusentes e do
    guardarAgendaLog). Revisão da F15 (29/09/2026):
    - CONGELADO DESDE O NASCIMENTO. O gravado não anda com a agenda, nem da
@@ -1625,6 +1674,11 @@ export function podarCarimbosF15(r) {
   else if (objeto(out.retornoPrevisto)) {
     const { porId: _pi, porConta: _pc, ...x } = out.retornoPrevisto;
     out.retornoPrevisto = x;
+  }
+  // A chegada conferida (F14) desce com o nome de quem conferiu, sem o ID e sem o login.
+  if (objeto(out.retornoConferido)) {
+    const { porId: _pi, porConta: _pc, ...x } = out.retornoConferido;
+    out.retornoConferido = x;
   }
   // Quem finalizou pelo celular (revisão da E5) desce com o nome, sem o ID; a volta sem ele não apaga.
   if (objeto(out.finalizadaPorCampo)) {

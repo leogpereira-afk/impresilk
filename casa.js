@@ -1648,6 +1648,8 @@ function renderEntregas() {
   const el = document.getElementById('panel-entregas');
   if (!el) return;
   if(STATE._entAba==='relatorios')return renderRelatoriosEntregas();
+  // Fechar o dia (F14): o lote da gestão, em lote.js. Sem ele (cache misto), a lista de sempre.
+  if (STATE._entAba === 'lote' && typeof renderLoteEntregas === 'function') return renderLoteEntregas();
   const todas = STORE.getAllOS();
   const porNumero = new Map(todas.map(o => [String(o.numero || '').trim(), o]));
   const cls = classificarEntregas(todas);

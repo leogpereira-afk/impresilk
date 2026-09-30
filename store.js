@@ -2133,6 +2133,8 @@ const STORE = (() => {
       _osMem = null; _prontoP = null;
       if (_db) { _db.close(); _db = null; }
       indexedDB.deleteDatabase('impresilk_inst');
+      // O rascunho do Fechar o dia (lote.js, F14) é da sessão que saiu.
+      indexedDB.deleteDatabase('impresilk_lote');
     } catch {}
     return true;
   }

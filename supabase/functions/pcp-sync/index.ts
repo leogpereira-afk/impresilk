@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
@@ -1253,6 +1253,8 @@ Deno.serve(async (req: Request) => {
         // O que o aparelho mandou de prazo e retorno (F15), antes da preservacao.
         const veioRetorno = Object.prototype.hasOwnProperty.call(os, "retornoPrevisto") ? os.retornoPrevisto : undefined;
         const veioPrazo = Object.prototype.hasOwnProperty.call(os, "prazoCombinado") ? os.prazoCombinado : undefined;
+        // A chegada conferida do carro (F14), antes da preservacao.
+        const veioChegada = Object.prototype.hasOwnProperty.call(os, "retornoConferido") ? os.retornoConferido : undefined;
         // A divisão da equipe que o aparelho mandou (F08), antes da preservação.
         const veioAlocacao = Object.prototype.hasOwnProperty.call(os, "alocacao") ? os.alocacao : undefined;
         trocarOS(preservarAusentes(os, existing, { podeLimpar: !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp) }));
@@ -1308,6 +1310,21 @@ Deno.serve(async (req: Request) => {
             f15 = rodarF15(await autorAuditoria());
           trocarOS(f15.os);
           avisosToque.push(...f15.avisos);
+        }
+        /* CHEGADA CONFERIDA DO CARRO (F14, retornoConferido). Regras em _shared
+           (carimbarRetornoConferido): so admin e pcp gravam; o carimbo (quem,
+           ID, login, recebidoEm) e daqui; a mesma hora mantem o carimbo; a
+           copia de outra versao (recebidoEm diferente do gravado) nao apaga;
+           invalido fica de fora com aviso, nunca 422. O RH so e lido quando
+           a chegada muda. */
+        {
+          const gestaoChegada = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
+          const agoraChegada = new Date().toISOString();
+          const rodarChegada = (autor: any) => carimbarRetornoConferido(veioChegada, os, existing, autor, agoraChegada, { pode: gestaoChegada, avisar: !ehMaquina && !ehToqueNoNome });
+          let rc = rodarChegada({ nome: String(cracha?.nome || cracha?.sub || ""), login: String(cracha?.sub ?? ""), porId: "" });
+          if (canon(rc.os.retornoConferido) !== canon(existing?.retornoConferido)) rc = rodarChegada(await autorAuditoria());
+          trocarOS(rc.os);
+          avisosToque.push(...rc.avisos);
         }
         /* ENTREGA LANCADA (F01): carimbo do servidor (por, porConta, porId, em).
            Lanca quem tem o botao e entrou com senha; o toque sem senha, a

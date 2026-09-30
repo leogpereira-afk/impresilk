@@ -21,7 +21,8 @@ const REL_ENT = {
 function relEntData(v){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || ''));return m?`${m[3]}/${m[2]}/${m[1]}`:'—';}
 // O servidor só entrega o relatório à gestão do PCP; para os outros papéis a aba era um erro garantido.
 function relEntPodeVer(){return typeof STATE==='undefined' || ['admin','pcp'].includes(String(STATE.user?.papel || ''));}
-function abasEntregasHTML(ativa) {if(!relEntPodeVer())return '';return `<nav class="rel-ent-abas" aria-label="Entregas e relatórios"><button class="btn-ghost ${ativa==='lista'?'active':''}" data-ent-aba="lista" aria-pressed="${ativa==='lista'}">📦 Entregas</button><button class="btn-ghost ${ativa==='relatorios'?'active':''}" data-ent-aba="relatorios" aria-pressed="${ativa==='relatorios'}">📈 Relatórios</button></nav>`;}
+/* A terceira aba, Fechar o dia (lote.js, F14), só aparece quando o lote.js carregou (cache misto não mostra aba que não abre). */
+function abasEntregasHTML(ativa) {if(!relEntPodeVer())return '';const lote=typeof renderLoteEntregas==='function'?`<button class="btn-ghost ${ativa==='lote'?'active':''}" data-ent-aba="lote" aria-pressed="${ativa==='lote'}">✅ Fechar o dia</button>`:'';return `<nav class="rel-ent-abas" aria-label="Entregas e relatórios"><button class="btn-ghost ${ativa==='lista'?'active':''}" data-ent-aba="lista" aria-pressed="${ativa==='lista'}">📦 Entregas</button><button class="btn-ghost ${ativa==='relatorios'?'active':''}" data-ent-aba="relatorios" aria-pressed="${ativa==='relatorios'}">📈 Relatórios</button>${lote}</nav>`;}
 function wireAbasEntregas(el) {el.querySelectorAll('[data-ent-aba]').forEach(b=>b.onclick=()=>{STATE._entAba=b.dataset.entAba;renderEntregas();});}
 function relEntValor(v,k,curto=false) {
  if(v===null || v===undefined || !Number.isFinite(v))return 'Sem informação';

@@ -3595,3 +3595,117 @@ img.perf-logo{object-fit:cover}
   .lig-rel-tabela td{border-bottom:0;padding:3px 8px}
   .lig-rel-tabela td.num{text-align:left;font-weight:700}
 }
+
+/* FECHAR O DIA (lote.js, F14): o lote da gestão dentro de Entregas. Grupo =
+   volta (dia, carro, equipe); linha = O.S. Alvos de 44 px na navegação e 40
+   px nos controles; a 375 px tudo empilha e nada rola para o lado. */
+.lote .lote-intro{border:1px solid #f0c36d;background:#fffaf0;border-radius:12px;padding:10px 14px}
+.lote .lote-intro summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:700;color:#7a4b00}
+.lote .lote-intro-corpo{font-size:.84rem;line-height:1.55;color:#3d4b5c;display:flex;flex-direction:column;gap:8px;padding-bottom:6px}
+.lote .lote-intro-corpo ul{margin:0;padding-left:18px}
+.lote .lote-intro-corpo button{align-self:flex-start;min-height:40px}
+.lote-modos{display:flex;gap:8px;flex-wrap:wrap}
+.lote-modos button{min-height:44px;padding:0 16px}
+.lote-modos button.active{background:#183f50;color:#fff;border-color:#183f50}
+.lote-filtro{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.lote-filtro button{min-height:40px}
+.lote-filtro button.active{background:#e8f0fa;border-color:#183f50}
+.lote-quando{display:flex;gap:8px;align-items:center;font-size:.84rem;font-weight:600;color:#163654}
+.lote-quando input{min-height:40px;padding:4px 8px;border:1px solid var(--border);border-radius:8px;font:inherit}
+.lote-resumo{font-size:.86rem;color:#163654;margin:0}
+.lote-dica{font-size:.78rem;color:#526378;margin:0;line-height:1.45}
+.lote-aviso{font-size:.82rem;color:#8a2d0a;background:#fff4ed;border-radius:8px;padding:8px 10px;margin:0}
+.lote-grupos{display:flex;flex-direction:column;gap:16px}
+.lote-grupo{background:#fff;border:1px solid #d7e1ee;border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.lote-g-head{display:flex;gap:6px 14px;flex-wrap:wrap;align-items:baseline;font-size:.88rem;color:#163654}
+.lote-g-head .lote-g-n{margin-left:auto;font-size:.78rem;color:#526378}
+.lote-g-equipe,.lote-g-chegada{display:flex;gap:8px 12px;flex-wrap:wrap;align-items:center;font-size:.84rem}
+.lote-g-volta{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:6px 18px;align-items:center;font-size:.84rem}
+.lote-g-volta > .lote-g-rot,.lote-g-volta > .lote-volta-obs,.lote-g-volta > .lote-dica,.lote-g-volta > .eq-registrou{grid-column:1 / -1}
+.lote-g-rot{font-size:.7rem;letter-spacing:.05em;text-transform:uppercase;color:#5b6f84;font-weight:700;min-width:84px}
+.lote-g-eq-txt{flex:1 1 260px;min-width:0;line-height:1.5}
+.lote-g-eq-acoes{display:flex;gap:8px;flex-wrap:wrap}
+.lote-sem-equipe{color:#8a2d0a}
+.lote-aloc{border:1px dashed #b9c7d8;border-radius:12px;padding:10px;min-width:0}
+.lote-g-chegada label{display:flex;gap:8px;align-items:center;font-weight:600;color:#163654}
+.lote-g-chegada input{min-height:40px;padding:4px 8px;border:1px solid var(--border);border-radius:8px;font:inherit}
+.lote-g-chegada small{color:#526378}
+.lote-volta-q{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.lote-volta-q > span:first-child{min-width:112px;color:#163654;font-weight:600}
+.lote-volta-q .seg{margin-top:0}
+.lote-volta-q .seg button{min-height:40px;min-width:48px;flex:0 0 auto}
+.lote-volta-q .seg button.active{background:#183f50;border-color:#183f50}
+.lote-volta-obs{display:flex;flex-direction:column;gap:4px;font-size:.8rem;color:#526378}
+.lote-volta-obs input{min-height:40px;padding:4px 8px;border:1px solid var(--border);border-radius:8px;font:inherit;width:100%}
+.lote-linhas{display:flex;flex-direction:column;gap:8px}
+.lote-linha{border:1px solid #e2e8f0;border-left:4px solid #cbd5e1;border-radius:10px;padding:10px 12px;display:grid;grid-template-columns:minmax(200px,1.4fr) auto auto;gap:8px 14px;align-items:center;min-width:0}
+.lote-linha:focus{outline:3px solid #7aa7d9;outline-offset:1px}
+.lote-linha.em-foco{box-shadow:0 0 0 2px #cfe0f5}
+.lote-linha.confirmada{border-left-color:var(--green);background:#f6fbf7}
+.lote-linha.com-falta{border-left-color:#f0b45a}
+.lote-l-os{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;min-width:0}
+.lote-l-os small{flex-basis:100%;color:#526378;font-size:.76rem}
+.lote-l-os .inline-link{min-height:40px;display:inline-flex;align-items:center;background:none;border:0;padding:0;font-size:.9rem}
+.lote-l-cli{font-size:.84rem;color:#163654;overflow-wrap:anywhere}
+.lote-l-data{display:flex;gap:6px;align-items:center;font-size:.78rem;color:#526378}
+.lote-l-data input{min-height:40px;padding:4px 8px;border:1px solid var(--border);border-radius:8px;font:inherit}
+.lote-retrab{display:flex;gap:6px;align-items:center;font-size:.78rem;color:#526378}
+.lote-l-entrega{display:flex;gap:6px;flex-wrap:wrap;grid-column:1 / -1}
+.lote-b{min-height:40px;padding:0 12px;border:1px solid #b9c7d8;border-radius:8px;background:#fff;color:#163654;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center}
+.lote-b.on{background:#183f50;border-color:#183f50;color:#fff}
+.lote-b.sim.on{background:var(--red);border-color:var(--red)}
+.lote-b.estatico{cursor:default}
+.lote-decl{grid-column:1 / -1;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:.8rem;color:#5b3d00;background:#fff8e6;border:1px dashed #e0b44a;border-radius:8px;padding:6px 8px}
+.lote-faltas{grid-column:1 / -1;margin:0;font-size:.78rem}
+.lote-faltas .trava{color:#a4380f;font-weight:700}
+.lote-faltas .nota{color:#526378}
+.lote-l-acoes{grid-column:1 / -1;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.lote-l-acoes button{min-height:40px}
+.lote-confirmar[aria-disabled="true"]{opacity:.55}
+.lote-ok{color:var(--green);font-weight:700;font-size:.84rem}
+.lote-salva{color:#526378}
+.lote-selo{font-size:.7rem;font-weight:700;border-radius:999px;padding:2px 8px;background:#eef2f7;color:#334155;white-space:nowrap}
+.lote-selo.erp{background:#fff1e6;color:#8a2d0a}
+.lote-selo.decl{background:#fff8e6;color:#7a4b00;border:1px dashed #e0b44a}
+.lote-selo.ok{background:#e8f6ee;color:#15603a}
+.lote-selo.sug{background:#eef2ff;color:#3730a3}
+.lote-selo.aberta{background:#e8f0fa;color:#1e3a8a}
+.lote-saldo{grid-column:1 / -1;margin:0;padding-left:18px;font-size:.78rem;color:#3d4b5c;line-height:1.5}
+.lote-saldo.resumido{columns:2 260px}
+.lote-itens{grid-column:1 / -1;border-top:1px dashed #d7e1ee;padding-top:8px;display:flex;flex-direction:column;gap:6px}
+.lote-itens-dica,.lote-itens-vazio{font-size:.78rem;color:#526378;margin:0}
+.lote-parte{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.lote-parte li{display:flex;gap:6px 10px;flex-wrap:wrap;align-items:center;font-size:.82rem}
+.lote-item-nome{font-weight:600;color:#163654;overflow-wrap:anywhere}
+.lote-item-q{display:flex;gap:6px;align-items:center;min-height:40px}
+.lote-item-q input[type=number]{width:72px;min-height:40px;padding:4px 6px;border:1px solid var(--border);border-radius:8px;font:inherit}
+.lote-item-q input[type=checkbox]{width:22px;height:22px}
+.lote-item-feito{color:#526378;font-size:.78rem}
+.lote-res{grid-column:1 / -1;margin:0;font-size:.8rem;border-radius:8px;padding:6px 8px;background:#eef2f7}
+.lote-res.st-gravada,.lote-rel li.st-gravada{background:#e8f6ee;color:#15603a}
+.lote-res.st-gravada-aviso,.lote-res.st-na-fila{background:#fff8e6;color:#7a4b00}
+.lote-res.st-recusada,.lote-res.st-conflito,.lote-res.st-pulada{background:#fdecec;color:#8b1c1c}
+.lote-rel{border:1px solid #d7e1ee;border-radius:12px;padding:10px 12px;background:#fbfdff;font-size:.82rem;display:flex;flex-direction:column;gap:6px}
+.lote-rel p{margin:0}
+.lote-rel ul{margin:0;padding-left:18px;max-height:220px;overflow:auto;line-height:1.5}
+.lote-rel li.st-recusada,.lote-rel li.st-conflito,.lote-rel li.st-pulada{color:#8b1c1c}
+.lote-rel button{align-self:flex-start;min-height:40px}
+.lote-rodape{position:sticky;bottom:0;z-index:5;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:#fff;border:1px solid #d7e1ee;border-radius:12px;padding:10px 12px;box-shadow:0 -4px 16px rgba(15,23,42,.06)}
+.lote-rodape span{font-size:.84rem;color:#163654}
+.lote-rodape button{min-height:44px}
+.lote-rodape kbd{font:inherit;font-size:.7rem;opacity:.8;margin-left:6px;border:1px solid rgba(255,255,255,.5);border-radius:4px;padding:0 4px}
+@media (max-width:760px){
+  .lote-linha{grid-template-columns:1fr}
+  .lote-g-head .lote-g-n{margin-left:0}
+  .lote-rodape kbd{display:none}
+  .lote-rodape{padding:8px 10px}
+  .lote-rodape button{flex:1 1 140px}
+  .lote-saldo.resumido{columns:1}
+}
+/* Três abas em Entregas (Entregas, Relatórios, Fechar o dia): a 375 px elas quebram a linha em vez de empurrar a página para o lado. */
+.rel-ent-abas{flex-wrap:wrap}
+/* "Não conferido" escolhido não parece resposta: cinza claro, não o azul de Sim/Não. */
+.lote-volta-q .seg button.active[data-v=""]{background:#e2e8f0;border-color:#94a3b8;color:#334155}
+.lote-g-volta.compacta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.lote-volta-resumo{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;flex:1 1 240px;min-width:0}
+.lote-volta-resumo small{color:#526378}
