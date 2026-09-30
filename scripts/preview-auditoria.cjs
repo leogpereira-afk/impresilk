@@ -109,6 +109,23 @@ const ELENCO_PREVIA={pessoas:[
  antigos:[{chave:'davi-antigo',id:'900006',nome:'Davi Antigo Nunes',apelido:'',ativo:false,desligado:true}],veiculos:[],ferias:[],ausencias:[]};
 cfg.vinculosRH=[{apelido:'Bia',id:'900002',chave:'bia-costa',nome:'Beatriz Costa Lima'}];
 lista.push(base('112',{cliente:'Mercado Bairro · teste (equipe por ID)',instalacao:{data:deslocar(1),periodo:'Tarde'},equipe:['900004','Ana'],veiculo:'Carro 1'}));
+/* ENTREGA POR ITEM NA FICHA (E4, 30/09/2026): marcas fictícias para ver a
+   coluna Entrega, o selo do card e os casos raros (item com problema,
+   cancelado, quantidade abaixo do entregue, serviço, O.S. interna, item sem
+   descrição e 38 itens). #ficha=E4A abre a ficha no bloco dos itens. */
+const pvMarca=(id,tipo,qtde,dia,extra={})=>({id,tipo,...(qtde?{qtde}:{}),dia,via:'gestao',por:'Gestor de teste',em:dia+'T12:00:00Z',...extra});
+lista.push(base('E4A',{cliente:'Cliente fictício E4 · entrega parcial',itens:[
+ {uid:'E4A:1:1',item:'1',descricao:'Placa ACM 2x1',medidas:'2,00x1,00',qtde:'10',entregas:[pvMarca('pv-e1','entregue',6,deslocar(-2))]},
+ {uid:'E4A:2:1',item:'2',descricao:'Adesivo de vitrine',medidas:'1,20x0,80',qtde:'1',entregas:[pvMarca('pv-e2','entregue',1,deslocar(-2))]},
+ {uid:'E4A:3:1',item:'3',descricao:'Totem de sinalização',medidas:'0,60x1,80',qtde:'2'},
+ {uid:'E4A:4:1',item:'4',descricao:'Lona com estrutura',medidas:'3,00x1,00',qtde:'3',entregas:[pvMarca('pv-e3','problema',0,deslocar(-1),{motivo:'Estrutura amassada no transporte'})]},
+ {uid:'E4A:5:1',item:'5',descricao:'Letreiro luminoso',medidas:'2,00x0,40',qtde:'1',entregas:[pvMarca('pv-e4','cancelado',0,deslocar(-1),{motivo:'Cliente desistiu do letreiro'})]},
+ {uid:'E4A:6:1',item:'6',descricao:'Faixa de obra',medidas:'5,00x0,90',qtde:'4',manual:true,entregas:[pvMarca('pv-e5','entregue',6,deslocar(-3))]},
+ {uid:'E4A:7:1',item:'7',descricao:'Servicos de instalação',qtde:'1'}]}));
+lista.push(base('E4B',{cliente:'Cliente fictício E4 · retira na fábrica',tipo:'interno',instalacao:{},equipe:[],itens:[
+ {uid:'E4B:1:1',item:'1',descricao:'Banner 3x1',qtde:'3',entregas:[pvMarca('pv-r1','retirado',1,deslocar(-1),{via:'balcao',retirou:'Fulano Fictício'})]},
+ {uid:'E4B:2:1',item:'2',descricao:'',qtde:'1'}]}));
+lista.push(base('E4C',{cliente:'Cliente fictício E4 · 38 itens',itens:Array.from({length:38},(_,k)=>({uid:'E4C:'+(k+1)+':1',item:String(k+1),descricao:k===6?'':k===7?'Item':'Peça de sinalização '+(k+1),qtde:String(1+(k%4)),...(k%5===0?{entregas:[pvMarca('pv-c'+k,'entregue',1,deslocar(-1))]}:{})}))}));
 /* A FILA DE LANÇAMENTO COMO NO PRINT DO DONO (revisão de Entregas, 29/09/2026).
    No ar a fila passou de 50 baixas do ERP esperando lançamento, quase todas sem
    equipe. Aqui são 56 (57 com a 109, que já estava na prévia), com valor
@@ -147,7 +164,7 @@ const STORE={getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id),getCFG:()=>cf
 `;
 const boot=`
 document.addEventListener('DOMContentLoaded',()=>{
- STATE.user={nome:'PRÉVIA LOCAL · dados fictícios',papel:'admin'};
+ STATE.user={nome:'PRÉVIA LOCAL · dados fictícios',papel:new URLSearchParams(location.hash.slice(1)).get('papel')||'admin'};
  document.querySelector('#login-screen').classList.add('hidden');document.querySelector('#app').classList.remove('hidden');
  document.querySelector('#user-badge').textContent=STATE.user.nome;
  document.querySelector('#topbar-logo').src=LOGO_IMPRESILK;
@@ -167,6 +184,8 @@ document.addEventListener('DOMContentLoaded',()=>{
  if(pv.get('base'))setTimeout(()=>{const d=document.querySelector('[data-quadro="perf-base"]');if(d)d.open=true;},900);
  // &tv=1 abre o Modo TV no painel das equipes; &tv=2 no das pessoas.
  if(pv.get('tv'))setTimeout(()=>{abrirTVCasa();for(let i=1;i<Number(pv.get('tv'));i++)document.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight'}));},1200);
+ // &ficha=E4A abre a ficha dessa O.S. (no bloco &bloco=, padrão itens); &papel=operacao entra como operação.
+ if(pv.get('ficha'))setTimeout(()=>{openModal(STORE.getOS(pv.get('ficha')),pv.get('bloco')||'itens');},700);
  if(pv.get('rolar'))setTimeout(()=>{const alvo=document.querySelector(pv.get('rolar'));if(alvo)alvo.scrollIntoView({block:'start'});},900);
 });`;
 http.createServer((req,res)=>{

@@ -520,6 +520,58 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .items-table tr.item-reprov { background: #fff7f7; }
 .motivo-row input { border-color: var(--red); }
 
+/* Entrega por item (E4): a linha embaixo do item, com a situação e os botões. */
+.items-table tr.entrega-row td { padding: 0 8px 10px; }
+.items-table tr[data-item-row]:has(+ tr.entrega-row) td { border-bottom: none; }
+.ent-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.ent-rotulo { font-size: .72rem; font-weight: 700; color: var(--muted); }
+.ent-selo {
+  display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: .74rem; font-weight: 600;
+  line-height: 1.35; background: #f1f5f9; color: var(--text); overflow-wrap: anywhere;
+}
+.ent-selo.st-parcial   { background: #fef3c7; color: #92400e; }
+.ent-selo.st-entregue  { background: #dcfce7; color: #166534; }
+.ent-selo.st-problema  { background: #fee2e2; color: #991b1b; }
+.ent-selo.st-cancelado { background: #f1f5f9; color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+.ent-selo.st-servico   { background: transparent; color: var(--muted); font-weight: 500; padding-left: 0; }
+.ent-selo.st-negativo  { border-radius: 8px; background: #fef2f2; color: var(--red); border: 1px solid #fecaca; font-weight: 600; }
+.ent-acoes { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+.ent-btn {
+  min-height: 40px; padding: 0 12px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  border: 1.5px solid var(--border); background: #fff; font-size: .8rem; font-weight: 600; color: var(--text);
+}
+.ent-btn.ent-tudo, .ent-btn.ent-retirado { border-color: var(--green); color: #166534; background: #f0fdf4; }
+.ent-btn.ent-cancelar, .ent-btn.ent-desfazer { color: var(--muted); }
+.ent-mais > summary {
+  min-height: 40px; padding: 0 12px; border-radius: 8px; cursor: pointer; list-style: none;
+  display: inline-flex; align-items: center; border: 1.5px solid var(--border); background: #fff;
+  font-size: .8rem; font-weight: 600; color: var(--muted);
+}
+.ent-mais > summary::-webkit-details-marker { display: none; }
+/* O "▸" dos blocos da ficha (.card-fs summary::before) não entra no "Mais". */
+.ent-mais > summary::before { content: none; }
+.ent-mais > summary::after { content: ' ▾'; margin-left: 4px; }
+.ent-mais[open] > summary { border-color: var(--blue); color: var(--blue); }
+.ent-menu { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ent-fica { font-size: .72rem; color: var(--muted); white-space: nowrap; }
+/* Quantidade abaixo do que já foi entregue: o campo acusa e a O.S. fica com a de antes. */
+.items-table input[aria-invalid="true"] { border-color: var(--red); background: #fef2f2; }
+.ent-resumo { font-weight: 600; }
+.ent-erro { color: var(--red); font-size: .82rem; margin: 6px 0; }
+.saldo-ent-lista { margin: 0 0 12px 18px; font-size: .84rem; display: grid; gap: 4px; }
+/* Item com problema aberto: fora da marcação do Finalizar, listado à parte. */
+.saldo-ent-sub { font-size: .82rem; margin-bottom: 4px; }
+.saldo-ent-prob { color: #991b1b; }
+.saldo-ent-acoes { display: grid; gap: 8px; }
+.saldo-ent-acoes button { min-height: 44px; }
+/* Selo do card: entrega parcial, itens entregues, problema. */
+.tag-entrega {
+  display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: .7rem; font-weight: 700;
+  background: #fef3c7; color: #92400e; vertical-align: middle;
+}
+.tag-entrega.tag-entrega-ok { background: #dcfce7; color: #166534; }
+.tag-entrega.tag-entrega-prob { background: #fee2e2; color: #991b1b; }
+
 /* Marcação de escolha única (Acesso / Fixação) */
 .mark-group { display: flex; flex-wrap: wrap; gap: 6px; }
 .mark-opt {
@@ -551,6 +603,14 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   .items-cards tr.item-reprov { background: #fff7f7; border-color: #fecaca; }
   .items-cards .item-del-cell::before { content: ''; flex: 0 0 84px; }
   .items-cards .item-del-cell { justify-content: flex-start; }
+  /* A linha Entrega cola no cartão do item, embaixo dele. */
+  .items-cards tr[data-item-row]:has(+ tr.entrega-row) { margin-bottom: 0; border-bottom: 0; border-radius: 10px 10px 0 0; padding-bottom: 2px; }
+  .items-cards tr.entrega-row { border-top: 0; border-radius: 0 0 10px 10px; padding-top: 2px; }
+  .items-cards tr.entrega-row td { padding: 2px 0 4px; }
+  .items-cards tr.entrega-row td::before { content: none; }
+  .items-cards tr.item-ok + tr.entrega-row { background: #f0fdf4; border-color: #bbf7d0; }
+  .items-cards tr.item-reprov + tr.entrega-row { background: #fff7f7; border-color: #fecaca; }
+  .items-cards .ent-linha { width: 100%; }
 }
 
 /* ── Subtítulos de etapa no bloco de Execução (orienta o fluxo da rua) ───── */

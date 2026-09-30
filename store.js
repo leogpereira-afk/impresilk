@@ -16,7 +16,8 @@ const STORE = (() => {
     CURSOR:     'impresilk_inst_cursor_v2',   // carimbo do servidor do ultimo pull
     CFGCONFLITO:'impresilk_inst_cfgconflito',
     CFGVER:     'impresilk_inst_cfgver',   // versao da config que o aparelho tem
-    ALOCDESC:   'impresilk_inst_alocdescarte' // divisões de equipe recusadas pelo servidor (aviso fixo, F08)
+    ALOCDESC:   'impresilk_inst_alocdescarte', // divisões de equipe recusadas pelo servidor (aviso fixo, F08)
+    ENTDESC:    'impresilk_inst_entdescarte'   // marcas de entrega por item recusadas pelo servidor (aviso fixo, E4)
   };
   // O que o aparelho GUARDA: abertas + finalizadas nos ultimos N dias (ordem do
   // dono, 14/09/2026). O resto so vem por busca. E a unica regua: o servidor
@@ -278,7 +279,8 @@ const STORE = (() => {
     if (idx >= 0) all[idx] = os;
     else all.push(os);
     _setAllOS(all);
-    _enqueue({ action: 'upsert', os });
+    // `fila` separa uma gravação da outra na fila (ver _removeFromQueue).
+    _enqueue({ action: 'upsert', os, fila: Date.now() + '-' + Math.random().toString(36).slice(2, 8) });
     trySync();
   }
 
@@ -435,6 +437,12 @@ const STORE = (() => {
         if (item.action === 'upsert' && x.os && item.os && x.os.atualizadoEm !== item.os.atualizadoEm) {
           return true;
         }
+        /* O relógio sozinho não separa duas gravações do mesmo milissegundo
+           (marcar e desfazer em seguida levam o mesmo atualizadoEm): a segunda
+           saía da fila junto com a primeira e nunca chegava ao servidor. A
+           senha `fila` de cada gravação desempata; item antigo sem ela segue
+           pelo relógio. */
+        if (item.action === 'upsert' && x.fila && item.fila && x.fila !== item.fila) return true;
         // Mesma regra para a configuração: a que foi salva durante o envio fica.
         if (item.action === 'setCfg' && x.em !== item.em) return true;
         removido = true;
@@ -651,11 +659,16 @@ const STORE = (() => {
   /* MARCA DE ENTREGA DESCARTADA PELO SERVIDOR (E3). A gravação passou, mas a
      marca de entrega do item (item.entregas) não: saldo, dia, papel. O
      servidor responde `descartado` com os ids em `entregasRecusadas`, e o
-     aparelho tira essas marcas da cópia da lista (que é o próprio rascunho da
-     ficha aberta) e dos envios da fila. Sem isto a mesma cópia mandava a
-     marca de novo na próxima gravação e, com o saldo liberado, ela entrava
-     calada, com a hora daquela gravação. Marcar de novo é ação nova (id novo).
-     O aviso do motivo vai pelo `item-aviso` de sempre. */
+     aparelho tira essas marcas da cópia da lista e dos envios da fila. Sem
+     isto a mesma cópia mandava a marca de novo na próxima gravação e, com o
+     saldo liberado, ela entrava calada, com a hora daquela gravação. Marcar
+     de novo é ação nova (id novo).
+     A FICHA ABERTA PODE SER OUTRA CÓPIA (E4): o _modalDraft da gestão nasce
+     clone (openModal, atualizarFichaAberta, Sobrescrever) e só vira o objeto
+     da lista depois de gravar, até a resposta trocá-lo de novo.
+     Quem limpa o rascunho é a tela, pelo evento 'entregas-descartadas'. O
+     aviso fica guardado até alguém dispensar (K.ENTDESC, no molde da divisão
+     recusada): o toast some, e a marca que sumiu da ficha ninguém veria. */
   function _tirarMarcas(alvo, ids) {
     let n = 0;
     if (!ids || !ids.size) return 0;
@@ -683,7 +696,36 @@ const STORE = (() => {
     let mudou = false;
     for (const it of q) if (it.action === 'upsert' && it.os && it.os.id === osId && _tirarMarcas(it.os, ids) > 0) mudou = true;
     if (mudou) _gravarFila(q);
-    _notifyListeners('entregas-descartadas', { id: String(osId), recusadas: lista.slice(0, 200) });
+    _guardarAvisoEntregas(osId, res, item, lista);
+    _notifyListeners('entregas-descartadas', { id: String(osId), numero: String((res.os && res.os.numero) || (item.os && item.os.numero) || ''), recusadas: lista.slice(0, 200) });
+  }
+  // "item 3 (Placa ACM)": só o produto; o texto livre depois de ' - ' fica de fora.
+  function _rotuloItemAviso(osRef, uid) {
+    const it = (osRef && Array.isArray(osRef.itens) ? osRef.itens : []).find(x => x && typeof x === 'object' && String(x.uid || '') === String(uid || ''));
+    if (!it) return '';
+    const d = String(it.descricao || '').split(' - ')[0].trim().slice(0, 40), n = String(it.item || '').trim().slice(0, 10);
+    return (n ? 'item ' + n : 'item') + (d ? ' (' + d + ')' : '');
+  }
+  function _guardarAvisoEntregas(osId, res, item, lista) {
+    const osRef = res.os || item.os;
+    // Pouco e curto: o localStorage é dividido pelos sistemas da casa.
+    const novas = lista.filter(r => r && typeof r === 'object').slice(0, 10).map(r => ({
+      id: String(r.id == null ? '' : r.id).slice(0, 64), uid: String(r.uid == null ? '' : r.uid).slice(0, 80),
+      item: _rotuloItemAviso(osRef, r.uid) || _rotuloItemAviso(item.os, r.uid), motivo: String(r.motivo == null ? '' : r.motivo).slice(0, 200) }));
+    if (!novas.length) return;
+    const todos = avisosEntregas();
+    const velho = todos.find(a => a.id === String(osId));
+    const vistos = new Set(), marcas = [];
+    for (const m of [...(velho && Array.isArray(velho.marcas) ? velho.marcas : []), ...novas]) { if (!m || vistos.has(m.id)) continue; vistos.add(m.id); marcas.push(m); }
+    const aviso = { id: String(osId), numero: String((res.os && res.os.numero) || (item.os && item.os.numero) || ''), marcas: marcas.slice(-10), em: new Date().toISOString() };
+    lsSet(K.ENTDESC, [...todos.filter(a => a.id !== aviso.id), aviso].slice(-10));
+  }
+  function avisosEntregas() {
+    const v = lsGet(K.ENTDESC, []);
+    return Array.isArray(v) ? v.filter(a => a && a.id) : [];
+  }
+  function dispensarAvisoEntregas(id) {
+    lsSet(K.ENTDESC, id == null ? [] : avisosEntregas().filter(a => a.id !== String(id)));
   }
   function avisosAlocacao() {
     const v = lsGet(K.ALOCDESC, []);
@@ -753,7 +795,7 @@ const STORE = (() => {
           if (res && res.fileId) { _removeFromQueue(item); _failCount.delete(sig); }
         } else {
           // O motivo da última recusa é anotação do aparelho, não vai ao servidor.
-          const { recusa: _recusa, ...envio } = item;
+          const { recusa: _recusa, fila: _fila, ...envio } = item;
           const res = await api(envio);
           if (res && res.conflitoCfg) {
             _flagged.add(sig);
@@ -793,8 +835,9 @@ const STORE = (() => {
                  rev logo abaixo: ele é o próprio rascunho da ficha aberta. */
               let mudou = _adotarUids(all[idx], res.os) > 0;
               /* A MARCA DE ENTREGA RECUSADA (E3) SAI DO OBJETO DA LISTA ANTES
-                 DA TROCA: ele é o rascunho da ficha aberta, que a próxima
-                 gravação manda de novo mesmo depois de a lista virar res.os. */
+                 DA TROCA: ele pode ser o rascunho do celular (_draft), que a
+                 próxima gravação manda de novo mesmo depois de a lista virar
+                 res.os. A ficha da gestão pode ser um clone: a tela limpa o dela. */
               if (_tirarMarcas(all[idx], _idsRecusados(res)) > 0) mudou = true;
               if (all[idx].atualizadoEm === item.os.atualizadoEm) {
                 /* O REV NOVO VAI PARA O OBJETO QUE SAI DA LISTA. O saveOS guarda
@@ -924,7 +967,8 @@ const STORE = (() => {
              mostrar mesmo depois de reabrir o app. */
           const motivo = e.servidor || msg;
           const q2 = getQueue();
-          const alvo = q2.find(x => x.action === 'upsert' && x.os && x.os.id === item.os.id && x.os.atualizadoEm === item.os.atualizadoEm);
+          const alvo = q2.find(x => x.action === 'upsert' && x.os && x.os.id === item.os.id && x.os.atualizadoEm === item.os.atualizadoEm
+            && (!x.fila || !item.fila || x.fila === item.fila));
           if (alvo && (!alvo.recusa || alvo.recusa.motivo !== motivo)) {
             alvo.recusa = { status, motivo, em: new Date().toISOString() };
             _gravarFila(q2);
@@ -2038,6 +2082,8 @@ const STORE = (() => {
       _apagarRegrasDisco();
       // O aviso da divisão recusada leva nomes e percentuais: é da gestão.
       localStorage.removeItem(K.ALOCDESC);
+      // O da marca de entrega recusada também (E4).
+      localStorage.removeItem(K.ENTDESC);
     } catch {}
     if (getQueue().length) return false;
     try {
@@ -2240,6 +2286,8 @@ const STORE = (() => {
     onSync, onConflict, on, conflitoCFG, resolverCFG,
     // Divisão da equipe recusada pelo servidor (aviso fixo, F08)
     avisosAlocacao, dispensarAvisoAlocacao,
+    // Marca de entrega por item recusada pelo servidor (aviso fixo, E4)
+    avisosEntregas, dispensarAvisoEntregas,
     // Conflito manual
     aceitarServidor, sobrescreverServidor,
     // Fila

@@ -1193,6 +1193,9 @@ function initSyncIndicator() {
      servidor; o aviso fica fixo no topo até alguém tocar em "Entendi". */
   STORE.on('alocacao-descartada', () => { pintarAvisosAlocacao(); repintarSeLivre(); });
   pintarAvisosAlocacao();
+  /* A MARCA DE ENTREGA RECUSADA (E3/E4): o store tira da cópia da lista e da
+     fila; a ficha aberta, que é outra cópia, tira aqui. Aviso fixo. */
+  ligarEntregasDescartadas();
   // Outra aba trocou a base do aparelho (saiu ou entrou outra pessoa): esta
   // aba não grava mais no disco. Recarregar é o caminho seguro.
   STORE.on('base-trocada', () => {
@@ -1332,6 +1335,14 @@ function manterExecucaoDoServidor(local, remote) {
       if (!it || !r) return;
       for (const k of ['statusInst', 'motivo', 'obsProb', 'fotoProbId']) {
         if (semValorRua(it[k]) && !semValorRua(r[k])) { it[k] = r[k]; if (k === 'fotoProbId') mantido.fotos++; }
+      }
+      /* A marca de entrega do servidor (E4) entra também, na ordem dele: o
+         servidor a guarda de qualquer jeito (só acréscimo), e sem ela a ficha
+         mostraria o item sem a entrega que outro aparelho marcou. */
+      if (Array.isArray(r.entregas) && r.entregas.length && (!it.uid || it.uid === r.uid)) {
+        const meus = Array.isArray(it.entregas) ? it.entregas : [];
+        const deles = new Set(r.entregas.map(e => e && typeof e === 'object' ? String(e.id == null ? '' : e.id) : ''));
+        it.entregas = [...JSON.parse(JSON.stringify(r.entregas)), ...meus.filter(e => !deles.has(e && typeof e === 'object' ? String(e.id == null ? '' : e.id) : ''))];
       }
     });
   }
@@ -1538,6 +1549,9 @@ document.addEventListener('visibilitychange', () => {
 // Autosave: grava draft no store
 function saveDraft() {
   if (!_modalDraft) return;
+  /* Relê a O.S. do STORE antes de gravar (E4): a marca de entrega que chegou
+     por fora entra no rascunho, e a que o servidor recusou sai. */
+  if (temMotorEntrega()) juntarMarcasDoStore(_modalDraft);
   _modalDraft.atualizadoEm = nowISO();
   _modalDraft.atualizadoPor = STATE.user.nome;
   // Programou a data: o período "parado no cliente" termina aqui, guardado no
@@ -1962,10 +1976,509 @@ function novoItemManual(lista) {
   const prox = Math.max(0, ...(lista || []).map(i => parseInt(i && i.item, 10) || 0)) + 1;
   return { uid: novoUidItemSeguro(), item: String(prox), descricao: '', medidas: '', qtde: '1', valorUnit: '0', subtotal: 0, pronto: false, reprovado: false, motivoReprovado: '', manual: true };
 }
+
+/* ── ENTREGA POR ITEM NA FICHA E NO CARD (E4, 30/09/2026) ──────────────────
+   A regra (quem marca, saldo, dia, teto) é do motor ENTREGA_ITEM, a mesma
+   cópia que a porta do servidor usa (E2/E3): a parte maior que o saldo é
+   recusada aqui com a frase que o servidor daria. Decisões do dono: marca-se
+   o item inteiro, e "Entregar parte" só aparece quando a quantidade é um
+   número inteiro maior que 1; admin, pcp e operação com senha marcam;
+   cancelar e desfazer são só de admin e pcp; o crachá sem senha não marca
+   nesta fatia (E5). Nenhuma marca mostra R$: o valor por item é conta do
+   servidor (E6). Sem o entrega-item.js (cache misto de versões), a ficha
+   abre como antes, sem a coluna. */
+const temMotorEntrega = () => typeof ENTREGA_ITEM !== 'undefined' && !!ENTREGA_ITEM && typeof ENTREGA_ITEM.validarEvento === 'function';
+// O dia da marca no calendário da fábrica (o servidor recusa dia depois de hoje em São Paulo).
+const hojeEntrega = () => ENTREGA_ITEM.diaSP(Date.now());
+function papelEntrega() {
+  if (typeof crachaEhToque === 'function' && crachaEhToque()) return 'toque';
+  return String((STATE.user || {}).papel || '');
+}
+function podeMarcarEntrega(tipo) {
+  return temMotorEntrega() && podeEditar() && ENTREGA_ITEM.podeMarcar(papelEntrega(), tipo);
+}
+/* Item com QUALQUER marca (até desfeita): o servidor não deixa ele sair da
+   lista (guardarEntregasItens), então a tela também não oferece. */
+const temMarcaEntrega = it => !!it && typeof it === 'object' && Array.isArray(it.entregas) && it.entregas.length > 0;
+const idMarca = e => e && typeof e === 'object' ? String(e.id == null ? '' : e.id).trim() : '';
+// "item 3 (Placa ACM)": só o produto; o texto livre depois de ' - ' (dia, local, evento) fica de fora.
+function rotuloItemEntrega(it) {
+  const d = String((it && it.descricao) || '').split(' - ')[0].trim().slice(0, 40);
+  const n = String((it && it.item) || '').trim().slice(0, 10);
+  return (n ? 'item ' + n : 'item') + (d ? ` (${d})` : '');
+}
+function novoIdMarca() {
+  const c = typeof crypto !== 'undefined' ? crypto : null, b = new Uint8Array(12);
+  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
+  else for (let k = 0; k < b.length; k++) b[k] = Math.floor(Math.random() * 256);
+  return 'e-' + Array.from(b, x => (x % 36).toString(36)).join('');
+}
+const ddmmEntrega = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : '';
+// Quem marcou: o nome que o servidor carimbou (o ID só desce para a gestão), curto.
+function quemMarcou(u) {
+  if (!u) return '';
+  let nome = String(u.por || '').trim();
+  if (!nome && u.porId) { try { nome = String(OPERACAO.nomePessoa(u.porId) || ''); } catch { nome = ''; } }
+  if (/^ID\s/i.test(nome) || /^\d{6}$/.test(nome)) return '';
+  // Primeiro e último nome: "Ana Paula Souza" vira "Ana Souza".
+  const p = nome.split(/\s+/).filter(Boolean);
+  return p.length > 2 ? `${p[0]} ${p[p.length - 1]}` : p.join(' ');
+}
+/* SALDO NEGATIVO. O motor conta cada unidade uma vez só: entrega acima da
+   quantidade não vale. Uma aba antiga que baixou a quantidade de um item
+   abaixo do que já foi entregue deixa o item "entregue" na conta, mas a
+   tela diz a diferença em vez de esconder. */
+function entregueSemTeto(it) {
+  if (!temMotorEntrega() || !it || typeof it !== 'object') return 0;
+  return ENTREGA_ITEM.eventosAtivos(it).reduce((s, e) => s + ((e.tipo === 'entregue' || e.tipo === 'retirado') && Number.isInteger(e.qtde) ? e.qtde : 0), 0);
+}
+function saldoNegativoItem(it) {
+  if (!temMotorEntrega() || !it || typeof it !== 'object' || ENTREGA_ITEM.ehServico(it)) return 0;
+  const n = ENTREGA_ITEM.qtdeNum(it) - entregueSemTeto(it);
+  return n < 0 ? n : 0;
+}
+
+/* O QUE O STORE JÁ SABE ENTRA NO RASCUNHO ANTES DE GRAVAR. A ficha trabalha
+   numa CÓPIA (_modalDraft): a resposta do servidor, o pull e o Sobrescrever
+   trocam o objeto da lista, e a ficha com edição pendente não é trocada.
+   Sem isto a marca que chegou por fora (outro tablet, a resposta com o
+   carimbo do servidor) não entrava na conta do saldo daqui, e a gravação
+   seguinte ia sem ela. Só acrescenta, na ordem do servidor; nada que o
+   rascunho tem sai, menos a marca que o servidor recusou. */
+const _marcasRecusadas = new Set();
+function tirarMarcasRecusadas(alvo, ids = _marcasRecusadas) {
+  let n = 0;
+  if (!ids || !ids.size) return 0;
+  for (const it of alvo && Array.isArray(alvo.itens) ? alvo.itens : []) {
+    if (!it || typeof it !== 'object' || !Array.isArray(it.entregas)) continue;
+    const fica = it.entregas.filter(e => !ids.has(idMarca(e)));
+    if (fica.length === it.entregas.length) continue;
+    n += it.entregas.length - fica.length;
+    if (fica.length) it.entregas = fica; else delete it.entregas;
+  }
+  return n;
+}
+function juntarMarcasDoStore(draft) {
+  if (!draft || typeof draft !== 'object' || !Array.isArray(draft.itens)) return 0;
+  let n = tirarMarcasRecusadas(draft);
+  const fonte = STORE.getOS(draft.id);
+  if (!fonte || fonte === draft || !Array.isArray(fonte.itens)) return n;
+  adotarUidsSeguro(draft, fonte);
+  const porUid = new Map();
+  for (const f of fonte.itens) if (f && typeof f === 'object' && uidItemOk(f.uid) && !porUid.has(f.uid)) porUid.set(f.uid, f);
+  for (const it of draft.itens) {
+    if (!it || typeof it !== 'object' || !uidItemOk(it.uid)) continue;
+    const f = porUid.get(it.uid);
+    const deles = f && Array.isArray(f.entregas) ? f.entregas.filter(e => idMarca(e) && !_marcasRecusadas.has(idMarca(e))) : [];
+    if (!deles.length) continue;
+    const meus = Array.isArray(it.entregas) ? it.entregas : [];
+    const idsMeus = new Set(meus.map(idMarca));
+    const novas = deles.filter(e => !idsMeus.has(idMarca(e))).length;
+    if (!novas) continue;
+    const idsDeles = new Set(deles.map(idMarca));
+    it.entregas = [...deles.map(e => JSON.parse(JSON.stringify(e))), ...meus.filter(e => !idsDeles.has(idMarca(e)))];
+    n += novas;
+  }
+  return n;
+}
+
+// Os botões de cada ação. `parte`: pede a quantidade.
+const ACOES_ENTREGA = {
+  tudo:            { tipo: 'entregue',  rotulo: 'Entregar tudo' },
+  parte:           { tipo: 'entregue',  rotulo: 'Entregar parte', parte: true },
+  retirado:        { tipo: 'retirado',  rotulo: 'Retirado' },
+  'retirar-parte': { tipo: 'retirado',  rotulo: 'Retirar parte', parte: true },
+  problema:        { tipo: 'problema',  rotulo: 'Problema' },
+  cancelar:        { tipo: 'cancelado', rotulo: 'Cancelar item' },
+  desfazer:        { tipo: 'desfeito',  rotulo: 'Desfazer' },
+};
+/* O QUE ESTE ITEM OFERECE A QUEM ESTÁ NA TELA. A O.S. interna (cliente
+   retira) troca "Entregar" por "Retirado". Serviço não recebe marca: ele
+   acompanha a entrega dos outros itens. */
+function acoesEntregaDoItem(it, os) {
+  if (!temMotorEntrega() || !it || typeof it !== 'object' || !os || os.finalizadaEm || ENTREGA_ITEM.ehServico(it)) return [];
+  let s;
+  try { s = ENTREGA_ITEM.situacaoItem(it, os); } catch { return []; }
+  const interna = isInterno(os), out = [];
+  if (s.situacao !== 'cancelado' && s.saldo > 0) {
+    const tipo = interna ? 'retirado' : 'entregue';
+    if (podeMarcarEntrega(tipo)) {
+      out.push(interna ? 'retirado' : 'tudo');
+      if (ENTREGA_ITEM.aceitaParte(it) && s.saldo > 1) out.push(interna ? 'retirar-parte' : 'parte');
+    }
+    if (!s.problema && podeMarcarEntrega('problema')) out.push('problema');
+    if (podeMarcarEntrega('cancelado')) out.push('cancelar');
+  }
+  if (s.ultimaMarca && podeMarcarEntrega('desfeito')) out.push('desfazer');
+  return out;
+}
+
+/* A MARCA DE UM ITEM. Relê a O.S. do STORE antes (juntarMarcasDoStore) e
+   trabalha no rascunho DE AGORA, nunca no objeto que a tela capturou ao
+   desenhar: dois cliques rápidos em itens diferentes, com a resposta do
+   primeiro trocando o objeto no meio, não se atropelam. O validador é o do
+   servidor. Devolve '' quando gravou, ou a frase do motivo. */
+function executarEntregaItem(acao, uid, idx, dados = {}) {
+  const conf = ACOES_ENTREGA[acao];
+  const d = _modalDraft;
+  if (!conf || !temMotorEntrega()) return 'Ação de entrega desconhecida.';
+  if (!d) return 'A ficha da O.S. não está aberta.';
+  if (!podeEditar() || d.finalizadaEm) return 'O.S. finalizada ou sem permissão de edição: reabra para marcar.';
+  juntarMarcasDoStore(d);
+  const it = itemDoDraft(d.itens, idx, uidItemOk(uid) ? uid : '');
+  if (!it) return 'Item não encontrado na O.S.: feche e abra a ficha de novo.';
+  const s = ENTREGA_ITEM.situacaoItem(it, d);
+  const hoje = hojeEntrega();
+  const ev = { id: novoIdMarca(), tipo: conf.tipo, dia: hoje, por: String((STATE.user || {}).nome || ''), em: nowISO() };
+  if (conf.parte) {
+    const q = String(dados.qtde == null ? '' : dados.qtde).trim();
+    if (!q) return 'Diga a quantidade.';
+    ev.qtde = /^\d+$/.test(q) ? Number(q) : q;
+  } else if (conf.tipo === 'entregue' || conf.tipo === 'retirado') ev.qtde = s.saldo;
+  /* O Desfazer desfaz a marca que o diálogo MOSTROU (revisão da E4): com o
+     diálogo aberto, outro tablet pode ter marcado o mesmo item, e a última
+     marca de agora é a dele. O diálogo manda o alvo; se ele já foi desfeito,
+     o validador recusa com a frase dele. Sem diálogo, vale a última marca. */
+  if (conf.tipo === 'desfeito') ev.alvo = String(Object.prototype.hasOwnProperty.call(dados, 'alvo') ? (dados.alvo || '') : (s.ultimaMarca || ''));
+  if (dados.motivo) ev.motivo = String(dados.motivo);
+  if (conf.tipo === 'retirado' && dados.retirou) ev.retirou = String(dados.retirou);
+  const v = ENTREGA_ITEM.validarEvento(ev, it, { papel: papelEntrega(), os: d, hoje });
+  if (!v.ok) return v.erro;
+  const desfeita = conf.tipo === 'desfeito' ? (Array.isArray(it.entregas) ? it.entregas : []).find(e => idMarca(e) === v.evento.alvo) : null;
+  it.entregas = (Array.isArray(it.entregas) ? it.entregas : []).concat(v.evento);
+  saveDraft(); reRenderModalKeepOpen();
+  const rot = rotuloItemEntrega(it);
+  const qualDesfeita = desfeita ? ` (${ACOES_ENTREGA_NOME[desfeita.tipo] || desfeita.tipo} em ${ddmmEntrega(desfeita.dia)})` : '';
+  const msg = { entregue: `${rot}: ${v.evento.qtde} entregue${v.evento.qtde === 1 ? '' : 's'} hoje`, retirado: `${rot}: ${v.evento.qtde} retirado${v.evento.qtde === 1 ? '' : 's'} hoje`,
+    problema: `${rot}: problema anotado; o saldo fica segurado`, cancelado: `${rot}: saldo cancelado`, desfeito: `${rot}: marca desfeita${qualDesfeita}` }[conf.tipo];
+  toast(msg + (podeMarcarEntrega('desfeito') || conf.tipo === 'desfeito' ? '' : '. Para desfazer, fale com o PCP.'), 'success');
+  return '';
+}
+
+/* O QUE CADA AÇÃO PERGUNTA ANTES. "Entregar tudo" é um toque só (o caso
+   comum); parte pede a quantidade; retirado pede quem retirou (texto curto,
+   opcional, sem documento); problema, cancelar e desfazer pedem o motivo. */
+function perguntaDaAcaoEntrega(acao, it, os) {
+  const conf = ACOES_ENTREGA[acao];
+  if (!conf || !temMotorEntrega()) return null;
+  const s = ENTREGA_ITEM.situacaoItem(it, os);
+  const rot = rotuloItemEntrega(it);
+  if (acao === 'tudo') return null;
+  if (acao === 'parte' || acao === 'retirar-parte') return { titulo: `${conf.rotulo}: ${rot}`, texto: `Faltam ${s.saldo} de ${s.qtde}. Quantas ${acao === 'parte' ? 'saem' : 'o cliente levou'} agora?`, qtde: { max: s.saldo }, retirou: acao === 'retirar-parte', botao: 'Marcar' };
+  if (acao === 'retirado') return { titulo: `Retirado: ${rot}`, texto: `Marca ${s.saldo === 1 ? 'o item' : `as ${s.saldo} unidades que faltam`} como retirado hoje.`, retirou: true, botao: 'Marcar retirado' };
+  if (acao === 'problema') return { titulo: `Problema: ${rot}`, texto: 'O saldo do item fica segurado até a entrega depois do problema.', motivo: true, botao: 'Anotar problema' };
+  if (acao === 'cancelar') return { titulo: `Cancelar item: ${rot}`, texto: s.entregue > 0 ? `Cancela o saldo (${s.saldo} de ${s.qtde}). O que já foi entregue (${s.entregue}) fica.` : 'Cancela o item: ele não vai mais ser entregue.', motivo: true, botao: 'Cancelar o saldo' };
+  if (acao === 'desfazer') {
+    const u = s.ultimo;
+    const qual = u ? `${ACOES_ENTREGA_NOME[u.tipo] || u.tipo} em ${ddmmEntrega(u.dia)}${quemMarcou(u) ? ' por ' + quemMarcou(u) : ''}` : 'a última marca';
+    // `alvo`: a marca que o diálogo mostra é a que o "Desfazer a marca" desfaz.
+    return { titulo: `Desfazer: ${rot}`, texto: `Desfaz ${qual}. A marca fica no histórico como desfeita.`, motivo: true, botao: 'Desfazer a marca', alvo: u ? u.id : '' };
+  }
+  return null;
+}
+const ACOES_ENTREGA_NOME = { entregue: 'entregue', retirado: 'retirado', problema: 'problema', cancelado: 'cancelamento' };
+// O diálogo das ações que pedem dado. `aoConfirmar` devolve '' (fecha) ou o motivo da recusa (fica aberto e mostra).
+function abrirDialogoEntrega(cfg, aoConfirmar) {
+  const velho = document.getElementById('entrega-item-box'); if (velho) velho.remove();
+  const box = document.createElement('div');
+  box.id = 'entrega-item-box';
+  box.className = 'wpp-picker-overlay';
+  box.innerHTML = `
+    <div class="wpp-picker retrab-box" role="dialog" aria-modal="true" aria-labelledby="ent-tit">
+      <div class="wpp-picker-head"><strong id="ent-tit">${esc(cfg.titulo)}</strong><button type="button" class="modal-close" data-ent-fechar aria-label="Fechar">×</button></div>
+      <form class="wpp-picker-body ent-form" novalidate>
+        <p class="text-muted ent-texto">${esc(cfg.texto)}</p>
+        ${cfg.qtde ? `<div class="field"><label>Quantidade <span class="req">*</span><input name="qtde" type="number" inputmode="numeric" min="1" max="${esc(cfg.qtde.max)}" step="1" required></label></div>` : ''}
+        ${cfg.retirou ? `<div class="field"><label>Quem retirou <span class="text-muted">(opcional; nome curto, sem documento)</span><input name="retirou" maxlength="60" autocomplete="off"></label></div>` : ''}
+        ${cfg.motivo ? `<div class="field"><label>Motivo <span class="req">*</span><textarea name="motivo" rows="2" maxlength="200" required></textarea></label></div>` : ''}
+        <p class="ent-erro" role="alert" hidden></p>
+        <div class="wpp-acoes"><button type="submit" class="btn-primary">${esc(cfg.botao)}</button><button type="button" class="btn-ghost" data-ent-fechar>Voltar</button></div>
+      </form>
+    </div>`;
+  document.body.appendChild(box);
+  const form = box.querySelector('form'), erro = box.querySelector('.ent-erro');
+  const fechar = () => box.remove();
+  box.querySelectorAll('[data-ent-fechar]').forEach(b => { b.onclick = fechar; });
+  form.onsubmit = ev => {
+    ev.preventDefault();
+    const val = n => { const el = form.querySelector(`[name="${n}"]`); return el ? String(el.value || '').trim() : ''; };
+    const msg = aoConfirmar({ qtde: val('qtde'), motivo: val('motivo'), retirou: val('retirou') });
+    if (msg) { erro.textContent = msg; erro.hidden = false; return; }
+    fechar();
+  };
+  const primeiro = form.querySelector('input,textarea');
+  if (primeiro) try { primeiro.focus(); } catch {}
+}
+/* OS BOTÕES DA COLUNA ENTREGA. Cada clique acha o item pelo código (E1) e
+   trabalha no rascunho da hora do clique (executarEntregaItem). */
+function ligarEntregasDaFicha(root, ro) {
+  $$('[data-ent-acao]', root).forEach(el => {
+    el.onclick = () => {
+      if (ro || !_modalDraft) return;
+      const acao = el.dataset.entAcao, uid = el.dataset.iuid, idx = el.dataset.ient;
+      // O diálogo mostra o que o STORE já sabe (a marca que outro tablet gravou).
+      if (temMotorEntrega()) juntarMarcasDoStore(_modalDraft);
+      const it = itemDoDraft(_modalDraft.itens, idx, uidItemOk(uid) ? uid : '');
+      if (!it) { toast('Item não encontrado na O.S.: feche e abra a ficha de novo.', 'error'); return; }
+      const pergunta = perguntaDaAcaoEntrega(acao, it, _modalDraft);
+      if (!pergunta) { const erro = executarEntregaItem(acao, uid, idx, {}); if (erro) toast(erro, 'error'); return; }
+      // O alvo do Desfazer fica preso ao que o diálogo mostrou (não é recalculado na confirmação).
+      const fixo = Object.prototype.hasOwnProperty.call(pergunta, 'alvo') ? { alvo: pergunta.alvo } : {};
+      abrirDialogoEntrega(pergunta, dados => executarEntregaItem(acao, uid, idx, { ...dados, ...fixo }));
+    };
+  });
+}
+
+/* A SITUAÇÃO DO ITEM, sem R$: 'a entregar', 'parcial 6 de 10', 'entregue
+   29/09 por Ana', 'retirado', 'com problema', 'cancelado'. */
+function seloEntregaItemHTML(it, s, os) {
+  const interna = isInterno(os);
+  // No selo, só o primeiro nome (a coluna é estreita); o nome inteiro vai na dica.
+  const u = s.ultimo, quem = quemMarcou(u).split(' ')[0], dia = ddmmEntrega(s.dia);
+  let txt = '', cls = '';
+  if (s.servico) { cls = 'st-servico'; txt = s.dia ? `serviço: ${s.situacao} ${dia}` : 'serviço: vai com a entrega'; }
+  else if (s.situacao === 'a entregar') { cls = 'st-aentregar'; txt = (interna ? 'a retirar' : 'a entregar') + (s.qtde > 1 ? ` (${s.qtde})` : ''); }
+  else if (s.situacao === 'parcial') { cls = 'st-parcial'; txt = `${s.rotulo}${dia ? ' · ' + dia : ''}${quem ? ' por ' + quem : ''}`; }
+  else if (s.situacao === 'entregue' || s.situacao === 'retirado') {
+    cls = 'st-entregue';
+    const origem = s.marca === 'implicito' ? ' na finalização' : s.marca === 'sem prova' ? ' pela baixa do ERP' : (quem ? ' por ' + quem : '');
+    txt = `${s.situacao}${dia ? ' ' + dia : ''}${origem}`;
+  } else if (s.situacao === 'problema') { cls = 'st-problema'; txt = `com problema${s.problema && s.problema.motivo ? ': ' + s.problema.motivo : ''}${s.entregue > 0 ? ` (${s.entregue} de ${s.qtde} já foram)` : ''}`; }
+  else if (s.situacao === 'cancelado') { cls = 'st-cancelado'; txt = `cancelado${s.cancelado && s.cancelado.motivo ? ': ' + s.cancelado.motivo : ' no ERP'}${s.entregue > 0 ? ` (${s.entregue} de ${s.qtde} já foram)` : ''}`; }
+  else { cls = 'st-aentregar'; txt = s.rotulo || s.situacao; }
+  const retirou = u && u.tipo === 'retirado' && Array.isArray(it.entregas) ? (it.entregas.find(e => idMarca(e) === u.id) || {}).retirou : '';
+  const neg = saldoNegativoItem(it);
+  const gestao = podeMarcarEntrega('desfeito');
+  const dica = u ? `Última marca: ${ACOES_ENTREGA_NOME[u.tipo] || u.tipo} em ${ddmmEntrega(u.dia)}${quemMarcou(u) ? ' por ' + quemMarcou(u) : ''}` : '';
+  return `<span class="ent-selo ${cls}"${dica ? ` title="${esc(dica)}"` : ''}>${esc(txt)}${retirou ? ` · levou: ${esc(retirou)}` : ''}</span>${neg < 0 ? `<span class="ent-selo st-negativo" role="note">⚠ Saldo ${neg}: a quantidade (${ENTREGA_ITEM.qtdeNum(it)}) ficou abaixo do que já foi entregue (${entregueSemTeto(it)}). ${gestao ? 'Corrija a quantidade ou desfaça a marca a mais.' : 'Avise o PCP.'}</span>` : ''}`;
+}
+/* A LINHA ENTREGA, logo abaixo do item: a ficha tem 760 px, e uma sétima
+   coluna espremia a descrição a meia palavra ("Placa AC"). Na linha de baixo
+   o selo e os botões ocupam a largura toda, e no celular ela cola no cartão
+   do item. */
+function linhaEntregaHTML(it, i, os, ro, u, cols) {
+  let s = null;
+  try { s = it && typeof it === 'object' ? ENTREGA_ITEM.situacaoItem(it, os) : null; } catch { s = null; }
+  if (!s) return '';
+  const acoes = ro ? [] : acoesEntregaDoItem(it, os);
+  const principais = acoes.filter(a => a === 'tudo' || a === 'retirado');
+  const outras = acoes.filter(a => !principais.includes(a));
+  const btn = a => `<button type="button" class="ent-btn ent-${a}" data-ent-acao="${a}" data-ient="${i}" ${u}>${esc(ACOES_ENTREGA[a].rotulo)}</button>`;
+  const mais = !outras.length ? '' : principais.length
+    ? `<details class="ent-mais"><summary>Mais</summary><div class="ent-menu">${outras.map(btn).join('')}</div></details>`
+    : outras.map(btn).join('');
+  return `<tr class="entrega-row" ${u}><td class="entrega-cell" colspan="${cols}" data-label="Entrega"><div class="ent-linha"><span class="ent-rotulo">Entrega</span>${seloEntregaItemHTML(it, s, os)}${acoes.length ? `<div class="ent-acoes">${principais.map(btn).join('')}${mais}</div>` : ''}</div></td></tr>`;
+}
+// A linha de baixo da tabela: "Entrega por item: 3 de 5 entregues · 1 em parte · saldo 7".
+function resumoEntregaFichaTexto(os) {
+  if (!temMotorEntrega()) return '';
+  let r;
+  try { r = ENTREGA_ITEM.resumoOS(os); } catch { return ''; }
+  if (!r.marcas || !r.itensTotal) return '';
+  const interna = isInterno(os);
+  const partes = [`${r.entregues} de ${r.itensTotal - r.cancelados} ${interna ? 'retirados' : 'entregues'}`];
+  if (r.parciais) partes.push(`${r.parciais} em parte`);
+  if (r.problema) partes.push(`${r.problema} com problema`);
+  if (r.cancelados) partes.push(`${r.cancelados} cancelado${r.cancelados === 1 ? '' : 's'}`);
+  if (!os.finalizadaEm && r.saldoItens > 0) partes.push(`saldo ${r.saldoItens}`);
+  return 'Entrega por item: ' + partes.join(' · ');
+}
+/* O SELO DO CARD (mesa, lista, Programação): "Entrega parcial 3 de 5" na O.S.
+   aberta com parte entregue por marca. Com um item só, a conta é de
+   unidades ("6 de 10"). Sem marca nenhuma, nada muda. */
+function seloEntregaCardHTML(os) {
+  if (!temMotorEntrega() || !os || os.finalizadaEm) return '';
+  let r;
+  try { r = ENTREGA_ITEM.resumoOS(os); } catch { return ''; }
+  if (!r.marcas) return '';
+  const itens = (os.itens || []).filter(it => it && typeof it === 'object');
+  const out = [];
+  const total = r.itensTotal - r.cancelados;
+  /* Item cancelado não conta (revisão da E4): a parte entregue de um item
+     cancelado depois não faz "Entrega parcial 0 de 1" nos itens que ficaram,
+     e O.S. com todos os itens cancelados não tem "Itens entregues". */
+  const vivos = itens.filter(it => !ENTREGA_ITEM.ehServico(it)).map(it => ENTREGA_ITEM.situacaoItem(it, os)).filter(s => s.situacao !== 'cancelado');
+  const unidadesVivas = vivos.reduce((t, s) => t + (s.entregue || 0), 0);
+  if (r.situacao === 'parcial' && unidadesVivas > 0) {
+    let conta = `${r.entregues} de ${total}`, dica = `${r.entregues} de ${total} itens ${isInterno(os) ? 'retirados' : 'entregues'}${r.parciais ? `, ${r.parciais} em parte` : ''}; saldo ${r.saldoItens}`;
+    if (total === 1) {
+      const um = itens.find(it => !ENTREGA_ITEM.ehServico(it) && ENTREGA_ITEM.situacaoItem(it, os).situacao !== 'cancelado');
+      const s = um ? ENTREGA_ITEM.situacaoItem(um, os) : null;
+      if (s) { conta = `${s.entregue} de ${s.qtde}`; dica = `${rotuloItemEntrega(um)}: ${s.entregue} de ${s.qtde}; saldo ${s.saldo}`; }
+    }
+    out.push(`<span class="tag-entrega" title="${esc(dica)}">📦 Entrega parcial ${esc(conta)}</span>`);
+  } else if (r.situacao === 'completa' && r.entregues > 0) out.push(`<span class="tag-entrega tag-entrega-ok" title="Todos os itens têm marca de entrega">📦 Itens entregues: falta finalizar</span>`);
+  if (r.problema) out.push(`<span class="tag-entrega tag-entrega-prob" title="Item com problema de entrega: o saldo fica segurado">⚠ ${r.problema} item${r.problema === 1 ? '' : 's'} com problema</span>`);
+  if (itens.some(it => saldoNegativoItem(it) < 0)) out.push(`<span class="tag-entrega tag-entrega-prob" title="A quantidade de um item ficou abaixo do que já foi entregue: confira na ficha">⚠ quantidade abaixo do entregue</span>`);
+  return out.length ? ' ' + out.join(' ') : '';
+}
+
+/* O SALDO NA FINALIZAÇÃO (E4). Com marca por item e item ainda a entregar,
+   o Finalizar pergunta: "Marcar os N restantes como entregues hoje" (padrão)
+   ou "Manter aberta, entrega parcial". Sem marca nenhuma, finaliza como
+   hoje, sem pergunta: o que não tem marca conta entregue na finalização
+   (entrega implícita), e ninguém fica travado.
+   O ITEM COM PROBLEMA ABERTO FICA FORA DA MARCAÇÃO EM LOTE (revisão da E4):
+   o saldo dele está segurado, e marcá-lo entregue junto com os outros
+   liberava o valor retido. Ele vem à parte (`comProblema`), a pergunta diz
+   "fica com problema; resolva no item", e só é marcado por quem marcar
+   aquele item de propósito. */
+function saldoAFinalizar(os) {
+  if (!temMotorEntrega() || !os || typeof os !== 'object' || os.finalizadaEm) return null;
+  let r;
+  try { r = ENTREGA_ITEM.resumoOS(os); } catch { return null; }
+  if (r.situacao !== 'parcial' && r.situacao !== 'com marca') return null;
+  const pendentes = [], comProblema = [];
+  (Array.isArray(os.itens) ? os.itens : []).forEach(it => {
+    if (!it || typeof it !== 'object' || ENTREGA_ITEM.ehServico(it)) return;
+    const s = ENTREGA_ITEM.situacaoItem(it, os);
+    if (s.saldo <= 0) return;
+    if (s.situacao === 'problema') comProblema.push({ it, s });
+    else if (s.situacao === 'a entregar' || s.situacao === 'parcial') pendentes.push({ it, s });
+  });
+  return pendentes.length || comProblema.length ? { resumo: r, pendentes, comProblema, unidades: pendentes.reduce((t, p) => t + p.s.saldo, 0) } : null;
+}
+/* Marca o saldo de cada item pendente, no objeto que vai ser gravado, ANTES
+   do finalizadaEm (o motor recusa marca em O.S. finalizada; o servidor aceita
+   marca e finalização na mesma gravação). Tudo ou nada: se um item não passa,
+   nenhum é marcado e a O.S. não finaliza. Quem não marca (montagem com senha)
+   finaliza como hoje. O item com problema aberto não entra (saldoAFinalizar).
+   Devolve { erro, marcadas, eventos }: `eventos` são as marcas criadas
+   ({ uid, idx, id }), para o Desfazer do card desfazer as mesmas. */
+function marcarSaldoNaFinalizacao(os, { simular = false } = {}) {
+  const p = saldoAFinalizar(os);
+  if (!p) return { erro: '', marcadas: 0, eventos: [] };
+  const tipo = isInterno(os) ? 'retirado' : 'entregue';
+  if (!podeMarcarEntrega(tipo)) return { erro: '', marcadas: 0, eventos: [] };
+  const hoje = hojeEntrega(), papel = papelEntrega(), novas = [];
+  for (const { it, s } of p.pendentes) {
+    const ev = { id: novoIdMarca(), tipo, dia: hoje, qtde: s.saldo, por: String((STATE.user || {}).nome || ''), em: nowISO() };
+    const v = ENTREGA_ITEM.validarEvento(ev, it, { papel, os, hoje });
+    if (!v.ok) return { erro: `A marca do ${rotuloItemEntrega(it)} não passou: ${v.erro} A O.S. não foi finalizada.`, marcadas: 0, eventos: [] };
+    novas.push([it, v.evento]);
+  }
+  if (!simular) for (const [it, ev] of novas) it.entregas = (Array.isArray(it.entregas) ? it.entregas : []).concat(ev);
+  const lista = Array.isArray(os.itens) ? os.itens : [];
+  return { erro: '', marcadas: novas.length, eventos: novas.map(([it, ev]) => ({ uid: uidItemOk(it.uid) ? it.uid : '', idx: lista.indexOf(it), id: ev.id })) };
+}
+/* `seguir(escolha)`: 'sem-saldo' (nada a perguntar) ou 'marcar'. "Manter
+   aberta" e "Voltar" não chamam: a O.S. não recebe finalizadaEm. A marca do
+   saldo é conferida antes da pergunta do retrabalho, para ninguém responder
+   à toa. */
+function finalizarComSaldo(os, seguir) {
+  const p = saldoAFinalizar(os);
+  if (!p) { seguir('sem-saldo'); return; }
+  perguntarSaldoEntrega(os, p, escolha => {
+    if (escolha === 'manter') { toast(`A O.S ${os.numero || ''} continua aberta: entrega parcial.`, 'success'); return; }
+    if (escolha !== 'marcar') return;
+    const teste = marcarSaldoNaFinalizacao(os, { simular: true });
+    if (teste.erro) { toast(teste.erro, 'error'); return; }
+    seguir('marcar');
+  });
+}
+/* A resposta do retrabalho que a pergunta grava na O.S. (perguntarRetrabalho).
+   Do `checkout` a pergunta só mexe na situação (o "Não" desmarca o
+   Retrabalho): o resto dele (a obs de fechamento) é de quem escreveu. */
+const CAMPOS_RESPOSTA_RETRAB = ['retrabalhoPerguntado', 'retrabalho', 'problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho', 'checkout'];
+/* A FOTO DA RESPOSTA (revisão da E4): tirada antes de perguntar. Se a ficha
+   foi trocada no meio (o pull trouxe a versão de outro tablet), o rascunho
+   novo recebe SÓ o que a resposta mudou, e do checkout só a situação. Copiar
+   os campos inteiros do rascunho velho apagava a obs que chegou depois. */
+function fotoRespostaRetrab(os) {
+  const f = {};
+  for (const k of CAMPOS_RESPOSTA_RETRAB) {
+    if (k === 'checkout') f.situacaoCheckout = JSON.stringify(os.checkout && typeof os.checkout === 'object' ? (os.checkout.situacao ?? null) : null);
+    else f[k] = Object.prototype.hasOwnProperty.call(os, k) ? JSON.stringify(os[k]) : undefined;
+  }
+  return f;
+}
+function copiarRespostaRetrab(de, para, foto) {
+  for (const k of CAMPOS_RESPOSTA_RETRAB) {
+    if (k === 'checkout') {
+      const sit = de.checkout && typeof de.checkout === 'object' ? (de.checkout.situacao ?? null) : null;
+      if (JSON.stringify(sit) === foto.situacaoCheckout) continue;
+      para.checkout = { ...(para.checkout && typeof para.checkout === 'object' ? para.checkout : {}), situacao: sit == null ? '' : sit };
+      continue;
+    }
+    const tem = Object.prototype.hasOwnProperty.call(de, k);
+    const agora = tem ? JSON.stringify(de[k]) : undefined;
+    if (agora === foto[k]) continue;
+    if (!tem) delete para[k];
+    else para[k] = agora === undefined ? undefined : JSON.parse(agora);
+  }
+}
+/* O FINALIZAR DA FICHA (instalação e "Cliente retirou"). Ordem: o que falta
+   no checklist; o saldo da entrega por item (E4); a pergunta do retrabalho
+   (só instalação); e só então a finalização, no rascunho DA HORA, relido do
+   STORE, com as marcas do saldo e o finalizadaEm na mesma gravação. */
+function finalizarDaFicha(interno) {
+  if (!_modalDraft) return;
+  const faltas = validarFinalizacao(_modalDraft);
+  if (faltas.length) { toast('Falta: ' + faltas.join(', '), 'error'); return; }
+  const id = _modalDraft.id;
+  juntarMarcasDoStore(_modalDraft);
+  finalizarComSaldo(_modalDraft, escolha => {
+    const d = _modalDraft;
+    if (!d || d.id !== id) return;   // a ficha fechou no meio da pergunta
+    const foto = fotoRespostaRetrab(d);
+    const concluir = () => {
+      const alvo = _modalDraft;
+      if (!alvo || alvo.id !== id) return;
+      if (alvo !== d) copiarRespostaRetrab(d, alvo, foto);
+      juntarMarcasDoStore(alvo);
+      const m = escolha === 'marcar' ? marcarSaldoNaFinalizacao(alvo) : { erro: '', marcadas: 0 };
+      if (m.erro) { toast(m.erro, 'error'); markDirty(); return; }
+      aplicarFinalizacao(alvo);
+      saveDraft(); reRenderModalKeepOpen();
+      const extra = m.marcadas ? ` · ${m.marcadas} ${m.marcadas === 1 ? 'item marcado' : 'itens marcados'} ${interno ? 'retirado' : 'entregue'}${m.marcadas === 1 ? '' : 's'} hoje` : '';
+      toast((interno ? 'Retirada registrada 📦' : 'Instalação finalizada 🏁') + extra, 'success');
+    };
+    if (interno) concluir(); else perguntarRetrabalho(d, concluir);
+  });
+}
+function perguntarSaldoEntrega(os, p, aoEscolher) {
+  const velho = document.getElementById('saldo-entrega-box'); if (velho) velho.remove();
+  const interna = isInterno(os), n = p.pendentes.length;
+  const prob = Array.isArray(p.comProblema) ? p.comProblema : [], np = prob.length;
+  const verbo = interna ? (n === 1 ? 'retirado' : 'retirados') : (n === 1 ? 'entregue' : 'entregues');
+  const marca = podeMarcarEntrega(interna ? 'retirado' : 'entregue');
+  /* Só item com problema: nada a marcar. Finalizar deixa o item com problema
+     (o saldo dele fica segurado); quem resolve é a marca no item. */
+  const principal = !n ? `Finalizar: ${np === 1 ? 'o item fica' : `os ${np} itens ficam`} com problema`
+    : marca ? `Marcar ${n === 1 ? 'o item restante' : `os ${n} restantes`} como ${verbo} hoje` : `Finalizar assim: o saldo conta como ${interna ? 'retirado' : 'entregue'} hoje`;
+  const linha = ({ it, s }) => `<li>${esc(rotuloItemEntrega(it))}: ${esc(s.situacao === 'parcial' ? `${s.rotulo}, faltam ${s.saldo}` : (interna ? 'a retirar' : 'a entregar') + (s.qtde > 1 ? ` (${s.qtde})` : ''))}</li>`;
+  const linhaProb = ({ it, s }) => `<li>${esc(rotuloItemEntrega(it))}${s.problema && s.problema.motivo ? ` (${esc(s.problema.motivo)})` : ''}: fica com problema; resolva no item</li>`;
+  const titulo = n ? (interna ? 'Ainda há itens a retirar' : 'Ainda há itens a entregar') : (np === 1 ? 'Item com problema de entrega' : 'Itens com problema de entrega');
+  const box = document.createElement('div');
+  box.id = 'saldo-entrega-box';
+  box.className = 'wpp-picker-overlay';
+  box.innerHTML = `
+    <div class="wpp-picker retrab-box" role="dialog" aria-modal="true" aria-labelledby="saldo-ent-tit">
+      <div class="wpp-picker-head"><strong id="saldo-ent-tit">${titulo}</strong></div>
+      <div class="wpp-picker-body">
+        ${n ? `<p class="text-muted" style="font-size:.85rem;margin-bottom:8px">O.S ${esc(os.numero || '')}: ${n} ${n === 1 ? 'item' : 'itens'} com saldo (${p.unidades} ${p.unidades === 1 ? 'unidade' : 'unidades'}).</p>
+        <ul class="saldo-ent-lista">${p.pendentes.slice(0, 12).map(linha).join('')}${n > 12 ? `<li>e mais ${n - 12}</li>` : ''}</ul>` : ''}
+        ${np ? `<p class="text-muted saldo-ent-sub">${n ? 'Fora da marcação, com problema aberto:' : `O.S ${esc(os.numero || '')}: ${np === 1 ? 'um item' : `${np} itens`} com problema aberto, fora da marcação:`}</p>
+        <ul class="saldo-ent-lista saldo-ent-prob">${prob.slice(0, 12).map(linhaProb).join('')}${np > 12 ? `<li>e mais ${np - 12}</li>` : ''}</ul>` : ''}
+        <div class="saldo-ent-acoes">
+          <button type="button" class="btn-success" data-saldo="marcar">${esc(principal)}</button>
+          <button type="button" class="btn-ghost" data-saldo="manter">${n ? 'Manter aberta, entrega parcial' : 'Manter aberta'}</button>
+          <button type="button" class="btn-ghost" data-saldo="voltar">Voltar</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(box);
+  box.querySelectorAll('[data-saldo]').forEach(b => { b.onclick = () => { box.remove(); aoEscolher(b.dataset.saldo); }; });
+  // autofocus não vale em HTML inserido depois da carga: o foco vai na mão para o padrão.
+  const padrao = box.querySelector('[data-saldo="marcar"]');
+  if (padrao) try { padrao.focus(); } catch {}
+}
+
 function blocoItens(os, ro, done) {
   const cfg = STORE.getCFG();
   const itens = os.itens || [];
   const prontos = itens.filter(i => i.pronto).length;
+  const resumoEnt = resumoEntregaFichaTexto(os);
 
   const markGroup = (field, opts) => `<div class="mark-group" data-mark="${field}">${
     opts.map(o => `<button type="button" class="mark-opt ${os[field] === o ? 'on' : ''}" data-mark-val="${esc(o)}" ${ro ? 'disabled' : ''}>${esc(o)}</button>`).join('')
@@ -1978,23 +2491,35 @@ function blocoItens(os, ro, done) {
   // PCP, e a foto tirada em cima da escada não chegava a ninguém.
   // O código do item (uid, E1) vai em cada controle: o handler acha o item
   // por ele (itemDoDraft). Item antigo, ainda sem código, vai pela posição.
+  /* A linha Entrega (E4), embaixo de cada item: a situação do item e os
+     botões de quem pode marcar. Item com marca de entrega não sai da lista
+     (o servidor o devolveria), e a quantidade dele não desce abaixo do que
+     já foi entregue (o handler segura). Sem o motor (cache misto), a tabela
+     é a de antes. */
+  const comEntrega = temMotorEntrega();
+  const cols = 6;
   const rows = itens.map((it, i) => {
     const lock = it.manual ? '' : 'readonly';
+    const marcado = temMarcaEntrega(it);
     const u = `data-iuid="${esc(uidItemOk(it.uid) ? it.uid : '')}"`;
+    const del = !it.manual ? ''
+      : marcado ? `<span class="ent-fica" title="Item com marca de entrega não sai da lista. Para tirar o saldo que falta, a gestão usa Cancelar item.">🔒 fica</span>`
+      : `<button class="btn-xs btn-danger edit-only" data-item-del="${i}" ${u} title="Remover item">× remover</button>`;
     return `
     <tr data-item-row="${i}" ${u} class="${it.pronto ? 'item-ok' : ''} ${it.reprovado ? 'item-reprov' : ''}">
       <td data-label="Item"><input data-item="${i}.item" ${u} value="${esc(it.item)}" ${lock}></td>
       <td data-label="Descrição"><input data-item="${i}.descricao" ${u} value="${esc(it.descricao)}" ${lock}></td>
       <td data-label="Medidas"><input data-item="${i}.medidas" ${u} value="${esc(it.medidas)}" ${lock}></td>
-      <td data-label="Qtde"><input data-item="${i}.qtde" ${u} value="${esc(it.qtde)}" inputmode="numeric" ${lock}></td>
+      <td data-label="Qtde"><input data-item="${i}.qtde" ${u} value="${esc(it.qtde)}" inputmode="numeric" ${lock}${marcado && it.manual ? ' title="Item com entrega: a quantidade não fica abaixo do que já foi entregue."' : ''}></td>
       <td class="verif-cell" data-label="Verificação">
         <button type="button" class="verif-btn verif-ok ${it.pronto ? 'on' : ''}" data-item-verif="${i}.ok" ${u} title="Verificado" ${ro ? 'disabled' : ''}>✓</button>
         <button type="button" class="verif-btn verif-no ${it.reprovado ? 'on' : ''}" data-item-verif="${i}.no" ${u} title="Reprovado" ${ro ? 'disabled' : ''}>✗</button>
       </td>
-      <td class="item-del-cell">${it.manual ? `<button class="btn-xs btn-danger edit-only" data-item-del="${i}" ${u} title="Remover item">× remover</button>` : ''}</td>
+      <td class="item-del-cell">${del}</td>
     </tr>
-    ${it.reprovado ? `<tr class="motivo-row"><td colspan="6" data-label="O que deu errado?"><input data-item="${i}.motivoReprovado" ${u} value="${esc(it.motivoReprovado || '')}" placeholder="❗ O que deu errado neste item?"></td></tr>` : ''}
-    ${it.statusInst === 'retrab' ? `<tr class="motivo-row"><td colspan="6" data-label="Retrabalho na instalação">🔴 Retrabalho na instalação: ${esc(it.motivo || 'sem motivo')}${it.obsProb ? ` (${esc(it.obsProb)})` : ''}${it.fotoProbId ? `<div class="fotos-grid"><div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(it.fotoProbId)}" alt="foto do problema"></div></div>` : ''}</td></tr>` : ''}`;
+    ${comEntrega ? linhaEntregaHTML(it, i, os, ro, u, cols) : ''}
+    ${it.reprovado ? `<tr class="motivo-row"><td colspan="${cols}" data-label="O que deu errado?"><input data-item="${i}.motivoReprovado" ${u} value="${esc(it.motivoReprovado || '')}" placeholder="❗ O que deu errado neste item?"></td></tr>` : ''}
+    ${it.statusInst === 'retrab' ? `<tr class="motivo-row"><td colspan="${cols}" data-label="Retrabalho na instalação">🔴 Retrabalho na instalação: ${esc(it.motivo || 'sem motivo')}${it.obsProb ? ` (${esc(it.obsProb)})` : ''}${it.fotoProbId ? `<div class="fotos-grid"><div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(it.fotoProbId)}" alt="foto do problema"></div></div>` : ''}</td></tr>` : ''}`;
   }).join('');
 
   return `
@@ -2015,9 +2540,9 @@ function blocoItens(os, ro, done) {
       </div>
       <table class="items-table items-cards">
         <thead><tr><th>Item</th><th>Descrição</th><th>Medidas</th><th>Qtde</th><th>OK</th><th></th></tr></thead>
-        <tbody id="itens-tbody">${rows || '<tr><td colspan="6" class="text-muted" style="text-align:center;padding:12px">Nenhum item</td></tr>'}</tbody>
+        <tbody id="itens-tbody">${rows || `<tr><td colspan="${cols}" class="text-muted" style="text-align:center;padding:12px">Nenhum item</td></tr>`}</tbody>
       </table>
-      ${itens.length ? `<div class="items-total">${itens.length} ${itens.length === 1 ? 'item' : 'itens'}</div>` : ''}
+      ${itens.length ? `<div class="items-total">${itens.length} ${itens.length === 1 ? 'item' : 'itens'}${resumoEnt ? ` · <span class="ent-resumo">${esc(resumoEnt)}</span>` : ''}</div>` : ''}
       <div class="flex gap-8 edit-only">
         <button class="btn-ghost btn-sm" id="btn-add-item">+ Item manual</button>
         <button class="btn-ghost btn-sm" id="btn-import-itens">📄 Importar itens do PDF</button>
@@ -3262,6 +3787,21 @@ function bindModalEvents(os, ro) {
       const [idx, key] = el.dataset.item.split('.');
       const it = itemDoDraft(_modalDraft.itens, idx, el.dataset.iuid);
       if (!it) return;
+      /* A QUANTIDADE NÃO DESCE ABAIXO DO QUE JÁ FOI ENTREGUE (E4): o saldo
+         ficaria negativo. Enquanto o número digitado estiver abaixo, a O.S.
+         fica com a quantidade de antes (nada vai para o servidor pela metade:
+         apagar o "10" para digitar "12" passa por "1"); ao sair do campo, ele
+         volta ao que vale. Para baixar de verdade, desfaz-se a marca a mais. */
+      if (key === 'qtde' && temMotorEntrega()) {
+        const minimo = entregueSemTeto(it);
+        if (minimo > 0 && ENTREGA_ITEM.qtdeNum({ ...it, qtde: el.value }) < minimo) {
+          el.setAttribute('aria-invalid', 'true');
+          el.dataset.qtdeMinima = String(minimo);
+          return;
+        }
+        el.removeAttribute('aria-invalid');
+        delete el.dataset.qtdeMinima;
+      }
       it[key] = el.value;
       if (key === 'qtde' || key === 'valorUnit') {
         it.subtotal = (parseBRNumber(it.qtde) * parseBRNumber(it.valorUnit));
@@ -3269,7 +3809,17 @@ function bindModalEvents(os, ro) {
       markDirty();
       _debouncedSaveDraft();
     };
-    el.onblur = () => { if (_modalDirty) saveDraft(); };
+    el.onblur = () => {
+      if (el.dataset.qtdeMinima) {
+        const [idx] = el.dataset.item.split('.');
+        const it = itemDoDraft(_modalDraft.itens, idx, el.dataset.iuid);
+        toast(`A quantidade não fica abaixo do que já foi entregue (${el.dataset.qtdeMinima}). Para baixar, ${podeMarcarEntrega('desfeito') ? 'desfaça antes a marca a mais' : 'fale com o PCP'}.`, 'error');
+        el.value = it ? String(it.qtde == null ? '' : it.qtde) : el.value;
+        el.removeAttribute('aria-invalid');
+        delete el.dataset.qtdeMinima;
+      }
+      if (_modalDirty) saveDraft();
+    };
   });
   // Verificação do item: ✓ verificado / ✗ reprovado (com motivo).
   $$('[data-item-verif]', root).forEach(el => {
@@ -3294,12 +3844,17 @@ function bindModalEvents(os, ro) {
       if (ro) return;
       const it = itemDoDraft(_modalDraft.itens, el.dataset.itemDel, el.dataset.iuid);
       if (!it) return;
+      // Item com marca de entrega não sai (o servidor o devolveria à lista, E3).
+      juntarMarcasDoStore(_modalDraft);
+      if (temMarcaEntrega(it)) { toast(`O ${rotuloItemEntrega(it)} tem marca de entrega e não sai da lista. Para tirar o saldo que falta, a gestão usa Cancelar item.`, 'error'); reRenderModalKeepOpen(); return; }
       if (!confirm(`Remover o item "${it.descricao || it.item || ''}"?`)) return;
       const pos = _modalDraft.itens.indexOf(it);
       if (pos >= 0) _modalDraft.itens.splice(pos, 1);
       saveDraft(); reRenderModalKeepOpen();
     };
   });
+  // Entrega por item (E4): Entregar tudo, parte, Retirado, Problema, Cancelar item, Desfazer.
+  ligarEntregasDaFicha(root, ro);
   // Marcação de escolha única (Acesso / Fixação).
   $$('[data-mark]', root).forEach(grp => {
     const field = grp.dataset.mark;
@@ -3392,20 +3947,9 @@ function bindModalEvents(os, ro) {
     saveDraft(); reRenderModalKeepOpen();
   };
 
-  // TRAVA 2 — Finalizar
+  // TRAVA 2 — Finalizar (com a pergunta do saldo da entrega por item, E4)
   const finBtn = $('#btn-finalizar');
-  if (finBtn) finBtn.onclick = () => {
-    const faltas = validarFinalizacao(_modalDraft);
-    if (faltas.length) {
-      toast('Falta: ' + faltas.join(', '), 'error');
-      return;
-    }
-    perguntarRetrabalho(_modalDraft, () => {
-      aplicarFinalizacao(_modalDraft);
-      saveDraft(); reRenderModalKeepOpen();
-      toast('Instalação finalizada 🏁', 'success');
-    });
-  };
+  if (finBtn) finBtn.onclick = () => finalizarDaFicha(false);
 
   // Seletor de tipo (Interno / Externo)
   $$('[data-set-tipo]', root).forEach(btn => {
@@ -3431,16 +3975,7 @@ function bindModalEvents(os, ro) {
 
   // Finalizar pedido interno (vai direto para "Finalizado")
   const finInterno = $('#btn-finalizar-interno');
-  if (finInterno) finInterno.onclick = () => {
-    const faltas = validarFinalizacao(_modalDraft);
-    if (faltas.length) {
-      toast('Falta: ' + faltas.join(', '), 'error');
-      return;
-    }
-    aplicarFinalizacao(_modalDraft);
-    saveDraft(); reRenderModalKeepOpen();
-    toast('Retirada registrada 📦', 'success');
-  };
+  if (finInterno) finInterno.onclick = () => finalizarDaFicha(true);
   // Reabrir O.S finalizada (interno e externo): limpa a finalização e deixa o
   // status voltar sozinho para a etapa anterior (calcStatus recalcula).
   const reabrirOS = $('#btn-reabrir-os');
@@ -3817,7 +4352,7 @@ function osCardHTML(os) {
     <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
       <div class="card-header card-header-os">
         <div class="card-meta">
-          <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${(os.retrabalho && !os.finalizadaEm) || retrabPendente(os) ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}${seloParado}${seloVoltouERP}${os.statusERP === 'CONCLUIDO' && !os.liberadoPCP && !os.finalizadaEm ? ` <span class="tag-erp-pronta" title="O ERP diz que a produção terminou${os.statusERPDesde ? ' em ' + esc(fmtDataBR(os.statusERPDesde)) : ''}; falta liberar no PCP">🏭 ERP: produção concluída</span>` : ''}${erpMudancasAConferir(os).length ? ' <span class="badge sem-valor">ERP mudou · conferir</span>' : ''}</div>
+          <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${(os.retrabalho && !os.finalizadaEm) || retrabPendente(os) ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}${seloParado}${seloVoltouERP}${seloEntregaCardHTML(os)}${os.statusERP === 'CONCLUIDO' && !os.liberadoPCP && !os.finalizadaEm ? ` <span class="tag-erp-pronta" title="O ERP diz que a produção terminou${os.statusERPDesde ? ' em ' + esc(fmtDataBR(os.statusERPDesde)) : ''}; falta liberar no PCP">🏭 ERP: produção concluída</span>` : ''}${erpMudancasAConferir(os).length ? ' <span class="badge sem-valor">ERP mudou · conferir</span>' : ''}</div>
           <span class="badge st-${st}">${statusLabelDe(os, st)}</span>
         </div>
         <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
@@ -4322,6 +4857,26 @@ function moverEtapa(id, acao, opcoes = {}) {
   });
 }
 
+/* Os 'desfeito' das marcas que a finalização pelo card criou (`criadas`,
+   de marcarSaldoNaFinalizacao), conferidos pelo motor na O.S. como ela vai
+   ficar: sem a finalização (o motor recusa marca em O.S. finalizada; o
+   servidor aceita reabrir e desfazer na mesma gravação). Marca que não está
+   mais valendo (o servidor recusou, alguém já desfez) fica de fora. Tudo ou
+   nada: se um não passa, nada muda e a O.S. continua finalizada. */
+function desfeitosDaFinalizacao(os, criadas) {
+  const lista = [];
+  if (!temMotorEntrega() || !os || !Array.isArray(os.itens)) return { erro: '', lista };
+  const hoje = hojeEntrega(), papel = papelEntrega(), ctxOS = { ...os, finalizadaEm: '' };
+  for (const c of criadas) {
+    const it = itemDoDraft(os.itens, c.idx, uidItemOk(c.uid) ? c.uid : '');
+    if (!it || !ENTREGA_ITEM.eventosAtivos(it).some(e => idMarca(e) === c.id)) continue;
+    const ev = { id: novoIdMarca(), tipo: 'desfeito', dia: hoje, alvo: c.id, motivo: 'Finalização desfeita pelo card', por: String((STATE.user || {}).nome || ''), em: nowISO() };
+    const v = ENTREGA_ITEM.validarEvento(ev, it, { papel, os: ctxOS, hoje });
+    if (!v.ok) return { erro: `Não deu para desfazer a marca do ${rotuloItemEntrega(it)}: ${v.erro} A O.S. continua finalizada.`, lista: [] };
+    lista.push([it, v.evento]);
+  }
+  return { erro: '', lista };
+}
 // Finaliza a O.S a partir do card. Se faltar algum requisito, abre o modal
 // para o usuário completar (foto de check‑in, confirmação, etc.).
 function finalizarServicoDoCard(osId) {
@@ -4333,26 +4888,48 @@ function finalizarServicoDoCard(osId) {
     openModal(os);
     return;
   }
-  const concluir = () => {
-    // Um toque no card finaliza: a volta também é de um toque (a lista se
-    // redesenha com o sync e o dedo acerta o card do lado).
-    const campos = ['finalizadaEm', 'finalizadoPor', 'checkout', 'historico', 'retrabalhoPerguntado', 'retrabalho', 'problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho'];
-    const antes = JSON.parse(JSON.stringify(Object.fromEntries(campos.map(k => [k, os[k] === undefined ? null : os[k]]))));
-    aplicarFinalizacao(os);
-    os.atualizadoEm = nowISO();
-    os.atualizadoPor = STATE.user.nome;
-    registrarEtapa(os);
-    STORE.saveOS(os);
-    renderActiveTab();
-    toastDesfazer(isInterno(os) ? 'Retirada registrada 📦' : 'Serviço finalizado 🏁', () => {
-      const atual = STORE.getOS(osId); if (!atual) return;
-      for (const k of campos) { if (antes[k] === null) delete atual[k]; else atual[k] = antes[k]; }
-      atual.atualizadoEm = nowISO(); atual.atualizadoPor = STATE.user.nome;
-      STORE.saveOS(atual); renderActiveTab(); toast('Desfeito', 'success');
-    });
-  };
-  // Retirada não é instalação: sem a pergunta. Instalação: sempre.
-  if (isInterno(os)) concluir(); else perguntarRetrabalho(os, concluir);
+  /* O saldo da entrega por item vem antes (E4): "Manter aberta" não grava
+     finalizadaEm. Depois da pergunta a O.S. é RELIDA do STORE: o diálogo
+     pode ter durado um pull, e gravar o objeto de antes atropelaria. */
+  finalizarComSaldo(os, escolha => {
+    const alvo = STORE.getOS(osId) || os;
+    const concluir = () => {
+      // Um toque no card finaliza: a volta também é de um toque (a lista se
+      // redesenha com o sync e o dedo acerta o card do lado).
+      const campos = ['finalizadaEm', 'finalizadoPor', 'checkout', 'historico', 'retrabalhoPerguntado', 'retrabalho', 'problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho'];
+      const antes = JSON.parse(JSON.stringify(Object.fromEntries(campos.map(k => [k, alvo[k] === undefined ? null : alvo[k]]))));
+      const m = escolha === 'marcar' ? marcarSaldoNaFinalizacao(alvo) : { erro: '', marcadas: 0, eventos: [] };
+      if (m.erro) { toast(m.erro, 'error'); return; }
+      aplicarFinalizacao(alvo);
+      alvo.atualizadoEm = nowISO();
+      alvo.atualizadoPor = STATE.user.nome;
+      registrarEtapa(alvo);
+      STORE.saveOS(alvo);
+      renderActiveTab();
+      const extra = m.marcadas ? ` · ${m.marcadas} ${m.marcadas === 1 ? 'item marcado' : 'itens marcados'} hoje` : '';
+      const msg = (isInterno(alvo) ? 'Retirada registrada 📦' : 'Serviço finalizado 🏁') + extra;
+      /* O DESFAZER DE UM TOQUE (revisão da E4) volta a finalização E as marcas
+         que ela criou: sem isso a O.S. reabria com o saldo "entregue hoje",
+         valendo R$. A gestão (admin e pcp) desfaz marca: cada marca criada
+         ganha um 'desfeito', na mesma gravação que tira o finalizadaEm. Quem
+         não desfaz marca (a operação) não recebe o Desfazer de um toque
+         quando a finalização marcou saldo. Sem marca criada, como antes. */
+      const criadas = Array.isArray(m.eventos) ? m.eventos : [];
+      if (criadas.length && !podeMarcarEntrega('desfeito')) { toast(msg + '. Para desfazer, fale com o PCP.', 'success'); return; }
+      toastDesfazer(msg, () => {
+        const atual = STORE.getOS(osId); if (!atual) return;
+        const d = criadas.length ? desfeitosDaFinalizacao(atual, criadas) : { erro: '', lista: [] };
+        if (d.erro) { toast(d.erro, 'error'); return; }
+        for (const k of campos) { if (antes[k] === null) delete atual[k]; else atual[k] = antes[k]; }
+        for (const [it, ev] of d.lista) it.entregas = (Array.isArray(it.entregas) ? it.entregas : []).concat(ev);
+        atual.atualizadoEm = nowISO(); atual.atualizadoPor = STATE.user.nome;
+        STORE.saveOS(atual); renderActiveTab();
+        toast(d.lista.length ? `Desfeito: a finalização e ${d.lista.length} ${d.lista.length === 1 ? 'marca de entrega' : 'marcas de entrega'}` : 'Desfeito', 'success');
+      });
+    };
+    // Retirada não é instalação: sem a pergunta. Instalação: sempre.
+    if (isInterno(alvo)) concluir(); else perguntarRetrabalho(alvo, concluir);
+  });
 }
 
 function applyFilter(list, busca) {
@@ -6598,6 +7175,50 @@ function pintarAvisosAlocacao() {
   box.querySelectorAll('[data-aloc-ok]').forEach(b => { b.onclick = () => { STORE.dispensarAvisoAlocacao(b.getAttribute('data-aloc-ok')); pintarAvisosAlocacao(); }; });
 }
 
+/* AVISO FIXO DA MARCA DE ENTREGA RECUSADA (E4, no molde da divisão). A
+   gravação da O.S. passou, mas a marca não (saldo que outro aparelho já
+   usou, O.S. finalizada no meio, papel): ela saiu deste aparelho, e o aviso
+   diz qual e por quê até alguém tocar em "Entendi". Marcar de novo é ação
+   nova. */
+function ligarEntregasDescartadas() {
+  if (typeof STORE.on !== 'function') return;
+  STORE.on('entregas-descartadas', d => { tirarRecusadasDaFicha(d); pintarAvisosEntregas(); });
+  pintarAvisosEntregas();
+}
+function tirarRecusadasDaFicha(d) {
+  const ids = new Set(((d && Array.isArray(d.recusadas)) ? d.recusadas : []).map(idMarca).filter(Boolean));
+  if (!ids.size) return 0;
+  ids.forEach(id => _marcasRecusadas.add(id));
+  if (!_modalDraft || String(_modalDraft.id) !== String(d.id)) return 0;
+  const n = tirarMarcasRecusadas(_modalDraft, ids);
+  if (!n) return 0;
+  // Quem está digitando na ficha não perde o campo: a marca já saiu, a tela acompanha na próxima pintura.
+  const ae = typeof document !== 'undefined' ? document.activeElement : null;
+  const digitando = ae && ae.closest && ae.closest('#modal-os') && ['INPUT', 'TEXTAREA', 'SELECT'].includes(ae.tagName);
+  if (!digitando) reRenderModalKeepOpen();
+  return n;
+}
+function pintarAvisosEntregas() {
+  const lista = typeof STORE.avisosEntregas === 'function' ? STORE.avisosEntregas() : [];
+  let box = document.getElementById('aviso-entregas');
+  if (!lista.length) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'aviso-entregas';
+    box.className = 'aviso-alocacao aviso-entregas';
+    box.setAttribute('role', 'alert');
+    const main = document.querySelector('#app main') || document.body;
+    main.insertBefore(box, main.firstChild);
+  }
+  box.innerHTML = lista.map(a => {
+    const marcas = (Array.isArray(a.marcas) ? a.marcas : []).slice(0, 5);
+    const txt = marcas.map(m => `${m.item || 'um item'}: ${m.motivo || 'o servidor não aceitou'}`).join(' ');
+    const mais = (a.marcas || []).length > 5 ? ` E mais ${(a.marcas || []).length - 5}.` : '';
+    return `<div class="trava-msg"><span>⚠️ ${marcas.length === 1 ? 'A marca de entrega' : 'Marcas de entrega'} da O.S. ${esc(a.numero || a.id)} não ${marcas.length === 1 ? 'foi gravada' : 'foram gravadas'}. ${esc(txt)}${esc(mais)} ${marcas.length === 1 ? 'Ela saiu' : 'Elas saíram'} deste aparelho: confira o item e marque de novo, se for o caso.</span><button type="button" class="btn-ghost" data-ent-desc-ok="${esc(a.id)}">Entendi</button></div>`;
+  }).join('');
+  box.querySelectorAll('[data-ent-desc-ok]').forEach(b => { b.onclick = () => { STORE.dispensarAvisoEntregas(b.getAttribute('data-ent-desc-ok')); pintarAvisosEntregas(); }; });
+}
+
 function mostrarConflitoCFG(c) {
   let box = document.getElementById('cfg-conflito');
   if (!box) { box = document.createElement('dialog'); box.id = 'cfg-conflito'; document.body.appendChild(box); }
@@ -7668,6 +8289,63 @@ function importarPDF() {
   inp.click();
 }
 
+/* O "SUBSTITUIR" DO PDF COM ITEM JÁ ENTREGUE (revisão da E4). O item com
+   marca de entrega fica na lista; antes, o mesmo produto vindo do PDF entrava
+   de novo, sem marca: o item aparecia duas vezes, o saldo voltava a pedir o
+   que já foi, e a soma dos itens quase dobrava o valor da O.S. Agora o item
+   do PDF que é o MESMO PRODUTO de um item marcado atualiza esse item (medida,
+   valor unitário e quantidade, que não desce abaixo do entregue), sem
+   repetir. O casamento, no molde do preservarItens do servidor: pelo código
+   quando o do PDF é um código que a O.S. tem; senão pela descrição (sem
+   acento, caixa e espaço) com a medida; e, quando a descrição só aparece uma
+   vez de cada lado, só por ela (a medida mudou na revisão). Dois iguais, sem
+   medida que separe, não se adivinha: o "Substituir" fica bloqueado e só
+   o "Adicionar" é oferecido. Devolve { par: Map(posição no PDF, item
+   marcado), ambiguos: [itens marcados sem casamento seguro] }. */
+const textoCasaPDF = v => String(v == null ? '' : v).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
+// '2,00 x 1,00', '2.00X1.00' e '2x1' são a mesma medida.
+const medidaCasaPDF = v => textoCasaPDF(v).replace(/\s+/g, '').replace(/×/g, 'x').replace(/\d+(?:[.,]\d+)?/g, n => String(Number(n.replace(',', '.'))));
+function casarPDFComMarcados(marcados, pdf) {
+  const par = new Map(), usados = new Set();
+  marcados.forEach(m => {
+    if (!uidItemOk(m.uid)) return;
+    const j = pdf.findIndex((p, k) => !par.has(k) && p && p.uid === m.uid);
+    if (j >= 0) { par.set(j, m); usados.add(m); }
+  });
+  const chaves = [it => textoCasaPDF(it.descricao) + '|' + medidaCasaPDF(it.medidas), it => textoCasaPDF(it.descricao)];
+  for (const chave of chaves) {
+    for (const m of marcados) {
+      if (usados.has(m) || !textoCasaPDF(m.descricao)) continue;
+      const k = chave(m);
+      const js = pdf.map((p, j) => j).filter(j => !par.has(j) && pdf[j] && chave(pdf[j]) === k);
+      const ms = marcados.filter(o => !usados.has(o) && chave(o) === k);
+      if (js.length === 1 && ms.length === 1) { par.set(js[0], m); usados.add(m); }
+    }
+  }
+  // Sobrou item marcado com o mesmo produto no PDF: dois iguais, sem como separar.
+  const ambiguos = marcados.filter(m => !usados.has(m) && textoCasaPDF(m.descricao) &&
+    pdf.some((p, j) => !par.has(j) && p && textoCasaPDF(p.descricao) === textoCasaPDF(m.descricao)));
+  return { par, ambiguos };
+}
+/* Atualiza o item marcado com o do PDF. A quantidade não desce abaixo do
+   que já foi entregue: o item fica com a do entregue, e volta o aviso. */
+function atualizarMarcadoPeloPDF(m, p) {
+  const entregue = entregueSemTeto(m);
+  let qtde = p.qtde == null || p.qtde === '' ? m.qtde : p.qtde, aviso = '';
+  if (entregue > 0 && ENTREGA_ITEM.qtdeNum({ ...m, qtde }) < entregue) {
+    aviso = `${rotuloItemEntrega(m)}: o PDF traz quantidade ${qtde}, abaixo do que já foi entregue (${entregue}); o item ficou com ${entregue}.`;
+    qtde = String(entregue);
+  }
+  if (p.medidas != null && String(p.medidas).trim()) m.medidas = p.medidas;
+  if (p.valorUnit != null && String(p.valorUnit).trim()) m.valorUnit = p.valorUnit;
+  m.qtde = qtde;
+  /* O valor unitário do PDF (parseItensPDF) e o do ERP vêm com ponto
+     decimal ('1234.56'); o parseBRNumber leria 123456. Com vírgula, é o
+     número digitado à brasileira. */
+  const unit = v => typeof v === 'number' ? v : String(v ?? '').includes(',') ? parseBRNumber(v) : (Number(String(v ?? '').replace(/[R$\s]/g, '')) || 0);
+  m.subtotal = !aviso && qtde === p.qtde && p.subtotal != null ? p.subtotal : Math.round(parseBRNumber(m.qtde) * unit(m.valorUnit) * 100) / 100;
+  return aviso;
+}
 function importarItensPDF(draft) {
   const inp = document.createElement('input');
   inp.type = 'file'; inp.accept = 'application/pdf';
@@ -7683,15 +8361,43 @@ function importarItensPDF(draft) {
       // se substitui; e renumera a partir do total para não repetir números.
       // Duas perguntas: no tablet "Cancelar" quer dizer desistir, e antes ele
       // adicionava os itens no fim, já gravados.
-      let atuais = draft.itens || [];
+      /* O PDF leva segundos: a ficha pode ter trocado de rascunho no meio
+         (a resposta do servidor, o pull). Os itens vão para o rascunho DE
+         AGORA, relido do STORE (E4), senão o saveDraft gravava o outro. */
+      const alvo = _modalDraft && draft && _modalDraft.id === draft.id ? _modalDraft : draft;
+      if (alvo === _modalDraft && temMotorEntrega()) juntarMarcasDoStore(alvo);
+      let atuais = alvo.itens || [];
+      /* ITEM COM ENTREGA NÃO É TROCADO (E4): o "Substituir" troca só os itens
+         sem marca de entrega; os com marca ficam na lista (o servidor os
+         devolveria de qualquer jeito). */
+      const comEntrega = atuais.filter(temMarcaEntrega);
+      /* O item do PDF que é o mesmo produto de um item com entrega atualiza
+         esse item no "Substituir", sem repetir (casarPDFComMarcados). */
+      const casa = comEntrega.length && temMotorEntrega() ? casarPDFComMarcados(comEntrega, itens) : { par: new Map(), ambiguos: [] };
+      let novos = itens, avisos = [], atualizados = 0;
       if (atuais.length) {
-        if (confirm(`Esta O.S já tem ${atuais.length} item(ns). Substituir pelos ${itens.length} do PDF?`)) atuais = [];
-        else if (!confirm(`Adicionar os ${itens.length} item(ns) do PDF no fim da lista?`)) return;
+        const rotulos = [...new Set(casa.ambiguos.map(rotuloItemEntrega))];
+        const nomes = rotulos.slice(0, 3).join(', ') + (rotulos.length > 3 ? ` e mais ${rotulos.length - 3}` : '');
+        const casados = casa.par.size;
+        const pergunta = casa.ambiguos.length ? ''
+          : comEntrega.length
+          ? `Esta O.S já tem ${atuais.length} item(ns), ${comEntrega.length} com marca de entrega. Substituir os ${atuais.length - comEntrega.length} sem marca pelos ${itens.length - casados} do PDF? Os itens com entrega ficam na lista${casados ? `, e ${casados === 1 ? 'o que é o mesmo produto do PDF é atualizado' : `os ${casados} que são o mesmo produto do PDF são atualizados`} (medida, valor e quantidade), sem repetir` : ''}.`
+          : `Esta O.S já tem ${atuais.length} item(ns). Substituir pelos ${itens.length} do PDF?`;
+        if (casa.ambiguos.length) {
+          // Dois iguais: não se adivinha qual é qual. Só o Adicionar, com a explicação.
+          if (!confirm(`Substituir está bloqueado: o PDF tem mais de um item igual a item com marca de entrega (${nomes}), e não dá para saber qual é qual. Adicionar os ${itens.length} item(ns) do PDF no fim da lista?`)) return;
+        } else if (confirm(pergunta)) {
+          atuais = comEntrega;
+          for (const [j, m] of casa.par) { const a = atualizarMarcadoPeloPDF(m, itens[j]); if (a) avisos.push(a); atualizados++; }
+          novos = itens.filter((_, j) => !casa.par.has(j));
+        } else if (!confirm(`Adicionar os ${itens.length} item(ns) do PDF no fim da lista?`)) return;
       }
-      itens.forEach((it, k) => { it.item = String(atuais.length + k + 1); if (!uidItemOk(it.uid)) it.uid = novoUidItemSeguro(); });
-      draft.itens = atuais.concat(itens);
+      const base = Math.max(atuais.length, ...atuais.map(i => parseInt(i && i.item, 10) || 0));
+      novos.forEach((it, k) => { it.item = String(base + k + 1); if (!uidItemOk(it.uid)) it.uid = novoUidItemSeguro(); });
+      alvo.itens = atuais.concat(novos);
       saveDraft(); reRenderModalKeepOpen();
-      toast(`${itens.length} item(ns) importado(s)`, 'success');
+      toast(`${novos.length} item(ns) importado(s)${atualizados ? `, ${atualizados} ${atualizados === 1 ? 'item com entrega atualizado' : 'itens com entrega atualizados'}` : ''}`, 'success');
+      for (const a of avisos) toast(a, 'error');
     } catch (e) {
       toast(e.message || 'Falha ao ler PDF', 'error');
     }
