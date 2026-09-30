@@ -463,6 +463,15 @@ function candidatosRH(apelido) {
     return normCasa(p.apelido) === toks.join(' ') || toks.every((t, i) => n[i] === t);
   });
 }
+/* AS O.S. DA CONFERÊNCIA (F12): as do aparelho (abertas e finalizadas da
+   janela local) e as antigas que a tela trouxe do servidor para converter
+   (STORE.historico, só na memória desta aba). A do aparelho vence. */
+function osDaConferencia() {
+  const local = STORE.getAllOS();
+  const vistos = new Set(local.map(o => o && o.id));
+  const hist = typeof STORE.historico === 'function' ? (STORE.historico() || []).filter(o => o && o.id && !vistos.has(o.id)) : [];
+  return hist.length ? local.concat(hist) : local;
+}
 function conferenciaRH() {
   const conta = new Map();
   const soma = (nome, n) => {
@@ -476,7 +485,8 @@ function conferenciaRH() {
   };
   // Cada NOME escrito conta (dois nomes da mesma pessoa na mesma O.S. são o
   // "juntos" que a tela mostra). O ID já é a pessoa: não entra na conferência.
-  for (const os of STORE.getAllOS()) {
+  // As O.S. antigas que a tela buscou no servidor (F12) contam junto.
+  for (const os of osDaConferencia()) {
     const vistos = new Set();
     for (const x of Array.isArray(os.equipe) ? os.equipe : []) {
       const ap = String(x ?? '').trim();
@@ -594,6 +604,87 @@ function initCasa() {
   });
 }
 
+/* O LANÇAMENTO NA O.S., SEM TELA (F13).
+   A parte que grava do "Lançar entrega", separada do formulário para o lote
+   do Fechar o dia (F14) usar a mesma regra. Recebe a O.S. e o que a pessoa
+   decidiu e DEVOLVE A O.S. NOVA: não mexe na que recebeu, não lê o DOM, não
+   pergunta nada e não grava (quem chama grava, uma vez). Tudo o que a O.S.
+   trouxe fica, inclusive o campo que chegou por fora (outro aparelho, o
+   servidor): só os campos do lançamento são escritos. Com o mesmo `em`, a
+   mesma entrada dá o mesmo resultado, e aplicada de novo sobre o próprio
+   resultado não muda nada (o lote pode repetir uma linha).
+   Entrada:
+   - data: o dia da entrega. Sem dia válido, erro (a tela avisa antes).
+   - alocacao: a divisão de admin e pcp, pronta e conferida pelo componente
+     (ALOCUI, com a trava contra outro aparelho). A equipe sai dela.
+   - pessoas: a equipe, quando não vai divisão. Lista vazia também grava
+     (quem tirou todo mundo confirmou). Ausente, a equipe fica como está.
+   - respostasVolta: as perguntas da volta (OPERACAO.PERGUNTAS_VOLTA), só de
+     quem confere (quem chama decide). O.S. interna não tem volta. Iguais às
+     gravadas, não recarimbam.
+   - retrabalho: a resposta da pergunta obrigatória, {resposta: 'nao'} ou
+     {resposta: 'sim', problema, etapaOrigem, causaRaiz, responsavelEtapa,
+     dataRetrabalho}, com `em` e `por` do carimbo quando vierem. A regra é a
+     do perguntarRetrabalho (app.js), com teste de paridade: 'nao' numa O.S.
+     marcada desmarca, e quem chama confirma antes, como ele.
+   - por, em: quem lança e quando. Padrão: o usuário e agora. */
+const CAMPOS_RETRABALHO = ['problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho'];
+function aplicarLancamento(os, e = {}) {
+  if (!os || typeof os !== 'object') throw new Error('Esta O.S. não está mais neste aparelho.');
+  const data = OPERACAO.dia(e.data);
+  if (!data) throw new Error('Informe a data da entrega.');
+  const r = e.retrabalho || null;
+  const resposta = r && (r.resposta === 'sim' || r.resposta === 'nao') ? r.resposta : '';
+  if (r && !resposta) throw new Error('A resposta do retrabalho é Sim ou Não.');
+  const texto = k => String((r && r[k]) ?? '').trim();
+  if (resposta === 'sim' && CAMPOS_RETRABALHO.some(k => !texto(k))) throw new Error('Preencha os cinco campos do retrabalho.');
+  const por = e.por != null ? String(e.por) : ((STATE.user && STATE.user.nome) || '');
+  const em = e.em || nowISO();
+  const nova = {...os};
+  // A equipe: a da divisão quando vai divisão (os.equipe é derivada dela); senão a lista que veio.
+  if (e.alocacao && typeof e.alocacao === 'object') {
+    nova.alocacao = JSON.parse(JSON.stringify(e.alocacao));
+    nova.equipe = typeof DIVISAO !== 'undefined' ? DIVISAO.derivarEquipe(nova.alocacao) : Array.isArray(e.pessoas) ? e.pessoas.slice() : nova.equipe;
+  } else if (Array.isArray(e.pessoas)) nova.equipe = e.pessoas.slice();
+  // A conferência da volta: só o que mudou recarimba (quem e quando).
+  const resp = v => (v === 'sim' || v === 'nao') ? v : '';
+  if (e.respostasVolta && typeof e.respostasVolta === 'object' && !OPERACAO.interno(nova)) {
+    const respostas = Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, resp(e.respostasVolta[k])]));
+    const antes = nova.retornoConf || {};
+    if (OPERACAO.PERGUNTAS_VOLTA.some(k => respostas[k] !== resp(antes[k]))) {
+      const respondeu = OPERACAO.voltaRespondida(respostas);
+      nova.retornoConf = {...antes, ...respostas, por: respondeu ? por : '', em: respondeu ? em : ''};
+    }
+  }
+  // O retrabalho, como o perguntarRetrabalho grava.
+  if (resposta) {
+    if (resposta === 'sim') {
+      nova.retrabalho = true;
+      for (const k of CAMPOS_RETRABALHO) nova[k] = texto(k);
+    } else if (nova.retrabalho || (nova.checkout && nova.checkout.situacao === 'Retrabalho')) {
+      nova.retrabalho = false;
+      if (nova.checkout && nova.checkout.situacao === 'Retrabalho') nova.checkout = {...nova.checkout, situacao: ''};
+      nova.problema = ''; nova.etapaOrigem = ''; nova.causaRaiz = ''; nova.responsavelEtapa = '';
+    }
+    nova.retrabalhoPerguntado = {em: r.em || em, por: r.por != null ? String(r.por) : por, resposta};
+  }
+  nova.entregaLancada = {em, por, data};
+  nova.atualizadoEm = em;
+  nova.atualizadoPor = por;
+  return nova;
+}
+/* A resposta que o perguntarRetrabalho deu, tirada da cópia em que ele
+   respondeu. Carimbo novo é resposta de agora; o mesmo carimbo de antes quer
+   dizer que ninguém respondeu, e não há o que aplicar. */
+function respostaRetrabalhoDe(antes, depois) {
+  const p = depois && depois.retrabalhoPerguntado;
+  if (!p || typeof p !== 'object' || p === (antes && antes.retrabalhoPerguntado)) return null;
+  if (p.resposta !== 'sim' && p.resposta !== 'nao') return null;
+  const r = {resposta: p.resposta, em: p.em, por: p.por};
+  if (p.resposta === 'sim') for (const k of CAMPOS_RETRABALHO) r[k] = depois[k];
+  return r;
+}
+
 // Baixa do ERP vira entrega só aqui: alguém confirma data e equipe e responde
 // a pergunta obrigatória do retrabalho. Fica carimbado quem lançou.
 function lancarEntregaManual(osId) {
@@ -682,32 +773,43 @@ function lancarEntregaManual(osId) {
     // Esconde (não apaga) o formulário: "Voltar" na pergunta do retrabalho
     // devolve a data, a equipe e a conferência como estavam.
     box.style.display = 'none';
-    perguntarRetrabalho(os, () => {
+    /* A pergunta do retrabalho responde numa CÓPIA, e a resposta vai para o
+       aplicarLancamento com o resto (F13): a O.S. só muda na gravação. */
+    const rascunho = {...os, checkout: os.checkout && typeof os.checkout === 'object' ? {...os.checkout} : os.checkout};
+    perguntarRetrabalho(rascunho, () => {
       fechar();
       /* A EQUIPE NO MESMO ENVIO (F10): a divisão de admin e pcp quando
          mexeram nela; só as pessoas para operação e montagem (a divisão fica
-         para a gestão). O que não entra vai no aviso, nunca calado. */
+         para a gestão). O que não entra vai no aviso, nunca calado. O
+         componente decide sobre uma cópia da O.S., com a trava dele contra a
+         mudança feita em outro aparelho; quem escreve é o aplicarLancamento. */
       const avisos = [];
+      let alocacao = null, pessoas = null;
       if (st) {
+        const alvo = {...os};
         if (st.tocado && st.modo === 'divisao' && equipe.length) {
-          const r = ALOCUI.aplicarNaOS(chaveAloc, os, { soSeTocou: true });
-          if (!r.ok && r.estado === 'conflito') avisos.push(r.mensagem);
-          else if (!r.ok) { os.equipe = r.equipe || equipe; avisos.push('A equipe foi gravada, mas a divisão não: ' + r.mensagem + ' Complete no Conferir da Performance.'); }
+          const r = ALOCUI.aplicarNaOS(chaveAloc, alvo, { soSeTocou: true });
+          if (r.ok && r.estado === 'aplicada') { alocacao = alvo.alocacao; pessoas = alvo.equipe; }
+          else if (!r.ok && r.estado === 'conflito') avisos.push(r.mensagem);
+          else if (!r.ok) { pessoas = r.equipe || equipe; avisos.push('A equipe foi gravada, mas a divisão não: ' + r.mensagem + ' Complete no Conferir da Performance.'); }
         } else if (st.tocado) {
-          const r = ALOCUI.aplicarEquipeNaOS(chaveAloc, os);
+          const r = ALOCUI.aplicarEquipeNaOS(chaveAloc, alvo);
           if (!r.ok) avisos.push(r.mensagem);
-          else if (r.divisaoFica) avisos.push('A equipe mudou: a divisão desta O.S. (líder e percentuais) fica para a gestão refazer.');
+          else {
+            pessoas = alvo.equipe;
+            if (r.divisaoFica) avisos.push('A equipe mudou: a divisão desta O.S. (líder e percentuais) fica para a gestão refazer.');
+          }
         }
         ALOCUI.esquecer(chaveAloc);
-      } else if (equipe.length) os.equipe = equipe;
-      const antes = os.retornoConf || {};
-      if (conferencia && OPERACAO.PERGUNTAS_VOLTA.some(k => respostas[k] !== resp(antes[k]))) {
-        const respondeu = OPERACAO.voltaRespondida(respostas);
-        os.retornoConf = {...antes, ...respostas, por: respondeu ? ((STATE.user && STATE.user.nome) || '') : '', em: respondeu ? nowISO() : ''};
+      } else if (equipe.length) pessoas = equipe;
+      let nova;
+      try {
+        nova = aplicarLancamento(os, { data, alocacao, pessoas, respostasVolta: conferencia ? respostas : null, retrabalho: respostaRetrabalhoDe(os, rascunho) });
+      } catch (err) {
+        toast('A entrega não foi lançada: ' + String((err && err.message) || err), 'error');
+        return;
       }
-      os.entregaLancada = { em: nowISO(), por: (STATE.user && STATE.user.nome) || '', data };
-      os.atualizadoEm = nowISO(); os.atualizadoPor = (STATE.user && STATE.user.nome) || '';
-      STORE.saveOS(os);
+      STORE.saveOS(nova);
       toast(`Entrega da O.S ${os.numero || ''} lançada.`, 'success');
       if (avisos.length) toast(avisos.join(' '), 'error');
       renderEntregas();
@@ -2227,6 +2329,800 @@ function carrosHTML(f) {
     ${semUso.length ? `<p class="text-muted" style="font-size:.8rem">Cadastrados no Ativos e sem nenhuma O.S no período: ${esc(semUso.map(v => v.nome).join(', '))}.</p>` : ''}`;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   NOMES ANTIGOS VIRAM ID PELA TELA (F12, 30/09/2026)
+   As O.S. antigas guardam o nome que o PCP digitava ("Lucas", "Adlando"); a
+   régua de pessoas acha o dono na leitura, mas o primeiro fechamento sela a
+   chave, e um xará novo no RH muda a resolução. Aqui a gestão (admin e pcp)
+   troca o nome pelo ID em os.equipe, com o vínculo confirmado
+   (OPERACAO.converterEquipe), UMA O.S. POR VEZ, pelo upsert normal: cada O.S.
+   é relida do STORE antes de gravar, vai sozinha ao servidor e entra no
+   diário da F03 com o autor do crachá. O.S. com divisão (os.alocacao) é
+   pulada: a equipe dela sai da divisão. O relatório diz O.S. por O.S. o que
+   houve, e "Desfazer" devolve exatamente a lista anterior.
+   As O.S. fora da janela do aparelho (finalizadas há mais de 60 dias) vêm
+   do servidor pelo mesmo caminho da F09 (STORE.buscarHistorico), sob
+   demanda; até lá, a tela diz que ficaram de fora. Nada calado.
+   ══════════════════════════════════════════════════════════════════════════ */
+const CHAVE_REL_CONV_NOMES = 'impresilk_inst_conv_nomes';
+let _convNomesLote = null;    // {tipo, feitas, total}: o lote em curso
+let _convNomesHist = null;    // a busca das antigas: {estado, novas, de, ate, truncados, erro}
+let _convNomesRelMem = null;  // o relatório, quando o localStorage recusa
+let _convNomesDifere = null;  // a última conferência no servidor: {em, itens:[{nome, local, servidor}]}
+/* Sem a lista de pessoas do RH neste aparelho (elenco vazio ou só nomes),
+   o ID repetido entre ficha e contrato não pode ser conferido: não converte.
+   E sem as funções novas do operacao.js (aba com versões misturadas no meio
+   de uma atualização), a tela mostra o quadro antigo em vez de quebrar. */
+const f12Carregada = () => typeof OPERACAO !== 'undefined' && ['converterEquipe', 'confirmarNome', 'dadosPessoas'].every(k => typeof OPERACAO[k] === 'function');
+const rhProntoParaConverter = () => f12Carregada() && temFichaRH() && pessoasRH().some(p => OPERACAO.ehIdPessoa(p.id));
+const SEM_RH_CONV = 'A lista de pessoas do RH ainda não carregou neste aparelho: sem ela não dá para conferir ID repetido. Atualize a página e tente de novo.';
+const podeConverterNomes = () => ['admin', 'pcp'].includes(String((typeof STATE !== 'undefined' && STATE.user && STATE.user.papel) || ''));
+const SO_GESTAO_CONV = 'Só a gestão (admin e pcp) troca o nome pelo ID: nada foi gravado.';
+const temDivisaoCasa = o => !!(o && o.alocacao && typeof o.alocacao === 'object' && !Array.isArray(o.alocacao));
+const listaCruaCasa = v => (Array.isArray(v) ? v : []).slice();
+const mesmaListaCasa = (a, b) => JSON.stringify(listaCruaCasa(a)) === JSON.stringify(listaCruaCasa(b));
+const dataBRConv = d => /^\d{4}-\d{2}-\d{2}/.test(String(d || '')) ? String(d).slice(0, 10).split('-').reverse().join('/') : '';
+// O nome completo da ficha (o relatório e a confirmação são conferência de gente).
+const nomeCompletoIdCasa = id => { const p = pessoaRHPorId6(id); return (p && p.nome) || OPERACAO.nomePessoa(id); };
+const rotuloGravarId = n => n === 1 ? 'Gravar o ID em 1 O.S.' : `Gravar o ID nas ${n} O.S.`;
+const MOTIVO_NOME = {
+  terceiro: 'marcador de terceiro, não é pessoa',
+  'sem-ficha': 'decidido: terceiro, sem ficha no RH',
+  'vinculo-invalido': 'o vínculo salvo não leva a uma pessoa só (duplicado ou ID repetido)',
+  'id-repetido': 'ID repetido no RH entre ficha e contrato: confira o CPF',
+  'sem-cpf': 'a ficha ou o contrato não tem CPF, então não tem ID',
+  'vinculo-sem-id': 'ligado à mão a uma ficha sem CPF, então sem ID',
+  ambiguo: 'serve para mais de uma pessoa',
+  desligado: 'só casa com quem já saiu da empresa',
+  comeco: 'ligado só pelo começo do nome: falta confirmar',
+  nenhuma: 'nenhuma ficha no RH',
+  'servidor-difere': 'o servidor resolve diferente; atualize e confira',
+};
+
+/* Uso de cada nome nas O.S. da conferência: quantas O.S. o nome converteria
+   (sem divisão) e quantas ficam de fora por já terem divisão. */
+function usoDosNomesCasa(lista) {
+  const uso = new Map();
+  for (const o of lista || osDaConferencia()) {
+    const vistos = new Set();
+    for (const x of Array.isArray(o && o.equipe) ? o.equipe : []) {
+      const s = String(x ?? '').trim();
+      const k = normCasa(s);
+      if (!s || OPERACAO.ehIdPessoa(s) || vistos.has(k)) continue;
+      vistos.add(k);
+      const u = uso.get(k) || { semDivisao: 0, comDivisao: 0 };
+      if (temDivisaoCasa(o)) u.comDivisao++; else u.semDivisao++;
+      uso.set(k, u);
+    }
+  }
+  return uso;
+}
+
+/* O PLANO: as O.S. em que algum nome confirmado vira ID. `nomes` limita a
+   alguns nomes (o botão de uma linha); sem ele, todos os confirmados.
+   Devolve {tarefas:[{id, numero, trocas, divisao}], aprovado: Map(nome -> id),
+   converte, comDivisao}. As com divisão entram nas tarefas para o relatório
+   dizer que foram puladas. */
+function planoConversaoNomes(nomes, lista, dados) {
+  const d = dados || OPERACAO.dadosPessoas();
+  const so = Array.isArray(nomes) && nomes.length ? { nomes } : {};
+  const tarefas = [], aprovado = new Map(), rotulos = new Map(), comos = new Map();
+  let converte = 0, comDivisao = 0;
+  for (const o of lista || osDaConferencia()) {
+    const eq = Array.isArray(o && o.equipe) ? o.equipe : [];
+    if (!eq.some(x => { const s = String(x ?? '').trim(); return s && !OPERACAO.ehIdPessoa(s); })) continue;
+    const c = OPERACAO.converterEquipe(eq, d, so);
+    if (!c.mudou) continue;
+    const divisao = temDivisaoCasa(o);
+    if (divisao) comDivisao++; else converte++;
+    for (const t of c.trocas) {
+      const k = normCasa(t.de);
+      aprovado.set(k, t.para); comos.set(k, t.como);
+      if (!rotulos.has(k)) rotulos.set(k, t.de);
+    }
+    tarefas.push({ id: o.id, numero: String(o.numero || ''), trocas: c.trocas, divisao });
+  }
+  // As com divisão por último: primeiro o que grava.
+  tarefas.sort((a, b) => a.divisao - b.divisao);
+  return { tarefas, aprovado, rotulos, comos, converte, comDivisao };
+}
+
+/* A RÉGUA DO SERVIDOR (revisão da F12, 30/09/2026). O aparelho decidia com o
+   retrato que tinha: a configuração de até 5 min, o elenco de até 30 min,
+   dias sem rede, e o contrato encerrado sem CPF que não desce. O lote grava
+   em O.S. de produção e decide quem pontua e quem recebe comissão: antes de
+   gravar, a ação conferirNomes do pcp-sync (só leitura, só admin e pcp)
+   devolve a resolução DO SERVIDOR (o vinculosRH gravado e o RH de agora,
+   pela régua de _shared/pcp-integridade.mjs), o estado de cada O.S. pedida
+   ('viva', 'excluida', 'ausente') e os períodos fechados da Performance.
+   Sem resposta, nada é gravado. */
+async function conferirNoServidorCasa(S, nomes, ids) {
+  if (!S || typeof S.conferirNomes !== 'function') return { ok: false, motivo: 'esta tela está desatualizada e não confere os nomes no servidor. Recarregue a página' };
+  const porChave = new Map();
+  for (const n of nomes || []) { const s = String(n ?? '').trim(); if (s && !porChave.has(normCasa(s))) porChave.set(normCasa(s), s); }
+  const ns = [...porChave.values()], is = [...new Set((ids || []).map(x => String(x ?? '')).filter(Boolean))];
+  const porNome = new Map(), os = new Map();
+  let fechados = [];
+  const LOTE = 300, voltas = Math.max(1, Math.ceil(ns.length / LOTE), Math.ceil(is.length / LOTE));
+  try {
+    for (let v = 0; v < voltas; v++) {
+      const r = await S.conferirNomes(ns.slice(v * LOTE, (v + 1) * LOTE), is.slice(v * LOTE, (v + 1) * LOTE));
+      if (!r || r.offline) return { ok: false, motivo: 'sem internet para conferir no servidor' };
+      for (const x of Array.isArray(r.nomes) ? r.nomes : []) {
+        if (x && x.nome) porNome.set(normCasa(x.nome), { id: OPERACAO.ehIdPessoa(x.id) ? String(x.id).trim() : '', fixado: x.fixado === true });
+      }
+      for (const [id, e] of Object.entries(r.os || {})) os.set(id, String(e));
+      if (v === 0) fechados = (Array.isArray(r.fechados) ? r.fechados : []).filter(f => f && /^\d{4}-\d{2}-\d{2}$/.test(f.de) && /^\d{4}-\d{2}-\d{2}$/.test(f.ate));
+    }
+  } catch (e) {
+    return { ok: false, motivo: 'o servidor não respondeu à conferência: ' + String((e && e.message) || e).replace(/[.\s]*$/, '') };
+  }
+  return { ok: true, porNome, os, fechados, em: new Date().toISOString() };
+}
+/* O servidor lê o nome como o aparelho? O mesmo ID e, quando o aparelho
+   converte por um vínculo salvo, o vínculo aceito lá também. Nome sem
+   resposta do servidor não converte. */
+const servidorConcordaCasa = (srv, nome, id, como) => {
+  const s = srv && srv.porNome ? srv.porNome.get(normCasa(nome)) : null;
+  return !!s && !!id && s.id === id && (como !== 'vinculo' || s.fixado);
+};
+function acordoServidorCasa(plano, srv) {
+  const acordo = new Map(), difere = [];
+  for (const [k, id] of plano.aprovado) {
+    const nome = (plano.rotulos && plano.rotulos.get(k)) || k;
+    if (servidorConcordaCasa(srv, nome, id, plano.comos ? plano.comos.get(k) : '')) acordo.set(k, id);
+    else { const s = srv && srv.porNome ? srv.porNome.get(normCasa(nome)) : null; difere.push({ nome, local: id, servidor: s ? s.id : '' }); }
+  }
+  return { acordo, difere };
+}
+const PULA_SERVIDOR = nomes => `${nomes.map(n => `"${n}"`).join(', ')}: o servidor resolve diferente; atualize e confira. Nada mudou nesta O.S.`;
+/* O PERÍODO FECHADO NÃO MUDA (revisão da F12). O dia da O.S. na Performance
+   é o do lançamento da entrega, senão o da finalização (o mesmo do servidor,
+   perfFonte). Dentro de um período fechado, a O.S. fica como está. */
+function periodoFechadoCasa(o, fechados) {
+  const d = OPERACAO.dia((o && o.entregaLancada && o.entregaLancada.data) || (o && o.finalizadaEm) || '');
+  return d ? (fechados || []).find(f => d >= f.de && d <= f.ate) || null : null;
+}
+
+/* O CELULAR DO INSTALADOR NÃO PODE PERDER A O.S. (crítica da F12). Depois da
+   troca, o crachá só enxerga a O.S. se o nome dele na lista de instaladores
+   levar ao mesmo ID no servidor. O casamento exato de hoje pode mudar com um
+   xará novo no RH: o nome da lista que chega a um ID convertido vira vínculo
+   salvo ANTES das O.S. (a configuração vai primeiro na fila). Nome da lista
+   que só chega pelo começo do nome não é fixado sozinho: a tela avisa. */
+function listaParaFixarCasa(aprovado, dados) {
+  const alvos = new Set(aprovado.values());
+  const fixar = [], avisar = [];
+  for (const n of (STORE.getCFG().instaladores || []).map(String).filter(Boolean)) {
+    if (OPERACAO.pessoaFixada(n)) continue;
+    const c = OPERACAO.confirmarNome(n, dados);
+    if (c.id && alvos.has(c.id) && c.como !== 'id') fixar.push({ nome: n, id: c.id });
+    else if (!c.id && c.motivo === 'comeco' && alvos.has(c.sugerido)) avisar.push(n);
+  }
+  return { fixar, avisar };
+}
+
+/* O RESULTADO DE CADA GRAVAÇÃO vem pelos eventos do store (o mesmo caminho
+   do Conferir da F09): 'os-gravada' com a lista que foi, o conflito (409), a
+   recusa definitiva e a recusa que fica na fila. Um ouvinte por loja. */
+const _convEsperas = new Map();
+const _convLojas = typeof WeakSet === 'function' ? new WeakSet() : new Set();
+function ouvirConversaoCasa(S) {
+  if (!S || _convLojas.has(S)) return;
+  _convLojas.add(S);
+  const fim = (id, r) => { const w = _convEsperas.get(id); if (w) w.fim(r); };
+  if (typeof S.on === 'function') {
+    S.on('os-gravada', d => {
+      const w = d && _convEsperas.get(d.id);
+      if (!w || !d.enviado || !mesmaListaCasa(d.enviado.equipe, w.equipe)) return;
+      w.fim({ estado: 'gravada', os: d.os });
+    });
+    const recusa = (d, naFila) => {
+      const id = d && d.item && d.item.os && d.item.os.id;
+      // A recusa de um envio anterior da mesma O.S. (outra lista) não é a desta troca.
+      if (!id || !_convEsperas.has(id) || !mesmaListaCasa(d.item.os.equipe, _convEsperas.get(id).equipe)) return;
+      const motivo = String((d && d.motivo) || 'sem motivo informado').replace(/[.\s]*$/, '.');
+      fim(id, { estado: 'recusada', motivo: naFila ? `O servidor não aceitou: ${motivo} A troca ficou na fila deste aparelho.` : `O servidor recusou: ${motivo}` });
+    };
+    S.on('item-recusado', d => recusa(d, false));
+    S.on('item-pendente', d => recusa(d, true));
+  }
+  if (typeof S.onConflict === 'function') S.onConflict((local, remoto) => {
+    const id = (remoto && remoto.id) || (local && local.id);
+    const quem = remoto && remoto.atualizadoPor ? ` (${remoto.atualizadoPor})` : '';
+    /* Mesmo que o 409 seja de um envio anterior da mesma O.S., a troca fica
+       presa atrás dele (a fila marca a O.S.): o resultado é o mesmo. */
+    fim(id, { estado: 'recusada', motivo: `Outra gravação desta O.S. chegou antes ao servidor${quem}. A troca não foi aceita: ficou só neste aparelho, na fila, até alguém resolver o aviso de conflito ("Recarregar" descarta a troca; "Sobrescrever" envia).` });
+  });
+}
+const dormirCasa = ms => new Promise(r => setTimeout(r, ms));
+const itemNaFilaCasa = (S, id) => (typeof S.getQueue === 'function' ? (S.getQueue() || []) : []).find(it => it && it.action === 'upsert' && it.os && it.os.id === id) || null;
+/* Grava UMA O.S. e espera o servidor dizer o que houve com ela. Sem rede, ou
+   sem resposta no prazo, a troca fica na fila (o normal do aparelho) e o
+   relatório diz isso. O conflito (409) de uma O.S. não segura as outras: o
+   store marca só aquela e segue. */
+async function gravarUmaEsperandoCasa(S, os, o = {}) {
+  const prazo = Number.isFinite(o.prazoMs) ? o.prazoMs : 20000;
+  const passo = Number.isFinite(o.passoMs) ? o.passoMs : 500;
+  let fim;
+  const resultado = new Promise(r => { fim = r; });
+  const w = { equipe: listaCruaCasa(os.equipe), feito: false, fim: r => { if (w.feito) return; w.feito = true; if (_convEsperas.get(os.id) === w) _convEsperas.delete(os.id); fim(r); } };
+  _convEsperas.set(os.id, w);
+  try { S.saveOS(os); }
+  catch (e) { w.fim({ estado: 'recusada', motivo: 'Não deu para guardar neste aparelho: ' + String((e && e.message) || e) }); return resultado; }
+  if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) {
+    w.fim({ estado: 'na-fila', semResposta: true, motivo: 'Sem internet: a troca ficou na fila deste aparelho e vai na próxima sincronização.' });
+    return resultado;
+  }
+  const t0 = Date.now();
+  while (!w.feito) {
+    try { if (typeof S.trySync === 'function') await S.trySync(); } catch (e) { /* a fila guarda; o resultado vem pelos eventos ou pelo prazo */ }
+    if (w.feito) break;
+    const it = itemNaFilaCasa(S, os.id);
+    // Loja sem eventos (a prévia local) e fila sem a O.S.: foi.
+    if (!it && typeof S.on !== 'function') { w.fim({ estado: 'gravada' }); break; }
+    if (it && it.recusa && it.recusa.motivo && mesmaListaCasa(it.os.equipe, w.equipe)) {
+      w.fim({ estado: 'recusada', motivo: `O servidor não aceitou: ${String(it.recusa.motivo).replace(/[.\s]*$/, '.')} A troca ficou na fila deste aparelho.` });
+      break;
+    }
+    /* Saiu da fila sem o aviso desta lista (o conflito resolvido com
+       "Recarregar", ou outra gravação da O.S. no meio): vale o que o aparelho
+       tem agora, nunca um "gravada" por ausência. */
+    if (!it && Date.now() - t0 >= passo) {
+      const agora = typeof S.getOS === 'function' ? S.getOS(os.id) : null;
+      w.fim(agora && mesmaListaCasa(agora.equipe, w.equipe) ? { estado: 'gravada' }
+        : { estado: 'recusada', motivo: 'A O.S. voltou a outra versão durante a troca (o aviso de conflito foi resolvido com "Recarregar", ou outra gravação chegou antes): a troca não valeu nela.' });
+      break;
+    }
+    if (Date.now() - t0 >= prazo) { w.fim({ estado: 'na-fila', semResposta: true, motivo: 'O servidor ainda não confirmou esta O.S.: a troca ficou na fila deste aparelho e vai na próxima sincronização. Se houver um aviso de conflito desta O.S. aberto, resolva-o primeiro.' }); break; }
+    await dormirCasa(passo);
+  }
+  return resultado;
+}
+
+/* O LOTE: uma O.S. por vez, relida do STORE antes de gravar. `decidir(atual)`
+   devolve {equipe, trocas, nota} ou {pular: motivo}. Devolve um item por
+   tarefa: {id, numero, estado ('convertida' | 'na-fila' | 'pulada' |
+   'recusada'), motivo, nota, antes, depois, trocas}.
+   A PORTA CONFERE (revisão da F12): o papel (quem chama pelo console não
+   passa pelo botão), a O.S. excluída no servidor (o upsert a ressuscitaria)
+   e o período fechado da Performance, com a régua do servidor
+   (`o.servidor`, de conferirNoServidorCasa; sem ela, pergunta aqui).
+   O ITEM VAI AO RELATÓRIO COMO 'enviando', com a lista de antes e a de
+   depois, ANTES do saveOS: a aba que fecha no meio deixa o Desfazer
+   alcançar a O.S. que a fila ainda vai mandar. */
+async function gravarEquipesUmaAUmaCasa(tarefas, decidir, o = {}) {
+  const S = o.store || STORE;
+  const numeroDe = t => String((t && t.numero) || '');
+  if (!podeConverterNomes()) return tarefas.map(t => ({ id: t.id, numero: numeroDe(t), estado: 'recusada', motivo: SO_GESTAO_CONV }));
+  let srv = o.servidor && o.servidor.ok ? o.servidor : null;
+  if (!srv) {
+    srv = await conferirNoServidorCasa(S, [], tarefas.map(t => t.id));
+    if (!srv.ok) return tarefas.map(t => ({ id: t.id, numero: numeroDe(t), estado: 'pulada', motivo: `Nada foi enviado: ${srv.motivo}.` }));
+  }
+  ouvirConversaoCasa(S);
+  const itens = [];
+  const avisarItem = () => { if (typeof o.aoItem === 'function') { try { o.aoItem(itens); } catch (e) { /* o relatório parcial é conveniência */ } } };
+  /* SERVIDOR MUDO NÃO VIRA FILA DE CENTO E TANTAS: duas O.S. seguidas sem
+     resposta (ou sem internet) param o lote; as outras ficam como estão, e
+     o relatório diz. Gravar de novo continua de onde parou (a troca é
+     idempotente). */
+  let mudas = 0;
+  for (let i = 0; i < tarefas.length; i++) {
+    const t = tarefas[i];
+    if (mudas >= 2) {
+      itens.push({ id: t.id, numero: numeroDe(t), estado: 'pulada', motivo: 'Não enviada: o servidor parou de responder no meio. Nada mudou nesta O.S.; grave de novo quando a conexão voltar.' });
+      avisarItem();
+      continue;
+    }
+    if (typeof o.aoProgresso === 'function') { try { o.aoProgresso(i, tarefas.length); } catch (e) { /* a tela pode ter saído */ } }
+    const pos = itens.length;
+    try {
+      // RELÊ do STORE agora, não a cópia de quando a tela pintou.
+      const atual = typeof S.getOS === 'function' ? S.getOS(t.id) : null;
+      const numero = String((atual && atual.numero) || t.numero || '');
+      if (!atual) { itens.push({ id: t.id, numero, estado: 'recusada', motivo: 'A O.S. não está neste aparelho agora (é antiga, ou saiu da lista). Busque as antigas no servidor e tente de novo.' }); continue; }
+      /* EXCLUÍDA NO SERVIDOR: o upsert da gestão ressuscita a O.S. (por
+         desenho), e a antiga que a tela buscou fica só na memória desta aba,
+         sem lápide. A que não está na lista do aparelho é conferida agora,
+         uma a uma; a da lista, pela conferência do começo do lote. */
+      const naLista = (typeof S.getAllOS === 'function' ? S.getAllOS() || [] : []).some(x => x && x.id === t.id);
+      let noServidor = srv.os.get(t.id) || '';
+      if (!naLista) {
+        const agora = await conferirNoServidorCasa(S, [], [t.id]);
+        if (!agora.ok) { itens.push({ id: t.id, numero, estado: 'pulada', motivo: `Não deu para conferir no servidor se esta O.S. ainda existe (${agora.motivo}). Nada mudou nela.` }); continue; }
+        noServidor = agora.os.get(t.id) || 'ausente';
+      }
+      if (noServidor === 'excluida') { itens.push({ id: t.id, numero, estado: 'pulada', motivo: 'Excluída no servidor: nada foi gravado, para a troca não trazê-la de volta.' }); continue; }
+      if (!naLista && noServidor !== 'viva') { itens.push({ id: t.id, numero, estado: 'pulada', motivo: 'A O.S. não está no servidor: nada foi gravado.' }); continue; }
+      const fech = periodoFechadoCasa(atual, srv.fechados);
+      if (fech) { itens.push({ id: t.id, numero, estado: 'pulada', motivo: `Período já fechado na Performance (${dataBRConv(fech.de)} a ${dataBRConv(fech.ate)}): o fechamento selado não muda, e a O.S. fica como está.` }); continue; }
+      const d = decidir(atual, t) || {};
+      if (d.pular) { itens.push({ id: t.id, numero, estado: 'pulada', motivo: d.pular }); continue; }
+      const antes = listaCruaCasa(atual.equipe), depois = listaCruaCasa(d.equipe);
+      const extra = { ...(d.nota ? { nota: d.nota } : {}), antes, depois, ...(d.trocas ? { trocas: d.trocas } : {}) };
+      const novo = JSON.parse(JSON.stringify(atual));
+      novo.equipe = depois;
+      novo.atualizadoEm = new Date().toISOString();
+      novo.atualizadoPor = String(o.usuario || '');
+      itens.push({ id: t.id, numero, estado: 'enviando', ...extra });
+      avisarItem();
+      const r = await gravarUmaEsperandoCasa(S, novo, o);
+      mudas = r.semResposta ? mudas + 1 : 0;
+      const estado = r.estado === 'gravada' ? 'convertida' : r.estado;
+      itens[pos] = { id: t.id, numero, estado, ...(r.motivo ? { motivo: r.motivo } : {}), ...extra };
+    } catch (e) {
+      itens[pos] = { id: t.id, numero: numeroDe(t), estado: 'recusada', motivo: 'Erro neste aparelho: ' + String((e && e.message) || e) };
+      itens.length = pos + 1;
+    } finally {
+      avisarItem();
+    }
+  }
+  if (typeof o.aoProgresso === 'function') { try { o.aoProgresso(tarefas.length, tarefas.length); } catch (e) { /* idem */ } }
+  return itens;
+}
+
+/* A MESMA CONFERÊNCIA DE DATAS DO SERVIDOR (validarMomentos em
+   _shared/pcp-integridade.mjs, que confere a O.S. inteira a cada gravação da
+   gestão e responde 400). A O.S. antiga com saída ou retorno inválido
+   recusaria a troca e o Desfazer, e o item ficaria preso na fila da gestão:
+   ela é pulada antes, com o motivo. tests/converter-equipe.test.cjs compara
+   as duas. */
+function momentosInvalidosCasa(os) {
+  for (const k of ['saidaEm', 'retornoEm']) if (os[k] && (!/^\d{4}-\d{2}-\d{2}T/.test(os[k]) || !Number.isFinite(Date.parse(os[k])))) return 'Data de saída ou retorno inválida.';
+  if (os.saidaEm && os.retornoEm && Date.parse(os.retornoEm) < Date.parse(os.saidaEm)) return 'O retorno não pode ser anterior à saída.';
+  return '';
+}
+const PULA_MOMENTO = m => `O servidor recusaria esta O.S. (${m.replace(/[.\s]*$/, '')}) e a troca ficaria presa na fila. Corrija a saída ou o retorno na ficha e grave de novo.`;
+
+/* CONVERTER: a decisão é refeita em cada O.S. relida (outro aparelho pode ter
+   mudado a equipe ou gravado a divisão), e só vale a troca que a pessoa
+   aprovou: se o vínculo de um nome mudou no meio, a O.S. é pulada. E só o
+   nome que o SERVIDOR lê como o aparelho vira ID (revisão da F12): o outro
+   fica como nome, com o motivo. `o.servidor` é a conferência feita antes do
+   confirm; sem ela (chamada direta), a conferência é feita aqui. */
+async function converterNomesNasOSCasa(plano, o = {}) {
+  const S = o.store || STORE;
+  const tarefas = plano && Array.isArray(plano.tarefas) ? plano.tarefas : [];
+  if (!podeConverterNomes()) return tarefas.map(t => ({ id: t.id, numero: String(t.numero || ''), estado: 'recusada', motivo: SO_GESTAO_CONV }));
+  let srv = o.servidor && o.servidor.ok ? o.servidor : null;
+  if (!srv) {
+    srv = await conferirNoServidorCasa(S, [...plano.aprovado.keys()].map(k => (plano.rotulos && plano.rotulos.get(k)) || k), tarefas.map(t => t.id));
+    if (!srv.ok) return tarefas.map(t => ({ id: t.id, numero: String(t.numero || ''), estado: 'pulada', motivo: `Nada foi enviado: ${srv.motivo}.` }));
+  }
+  const { acordo, difere } = acordoServidorCasa(plano, srv);
+  const todos = [...plano.aprovado.keys()], nomes = [...acordo.keys()];
+  /* O nome que o servidor lê diferente fica como nome e o relatório diz, na
+     O.S.: os que esta conferência achou e os que o preparo da tela já tirou
+     do plano (`o.difere`). */
+  const difereSet = new Set([...difere, ...(Array.isArray(o.difere) ? o.difere : [])].map(d => normCasa(d.nome)));
+  const notaDe = equipe => {
+    const ficam = [...new Set(listaCruaCasa(equipe).map(x => String(x ?? '').trim()).filter(x => x && !OPERACAO.ehIdPessoa(x) && difereSet.has(normCasa(x))))];
+    return ficam.length ? `Ficou como nome: ${ficam.map(n => `"${n}"`).join(', ')} (o servidor resolve diferente; atualize e confira).` : '';
+  };
+  const decidir = atual => {
+    if (temDivisaoCasa(atual)) return { pular: 'Tem divisão gravada (alocação): a equipe dela sai da divisão. Confira no Conferir da Performance.' };
+    const m = momentosInvalidosCasa(atual);
+    if (m) return { pular: PULA_MOMENTO(m) };
+    const c = OPERACAO.converterEquipe(atual.equipe, o.dados, { nomes: todos });
+    if (!c.mudou) return { pular: 'Nada a trocar: a O.S. já não tem nome confirmado (convertida antes ou mudada em outro aparelho).' };
+    const mudou = c.trocas.find(t => plano.aprovado.get(normCasa(t.de)) !== t.para);
+    if (mudou) return { pular: `O vínculo de "${mudou.de}" mudou desde a conferência. Confira o nome de novo.` };
+    const fora = [...new Set(c.trocas.filter(t => !acordo.has(normCasa(t.de))).map(t => t.de))];
+    if (!fora.length) return { equipe: c.equipe, trocas: c.trocas, nota: notaDe(c.equipe) };
+    const s = OPERACAO.converterEquipe(atual.equipe, o.dados, { nomes });
+    if (!s.mudou) return { pular: PULA_SERVIDOR(fora) };
+    return { equipe: s.equipe, trocas: s.trocas, nota: notaDe(s.equipe) };
+  };
+  return gravarEquipesUmaAUmaCasa(tarefas, decidir, { ...o, store: S, servidor: srv });
+}
+
+/* DESFAZER: devolve EXATAMENTE a lista anterior de cada O.S. convertida,
+   pelo mesmo caminho. Só onde a equipe ainda é a que a conversão gravou:
+   se outra gravação mexeu depois, ou a O.S. ganhou divisão, não desfaz
+   calado por cima e diz por quê. A 'enviando' (a aba fechou no meio do
+   envio) também é desfeita, se a troca chegou a valer. */
+const desfazivelConv = it => !!(it && Array.isArray(it.depois) && ['convertida', 'na-fila', 'recusada', 'enviando'].includes(it.estado)
+  && !(it.desfazer && ['convertida', 'na-fila'].includes(it.desfazer.estado)));
+/* A MESMA O.S. PODE TER SIDO CONVERTIDA EM DOIS LOTES (um nome, depois
+   outro): desfaz do mais novo para o mais velho, e cada passo confere a lista
+   que o passo anterior devolveu. O relatório guarda só os itens tocados,
+   mesclados com o que outra aba gravou. */
+async function desfazerConversaoNomesCasa(rel, o = {}) {
+  if (!podeConverterNomes()) return rel;
+  const alvo = (rel && Array.isArray(rel.itens) ? rel.itens : []).filter(desfazivelConv).reverse();
+  if (!alvo.length) return rel;
+  const decidir = (atual, t) => {
+    const it = t.it;
+    if (!mesmaListaCasa(atual.equipe, it.depois)) return { pular: 'A equipe desta O.S. mudou depois da conversão (ou a troca não chegou a valer): nada foi desfeito nela.' };
+    if (temDivisaoCasa(atual)) return { pular: 'A O.S. ganhou divisão depois da conversão: desfazer mexeria na equipe da divisão.' };
+    const m = momentosInvalidosCasa(atual);
+    if (m) return { pular: PULA_MOMENTO(m) };
+    return { equipe: it.antes };
+  };
+  const cab = { tipo: rel.tipo || 'conversao', ...(rel.em ? { em: rel.em } : {}), ...(rel.por ? { por: rel.por } : {}) };
+  const marcar = res => {
+    const em = new Date().toISOString();
+    res.forEach((r, i) => { if (alvo[i]) alvo[i].desfazer = { estado: r.estado, ...(r.motivo ? { motivo: r.motivo } : {}), em }; });
+  };
+  const res = await gravarEquipesUmaAUmaCasa(alvo.map(it => ({ id: it.id, numero: it.numero, it })), decidir, { ...o,
+    aoItem: parcial => {
+      marcar(parcial);
+      gravarRelConvNomes({ ...cab, atualizadoEm: new Date().toISOString(), itens: alvo.slice(0, parcial.length) });
+      if (typeof o.aoItem === 'function') o.aoItem(parcial);
+    } });
+  marcar(res);
+  return gravarRelConvNomes({ ...cab, atualizadoEm: new Date().toISOString(), itens: alvo }) || rel;
+}
+
+/* O RELATÓRIO É DIVIDIDO PELAS ABAS DO NAVEGADOR (revisão da F12). Duas abas
+   do mesmo navegador dividem o localStorage: cada uma gravava a sua cópia
+   inteira, e a última apagava o lote da outra (com o Desfazer junto). Agora
+   cada gravação relê o que está guardado e mescla por lote e por O.S.; a
+   aba manda só os itens que tocou. Com o localStorage cheio (os sistemas da
+   casa dividem 5 MB), o relatório fica só na memória desta aba, e a tela
+   avisa que o Desfazer some ao fechar a aba. */
+let _convNomesRelFalhou = false;
+const chaveItemConv = it => String((it && it.lote) || '') + '|' + String((it && it.id) || '');
+function lerRelConvNomesGuardado() {
+  try { const v = JSON.parse(localStorage.getItem(CHAVE_REL_CONV_NOMES) || 'null'); return v && Array.isArray(v.itens) ? v : null; }
+  catch (e) { return undefined; }
+}
+function juntarRelConv(a, b) {
+  if (!a || !Array.isArray(a.itens)) return b || null;
+  if (!b || !Array.isArray(b.itens)) return a;
+  const novos = new Map(b.itens.map(it => [chaveItemConv(it), it]));
+  const itens = a.itens.map(it => { const k = chaveItemConv(it); if (!novos.has(k)) return it; const n = novos.get(k); novos.delete(k); return n; });
+  for (const it of novos.values()) itens.push(it);
+  const out = { ...a, ...b, em: [a.em, b.em].filter(Boolean).sort()[0] || '', itens };
+  delete out.emCurso;
+  return out;
+}
+function lerRelConvNomes() {
+  if (_convNomesRelFalhou) return _convNomesRelMem;
+  const v = lerRelConvNomesGuardado();
+  return v === undefined ? _convNomesRelMem : v;
+}
+function gravarRelConvNomes(rel) {
+  if (!rel) {
+    _convNomesRelMem = null; _convNomesRelFalhou = false;
+    try { localStorage.removeItem(CHAVE_REL_CONV_NOMES); } catch (e) { /* nada guardado */ }
+    return null;
+  }
+  const guardado = lerRelConvNomesGuardado();
+  const base = juntarRelConv(guardado || null, _convNomesRelFalhou || guardado === undefined ? _convNomesRelMem : null);
+  const junto = juntarRelConv(base, rel);
+  _convNomesRelMem = junto;
+  try { localStorage.setItem(CHAVE_REL_CONV_NOMES, JSON.stringify(junto)); _convNomesRelFalhou = false; }
+  catch (e) {
+    _convNomesRelFalhou = true;
+    // Não coube: tira o velho, para ele não voltar no lugar deste ao recarregar.
+    try { localStorage.removeItem(CHAVE_REL_CONV_NOMES); } catch (e2) { /* só a memória */ }
+  }
+  return junto;
+}
+const AVISO_REL_SO_NA_ABA = 'O relatório não coube no armazenamento deste navegador: ele fica só nesta aba, e o Desfazer some ao fechar esta aba.';
+
+/* AS ANTIGAS DO SERVIDOR: o mesmo caminho da F09 (STORE.buscarHistorico,
+   finalizadas, direto para a memória desta aba, nunca para o disco). A busca
+   devolve até 750 O.S. por vez; o trecho que estoura é partido ao meio até
+   caber, e o que ainda assim cortar é dito na tela. */
+const diasEntreCasa = (a, b) => Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 864e5);
+async function buscarTrechoCasa(de, ate, achadas, truncados, nivel) {
+  const r = await STORE.buscarHistorico({ de, ate });
+  if (r && r.offline) return 'offline';
+  for (const o of (r && r.itens) || []) if (o && o.id) achadas.add(o.id);
+  if (!(r && r.truncou)) return '';
+  const span = diasEntreCasa(de, ate);
+  if (span < 1 || nivel >= 12) { truncados.push({ de, ate }); return ''; }
+  const meio = OPERACAO.somarDias(de, Math.floor(span / 2));
+  const a = await buscarTrechoCasa(de, meio, achadas, truncados, nivel + 1);
+  if (a) return a;
+  return buscarTrechoCasa(OPERACAO.somarDias(meio, 1), ate, achadas, truncados, nivel + 1);
+}
+async function buscarAntigasConferenciaCasa() {
+  if ((_convNomesHist && _convNomesHist.estado === 'buscando') || !podeConverterNomes()) return;
+  const repintar = () => { if (typeof renderPerformanceCasa === 'function' && STATE.activeTab === 'performance') renderPerformanceCasa(); };
+  if (typeof STORE.buscarHistorico !== 'function') { _convNomesHist = { estado: 'erro', erro: 'Esta tela está desatualizada e não busca O.S. antigas. Recarregue a página.' }; repintar(); return; }
+  const ate = limiteJanelaCasa();
+  _convNomesHist = { estado: 'buscando' };
+  repintar();
+  try {
+    let faixa = null;
+    try { faixa = typeof STORE.faixaHistorico === 'function' ? await STORE.faixaHistorico() : null; } catch (e) { faixa = null; }
+    const de = faixa && /^\d{4}-\d{2}-\d{2}$/.test(faixa.de || '') && faixa.de <= ate ? faixa.de : '2020-01-01';
+    const achadas = new Set(), truncados = [];
+    const r = await buscarTrechoCasa(de, ate, achadas, truncados, 0);
+    if (r === 'offline') _convNomesHist = { estado: 'erro', erro: 'Sem internet agora: conecte-se e busque de novo.' };
+    else {
+      const locais = new Set(STORE.getAllOS().map(o => o && o.id));
+      _convNomesHist = { estado: 'pronto', novas: [...achadas].filter(id => !locais.has(id)).length, de, ate, truncados, em: new Date().toISOString() };
+    }
+  } catch (e) {
+    _convNomesHist = { estado: 'erro', erro: 'O servidor não respondeu à busca: ' + String((e && e.message) || e) };
+  }
+  repintar();
+}
+
+// O status do lote em curso (a tela pode repintar no meio: ele se refaz daqui).
+function statusLoteConvTexto() {
+  const l = _convNomesLote;
+  if (!l) return '';
+  if (l.tipo === 'conferindo') return 'Conferindo os nomes com o servidor (configuração, RH e O.S.)…';
+  const n = Math.min(l.feitas + 1, l.total);
+  return l.tipo === 'desfazer' ? `Desfazendo: O.S. ${n} de ${l.total}. Não feche esta aba.` : `Gravando o ID: O.S. ${n} de ${l.total}. Não feche esta aba.`;
+}
+function pintarStatusLoteConv() {
+  const el = typeof document !== 'undefined' && document.getElementById ? document.getElementById('lig-conv-status') : null;
+  if (el) el.textContent = statusLoteConvTexto();
+}
+
+/* A TELA: antes da gravação, o que vai ser trocado (e a lista que fica como
+   nome); depois, o relatório por O.S. com o Desfazer. */
+function conversaoNomesHTML(linhas, uso, plano) {
+  const pode = podeConverterNomes();
+  const limite = limiteJanelaCasa();
+  const h = _convNomesHist;
+  const antigas = osDaConferencia().slice(STORE.getAllOS().length);
+  const antigasComNome = antigas.filter(o => (Array.isArray(o.equipe) ? o.equipe : []).some(x => { const t = String(x ?? '').trim(); return t && !OPERACAO.ehIdPessoa(t); })).length;
+  const janela = !h || h.estado === 'erro'
+    ? `<p class="metricas-nota">Esta conta lê as O.S. deste aparelho: as abertas e as finalizadas desde ${esc(dataBRConv(limite))} (últimos ${janelaLocalCasa()} dias)${antigas.length ? `, mais ${antigas.length} O.S. antiga${antigas.length === 1 ? '' : 's'} que outra tela trouxe do servidor` : ''}. <strong>As ${antigas.length ? 'outras ' : ''}finalizadas antes disso ficam no servidor e não entram na conta nem na troca</strong> até ${pode ? 'você buscá-las' : 'a gestão buscá-las'}.${h && h.erro ? ` ${esc(h.erro)}` : ''} ${pode && typeof STORE.buscarHistorico === 'function' ? '<button class="btn-ghost btn-xs" data-lig-antigas type="button">Buscar as antigas no servidor</button>' : ''}</p>`
+    : h.estado === 'buscando'
+    ? '<p class="metricas-nota" role="status">Buscando no servidor as O.S. finalizadas antes da janela deste aparelho…</p>'
+    : `<p class="metricas-nota">Vieram do servidor ${h.novas} O.S. finalizadas até ${esc(dataBRConv(h.ate))} que não estavam neste aparelho${antigasComNome ? `, ${antigasComNome} com nome na equipe` : ''}: elas entram na conta e na troca abaixo. Ao recarregar a página, as que não foram trocadas saem da conta: busque de novo.${h.truncados.length ? ` <strong>Ficaram de fora O.S. de ${esc(h.truncados.map(t => dataBRConv(t.de) + ' a ' + dataBRConv(t.ate)).join(', '))}</strong>: o servidor manda até 750 por busca. Busque de novo.` : ''} ${pode ? '<button class="btn-ghost btn-xs" data-lig-antigas type="button">Buscar de novo</button>' : ''}</p>`;
+  /* Pendências: o que fica como nome, com o motivo. Entra também o nome que
+     o aparelho confirma e o SERVIDOR lê diferente (a última conferência desta
+     aba), enquanto o aparelho continuar lendo igual ao que conferiu. */
+  const difere = new Map(((_convNomesDifere && _convNomesDifere.itens) || []).map(d => [normCasa(d.nome), d]));
+  const naoConfere = (l, c) => { const d = difere.get(normCasa(l.apelido)); return !!(d && c.id && c.id === d.local); };
+  const pend = linhas.map(l => ({ l, c: l.conf, u: uso.get(normCasa(l.apelido)) || { semDivisao: 0, comDivisao: 0 } }))
+    .map(x => (naoConfere(x.l, x.c) ? { ...x, c: { id: '', motivo: 'servidor-difere' } } : x))
+    .filter(x => !x.c.id && x.c.motivo !== 'comeco' && (x.u.semDivisao + x.u.comDivisao) > 0);
+  const pendHTML = pend.length ? `<div class="lig-pend"><h4>Pendências: ficam como nome</h4><ul>${pend.map(x => `<li><strong>${esc(x.l.apelido)}</strong> · ${x.u.semDivisao + x.u.comDivisao} O.S. · ${esc(MOTIVO_NOME[x.c.motivo] || x.c.motivo || 'sem vínculo')}</li>`).join('')}</ul><p class="text-muted" style="font-size:.78rem">Nome que é pessoa do RH vira ID depois de ligado na tabela. "Terceiro" e nome decidido sem ficha não viram pessoa.</p></div>` : '';
+  let acao = '';
+  if (_convNomesLote) acao = `<p class="lig-conv-status" id="lig-conv-status" role="status" aria-live="polite">${esc(statusLoteConvTexto())}</p>`;
+  else if (pode && plano.converte && !rhProntoParaConverter()) acao = `<p class="metricas-nota">⚠️ ${esc(SEM_RH_CONV)}</p>`;
+  else if (pode && plano.converte) {
+    const fix = listaParaFixarCasa(plano.aprovado, OPERACAO.dadosPessoas());
+    acao = `<p class="lig-conv-resumo"><strong>${plano.aprovado.size} ${plano.aprovado.size === 1 ? 'nome confirmado vira' : 'nomes confirmados viram'} ID em ${plano.converte} O.S.</strong>${plano.comDivisao ? ` ${plano.comDivisao} O.S. com divisão ${plano.comDivisao === 1 ? 'fica como está' : 'ficam como estão'} (a divisão já grava o ID).` : ''} Cada O.S. vai sozinha ao servidor, com o seu nome no histórico de alterações, e dá para desfazer.</p>
+      ${fix.avisar.length ? `<p class="metricas-nota">⚠️ ${esc(fix.avisar.join(', '))} ${fix.avisar.length === 1 ? 'está' : 'estão'} na lista de instaladores ligado${fix.avisar.length === 1 ? '' : 's'} só pelo começo do nome. Confirme na tabela antes: senão o celular pode deixar de ver as O.S. convertidas se entrar um xará no RH.</p>` : ''}
+      <button class="btn-primary btn-sm" data-lig-converter type="button">${rotuloGravarId(plano.converte)}</button>`;
+  } else if (plano.converte === 0 && linhas.some(l => l.n > 0)) acao = `<p class="metricas-nota">Nenhuma O.S. com nome confirmado para trocar${plano.comDivisao ? ` (${plano.comDivisao} com divisão ${plano.comDivisao === 1 ? 'fica como está' : 'ficam como estão'})` : ''}. Ligue ou confirme os nomes na tabela.</p>`;
+  const rel = lerRelConvNomes();
+  return `<div class="lig-conv">${janela}${acao}${relConvNomesHTML(rel, pode)}${pendHTML}</div>`;
+}
+
+function relConvNomesHTML(rel, pode) {
+  if (!rel || !Array.isArray(rel.itens) || !rel.itens.length) return '';
+  const conta = e => rel.itens.filter(it => it.estado === e).length;
+  const desf = rel.itens.filter(it => it.desfazer);
+  const desfOk = desf.filter(it => ['convertida', 'na-fila'].includes(it.desfazer.estado)).length;
+  const aDesfazer = rel.itens.filter(desfazivelConv).length;
+  // 'enviando' fora do lote desta aba: a aba fechou no meio do envio (ou outra aba está gravando agora).
+  const interrompidas = conta('enviando');
+  const rotulo = { convertida: 'Convertida', 'na-fila': 'Na fila', pulada: 'Pulada', recusada: 'Recusada', enviando: _convNomesLote ? 'Enviando' : 'Interrompida' };
+  const troca = it => (it.trocas || []).map(t => `${esc(t.de)} → ${esc(nomeCompletoIdCasa(t.para))} <small>ID ${esc(t.para)}</small>`).join('<br>');
+  const desfTxt = it => !it.desfazer ? '' : ['convertida', 'na-fila'].includes(it.desfazer.estado)
+    ? `<small class="bloco">Desfeita${it.desfazer.estado === 'na-fila' ? ' (na fila)' : ''}: voltou a ${esc(listaCruaCasa(it.antes).join(', ') || 'lista vazia')}.</small>`
+    : it.desfazer.estado === 'enviando'
+    ? '<small class="bloco">O desfazer foi interrompido no envio desta O.S.: ele pode ter chegado ao servidor pela fila. Desfazer de novo confere a lista antes de devolver.</small>'
+    : `<small class="bloco">Não desfeita: ${esc(it.desfazer.motivo || '')}</small>`;
+  const interrompidaTxt = it => it.estado === 'enviando' && !_convNomesLote ? '<small class="bloco">A aba fechou durante o envio: a troca pode ter chegado ao servidor pela fila deste aparelho. O Desfazer confere a lista antes de devolver.</small>' : '';
+  const quando = rel.atualizadoEm || rel.em ? new Date(rel.atualizadoEm || rel.em).toLocaleString('pt-BR') : '';
+  return `<div class="lig-rel" role="region" aria-label="Relatório da troca do nome pelo ID">
+    <h4>Troca do nome pelo ID${quando ? ' · última em ' + esc(quando) : ''}${rel.por ? ' · ' + esc(rel.por) : ''}</h4>${_convNomesRelFalhou ? `<p class="metricas-nota" role="alert">⚠️ ${esc(AVISO_REL_SO_NA_ABA)}</p>` : ''}${interrompidas && !_convNomesLote ? '<p class="metricas-nota">Uma troca foi interrompida no meio (a aba fechou, ou outra aba está gravando agora): o relatório vai até onde ela chegou.</p>' : ''}
+    <p class="lig-rel-conta">${conta('convertida')} convertida${conta('convertida') === 1 ? '' : 's'} · ${conta('na-fila')} na fila · ${conta('pulada')} pulada${conta('pulada') === 1 ? '' : 's'} · ${conta('recusada')} recusada${conta('recusada') === 1 ? '' : 's'}${interrompidas ? ` · ${interrompidas} ${_convNomesLote ? 'enviando' : `interrompida${interrompidas === 1 ? '' : 's'}`}` : ''}${desf.length ? ` · ${desfOk} desfeita${desfOk === 1 ? '' : 's'}` : ''}</p>
+    <details class="lig-rel-os" ${rel.itens.length <= 12 ? 'open' : ''}><summary>O.S. por O.S. (${rel.itens.length})</summary>
+      <div class="casa-tabela-wrap"><table class="casa-tabela lig-rel-tabela"><thead><tr><th>O.S.</th><th>Resultado</th><th>Troca</th></tr></thead><tbody>
+      ${rel.itens.map(it => `<tr class="lig-rel-${esc(it.estado)}"><td class="num">${esc(it.numero || it.id)}</td><td><span class="badge ${it.estado === 'convertida' ? '' : 'sem-valor'}">${esc(rotulo[it.estado] || it.estado)}</span>${it.motivo ? `<small class="bloco">${esc(it.motivo)}</small>` : ''}${it.nota ? `<small class="bloco">${esc(it.nota)}</small>` : ''}${interrompidaTxt(it)}${desfTxt(it)}</td><td>${troca(it) || '<span class="text-muted">—</span>'}</td></tr>`).join('')}
+      </tbody></table></div></details>
+    <div class="lig-rel-acoes">${pode && aDesfazer && !_convNomesLote ? `<button class="btn-ghost btn-sm" data-lig-desfazer type="button">Desfazer: devolver a lista anterior de ${aDesfazer} O.S.</button>` : ''}${!_convNomesLote ? '<button class="btn-ghost btn-sm" data-lig-rel-fechar type="button">Dispensar relatório</button>' : ''}</div>
+  </div>`;
+}
+
+/* A CONFIGURAÇÃO (os vínculos fixados da lista) tem de chegar ao servidor
+   antes das O.S.: sem isso o celular pode perder a O.S. convertida. */
+/* A recusa (403, 400, 422) também tira a configuração da fila: sair da fila
+   não quer dizer aceita. O aviso 'item-recusado' do setCfg é que diz. */
+let _cfgRecusaCasa = null;
+const _cfgLojasCasa = typeof WeakSet === 'function' ? new WeakSet() : new Set();
+function ouvirCfgCasa(S) {
+  if (!S || _cfgLojasCasa.has(S) || typeof S.on !== 'function') return;
+  _cfgLojasCasa.add(S);
+  S.on('item-recusado', d => { if (d && d.item && d.item.action === 'setCfg') _cfgRecusaCasa = { em: Date.now(), motivo: String((d && d.motivo) || '') }; });
+}
+async function esperarCfgNoServidorCasa(desde, prazoMs = 12000) {
+  const t0 = Number.isFinite(desde) ? desde : Date.now();
+  const naFila = () => (typeof STORE.getQueue === 'function' ? (STORE.getQueue() || []) : []).some(x => x && x.action === 'setCfg');
+  const recusada = () => _cfgRecusaCasa && _cfgRecusaCasa.em >= t0;
+  // O conflito de configuração não se resolve sozinho: esperar o prazo só atrasava o aviso.
+  const conflito = () => typeof STORE.conflitoCFG === 'function' && !!STORE.conflitoCFG();
+  while (naFila() && !recusada()) {
+    try { if (typeof STORE.trySync === 'function') await STORE.trySync(); } catch (e) { /* a fila guarda */ }
+    if (!naFila() || recusada()) break;
+    if (conflito()) return { ok: false, motivo: 'em conflito de configuração com outro aparelho: resolva o aviso de conflito' };
+    if (Date.now() - t0 >= prazoMs) return { ok: false, motivo: 'sem resposta do servidor, ou em conflito de configuração' };
+    await dormirCasa(500);
+  }
+  if (recusada()) return { ok: false, motivo: 'o servidor recusou' + (_cfgRecusaCasa.motivo ? ': ' + _cfgRecusaCasa.motivo : '') };
+  return { ok: true };
+}
+const resumoRelConv = itens => {
+  const n = e => itens.filter(it => it.estado === e).length;
+  const partes = [[n('convertida'), 'convertida', 'convertidas'], [n('na-fila'), 'na fila', 'na fila'], [n('pulada'), 'pulada', 'puladas'], [n('recusada'), 'recusada', 'recusadas']]
+    .filter(([k]) => k > 0).map(([k, um, varios]) => `${k} ${k === 1 ? um : varios}`);
+  return (partes.join(', ') || 'nada a fazer') + '.';
+};
+const e2Casa = xs => xs.length > 1 ? xs.slice(0, -1).join(', ') + ' e ' + xs[xs.length - 1] : xs.join('');
+/* ANTES DO PLANO E DO CONFIRM (revisão da F12): a régua é a do servidor.
+   1. Configuração deste aparelho que o servidor ainda não aceitou (setCfg na
+      fila, pendente ou em conflito): não converte. O vínculo "salvo" aqui
+      pode não existir lá, e o nome viraria o ID que o servidor não lê.
+   2. Puxa a configuração e o elenco do RH (sem a cópia de 60 s do
+      servidor). Falhou um dos dois: não converte, e diz qual.
+   3. O plano sai do retrato novo; a conferência no servidor (conferirNomes)
+      tira do lote o nome que o servidor lê diferente, e ele vai para as
+      pendências com o motivo. */
+async function prepararConversaoCasa(nomes) {
+  const fila = typeof STORE.getQueue === 'function' ? (STORE.getQueue() || []) : [];
+  if (fila.some(x => x && x.action === 'setCfg') || (typeof STORE.conflitoCFG === 'function' && STORE.conflitoCFG()))
+    return { ok: false, motivo: 'Nenhuma O.S. foi trocada: a ligação ainda não foi aceita pelo servidor (há uma configuração deste aparelho na fila ou em conflito). Espere sincronizar, ou resolva o aviso de conflito, e tente de novo.' };
+  const rc = await STORE.pullCFG();
+  if (rc !== true && rc !== false) return { ok: false, motivo: 'Nenhuma O.S. foi trocada: a configuração do servidor não chegou a este aparelho (sem rede, ou sessão recusada). Tente de novo.' };
+  const re = typeof STORE.pullElenco === 'function' ? await STORE.pullElenco(true, { semCache: true }) : false;
+  if (re !== true) return { ok: false, motivo: 'Nenhuma O.S. foi trocada: a lista de pessoas do RH não chegou a este aparelho (sem rede, ou sessão recusada). Tente de novo.' };
+  esquecerVinculosCasa(); OPERACAO.esquecerPessoas();
+  if (!rhProntoParaConverter()) return { ok: false, motivo: SEM_RH_CONV };
+  const dados = OPERACAO.dadosPessoas();
+  const plano0 = planoConversaoNomes(nomes, null, dados);
+  if (!plano0.converte) return { ok: false, motivo: 'Nenhuma O.S. com nome confirmado para trocar.' };
+  const lista = (STORE.getCFG().instaladores || []).map(String).filter(Boolean);
+  const srv = await conferirNoServidorCasa(STORE, [...[...plano0.aprovado.keys()].map(k => plano0.rotulos.get(k) || k), ...lista], plano0.tarefas.map(t => t.id));
+  if (!srv.ok) return { ok: false, motivo: `Nenhuma O.S. foi trocada: ${srv.motivo}.` };
+  const { acordo, difere } = acordoServidorCasa(plano0, srv);
+  _convNomesDifere = difere.length ? { em: srv.em, itens: difere } : null;
+  const plano = acordo.size ? planoConversaoNomes([...acordo.keys()], null, dados) : null;
+  if (!plano || !plano.converte) return { ok: false, difere, motivo: `Nenhuma O.S. foi trocada: ${e2Casa(difere.map(d => `"${d.nome}"`))}: o servidor resolve diferente; atualize e confira.` };
+  /* O nome da lista de instaladores que já é vínculo salvo e chega a um ID
+     convertido: o servidor tem de ter a mesma ligação, senão o celular dele
+     perde as O.S. convertidas. */
+  const alvos = new Set(plano.aprovado.values());
+  const listaFalta = lista.filter(n => { const id = OPERACAO.idPessoa(n); return OPERACAO.pessoaFixada(n) && id && alvos.has(id) && !servidorConcordaCasa(srv, n, id, 'vinculo'); });
+  if (listaFalta.length) return { ok: false, motivo: `Nenhuma O.S. foi trocada: a ligação de ${e2Casa(listaFalta)} ainda não foi aceita pelo servidor. Atualize a página e confira.` };
+  return { ok: true, plano, srv, difere, dados, fix: listaParaFixarCasa(plano.aprovado, dados) };
+}
+async function iniciarConversaoNomesCasa(nomes) {
+  if (_convNomesLote) return;
+  if (!podeConverterNomes()) { toast('Só a gestão (admin e pcp) troca o nome pelo ID.', 'error'); return; }
+  if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) { toast('Sem internet: a troca precisa do servidor para dizer, O.S. por O.S., o que foi gravado. Conecte-se e tente de novo.', 'error'); return; }
+  if (!rhProntoParaConverter()) { toast(SEM_RH_CONV, 'error'); return; }
+  const repintar = () => { if (STATE.activeTab === 'performance' && typeof renderPerformanceCasa === 'function') renderPerformanceCasa(); };
+  _convNomesLote = { tipo: 'conferindo', feitas: 0, total: 0 };
+  repintar();
+  try {
+    let prep;
+    try { prep = await prepararConversaoCasa(nomes); }
+    catch (e) { prep = { ok: false, motivo: 'Nenhuma O.S. foi trocada: ' + String((e && e.message) || e) }; }
+    if (!prep.ok) { toast(prep.motivo, 'error'); return; }
+    const { plano, srv, difere, fix } = prep;
+    const linhas = [...plano.aprovado.entries()].map(([k, id]) => `${plano.rotulos.get(k) || k} → ${nomeCompletoIdCasa(id)} (ID ${id})`);
+    const texto = [`Gravar o ID em ${plano.converte} O.S.?`, '',
+      ...linhas.slice(0, 15), ...(linhas.length > 15 ? [`e mais ${linhas.length - 15} nomes`] : []), '',
+      ...(difere.length ? [`${e2Casa(difere.map(d => d.nome))} ${difere.length === 1 ? 'fica' : 'ficam'} como nome: o servidor resolve diferente; atualize e confira.`] : []),
+      ...(plano.comDivisao ? [`${plano.comDivisao} O.S. com divisão ficam como estão e aparecem no relatório.`] : []),
+      ...(fix.fixar.length ? [`Antes, ${fix.fixar.map(f => f.nome).join(', ')} da lista de instaladores ${fix.fixar.length === 1 ? 'vira vínculo salvo' : 'viram vínculos salvos'}, para o celular continuar vendo as O.S.`] : []),
+      ...(fix.avisar.length ? [`Atenção: ${fix.avisar.join(', ')} ${fix.avisar.length === 1 ? 'está' : 'estão'} na lista de instaladores ligado só pelo começo do nome.`] : []),
+      'Cada O.S. vai sozinha ao servidor, com o seu nome no histórico de alterações. Dá para desfazer depois.'].join('\n');
+    if (!confirm(texto)) return;
+    const usuario = (STATE.user && STATE.user.nome) || '';
+    /* O RELATÓRIO ACUMULA os lotes (nome por nome, ou todos, desta aba e das
+       outras): cada gravação manda só os itens deste lote, e gravarRelConvNomes
+       mescla com o que já está guardado. O Desfazer alcança todos até alguém
+       dispensar. */
+    const agora = new Date().toISOString();
+    // O lote é a chave da mescla (com a O.S.): dois lotes no mesmo milissegundo não podem se apagar.
+    const lote = agora + '~' + Math.random().toString(36).slice(2, 8);
+    const base = { tipo: 'conversao', em: agora, atualizadoEm: agora, por: usuario };
+    const doLote = xs => xs.map(it => ({ ...it, lote, por: usuario }));
+    _convNomesLote = { tipo: 'conversao', feitas: 0, total: plano.tarefas.length };
+    repintar();
+    if (fix.fixar.length) {
+      ouvirCfgCasa(STORE);
+      const desde = Date.now();
+      const lista = lerVinculosCasa().filter(v => !fix.fixar.some(f => normCasa(f.nome) === normCasa(v.apelido)));
+      for (const f of fix.fixar) { const p = pessoaRHPorId6(f.id); lista.push({ id: f.id, chave: (p && p.chave) || '', nome: (p && p.nome) || '', apelido: f.nome }); }
+      gravarVinculosCasa(lista);
+      const cfgOk = await esperarCfgNoServidorCasa(desde);
+      if (!cfgOk || !cfgOk.ok) {
+        toast(`Os vínculos da lista de instaladores não chegaram ao servidor (${(cfgOk && cfgOk.motivo) || 'sem resposta'}). Nenhuma O.S. foi trocada.`, 'error');
+        return;
+      }
+      // Saiu da fila não quer dizer que a ligação vale lá: confere pela régua do servidor.
+      const conf = await conferirNoServidorCasa(STORE, fix.fixar.map(f => f.nome), []);
+      const falta = conf.ok ? fix.fixar.filter(f => !servidorConcordaCasa(conf, f.nome, f.id, 'vinculo')).map(f => f.nome) : fix.fixar.map(f => f.nome);
+      if (falta.length) {
+        toast(`Nenhuma O.S. foi trocada: a ligação de ${e2Casa(falta)} ainda não foi aceita pelo servidor${conf.ok ? '' : ` (${conf.motivo})`}. Atualize a página e confira.`, 'error');
+        return;
+      }
+    }
+    const itens = await converterNomesNasOSCasa(plano, { usuario, servidor: srv, difere,
+      aoProgresso: i => { if (_convNomesLote) { _convNomesLote.feitas = i; pintarStatusLoteConv(); } },
+      aoItem: parcial => gravarRelConvNomes({ ...base, atualizadoEm: new Date().toISOString(), itens: doLote(parcial) }) });
+    gravarRelConvNomes({ ...base, atualizadoEm: new Date().toISOString(), itens: doLote(itens) });
+    toast('Troca do nome pelo ID: ' + resumoRelConv(itens) + (_convNomesRelFalhou ? ' ' + AVISO_REL_SO_NA_ABA : ''), itens.some(it => it.estado === 'recusada') || _convNomesRelFalhou ? 'error' : 'success');
+  } catch (e) {
+    toast('A troca parou: ' + String((e && e.message) || e) + ' O relatório mostra até onde foi.', 'error');
+  } finally {
+    _convNomesLote = null;
+    repintar();
+  }
+}
+async function iniciarDesfazerConversaoCasa() {
+  if (_convNomesLote) return;
+  if (!podeConverterNomes()) { toast('Só a gestão (admin e pcp) desfaz a troca.', 'error'); return; }
+  const rel = lerRelConvNomes();
+  const alvo = rel ? rel.itens.filter(desfazivelConv) : [];
+  const n = alvo.length;
+  if (!n) return;
+  if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) { toast('Sem internet: conecte-se para desfazer.', 'error'); return; }
+  if (!confirm(`Desfazer a troca em ${n} O.S.? Cada uma volta exatamente à lista de antes, se a equipe não mudou depois. Cada O.S. vai sozinha ao servidor e entra no histórico de alterações.`)) return;
+  _convNomesLote = { tipo: 'desfazer', feitas: 0, total: n };
+  const repintar = () => { if (STATE.activeTab === 'performance' && typeof renderPerformanceCasa === 'function') renderPerformanceCasa(); };
+  repintar();
+  const chaves = new Set(alvo.map(chaveItemConv));
+  try {
+    const fim = await desfazerConversaoNomesCasa(rel, { usuario: (STATE.user && STATE.user.nome) || '',
+      aoProgresso: i => { if (_convNomesLote) { _convNomesLote.feitas = i; pintarStatusLoteConv(); } } });
+    const d = ((fim && fim.itens) || []).filter(it => chaves.has(chaveItemConv(it)) && it.desfazer);
+    const ok = d.filter(it => ['convertida', 'na-fila'].includes(it.desfazer.estado)).length;
+    toast(`Desfazer: ${ok} de ${n} O.S. voltaram à lista de antes.` + (_convNomesRelFalhou ? ' ' + AVISO_REL_SO_NA_ABA : ''), ok === n && !_convNomesRelFalhou ? 'success' : 'error');
+  } catch (e) {
+    toast('O desfazer parou: ' + String((e && e.message) || e), 'error');
+  } finally {
+    _convNomesLote = null;
+    repintar();
+  }
+}
+
+/* GRAFIAS PARECIDAS, LADO A LADO (Adlando, Adilsom e Jose Adilando; Adriano,
+   Adriano Pinheiro e Adriano Nunes): juntam-se os nomes que chegam à mesma
+   ficha (ou à mesma sugestão), os que dividem os candidatos, e os que têm a
+   primeira palavra igual ou parecida com uma palavra do outro. É só para a
+   pessoa olhar junto e decidir: agrupar não liga ninguém. */
+function sugestaoParecidaCasa(apelido, ativos) {
+  let melhor = null, empate = false;
+  for (const p of ativos) {
+    if (!OPERACAO.ehIdPessoa(p.id)) continue;
+    const r = OPERACAO.buscaTolerante(apelido, { textos: [p.nome, p.apelido] });
+    if (!r.tipo) continue;
+    if (!melhor || r.dist < melhor.dist) { melhor = { p, dist: r.dist }; empate = false; }
+    else if (r.dist === melhor.dist) empate = true;
+  }
+  return melhor && !empate ? melhor.p : null;
+}
+function palavrasParecidasCasa(a, b) {
+  const pa = normCasa(a).split(/\s+/).filter(t => t.length >= 3), pb = normCasa(b).split(/\s+/).filter(t => t.length >= 3);
+  const perto = (x, y) => {
+    if (x === y) return true;
+    if (x[0] !== y[0]) return false;
+    const n = Math.min(x.length, y.length), lim = n <= 3 ? 0 : n <= 5 ? 1 : 2;
+    return lim > 0 && OPERACAO.distanciaEdicao(x, y) <= lim;
+  };
+  return (pa.length && pb.some(t => perto(pa[0], t))) || (pb.length && pa.some(t => perto(pb[0], t)));
+}
+function gruposDeGrafiasCasa(linhas) {
+  const pai = linhas.map((_, i) => i);
+  const raiz = i => (pai[i] === i ? i : (pai[i] = raiz(pai[i])));
+  const unir = (a, b) => { const x = raiz(a), y = raiz(b); if (x !== y) pai[Math.max(x, y)] = Math.min(x, y); };
+  const alvos = linhas.map(l => new Set([l.pessoa && l.pessoa.id, l.conf && (l.conf.id || l.conf.sugerido), l.sugestao && l.sugestao.id, ...(l.candidatos || []).map(p => p.id)].filter(x => OPERACAO.ehIdPessoa(x))));
+  for (let i = 0; i < linhas.length; i++) for (let j = i + 1; j < linhas.length; j++) {
+    if ([...alvos[i]].some(x => alvos[j].has(x)) || palavrasParecidasCasa(linhas[i].apelido, linhas[j].apelido)) unir(i, j);
+  }
+  const grupos = new Map();
+  linhas.forEach((l, i) => { const r = raiz(i); if (!grupos.has(r)) grupos.set(r, []); grupos.get(r).push(l); });
+  return [...grupos.values()];
+}
+
 /* ── Conferir e ligar o nome do PCP à ficha do RH, pela tela ─────────────
    Todos os nomes que o PCP usa, cada um com a ficha a que chega. O que falta
    resolver vem primeiro; qualquer ligação (automática ou salva) pode ser
@@ -2237,6 +3133,18 @@ function ligacaoRHHTML() {
   const pend = linhas.filter(l => l.como === 'sem-ficha' || l.como === 'ambiguo').length;
   const juntos = linhas.filter(l => l.juntos.length).length;
   const soAuto = linhas.filter(l => l.naLista && l.como === 'auto' && l.pessoa && l.pessoa.id).length;
+  /* NOME ANTIGO VIRA ID (F12): cada linha sabe se o nome está confirmado
+     (OPERACAO.confirmarNome), em quantas O.S. ele viraria ID e, sem ficha,
+     qual ficha tem a grafia parecida. */
+  const f12 = f12Carregada();
+  const dados = f12 ? OPERACAO.dadosPessoas() : {};
+  const uso = usoDosNomesCasa();
+  const plano = f12 ? planoConversaoNomes(null, null, dados) : { tarefas: [], aprovado: new Map(), rotulos: new Map(), converte: 0, comDivisao: 0 };
+  const pode = f12 && podeConverterNomes() && !_convNomesLote && rhProntoParaConverter();
+  for (const l of linhas) {
+    l.conf = f12 ? OPERACAO.confirmarNome(l.apelido, dados) : { id: '', motivo: '' };
+    l.sugestao = !l.pessoa && l.como !== 'ambiguo' && l.como !== 'terceiro' && l.conf.motivo !== 'terceiro' ? sugestaoParecidaCasa(l.apelido, ativos) : null;
+  }
   /* Cadastro que não separa a pessoa não vira vínculo (F07): ID que ficha e
      contrato de freelancer dividem, ou contrato ainda sem ID. Aparece
      desabilitado, com o motivo, como no seletor da equipe. */
@@ -2246,29 +3154,49 @@ function ligacaoRHHTML() {
   // ID repetido entre ficha e contrato de freelancer (F07): o servidor avisa.
   const avisosRH = (elencoRH().avisos || []).map(a => `<p class="metricas-nota">⚠️ ${esc(a)}</p>`).join('');
   const situacao = l => {
+    if (l.conf.motivo === 'terceiro' && l.pessoa) return `<span class="badge sem-valor">Marcador ligado a ${esc(l.pessoa.nome)}</span><small class="bloco">"Terceiro" é marcador: a troca por ID nunca grava pessoa nele, mas a leitura de hoje conta para ${esc(l.pessoa.nome)}. Se foi engano, desligue.</small>`;
+    if (l.conf.motivo === 'terceiro' && l.como !== 'terceiro') return '<span class="badge">Terceiro</span><small class="bloco">Marcador de terceiro: nunca vira pessoa.</small>';
     if (l.como === 'sem-ficha') return '<span class="badge sem-valor">Sem ficha no RH</span>';
     if (l.como === 'ambiguo') return `<span class="badge sem-valor">Ambíguo</span><small class="bloco">Serve para ${esc(l.candidatos.map(p => p.nome).join(' e '))}. Escolha quem é.</small>`;
     if (l.como === 'terceiro') return '<span class="badge">Terceiro, sem ficha</span><small class="bloco">Decidido: não casa com ninguém do RH.</small>';
+    if (l.conf.motivo === 'comeco') return `<span class="badge sem-valor">Só pelo começo do nome</span><small class="bloco">Confirme se é ${esc((l.pessoa && l.pessoa.nome) || 'essa pessoa')}: sem isso o nome não vira ID.</small>${l.juntos.length ? `<small class="bloco">Mesma pessoa que: ${esc(l.juntos.join(', '))}.</small>` : ''}`;
     const como = l.como === 'salvo' ? 'Ligado à mão' : 'Ligado pelo nome';
-    return `<span class="badge">${como}</span>${l.inativa ? ' <span class="badge sem-valor">Fora da ativa no RH</span>' : ''}${l.juntos.length ? `<small class="bloco">Mesma pessoa que: ${esc(l.juntos.join(', '))}. Se forem pessoas diferentes, troque.</small>` : ''}`;
+    return `<span class="badge">${como}</span>${l.inativa ? ' <span class="badge sem-valor">Fora da ativa no RH</span>' : ''}${l.conf.id ? '' : `<small class="bloco">Não vira ID: ${esc(MOTIVO_NOME[l.conf.motivo] || 'sem vínculo')}.</small>`}${l.juntos.length ? `<small class="bloco">Mesma pessoa que: ${esc(l.juntos.join(', '))}. Se forem pessoas diferentes, troque.</small>` : ''}`;
   };
-  const ficha = l => l.pessoa ? `<strong>${esc(l.pessoa.nome)}</strong>${l.pessoa.cargo || l.pessoa.area ? `<small class="bloco">${esc([l.pessoa.cargo, l.pessoa.area].filter(Boolean).join(' · '))}</small>` : ''}` : '<span class="text-muted">Nenhuma</span>';
-  return `<p>Cada nome que o PCP usa (lista de instaladores e equipes das O.S.) e a ficha do RH a que ele chega. O que falta resolver vem primeiro. Qualquer ligação pode ser trocada aqui: a partir dela, a foto, o cargo e o nome completo aparecem sozinhos, aqui e na mensagem do dia.</p>
+  const ficha = l => l.pessoa ? `<strong>${esc(l.pessoa.nome)}</strong>${l.pessoa.cargo || l.pessoa.area ? `<small class="bloco">${esc([l.pessoa.cargo, l.pessoa.area].filter(Boolean).join(' · '))}</small>` : ''}`
+    : l.sugestao ? `<span class="text-muted">Nenhuma</span><small class="bloco">Sugestão, grafia parecida: <strong>${esc(l.sugestao.nome)}</strong>. Confira e ligue.</small>` : '<span class="text-muted">Nenhuma</span>';
+  // Em quantas O.S. o nome vira ID (as com divisão ficam como estão).
+  const viraId = l => {
+    const u = uso.get(normCasa(l.apelido)) || { semDivisao: 0, comDivisao: 0 };
+    const div = u.comDivisao ? `<small class="bloco">${u.comDivisao} com divisão ${u.comDivisao === 1 ? 'fica' : 'ficam'}</small>` : '';
+    if (!u.semDivisao) return '<span class="text-muted">—</span>' + div;
+    if (l.conf.id) return `<strong>${u.semDivisao} O.S.</strong>${div}${pode ? `<button class="btn-ghost btn-xs" data-lig-converter-nome="${esc(l.apelido)}" type="button">${rotuloGravarId(u.semDivisao)}</button>` : ''}`;
+    if (l.conf.motivo === 'comeco') return `${u.semDivisao} O.S.<small class="bloco">depois de confirmar</small>${div}`;
+    return `<span class="text-muted">fica nome</span><small class="bloco">${u.semDivisao} O.S.</small>${div}`;
+  };
+  const linhaHTML = l => `<tr>
+        <td data-rot="Nome no PCP"><strong>${esc(l.apelido)}</strong>${l.naLista ? '<small class="bloco">na lista de instaladores</small>' : ''}</td>
+        <td data-rot="O.S." class="num">${l.n}</td>
+        <td data-rot="Vira ID em" class="lig-vira">${viraId(l)}</td>
+        <td data-rot="Ficha do RH">${ficha(l)}</td>
+        <td data-rot="Situação">${situacao(l)}</td>
+        <td data-rot="Ligar a" class="lig-acoes">${l.conf.motivo === 'terceiro' ? '' : `<select data-lig-sel="${esc(l.apelido)}" aria-label="Pessoa do RH para ${esc(l.apelido)}"><option value="">Escolher</option>${optPessoas(l.pessoa)}</select>
+          <button class="btn-primary btn-xs edit-only" data-lig-ok="${esc(l.apelido)}">${l.pessoa ? 'Trocar' : 'Ligar'}</button>`}
+          ${l.conf.motivo === 'comeco' && l.pessoa && l.pessoa.chave ? `<button class="btn-primary btn-xs edit-only" data-lig-confirmar="${esc(l.apelido)}" data-lig-chave="${esc(l.pessoa.chave)}" type="button" title="Confirma que ${esc(l.apelido)} é ${esc(l.pessoa.nome)}: vira vínculo salvo">Confirmar</button>` : ''}
+          ${l.como === 'salvo' || l.como === 'terceiro' ? `<button class="btn-ghost btn-xs edit-only" data-del-ficha="${esc(l.apelido)}" type="button" title="Tira a decisão salva; o nome volta a casar sozinho, se casar">Desligar</button>` : ''}
+          ${l.como === 'sem-ficha' || l.como === 'ambiguo' ? `<button class="btn-ghost btn-xs edit-only" data-lig-terceiro="${esc(l.apelido)}" type="button" title="Marca que este nome é de um terceiro, sem ficha no RH">É terceiro</button>` : ''}</td>
+      </tr>`;
+  const e = xs => xs.length > 1 ? xs.slice(0, -1).join(', ') + ' e ' + xs[xs.length - 1] : xs.join('');
+  const grupos = gruposDeGrafiasCasa(linhas);
+  const corpo = grupos.map(g => `<tbody class="${g.length > 1 ? 'lig-grupo' : ''}">${g.length > 1 ? `<tr class="lig-grupo-cab"><td colspan="6">Grafias parecidas: <strong>${esc(e(g.map(l => l.apelido)))}</strong>. Confira se são a mesma pessoa antes de ligar.</td></tr>` : ''}${g.map(linhaHTML).join('')}</tbody>`).join('');
+  return `<p>Cada nome que o PCP usa (lista de instaladores e equipes das O.S.) e a ficha do RH a que ele chega. O que falta resolver vem primeiro. Qualquer ligação pode ser trocada aqui: a partir dela, a foto, o cargo e o nome completo aparecem sozinhos, aqui e na mensagem do dia. Com o nome confirmado, a O.S. antiga pode trocar o nome pelo ID da pessoa.</p>
     ${avisosRH}
     <p class="text-muted" style="font-size:.8rem">${linhas.length} nomes · ${pend ? `<strong>${pend} sem ficha ou ambíguo${pend === 1 ? '' : 's'}</strong>` : 'todos com ficha'}${juntos ? ` · ${juntos} nomes dividem a ficha com outro` : ''}.</p>
     ${soAuto ? `<p class="metricas-nota">📌 ${soAuto} ${soAuto === 1 ? 'nome da lista de instaladores está ligado' : 'nomes da lista de instaladores estão ligados'} só pelo nome. Se entrar no RH alguém com o mesmo começo de nome, a ligação some e o celular dessa pessoa deixa de ver as O.S. gravadas pelo ID. <button class="btn-primary btn-xs edit-only" data-lig-fixar type="button">Fixar ${soAuto === 1 ? 'a ligação' : `as ${soAuto} ligações`}</button></p>` : ''}
-    ${linhas.length ? `<div class="casa-tabela-wrap"><table class="casa-tabela">
-      <thead><tr><th>Nome no PCP</th><th class="num">O.S</th><th>Ficha do RH</th><th>Situação</th><th>Ligar a</th></tr></thead>
-      <tbody>${linhas.map(l => `<tr>
-        <td><strong>${esc(l.apelido)}</strong>${l.naLista ? '<small class="bloco">na lista de instaladores</small>' : ''}</td>
-        <td class="num">${l.n}</td>
-        <td>${ficha(l)}</td>
-        <td>${situacao(l)}</td>
-        <td><select data-lig-sel="${esc(l.apelido)}" aria-label="Pessoa do RH para ${esc(l.apelido)}"><option value="">Escolher</option>${optPessoas(l.pessoa)}</select>
-          <button class="btn-primary btn-xs edit-only" data-lig-ok="${esc(l.apelido)}">${l.pessoa ? 'Trocar' : 'Ligar'}</button>
-          ${l.como === 'salvo' || l.como === 'terceiro' ? `<button class="btn-ghost btn-xs edit-only" data-del-ficha="${esc(l.apelido)}" type="button" title="Tira a decisão salva; o nome volta a casar sozinho, se casar">Desligar</button>` : ''}
-          ${l.como === 'sem-ficha' || l.como === 'ambiguo' ? `<button class="btn-ghost btn-xs edit-only" data-lig-terceiro="${esc(l.apelido)}" type="button" title="Marca que este nome é de um terceiro, sem ficha no RH">É terceiro</button>` : ''}</td>
-      </tr>`).join('')}</tbody></table></div>` : '<p class="text-muted">Nenhum nome no PCP ainda.</p>'}
+    ${f12 ? conversaoNomesHTML(linhas, uso, plano) : '<p class="metricas-nota">Esta tela está com uma parte desatualizada: recarregue a página para trocar os nomes antigos pelo ID.</p>'}
+    ${linhas.length ? `<div class="casa-tabela-wrap"><table class="casa-tabela lig-tabela">
+      <thead><tr><th>Nome no PCP</th><th class="num">O.S</th><th>Vira ID em</th><th>Ficha do RH</th><th>Situação</th><th>Ligar a</th></tr></thead>
+      ${corpo}</table></div>` : '<p class="text-muted">Nenhum nome no PCP ainda.</p>'}
     <p class="text-muted" style="font-size:.8rem">${ativos.length} pessoas ativas no RH${ativos.some(p => p.freelancer) ? ` (${ativos.filter(p => p.freelancer).length} por contrato de freelancer)` : ''}${pessoasRH().length > ativos.length ? ` · ${pessoasRH().length - ativos.length} inativa(s) fora da lista de escolha` : ''}. Quem sai da empresa sai daqui sozinho.</p>`;
 }
 
@@ -2610,6 +3538,28 @@ function renderPerformanceCasa() {
       // Apaga só ESTE apelido. Outro apelido da mesma pessoa continua ligado —
       // eles dividem o id do RH, e filtrar por id desligava os dois de uma vez.
       gravarVinculosCasa(lerVinculosCasa().filter(v => normCasa(v.apelido) !== normCasa(btn.dataset.delFicha)));
+      renderPerformanceCasa();
+    };
+  });
+  // Nome antigo vira ID (F12): confirmar a ligação pelo começo do nome, buscar
+  // as O.S. antigas, gravar o ID, desfazer e dispensar o relatório.
+  el.querySelectorAll('[data-lig-confirmar]').forEach(btn => {
+    btn.onclick = () => {
+      const ap = btn.dataset.ligConfirmar, p = pessoaRHPorChave(btn.dataset.ligChave);
+      if (!p || !ligarApelidoRH(ap, btn.dataset.ligChave)) { toast('Não consegui confirmar este nome. Confira se a ficha do RH tem CPF e se o ID não está repetido.', 'error'); return; }
+      renderPerformanceCasa();
+      toast(`${ap} → ${p.nome}: confirmado.`, 'success');
+    };
+  });
+  el.querySelectorAll('[data-lig-antigas]').forEach(b => { b.onclick = () => { void buscarAntigasConferenciaCasa(); }; });
+  el.querySelectorAll('[data-lig-converter]').forEach(b => { b.onclick = () => { void iniciarConversaoNomesCasa(null); }; });
+  el.querySelectorAll('[data-lig-converter-nome]').forEach(b => { b.onclick = () => { void iniciarConversaoNomesCasa([b.dataset.ligConverterNome]); }; });
+  el.querySelectorAll('[data-lig-desfazer]').forEach(b => { b.onclick = () => { void iniciarDesfazerConversaoCasa(); }; });
+  el.querySelectorAll('[data-lig-rel-fechar]').forEach(b => {
+    b.onclick = () => {
+      const rel = lerRelConvNomes();
+      if (rel && rel.itens.some(desfazivelConv) && !confirm('Dispensar o relatório? O botão Desfazer some junto; o histórico de alterações de cada O.S. continua.')) return;
+      gravarRelConvNomes(null);
       renderPerformanceCasa();
     };
   });

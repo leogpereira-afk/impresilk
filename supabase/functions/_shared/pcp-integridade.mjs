@@ -407,6 +407,36 @@ export function carimbarEntregaLancada(os, antes, autor, em, { podeDesfazer = fa
   };
   return { os: r, aviso: '' };
 }
+/* FINALIZADA PELO CELULAR (revisão da E5, 30/09/2026). Decisão do dono: a
+   palavra do instalador é DECLARAÇÃO. A O.S. que o celular finaliza sem tocar
+   no Instalado contava o implícito como entregue CONFERIDO (a finalização da
+   gestão), e a do instalador que tocou em cada item, como declarado. Agora o
+   servidor carimba `finalizadaPorCampo` {finalizadaEm, por, porId, em} quando
+   quem põe a finalização é o celular: o crachá sem senha ou a montagem com
+   senha (o papel 'montagem', o mesmo que o motor trata como celular). O motor
+   (entregaImplicita) manda o implícito dessa finalização para as
+   declarações. Precisa ser aqui: o celular v139 continua finalizando sem
+   marca nenhuma.
+   Campo do SERVIDOR, protegido como os da gestão (F01): o que o aparelho
+   mandou nele nunca entra (nem da gestão), e a aba que não o conhece não o
+   apaga. Vale para a finalização de mesmo finalizadaEm: a gestão que reabre e
+   finaliza de novo põe uma finalização dela, e o carimbo antigo fica sem
+   efeito (o Desfazer do reabrir devolve a do celular, e ele volta a valer).
+   `autor` = { nome, porId } quando quem envia é o celular; null nos outros.
+   Devolve a O.S. */
+export const finalizacaoMudou = (os, antes) => !!String(os?.finalizadaEm ?? '').trim() && String(os?.finalizadaEm ?? '').trim() !== String(antes?.finalizadaEm ?? '').trim();
+export function carimbarFinalizacaoCampo(os, antes, autor, em) {
+  const r = { ...os };
+  if (objeto(antes?.finalizadaPorCampo)) r.finalizadaPorCampo = antes.finalizadaPorCampo; else delete r.finalizadaPorCampo;
+  if (autor && finalizacaoMudou(os, antes)) {
+    r.finalizadaPorCampo = {
+      // Sem corte: o motor compara este texto com o finalizadaEm gravado.
+      finalizadaEm: String(os.finalizadaEm).trim(), por: String(autor.nome ?? '').trim().slice(0, 120),
+      porId: ehIdPessoa(autor.porId) ? String(autor.porId).trim() : '', em: String(em ?? ''),
+    };
+  }
+  return r;
+}
 /* O ID DE QUEM MARCOU (F01). Cada carimbo de nome da ficha ganha, ao lado, o
    ID do RH (<campo>Id). O ID nunca vem do aparelho. O par diz qual hora
    acompanha o nome: refazer com o mesmo nome em outra hora é marca nova.
@@ -1246,25 +1276,33 @@ export function preservarItens(os, antes, { sortear = sortearUid } = {}) {
 /* PORTA DAS MARCAS DE ENTREGA POR ITEM (E3 do plano de entrega por item,
    29/09/2026). Roda em toda gravação de O.S. no pcp-sync, depois do
    preservarItens (o item já tem o código). Decisões do dono:
-   - marca nova (item.entregas) só de admin e pcp e de operação com senha
-     (balcão); cancelar e desfazer só admin e pcp. A permissão, o saldo, o
-     dia (nunca depois de hoje), o teto e o formato são do motor da E2
-     (ENTREGA_ITEM.validarEvento, a mesma régua que a tela usa). O crachá sem
-     senha ainda não marca (E5), a montagem e a máquina não marcam;
+   - marca nova (item.entregas) de admin e pcp e de operação com senha
+     (balcão); cancelar e desfazer só admin e pcp. O celular (E5: crachá sem
+     senha, papel 'toque', e montagem com senha) só entrega e retira, e a
+     marca dele sai DECLARADA (via 'toque', declarado:true): conta no saldo,
+     não conta como entregue conferido até o Fechar o dia (F14). A máquina
+     não marca. A permissão, o saldo, o dia (nunca depois de hoje), o teto e
+     o formato são do motor da E2 (ENTREGA_ITEM.validarEvento, a mesma régua
+     que a tela usa);
    - SÓ ACRÉSCIMO: a marca gravada não muda e não some. O item parte das
      marcas GRAVADAS, e o aparelho só acrescenta. Aba antiga sem o campo, ou
      com a marca mexida, fica com o gravado;
    - id já gravado (neste item ou em outro da O.S.) é ignorado sem aviso: é a
      fila offline mandando de novo, ou o item copiado na tela;
-   - porId, por e em são do crachá e do relógio do servidor; o via sai do
-     papel (o motor). O que o aparelho escreveu neles não entra;
+   - porId, por e em são do crachá e do relógio do servidor; o via e o
+     declarado saem do papel (o motor). O que o aparelho escreveu neles não
+     entra. O crachá é o do ENVIO: a fila offline atravessa a troca de
+     crachá, e a marca feita ontem por um crachá e enviada hoje por outro
+     leva o de hoje (o aparelho não escolhe o autor);
    - marca que não passa é DESCARTADA com aviso, nunca 422 (422 prende a fila
      do aparelho). O resto da gravação segue;
    - item que tem marca não sai da lista: o servidor o devolve ao lugar dele
      e avisa. O saldo de um item que não vai mais se tira com Cancelar item;
    - O.S. finalizada antes e depois desta gravação não recebe marca (o motor
      recusa: a entrega implícita já contou). Finalizar junto com a marca, na
-     mesma gravação, vale (o Finalizar da E4 marca o saldo e fecha).
+     mesma gravação, vale (o Finalizar da E4 marca o saldo e fecha; o do
+     celular também). A entrega do celular numa O.S. que a gestão finalizou
+     enquanto ele estava sem sinal é descartada com aviso ao celular.
    Opções: papel (o do crachá; 'toque' e 'maquina' para as portas sem conta),
    avisar (quem ouve o aviso), autor {nome, porId}, agora (ISO do servidor).
    Devolve { os, avisos, eventos, recusadas }: `eventos` são as marcas novas
@@ -1288,7 +1326,8 @@ function linhaEntrega(it, e) {
     id: t(e.id, 64), uid: t(it?.uid, 80), item: t(it?.item, 20), tipo: t(e.tipo, 20),
     ...(Number.isInteger(e.qtde) ? { qtde: e.qtde } : {}), dia: t(e.dia, 10),
     ...(e.alvo ? { alvo: t(e.alvo, 64) } : {}), ...(e.motivo ? { motivo: t(e.motivo, 200) } : {}),
-    via: t(e.via, 10), por: t(e.por, 80), porId: ehIdPessoa(e.porId) ? String(e.porId).trim() : '',
+    via: t(e.via, 10), ...(e.declarado === true ? { declarado: true } : {}),
+    por: t(e.por, 80), porId: ehIdPessoa(e.porId) ? String(e.porId).trim() : '',
   };
 }
 const marcasDe = it => objeto(it) && Array.isArray(it.entregas) ? it.entregas : [];
@@ -1361,8 +1400,27 @@ export function entregasNaoGravadas(os, gravado) {
   }
   return fora.slice(0, 200);
 }
-// Do item, só a marca da montagem: descrição, medida e valor são do PCP e do ERP.
-const CAMPOS_ITEM_MONTAGEM = ['statusInst', 'pronto', 'motivo', 'obsProb', 'fotoProbId'];
+/* Do item, só a marca da montagem: descrição, medida e valor são do PCP e do
+   ERP. `entregas` (E5) é a entrega que o celular declara, e entra de outro
+   jeito: SÓ ACRÉSCIMO. A mescla parte das marcas gravadas e junta só as de id
+   novo (marcasNovasDoToque); quem confere o tipo, o saldo, o autor e a hora é
+   a guardarEntregasItens, com o papel do crachá, logo depois no pcp-sync. */
+const CAMPOS_ITEM_MONTAGEM = ['statusInst', 'pronto', 'motivo', 'obsProb', 'fotoProbId', 'entregas'];
+/* Marcas novas de um item num envio só: a lista gravada tem teto de 40 (o
+   motor), e mandar mais que isso é aparelho doido ou abuso. O que passa do
+   teto volta como recusado, com o motivo. */
+const TETO_MARCAS_TOQUE = 40;
+// As marcas do item que o celular mandou e o servidor ainda não tem (id novo na O.S. inteira).
+function marcasNovasDoToque(v, idsGravados) {
+  const vistos = new Set(), novas = [];
+  for (const e of objeto(v) && Array.isArray(v.entregas) ? v.entregas : []) {
+    if (!objeto(e)) continue;
+    const id = String(e.id ?? '').trim();
+    if (!id || idsGravados.has(id) || vistos.has(id)) continue;
+    vistos.add(id); novas.push(e);
+  }
+  return novas;
+}
 const LISTAS_FOTO = ['fotosCheckinIds', 'fotosRetornoIds'];
 // Só fileId simples (o que o STORE.pushPhoto gera); nada de caminho.
 const idFoto = f => typeof f === 'string' && /^[\w.-]{1,100}$/.test(f) && !f.includes('..');
@@ -1373,8 +1431,10 @@ const TEXTO_MAX = 2000;
 const cortar = v => typeof v === 'string' && v.length > TEXTO_MAX ? v.slice(0, TEXTO_MAX) : v;
 /* MESCLA, NÃO FILTRA. O upsert SUBSTITUI a O.S. inteira; partir do que já está
    gravado e deixar o crachá de toque mudar só os campos dele é o que protege
-   o resto. Devolve { os, erro, avisos }: erro preenchido vira 422 e os vem nulo;
-   aviso é o que foi deixado de fora, e o resto grava.
+   o resto. Devolve { os, erro, avisos, entregasFora }: erro preenchido vira 422
+   e os vem nulo; aviso é o que foi deixado de fora, e o resto grava.
+   entregasFora são as entregas declaradas que não acharam item ({ id, uid,
+   motivo }): o pcp-sync as devolve em `descartado` com as recusadas.
 
    SEM CONFLITO DE VERSÃO (25/09/2026). O rev gravado passa a valer sempre: a
    janela "alterada em outro aparelho" só oferecia duas perdas (Recarregar
@@ -1400,7 +1460,7 @@ const cortar = v => typeof v === 'string' && v.length > TEXTO_MAX ? v.slice(0, T
    finalizada, com o autor que tinha; e finalização mais velha que a reabertura
    da gestão não fecha a O.S. de novo. */
 export function mesclarToqueNoNome(atual, veio, autor, agora) {
-  const m = { ...atual }, avisos = [];
+  const m = { ...atual }, avisos = [], entregasFora = [];
   const revAtual = typeof atual?.rev === 'number' ? atual.rev : 0;
   const velha = typeof veio?.rev === 'number' && veio.rev !== revAtual;
   /* FOTO TIRADA É DITA, NÃO DEDUZIDA. Na cópia velha a lista SOMA, então o ×
@@ -1448,19 +1508,25 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
     const par = casarItens(atual.itens, veio.itens);
     const usados = new Set(par.map((i, j) => i >= 0 ? j : -1).filter(j => j >= 0));
     const doGravado = new Map(par.map((i, j) => [i, j]).filter(([i]) => i >= 0));
-    /* MARCA DE ENTREGA POR ITEM (item.entregas) o crachá sem senha ainda não
-       grava (entra na E5, como entrega declarada): a mescla parte do gravado
-       e o campo não está em CAMPOS_ITEM_MONTAGEM. A marca nova que o celular
-       mandou não some calada: vira aviso. */
-    const entregaNaoGravada = [];
+    /* ENTREGA DECLARADA PELO CELULAR (E5): a marca de id novo entra no item
+       casado, depois das gravadas; a que já está gravada (a fila mandou de
+       novo, em qualquer item da O.S.) fica como está. Cópia velha também
+       traz marca nova: quem marcou sem sinal ontem marcou de verdade. */
+    const idsGravados = new Set();
+    for (const g of atual.itens) for (const e of objeto(g) && Array.isArray(g.entregas) ? g.entregas : []) if (objeto(e)) idsGravados.add(String(e.id ?? '').trim());
+    const fora = (it, e, motivo) => entregasFora.push({ id: String(e.id ?? '').trim().slice(0, 64), uid: String(it?.uid ?? '').slice(0, 80), motivo });
     m.itens = atual.itens.map((it, i) => {
       if (!objeto(it)) return it;
       const v = doGravado.has(i) ? veio.itens[doGravado.get(i)] : null;
       if (!v) return it;
-      const jaTem = new Set((Array.isArray(it.entregas) ? it.entregas : []).filter(objeto).map(e => String(e.id ?? '')));
-      if (Array.isArray(v.entregas) && v.entregas.some(e => objeto(e) && !jaTem.has(String(e.id ?? '')))) entregaNaoGravada.push(it);
       const r = { ...it };
       for (const c of CAMPOS_ITEM_MONTAGEM) {
+        if (c === 'entregas') {
+          const novas = marcasNovasDoToque(v, idsGravados);
+          for (const e of novas.slice(TETO_MARCAS_TOQUE)) fora(it, e, 'Marcas demais num envio só: esta não foi gravada. Fale com o PCP.');
+          if (novas.length) r.entregas = [...(Array.isArray(it.entregas) ? it.entregas : []), ...novas.slice(0, TETO_MARCAS_TOQUE)];
+          continue;
+        }
         if (!proprio(v, c) || (velha && vazio(v[c]) && !vazio(it[c]))) continue;
         // O toque só LIGA o Verificado (pronto): desligar é da gestão.
         if (c === 'pronto' && v[c] !== true) continue;
@@ -1469,9 +1535,13 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
       if (r.fotoProbId && tiradas.has(r.fotoProbId)) r.fotoProbId = '';
       return r;
     });
-    const perdidas = veio.itens.filter((v, j) => !usados.has(j) && objeto(v) && CAMPOS_ITEM_MONTAGEM.some(c => !vazio(v[c])));
+    /* Item que só o aparelho tem (o PCP tirou da lista): a marca não pula
+       para o vizinho e não cria item. A entrega declarada nele volta como
+       recusada, para o celular tirá-la da cópia e da fila. */
+    const soDoAparelho = veio.itens.filter((v, j) => !usados.has(j) && objeto(v));
+    const perdidas = soDoAparelho.filter(v => CAMPOS_ITEM_MONTAGEM.some(c => c === 'entregas' ? marcasNovasDoToque(v, idsGravados).length > 0 : !vazio(v[c])));
+    for (const v of soDoAparelho) for (const e of marcasNovasDoToque(v, idsGravados)) fora(v, e, 'O item não está mais na O.S.: a entrega não foi gravada. Fale com o PCP.');
     if (perdidas.length) avisos.push(`${perdidas.length === 1 ? 'A marca do item ' + txt(perdidas[0].item || perdidas[0].descricao) + ' não foi gravada' : perdidas.length + ' marcas de item não foram gravadas'}: o PCP mudou a lista de itens. Confira os itens com o PCP.`);
-    if (entregaNaoGravada.length) avisos.push(`${entregaNaoGravada.length === 1 ? 'A marca de entrega do ' + rotuloItem(entregaNaoGravada[0]) + ' não foi gravada' : entregaNaoGravada.length + ' marcas de entrega de item não foram gravadas'}: pelo celular a entrega por item ainda não vale. Fale com o PCP.`);
   }
   if (!atual?.finalizadaEm && veio?.finalizadaEm) {
     const t = Date.parse(String(veio.finalizadaEm)), reaberta = Date.parse(String(atual?.reabertaEm || ''));
@@ -1483,7 +1553,7 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
       m.finalizadoPor = autor;
     }
   }
-  return { os: m, erro: '', avisos };
+  return { os: m, erro: '', avisos, entregasFora: entregasFora.slice(0, 200) };
 }
 /* HORÁRIOS DO ESPELHO QUE FEREM A REGRA NÃO DERRUBAM O ENVIO (crachá de toque).
    O espelho carimba saída e retorno com o dia AGENDADO: serviço que vira a
@@ -1571,6 +1641,11 @@ export function podarCarimbosF15(r) {
     const { porId: _pi, porConta: _pc, desfeitoPorId: _di, desfeitoPorConta: _dc, ...c } = out.cancelamento;
     out.cancelamento = c;
   }
+  // Quem finalizou pelo celular (revisão da E5) desce com o nome, sem o ID; a volta sem ele não apaga.
+  if (objeto(out.finalizadaPorCampo)) {
+    const { porId: _pi, ...x } = out.finalizadaPorCampo;
+    out.finalizadaPorCampo = x;
+  }
   /* A MARCA DE ENTREGA POR ITEM (E3) desce com o nome de quem marcou, sem o
      ID: a mesma régua. A volta sem ele não apaga nada, porque marca gravada
      não muda (guardarEntregasItens parte do gravado). */
@@ -1655,6 +1730,8 @@ export const CAMPOS_AUDITADOS = [
   'fotosCheckinIds', 'fotosRetornoIds', 'layoutFotoId',
   'retornoConf', 'voltaEquipe', 'excecaoConclusao',
   'finalizadaEm', 'finalizadoPor', 'reabertaEm', 'reabertaPor',
+  // Quem finalizou pelo celular (revisão da E5): decide se o implícito é declarado.
+  'finalizadaPorCampo',
   'entregaLancada', 'retrabalho', 'causa', 'causaRaiz', 'etapaOrigem',
   // O que a apuração da performance e a trava da conclusão leem (perfFonte,
   // validarConclusao): o tipo tira a O.S. da performance e dispensa a prova;

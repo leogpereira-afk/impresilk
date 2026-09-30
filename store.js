@@ -1059,6 +1059,11 @@ const STORE = (() => {
         // Lapide de outro aparelho: sai daqui -- a menos que ESTE aparelho tenha
         // edicao pendente dela (o upsert ressuscita no servidor, por desenho).
         if (porId.has(r.id) && !pendentes.has(r.id)) { porId.delete(r.id); changed = true; }
+        /* E sai do HISTÓRICO desta aba (revisão da F12). O getOS cai no
+           _osHistorico quando a O.S. não está na lista: a antiga que a tela
+           buscou e outra pessoa excluiu continuava "viva" aqui, e a troca do
+           nome pelo ID a ressuscitava no servidor. */
+        _osHistorico.delete(r.id);
         continue;
       }
       if (excluidas.has(r.id) || pendentes.has(r.id)) continue;
@@ -1187,6 +1192,20 @@ const STORE = (() => {
     const res = await api({ action: 'auditoriaOS', osId: String(osId || '') });
     if (!res || !Array.isArray(res.entradas)) throw new Error((res && res.error) || 'Resposta inesperada do servidor.');
     return { entradas: res.entradas, cortado: !!res.cortado };
+  }
+
+  /* A RÉGUA DO SERVIDOR PARA A TROCA DO NOME PELO ID (revisão da F12). Só
+     leitura, só da gestão (admin e pcp), fora da fila: a tela pergunta na
+     hora e não grava nada se não houver resposta. Devolve {nomes:[{nome, id,
+     fixado}], os:{id: 'viva'|'excluida'|'ausente'}, fechados:[{de, ate}]}.
+     Sem rede, `offline`; recusa ou resposta estranha, erro com o motivo. */
+  async function conferirNomes(nomes, ids) {
+    if (!navigator.onLine) return { offline: true };
+    const lista = v => (Array.isArray(v) ? v : []).map(x => String(x ?? ''));
+    const res = await api({ action: 'conferirNomes', nomes: lista(nomes), ids: lista(ids) });
+    if (!res || !Array.isArray(res.nomes) || !res.os || typeof res.os !== 'object' || !Array.isArray(res.fechados))
+      throw new Error((res && res.error) || 'Resposta inesperada do servidor.');
+    return res;
   }
 
   /* REGRAS DO PROGRAMA DAS EQUIPES (F05). Só da gestão (admin e pcp): o
@@ -2280,6 +2299,8 @@ const STORE = (() => {
     iniciarMaestro, sincronizarAgora, buscarHistorico, historico, faixaHistorico, JANELA_LOCAL_DIAS,
     // Diário de auditoria (só gestão, sob demanda)
     auditoriaOS,
+    // A régua do servidor para a troca do nome pelo ID (F12, só gestão, sob demanda)
+    conferirNomes,
     // Regras do programa (só gestão; cópia local para a prévia offline)
     regrasLocais, lerRegrasDisco, pullRegras,
     // Fotos

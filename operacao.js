@@ -142,18 +142,22 @@ const OPERACAO = (() => {
   // A tela diz de onde vêm as fichas (elenco do RH + CFG); o resolvedor vale
   // até o fim da volta síncrona, como o cache de vínculos do casa.js. Sem
   // fonte (teste, página que não liga), nome continua valendo como nome.
-  let _fontePessoas = null, _resolvedor = null;
-  const esquecerPessoas = () => { _resolvedor = null; };
+  let _fontePessoas = null, _resolvedor = null, _dadosPessoas = null;
+  const esquecerPessoas = () => { _resolvedor = null; _dadosPessoas = null; };
   const usarPessoas = fonte => { _fontePessoas = typeof fonte === 'function' ? fonte : null; esquecerPessoas(); };
   function pessoas() {
     if (!_resolvedor) {
       let dados = {};
       try { dados = _fontePessoas ? (_fontePessoas() || {}) : {}; } catch (e) { dados = {}; }
+      _dadosPessoas = dados;
       _resolvedor = resolverPessoas(dados);
       Promise.resolve().then(esquecerPessoas);
     }
     return _resolvedor;
   }
+  // Os dados de onde a régua de agora saiu (fichas, vínculos e lista): quem
+  // precisa decidir junto com ela (converterEquipe) lê o MESMO retrato.
+  const dadosPessoas = () => { pessoas(); return _dadosPessoas || {}; };
   const idPessoa = v => pessoas().idDe(v);
   const chavePessoa = v => pessoas().chave(v);
   const nomePessoa = v => pessoas().nome(v);
@@ -161,6 +165,96 @@ const OPERACAO = (() => {
   const pessoaFixada = v => pessoas().fixado(v);
   // ID que ficha e contrato de freelancer dividem (F07): não é escolha.
   const idRepetido = v => { const r = pessoas(); const id = r.idDe(v); return !!id && r.repetido(id); };
+  /* NOME ANTIGO VIRA ID, SÓ COM VÍNCULO CONFIRMADO (F12, 30/09/2026).
+     A O.S. antiga guarda o nome que o PCP digitava; a tela "Conferir nomes"
+     troca esse nome pelo ID, uma O.S. por vez. Esta é a decisão de cada nome,
+     pura (não lê tela nem banco), com a MESMA régua de resolverPessoas:
+     - vínculo salvo (Ligar, Fixar, Confirmar) é decisão de gente: vale;
+     - sem vínculo, só o casamento EXATO e único de hoje: apelido do RH ou nome
+       completo. Começo de nome ("Bruno Martins" de Bruno Martins Dias) é
+       sugestão e espera alguém confirmar; o xará que entrar amanhã no RH
+       mudaria o dono;
+     - "Terceiro" é marcador, não gente, e o nome decidido "sem ficha" fica
+       nome; ID repetido entre ficha e contrato (F07), contrato sem CPF e
+       ambíguo ("Lucas" com três Lucas) nunca viram ID.
+     `dados` é o que resolverPessoas recebe ({pessoas, vinculos, lista}); sem
+     ele, o retrato de agora (dadosPessoas). */
+  const MARCADOR_SEM_PESSOA = /^terceir/;   // Terceiro, Terceiros, Terceirizado
+  const _reguas = new WeakMap();
+  function reguaDe(dados) {
+    const d = dados === undefined ? dadosPessoas() : (dados && typeof dados === 'object' ? dados : {});
+    if (d === _dadosPessoas && _resolvedor) return {r: _resolvedor, d};
+    let r = _reguas.get(d);
+    if (!r) { r = resolverPessoas(d); _reguas.set(d, r); }
+    return {r, d};
+  }
+  function motivoSemId(ap, r, d) {
+    const todas = (Array.isArray(d.pessoas) ? d.pessoas : []).filter(p => p && String(p.nome || p.apelido || '').trim());
+    const tokens = ap.split(' ');
+    let cands = todas.filter(p => normPessoa(p.apelido) === ap);
+    if (!cands.length) cands = todas.filter(p => normPessoa(p.nome) === ap);
+    if (!cands.length) cands = todas.filter(p => { const n = normPessoa(p.nome).split(' '); return tokens.every((t, i) => n[i] === t); });
+    const ids = [...new Set(cands.map(p => String(p.id ?? '').trim()))];
+    if (!cands.length) return 'nenhuma';
+    if (ids.length === 1 && ehIdPessoa(ids[0]) && r.repetido(ids[0])) return 'id-repetido';
+    if (cands.length > 1) return 'ambiguo';
+    const p = cands[0];
+    if (!ehIdPessoa(p.id)) return 'sem-cpf';
+    if (p.desligado) return 'desligado';
+    return 'ambiguo';
+  }
+  function confirmarNome(nome, dados) {
+    const s = String(nome ?? '').trim();
+    if (!s) return {id:'', motivo:'vazio'};
+    if (ehIdPessoa(s)) return {id:s, como:'id'};
+    const ap = normPessoa(s);
+    if (MARCADOR_SEM_PESSOA.test(ap)) return {id:'', motivo:'terceiro'};
+    const {r, d} = reguaDe(dados);
+    const id = r.idDe(s);
+    if (r.fixado(s)) {
+      if (id) return {id, como:'vinculo'};
+      const semFicha = (Array.isArray(d.vinculos) ? d.vinculos : []).some(v => v && v.semFicha === true && normPessoa(v.apelido || v.nomePCP) === ap);
+      return {id:'', motivo:semFicha ? 'sem-ficha' : 'vinculo-invalido'};
+    }
+    /* Vínculo salvo que a régua não usa (ficha sem CPF: só a chave do RH, sem
+       ID) continua sendo decisão de gente: o nome é daquela ficha, e o
+       casamento automático com um xará nunca passa por cima (revisão da F12). */
+    const ligadoSemId = (Array.isArray(d.vinculos) ? d.vinculos : []).some(v => v && typeof v === 'object' && v.semFicha !== true && normPessoa(v.apelido || v.nomePCP) === ap);
+    if (ligadoSemId) return {id:'', motivo:'vinculo-sem-id'};
+    if (!id) return {id:'', motivo:motivoSemId(ap, r, d)};
+    const p = r.fichas.find(f => f.id === id);
+    if (p && normPessoa(p.apelido) === ap) return {id, como:'apelido'};
+    if (p && normPessoa(p.nome) === ap) return {id, como:'nome'};
+    return {id:'', motivo:'comeco', sugerido:id};
+  }
+  /* A EQUIPE DA O.S. COM OS NOMES CONFIRMADOS TROCADOS PELO ID. Quem já é ID
+     fica como está (nem o espaço muda), o nome sem confirmação fica, e o ID
+     não se repete: "Lucas Natalino" numa O.S. que já tem o ID dele sai da
+     lista em vez de virar o segundo. Rodar de novo não muda nada.
+     opcoes.nomes: converte só estes nomes (a tela pode ir por partes).
+     Devolve {equipe, mudou, trocas:[{de, para, como}], ficam:[{nome, motivo, sugerido}]}. */
+  function converterEquipe(lista, dados, opcoes = {}) {
+    const entrada = Array.isArray(lista) ? lista : [];
+    const so = Array.isArray(opcoes && opcoes.nomes) ? new Set(opcoes.nomes.map(normPessoa)) : null;
+    const regua = reguaDe(dados);
+    const ids = new Set(entrada.map(x => String(x ?? '').trim()).filter(ehIdPessoa));
+    const out = [], trocas = [], ficam = [];
+    for (const x of entrada) {
+      const s = String(x ?? '').trim();
+      if (!s || ehIdPessoa(s)) { out.push(x); continue; }
+      const c = confirmarNome(s, regua.d);
+      if (!c.id || (so && !so.has(normPessoa(s)))) {
+        out.push(x);
+        ficam.push({nome:s, motivo:c.id ? 'fora-da-escolha' : c.motivo, sugerido:c.sugerido || ''});
+        continue;
+      }
+      trocas.push({de:s, para:c.id, como:c.como});
+      if (ids.has(c.id)) continue;
+      ids.add(c.id);
+      out.push(c.id);
+    }
+    return {equipe:trocas.length ? out : entrada.slice(), mudou:trocas.length > 0, trocas, ficam};
+  }
   // A equipe da O.S.: as ENTRADAS gravadas (ID ou nome antigo), uma por pessoa
   // -- "Lucas" e "Lucas Natalino" na mesma O.S. são uma pessoa só.
   const equipe = o => {
@@ -1028,7 +1122,7 @@ function statusEntrega(o, hoje, regra) {
     return {ESTADOS_ENTREGA, ROTULOS_ENTREGA, MOTIVO_CANCELAMENTO_MIN, MOTIVO_CANCELAMENTO_MAX, motivoCancelamentoInvalido, cancelamentoDe, cancelada, prazoDaEntrega, statusEntrega};
   })(prazoCombinadoDe, () => motorDaEntrega
     || (typeof module !== 'undefined' && module.exports && typeof require === 'function' ? require('./entrega-item.js') : null));
-  return {uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,...STATUS_ENTREGA};
+  return {uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,...STATUS_ENTREGA};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
 // Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega

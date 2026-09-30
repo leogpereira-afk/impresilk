@@ -56,15 +56,16 @@ test('comercial (só leitura) leva 403 e nada grava', async () => {
   assert.deepEqual(entregas(e, '8001:1:1'), []);
 });
 
-test('crachá sem senha (toque): a marca de entrega não grava e o celular recebe o aviso; o resto grava', async () => {
+test('crachá sem senha (toque, E5): a entrega grava DECLARADA, com o autor do crachá; o resto grava junto', async () => {
   const e = await edge('pcp-sync', banco());
   const os = comMarca(copia(e), '8001:1:1', ev('e-toq1', 'entregue', {qtde:10}));
   os.obsTecnicas = 'Fixado com parafuso';
   const r = await e.call({action:'upsert', os}, toque);
   assert.equal(r.status, 200);
-  assert.deepEqual(entregas(e, '8001:1:1'), [], 'o toque ainda não grava entrega (E5)');
+  const [m] = entregas(e, '8001:1:1');
+  assert.deepEqual([m.id, m.tipo, m.qtde, m.via, m.declarado, m.por, m.porId], ['e-toq1', 'entregue', 10, 'toque', true, 'Ana', '100001']);
   assert.equal(gravada(e).obsTecnicas, 'Fixado com parafuso', 'o trabalho do celular grava');
-  assert.match((r.avisos || []).join(' '), /entrega/i);
+  assert.equal(r.descartado, undefined);
 });
 
 test('máquina (integração) não grava marca de entrega', async () => {
@@ -74,12 +75,16 @@ test('máquina (integração) não grava marca de entrega', async () => {
   assert.deepEqual(entregas(e, '8001:1:1'), []);
 });
 
-test('montagem com senha não marca: descartado com aviso, resposta 200', async () => {
+test('montagem com senha (E5): entrega grava declarada, via toque; problema, cancelar e desfazer são descartados com aviso, resposta 200', async () => {
   const e = await edge('pcp-sync', banco());
-  const r = await e.call({action:'upsert', os:comMarca(copia(e), '8001:1:1', ev('e-mon1', 'entregue', {qtde:1}))}, montagem);
+  let r = await e.call({action:'upsert', os:comMarca(copia(e), '8001:1:1', ev('e-mon1', 'entregue', {qtde:1}))}, montagem);
   assert.equal(r.status, 200);
-  assert.deepEqual(entregas(e, '8001:1:1'), []);
+  assert.deepEqual(entregas(e, '8001:1:1').map(m => [m.id, m.via, m.declarado, m.por]), [['e-mon1', 'toque', true, 'Conta Montagem']]);
+  r = await e.call({action:'upsert', os:comMarca(copia(e), '8001:1:1', ev('e-mon2', 'problema', {motivo:'chuva'}), ev('e-mon3', 'desfeito', {alvo:'e-mon1', motivo:'errei'}))}, montagem);
+  assert.equal(r.status, 200);
+  assert.deepEqual(entregas(e, '8001:1:1').map(m => m.id), ['e-mon1']);
   assert.match(r.avisos.join(' '), /montagem/);
+  assert.deepEqual(r.descartado, ['entregas']);
 });
 
 /* ── Balcão: operação com senha ────────────────────────────────────────── */

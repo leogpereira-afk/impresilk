@@ -74,7 +74,8 @@ function toast(msg, type = '') {
 }
 
 const EQ = { instalador: null, modalId: null, comercial: false, limpeza: null,
-  vencido: false, donoDaFila: null, pronto: false, tentouFinalizar: null, pedirAutorizacao: false, recusas: null };
+  vencido: false, donoDaFila: null, pronto: false, tentouFinalizar: null, pedirAutorizacao: false, recusas: null,
+  parte: null };  // o item com o campo "Entregar parte" aberto (chaveParte)
 let _draft = null, _dirty = false;
 /* O ITEM DO TOQUE (E1): pelo código do item (uid) quando o cartão tem código;
    código que saiu da lista não cai no item que ficou na mesma posição. Item
@@ -83,6 +84,128 @@ function itemDoRascunho(idx, uid) {
   const itens = (_draft && Array.isArray(_draft.itens)) ? _draft.itens : [];
   if (uid) return itens.find(it => it && it.uid === uid) || null;
   return itens[+idx] || null;
+}
+
+/* ── ENTREGA DECLARADA PELO CELULAR (E5, 30/09/2026) ────────────────────────
+   Decisão do dono: o "✅ Instalado" do item vale como entrega DECLARADA. Além
+   do statusInst, ele grava uma marca 'entregue' do saldo do item (na O.S.
+   interna o botão diz "Retirado" e a marca é 'retirado'). Quantidade inteira
+   maior que 1 aceita "Entregar parte", com um campo de quantidade. A marca
+   conta no saldo, mas só vale como entregue depois de conferida no Fechar o
+   dia (F14). A regra é a do motor (entrega-item.js), a mesma do servidor: o
+   que o servidor recusaria, o celular recusa antes, com a mesma frase. O
+   servidor carimba o autor pelo crachá do ENVIO e a hora dele; o aparelho só
+   propõe. O celular não desfaz nem cancela (é da gestão) e nunca vê R$: aqui
+   só se lê a situação e o saldo. Sem o entrega-item.js (cache misto de
+   versões), o Instalado funciona como antes, sem marca. O motor da v139
+   também conta como "sem motor" (revisão da E5): ele existe, mas não conhece
+   o papel 'toque', e o Instalado dava erro vermelho e o Finalizar travava na
+   O.S. com marca da gestão. A assinatura do motor novo é o toque poder
+   marcar a entrega. */
+const temMotorEntrega = () => typeof ENTREGA_ITEM !== 'undefined' && !!ENTREGA_ITEM && typeof ENTREGA_ITEM.validarEvento === 'function'
+  && typeof ENTREGA_ITEM.podeMarcar === 'function' && ENTREGA_ITEM.podeMarcar('toque', 'entregue') === true;
+const idMarca = e => e && typeof e === 'object' ? String(e.id == null ? '' : e.id).trim() : '';
+function novoIdMarca() {
+  const c = typeof crypto !== 'undefined' ? crypto : null, b = new Uint8Array(12);
+  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
+  else for (let k = 0; k < b.length; k++) b[k] = Math.floor(Math.random() * 256);
+  return 'e-' + Array.from(b, x => (x % 36).toString(36)).join('');
+}
+function situacaoEntrega(it, os) {
+  if (!temMotorEntrega() || !it || typeof it !== 'object') return null;
+  try { return ENTREGA_ITEM.situacaoItem(it, os); } catch { return null; }
+}
+// A chave do item para o campo "Entregar parte" aberto: o código, ou a posição no item antigo.
+const chaveParte = (idx, uid) => uid ? 'u:' + uid : 'i:' + idx;
+/* O QUE O ESCRITÓRIO JÁ MARCOU ENTRA NO RASCUNHO ANTES DE MARCAR. O rascunho
+   é uma cópia tirada ao abrir; a marca que a gestão fez depois (e que o pull
+   trouxe) não entrava na conta do saldo daqui, e o celular declarava a
+   quantidade inteira que o servidor recusaria. Só acrescenta, pelo código do
+   item; nada que o rascunho tem sai. */
+function juntarMarcasDoStore(d) {
+  if (!d || !Array.isArray(d.itens) || typeof STORE.getOS !== 'function') return 0;
+  const fonte = STORE.getOS(d.id);
+  if (!fonte || fonte === d || !Array.isArray(fonte.itens)) return 0;
+  const porUid = new Map();
+  for (const f of fonte.itens) if (f && typeof f === 'object' && uidItemOk(f.uid) && !porUid.has(f.uid)) porUid.set(f.uid, f);
+  let n = 0;
+  for (const it of d.itens) {
+    if (!it || typeof it !== 'object' || !uidItemOk(it.uid)) continue;
+    const f = porUid.get(it.uid);
+    const deles = f && Array.isArray(f.entregas) ? f.entregas.filter(idMarca) : [];
+    const meus = Array.isArray(it.entregas) ? it.entregas : [];
+    const idsMeus = new Set(meus.map(idMarca));
+    const novas = deles.filter(e => !idsMeus.has(idMarca(e)));
+    if (!novas.length) continue;
+    const idsDeles = new Set(deles.map(idMarca));
+    it.entregas = [...deles.map(e => JSON.parse(JSON.stringify(e))), ...meus.filter(e => !idsDeles.has(idMarca(e)))];
+    n += novas.length;
+  }
+  return n;
+}
+/* A MARCA DO CELULAR. Confere com o motor (papel 'toque': o servidor decide
+   pelo crachá, e o celular e a montagem com senha têm a mesma régua) e só
+   então acrescenta no item. `simular`: confere sem gravar (o Finalizar marca
+   tudo ou nada). Devolve o resultado do validarEvento. */
+function declararEntrega(it, qtde, { simular = false } = {}) {
+  if (!temMotorEntrega()) return { ok: false, erro: 'Atualize o app para marcar a entrega.', evento: null };
+  const hoje = ENTREGA_ITEM.diaSP(Date.now());
+  const ev = { id: novoIdMarca(), tipo: isInterno(_draft) ? 'retirado' : 'entregue', dia: hoje, qtde, por: EQ.instalador || '', em: nowISO() };
+  const v = ENTREGA_ITEM.validarEvento(ev, it, { papel: 'toque', os: _draft, hoje });
+  if (v.ok && !simular) it.entregas = [...(Array.isArray(it.entregas) ? it.entregas : []), v.evento];
+  return v;
+}
+/* "Instalado" num item com saldo: declara o saldo inteiro. null quando não há
+   o que declarar. O item com problema aberto pela gestão fica como está, como
+   no Finalizar (revisão da E5): a declaração não fecha o problema, e o
+   servidor a recusaria com a mesma frase. */
+function declararSaldoDoItem(it) {
+  if (!temMotorEntrega() || ENTREGA_ITEM.ehServico(it)) return null;
+  juntarMarcasDoStore(_draft);
+  const s = situacaoEntrega(it, _draft);
+  if (!s) return null;
+  if (s.situacao === 'cancelado' && s.entregue < s.qtde) return { ok: false, erro: 'Item cancelado pelo PCP: a entrega não foi marcada. Fale com o PCP.' };
+  if (s.situacao === 'problema') return { ok: false, erro: 'Este item está com problema marcado pela gestão; fale com o PCP.' };
+  if (s.saldo <= 0) return null;
+  return declararEntrega(it, s.saldo);
+}
+function textoDeclarado(it, v) {
+  const q = v && v.evento ? v.evento.qtde : 0, Q = temMotorEntrega() ? ENTREGA_ITEM.qtdeNum(it) : 1;
+  const verbo = isInterno(_draft) ? 'Retirada' : 'Entrega';
+  return `${verbo} declarada${Q > 1 ? `: ${q} de ${Q}` : ''}. O PCP confere no fechamento do dia.`;
+}
+/* O SALDO NA FINALIZAÇÃO (o mesmo da ficha da gestão, E4). O.S. com entrega
+   marcada e item ainda a entregar: o Finalizar diz que o que falta vai como
+   instalado hoje, e o Cancelar deixa a O.S. aberta, com a entrega parcial.
+   Sem marca nenhuma na O.S., finaliza como sempre. O item com problema de
+   entrega (marcado pelo PCP) fica como está. */
+function saldoAoFinalizar(d) {
+  if (!temMotorEntrega() || !d || d.finalizadaEm) return null;
+  let r;
+  try { r = ENTREGA_ITEM.resumoOS(d); } catch { return null; }
+  if (r.situacao !== 'parcial' && r.situacao !== 'com marca') return null;
+  const pendentes = [];
+  for (const it of Array.isArray(d.itens) ? d.itens : []) {
+    if (!it || typeof it !== 'object' || ENTREGA_ITEM.ehServico(it)) continue;
+    const s = situacaoEntrega(it, d);
+    if (s && s.saldo > 0 && (s.situacao === 'a entregar' || s.situacao === 'parcial')) pendentes.push({ it, s });
+  }
+  return pendentes.length ? { pendentes, unidades: pendentes.reduce((t, p) => t + p.s.saldo, 0) } : null;
+}
+/* MARCA RECUSADA PELO ESCRITÓRIO (saldo, O.S. finalizada pela gestão): o
+   store já a tirou da cópia da lista e da fila; o rascunho aberto pode ser
+   outra cópia, e a próxima gravação a mandaria de novo. */
+function tirarRecusadasDoRascunho(d) {
+  const ids = new Set(((d && Array.isArray(d.recusadas)) ? d.recusadas : []).map(idMarca).filter(Boolean));
+  if (!ids.size || !_draft || String(_draft.id) !== String(d.id)) return 0;
+  let n = 0;
+  for (const it of Array.isArray(_draft.itens) ? _draft.itens : []) {
+    if (!it || typeof it !== 'object' || !Array.isArray(it.entregas)) continue;
+    const fica = it.entregas.filter(e => !ids.has(idMarca(e)));
+    n += it.entregas.length - fica.length;
+    if (fica.length) it.entregas = fica; else delete it.entregas;
+  }
+  return n;
 }
 
 const normNome = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
@@ -294,6 +417,18 @@ async function enter() {
     toast(`⚠️ ${ref} continua neste celular sem ir para o escritório (${motivo || 'erro'}). Avise o PCP.`, 'error');
   });
   STORE.on('item-recusado', registrarRecusa);
+  /* A ENTREGA DECLARADA QUE O ESCRITÓRIO NÃO GRAVOU (E5: parte maior que o
+     saldo, O.S. finalizada pela gestão, item que saiu da lista). A gravação
+     passou; a marca não. O store já a tirou da cópia e da fila e guardou o
+     aviso; aqui ela sai do rascunho aberto, e o aviso fica fixo no topo da
+     lista até o Entendi (o toast some em 7 s). */
+  STORE.on('entregas-descartadas', d => {
+    if (tirarRecusadasDoRascunho(d) && EQ.modalId) {
+      const ae = document.activeElement;
+      if (!(ae && ae.closest && ae.closest('#modal-os') && ['INPUT', 'TEXTAREA', 'SELECT'].includes(ae.tagName))) reRender();
+    }
+    renderAvisos();
+  });
   STORE.on('pull-truncado', () => toast('Pode faltar O.S na lista. Feche e abra o app de novo.', 'error'));
   STORE.on('sem-sessao', () => {
     // Crachá que venceu com o app aberto: vira o aviso fixo com o botão de autorizar.
@@ -455,7 +590,18 @@ function renderAvisos() {
     const quais = rec.map(r => r.numero ? 'a O.S ' + r.numero : 'uma alteração').join(', ');
     avisos.push(`<div class="trava-msg eq-aviso" role="alert"><span>⛔ O escritório não aceitou ${esc(quais)}: ${esc(rec[rec.length - 1].motivo)} O registro ficou guardado neste celular. Ligue para o PCP antes de sair daqui.</span><button type="button" class="btn-ghost" data-aviso="recusa">Entendi</button></div>`);
   }
+  // Entrega declarada que o escritório não gravou (E5): uma linha por O.S., até o Entendi.
+  const entDesc = typeof STORE.avisosEntregas === 'function' ? STORE.avisosEntregas() : [];
+  for (const a of entDesc.slice(-3)) {
+    const marcas = (Array.isArray(a.marcas) ? a.marcas : []).slice(0, 3);
+    const txt = marcas.map(m => `${m.item || 'Um item'}: ${m.motivo || 'o escritório não aceitou.'}`).join(' ');
+    avisos.push(`<div class="trava-msg eq-aviso" role="alert"><span>⚠️ ${marcas.length === 1 ? 'A entrega marcada' : 'Entregas marcadas'} na O.S ${esc(a.numero || a.id)} não ${marcas.length === 1 ? 'foi gravada' : 'foram gravadas'}. ${esc(txt)} Fale com o PCP.</span><button type="button" class="btn-ghost" data-aviso="entrega" data-ent="${esc(a.id)}">Entendi</button></div>`);
+  }
   el.innerHTML = avisos.join('');
+  $$('[data-aviso="entrega"]', el).forEach(b => b.onclick = () => {
+    if (typeof STORE.dispensarAvisoEntregas === 'function') STORE.dispensarAvisoEntregas(b.dataset.ent);
+    renderAvisos();
+  });
   $$('[data-aviso="autorizar"]', el).forEach(b => b.onclick = () => { EQ.pedirAutorizacao = true; mostrarAutorizacao(); });
   $$('[data-aviso="recusa"]', el).forEach(b => b.onclick = () => {
     try { localStorage.setItem(K_RECUSADOS, JSON.stringify(lerRecusados().map(r => ({ ...r, visto: true })))); } catch {}
@@ -773,7 +919,7 @@ function aoVoltar() {
 function openModal(os) {
   if (!os) { toast('O.S não encontrada.', 'error'); return; }
   _draft = JSON.parse(JSON.stringify(os));
-  _dirty = false; EQ.modalId = os.id; EQ.tentouFinalizar = null;
+  _dirty = false; EQ.modalId = os.id; EQ.tentouFinalizar = null; EQ.parte = null;
   renderModal();
   $('#modal-overlay').classList.remove('hidden');
   empilharFicha();
@@ -782,7 +928,7 @@ function openModal(os) {
 function closeModal(veioDoVoltar) {
   if (_dirty) save();
   $('#modal-overlay').classList.add('hidden');
-  EQ.modalId = null; _draft = null; EQ.tentouFinalizar = null;
+  EQ.modalId = null; _draft = null; EQ.tentouFinalizar = null; EQ.parte = null;
   if (veioDoVoltar !== true) desempilharFicha();
   renderList();
 }
@@ -828,7 +974,7 @@ function reRender() {
   const ae = document.activeElement;
   let foco = null, pos = null;
   if (ae && ae.closest && ae.closest('#modal-os')) {
-    for (const a of ['data-f', 'data-iobs', 'data-c']) if (ae.hasAttribute(a)) { foco = `[${a}="${ae.getAttribute(a)}"]`; break; }
+    for (const a of ['data-f', 'data-iobs', 'data-c', 'data-iparteq']) if (ae.hasAttribute(a)) { foco = `[${a}="${ae.getAttribute(a)}"]`; break; }
     try { if (typeof ae.selectionStart === 'number') pos = ae.selectionStart; } catch {}
   }
   renderModal();
@@ -994,6 +1140,85 @@ function irParaBloco(bloco) {
   if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
+/* PENDENTE, INSTALADO, RETRABALHO NUM ITEM. O Instalado liga o ✓ Verificado
+   da gestão; Pendente e Retrabalho não o desligam (diagnóstico de 29/09/2026:
+   o toque em Pendente apagava a conferência da produção). Quem desmarca o
+   Verificado é a gestão. E o Instalado DECLARA A ENTREGA DO SALDO (E5).
+   Voltar para Pendente não desfaz a marca: o celular só acrescenta, e
+   desfazer é da gestão. */
+function marcarStatusItem(idx, uid, val) {
+  const it = itemDoRascunho(idx, uid); if (!it) return;
+  const antes = it.statusInst || '';
+  it.statusInst = val;
+  if (val === 'ok') it.pronto = true;
+  const v = val === 'ok' ? declararSaldoDoItem(it) : null;
+  const s = val === '' && antes === 'ok' ? situacaoEntrega(it, _draft) : null;
+  rollupRetrab();
+  save(); reRender();
+  if (v && !v.ok) toast(v.erro, 'error');
+  else if (v) toast(textoDeclarado(it, v), 'success');
+  else if (s && s.declarado > 0) toast('A entrega declarada continua registrada. Para desfazer, fale com o PCP.');
+}
+/* ENTREGAR PARTE: a parte maior que o saldo é recusada aqui, com a frase do
+   servidor; a que passa é declarada. Fechar o saldo pela parte vale como
+   Instalado. Devolve '' quando marcou, ou o motivo. */
+function marcarParteDoItem(idx, uid, qtde) {
+  const it = itemDoRascunho(idx, uid); if (!it) return 'Item não encontrado.';
+  const q = String(qtde == null ? '' : qtde).trim();
+  if (!q) { toast('Diga a quantidade.', 'error'); return 'Diga a quantidade.'; }
+  juntarMarcasDoStore(_draft);
+  const v = declararEntrega(it, /^\d+$/.test(q) ? Number(q) : q);
+  if (!v.ok) { toast(v.erro, 'error'); return v.erro; }
+  const s = situacaoEntrega(it, _draft);
+  if (s && s.saldo === 0 && !it.statusInst) { it.statusInst = 'ok'; it.pronto = true; }
+  EQ.parte = null;
+  rollupRetrab();
+  save(); reRender();
+  toast(textoDeclarado(it, v), 'success');
+  return '';
+}
+
+/* A ENTREGA NO CARTÃO DO ITEM (E5): a situação, sem R$ (o que foi e quem
+   marcou: a equipe, declarado, ou o PCP) e, com saldo e quantidade inteira
+   maior que 1, o "Entregar parte", que abre o campo da quantidade. Item sem
+   marca e sem parte a oferecer não ganha linha: o cartão fica como era. */
+function entregaDoItemHTML(it, i, os, ro, u) {
+  if (!temMotorEntrega() || !it || typeof it !== 'object' || ENTREGA_ITEM.ehServico(it)) return '';
+  const s = situacaoEntrega(it, os);
+  if (!s) return '';
+  const interno = isInterno(os);
+  const uid = uidItemOk(it.uid) ? it.uid : '';
+  // Item com problema aberto não oferece parte: a declaração não o fecha (revisão da E5).
+  const podeParte = !ro && !os.finalizadaEm && s.situacao !== 'cancelado' && s.situacao !== 'problema' && s.saldo > 1 && ENTREGA_ITEM.aceitaParte(it);
+  let selo = '';
+  if (s.situacao === 'cancelado') selo = `<span class="ent-selo st-cancelado">Cancelado pelo PCP${s.cancelado && s.cancelado.motivo ? ': ' + esc(s.cancelado.motivo) : ''}</span>`;
+  else if (s.situacao === 'problema') selo = `<span class="ent-selo st-problema">Com problema de entrega${s.problema && s.problema.motivo ? ': ' + esc(s.problema.motivo) : ''}. Fale com o PCP.</span>`;
+  else if (s.entregue > 0) {
+    const conta = `${interno ? 'Retirado' : 'Entregue'}${s.qtde > 1 ? ` ${s.entregue} de ${s.qtde}` : ''}${s.saldo > 0 ? ` · faltam ${s.saldo}` : ''}`;
+    const quem = s.declarado >= s.entregue ? 'declarado pela equipe' : s.declarado > 0 ? `${s.declarado} declarado${s.declarado === 1 ? '' : 's'} pela equipe` : 'marcado pelo PCP';
+    selo = `<span class="ent-selo ${s.declarado > 0 ? 'st-declarado' : 'st-entregue'}">${s.declarado > 0 ? '📝' : '📦'} ${esc(conta)} (${quem})</span>`;
+  }
+  if (!selo && !podeParte) return '';
+  const chave = chaveParte(i, uid);
+  const aberto = podeParte && EQ.parte === chave;
+  const rotuloParte = interno ? 'Retirar parte' : 'Entregar parte';
+  const campo = aberto ? `
+      <div class="item-parte">
+        <label for="m-iparteq-${i}">Quantas ${interno ? 'o cliente levou' : 'foram'} agora? Faltam ${s.saldo} de ${s.qtde}.</label>
+        <div class="item-parte-linha">
+          <input id="m-iparteq-${i}" type="number" inputmode="numeric" min="1" max="${s.saldo}" step="1" data-iparteq="${i}" ${u}>
+          <button type="button" class="btn-primary" data-iparteok="${i}" ${u}>Marcar</button>
+          <button type="button" class="btn-ghost" data-ipartex="${i}" ${u}>Cancelar</button>
+        </div>
+      </div>` : '';
+  return `
+      <div class="item-entrega">
+        ${selo}
+        ${podeParte && !aberto ? `<button type="button" class="btn-ghost ent-parte-btn" data-iparte="${i}" ${u}>${rotuloParte}</button>` : ''}
+        ${campo}
+      </div>`;
+}
+
 /* A FICHA NA ORDEM DO DIA: saída, chegada no cliente (check-in), itens,
    serviço pronto, retorno e, preso ao pé da tela, o Finalizar. Antes a foto
    de check-in, feita na chegada, vinha depois da hora e do KM de RETORNO, e o
@@ -1067,9 +1292,10 @@ function renderModal() {
         </div>
         <div class="seg">
           <button type="button" data-iset="${i}|" ${u} ${ro?'disabled':''} class="${st===''?'active':''}">Pendente</button>
-          <button type="button" data-iset="${i}|ok" ${u} ${ro?'disabled':''} class="seg-ok ${st==='ok'?'active':''}">✅ Instalado</button>
+          <button type="button" data-iset="${i}|ok" ${u} ${ro?'disabled':''} class="seg-ok ${st==='ok'?'active':''}">${interno ? '✅ Retirado' : '✅ Instalado'}</button>
           <button type="button" data-iset="${i}|retrab" ${u} ${ro?'disabled':''} class="seg-retrab ${st==='retrab'?'active':''}">🔴 Retrabalho</button>
         </div>
+        ${entregaDoItemHTML(it, i, os, ro, u)}
         ${retrabBox}
       </div>`;
   }).join('');
@@ -1111,7 +1337,7 @@ function renderModal() {
     <details class="card-fs" data-bloco="itens" open>
       <summary>${n.itens}. Itens <span class="item-progress" style="margin-left:auto">✅ ${instalados}/${itens.length}${retrabN?` · 🔴 ${retrabN}`:''}</span></summary>
       <div class="fs-body">
-        <p class="text-muted" style="margin-bottom:8px">Marque cada item: <strong>Instalado</strong> ou <strong>Retrabalho</strong>. No retrabalho, escolha o motivo e tire uma foto do problema.</p>
+        <p class="text-muted" style="margin-bottom:8px">Marque cada item: <strong>${interno ? 'Retirado' : 'Instalado'}</strong> ou <strong>Retrabalho</strong>. ${temMotorEntrega() ? `O ${interno ? 'Retirado' : 'Instalado'} declara a entrega do item, e o PCP confere. ` : ''}No retrabalho, escolha o motivo e tire uma foto do problema.</p>
         <div class="item-cards">${itensCards || '<p class="text-muted" style="text-align:center">Sem itens</p>'}</div>
       </div>
     </details>`;
@@ -1286,14 +1512,20 @@ function bindModal(os, ro) {
   // Status por item (Pendente / Instalado / Retrabalho)
   $$('[data-iset]', root).forEach(btn => btn.onclick = () => {
     const [i, val] = btn.dataset.iset.split('|');
-    const it = itemDoRascunho(i, btn.dataset.iuid); if (!it) return;
-    it.statusInst = val;
-    /* O INSTALADO LIGA O ✓ VERIFICADO DA GESTÃO; PENDENTE E RETRABALHO NÃO O
-       DESLIGAM (diagnóstico de 29/09/2026: o toque em Pendente apagava a
-       conferência da produção). Quem desmarca o Verificado é a gestão. */
-    if (val === 'ok') it.pronto = true;
-    rollupRetrab();
-    save(); reRender();
+    marcarStatusItem(i, btn.dataset.iuid, val);
+  });
+  /* ENTREGAR PARTE (E5): abre o campo da quantidade no cartão; Marcar confere
+     com o motor e declara (marcarParteDoItem). */
+  $$('[data-iparte]', root).forEach(b => b.onclick = () => {
+    EQ.parte = chaveParte(b.dataset.iparte, b.dataset.iuid);
+    reRender();
+    const inp = $(`#modal-os [data-iparteq="${b.dataset.iparte}"]`);
+    if (inp && inp.focus) inp.focus();
+  });
+  $$('[data-ipartex]', root).forEach(b => b.onclick = () => { EQ.parte = null; reRender(); });
+  $$('[data-iparteok]', root).forEach(b => b.onclick = () => {
+    const inp = $(`[data-iparteq="${b.dataset.iparteok}"]`, root);
+    marcarParteDoItem(b.dataset.iparteok, b.dataset.iuid, (inp && inp.value) || '');
   });
   $$('[data-imotivo]', root).forEach(sel => sel.onchange = () => {
     const it = itemDoRascunho(sel.dataset.imotivo, sel.dataset.iuid); if (!it) return;
@@ -1380,8 +1612,30 @@ function bindModal(os, ro) {
     }
     // Finalizar não tem volta pelo espelho (só a gestão reabre): pergunta antes.
     const pend = (_draft.itens || []).filter(i => !i.statusInst).length;
-    const avisoPend = pend ? ` ${pend === 1 ? '1 item ainda está' : pend + ' itens ainda estão'} como Pendente.` : '';
-    if (!confirm(`Finalizar a O.S ${_draft.numero || ''}? Depois só a gestão reabre.${avisoPend}`)) return;
+    let avisoPend = pend ? ` ${pend === 1 ? '1 item ainda está' : pend + ' itens ainda estão'} como Pendente.` : '';
+    /* ENTREGA PARCIAL (E5): com marca de entrega na O.S. e item ainda a
+       entregar, o que falta vai declarado hoje; o Cancelar deixa a O.S.
+       aberta. Tudo ou nada: se um item não passa no motor, nenhum é marcado
+       e a O.S. não finaliza. */
+    juntarMarcasDoStore(_draft);
+    const saldo = saldoAoFinalizar(_draft);
+    if (saldo) {
+      const n = saldo.pendentes.length, interno = isInterno(_draft);
+      for (const { it, s } of saldo.pendentes) {
+        const v = declararEntrega(it, s.saldo, { simular: true });
+        if (!v.ok) { toast(`Item ${it.item || ''}: ${v.erro} A O.S. não foi finalizada.`, 'error'); return; }
+      }
+      const como = interno ? (n === 1 ? 'retirado' : 'retirados') : (n === 1 ? 'instalado' : 'instalados');
+      avisoPend = ` ${n === 1 ? 'O item que falta vai' : `Os ${n} itens que faltam vão`} como ${como} hoje (entrega declarada). Para deixar a O.S. aberta, com entrega parcial, toque em Cancelar.`;
+    }
+    if (!confirm(`Finalizar a O.S ${_draft.numero || ''}? Depois só a gestão reabre.${avisoPend}`)) {
+      if (saldo) toast('A O.S. continua aberta: entrega parcial.');
+      return;
+    }
+    if (saldo) for (const { it, s } of saldo.pendentes) {
+      declararEntrega(it, s.saldo);
+      if (!it.statusInst) { it.statusInst = 'ok'; it.pronto = true; }
+    }
     // Quem finaliza responde pela conferência, se ninguém escreveu outro nome.
     if (!String(_draft.conferidoPor || '').trim()) _draft.conferidoPor = EQ.instalador;
     _draft.finalizadaEm = nowISO(); _draft.finalizadoPor = EQ.instalador;

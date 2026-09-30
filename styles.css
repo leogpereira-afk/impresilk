@@ -535,6 +535,9 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .ent-selo.st-cancelado { background: #f1f5f9; color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
 .ent-selo.st-servico   { background: transparent; color: var(--muted); font-weight: 500; padding-left: 0; }
 .ent-selo.st-negativo  { border-radius: 8px; background: #fef2f2; color: var(--red); border: 1px solid #fecaca; font-weight: 600; }
+/* Declarado pela equipe (E5): o celular disse que foi; ainda não é entregue
+   conferido. Outra cor e borda tracejada, para não se confundir com o verde. */
+.ent-selo.st-declarado { background: #f5f3ff; color: #5b21b6; border: 1px dashed #8b5cf6; }
 .ent-acoes { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
 .ent-btn {
   min-height: 40px; padding: 0 12px; border-radius: 8px; cursor: pointer; white-space: nowrap;
@@ -571,6 +574,7 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 }
 .tag-entrega.tag-entrega-ok { background: #dcfce7; color: #166534; }
 .tag-entrega.tag-entrega-prob { background: #fee2e2; color: #991b1b; }
+.tag-entrega.tag-entrega-decl { background: #f5f3ff; color: #5b21b6; border: 1px dashed #8b5cf6; }
 
 /* Marcação de escolha única (Acesso / Fixação) */
 .mark-group { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -658,6 +662,17 @@ main { padding-bottom: env(safe-area-inset-bottom); }
    não os pegava: o iPhone ampliava a página ao tocar e ela ficava ampliada. */
 .item-retrab select, .item-retrab input:not([type=file]) { font-size: 16px; min-height: 44px; }
 .item-foto { margin-top: 6px; }
+/* Entrega declarada no cartão do item (E5): a situação, sem R$, e o "Entregar
+   parte", que abre o campo da quantidade. Controles de 40 px, campo de 44 px
+   com fonte de 16 px (abaixo disso o iPhone amplia a página). */
+.item-entrega { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; }
+.item-entrega .ent-selo { font-size: .8rem; }
+.item-entrega .ent-parte-btn { min-height: 40px; padding: 0 12px; font-size: .88rem; font-weight: 600; color: var(--text); border-radius: var(--radius-s); }
+.item-parte { flex-basis: 100%; display: flex; flex-direction: column; gap: 4px; }
+.item-parte label { font-size: .9rem; font-weight: 600; color: #334155; }
+.item-parte-linha { display: flex; gap: 6px; align-items: stretch; }
+.item-parte-linha input { flex: 1 1 auto; min-width: 0; min-height: 44px; font-size: 16px; border: 1px solid var(--border); border-radius: var(--radius-s); padding: 8px; }
+.item-parte-linha button { min-height: 44px; padding: 0 12px; flex: 0 0 auto; border-radius: var(--radius-s); }
 
 /* ── Foto (upload) ───────────────────────────────────────────────────────── */
 .foto-box {
@@ -2234,6 +2249,9 @@ body.nav-aberta .nav-fundo { display: block; }
 .casa-tabela tr.st-finalizada td:first-child { border-left:3px solid #10b981; }
 .retrab-box { max-width: 560px; }
 .retrab-form { display:grid; gap:10px; margin-top:12px; }
+/* O display:grid acima vencia o atributo hidden: os cinco campos do "Sim,
+   gerou" apareciam abertos antes do toque em "Sim". */
+.retrab-form[hidden] { display:none; }
 .retrab-form .field { display:flex; flex-direction:column; gap:4px; }
 .retrab-form textarea, .retrab-form input, .retrab-form select { min-height:40px; }
 .casa-lancar { margin-top:16px; border-color:#f59e0b; }
@@ -3568,3 +3586,44 @@ img.perf-logo{object-fit:cover}
 .st-ent-acoes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .st-ent-acoes .st-ent-btn { min-height: 40px; }
 .st-ent-acoes .st-ent-cancelar { color: #b91c1c; border-color: #fecaca; }
+
+/* ── NOMES ANTIGOS VIRAM ID (F12, 30/09/2026) ──────────────────────────────
+   Dentro de "Conferir nomes do PCP × fichas do RH": o painel da troca (o
+   que vai, a janela do aparelho, o relatório com o Desfazer, as pendências)
+   e as grafias parecidas agrupadas na tabela. No celular a tabela vira uma
+   ficha por nome, com o rótulo de cada campo. Só classes novas. */
+.lig-conv{display:grid;gap:10px;margin:10px 0 14px}
+.lig-conv .metricas-nota{margin:0}
+.lig-conv-resumo{margin:0;font-size:.86rem;color:#163654;line-height:1.5}
+.lig-conv-status{margin:0;padding:10px 12px;border-radius:10px;background:#eef6ff;color:#1d4ed8;font-weight:600;font-size:.86rem}
+.lig-conv > .btn-primary{justify-self:start;min-height:44px}
+.lig-rel{border:1px solid #d7e1ee;border-radius:12px;padding:10px 12px;background:#fbfdff}
+.lig-rel h4{margin:0 0 4px}
+.lig-rel-conta{margin:0 0 6px;font-size:.84rem;color:#163654}
+.lig-rel-os > summary{cursor:pointer;min-height:40px;display:flex;align-items:center;font-size:.84rem;color:#1d4ed8}
+.lig-rel-tabela td{vertical-align:top}
+.lig-rel-acoes{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.lig-rel-acoes button{min-height:40px}
+.lig-pend{border-left:4px solid #f0b45a;padding:4px 0 4px 12px}
+.lig-pend h4{margin:0 0 4px}
+.lig-pend ul{margin:0;padding-left:18px;font-size:.84rem;line-height:1.6}
+.lig-tabela tbody.lig-grupo{border-left:4px solid #93c5fd}
+.lig-tabela tr.lig-grupo-cab td{background:#eff6ff;color:#1e3a8a;font-size:.8rem;padding:8px 12px}
+.lig-tabela td.lig-vira button,.lig-tabela td.lig-acoes button{margin-top:6px}
+.lig-tabela td.lig-acoes select{max-width:100%}
+@media (max-width:640px){
+  .lig-tabela,.lig-tabela tbody,.lig-tabela tr,.lig-tabela td{display:block;width:100%}
+  .lig-tabela thead{display:none}
+  .lig-tabela tbody{border-bottom:1px solid #d7e1ee}
+  .lig-tabela tr{padding:6px 0}
+  .lig-tabela td{border-bottom:0;padding:4px 12px}
+  .lig-tabela td[data-rot]::before{content:attr(data-rot);display:block;font-size:.66rem;letter-spacing:.05em;text-transform:uppercase;color:#5b6f84;font-weight:700}
+  .lig-tabela td.num{text-align:left}
+  .lig-tabela td.num::before{display:inline;margin-right:8px}
+  .lig-tabela td.lig-acoes select{width:100%;min-height:40px}
+  .lig-rel-tabela,.lig-rel-tabela tbody,.lig-rel-tabela tr,.lig-rel-tabela td{display:block;width:100%}
+  .lig-rel-tabela thead{display:none}
+  .lig-rel-tabela tr{border-bottom:1px solid #eef2f7;padding:4px 0}
+  .lig-rel-tabela td{border-bottom:0;padding:3px 8px}
+  .lig-rel-tabela td.num{text-align:left;font-weight:700}
+}
