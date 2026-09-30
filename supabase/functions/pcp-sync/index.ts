@@ -1,5 +1,6 @@
 import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
+import { cancelada, carimbarCancelamento, cancelamentoMudou } from "../_shared/pcp-status.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -364,6 +365,12 @@ async function perfHash(v:any) {
   const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(JSON.stringify(v)));
   return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
 }
+/* O CORTE DO LANÇAMENTO MANUAL (decisão do dono, 14/09/2026): baixa do ERP
+   anterior a este dia conta como entregue sem lançamento; a partir dele,
+   espera o lançamento à mão. Constante ÚNICA deste lado; o aparelho tem a
+   dele em casa.js (CORTE_LANCAMENTO_MANUAL), e tests/cancelamento-f16.test.cjs
+   confere que as duas dizem o mesmo dia (F16). */
+const CORTE_LANCAMENTO_MANUAL = "2026-09-15";
 /* `estrito` é a trava de "a base mudou durante a consulta": vale para a
    apuração, que sela um hash. O relatório de entregas só lê; com a equipe
    sincronizando o dia inteiro, ele falhava sem motivo. */
@@ -379,8 +386,12 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     for(const row of rows) {
       const o=row.registro, fim=perfDia(o?.finalizadaEm);
       if(!fim || o.tipo==="interno") continue;
+      /* A O.S. CANCELADA (F16), no ERP ou à mão pela gestão, não é entrega:
+         sai da base. O hash do período aberto muda; a revisão selada é lida
+         do selo e fica como foi. */
+      if(cancelada(o)) continue;
       const erp=o.baixaAutoERP?.em===o.finalizadaEm || /^Mubisys\b/i.test(o.finalizadoPor || "");
-      if(erp && !o.entregaLancada && fim>="2026-09-15") continue;
+      if(erp && !o.entregaLancada && fim>=CORTE_LANCAMENTO_MANUAL) continue;
       const dia=(o.entregaLancada && perfDia(o.entregaLancada.data)) || fim;
       if(dia>=periodo.de && dia<=periodo.ate) lista.push({...o,id:row.id,_dia:dia});
     }
@@ -1248,6 +1259,8 @@ Deno.serve(async (req: Request) => {
         const veioPrazo = Object.prototype.hasOwnProperty.call(os, "prazoCombinado") ? os.prazoCombinado : undefined;
         // A divisão da equipe que o aparelho mandou (F08), antes da preservação.
         const veioAlocacao = Object.prototype.hasOwnProperty.call(os, "alocacao") ? os.alocacao : undefined;
+        // O pedido de cancelar ou de desfazer o cancelamento (F16), antes da preservação.
+        const veioCancelamento = Object.prototype.hasOwnProperty.call(os, "cancelamento") ? os.cancelamento : undefined;
         trocarOS(preservarAusentes(os, existing, { podeLimpar: !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp) }));
         /* A DIVISÃO DA EQUIPE DENTRO DA O.S. (F08). Regras em _shared
            (sanearAlocacao): só admin e pcp mudam; conferida pelo motor e pela
@@ -1301,6 +1314,22 @@ Deno.serve(async (req: Request) => {
             f15 = rodarF15(await autorAuditoria());
           trocarOS(f15.os);
           avisosToque.push(...f15.avisos);
+        }
+        /* CANCELAMENTO DA O.S. (F16). Regras em _shared/pcp-status.mjs
+           (carimbarCancelamento): so o PEDIDO muda o campo ({ cancelar: true,
+           motivo } ou { desfazer: true }), so de admin e pcp, com motivo de 15
+           letras ou mais; o carimbo e do cracha e do servidor; desfazer guarda
+           quem desfez. A copia da aba antiga, o null e a marca forjada ficam
+           com o gravado. Nada aqui e 422: o que nao entra vira aviso. So le o
+           RH quando o pedido muda o gravado. */
+        {
+          const gestaoCanc = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
+          const agoraCanc = new Date().toISOString();
+          const rodarCanc = (autor: any) => carimbarCancelamento(veioCancelamento, os, existing, autor, agoraCanc, { pode: gestaoCanc, avisar: !ehMaquina && !ehToqueNoNome });
+          let rc = rodarCanc({ nome: String(cracha?.nome || cracha?.sub || ""), login: String(cracha?.sub ?? ""), porId: "" });
+          if (cancelamentoMudou(os.cancelamento, rc.os.cancelamento)) rc = rodarCanc(await autorAuditoria());
+          trocarOS(rc.os);
+          avisosToque.push(...rc.avisos);
         }
         /* ENTREGA LANCADA (F01): carimbo do servidor (por, porConta, porId, em).
            Lanca quem tem o botao e entrou com senha; o toque sem senha, a

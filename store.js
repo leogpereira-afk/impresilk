@@ -1081,6 +1081,8 @@ const STORE = (() => {
      tem fica; a exclusão chega pelo incremental (lápide), como sempre. */
   function _esperaLancamento(o) {
     if (!o || !o.finalizadaEm || o.entregaLancada || o.tipo === 'interno') return false;
+    // A cancelada (F16) não espera lançamento: sai com a janela, como as outras.
+    if (typeof OPERACAO !== 'undefined' && OPERACAO && typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(o)) return false;
     const erp = (o.baixaAutoERP && o.baixaAutoERP.em === o.finalizadaEm) || /^Mubisys\b/i.test(o.finalizadoPor || '');
     const corte = typeof CORTE_LANCAMENTO_MANUAL === 'string' ? CORTE_LANCAMENTO_MANUAL : '2026-09-15';
     return erp && String(o.finalizadaEm).slice(0, 10) >= corte;

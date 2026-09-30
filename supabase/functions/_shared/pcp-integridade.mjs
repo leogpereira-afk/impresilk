@@ -69,13 +69,17 @@ export function motivoAgendaViva(o, hojeLocal) {
    apagariam a alocação calados. Nesta fatia nenhum valor novo é aceito:
    a porta só preserva o gravado e deixa a gestão limpar de propósito.
    Cada fatia que abre um campo o faz com uma regra própria, DEPOIS desta
-   (F15: carimbarRetornoPrevisto e carimbarPrazoCombinado).
+   (F15: carimbarRetornoPrevisto e carimbarPrazoCombinado; F16:
+   carimbarCancelamento, em _shared/pcp-status.mjs).
    Toda a lista entra no diário (CAMPOS_AUDITADOS). */
 export const CAMPOS_GESTAO = ['alocacao', 'alocacaoLog', 'prazoCombinado', 'retornoPrevisto', 'retornoConferido', 'ocorrencias', 'abonos', 'cancelamento', 'osOriginalId'];
 // O log da alocação é histórico: nem a gestão o apaga com null. O prazo
 // combinado também não: mudar o prazo exige motivo, e o único caminho é o
-// pedido { corrigir: true, data, motivo } (revisão da F15).
-const GESTAO_SO_ACRESCIMO = new Set(['alocacaoLog', 'prazoCombinado']);
+// pedido { corrigir: true, data, motivo } (revisão da F15). O cancelamento
+// também não (F16): cancelar e desfazer são pedidos explícitos
+// ({ cancelar: true, motivo } e { desfazer: true }, carimbarCancelamento em
+// _shared/pcp-status.mjs), e o desfeito fica guardado com quem desfez.
+const GESTAO_SO_ACRESCIMO = new Set(['alocacaoLog', 'prazoCombinado', 'cancelamento']);
 const vazioGestao = v => v == null || v === '' || (Array.isArray(v) && !v.length) || (objeto(v) && !Object.keys(v).length);
 // Algum campo da gestão preenchido = a O.S. tem trabalho (o esqueleto do ERP não passa por cima).
 export const temCampoGestao = o => !!o && CAMPOS_GESTAO.some(c => !vazioGestao(o[c]));
@@ -1298,7 +1302,11 @@ export function guardarEntregasItens(os, antes, { papel = '', avisar = false, au
   for (const g of gravados) for (const e of marcasDe(g)) if (objeto(e)) idsOS.add(String(e.id ?? '').trim());
   const hoje = ENTREGA_ITEM.diaSP(agora) || ENTREGA_ITEM.diaSP(Date.now());
   // Finalizada antes E depois desta gravação: o motor recusa. Finalizando agora, ou reabrindo, vale.
-  const osCtx = { ...os, finalizadaEm: antes?.finalizadaEm && os.finalizadaEm ? os.finalizadaEm : '' };
+  /* O cancelamento que vale é o GRAVADO (F16): a cópia velha sem ele não
+     marca item de O.S. cancelada, e a marca forjada no envio não vale. O
+     pedido de cancelar que vem junto só vale depois desta gravação (o que foi
+     entregue nela fica; o saldo é cancelado). */
+  const osCtx = { ...os, finalizadaEm: antes?.finalizadaEm && os.finalizadaEm ? os.finalizadaEm : '', cancelamento: antes ? antes.cancelamento : undefined };
   const carimbo = { por: String(autor?.nome ?? '').trim().slice(0, 80), porId: ehIdPessoa(autor?.porId) ? String(autor.porId).trim() : '', em: String(agora ?? '') };
   const lista = Array.isArray(os.itens) ? os.itens : [];
   const itens = lista.map(it => {
@@ -1555,6 +1563,13 @@ export function podarCarimbosF15(r) {
   else if (objeto(out.retornoPrevisto)) {
     const { porId: _pi, porConta: _pc, ...x } = out.retornoPrevisto;
     out.retornoPrevisto = x;
+  }
+  /* O CANCELAMENTO DA O.S. (F16) desce com o nome de quem cancelou e de quem
+     desfez, sem o ID e sem o login: a mesma régua. A volta sem eles não
+     apaga nada (só pedido muda o campo: carimbarCancelamento). */
+  if (objeto(out.cancelamento)) {
+    const { porId: _pi, porConta: _pc, desfeitoPorId: _di, desfeitoPorConta: _dc, ...c } = out.cancelamento;
+    out.cancelamento = c;
   }
   /* A MARCA DE ENTREGA POR ITEM (E3) desce com o nome de quem marcou, sem o
      ID: a mesma régua. A volta sem ele não apaga nada, porque marca gravada

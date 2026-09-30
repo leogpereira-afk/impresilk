@@ -399,6 +399,8 @@ function stepperHTML(os, compact) {
 function proximoPasso(os) {
   const st = calcStatus(os);
   if (st === 'finalizada') return null;
+  // Cancelada (F16): não há próximo passo; a ficha oferece Desfazer cancelamento.
+  if (canceladaNaTela(os)) return null;
   if (isInterno(os)) {
     if (!os.liberadoPCP)            return { label: 'PCP precisa liberar', cta: '✓ Liberar PCP', acao: 'pcp' };
     if (!(os.itens || []).length)  return { label: 'Adicionar itens',      cta: '+ Itens',       acao: 'itens' };
@@ -462,7 +464,7 @@ function estaAtrasada(os) {
 // Camada de cor semântica vermelha (alerta) sobre o status normal:
 // vermelho = retrabalho ou atrasada. Devolve classe extra (ou vazio).
 function alertaOS(os) {
-  if (!os || os.finalizadaEm) return '';
+  if (!os || os.finalizadaEm || canceladaNaTela(os)) return '';
   if (os.retrabalho) return 'alerta-retrab';
   if (estaAtrasada(os)) return 'alerta-atraso';
   return '';
@@ -472,7 +474,7 @@ function alertaOS(os) {
 // mais o card "esquenta": branco → creme → amarelo → laranja → vermelho.
 // Retorna '' (sem cor) quando finalizada ou sem data de entrega.
 function urgenciaOS(os) {
-  if (!os || os.finalizadaEm) return '';
+  if (!os || os.finalizadaEm || canceladaNaTela(os)) return '';
   const entrega = dataEntregaOS(os);
   if (!entrega) return '';
   const d = diasEntre(todayISO(), entrega);
@@ -1681,6 +1683,7 @@ function renderModal() {
     ${stepperHTML(os, false)}
     ${temposTags.length ? `<div class="modal-tempos">${temposTags.join(' · ')}</div>` : ''}
     ${pp ? `<div class="prox-passo prox-passo-modal"><span class="prox-passo-tag">Próximo passo</span> <strong>${esc(pp.label)}</strong></div>` : ''}
+    ${statusEntregaFichaHTML(os)}
 
     <div class="ficha-pct">
       <div class="ficha-pct-bar"><div class="ficha-pct-fill" style="width:${pct}%"></div></div>
@@ -1723,6 +1726,7 @@ function renderModal() {
   bindModalEvents(os, ro);
   ligarEquipeDaFicha(ro);
   ligarHistoricoAlteracoes(os);
+  ligarStatusEntregaDaFicha();
 }
 
 /* ── HISTÓRICO DE ALTERAÇÕES DA O.S. (diário do servidor, F03) ─────────────
@@ -1745,7 +1749,7 @@ const AUD_ROTULOS = {
   tipo: 'Tipo', numero: 'Número da O.S.', baixaAutoERP: 'Baixa pelo ERP', justificativaConclusao: 'Justificativa da conclusão',
   prazoCombinado: 'Prazo combinado', retornoPrevisto: 'Retorno previsto',
   agendaLog: 'Histórico de remarcações', origemPDF: 'Lida do PDF do ERP',
-  alocacao: 'Divisão da equipe', alocacaoLog: 'Histórico da divisão',
+  alocacao: 'Divisão da equipe', alocacaoLog: 'Histórico da divisão', cancelamento: 'Cancelamento da O.S.',
   apagado: 'Excluída'
 };
 // Por dentro dos campos que são objeto (conferência da volta, limpeza do
@@ -1758,7 +1762,7 @@ const AUD_SUBROTULOS = {
   descartada: 'Recusada'
 };
 // porConta (o login de quem lançou a entrega) também: "Por conta" leria outra coisa.
-const AUD_SUBOCULTAS = new Set(['porId', 'porConta']);
+const AUD_SUBOCULTAS = new Set(['porId', 'porConta', 'desfeitoPorId', 'desfeitoPorConta']);
 const AUD_PAPEIS = { maquina: 'integração' };
 function audTexto(v) {
   if (typeof v === 'boolean') return v ? 'sim' : 'não';
@@ -1813,6 +1817,11 @@ function audValor(campo, v) {
     return `${n} ${n === 1 ? 'marca' : 'marcas'}` + (novos.length ? ` (${novos.length === 1 ? 'nova' : 'novas'}: ${novos.join('; ')})` : '');
   }
   if (campo.startsWith('fotos') && Array.isArray(v)) return v.length + (v.length === 1 ? ' foto' : ' fotos');
+  // F16: "cancelada por Ana: cliente desistiu" / "desfeito por Bia em 30/09 (era: ...)".
+  if (campo === 'cancelamento' && v && typeof v === 'object' && !Array.isArray(v)) {
+    if (v.ativo === false) return `cancelamento desfeito${v.desfeitoPor ? ' por ' + v.desfeitoPor : ''}${v.desfeitoEm ? ' em ' + audTexto(v.desfeitoEm) : ''}${v.motivo ? ' (o motivo era: ' + v.motivo + ')' : ''}`;
+    return `cancelada${v.por ? ' por ' + v.por : ''}${v.motivo ? ': ' + v.motivo : ''}`;
+  }
   // F15: um dia por linha ("30/09: saída 08:00, retorno 17:00").
   if (campo === 'retornoPrevisto') return (Array.isArray(v) ? v : [v]).filter(e => e && typeof e === 'object')
     .map(e => `${audTexto(e.dia)}: ${e.saida ? 'saída ' + e.saida + ', ' : ''}retorno ${e.hora || '(vazio)'}`).join(' | ') || '(vazio)';
@@ -2097,6 +2106,8 @@ const ACOES_ENTREGA = {
    acompanha a entrega dos outros itens. */
 function acoesEntregaDoItem(it, os) {
   if (!temMotorEntrega() || !it || typeof it !== 'object' || !os || os.finalizadaEm || ENTREGA_ITEM.ehServico(it)) return [];
+  // O.S. cancelada (F16): o saldo está cancelado; para marcar, desfaça o cancelamento da O.S.
+  if (typeof ENTREGA_ITEM.canceladaOS === 'function' && ENTREGA_ITEM.canceladaOS(os)) return [];
   let s;
   try { s = ENTREGA_ITEM.situacaoItem(it, os); } catch { return []; }
   const interna = isInterno(os), out = [];
@@ -4291,6 +4302,86 @@ function aplicarFinalizacao(os) {
 /* ══════════════════════════════════════════════════════════════════════════
    CARD DE O.S (reutilizável)
    ══════════════════════════════════════════════════════════════════════════ */
+/* ── STATUS DA ENTREGA EM 7 ESTADOS E CANCELAMENTO (F16, 30/09/2026) ───────
+   O selo vem de OPERACAO.statusEntrega, a mesma régua do servidor
+   (_shared/pcp-status.mjs): Cancelado > Retrabalho > Retorno antecipado >
+   Com atraso > No prazo > Em execução > Agendado, sempre com o motivo (na
+   dica do selo e na ficha). NÃO é o status de agenda (calcStatus e
+   OPERACAO.status continuam como estão: o Painel copia aquele). Cancelar a
+   O.S. é só da gestão (admin e pcp), com motivo, pelo botão da ficha; o
+   servidor guarda o pedido (carimbarCancelamento) e desfazer fica no
+   histórico. Sem o operacao.js novo (cache misto), a tela segue sem o selo. */
+const temStatusEntrega = () => typeof OPERACAO !== 'undefined' && typeof OPERACAO.statusEntrega === 'function';
+function statusEntregaDe(os) {
+  if (!temStatusEntrega() || !os || typeof os !== 'object') return null;
+  try { return OPERACAO.statusEntrega(os); } catch { return null; }
+}
+const canceladaNaTela = os => temStatusEntrega() && typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(os);
+const ICONE_STATUS_ENTREGA = { cancelado: '⛔', retrabalho: '🔴', retorno_antecipado: '↩', atraso: '⏰', no_prazo: '✅', execucao: '🔧', agendado: '📅' };
+function seloStatusEntregaHTML(st) {
+  if (!st || !st.estado) return '';
+  const dica = (st.aplicaveis || []).map(a => `${a.rotulo}: ${a.motivo}`).join('\n');
+  return `<span class="selo-entrega se-${esc(st.estado)}" title="${esc(dica)}"><span aria-hidden="true">${ICONE_STATUS_ENTREGA[st.estado] || ''}</span> ${esc(st.rotulo)}</span>`;
+}
+const podeCancelarOS = () => ['admin', 'pcp'].includes(String((STATE.user || {}).papel || '')) && !(typeof crachaEhToque === 'function' && crachaEhToque());
+/* NA FICHA: o selo, o motivo, os outros estados que também valem, o retorno
+   antecipado "sem dado" (entra com a F17) e, para a gestão, "Cancelar O.S."
+   ou "Desfazer cancelamento". Vale também na O.S. finalizada (lock-allow): a
+   baixa do ERP fora da carteira é justamente a que a gestão cancela. */
+function statusEntregaFichaHTML(os) {
+  const st = statusEntregaDe(os);
+  if (!st) return '';
+  const c = st.cancelamento;
+  const outros = (st.aplicaveis || []).slice(1).map(a => `<li><strong>${esc(a.rotulo)}:</strong> ${esc(a.motivo)}</li>`).join('');
+  const g = os.cancelamento && typeof os.cancelamento === 'object' ? os.cancelamento : null;
+  const desfeito = !c && g && g.ativo === false && g.desfeitoEm
+    ? `<p class="st-ent-hist">Cancelamento desfeito${g.desfeitoPor ? ' por ' + esc(g.desfeitoPor) : ''} em ${esc(fmtDataBR(g.desfeitoEm))}${g.motivo ? ` (o motivo era: ${esc(g.motivo)})` : ''}.</p>` : '';
+  let acao = '';
+  if (podeCancelarOS() && c && c.origem === 'manual') acao = '<button type="button" class="btn-ghost btn-sm st-ent-btn" id="btn-desfazer-cancelamento">↩ Desfazer cancelamento</button>';
+  else if (podeCancelarOS() && !c) acao = '<button type="button" class="btn-ghost btn-sm st-ent-btn st-ent-cancelar" id="btn-cancelar-os">Cancelar O.S.</button>';
+  const erp = c && c.origem === 'erp' ? '<p class="st-ent-hist">Cancelada no ERP: ela só volta se for reaberta no ERP.</p>' : '';
+  return `<section class="st-entrega lock-allow" aria-label="Status da entrega">
+      <div class="st-ent-linha"><span class="st-ent-rot">Status da entrega</span>${seloStatusEntregaHTML(st)}</div>
+      <p class="st-ent-motivo">${esc(st.motivo.charAt(0).toUpperCase() + st.motivo.slice(1))}.</p>
+      ${outros ? `<ul class="st-ent-outros" aria-label="Também vale">${outros}</ul>` : ''}
+      <p class="st-ent-retorno">Retorno antecipado: ${esc(st.retornoAntecipado.situacao)} ainda.</p>
+      ${erp}${desfeito}
+      ${acao ? `<div class="st-ent-acoes">${acao}</div>` : ''}
+    </section>`;
+}
+/* CANCELAR A O.S. (só admin e pcp): o motivo é obrigatório (15 letras ou mais,
+   a mesma frase do servidor). Grava o PEDIDO no rascunho da hora; o servidor
+   carimba quem e quando. O que já foi entregue por item fica; o saldo é
+   cancelado, a O.S. sai da fila "a lançar" e da apuração. */
+function cancelarOSDaFicha() {
+  if (!_modalDraft || !podeCancelarOS()) return;
+  const id = _modalDraft.id;
+  abrirDialogoEntrega({ titulo: `Cancelar a O.S ${_modalDraft.numero || ''}`,
+    texto: 'A O.S. sai da fila a lançar e da apuração da performance. O que já foi entregue por item fica; o saldo é cancelado. Dá para desfazer depois, na ficha.',
+    motivo: true, botao: 'Cancelar a O.S.' }, dados => {
+    const d = _modalDraft;
+    if (!d || d.id !== id) return 'A ficha mudou: feche e abra de novo.';
+    const erro = OPERACAO.motivoCancelamentoInvalido(dados.motivo);
+    if (erro) return erro;
+    d.cancelamento = { cancelar: true, motivo: String(dados.motivo || '').trim(), por: String((STATE.user || {}).nome || ''), em: nowISO() };
+    saveDraft(); reRenderModalKeepOpen();
+    toast(`O.S ${d.numero || ''} cancelada. Para voltar atrás, use Desfazer cancelamento na ficha.`, 'success');
+    return '';
+  });
+}
+function desfazerCancelamentoDaFicha() {
+  const d = _modalDraft;
+  if (!d || !podeCancelarOS()) return;
+  if (!confirm(`Desfazer o cancelamento da O.S ${d.numero || ''}? Ela volta para a fila a lançar e para a apuração.`)) return;
+  d.cancelamento = { desfazer: true };
+  saveDraft(); reRenderModalKeepOpen();
+  toast(`Cancelamento da O.S ${d.numero || ''} desfeito.`, 'success');
+}
+function ligarStatusEntregaDaFicha() {
+  const c = document.getElementById('btn-cancelar-os'); if (c) c.onclick = cancelarOSDaFicha;
+  const u = document.getElementById('btn-desfazer-cancelamento'); if (u) u.onclick = desfazerCancelamentoDaFicha;
+}
+
 function osCardHTML(os) {
   const st = calcStatus(os);
   const itens = os.itens || [];
@@ -4320,6 +4411,11 @@ function osCardHTML(os) {
      exclusão sozinho. */
   const seloVoltouERP = os.restauradaPeloERPEm && !os.finalizadaEm
     ? ` <span class="badge sem-valor" title="Voltou porque o ERP ainda lista esta O.S. Para sair de vez, baixe no ERP.">↩ voltou pelo ERP ${esc(fmtDataBR(os.restauradaPeloERPEm))}</span>` : '';
+  // O selo do status da entrega (F16) vem primeiro; o "⏰ atrasada" e o "🔴 retrabalho" antigos só aparecem quando dizem outra coisa.
+  const stE = statusEntregaDe(os);
+  const seloStatus = stE ? ' ' + seloStatusEntregaHTML(stE) : '';
+  const tagAtraso = estaAtrasada(os) && !(stE && stE.estado === 'atraso') ? ' <span class="tag-atraso">⏰ atrasada</span>' : '';
+  const tagRetrab = ((os.retrabalho && !os.finalizadaEm) || retrabPendente(os)) && !(stE && stE.estado === 'retrabalho') ? ' <span class="tag-retrab">🔴 retrabalho</span>' : '';
   const etapasBtns = `<div class="card-etapas">${etapasCard
     .map(([b, lbl]) => `<button class="card-etapa-btn ${etapaDone ? 'done' : ''}" data-etapa-os="${esc(os.id)}" data-etapa-bloco="${b}" title="Abrir em ${esc(lbl)}">${esc(lbl)}</button>`)
     .join('')}</div>`;
@@ -4329,7 +4425,9 @@ function osCardHTML(os) {
     ? (pp.acao === 'finalizar'
         ? `<button class="btn-success btn-sm edit-only card-finalizar" data-finalizar-os="${esc(os.id)}" title="Finalizar serviço">${esc(pp.cta)}</button>`
         : `<button class="btn-primary btn-sm edit-only card-cta" data-cta-os="${esc(os.id)}" data-cta-acao="${esc(pp.acao)}" title="${esc(pp.label)}">${esc(pp.cta)}</button>`)
-    : (OPERACAO.encerradaERP(os)
+    : (stE && stE.estado === 'cancelado'
+        ? `<span class="card-fin-tag card-fin-cancelada" title="${esc(stE.motivo)}">Cancelada</span>`
+        : OPERACAO.encerradaERP(os)
         ? `<span class="card-fin-tag card-fin-erp" title="Encerrada pela baixa do ERP; a execução não foi registrada no PCP. A data é a da sincronização, não a da entrega.">Baixa do ERP</span>`
         : `<span class="card-fin-tag" title="Serviço finalizado">✓ ${interno ? 'Retirado' : 'Finalizado'}</span>`);
   /* O BOTAO DA LIBERACAO DO CLIENTE. So aparece onde a duvida existe: O.S
@@ -4352,7 +4450,7 @@ function osCardHTML(os) {
     <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
       <div class="card-header card-header-os">
         <div class="card-meta">
-          <div class="card-numero">O.S ${esc(os.numero || '—')}${estaAtrasada(os) ? ' <span class="tag-atraso">⏰ atrasada</span>' : ''}${(os.retrabalho && !os.finalizadaEm) || retrabPendente(os) ? ' <span class="tag-retrab">🔴 retrabalho</span>' : ''}${seloParado}${seloVoltouERP}${seloEntregaCardHTML(os)}${os.statusERP === 'CONCLUIDO' && !os.liberadoPCP && !os.finalizadaEm ? ` <span class="tag-erp-pronta" title="O ERP diz que a produção terminou${os.statusERPDesde ? ' em ' + esc(fmtDataBR(os.statusERPDesde)) : ''}; falta liberar no PCP">🏭 ERP: produção concluída</span>` : ''}${erpMudancasAConferir(os).length ? ' <span class="badge sem-valor">ERP mudou · conferir</span>' : ''}</div>
+          <div class="card-numero">O.S ${esc(os.numero || '—')}${seloStatus}${tagAtraso}${tagRetrab}${seloParado}${seloVoltouERP}${seloEntregaCardHTML(os)}${os.statusERP === 'CONCLUIDO' && !os.liberadoPCP && !os.finalizadaEm ? ` <span class="tag-erp-pronta" title="O ERP diz que a produção terminou${os.statusERPDesde ? ' em ' + esc(fmtDataBR(os.statusERPDesde)) : ''}; falta liberar no PCP">🏭 ERP: produção concluída</span>` : ''}${erpMudancasAConferir(os).length ? ' <span class="badge sem-valor">ERP mudou · conferir</span>' : ''}</div>
           <span class="badge st-${st}">${statusLabelDe(os, st)}</span>
         </div>
         <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
@@ -4387,6 +4485,10 @@ function osCardHTML(os) {
 
 function prazoPrincipalHTML(os) {
   const interno = isInterno(os);
+  if (canceladaNaTela(os)) {
+    const c = OPERACAO.cancelamentoDe(os) || {};
+    return `<span class="prazo-tag prazo-cancelada" title="${esc(c.motivo || '')}">Cancelada${c.em ? ' ' + esc(fmtDataBR(c.em)) : ''}</span>`;
+  }
   if (os.finalizadaEm) {
     if (OPERACAO.encerradaERP(os)) return `<span class="prazo-tag prazo-erp" title="Data da sincronização com o ERP, não da entrega">Baixa do ERP ${esc(fmtDataBR(os.finalizadaEm))}</span>`;
     return `<span class="prazo-tag prazo-ok">Finalizada ${esc(fmtDataBR(os.finalizadaEm))}</span>`;

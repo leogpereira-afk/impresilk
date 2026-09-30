@@ -271,13 +271,21 @@ function periodoOuMes(chave) {
 // como entregues para somar nos valores; vai ser de amanhã para frente". Baixa
 // do ERP anterior a esta data conta como entregue sem lançamento; a partir
 // dela, lançamento manual. Regra explícita aqui, não 147 carimbos no banco.
+// CONSTANTE ÚNICA do aparelho (F16): o servidor tem a dele no pcp-sync
+// (perfFonte), e tests/cancelamento-f16.test.cjs confere que as duas dizem o
+// mesmo dia (e a reserva do store.js, para quando este arquivo não carrega).
 const CORTE_LANCAMENTO_MANUAL = '2026-09-15';
 function erpAntesDoCorte(o) {
   return OPERACAO.encerradaERP(o) && !o.entregaLancada && OPERACAO.dia(o.finalizadaEm) < CORTE_LANCAMENTO_MANUAL;
 }
+/* A O.S. CANCELADA (F16), no ERP ou à mão pela gestão, não é entrega nem
+   retirada: não conta valor, sai da fila "a lançar" e da base da apuração (o
+   servidor faz o mesmo no perfFonte). Fica em `canceladas`, para quem quiser
+   contar. A aberta cancelada também entra: ela não vai mais ser entregue. */
 function classificarEntregas(lista) {
-  const r = { retiradas: [], instalacoes: [], aLancar: [] };
+  const r = { retiradas: [], instalacoes: [], aLancar: [], canceladas: [] };
   for (const o of lista || STORE.getAllOS()) {
+    if (OPERACAO.cancelada(o)) { r.canceladas.push(o); continue; }
     if (!OPERACAO.dia(o.finalizadaEm)) continue;
     if (OPERACAO.interno(o)) { r.retiradas.push(o); continue; }
     if (OPERACAO.encerradaERP(o) && !o.entregaLancada && !erpAntesDoCorte(o)) { r.aLancar.push(o); continue; }
@@ -1479,6 +1487,7 @@ function filaLancarHTML(aLancar, f, hoje) {
         <li>Aparecem todas as baixas pendentes, de qualquer período, e não só as do período escolhido nos filtros. As de fora dele vêm marcadas "fora do período".</li>
         <li>Ao lançar, confirme a data da entrega e a equipe que instalou e responda se gerou retrabalho.</li>
         <li>Baixas anteriores a ${corte} já contam como entregues (decisão da direção) e não entram nesta fila.</li>
+        <li>A O.S. cancelada (no ERP ou pelo botão Cancelar O.S. da ficha) sai da fila e não conta como entrega.</li>
       </ul>
     </details>`;
 
@@ -1585,6 +1594,7 @@ function renderEntregas() {
     // servidor. Dizer "fora do PCP" aqui culpava a equipe por um mês inteiro.
     if (!card && o.data && o.data < limiteEntregas) return { rotulo: 'sem cópia no aparelho', classe: 'st-aguardando_producao', dica: `Entregue há mais de ${janelaLocalCasa()} dias; o aparelho guarda só os últimos ${janelaLocalCasa()}` };
     if (!card) return { rotulo: 'fora do PCP', classe: 'st-aguardando_producao', dica: 'O ERP entregou, mas esta O.S nunca passou pelo PCP' };
+    if (OPERACAO.cancelada(card)) return { rotulo: 'cancelada', classe: 'st-aguardando_producao', dica: 'Cancelada no PCP: ' + ((OPERACAO.cancelamentoDe(card) || {}).motivo || '') };
     if (card.entregaLancada) return { rotulo: 'lançada', classe: 'st-confirmada', dica: 'Baixa do ERP lançada à mão por ' + (card.entregaLancada.por || '') };
     if (registradas.has(n)) return { rotulo: 'registrada', classe: 'st-confirmada', dica: 'Entrega registrada no PCP' };
     if (aLancarSet.has(n)) return { rotulo: 'a lançar', classe: 'st-retrabalho', dica: 'Baixada pelo ERP; falta lançar no PCP' };

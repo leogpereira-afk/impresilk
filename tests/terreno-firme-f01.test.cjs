@@ -381,14 +381,19 @@ test('revisão: crachá de toque não recebe ID do RH de ninguém (lista, increm
  assert.equal(gravada(e).aptoPorId,'111222');assert.equal(gravada(e).entregaLancada.porId,'111222');assert.equal(gravada(e).entregaLancada.porConta,'gestor');
 });
 
-test('revisão: gestão limpando com texto vazio (o jeito da casa) limpa os campos da gestão (o prazo não: exige motivo); operação não',async()=>{
+/* TROCADO DE PROPÓSITO NA F16 (30/09/2026): o cancelamento passou a ser
+   como o prazo combinado: o vazio da gestão não o apaga. Cancelar e desfazer
+   são pedidos explícitos ({cancelar:true, motivo} e {desfazer:true}), e o
+   desfeito fica guardado com quem desfez (tests/cancelamento-f16.test.cjs). */
+test('revisão: gestão limpando com texto vazio (o jeito da casa) limpa os campos da gestão (o prazo e o cancelamento não: pedem pedido explícito); operação não',async()=>{
  const campos={retornoPrevisto:{dia:'2026-09-30',hora:'17:00'},cancelamento:{motivo:'cliente desistiu'},prazoCombinado:'2026-09-30'};
  const e=await edge('pcp-sync',{pcp_registros:[base(campos)]});
  let r=await e.call({action:'upsert',os:{...copia(e),retornoPrevisto:'',cancelamento:'',prazoCombinado:''}},operacao);
  assert.equal(r.status,200);assert.deepEqual(gravada(e).cancelamento,campos.cancelamento,'operação não limpa');
  r=await e.call({action:'upsert',os:{...copia(e),retornoPrevisto:'',cancelamento:'',prazoCombinado:''}},gestor);
  assert.equal(r.status,200,JSON.stringify(r));
- const g=gravada(e);assert.equal(g.retornoPrevisto,null);assert.equal(g.cancelamento,null);
+ const g=gravada(e);assert.equal(g.retornoPrevisto,null);
+ assert.deepEqual(g.cancelamento,campos.cancelamento,'o vazio não desfaz o cancelamento: desfazer é o pedido {desfazer:true} (F16)');
  assert.equal(g.prazoCombinado,'2026-09-30','o prazo combinado muda só pela correção com motivo (revisão da F15)');
 });
 

@@ -3537,3 +3537,34 @@ img.perf-logo{object-fit:cover}
 .picker-opt.picker-sugestao .picker-pessoa small::after{content:" · parecido com o que você digitou"}
 @media (prefers-reduced-motion:no-preference){.aloc-seg{transition:opacity .2s}.aloc-chip{transition:background-color .2s}}
 @media (max-width:640px){.aloc-rapidas-lista{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.aloc button.aloc-eq{min-width:0;border-radius:14px}.aloc-grupo{padding:8px}.aloc-chip{padding:6px;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"quem x" "ctrl ctrl"}.aloc-tab{font-size:.8rem}.aloc-tab th,.aloc-tab td{padding:5px 4px}}
+
+/* ── Status da entrega em 7 estados e cancelamento (F16) ───────────────────
+   O selo do card e da ficha. As cores seguem o padrão da casa (atraso
+   vermelho, retrabalho âmbar); o texto passa de 4,5:1 no fundo claro. O
+   "Agendado" é discreto: é o estado de quase toda O.S. aberta. */
+.selo-entrega {
+  display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: .7rem; font-weight: 700;
+  vertical-align: middle; border: 1px solid transparent; white-space: nowrap;
+}
+.selo-entrega.se-cancelado { background: #e2e8f0; color: #334155; border-color: #94a3b8; text-decoration: none; }
+.selo-entrega.se-retrabalho { background: #fef3c7; color: #92400e; }
+.selo-entrega.se-retorno_antecipado { background: #ffedd5; color: #9a3412; }
+.selo-entrega.se-atraso { background: #fee2e2; color: #b91c1c; }
+.selo-entrega.se-no_prazo { background: #dcfce7; color: #166534; }
+.selo-entrega.se-execucao { background: #dbeafe; color: #1e40af; }
+.selo-entrega.se-agendado { background: #f8fafc; color: #475569; border-color: #e2e8f0; font-weight: 600; }
+.card-fin-tag.card-fin-cancelada { display: inline-block; justify-self: start; padding: 2px 10px; border-radius: 999px; background: #e2e8f0; color: #334155; border: 1px solid #94a3b8; }
+.prazo-tag.prazo-cancelada { background: #e2e8f0; color: #334155; }
+/* Na ficha: logo abaixo do próximo passo. */
+.st-entrega {
+  margin: 8px 16px 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-s);
+  background: var(--surface); font-size: .85rem;
+}
+.st-ent-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.st-ent-rot { font-size: .64rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.st-ent-motivo { margin: 6px 0 0; }
+.st-ent-outros { margin: 4px 0 0 18px; font-size: .8rem; color: var(--muted); }
+.st-ent-retorno, .st-ent-hist { margin: 4px 0 0; font-size: .78rem; color: var(--muted); }
+.st-ent-acoes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.st-ent-acoes .st-ent-btn { min-height: 40px; }
+.st-ent-acoes .st-ent-cancelar { color: #b91c1c; border-color: #fecaca; }

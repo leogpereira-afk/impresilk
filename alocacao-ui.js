@@ -88,6 +88,22 @@ const ALOCUI = (() => {
   const regras = () => typeof REGRAS !== 'undefined' ? REGRAS : G('REGRAS');
   const perf = () => typeof PERF !== 'undefined' ? PERF : G('PERF');
   const oper = () => typeof OPERACAO !== 'undefined' ? OPERACAO : G('OPERACAO');
+  /* O QUE O STATUS DA ENTREGA JÁ SABE (F16, crítica 5.4): a O.S. cancelada, e
+     a perda que a regra do programa conta (retrabalho, atraso da entregue),
+     não pontuam. A prévia diz isso e mostra a comissão prevista zerada, em vez
+     de prometer uma comissão que a apuração não vai pagar. Sem o status
+     (versão misturada), fica como estava. */
+  function naoPontuaDe(os, programa) {
+    const O = oper();
+    if (!O || typeof O.statusEntrega !== 'function') return '';
+    let s;
+    try { s = O.statusEntrega(os, undefined, programa); } catch (e) { return ''; }
+    if (!s || !s.estado) return '';
+    if (s.estado === 'cancelado') return 'O.S. cancelada: não pontua nem paga comissão.';
+    if (!programa || !lista(s.perdas).length) return '';
+    const rot = {retrabalho: 'retrabalho', atraso: 'entregue com atraso', retornoAntecipado: 'retorno antecipado'};
+    return `O.S. com ${s.perdas.map(p => rot[p] || p).join(' e ')}: pela regra do programa, não pontua nem paga comissão.`;
+  }
   const loja = () => typeof STORE !== 'undefined' ? STORE : G('STORE');
   const fn = nome => { const f = G(nome); return typeof f === 'function' ? f : null; };
   const reais = centavos => { const f = fn('dinheiroCasa'); const v = (Number(centavos) || 0) / 100; return f ? f(v) : v.toLocaleString('pt-BR', {style:'currency', currency:'BRL'}); };
@@ -365,6 +381,7 @@ const ALOCUI = (() => {
     if (ja && !o.reiniciar && ja.osId === os.id && ja.modo === modo && nucleo(ja.gravada) === nucleo(gravada) && mesmaEquipe(ja)) {
       if (o.ocupados !== undefined) ja.ocupados = mapaOcupados(o.ocupados);
       if (o.dica !== undefined) ja.dica = String(o.dica || '');
+      ja.naoPontua = naoPontuaDe(os, ja.programa);
       return ja;
     }
     const equipes = lista(o.equipes).filter(objeto);
@@ -391,6 +408,7 @@ const ALOCUI = (() => {
       // As equipes que "Trazer equipe" trouxe nesta tela (a ficha grava o equipeId delas ao fechar).
       trazidas: [],
       ocupados: mapaOcupados(o.ocupados), dica: String(o.dica || ''),
+      naoPontua: naoPontuaDe(os, programa),
     };
     if (modo === 'pessoas') {
       /* SÓ PESSOAS: todo mundo da O.S. aparece. Quem tem ID vai para os
@@ -1049,14 +1067,15 @@ const ALOCUI = (() => {
     const D = motor(), fs = D.finais(st.aloc);
     if (!fs.length) return '';
     const R = regras(), prog = st.programa;
-    const comissao = st.verValor && prog && st.valor != null && R && typeof R.comissaoCentavos === 'function' ? R.comissaoCentavos(st.valor, prog) : null;
+    const comissao = st.verValor && prog && st.valor != null && R && typeof R.comissaoCentavos === 'function' ? (st.naoPontua ? 0 : R.comissaoCentavos(st.valor, prog)) : null;
     const partes = comissao != null ? D.ratearCentavosLider(comissao, st.aloc) : [];
     const papel = f => f.papel === 'lider' ? 'Líder' : f.papel === 'ajudante' ? 'Ajudante' : 'Sem líder';
     const linhas = fs.map((f, i) => `<tr><td>${escA(pessoa(f.pessoaId).nome)}${f.freelancer ? ' <span class="tag-freelancer">Freelancer</span>' : ''}</td><td>${papel(f)}</td><td class="num">${escA(pctTexto(f.cota))}%</td>${st.verValor ? `<td class="num">${comissao != null && partes[i] && partes[i].centavos != null ? escA(reais(partes[i].centavos)) : '·'}</td>` : ''}</tr>`).join('');
     let valor = '';
     if (st.verValor) {
       const bruto = st.valor == null ? 'sem valor informado' : escA(reais(st.valor));
-      const sobre = !prog ? `Esta O.S. é de ${dataBR(st.dia) || 'antes de 01/10/2026'}: fica na regra atual, sem comissão do programa.`
+      const sobre = st.naoPontua ? escA(st.naoPontua)
+        : !prog ? `Esta O.S. é de ${dataBR(st.dia) || 'antes de 01/10/2026'}: fica na regra atual, sem comissão do programa.`
         : st.valor == null ? 'Sem o valor não há comissão prevista.'
         : `Comissão prevista de ${escA(pctTexto(prog.comissaoBp))}%${prog.provisoria ? ' (regra embutida, provisória)' : ''}: ${escA(reais(comissao || 0))}, dividida como na tabela.`;
       valor = `<p class="aloc-valor"><span>Valor bruto da O.S.: <b>${bruto}</b>.</span> ${sobre}</p>

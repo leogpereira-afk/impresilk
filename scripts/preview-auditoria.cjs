@@ -126,6 +126,20 @@ lista.push(base('E4B',{cliente:'Cliente fictício E4 · retira na fábrica',tipo
  {uid:'E4B:1:1',item:'1',descricao:'Banner 3x1',qtde:'3',entregas:[pvMarca('pv-r1','retirado',1,deslocar(-1),{via:'balcao',retirou:'Fulano Fictício'})]},
  {uid:'E4B:2:1',item:'2',descricao:'',qtde:'1'}]}));
 lista.push(base('E4C',{cliente:'Cliente fictício E4 · 38 itens',itens:Array.from({length:38},(_,k)=>({uid:'E4C:'+(k+1)+':1',item:String(k+1),descricao:k===6?'':k===7?'Item':'Peça de sinalização '+(k+1),qtde:String(1+(k%4)),...(k%5===0?{entregas:[pvMarca('pv-c'+k,'entregue',1,deslocar(-1))]}:{})}))}));
+/* STATUS DA ENTREGA E CANCELAMENTO (F16, 30/09/2026): uma baixa do ERP fora da
+   carteira cancelada à mão pela gestão, uma aberta cancelada, uma entregue com
+   atraso e retrabalho, e uma em execução com entrega parcial. Fictícias.
+   #ficha=S16A&bloco=pcp abre a ficha da cancelada. */
+lista.push(base('S16A',{cliente:'Cliente fictício F16 · cancelada à mão',instalacao:{data:deslocar(-6),periodo:'Manhã'},equipe:[],veiculo:'',valorTotal:2350,
+ finalizadaEm:deslocar(-3)+'T18:00:00',finalizadoPor:'Mubisys · saiu da carteira aberta',baixaAutoERP:{em:deslocar(-3)+'T18:00:00',status:'FORA DA CARTEIRA ABERTA',carteira:true},
+ cancelamento:{ativo:true,motivo:'Cliente cancelou o pedido por telefone',por:'Gestor de teste',em:deslocar(-1)+'T14:00:00'}}));
+lista.push(base('S16B',{cliente:'Cliente fictício F16 · aberta cancelada',instalacao:{data:deslocar(3),periodo:'Tarde'},prazoCombinado:{data:deslocar(3),fonte:'agenda'},
+ cancelamento:{ativo:true,motivo:'Obra do cliente foi embargada',por:'Gestor de teste',em:hoje+'T09:00:00'}}));
+lista.push(base('S16C',{cliente:'Cliente fictício F16 · atraso e retrabalho',instalacao:{data:deslocar(-6),periodo:'Manhã'},prazoCombinado:{data:deslocar(-7),fonte:'agenda'},
+ finalizadaEm:deslocar(-5)+'T17:00:00',finalizadoPor:'Gestor de teste',retrabalho:true,problema:'Adesivo descolou na borda'}));
+lista.push(base('S16D',{cliente:'Cliente fictício F16 · entrega parcial',instalacao:{data:hoje,periodo:'Manhã',duracaoDias:2},prazoCombinado:{data:hoje,fonte:'agenda'},itens:[
+ {uid:'S16D:1:1',item:'1',descricao:'Placa ACM',qtde:'1',entregas:[pvMarca('pv-s1','entregue',1,hoje)]},
+ {uid:'S16D:2:1',item:'2',descricao:'Totem',qtde:'1'},{uid:'S16D:3:1',item:'3',descricao:'Adesivo de porta',qtde:'1'}]}));
 /* A FILA DE LANÇAMENTO COMO NO PRINT DO DONO (revisão de Entregas, 29/09/2026).
    No ar a fila passou de 50 baixas do ERP esperando lançamento, quase todas sem
    equipe. Aqui são 56 (57 com a 109, que já estava na prévia), com valor

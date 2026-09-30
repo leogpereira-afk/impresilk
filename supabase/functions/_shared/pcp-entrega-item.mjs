@@ -192,6 +192,7 @@ function validarEvento(evento, item, ctx) {
   const os = o.os;
   if (!os || typeof os !== 'object' || Array.isArray(os)) return nao('O.S. não informada: sem ela não dá para conferir o saldo.');
   if (textoE(os.finalizadaEm)) return nao('O.S. finalizada: reabra para marcar.');
+  if (canceladaAMao(os)) return nao('O.S. cancelada: desfaça o cancelamento da O.S. para marcar.');
   if (ehServico(item)) return nao('Item de serviço não recebe marca: ele acompanha a entrega dos outros itens.');
   /* Teto: 20 marcas VALENDO por item, e 40 na lista inteira. Desfazer uma
      marca errada libera a vaga dela, então o item no teto tem conserto. */
@@ -251,6 +252,22 @@ function encerradaNoERP(os) {
 function canceladaNoERP(os) {
   return encerradaNoERP(os) && /cancel/i.test(`${textoE(os.baixaAutoERP && os.baixaAutoERP.status)} ${textoE(os.finalizadoPor)}`);
 }
+/* CANCELADA À MÃO (F16): a marca os.cancelamento da gestão ("Cancelar O.S."
+   da ficha, com motivo). Vale a que o servidor gravou ({ativo:true, motivo,
+   por, porId, em}) e o pedido que o aparelho ainda vai mandar ({cancelar:true,
+   motivo}). O desfeito ({ativo:false, desfeitoEm...}), o pedido de desfazer e
+   a marca sem motivo não valem. A mesma leitura está em _shared/pcp-status.mjs
+   (OPERACAO.cancelamentoDe), e um teste confere as duas. */
+function canceladaAMao(os) {
+  const c = os && os.cancelamento;
+  if (!c || typeof c !== 'object' || Array.isArray(c) || !textoE(c.motivo)) return false;
+  return c.ativo === true || c.cancelar === true;
+}
+/* A O.S. CANCELADA, no ERP ou à mão: cancela o SALDO de todos os itens, e o
+   que já foi entregue fica. Item cancelado sozinho não cancela a O.S. */
+function canceladaOS(os) {
+  return canceladaNoERP(os) || canceladaAMao(os);
+}
 /* O ERP DISSE ENTREGUE? A baixa automática grava o status em baixaAutoERP
    (ou, na baixa antiga, no fim do finalizadoPor: 'Mubisys (baixa automática ·
    ENTREGUE)'). A conciliação da carteira ('Mubisys · saiu da carteira
@@ -273,12 +290,13 @@ function erpDisseEntregue(os) {
                         ENTREGUE (erpDisseEntregue)              'sem prova'
      fora da carteira,  nada até vir ctx.dataEntregueERP: o saldo fica
      CONCLUIDO etc.     como 'sem confirmação do ERP' (semConfirmacaoERP)
-     cancelada no ERP   nada (o saldo é cancelado; o entregue fica)
+     cancelada          nada (o saldo é cancelado; o entregue fica): no ERP
+                        ou à mão (canceladaOS, F16)
    Aberta: nada implícito. */
 function entregaImplicita(os, ctx) {
   const fim = diaSP(os && os.finalizadaEm);
   if (!fim) return null;
-  if (canceladaNoERP(os)) return null;
+  if (canceladaOS(os)) return null;
   const l = os.entregaLancada;
   const lancada = diaSP(l && typeof l === 'object' ? l.data : l);
   if (lancada) return {dia:lancada, fonte:'lancada', marca:'implicito'};
@@ -301,7 +319,9 @@ function situacaoFisica(item, os, imp, osCancelada) {
     problema:c.problema ? {id:textoE(c.problema.id), dia:c.problema.dia, motivo:textoE(c.problema.motivo)} : null,
     cancelado:c.cancelado ? {id:textoE(c.cancelado.id), dia:c.cancelado.dia, motivo:textoE(c.cancelado.motivo)} : null,
   };
-  if (c.cancelado || osCancelada) { s.situacao = 'cancelado'; s.saldo = 0; }
+  /* O.S. cancelada (F16): cancela o SALDO. O item que já tinha ido por
+     inteiro fica entregue (ou retirado): o entregue fica. */
+  if (c.cancelado || (osCancelada && c.acum < c.Q)) { s.situacao = 'cancelado'; s.saldo = 0; }
   else if (c.problema) s.situacao = 'problema';
   else if (c.acum >= c.Q) s.situacao = c.soRetirada ? 'retirado' : 'entregue';
   else if (imp) {
@@ -315,7 +335,8 @@ function situacaoFisica(item, os, imp, osCancelada) {
 }
 /* O DIA DO SERVIÇO: o da última entrega física, quando nenhum item físico
    ficou pendente (a entregar, parcial ou com problema); senão, o da entrega
-   implícita da O.S. encerrada. Cancelada no ERP: o serviço é cancelado junto. */
+   implícita da O.S. encerrada. Cancelada (no ERP ou à mão): o serviço é
+   cancelado junto. */
 function diaDoServico(os, imp, osCancelada) {
   if (osCancelada) return {dia:'', cancelado:true, marca:''};
   let maior = '', pendente = false;
@@ -333,7 +354,7 @@ function diaDoServico(os, imp, osCancelada) {
    soma chegou na quantidade) > entregue implícito (O.S. encerrada) > parcial
    ('parcial 6 de 10') > a entregar. Item de serviço segue diaDoServico. */
 function situacaoItem(item, os, ctx) {
-  const imp = entregaImplicita(os, ctx), osCancelada = canceladaNoERP(os);
+  const imp = entregaImplicita(os, ctx), osCancelada = canceladaOS(os);
   if (!ehServico(item)) return situacaoFisica(item, os, imp, osCancelada);
   const d = diaDoServico(os, imp, osCancelada), Q = qtdeNum(item);
   const situacao = d.cancelado ? 'cancelado' : d.dia ? 'entregue' : 'a entregar';
@@ -351,7 +372,7 @@ function situacaoItem(item, os, ctx) {
    soma das unidades que foram por marca (o implícito fica fora). */
 function resumoOS(os, ctx) {
   const r = {itensTotal:0, servicos:0, entregues:0, parciais:0, aEntregar:0, problema:0, cancelados:0, saldoItens:0, marcas:0, unidadesEntregues:0, situacao:'sem marca'};
-  const imp = entregaImplicita(os, ctx), osCancelada = canceladaNoERP(os);
+  const imp = entregaImplicita(os, ctx), osCancelada = canceladaOS(os);
   for (const it of listaE(os && os.itens)) {
     if (!it || typeof it !== 'object') continue;
     if (ehServico(it)) { r.servicos++; continue; }
@@ -425,7 +446,8 @@ function valorDoEvento(item, evento, valorItem) {
    semItem = total (o líquido).
      entregue   as linhas de `lancamentos`
      saldo      o que ainda falta entregar (O.S. aberta)
-     cancelado  saldo de item cancelado, ou de O.S. cancelada no ERP
+     cancelado  saldo de item cancelado, ou de O.S. cancelada (no ERP ou à
+                mão, F16)
      retido     SALDO de item com problema aberto: não conta nem pela
                 finalização até a entrega depois do problema. O que já tinha
                 ido fica no seu dia (mês que passou não muda)
@@ -438,7 +460,7 @@ function valorDoEvento(item, evento, valorItem) {
    se ela já foi conferida. */
 function lancamentosDaOS(os, ctx) {
   const rateio = valorItemRateado(os, ctx);
-  const imp = entregaImplicita(os, ctx), osCancelada = canceladaNoERP(os);
+  const imp = entregaImplicita(os, ctx), osCancelada = canceladaOS(os);
   const r = {total:rateio.total, fonte:rateio.fonte, entregue:0, saldo:0, cancelado:0, retido:0, semItem:0,
     semConfirmacaoERP:!imp && !osCancelada && encerradaNoERP(os), itens:[], lancamentos:[]};
   const itens = listaE(os && os.itens);
@@ -472,5 +494,5 @@ function lancamentosDaOS(os, ctx) {
   return r;
 }
 /* ==== FIM DO MOTOR ==== */
-export { TIPOS, VIAS, TETO_EVENTOS, PERMISSOES, diaSP, qtdeNum, aceitaParte, ehServico, podeMarcar, eventosAtivos, validarEvento, situacaoItem, resumoOS, entregaImplicita, canceladaNoERP, valorItemRateado, valorDoEvento, lancamentosDaOS };
-export const ENTREGA_ITEM = { TIPOS, VIAS, TETO_EVENTOS, PERMISSOES, diaSP, qtdeNum, aceitaParte, ehServico, podeMarcar, eventosAtivos, validarEvento, situacaoItem, resumoOS, entregaImplicita, canceladaNoERP, valorItemRateado, valorDoEvento, lancamentosDaOS };
+export { TIPOS, VIAS, TETO_EVENTOS, PERMISSOES, diaSP, qtdeNum, aceitaParte, ehServico, podeMarcar, eventosAtivos, validarEvento, situacaoItem, resumoOS, entregaImplicita, canceladaNoERP, canceladaAMao, canceladaOS, valorItemRateado, valorDoEvento, lancamentosDaOS };
+export const ENTREGA_ITEM = { TIPOS, VIAS, TETO_EVENTOS, PERMISSOES, diaSP, qtdeNum, aceitaParte, ehServico, podeMarcar, eventosAtivos, validarEvento, situacaoItem, resumoOS, entregaImplicita, canceladaNoERP, canceladaAMao, canceladaOS, valorItemRateado, valorDoEvento, lancamentosDaOS };
