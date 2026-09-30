@@ -92,16 +92,21 @@ const ALOCUI = (() => {
      a perda que a regra do programa conta (retrabalho, atraso da entregue),
      não pontuam. A prévia diz isso e mostra a comissão prevista zerada, em vez
      de prometer uma comissão que a apuração não vai pagar. Sem o status
-     (versão misturada), fica como estava. */
-  function naoPontuaDe(os, programa) {
+     (versão misturada), fica como estava.
+     `dataEntrega` (revisão da F16): o dia DIGITADO no Lançar entrega. A baixa
+     do ERP ainda não lançada tem a data da sincronização, e a prévia dizia
+     "não pontua" antes de a gestão digitar a data real; com o dia digitado,
+     o status é o da O.S. lançada nesse dia. */
+  function naoPontuaDe(os, programa, dataEntrega) {
     const O = oper();
     if (!O || typeof O.statusEntrega !== 'function') return '';
+    const alvo = /^\d{4}-\d{2}-\d{2}$/.test(String(dataEntrega || '')) && objeto(os) ? {...os, entregaLancada: {data: dataEntrega}} : os;
     let s;
-    try { s = O.statusEntrega(os, undefined, programa); } catch (e) { return ''; }
+    try { s = O.statusEntrega(alvo, undefined, programa); } catch (e) { return ''; }
     if (!s || !s.estado) return '';
     if (s.estado === 'cancelado') return 'O.S. cancelada: não pontua nem paga comissão.';
     if (!programa || !lista(s.perdas).length) return '';
-    const rot = {retrabalho: 'retrabalho', atraso: 'entregue com atraso', retornoAntecipado: 'retorno antecipado'};
+    const rot = {retrabalho: 'retrabalho', atraso: 'atraso na entrega', retornoAntecipado: 'retorno antecipado'};
     return `O.S. com ${s.perdas.map(p => rot[p] || p).join(' e ')}: pela regra do programa, não pontua nem paga comissão.`;
   }
   const loja = () => typeof STORE !== 'undefined' ? STORE : G('STORE');
@@ -381,11 +386,15 @@ const ALOCUI = (() => {
     if (ja && !o.reiniciar && ja.osId === os.id && ja.modo === modo && nucleo(ja.gravada) === nucleo(gravada) && mesmaEquipe(ja)) {
       if (o.ocupados !== undefined) ja.ocupados = mapaOcupados(o.ocupados);
       if (o.dica !== undefined) ja.dica = String(o.dica || '');
-      ja.naoPontua = naoPontuaDe(os, ja.programa);
+      if (o.dataEntrega !== undefined) ja.dataEntrega = String(o.dataEntrega || '');
+      ja.os = os;
+      ja.naoPontua = naoPontuaDe(os, ja.programa, ja.dataEntrega);
       return ja;
     }
     const equipes = lista(o.equipes).filter(objeto);
-    const dia = /^\d{4}-\d{2}-\d{2}$/.test(String(o.dia || '')) ? o.dia : diaDe(os);
+    // O dia digitado no Lançar entrega manda na regra e na prévia (revisão da F16).
+    const dataEntrega = /^\d{4}-\d{2}-\d{2}$/.test(String(o.dataEntrega || '')) ? o.dataEntrega : '';
+    const dia = dataEntrega || (/^\d{4}-\d{2}-\d{2}$/.test(String(o.dia || '')) ? o.dia : diaDe(os));
     const {programa, divisao} = regraDoDia(dia, o.versoes);
     const papel = String(o.papel || '');
     // R$ só para admin e pcp, e nunca no modo só pessoas.
@@ -408,7 +417,8 @@ const ALOCUI = (() => {
       // As equipes que "Trazer equipe" trouxe nesta tela (a ficha grava o equipeId delas ao fechar).
       trazidas: [],
       ocupados: mapaOcupados(o.ocupados), dica: String(o.dica || ''),
-      naoPontua: naoPontuaDe(os, programa),
+      os, versoes: lista(o.versoes), dataEntrega,
+      naoPontua: naoPontuaDe(os, programa, dataEntrega),
     };
     if (modo === 'pessoas') {
       /* SÓ PESSOAS: todo mundo da O.S. aparece. Quem tem ID vai para os
@@ -434,6 +444,18 @@ const ALOCUI = (() => {
   }
   const estado = chave => estados.get(chave) || null;
   function esquecer(chave) { estados.delete(chave); hosts.delete(chave); }
+  /* A DATA DIGITADA NO LANÇAR ENTREGA (revisão da F16): a regra do dia e o
+     "não pontua" da prévia seguem o campo de data, não a data da baixa do
+     ERP (a da sincronização). Repinta a prévia. */
+  function definirDataEntrega(chave, data) {
+    const st = estados.get(chave);
+    if (!st) return;
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(String(data || '')) ? String(data) : '';
+    st.dataEntrega = d;
+    if (d) { st.dia = d; st.programa = regraDoDia(d, st.versoes).programa; }
+    st.naoPontua = naoPontuaDe(st.os, st.programa, d);
+    repintar(chave);
+  }
 
   /* ------------------------------------------------------------ AÇÕES */
   /* Mudança de estrutura (entra, sai, equipe nova): as equipes tocadas voltam
@@ -1231,7 +1253,7 @@ const ALOCUI = (() => {
     repintar(chave);
   }
 
-  return {TOTAL, iniciar, estado, esquecer, executar, html, montar, repintar, bloqueio, paraGravar, paraParticipacao, gravarNaOS, mudou, nucleo, lerPct, pctTexto, dataBR,
+  return {TOTAL, iniciar, estado, esquecer, definirDataEntrega, executar, html, montar, repintar, bloqueio, paraGravar, paraParticipacao, gravarNaOS, mudou, nucleo, lerPct, pctTexto, dataBR,
     modoPara, dicaModo, paraEquipe, aplicarNaOS, aplicarEquipeNaOS, definirOcupados, estrutura, resultadosHTML: chave => { const st = estados.get(chave); return st ? resultadosHTML(st) : ''; }, textoOcupado, gente: genteDe};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = ALOCUI;

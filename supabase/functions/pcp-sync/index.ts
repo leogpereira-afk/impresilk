@@ -1,6 +1,6 @@
 import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
-import { cancelada, carimbarCancelamento, cancelamentoMudou } from "../_shared/pcp-status.mjs";
+import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas } from "../_shared/pcp-status.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -1233,6 +1233,34 @@ Deno.serve(async (req: Request) => {
            codigo recebe de volta o codigo gravado, casando pelo casamento de
            hoje. Vale para todos, toque e maquina inclusive. Nada aqui recusa. */
         trocarOS(preservarItens(os, existing).os);
+        /* CANCELAMENTO DA O.S. (F16). Regras em _shared/pcp-status.mjs
+           (carimbarCancelamento): so o PEDIDO muda o campo ({ cancelar: true,
+           motivo } ou { desfazer: true }), so de admin e pcp, com motivo de 15
+           letras ou mais; o carimbo e do cracha e do servidor; desfazer guarda
+           quem desfez. A copia da aba antiga, o null e a marca forjada ficam
+           com o gravado. Nada aqui e 422: o que nao entra vira aviso. So le o
+           RH quando o pedido muda o gravado.
+           Decide ANTES das marcas de item (revisao da F16): a fila junta o
+           "Desfazer cancelamento" e a marca feita depois dele no mesmo envio,
+           e a marca lia o cancelamento gravado e era recusada. As marcas e o
+           lancamento veem o desfazer aceito neste envio; o pedido de cancelar
+           so vale depois da gravacao (cancelamentoParaMarcas). O campo e
+           gravado depois do preservarAusentes, como antes. */
+        const veioCancelamento = Object.prototype.hasOwnProperty.call(os, "cancelamento") ? os.cancelamento : undefined;
+        const cancelamentoDecidido: { tem: boolean, valor: any, avisos: string[] } = { tem: false, valor: undefined, avisos: [] };
+        {
+          const gestaoCanc = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
+          const agoraCanc = new Date().toISOString();
+          // A base e o gravado: o que o preservarAusentes deixa no campo (cancelamento so cresce por pedido).
+          const baseCanc = preservarAusentes(os, existing, {}, ["cancelamento"]);
+          const rodarCanc = (autor: any) => carimbarCancelamento(veioCancelamento, baseCanc, existing, autor, agoraCanc, { pode: gestaoCanc, avisar: !ehMaquina && !ehToqueNoNome });
+          let rc = rodarCanc({ nome: String(cracha?.nome || cracha?.sub || ""), login: String(cracha?.sub ?? ""), porId: "" });
+          if (cancelamentoMudou(baseCanc.cancelamento, rc.os.cancelamento)) rc = rodarCanc(await autorAuditoria());
+          cancelamentoDecidido.tem = Object.prototype.hasOwnProperty.call(rc.os, "cancelamento");
+          cancelamentoDecidido.valor = rc.os.cancelamento;
+          cancelamentoDecidido.avisos = rc.avisos;
+        }
+        const cancelamentoDoEnvio = cancelamentoParaMarcas(existing?.cancelamento, cancelamentoDecidido.valor);
         /* MARCAS DE ENTREGA POR ITEM (E3). Regras em _shared
            (guardarEntregasItens): só acréscimo, parte do gravado; marca nova
            de admin, pcp e operação com senha (balcão), conferida pelo motor
@@ -1250,7 +1278,7 @@ Deno.serve(async (req: Request) => {
         {
           const papelEnt = ehMaquina ? "maquina" : ehToqueNoNome ? "toque" : papelUp;
           const agoraEnt = new Date().toISOString();
-          const rodarEnt = (autor: any) => guardarEntregasItens(os, existing, { papel: papelEnt, avisar: !ehMaquina, autor, agora: agoraEnt });
+          const rodarEnt = (autor: any) => guardarEntregasItens(os, existing, { papel: papelEnt, avisar: !ehMaquina, autor, agora: agoraEnt, cancelamento: cancelamentoDoEnvio });
           let ge = rodarEnt({ nome: String(cracha?.nome || cracha?.sub || ""), porId: "" });
           if (ge.eventos.length) ge = rodarEnt(await autorAuditoria());
           trocarOS(ge.os);
@@ -1266,8 +1294,6 @@ Deno.serve(async (req: Request) => {
         const veioPrazo = Object.prototype.hasOwnProperty.call(os, "prazoCombinado") ? os.prazoCombinado : undefined;
         // A divisão da equipe que o aparelho mandou (F08), antes da preservação.
         const veioAlocacao = Object.prototype.hasOwnProperty.call(os, "alocacao") ? os.alocacao : undefined;
-        // O pedido de cancelar ou de desfazer o cancelamento (F16), antes da preservação.
-        const veioCancelamento = Object.prototype.hasOwnProperty.call(os, "cancelamento") ? os.cancelamento : undefined;
         trocarOS(preservarAusentes(os, existing, { podeLimpar: !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp) }));
         /* A DIVISÃO DA EQUIPE DENTRO DA O.S. (F08). Regras em _shared
            (sanearAlocacao): só admin e pcp mudam; conferida pelo motor e pela
@@ -1322,22 +1348,11 @@ Deno.serve(async (req: Request) => {
           trocarOS(f15.os);
           avisosToque.push(...f15.avisos);
         }
-        /* CANCELAMENTO DA O.S. (F16). Regras em _shared/pcp-status.mjs
-           (carimbarCancelamento): so o PEDIDO muda o campo ({ cancelar: true,
-           motivo } ou { desfazer: true }), so de admin e pcp, com motivo de 15
-           letras ou mais; o carimbo e do cracha e do servidor; desfazer guarda
-           quem desfez. A copia da aba antiga, o null e a marca forjada ficam
-           com o gravado. Nada aqui e 422: o que nao entra vira aviso. So le o
-           RH quando o pedido muda o gravado. */
-        {
-          const gestaoCanc = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
-          const agoraCanc = new Date().toISOString();
-          const rodarCanc = (autor: any) => carimbarCancelamento(veioCancelamento, os, existing, autor, agoraCanc, { pode: gestaoCanc, avisar: !ehMaquina && !ehToqueNoNome });
-          let rc = rodarCanc({ nome: String(cracha?.nome || cracha?.sub || ""), login: String(cracha?.sub ?? ""), porId: "" });
-          if (cancelamentoMudou(os.cancelamento, rc.os.cancelamento)) rc = rodarCanc(await autorAuditoria());
-          trocarOS(rc.os);
-          avisosToque.push(...rc.avisos);
-        }
+        /* O CANCELAMENTO DECIDIDO LA EM CIMA (F16) entra aqui, depois do
+           preservarAusentes (que deixou o gravado): o pedido aceito troca o
+           campo; sem pedido, fica o gravado. */
+        if (cancelamentoDecidido.tem) os.cancelamento = cancelamentoDecidido.valor; else delete os.cancelamento;
+        avisosToque.push(...cancelamentoDecidido.avisos);
         /* ENTREGA LANCADA (F01): carimbo do servidor (por, porConta, porId, em).
            Lanca quem tem o botao e entrou com senha; o toque sem senha, a
            maquina e o comercial ficam com o gravado. Nada aqui e 422: data
@@ -1347,7 +1362,9 @@ Deno.serve(async (req: Request) => {
           const autorEntrega = podeLancar ? (entregaLancadaMudou(os, existing) ? await autorAuditoria() : { nome: "", login: "", porId: "" }) : null;
           // Desfazer so por pedido explicito ({ desfazer: true }) e so da gestao (revisao da F01).
           const podeDesfazer = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
-          const el = carimbarEntregaLancada(os, existing, autorEntrega, new Date().toISOString(), { podeDesfazer });
+          // O.S. cancelada (revisão da F16): o lançamento fica o gravado, com aviso; a mesma régua das marcas de item.
+          const canceladaLanc = !!existing && cancelada({ ...existing, cancelamento: cancelamentoDoEnvio });
+          const el = carimbarEntregaLancada(os, existing, autorEntrega, new Date().toISOString(), { podeDesfazer, cancelada: canceladaLanc });
           trocarOS(el.os);
           if (el.aviso) avisosToque.push(el.aviso);
         }

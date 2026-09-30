@@ -275,8 +275,18 @@ export function carimbarRetornoPrevisto(veio, os, antes, autor, agora, { pode = 
      (preservarAusentes).
    A origem (ERP, PDF) e a previsão do ERP valem as da versão gravada: o
    aparelho que as tira não faz a previsão virar agenda.
+   OS DIAS CONGELAM JUNTO (revisão da F16): o prazo de uma O.S. de vários
+   dias vai até o último dia da duração, e a duração de agora movia o prazo
+   congelado (5 dias escritos depois viravam "no prazo" o que atrasou). O
+   carimbo leva `dias`, a duração de quando o prazo nasceu; a correção leva
+   os dias do pedido ou a duração de agora. O carimbo antigo, sem os dias,
+   ganha os da versão GRAVADA na gravação que mudaria a duração, como o
+   prazo lido da O.S. antiga (o resto do carimbo fica como estava).
    Devolve { os, avisos }. */
 export const MOTIVO_PRAZO_MIN = 15;
+// A duração da agenda em dias (a mesma conta do diasAgendaF15); cliente retira: 1.
+export const duracaoF15 = o => o?.tipo === 'interno' ? 1 : Math.min(366, Math.max(1, Math.floor(Number(o?.instalacao?.duracaoDias) || 1)));
+const diasValidosF15 = v => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 366 ? v : 0;
 export const pedeCorrecaoPrazo = v => objeto(v) && v.corrigir === true;
 // Entregue: finalizada, ou baixada pelo ERP ou com entrega lançada e não reaberta depois.
 const entregueF15 = o => !!(o && (o.finalizadaEm
@@ -289,7 +299,10 @@ export function carimbarPrazoCombinado(veio, os, antes, autor, agora, { podeCorr
   const semAgenda = !temGravado && objeto(gravadoCru) && gravadoCru.fonte === PRAZO_SEM_AGENDA;
   if (pedeCorrecaoPrazo(veio) && !toque) {
     const data = diaPlausivel(veio.data), motivo = String(veio.motivo ?? '').trim().slice(0, 300);
-    const igual = gravado && gravado.fonte === 'correcao' && gravado.data === data && String(gravado.motivo ?? '') === motivo;
+    const dias = diasValidosF15(veio.dias) || duracaoF15(r);
+    // A correção gravada antes desta revisão (sem os dias) é a mesma quando o pedido também não diz os dias.
+    const mesmosDias = gravado && (gravado.dias === dias || (!diasValidosF15(gravado.dias) && !diasValidosF15(veio.dias)));
+    const igual = gravado && gravado.fonte === 'correcao' && gravado.data === data && String(gravado.motivo ?? '') === motivo && mesmosDias;
     if (igual) return { os: r, avisos };
     if (!podeCorrigir) { if (avisar) avisos.push('O prazo combinado não foi corrigido: só a gestão do PCP (admin ou pcp) corrige o prazo.'); }
     else if (!data) avisos.push('O prazo combinado não foi corrigido: a data não é válida.');
@@ -297,17 +310,22 @@ export function carimbarPrazoCombinado(veio, os, antes, autor, agora, { podeCorr
     else {
       const original = diaPlausivel(gravado?.original) || (temGravado ? diaPlausivel(objeto(gravadoCru) ? gravadoCru.data : gravadoCru) : '')
         || (semAgenda ? '' : prazoCombinadoDe(antes || r)?.data || '');
-      r.prazoCombinado = { data, fonte: 'correcao', motivo, ...(original ? { original } : {}), ...carimboF15(autor, agora) };
+      r.prazoCombinado = { data, dias, fonte: 'correcao', motivo, ...(original ? { original } : {}), ...carimboF15(autor, agora) };
       return { os: r, avisos };
     }
+  }
+  // O carimbo sem os dias (antes desta revisão) congela os da versão gravada quando a duração muda.
+  if (gravado && !diasValidosF15(gravado.dias) && antes && duracaoF15(r) !== duracaoF15(antes)) {
+    r.prazoCombinado = { ...gravado, dias: duracaoF15(antes) };
+    return { os: r, avisos };
   }
   if (temGravado || semAgenda || toque) return { os: r, avisos };
   const fixo = antes ? { origemMubisys: antes.origemMubisys || r.origemMubisys, origemPDF: antes.origemPDF || r.origemPDF, previsaoEntrega: proprio(antes, 'previsaoEntrega') ? antes.previsaoEntrega : r.previsaoEntrega } : {};
   const lidoAntes = antes ? prazoCombinadoDe({ ...antes, prazoCombinado: null }) : null;
   const depois = { ...r, ...fixo, prazoCombinado: null };
   if (lidoAntes) {
-    if (prazoCombinadoDe(depois)?.data !== lidoAntes.data)
-      r.prazoCombinado = { data: lidoAntes.data, fonte: 'agenda', lidoDe: lidoAntes.fonte, ...carimboF15(autor, agora) };
+    if (prazoCombinadoDe(depois)?.data !== lidoAntes.data || duracaoF15(depois) !== duracaoF15(antes))
+      r.prazoCombinado = { data: lidoAntes.data, dias: duracaoF15(antes), fonte: 'agenda', lidoDe: lidoAntes.fonte, ...carimboF15(autor, agora) };
     return { os: r, avisos };
   }
   const nasce = agendaDeGente(depois);
@@ -316,7 +334,7 @@ export function carimbarPrazoCombinado(veio, os, antes, autor, agora, { podeCorr
     r.prazoCombinado = { data: '', fonte: PRAZO_SEM_AGENDA, motivo: 'A O.S. já estava entregue quando ganhou data ou equipe no PCP.', ...carimboF15(autor, agora) };
     return { os: r, avisos };
   }
-  r.prazoCombinado = { data: nasce, fonte: 'agenda', ...carimboF15(autor, agora) };
+  r.prazoCombinado = { data: nasce, dias: duracaoF15(depois), fonte: 'agenda', ...carimboF15(autor, agora) };
   return { os: r, avisos };
 }
 /* O HISTÓRICO DE REMARCAÇÕES (agendaLog) SÓ CRESCE, e só quando a data muda.
@@ -380,7 +398,12 @@ const DIA_ISO = /^\d{4}-\d{2}-\d{2}$/;
 const pedeDesfazer = v => objeto(v) && v.desfazer === true;
 export const entregaLancadaMudou = (os, antes) => proprio(os, 'entregaLancada') && objeto(os.entregaLancada) && !pedeDesfazer(os.entregaLancada)
   && String(os.entregaLancada.data ?? '') !== String(antes?.entregaLancada?.data ?? '');
-export function carimbarEntregaLancada(os, antes, autor, em, { podeDesfazer = false } = {}) {
+/* O.S. CANCELADA (revisão da F16): `cancelada` é o cancelamento que vale
+   para este envio (o mesmo das marcas de item: o gravado, ou o desfeito
+   neste envio; o pedido de cancelar só vale depois da gravação). Nela o
+   lançamento não muda: fica o gravado, com aviso. A aba v139 não conhece o
+   cancelamento e lançava a entrega de uma cancelada calada. */
+export function carimbarEntregaLancada(os, antes, autor, em, { podeDesfazer = false, cancelada = false } = {}) {
   const r = { ...os };
   const manter = () => { if (proprio(antes, 'entregaLancada')) r.entregaLancada = antes.entregaLancada; else delete r.entregaLancada; };
   if (!proprio(os, 'entregaLancada')) { manter(); return { os: r, aviso: '' }; }
@@ -388,6 +411,12 @@ export function carimbarEntregaLancada(os, antes, autor, em, { podeDesfazer = fa
   if (!autor) {
     if (!(v == null && !gravada)) manter();
     return { os: r, aviso: '' };
+  }
+  if (cancelada) {
+    const dataVeio = objeto(v) ? String(v.data ?? '').trim() : '';
+    const muda = pedeDesfazer(v) ? !!gravada : !!dataVeio && !(gravada && gravada.data === dataVeio);
+    manter();
+    return { os: r, aviso: muda ? 'A entrega não foi lançada: a O.S. está cancelada. Para lançar, desfaça o cancelamento da O.S.' : '' };
   }
   if (pedeDesfazer(v)) {
     if (podeDesfazer && gravada) r.entregaLancada = null; else manter();
@@ -1331,7 +1360,7 @@ function linhaEntrega(it, e) {
   };
 }
 const marcasDe = it => objeto(it) && Array.isArray(it.entregas) ? it.entregas : [];
-export function guardarEntregasItens(os, antes, { papel = '', avisar = false, autor = {}, agora = '' } = {}) {
+export function guardarEntregasItens(os, antes, { papel = '', avisar = false, autor = {}, agora = '', cancelamento = antes ? antes.cancelamento : undefined } = {}) {
   const avisos = [], eventos = [], recusas = [], recusadas = [];
   if (!objeto(os)) return { os, avisos, eventos, recusadas };
   const gravados = Array.isArray(antes?.itens) ? antes.itens : [];
@@ -1341,11 +1370,14 @@ export function guardarEntregasItens(os, antes, { papel = '', avisar = false, au
   for (const g of gravados) for (const e of marcasDe(g)) if (objeto(e)) idsOS.add(String(e.id ?? '').trim());
   const hoje = ENTREGA_ITEM.diaSP(agora) || ENTREGA_ITEM.diaSP(Date.now());
   // Finalizada antes E depois desta gravação: o motor recusa. Finalizando agora, ou reabrindo, vale.
-  /* O cancelamento que vale é o GRAVADO (F16): a cópia velha sem ele não
-     marca item de O.S. cancelada, e a marca forjada no envio não vale. O
-     pedido de cancelar que vem junto só vale depois desta gravação (o que foi
-     entregue nela fica; o saldo é cancelado). */
-  const osCtx = { ...os, finalizadaEm: antes?.finalizadaEm && os.finalizadaEm ? os.finalizadaEm : '', cancelamento: antes ? antes.cancelamento : undefined };
+  /* O cancelamento que vale é o do SERVIDOR (F16), nunca o do envio: a cópia
+     velha sem ele não marca item de O.S. cancelada, e a marca forjada no
+     envio não vale. Quem chama passa `cancelamento` (revisão da F16): o
+     gravado, ou o desfeito pelo pedido aceito neste mesmo envio (a fila junta
+     o desfazer e a marca feita depois dele). O pedido de cancelar que vem
+     junto só vale depois desta gravação (o que foi entregue nela fica; o
+     saldo é cancelado). Sem a opção, o gravado. */
+  const osCtx = { ...os, finalizadaEm: antes?.finalizadaEm && os.finalizadaEm ? os.finalizadaEm : '', cancelamento };
   const carimbo = { por: String(autor?.nome ?? '').trim().slice(0, 80), porId: ehIdPessoa(autor?.porId) ? String(autor.porId).trim() : '', em: String(agora ?? '') };
   const lista = Array.isArray(os.itens) ? os.itens : [];
   const itens = lista.map(it => {

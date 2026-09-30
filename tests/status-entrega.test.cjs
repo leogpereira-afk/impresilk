@@ -40,7 +40,7 @@ const TABELA = [
   ['finalizada dois dias depois: com atraso', os(fin('2026-09-12')), HOJE, 'atraso', 'Com atraso', 'entregue em 12/09 (finalizada no PCP), 2 dias depois do prazo (10/09)'],
   ['a entrega lançada à mão vale antes da baixa do ERP', os({finalizadaEm:'2026-09-15T15:00:00.000Z', finalizadoPor:'Mubisys (baixa automática · ENTREGUE)', baixaAutoERP:{em:'2026-09-15T15:00:00.000Z', status:'ENTREGUE'}, entregaLancada:{data:'2026-09-10', por:'Gestor Teste'}}), HOJE, 'no_prazo', 'No prazo', '(lançada à mão)'],
   ['baixa do ERP sem lançamento: vale a data da baixa, sem prova', os({finalizadaEm:'2026-09-11T15:00:00.000Z', finalizadoPor:'Mubisys (baixa automática · ENTREGUE)', baixaAutoERP:{em:'2026-09-11T15:00:00.000Z', status:'ENTREGUE'}}), HOJE, 'atraso', 'Com atraso', 'baixa do ERP, sem prova'],
-  ['entregue sem prazo combinado ("sem prazo" da F15): no prazo, sem atraso a medir', os({...fin('2026-09-30'), prazoCombinado:{data:'', fonte:'semAgenda'}}), '2026-10-01', 'no_prazo', 'No prazo', 'sem prazo combinado no PCP'],
+  ['entregue sem prazo combinado ("sem prazo" da F15): neutro, sem atraso a medir (revisão da F16)', os({...fin('2026-09-30'), prazoCombinado:{data:'', fonte:'semAgenda'}}), '2026-10-01', 'entregue', 'Entregue, sem prazo combinado', 'sem prazo combinado no PCP'],
   ['retrabalho marcado e entregue no prazo', os({...fin('2026-09-10'), retrabalho:true, problema:'Adesivo descolou'}), HOJE, 'retrabalho', 'Retrabalho', 'retrabalho marcado: Adesivo descolou'],
   ['retrabalho em O.S. ainda aberta também é retrabalho', os({retrabalho:true, instalacao:{data:'2026-09-25'}, prazoCombinado:{data:'2026-09-25', fonte:'agenda'}}), HOJE, 'retrabalho', 'Retrabalho', 'retrabalho marcado'],
   ['cancelada à mão pela gestão', os({cancelamento:cancel()}), HOJE, 'cancelado', 'Cancelado', 'cancelada por Gestor Teste em 15/09: Cliente desistiu do serviço'],
@@ -75,7 +75,7 @@ test('precedência: retrabalho com atraso mostra Retrabalho e diz que também at
     const idx = st(o, hoje).aplicaveis.map(a => O.ESTADOS_ENTREGA.indexOf(a.estado));
     assert.deepEqual(idx, idx.slice().sort((a, b) => a - b));
   }
-  assert.deepEqual(O.ESTADOS_ENTREGA, ['cancelado', 'retrabalho', 'retorno_antecipado', 'atraso', 'no_prazo', 'execucao', 'agendado']);
+  assert.deepEqual(O.ESTADOS_ENTREGA, ['cancelado', 'retrabalho', 'retorno_antecipado', 'atraso', 'no_prazo', 'entregue', 'execucao', 'agendado']);
   // Aberta, atrasada e em execução: o atraso manda, a execução vem junto.
   const ae = st(os({horaSaida:'08:00', saidaEm:'2026-09-19T11:00:00.000Z'}));
   assert.deepEqual(estados(ae), ['atraso', 'execucao']);assert.equal(ae.entregue, false);

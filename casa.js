@@ -285,7 +285,8 @@ function erpAntesDoCorte(o) {
 function classificarEntregas(lista) {
   const r = { retiradas: [], instalacoes: [], aLancar: [], canceladas: [] };
   for (const o of lista || STORE.getAllOS()) {
-    if (OPERACAO.cancelada(o)) { r.canceladas.push(o); continue; }
+    // Cache misto (operacao.js de antes da F16 com este casa.js): sem a função, ninguém é cancelada.
+    if (typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(o)) { r.canceladas.push(o); continue; }
     if (!OPERACAO.dia(o.finalizadaEm)) continue;
     if (OPERACAO.interno(o)) { r.retiradas.push(o); continue; }
     if (OPERACAO.encerradaERP(o) && !o.entregaLancada && !erpAntesDoCorte(o)) { r.aLancar.push(o); continue; }
@@ -745,9 +746,15 @@ function lancarEntregaManual(osId) {
   document.body.appendChild(box);
   if (componente) {
     const papel = STATE.user && STATE.user.papel;
+    /* A prévia (regra do dia e "não pontua") segue a DATA DIGITADA, não a da
+       baixa do ERP, que é a da sincronização (revisão da F16). Ao abrir, o
+       campo traz a data da baixa, que ninguém digitou: a prévia fica sem
+       julgar o prazo (o status da baixa a lançar) até a data mudar. */
+    const campoData = typeof box.querySelector === 'function' ? box.querySelector('#lancar-form input[name="data"]') : null;
     ALOCUI.iniciar(chaveAloc, { os, equipes: equipesCadastradasCasa(), papel, modo: ALOCUI.modoPara(papel, os), dica: ALOCUI.dicaModo(papel, os), semAntigo: true, reiniciar: true,
       dia: OPERACAO.dia(os.finalizadaEm) || hojeISO(), valor: typeof valorDaOS === 'function' ? valorDaOS(os) : os.valorTotal, versoes: versoesRegrasCasa() });
     ALOCUI.montar(document.getElementById('lancar-aloc'), chaveAloc);
+    if (campoData && typeof ALOCUI.definirDataEntrega === 'function') campoData.onchange = () => ALOCUI.definirDataEntrega(chaveAloc, campoData.value);
   }
   // Miniaturas da foto do carro que a equipe registrou.
   box.querySelectorAll('[data-foto-img]').forEach(async img => { const b64 = await STORE.pullPhoto(img.dataset.fotoImg); if (b64) img.src = b64; });
@@ -1696,7 +1703,7 @@ function renderEntregas() {
     // servidor. Dizer "fora do PCP" aqui culpava a equipe por um mês inteiro.
     if (!card && o.data && o.data < limiteEntregas) return { rotulo: 'sem cópia no aparelho', classe: 'st-aguardando_producao', dica: `Entregue há mais de ${janelaLocalCasa()} dias; o aparelho guarda só os últimos ${janelaLocalCasa()}` };
     if (!card) return { rotulo: 'fora do PCP', classe: 'st-aguardando_producao', dica: 'O ERP entregou, mas esta O.S nunca passou pelo PCP' };
-    if (OPERACAO.cancelada(card)) return { rotulo: 'cancelada', classe: 'st-aguardando_producao', dica: 'Cancelada no PCP: ' + ((OPERACAO.cancelamentoDe(card) || {}).motivo || '') };
+    if (typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(card)) return { rotulo: 'cancelada', classe: 'st-aguardando_producao', dica: 'Cancelada no PCP: ' + (((typeof OPERACAO.cancelamentoDe === 'function' && OPERACAO.cancelamentoDe(card)) || {}).motivo || '') };
     if (card.entregaLancada) return { rotulo: 'lançada', classe: 'st-confirmada', dica: 'Baixa do ERP lançada à mão por ' + (card.entregaLancada.por || '') };
     if (registradas.has(n)) return { rotulo: 'registrada', classe: 'st-confirmada', dica: 'Entrega registrada no PCP' };
     if (aLancarSet.has(n)) return { rotulo: 'a lançar', classe: 'st-retrabalho', dica: 'Baixada pelo ERP; falta lançar no PCP' };

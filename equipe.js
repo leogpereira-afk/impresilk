@@ -164,6 +164,11 @@ function declararSaldoDoItem(it) {
   juntarMarcasDoStore(_draft);
   const s = situacaoEntrega(it, _draft);
   if (!s) return null;
+  // A O.S. inteira cancelada: a frase do motor para o celular (revisão da F16), não a do item.
+  if (typeof ENTREGA_ITEM.canceladaOS === 'function' && ENTREGA_ITEM.canceladaOS(_draft) && s.entregue < s.qtde) {
+    const v = declararEntrega(it, Math.max(1, s.qtde - s.entregue), { simular: true });
+    if (!v.ok) return v;
+  }
   if (s.situacao === 'cancelado' && s.entregue < s.qtde) return { ok: false, erro: 'Item cancelado pelo PCP: a entrega não foi marcada. Fale com o PCP.' };
   if (s.situacao === 'problema') return { ok: false, erro: 'Este item está com problema marcado pela gestão; fale com o PCP.' };
   if (s.saldo <= 0) return null;
@@ -791,11 +796,22 @@ function fotosNaFila() { return new Set(STORE.getQueue().filter(x => x.action ==
    semanas de finalizadas (o aparelho guarda 60 dias). Grupos na ordem do dia:
    Hoje (na rua ou na agenda de hoje), Data vencida, Próximas; as finalizadas
    num bloco fechado, as mais novas primeiro. */
+/* A O.S. CANCELADA PELO PCP (revisão da F16): o celular não dizia nada, e a
+   cancelada de hoje continuava em "Hoje", com Registrar saída e Finalizar.
+   Ela vai para um grupo próprio, com o selo, e a ficha não oferece saída nem
+   finalização (o servidor já recusa as marcas). Cache misto (operacao.js de
+   antes da F16): sem a função, nenhuma é cancelada. */
+const canceladaNoCel = o => !!o && typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(o);
+function motivoCancelNoCel(o) {
+  const c = typeof OPERACAO.cancelamentoDe === 'function' ? OPERACAO.cancelamentoDe(o) : null;
+  return c && c.motivo ? String(c.motivo) : '';
+}
 function gruposDaLista(list, hoje = OPERACAO.dia(new Date())) {
-  const g = { hoje: [], vencidas: [], proximas: [], finalizadas: [] };
+  const g = { hoje: [], vencidas: [], proximas: [], canceladas: [], finalizadas: [] };
   const dataDe = o => OPERACAO.dia(o.instalacao && o.instalacao.data);
   for (const o of list) {
     if (o.finalizadaEm) g.finalizadas.push(o);
+    else if (canceladaNoCel(o)) g.canceladas.push(o);
     // Voltou e só falta finalizar: a ação é abrir e finalizar, não "confirmar
     // com o PCP" (título das vencidas).
     else if (OPERACAO.naRua(o, hoje) || OPERACAO.diasAgenda(o).includes(hoje) || (isInterno(o) && dataDe(o) === hoje) || o.horaRetorno || o.retornoEm) g.hoje.push(o);
@@ -804,7 +820,7 @@ function gruposDaLista(list, hoje = OPERACAO.dia(new Date())) {
   }
   // Sem data vai para o fim do grupo.
   const porData = (a, b) => (dataDe(a) || '9999').localeCompare(dataDe(b) || '9999');
-  g.hoje.sort(porData); g.vencidas.sort(porData); g.proximas.sort(porData);
+  g.hoje.sort(porData); g.vencidas.sort(porData); g.proximas.sort(porData); g.canceladas.sort(porData);
   g.finalizadas.sort((a, b) => String(b.finalizadaEm || '').localeCompare(String(a.finalizadaEm || '')));
   return g;
 }
@@ -813,7 +829,7 @@ function itemListaHTML(os, heroId, naFila) {
   const naRua = OPERACAO.naRua(os);
   return `<div class="os-list-item st-${st}${os.id===heroId?' is-hero':''}" data-os-id="${esc(os.id)}">
           <div class="list-info">
-            <div class="list-numero">O.S ${esc(os.numero||'sem número')} ${naRua?'🚗':''} ${os.finalizadaEm?'✓':''}${OPERACAO.atrasada(os) && !(os.horaRetorno || os.retornoEm) ? ' <span class="tag-atraso">⏰ data vencida · confirme com o PCP</span>' : ''}${!os.finalizadaEm && (os.horaRetorno || os.retornoEm) ? ' <span class="badge">voltou · falta finalizar</span>' : ''}${naFila.has(os.id) ? (EQ.recusas && EQ.recusas.has(os.id) ? ' <span class="badge eq-na-fila">⛔ parada no celular</span>' : ' <span class="badge eq-na-fila">⏳ ainda no celular</span>') : ''}</div>
+            <div class="list-numero">O.S ${esc(os.numero||'sem número')} ${naRua?'🚗':''} ${os.finalizadaEm?'✓':''}${canceladaNoCel(os) ? ` <span class="badge eq-cancelada" title="${esc(motivoCancelNoCel(os))}">⛔ Cancelada pelo PCP</span>` : ''}${OPERACAO.atrasada(os) && !(os.horaRetorno || os.retornoEm) ? ' <span class="tag-atraso">⏰ data vencida · confirme com o PCP</span>' : ''}${!os.finalizadaEm && (os.horaRetorno || os.retornoEm) ? ' <span class="badge">voltou · falta finalizar</span>' : ''}${naFila.has(os.id) ? (EQ.recusas && EQ.recusas.has(os.id) ? ' <span class="badge eq-na-fila">⛔ parada no celular</span>' : ' <span class="badge eq-na-fila">⏳ ainda no celular</span>') : ''}</div>
             ${EQ.recusas && EQ.recusas.has(os.id) ? `<div class="trava-msg" style="margin-top:4px">O escritório não aceitou: ${esc(EQ.recusas.get(os.id))} Fale com o PCP.</div>` : ''}
             <div class="list-cliente">${esc(os.cliente)} · ${esc(os.endereco||'')}</div>
             <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
@@ -883,6 +899,7 @@ function renderList() {
     g.hoje.length ? linhas(g.hoje) : '<p class="text-muted">Nenhuma O.S sua para hoje.</p>',
     g.vencidas.length ? titulo('Data vencida · confirme com o PCP', g.vencidas.length) + linhas(g.vencidas) : '',
     g.proximas.length ? titulo('Próximas', g.proximas.length) + linhas(g.proximas) : '',
+    g.canceladas.length ? titulo('Cancelada pelo PCP · não saia para estas', g.canceladas.length) + linhas(g.canceladas) : '',
     g.finalizadas.length ? `<details class="card-fs eq-finalizadas" style="margin-top:14px"${finAberto ? ' open' : ''}><summary>Finalizadas (${g.finalizadas.length})</summary><div class="fs-body">${linhas(g.finalizadas)}</div></details>` : '',
   ].join('');
 
@@ -1240,6 +1257,8 @@ function renderModal() {
   const fotosRet = os.fotosRetornoIds || [];
   const causas = STORE.getCFG().causas_retrabalho || [];
   const ro = !!os.finalizadaEm; // O.S finalizada = somente leitura no espelho
+  // Cancelada pelo PCP (revisão da F16): sem saída e sem finalizar.
+  const canc = !ro && canceladaNoCel(os);
   const naFila = fotosNaFila();
   // Miniatura; rm é o atributo do × (vazio na O.S. finalizada, que não apaga nada).
   const thumb = (fid, rm) => `<div class="foto-thumb-wrap${naFila.has(fid) ? ' na-fila' : ''}" data-fid="${esc(fid)}"><img class="foto-thumb" data-img="${esc(fid)}" alt="foto">${ro || !rm ? '' : `<button type="button" class="foto-rm" ${rm} aria-label="Apagar foto">×</button>`}</div>`;
@@ -1306,13 +1325,14 @@ function renderModal() {
     <details class="card-fs" data-bloco="saida"${ro ? '' : ' open'}>
       <summary>${n.saida}. Saída${os.horaSaida ? ` <span class="item-progress" style="margin-left:auto">✓ ${esc(os.horaSaida)}</span>` : ''}</summary>
       <div class="fs-body">
-        ${(!ro && !os.carroLiberado && !confirmadoHoje) ? `<div class="trava-msg">🔒 ${esc(msgConfirmacao(os))}</div>` : ''}
+        ${canc ? '<div class="trava-msg">⛔ O.S. cancelada pelo PCP: não saia para ela. Fale com o PCP.</div>' : ''}
+        ${(!ro && !canc && !os.carroLiberado && !confirmadoHoje) ? `<div class="trava-msg">🔒 ${esc(msgConfirmacao(os))}</div>` : ''}
         ${os.carroLiberado
           ? `<div class="liberar-status">${OPERACAO.semCarro(os) ? '🏠 Saída liberada (sem carro)' : '🚗 Carro liberado'} · ${esc(os.carroLiberadoPor||'')}</div>`
-          : `<button type="button" class="btn-primary" id="m-carro" ${(!confirmadoHoje||ro)?'disabled style="opacity:.5"':''}>${OPERACAO.semCarro(os) ? '🏠 Liberar saída (sem carro)' : '🚗 Liberar carro'}</button>`}
+          : canc ? '' : `<button type="button" class="btn-primary" id="m-carro" ${(!confirmadoHoje||ro)?'disabled style="opacity:.5"':''}>${OPERACAO.semCarro(os) ? '🏠 Liberar saída (sem carro)' : '🚗 Liberar carro'}</button>`}
         <div class="field-row">
           <div class="field"><label for="m-hora-saida">Hora saída</label>
-            <div class="eq-hora"><input id="m-hora-saida" type="time" data-f="horaSaida" value="${esc(os.horaSaida)}">${(ro || os.horaSaida) ? '' : `<button type="button" class="btn-ghost" id="m-sai-agora" ${(os.carroLiberado || confirmadoHoje) ? '' : 'disabled style="opacity:.5"'}>Saí agora</button>`}</div></div>
+            <div class="eq-hora"><input id="m-hora-saida" type="time" data-f="horaSaida" value="${esc(os.horaSaida)}"${canc && !os.horaSaida ? ' disabled' : ''}>${(ro || canc || os.horaSaida) ? '' : `<button type="button" class="btn-ghost" id="m-sai-agora" ${(os.carroLiberado || confirmadoHoje) ? '' : 'disabled style="opacity:.5"'}>Saí agora</button>`}</div></div>
           ${OPERACAO.semCarro(os) ? '' : `<div class="field"><label for="m-km-saida">KM saída</label><input id="m-km-saida" type="number" inputmode="numeric" data-f="kmSaida" value="${esc(os.kmSaida)}" placeholder="km do veículo"></div>`}
         </div>
       </div>
@@ -1399,6 +1419,9 @@ function renderModal() {
     ${ro ? `<div class="finalizada-lock lock-allow">
       <span>🔒 O.S finalizada${os.finalizadoPor ? ' por <strong>' + esc(os.finalizadoPor) + '</strong>' : ''}${os.finalizadaEm ? ' · ' + new Date(os.finalizadaEm).toLocaleString('pt-BR') : ''}. Somente leitura.</span>
     </div>` : ''}
+    ${canc ? `<div class="finalizada-lock lock-allow eq-cancelada-aviso">
+      <span>⛔ O.S. cancelada pelo PCP${motivoCancelNoCel(os) ? ': ' + esc(motivoCancelNoCel(os)) : ''}. Não saia para ela e não finalize: fale com o PCP.</span>
+    </div>` : ''}
 
     <div style="padding:12px 16px;background:#eff6ff;border-bottom:1px solid var(--border)">
       <div class="list-date" style="font-size:.95rem">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
@@ -1418,6 +1441,7 @@ function renderModal() {
       ${faltaHtml}
       ${ro
         ? `<div class="liberar-status" style="background:#dcfce7;color:var(--green)">✓ Finalizada · ${new Date(os.finalizadaEm).toLocaleString('pt-BR')}</div>`
+        : canc ? '<div class="trava-msg">⛔ Cancelada pelo PCP: não há o que finalizar. Fale com o PCP.</div>'
         : `<button type="button" class="btn-primary" id="m-finalizar">${interno ? '🛍 Entregue ao cliente' : '🏁 Finalizar instalação'}</button>`}
       <button type="button" class="btn-ghost" id="m-save">${ro ? 'Fechar' : 'Salvar e fechar'}</button>
     </div>

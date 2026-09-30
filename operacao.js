@@ -907,13 +907,29 @@ const OPERACAO = (() => {
      M"), item com problema de entrega, equipe na rua, equipe que voltou sem
      finalizar, ou no dia da agenda com equipe escalada.
    - Agendado: as outras abertas ("A agendar" quando nem data tem).
+   - Entregue, SEM MEDIDA DE PRAZO (revisão da F16): a entregue que não tem
+     como ser julgada fica neutra, nunca "No prazo" e nunca perda. Sem prazo
+     combinado: "Entregue, sem prazo combinado". A baixa do ERP ainda sem
+     lançamento, depois do corte: "Entregue (baixa do ERP a lançar)", porque a
+     data da baixa é a da sincronização e a data real vem no lançamento. A
+     baixa que não diz o dia da entrega (fora da carteira, antes do corte ou
+     na retirada): "Entregue (baixa do ERP, sem data)".
    `hoje` é 'AAAA-MM-DD' no calendário da fábrica; sem ele, o dia de hoje em
    São Paulo. `regra` é a versão da regra do programa (F05): aqui ela só diz
    quais estados são perda (`perdas`); a tolerância do retorno entra na F17.
    NÃO muda o status de agenda (OPERACAO.status), que o Painel copia. */
-const ESTADOS_ENTREGA = Object.freeze(['cancelado', 'retrabalho', 'retorno_antecipado', 'atraso', 'no_prazo', 'execucao', 'agendado']);
+const ESTADOS_ENTREGA = Object.freeze(['cancelado', 'retrabalho', 'retorno_antecipado', 'atraso', 'no_prazo', 'entregue', 'execucao', 'agendado']);
 const ROTULOS_ENTREGA = Object.freeze({cancelado:'Cancelado', retrabalho:'Retrabalho', retorno_antecipado:'Retorno antecipado',
-  atraso:'Com atraso', no_prazo:'No prazo', execucao:'Em execução', agendado:'Agendado'});
+  atraso:'Com atraso', no_prazo:'No prazo', entregue:'Entregue', execucao:'Em execução', agendado:'Agendado'});
+// Os rótulos do "Entregue" neutro, um por motivo de não haver medida.
+const ROTULO_SEM_PRAZO_ST = 'Entregue, sem prazo combinado';
+const ROTULO_A_LANCAR_ST = 'Entregue (baixa do ERP a lançar)';
+const ROTULO_ERP_SEM_DATA_ST = 'Entregue (baixa do ERP, sem data)';
+/* O CORTE DO LANÇAMENTO MANUAL (decisão do dono, 14/09/2026): a baixa do ERP
+   anterior a este dia conta como entregue sem lançamento; a partir dele, a
+   data real da entrega vem do lançamento à mão. O mesmo dia do casa.js e do
+   pcp-sync (tests/cancelamento-f16.test.cjs confere). */
+const CORTE_LANCAMENTO_ST = '2026-09-15';
 // A perda da regra do programa (a lista PERDAS de regras.js) que cada estado mostra.
 const PERDA_DO_ESTADO = Object.freeze({atraso:'atraso', retrabalho:'retrabalho', retorno_antecipado:'retornoAntecipado'});
 const MOTIVO_CANCELAMENTO_MIN = 15;
@@ -921,7 +937,11 @@ const MOTIVO_CANCELAMENTO_MAX = 300;
 const SEM_DADO_RETORNO = Object.freeze({situacao:'sem dado', motivo:'O retorno antecipado ainda não é medido: entra com as ocorrências e os abonos.'});
 const txtSt = v => v == null ? '' : String(v).trim();
 const objSt = v => !!v && typeof v === 'object' && !Array.isArray(v);
-const letrasSt = v => Array.from(txtSt(v)).length;
+/* O MOTIVO É TEXTO, e as letras contam sem os caracteres invisíveis (largura
+   zero, controle, marca de direção): quinze espaços de largura zero não
+   dizem motivo nenhum, e um objeto não é motivo (revisão da F16). */
+const INVISIVEIS_ST = /[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
+const letrasMotivoSt = v => typeof v === 'string' ? Array.from(v.replace(INVISIVEIS_ST, '').trim()).length : 0;
 function diaValidoSt(v) {
   if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return '';
   const d = new Date(v + 'T12:00:00Z');
@@ -976,21 +996,27 @@ function cancelamentoDe(o) {
 const cancelada = o => !!cancelamentoDe(o);
 // O motivo do "Cancelar O.S.": '' quando serve; senão a frase, igual na tela e na porta.
 function motivoCancelamentoInvalido(motivo) {
-  const n = letrasSt(motivo);
+  const n = letrasMotivoSt(motivo);
   if (n < MOTIVO_CANCELAMENTO_MIN) return `Escreva o motivo do cancelamento com ${MOTIVO_CANCELAMENTO_MIN} letras ou mais.`;
   if (n > MOTIVO_CANCELAMENTO_MAX) return `O motivo do cancelamento vai até ${MOTIVO_CANCELAMENTO_MAX} letras.`;
   return '';
 }
 /* O PRAZO DA ENTREGA: o combinado (F15, congelado) é o primeiro dia, e a O.S.
-   de vários dias tem até o último dia da duração (a duração de agora: o prazo
-   congelado guarda só o dia). Cliente retira: o próprio dia. Sem prazo
-   combinado: null, e não há atraso a medir. */
+   de vários dias tem até o último dia da duração. A duração é a CONGELADA
+   junto com a data (prazoCombinado.dias, revisão da F16): mudar a duração
+   depois não move o prazo. O carimbo antigo, sem os dias, e o prazo lido do
+   histórico usam a duração de agora. Cliente retira: o próprio dia. Sem
+   prazo combinado: null, e não há atraso a medir. */
+function diasCongeladosSt(o, pc) {
+  const d = pc && !pc.derivado && objSt(o.prazoCombinado) ? o.prazoCombinado.dias : undefined;
+  return typeof d === 'number' && Number.isInteger(d) && d >= 1 && d <= 366 ? d : 0;
+}
 function prazoDaEntrega(o) {
   if (!objSt(o)) return null;
   const pc = prazoCombinadoDe(o);
   const inicio = pc ? diaValidoSt(txtSt(pc.data)) : '';
   if (!inicio) return null;
-  const dias = duracaoSt(o);
+  const dias = o.tipo === 'interno' ? 1 : diasCongeladosSt(o, pc) || duracaoSt(o);
   return {inicio, fim:somarDiasSt(inicio, dias - 1), dias, fonte:txtSt(pc.fonte)};
 }
 const prazoTxtSt = p => p.dias > 1 ? `${ddmmSt(p.inicio)} a ${ddmmSt(p.fim)}` : ddmmSt(p.fim);
@@ -999,16 +1025,37 @@ function diasAgendaSt(o) {
   const d = o.tipo === 'interno' ? '' : diaValidoSt(txtSt(o.instalacao && o.instalacao.data).slice(0, 10));
   return d ? Array.from({length:duracaoSt(o)}, (_, i) => somarDiasSt(d, i)) : [];
 }
+/* O ERP DISSE ENTREGUE? A mesma régua do erpDisseEntregue do motor da
+   entrega por item: a baixa da conciliação da carteira ("fora da carteira")
+   e a de CONCLUIDO ou FINALIZADO não dizem o dia da entrega. */
+function erpDisseEntregueSt(o) {
+  if (!encerradaNoERPSt(o)) return false;
+  const b = objSt(o.baixaAutoERP) && o.baixaAutoERP.em === o.finalizadaEm ? o.baixaAutoERP : null;
+  if (b && b.carteira) return false;
+  const m = /\(baixa autom[aá]tica\s*\S\s*([^)]*)\)\s*$/i.exec(txtSt(o.finalizadoPor));
+  const status = b && txtSt(b.status) ? txtSt(b.status) : m ? m[1] : '';
+  return txtSt(status).normalize('NFD').replace(/\p{M}/gu, '').toUpperCase() === 'ENTREGUE';
+}
 /* A ENTREGA DA O.S.: {dia, fonte, semProva} ou null (não entregue).
    Com marca por item: a ÚLTIMA entrega por item, marcada ou implícita,
    quando nenhum item físico ficou a entregar, ou quando a O.S. foi encerrada
-   (o item que ficou sem entrega na baixa do ERP que não disse entregue
-   conta no dia da baixa, sem prova). Sem marca: a entrega lançada à mão, a
-   finalização no PCP ou a baixa do ERP (sem prova). Cancelada: só o que já
-   foi entregue por item. */
+   no PCP. Sem marca: a entrega lançada à mão, a finalização no PCP ou a
+   baixa do ERP (sem prova). Cancelada: só o que já foi entregue por item.
+   A BAIXA DO ERP SEM LANÇAMENTO (revisão da F16) tem a data da
+   sincronização, não a da entrega. Depois do corte, a O.S. externa espera o
+   lançamento à mão: fica "a lançar", entregue e sem dia ({dia:''}), e o
+   prazo não é julgado. Nos outros casos a baixa só dá o dia quando o ERP
+   disse ENTREGUE, a régua da entrega implícita do motor ("fora da carteira"
+   não conta como entrega no dia da baixa). Com marca por item, vale a última
+   marca quando todo item físico foi por marca; o implícito dessa baixa não. */
 function entregaDaOS(o, M, r, canc) {
   const fim = o.finalizadaEm ? diaSt(o.finalizadaEm) : '';
   const erp = encerradaNoERPSt(o);
+  const l = o.entregaLancada;
+  const lancada = diaSt(l && typeof l === 'object' ? l.data : l);
+  const aLancar = erp && !lancada && !!fim && o.tipo !== 'interno' && fim >= CORTE_LANCAMENTO_ST;
+  const semDia = aLancar ? {dia:'', fonte:'aLancar', semProva:true}
+    : erp && !lancada && !erpDisseEntregueSt(o) ? {dia:'', fonte:'erpSemData', semProva:true} : null;
   if (r && r.marcas > 0) {
     const L = M.lancamentosDaOS(o);
     const linhas = L.lancamentos.filter(x => x.tipo !== 'servico' && diaValidoSt(x.dia));
@@ -1016,13 +1063,13 @@ function entregaDaOS(o, M, r, canc) {
     const semProva = linhas.some(x => x.marca === 'sem prova');
     if (canc) return ultimo ? {dia:ultimo, fonte:'itens', semProva} : null;
     const pendente = r.aEntregar + r.parciais + r.problema > 0;
+    if (fim && semDia) return !pendente && !semProva && ultimo ? {dia:ultimo, fonte:'itens', semProva:false} : semDia;
     if (fim) return pendente ? {dia:fim > ultimo ? fim : ultimo, fonte:'itens', semProva:semProva || erp} : {dia:ultimo || fim, fonte:'itens', semProva};
     return !pendente && ultimo ? {dia:ultimo, fonte:'itens', semProva} : null;
   }
   if (canc || !fim) return null;
-  const l = o.entregaLancada;
-  const lancada = diaSt(l && typeof l === 'object' ? l.data : l);
   if (lancada) return {dia:lancada, fonte:'lancada', semProva:false};
+  if (semDia) return semDia;
   return erp ? {dia:fim, fonte:'erp', semProva:true} : {dia:fim, fonte:'finalizada', semProva:false};
 }
 const FONTE_TXT_ST = Object.freeze({itens:'última entrega por item', lancada:'lançada à mão', finalizada:'finalizada no PCP', erp:'baixa do ERP, sem prova'});
@@ -1075,7 +1122,7 @@ function statusEntrega(o, hoje, regra) {
   const entrega = entregaDaOS(os, M, r, canc);
   const parcial = !canc && !entrega ? parcialDe(os, M, r) : null;
   const aplicaveis = [];
-  const poe = (estado, motivo) => { aplicaveis.push({estado, rotulo:ROTULOS_ENTREGA[estado], motivo}); };
+  const poe = (estado, motivo, rotulo) => { aplicaveis.push({estado, rotulo:rotulo || ROTULOS_ENTREGA[estado], motivo}); };
   let diasAtraso = 0;
   if (canc) {
     const foi = entrega ? '; o que já foi entregue fica' : '';
@@ -1086,12 +1133,18 @@ function statusEntrega(o, hoje, regra) {
     const prob = Array.from(txtSt(os.problema)).slice(0, 120).join('');
     poe('retrabalho', `retrabalho marcado${prob ? ': ' + prob : ''}${diaSt(os.dataResolvido) ? ` (resolvido em ${ddmmSt(diaSt(os.dataResolvido))})` : ''}`);
   }
-  if (!canc && entrega) {
+  if (!canc && entrega && !entrega.dia) {
+    const baixa = ddmmSt(diaSt(os.finalizadaEm));
+    if (entrega.fonte === 'aLancar') poe('entregue', `baixa do ERP em ${baixa}, ainda a lançar: a data real da entrega vem no lançamento, e só com ela o prazo é julgado`, ROTULO_A_LANCAR_ST);
+    else poe('entregue', `baixa do ERP em ${baixa} sem o dia da entrega (o ERP não disse entregue): o prazo não é julgado`, ROTULO_ERP_SEM_DATA_ST);
+  } else if (!canc && entrega) {
     const como = `${os.tipo === 'interno' ? 'retirada' : 'entregue'} em ${ddmmSt(entrega.dia)} (${FONTE_TXT_ST[entrega.fonte]})`;
     if (prazo && entrega.dia > prazo.fim) {
       diasAtraso = diasEntreSt(prazo.fim, entrega.dia);
       poe('atraso', `${como}, ${diasTxtSt(diasAtraso)} depois do prazo (${prazoTxtSt(prazo)})`);
-    } else poe('no_prazo', prazo ? `${como}, dentro do prazo (${prazoTxtSt(prazo)})` : `${como}; sem prazo combinado no PCP, não há atraso a medir`);
+    } else if (prazo) poe('no_prazo', `${como}, dentro do prazo (${prazoTxtSt(prazo)})`);
+    // Sem prazo combinado não há o que medir: neutro, nunca o verde do "No prazo".
+    else poe('entregue', `${como}; sem prazo combinado no PCP, não há atraso a medir`, ROTULO_SEM_PRAZO_ST);
   } else if (!canc) {
     if (prazo && dHoje > prazo.fim) {
       diasAtraso = diasEntreSt(prazo.fim, dHoje);

@@ -261,7 +261,12 @@ test('corte do lançamento manual: casa.js e pcp-sync dizem o mesmo dia, e o lit
   // A reserva do store.js (quando o casa.js não carrega, no celular) diz o mesmo dia.
   const reserva = /typeof CORTE_LANCAMENTO_MANUAL === 'string' \? CORTE_LANCAMENTO_MANUAL : '(\d{4}-\d{2}-\d{2})'/.exec(store);
   assert.ok(reserva);assert.equal(reserva[1], doCasa[1]);
-  for (const f of ['operacao.js', 'app.js', 'performance.js', 'relatorios-entregas.js', 'equipe.js']) assert.equal(vezes(ler(f), doCasa[1]), 0, f);
+  for (const f of ['app.js', 'performance.js', 'relatorios-entregas.js', 'equipe.js']) assert.equal(vezes(ler(f), doCasa[1]), 0, f);
+  // O status da entrega (revisão da F16: a baixa "a lançar" não julga o prazo) tem a dele no bloco copiado: o mesmo dia, uma vez.
+  for (const f of ['operacao.js', 'supabase/functions/_shared/pcp-status.mjs']) {
+    const doStatus = /^const CORTE_LANCAMENTO_ST = '(\d{4}-\d{2}-\d{2})';$/m.exec(ler(f));
+    assert.ok(doStatus, f);assert.equal(doStatus[1], doCasa[1], f);assert.equal(vezes(ler(f), doCasa[1]), 1, f);
+  }
 });
 
 /* ───────────── a tela: selo no card e na ficha, Cancelar e Desfazer ───────────── */
@@ -306,7 +311,8 @@ test('tela: selo no card e na ficha; Cancelar O.S. com motivo só para a gestão
   b.abrir('1');
   let ficha = b.run('statusEntregaFichaHTML(_modalDraft)');
   assert.match(ficha, /class="st-entrega lock-allow"/, 'vale na O.S. finalizada (a baixa fora da carteira)');
-  assert.match(ficha, /selo-entrega se-no_prazo/);assert.match(ficha, /baixa do ERP, sem prova/);
+  // A baixa fora da carteira depois do corte, sem lançamento: neutra, "a lançar" (revisão da F16), não "No prazo".
+  assert.match(ficha, /selo-entrega se-entregue/);assert.match(ficha, /Entregue \(baixa do ERP a lançar\)/);assert.match(ficha, /Baixa do ERP em 22\/09, ainda a lançar/);
   assert.match(ficha, /Retorno antecipado: sem dado ainda\./);
   assert.match(ficha, /id="btn-cancelar-os">Cancelar O\.S\.</);
   // Caso ruim: motivo curto. O diálogo mostra a frase e não grava nada.
@@ -379,7 +385,8 @@ test('prévia da divisão: a O.S. cancelada, ou com a perda da regra, mostra a c
   const retrab = html('r', base({retrabalho:true}));
   assert.match(retrab, /O\.S\. com retrabalho: pela regra do programa, não pontua nem paga comissão\./);
   const atraso = html('a', base({instalacao:{data:'2026-10-01'}, prazoCombinado:{data:'2026-10-01', fonte:'agenda'}}));
-  assert.match(atraso, /O\.S\. com entregue com atraso: pela regra do programa, não pontua nem paga comissão\./);
+  // O texto (revisão da F16): "atraso na entrega", não "com entregue com atraso".
+  assert.match(atraso, /O\.S\. com atraso na entrega: pela regra do programa, não pontua nem paga comissão\./);
   // Antes de 01/10 (regra atual, sem programa): só a cancelada muda a prévia.
   assert.doesNotMatch(html('s', base({retrabalho:true, finalizadaEm:'2026-09-20T10:00:00'})), /não pontua/);
   assert.match(html('s2', base({finalizadaEm:'2026-09-20T10:00:00', cancelamento:{ativo:true, motivo:'Cliente desistiu do serviço'}})), /O\.S\. cancelada: não pontua/);

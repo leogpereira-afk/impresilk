@@ -2328,6 +2328,8 @@ function resumoEntregaFichaTexto(os) {
    unidades ("6 de 10"). Sem marca nenhuma, nada muda. */
 function seloEntregaCardHTML(os) {
   if (!temMotorEntrega() || !os || os.finalizadaEm) return '';
+  // O.S. cancelada (revisão da F16): o selo "Cancelado" diz tudo; "Itens entregues: falta finalizar" a contradizia.
+  if (canceladaNaTela(os)) return '';
   let r;
   try { r = ENTREGA_ITEM.resumoOS(os); } catch { return ''; }
   if (!r.marcas) return '';
@@ -4352,7 +4354,8 @@ function statusEntregaDe(os) {
   try { return OPERACAO.statusEntrega(os); } catch { return null; }
 }
 const canceladaNaTela = os => temStatusEntrega() && typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(os);
-const ICONE_STATUS_ENTREGA = { cancelado: '⛔', retrabalho: '🔴', retorno_antecipado: '↩', atraso: '⏰', no_prazo: '✅', execucao: '🔧', agendado: '📅' };
+// "Entregue" é o neutro (revisão da F16): entregue sem medida de prazo, sem o verde do "No prazo".
+const ICONE_STATUS_ENTREGA = { cancelado: '⛔', retrabalho: '🔴', retorno_antecipado: '↩', atraso: '⏰', no_prazo: '✅', entregue: '📦', execucao: '🔧', agendado: '📅' };
 function seloStatusEntregaHTML(st) {
   if (!st || !st.estado) return '';
   const dica = (st.aplicaveis || []).map(a => `${a.rotulo}: ${a.motivo}`).join('\n');
@@ -4450,7 +4453,13 @@ function osCardHTML(os) {
   const stE = statusEntregaDe(os);
   const seloStatus = stE ? ' ' + seloStatusEntregaHTML(stE) : '';
   const tagAtraso = estaAtrasada(os) && !(stE && stE.estado === 'atraso') ? ' <span class="tag-atraso">⏰ atrasada</span>' : '';
-  const tagRetrab = ((os.retrabalho && !os.finalizadaEm) || retrabPendente(os)) && !(stE && stE.estado === 'retrabalho') ? ' <span class="tag-retrab">🔴 retrabalho</span>' : '';
+  /* O selo "Retrabalho" vale para o pendente e para o resolvido (revisão da
+     F16): o que ainda falta resolver leva a marca "a resolver" ao lado, como
+     o card da v139 distinguia. */
+  const retrabAResolver = (os.retrabalho && !os.finalizadaEm) || retrabPendente(os);
+  const tagRetrab = !retrabAResolver ? ''
+    : stE && stE.estado === 'retrabalho' ? ' <span class="tag-retrab" title="Retrabalho ainda a resolver">a resolver</span>'
+    : ' <span class="tag-retrab">🔴 retrabalho</span>';
   const etapasBtns = `<div class="card-etapas">${etapasCard
     .map(([b, lbl]) => `<button class="card-etapa-btn ${etapaDone ? 'done' : ''}" data-etapa-os="${esc(os.id)}" data-etapa-bloco="${b}" title="Abrir em ${esc(lbl)}">${esc(lbl)}</button>`)
     .join('')}</div>`;
@@ -4575,6 +4584,10 @@ function cardTempoHTML(os) {
   if (os.dataEntrada) {
     tags.push(`<span class="prazo-tag prazo-info" title="Data do pedido">📋 ${fmtDataBR(os.dataEntrada)}</span>`);
   }
+  /* O.S. CANCELADA (revisão da F16): contador de entrega ("atrasada 5d",
+     "entrega em 3d"), HOJE, agenda e finalização contradiziam o "Cancelada"
+     do prazo principal. Fica só a data do pedido. */
+  if (canceladaNaTela(os)) return tags.length ? `<div class="card-prazo">${tags.join('')}</div>` : '';
 
   if (os.finalizadaEm) {
     // Quando finalizada: mostra agenda (se existiu) + data da conclusão.
@@ -4875,6 +4888,11 @@ function etapasDoCard(os) {
   const filhasRetrab = filhasRetrabDe(os);
   const retrab = retrabPendente(os);
   const filhaAberta = filhasRetrab.find(f => !f.finalizadaEm);
+  /* O.S. CANCELADA PELO PCP (revisão da F16): o menu não oferece "Registrar
+     saída" nem "Finalizar", como a ficha e o celular. A equipe que já saiu
+     ainda abre a execução (para registrar a volta). */
+  const canc = !fin && canceladaNaTela(os);
+  const MOTIVO_CANC = 'Cancelada pelo PCP: para seguir, desfaça o cancelamento na ficha.';
   const L = [];
   // Equipe escalada numa O.S. não liberada não a vê no espelho (o espelho só
   // lista liberadas): dito aqui, para ninguém esperar a equipe aparecer.
@@ -4899,8 +4917,8 @@ function etapasDoCard(os) {
       dica: !lib ? 'libera do PCP junto' : '',
       motivo: parado ? '' : fin ? 'Finalizada.' : saiu ? 'A equipe já saiu.' : agenda ? 'Tem data marcada: tire a data na programação para marcar parado.' : '' });
     L.push({ aba: 'execucao', icone: '⚡', nome: 'Execução', sub: saiu && !fin ? (voltou ? 'voltou · conferir e finalizar' : 'equipe na rua') : 'saída e retorno', atual: saiu && !fin,
-      acao: fin || !lib || !agenda ? '' : 'exec', rotulo: saiu ? '🔧 Abrir execução' : '🚗 Registrar saída',
-      motivo: fin ? 'Finalizada.' : !lib ? 'Libere do PCP primeiro.' : !agenda ? 'Programe a data primeiro.' : '' });
+      acao: fin || !lib || !agenda || (canc && !saiu) ? '' : 'exec', rotulo: saiu ? '🔧 Abrir execução' : '🚗 Registrar saída',
+      motivo: fin ? 'Finalizada.' : canc && !saiu ? MOTIVO_CANC : !lib ? 'Libere do PCP primeiro.' : !agenda ? 'Programe a data primeiro.' : '' });
   }
   /* Retrabalho pendente sai daqui com "resolvido" -- inclusive em O.S.
      finalizada, onde a ficha travada não deixava preencher a data. */
@@ -4914,7 +4932,7 @@ function etapasDoCard(os) {
     dica: retrab && !filhaAberta ? 'sai da vista Retrabalho' : '',
     motivo: filhaAberta ? 'Resolve quando a O.S. de correção for finalizada.' : (!retrab && interno ? 'Retirada não tem retrabalho de instalação.' : (fin && !retrab ? 'Finalizada: retrabalho novo vira O.S. (aba Retrabalho).' : '')) });
   L.push({ aba: 'finalizados', icone: interno ? '📦' : '🏁', nome: interno ? 'Retirado' : 'Finalizados', sub: fin ? statusLabelDe(os, st) : (os.erpSaiuDaCarteiraEm ? 'o ERP já fechou: confirme a baixa no aviso acima' : 'confere o checklist antes'), atual: fin,
-    acao: fin ? '' : 'finalizar', rotulo: interno ? '📦 Cliente retirou' : '🏁 Finalizar', motivo: '' });
+    acao: fin || canc ? '' : 'finalizar', rotulo: interno ? '📦 Cliente retirou' : '🏁 Finalizar', motivo: canc ? MOTIVO_CANC : '' });
   return L;
 }
 function etapaCardHTML(os) {
@@ -4935,6 +4953,11 @@ function moverEtapa(id, acao, opcoes = {}) {
   if (!os) return;
   if (typeof podeEditar === 'function' && !podeEditar()) { toast('Seu acesso é somente leitura.', 'error'); return; }
   if (STATE._cardsAbertos) STATE._cardsAbertos.delete(id + ':etapa');
+  // Cancelada pelo PCP (revisão da F16): o menu desenhado antes do último sync não registra saída nem finaliza.
+  if (!os.finalizadaEm && canceladaNaTela(os) && (acao === 'finalizar' || (acao === 'exec' && !(os.horaSaida || os.saidaEm)))) {
+    toast(`O.S ${os.numero || ''} cancelada pelo PCP: para seguir, desfaça o cancelamento na ficha.`, 'error');
+    return;
+  }
   // O que precisa de dado abre a ficha no bloco certo.
   if (acao === 'programar') return openModal(os, 'agenda');
   if (acao === 'exec' || acao === 'retrabalho') return openModal(os, 'exec');
@@ -5019,6 +5042,8 @@ function desfeitosDaFinalizacao(os, criadas) {
 function finalizarServicoDoCard(osId) {
   const os = STORE.getOS(osId);
   if (!os) return;
+  // Cancelada pelo PCP (revisão da F16): não finaliza pelo card.
+  if (!os.finalizadaEm && canceladaNaTela(os)) { toast(`O.S ${os.numero || ''} cancelada pelo PCP: para seguir, desfaça o cancelamento na ficha.`, 'error'); return; }
   const faltas = validarFinalizacao(os);
   if (faltas.length) {
     toast('Para finalizar, falta: ' + faltas.join(', '), 'error');

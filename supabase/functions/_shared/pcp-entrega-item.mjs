@@ -232,7 +232,8 @@ function validarEvento(evento, item, ctx) {
   const os = o.os;
   if (!os || typeof os !== 'object' || Array.isArray(os)) return nao('O.S. não informada: sem ela não dá para conferir o saldo.');
   if (textoE(os.finalizadaEm)) return nao(celular ? 'A O.S. já foi finalizada: a entrega marcada pelo celular não entra. Fale com o PCP.' : 'O.S. finalizada: reabra para marcar.');
-  if (canceladaAMao(os)) return nao('O.S. cancelada: desfaça o cancelamento da O.S. para marcar.');
+  // O celular não desfaz cancelamento: a frase dele diz com quem falar (revisão da F16).
+  if (canceladaAMao(os)) return nao(celular ? 'O.S. cancelada pelo PCP: a entrega não entra. Fale com o PCP.' : 'O.S. cancelada: desfaça o cancelamento da O.S. para marcar.');
   /* O TIPO DO CELULAR SEGUE O TIPO DA O.S. (revisão da E5): na interna o
      cliente retira na fábrica, na externa a equipe instala. O botão do
      celular já é um só por O.S.; o que vier trocado não entra. */

@@ -121,7 +121,7 @@ test('600 O.S. geradas dão o mesmo status no aparelho e no servidor; o cancelam
     if (a.fonteEntrega === 'itens') comItens++;
   }
   // Os casos exercitam todos os estados (menos o retorno antecipado, que é "sem dado" até a F17).
-  assert.deepEqual([...vistos].sort(), ['agendado', 'atraso', 'cancelado', 'execucao', 'no_prazo', 'retrabalho']);
+  assert.deepEqual([...vistos].sort(), ['agendado', 'atraso', 'cancelado', 'entregue', 'execucao', 'no_prazo', 'retrabalho']);
   assert.ok(canceladas > 60, `canceladas: ${canceladas}`);
   assert.ok(comItens > 20, `entregas julgadas pelos itens: ${comItens}`);
 });
