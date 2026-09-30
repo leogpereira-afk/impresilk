@@ -168,12 +168,12 @@ test('validarEvento: desfazer só marca que existe e está valendo; desfeito nã
   assert.equal(E.validarEvento(ev('desfeito', {alvo:d.id, motivo:'desfazer o desfazer'}), it, ctx()).ok, false);
 });
 
-test('podeMarcar: admin e pcp tudo; operação entrega, retira e aponta problema; toque (até a E5), montagem e máquina nada', () => {
+test('podeMarcar: admin e pcp tudo; operação entrega, retira e aponta problema; o celular (toque e montagem) só entrega e retira; máquina nada', () => {
   for (const t of E.TIPOS) { assert.equal(E.podeMarcar('admin', t), true); assert.equal(E.podeMarcar('pcp', t), true); }
   assert.deepEqual(E.TIPOS.filter(t => E.podeMarcar('operacao', t)), ['entregue', 'retirado', 'problema']);
-  assert.deepEqual(E.TIPOS.filter(t => E.podeMarcar('toque', t)), [], 'o crachá sem senha só marca a partir da E5');
+  assert.deepEqual(E.TIPOS.filter(t => E.podeMarcar('toque', t)), ['entregue', 'retirado'], 'E5: o crachá sem senha declara a entrega, nunca desfaz nem cancela');
   assert.deepEqual(E.TIPOS.filter(t => E.podeMarcar('maquina', t)), []);
-  assert.deepEqual(E.TIPOS.filter(t => E.podeMarcar('montagem', t)), []);
+  assert.deepEqual(E.TIPOS.filter(t => E.podeMarcar('montagem', t)), ['entregue', 'retirado'], 'E5: a montagem com senha também declara');
   assert.equal(E.podeMarcar('constructor', 'entregue'), false, 'nome de propriedade do objeto não vira papel');
   assert.equal(E.podeMarcar(undefined, 'entregue'), false);
   const r = E.validarEvento(ev('cancelado', {motivo:'x'}), item(), ctx({papel:'operacao'}));
@@ -477,14 +477,20 @@ test('diaSP: o dia sai no fuso de São Paulo em qualquer aparelho', () => {
   assert.equal(E.diaSP(Date.UTC(2026, 8, 30, 2, 0)), '2026-09-29');
 });
 
-test('entrega-item.js entra no index.html e no SHELL do sw.js; não no celular do instalador (ainda)', () => {
+test('entrega-item.js entra no index.html, no equipe.html (E5) e no SHELL do sw.js', () => {
   const fs = require('node:fs'), path = require('node:path');
   const ler = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
   const index = ler('index.html');
   assert.match(index, /<script src="entrega-item\.js\?v=v\d+"><\/script>/);
   assert.ok(index.indexOf('entrega-item.js?v=') < index.indexOf('app.js?v='), 'carrega antes da tela que vai usar');
   assert.match(/const SHELL = \[([\s\S]*?)\];/.exec(ler('sw.js'))[1], /'entrega-item\.js\?v=v\d+'/);
-  // O celular não carrega o motor (entra na E5, se precisar): nada que ele roda pode chamar ENTREGA_ITEM.
-  assert.doesNotMatch(ler('equipe.html'), /entrega-item\.js/);
-  for (const f of ['operacao.js', 'equipe.js', 'store.js', 'auth.js']) assert.doesNotMatch(ler(f), /ENTREGA_ITEM/, f);
+  /* O celular carrega o motor desde a E5 (o Instalado declara a entrega),
+     antes do equipe.js. O equipe.js só o usa atrás de temMotorEntrega (cache
+     misto: sem o arquivo novo, o Instalado funciona como antes). O resto do
+     que o celular roda não chama o motor. */
+  const equipe = ler('equipe.html');
+  assert.match(equipe, /<script src="entrega-item\.js\?v=v\d+"><\/script>/);
+  assert.ok(equipe.indexOf('entrega-item.js?v=') < equipe.indexOf('equipe.js?v='), 'carrega antes do equipe.js');
+  assert.match(ler('equipe.js'), /const temMotorEntrega = \(\) => typeof ENTREGA_ITEM !== 'undefined'/);
+  for (const f of ['operacao.js', 'store.js', 'auth.js']) assert.doesNotMatch(ler(f), /ENTREGA_ITEM/, f);
 });

@@ -535,6 +535,9 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .ent-selo.st-cancelado { background: #f1f5f9; color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
 .ent-selo.st-servico   { background: transparent; color: var(--muted); font-weight: 500; padding-left: 0; }
 .ent-selo.st-negativo  { border-radius: 8px; background: #fef2f2; color: var(--red); border: 1px solid #fecaca; font-weight: 600; }
+/* Declarado pela equipe (E5): o celular disse que foi; ainda não é entregue
+   conferido. Outra cor e borda tracejada, para não se confundir com o verde. */
+.ent-selo.st-declarado { background: #f5f3ff; color: #5b21b6; border: 1px dashed #8b5cf6; }
 .ent-acoes { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
 .ent-btn {
   min-height: 40px; padding: 0 12px; border-radius: 8px; cursor: pointer; white-space: nowrap;
@@ -571,6 +574,7 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 }
 .tag-entrega.tag-entrega-ok { background: #dcfce7; color: #166534; }
 .tag-entrega.tag-entrega-prob { background: #fee2e2; color: #991b1b; }
+.tag-entrega.tag-entrega-decl { background: #f5f3ff; color: #5b21b6; border: 1px dashed #8b5cf6; }
 
 /* Marcação de escolha única (Acesso / Fixação) */
 .mark-group { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -658,6 +662,17 @@ main { padding-bottom: env(safe-area-inset-bottom); }
    não os pegava: o iPhone ampliava a página ao tocar e ela ficava ampliada. */
 .item-retrab select, .item-retrab input:not([type=file]) { font-size: 16px; min-height: 44px; }
 .item-foto { margin-top: 6px; }
+/* Entrega declarada no cartão do item (E5): a situação, sem R$, e o "Entregar
+   parte", que abre o campo da quantidade. Controles de 40 px, campo de 44 px
+   com fonte de 16 px (abaixo disso o iPhone amplia a página). */
+.item-entrega { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; }
+.item-entrega .ent-selo { font-size: .8rem; }
+.item-entrega .ent-parte-btn { min-height: 40px; padding: 0 12px; font-size: .88rem; font-weight: 600; color: var(--text); border-radius: var(--radius-s); }
+.item-parte { flex-basis: 100%; display: flex; flex-direction: column; gap: 4px; }
+.item-parte label { font-size: .9rem; font-weight: 600; color: #334155; }
+.item-parte-linha { display: flex; gap: 6px; align-items: stretch; }
+.item-parte-linha input { flex: 1 1 auto; min-width: 0; min-height: 44px; font-size: 16px; border: 1px solid var(--border); border-radius: var(--radius-s); padding: 8px; }
+.item-parte-linha button { min-height: 44px; padding: 0 12px; flex: 0 0 auto; border-radius: var(--radius-s); }
 
 /* ── Foto (upload) ───────────────────────────────────────────────────────── */
 .foto-box {

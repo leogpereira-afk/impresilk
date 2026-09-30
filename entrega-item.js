@@ -7,15 +7,16 @@
    cópia em supabase/functions/_shared/pcp-entrega-item.mjs e valida com ela a
    marca que chega (E3) e soma o 'entregue por item' (E6). Mudou aqui, muda lá
    no mesmo commit: tests/entrega-item-paridade.test.cjs compara o texto e 500
-   casos. Carregado no index.html e no sw.js, ainda sem uso na tela. NÃO entra
-   no equipe.html (celular do instalador) até a E5 precisar, então nada em
-   operacao.js nem equipe.js pode chamar ENTREGA_ITEM. */
+   casos. Carregado no index.html (ficha da gestão, E4), no equipe.html
+   (celular do instalador, E5: o Instalado declara a entrega) e no sw.js.
+   Nunca dá R$ ao celular: o equipe.js só lê situação e saldo, e o servidor
+   não manda subtotal nem valor ao crachá sem senha (podarToque). */
 const ENTREGA_ITEM = (() => {
 /* ==== MOTOR DA ENTREGA POR ITEM: daqui até FIM DO MOTOR, cópia byte a byte de _shared/pcp-entrega-item.mjs ==== */
 /* O QUE FICA GRAVADO (dentro de os.itens, e mais nada):
      item.entregas: lista SÓ DE ACRÉSCIMO, até 20 marcas VALENDO por item e 40
        na história (desfeitos e anulados contam só nos 40). Cada marca é
-       {id, tipo, qtde?, dia, alvo?, motivo?, via, retirou?, fotoId?, porId, por, em}
+       {id, tipo, qtde?, dia, alvo?, motivo?, via, declarado?, retirou?, fotoId?, porId, por, em}
        tipo   'entregue' | 'retirado' (com qtde inteira) | 'problema' |
               'cancelado' (cancela o SALDO; o que já foi entregue fica) |
               'desfeito' (anula a marca `alvo`; ela deixa de valer para tudo)
@@ -23,9 +24,16 @@ const ENTREGA_ITEM = (() => {
        id     gerado no aparelho: a fila offline manda de novo e o repetido some
        via    NÃO é escolha do aparelho: sai do papel de quem marca (admin e
               pcp 'gestao', ou 'lote' quando a tela do lote pede; operação
-              'balcao'; crachá sem senha 'toque'). A porta passa o papel do
-              crachá, então o via gravado é sempre o do papel.
+              'balcao'; o celular, crachá sem senha ou montagem com senha,
+              'toque'). A porta passa o papel do crachá, então o via gravado
+              é sempre o do papel.
+       declarado  true na marca do celular (via 'toque', E5): conta no saldo,
+              mas não é entregue conferido (ver declarada)
        porId, por, em: do crachá e do relógio do SERVIDOR (a porta troca)
+   Fora dos itens o motor lê um carimbo só: os.finalizadaPorCampo
+   {finalizadaEm, por, porId, em}, que o SERVIDOR grava quando quem finaliza
+   é o celular (crachá sem senha ou montagem com senha). Ele vale para a
+   finalização de mesmo finalizadaEm (ver entregaImplicita).
    O QUE NUNCA FICA GRAVADO: situação do item, resumo da O.S., valor do item e
    valor de cada entrega. Saem daqui, na leitura, iguais no aparelho e no
    servidor. Dinheiro sempre em CENTAVOS inteiros: com fração, 6/10 + 4/10 de
@@ -41,17 +49,27 @@ const TETO_MOTIVO = 200;
 const TETO_RETIROU = 60;
 const TETO_QTDE = 1000000;
 const DIA_MINIMO = '2020-01-01';
+/* A declaração do celular aceita o dia de até 30 dias atrás: é a validade do
+   crachá (pcp-sync, assinarCrachaMontagem). Fora disso, vale o dia de hoje. */
+const DIAS_DECLARACAO = 30;
+const PROBLEMA_NA_DECLARACAO = 'Este item está com problema marcado pela gestão; fale com o PCP.';
 /* QUEM MARCA O QUÊ (decisão do dono, 29/09/2026): admin e pcp tudo; operação
    com senha (balcão) entrega, retira e aponta problema; cancelar e desfazer só
-   admin e pcp. O crachá sem senha do celular ('toque'; no servidor é o papel
-   'montagem' com ehToqueNoNome) ainda NÃO marca: entra na E5, só com entrega
-   e retirada declaradas, nunca desfaz nem cancela. Montagem e máquina não
-   marcam. Papel ausente não marca: a trava fecha por omissão. */
+   admin e pcp. O celular (E5, 30/09/2026): o crachá sem senha ('toque'; no
+   servidor é o papel 'montagem' com ehToqueNoNome) e a montagem com senha só
+   entregam e retiram, e a marca deles é DECLARADA (via 'toque'). Nunca
+   apontam problema, desfazem nem cancelam: isso fica com a gestão. Revisão
+   da E5: o celular marca 'entregue' na O.S. externa e 'retirado' na interna,
+   não marca item com problema aberto, e o dia vai de 30 dias atrás a hoje
+   (ver validarEvento). A máquina
+   não marca. Papel ausente não marca: a trava fecha por omissão. */
 const PERMISSOES = Object.freeze({
   admin:Object.freeze(TIPOS.slice()), pcp:Object.freeze(TIPOS.slice()),
   operacao:Object.freeze(['entregue', 'retirado', 'problema']),
+  toque:Object.freeze(['entregue', 'retirado']),
+  montagem:Object.freeze(['entregue', 'retirado']),
 });
-const VIA_DO_PAPEL = Object.freeze({admin:'gestao', pcp:'gestao', operacao:'balcao', toque:'toque'});
+const VIA_DO_PAPEL = Object.freeze({admin:'gestao', pcp:'gestao', operacao:'balcao', toque:'toque', montagem:'toque'});
 const NOME_PAPEL = Object.freeze({admin:'admin', pcp:'PCP', operacao:'operação', toque:'crachá sem senha', montagem:'montagem', maquina:'integração do ERP'});
 const NOME_TIPO = Object.freeze({entregue:'entregue', retirado:'retirado', problema:'problema', cancelado:'cancelar item', desfeito:'desfazer'});
 const listaE = v => Array.isArray(v) ? v : [];
@@ -68,6 +86,11 @@ function diaValido(v) {
   if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return '';
   const d = new Date(v + 'T00:00:00Z');
   return Number.isFinite(+d) && d.toISOString().slice(0, 10) === v ? v : '';
+}
+// O dia `n` dias antes de `dia` ('AAAA-MM-DD'); '' quando o dia não se lê.
+function diaMenos(dia, n) {
+  const t = Date.parse(diaValido(dia) + 'T12:00:00Z');
+  return Number.isFinite(t) ? new Date(t - n * 86400000).toISOString().slice(0, 10) : '';
 }
 /* O DIA NO FUSO DE SÃO PAULO, em qualquer aparelho e no servidor (UTC). O
    finalizadaEm é toISOString: 23h30 de 29/09 na fábrica é 02h30 de 30/09 em
@@ -136,6 +159,18 @@ function eventosLidos(item) {
   }
   return saida;
 }
+/* ENTREGA DECLARADA (E5, decisão do dono de 30/09/2026). A marca do celular
+   (via 'toque', gravada com declarado:true) vale para o SALDO: a unidade
+   declarada não é entregue de novo, e a gestão não é chamada a marcá-la. Mas
+   ela é a palavra de quem estava no local, NÃO é entregue conferido: quem
+   soma R$, pontos ou o 'entregue por item' (valorDoEvento e o `entregue` do
+   lancamentosDaOS) não a conta. Ela fica à parte (`declarado` e
+   `declaracoes`) até a conferência do Fechar o dia (F14, que ainda não
+   existe e vai dizer como a conferência se grava). A leitura fecha por
+   omissão: via 'toque' é declarada mesmo sem a bandeira. */
+function declarada(e) {
+  return !!e && typeof e === 'object' && TIPOS_QTDE.includes(e.tipo) && (e.declarado === true || textoE(e.via) === 'toque');
+}
 // As marcas que valem: sem os 'desfeito' e sem o que eles anularam.
 function eventosAtivos(item) {
   const lidos = eventosLidos(item);
@@ -151,23 +186,27 @@ function eventosAtivos(item) {
    quantidade (a quantidade caiu depois) não conta: cada unidade vale uma vez
    só. Problema fica aberto até uma entrega DEPOIS dele NO CALENDÁRIO (no
    mesmo dia, a que entrou depois): o tablet que ficou sem rede sobe hoje a
-   entrega de anteontem, e ela não fecha o problema de ontem. */
+   entrega de anteontem, e ela não fecha o problema de ontem. A marca
+   DECLARADA não fecha problema (revisão da E5): o problema é da gestão, e a
+   palavra do celular não o resolve; a porta já a recusa com o problema aberto
+   (validarEvento), e esta regra cobre a que chegou antes com dia depois dele.
+   `declarado`: quantas das unidades que foram vieram de marca declarada (E5). */
 function contar(item) {
   const Q = qtdeNum(item), ativos = eventosAtivos(item), partes = [], problemas = [];
-  let acum = 0, cancelado = null, soRetirada = true;
+  let acum = 0, declarado = 0, cancelado = null, soRetirada = true;
   ativos.forEach((e, ordem) => {
     if (TIPOS_QTDE.includes(e.tipo)) {
       const q = Math.min(e.qtde, Q - acum);
       partes.push({evento:e, antes:acum, qtde:q, ordem});
-      if (q > 0) { acum += q; if (e.tipo !== 'retirado') soRetirada = false; }
+      if (q > 0) { acum += q; if (declarada(e)) declarado += q; if (e.tipo !== 'retirado') soRetirada = false; }
     } else if (e.tipo === 'problema') problemas.push({evento:e, ordem});
     else if (e.tipo === 'cancelado') cancelado = e;
   });
-  const fecha = (p, x) => x.qtde > 0 && (x.evento.dia > p.evento.dia || (x.evento.dia === p.evento.dia && x.ordem > p.ordem));
+  const fecha = (p, x) => x.qtde > 0 && !declarada(x.evento) && (x.evento.dia > p.evento.dia || (x.evento.dia === p.evento.dia && x.ordem > p.ordem));
   const abertos = problemas.filter(p => !partes.some(x => fecha(p, x)));
   const problema = abertos.length ? abertos[abertos.length - 1].evento : null;
   const ultimoDia = partes.filter(p => p.qtde > 0).reduce((m, p) => p.evento.dia > m ? p.evento.dia : m, '');
-  return {Q, ativos, partes, acum, problema, cancelado, soRetirada:acum > 0 && soRetirada, ultimoDia};
+  return {Q, ativos, partes, acum, declarado, problema, cancelado, soRetirada:acum > 0 && soRetirada, ultimoDia};
 }
 
 /* ── validar uma marca nova ───────────────────────────────────────────── */
@@ -196,31 +235,56 @@ function validarEvento(evento, item, ctx) {
   if (!TIPOS.includes(tipo)) return nao('Tipo de marca desconhecido.');
   if (!podeMarcar(o.papel, tipo)) return nao(`Seu acesso (${typeof o.papel === 'string' && temChave(NOME_PAPEL, o.papel) ? NOME_PAPEL[o.papel] : cortarE(o.papel, 30) || 'sem papel'}) não pode marcar "${NOME_TIPO[tipo]}".`);
   const gestao = o.papel === 'admin' || o.papel === 'pcp';
+  // O celular (crachá sem senha e montagem com senha) declara; não reabre O.S.
+  const celular = VIA_DO_PAPEL[o.papel] === 'toque';
   const os = o.os;
   if (!os || typeof os !== 'object' || Array.isArray(os)) return nao('O.S. não informada: sem ela não dá para conferir o saldo.');
-  if (textoE(os.finalizadaEm)) return nao('O.S. finalizada: reabra para marcar.');
+  if (textoE(os.finalizadaEm)) return nao(celular ? 'A O.S. já foi finalizada: a entrega marcada pelo celular não entra. Fale com o PCP.' : 'O.S. finalizada: reabra para marcar.');
+  /* O TIPO DO CELULAR SEGUE O TIPO DA O.S. (revisão da E5): na interna o
+     cliente retira na fábrica, na externa a equipe instala. O botão do
+     celular já é um só por O.S.; o que vier trocado não entra. */
+  if (celular && TIPOS_QTDE.includes(tipo)) {
+    const interna = os.tipo === 'interno';
+    if (tipo !== (interna ? 'retirado' : 'entregue')) return nao(interna ? 'Na O.S. interna o celular só marca "retirado": o cliente retira na fábrica.' : 'Na O.S. de instalação o celular só marca "entregue".');
+  }
   if (ehServico(item)) return nao('Item de serviço não recebe marca: ele acompanha a entrega dos outros itens.');
   /* Teto: 20 marcas VALENDO por item, e 40 na lista inteira. Desfazer uma
      marca errada libera a vaga dela, então o item no teto tem conserto. */
   const gravadas = listaE(item.entregas).length, ativas = eventosAtivos(item).length;
   if (gravadas >= TETO_HISTORIA) return nao(`Este item já tem ${gravadas} marcas gravadas, contando as desfeitas: é o limite, e nenhuma marca nova cabe nele.`);
   if (tipo !== 'desfeito' && ativas >= TETO_EVENTOS) return nao(`Este item já tem ${ativas} marcas valendo, o máximo. ${gestao ? 'Desfaça uma marca errada antes de marcar de novo.' : 'Fale com o PCP.'}`);
-  const dia = diaValido(textoE(evento.dia));
+  let dia = diaValido(textoE(evento.dia));
   if (!dia) return nao('Dia da marca inválido.');
   const hoje = diaValido(o.hoje) || diaSP(Date.now());
+  /* O DIA DA DECLARAÇÃO (revisão da E5): o celular é o crachá sem senha, e o
+     dia é a única coisa da marca que ele escolhe. Vale o dia de até 30 dias
+     atrás (a fila offline de quem ficou sem sinal); antes disso, ou depois de
+     hoje (relógio adiantado), a marca entra com o dia de hoje. Recusar
+     perderia a entrega de quem instalou de verdade. */
+  if (celular && (dia > hoje || dia < diaMenos(hoje, DIAS_DECLARACAO))) dia = hoje;
   if (dia > hoje) return nao('O dia da marca não pode ser depois de hoje.');
   if (dia < DIA_MINIMO) return nao('Dia da marca antigo demais.');
   if (evento.via != null && evento.via !== '' && !VIAS.includes(evento.via)) return nao('Origem da marca desconhecida.');
   // O via sai do papel; o aparelho só escolhe 'lote' quando quem marca é a gestão.
   const via = gestao && evento.via === 'lote' ? 'lote' : VIA_DO_PAPEL[o.papel];
   const c = contar(item);
-  const saida = {id, tipo, dia, via};
+  /* A marca do celular sai DECLARADA pelo papel, nunca pela palavra do
+     aparelho: declarado:false vindo do celular não a torna conferida. E o
+     aparelho só REBAIXA (revisão da E5): a marca que já veio declarada (via
+     'toque' ou declarado:true), a da fila do celular que a gestão ou o balcão
+     esvaziou com usuário e senha, continua declarada. O autor é o do envio;
+     a conferência é o Fechar o dia (F14), não o crachá de quem enviou. */
+  const declarado = TIPOS_QTDE.includes(tipo) && (celular || evento.declarado === true || textoE(evento.via) === 'toque');
+  const saida = declarado ? {id, tipo, dia, via, declarado:true} : {id, tipo, dia, via};
   if (tipo === 'desfeito') {
     const alvo = textoE(evento.alvo);
     if (!alvo || !c.ativos.some(e => textoE(e.id) === alvo)) return nao('A marca a desfazer não existe ou já foi desfeita.');
     saida.alvo = alvo;
   } else if (c.cancelado) return nao('Item cancelado: desfaça o cancelamento antes de marcar.');
   if (TIPOS_QTDE.includes(tipo)) {
+    /* Problema aberto pela gestão segura o saldo, e a declaração não o
+       fecha (revisão da E5): quem resolve é a gestão. */
+    if (declarado && c.problema) return nao(PROBLEMA_NA_DECLARACAO);
     const saldo = c.Q - c.acum;
     if (saldo <= 0) return nao('Este item já foi todo entregue.');
     const bruto = evento.qtde;
@@ -281,7 +345,21 @@ function erpDisseEntregue(os) {
      fora da carteira,  nada até vir ctx.dataEntregueERP: o saldo fica
      CONCLUIDO etc.     como 'sem confirmação do ERP' (semConfirmacaoERP)
      cancelada no ERP   nada (o saldo é cancelado; o entregue fica)
-   Aberta: nada implícito. */
+     finalizada pelo    finalizadaEm, DECLARADA ('implicito' com
+     celular            declarado: true; ver finalizadaPeloCampo)
+   Aberta: nada implícito.
+   FINALIZADA PELO CELULAR (revisão da E5, decisão do dono de que a palavra do
+   instalador é declaração). Finalizar pelo celular sem tocar no Instalado
+   dava tudo entregue CONFERIDO, e tocar em cada item dava tudo declarado: o
+   instalador apressado valia mais que o cuidadoso. O carimbo é do servidor
+   (finalizadaPorCampo, a montagem com senha também), porque o celular
+   antigo finaliza sem marca; o aparelho não o forja nem o apaga. Ele vale
+   para a finalização de mesmo finalizadaEm: a gestão que reabre e finaliza
+   de novo confere, e o Desfazer do reabrir devolve a finalização do celular. */
+function finalizadaPeloCampo(os) {
+  const f = os && os.finalizadaPorCampo;
+  return !!f && typeof f === 'object' && !Array.isArray(f) && !!textoE(f.finalizadaEm) && textoE(f.finalizadaEm) === textoE(os.finalizadaEm);
+}
 function entregaImplicita(os, ctx) {
   const fim = diaSP(os && os.finalizadaEm);
   if (!fim) return null;
@@ -293,18 +371,22 @@ function entregaImplicita(os, ctx) {
     const dia = diaValido(textoE(ctx && ctx.dataEntregueERP)) || (erpDisseEntregue(os) ? fim : '');
     return dia ? {dia, fonte:'erp', marca:'sem prova'} : null;
   }
+  if (finalizadaPeloCampo(os)) return {dia:fim, fonte:'finalizada', marca:'implicito', declarado:true};
   return {dia:fim, fonte:'finalizada', marca:'implicito'};
 }
 const ROTULO = Object.freeze({'a entregar':'a entregar', entregue:'entregue', retirado:'retirado', problema:'com problema', cancelado:'cancelado'});
-// Situação de item físico. `imp` e `osCancelada` vêm prontos de quem chama.
+/* Situação de item físico. `imp` e `osCancelada` vêm prontos de quem chama.
+   `entregue` são as unidades que foram por marca, e `declarado` quantas delas
+   só o celular declarou (E5): a situação conta as duas (o saldo é um só), e
+   a tela diz qual é qual. */
 function situacaoFisica(item, os, imp, osCancelada) {
   const c = contar(item);
   const ultimo = c.ativos.length ? c.ativos[c.ativos.length - 1] : null;
   const s = {
-    situacao:'a entregar', rotulo:'', qtde:c.Q, entregue:c.acum, implicito:0, saldo:c.Q - c.acum,
+    situacao:'a entregar', rotulo:'', qtde:c.Q, entregue:c.acum, declarado:c.declarado, implicito:0, saldo:c.Q - c.acum,
     parte:c.Q > 1, servico:false, dia:c.ultimoDia, marca:c.acum > 0 ? 'marcado' : '',
     ultimaMarca:ultimo ? textoE(ultimo.id) : '',
-    ultimo:ultimo ? {id:textoE(ultimo.id), tipo:ultimo.tipo, dia:ultimo.dia, porId:textoE(ultimo.porId), por:textoE(ultimo.por)} : null,
+    ultimo:ultimo ? {id:textoE(ultimo.id), tipo:ultimo.tipo, dia:ultimo.dia, porId:textoE(ultimo.porId), por:textoE(ultimo.por), declarado:declarada(ultimo)} : null,
     problema:c.problema ? {id:textoE(c.problema.id), dia:c.problema.dia, motivo:textoE(c.problema.motivo)} : null,
     cancelado:c.cancelado ? {id:textoE(c.cancelado.id), dia:c.cancelado.dia, motivo:textoE(c.cancelado.motivo)} : null,
   };
@@ -322,19 +404,25 @@ function situacaoFisica(item, os, imp, osCancelada) {
 }
 /* O DIA DO SERVIÇO: o da última entrega física, quando nenhum item físico
    ficou pendente (a entregar, parcial ou com problema); senão, o da entrega
-   implícita da O.S. encerrada. Cancelada no ERP: o serviço é cancelado junto. */
+   implícita da O.S. encerrada. Cancelada no ERP: o serviço é cancelado junto.
+   Com item físico só DECLARADO pelo celular (E5), o serviço também espera a
+   conferência: ele acompanha a entrega dos outros, e ela ainda não foi
+   conferida. A finalização do celular (implícito declarado) declara o
+   serviço junto, com item físico ou sem. */
 function diaDoServico(os, imp, osCancelada) {
-  if (osCancelada) return {dia:'', cancelado:true, marca:''};
-  let maior = '', pendente = false;
+  if (osCancelada) return {dia:'', cancelado:true, marca:'', declarado:false};
+  const impDeclarado = !!(imp && imp.declarado);
+  let maior = '', pendente = false, declarado = false;
   for (const it of listaE(os && os.itens)) {
     if (!it || typeof it !== 'object' || ehServico(it)) continue;
     const s = situacaoFisica(it, os, imp, false);
     if (s.situacao === 'a entregar' || s.situacao === 'parcial' || s.situacao === 'problema') pendente = true;
+    if (s.declarado > 0 || (s.implicito > 0 && impDeclarado)) declarado = true;
     if ((s.entregue > 0 || s.implicito > 0) && s.dia > maior) maior = s.dia;
   }
-  if (!pendente && maior) return {dia:maior, cancelado:false, marca:'servico'};
-  if (imp) return {dia:imp.dia, cancelado:false, marca:'servico'};
-  return {dia:'', cancelado:false, marca:''};
+  if (!pendente && maior) return {dia:maior, cancelado:false, marca:'servico', declarado};
+  if (imp) return {dia:imp.dia, cancelado:false, marca:'servico', declarado:declarado || impDeclarado};
+  return {dia:'', cancelado:false, marca:'', declarado:false};
 }
 /* SITUAÇÃO DO ITEM: cancelado > problema aberto > entregue ou retirado (a
    soma chegou na quantidade) > entregue implícito (O.S. encerrada) > parcial
@@ -344,7 +432,7 @@ function situacaoItem(item, os, ctx) {
   if (!ehServico(item)) return situacaoFisica(item, os, imp, osCancelada);
   const d = diaDoServico(os, imp, osCancelada), Q = qtdeNum(item);
   const situacao = d.cancelado ? 'cancelado' : d.dia ? 'entregue' : 'a entregar';
-  return {situacao, rotulo:ROTULO[situacao], qtde:Q, entregue:d.dia ? Q : 0, implicito:0, saldo:situacao === 'a entregar' ? Q : 0,
+  return {situacao, rotulo:ROTULO[situacao], qtde:Q, entregue:d.dia ? Q : 0, declarado:d.dia && d.declarado ? Q : 0, implicito:0, saldo:situacao === 'a entregar' ? Q : 0,
     parte:false, servico:true, dia:d.dia, marca:d.marca, ultimaMarca:'', ultimo:null, problema:null, cancelado:null};
 }
 /* RESUMO DA O.S. (itens físicos; serviço conta à parte). situacao:
@@ -355,9 +443,11 @@ function situacaoItem(item, os, ctx) {
                   marca, e ainda sobra item: não é entrega parcial
      'completa'   tem marca e todo item físico está entregue, retirado ou cancelado
    Entrega parcial é O.S. ABERTA com situacao 'parcial'. unidadesEntregues é a
-   soma das unidades que foram por marca (o implícito fica fora). */
+   soma das unidades que foram por marca (o implícito fica fora), e
+   unidadesDeclaradas quantas delas só o celular declarou (E5); `declarados`
+   conta os itens com alguma unidade declarada. */
 function resumoOS(os, ctx) {
-  const r = {itensTotal:0, servicos:0, entregues:0, parciais:0, aEntregar:0, problema:0, cancelados:0, saldoItens:0, marcas:0, unidadesEntregues:0, situacao:'sem marca'};
+  const r = {itensTotal:0, servicos:0, entregues:0, parciais:0, aEntregar:0, problema:0, cancelados:0, saldoItens:0, marcas:0, unidadesEntregues:0, unidadesDeclaradas:0, declarados:0, situacao:'sem marca'};
   const imp = entregaImplicita(os, ctx), osCancelada = canceladaNoERP(os);
   for (const it of listaE(os && os.itens)) {
     if (!it || typeof it !== 'object') continue;
@@ -367,6 +457,8 @@ function resumoOS(os, ctx) {
     r.marcas += eventosAtivos(it).length;
     r.saldoItens += s.saldo;
     r.unidadesEntregues += s.entregue;
+    r.unidadesDeclaradas += s.declarado;
+    if (s.declarado > 0) r.declarados++;
     if (s.situacao === 'entregue' || s.situacao === 'retirado') r.entregues++;
     else if (s.situacao === 'parcial') r.parciais++;
     else if (s.situacao === 'a entregar') r.aEntregar++;
@@ -417,20 +509,29 @@ function valorItemRateado(os, ctx) {
    acumulada: a parte k vale piso(V x até_k / Q) - piso(V x antes_k / Q). A
    última parte leva o resto e o item inteiro fecha no centavo, qualquer que
    seja a ordem. Marca que não vale (desfeita, problema, de outro item) = 0.
+   A marca DECLARADA pelo celular (E5) também dá 0: ela ainda não é entregue
+   conferido, e quem soma pontos por aqui não pode contá-la. O valor dela
+   está em lancamentosDaOS().declaracoes, à parte.
    Não olha problema aberto nem cancelamento: isso é do lancamentosDaOS. */
 function valorDoEvento(item, evento, valorItem) {
   const V = Number.isInteger(valorItem) && valorItem > 0 ? valorItem : 0;
   const id = textoE(evento && evento.id), c = contar(item);
   const p = id ? c.partes.find(x => textoE(x.evento.id) === id) : null;
-  if (!V || !p || p.qtde <= 0) return 0;
+  if (!V || !p || p.qtde <= 0 || declarada(p.evento)) return 0;
   return mulDiv(V, p.antes + p.qtde, c.Q) - mulDiv(V, p.antes, c.Q);
 }
 /* OS LANÇAMENTOS DE R$ DA O.S.: uma linha por entrega que vale, com o dia que
    decide o dia e o mês. Cada unidade conta UMA vez em toda a história: o que
    foi entregue em agosto fica em agosto, e a baixa do ERP em setembro só leva
-   o SALDO. A conta fecha sempre: entregue + saldo + cancelado + retido +
-   semItem = total (o líquido).
-     entregue   as linhas de `lancamentos`
+   o SALDO. A conta fecha sempre: entregue + declarado + saldo + cancelado +
+   retido + semItem = total (o líquido).
+     entregue   as linhas de `lancamentos` (entregue CONFERIDO: gestão,
+                balcão, lote, implícito e serviço)
+     declarado  as linhas de `declaracoes`: entrega que só o celular
+                declarou (E5). Não é entregue conferido: fica fora do
+                `entregue` e das `lancamentos` até a conferência (F14). O
+                serviço de uma O.S. com item declarado vem junto, e o
+                implícito da O.S. finalizada pelo celular também
      saldo      o que ainda falta entregar (O.S. aberta)
      cancelado  saldo de item cancelado, ou de O.S. cancelada no ERP
      retido     SALDO de item com problema aberto: não conta nem pela
@@ -441,23 +542,29 @@ function valorDoEvento(item, evento, valorItem) {
    (saiu da carteira, CONCLUIDO): o saldo fica em `saldo` até vir a data.
    Linha: {indice, tipo:'entregue'|'retirado'|'implicito'|'servico', dia,
    valor, qtde, marca:'marcado'|'implicito'|'sem prova'|'servico', eventoId,
-   via}. `via` 'toque' é a entrega DECLARADA pelo celular: quem pontua decide
-   se ela já foi conferida. */
+   via, declarado}. A linha com `declarado: true` (via 'toque', ou o
+   implícito e o serviço da finalização do celular) vai para
+   `declaracoes`, nunca para `lancamentos`: quem soma as linhas não conta a
+   declaração por engano. */
 function lancamentosDaOS(os, ctx) {
   const rateio = valorItemRateado(os, ctx);
   const imp = entregaImplicita(os, ctx), osCancelada = canceladaNoERP(os);
-  const r = {total:rateio.total, fonte:rateio.fonte, entregue:0, saldo:0, cancelado:0, retido:0, semItem:0,
-    semConfirmacaoERP:!imp && !osCancelada && encerradaNoERP(os), itens:[], lancamentos:[]};
+  const r = {total:rateio.total, fonte:rateio.fonte, entregue:0, declarado:0, saldo:0, cancelado:0, retido:0, semItem:0,
+    semConfirmacaoERP:!imp && !osCancelada && encerradaNoERP(os), itens:[], lancamentos:[], declaracoes:[]};
   const itens = listaE(os && os.itens);
   if (!itens.length) { r.semItem = rateio.total; return r; }
   const servico = diaDoServico(os, imp, osCancelada);
   itens.forEach((it, indice) => {
     const V = rateio.itens[indice];
     const item = it && typeof it === 'object' ? it : {};
-    const linha = l => { r.lancamentos.push({indice, ...l}); r.entregue += l.valor; return l.valor; };
+    const linha = l => {
+      if (l.declarado) { r.declaracoes.push({indice, ...l}); r.declarado += l.valor; }
+      else { r.lancamentos.push({indice, ...l}); r.entregue += l.valor; }
+      return l.valor;
+    };
     if (ehServico(item)) {
       r.itens.push({indice, valor:V, situacao:servico.cancelado ? 'cancelado' : servico.dia ? 'entregue' : 'a entregar', servico:true});
-      if (servico.dia) linha({tipo:'servico', dia:servico.dia, valor:V, qtde:qtdeNum(item), marca:'servico', eventoId:'', via:''});
+      if (servico.dia) linha({tipo:'servico', dia:servico.dia, valor:V, qtde:qtdeNum(item), marca:'servico', eventoId:'', via:'', declarado:servico.declarado});
       else if (servico.cancelado) r.cancelado += V;
       else r.saldo += V;
       return;
@@ -469,9 +576,9 @@ function lancamentosDaOS(os, ctx) {
     for (const p of c.partes) {
       if (p.qtde <= 0) continue;
       const valor = mulDiv(V, p.antes + p.qtde, c.Q) - mulDiv(V, p.antes, c.Q);
-      foi += linha({tipo:p.evento.tipo, dia:p.evento.dia, valor, qtde:p.qtde, marca:'marcado', eventoId:textoE(p.evento.id), via:textoE(p.evento.via)});
+      foi += linha({tipo:p.evento.tipo, dia:p.evento.dia, valor, qtde:p.qtde, marca:'marcado', eventoId:textoE(p.evento.id), via:textoE(p.evento.via), declarado:declarada(p.evento)});
     }
-    if (s.implicito > 0) foi += linha({tipo:'implicito', dia:imp.dia, valor:V - foi, qtde:s.implicito, marca:imp.marca, eventoId:'', via:''});
+    if (s.implicito > 0) foi += linha({tipo:'implicito', dia:imp.dia, valor:V - foi, qtde:s.implicito, marca:imp.marca, eventoId:'', via:'', declarado:!!imp.declarado});
     if (s.situacao === 'cancelado') r.cancelado += V - foi;
     else if (s.situacao === 'problema') r.retido += V - foi;
     else r.saldo += V - foi;
@@ -479,6 +586,6 @@ function lancamentosDaOS(os, ctx) {
   return r;
 }
 /* ==== FIM DO MOTOR ==== */
-return {TIPOS, VIAS, TETO_EVENTOS, PERMISSOES, diaSP, qtdeNum, aceitaParte, ehServico, podeMarcar, eventosAtivos, validarEvento, situacaoItem, resumoOS, entregaImplicita, canceladaNoERP, valorItemRateado, valorDoEvento, lancamentosDaOS};
+return {TIPOS, VIAS, TETO_EVENTOS, PERMISSOES, diaSP, qtdeNum, aceitaParte, ehServico, podeMarcar, declarada, eventosAtivos, validarEvento, situacaoItem, resumoOS, entregaImplicita, canceladaNoERP, valorItemRateado, valorDoEvento, lancamentosDaOS};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = ENTREGA_ITEM;

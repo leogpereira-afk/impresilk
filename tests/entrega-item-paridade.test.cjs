@@ -112,14 +112,19 @@ function rodar(M, g, i) {
 
 test('500 O.S. geradas dão o mesmo resultado no aparelho e no servidor, e cada conta fecha no centavo', async () => {
   const M = await import('../supabase/functions/_shared/pcp-entrega-item.mjs');
-  let aceitas = 0, recusadas = 0, parciais = 0, implicitas = 0, retidas = 0, canceladas = 0;
+  let aceitas = 0, recusadas = 0, parciais = 0, implicitas = 0, retidas = 0, canceladas = 0, declaradas = 0;
   for (let i = 0; i < 500; i++) {
     const aparelho = rodar(D, gerador(2000 + i), i);
     const servidor = rodar(M, gerador(2000 + i), i);
     assert.deepEqual(servidor, aparelho, `caso ${i} (semente ${2000 + i})`);
     const L = aparelho.lancamentos;
-    assert.equal(L.entregue + L.saldo + L.cancelado + L.retido + L.semItem, L.total, `caso ${i}: a conta fecha`);
+    assert.equal(L.entregue + L.declarado + L.saldo + L.cancelado + L.retido + L.semItem, L.total, `caso ${i}: a conta fecha`);
     assert.equal(L.lancamentos.reduce((s, l) => s + l.valor, 0), L.entregue, `caso ${i}: as linhas somam o entregue`);
+    // E5: a declaração do celular fica à parte, nunca no entregue conferido.
+    assert.equal(L.declaracoes.reduce((s, l) => s + l.valor, 0), L.declarado, `caso ${i}: as declarações somam o declarado`);
+    assert.ok(L.lancamentos.every(l => !l.declarado && l.via !== 'toque'), `caso ${i}: declaração no entregue conferido`);
+    assert.ok(L.declaracoes.every(l => l.declarado), `caso ${i}`);
+    if (L.declaracoes.some(l => l.tipo !== 'servico')) declaradas++;
     assert.ok(L.lancamentos.every(l => Number.isInteger(l.valor) && l.valor >= 0 && /^\d{4}-\d{2}-\d{2}$/.test(l.dia)), `caso ${i}: linha em centavos e com dia`);
     assert.equal(aparelho.rateio.itens.reduce((s, v) => s + v, 0), aparelho.rateio.itens.length ? aparelho.rateio.total : 0, `caso ${i}: o rateio fecha no líquido`);
     // Nenhum item entrega mais do que tem.
@@ -138,4 +143,5 @@ test('500 O.S. geradas dão o mesmo resultado no aparelho e no servidor, e cada 
   assert.ok(implicitas > 50, `O.S. com entrega implícita: ${implicitas}`);
   assert.ok(retidas > 20, `O.S. com item retido: ${retidas}`);
   assert.ok(canceladas > 20, `O.S. com cancelado: ${canceladas}`);
+  assert.ok(declaradas > 20, `O.S. com entrega declarada pelo celular: ${declaradas}`);
 });

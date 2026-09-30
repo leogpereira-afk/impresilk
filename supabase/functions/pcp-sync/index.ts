@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
@@ -567,6 +567,9 @@ Deno.serve(async (req: Request) => {
   const pessoasReq = async () => (_pessoasReq ??= await pessoasDoPCP());
   // O que foi deixado de fora de um envio do crachá de toque; volta no 200.
   const avisosToque: string[] = [];
+  /* A entrega declarada pelo celular que não achou item (o PCP tirou o item
+     da lista): volta em `descartado` junto com as recusadas pelo motor (E5). */
+  let entregasForaToque: any[] = [];
   if (cracha && !ehMaquina) {
     const papel = String(cracha.papel ?? "");
     const podeEditar = ["admin", "pcp", "montagem", "operacao"].includes(papel);
@@ -683,6 +686,7 @@ Deno.serve(async (req: Request) => {
       const mescla = mesclarToqueNoNome(atual, veio, String(cracha.nome || cracha.sub), new Date().toISOString());
       if (mescla.erro) return resp({ error: mescla.erro }, 422);
       avisosToque.push(...(mescla.avisos || []), ...acertarMomentosToque(mescla.os, atual));
+      entregasForaToque = Array.isArray(mescla.entregasFora) ? mescla.entregasFora : [];
       body.os = mescla.os;
     }
 
@@ -1220,12 +1224,14 @@ Deno.serve(async (req: Request) => {
         trocarOS(preservarItens(os, existing).os);
         /* MARCAS DE ENTREGA POR ITEM (E3). Regras em _shared
            (guardarEntregasItens): só acréscimo, parte do gravado; marca nova
-           só de admin, pcp e operação com senha (balcão), conferida pelo motor
+           de admin, pcp e operação com senha (balcão), conferida pelo motor
            da E2 (permissão, saldo, dia, teto); autor, ID e hora do crachá e
            do servidor; id repetido ignorado; item com marca não sai da lista.
-           O toque (a mescla já partiu do gravado) e a máquina não marcam. O
-           que não passa vira aviso, nunca 422. O autor só é lido do RH quando
-           entra marca nova. */
+           O celular (E5: o toque, cuja mescla já partiu do gravado e trouxe
+           só as marcas de id novo, e a montagem com senha) só entrega e
+           retira, e a marca sai DECLARADA; a máquina não marca. O que não
+           passa vira aviso, nunca 422. O autor só é lido do RH quando entra
+           marca nova, e é o crachá DESTE envio. */
         /* A marca recusada volta na resposta (`descartado` com os ids), para o
            aparelho tirá-la da cópia e da fila: senão a mesma cópia a mandava
            de novo e, com o saldo liberado, ela entrava calada. */
@@ -1239,6 +1245,7 @@ Deno.serve(async (req: Request) => {
           trocarOS(ge.os);
           avisosToque.push(...ge.avisos);
           if (!ehMaquina && ge.recusadas.length) entregasRecusadas = ge.recusadas;
+          if (ehToqueNoNome && entregasForaToque.length) entregasRecusadas = [...entregasRecusadas, ...entregasForaToque].slice(0, 200);
         }
         /* CAMPOS DA GESTAO (F01): ausente fica o gravado, valor novo ainda nao
            entra, null explicito de admin/pcp limpa. O toque ja parte do gravado
@@ -1403,6 +1410,18 @@ Deno.serve(async (req: Request) => {
           os.reabertaEm = new Date().toISOString();
           os.reabertaPor = cracha?.nome || cracha?.sub || (ehMaquina ? "Integração" : "");
           delete os.arquivadaEm;
+        }
+        /* FINALIZADA PELO CELULAR (revisão da E5). Regras em _shared
+           (carimbarFinalizacaoCampo): quem põe a finalização é o crachá sem
+           senha ou a montagem com senha (papel 'montagem', os dois) => o
+           servidor carimba finalizadaPorCampo, e o implícito dessa finalização
+           é DECLARADO, não conferido. O aparelho não forja nem apaga o
+           carimbo. Roda depois de toda regra que pode tirar a finalização
+           (validarConclusao do toque) e só lê o RH quando carimba. */
+        {
+          const doCampo = !ehMaquina && (ehToqueNoNome || papelUp === "montagem");
+          const autorFin = doCampo && finalizacaoMudou(os, existing) ? await autorAuditoria() : null;
+          trocarOS(carimbarFinalizacaoCampo(os, existing, autorFin, new Date().toISOString()));
         }
         // Preserva o atualizadoEm do autor: reescrever com o relogio do servidor
         // misturava duas fontes de tempo e o proprio autor levava "conflito".

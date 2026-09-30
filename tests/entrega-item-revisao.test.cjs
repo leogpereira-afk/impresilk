@@ -9,7 +9,8 @@
      5  teto contava os desfeitos: a marca certa não entrava depois do desfazer
      6  saída da carteira contava como entregue 'sem prova'
      7  o via vinha do aparelho e decidia se a entrega era declarada
-     8  sem papel, a trava ficava aberta; 'toque' marcava antes da E5
+     8  sem papel, a trava ficava aberta; 'toque' marcava antes da E5 (na E5
+        o celular declara entrega e retirada, e só isso)
      9  (o mesmo do 2, pelo lado da reentrega)
      10 20 problemas e 20 desfeitos travavam o item
    Dados fictícios: o repositório é público. */
@@ -182,14 +183,25 @@ test('7: o via sai do papel, não do aparelho', async () => {
   }
 });
 
-test('8: sem papel, com papel de máquina, montagem ou toque (antes da E5), nada passa', async () => {
+test('8: sem papel ou com papel de máquina nada passa; o celular (montagem e toque, E5) só entrega e retira', async () => {
   for (const [nome, E] of await copias()) {
-    for (const papel of [undefined, null, '', 'maquina', 'montagem', 'toque', 'constructor', {}]) {
+    for (const papel of [undefined, null, '', 'maquina', 'constructor', {}]) {
       for (const tipo of ['entregue', 'retirado', 'problema', 'cancelado']) {
         const r = E.validarEvento(ev(tipo, {qtde:1, motivo:'x'}), item(), {hoje:HOJE, papel, os:{}});
         assert.equal(r.ok, false, `${nome}: papel ${JSON.stringify(papel)} marcou ${tipo}`);
         assert.match(r.erro, /não pode marcar/);
       }
+    }
+    for (const papel of ['montagem', 'toque']) {
+      for (const tipo of ['problema', 'cancelado']) {
+        const r = E.validarEvento(ev(tipo, {qtde:1, motivo:'x'}), item(), {hoje:HOJE, papel, os:{}});
+        assert.equal(r.ok, false, `${nome}: ${papel} marcou ${tipo}`);
+        assert.match(r.erro, /não pode marcar/);
+      }
+      const r = E.validarEvento(ev('entregue', {qtde:1}), item(), {hoje:HOJE, papel, os:{}});
+      assert.equal(r.ok, true, `${nome}: ${papel} declara a entrega`);
+      assert.equal(r.evento.via, 'toque');
+      assert.equal(r.evento.declarado, true);
     }
     // ctx vazio ou ausente: fecha.
     assert.equal(E.validarEvento(ev('cancelado', {motivo:'x'}), item(), {}).ok, false, nome);
@@ -198,7 +210,7 @@ test('8: sem papel, com papel de máquina, montagem ou toque (antes da E5), nada
     const a = marcar(E, it, ev('entregue', {qtde:2}), {hoje:HOJE, papel:'admin', os:{}});
     assert.equal(E.validarEvento(ev('desfeito', {alvo:a.id, motivo:'x'}), it, {hoje:HOJE, os:{}}).ok, false, `${nome}: desfazer sem papel`);
     assert.equal(E.validarEvento(ev('desfeito', {alvo:a.id, motivo:'x'}), it, {hoje:HOJE, papel:'operacao', os:{}}).ok, false, 'operação não desfaz');
-    assert.equal('toque' in E.PERMISSOES, false, 'toque entra na E5');
+    assert.deepEqual([...E.PERMISSOES.toque], ['entregue', 'retirado'], 'E5: o toque só entrega e retira');
   }
 });
 
