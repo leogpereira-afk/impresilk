@@ -1788,6 +1788,14 @@ Deno.serve(async (req: Request) => {
           ...antigos.filter((p: any) => !junta.fichasFora.has(p.chave)).map(marcar),
           ...junta.contratos.filter((c: any) => !c.ativo && c.id).map((c: any) => ({ chave: c.chave, id: c.id, nome: c.nome,
             apelido: c.apelido, ativo: false, desligado: true, freelancer: true, ...(c.idRepetido ? { idRepetido: true } : {}) })),
+          /* O CONTRATO ENCERRADO SEM CPF CONTA NA AMBIGUIDADE (revisão da F12).
+             A régua do servidor (fichasRH) conta todo contrato sem ID: "Lucas"
+             com a ficha do Lucas Ferreira e o contrato encerrado do Lucas Prado
+             não é de ninguém. Sem ele no aparelho, a tela confirmava "Lucas"
+             como o Lucas Ferreira, e a troca pelo ID gravava o que o servidor
+             não lê. Vai só o que a conta usa: nome e apelido, desligado. */
+          ...junta.contratos.filter((c: any) => !c.ativo && !c.id).map((c: any) => ({ id: "", nome: c.nome, apelido: c.apelido,
+            ativo: false, desligado: true, freelancer: true })),
         ];
         // Presenca: ferias e ausencias vem CRUAS (o dia local quem sabe e a
         // tela; aqui e UTC). Janela curta para o pacote nao inchar.
@@ -2066,6 +2074,56 @@ Deno.serve(async (req: Request) => {
         const entradas = ((data ?? []) as any[]).map((r) => r.registro).filter(Boolean)
           .sort((a: any, b: any) => String(b.em || "").localeCompare(String(a.em || "")));
         return resp({ osId, entradas, cortado: entradas.length >= TETO });
+      }
+
+      /* A RÉGUA DO SERVIDOR PARA A TROCA DO NOME PELO ID (revisão da F12,
+         30/09/2026). A tela "Conferir nomes" grava em lote o ID no lugar do
+         nome antigo, e isso decide quem pontua e quem recebe comissão. O
+         aparelho decidia com o retrato que tinha: configuração de até 5 min,
+         elenco de até 30 min, dias sem rede. Esta porta devolve a resolução
+         DAQUI: o vinculosRH gravado e o RH de agora (a cópia de 60 s das
+         fichas é jogada fora), pela MESMA régua de _shared/pcp-integridade.mjs
+         (pessoasDoPCP → resolverPessoas), sem cópia nova. O lote só troca o
+         nome em que as duas respostas batem.
+         Junto, para o lote não gravar às cegas: o estado de cada O.S. pedida
+         ('viva', 'excluida' ou 'ausente': o upsert ressuscita a excluída, por
+         desenho) e os períodos já fechados da Performance (o fechamento selado
+         não muda). SÓ LEITURA, SÓ admin e pcp: a régua cruza nomes com fichas
+         do RH, e nada disso desce à operação, à montagem nem ao crachá sem
+         senha. A tela chama na hora, fora da fila: o 403 e o 422 não prendem
+         nada. */
+      case "conferirNomes": {
+        if (!cracha || ehMaquina || ehToqueNoNome || !["admin", "pcp"].includes(String(cracha.papel ?? "")))
+          return resp({ error: "A conferência dos nomes com o RH é só da gestão do PCP (admin e pcp)." }, 403);
+        const TETO_NOMES = 500, TETO_IDS = 500;
+        const nomesPedidos = Array.isArray(body.nomes) ? body.nomes : [];
+        const idsPedidos = Array.isArray(body.ids) ? body.ids : [];
+        if (nomesPedidos.length > TETO_NOMES || idsPedidos.length > TETO_IDS)
+          return resp({ error: `Confira no máximo ${TETO_NOMES} nomes e ${TETO_IDS} O.S. por vez.` }, 422);
+        const nomes = [...new Set(nomesPedidos.map((n: any) => String(n ?? "").trim().slice(0, 120)).filter(Boolean))];
+        const ids = [...new Set(idsPedidos.map((x: any) => String(x ?? "").trim().slice(0, 200)).filter(Boolean))];
+        // O RH de AGORA: a cópia de 60 s pode ser de antes da correção do cadastro.
+        _fichasRH = null;
+        const r = await pessoasDoPCP((await getCfg()) ?? {});
+        const resolvidos = nomes.map((nome) => ({ nome, id: r.idDe(nome), fixado: r.fixado(nome) }));
+        const os: Record<string, string> = {};
+        for (let i = 0; i < ids.length; i += 100) {
+          const parte = ids.slice(i, i + 100);
+          const { data, error } = await sb.from("pcp_registros").select("id,apagado").eq("colecao", "os").in("id", parte);
+          if (error) throw new Error(error.message);
+          for (const l of (data ?? []) as any[]) os[String(l.id)] = l.apagado ? "excluida" : "viva";
+          for (const id of parte) if (!os[id]) os[id] = "ausente";
+        }
+        // Os períodos fechados (uma linha por revisão: o período conta uma vez).
+        const { data: fech, error: erroFech } = await sb.from("pcp_registros").select("registro->>de, registro->>ate")
+          .eq("colecao", "performance_fechamentos").eq("apagado", false).limit(1000);
+        if (erroFech) throw new Error(erroFech.message);
+        if ((fech || []).length >= 1000) throw new Error("Limite de fechamentos atingido na leitura.");
+        const dataOk = (d: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(d ?? ""));
+        const periodos = new Map<string, { de: string; ate: string }>();
+        for (const f of (fech ?? []) as any[]) if (dataOk(f.de) && dataOk(f.ate) && f.de <= f.ate) periodos.set(f.de + ":" + f.ate, { de: String(f.de), ate: String(f.ate) });
+        const fechados = [...periodos.values()].sort((a, b) => a.de.localeCompare(b.de));
+        return resp({ nomes: resolvidos, os, fechados, em: new Date().toISOString() });
       }
 
       default:

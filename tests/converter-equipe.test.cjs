@@ -122,7 +122,7 @@ const osDe = (id, equipe, extra = {}) => ({id, numero:'N' + id, tipo:'externo', 
    marcada, o conflito (409), que fica na fila marcado sem travar as outras. */
 function loja({lista, cfg = {}, conflitos = [], hist = [], busca = null}) {
   const L = {os:lista.map(o => structuredClone(o)), fila:[], ouv:{}, conf:[], servidor:new Map(lista.map(o => [o.id, structuredClone(o)])),
-    gravadas:[], hist:new Map(hist.map(o => [o.id, structuredClone(o)])), buscas:[]};
+    gravadas:[], hist:new Map(hist.map(o => [o.id, structuredClone(o)])), buscas:[], conferencias:[]};
   const conf = new Set(conflitos);
   const S = {
     JANELA_LOCAL_DIAS:60,
@@ -151,6 +151,18 @@ function loja({lista, cfg = {}, conflitos = [], hist = [], busca = null}) {
         L.servidor.set(id, structuredClone(it.os)); L.gravadas.push(structuredClone(it.os));
         for (const f of L.ouv['os-gravada'] || []) f({id, os:structuredClone(it.os), enviado:structuredClone(it.os), descartado:[]});
       }
+    },
+    /* A régua do servidor (revisão da F12): a loja falsa responde como um
+       servidor que lê igual ao aparelho. Os casos em que ele lê diferente
+       estão em converter-equipe-revisao.test.cjs, com o pcp-sync de verdade. */
+    async pullCFG() { return false; },
+    async pullElenco() { return true; },
+    conflitoCFG:() => null,
+    async conferirNomes(nomes, ids) {
+      L.conferencias.push({nomes, ids});
+      const el = S.elenco() || {};
+      const r = O.resolverPessoas({pessoas:[...(el.pessoas || []), ...(el.antigos || [])], vinculos:cfg.vinculosRH, lista:cfg.instaladores});
+      return {nomes:nomes.map(n => ({nome:n, id:r.idDe(n), fixado:r.fixado(n)})), os:Object.fromEntries(ids.map(id => [id, L.servidor.has(id) || L.hist.has(id) ? 'viva' : 'ausente'])), fechados:[]};
     },
     async faixaHistorico() { return {de:'2026-05-01', ate:'2026-09-29'}; },
     async buscarHistorico(q) {
@@ -521,6 +533,11 @@ test('store.js real: aceita, 409 e 422 numa O.S. cada, sem travar as outras; o d
   for (const o of lista) servidor.set(o.id, structuredClone(o));
   const envios = [];
   const t = lojaReal({lista, responder:q => {
+    // A régua do servidor (revisão da F12): este servidor de mentira lê igual ao aparelho.
+    if (q.action === 'conferirNomes') {
+      const r = O.resolverPessoas({pessoas:ELENCO.pessoas, vinculos:[], lista:[]});
+      return {nomes:q.nomes.map(n => ({nome:n, id:r.idDe(n), fixado:r.fixado(n)})), os:Object.fromEntries(q.ids.map(id => [id, 'viva'])), fechados:[]};
+    }
     if (q.action !== 'upsert') return {ok:true, os:[]};
     envios.push(q.os.id + ':' + q.os.equipe.join('+'));
     const atual = servidor.get(q.os.id);
