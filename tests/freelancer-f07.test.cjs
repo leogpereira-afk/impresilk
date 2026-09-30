@@ -460,7 +460,10 @@ test('revisão: servidor leva a situação da ficha até a junção (elenco e r�
 // Média: CPF que o RH não aceita (verificador errado, dígitos repetidos) não vira ID no PCP.
 test('revisão: o PCP usa o mesmo CPF válido do RH; CPF que não confere fica sem ID, travado', async () => {
   const S = await import('../supabase/functions/_shared/pcp-integridade.mjs');
-  const rhSrc = fs.readFileSync(path.join(root, '../impresilkrh/supabase/functions/_shared/freelancerContrato.ts'), 'utf8');
+  // A régua do RH mora no outro repositório: aqui no Mac ele está ao lado; na
+  // CI do Pages, não. Sem ele, a comparação das duas réguas fica para o Mac.
+  const rhArq = path.join(root, '../impresilkrh/supabase/functions/_shared/freelancerContrato.ts');
+  const rhSrc = fs.existsSync(rhArq) ? fs.readFileSync(rhArq, 'utf8') : '';
   const casos = ['300.005.987-39', '300.005.987-38', '000.000.000-00', '111.111.111-11', '30000111104', '3000011110', '', 'abc'];
   if (/export function cpfValido/.test(rhSrc)) {
     // A régua do RH, sem os tipos: as duas dizem o mesmo para cada CPF.
