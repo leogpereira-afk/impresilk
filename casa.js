@@ -586,6 +586,87 @@ function initCasa() {
   });
 }
 
+/* O LANÇAMENTO NA O.S., SEM TELA (F13).
+   A parte que grava do "Lançar entrega", separada do formulário para o lote
+   do Fechar o dia (F14) usar a mesma regra. Recebe a O.S. e o que a pessoa
+   decidiu e DEVOLVE A O.S. NOVA: não mexe na que recebeu, não lê o DOM, não
+   pergunta nada e não grava (quem chama grava, uma vez). Tudo o que a O.S.
+   trouxe fica, inclusive o campo que chegou por fora (outro aparelho, o
+   servidor): só os campos do lançamento são escritos. Com o mesmo `em`, a
+   mesma entrada dá o mesmo resultado, e aplicada de novo sobre o próprio
+   resultado não muda nada (o lote pode repetir uma linha).
+   Entrada:
+   - data: o dia da entrega. Sem dia válido, erro (a tela avisa antes).
+   - alocacao: a divisão de admin e pcp, pronta e conferida pelo componente
+     (ALOCUI, com a trava contra outro aparelho). A equipe sai dela.
+   - pessoas: a equipe, quando não vai divisão. Lista vazia também grava
+     (quem tirou todo mundo confirmou). Ausente, a equipe fica como está.
+   - respostasVolta: as perguntas da volta (OPERACAO.PERGUNTAS_VOLTA), só de
+     quem confere (quem chama decide). O.S. interna não tem volta. Iguais às
+     gravadas, não recarimbam.
+   - retrabalho: a resposta da pergunta obrigatória, {resposta: 'nao'} ou
+     {resposta: 'sim', problema, etapaOrigem, causaRaiz, responsavelEtapa,
+     dataRetrabalho}, com `em` e `por` do carimbo quando vierem. A regra é a
+     do perguntarRetrabalho (app.js), com teste de paridade: 'nao' numa O.S.
+     marcada desmarca, e quem chama confirma antes, como ele.
+   - por, em: quem lança e quando. Padrão: o usuário e agora. */
+const CAMPOS_RETRABALHO = ['problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho'];
+function aplicarLancamento(os, e = {}) {
+  if (!os || typeof os !== 'object') throw new Error('Esta O.S. não está mais neste aparelho.');
+  const data = OPERACAO.dia(e.data);
+  if (!data) throw new Error('Informe a data da entrega.');
+  const r = e.retrabalho || null;
+  const resposta = r && (r.resposta === 'sim' || r.resposta === 'nao') ? r.resposta : '';
+  if (r && !resposta) throw new Error('A resposta do retrabalho é Sim ou Não.');
+  const texto = k => String((r && r[k]) ?? '').trim();
+  if (resposta === 'sim' && CAMPOS_RETRABALHO.some(k => !texto(k))) throw new Error('Preencha os cinco campos do retrabalho.');
+  const por = e.por != null ? String(e.por) : ((STATE.user && STATE.user.nome) || '');
+  const em = e.em || nowISO();
+  const nova = {...os};
+  // A equipe: a da divisão quando vai divisão (os.equipe é derivada dela); senão a lista que veio.
+  if (e.alocacao && typeof e.alocacao === 'object') {
+    nova.alocacao = JSON.parse(JSON.stringify(e.alocacao));
+    nova.equipe = typeof DIVISAO !== 'undefined' ? DIVISAO.derivarEquipe(nova.alocacao) : Array.isArray(e.pessoas) ? e.pessoas.slice() : nova.equipe;
+  } else if (Array.isArray(e.pessoas)) nova.equipe = e.pessoas.slice();
+  // A conferência da volta: só o que mudou recarimba (quem e quando).
+  const resp = v => (v === 'sim' || v === 'nao') ? v : '';
+  if (e.respostasVolta && typeof e.respostasVolta === 'object' && !OPERACAO.interno(nova)) {
+    const respostas = Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, resp(e.respostasVolta[k])]));
+    const antes = nova.retornoConf || {};
+    if (OPERACAO.PERGUNTAS_VOLTA.some(k => respostas[k] !== resp(antes[k]))) {
+      const respondeu = OPERACAO.voltaRespondida(respostas);
+      nova.retornoConf = {...antes, ...respostas, por: respondeu ? por : '', em: respondeu ? em : ''};
+    }
+  }
+  // O retrabalho, como o perguntarRetrabalho grava.
+  if (resposta) {
+    if (resposta === 'sim') {
+      nova.retrabalho = true;
+      for (const k of CAMPOS_RETRABALHO) nova[k] = texto(k);
+    } else if (nova.retrabalho || (nova.checkout && nova.checkout.situacao === 'Retrabalho')) {
+      nova.retrabalho = false;
+      if (nova.checkout && nova.checkout.situacao === 'Retrabalho') nova.checkout = {...nova.checkout, situacao: ''};
+      nova.problema = ''; nova.etapaOrigem = ''; nova.causaRaiz = ''; nova.responsavelEtapa = '';
+    }
+    nova.retrabalhoPerguntado = {em: r.em || em, por: r.por != null ? String(r.por) : por, resposta};
+  }
+  nova.entregaLancada = {em, por, data};
+  nova.atualizadoEm = em;
+  nova.atualizadoPor = por;
+  return nova;
+}
+/* A resposta que o perguntarRetrabalho deu, tirada da cópia em que ele
+   respondeu. Carimbo novo é resposta de agora; o mesmo carimbo de antes quer
+   dizer que ninguém respondeu, e não há o que aplicar. */
+function respostaRetrabalhoDe(antes, depois) {
+  const p = depois && depois.retrabalhoPerguntado;
+  if (!p || typeof p !== 'object' || p === (antes && antes.retrabalhoPerguntado)) return null;
+  if (p.resposta !== 'sim' && p.resposta !== 'nao') return null;
+  const r = {resposta: p.resposta, em: p.em, por: p.por};
+  if (p.resposta === 'sim') for (const k of CAMPOS_RETRABALHO) r[k] = depois[k];
+  return r;
+}
+
 // Baixa do ERP vira entrega só aqui: alguém confirma data e equipe e responde
 // a pergunta obrigatória do retrabalho. Fica carimbado quem lançou.
 function lancarEntregaManual(osId) {
@@ -674,32 +755,43 @@ function lancarEntregaManual(osId) {
     // Esconde (não apaga) o formulário: "Voltar" na pergunta do retrabalho
     // devolve a data, a equipe e a conferência como estavam.
     box.style.display = 'none';
-    perguntarRetrabalho(os, () => {
+    /* A pergunta do retrabalho responde numa CÓPIA, e a resposta vai para o
+       aplicarLancamento com o resto (F13): a O.S. só muda na gravação. */
+    const rascunho = {...os, checkout: os.checkout && typeof os.checkout === 'object' ? {...os.checkout} : os.checkout};
+    perguntarRetrabalho(rascunho, () => {
       fechar();
       /* A EQUIPE NO MESMO ENVIO (F10): a divisão de admin e pcp quando
          mexeram nela; só as pessoas para operação e montagem (a divisão fica
-         para a gestão). O que não entra vai no aviso, nunca calado. */
+         para a gestão). O que não entra vai no aviso, nunca calado. O
+         componente decide sobre uma cópia da O.S., com a trava dele contra a
+         mudança feita em outro aparelho; quem escreve é o aplicarLancamento. */
       const avisos = [];
+      let alocacao = null, pessoas = null;
       if (st) {
+        const alvo = {...os};
         if (st.tocado && st.modo === 'divisao' && equipe.length) {
-          const r = ALOCUI.aplicarNaOS(chaveAloc, os, { soSeTocou: true });
-          if (!r.ok && r.estado === 'conflito') avisos.push(r.mensagem);
-          else if (!r.ok) { os.equipe = r.equipe || equipe; avisos.push('A equipe foi gravada, mas a divisão não: ' + r.mensagem + ' Complete no Conferir da Performance.'); }
+          const r = ALOCUI.aplicarNaOS(chaveAloc, alvo, { soSeTocou: true });
+          if (r.ok && r.estado === 'aplicada') { alocacao = alvo.alocacao; pessoas = alvo.equipe; }
+          else if (!r.ok && r.estado === 'conflito') avisos.push(r.mensagem);
+          else if (!r.ok) { pessoas = r.equipe || equipe; avisos.push('A equipe foi gravada, mas a divisão não: ' + r.mensagem + ' Complete no Conferir da Performance.'); }
         } else if (st.tocado) {
-          const r = ALOCUI.aplicarEquipeNaOS(chaveAloc, os);
+          const r = ALOCUI.aplicarEquipeNaOS(chaveAloc, alvo);
           if (!r.ok) avisos.push(r.mensagem);
-          else if (r.divisaoFica) avisos.push('A equipe mudou: a divisão desta O.S. (líder e percentuais) fica para a gestão refazer.');
+          else {
+            pessoas = alvo.equipe;
+            if (r.divisaoFica) avisos.push('A equipe mudou: a divisão desta O.S. (líder e percentuais) fica para a gestão refazer.');
+          }
         }
         ALOCUI.esquecer(chaveAloc);
-      } else if (equipe.length) os.equipe = equipe;
-      const antes = os.retornoConf || {};
-      if (conferencia && OPERACAO.PERGUNTAS_VOLTA.some(k => respostas[k] !== resp(antes[k]))) {
-        const respondeu = OPERACAO.voltaRespondida(respostas);
-        os.retornoConf = {...antes, ...respostas, por: respondeu ? ((STATE.user && STATE.user.nome) || '') : '', em: respondeu ? nowISO() : ''};
+      } else if (equipe.length) pessoas = equipe;
+      let nova;
+      try {
+        nova = aplicarLancamento(os, { data, alocacao, pessoas, respostasVolta: conferencia ? respostas : null, retrabalho: respostaRetrabalhoDe(os, rascunho) });
+      } catch (err) {
+        toast('A entrega não foi lançada: ' + String((err && err.message) || err), 'error');
+        return;
       }
-      os.entregaLancada = { em: nowISO(), por: (STATE.user && STATE.user.nome) || '', data };
-      os.atualizadoEm = nowISO(); os.atualizadoPor = (STATE.user && STATE.user.nome) || '';
-      STORE.saveOS(os);
+      STORE.saveOS(nova);
       toast(`Entrega da O.S ${os.numero || ''} lançada.`, 'success');
       if (avisos.length) toast(avisos.join(' '), 'error');
       renderEntregas();
