@@ -37,8 +37,13 @@ function diasCasa(os) {
   return d ? [d] : [];
 }
 
+/* A cancelada (Cancelar O.S., v141) sai do calendário como já sai da
+   programação do dia: ela não ocupa mais o dia. A agenda do Painel segue a
+   mesma régua (agenda-pcp.ts, canceladaPCP). Guarda de cache misto: sem o
+   operacao.js novo, ninguém sai. */
 function osNoMesCasa(mes) {
-  return STORE.getAllOS().filter(o => !OPERACAO.encerradaERP(o) && diasCasa(o).some(d => d.startsWith(mes)));
+  const canc = typeof OPERACAO.cancelada === 'function' ? OPERACAO.cancelada : () => false;
+  return STORE.getAllOS().filter(o => !OPERACAO.encerradaERP(o) && !canc(o) && diasCasa(o).some(d => d.startsWith(mes)));
 }
 
 function lerBonusCasa() {

@@ -169,6 +169,16 @@ test('calendário da casa lê o prazo da O.S., inclusive retirada', () => {
   assert.equal(t.run("osNoMesCasa('2026-09').map(o=>o.id).sort().join(',')"), 'a,e,i');
 });
 
+// A cancelada à mão (v141) sai do calendário, como sai da programação do dia.
+test('calendário da casa deixa de fora a O.S. cancelada; a desfeita volta', () => {
+  const t = casa([
+    { id: 'a', tipo: 'externo', instalacao: { data: '2026-09-13', periodo: 'Manhã' }, equipe: ['Natan'] },
+    { id: 'c', tipo: 'externo', instalacao: { data: '2026-09-13', periodo: 'Manhã' }, cancelamento: { ativo: true, motivo: 'Cliente desistiu da fachada', por: 'Gestor Teste' } },
+    { id: 'd', tipo: 'externo', instalacao: { data: '2026-09-13', periodo: 'Tarde' }, cancelamento: { ativo: false, motivo: 'Cliente desistiu da fachada', desfeitoEm: '2026-09-12T10:00:00Z' } },
+  ]);
+  assert.equal(t.run("osNoMesCasa('2026-09').map(o=>o.id).sort().join(',')"), 'a,d');
+});
+
 /* ── Onda 4 (14/09/2026): ficha do RH, presença, relatórios e escala ────── */
 const ELENCO = {
   em: '2026-09-14T10:00:00Z',
