@@ -1110,7 +1110,10 @@ const STORE = (() => {
      a instalação ficava fora da contagem sem ninguém ver. O que o aparelho já
      tem fica; a exclusão chega pelo incremental (lápide), como sempre. */
   function _esperaLancamento(o) {
-    if (!o || !o.finalizadaEm || o.entregaLancada || o.tipo === 'interno') return false;
+    // O pedido de Desfazer ainda na fila ({desfazer:true}) não é lançamento: a O.S. segue esperando.
+    const lancada = typeof OPERACAO !== 'undefined' && OPERACAO && typeof OPERACAO.entregaLancadaValida === 'function'
+      ? OPERACAO.entregaLancadaValida(o) : (o && o.entregaLancada && o.entregaLancada.desfazer !== true ? o.entregaLancada : null);
+    if (!o || !o.finalizadaEm || lancada || o.tipo === 'interno') return false;
     // A cancelada (F16) não espera lançamento: sai com a janela, como as outras.
     if (typeof OPERACAO !== 'undefined' && OPERACAO && typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(o)) return false;
     const erp = (o.baixaAutoERP && o.baixaAutoERP.em === o.finalizadaEm) || /^Mubisys\b/i.test(o.finalizadoPor || '');
@@ -2131,6 +2134,12 @@ const STORE = (() => {
       // O da marca de entrega recusada também (E4).
       localStorage.removeItem(K.ENTDESC);
     } catch {}
+    /* O RASCUNHO E O RELATÓRIO DO FECHAR O DIA (lote.js, F14) SAEM JUNTO, antes
+       da trava da fila (revisão da F14). O relatório guarda o antes de cada O.S.
+       (equipe, divisão, quem lançou) para o Desfazer: é da sessão que saiu, e
+       não do trabalho que ainda está na fila. A gravação na fila continua
+       sendo mandada; só o Desfazer do lote deixa de existir neste aparelho. */
+    try { indexedDB.deleteDatabase('impresilk_lote'); } catch {}
     if (getQueue().length) return false;
     try {
       localStorage.removeItem(K.OS);

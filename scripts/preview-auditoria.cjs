@@ -3,7 +3,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','relatorios-entregas.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
+const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','relatorios-entregas.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','lote.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
@@ -170,6 +170,18 @@ lista.push(base('E5A',{cliente:'Cliente fictício E5 · entrega pelo celular',ho
  {uid:'E5A:4:1',item:'4',descricao:'Servicos de instalação',qtde:'1'}]}));
 lista.push(base('E5B',{cliente:'Cliente fictício E5 · retira na fábrica',tipo:'interno',instalacao:{data:hoje},itens:[
  {uid:'E5B:1:1',item:'1',descricao:'Banner 3x1',qtde:'3'},{uid:'E5B:2:1',item:'2',descricao:'Wind banner',qtde:'1',statusInst:'ok',pronto:true,entregas:[pvDecl('pv-d3',1,hoje)]}]}));
+/* FECHAR O DIA (F14, 30/09/2026): o dia de hoje com voltas de verdade.
+   Duas O.S. da mesma volta finalizadas no PCP (Carro 3, equipe Lobo, sem
+   divisão), uma finalizada pelo celular com itens declarados, e uma aberta
+   com 10 placas para marcar a parte. #aba=entregas&lote=dia abre o modo Dia;
+   &lote=pendencias, as pendências do mês. Tudo fictício. */
+const pvItens=id=>[{uid:id+':1:1',item:'1',descricao:'Placa ACM 2x1',qtde:'10',subtotal:'4000'},{uid:id+':2:1',item:'2',descricao:'Adesivo de vitrine',qtde:'1',subtotal:'600'},{uid:id+':3:1',item:'3',descricao:'Servicos de instalação',qtde:'1',subtotal:'400'}];
+lista.push(base('LT1',{cliente:'Cliente fictício LT1 · fachada',equipe:['900005','900008'],veiculo:'Carro 3',valorTotal:3200,saidaEm:hoje+'T08:00:00',horaSaida:'08:00',horaRetorno:'12:30',retornoEm:hoje+'T12:30:00',finalizadaEm:hoje+'T12:40:00',finalizadoPor:'Gestor de teste',itens:pvItens('LT1')}));
+lista.push(base('LT2',{cliente:'Cliente fictício LT2 · vitrine',equipe:['900005','900008'],veiculo:'Carro 3',valorTotal:1450,saidaEm:hoje+'T13:00:00',horaSaida:'13:00',horaRetorno:'17:10',retornoEm:hoje+'T17:10:00',finalizadaEm:hoje+'T17:20:00',finalizadoPor:'Gestor de teste',retornoPrevisto:[{dia:hoje,hora:'17:00'}],itens:pvItens('LT2')}));
+lista.push(base('LT3',{cliente:'Cliente fictício LT3 · pelo celular',equipe:['900001','900002'],veiculo:'Carro 1',valorTotal:2600,saidaEm:hoje+'T08:30:00',horaSaida:'08:30',horaRetorno:'15:00',retornoEm:hoje+'T15:00:00',finalizadaEm:hoje+'T15:05:00',finalizadoPor:'Ana',finalizadaPorCampo:{finalizadaEm:hoje+'T15:05:00',por:'Ana',em:hoje+'T15:05:10Z'},
+ voltaEquipe:{carroLimpo:'sim',carroArrumado:'sim',equipamentosOk:'sim',semAvaria:'sim',por:'Ana',em:hoje+'T15:06:00Z'},
+ itens:[{uid:'LT3:1:1',item:'1',descricao:'Placa ACM 2x1',qtde:'10',subtotal:'2000',entregas:[pvDecl('pv-lt3a',6,hoje)]},{uid:'LT3:2:1',item:'2',descricao:'Totem de sinalização',qtde:'2',subtotal:'600'}]}));
+lista.push(base('LT4',{cliente:'Cliente fictício LT4 · entrega em partes',equipe:['900004','900007'],veiculo:'Carro 2',valorTotal:5400,saidaEm:hoje+'T07:30:00',horaSaida:'07:30',itens:pvItens('LT4')}));
 /* A FILA DE LANÇAMENTO COMO NO PRINT DO DONO (revisão de Entregas, 29/09/2026).
    No ar a fila passou de 50 baixas do ERP esperando lançamento, quase todas sem
    equipe. Aqui são 56 (57 com a 109, que já estava na prévia), com valor
@@ -238,6 +250,11 @@ document.addEventListener('DOMContentLoaded',()=>{
  if(pv.get('fila'))STATE._entFilaAberta=true;
  if(pv.get('ordem'))STATE._entFilaOrdem=pv.get('ordem');
  if(pv.get('todas'))STATE._entFilaTodas=true;
+ // &lote=dia ou &lote=pendencias abre o Fechar o dia (F14) nesse modo.
+ if(pv.get('lote')){STATE._entAba='lote';STATE._loteModo=pv.get('lote');}
+ // &intro=0 dá o quadro do primeiro uso por lido; &itens=LT4 abre os itens da linha; &rolar= desce até o seletor.
+ if(pv.get('intro')==='0')try{localStorage.setItem('impresilk_lote_intro_visto|'+STATE.user.nome,'1');}catch(e){}
+ if(pv.get('itens'))setTimeout(()=>{LOTE.executar({acao:'itens',os:pv.get('itens')});LOTE.render();},600);
  const pvAba=pv.get('aba')&&document.querySelector('.tab[data-tab="'+pv.get('aba')+'"]:not([data-vista])');
  if(pvAba)pvAba.click();
  if(pv.get('base'))setTimeout(()=>{const d=document.querySelector('[data-quadro="perf-base"]');if(d)d.open=true;},900);

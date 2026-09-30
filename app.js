@@ -1748,7 +1748,7 @@ const AUD_ROTULOS = {
   finalizadaPorCampo: 'Finalizada pelo celular (declarada)',
   entregaLancada: 'Entrega lançada', retrabalho: 'Retrabalho', causa: 'Causa', causaRaiz: 'Causa raiz', etapaOrigem: 'Etapa de origem',
   tipo: 'Tipo', numero: 'Número da O.S.', baixaAutoERP: 'Baixa pelo ERP', justificativaConclusao: 'Justificativa da conclusão',
-  prazoCombinado: 'Prazo combinado', retornoPrevisto: 'Retorno previsto',
+  prazoCombinado: 'Prazo combinado', retornoPrevisto: 'Retorno previsto', retornoConferido: 'Chegada conferida do carro',
   agendaLog: 'Histórico de remarcações', origemPDF: 'Lida do PDF do ERP',
   alocacao: 'Divisão da equipe', alocacaoLog: 'Histórico da divisão', cancelamento: 'Cancelamento da O.S.',
   apagado: 'Excluída'
@@ -1760,7 +1760,7 @@ const AUD_SUBROTULOS = {
   carroLimpo: 'Carro limpo', carroArrumado: 'Carro arrumado', equipamentosOk: 'Equipamentos ok', semAvaria: 'Sem avaria',
   obs: 'Observação', dia: 'Dia', veiculo: 'Veículo', motivo: 'Motivo', data: 'Data', status: 'Situação',
   por: 'Por', em: 'Em', recebidoEm: 'Recebido em', confirmadoPor: 'Confirmado por', fotos: 'Fotos',
-  descartada: 'Recusada'
+  descartada: 'Recusada', hora: 'Hora', fonte: 'Origem'
 };
 // porConta (o login de quem lançou a entrega) também: "Por conta" leria outra coisa.
 const AUD_SUBOCULTAS = new Set(['porId', 'porConta', 'desfeitoPorId', 'desfeitoPorConta']);
@@ -1811,7 +1811,7 @@ function audValor(campo, v) {
   // Entrega por item (E3): quantas marcas, e uma linha por marca nova (sem R$).
   if (campo === 'itens.entregas' && v && typeof v === 'object' && !Array.isArray(v)) {
     const n = Number(v.marcas) || 0;
-    const tipos = { entregue: 'entregue', retirado: 'retirado', problema: 'problema', cancelado: 'item cancelado', desfeito: 'marca desfeita' };
+    const tipos = { entregue: 'entregue', retirado: 'retirado', problema: 'problema', cancelado: 'item cancelado', desfeito: 'marca desfeita', conferido: 'declaração conferida' };
     const novos = (Array.isArray(v.novos) ? v.novos : []).filter(l => l && typeof l === 'object')
       .map(l => [l.item ? 'item ' + l.item : 'item', tipos[l.tipo] || String(l.tipo || ''), Number.isInteger(l.qtde) ? l.qtde + (l.qtde === 1 ? ' unidade' : ' unidades') : '',
         l.dia ? 'em ' + audTexto(l.dia) : '', l.declarado || l.via === 'toque' ? '(declarado pela equipe)' : '', l.motivo ? 'motivo: ' + l.motivo : ''].filter(Boolean).join(' '));
@@ -2198,7 +2198,7 @@ function perguntaDaAcaoEntrega(acao, it, os) {
   }
   return null;
 }
-const ACOES_ENTREGA_NOME = { entregue: 'entregue', retirado: 'retirado', problema: 'problema', cancelado: 'cancelamento' };
+const ACOES_ENTREGA_NOME = { entregue: 'entregue', retirado: 'retirado', problema: 'problema', cancelado: 'cancelamento', conferido: 'conferência do declarado' };
 // O diálogo das ações que pedem dado. `aoConfirmar` devolve '' (fecha) ou o motivo da recusa (fica aberto e mostra).
 function abrirDialogoEntrega(cfg, aoConfirmar) {
   const velho = document.getElementById('entrega-item-box'); if (velho) velho.remove();
@@ -7688,7 +7688,7 @@ function abrirInstrucoes() {
       <h2>A barra lateral</h2>
       <ul>
         <li><strong>Operação</strong> — 📋 <strong>PCP</strong> (todas as O.S por data de entrega, com % preenchido e responsável), 🚚 <strong>Instalação</strong> (quadro <em>Kanban</em> por dia; o 🖨 gera o espelho), ⚡ <strong>Execução</strong> (o que está na rua agora), ⏸ <strong>Parado Cliente</strong>, 🔧 <strong>Retrabalho</strong>, 🏁 <strong>Finalizados</strong> e 🚗 <strong>Volta do carro</strong>.</li>
-        <li><strong>Entrega</strong> — 📦 Entregas e 🏅 Performance.</li>
+        <li><strong>Entrega</strong>: 📦 Entregas e 🏅 Performance. Em Entregas fica a aba ✅ Fechar o dia, o lote da gestão, por dia ou pelas pendências do mês.</li>
         <li><strong>Agenda</strong> — 📅 Calendário, ⏰ Plantões e 🗓️ Programação.</li>
         <li><strong>Casa</strong> — 📊 <strong>Painel</strong> (indicadores, ranking e tendências; clique nos números para abrir o detalhe) e ⚙️ <strong>Configurações</strong> (admin: listas, usuários, contatos e níveis de acesso).</li>
       </ul>

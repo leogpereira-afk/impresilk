@@ -370,6 +370,18 @@ const OPERACAO = (() => {
   }
   // A cancelada (F16) não é conclusão: não conta entrega nem produtividade.
   const concluida = o => !!(dia(o?.finalizadaEm) && !encerradaERP(o) && !STATUS_ENTREGA.cancelada(o));
+  /* O LANÇAMENTO QUE VALE (revisão da F14). O Desfazer do lote pede ao
+     servidor para tirar o lançamento com {desfazer: true}; sem internet, esse
+     pedido fica na cópia deste aparelho até subir, e NÃO é lançamento: a O.S.
+     volta para "a lançar" na hora. O pedido continua na cópia (e não vira
+     null) porque a fila guarda uma gravação por O.S.: a próxima gravação da
+     mesma O.S. parte da cópia e levaria null, que o servidor lê como "manter
+     o lançado", e o Desfazer se perderia calado. Quem pergunta se a O.S. foi
+     lançada pergunta aqui. */
+  const entregaLancadaValida = o => {
+    const l = o && o.entregaLancada;
+    return l && typeof l === 'object' && !Array.isArray(l) && l.desfazer !== true ? l : null;
+  };
   const conclusoes = (lista, de = '', ate = '') => lista.filter(o => concluida(o) && emIntervalo(o.finalizadaEm, de, ate));
   function horas(o) {
     if (o?.saidaEm && o?.retornoEm) {
@@ -725,10 +737,10 @@ const OPERACAO = (() => {
      duas O.S. que o carro entregou no dia 20 e o ERP baixou nos dias 21 e 23
      viravam duas voltas em dias em que o carro nem saiu. */
   function diaDaVolta(o) {
-    return dia(o?.retornoEm) || (o?.horaRetorno ? (dia(o.saidaEm) || dia(o.instalacao?.data)) : '') || dia(o?.entregaLancada?.data) || dia(o?.finalizadaEm);
+    return dia(o?.retornoEm) || (o?.horaRetorno ? (dia(o.saidaEm) || dia(o.instalacao?.data)) : '') || dia(entregaLancadaValida(o)?.data) || dia(o?.finalizadaEm);
   }
   const voltou = o => !!(o && !interno(o) && !semCarro(o) && equipe(o).length &&
-    (o.retornoEm || o.horaRetorno || (dia(o.finalizadaEm) && (concluida(o) || o.entregaLancada))));
+    (o.retornoEm || o.horaRetorno || (dia(o.finalizadaEm) && (concluida(o) || entregaLancadaValida(o)))));
   /* SEM CARRO (pedido do Léo, 29/09/2026: "preciso que tenha a opção
      instalação interna, porque tem vezes que não precisa de carro"). É um
      valor do campo VEÍCULO, não um tipo de O.S.: a instalação continua sendo
@@ -776,6 +788,32 @@ const OPERACAO = (() => {
     });
     const ordem = { conferir: 0, parcial: 1, conferida: 2 };
     return lista2.sort((a, b) => ordem[a.situacao] - ordem[b.situacao] || b.dia.localeCompare(a.dia) || a.chave.localeCompare(b.chave));
+  }
+  /* O AGRUPAMENTO DO FECHAR O DIA (F14): a mesma chave da volta (dia + carro
+     + equipe, pela pessoa), SEM exigir equipe nem retorno. O lote junta a
+     baixa do ERP sem equipe e a O.S. ainda aberta do dia, que a fila da
+     volta do carro deixa de fora; é no lote que a equipe entra. `diaDe(o)`
+     escolhe o dia de cada O.S. (padrão: diaDaVolta); O.S. sem dia fica de
+     fora. Só leitura.
+     SEM CARRO E SEM EQUIPE (revisão da F14): nada liga uma O.S. à outra (o
+     caso comum da baixa do ERP "a lançar"). Juntar pelo dia fazia uma volta
+     falsa, com uma equipe e uma chegada para O.S. sem relação; cada uma vira
+     a própria volta, e a chave leva o id. */
+  function agruparPorVolta(lista, diaDe = diaDaVolta) {
+    const grupos = new Map();
+    for (const o of lista || []) {
+      if (!o) continue;
+      const d = dia(diaDe(o));
+      if (!d) continue;
+      const time = equipe(o);
+      const pessoasDaVolta = time.map(chavePessoa).sort();
+      const soltaDasOutras = !pessoasDaVolta.length && (!normal(o.veiculo) || semCarro(o));
+      const chave = [d, normal(o.veiculo), soltaDasOutras ? 'os:' + String(o.id) : pessoasDaVolta.join('+')].join('|');
+      const g = grupos.get(chave) || { chave, dia: d, veiculo: String(o.veiculo || '').trim(), semCarro: semCarro(o), equipe: time.map(nomePessoa), pessoas: pessoasDaVolta, os: [] };
+      g.os.push(o);
+      grupos.set(chave, g);
+    }
+    return [...grupos.values()].sort((a, b) => a.dia.localeCompare(b.dia) || a.veiculo.localeCompare(b.veiculo) || a.chave.localeCompare(b.chave));
   }
   /* CÓDIGO FIXO DO ITEM (E1, 29/09/2026). Cópia do casamento do servidor
      (_shared/pcp-integridade.mjs: casarItens e uidItemValido); um teste
@@ -1175,7 +1213,7 @@ function statusEntrega(o, hoje, regra) {
     return {ESTADOS_ENTREGA, ROTULOS_ENTREGA, MOTIVO_CANCELAMENTO_MIN, MOTIVO_CANCELAMENTO_MAX, motivoCancelamentoInvalido, cancelamentoDe, cancelada, prazoDaEntrega, statusEntrega};
   })(prazoCombinadoDe, () => motorDaEntrega
     || (typeof module !== 'undefined' && module.exports && typeof require === 'function' ? require('./entrega-item.js') : null));
-  return {uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,...STATUS_ENTREGA};
+  return {uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,...STATUS_ENTREGA};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
 // Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega
