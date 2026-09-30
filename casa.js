@@ -297,9 +297,55 @@ function avisoJanelaCasa(f) {
   return foraDaJanelaCasa(f) ? `<p class="metricas-nota">Este quadro lê só as O.S guardadas neste aparelho, dos últimos ${janelaLocalCasa()} dias. O período escolhido começa antes disso; o histórico completo está em Entregas.</p>` : '';
 }
 
-// Data que vale para o mês: a do lançamento manual, se houver; senão a finalização.
+// Data que vale para o mês: a do lançamento manual, se houver; senão a
+// finalização (na O.S. que o ERP baixou, o dia da entrega: diaDaBaixaERP).
 function diaEntrega(o) {
-  return (o.entregaLancada && OPERACAO.dia(o.entregaLancada.data)) || OPERACAO.dia(o.finalizadaEm);
+  return (o.entregaLancada && OPERACAO.dia(o.entregaLancada.data))
+    || (OPERACAO.encerradaERP(o) ? diaDaBaixaERP(o) : OPERACAO.dia(o.finalizadaEm));
+}
+/* O DIA DA ENTREGA NA O.S. QUE O ERP BAIXOU (revisão da E7). A baixa finaliza
+   no dia em que roda, e a entrega pode ter sido antes: o "Entregar o saldo em
+   29/09" decidido em 02/10 marca os itens em 29/09, a baixa da hora seguinte
+   finaliza em 02/10, e a O.S. passava a contar em outubro (e o Lançar
+   propunha 02/10). A ordem:
+     1. a data de entrega que o ERP informou (erpComSaldo.dataEntregue);
+     2. com todo item marcado (entregue, retirado ou cancelado, por marca), o
+        último dia de marca;
+     3. só então o dia da finalização.
+   MANTIDA ABERTA (decisão do dono, revisão da E7): com o "Manter aberta"
+   da gestão para este aviso do ERP (erpSaldoDecisao manter, o mesmo selo), a
+   gestão disse que NÃO foi entregue naquela data, e a data do ERP não vence:
+   vale o último dia de marca (todo item marcado) ou o dia da finalização.
+   Cancelada no ERP segue o dia da baixa, como antes. Vale só para a O.S.
+   encerrada pelo ERP: a finalizada no PCP conta no dia em que alguém a
+   finalizou, como sempre. */
+function diaDaBaixaERP(o) {
+  const fim = OPERACAO.dia(o && o.finalizadaEm);
+  if (!o || typeof o !== 'object' || typeof ENTREGA_ITEM === 'undefined' || !ENTREGA_ITEM || typeof ENTREGA_ITEM.resumoOS !== 'function') return fim;
+  try { if (ENTREGA_ITEM.canceladaNoERP(o)) return fim; } catch { return fim; }
+  const m = o.erpComSaldo && typeof o.erpComSaldo === 'object' && !Array.isArray(o.erpComSaldo) ? o.erpComSaldo : null;
+  const dec = o.erpSaldoDecisao;
+  const mantida = !!(m && dec && typeof dec === 'object' && dec.tipo === 'manter' && String(dec.selo || '') === String(m.selo || ''));
+  const doERP = m && !mantida && /^\d{4}-\d{2}-\d{2}$/.test(String(m.dataEntregue || '')) ? String(m.dataEntregue) : '';
+  return doERP || ultimoDiaDeMarcaCasa(o) || fim;
+}
+// O último dia de marca, só quando TODO item físico está entregue, retirado ou cancelado por marca.
+function ultimoDiaDeMarcaCasa(o) {
+  // Filtro barato primeiro: quase toda baixa do ERP chega sem marca nenhuma.
+  if (!(Array.isArray(o.itens) && o.itens.some(it => it && Array.isArray(it.entregas) && it.entregas.length))) return '';
+  const semFim = {...o, finalizadaEm: ''};   // sem a finalização o motor não põe entrega implícita
+  let r;
+  try { r = ENTREGA_ITEM.resumoOS(semFim); } catch { return ''; }
+  if (!r || r.situacao !== 'completa') return '';
+  let maior = '';
+  for (const it of Array.isArray(o.itens) ? o.itens : []) {
+    if (!it || typeof it !== 'object' || ENTREGA_ITEM.ehServico(it)) continue;
+    let st;
+    try { st = ENTREGA_ITEM.situacaoItem(it, semFim); } catch { return ''; }
+    const d = st && st.entregue > 0 && /^\d{4}-\d{2}-\d{2}$/.test(String(st.dia || '')) ? String(st.dia) : '';
+    if (d > maior) maior = d;
+  }
+  return maior;
 }
 // Como a pessoa aparece nas telas da casa. Desde 14/09/2026 vem com a FICHA do
 // RH junto (foto, cargo, área) -- quando o apelido acha dona. A chave de
@@ -710,13 +756,16 @@ function lancarEntregaManual(osId) {
   const equipeRegistrou = OPERACAO.interno(os) ? ''
     : OPERACAO.voltaRespondida(os.voltaEquipe) ? voltaEquipeHTML(os.voltaEquipe, { fotos: true })
     : '<p class="text-muted" style="font-size:.8rem">A equipe não registrou a limpeza desta volta.</p>';
+  /* O dia que o Lançar propõe e cita é o da entrega que o ERP baixou
+     (diaDaBaixaERP, revisão da E7), e não o dia em que a baixa rodou. */
+  const diaBaixa = diaDaBaixaERP(os);
   box.innerHTML = `
     <div class="wpp-picker retrab-box" role="dialog" aria-modal="true">
       <div class="wpp-picker-head"><strong>📦 Lançar entrega · O.S ${esc(os.numero || '—')}</strong><button class="modal-close" id="lancar-x">×</button></div>
       <div class="wpp-picker-body">
-        <p class="text-muted" style="font-size:.8rem;margin-bottom:8px">${esc(os.cliente || '')} · ${esc(os.servico || '')}. O ERP baixou em ${esc(OPERACAO.dia(os.finalizadaEm) ? OPERACAO.dia(os.finalizadaEm).slice(8, 10) + '/' + OPERACAO.dia(os.finalizadaEm).slice(5, 7) : '—')}.</p>
+        <p class="text-muted" style="font-size:.8rem;margin-bottom:8px">${esc(os.cliente || '')} · ${esc(os.servico || '')}. O ERP baixou em ${esc(diaBaixa ? diaBaixa.slice(8, 10) + '/' + diaBaixa.slice(5, 7) : '—')}.</p>
         <form id="lancar-form" class="retrab-form">
-          <div class="field"><label>Data da entrega <span class="req">*</span></label><input name="data" type="date" required value="${esc(OPERACAO.dia(os.finalizadaEm) || hojeISO())}"></div>
+          <div class="field"><label>Data da entrega <span class="req">*</span></label><input name="data" type="date" required value="${esc(diaBaixa || hojeISO())}"></div>
           <div class="field"><label>Equipe que instalou</label>${componente ? '<div class="aloc-host" id="lancar-aloc"></div>' : `<div class="casa-chips">${chipsEquipe}</div>`}</div>
           ${equipeRegistrou}
           ${conferencia}
@@ -728,7 +777,7 @@ function lancarEntregaManual(osId) {
   if (componente) {
     const papel = STATE.user && STATE.user.papel;
     ALOCUI.iniciar(chaveAloc, { os, equipes: equipesCadastradasCasa(), papel, modo: ALOCUI.modoPara(papel, os), dica: ALOCUI.dicaModo(papel, os), semAntigo: true, reiniciar: true,
-      dia: OPERACAO.dia(os.finalizadaEm) || hojeISO(), valor: typeof valorDaOS === 'function' ? valorDaOS(os) : os.valorTotal, versoes: versoesRegrasCasa() });
+      dia: diaBaixa || hojeISO(), valor: typeof valorDaOS === 'function' ? valorDaOS(os) : os.valorTotal, versoes: versoesRegrasCasa() });
     ALOCUI.montar(document.getElementById('lancar-aloc'), chaveAloc);
   }
   // Miniaturas da foto do carro que a equipe registrou.
@@ -1780,6 +1829,41 @@ function manterAbertaSaldoERP(osId, selo) {
   return {erro: ''};
 }
 const NOME_SITUACAO_ERP = {ENTREGUE: 'entregue', FINALIZADO: 'finalizada'};
+/* O QUE O CARD, A FICHA E O FINALIZAR DIZEM DO ERP (revisão da E7). Os dois
+   caminhos do ERP (a marca da baixa, erpComSaldo, e a saída da carteira com
+   o pacote de entregues) viram o mesmo aviso, com as mesmas palavras. Só
+   vale com entrega parcial marcada: sem ela, o card segue como antes (a
+   carteira oferece "Confirmar baixa"). Devolve {aviso, resumo, mantida}, ou
+   null; `mantida` = a gestão já decidiu "Manter aberta" para este aviso. */
+function erpSaldoNaOS(os) {
+  if (!os || typeof os !== 'object' || os.finalizadaEm || !temMotorSaldoERP()) return null;
+  if (!(os.erpComSaldo || os.erpSaiuDaCarteiraEm)) return null;
+  let resumo;
+  try { resumo = ENTREGA_ITEM.resumoOS(os); } catch { return null; }
+  if (!resumo || resumo.situacao !== 'parcial') return null;
+  const aviso = avisoERPSaldo(os);
+  if (!aviso) return null;
+  const dec = os.erpSaldoDecisao;
+  return {aviso, resumo, mantida: !!(dec && typeof dec === 'object' && dec.tipo === 'manter' && dec.selo === aviso.selo)};
+}
+// "O ERP diz entregue em 29/09": a mesma frase no card, na ficha e no Finalizar.
+const textoERPDiz = aviso => `O ERP diz ${NOME_SITUACAO_ERP[aviso && aviso.status] || String((aviso && aviso.status) || 'encerrada').toLowerCase()}${aviso && aviso.data ? ` em ${ddmmCasa(aviso.data)}` : ' (sem data de entrega)'}`;
+function erpSaldoAvisoHTML(s) {
+  if (!s || !s.aviso) return '';
+  const gestao = podeDecidirSaldoERP();
+  const frase = s.mantida ? '; a gestão manteve a O.S. aberta: entrega parcial.'
+    : ` e o PCP tem saldo: ${gestao ? 'decida' : 'a gestão decide'} em Entregas.`;
+  const link = !s.mantida && gestao ? '<button type="button" class="btn-ghost card-erp-ok" data-erp-saldo-lista>Abrir a lista</button>' : '';
+  return `<div class="card-erp-conferir card-erp-saldo"><div><b>${esc(textoERPDiz(s.aviso))}</b>${esc(frase)}</div>${link}</div>`;
+}
+/* O LINK DO CARD E DA FICHA: abre Entregas (a lista, não os relatórios) e
+   desce até "ERP diz entregue, PCP tem saldo". */
+function abrirListaErpSaldo() {
+  STATE._entAba = '';
+  const rolar = () => { const alvo = document.querySelector('#panel-entregas .erp-saldo'); if (alvo && alvo.scrollIntoView) alvo.scrollIntoView({behavior: 'smooth', block: 'start'}); };
+  const aba = document.querySelector('.tab[data-tab="entregas"]:not([data-vista])');
+  if (aba) { aba.click(); setTimeout(rolar, 80); } else rolar();
+}
 function erpComSaldoHTML(linhas) {
   if (!podeDecidirSaldoERP() || !Array.isArray(linhas) || !linhas.length) return '';
   const n = linhas.length;

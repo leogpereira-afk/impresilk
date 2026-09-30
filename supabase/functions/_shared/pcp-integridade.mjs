@@ -107,7 +107,11 @@ export function decisaoBaixaERP(o, statusERP) {
 export const seloSaldoERP = (status, dataEntregue) => `${situacaoERP(status)}|${/^\d{4}-\d{2}-\d{2}$/.test(String(dataEntregue ?? '')) ? dataEntregue : ''}`;
 /* A MARCA DA BAIXA NA O.S. PARCIAL. Devolve o registro novo, ou null quando a
    marca já diz o mesmo (a baixa é idempotente: a mesma resposta do ERP não
-   grava de novo). `desde` fica o da primeira vez que o ERP disse. */
+   grava de novo). `desde` é a primeira vez que o ERP disse ESTA situação:
+   mudou a situação (FINALIZADO e depois ENTREGUE), `desde` recomeça (revisão
+   da E7). Sem a data de entrega do ERP, a tela usa o dia de `desde` como o
+   dia do ENTREGUE, e herdar o do FINALIZADO dava o dia de outro aviso. Só a
+   data mudando (ENTREGUE em 25/09 e depois em 27/09) mantém o `desde`. */
 export function marcarErpComSaldo(o, { status = '', dataEntregue = '', agora = '' } = {}) {
   if (!objeto(o)) return null;
   const st = situacaoERP(status);
@@ -115,7 +119,8 @@ export function marcarErpComSaldo(o, { status = '', dataEntregue = '', agora = '
   const selo = seloSaldoERP(st, data);
   const antes = objeto(o.erpComSaldo) ? o.erpComSaldo : null;
   if (antes && antes.selo === selo) return null;
-  return { ...o, erpComSaldo: { status: st, dataEntregue: data, selo, desde: String(antes?.desde || agora), em: String(agora) } };
+  const mesmaSituacao = !!antes && situacaoERP(antes.status) === st;
+  return { ...o, erpComSaldo: { status: st, dataEntregue: data, selo, desde: String((mesmaSituacao && antes.desde) || agora), em: String(agora) } };
 }
 /* A PORTA DO APARELHO (pcp-sync). erpComSaldo é só do servidor: fica o
    gravado, sempre. erpSaldoDecisao é o "Manter aberta" da gestão: o aparelho

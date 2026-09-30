@@ -582,8 +582,14 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
    com a marca nova ela passa a ser poupada, com a marca preservada. A marca
    da lista (erpComSaldo) grava com a mesma trava, mas NAO sobe o rev: ela
    nao fecha nada, o pcp-sync a guarda contra a copia do aparelho, e subir o
-   rev poria em conflito a ficha que a gestao tem aberta. O atualizadoEm anda
-   para os aparelhos puxarem a marca. */
+   rev poria em conflito a ficha que a gestao tem aberta.
+   REVISAO DA E7: a marca tambem NAO mexe no atualizadoEm nem no
+   atualizadoPor (ficam os gravados, de quem editou por ultimo). Com o
+   atualizadoEm da maquina, o reenvio da mesma gravacao (a resposta que se
+   perdeu) virava conflito contra a propria escrita, e o PC com o relogio
+   adiantado nunca puxava a marca (store.js compara rev e atualizadoEm). O
+   carimbo da LINHA (atualizado_em) anda: o pull incremental acha a O.S., e
+   o aparelho copia SO a marca com o mesmo rev (store.js, _camposDoServidor). */
 async function gravarBaixas(sb: any, lote: any[], hojeLocal: string) {
   const desistencias: any[] = [], poupadas: any[] = [], canceladasComEntrega: any[] = [];
   let baixadas = 0, marcadas = 0;
@@ -614,7 +620,6 @@ async function gravarBaixas(sb: any, lote: any[], hojeLocal: string) {
         // Poupada sem marca (CONCLUIDO), ou já marcada com o mesmo aviso do ERP: nada a gravar.
         registro = dec.marcar ? marcarErpComSaldo(linha.registro, { status: a.statusERP, dataEntregue: a.dataEntregue, agora }) : null;
         if (!registro) { motivo = ""; break; }
-        registro = { ...registro, atualizadoEm: agora, atualizadoPor: "Mubisys (auto)" };
       } else {
         registro = {
           ...linha.registro,

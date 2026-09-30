@@ -101,7 +101,8 @@ test('ERP ENTREGUE numa O.S. com 2 de 5 itens: poupada, listada, sem finalizadaE
   assert.deepEqual({...g.erpComSaldo, desde: 'x', em: 'x'}, {status: 'ENTREGUE', dataEntregue: DIA_ERP, selo: 'ENTREGUE|2026-09-25', desde: 'x', em: 'x'});
   assert.equal(g.rev, 1, 'a marca não sobe o rev: a ficha aberta da gestão não vira conflito');
   assert.notEqual(linhaDe(e, 'mub-10').atualizado_em, '2026-09-19T10:00:00Z', 'atualizado_em anda: os aparelhos puxam a marca');
-  assert.equal(g.atualizadoPor, 'Mubisys (auto)');
+  // Revisão da E7: a marca não é edição de ninguém; atualizadoEm e atualizadoPor ficam os gravados.
+  assert.equal(g.atualizadoEm, undefined);assert.equal(g.atualizadoPor, undefined);
   assert.deepEqual(g.itens.map(i => (i.entregas || []).length), [1, 1, 0, 0, 0], 'as marcas ficam como estavam');
   assert.ok(e.log().some(l => /^log .*poupou a O\.S\. 10 .*ENTREGUE.*entrega parcial marcada no PCP.*o PCP segura/.test(l)), JSON.stringify(e.log()));
   // A lista da tela (admin e pcp) mostra a O.S., com a data do ERP.

@@ -2368,6 +2368,21 @@ function saldoAFinalizar(os) {
   });
   return pendentes.length || comProblema.length ? { resumo: r, pendentes, comProblema, unidades: pendentes.reduce((t, p) => t + p.s.saldo, 0) } : null;
 }
+/* O ERP NO FINALIZAR (revisão da E7). Com o ERP dizendo entregue e o PCP com
+   saldo (os dois caminhos: a marca da baixa e a carteira; casa.js,
+   avisoERPSaldo), a pergunta do saldo cita o ERP e oferece marcar os
+   restantes NA DATA DO ERP, como o "Entregar o saldo" da lista, e não hoje.
+   Quem declara (o celular) declara hoje: a data do ERP não é palavra dele.
+   Sem casa.js (cache misto), como antes. */
+function avisoERPNoFinalizar(os) {
+  if (typeof avisoERPSaldo !== 'function') return null;
+  try { return avisoERPSaldo(os); } catch { return null; }
+}
+function diaERPNoFinalizar(os) {
+  const a = avisoERPNoFinalizar(os);
+  const d = a && /^\d{4}-\d{2}-\d{2}$/.test(String(a.data || '')) ? String(a.data) : '';
+  return d && !papelDeclara() && d <= hojeEntrega() ? d : '';
+}
 /* Marca o saldo de cada item pendente, no objeto que vai ser gravado, ANTES
    do finalizadaEm (o motor recusa marca em O.S. finalizada; o servidor aceita
    marca e finalização na mesma gravação). Tudo ou nada: se um item não passa,
@@ -2382,30 +2397,52 @@ function marcarSaldoNaFinalizacao(os, { simular = false } = {}) {
   const tipo = isInterno(os) ? 'retirado' : 'entregue';
   if (!podeMarcarEntrega(tipo)) return { erro: '', marcadas: 0, eventos: [] };
   const hoje = hojeEntrega(), papel = papelEntrega(), novas = [];
+  // Com o ERP dizendo entregue, a data do ERP (revisão da E7); senão, hoje.
+  const dia = diaERPNoFinalizar(os) || hoje;
   for (const { it, s } of p.pendentes) {
-    const ev = { id: novoIdMarca(), tipo, dia: hoje, qtde: s.saldo, por: String((STATE.user || {}).nome || ''), em: nowISO() };
+    const ev = { id: novoIdMarca(), tipo, dia, qtde: s.saldo, por: String((STATE.user || {}).nome || ''), em: nowISO() };
     const v = ENTREGA_ITEM.validarEvento(ev, it, { papel, os, hoje });
     if (!v.ok) return { erro: `A marca do ${rotuloItemEntrega(it)} não passou: ${v.erro} A O.S. não foi finalizada.`, marcadas: 0, eventos: [] };
     novas.push([it, v.evento]);
   }
   if (!simular) for (const [it, ev] of novas) it.entregas = (Array.isArray(it.entregas) ? it.entregas : []).concat(ev);
   const lista = Array.isArray(os.itens) ? os.itens : [];
-  return { erro: '', marcadas: novas.length, eventos: novas.map(([it, ev]) => ({ uid: uidItemOk(it.uid) ? it.uid : '', idx: lista.indexOf(it), id: ev.id })) };
+  return { erro: '', marcadas: novas.length, dia, quando: dia === hoje ? 'hoje' : `em ${ddmmEntrega(dia)}, a data do ERP`,
+    eventos: novas.map(([it, ev]) => ({ uid: uidItemOk(it.uid) ? it.uid : '', idx: lista.indexOf(it), id: ev.id })) };
 }
 /* `seguir(escolha)`: 'sem-saldo' (nada a perguntar) ou 'marcar'. "Manter
    aberta" e "Voltar" não chamam: a O.S. não recebe finalizadaEm. A marca do
    saldo é conferida antes da pergunta do retrabalho, para ninguém responder
-   à toa. */
-function finalizarComSaldo(os, seguir) {
+   à toa. `gravarManter(selo)`: como a ficha grava a decisão do ERP no
+   próprio rascunho (ver manterAbertaComERP). */
+function finalizarComSaldo(os, seguir, { gravarManter = null } = {}) {
   const p = saldoAFinalizar(os);
   if (!p) { seguir('sem-saldo'); return; }
   perguntarSaldoEntrega(os, p, escolha => {
-    if (escolha === 'manter') { toast(`A O.S ${os.numero || ''} continua aberta: entrega parcial.`, 'success'); return; }
+    if (escolha === 'manter') { manterAbertaComERP(os, gravarManter); return; }
     if (escolha !== 'marcar') return;
     const teste = marcarSaldoNaFinalizacao(os, { simular: true });
     if (teste.erro) { toast(teste.erro, 'error'); return; }
     seguir('marcar');
   });
+}
+/* "MANTER ABERTA" COM O ERP DIZENDO ENTREGUE (revisão da E7). É a mesma
+   decisão do "Manter aberta" da lista de Entregas, gravada pelo mesmo campo
+   (erpSaldoDecisao {tipo:'manter', selo}, que o servidor carimba com quem e
+   quando): sem ela a O.S. seguia na lista pedindo uma decisão que a gestão
+   já tinha tomado. Só admin e pcp decidem; os outros mantêm aberta como
+   antes, e a lista segue para a gestão. O card grava pela lista
+   (manterAbertaSaldoERP, sobre a O.S. relida); a ficha grava no próprio
+   rascunho (`gravarManter`): gravar uma cópia deixava o rascunho com o rev
+   velho, e a gravação seguinte da ficha virava conflito contra a própria. */
+function manterAbertaComERP(os, gravarManter) {
+  const aviso = avisoERPNoFinalizar(os);
+  const decide = !!aviso && typeof podeDecidirSaldoERP === 'function' && podeDecidirSaldoERP();
+  if (!decide) { toast(`A O.S ${os.numero || ''} continua aberta: entrega parcial.`, 'success'); return; }
+  const r = gravarManter ? gravarManter(aviso.selo) : manterAbertaSaldoERP(os.id, aviso.selo);
+  if (r && r.erro) { toast(r.erro, 'error'); return; }
+  toast(`A O.S ${os.numero || ''} continua aberta: entrega parcial. Ela sai da lista "ERP diz entregue, PCP tem saldo" e volta se o ERP mudar o aviso.`, 'success');
+  if (!gravarManter) renderActiveTab();
 }
 /* A resposta do retrabalho que a pergunta grava na O.S. (perguntarRetrabalho).
    Do `checkout` a pergunta só mexe na situação (o "Não" desmarca o
@@ -2448,6 +2485,14 @@ function finalizarDaFicha(interno) {
   if (faltas.length) { toast('Falta: ' + faltas.join(', '), 'error'); return; }
   const id = _modalDraft.id;
   juntarMarcasDoStore(_modalDraft);
+  // "Manter aberta" com o ERP dizendo entregue: a decisão vai no próprio rascunho (revisão da E7).
+  const gravarManter = selo => {
+    const d = _modalDraft;
+    if (!d || d.id !== id) return { erro: 'A ficha fechou: a decisão não foi gravada.' };
+    d.erpSaldoDecisao = { tipo: 'manter', selo };
+    saveDraft(); reRenderModalKeepOpen();
+    return { erro: '' };
+  };
   finalizarComSaldo(_modalDraft, escolha => {
     const d = _modalDraft;
     if (!d || d.id !== id) return;   // a ficha fechou no meio da pergunta
@@ -2463,11 +2508,11 @@ function finalizarDaFicha(interno) {
       saveDraft(); reRenderModalKeepOpen();
       const extra = !m.marcadas ? '' : papelDeclara()
         ? ` · ${m.marcadas} ${m.marcadas === 1 ? 'item declarado' : 'itens declarados'} pela equipe hoje; a gestão confere no Fechar o dia`
-        : ` · ${m.marcadas} ${m.marcadas === 1 ? 'item marcado' : 'itens marcados'} ${interno ? 'retirado' : 'entregue'}${m.marcadas === 1 ? '' : 's'} hoje`;
+        : ` · ${m.marcadas} ${m.marcadas === 1 ? 'item marcado' : 'itens marcados'} ${interno ? 'retirado' : 'entregue'}${m.marcadas === 1 ? '' : 's'} ${m.quando || 'hoje'}`;
       toast((interno ? 'Retirada registrada 📦' : 'Instalação finalizada 🏁') + extra, 'success');
     };
     if (interno) concluir(); else perguntarRetrabalho(d, concluir);
-  });
+  }, { gravarManter });
 }
 function perguntarSaldoEntrega(os, p, aoEscolher) {
   const velho = document.getElementById('saldo-entrega-box'); if (velho) velho.remove();
@@ -2475,12 +2520,17 @@ function perguntarSaldoEntrega(os, p, aoEscolher) {
   const prob = Array.isArray(p.comProblema) ? p.comProblema : [], np = prob.length;
   const verbo = interna ? (n === 1 ? 'retirado' : 'retirados') : (n === 1 ? 'entregue' : 'entregues');
   const marca = podeMarcarEntrega(interna ? 'retirado' : 'entregue');
+  /* O ERP diz entregue (revisão da E7): a pergunta cita o ERP com as mesmas
+     palavras do card e marca na data dele (diaERPNoFinalizar). */
+  const avisoERP = avisoERPNoFinalizar(os), diaERP = diaERPNoFinalizar(os);
+  const quando = diaERP ? `em ${ddmmEntrega(diaERP)} (data do ERP)` : 'hoje';
+  const citaERP = avisoERP && typeof textoERPDiz === 'function' ? `<p class="text-muted saldo-ent-erp" style="font-size:.85rem;margin-bottom:8px">${esc(textoERPDiz(avisoERP))} e o PCP tem saldo.</p>` : '';
   /* Só item com problema: nada a marcar. Finalizar deixa o item com problema
      (o saldo dele fica segurado); quem resolve é a marca no item. */
   /* Quem declara (montagem com senha, E5) não marca entregue: declara, e a
      gestão confere no Fechar o dia (revisão da E5: o texto dizia "Marcar"). */
   const principal = !n ? `Finalizar: ${np === 1 ? 'o item fica' : `os ${np} itens ficam`} com problema`
-    : marca ? `${papelDeclara() ? 'Declarar' : 'Marcar'} ${n === 1 ? 'o item restante' : `os ${n} restantes`} como ${verbo}${papelDeclara() ? ' pela equipe' : ''} hoje` : `Finalizar assim: o saldo conta como ${interna ? 'retirado' : 'entregue'} hoje`;
+    : marca ? `${papelDeclara() ? 'Declarar' : 'Marcar'} ${n === 1 ? 'o item restante' : `os ${n} restantes`} como ${verbo}${papelDeclara() ? ' pela equipe' : ''} ${quando}` : `Finalizar assim: o saldo conta como ${interna ? 'retirado' : 'entregue'} hoje`;
   const linha = ({ it, s }) => `<li>${esc(rotuloItemEntrega(it))}: ${esc(s.situacao === 'parcial' ? `${s.rotulo}, faltam ${s.saldo}` : (interna ? 'a retirar' : 'a entregar') + (s.qtde > 1 ? ` (${s.qtde})` : ''))}</li>`;
   const linhaProb = ({ it, s }) => `<li>${esc(rotuloItemEntrega(it))}${s.problema && s.problema.motivo ? ` (${esc(s.problema.motivo)})` : ''}: fica com problema; resolva no item</li>`;
   const titulo = n ? (interna ? 'Ainda há itens a retirar' : 'Ainda há itens a entregar') : (np === 1 ? 'Item com problema de entrega' : 'Itens com problema de entrega');
@@ -2491,6 +2541,7 @@ function perguntarSaldoEntrega(os, p, aoEscolher) {
     <div class="wpp-picker retrab-box" role="dialog" aria-modal="true" aria-labelledby="saldo-ent-tit">
       <div class="wpp-picker-head"><strong id="saldo-ent-tit">${titulo}</strong></div>
       <div class="wpp-picker-body">
+        ${citaERP}
         ${n ? `<p class="text-muted" style="font-size:.85rem;margin-bottom:8px">O.S ${esc(os.numero || '')}: ${n} ${n === 1 ? 'item' : 'itens'} com saldo (${p.unidades} ${p.unidades === 1 ? 'unidade' : 'unidades'}).</p>
         <ul class="saldo-ent-lista">${p.pendentes.slice(0, 12).map(linha).join('')}${n > 12 ? `<li>e mais ${n - 12}</li>` : ''}</ul>` : ''}
         ${np ? `<p class="text-muted saldo-ent-sub">${n ? 'Fora da marcação, com problema aberto:' : `O.S ${esc(os.numero || '')}: ${np === 1 ? 'um item' : `${np} itens`} com problema aberto, fora da marcação:`}</p>
@@ -2578,6 +2629,7 @@ function blocoItens(os, ro, done) {
         <tbody id="itens-tbody">${rows || `<tr><td colspan="${cols}" class="text-muted" style="text-align:center;padding:12px">Nenhum item</td></tr>`}</tbody>
       </table>
       ${itens.length ? `<div class="items-total">${itens.length} ${itens.length === 1 ? 'item' : 'itens'}${resumoEnt ? ` · <span class="ent-resumo">${esc(resumoEnt)}</span>` : ''}</div>` : ''}
+      ${(saldoERP => saldoERP ? erpSaldoAvisoHTML(saldoERP) : '')(erpSaldoDoCard(os))}
       <div class="flex gap-8 edit-only">
         <button class="btn-ghost btn-sm" id="btn-add-item">+ Item manual</button>
         <button class="btn-ghost btn-sm" id="btn-import-itens">📄 Importar itens do PDF</button>
@@ -3912,6 +3964,10 @@ function bindModalEvents(os, ro) {
   };
   const impItens = $('#btn-import-itens');
   if (impItens) impItens.onclick = () => importarItensPDF(_modalDraft);
+  // O aviso do ERP no bloco Itens (revisão da E7): o link fecha a ficha e abre a lista de Entregas.
+  document.querySelectorAll('#modal-overlay [data-erp-saldo-lista]').forEach(b => {
+    b.onclick = () => { closeModal(); if (typeof abrirListaErpSaldo === 'function') abrirListaErpSaldo(); };
+  });
 
   // Pop-up de múltipla escolha
   $$('[data-picker-open]', root).forEach(btn => {
@@ -4612,6 +4668,9 @@ function bindCardClicks(container) {
   $$('[data-erp-baixa]', container).forEach(b => {
     b.onclick = (e) => { e.stopPropagation(); erpConfirmarBaixa(b.dataset.erpBaixa); };
   });
+  $$('[data-erp-saldo-lista]', container).forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); if (typeof abrirListaErpSaldo === 'function') abrirListaErpSaldo(); };
+  });
   $$('[data-erp-conferi]', container).forEach(b => {
     b.onclick = (e) => { e.stopPropagation(); erpConferi(b.dataset.erpConferi); };
   });
@@ -4676,8 +4735,18 @@ function erpSituacaoTxt(os) { return os && ERP_SITUACAO[os.statusERP] ? 'ERP: ' 
    mais sozinha, deixa a marca erpSaiuDaCarteiraEm. A gestão confirma a baixa
    num toque (com justificativa carimbada, como toda baixa sem foto de retorno)
    ou segue o fluxo normal e finaliza quando terminar. */
+/* ERP DIZ ENTREGUE E O PCP TEM SALDO (revisão da E7). Com entrega parcial
+   marcada, o card NÃO oferece "Confirmar baixa": ela finalizava a O.S. como
+   "fora da carteira aberta", com itens a entregar numa O.S. finalizada e o
+   Lançar pondo o dia do toque. No lugar, o mesmo aviso da ficha, nos dois
+   caminhos do ERP (a marca da baixa e a carteira), com o link para a lista
+   de Entregas, onde a gestão decide (casa.js, erpSaldoNaOS). */
+const erpSaldoDoCard = os => typeof erpSaldoNaOS === 'function' ? erpSaldoNaOS(os) : null;
 function erpFechouHTML(os) {
-  if (!os || os.finalizadaEm || !os.erpSaiuDaCarteiraEm) return '';
+  if (!os || os.finalizadaEm) return '';
+  const saldo = erpSaldoDoCard(os);
+  if (saldo) return erpSaldoAvisoHTML(saldo);
+  if (!os.erpSaiuDaCarteiraEm) return '';
   const pode = ['admin', 'pcp'].includes(STATE.user && STATE.user.papel) && (typeof podeEditar !== 'function' || podeEditar());
   return `<div class="card-erp-conferir card-erp-fechou"><div><b>O ERP fechou esta O.S.</b> em ${esc(fmtDataBR(os.erpSaiuDaCarteiraEm))} (saiu da carteira aberta). Se o serviço terminou, confirme a baixa; se não, siga e finalize quando terminar.</div>${pode ? `<button type="button" class="btn-ghost card-erp-ok" data-erp-baixa="${esc(os.id)}">Confirmar baixa</button>` : ''}</div>`;
 }
@@ -4685,6 +4754,8 @@ function erpConfirmarBaixa(id) {
   const os = STORE.getOS(id);
   if (!os || os.finalizadaEm || !os.erpSaiuDaCarteiraEm) return;
   if (!['admin', 'pcp'].includes(STATE.user && STATE.user.papel)) { toast('Só a gestão do PCP confirma a baixa do ERP.', 'error'); return; }
+  // O card desenhado antes da marca parcial chegar: relida, a O.S. vai para a decisão em Entregas.
+  if (erpSaldoDoCard(os)) { toast(`A O.S ${os.numero || ''} tem entrega parcial marcada: decida em Entregas, na lista "ERP diz entregue, PCP tem saldo".`, 'error'); renderActiveTab(); return; }
   if (!confirm(`Confirmar a baixa do ERP da O.S ${os.numero || ''}? Ela vai para Finalizados como "Baixa do ERP" e a entrega fica para lançar em Entregas.`)) return;
   const quem = STATE.user.nome, agora = nowISO();
   const antes = JSON.parse(JSON.stringify({ finalizadaEm: os.finalizadaEm || '', finalizadoPor: os.finalizadoPor || '', baixaAutoERP: os.baixaAutoERP || null, justificativaConclusao: os.justificativaConclusao || '', historico: os.historico || [] }));
@@ -4811,7 +4882,7 @@ function etapasDoCard(os) {
     rotulo: retrab ? '✓ Retrabalho resolvido' : '🔴 Registrar retrabalho',
     dica: retrab && !filhaAberta ? 'sai da vista Retrabalho' : '',
     motivo: filhaAberta ? 'Resolve quando a O.S. de correção for finalizada.' : (!retrab && interno ? 'Retirada não tem retrabalho de instalação.' : (fin && !retrab ? 'Finalizada: retrabalho novo vira O.S. (aba Retrabalho).' : '')) });
-  L.push({ aba: 'finalizados', icone: interno ? '📦' : '🏁', nome: interno ? 'Retirado' : 'Finalizados', sub: fin ? statusLabelDe(os, st) : (os.erpSaiuDaCarteiraEm ? 'o ERP já fechou: confirme a baixa no aviso acima' : 'confere o checklist antes'), atual: fin,
+  L.push({ aba: 'finalizados', icone: interno ? '📦' : '🏁', nome: interno ? 'Retirado' : 'Finalizados', sub: fin ? statusLabelDe(os, st) : erpSaldoDoCard(os) ? 'o ERP diz entregue e o PCP tem saldo: veja o aviso acima' : (os.erpSaiuDaCarteiraEm ? 'o ERP já fechou: confirme a baixa no aviso acima' : 'confere o checklist antes'), atual: fin,
     acao: fin ? '' : 'finalizar', rotulo: interno ? '📦 Cliente retirou' : '🏁 Finalizar', motivo: '' });
   return L;
 }
@@ -4944,7 +5015,7 @@ function finalizarServicoDoCard(osId) {
       // Quem declara (montagem com senha) não diz "marcados" (revisão da E5).
       const extra = !m.marcadas ? '' : papelDeclara()
         ? ` · ${m.marcadas} ${m.marcadas === 1 ? 'item declarado' : 'itens declarados'} pela equipe hoje`
-        : ` · ${m.marcadas} ${m.marcadas === 1 ? 'item marcado' : 'itens marcados'} hoje`;
+        : ` · ${m.marcadas} ${m.marcadas === 1 ? 'item marcado' : 'itens marcados'} ${m.quando || 'hoje'}`;
       const msg = (isInterno(alvo) ? 'Retirada registrada 📦' : 'Serviço finalizado 🏁') + extra;
       /* O DESFAZER DE UM TOQUE (revisão da E4) volta a finalização E as marcas
          que ela criou: sem isso a O.S. reabria com o saldo "entregue hoje",
