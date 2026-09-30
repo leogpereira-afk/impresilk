@@ -118,3 +118,79 @@ test('filtro "Próximos 7 dias" acompanha o dia: a aba aberta ontem não fica pr
   t.run(`STATE._fProg = {de:'2026-09-01', ate:'2026-09-03', rapido:''}`);
   assert.equal(t.run(`dentroPeriodo('2026-09-09', '_fProg')`), false);
 });
+
+/* ═════════════ F10 (30/09/2026): equipe e divisão na ficha da O.S. ═════════════
+   A ficha ganha o bloco "Divisão da equipe" (só admin e pcp, só em O.S.
+   externa) e o campo Equipe vira o componente único. renderModal roda de
+   verdade: o DOM falso transforma o HTML em blocos (data-bloco) a cada
+   pintura, como o navegador. Dados fictícios. */
+function fichaReal(papel, lista = []) {
+  let html = '', blocos = [];
+  const modal = {
+    get innerHTML() { return html; },
+    set innerHTML(v) { html = v; blocos = [...v.matchAll(/<details class="card-fs[^"]*"[^>]*data-bloco="([^"]+)"/g)].map(m => ({dataset: {bloco: m[1]}, open: false})); },
+    classList: {toggle() {}, add() {}, remove() {}}, querySelector: () => null, querySelectorAll: () => []};
+  const doc = {querySelector: sel => (sel === '#modal-os' ? modal : null), querySelectorAll: sel => (sel === '#modal-os .card-fs' ? blocos : []),
+    getElementById: () => null, addEventListener() {}, activeElement: null};
+  const ctx = vm.createContext({console, Date: class extends Date { constructor(...a) { super(...(a.length ? a : [hoje + 'T12:00:00'])); } },
+    document: doc, window: {}, localStorage: {getItem: () => null},
+    STORE: {getAllOS: () => lista, getCFG: () => ({instaladores: ['Ana'], performancePCP: {equipes: [], participacoes: []}}), getOS: id => lista.find(o => o.id === id), elenco: () => ({pessoas: [], antigos: []})},
+    setTimeout() {}, clearTimeout() {}});
+  for (const f of ['operacao.js', 'divisao.js', 'regras.js', 'alocacao-ui.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, {filename: f});
+  vm.runInContext(fs.readFileSync(path.join(root, 'app.js'), 'utf8'), ctx, {filename: 'app.js'});
+  vm.runInContext(`STATE.user={nome:'Revisão',papel:'${papel}'}; bindModalEvents=()=>{}; ligarHistoricoAlteracoes=()=>{};`, ctx);
+  return {run: code => vm.runInContext(code, ctx), blocos: () => blocos, html: () => html};
+}
+const osFicha = (extra = {}) => ({id: 'f1', numero: '7001', tipo: 'externo', cliente: 'Cliente Fictício', liberadoPCP: true,
+  instalacao: {data: hoje, periodo: 'Manhã', duracaoDias: 1}, equipe: ['100001'], veiculo: 'Carro 1', itens: [], ...extra});
+
+test('F10 ficha: os blocos abertos sobrevivem à repintura com o bloco novo "divisao"', () => {
+  const t = fichaReal('pcp', [osFicha()]);
+  t.run(`_modalDraft = ${JSON.stringify(osFicha())}; renderModal();`);
+  const chaves = t.blocos().map(b => b.dataset.bloco);
+  assert.deepEqual(chaves, ['pcp', 'itens', 'agenda', 'exec', 'divisao'], 'o bloco da divisão vem depois da execução');
+  // O usuário abre a divisão e a execução e fecha a agenda (que o render abriu).
+  const porChave = k => t.blocos().find(b => b.dataset.bloco === k);
+  porChave('divisao').open = true; porChave('exec').open = true; porChave('agenda').open = false;
+  // Caso ruim: a repintura (cada campo gravado repinta) fechava o bloco novo.
+  t.run('reRenderModalKeepOpen()');
+  const abertos = Object.fromEntries(t.blocos().map(b => [b.dataset.bloco, b.open]));
+  assert.deepEqual(abertos, {pcp: false, itens: false, agenda: false, exec: true, divisao: true});
+  // A O.S. que vira "Cliente retira" perde o bloco sem trocar o que fica aberto.
+  t.run(`_modalDraft.tipo = 'interno'; reRenderModalKeepOpen();`);
+  assert.deepEqual(t.blocos().map(b => b.dataset.bloco), ['pcp', 'itens']);
+});
+
+test('F10 ficha: blocoExec(os, ro, done) continua com a mesma assinatura e o mesmo bloco', () => {
+  const t = fichaReal('pcp');
+  const html = t.run(`blocoExec(${JSON.stringify(osFicha())}, false, true)`);
+  assert.match(html, /<details class="card-fs done" data-bloco="exec">/);
+  assert.match(html, /4 · Embarque &amp; Execução/);
+  assert.equal(t.run('blocoExec.length'), 3);
+});
+
+test('F10 ficha: o bloco divisao só aparece para admin e pcp, e só em O.S. externa', () => {
+  for (const papel of ['admin', 'pcp']) {
+    const t = fichaReal(papel);
+    t.run(`_modalDraft = ${JSON.stringify(osFicha())}; renderModal();`);
+    assert.match(t.html(), /data-bloco="divisao"/, papel + ' vê a divisão');
+    assert.match(t.html(), /id="ficha-div-ok"/);
+    assert.match(t.html(), /id="ficha-equipe"/, 'o campo Equipe é o componente');
+    t.run(`_modalDraft = ${JSON.stringify(osFicha({tipo: 'interno'}))}; renderModal();`);
+    assert.doesNotMatch(t.html(), /data-bloco="divisao"/, papel + ': cliente retira não tem divisão');
+  }
+  for (const papel of ['operacao', 'montagem', 'comercial']) {
+    const t = fichaReal(papel);
+    t.run(`_modalDraft = ${JSON.stringify(osFicha())}; renderModal();`);
+    assert.doesNotMatch(t.html(), /data-bloco="divisao"/, papel + ' não vê a divisão');
+    assert.doesNotMatch(t.html(), /ficha-div-ok/);
+  }
+  // Operação edita a equipe pelo componente (só pessoas); o comercial só lê.
+  const op = fichaReal('operacao');
+  op.run(`_modalDraft = ${JSON.stringify(osFicha())}; renderModal();`);
+  assert.match(op.html(), /id="ficha-equipe"/);
+  const com = fichaReal('comercial');
+  com.run(`_modalDraft = ${JSON.stringify(osFicha())}; renderModal();`);
+  assert.doesNotMatch(com.html(), /id="ficha-equipe"/, 'quem só lê vê os chips de sempre');
+  assert.match(com.html(), /data-chips="equipe"/);
+});

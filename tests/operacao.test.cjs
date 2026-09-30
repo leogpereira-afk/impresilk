@@ -192,3 +192,98 @@ test('instalação interna (sem carro): não disputa carro, não vira volta do c
   assert.ok(!O.pendencias(os({veiculo:'Instalação interna'})).includes('Definir veículo'));
   assert.equal(O.SEM_CARRO, 'Instalação interna');
 });
+
+/* ───────────── F10 (30/09/2026): ocupados antes de gravar ─────────────
+   OPERACAO.ocupados diz quem já está em outra O.S. no mesmo horário, pelo
+   dia e pelo período que a tela mostra (ainda não gravados). Dados fictícios. */
+test('ocupados: mesmo turno ocupa; turno diferente não; a própria O.S. não conta', () => {
+  const outra = os({id:'b', numero:'5002', equipe:['Ana', 'Bruno'], veiculo:'Carro 2'});
+  const tarde = os({id:'c', numero:'5003', equipe:['Caio'], instalacao:{data:hoje, periodo:'Tarde'}});
+  const eu = os({id:'a', numero:'5001', equipe:['Ana']});
+  const r = O.ocupados([eu, outra, tarde], hoje, 'Manhã', 'a');
+  assert.ok(r.pessoas.has(O.chavePessoa('Ana')), 'Ana está na 5002 de manhã');
+  assert.equal(r.pessoas.get(O.chavePessoa('Ana'))[0].numero, '5002');
+  assert.ok(r.pessoas.has(O.chavePessoa('Bruno')));
+  assert.ok(!r.pessoas.has(O.chavePessoa('Caio')), 'a O.S. da tarde não ocupa quem vai de manhã');
+  assert.ok(r.veiculos.has('Carro 2'));
+  // Caso ruim: a O.S. que está sendo editada contava contra ela mesma.
+  assert.equal(O.ocupados([eu], hoje, 'Manhã', 'a').pessoas.size, 0);
+  // A tela troca o período antes de gravar: a tarde agora bate com a 5003.
+  const t = O.ocupados([eu, outra, tarde], hoje, 'Tarde', 'a');
+  assert.ok(t.pessoas.has(O.chavePessoa('Caio')));
+  assert.ok(!t.pessoas.has(O.chavePessoa('Bruno')));
+  // Finalizada e sem data não ocupam ninguém.
+  assert.equal(O.ocupados([eu, {...outra, finalizadaEm:hoje + 'T10:00:00'}], hoje, 'Manhã', 'a').pessoas.size, 0);
+  assert.equal(O.ocupados([eu, outra], '', 'Manhã', 'a').pessoas.size, 0);
+});
+
+test('ocupados: "Horário" (só início, sem fim) bate com tudo; "Dia inteiro" também', () => {
+  const manha = os({id:'b', numero:'5002', equipe:['Bruno']});
+  const tarde = os({id:'c', numero:'5003', equipe:['Caio'], instalacao:{data:hoje, periodo:'Tarde'}});
+  const eu = os({id:'a', equipe:[]});
+  const h = O.ocupados([eu, manha, tarde], hoje, {periodo:'Horário', hora:'15:00'}, 'a');
+  assert.ok(h.pessoas.has(O.chavePessoa('Bruno')) && h.pessoas.has(O.chavePessoa('Caio')), 'Horário às 15h ainda bate com a manhã');
+  const outraH = os({id:'d', numero:'5004', equipe:['Davi'], instalacao:{data:hoje, periodo:'Horário', hora:'07:00'}});
+  assert.ok(O.ocupados([eu, outraH], hoje, 'Tarde', 'a').pessoas.has(O.chavePessoa('Davi')), 'a outra em Horário também bate');
+  const d = O.ocupados([eu, manha, tarde], hoje, 'Dia inteiro', 'a');
+  assert.equal(d.pessoas.size, 2);
+});
+
+test('ocupados: com saída e retorno previstos nas duas O.S. vale o intervalo; faltando, o turno', () => {
+  const janela = (saida, hora) => ({retornoPrevisto:[{dia:hoje, saida, hora}]});
+  const outra = os({id:'b', numero:'5002', equipe:['Bruno'], ...janela('08:00', '10:00')});
+  const eu = os({id:'a', equipe:[], ...janela('10:00', '12:00')});
+  assert.equal(O.ocupados([eu, outra], hoje, 'Manhã', 'a').pessoas.size, 0, '8h-10h e 10h-12h não se cruzam');
+  const cruza = {...eu, ...janela('09:30', '12:00')};
+  assert.equal(O.ocupados([cruza, outra], hoje, 'Manhã', 'a').pessoas.size, 1, '9h30 sai antes das 10h da outra voltar');
+  const semJanela = {...eu, retornoPrevisto:[]};
+  assert.equal(O.ocupados([semJanela, outra], hoje, 'Manhã', 'a').pessoas.size, 1, 'sem a janela desta, vale o turno');
+  // Vários dias: o segundo dia da O.S. também conta.
+  const amanha = O.somarDias(hoje, 1);
+  const depois = os({id:'c', numero:'5003', equipe:['Caio'], instalacao:{data:amanha, periodo:'Manhã'}});
+  assert.ok(O.ocupados([eu, depois], hoje, {periodo:'Manhã', duracaoDias:2}, 'a').pessoas.has(O.chavePessoa('Caio')));
+  assert.equal(O.ocupados([eu, depois], hoje, {periodo:'Manhã', duracaoDias:1}, 'a').pessoas.size, 0);
+});
+
+test('ocupados: Instalação interna não é carro (fora da conta dos veículos); cliente retira não tem agenda', () => {
+  const interna = os({id:'b', numero:'5002', equipe:['Bruno'], veiculo:'Instalação interna'});
+  const retira = os({id:'c', numero:'5003', equipe:['Caio'], tipo:'interno'});
+  const eu = os({id:'a', equipe:[], veiculo:'Instalação interna'});
+  const r = O.ocupados([eu, interna, retira], hoje, 'Manhã', 'a');
+  assert.equal(r.veiculos.size, 0, 'Instalação interna nunca fica ocupada');
+  assert.ok(!r.pessoas.has(O.chavePessoa('Caio')), 'O.S. de cliente retira não ocupa ninguém');
+  assert.ok(r.pessoas.has(O.chavePessoa('Bruno')), 'a pessoa numa instalação interna continua ocupada no turno');
+  // A O.S. editada de cliente retira não tem agenda: ninguém fica marcado.
+  assert.equal(O.ocupados([{...eu, tipo:'interno'}, interna], hoje, 'Manhã', 'a').pessoas.size, 0);
+});
+
+/* ───────────── F10: busca tolerante ───────────── */
+test('busca: "Adrinao" acha Adriano só como sugestão; o texto contido é achado; o ID exato vence', () => {
+  const adriano = {id:'123456', textos:['Adriano', 'Adriano Fictício Souza', 'dri']};
+  const adriana = {id:'654321', textos:['Adriana', 'Adriana Fictícia Lima']};
+  assert.equal(O.buscaTolerante('Adrinao', adriano).tipo, 'sugestao');
+  assert.equal(O.buscaTolerante('Adrinao', adriano).dist, 1, 'troca de duas letras vizinhas conta 1');
+  assert.equal(O.buscaTolerante('adri', adriano).tipo, 'direto');
+  assert.equal(O.buscaTolerante('ADRIANO souza', adriano).tipo, 'direto', 'palavras que começam as do nome, sem acento nem caixa');
+  assert.equal(O.buscaTolerante('123456', adriano).tipo, 'id');
+  assert.equal(O.buscaTolerante('123456', adriana).tipo, '', 'o ID de um não acha o outro');
+  assert.equal(O.buscaTolerante('Zuleica', adriano).tipo, '');
+  // Palavra curta não tem tolerância (senão "Ana" achava meio mundo).
+  assert.equal(O.buscaTolerante('Adx', adriano).tipo, '');
+  assert.equal(O.buscaTolerante('', adriano).tipo, 'direto', 'sem busca, tudo aparece');
+});
+
+test('busca: pedaço de CPF não acha ninguém; só o ID inteiro de 6 dígitos', () => {
+  const p = {id:'123456', textos:['Rita Fictícia', 'rita']};
+  for (const q of ['1234', '12345', '456.789', '789-00', '123.456.789-00', '23456']) assert.equal(O.buscaTolerante(q, p).tipo, '', q);
+  assert.equal(O.buscaTolerante('123.456', p).tipo, 'id', 'o ID com ponto também é o ID');
+  assert.equal(O.buscaTolerante('rita 123456', p).tipo, 'id');
+  assert.equal(O.buscaTolerante('rita 1234', p).tipo, '', 'pedaço de número junto do nome também não acha');
+});
+
+test('busca: vale para equipe (nome e animal)', () => {
+  const aguia = {id:'', textos:['Águia', 'aguia']};
+  assert.equal(O.buscaTolerante('agu', aguia).tipo, 'direto');
+  assert.equal(O.buscaTolerante('Aguai', aguia).tipo, 'sugestao');
+  assert.equal(O.buscaTolerante('100001', aguia).tipo, '', 'número nunca acha equipe');
+});

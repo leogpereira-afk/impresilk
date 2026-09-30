@@ -409,6 +409,94 @@ const OPERACAO = (() => {
     }
     return out;
   }
+  /* QUEM ESTÁ OCUPADO ANTES DE GRAVAR (F10, 30/09/2026). A mesma conta do
+     `conflitos`, só que para a O.S. que está sendo programada agora, com o
+     dia e o período que a tela mostra (ainda não gravados): as outras O.S.
+     programadas nesses dias que batem de horário. Bate pelo intervalo da
+     saída prevista ao retorno previsto quando as duas O.S. têm os dois (F15);
+     senão pelo turno, e "Horário" (só início, sem fim) bate com tudo. O.S.
+     de cliente retira (tipo interno) não tem agenda e fica fora; o veículo
+     "Instalação interna" não é carro e nunca fica ocupado. Só leitura: a tela
+     marca o chip e deixa gravar (é aviso, não trava). `periodo` é o texto do
+     período ou {periodo, hora, duracaoDias}.
+     Devolve {pessoas: Map(chavePessoa -> [{id, numero, cliente, dia, outroDia, periodo, hora}]),
+              veiculos: Map(veículo -> [...])}. */
+  function ocupados(lista, d, periodo, osId = '', extra = {}) {
+    const pessoasOc = new Map(), veiculosOc = new Map();
+    const vazio = {pessoas:pessoasOc, veiculos:veiculosOc};
+    const dia0 = dia(d);
+    if (!dia0) return vazio;
+    const todas = (Array.isArray(lista) ? lista : []).filter(o => o && typeof o === 'object');
+    const base = todas.find(o => osId && o.id === osId) || (extra && extra.os) || {};
+    const p = periodo && typeof periodo === 'object' ? periodo : {periodo};
+    const inst = {...(base.instalacao || {}), data:dia0, periodo:String(p.periodo ?? ''),
+      hora:String(p.hora ?? (extra && extra.hora) ?? ''), duracaoDias:p.duracaoDias ?? (extra && extra.duracaoDias) ?? base.instalacao?.duracaoDias ?? 1};
+    const eu = {...base, id:osId || base.id || '', instalacao:inst, finalizadaEm:''};
+    const meusDias = diasAgenda(eu);
+    if (!meusDias.length) return vazio;
+    const outras = programadas(todas, meusDias[0], meusDias[meusDias.length - 1]).filter(o => !(eu.id && o.id === eu.id));
+    const anotar = (mapa, k, info) => { if (!k) return; const xs = mapa.get(k) || []; if (!xs.some(x => x.id === info.id)) xs.push(info); mapa.set(k, xs); };
+    for (const dd of meusDias) for (const o of outras) {
+      if (!diasAgenda(o).includes(dd) || !mesmoTurno(eu, o, dd)) continue;
+      const info = {id:String(o.id), numero:String(o.numero || ''), cliente:String(o.cliente || ''), dia:dd, outroDia:dd !== dia0, periodo:String(o.instalacao?.periodo || ''), hora:String(o.instalacao?.hora || '')};
+      for (const x of equipe(o)) anotar(pessoasOc, chavePessoa(x), info);
+      const carro = semCarro(o) ? '' : String(o.veiculo || '').trim();
+      if (carro) anotar(veiculosOc, carro, info);
+    }
+    return vazio;
+  }
+  /* BUSCA TOLERANTE (F10). Classifica uma opção (pessoa ou equipe) para o que
+     foi digitado, sobre o nome normalizado (sem acento, sem caixa):
+     - 'id': o ID do RH digitado inteiro (6 dígitos). Número só acha o ID
+       exato: pedaço de CPF, ou o começo do ID, não acha ninguém;
+     - 'direto': o texto da opção contém o que foi digitado ("adri", "silva");
+     - 'sugestao': erro de digitação ("Adrinao" -> Adriano), pela distância de
+       edição de cada palavra (troca de duas letras vizinhas conta 1). A tela
+       mostra só como sugestão, nunca como achado;
+     - '': não acha.
+     `opcao` = {id, textos: [nome, completo, apelido...]}. Devolve {tipo, dist}. */
+  function distanciaEdicao(a, b) {
+    const s = String(a), t = String(b), m = s.length, n = t.length;
+    if (!m) return n;
+    if (!n) return m;
+    const d = Array.from({length:m + 1}, (_, i) => [i, ...Array(n).fill(0)]);
+    for (let j = 0; j <= n; j++) d[0][j] = j;
+    for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) {
+      const c = s[i - 1] === t[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c);
+      if (i > 1 && j > 1 && s[i - 1] === t[j - 2] && s[i - 2] === t[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+    return d[m][n];
+  }
+  const NENHUM = Object.freeze({tipo:'', dist:Infinity});
+  function buscaTolerante(consulta, opcao = {}) {
+    const q = normPessoa(consulta);
+    if (!q) return {tipo:'direto', dist:0};
+    const id = String(opcao && opcao.id != null ? opcao.id : '').trim();
+    const idExato = t => { const dig = t.replace(/\D/g, ''); return ehIdPessoa(dig) && dig === id; };
+    if (/^[\d.\-\/\s]+$/.test(q)) return idExato(q) ? {tipo:'id', dist:0} : NENHUM;
+    const tokens = q.split(' ').filter(Boolean);
+    const numeros = tokens.filter(t => /\d/.test(t)), letras = tokens.filter(t => !/\d/.test(t));
+    if (numeros.some(t => !idExato(t))) return NENHUM;
+    const textos = (Array.isArray(opcao && opcao.textos) ? opcao.textos : [opcao && opcao.textos]).map(normPessoa).filter(Boolean);
+    const monte = textos.join(' ');
+    if (monte.includes(letras.join(' '))) return {tipo:numeros.length ? 'id' : 'direto', dist:0};
+    const palavras = [...new Set(monte.split(' ').filter(Boolean))];
+    let total = 0;
+    for (const t of letras) {
+      const lim = t.length <= 3 ? 0 : t.length <= 5 ? 1 : 2;
+      let melhor = Infinity;
+      for (const w of palavras) {
+        if (w.startsWith(t)) { melhor = 0; break; }
+        if (!lim) continue;
+        melhor = Math.min(melhor, distanciaEdicao(t, w), w.length > t.length ? distanciaEdicao(t, w.slice(0, t.length)) : Infinity);
+      }
+      if (melhor > lim) return NENHUM;
+      total += melhor;
+    }
+    // Toda palavra digitada é o começo de uma palavra da opção ("ana souza" em Ana Paula Souza): achado.
+    return total === 0 ? {tipo:numeros.length ? 'id' : 'direto', dist:0} : {tipo:'sugestao', dist:total};
+  }
   function resumo(lista, hoje = dia(new Date())) {
     const abertas = lista.filter(o => !o.finalizadaEm);
     return {
@@ -685,7 +773,7 @@ const OPERACAO = (() => {
     });
     return n;
   }
-  return {uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco};
+  return {uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
 // Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega

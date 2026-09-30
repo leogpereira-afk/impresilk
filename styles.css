@@ -3432,5 +3432,42 @@ img.perf-logo{object-fit:cover}
 .aloc-status{margin:8px 0 0;font-size:.88rem;color:#5c6e78}
 .aloc-status.erro{color:#b42318;font-weight:600}
 .aloc-status:empty{display:none}
+/* F10 (30/09/2026): o mesmo componente na ficha (campo Equipe e bloco
+   Divisão), na Agenda e no Lançar entrega. Só classes novas: o celular do
+   instalador (equipe.html) usa o mesmo styles.css e não carrega o componente.
+   As regras genéricas dos formulários (.casa-add-os label, .field label,
+   .campo-grupo) não podem engolir as do componente. */
+.aloc-host{display:block;min-width:0}
+.aloc-campo .aloc{margin:6px 0 0;font-size:.9rem;font-weight:400;color:var(--text)}
+.aloc label.aloc-pct{display:inline-flex;flex-direction:row;align-items:center;gap:4px;font-size:inherit;font-weight:inherit;color:inherit}
+.aloc-chip.aloc-chip-pessoa{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"quem x"}
+.aloc-chip.ocupado{background:#fff4e0;box-shadow:inset 0 0 0 1.5px #f0b45a}
+.aloc-badge.ocupado{background:#fde68a;color:#78350f;white-space:normal}
+.aloc button.aloc-eq.ocupada{border-style:dashed}
+.aloc button.aloc-eq .aloc-eq-txt small{white-space:normal;line-height:1.2}
+.aloc-so-nome{border-left-color:#e0a4a4}
+.aloc-sugestoes{display:grid;gap:4px;border-top:1px dashed #cbd5e1;margin-top:4px;padding-top:4px}
+.aloc button.aloc-opcao.sugestao{background:#fffbeb}
+.aloc button.aloc-opcao.ocupado .aloc-opcao-ocupado{color:#92400e;font-weight:650}
+.aloc button.aloc-opcao-equipe.perf-com-cor{box-shadow:inset 4px 0 0 var(--equipe-cor)}
+.aloc-painel-pe{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.aloc-painel-pe .aloc-dica{flex:1 1 220px}
+.aloc button.aloc-atualizar{min-height:40px}
+.aloc-bloco-divisao .aloc{margin-top:8px}
+.aloc-bloco-divisao .aloc-acoes{margin-top:8px}
+/* O componente decide pela LARGURA QUE SOBRA, não pela da tela: na Agenda
+   ele mora numa coluna estreita do computador, e o @media de 640 px não
+   pegava (o nome sumia atrás dos controles). */
+.aloc-host{container-type:inline-size}
+@container (max-width:560px){
+  .aloc-rapidas-lista{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .aloc button.aloc-eq{min-width:0;border-radius:14px}
+  .aloc-grupo{padding:8px}
+  .aloc-chip{padding:6px;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"quem x" "ctrl ctrl"}
+  .aloc-tab{font-size:.8rem}
+  .aloc-tab th,.aloc-tab td{padding:5px 4px}
+}
+.picker-opt.picker-sugestao{background:#fffbeb}
+.picker-opt.picker-sugestao .picker-pessoa small::after{content:" · parecido com o que você digitou"}
 @media (prefers-reduced-motion:no-preference){.aloc-seg{transition:opacity .2s}.aloc-chip{transition:background-color .2s}}
 @media (max-width:640px){.aloc-rapidas-lista{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.aloc button.aloc-eq{min-width:0;border-radius:14px}.aloc-grupo{padding:8px}.aloc-chip{padding:6px;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"quem x" "ctrl ctrl"}.aloc-tab{font-size:.8rem}.aloc-tab th,.aloc-tab td{padding:5px 4px}}

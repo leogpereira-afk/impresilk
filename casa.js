@@ -606,6 +606,12 @@ function lancarEntregaManual(osId) {
   const chipEquipe = p => { const on = eq.has(p.chave); return `<label class="casa-chip ${on ? 'on' : ''}" title="${esc(p.dica)}"><input type="checkbox" name="equipe" value="${esc(p.valor)}" ${on ? 'checked' : ''}><span>${esc(p.rotulo)}</span>${p.freelancer ? '<small class="tag-freelancer">Freelancer</small>' : ''}${p.fora ? '<small>fora da lista</small>' : ''}</label>`; };
   const chipsEquipe = pessoasDosChips(os).map(chipEquipe).join('')
     || '<p class="text-muted" style="font-size:.8rem">Cadastre instaladores em Configurações.</p>';
+  /* O COMPONENTE ÚNICO (F10) no lugar dos chips: parte de quem já está na
+     O.S. (nome sem ficha incluído, marcado), com busca tolerante e equipe
+     num toque. Admin e pcp gravam a divisão; operação e montagem, só as
+     pessoas. Sem o componente (cache velho), os chips de antes. */
+  const componente = typeof ALOCUI !== 'undefined';
+  const chaveAloc = 'lancar:' + os.id;
   /* A CONFERÊNCIA DA VOLTA também mora aqui: a maioria das O.S. chega
      finalizada pela baixa do ERP, e este é o momento em que a gestão pega
      nelas. Sem isto, carro e equipamentos quase nunca teriam resposta e o
@@ -630,7 +636,7 @@ function lancarEntregaManual(osId) {
         <p class="text-muted" style="font-size:.8rem;margin-bottom:8px">${esc(os.cliente || '')} · ${esc(os.servico || '')}. O ERP baixou em ${esc(OPERACAO.dia(os.finalizadaEm) ? OPERACAO.dia(os.finalizadaEm).slice(8, 10) + '/' + OPERACAO.dia(os.finalizadaEm).slice(5, 7) : '—')}.</p>
         <form id="lancar-form" class="retrab-form">
           <div class="field"><label>Data da entrega <span class="req">*</span></label><input name="data" type="date" required value="${esc(OPERACAO.dia(os.finalizadaEm) || hojeISO())}"></div>
-          <div class="field"><label>Equipe que instalou</label><div class="casa-chips">${chipsEquipe}</div></div>
+          <div class="field"><label>Equipe que instalou</label>${componente ? '<div class="aloc-host" id="lancar-aloc"></div>' : `<div class="casa-chips">${chipsEquipe}</div>`}</div>
           ${equipeRegistrou}
           ${conferencia}
           <button class="btn-primary w-100" type="submit">Continuar → pergunta do retrabalho</button>
@@ -638,30 +644,54 @@ function lancarEntregaManual(osId) {
       </div>
     </div>`;
   document.body.appendChild(box);
+  if (componente) {
+    const papel = STATE.user && STATE.user.papel;
+    ALOCUI.iniciar(chaveAloc, { os, equipes: equipesCadastradasCasa(), papel, modo: ALOCUI.modoPara(papel, os), dica: ALOCUI.dicaModo(papel, os), semAntigo: true, reiniciar: true,
+      dia: OPERACAO.dia(os.finalizadaEm) || hojeISO(), valor: typeof valorDaOS === 'function' ? valorDaOS(os) : os.valorTotal, versoes: versoesRegrasCasa() });
+    ALOCUI.montar(document.getElementById('lancar-aloc'), chaveAloc);
+  }
   // Miniaturas da foto do carro que a equipe registrou.
   box.querySelectorAll('[data-foto-img]').forEach(async img => { const b64 = await STORE.pullPhoto(img.dataset.fotoImg); if (b64) img.src = b64; });
   const fechar = () => box.remove();
-  document.getElementById('lancar-x').onclick = fechar;
+  document.getElementById('lancar-x').onclick = () => { if (componente) ALOCUI.esquecer(chaveAloc); fechar(); };
   box.querySelectorAll('.casa-chip input').forEach(cb => { cb.onchange = () => cb.closest('.casa-chip').classList.toggle('on', cb.checked); });
   document.getElementById('lancar-form').onsubmit = ev => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
     const data = String(fd.get('data') || '');
     if (!OPERACAO.dia(data)) { toast('Informe a data da entrega.', 'error'); return; }
-    const equipe = fd.getAll('equipe').map(String).filter(Boolean);
+    const st = componente ? ALOCUI.estado(chaveAloc) : null;
+    // Com o componente, a equipe é a que ele mostra (parte de quem já estava na O.S.).
+    const equipe = st ? ALOCUI.paraEquipe(chaveAloc).equipe : fd.getAll('equipe').map(String).filter(Boolean);
     const resp = v => (v === 'sim' || v === 'nao') ? v : '';
     const respostas = Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, resp(fd.get(k))]));
     // Sem equipe a entrega não conta para ninguém e a conferência da volta
     // fica numa O.S que a nota descarta. E ela sai da fila "a lançar": o erro
-    // não volta a aparecer. Pergunta antes.
-    if (!equipe.length && !OPERACAO.equipe(os).length && !OPERACAO.interno(os)
+    // não volta a aparecer. Pergunta antes. Com o componente, tirar todo mundo
+    // também pergunta (senão a equipe antiga ficava, calada).
+    if (!equipe.length && (st || !OPERACAO.equipe(os).length) && !OPERACAO.interno(os)
       && !confirm('Lançar sem equipe? A entrega não conta para ninguém e a conferência da volta não entra na nota.')) return;
     // Esconde (não apaga) o formulário: "Voltar" na pergunta do retrabalho
     // devolve a data, a equipe e a conferência como estavam.
     box.style.display = 'none';
     perguntarRetrabalho(os, () => {
       fechar();
-      if (equipe.length) os.equipe = equipe;
+      /* A EQUIPE NO MESMO ENVIO (F10): a divisão de admin e pcp quando
+         mexeram nela; só as pessoas para operação e montagem (a divisão fica
+         para a gestão). O que não entra vai no aviso, nunca calado. */
+      const avisos = [];
+      if (st) {
+        if (st.tocado && st.modo === 'divisao' && equipe.length) {
+          const r = ALOCUI.aplicarNaOS(chaveAloc, os, { soSeTocou: true });
+          if (!r.ok && r.estado === 'conflito') avisos.push(r.mensagem);
+          else if (!r.ok) { os.equipe = r.equipe || equipe; avisos.push('A equipe foi gravada, mas a divisão não: ' + r.mensagem + ' Complete no Conferir da Performance.'); }
+        } else if (st.tocado) {
+          const r = ALOCUI.aplicarEquipeNaOS(chaveAloc, os);
+          if (!r.ok) avisos.push(r.mensagem);
+          else if (r.divisaoFica) avisos.push('A equipe mudou: a divisão desta O.S. (líder e percentuais) fica para a gestão refazer.');
+        }
+        ALOCUI.esquecer(chaveAloc);
+      } else if (equipe.length) os.equipe = equipe;
       const antes = os.retornoConf || {};
       if (conferencia && OPERACAO.PERGUNTAS_VOLTA.some(k => respostas[k] !== resp(antes[k]))) {
         const respondeu = OPERACAO.voltaRespondida(respostas);
@@ -671,6 +701,7 @@ function lancarEntregaManual(osId) {
       os.atualizadoEm = nowISO(); os.atualizadoPor = (STATE.user && STATE.user.nome) || '';
       STORE.saveOS(os);
       toast(`Entrega da O.S ${os.numero || ''} lançada.`, 'success');
+      if (avisos.length) toast(avisos.join(' '), 'error');
       renderEntregas();
     }, { rotulo: 'Voltar ao lançamento', aoVoltar: () => { box.style.display = ''; } });
   };
@@ -2977,7 +3008,28 @@ function rotuloJaProgramadaCasa(o) {
   const d = OPERACAO.diasAgenda(o)[0];
   return (d ? ` · programada ${d.slice(8, 10)}/${d.slice(5, 7)}` : '') + (o.confirmacao === 'Confirmado' ? ' · confirmada' : '');
 }
+/* OCUPADOS NO DIA (F10, 30/09/2026): quem já está em outra O.S. no mesmo
+   horário (OPERACAO.ocupados, pelo dia e pelo período que a tela mostra) e
+   quem o RH diz que está fora (férias, atestado). O chip do componente de
+   equipe aparece marcado ANTES de gravar; é aviso, não trava. */
+function ocupadosNoDiaCasa(dia, periodo, osId, extra = {}) {
+  const r = OPERACAO.ocupados(STORE.getAllOS(), dia, periodo, osId, extra);
+  const pessoas = new Map(r.pessoas);
+  if (typeof temFichaRH === 'function' && temFichaRH()) for (const p of pessoasRH()) {
+    if (!p || p.ativo === false || !OPERACAO.ehIdPessoa(p.id)) continue;
+    const a = ausenciaRH(p, dia);
+    if (a) pessoas.set(p.id, [...(pessoas.get(p.id) || []), { texto: a.motivo === 'Férias' ? 'De férias' : 'Fora pelo RH: ' + a.motivo }]);
+  }
+  return { pessoas, veiculos: r.veiculos };
+}
+const equipesCadastradasCasa = () => ((STORE.getCFG() || {}).performancePCP || {}).equipes || [];
+const versoesRegrasCasa = () => (typeof perfRegrasFonte === 'function' ? perfRegrasFonte().versoes : []);
 function formAddOSHTML(id, dia, candidatas) {
+  /* A EQUIPE É O COMPONENTE ÚNICO (F10): no lugar de "Equipe salva" e dos
+     chips. Admin e pcp montam a divisão (líder, percentual, equipe); operação
+     e montagem montam só as pessoas. Sem o componente (cache velho), os
+     chips de antes. */
+  const componente = typeof ALOCUI !== 'undefined';
   return `<form id="${esc(id)}">
       <label>Buscar O.S. ou cliente <input type="search" data-ag-busca placeholder="Número ou nome do cliente"></label><label>O.S <select name="osId" required><option value="">Escolher a O.S</option>${candidatas.map(o => `<option value="${esc(o.id)}">${esc(o.numero || '—')} · ${esc((o.cliente || '').slice(0, 34))}${OPERACAO.prazo(o) ? ' · prazo ' + OPERACAO.prazo(o).slice(8, 10) + '/' + OPERACAO.prazo(o).slice(5, 7) : ''}${esc(rotuloJaProgramadaCasa(o))}</option>`).join('')}</select></label>
       <div class="linha2">
@@ -2988,14 +3040,14 @@ function formAddOSHTML(id, dia, candidatas) {
         <label>Duração (dias) <input name="dias" type="number" min="1" value="1"></label>
         <label>Veículo <select name="veiculo"><option value="">— sem veículo —</option>${optionsVeiculoCasa('')}</select></label>
       </div>
-      ${typeof perfModeloEquipeHTML === 'function' ? perfModeloEquipeHTML() : ''}
+      ${componente ? `<div class="campo-grupo aloc-campo"><span>Equipe</span><div class="aloc-host" data-aloc-host="${esc(id)}"><p class="aloc-dica">Escolha a O.S. para montar a equipe.</p></div></div>` : `${typeof perfModeloEquipeHTML === 'function' ? perfModeloEquipeHTML() : ''}
       <div class="campo-grupo"><span>Equipe</span><div class="casa-chips">${equipeEscalavel().doPCP.map(n => {
         const p = fichaDoApelido(n);
         const a = p ? ausenciaRH(p, dia) : null;
         // O chip grava o ID do RH (quando há ficha) e mostra o nome.
         const quem = p && p.nome && p.id ? `${p.nome} · ID ${p.id}` : 'Sem ficha no RH: grava o nome';
         return `<label class="casa-chip ${a ? 'fora' : ''}" title="${esc(a ? a.motivo + ' · ' + quem : quem)}"><input type="checkbox" name="equipe" value="${esc(OPERACAO.idPessoa(n) || n)}"><span>${esc(OPERACAO.nomePessoa(n))}</span>${a ? `<small>${esc(a.motivo)}</small>` : ''}</label>`;
-      }).join('') || '<span class="text-muted">Cadastre instaladores em Configurações.</span>'}</div></div>
+      }).join('') || '<span class="text-muted">Cadastre instaladores em Configurações.</span>'}</div></div>`}
       <button class="btn-primary btn-sm" type="submit">Programar em ${esc(dia.slice(8, 10) + '/' + dia.slice(5, 7))}</button>
     </form>`;
 }
@@ -3005,17 +3057,86 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
   });
   const f = document.getElementById(id);
   if (!f) return;
-  if (typeof perfWireModelo === 'function') perfWireModelo(f);
+  const host = f.querySelector('[data-aloc-host]');
+  const componente = !!host && typeof ALOCUI !== 'undefined';
+  const chave = 'agenda:' + id;
+  if (!componente && typeof perfWireModelo === 'function') perfWireModelo(f);
+  const selOS = f.querySelector('[name="osId"]');
+  /* O COMPONENTE PARTE DA O.S. ESCOLHIDA (a equipe e a divisão que ela já
+     tem) e marca quem está ocupado no dia e no período do formulário. A
+     escolha sobrevive à repintura da Agenda (a montagem mora no componente). */
+  let osDoComp = null;
+  const campo = n => f.querySelector(`[name="${n}"]`);
+  const periodoDoForm = () => ({ periodo: String((campo('periodo') || {}).value || ''), hora: String((campo('hora') || {}).value || ''), duracaoDias: Math.max(1, Number((campo('dias') || {}).value) || 1) });
+  const ocupadosAgora = () => (osDoComp ? ocupadosNoDiaCasa(dia, periodoDoForm(), osDoComp.id, { os: osDoComp }) : { pessoas: new Map(), veiculos: new Map() });
+  // O veículo que já saiu em outra O.S. no mesmo horário aparece marcado na lista.
+  const pintarVeiculos = vs => {
+    const sel = campo('veiculo');
+    if (!sel || !sel.options) return;
+    [...sel.options].forEach(op => {
+      if (op.dataset && op.dataset.rotulo === undefined) op.dataset.rotulo = op.textContent;
+      const xs = op.value ? vs.get(op.value) : null;
+      op.textContent = (op.dataset ? op.dataset.rotulo : op.textContent) + (xs && xs.length ? ' · ocupado na O.S. ' + xs.map(x => x.numero || 'sem número').join(', ') : '');
+    });
+  };
+  /* A ESCOLHA SOBREVIVE À REPINTURA DA AGENDA (o pull que traz mudança
+     repinta a aba) com o formulário INTEIRO: a O.S., o período, a hora, a
+     duração e o veículo voltam juntos, e os ocupados são contados pelo que
+     voltou. Só a O.S. voltando, o formulário vinha em Manhã, 1 dia e sem
+     veículo, com a equipe montada, e o Programar gravava errado sem aviso
+     (revisão F10). Fechar o formulário ou programar desiste da escolha. */
+  const escolhas = STATE._agAddEscolha || (STATE._agAddEscolha = {});
+  const CAMPOS_FORM = ['periodo', 'hora', 'dias', 'veiculo'];
+  const lerForm = () => Object.fromEntries(CAMPOS_FORM.map(n => [n, String((campo(n) || {}).value ?? '')]));
+  const guardarForm = () => { const e = escolhas[id]; if (e && typeof e === 'object' && e.os) escolhas[id] = { ...e, ...lerForm() }; };
+  const montarComp = (o, manter) => {
+    osDoComp = o || null;
+    if (!componente) return;
+    escolhas[id] = o ? { os: o.id, ...lerForm() } : '';
+    if (!o) { ALOCUI.esquecer(chave); host.innerHTML = '<p class="aloc-dica">Escolha a O.S. para montar a equipe.</p>'; pintarVeiculos(new Map()); return; }
+    const papel = STATE.user && STATE.user.papel, oc = ocupadosAgora();
+    ALOCUI.iniciar(chave, { os: o, equipes: equipesCadastradasCasa(), papel, modo: ALOCUI.modoPara(papel, o), dica: ALOCUI.dicaModo(papel, o), semAntigo: true, reiniciar: !manter,
+      ocupados: oc.pessoas, dia, valor: typeof valorDaOS === 'function' ? valorDaOS(o) : o.valorTotal, versoes: versoesRegrasCasa() });
+    ALOCUI.montar(host, chave);
+    pintarVeiculos(oc.veiculos);
+  };
+  const repintarOcupados = () => {
+    if (!osDoComp) return;
+    const oc = ocupadosAgora();
+    if (componente && ALOCUI.definirOcupados(chave, oc.pessoas)) ALOCUI.repintar(chave);
+    pintarVeiculos(oc.veiculos);
+  };
+  // O dia é o do formulário; o período, a hora e a duração repintam os ocupados.
+  ['periodo', 'hora', 'dias'].forEach(n => { const x = campo(n); if (x && x.addEventListener) { x.addEventListener('change', repintarOcupados); if (n === 'dias') x.addEventListener('input', repintarOcupados); } });
+  // Cada campo mexido fica guardado com a escolha (a repintura repõe).
+  if (componente) CAMPOS_FORM.forEach(n => { const x = campo(n); if (x && x.addEventListener) { x.addEventListener('change', guardarForm); x.addEventListener('input', guardarForm); } });
   /* Ao escolher a O.S, os chips mostram a equipe que ela JÁ tem. Vinham sempre
      desmarcados: marcar um ajudante "somando" trocava a equipe inteira por ele. */
-  const selOS = f.querySelector('[name="osId"]');
   if (selOS) selOS.addEventListener('change', () => {
     const o = STORE.getOS(selOS.value);
+    if (componente) { montarComp(o); return; }
     const eq = new Set((o ? OPERACAO.equipe(o) : []).map(OPERACAO.chavePessoa));
     f.querySelectorAll('.casa-chip input[name="equipe"]').forEach(cb => {
       cb.checked = eq.has(OPERACAO.chavePessoa(cb.value));
       cb.closest('.casa-chip').classList.toggle('on', cb.checked);
     });
+  });
+  /* A escolha feita antes da repintura volta, com a montagem que estava: os
+     campos primeiro, para os ocupados (pessoas e carro) serem os do período
+     que voltou. */
+  const esc0 = escolhas[id] && typeof escolhas[id] === 'object' ? escolhas[id] : null;
+  if (componente && selOS && esc0 && esc0.os && [...(selOS.options || [])].some(op => op.value === esc0.os)) {
+    CAMPOS_FORM.forEach(n => { const x = campo(n); if (x && typeof esc0[n] === 'string') x.value = esc0[n]; });
+    selOS.value = esc0.os;
+    montarComp(STORE.getOS(esc0.os), true);
+  }
+  // Fechar o formulário sem programar desiste: a escolha, a equipe montada e os campos voltam ao começo.
+  const caixa = componente && typeof f.closest === 'function' ? f.closest('details') : null;
+  if (caixa && typeof caixa.addEventListener === 'function') caixa.addEventListener('toggle', () => {
+    if (caixa.open) return;
+    if (typeof f.reset === 'function') f.reset();
+    f.querySelectorAll('[name="osId"] option').forEach(op => { op.hidden = false; });
+    montarComp(null);
   });
   const buscaOS=f.querySelector('[data-ag-busca]');
   if(buscaOS) buscaOS.oninput=()=>f.querySelectorAll('[name="osId"] option').forEach(o=>{o.hidden=!!o.value && !o.selected && !normCasa(o.textContent).includes(normCasa(buscaOS.value));});
@@ -3027,7 +3148,7 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
     const periodo = String(fd.get('periodo') || 'Manhã');
     const hora = String(fd.get('hora') || '');
     if (periodo === 'Horário' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(hora)) { toast('Período "Horário" pede a hora.', 'error'); return; }
-    const equipe = fd.getAll('equipe').map(String).filter(Boolean);
+    const equipe = componente ? [] : fd.getAll('equipe').map(String).filter(Boolean);
     // Mover O.S que já tinha dia desfaz a confirmação do cliente e a liberação
     // do carro. Isso acontecia calado; agora pergunta.
     const diaAntes = OPERACAO.diasAgenda(os)[0];
@@ -3042,7 +3163,23 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
     // Linha do Tempo reescrevia o passado (o dia de antes aparecia vazio).
     if (typeof registrarRemarcacao === 'function') registrarRemarcacao(os, dia);
     os.instalacao = Object.assign({}, os.instalacao || {}, { data: dia, periodo, hora, duracaoDias: Math.max(1, Number(fd.get('dias')) || 1) });
-    if (equipe.length) os.equipe = [...equipe, ...semChip];
+    /* A EQUIPE PELO COMPONENTE (F10), no mesmo envio da O.S.: admin e pcp
+       gravam a divisão (equipe escolhida, líder e papéis) quando mexeram nela;
+       operação e montagem gravam só as pessoas, e a divisão fica para a
+       gestão. O que não entra diz o motivo; nada sai calado. */
+    const avisos = [];
+    const st = componente && osDoComp && osDoComp.id === os.id ? ALOCUI.estado(chave) : null;
+    if (st && st.tocado) {
+      if (st.modo === 'divisao') {
+        const r = ALOCUI.aplicarNaOS(chave, os, { soSeTocou: true });
+        if (!r.ok && r.estado === 'conflito') avisos.push(r.mensagem);
+        else if (!r.ok) { os.equipe = r.equipe || []; avisos.push('A equipe foi gravada, mas a divisão não: ' + r.mensagem + ' Complete na ficha da O.S., bloco Divisão da equipe.'); }
+      } else {
+        const r = ALOCUI.aplicarEquipeNaOS(chave, os);
+        if (!r.ok) avisos.push(r.mensagem);
+        else if (r.divisaoFica) avisos.push('A equipe mudou: a divisão desta O.S. (líder e percentuais) fica para a gestão refazer.');
+      }
+    } else if (!componente && equipe.length) os.equipe = [...equipe, ...semChip];
     const veiculo = String(fd.get('veiculo') || ''); if (veiculo) os.veiculo = veiculo;
     // Programou a data: o período "parado no cliente" termina aqui, guardado no log.
     if (os.paradoClienteEm) OPERACAO.fecharParadoPorAgenda(os, agendaAntes, new Date().toISOString(), (STATE.user && STATE.user.nome) || '');
@@ -3052,6 +3189,8 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
     const conf = OPERACAO.conflitos(STORE.getAllOS(), dia).filter(c => c.a.id === os.id || c.b.id === os.id);
     if (conf.length) toast(`Programada, mas com possível conflito: ${conf.map(c => [...c.equipe, c.veiculo].filter(Boolean).join(', ')).join(' · ')} já está em outra O.S neste turno.`, 'error');
     else toast(`O.S ${os.numero || ''} programada para ${dia.slice(8, 10)}/${dia.slice(5, 7)}.`, 'success');
+    if (avisos.length) toast(avisos.join(' '), 'error');
+    if (componente) { ALOCUI.esquecer(chave); escolhas[id] = ''; }
     if (aoGravar) aoGravar();
   };
 }

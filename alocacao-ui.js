@@ -47,6 +47,22 @@
    com o que paraParticipacao entrega. Sem isso o Fechar período de julho a
    setembro trava. Nada disso vai para os.alocacao.
 
+   AS OUTRAS TELAS (F10, 30/09/2026): a ficha da O.S. (campo Equipe e bloco
+   "Divisão da equipe"), a Agenda e o Lançar entrega usam o mesmo componente.
+   - MODO "SÓ PESSOAS" (modo: 'pessoas'): quem vai, sem papel, percentual nem
+     R$. É o modo da operação e da montagem com senha (a divisão é só de admin
+     e pcp: o servidor descarta a que vem de outro papel) e o do campo Equipe
+     da ficha. Grava só os.equipe, como sempre, com o aviso de que a divisão
+     fica para a gestão; nada vai para os.alocacao. Nome antigo sem ficha no
+     RH aparece e só sai se alguém tirar (nunca some calado).
+   - OCUPADOS: a tela passa quem já está em outra O.S. no mesmo horário
+     (OPERACAO.ocupados) e o chip aparece marcado antes de gravar.
+   - BUSCA TOLERANTE (OPERACAO.buscaTolerante): o ID exato vence; erro de
+     digitação vira sugestão ("Você quis dizer"), nunca achado; pedaço de CPF
+     não acha ninguém. Vale para pessoa e para equipe.
+   - A Agenda e o Lançar entrega gravam a divisão no MESMO envio da O.S.
+     (aplicarNaOS), e só quando alguém mexeu nela.
+
    Textos para quem usa: português, sem travessão. Este arquivo nunca grava em
    cfg.performancePCP.participacoes. */
 const ALOCUI = (() => {
@@ -251,40 +267,152 @@ const ALOCUI = (() => {
       return g.cota !== pg.cota || lista(g.membros).some((m, j) => m.cota !== (lista(pg.membros)[j] || {}).cota);
     });
   }
+  /* OCUPADOS (F10): o que a tela passa, pela chave da pessoa (o ID, ou
+     "nome:..." para nome sem ficha): as O.S. do mesmo horário
+     (OPERACAO.ocupados) ou um texto pronto ({texto: 'Férias'}). */
+  function mapaOcupados(m) {
+    const out = new Map();
+    const pares = m instanceof Map ? [...m.entries()] : objeto(m) ? Object.entries(m) : [];
+    for (const [k, v] of pares) { const xs = (Array.isArray(v) ? v : [v]).filter(x => x != null && x !== ''); if (k && xs.length) out.set(String(k), xs); }
+    return out;
+  }
+  const chaveDe = v => { const O = oper(); const t = String(v == null ? '' : v).trim(); return O && typeof O.chavePessoa === 'function' ? O.chavePessoa(t) : t; };
+  const ocupadoDe = (st, v) => (st && st.ocupados && st.ocupados.get(chaveDe(v))) || [];
+  function textoOcupado(xs) {
+    return lista(xs).map(x => {
+      if (typeof x === 'string') return x;
+      if (x && x.texto) return String(x.texto);
+      // O dia só aparece quando é outro dia da O.S. (serviço de vários dias).
+      const onde = [x && x.periodo === 'Horário' && x.hora ? x.hora : x && x.periodo, x && x.outroDia && x.dia ? dataBR(x.dia).slice(0, 5) : ''].filter(Boolean).join(', ');
+      return `Ocupado na O.S. ${x && x.numero ? x.numero : 'sem número'}${onde ? ` (${onde})` : ''}`;
+    }).join('; ');
+  }
+  /* A EQUIPE QUE O COMPONENTE ENTREGA: quem está na divisão (pela ordem) e,
+     no modo só pessoas, o nome antigo sem ficha que ninguém tirou. */
+  const saidaEquipe = st => [...motor().derivarEquipe(st.aloc), ...lista(st.soNome)];
+  /* Quem escolhe o modo é a tela; esta é a regra das três telas da F10:
+     divisão só para admin e pcp, só em O.S. externa e só sem nome sem ficha
+     (o motor e o servidor só aceitam ID); o resto monta só as pessoas. */
+  function modoPara(papel, os) {
+    return ['admin', 'pcp'].includes(String(papel || '')) && !(os && os.tipo === 'interno') && !semIdDe(os).length ? 'divisao' : 'pessoas';
+  }
+  // Por que a gestão está no modo só pessoas (a tela mostra no lugar do aviso da operação).
+  function dicaModo(papel, os) {
+    if (!['admin', 'pcp'].includes(String(papel || '')) || (os && os.tipo === 'interno') || !semIdDe(os).length) return '';
+    return 'Esta O.S. tem nome sem ficha no RH: aqui vão só as pessoas. Para dividir (líder e percentuais), ligue o nome em Performance, Conferir nomes.';
+  }
+  /* A ESTRUTURA montada no modo só pessoas (quais equipes vieram inteiras):
+     a divisão da mesma ficha parte dela, e a equipe escolhida não se perde
+     quando alguém entra avulso. */
+  function estrutura(chave) {
+    const st = estados.get(chave);
+    return st ? st.aloc.grupos.map(g => ({equipeId: g.equipeId != null ? g.equipeId : null, pessoas: lista(g.membros).map(m => m.pessoaId)})) : null;
+  }
+  function daEstrutura(st, est, pessoasSug) {
+    const D = motor(), ids = lista(est).flatMap(g => lista(g && g.pessoas)).filter(ehId);
+    const alvo = new Set(lista(pessoasSug));
+    if (!ids.length || ids.length !== alvo.size || !ids.every(id => alvo.has(id)) || new Set(ids).size !== ids.length) return null;
+    /* A EQUIPE QUE NINGUÉM MEXEU MANTÉM O AJUSTE GRAVADO (revisão F10), como
+       na Agenda (reconstruir): a mesma equipe, com a mesma gente, da divisão
+       gravada (a válida, que a sugestão guarda em `anterior`) volta com os
+       percentuais internos, o líder e os cadeados dela. Só a equipe nova ou
+       mexida entra pelo padrão, e a parte entre as equipes é redistribuída
+       pela regra. Sem isto, trazer outra equipe na ficha e fechar trocava o
+       55/45 confirmado pelo padrão, calado. */
+    const gravados = lista(st.anterior && st.anterior.grupos).filter(objeto);
+    const mesmaGente = (xs, ys) => xs.length === ys.length && xs.every(id => ys.includes(id));
+    let manteve = false;
+    const grupos = lista(est).filter(g => g && lista(g.pessoas).length).map(g => {
+      const ps = lista(g.pessoas);
+      const eqId = g.equipeId != null ? String(g.equipeId) : null;
+      const velho = gravados.find(x => (x.equipeId != null ? String(x.equipeId) : null) === eqId && mesmaGente(lista(x.membros).map(m => m && m.pessoaId), ps));
+      if (velho) {
+        manteve = true;
+        const x = {equipeId: velho.equipeId != null ? velho.equipeId : null, liderId: velho.liderId, membros: lista(velho.membros).map(m => ({...m})), manter: true};
+        liderNaFrente(x);
+        return x;
+      }
+      const e = g.equipeId != null ? equipeDe(st, g.equipeId) : null;
+      const lider = e && ehId(e.liderPadraoId) && ps.includes(e.liderPadraoId) ? e.liderPadraoId : ps.length === 1 ? ps[0] : null;
+      const x = {equipeId: e ? String(e.id) : null, liderId: lider, membros: ps.map(id => ({pessoaId: id, freelancer: pessoa(id).freelancer}))};
+      liderNaFrente(x);
+      return x;
+    });
+    if (!manteve) return limpar(D.montar(grupos, st.regra));
+    const a = {grupos: grupos.map(g => { if (!g.manter) return D.padrao(g, st.regra); const {manter, ...resto} = g; return resto; }), manual: false};
+    const cotas = D.entreEquipes(a.grupos);
+    a.grupos.forEach((g, i) => { g.cota = cotas[i]; delete g.fixo; });
+    a.final = D.finais(a);
+    a.manual = difere(a, st.regra);
+    return limpar(a);
+  }
   /* Opções: {os, equipes, papel, valor, dia, versoes, participacao,
      reiniciar}. `participacao` = membros da participação antiga que ainda vale
      nesta O.S. (só o jeito antigo usa). Mantém o estado da mesma O.S.
      (repintura), a menos que peça reiniciar ou que a divisão gravada tenha
-     mudado de conteúdo. */
+     mudado de conteúdo.
+     F10: `modo` ('divisao' ou 'pessoas'); `semAntigo` (a tela não confirma
+     pelo jeito antigo: nome sem ficha só trava); `seguirEquipe` (a equipe da
+     O.S. mudou nesta mesma tela: recomeça por ela); `estrutura` (as equipes
+     que o modo só pessoas trouxe); `ocupados`; `dica` (texto da tela). */
   function iniciar(chave, o = {}) {
     const D = motor();
     const os = objeto(o.os) ? o.os : {};
     const gravada = objeto(os.alocacao) ? os.alocacao : null;
+    const modo = o.modo === 'pessoas' ? 'pessoas' : 'divisao';
     const ja = estados.get(chave);
-    if (ja && !o.reiniciar && ja.osId === os.id && nucleo(ja.gravada) === nucleo(gravada)) return ja;
+    const mesmaEquipe = st => !o.seguirEquipe || genteDe(os.equipe) === (st.modo === 'pessoas' ? genteDe(saidaEquipe(st)) : st.base.equipe);
+    if (ja && !o.reiniciar && ja.osId === os.id && ja.modo === modo && nucleo(ja.gravada) === nucleo(gravada) && mesmaEquipe(ja)) {
+      if (o.ocupados !== undefined) ja.ocupados = mapaOcupados(o.ocupados);
+      if (o.dica !== undefined) ja.dica = String(o.dica || '');
+      return ja;
+    }
     const equipes = lista(o.equipes).filter(objeto);
     const dia = /^\d{4}-\d{2}-\d{2}$/.test(String(o.dia || '')) ? o.dia : diaDe(os);
     const {programa, divisao} = regraDoDia(dia, o.versoes);
     const papel = String(o.papel || '');
-    const verValor = ['admin', 'pcp'].includes(papel);
+    // R$ só para admin e pcp, e nunca no modo só pessoas.
+    const verValor = ['admin', 'pcp'].includes(papel) && modo === 'divisao';
     const r = regua();
     const sug = D.alocacaoSugerida(os, {pessoas: r, equipes, regra: divisao});
     const semId = semIdDe(os);
     const st = {
-      chave, osId: os.id, numero: String(os.numero || ''),
+      chave, osId: os.id, numero: String(os.numero || ''), modo,
       gravada: gravada ? copia(gravada) : null, conferirRH: !!(gravada && gravada.conferirRH === true),
       // A equipe e a marca de quando a tela abriu: a trava contra a mudança feita em outro aparelho.
       base: {equipe: genteDe(os.equipe), desatualizada: !!(gravada && gravada.desatualizada === true)},
       origem: sug.origem || (gravada ? 'invalida' : ''), anterior: sug.anterior ? copia(sug.anterior) : null,
-      aviso: String(sug.aviso || ''), semId,
-      antigo: semId.length ? antigoDe(os, o.participacao, divisao) : null,
+      aviso: String(sug.aviso || ''), semId, soNome: [],
+      antigo: semId.length && modo === 'divisao' && !o.semAntigo ? antigoDe(os, o.participacao, divisao) : null,
       aloc: sug.alocacao ? limpar(sug.alocacao) : {grupos: [], final: [], manual: false},
       regra: divisao, programa, dia, equipes, papel, verValor,
       valor: verValor && Number.isFinite(Number(o.valor)) && o.valor !== null && o.valor !== '' ? Math.round(Number(o.valor) * 100) : null,
-      painel: null, erro: '', notas: [],
+      painel: null, erro: '', notas: [], tocado: false,
+      // As equipes que "Trazer equipe" trouxe nesta tela (a ficha grava o equipeId delas ao fechar).
+      trazidas: [],
+      ocupados: mapaOcupados(o.ocupados), dica: String(o.dica || ''),
     };
+    if (modo === 'pessoas') {
+      /* SÓ PESSOAS: todo mundo da O.S. aparece. Quem tem ID vai para os
+         grupos (a equipe da divisão gravada, a equipe cadastrada de mesma
+         composição, ou avulso); o nome sem ficha fica à parte, marcado. */
+      st.soNome = semId.slice();
+      if (!sug.alocacao) {
+        const ids = lista(sug.pessoas).filter(ehId);
+        st.aloc = ids.length ? limpar(D.montar([{equipeId: null, liderId: ids.length === 1 ? ids[0] : null, membros: ids.map(id => ({pessoaId: id, freelancer: pessoa(id).freelancer}))}], divisao)) : {grupos: [], final: [], manual: false};
+      }
+    } else if (!semId.length && sug.origem !== 'gravada' && o.estrutura) {
+      // A divisão da ficha parte das equipes que o campo Equipe trouxe.
+      const a = daEstrutura(st, o.estrutura, sug.pessoas);
+      if (a) st.aloc = a;
+    }
     estados.set(chave, st);
     return st;
+  }
+  function definirOcupados(chave, m) {
+    const st = estados.get(chave);
+    if (st) st.ocupados = mapaOcupados(m);
+    return !!st;
   }
   const estado = chave => estados.get(chave) || null;
   function esquecer(chave) { estados.delete(chave); hosts.delete(chave); }
@@ -339,7 +467,7 @@ const ALOCUI = (() => {
     const lider = ehId(e.liderPadraoId) && novos.some(m => m.pessoaId === e.liderPadraoId) ? e.liderPadraoId : (novos.length === 1 ? novos[0].pessoaId : null);
     const g = {equipeId: String(e.id), cota: 0, liderId: lider, membros: novos};
     liderNaFrente(g);
-    if (!lider) st.notas.push(`A equipe ${e.nome} não tem líder padrão: toque em Tornar líder em quem liderou.`);
+    if (!lider && st.modo !== 'pessoas') st.notas.push(`A equipe ${e.nome} não tem líder padrão: toque em Tornar líder em quem liderou.`);
     st.aloc.grupos.push(g); tocados.add(g);
     reconstruir(st, tocados);
     return '';
@@ -349,7 +477,7 @@ const ALOCUI = (() => {
     const p = pessoa(id);
     if (p.repetido) return `${p.nome}: ID repetido no RH (ficha e contrato). O RH precisa conferir o CPF.`;
     const ja = ondeEsta(st, id);
-    if (ja >= 0) return `${p.nome} já está na divisão (${nomeGrupo(st, st.aloc.grupos[ja])}).`;
+    if (ja >= 0) return `${p.nome} já está na ${st.modo === 'pessoas' ? 'equipe' : 'divisão'} (${nomeGrupo(st, st.aloc.grupos[ja])}).`;
     let g = Number.isInteger(grupo) ? st.aloc.grupos[grupo] : null;
     if (!g) {
       g = st.aloc.grupos.find(x => x.equipeId == null);
@@ -429,6 +557,32 @@ const ALOCUI = (() => {
     st.antigo.aloc = r.alocacao;
     return '';
   }
+  /* Nome da lista de instaladores sem ficha no RH (modo só pessoas): entra
+     como a Agenda sempre deixou, marcado "sem ficha". A divisão não aceita. */
+  function adicionarNome(st, nome) {
+    const t = String(nome == null ? '' : nome).trim();
+    if (st.modo !== 'pessoas') return 'Só entra na divisão quem tem ID do RH (6 dígitos).';
+    if (!t) return 'Escolha a pessoa na lista.';
+    if (lista(st.soNome).some(n => norm(n) === norm(t))) return `${t} já está na equipe.`;
+    // O nome que é de cadastro travado (ID repetido, contrato sem CPF) não entra pelo nome (revisão F10).
+    const trava = opcoesPessoas(st).find(o => !o.id && o.bloqueio && norm(o.nome) === norm(t));
+    if (trava) return `${t}: ${trava.bloqueio}`;
+    st.soNome.push(t);
+    st.notas = [];
+    st.painel = null;
+    return '';
+  }
+  // O nome antigo sem ficha só sai se alguém tirar (modo só pessoas).
+  function removerNome(st, nome) {
+    const k = norm(nome), i = lista(st.soNome).findIndex(n => norm(n) === k);
+    if (i < 0) return 'Esse nome não está na equipe.';
+    st.soNome.splice(i, 1);
+    st.notas = [];
+    return '';
+  }
+  // Ações que mudam a montagem (as outras só abrem e fecham a lista).
+  const MUDAM = new Set(['equipe', 'pessoa', 'nome', 'remover', 'remover-equipe', 'remover-nome', 'lider', 'trava', 'trava-equipe', 'pct', 'pct-equipe', 'restaurar', 'pct-antigo', 'trava-antigo', 'antigo-iguais']);
+  const SO_DIVISAO = new Set(['lider', 'trava', 'trava-equipe', 'pct', 'pct-equipe', 'restaurar', 'pct-antigo', 'trava-antigo', 'antigo-iguais']);
   /* UMA AÇÃO SOBRE O ESTADO, com o nome que a tela usa em data-aloc-acao.
      Só o estado muda; nada é enviado. Devolve '' ou o motivo da recusa (a
      divisão fica como estava). */
@@ -438,8 +592,10 @@ const ALOCUI = (() => {
     const g = ds.g === undefined || ds.g === null || ds.g === '' ? null : Number(ds.g);
     const p = ds.p == null ? '' : String(ds.p);
     let erro = '';
+    // No modo só pessoas não há líder, percentual nem cadeado: é a gestão que divide.
+    if (st.modo === 'pessoas' && SO_DIVISAO.has(ds.alocAcao)) { st.erro = 'Líder e percentuais ficam para a gestão (admin e PCP).'; return st.erro; }
     switch (ds.alocAcao) {
-      case 'equipe': erro = adicionarEquipe(st, ds.e); break;
+      case 'equipe': erro = adicionarEquipe(st, ds.e); if (!erro) st.trazidas = [...lista(st.trazidas), String(ds.e)]; break;
       case 'painel': st.painel = {grupo: Number.isInteger(g) ? g : null, busca: ''}; break;
       case 'fechar-painel': st.painel = null; break;
       case 'pessoa': erro = adicionarPessoa(st, st.painel ? st.painel.grupo : g, p); if (!erro) st.painel = null; break;
@@ -454,9 +610,12 @@ const ALOCUI = (() => {
       case 'pct-antigo': erro = antigoAcao(st, 'pct', p, ds.valor); break;
       case 'trava-antigo': erro = antigoAcao(st, 'trava', p); break;
       case 'antigo-iguais': erro = antigoAcao(st, 'iguais', p); break;
+      case 'nome': erro = adicionarNome(st, ds.nome); break;
+      case 'remover-nome': erro = st.modo === 'pessoas' ? removerNome(st, ds.nome) : 'Esta tela não tira nome sem ficha.'; break;
       default: erro = '';
     }
     st.erro = erro;
+    if (!erro && MUDAM.has(ds.alocAcao)) st.tocado = true;
     return erro;
   }
 
@@ -475,6 +634,8 @@ const ALOCUI = (() => {
   function bloqueio(chave) {
     const st = estados.get(chave);
     if (!st) return 'A divisão não está aberta.';
+    // Só pessoas grava só os.equipe: não há divisão para travar.
+    if (st.modo === 'pessoas') return '';
     if (st.antigo) return bloqueioAntigo(st);
     if (st.semId.length) return SEM_ID_NA_DIVISAO(st);
     /* ID REPETIDO (a trava da F07): o seletor e o botão de equipe já recusam;
@@ -516,7 +677,71 @@ const ALOCUI = (() => {
     });
     return {erro: '', membros};
   }
-  const mudou = chave => { const st = estados.get(chave); return !!st && (st.origem !== 'gravada' || st.conferirRH || nucleo(st.aloc) !== nucleo(st.gravada)); };
+  const mudou = chave => {
+    const st = estados.get(chave);
+    if (!st) return false;
+    if (st.modo === 'pessoas') return genteDe(saidaEquipe(st)) !== st.base.equipe;
+    return st.origem !== 'gravada' || st.conferirRH || nucleo(st.aloc) !== nucleo(st.gravada);
+  };
+  // A equipe pronta para os.equipe (o que o modo só pessoas grava).
+  const paraEquipe = chave => { const st = estados.get(chave); return {equipe: st ? saidaEquipe(st) : []}; };
+  const SO_GESTAO = 'Só a gestão (admin e PCP) grava a divisão. A equipe vai para a O.S. como sempre.';
+  /* A TRAVA CONTRA A MUDANÇA FEITA EM OUTRO APARELHO: a divisão gravada não
+     mudou de conteúdo desde que a tela abriu, nem a equipe da O.S. e a marca
+     `desatualizada` (quem outro aparelho pôs na O.S. sairia calado). */
+  function conflitoCom(st, os, depois) {
+    const atual = objeto(os.alocacao) ? os.alocacao : null;
+    if (nucleo(atual) !== nucleo(st.gravada))
+      return `A divisão desta O.S. foi mudada em outro aparelho${atual && atual.por ? ` (${atual.por})` : ''} enquanto você editava. Nada foi gravado. ${depois}`;
+    if (genteDe(os.equipe) !== st.base.equipe || !!(atual && atual.desatualizada === true) !== st.base.desatualizada)
+      return `A equipe desta O.S. foi mudada em outro aparelho${os.atualizadoPor ? ` (${os.atualizadoPor})` : ''} enquanto você editava. Nada foi gravado. ${depois}`;
+    return '';
+  }
+  /* SÓ AS PESSOAS NO MESMO ENVIO (F10: Agenda e Lançar entrega, modo só
+     pessoas). Só quando alguém mexeu; a equipe mudada em outro aparelho com
+     a tela aberta não é trocada por cima (quem entrou lá sairia calado).
+     `divisaoFica`: a O.S. tinha divisão e a equipe mudou (o servidor a marca
+     desatualizada; a tela avisa que ela fica para a gestão). */
+  function aplicarEquipeNaOS(chave, os) {
+    const st = estados.get(chave);
+    if (!st) return {ok: false, estado: 'erro', mensagem: 'A equipe não está aberta.'};
+    if (!objeto(os)) return {ok: false, estado: 'erro', mensagem: 'Esta O.S. não está mais neste aparelho.'};
+    if (!st.tocado) return {ok: true, estado: 'sem-mudanca', mensagem: ''};
+    if (genteDe(os.equipe) !== st.base.equipe)
+      return {ok: false, estado: 'conflito', mensagem: `A equipe desta O.S. foi mudada em outro aparelho${os.atualizadoPor ? ` (${os.atualizadoPor})` : ''} enquanto você editava. A equipe não foi trocada: abra de novo para partir de quem está na O.S. agora.`};
+    const nova = saidaEquipe(st);
+    const mudouGente = genteDe(nova) !== st.base.equipe;
+    os.equipe = nova;
+    st.base = {...st.base, equipe: genteDe(nova)};
+    return {ok: true, estado: mudouGente ? 'aplicada' : 'sem-mudanca', mensagem: '', divisaoFica: mudouGente && objeto(os.alocacao)};
+  }
+  /* A DIVISÃO NO MESMO ENVIO DA O.S. (F10: Agenda e Lançar entrega). Confere
+     como o gravarNaOS, põe a divisão e a equipe derivada no objeto `os` e NÃO
+     envia: quem chama grava a O.S. inteira uma vez só. `soSeTocou`: só quando
+     alguém mexeu no componente (a sugestão que ninguém conferiu não vira
+     divisão gravada). Divisão que não fecha devolve `equipe` (quem está nela)
+     para a tela gravar ao menos as pessoas, com o motivo. */
+  function aplicarNaOS(chave, os, o = {}) {
+    const st = estados.get(chave);
+    if (!st) return {ok: false, estado: 'erro', mensagem: 'A divisão não está aberta.'};
+    if (!objeto(os)) return {ok: false, estado: 'erro', mensagem: 'Esta O.S. não está mais neste aparelho.'};
+    if (o.soSeTocou && !st.tocado) return {ok: true, estado: 'sem-mudanca', mensagem: ''};
+    if (st.modo === 'pessoas' || !st.verValor) return {ok: false, estado: 'so-pessoas', mensagem: SO_GESTAO, equipe: saidaEquipe(st)};
+    if (!mudou(chave)) return {ok: true, estado: 'sem-mudanca', mensagem: ''};
+    // A trava vem antes: nem a divisão nem as pessoas vão por cima do que outro aparelho gravou.
+    const c = conflitoCom(st, os, 'Abra de novo para partir do que está gravado agora.');
+    if (c) return {ok: false, estado: 'conflito', mensagem: c};
+    const pronto = paraGravar(chave);
+    if (pronto.erro) return {ok: false, estado: 'invalida', mensagem: pronto.erro, equipe: saidaEquipe(st)};
+    const a = pronto.alocacao, atual = objeto(os.alocacao) ? os.alocacao : null;
+    // Editou a partir da divisão gravada: devolve o carimbo dela. Divisão nova vai sem.
+    if (atual && emDe(atual)) a.em = emDe(atual);
+    os.alocacao = a;
+    os.equipe = pronto.equipe;
+    st.gravada = copia(a); st.origem = 'gravada'; st.conferirRH = false;
+    st.base = {equipe: genteDe(pronto.equipe), desatualizada: false};
+    return {ok: true, estado: 'aplicada', mensagem: 'Divisão gravada na O.S.'};
+  }
 
   /* O RESULTADO DO ENVIO. O store avisa por eventos (os-gravada, conflito,
      recusa); um ouvinte por loja, e cada espera é pela O.S. */
@@ -554,6 +779,16 @@ const ALOCUI = (() => {
       S.on('item-recusado', d => recusa(d, false));
       S.on('item-pendente', d => recusa(d, true));
     }
+    /* GRAVOU COM UM ENVIO EM VOO (revisão F10). O trySync volta na hora
+       quando já há um envio em voo, e a versão nova (a com a divisão) ficava
+       na fila até o próximo ciclo, 30 s depois: a tela dizia "o servidor ainda
+       não respondeu" sem motivo. No próximo aviso de ciclo do store, a espera
+       manda de novo, uma vez só (sem martelar o servidor quando falta rede). */
+    if (typeof S.onSync === 'function') S.onSync(() => {
+      let deNovo = false;
+      for (const w of esperas.values()) if (w.reenviar) { w.reenviar = false; deNovo = true; }
+      if (deNovo && typeof S.trySync === 'function') setTimeout(() => { try { Promise.resolve(S.trySync()).catch(() => {}); } catch (e) { /* a fila guarda */ } }, 0);
+    });
     if (typeof S.onConflict === 'function') S.onConflict((local, remoto) => {
       const id = (remoto && remoto.id) || (local && local.id);
       const quem = remoto && remoto.atualizadoPor ? ` (${remoto.atualizadoPor})` : '';
@@ -573,10 +808,13 @@ const ALOCUI = (() => {
   async function gravarNaOS(chave, o = {}) {
     const st = estados.get(chave);
     if (!st) return {ok: false, estado: 'erro', mensagem: 'A divisão não está aberta. Abra o Conferir de novo.'};
+    if (st.modo === 'pessoas' || !st.verValor) return {ok: false, estado: 'invalida', mensagem: SO_GESTAO};
     const pronto = paraGravar(chave);
     if (pronto.erro) return {ok: false, estado: 'invalida', mensagem: pronto.erro};
     const S = o.store || loja();
-    const os = S && typeof S.getOS === 'function' ? S.getOS(st.osId) : null;
+    /* `alvo` (F10): a ficha da O.S. grava no próprio rascunho aberto, e
+       `salvar` é a gravação da ficha (o rascunho vai inteiro, uma vez). */
+    const os = typeof o.alvo === 'function' ? o.alvo() : S && typeof S.getOS === 'function' ? S.getOS(st.osId) : null;
     if (!os) return {ok: false, estado: 'erro', mensagem: 'Esta O.S. não está mais neste aparelho. Atualize a lista e abra o Conferir de novo.'};
     const atual = objeto(os.alocacao) ? os.alocacao : null;
     if (nucleo(atual) !== nucleo(st.gravada))
@@ -605,7 +843,8 @@ const ALOCUI = (() => {
     let fim;
     const resultado = new Promise(res => { fim = res; });
     let feito = false, timer = null;
-    const w = {nucleo: nucleo(alocacao), fim: r => { if (feito) return; feito = true; if (timer) clearTimeout(timer); if (esperas.get(st.osId) === w) esperas.delete(st.osId); fim(r); }};
+    // `reenviar`: o próximo aviso de ciclo do store manda de novo, uma vez (ver ouvir).
+    const w = {nucleo: nucleo(alocacao), reenviar: true, fim: r => { if (feito) return; feito = true; if (timer) clearTimeout(timer); if (esperas.get(st.osId) === w) esperas.delete(st.osId); fim(r); }};
     esperas.set(st.osId, w);
     timer = setTimeout(() => w.fim({ok: true, estado: 'pendente', mensagem: 'O servidor ainda não respondeu. ' + PENDENTE}), Number.isFinite(o.prazoMs) ? o.prazoMs : 20000);
     const agora = new Date().toISOString();
@@ -613,7 +852,7 @@ const ALOCUI = (() => {
     os.equipe = pronto.equipe;
     os.atualizadoEm = agora;
     os.atualizadoPor = String(o.usuario || '');
-    S.saveOS(os);
+    if (typeof o.salvar === 'function') o.salvar(os); else S.saveOS(os);
     if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) w.fim({ok: true, estado: 'pendente', mensagem: 'Sem internet agora. ' + PENDENTE});
     else if (typeof S.trySync === 'function') {
       try { await S.trySync(); } catch (e) { /* a fila guarda; o resultado vem pelos eventos ou pelo prazo */ }
@@ -637,29 +876,38 @@ const ALOCUI = (() => {
   const papelBadge = (m, g) => m.papel === 'lider' ? '<span class="aloc-badge lider">★ Líder</span>'
     : m.papel === 'ajudante' ? '<span class="aloc-badge">Ajudante</span>'
     : lista(g.membros).length > 1 ? '<span class="aloc-badge alerta">sem líder</span>' : '';
+  // O selo de quem já está em outra O.S. no mesmo horário (ou fora pelo RH).
+  const seloOcupado = xs => xs.length ? `<span class="aloc-badge ocupado" title="${escA(textoOcupado(xs))}">⚠ ${escA(textoOcupado(xs))}</span>` : '';
   function chipHTML(st, g, gi, m) {
     const p = pessoa(m.pessoaId), n = lista(g.membros).length, lider = m.papel === 'lider';
     const k = `${gi}:${m.pessoaId}`;
     const fixo = m.fixo === true;
+    const oc = ocupadoDe(st, m.pessoaId);
+    const selos = `${p.freelancer || m.freelancer ? '<span class="tag-freelancer">Freelancer</span>' : ''}${p.semFicha ? '<span class="aloc-badge alerta">sem ficha neste aparelho</span>' : ''}${p.repetido ? '<span class="aloc-badge alerta">ID repetido no RH</span>' : ''}${seloOcupado(oc)}`;
+    const quem = `<span class="aloc-quem">${avatar(p)}<span class="aloc-nome"><b title="${escA(p.completo ? p.completo + ' · ID ' + m.pessoaId : 'ID ' + m.pessoaId)}">${escA(p.nome)}</b><span class="aloc-badges">${st.modo === 'pessoas' ? '' : papelBadge(m, g)}${selos}</span></span></span>`;
+    // SÓ PESSOAS: sem papel, percentual nem cadeado; só tirar.
+    if (st.modo === 'pessoas') return `<li class="aloc-chip aloc-chip-pessoa${oc.length ? ' ocupado' : ''}">${quem}
+      <button type="button" class="aloc-x" data-aloc-acao="remover" data-g="${gi}" data-p="${escA(m.pessoaId)}" data-aloc-k="rm:${escA(k)}" aria-label="Tirar ${escA(p.nome)} da equipe">×</button>
+    </li>`;
     const pct = n === 1
       ? '<span class="aloc-pct-fixa">100%</span>'
       : `<label class="aloc-pct"><span class="perf-sr">Percentual de ${escA(p.nome)} na equipe</span><input type="text" inputmode="decimal" autocomplete="off" data-aloc-pct data-g="${gi}" data-p="${escA(m.pessoaId)}" data-aloc-k="pct:${escA(k)}" value="${escA(pctTexto(m.cota))}" ${fixo ? 'readonly aria-readonly="true"' : ''}><span aria-hidden="true">%</span></label>
          <button type="button" class="aloc-trava" data-aloc-acao="trava" data-g="${gi}" data-p="${escA(m.pessoaId)}" data-aloc-k="trava:${escA(k)}" aria-pressed="${fixo}" aria-label="${fixo ? 'Destravar' : 'Travar'} o percentual de ${escA(p.nome)}" title="${fixo ? 'Travado: a redistribuição não mexe aqui' : 'Travar este percentual'}">${fixo ? '🔒' : '🔓'}</button>`;
-    return `<li class="aloc-chip${lider ? ' lider' : ''}">
-      <span class="aloc-quem">${avatar(p)}<span class="aloc-nome"><b title="${escA(p.completo ? p.completo + ' · ID ' + m.pessoaId : 'ID ' + m.pessoaId)}">${escA(p.nome)}</b><span class="aloc-badges">${papelBadge(m, g)}${p.freelancer || m.freelancer ? '<span class="tag-freelancer">Freelancer</span>' : ''}${p.semFicha ? '<span class="aloc-badge alerta">sem ficha neste aparelho</span>' : ''}${p.repetido ? '<span class="aloc-badge alerta">ID repetido no RH</span>' : ''}</span></span></span>
+    return `<li class="aloc-chip${lider ? ' lider' : ''}${oc.length ? ' ocupado' : ''}">
+      ${quem}
       <span class="aloc-ctrl">${!lider && n > 1 ? `<button type="button" class="aloc-lider" data-aloc-acao="lider" data-g="${gi}" data-p="${escA(m.pessoaId)}" data-aloc-k="lider:${escA(k)}" aria-label="Tornar ${escA(p.nome)} líder">★ Tornar líder</button>` : ''}${pct}</span>
       <button type="button" class="aloc-x" data-aloc-acao="remover" data-g="${gi}" data-p="${escA(m.pessoaId)}" data-aloc-k="rm:${escA(k)}" aria-label="Tirar ${escA(p.nome)} da divisão">×</button>
     </li>`;
   }
   function grupoHTML(st, g, gi) {
     const e = g.equipeId != null ? equipeDe(st, g.equipeId) : null;
-    const nome = nomeGrupo(st, g), varios = st.aloc.grupos.length > 1, fixo = g.fixo === true;
+    const nome = nomeGrupo(st, g), varios = st.aloc.grupos.length > 1 && st.modo !== 'pessoas', fixo = g.fixo === true;
     const cota = varios ? `<span class="aloc-cota-eq"><label class="aloc-pct"><span class="aloc-rot-cota">Parte da equipe</span><input type="text" inputmode="decimal" autocomplete="off" data-aloc-pct-equipe data-g="${gi}" data-aloc-k="pcteq:${gi}" value="${escA(pctTexto(g.cota))}" aria-label="Parte da equipe ${escA(nome)} na O.S." ${fixo ? 'readonly aria-readonly="true"' : ''}><span aria-hidden="true">%</span></label>
         <button type="button" class="aloc-trava" data-aloc-acao="trava-equipe" data-g="${gi}" data-aloc-k="travaeq:${gi}" aria-pressed="${fixo}" aria-label="${fixo ? 'Destravar' : 'Travar'} a parte da equipe ${escA(nome)}">${fixo ? '🔒' : '🔓'}</button></span>` : '';
     return `<section class="aloc-grupo${corClasse(e)}" aria-label="${escA(nome)}">
       <header class="aloc-grupo-cab">${e ? logoDe(e) : '<span class="aloc-logo" aria-hidden="true">🤝</span>'}<h4>${escA(nome)}${e && e.ativo === false ? ' <small>(desativada)</small>' : ''}</h4>${cota}
-        <button type="button" class="aloc-x" data-aloc-acao="remover-equipe" data-g="${gi}" data-aloc-k="rmeq:${gi}" aria-label="Tirar ${escA(nome)} da divisão">×</button></header>
-      ${g.semLider ? '<p class="aloc-dica">Sem líder: toque em Tornar líder em quem liderou. Até lá fica em partes iguais e não grava.</p>' : ''}
+        <button type="button" class="aloc-x" data-aloc-acao="remover-equipe" data-g="${gi}" data-aloc-k="rmeq:${gi}" aria-label="Tirar ${escA(nome)} da ${st.modo === 'pessoas' ? 'equipe' : 'divisão'}">×</button></header>
+      ${g.semLider && st.modo !== 'pessoas' ? '<p class="aloc-dica">Sem líder: toque em Tornar líder em quem liderou. Até lá fica em partes iguais e não grava.</p>' : ''}
       <ul class="aloc-chips">${lista(g.membros).map(m => chipHTML(st, g, gi, m)).join('')}</ul>
       <button type="button" class="aloc-mais" data-aloc-acao="painel" data-g="${gi}" data-aloc-k="painel:${gi}">＋ Pessoa ${e ? 'na ' + escA(nome) : 'avulsa'}</button>
     </section>`;
@@ -669,8 +917,11 @@ const ALOCUI = (() => {
     if (!xs.length) return '<p class="aloc-dica">Nenhuma equipe ativa cadastrada. Cadastre em Performance, na vista Equipes.</p>';
     return `<div class="aloc-rapidas" role="group" aria-label="Trazer uma equipe inteira"><span class="aloc-rotulo">Trazer equipe</span><div class="aloc-rapidas-lista">${xs.map(e => {
       const na = st.aloc.grupos.some(g => g.equipeId === e.id);
-      const n = integrantes(e).ids.length;
-      return `<button type="button" class="aloc-eq${corClasse(e)}" data-aloc-acao="equipe" data-e="${escA(e.id)}" data-aloc-k="eq:${escA(e.id)}" aria-pressed="${na}" ${na ? 'disabled' : ''} title="${escA(integrantes(e).ids.map(id => pessoa(id).nome).join(', ') || 'Sem integrantes com ID')}">${logoDe(e)}<span class="aloc-eq-txt"><b>${escA(e.nome || e.id)}</b><small>${na ? 'na divisão' : `${n} ${n === 1 ? 'pessoa' : 'pessoas'}`}</small></span></button>`;
+      const ids = integrantes(e).ids, n = ids.length;
+      // Quem da equipe já está em outra O.S. no mesmo horário aparece antes de trazer.
+      const oc = ids.filter(id => ocupadoDe(st, id).length);
+      const dica = ids.map(id => pessoa(id).nome + (ocupadoDe(st, id).length ? ' (' + textoOcupado(ocupadoDe(st, id)) + ')' : '')).join(', ') || 'Sem integrantes com ID';
+      return `<button type="button" class="aloc-eq${corClasse(e)}${oc.length && !na ? ' ocupada' : ''}" data-aloc-acao="equipe" data-e="${escA(e.id)}" data-aloc-k="eq:${escA(e.id)}" aria-pressed="${na}" ${na ? 'disabled' : ''} title="${escA(dica)}">${logoDe(e)}<span class="aloc-eq-txt"><b>${escA(e.nome || e.id)}</b><small>${na ? (st.modo === 'pessoas' ? 'na equipe' : 'na divisão') : `${n} ${n === 1 ? 'pessoa' : 'pessoas'}${oc.length ? ` · ⚠ ${oc.length} ${oc.length === 1 ? 'ocupada' : 'ocupadas'}` : ''}`}</small></span></button>`;
     }).join('')}</div></div>`;
   }
   function barraHTML(st) {
@@ -693,6 +944,8 @@ const ALOCUI = (() => {
   function opcoesPessoas(st) {
     const f = fn('opcoesEquipe'), S = loja();
     const naDivisao = new Set(motor().derivarEquipe(st.aloc));
+    const soPessoas = st.modo === 'pessoas';
+    const nomes = new Set(lista(st.soNome).map(norm));
     let ops = [];
     if (f) { try { ops = lista(f([...naDivisao])); } catch (e) { ops = []; } }
     if (!ops.length && S && typeof S.elenco === 'function') {
@@ -700,29 +953,75 @@ const ALOCUI = (() => {
     }
     return ops.map(o => {
       const id = ehId(o.valor) ? String(o.valor) : '';
-      const bloqueio = o.bloqueio ? String(o.bloqueio) : !id ? 'Sem ID no RH: não entra na divisão.' : naDivisao.has(id) ? 'Já está na divisão.' : '';
-      return {id, nome: String(o.nome || ''), completo: String(o.completo || ''), apelido: String(o.apelido || ''), grupo: String(o.grupo || ''), freelancer: !!o.freelancer, bloqueio};
+      /* Nome da lista de instaladores sem ficha no RH: na divisão não entra
+         (só ID); no modo só pessoas entra como hoje, marcado "sem ficha". */
+      const soNome = !id && !o.bloqueio && soPessoas ? String(o.valor || o.nome || '').trim() : '';
+      const bloqueio = o.bloqueio ? String(o.bloqueio)
+        : !id && !soNome ? 'Sem ID no RH: não entra na divisão.'
+        : id && naDivisao.has(id) ? (soPessoas ? 'Já está na equipe.' : 'Já está na divisão.')
+        : soNome && nomes.has(norm(soNome)) ? 'Já está na equipe.' : '';
+      return {id, soNome, nome: String(o.nome || ''), completo: String(o.completo || ''), apelido: String(o.apelido || ''), grupo: String(o.grupo || ''), freelancer: !!o.freelancer, bloqueio};
     });
+  }
+  // A mesma régua da busca para pessoa e equipe (OPERACAO.buscaTolerante); sem ela, o texto contido.
+  function classificar(q, id, textos) {
+    const O = oper();
+    if (O && typeof O.buscaTolerante === 'function') return O.buscaTolerante(q, {id, textos});
+    const t = norm(q);
+    return {tipo: !t || norm(textos.join(' ')).includes(t) ? 'direto' : '', dist: 0};
+  }
+  function opcaoHTML(st, o, sugestao) {
+    const oc = o.id ? ocupadoDe(st, o.id) : o.soNome ? ocupadoDe(st, o.soNome) : [];
+    const sub = o.bloqueio ? '⚠️ ' + (o.id ? `ID ${o.id} · ` : '') + o.bloqueio
+      : o.soNome ? '⚠️ sem ficha no RH: entra pelo nome'
+      : (o.completo ? `${o.completo} · ID ${o.id}` : `ID ${o.id}`);
+    const acao = o.soNome && !o.id ? `data-aloc-acao="nome" data-nome="${escA(o.soNome)}"` : `data-aloc-acao="pessoa" data-p="${escA(o.id)}"`;
+    return `<button type="button" class="aloc-opcao${o.bloqueio ? ' bloqueado' : ''}${sugestao ? ' sugestao' : ''}${oc.length ? ' ocupado' : ''}" ${acao} data-aloc-opcao data-aloc-k="${sugestao ? 'sug' : 'op'}:${escA(o.id || o.soNome || o.nome)}" ${o.bloqueio ? 'disabled' : ''}>${avatar({nome: o.nome, completo: o.completo, foto: o.id ? pessoa(o.id).foto : ''})}<span class="aloc-opcao-txt">${escA(o.nome)}${o.freelancer ? ' <span class="tag-freelancer">Freelancer</span>' : ''}<small>${escA(sub)}</small>${oc.length ? `<small class="aloc-opcao-ocupado">⚠ ${escA(textoOcupado(oc))}</small>` : ''}</span></button>`;
+  }
+  function equipeOpcaoHTML(st, e, sugestao) {
+    const na = st.aloc.grupos.some(g => g.equipeId === e.id);
+    const n = integrantes(e).ids.length;
+    return `<button type="button" class="aloc-opcao aloc-opcao-equipe${sugestao ? ' sugestao' : ''}${corClasse(e)}" data-aloc-acao="equipe" data-e="${escA(e.id)}" data-aloc-opcao data-aloc-k="${sugestao ? 'sugeq' : 'opeq'}:${escA(e.id)}" ${na ? 'disabled' : ''}>${logoDe(e)}<span class="aloc-opcao-txt">Equipe ${escA(e.nome || e.id)}<small>${na ? 'já está aqui' : `traz ${n} ${n === 1 ? 'pessoa' : 'pessoas'} de uma vez`}</small></span></button>`;
+  }
+  /* O RESULTADO DA BUSCA: o ID exato vence (só ele aparece); o texto contido
+     aparece como sempre; o parecido (erro de digitação) vem à parte, em
+     "Você quis dizer", e nunca entra sozinho. Com busca, as equipes que casam
+     também aparecem (a mesma régua). */
+  function resultadosHTML(st) {
+    const q = String((st.painel && st.painel.busca) || '');
+    const comBusca = !!norm(q);
+    const achadas = [], parecidas = [];
+    for (const o of opcoesPessoas(st)) {
+      const c = comBusca ? classificar(q, o.id, [o.nome, o.completo, o.apelido]) : {tipo: 'direto', dist: 0};
+      if (c.tipo === 'id' || c.tipo === 'direto') achadas.push({o, c}); else if (c.tipo === 'sugestao') parecidas.push({o, c});
+    }
+    const porId = achadas.filter(x => x.c.tipo === 'id');
+    const mostrar = porId.length ? porId : achadas;
+    const eqAchadas = [], eqParecidas = [];
+    if (comBusca && !porId.length) for (const e of ativas(st)) {
+      const c = classificar(q, '', [e.nome, e.animal]);
+      if (c.tipo === 'direto') eqAchadas.push(e); else if (c.tipo === 'sugestao') eqParecidas.push({e, c});
+    }
+    let grupo = '';
+    const linhas = mostrar.map(({o}) => { const cab = o.grupo !== grupo ? `<div class="aloc-opcoes-grupo">${escA(o.grupo)}</div>` : ''; grupo = o.grupo; return cab + opcaoHTML(st, o, false); }).join('');
+    const eqs = eqAchadas.length ? `<div class="aloc-opcoes-grupo">Equipes</div>${eqAchadas.map(e => equipeOpcaoHTML(st, e, false)).join('')}` : '';
+    const sugs = [...eqParecidas.map(x => ({dist: x.c.dist, html: equipeOpcaoHTML(st, x.e, true)})), ...(porId.length ? [] : parecidas.map(x => ({dist: x.c.dist, html: opcaoHTML(st, x.o, true)})))]
+      .sort((a, b) => a.dist - b.dist).slice(0, 5);
+    const sugHTML = sugs.length ? `<div class="aloc-sugestoes" role="group" aria-label="Você quis dizer"><div class="aloc-opcoes-grupo">Você quis dizer</div>${sugs.map(x => x.html).join('')}</div>` : '';
+    const nada = !linhas && !eqs && !sugHTML;
+    return `${eqs}${linhas}${sugHTML}${nada ? `<p class="aloc-dica">${comBusca ? (/^[\d.\-\/\s]+$/.test(q.trim()) ? 'Nenhuma pessoa com esse ID. Digite os 6 dígitos do ID inteiro (o CPF não é usado aqui).' : 'Ninguém com esse nome. Confira a grafia, ou cadastre no RH e toque em Atualizar elenco.') : 'Sem pessoas do RH neste aparelho ainda. Toque em Atualizar elenco.'}</p>` : ''}`;
   }
   function painelHTML(st) {
     if (!st.painel) return '';
     const g = Number.isInteger(st.painel.grupo) ? st.aloc.grupos[st.painel.grupo] : null;
-    const busca = norm(st.painel.busca);
-    let grupo = '';
-    const linhas = opcoesPessoas(st).map(o => {
-      const cab = o.grupo !== grupo ? `<div class="aloc-opcoes-grupo">${escA(o.grupo)}</div>` : '';
-      grupo = o.grupo;
-      const chave = norm([o.nome, o.completo, o.apelido, o.id].join(' '));
-      const sub = o.bloqueio ? '⚠️ ' + (o.id ? `ID ${o.id} · ` : '') + o.bloqueio : (o.completo ? `${o.completo} · ID ${o.id}` : `ID ${o.id}`);
-      return `${cab}<button type="button" class="aloc-opcao${o.bloqueio ? ' bloqueado' : ''}" data-aloc-acao="pessoa" data-p="${escA(o.id)}" data-aloc-opcao data-busca="${escA(chave)}" data-aloc-k="op:${escA(o.id || o.nome)}" ${o.bloqueio ? 'disabled' : ''} ${busca && !chave.includes(busca) ? 'hidden' : ''}>${avatar({nome: o.nome, completo: o.completo, foto: o.id ? pessoa(o.id).foto : ''})}<span class="aloc-opcao-txt">${escA(o.nome)}${o.freelancer ? ' <span class="tag-freelancer">Freelancer</span>' : ''}<small>${escA(sub)}</small></span></button>`;
-    }).join('');
     // Constante do app.js (const no escopo global, fora do window): lida pelo nome.
     const rh = typeof RH_CONTRATOS_FREELANCER !== 'undefined' ? RH_CONTRATOS_FREELANCER : '';
+    const S = loja();
     return `<div class="aloc-painel" role="group" aria-label="Adicionar pessoa">
       <div class="aloc-painel-cab"><strong>Adicionar pessoa ${g ? 'na ' + escA(nomeGrupo(st, g)) : 'avulsa'}</strong><button type="button" class="aloc-x" data-aloc-acao="fechar-painel" data-aloc-k="fechar-painel" aria-label="Fechar a lista de pessoas">×</button></div>
-      <input type="search" class="aloc-busca" data-aloc-busca data-aloc-k="busca" value="${escA(st.painel.busca)}" placeholder="Buscar por nome, apelido ou ID" autocomplete="off" aria-label="Buscar pessoa">
-      <div class="aloc-opcoes">${linhas || '<p class="aloc-dica">Sem pessoas do RH neste aparelho ainda.</p>'}</div>
-      <p class="aloc-dica">Freelancer entra pelo contrato no RH, com CPF.${typeof rh === 'string' && rh ? ` <a href="${escA(rh)}" target="_blank" rel="noopener">Cadastrar novo no RH ↗</a>` : ''}</p>
+      <input type="search" class="aloc-busca" data-aloc-busca data-aloc-k="busca" value="${escA(st.painel.busca)}" placeholder="Buscar por nome, apelido, ID ou equipe" autocomplete="off" aria-label="Buscar pessoa ou equipe">
+      <div class="aloc-opcoes aloc-resultados" aria-live="polite">${resultadosHTML(st)}</div>
+      <div class="aloc-painel-pe"><p class="aloc-dica">Freelancer entra pelo contrato no RH, com CPF.${typeof rh === 'string' && rh ? ` <a href="${escA(rh)}" target="_blank" rel="noopener">Cadastrar novo no RH ↗</a>` : ''}</p>${S && typeof S.pullElenco === 'function' ? '<button type="button" class="btn-ghost btn-sm aloc-atualizar" data-aloc-acao="atualizar-elenco" data-aloc-k="atualizar-elenco">Atualizar elenco</button>' : ''}</div>
     </div>`;
   }
   const botoesIr = '<div class="aloc-aviso-acoes"><button type="button" class="btn-ghost btn-sm" data-aloc-acao="ir-rh" data-aloc-k="ir-rh">Conferir nomes</button><button type="button" class="btn-ghost btn-sm" data-aloc-acao="ir-ficha" data-aloc-k="ir-ficha">Abrir a ficha da O.S.</button></div>';
@@ -787,12 +1086,37 @@ const ALOCUI = (() => {
       <ul class="aloc-chips">${linhas}</ul></section>
       <div class="aloc-rodape"><span class="aloc-soma${total === TOTAL ? ' ok' : ''}">Total ${escA(pctTexto(total))}%</span>${n > 1 ? '<button type="button" class="btn-ghost btn-sm" data-aloc-acao="antigo-iguais" data-aloc-k="antigo-iguais">Dividir igualmente</button>' : ''}</div>`;
   }
+  /* O MODO SÓ PESSOAS NA TELA (F10): quem vai, agrupado pela equipe que
+     veio inteira, sem papel, percentual nem R$. O nome sem ficha no RH fica
+     num grupo à parte e só sai se alguém tirar. */
+  function pessoasHTML(st, chave) {
+    const vazio = !st.aloc.grupos.length && !st.soNome.length;
+    const aviso = !['admin', 'pcp'].includes(st.papel)
+      ? '<p class="aloc-aviso neutro">Aqui você escolhe quem vai. A divisão (líder e percentuais) fica para a gestão, admin e PCP.</p>'
+      : st.dica ? `<p class="aloc-dica">${escA(st.dica)}</p>` : '';
+    const nomes = st.soNome.length ? `<section class="aloc-grupo aloc-so-nome" aria-label="Só pelo nome, sem ficha no RH"><header class="aloc-grupo-cab"><span class="aloc-logo" aria-hidden="true">✍️</span><h4>Só pelo nome <small>(sem ficha no RH)</small></h4></header>
+      <ul class="aloc-chips">${st.soNome.map(n => { const oc = ocupadoDe(st, n); return `<li class="aloc-chip aloc-chip-pessoa${oc.length ? ' ocupado' : ''}"><span class="aloc-quem">${avatar({nome: n})}<span class="aloc-nome"><b>${escA(n)}</b><span class="aloc-badges"><span class="aloc-badge alerta">sem ficha no RH</span>${seloOcupado(oc)}</span></span></span><button type="button" class="aloc-x" data-aloc-acao="remover-nome" data-nome="${escA(n)}" data-aloc-k="rmnome:${escA(n)}" aria-label="Tirar ${escA(n)} da equipe">×</button></li>`; }).join('')}</ul></section>` : '';
+    return `<div class="aloc aloc-modo-pessoas" data-aloc="${escA(chave)}">
+      ${aviso}
+      ${rapidasHTML(st)}
+      <div class="aloc-grupos">${st.aloc.grupos.map((g, gi) => grupoHTML(st, g, gi)).join('')}${nomes}</div>
+      ${vazio ? '<p class="aloc-vazio">Ninguém na equipe ainda. Traga uma equipe ou adicione pessoas.</p>' : ''}
+      ${vazio || st.aloc.grupos.every(g => g.equipeId != null) ? '<button type="button" class="aloc-mais" data-aloc-acao="painel" data-aloc-k="painel:avulsa">＋ Pessoa avulsa</button>' : ''}
+      ${painelHTML(st)}
+      ${st.notas.length ? `<ul class="aloc-notas">${st.notas.map(n => `<li>${escA(n)}</li>`).join('')}</ul>` : ''}
+      <p class="aloc-erro" role="alert">${escA(st.erro)}</p>
+    </div>`;
+  }
   function html(chave) {
     const st = estados.get(chave);
     if (!st) return '';
+    if (st.modo === 'pessoas') return pessoasHTML(st, chave);
     if (st.antigo) return `<div class="aloc aloc-modo-antigo" data-aloc="${escA(chave)}">${avisosHTML(st)}${antigoHTML(st)}<p class="aloc-erro" role="alert">${escA(st.erro)}</p></div>`;
+    // Tela que não confirma pelo jeito antigo: o nome sem ficha só trava, e diz como destravar.
+    if (st.semId.length) return `<div class="aloc aloc-sem-id" data-aloc="${escA(chave)}"><div class="aloc-aviso aloc-trava-aviso" role="note"><p><strong>A divisão precisa do cadastro de todos.</strong> ${escA(SEM_ID_NA_DIVISAO(st))}</p></div></div>`;
     const vazio = !st.aloc.grupos.length;
     return `<div class="aloc" data-aloc="${escA(chave)}">
+      ${st.dica ? `<p class="aloc-dica">${escA(st.dica)}</p>` : ''}
       ${avisosHTML(st)}
       ${rapidasHTML(st)}
       ${barraHTML(st)}
@@ -821,43 +1145,74 @@ const ALOCUI = (() => {
     }
     if (typeof h.aoMudar === 'function') h.aoMudar(estados.get(chave));
   }
+  /* "Atualizar elenco" (a mesma porta do seletor da F07): relê o RH sem o
+     cache do servidor. Sem internet, diz que não atualizou em vez de fingir
+     que a pessoa não existe. */
+  async function atualizarElenco(chave) {
+    const st = estados.get(chave), S = loja(), O = oper();
+    if (!st || !S || typeof S.pullElenco !== 'function') return;
+    if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) { st.erro = 'Sem internet: o elenco não foi atualizado. A pessoa nova aparece quando a conexão voltar.'; repintar(chave); return; }
+    st.erro = ''; st.notas = ['Atualizando o elenco do RH…']; repintar(chave);
+    let ok = false;
+    try { ok = await S.pullElenco(true, {semCache: true}); } catch (e) { ok = false; }
+    if (O && typeof O.esquecerPessoas === 'function') O.esquecerPessoas();
+    const agora = estados.get(chave);
+    if (!agora) return;
+    agora.notas = [];
+    agora.erro = ok ? '' : 'Não foi possível atualizar o elenco agora. Tente de novo.';
+    if (ok) agora.notas = ['Elenco atualizado.'];
+    repintar(chave);
+  }
+  /* Opções: {aoMudar(st)} a cada pintura; {aoAlterar(st)} só quando uma ação
+     mudou a montagem (a ficha grava a equipe por ele); {aoIr(destino)}. */
   function montar(root, chave, o = {}) {
     if (!root) return;
-    hosts.set(chave, {root, aoMudar: o.aoMudar, aoIr: o.aoIr});
+    hosts.set(chave, {root, aoMudar: o.aoMudar, aoIr: o.aoIr, aoAlterar: o.aoAlterar});
+    const alterou = (ds, erro) => { const h = hosts.get(chave); if (!erro && MUDAM.has(ds.alocAcao) && h && typeof h.aoAlterar === 'function') h.aoAlterar(estados.get(chave)); };
     root.onclick = ev => {
       const b = ev && ev.target && typeof ev.target.closest === 'function' ? ev.target.closest('[data-aloc-acao]') : null;
       if (!b || b.disabled) return;
       const ds = b.dataset || {};
       if (ds.alocAcao === 'ir-rh' || ds.alocAcao === 'ir-ficha') { const h = hosts.get(chave); if (h && typeof h.aoIr === 'function') h.aoIr(ds.alocAcao === 'ir-rh' ? 'rh' : 'ficha'); return; }
-      executar(chave, ds);
+      if (ds.alocAcao === 'atualizar-elenco') { void atualizarElenco(chave); return; }
+      const erro = executar(chave, ds);
       repintar(chave);
+      alterou(ds, erro);
     };
     root.onchange = ev => {
       const t = ev && ev.target, ds = t && t.dataset;
       if (!ds) return;
-      if (ds.alocPct !== undefined) executar(chave, {alocAcao: 'pct', g: ds.g, p: ds.p, valor: t.value});
-      else if (ds.alocPctEquipe !== undefined) executar(chave, {alocAcao: 'pct-equipe', g: ds.g, valor: t.value});
-      else if (ds.alocPctAntigo !== undefined) executar(chave, {alocAcao: 'pct-antigo', p: ds.p, valor: t.value});
+      let acao;
+      if (ds.alocPct !== undefined) acao = {alocAcao: 'pct', g: ds.g, p: ds.p, valor: t.value};
+      else if (ds.alocPctEquipe !== undefined) acao = {alocAcao: 'pct-equipe', g: ds.g, valor: t.value};
+      else if (ds.alocPctAntigo !== undefined) acao = {alocAcao: 'pct-antigo', p: ds.p, valor: t.value};
       else return;
+      const erro = executar(chave, acao);
       repintar(chave);
+      alterou(acao, erro);
     };
-    // A busca filtra sem repintar (o cursor fica no campo).
+    /* A busca repinta SÓ o resultado (o campo e o cursor ficam): o achado, e
+       o parecido à parte, em "Você quis dizer". */
     root.oninput = ev => {
       const t = ev && ev.target;
       if (!t || !t.dataset || t.dataset.alocBusca === undefined) return;
       const st = estados.get(chave);
-      if (st && st.painel) st.painel.busca = String(t.value || '');
-      const q = norm(t.value);
-      if (root.querySelectorAll) root.querySelectorAll('[data-aloc-opcao]').forEach(b => { b.hidden = !!q && !String(b.getAttribute('data-busca') || '').includes(q); });
+      if (!st || !st.painel) return;
+      st.painel.busca = String(t.value || '');
+      const caixa = root.querySelector ? root.querySelector('.aloc-resultados') : null;
+      if (caixa) caixa.innerHTML = resultadosHTML(st);
     };
     // Enter no percentual confirma o número (não envia nada).
     root.onkeydown = ev => {
       const t = ev && ev.target;
       if (ev && ev.key === 'Enter' && t && t.dataset && (t.dataset.alocPct !== undefined || t.dataset.alocPctEquipe !== undefined || t.dataset.alocPctAntigo !== undefined)) { ev.preventDefault(); if (typeof t.blur === 'function') t.blur(); }
+      // Enter na busca não envia o formulário em volta (Agenda, Lançar entrega).
+      else if (ev && ev.key === 'Enter' && t && t.dataset && t.dataset.alocBusca !== undefined) ev.preventDefault();
     };
     repintar(chave);
   }
 
-  return {TOTAL, iniciar, estado, esquecer, executar, html, montar, repintar, bloqueio, paraGravar, paraParticipacao, gravarNaOS, mudou, nucleo, lerPct, pctTexto, dataBR};
+  return {TOTAL, iniciar, estado, esquecer, executar, html, montar, repintar, bloqueio, paraGravar, paraParticipacao, gravarNaOS, mudou, nucleo, lerPct, pctTexto, dataBR,
+    modoPara, dicaModo, paraEquipe, aplicarNaOS, aplicarEquipeNaOS, definirOcupados, estrutura, resultadosHTML: chave => { const st = estados.get(chave); return st ? resultadosHTML(st) : ''; }, textoOcupado, gente: genteDe};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = ALOCUI;

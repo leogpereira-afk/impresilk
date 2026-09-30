@@ -1492,8 +1492,11 @@ function openModal(os, blocoForcado) {
 }
 
 function closeModal() {
+  divisaoAoFecharFicha();
   if (_modalDirty) saveDraft();
   _audOS = null;   // o histórico relê do servidor na próxima abertura
+  // A montagem da equipe e da divisão desta ficha acaba aqui (a divisão em envio espera a resposta).
+  if (typeof ALOCUI !== 'undefined' && _modalDraft && !_fichaDivEnviando) { const k = chavesFicha(_modalDraft.id); ALOCUI.esquecer(k.eq); ALOCUI.esquecer(k.div); }
   $('#modal-overlay').classList.add('hidden');
   STATE.modalOSId = null;
   _modalDraft = null;
@@ -1640,7 +1643,8 @@ function renderModal() {
     : `${blocoPCP(os, ro, done.pcp)}
        ${blocoItens(os, ro, done.itens)}
        ${blocoAgenda(os, ro, done.agenda)}
-       ${blocoExec(os, ro, done.exec)}`;
+       ${blocoExec(os, ro, done.exec)}
+       ${podeDividirFicha(os) ? blocoDivisao(os, divisaoConfirmadaFicha(os)) : ''}`;
 
   $('#modal-os').innerHTML = `
     <div class="modal-header">
@@ -1703,6 +1707,7 @@ function renderModal() {
   $$('#modal-os .card-fs').forEach(d => { d.open = (d.dataset.bloco === blocoAlvo); });
 
   bindModalEvents(os, ro);
+  ligarEquipeDaFicha(ro);
   ligarHistoricoAlteracoes(os);
 }
 
@@ -2151,9 +2156,9 @@ function blocoAgenda(os, ro, done) {
           <select data-f="veiculo"><option value=""></option>${veiculoOptionsFicha(os.veiculo, cfg)}</select>
         </div>
       </div>
-      <div class="field">
+      <div class="field aloc-campo">
         <label>Equipe</label>
-        ${chipsField('equipe', os.equipe || [], cfg.instaladores, ro)}
+        ${!ro && typeof ALOCUI !== 'undefined' ? '<div class="aloc-host" id="ficha-equipe" aria-label="Equipe da O.S."></div>' : chipsField('equipe', os.equipe || [], cfg.instaladores, ro)}
       </div>
       ${isInterno(os) ? '' : `<div class="prazo-retorno" id="prazo-retorno">${prazoRetornoHTML(os, ro)}</div>`}
       <div class="field"><label>Obs agenda</label><textarea data-f="obsAgenda">${esc(os.obsAgenda)}</textarea></div>
@@ -2195,6 +2200,158 @@ function blocoAgenda(os, ro, done) {
       </div>
     </div>
   </details>`;
+}
+
+/* ── EQUIPE E DIVISÃO NA FICHA (F10, 30/09/2026) ────────────────────────────
+   O campo Equipe (bloco 3) é o componente único (alocacao-ui.js) no modo só
+   pessoas: quem vai, com foto, equipe num toque, busca tolerante e o chip
+   marcado quando a pessoa já está em outra O.S. no mesmo horário. Grava
+   os.equipe como sempre (cada mudança, uma gravação da ficha).
+   O bloco "Divisão da equipe" (5) é o mesmo componente com líder, percentual
+   e prévia, só para admin e pcp e só em O.S. externa. Ele grava pelo caminho
+   da F09: nada vai até "Confirmar divisão", e uma confirmação é uma gravação
+   (o histórico da divisão tem teto de 40 linhas no servidor). Como a
+   conferência da volta, não trava na O.S. finalizada: é da gestão e não mexe
+   na execução. */
+const podeDividirFicha = os => !!os && !isInterno(os) && typeof ALOCUI !== 'undefined'
+  && ['admin', 'pcp'].includes(STATE.user && STATE.user.papel) && podeEditar();
+function blocoDivisao(os, done) {
+  return `
+  <details class="card-fs aloc-bloco-divisao lock-allow ${done ? 'done' : ''}" data-bloco="divisao">
+    <summary>5 · Divisão da equipe ${done ? '<span class="sum-check">✓ confirmada</span>' : ''}</summary>
+    <div class="fs-body">
+      <p class="aloc-dica">Quem liderou e a parte de cada um nesta O.S. Só a gestão (admin e PCP) divide. Confirmar grava a divisão, e a equipe da O.S. passa a ser a desta divisão.</p>
+      <div id="ficha-divisao" class="aloc-host"></div>
+      <div class="aloc-acoes"><button type="button" class="btn-primary" id="ficha-div-ok">Confirmar divisão</button><button type="button" class="btn-ghost" id="ficha-div-recomecar" hidden>Recomeçar pela divisão gravada</button></div>
+      <p class="aloc-status" id="ficha-div-status" role="status" aria-live="polite"></p>
+    </div>
+  </details>`;
+}
+// A divisão desta O.S. conta como confirmada (a régua da F08: válida, não desatualizada, mesma gente).
+const divisaoConfirmadaFicha = os => typeof DIVISAO !== 'undefined' && typeof DIVISAO.alocacaoConfirmada === 'function' && DIVISAO.alocacaoConfirmada(os);
+// Quem já está em outra O.S. no mesmo horário (e quem o RH diz que está fora), pelo que a ficha mostra agora.
+function ocupadosDaFicha(os) {
+  const i = (os && os.instalacao) || {};
+  if (!os || isInterno(os) || !OPERACAO.dia(i.data)) return new Map();
+  const extra = {os, hora: i.hora, duracaoDias: i.duracaoDias};
+  if (typeof ocupadosNoDiaCasa === 'function') return ocupadosNoDiaCasa(i.data, {periodo: i.periodo, hora: i.hora, duracaoDias: i.duracaoDias}, os.id, extra).pessoas;
+  return OPERACAO.ocupados(STORE.getAllOS(), i.data, {periodo: i.periodo, hora: i.hora, duracaoDias: i.duracaoDias}, os.id, extra).pessoas;
+}
+const chavesFicha = id => ({eq: 'ficha-eq:' + id, div: 'ficha-div:' + id});
+const equipesDoCadastro = () => ((STORE.getCFG() || {}).performancePCP || {}).equipes || [];
+function ligarEquipeDaFicha(ro) {
+  if (typeof ALOCUI === 'undefined' || !_modalDraft) return;
+  const os = _modalDraft, papel = STATE.user && STATE.user.papel, k = chavesFicha(os.id);
+  const oc = ocupadosDaFicha(os);
+  const host = document.getElementById('ficha-equipe');
+  if (host && !ro) {
+    ALOCUI.iniciar(k.eq, {os, equipes: equipesDoCadastro(), papel, modo: 'pessoas', seguirEquipe: true, ocupados: oc,
+      dica: podeDividirFicha(os) ? 'Quem vai. Líder e percentuais ficam no bloco 5, Divisão da equipe.' : ''});
+    ALOCUI.montar(host, k.eq, {aoAlterar: () => equipeDaFichaMudou(k.eq)});
+  }
+  const box = document.getElementById('ficha-divisao');
+  if (box && podeDividirFicha(os)) ligarDivisaoDaFicha(box, oc);
+}
+/* O campo Equipe mudou: a ficha grava os.equipe como sempre gravou (o
+   seletor antigo fazia o mesmo no OK) e repinta, porque a etapa, o
+   checklist e a divisão dependem da equipe. */
+function equipeDaFichaMudou(chave) {
+  if (!_modalDraft) return;
+  const nova = ALOCUI.paraEquipe(chave).equipe;
+  const antes = Array.isArray(_modalDraft.equipe) ? _modalDraft.equipe : [];
+  if (nova.length === antes.length && nova.every((x, i) => x === antes[i])) return;
+  _modalDraft.equipe = nova;
+  saveDraft();
+  const foco = document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute('data-aloc-k') : null;
+  reRenderModalKeepOpen();
+  if (foco) { const alvo = [...document.querySelectorAll('#ficha-equipe [data-aloc-k]')].find(x => x.getAttribute('data-aloc-k') === foco && !x.disabled); if (alvo) try { alvo.focus({preventScroll: true}); } catch {} }
+}
+/* A EQUIPE TRAZIDA INTEIRA NO CAMPO EQUIPE GRAVA O equipeId AO FECHAR
+   (revisão F10). Na Agenda e no Lançar entrega, "Trazer equipe" de admin e
+   pcp grava a divisão com o equipeId no mesmo envio; aqui ela ficava no bloco
+   5 esperando "Confirmar divisão", e fechar a ficha perdia a equipe
+   escolhida, calado. Ao fechar, a divisão que o bloco 5 montou a partir da
+   equipe trazida vai junto com o rascunho, numa gravação só (nunca a cada
+   toque: o histórico da divisão tem teto de 40 linhas). Só a que veio do
+   "Trazer equipe" desta ficha, e só se ninguém mexeu nela à mão: a divisão
+   mexida e não confirmada não grava, e a tela diz. */
+function divisaoAoFecharFicha() {
+  if (typeof ALOCUI === 'undefined' || !_modalDraft || _fichaDivEnviando || !podeDividirFicha(_modalDraft)) return;
+  const k = chavesFicha(_modalDraft.id), eq = ALOCUI.estado(k.eq), div = ALOCUI.estado(k.div);
+  if (!div || div.modo !== 'divisao' || !ALOCUI.mudou(k.div)) return;
+  const num = _modalDraft.numero || '';
+  if (div.tocado) { toast(`O.S. ${num}: a divisão mexida no bloco 5 não foi confirmada e não foi gravada. Para gravar, abra a ficha e toque em Confirmar divisão.`, 'error'); return; }
+  const trazidas = eq && eq.tocado && Array.isArray(eq.trazidas) ? eq.trazidas : [];
+  if (!(ALOCUI.estrutura(k.eq) || []).some(g => g.equipeId != null && trazidas.includes(String(g.equipeId)))) return;
+  const r = ALOCUI.aplicarNaOS(k.div, _modalDraft);
+  if (r.ok && r.estado === 'aplicada') markDirty();
+  else if (!r.ok) toast(`O.S. ${num}: a equipe foi gravada, mas a divisão não: ${r.mensagem} Complete no bloco 5, Divisão da equipe.`, 'error');
+}
+// A hora e a duração não repintam a ficha (o teclado não cai): só os chips.
+function repintarOcupadosDaFicha() {
+  if (typeof ALOCUI === 'undefined' || !_modalDraft) return;
+  const oc = ocupadosDaFicha(_modalDraft), k = chavesFicha(_modalDraft.id);
+  for (const ch of [k.eq, k.div]) if (ALOCUI.definirOcupados(ch, oc)) ALOCUI.repintar(ch);
+}
+let _fichaDivEnviando = false;
+function ligarDivisaoDaFicha(box, oc) {
+  const os = _modalDraft, id = os.id, k = chavesFicha(id);
+  const ok = document.getElementById('ficha-div-ok'), status = document.getElementById('ficha-div-status'), recomecar = document.getElementById('ficha-div-recomecar');
+  const abrir = reiniciar => ALOCUI.iniciar(k.div, {os: _modalDraft, equipes: equipesDoCadastro(), papel: STATE.user && STATE.user.papel, modo: 'divisao', semAntigo: true,
+    seguirEquipe: true, estrutura: ALOCUI.estrutura(k.eq), ocupados: oc, reiniciar,
+    valor: typeof valorDaOS === 'function' ? valorDaOS(_modalDraft) : _modalDraft.valorTotal,
+    versoes: typeof perfRegrasFonte === 'function' ? perfRegrasFonte().versoes : []});
+  abrir(false);
+  const conferirBotao = () => {
+    if (!ok || _fichaDivEnviando) return;
+    const motivo = ALOCUI.bloqueio(k.div);
+    ok.disabled = !!motivo;
+    if (status && !status.classList.contains('erro')) status.textContent = motivo ? 'Para gravar: ' + motivo : '';
+  };
+  ALOCUI.montar(box, k.div, {aoMudar: () => { if (status) status.classList.remove('erro'); conferirBotao(); }});
+  if (recomecar) recomecar.onclick = () => { abrir(true); recomecar.hidden = true; if (status) { status.textContent = ''; status.classList.remove('erro'); } ALOCUI.repintar(k.div); };
+  if (ok) ok.onclick = async () => {
+    if (_fichaDivEnviando || ALOCUI.bloqueio(k.div)) return conferirBotao();
+    _fichaDivEnviando = true; ok.disabled = true;
+    if (status) { status.classList.remove('erro'); status.textContent = 'Gravando a divisão…'; }
+    /* O que já estava digitado na ficha vai junto: o `salvar` grava o
+       rascunho inteiro, uma vez. Gravar antes dele (revisão F10) punha um
+       envio em voo, e a versão com a divisão ficava na fila até o próximo
+       ciclo: a tela dizia "o servidor ainda não respondeu" sem motivo. */
+    let r;
+    try {
+      r = await ALOCUI.gravarNaOS(k.div, {store: STORE, usuario: (STATE.user && STATE.user.nome) || '',
+        alvo: () => (_modalDraft && _modalDraft.id === id ? _modalDraft : null),
+        salvar: () => { markDirty(); saveDraft(); }});
+    } catch (e) { r = {ok: false, estado: 'erro', mensagem: 'Não foi possível gravar: ' + ((e && e.message) || e)}; }
+    finally { _fichaDivEnviando = false; }
+    const aberta = !!_modalDraft && _modalDraft.id === id && !!document.getElementById('ficha-div-status');
+    if (!aberta) { toast(`O.S. ${os.numero || ''}: ${r.mensagem}`, r.ok ? 'success' : 'error'); return; }
+    if (r.ok) {
+      toast(r.estado === 'gravada' ? `Divisão gravada na O.S. ${os.numero || ''}.` : r.mensagem, r.estado === 'pendente' ? '' : 'success');
+      reRenderModalKeepOpen();
+      return;
+    }
+    /* DESCARTE: a cópia do aparelho voltou à do servidor (o store repôs). O
+       rascunho da ficha segue o store e a ficha repinta: a divisão recomeça
+       pelo que está gravado. O motivo fica na tela. O bloco recomeça de
+       verdade (revisão F10): a repintura reaproveitava o estado, e a tela
+       dizia "voltou à divisão do servidor" mostrando a recusada, com o
+       Confirmar pronto para a mesma recusa. */
+    if (r.estado === 'descartada') {
+      const doStore = STORE.getOS(id);
+      if (doStore && doStore !== _modalDraft) for (const c of ['alocacao', 'alocacaoLog', 'equipe']) {
+        if (Object.prototype.hasOwnProperty.call(doStore, c)) _modalDraft[c] = JSON.parse(JSON.stringify(doStore[c])); else delete _modalDraft[c];
+      }
+      ALOCUI.esquecer(k.div);
+      reRenderModalKeepOpen();
+    }
+    const st2 = document.getElementById('ficha-div-status'), rec2 = document.getElementById('ficha-div-recomecar'), ok2 = document.getElementById('ficha-div-ok');
+    if (st2) { st2.textContent = r.mensagem; st2.classList.add('erro'); }
+    if (rec2) rec2.hidden = r.estado !== 'conflito';
+    if (ok2) ok2.disabled = r.estado === 'conflito' || !!ALOCUI.bloqueio(k.div);
+  };
+  conferirBotao();
 }
 
 /* ── Bloco 4: Embarque & Execução ────────────────────────────────────────── */
@@ -2649,6 +2806,26 @@ function opcoesEquipe(atuais) {
   const freq = {};
   STORE.getAllOS().forEach(o => OPERACAO.equipe(o).forEach(x => { const k = OPERACAO.chavePessoa(x); freq[k] = (freq[k] || 0) + 1; }));
   const vistos = new Set(), out = [];
+  /* NOME DA LISTA QUE É DE UM CADASTRO TRAVADO (revisão F10). "Rita" da lista
+     de instaladores não vira ID quando o ID dela é repetido (ou o contrato de
+     freelancer não tem CPF), e entrava livre, pelo nome, com a linha travada
+     da própria Rita logo abaixo. O nome que casa só com cadastros travados
+     (pelo apelido, pelo nome inteiro ou pelo começo do nome, a régua do
+     casamento de sempre) leva o mesmo motivo. A decisão salva de que o nome
+     não é ninguém do RH (terceiro, em Conferir nomes) continua valendo. */
+  const normP = s => String(s == null ? '' : s).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const cadastrosAtivos = ((STORE.elenco() || {}).pessoas || []).filter(p => p && p.ativo !== false);
+  const motivoDoCadastro = p => OPERACAO.ehIdPessoa(p.id) ? (p.idRepetido || OPERACAO.idRepetido(p.id) ? MOTIVO_ID_REPETIDO : '')
+    : p.freelancer ? (p.cpfInvalido ? MOTIVO_CPF_INVALIDO : MOTIVO_SEM_CPF) : '';
+  const terceiros = new Set((Array.isArray(cfg.vinculosRH) ? cfg.vinculosRH : []).filter(v => v && v.semFicha === true).map(v => normP(v.apelido || v.nomePCP)));
+  const travaDoNome = valor => {
+    const ap = normP(valor);
+    if (!ap || terceiros.has(ap)) return '';
+    const tokens = ap.split(' ');
+    const casam = [cadastrosAtivos.filter(p => normP(p.apelido) === ap), cadastrosAtivos.filter(p => normP(p.nome) === ap),
+      cadastrosAtivos.filter(p => { const n = normP(p.nome).split(' '); return tokens.every((t, i) => n[i] === t); })].find(xs => xs.length) || [];
+    return casam.length && casam.every(p => motivoDoCadastro(p)) ? motivoDoCadastro(casam[0]) : '';
+  };
   const add = (valor, grupo, rh) => {
     const k = OPERACAO.chavePessoa(valor);
     if (!k || vistos.has(k)) return;
@@ -2659,7 +2836,7 @@ function opcoesEquipe(atuais) {
     out.push({ valor: p ? p.id : String(valor).trim(), chave: k, nome: OPERACAO.nomePessoa(valor),
       completo: ficha ? ficha.nome : '', apelido: ficha ? String(ficha.apelido || '') : '', id: p ? p.id : '',
       grupo: p ? grupo : 'Sem ficha no RH', freelancer, rh: rh || (ficha && ficha.chave) || '',
-      bloqueio: p && OPERACAO.idRepetido(p.id) ? MOTIVO_ID_REPETIDO : '', n: freq[k] || 0 });
+      bloqueio: p ? (OPERACAO.idRepetido(p.id) ? MOTIVO_ID_REPETIDO : '') : travaDoNome(valor), n: freq[k] || 0 });
   };
   // Cadastro que não pode ser escolhido: uma linha por cadastro, travada.
   const travado = (p, motivo) => {
@@ -2722,7 +2899,7 @@ function abrirPickerEquipe(marcadosAgora, novas) {
     const nova = !!(novas && o.rh && novas.has(o.rh));
     // Travado não entra; o que já estava na O.S. continua marcado e pode sair.
     const marcado = !!(o.valor && marcadas.has(o.chave));
-    return `${cab}<label class="picker-opt${o.bloqueio ? ' bloqueado' : ''}${nova ? ' nova' : ''}" data-busca="${esc(busca)}">
+    return `${cab}<label class="picker-opt${o.bloqueio ? ' bloqueado' : ''}${nova ? ' nova' : ''}" data-busca="${esc(busca)}" data-id="${esc(o.id || '')}">
       <input type="checkbox" value="${esc(o.valor)}" ${marcado ? 'checked' : ''} ${o.bloqueio && !marcado ? 'disabled' : ''}>
       <span class="picker-pessoa">${esc(o.nome)}${o.freelancer ? ' <span class="tag-freelancer">Freelancer</span>' : ''}${nova ? ' <span class="tag-nova">nova</span>' : ''}<small>${esc(sub)}</small></span>
       ${o.n > 0 ? `<span class="picker-n">${o.n}×</span>` : ''}
@@ -2744,9 +2921,17 @@ function abrirPickerEquipe(marcadosAgora, novas) {
   const atualizar = document.querySelector('#picker-list [data-picker-atualizar]');
   if (atualizar) atualizar.onclick = () => atualizarElencoDoPicker();
   const busca = document.querySelector('#picker-list .picker-busca');
+  /* BUSCA TOLERANTE (F10): o ID exato vence, o texto contido aparece, o
+     parecido (erro de digitação) aparece marcado como sugestão; pedaço de CPF
+     não acha ninguém (OPERACAO.buscaTolerante). */
   if (busca) busca.oninput = () => {
-    const q = normNome(busca.value);
-    $$('#picker-list .picker-opt').forEach(l => { l.style.display = !q || l.dataset.busca.includes(q) ? '' : 'none'; });
+    const q = busca.value;
+    $$('#picker-list .picker-opt').forEach(l => {
+      const c = typeof OPERACAO.buscaTolerante === 'function' ? OPERACAO.buscaTolerante(q, { id: l.dataset.id || '', textos: [l.dataset.busca] })
+        : { tipo: !normNome(q) || l.dataset.busca.includes(normNome(q)) ? 'direto' : '' };
+      l.style.display = c.tipo ? '' : 'none';
+      l.classList.toggle('picker-sugestao', c.tipo === 'sugestao');
+    });
     $$('#picker-list .picker-grupo').forEach(g => {
       let el = g.nextElementSibling, algum = false;
       while (el && !el.classList.contains('picker-grupo')) { if (el.style.display !== 'none') algum = true; el = el.nextElementSibling; }
@@ -3006,6 +3191,8 @@ function bindModalEvents(os, ro) {
       }
       // Os dias do retorno previsto seguem a data e a duração (F15).
       if (el.dataset.f === 'instalacao.data' || el.dataset.f === 'instalacao.duracaoDias') repintarPrazoRetorno(root, ro);
+      // Quem está ocupado segue o dia, o período, a hora e a duração (F10).
+      if (['instalacao.hora', 'instalacao.duracaoDias'].includes(el.dataset.f)) repintarOcupadosDaFicha();
       // Hora de saída/retorno sem dia não reconstrói o passado (carimbarMomento).
       if (el.dataset.f === 'horaSaida')   STORE.carimbarMomento(_modalDraft, 'horaSaida', 'saidaEm');
       if (el.dataset.f === 'horaRetorno') STORE.carimbarMomento(_modalDraft, 'horaRetorno', 'retornoEm');
@@ -6615,6 +6802,7 @@ function abrirInstrucoes() {
       <ol>
         <li><strong>PCP:</strong> cria/importa a O.S, define itens, clica <em>"✓ Liberar para instalação"</em>.</li>
         <li><strong>Agendamento:</strong> data + período (obrigatório) + equipe → confirma com o cliente.</li>
+        <li><strong>Equipe e divisão:</strong> no campo Equipe, <em>Trazer equipe</em> traz os integrantes num toque. A busca acha pelo nome, pelo apelido ou pelo ID inteiro (6 dígitos); o nome digitado com erro aparece em <em>Você quis dizer</em>. Quem já está em outra O.S. no mesmo horário (ou de férias) aparece marcado antes de gravar. Líder e percentuais ficam no bloco <strong>Divisão da equipe</strong>, só da gestão (admin e PCP); operação e montagem escolhem só as pessoas. A Agenda e o Lançar entrega usam o mesmo quadro.</li>
         <li><strong>⏸ Parado no cliente</strong> (quando for o caso): a O.S está pronta e o cliente ainda não liberou a instalação. No card, toque em <strong>Etapa</strong> e escolha <em>"⏸ Marcar parado"</em>. Ela some da fila de agendamento e passa a aparecer na vista <strong>Parado Cliente</strong>, que separa o que está parado <em>por culpa nossa</em> do que está parado esperando o cliente. Quando ele liberar, a mesma lista traz <em>"▶ Cliente liberou"</em> e ela volta para a fila; o tempo que ficou parada fica guardado.</li>
         <li><strong>Etapa no card:</strong> todo card tem a linha <strong>Etapa</strong>, com as etapas da barra lateral (PCP, Instalação, Parado Cliente, Execução, Retrabalho, Finalizados). O que é de um toque acontece no toque e o aviso traz <em>Desfazer</em>; o que precisa de dado (data, saída, retrabalho, finalização) abre a ficha no lugar certo. Etapa que ainda não dá diz por quê.</li>
         <li><strong>Embarque:</strong> confere embarque/produtos/ferramentas e registra o <strong>KM de saída</strong>.</li>
