@@ -108,6 +108,23 @@ const ELENCO_PREVIA={pessoas:[
  {chave:'fernanda-alves',id:'900009',nome:'Fernanda Alves Rocha',apelido:'',area:'Montagem Externa',cargo:'Instaladora',ativo:true,foto:''}],
  antigos:[{chave:'davi-antigo',id:'900006',nome:'Davi Antigo Nunes',apelido:'',ativo:false,desligado:true}],veiculos:[],ferias:[],ausencias:[]};
 cfg.vinculosRH=[{apelido:'Bia',id:'900002',chave:'bia-costa',nome:'Beatriz Costa Lima'}];
+/* NOMES ANTIGOS VIRAM ID (F12, 30/09/2026): O.S. antigas com o nome que o PCP
+   digitava, grafias variantes da mesma pessoa, xarás, "Terceiro" e uma O.S.
+   com divisão. Duas O.S. antigas só vêm pelo "Buscar as antigas no servidor".
+   Pessoas e O.S. FICTÍCIAS. #aba=performance&rolar=[data-quadro="perf-rh"]
+   mostra o quadro; &converter=1 roda a troca (confirmação automática, só aqui). */
+ELENCO_PREVIA.pessoas.push(
+ {chave:'jose-adilando',id:'900010',nome:'José Adilando Rocha',apelido:'adilsom',area:'Montagem Externa',cargo:'Instalador',ativo:true,foto:''},
+ {chave:'lucas-gabriel',id:'900011',nome:'Lucas Gabriel Souza',apelido:'',area:'Montagem Externa',cargo:'Instalador',ativo:true,foto:''},
+ {chave:'lucas-natalino',id:'900012',nome:'Lucas Natalino Reis',apelido:'',area:'Montagem Externa',cargo:'Ajudante',ativo:true,foto:''},
+ {chave:'adriano-pinheiro',id:'900013',nome:'Adriano Pinheiro Lima',apelido:'',area:'Serralheria',cargo:'Serralheiro',ativo:true,foto:''},
+ {chave:'adriano-nunes',id:'900014',nome:'Adriano Nunes Araújo',apelido:'',area:'Serralheria',cargo:'Serralheiro',ativo:true,foto:''});
+const pvLegado=(id,dias,equipe,extra={})=>base(id,{numero:'T-'+id,cliente:'Cliente fictício '+id+' · nome antigo',instalacao:{data:deslocar(dias),periodo:'Manhã'},equipe,veiculo:'Carro 2',valorTotal:1800,finalizadaEm:deslocar(dias)+'T16:00:00',finalizadoPor:'Gestor de teste',...extra});
+lista.push(pvLegado('G01',-12,['Adlando','Lucas']),pvLegado('G02',-15,['Adilsom','Lucas Gabriel']),pvLegado('G03',-18,['Jose Adilando','Terceiro']),
+ pvLegado('G04',-22,['Adriano','Adriano Pinheiro']),pvLegado('G05',-26,['Adriano Nunes','Lucas Natalino']),pvLegado('G06',-30,['Lucas Gabriel Souza','Adilsom']),
+ pvLegado('G07',-33,['Adilsom','900011'],{alocacao:{id:'pv-g07',versao:1,grupos:[{equipeId:null,cota:10000,liderId:'900011',membros:[{pessoaId:'900011',papel:'lider',cota:10000}]}],em:deslocar(-33)+'T17:00:00Z'}}));
+const pvHist=new Map();
+const PV_ANTIGAS=[pvLegado('H01',-95,['Adilsom','Terceiro']),pvLegado('H02',-104,['Lucas Natalino Reis','Ana'])];
 lista.push(base('112',{cliente:'Mercado Bairro · teste (equipe por ID)',instalacao:{data:deslocar(1),periodo:'Tarde'},equipe:['900004','Ana'],veiculo:'Carro 1'}));
 /* ENTREGA POR ITEM NA FICHA (E4, 30/09/2026): marcas fictícias para ver a
    coluna Entrega, o selo do card e os casos raros (item com problema,
@@ -173,7 +190,9 @@ for(let m=1;m<=Number(hoje.slice(5,7));m++){
  }
  PV_ERP[mes]={v:3,os,em:new Date().toISOString()};
 }
-const STORE={getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id),getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>ELENCO_PREVIA, valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>{}, entreguesMes:m=>PV_ERP[m]||null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>{},trySync:async()=>{},pronto:async()=>lista,api:previewApi,apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){},
+const STORE={JANELA_LOCAL_DIAS:60,historico:()=>[...pvHist.values()],faixaHistorico:async()=>({de:deslocar(-120),ate:hoje}),
+ buscarHistorico:async q=>{const itens=PV_ANTIGAS.filter(o=>(!q.de||o.finalizadaEm.slice(0,10)>=q.de)&&(!q.ate||o.finalizadaEm.slice(0,10)<=q.ate));for(const o of itens)pvHist.set(o.id,structuredClone(o));return {itens,truncou:false};},
+ getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id)||pvHist.get(id)||null,getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>ELENCO_PREVIA, valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>true, entreguesMes:m=>PV_ERP[m]||null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>false,trySync:async()=>{},pronto:async()=>lista,api:previewApi,conferirNomes:async(nomes,ids)=>{const r=OPERACAO.resolverPessoas({pessoas:[...ELENCO_PREVIA.pessoas,...ELENCO_PREVIA.antigos],vinculos:cfg.vinculosRH,lista:cfg.instaladores});return {nomes:nomes.map(n=>({nome:n,id:r.idDe(n),fixado:r.fixado(n)})),os:Object.fromEntries(ids.map(i=>[i,'viva'])),fechados:[]};},apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{if(pvHist.has(o.id))pvHist.set(o.id,structuredClone(o));lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){},
  /* o que o celular (equipe.html) chama */ setInstalador(){},setUser(){},limparCache(){},avisosEntregas:()=>[],dispensarAvisoEntregas(){},delFotoSync(){}};
 `;
 const boot=`
@@ -201,6 +220,8 @@ document.addEventListener('DOMContentLoaded',()=>{
  // &ficha=E4A abre a ficha dessa O.S. (no bloco &bloco=, padrão itens); &papel=operacao entra como operação.
  if(pv.get('ficha'))setTimeout(()=>{openModal(STORE.getOS(pv.get('ficha')),pv.get('bloco')||'itens');},700);
  if(pv.get('rolar'))setTimeout(()=>{const alvo=document.querySelector(pv.get('rolar'));if(alvo)alvo.scrollIntoView({block:'start'});},900);
+ // &antigas=1 busca as O.S. antigas; &converter=1 grava o ID (a confirmação responde sim, só na prévia).
+ if(pv.get('antigas')||pv.get('converter'))setTimeout(async()=>{if(pv.get('antigas'))await buscarAntigasConferenciaCasa();if(pv.get('converter')){window.confirm=()=>true;await iniciarConversaoNomesCasa(null);}const alvo=pv.get('rolar')&&document.querySelector(pv.get('rolar'));if(alvo)alvo.scrollIntoView({block:'start'});},1000);
 });`;
 /* O CELULAR NA PRÉVIA: a Ana entra pelo crachá fictício do fixture (AUTH.dono);
    #ficha=E5A abre a ficha no bloco dos itens (&bloco= outro bloco, &desce=px
