@@ -1654,7 +1654,7 @@ function renderModal() {
     ? `${blocoPCP(os, ro, done.pcp)}
        ${blocoItens(os, ro, done.itens)}
        ${finalizada ? '' : `<div class="fs-body interno-finalizar edit-only" style="padding:14px 16px">
-         <button class="btn-success" id="btn-finalizar-interno" style="width:100%">📦 Cliente retirou — finalizar</button>
+         ${canceladaNaTela(os) ? FINALIZAR_CANCELADA_HTML : '<button class="btn-success" id="btn-finalizar-interno" style="width:100%">📦 Cliente retirou — finalizar</button>'}
        </div>`}`
     : `${blocoPCP(os, ro, done.pcp)}
        ${blocoItens(os, ro, done.itens)}
@@ -2494,6 +2494,9 @@ function copiarRespostaRetrab(de, para, foto) {
    STORE, com as marcas do saldo e o finalizadaEm na mesma gravação. */
 function finalizarDaFicha(interno) {
   if (!_modalDraft) return;
+  /* Cancelada pelo PCP (revisão da junção F16+E7): a ficha não finaliza, como
+     o card e o celular. Vale o cancelamento gravado e o pedido no rascunho. */
+  if (canceladaNaTela(_modalDraft)) { toast(`O.S ${_modalDraft.numero || ''} cancelada pelo PCP: para finalizar, desfaça o cancelamento no Status da entrega.`, 'error'); return; }
   const faltas = validarFinalizacao(_modalDraft);
   if (faltas.length) { toast('Falta: ' + faltas.join(', '), 'error'); return; }
   const id = _modalDraft.id;
@@ -2642,7 +2645,7 @@ function blocoItens(os, ro, done) {
         <tbody id="itens-tbody">${rows || `<tr><td colspan="${cols}" class="text-muted" style="text-align:center;padding:12px">Nenhum item</td></tr>`}</tbody>
       </table>
       ${itens.length ? `<div class="items-total">${itens.length} ${itens.length === 1 ? 'item' : 'itens'}${resumoEnt ? ` · <span class="ent-resumo">${esc(resumoEnt)}</span>` : ''}</div>` : ''}
-      ${(saldoERP => saldoERP ? erpSaldoAvisoHTML(saldoERP) : '')(erpSaldoDoCard(os))}
+      ${(saldoERP => saldoERP ? erpSaldoAvisoHTML(saldoERP) : '')(canceladaNaTela(os) ? null : erpSaldoDoCard(os))}
       <div class="flex gap-8 edit-only">
         <button class="btn-ghost btn-sm" id="btn-add-item">+ Item manual</button>
         <button class="btn-ghost btn-sm" id="btn-import-itens">📄 Importar itens do PDF</button>
@@ -3080,6 +3083,7 @@ function blocoExec(os, ro, done) {
       <div class="edit-only mt-12">
         ${os.finalizadaEm
           ? `<div class="liberar-status" style="background:#dcfce7;color:var(--green)">✓ Finalizada por ${esc(os.finalizadoPor||'—')} · ${new Date(os.finalizadaEm).toLocaleString('pt-BR')}</div>`
+          : canceladaNaTela(os) ? FINALIZAR_CANCELADA_HTML
           : `<button class="btn-primary w-100" id="btn-finalizar">🏁 Finalizar instalação</button>`}
       </div>
     </div>
@@ -4410,6 +4414,8 @@ function statusEntregaDe(os) {
   try { return OPERACAO.statusEntrega(os); } catch { return null; }
 }
 const canceladaNaTela = os => temStatusEntrega() && typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(os);
+// No lugar do "Finalizar" e do "Cliente retirou" da ficha da O.S. cancelada (revisão da junção F16+E7).
+const FINALIZAR_CANCELADA_HTML = '<div class="liberar-status" style="background:#e2e8f0;color:#334155">⛔ O.S. cancelada: para finalizar, desfaça o cancelamento no Status da entrega.</div>';
 // "Entregue" é o neutro (revisão da F16): entregue sem medida de prazo, sem o verde do "No prazo".
 const ICONE_STATUS_ENTREGA = { cancelado: '⛔', retrabalho: '🔴', retorno_antecipado: '↩', atraso: '⏰', no_prazo: '✅', entregue: '📦', execucao: '🔧', agendado: '📅' };
 function seloStatusEntregaHTML(st) {
@@ -4857,8 +4863,16 @@ function erpSituacaoTxt(os) { return os && ERP_SITUACAO[os.statusERP] ? 'ERP: ' 
    caminhos do ERP (a marca da baixa e a carteira), com o link para a lista
    de Entregas, onde a gestão decide (casa.js, erpSaldoNaOS). */
 const erpSaldoDoCard = os => typeof erpSaldoNaOS === 'function' ? erpSaldoNaOS(os) : null;
+/* CANCELADA NO PCP (revisão da junção F16+E7): nem "Confirmar baixa" (ela
+   finalizava a O.S. cancelada, e desfazer o cancelamento deixava o saldo
+   preso numa O.S. finalizada) nem o aviso da E7 (a lista de Entregas não
+   mostra a cancelada). A saída da carteira fica dita, sem botão; o aviso
+   volta quando o cancelamento é desfeito. */
 function erpFechouHTML(os) {
   if (!os || os.finalizadaEm) return '';
+  if (canceladaNaTela(os)) {
+    return os.erpSaiuDaCarteiraEm ? `<div class="card-erp-conferir card-erp-fechou"><div><b>O ERP fechou esta O.S.</b> em ${esc(fmtDataBR(os.erpSaiuDaCarteiraEm))} (saiu da carteira aberta). Ela está cancelada no PCP: desfaça o cancelamento na ficha para decidir.</div></div>` : '';
+  }
   const saldo = erpSaldoDoCard(os);
   if (saldo) return erpSaldoAvisoHTML(saldo);
   if (!os.erpSaiuDaCarteiraEm) return '';
@@ -4869,6 +4883,8 @@ function erpConfirmarBaixa(id) {
   const os = STORE.getOS(id);
   if (!os || os.finalizadaEm || !os.erpSaiuDaCarteiraEm) return;
   if (!['admin', 'pcp'].includes(STATE.user && STATE.user.papel)) { toast('Só a gestão do PCP confirma a baixa do ERP.', 'error'); return; }
+  // O card desenhado antes do cancelamento (revisão da junção F16+E7): a cancelada não confirma a baixa.
+  if (canceladaNaTela(os)) { toast(`O.S ${os.numero || ''} cancelada pelo PCP: para decidir a baixa, desfaça o cancelamento na ficha.`, 'error'); renderActiveTab(); return; }
   // O card desenhado antes da marca parcial chegar: relida, a O.S. vai para a decisão em Entregas.
   if (erpSaldoDoCard(os)) { toast(`A O.S ${os.numero || ''} tem entrega parcial marcada: decida em Entregas, na lista "ERP diz entregue, PCP tem saldo".`, 'error'); renderActiveTab(); return; }
   if (!confirm(`Confirmar a baixa do ERP da O.S ${os.numero || ''}? Ela vai para Finalizados como "Baixa do ERP" e a entrega fica para lançar em Entregas.`)) return;
@@ -4960,8 +4976,10 @@ function etapasDoCard(os) {
   const retrab = retrabPendente(os);
   const filhaAberta = filhasRetrab.find(f => !f.finalizadaEm);
   /* O.S. CANCELADA PELO PCP (revisão da F16): o menu não oferece "Registrar
-     saída" nem "Finalizar", como a ficha e o celular. A equipe que já saiu
-     ainda abre a execução (para registrar a volta). */
+     saída" nem "Finalizar", como o celular; a ficha não tem "Finalizar" nem
+     "Cliente retirou" (finalizarDaFicha recusa, revisão da junção F16+E7) e o
+     aviso do ERP não oferece "Confirmar baixa" (erpFechouHTML). A equipe que
+     já saiu ainda abre a execução (para registrar a volta). */
   const canc = !fin && canceladaNaTela(os);
   const MOTIVO_CANC = 'Cancelada pelo PCP: para seguir, desfaça o cancelamento na ficha.';
   const L = [];
@@ -5002,7 +5020,7 @@ function etapasDoCard(os) {
     rotulo: retrab ? '✓ Retrabalho resolvido' : '🔴 Registrar retrabalho',
     dica: retrab && !filhaAberta ? 'sai da vista Retrabalho' : '',
     motivo: filhaAberta ? 'Resolve quando a O.S. de correção for finalizada.' : (!retrab && interno ? 'Retirada não tem retrabalho de instalação.' : (fin && !retrab ? 'Finalizada: retrabalho novo vira O.S. (aba Retrabalho).' : '')) });
-  L.push({ aba: 'finalizados', icone: interno ? '📦' : '🏁', nome: interno ? 'Retirado' : 'Finalizados', sub: fin ? statusLabelDe(os, st) : erpSaldoDoCard(os) ? 'o ERP diz entregue e o PCP tem saldo: veja o aviso acima' : (os.erpSaiuDaCarteiraEm ? 'o ERP já fechou: confirme a baixa no aviso acima' : 'confere o checklist antes'), atual: fin,
+  L.push({ aba: 'finalizados', icone: interno ? '📦' : '🏁', nome: interno ? 'Retirado' : 'Finalizados', sub: fin ? statusLabelDe(os, st) : canc ? (os.erpSaiuDaCarteiraEm ? 'o ERP já fechou esta O.S.' : 'confere o checklist antes') : erpSaldoDoCard(os) ? 'o ERP diz entregue e o PCP tem saldo: veja o aviso acima' : (os.erpSaiuDaCarteiraEm ? 'o ERP já fechou: confirme a baixa no aviso acima' : 'confere o checklist antes'), atual: fin,
     acao: fin || canc ? '' : 'finalizar', rotulo: interno ? '📦 Cliente retirou' : '🏁 Finalizar', motivo: canc ? MOTIVO_CANC : '' });
   return L;
 }

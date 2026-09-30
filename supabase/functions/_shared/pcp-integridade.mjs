@@ -81,11 +81,18 @@ export function motivoAgendaViva(o, hojeLocal) {
    volta à lista quando o ERP disser outra coisa. */
 const situacaoERP = s => String(s ?? '').normalize('NFD').replace(/\p{M}/gu, '').trim().toUpperCase();
 export const SITUACOES_ERP_ENTREGUE = ['ENTREGUE', 'FINALIZADO'];
-// A O.S. aberta com entrega parcial marcada: o resumo do motor, ou null.
+/* A O.S. aberta com entrega parcial marcada: o resumo do motor, ou null.
+   O CANCELAMENTO DA GESTÃO FICA FORA DA CONTA (revisão da junção F16+E7). Na
+   O.S. cancelada no PCP o motor lê o saldo como cancelado e ela deixava de
+   ser "parcial": a baixa a finalizava por cima do "Manter aberta", e desfazer
+   o cancelamento deixava o saldo preso numa O.S. finalizada. Cancelada, ela
+   segue poupada; a lista e o card não a mostram enquanto estiver cancelada, e
+   ela volta à lista quando o cancelamento é desfeito. O cancelamento do ERP é
+   a situação que chega (CANCELADO, em decisaoBaixaERP), não este campo. */
 export function entregaParcialMarcada(o) {
   if (!objeto(o) || String(o.finalizadaEm ?? '').trim()) return null;
   let r;
-  try { r = ENTREGA_ITEM.resumoOS(o); } catch { return null; }
+  try { r = ENTREGA_ITEM.resumoOS({ ...o, cancelamento: undefined }); } catch { return null; }
   return r && r.situacao === 'parcial' ? r : null;
 }
 function textoParcial(r) {

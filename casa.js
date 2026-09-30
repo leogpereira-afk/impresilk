@@ -1804,6 +1804,13 @@ function rotuloItemSaldoERP(it) {
   const n = String((it && it.item) || '').trim().slice(0, 10);
   return (n ? 'item ' + n : 'item') + (d ? ` (${d})` : '');
 }
+/* A O.S. CANCELADA NÃO SE DECIDE PELA LISTA (revisão da junção F16+E7). A
+   lista aberta antes do cancelamento dizia "Não há saldo a entregar" (o saldo
+   está cancelado, não entregue), e o "Manter aberta" gravava a decisão numa
+   O.S. cancelada. Vem antes de tudo e nada é gravado: vale o cancelamento
+   gravado e o pedido ainda na fila deste aparelho (ENTREGA_ITEM.canceladaOS). */
+const ERRO_SALDO_ERP_CANCELADA = 'O.S. cancelada: desfaça o cancelamento para decidir.';
+const canceladaSaldoERP = os => temMotorSaldoERP() && typeof ENTREGA_ITEM.canceladaOS === 'function' && ENTREGA_ITEM.canceladaOS(os);
 /* ENTREGAR O SALDO NA DATA DO ERP. Relê a O.S. do STORE (a marca que chegou
    de outro aparelho entra na conta do saldo), confere que o ERP ainda diz o
    mesmo (o selo que a tela mostrou) e marca cada item a entregar com a data
@@ -1814,6 +1821,7 @@ function entregarSaldoERP(osId, selo) {
   if (!temMotorSaldoERP()) return {erro: 'Atualize a página: falta o motor da entrega por item.'};
   const fonte = STORE.getOS(osId);
   if (!fonte) return {erro: 'Esta O.S. não está mais neste aparelho.'};
+  if (canceladaSaldoERP(fonte)) return {erro: ERRO_SALDO_ERP_CANCELADA};
   if (fonte.finalizadaEm) return {erro: `A O.S ${fonte.numero || ''} já foi finalizada: nada foi marcado.`};
   const os = JSON.parse(JSON.stringify(fonte));
   const aviso = avisoERPSaldo(os);
@@ -1843,6 +1851,7 @@ function manterAbertaSaldoERP(osId, selo) {
   if (!podeDecidirSaldoERP()) return {erro: 'Só admin e PCP decidem o saldo que o ERP deu como entregue.'};
   const fonte = STORE.getOS(osId);
   if (!fonte) return {erro: 'Esta O.S. não está mais neste aparelho.'};
+  if (canceladaSaldoERP(fonte)) return {erro: ERRO_SALDO_ERP_CANCELADA};
   if (fonte.finalizadaEm) return {erro: `A O.S ${fonte.numero || ''} já foi finalizada.`};
   const aviso = avisoERPSaldo(fonte);
   if (!aviso) return {erro: `O ERP não diz mais que a O.S ${fonte.numero || ''} foi entregue.`};
@@ -1864,8 +1873,12 @@ const NOME_SITUACAO_ERP = {ENTREGUE: 'entregue', FINALIZADO: 'finalizada'};
 function erpSaldoNaOS(os) {
   if (!os || typeof os !== 'object' || os.finalizadaEm || !temMotorSaldoERP()) return null;
   if (!(os.erpComSaldo || os.erpSaiuDaCarteiraEm)) return null;
+  /* O cancelamento da gestão fica fora da conta, como na baixa do servidor
+     (entregaParcialMarcada, revisão da junção F16+E7): cancelada, a O.S. dava
+     "completa", este aviso sumia e o card voltava a oferecer "Confirmar
+     baixa". Quem mostra o aviso esconde a cancelada (erpFechouHTML). */
   let resumo;
-  try { resumo = ENTREGA_ITEM.resumoOS(os); } catch { return null; }
+  try { resumo = ENTREGA_ITEM.resumoOS({...os, cancelamento: undefined}); } catch { return null; }
   if (!resumo || resumo.situacao !== 'parcial') return null;
   const aviso = avisoERPSaldo(os);
   if (!aviso) return null;
