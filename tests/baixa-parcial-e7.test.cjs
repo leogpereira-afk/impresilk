@@ -228,7 +228,10 @@ test('CANCELADO no ERP numa O.S. parcial: baixa como sempre, o saldo vira cancel
   assert.equal(g.baixaAutoERP.status, 'CANCELADO');assert.ok(!g.erpComSaldo);
   assert.deepEqual(g.itens.map(i => (i.entregas || []).length), [1, 1, 0, 0, 0], 'o entregue fica gravado');
   // O motor: o que foi entregue fica no dia dele; o saldo é cancelado, nada em aberto.
-  assert.deepEqual(g.itens.map(i => E.situacaoItem(i, g).situacao), ['cancelado', 'cancelado', 'cancelado', 'cancelado', 'cancelado']);
+  /* Regra da F16 (decisão 4, revisada): na O.S. cancelada, o item que já foi
+     por inteiro fica "entregue"; só o saldo vira "cancelado". Os valores não
+     mudam (entregue 20000, cancelado 30000). */
+  assert.deepEqual(g.itens.map(i => E.situacaoItem(i, g).situacao), ['entregue', 'entregue', 'cancelado', 'cancelado', 'cancelado']);
   const l = E.lancamentosDaOS(g, {liquido: '500.00'});
   assert.equal(l.entregue, 20000);assert.equal(l.cancelado, 30000);assert.equal(l.saldo, 0);
   assert.deepEqual(l.lancamentos.map(x => x.dia), ['2026-09-20', '2026-09-20']);
