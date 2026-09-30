@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
@@ -1410,6 +1410,18 @@ Deno.serve(async (req: Request) => {
           os.reabertaEm = new Date().toISOString();
           os.reabertaPor = cracha?.nome || cracha?.sub || (ehMaquina ? "Integração" : "");
           delete os.arquivadaEm;
+        }
+        /* FINALIZADA PELO CELULAR (revisão da E5). Regras em _shared
+           (carimbarFinalizacaoCampo): quem põe a finalização é o crachá sem
+           senha ou a montagem com senha (papel 'montagem', os dois) => o
+           servidor carimba finalizadaPorCampo, e o implícito dessa finalização
+           é DECLARADO, não conferido. O aparelho não forja nem apaga o
+           carimbo. Roda depois de toda regra que pode tirar a finalização
+           (validarConclusao do toque) e só lê o RH quando carimba. */
+        {
+          const doCampo = !ehMaquina && (ehToqueNoNome || papelUp === "montagem");
+          const autorFin = doCampo && finalizacaoMudou(os, existing) ? await autorAuditoria() : null;
+          trocarOS(carimbarFinalizacaoCampo(os, existing, autorFin, new Date().toISOString()));
         }
         // Preserva o atualizadoEm do autor: reescrever com o relogio do servidor
         // misturava duas fontes de tempo e o proprio autor levava "conflito".

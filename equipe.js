@@ -97,8 +97,13 @@ function itemDoRascunho(idx, uid) {
    servidor carimba o autor pelo crachá do ENVIO e a hora dele; o aparelho só
    propõe. O celular não desfaz nem cancela (é da gestão) e nunca vê R$: aqui
    só se lê a situação e o saldo. Sem o entrega-item.js (cache misto de
-   versões), o Instalado funciona como antes, sem marca. */
-const temMotorEntrega = () => typeof ENTREGA_ITEM !== 'undefined' && !!ENTREGA_ITEM && typeof ENTREGA_ITEM.validarEvento === 'function';
+   versões), o Instalado funciona como antes, sem marca. O motor da v139
+   também conta como "sem motor" (revisão da E5): ele existe, mas não conhece
+   o papel 'toque', e o Instalado dava erro vermelho e o Finalizar travava na
+   O.S. com marca da gestão. A assinatura do motor novo é o toque poder
+   marcar a entrega. */
+const temMotorEntrega = () => typeof ENTREGA_ITEM !== 'undefined' && !!ENTREGA_ITEM && typeof ENTREGA_ITEM.validarEvento === 'function'
+  && typeof ENTREGA_ITEM.podeMarcar === 'function' && ENTREGA_ITEM.podeMarcar('toque', 'entregue') === true;
 const idMarca = e => e && typeof e === 'object' ? String(e.id == null ? '' : e.id).trim() : '';
 function novoIdMarca() {
   const c = typeof crypto !== 'undefined' ? crypto : null, b = new Uint8Array(12);
@@ -150,13 +155,17 @@ function declararEntrega(it, qtde, { simular = false } = {}) {
   if (v.ok && !simular) it.entregas = [...(Array.isArray(it.entregas) ? it.entregas : []), v.evento];
   return v;
 }
-// "Instalado" num item com saldo: declara o saldo inteiro. null quando não há o que declarar.
+/* "Instalado" num item com saldo: declara o saldo inteiro. null quando não há
+   o que declarar. O item com problema aberto pela gestão fica como está, como
+   no Finalizar (revisão da E5): a declaração não fecha o problema, e o
+   servidor a recusaria com a mesma frase. */
 function declararSaldoDoItem(it) {
   if (!temMotorEntrega() || ENTREGA_ITEM.ehServico(it)) return null;
   juntarMarcasDoStore(_draft);
   const s = situacaoEntrega(it, _draft);
   if (!s) return null;
   if (s.situacao === 'cancelado' && s.entregue < s.qtde) return { ok: false, erro: 'Item cancelado pelo PCP: a entrega não foi marcada. Fale com o PCP.' };
+  if (s.situacao === 'problema') return { ok: false, erro: 'Este item está com problema marcado pela gestão; fale com o PCP.' };
   if (s.saldo <= 0) return null;
   return declararEntrega(it, s.saldo);
 }
@@ -1179,7 +1188,8 @@ function entregaDoItemHTML(it, i, os, ro, u) {
   if (!s) return '';
   const interno = isInterno(os);
   const uid = uidItemOk(it.uid) ? it.uid : '';
-  const podeParte = !ro && !os.finalizadaEm && s.situacao !== 'cancelado' && s.saldo > 1 && ENTREGA_ITEM.aceitaParte(it);
+  // Item com problema aberto não oferece parte: a declaração não o fecha (revisão da E5).
+  const podeParte = !ro && !os.finalizadaEm && s.situacao !== 'cancelado' && s.situacao !== 'problema' && s.saldo > 1 && ENTREGA_ITEM.aceitaParte(it);
   let selo = '';
   if (s.situacao === 'cancelado') selo = `<span class="ent-selo st-cancelado">Cancelado pelo PCP${s.cancelado && s.cancelado.motivo ? ': ' + esc(s.cancelado.motivo) : ''}</span>`;
   else if (s.situacao === 'problema') selo = `<span class="ent-selo st-problema">Com problema de entrega${s.problema && s.problema.motivo ? ': ' + esc(s.problema.motivo) : ''}. Fale com o PCP.</span>`;

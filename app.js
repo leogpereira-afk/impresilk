@@ -1741,6 +1741,7 @@ const AUD_ROTULOS = {
   fotosCheckinIds: 'Fotos do check-in', fotosRetornoIds: 'Fotos do serviço pronto', layoutFotoId: 'Layout',
   retornoConf: 'Conferência da volta', voltaEquipe: 'Limpeza do carro (equipe)', excecaoConclusao: 'Exceção de encerramento',
   finalizadaEm: 'Finalizada em', finalizadoPor: 'Finalizada por', reabertaEm: 'Reaberta em', reabertaPor: 'Reaberta por',
+  finalizadaPorCampo: 'Finalizada pelo celular (declarada)',
   entregaLancada: 'Entrega lançada', retrabalho: 'Retrabalho', causa: 'Causa', causaRaiz: 'Causa raiz', etapaOrigem: 'Etapa de origem',
   tipo: 'Tipo', numero: 'Número da O.S.', baixaAutoERP: 'Baixa pelo ERP', justificativaConclusao: 'Justificativa da conclusão',
   prazoCombinado: 'Prazo combinado', retornoPrevisto: 'Retorno previsto',
@@ -1999,6 +2000,11 @@ function papelEntrega() {
 function podeMarcarEntrega(tipo) {
   return temMotorEntrega() && podeEditar() && ENTREGA_ITEM.podeMarcar(papelEntrega(), tipo);
 }
+/* Quem DECLARA em vez de marcar (E5): o crachá sem senha e a montagem com
+   senha, o celular no motor (via 'toque'). A tela diz "declarar", não
+   "marcar", e não oferece a entrega do item com problema aberto (o motor
+   recusa: a declaração não fecha problema, revisão da E5). */
+const papelDeclara = () => ['toque', 'montagem'].includes(papelEntrega());
 /* Item com QUALQUER marca (até desfeita): o servidor não deixa ele sair da
    lista (guardarEntregasItens), então a tela também não oferece. */
 const temMarcaEntrega = it => !!it && typeof it === 'object' && Array.isArray(it.entregas) && it.entregas.length > 0;
@@ -2104,7 +2110,7 @@ function acoesEntregaDoItem(it, os) {
   const interna = isInterno(os), out = [];
   if (s.situacao !== 'cancelado' && s.saldo > 0) {
     const tipo = interna ? 'retirado' : 'entregue';
-    if (podeMarcarEntrega(tipo)) {
+    if (podeMarcarEntrega(tipo) && !(s.problema && papelDeclara())) {
       out.push(interna ? 'retirado' : 'tudo');
       if (ENTREGA_ITEM.aceitaParte(it) && s.saldo > 1) out.push(interna ? 'retirar-parte' : 'parte');
     }
@@ -2246,14 +2252,18 @@ function seloEntregaItemHTML(it, s, os) {
   const interna = isInterno(os);
   // No selo, só o primeiro nome (a coluna é estreita); o nome inteiro vai na dica.
   const u = s.ultimo, quem = quemMarcou(u).split(' ')[0], dia = ddmmEntrega(s.dia);
-  const decl = !s.servico && s.declarado > 0 ? s.declarado : 0;
-  const soDeclarado = decl > 0 && decl >= s.entregue && !s.implicito && ['parcial', 'entregue', 'retirado'].includes(s.situacao);
+  /* O implícito da O.S. que o celular finalizou também é declarado (revisão
+     da E5): o selo não diz "entregue na finalização" do que ninguém conferiu. */
+  let impDecl = false;
+  if (!s.servico && s.implicito > 0) try { impDecl = !!(ENTREGA_ITEM.entregaImplicita(os) || {}).declarado; } catch {}
+  const decl = !s.servico ? (s.declarado > 0 ? s.declarado : 0) + (impDecl ? s.implicito : 0) : 0;
+  const soDeclarado = decl > 0 && decl >= s.entregue + s.implicito && ['parcial', 'entregue', 'retirado'].includes(s.situacao);
   let txt = '', cls = '';
   if (s.servico) { cls = 'st-servico'; txt = s.dia ? `serviço: ${s.situacao}${s.declarado ? ' (declarado)' : ''} ${dia}` : 'serviço: vai com a entrega'; }
   else if (s.situacao === 'a entregar') { cls = 'st-aentregar'; txt = (interna ? 'a retirar' : 'a entregar') + (s.qtde > 1 ? ` (${s.qtde})` : ''); }
   else if (soDeclarado) {
     cls = 'st-declarado';
-    txt = `declarado pela equipe${s.situacao === 'parcial' ? `: ${s.entregue} de ${s.qtde} ·` : ''}${dia ? ' ' + dia : ''}${quem ? ' por ' + quem : ''}`;
+    txt = `declarado pela equipe${s.situacao === 'parcial' ? `: ${s.entregue} de ${s.qtde} ·` : ''}${dia ? ' ' + dia : ''}${impDecl ? ' na finalização' : quem ? ' por ' + quem : ''}`;
   }
   else if (s.situacao === 'parcial') { cls = 'st-parcial'; txt = `${s.rotulo}${dia ? ' · ' + dia : ''}${quem ? ' por ' + quem : ''}`; }
   else if (s.situacao === 'entregue' || s.situacao === 'retirado') {
@@ -2451,7 +2461,9 @@ function finalizarDaFicha(interno) {
       if (m.erro) { toast(m.erro, 'error'); markDirty(); return; }
       aplicarFinalizacao(alvo);
       saveDraft(); reRenderModalKeepOpen();
-      const extra = m.marcadas ? ` · ${m.marcadas} ${m.marcadas === 1 ? 'item marcado' : 'itens marcados'} ${interno ? 'retirado' : 'entregue'}${m.marcadas === 1 ? '' : 's'} hoje` : '';
+      const extra = !m.marcadas ? '' : papelDeclara()
+        ? ` · ${m.marcadas} ${m.marcadas === 1 ? 'item declarado' : 'itens declarados'} pela equipe hoje; a gestão confere no Fechar o dia`
+        : ` · ${m.marcadas} ${m.marcadas === 1 ? 'item marcado' : 'itens marcados'} ${interno ? 'retirado' : 'entregue'}${m.marcadas === 1 ? '' : 's'} hoje`;
       toast((interno ? 'Retirada registrada 📦' : 'Instalação finalizada 🏁') + extra, 'success');
     };
     if (interno) concluir(); else perguntarRetrabalho(d, concluir);
@@ -2465,8 +2477,10 @@ function perguntarSaldoEntrega(os, p, aoEscolher) {
   const marca = podeMarcarEntrega(interna ? 'retirado' : 'entregue');
   /* Só item com problema: nada a marcar. Finalizar deixa o item com problema
      (o saldo dele fica segurado); quem resolve é a marca no item. */
+  /* Quem declara (montagem com senha, E5) não marca entregue: declara, e a
+     gestão confere no Fechar o dia (revisão da E5: o texto dizia "Marcar"). */
   const principal = !n ? `Finalizar: ${np === 1 ? 'o item fica' : `os ${np} itens ficam`} com problema`
-    : marca ? `Marcar ${n === 1 ? 'o item restante' : `os ${n} restantes`} como ${verbo} hoje` : `Finalizar assim: o saldo conta como ${interna ? 'retirado' : 'entregue'} hoje`;
+    : marca ? `${papelDeclara() ? 'Declarar' : 'Marcar'} ${n === 1 ? 'o item restante' : `os ${n} restantes`} como ${verbo}${papelDeclara() ? ' pela equipe' : ''} hoje` : `Finalizar assim: o saldo conta como ${interna ? 'retirado' : 'entregue'} hoje`;
   const linha = ({ it, s }) => `<li>${esc(rotuloItemEntrega(it))}: ${esc(s.situacao === 'parcial' ? `${s.rotulo}, faltam ${s.saldo}` : (interna ? 'a retirar' : 'a entregar') + (s.qtde > 1 ? ` (${s.qtde})` : ''))}</li>`;
   const linhaProb = ({ it, s }) => `<li>${esc(rotuloItemEntrega(it))}${s.problema && s.problema.motivo ? ` (${esc(s.problema.motivo)})` : ''}: fica com problema; resolva no item</li>`;
   const titulo = n ? (interna ? 'Ainda há itens a retirar' : 'Ainda há itens a entregar') : (np === 1 ? 'Item com problema de entrega' : 'Itens com problema de entrega');
@@ -4927,7 +4941,10 @@ function finalizarServicoDoCard(osId) {
       registrarEtapa(alvo);
       STORE.saveOS(alvo);
       renderActiveTab();
-      const extra = m.marcadas ? ` · ${m.marcadas} ${m.marcadas === 1 ? 'item marcado' : 'itens marcados'} hoje` : '';
+      // Quem declara (montagem com senha) não diz "marcados" (revisão da E5).
+      const extra = !m.marcadas ? '' : papelDeclara()
+        ? ` · ${m.marcadas} ${m.marcadas === 1 ? 'item declarado' : 'itens declarados'} pela equipe hoje`
+        : ` · ${m.marcadas} ${m.marcadas === 1 ? 'item marcado' : 'itens marcados'} hoje`;
       const msg = (isInterno(alvo) ? 'Retirada registrada 📦' : 'Serviço finalizado 🏁') + extra;
       /* O DESFAZER DE UM TOQUE (revisão da E4) volta a finalização E as marcas
          que ela criou: sem isso a O.S. reabria com o saldo "entregue hoje",

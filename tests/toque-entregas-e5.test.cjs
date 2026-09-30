@@ -204,15 +204,22 @@ test('troca de crachá: a marca da gestão guardada no aparelho e enviada pelo c
   assert.deepEqual(r.entregasRecusadas.map(x => x.id), ['e-gc2']);
 });
 
-test('troca de crachá: a marca do celular enviada pela gestão (a fila esvaziada com usuário e senha) leva o crachá da gestão, e não fica declarada', async () => {
+test('troca de crachá: a marca do celular enviada pela gestão (a fila esvaziada com usuário e senha) leva o crachá da gestão, e CONTINUA declarada', async () => {
   const e = await edge('pcp-sync', banco());
   const cel = comMarca(await doCelular(e), '8101:1:1', ev('e-gx1', 'entregue', {qtde:10, via:'toque', declarado:true, por:'Ana'}));
   // A cópia do celular é podada: a gestão manda o que o aparelho tem, e o servidor devolve o que falta.
   const r = await e.call({action:'upsert', os:cel}, gestor);
   assert.equal(r.status, 200);
   const [m] = entregas(e, '8101:1:1');
-  assert.deepEqual([m.por, m.porId, m.via, m.declarado], ['Gestor Teste', '111222', 'gestao', undefined],
-    'regra do plano: o evento leva o crachá da hora do envio (quem tem senha responde por ela)');
+  /* Invertido na revisão da E5 (D2): este teste fixava o buraco. O autor é o
+     crachá do envio (quem tem senha responde por ela), mas enviar a fila de
+     outro não é conferir: a declaração do instalador virava entregue
+     conferido só porque o celular foi esvaziado com senha. O aparelho só
+     rebaixa a marca; quem confere é o Fechar o dia (F14). */
+  assert.deepEqual([m.por, m.porId, m.via, m.declarado], ['Gestor Teste', '111222', 'gestao', true],
+    'o autor é o do envio, e a marca segue declarada');
+  const L = D.lancamentosDaOS(gravada(e));
+  assert.equal(L.entregue, 0, 'nada virou entregue conferido');
 });
 
 /* ── O celular nunca vê R$ ───────────────────────────────────────────── */
@@ -275,17 +282,23 @@ test('o declarado não entra no valor entregue conferido: fica em `declarado` e 
   }
 });
 
-test('leitura fecha por omissão: via "toque" sem a bandeira é declarada; a gestão com via "toque" do aparelho não vira declarada (o via sai do papel)', async () => {
+test('leitura fecha por omissão: via "toque" sem a bandeira é declarada; a marca que já veio declarada segue declarada com a gestão (o via sai do papel)', async () => {
   for (const [nome, E] of await copias()) {
     assert.equal(E.declarada({id:'a', tipo:'entregue', qtde:1, dia:HOJE, via:'toque'}), true, nome);
     assert.equal(E.declarada({id:'a', tipo:'entregue', qtde:1, dia:HOJE, via:'gestao', declarado:true}), true, nome);
     assert.equal(E.declarada({id:'a', tipo:'entregue', qtde:1, dia:HOJE, via:'gestao'}), false, nome);
     assert.equal(E.declarada({id:'a', tipo:'problema', dia:HOJE, via:'toque'}), false, `${nome}: só entrega e retirada são declaradas`);
     const it = {descricao:'Placa', qtde:'10'};
-    const doCel = E.validarEvento({id:'c1', tipo:'retirado', qtde:2, dia:HOJE, via:'gestao', declarado:false}, it, {papel:'toque', os:{}, hoje:HOJE});
+    // O retirado do celular é o da O.S. interna (revisão da E5, D5: o tipo do celular segue o da O.S.).
+    const doCel = E.validarEvento({id:'c1', tipo:'retirado', qtde:2, dia:HOJE, via:'gestao', declarado:false}, it, {papel:'toque', os:{tipo:'interno'}, hoje:HOJE});
     assert.deepEqual([doCel.ok, doCel.evento.via, doCel.evento.declarado], [true, 'toque', true], nome);
+    /* Invertido na revisão da E5 (D2): a marca que veio declarada (a fila do
+       celular esvaziada pela gestão) segue declarada; o via é o do papel. */
     const daGestao = E.validarEvento({id:'c2', tipo:'entregue', qtde:2, dia:HOJE, via:'toque', declarado:true}, it, {papel:'pcp', os:{}, hoje:HOJE});
-    assert.deepEqual([daGestao.evento.via, daGestao.evento.declarado], ['gestao', undefined], nome);
+    assert.deepEqual([daGestao.evento.via, daGestao.evento.declarado], ['gestao', true], nome);
+    // A marca da gestão que não veio declarada continua conferida: o aparelho só rebaixa.
+    const propria = E.validarEvento({id:'c3', tipo:'entregue', qtde:2, dia:HOJE, via:'gestao'}, it, {papel:'pcp', os:{}, hoje:HOJE});
+    assert.deepEqual([propria.evento.via, propria.evento.declarado], ['gestao', undefined], nome);
   }
 });
 

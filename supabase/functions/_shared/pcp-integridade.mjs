@@ -403,6 +403,36 @@ export function carimbarEntregaLancada(os, antes, autor, em, { podeDesfazer = fa
   };
   return { os: r, aviso: '' };
 }
+/* FINALIZADA PELO CELULAR (revisão da E5, 30/09/2026). Decisão do dono: a
+   palavra do instalador é DECLARAÇÃO. A O.S. que o celular finaliza sem tocar
+   no Instalado contava o implícito como entregue CONFERIDO (a finalização da
+   gestão), e a do instalador que tocou em cada item, como declarado. Agora o
+   servidor carimba `finalizadaPorCampo` {finalizadaEm, por, porId, em} quando
+   quem põe a finalização é o celular: o crachá sem senha ou a montagem com
+   senha (o papel 'montagem', o mesmo que o motor trata como celular). O motor
+   (entregaImplicita) manda o implícito dessa finalização para as
+   declarações. Precisa ser aqui: o celular v139 continua finalizando sem
+   marca nenhuma.
+   Campo do SERVIDOR, protegido como os da gestão (F01): o que o aparelho
+   mandou nele nunca entra (nem da gestão), e a aba que não o conhece não o
+   apaga. Vale para a finalização de mesmo finalizadaEm: a gestão que reabre e
+   finaliza de novo põe uma finalização dela, e o carimbo antigo fica sem
+   efeito (o Desfazer do reabrir devolve a do celular, e ele volta a valer).
+   `autor` = { nome, porId } quando quem envia é o celular; null nos outros.
+   Devolve a O.S. */
+export const finalizacaoMudou = (os, antes) => !!String(os?.finalizadaEm ?? '').trim() && String(os?.finalizadaEm ?? '').trim() !== String(antes?.finalizadaEm ?? '').trim();
+export function carimbarFinalizacaoCampo(os, antes, autor, em) {
+  const r = { ...os };
+  if (objeto(antes?.finalizadaPorCampo)) r.finalizadaPorCampo = antes.finalizadaPorCampo; else delete r.finalizadaPorCampo;
+  if (autor && finalizacaoMudou(os, antes)) {
+    r.finalizadaPorCampo = {
+      // Sem corte: o motor compara este texto com o finalizadaEm gravado.
+      finalizadaEm: String(os.finalizadaEm).trim(), por: String(autor.nome ?? '').trim().slice(0, 120),
+      porId: ehIdPessoa(autor.porId) ? String(autor.porId).trim() : '', em: String(em ?? ''),
+    };
+  }
+  return r;
+}
 /* O ID DE QUEM MARCOU (F01). Cada carimbo de nome da ficha ganha, ao lado, o
    ID do RH (<campo>Id). O ID nunca vem do aparelho. O par diz qual hora
    acompanha o nome: refazer com o mesmo nome em outra hora é marca nova.
@@ -1596,6 +1626,11 @@ export function podarCarimbosF15(r) {
     const { porId: _pi, porConta: _pc, ...x } = out.retornoPrevisto;
     out.retornoPrevisto = x;
   }
+  // Quem finalizou pelo celular (revisão da E5) desce com o nome, sem o ID; a volta sem ele não apaga.
+  if (objeto(out.finalizadaPorCampo)) {
+    const { porId: _pi, ...x } = out.finalizadaPorCampo;
+    out.finalizadaPorCampo = x;
+  }
   /* A MARCA DE ENTREGA POR ITEM (E3) desce com o nome de quem marcou, sem o
      ID: a mesma régua. A volta sem ele não apaga nada, porque marca gravada
      não muda (guardarEntregasItens parte do gravado). */
@@ -1680,6 +1715,8 @@ export const CAMPOS_AUDITADOS = [
   'fotosCheckinIds', 'fotosRetornoIds', 'layoutFotoId',
   'retornoConf', 'voltaEquipe', 'excecaoConclusao',
   'finalizadaEm', 'finalizadoPor', 'reabertaEm', 'reabertaPor',
+  // Quem finalizou pelo celular (revisão da E5): decide se o implícito é declarado.
+  'finalizadaPorCampo',
   'entregaLancada', 'retrabalho', 'causa', 'causaRaiz', 'etapaOrigem',
   // O que a apuração da performance e a trava da conclusão leem (perfFonte,
   // validarConclusao): o tipo tira a O.S. da performance e dispensa a prova;
