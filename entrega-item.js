@@ -197,6 +197,9 @@ function eventosAtivos(item) {
    DECLARADA não fecha problema (revisão da E5): o problema é da gestão, e a
    palavra do celular não o resolve; a porta já a recusa com o problema aberto
    (validarEvento), e esta regra cobre a que chegou antes com dia depois dele.
+   Nem depois de CONFERIDA no Fechar o dia (revisão da F14): a conferência diz
+   que a declaração vale como entrega, não que o problema acabou. O problema
+   só fecha por marca da gestão.
    `declarado`: quantas das unidades que foram vieram de marca declarada (E5)
    e ainda não conferida.
    A CONFERÊNCIA DO FECHAR O DIA (F14): a marca 'conferido' que vale aponta
@@ -217,7 +220,7 @@ function contar(item) {
     } else if (e.tipo === 'problema') problemas.push({evento:e, ordem});
     else if (e.tipo === 'cancelado') cancelado = e;
   });
-  const fecha = (p, x) => x.qtde > 0 && !x.declarado && (x.evento.dia > p.evento.dia || (x.evento.dia === p.evento.dia && x.ordem > p.ordem));
+  const fecha = (p, x) => x.qtde > 0 && !declarada(x.evento) && (x.evento.dia > p.evento.dia || (x.evento.dia === p.evento.dia && x.ordem > p.ordem));
   const abertos = problemas.filter(p => !partes.some(x => fecha(p, x)));
   const problema = abertos.length ? abertos[abertos.length - 1].evento : null;
   const ultimoDia = partes.filter(p => p.qtde > 0).reduce((m, p) => p.evento.dia > m ? p.evento.dia : m, '');

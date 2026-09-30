@@ -562,7 +562,9 @@ test('atalhos: setas e Enter nunca disparam dentro de campo; na linha, Enter con
   await abrirPendencias(b);
   await b.acao({acao:'retrabalho-nao', os:'a1'});
   const linha = id => { const el = {tagName:'DIV', getAttribute:k => k === 'data-lote-linha' ? id : null, closest:() => el}; return el; };
-  const campo = tag => ({tagName:tag, getAttribute:() => null, closest:sel => sel === '[data-lote-linha]' ? linha('a1') : null});
+  // O campo do lote fica dentro de #lote-raiz (a tecla que nasce fora do lote não é dele: tests/lote-revisao.test.cjs).
+  const raiz = {tagName:'DIV', getAttribute:() => null, closest:() => null};
+  const campo = tag => ({tagName:tag, getAttribute:() => null, closest:sel => sel === '[data-lote-linha]' ? linha('a1') : sel === '#lote-raiz' ? raiz : null});
   let prevenido = 0;
   const tecla = (key, target, extra = {}) => { b.ctx.__ev = {key, target, preventDefault() { prevenido++; }, ...extra}; return b.run('LOTE.teclado(__ev)'); };
   b.run(`LOTE.estado().foco = 'a1'`);

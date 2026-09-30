@@ -170,62 +170,97 @@ const LOTE = (() => {
 
   /* ─────────────────────────────── QUAIS O.S. ──────────────────────────── */
   const canceladaERP = o => temMotor() ? ENTREGA_ITEM.canceladaNoERP(o) : false;
+  /* O LANÇAMENTO QUE VALE: o pedido de Desfazer que ainda está na fila
+     ({desfazer: true}) não é lançamento (OPERACAO.entregaLancadaValida). */
+  const lancada = o => typeof OPERACAO.entregaLancadaValida === 'function' ? OPERACAO.entregaLancadaValida(o)
+    : (o && objeto(o.entregaLancada) && o.entregaLancada.desfazer !== true ? o.entregaLancada : null);
+  // A baixa do ERP de antes do corte (casa.js) já conta como entregue no dia da baixa, sem lançamento.
+  const antesDoCorte = o => typeof erpAntesDoCorte === 'function' && !!erpAntesDoCorte(o);
   // O dia que vale para a linha e para a volta: o lançado, o da volta, o da finalização.
-  const diaLinha = o => OPERACAO.dia(o && o.entregaLancada && o.entregaLancada.data) || OPERACAO.diaDaVolta(o) || OPERACAO.dia(o && o.finalizadaEm);
+  const diaLinha = o => OPERACAO.dia((lancada(o) || {}).data) || OPERACAO.diaDaVolta(o) || OPERACAO.dia(o && o.finalizadaEm);
   const aberta = o => !OPERACAO.dia(o && o.finalizadaEm);
   const baixaERP = o => OPERACAO.encerradaERP(o);
   /* A DATA DA ENTREGA QUE A LINHA SUGERE. A lançada; a da finalização do PCP
-     (a que já vale: sugerir outra mudaria o dia da entrega calado); e, na
-     baixa do ERP ainda não lançada, o retorno registrado ou o último dia da
-     agenda até a baixa: o ERP baixa 2 a 4 dias depois da entrega real. */
+     (a que já vale: sugerir outra mudaria o dia da entrega calado); a da
+     baixa do ERP de antes do corte (ela já conta nesse dia, diaEntrega:
+     sugerir outra mudaria o mês da entrega); e, na baixa do ERP a lançar, o
+     retorno registrado ou o último dia da agenda até a baixa: o ERP baixa 2 a
+     4 dias depois da entrega real. */
   function diaSugerido(o) {
-    const lancado = OPERACAO.dia(o && o.entregaLancada && o.entregaLancada.data);
+    const lancado = OPERACAO.dia((lancada(o) || {}).data);
     if (lancado) return lancado;
     const fim = OPERACAO.dia(o && o.finalizadaEm);
     if (!fim) return '';
-    if (!baixaERP(o)) return fim;
+    if (!baixaERP(o) || antesDoCorte(o)) return fim;
     const ret = OPERACAO.dia(o.retornoEm);
     if (ret && ret <= fim) return ret;
     return OPERACAO.diasAgenda(o).filter(d => d <= fim).pop() || fim;
   }
   // O dia da volta nas pendências: o do carro que voltou; na baixa do ERP, o dia sugerido da entrega.
-  const diaVoltaPendencia = o => baixaERP(o) && !(o.entregaLancada && o.entregaLancada.data) ? diaSugerido(o) : diaLinha(o);
+  const diaVoltaPendencia = o => baixaERP(o) && !lancada(o) ? diaSugerido(o) : diaLinha(o);
   /* DIA: as instalações que voltaram (ou foram entregues) no dia, a baixa do
-     ERP ainda não lançada cuja agenda passou pelo dia (a baixa costuma chegar
-     2 a 4 dias depois da entrega), e as O.S. abertas com agenda no dia e
-     equipe, liberação ou saída. Retirada no balcão não tem volta. */
+     ERP ainda não lançada NO DIA SUGERIDO dela (o último dia da agenda até a
+     baixa: a baixa costuma chegar 2 a 4 dias depois da entrega, e o dia da
+     baixa não é o da entrega), e as O.S. abertas com agenda no dia e equipe,
+     liberação ou saída. Retirada no balcão não tem volta. */
   function osDoDia(todas, dia) {
     const out = [];
     for (const o of todas || []) {
       if (!o || OPERACAO.interno(o) || canceladaERP(o)) continue;
-      const agenda = OPERACAO.diasAgenda(o).includes(dia);
       if (!aberta(o)) {
-        const erpSemLancar = baixaERP(o) && !o.entregaLancada && agenda && OPERACAO.dia(o.finalizadaEm) >= dia;
-        if (diaLinha(o) === dia || erpSemLancar) out.push(o);
-      } else if (agenda && (o.liberadoPCP || OPERACAO.equipe(o).length || o.horaSaida || o.saidaEm)) out.push(o);
+        if (baixaERP(o) && !lancada(o) ? diaSugerido(o) === dia : diaLinha(o) === dia) out.push(o);
+      } else if (OPERACAO.diasAgenda(o).includes(dia) && (o.liberadoPCP || OPERACAO.equipe(o).length || o.horaSaida || o.saidaEm)) out.push(o);
     }
     return out;
   }
+  /* A PARTICIPAÇÃO ANTIGA QUE AINDA VALE (o blob performancePCP.participacoes),
+     pela régua da Performance: perfParticipacaoVale e os percentuais certos
+     (PERF.validar). A O.S. com ela já está confirmada. As participações são
+     lidas uma vez por volta do laço de eventos (a configuração é relida do
+     localStorage a cada perfConfig, e a tela pergunta por centenas de O.S.). */
+  let _partes = null;
+  function participacoes() {
+    if (_partes) return _partes;
+    const m = new Map();
+    try {
+      const c = typeof perfConfig === 'function' ? perfConfig() : null;
+      for (const p of lista(c && c.participacoes)) if (objeto(p) && !m.has(p.id)) m.set(p.id, p);
+    } catch (e) { /* sem configuração: nenhuma participação */ }
+    _partes = m;
+    Promise.resolve().then(() => { _partes = null; });
+    return m;
+  }
+  function participacaoQueVale(o) {
+    if (!objeto(o) || typeof perfParticipacaoVale !== 'function') return null;
+    let p = null;
+    try { p = perfParticipacaoVale(o, participacoes().get(o.id) || null); } catch (e) { return null; }
+    if (!objeto(p)) return null;
+    if (typeof PERF !== 'undefined' && PERF && typeof PERF.validar === 'function' && PERF.validar(lista(p.membros))) return null;
+    return p;
+  }
+  // A equipe desta O.S. já está confirmada: a divisão gravada nela, ou a participação antiga que vale.
+  const confirmadaNaOS = o => (typeof DIVISAO !== 'undefined' && DIVISAO.alocacaoConfirmada(o)) || !!participacaoQueVale(o);
   /* PENDÊNCIAS DO MÊS: as instalações entregues no mês sem divisão
-     confirmada e as baixas do ERP a lançar (a mesma regra da fila de
-     Entregas, classificarEntregas). A cancelada no ERP fica fora e é
-     contada no cabeçalho. */
+     confirmada (nem participação antiga que valha) e as baixas do ERP a
+     lançar (a mesma regra da fila de Entregas, classificarEntregas). A
+     cancelada no ERP fica fora e é contada no cabeçalho. `aLancar` e
+     `semDivisao` são as duas contas do cabeçalho, pela mesma régua. */
   function osPendentes(todas, mes) {
     const cls = classificarEntregas(todas || []);
     const noMes = o => String(diaSugerido(o) || '').slice(0, 7) === mes;
     const out = [], vistas = new Set();
-    let canceladas = 0;
+    let canceladas = 0, aLancar = 0;
     for (const o of cls.aLancar) {
       if (!noMes(o)) continue;
       if (canceladaERP(o)) { canceladas++; continue; }
-      if (!vistas.has(o.id)) { vistas.add(o.id); out.push(o); }
+      if (!vistas.has(o.id)) { vistas.add(o.id); out.push(o); aLancar++; }
     }
     for (const o of cls.instalacoes) {
       if (!noMes(o) || canceladaERP(o) || vistas.has(o.id)) continue;
-      if (typeof DIVISAO !== 'undefined' && DIVISAO.alocacaoConfirmada(o)) continue;
+      if (confirmadaNaOS(o)) continue;
       vistas.add(o.id); out.push(o);
     }
-    return {os: out, canceladas};
+    return {os: out, canceladas, aLancar, semDivisao: out.length - aLancar};
   }
   function osDaTela(todas) {
     if (est.modo === 'dia') return {os: osDoDia(todas, est.dia), canceladas: 0};
@@ -274,8 +309,10 @@ const LOTE = (() => {
     const r = est.rascunho;
     let l = r.linhas[o.id];
     if (!l) {
-      // No Dia, a aberta e a baixa do ERP levam o dia que se fecha; o resto, a data que já vale (diaSugerido).
-      l = {data: est.modo === 'dia' && (aberta(o) || (baixaERP(o) && !o.entregaLancada)) ? est.dia : (diaSugerido(o) || (grupo && grupo.dia) || hoje()),
+      /* No Dia, a aberta leva o dia que se fecha; o resto, a data que já vale
+         ou a sugerida (diaSugerido), também a baixa do ERP: ela só aparece no
+         dia sugerido, e o dia da baixa não é o da entrega. */
+      l = {data: est.modo === 'dia' && aberta(o) ? est.dia : (diaSugerido(o) || (grupo && grupo.dia) || hoje()),
         retrabalho: null, entrega: aberta(o) ? '' : 'todos', parte: {}, conferir: false, confirmada: false, visto: assinatura(o)};
       r.linhas[o.id] = l;
     }
@@ -304,8 +341,39 @@ const LOTE = (() => {
   }
   const voltaMexida = rg => PERGUNTAS().some(k => (rg.volta[k] || '') !== (rg.voltaVista[k] || '')) || texto(rg.volta.obs) !== texto(rg.voltaVista.obs);
   const chaveAloc = g => 'lote:' + g.chave;
-  // A O.S. que representa a volta no componente: a que já tem divisão confirmada, senão a primeira.
-  const representante = g => g.os.find(o => typeof DIVISAO !== 'undefined' && DIVISAO.alocacaoConfirmada(o)) || g.os[0];
+  // Com uma volta só de carro ("carro não informado" fica sem chegada e sem conferência pedidas).
+  const comCarro = g => !g.semCarro && !!texto(g.veiculo);
+  /* A O.S. que representa a volta no componente: a que já tem divisão
+     confirmada, senão a que tem participação antiga que vale, senão a primeira. */
+  const representante = g => g.os.find(o => typeof DIVISAO !== 'undefined' && DIVISAO.alocacaoConfirmada(o)) || g.os.find(o => participacaoQueVale(o)) || g.os[0];
+  /* A DIVISÃO QUE PARTE DA PARTICIPAÇÃO ANTIGA (revisão da F14). A O.S. do
+     Dia que tem participação conferida antes (70/30, digamos) abre o
+     componente nela, não na sugestão (60/40): "✓ Equipe certa" grava a mesma
+     conta que já valia, agora dentro da O.S. A equipe e o líder vêm da
+     sugestão (a composição da O.S.); os percentuais, da participação. Sem
+     líder na sugestão, ou com gente diferente, fica a sugestão. */
+  const EM_PARTICIPACAO = 'participacao-antiga-do-lote';
+  function alocDaParticipacao(st, p) {
+    if (!st || st.modo !== 'divisao' || typeof DIVISAO === 'undefined') return null;
+    const gs = lista(st.aloc && st.aloc.grupos);
+    if (gs.length !== 1 || !gs[0].liderId) return null;
+    const ms = typeof perfMembrosAntigos === 'function' ? perfMembrosAntigos(p) : lista(p.membros);
+    const g = gs[0];
+    if (ms.length !== lista(g.membros).length) return null;
+    const membros = g.membros.map(m => {
+      const x = ms.find(y => y && String(y.chave) === String(m.pessoaId));
+      const cota = x ? Math.round(Number(x.percentual) * 100) : NaN;
+      return Number.isInteger(cota) && cota > 0 ? {...m, cota} : null;
+    });
+    if (membros.some(m => !m)) return null;
+    const a = {grupos: [{...g, cota: DIVISAO.TOTAL, membros}], manual: false};
+    const padrao = DIVISAO.restaurarPadrao(a, st.regra);
+    const cotasPadrao = lista(padrao && padrao.grupos && padrao.grupos[0] && padrao.grupos[0].membros).map(m => m && m.cota);
+    a.manual = membros.some((m, i) => m.cota !== cotasPadrao[i]);
+    a.final = DIVISAO.finais(a);
+    return DIVISAO.validar(a) ? null : a;
+  }
+  const daParticipacao = st => !!(st && st.gravada && st.gravada.em === EM_PARTICIPACAO);
   const valorGrupo = g => g.os.reduce((s, o) => { const v = typeof valorDaOS === 'function' ? valorDaOS(o) : o.valorTotal; return s + (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : 0); }, 0);
   /* O COMPONENTE DA DIVISÃO, um por volta. O rascunho guarda a divisão que a
      pessoa montou (ou só as pessoas, no modo só pessoas): reabrir a tela parte
@@ -324,9 +392,14 @@ const LOTE = (() => {
       os = {...semAloc, equipe: rg.pessoas.slice()};
     }
     const p = papel();
-    ALOCUI.iniciar(chave, {os, equipes: typeof equipesCadastradasCasa === 'function' ? equipesCadastradasCasa() : [], papel: p,
-      modo: ALOCUI.modoPara(p, os), dica: ALOCUI.dicaModo(p, os), semAntigo: true, reiniciar: true, dia: g.dia,
-      valor: valorGrupo(g), versoes: typeof versoesRegrasCasa === 'function' ? versoesRegrasCasa() : []});
+    const opcoes = {equipes: typeof equipesCadastradasCasa === 'function' ? equipesCadastradasCasa() : [], papel: p,
+      semAntigo: true, reiniciar: true, dia: g.dia, valor: valorGrupo(g), versoes: typeof versoesRegrasCasa === 'function' ? versoesRegrasCasa() : []};
+    const iniciarCom = x => ALOCUI.iniciar(chave, {...opcoes, os: x, modo: ALOCUI.modoPara(p, x), dica: ALOCUI.dicaModo(p, x)});
+    iniciarCom(os);
+    // Sem rascunho, a O.S. com participação antiga que vale parte dela (não da sugestão).
+    const part = os === rep && !objeto(rep.alocacao) ? participacaoQueVale(rep) : null;
+    const a = part ? alocDaParticipacao(ALOCUI.estado(chave), part) : null;
+    if (a) iniciarCom({...rep, alocacao: {...a, em: EM_PARTICIPACAO}});
     return ALOCUI.estado(chave);
   }
   // A divisão (ou as pessoas) que a volta manda para cada O.S., quando a equipe foi conferida.
@@ -349,10 +422,15 @@ const LOTE = (() => {
   }
 
   /* ─────────────────────────────── AS FALTAS ───────────────────────────── */
+  const EQUIPE_NAO_CONFERIDA = 'equipe não conferida (toque em ✓ Equipe certa ou mude a equipe)';
   const respostaDaLinha = (o, l) => (l.retrabalho && l.retrabalho.resposta) || respostaFeita(o);
   /* O que falta na linha. `trava` impede confirmar e salvar; `nota` é o que
      ainda não foi feito e o Salvar aceita (a equipe vazia é perguntada no
-     Salvar; a conferência e a chegada ficam como estão). */
+     Salvar; a conferência e a chegada ficam como estão).
+     A EQUIPE NÃO É CONFIRMADA PELA LINHA (revisão da F14, decisão 2 mudada):
+     só "✓ Equipe certa" ou mudar a equipe no grupo a gravam. Sem isso a linha
+     grava o resto e diz "equipe não conferida". Sem carro informado, a
+     chegada e a conferência da volta não são pedidas. */
   function faltasDaLinha(o, l, g, rg) {
     const trava = [], nota = [];
     if (!diaOk(l.data)) trava.push('data da entrega');
@@ -366,9 +444,9 @@ const LOTE = (() => {
     const eq = conf ? conf.equipe : OPERACAO.equipe(o);
     if (!lista(eq).length) nota.push('equipe (o Salvar pergunta)');
     else if (conf && conf.erro) nota.push(`divisão da volta: ${conf.erro.replace(/[.\s]*$/, '').toLowerCase()} (sem isso vão só as pessoas)`);
-    else if (!rg.equipeConfirmada && !(typeof DIVISAO !== 'undefined' && DIVISAO.alocacaoConfirmada(o))) nota.push('conferir a equipe');
+    else if (!rg.equipeConfirmada && !confirmadaNaOS(o)) nota.push(EQUIPE_NAO_CONFERIDA);
     if (declaracoesDe(o).length && !l.conferir) nota.push('conferir o que a equipe declarou');
-    if (!g.semCarro) {
+    if (comCarro(g)) {
       // A chegada e a conferência que VALEM nesta O.S.: as da volta, se a pessoa mexeu; senão, as gravadas nela.
       const chegou = horaOk(rg.chegada) || (objeto(o.retornoConferido) && o.retornoConferido.dia === g.dia && horaOk(o.retornoConferido.hora));
       if (!chegou) nota.push('chegada do carro');
@@ -383,7 +461,7 @@ const LOTE = (() => {
   function retrato(o) {
     const r = {equipe: copia(lista(o.equipe)), alocacao: objeto(o.alocacao) ? copia(o.alocacao) : null,
       retornoConferido: objeto(o.retornoConferido) ? copia(o.retornoConferido) : null, retornoConf: objeto(o.retornoConf) ? copia(o.retornoConf) : null,
-      entregaLancada: objeto(o.entregaLancada) ? copia(o.entregaLancada) : null, checkoutSituacao: objeto(o.checkout) ? texto(o.checkout.situacao) : ''};
+      entregaLancada: lancada(o) ? copia(o.entregaLancada) : null, checkoutSituacao: objeto(o.checkout) ? texto(o.checkout.situacao) : ''};
     for (const k of CAMPOS_RETRAB) r[k] = o[k] === undefined ? null : copia(o[k]);
     return r;
   }
@@ -414,7 +492,7 @@ const LOTE = (() => {
         }
       } else if (Array.isArray(eq.equipe) && genteDe(eq.equipe) !== genteDe(atual.equipe)) { pessoas = eq.equipe.slice(); mexeu.pessoas = true; }
       if (eq.erro && lista(eq.equipe).length) avisos.push('A divisão da volta não foi gravada (' + eq.erro.replace(/[.\s]*$/, '') + '); só as pessoas foram.');
-    }
+    } else if (OPERACAO.equipe(atual).length && !confirmadaNaOS(atual)) avisos.push('Equipe não conferida: a equipe da O.S. ficou como estava. Para gravá-la, toque em ✓ Equipe certa (ou mude a equipe) e salve de novo.');
     const semVolta = OPERACAO.interno(atual) || OPERACAO.semCarro(atual);
     const respostasVolta = voltaMexida(rg) && !semVolta ? Object.fromEntries(PERGUNTAS().map(k => [k, rg.volta[k] || ''])) : null;
     // A resposta desta tela; sem ela, a que a O.S. já tinha fica (não recarimba).
@@ -431,10 +509,11 @@ const LOTE = (() => {
     /* O LANÇAMENTO (entregaLancada) é da O.S. encerrada: a baixa do ERP (o que
        a fila "a lançar" espera) e a finalizada em outro dia do que a gestão
        conferiu. Na O.S. aberta a entrega fica pelos itens; na finalizada no
-       dia certo, a finalização já diz o dia. */
-    const lancar = !aberta(atual) && (baixaERP(atual) || l.data !== diaEntrega(atual));
+       dia certo, a finalização já diz o dia. A baixa do ERP de antes do corte
+       já conta no dia dela: só ganha lançamento se a pessoa mudou a data. */
+    const lancar = !aberta(atual) && ((baixaERP(atual) && !antesDoCorte(atual)) || l.data !== diaEntrega(atual));
     if (!lancar) { if ('entregaLancada' in atual) nova.entregaLancada = atual.entregaLancada; else delete nova.entregaLancada; }
-    else if (!(objeto(atual.entregaLancada) && atual.entregaLancada.data === l.data)) mexeu.lancamento = true;
+    else if (!(lancada(atual) && atual.entregaLancada.data === l.data)) mexeu.lancamento = true;
     // A CHEGADA CONFERIDA (retornoConferido): a mesma hora em toda O.S. da volta.
     if (!g.semCarro && horaOk(rg.chegada)) {
       const ch = objeto(atual.retornoConferido) ? atual.retornoConferido : null;
@@ -485,12 +564,31 @@ const LOTE = (() => {
 
   /* ─────────────────────────────── A ESPERA DE CADA GRAVAÇÃO ───────────── */
   const _esperas = new Map();
+  // As O.S. cuja gravação na fila levou aviso de conflito (a loja não diz): o Desfazer não espera por elas.
+  const _emConflito = new Set();
   const _lojas = typeof WeakSet === 'function' ? new WeakSet() : new Set();
+  /* A CONFIRMAÇÃO QUE CHEGA DEPOIS: a gravação que ficou "na fila" (do lote
+     ou do Desfazer) só conta como feita quando o servidor a aceita. Quem a
+     aceitou manda o `atualizadoEm` do envio; o relatório guardado passa a
+     dizer "gravada". */
+  function confirmarNoRelatorio(d) {
+    const em = d && d.enviado && d.enviado.atualizadoEm;
+    if (!em) return;
+    let mudou = false;
+    for (const rel of est.relatorios) for (const it of lista(rel && rel.itens)) {
+      if (!it || it.id !== d.id) continue;
+      if (it.estado === 'na-fila' && it.em === em) { it.estado = 'gravada'; delete it.motivo; mudou = true; }
+      if (it.desfazer && it.desfazer.estado === 'na-fila' && it.desfazer.enviado === em) { const {motivo: _m, ...resto} = it.desfazer; it.desfazer = {...resto, estado: 'gravada'}; mudou = true; }
+    }
+    if (mudou) { void gravarRelatorios(); if (!est.salvando && telaAtiva()) pintarRelatorio([d.id]); }
+  }
   function ouvir(S) {
     if (!S || _lojas.has(S)) return;
     _lojas.add(S);
     if (typeof S.on === 'function') {
       S.on('os-gravada', d => {
+        if (d && d.id) _emConflito.delete(d.id);
+        confirmarNoRelatorio(d);
         const w = d && _esperas.get(d.id);
         if (!w || !d.enviado || d.enviado.atualizadoEm !== w.em) return;
         w.fim({estado: 'gravada', os: d.os, descartado: lista(d.descartado), motivo: d.motivo || null, avisos: lista(d.avisos).map(String)});
@@ -506,6 +604,7 @@ const LOTE = (() => {
     }
     if (typeof S.onConflict === 'function') S.onConflict((local, remoto) => {
       const id = (remoto && remoto.id) || (local && local.id), w = id && _esperas.get(id);
+      if (id) _emConflito.add(id);
       if (!w) return;
       const quem = remoto && remoto.atualizadoPor ? ` (${remoto.atualizadoPor})` : '';
       w.fim({estado: 'conflito', motivo: `Outra gravação desta O.S. chegou antes ao servidor${quem}. O lote não foi aceito nela: ficou só neste aparelho, na fila, até alguém resolver o aviso de conflito ("Recarregar" descarta o que o lote fez nela; "Sobrescrever" envia).`});
@@ -513,28 +612,31 @@ const LOTE = (() => {
   }
   const dormir = ms => new Promise(r => setTimeout(r, ms));
   const naFilaDe = (S, id) => (typeof S.getQueue === 'function' ? lista(S.getQueue()) : []).find(it => it && it.action === 'upsert' && it.os && it.os.id === id) || null;
+  // A gravação de `em` desta O.S. ainda está na fila deste aparelho.
+  const pendenteNaFila = (S, id, em) => { const q = em ? naFilaDe(S, id) : null; return !!(q && q.os && q.os.atualizadoEm === em); };
   const offline = () => typeof navigator !== 'undefined' && navigator && navigator.onLine === false;
-  async function gravarEsperando(S, nova, o = {}) {
+  /* A RESPOSTA DO SERVIDOR a uma gravação que já está na fila (`em` = o
+     atualizadoEm dela): pelos eventos da loja ou pelo prazo. Sem internet,
+     ou com `semEsperar`, não espera: fica "na fila". */
+  async function esperarResposta(S, id, em, o = {}) {
     const prazo = Number.isFinite(o.prazoMs) ? o.prazoMs : 20000, passo = Number.isFinite(o.passoMs) ? o.passoMs : 300;
     let fim;
     const resultado = new Promise(r => { fim = r; });
-    const w = {em: nova.atualizadoEm, feito: false, fim: r => { if (w.feito) return; w.feito = true; if (_esperas.get(nova.id) === w) _esperas.delete(nova.id); fim(r); }};
-    _esperas.set(nova.id, w);
-    try { S.saveOS(nova); }
-    catch (e) { w.fim({estado: 'recusada', motivo: 'Não deu para guardar neste aparelho: ' + String((e && e.message) || e)}); return resultado; }
+    const w = {em, feito: false, fim: r => { if (w.feito) return; w.feito = true; if (_esperas.get(id) === w) _esperas.delete(id); fim(r); }};
+    _esperas.set(id, w);
     if (offline()) { w.fim({estado: 'na-fila', semResposta: true, motivo: 'Sem internet: ficou na fila deste aparelho e vai na próxima sincronização.'}); return resultado; }
     if (o.semEsperar) { w.fim({estado: 'na-fila', semResposta: true, motivo: 'O servidor não respondeu às anteriores: ficou na fila deste aparelho e vai quando ele voltar.'}); return resultado; }
     const t0 = Date.now();
     while (!w.feito) {
       try { if (typeof S.trySync === 'function') await S.trySync(); } catch (e) { /* a fila guarda; o resultado vem pelos eventos ou pelo prazo */ }
       if (w.feito) break;
-      const it = naFilaDe(S, nova.id);
+      const it = naFilaDe(S, id);
       if (it && it.recusa && it.recusa.motivo && it.os && it.os.atualizadoEm === w.em) {
         w.fim({estado: 'recusada', naFila: true, motivo: `O servidor não aceitou: ${String(it.recusa.motivo).replace(/[.\s]*$/, '.')} A gravação ficou na fila deste aparelho.`});
         break;
       }
       if (!it && Date.now() - t0 >= passo) {
-        const agora = typeof S.getOS === 'function' ? S.getOS(nova.id) : null;
+        const agora = typeof S.getOS === 'function' ? S.getOS(id) : null;
         w.fim(agora && agora.atualizadoEm === w.em ? {estado: 'gravada'} : {estado: 'recusada', motivo: 'A O.S. voltou a outra versão durante o envio (outra gravação chegou antes, ou o aviso de conflito foi resolvido com "Recarregar"): o lote não valeu nela.'});
         break;
       }
@@ -542,6 +644,11 @@ const LOTE = (() => {
       await dormir(passo);
     }
     return resultado;
+  }
+  async function gravarEsperando(S, nova, o = {}) {
+    try { S.saveOS(nova); }
+    catch (e) { return {estado: 'recusada', motivo: 'Não deu para guardar neste aparelho: ' + String((e && e.message) || e)}; }
+    return esperarResposta(S, nova.id, nova.atualizadoEm, o);
   }
   // O que o servidor deixou de fora de uma gravação aceita: dito na linha.
   function avisosDaResposta(r) {
@@ -605,7 +712,8 @@ const LOTE = (() => {
         const nova = grav.nova;
         nova.atualizadoEm = emUnico();
         nova.atualizadoPor = nomeUsuario();
-        Object.assign(item, {antes: retrato(atual), depois: retrato(nova), mexeu: grav.mexeu, marcas: grav.marcas, avisos: grav.avisos.slice()});
+        // `em`: o atualizadoEm desta gravação (o Desfazer sabe se ela ainda está na fila, e a confirmação que chega depois a acha).
+        Object.assign(item, {antes: retrato(atual), depois: retrato(nova), mexeu: grav.mexeu, marcas: grav.marcas, avisos: grav.avisos.slice(), em: nova.atualizadoEm});
         // Vai ao relatório ANTES de gravar: a aba que fecha no meio deixa o Desfazer alcançar esta O.S.
         await gravarRelatorios();
         const r = await gravarEsperando(S, nova, {...o, semEsperar: mudas >= 2});
@@ -626,19 +734,24 @@ const LOTE = (() => {
   const ESTADO_TEXTO = {gravada: 'Gravada', 'gravada-aviso': 'Gravada, com aviso', 'na-fila': 'Na fila deste aparelho', recusada: 'Recusada', conflito: 'Conflito', pulada: 'Não enviada', 'sem-mudanca': 'Nada mudou', enviando: 'Enviando'};
 
   /* ─────────────────────────────── DESFAZER O LOTE ─────────────────────── */
-  const desfazivel = it => !!(it && it.antes && ['gravada', 'gravada-aviso', 'na-fila', 'enviando', 'recusada'].includes(it.estado) && !(it.desfazer && ['gravada', 'gravada-aviso', 'na-fila'].includes(it.desfazer.estado)));
+  /* O QUE AINDA DÁ PARA DESFAZER: o que o lote gravou (ou mandou para a fila)
+     e o Desfazer ainda não fez. O Desfazer "na fila" NÃO conta como feito:
+     só a confirmação do servidor o fecha (revisão da F14). */
+  const desfazivel = it => !!(it && it.antes && ['gravada', 'gravada-aviso', 'na-fila', 'enviando', 'recusada'].includes(it.estado) && !(it.desfazer && ['gravada', 'gravada-aviso'].includes(it.desfazer.estado)));
   /* A VOLTA DE UMA O.S.: cada campo que o lote mexeu volta ao de antes, só
      se ainda está como o lote deixou (o que outra pessoa mudou depois fica, e
-     é dito). As marcas do lote são desfeitas por marca 'desfeito' (a lista é
-     só de acréscimo); a divisão volta como divisão nova com o carimbo da
-     gravada (ou sai, se não havia); o lançamento sai por pedido explícito. */
+     é dito; o que já está como antes fica quieto). As marcas do lote são
+     desfeitas por marca 'desfeito' (a lista é só de acréscimo); a divisão
+     volta como divisão nova com o carimbo da gravada (ou sai, se não havia);
+     o lançamento sai por pedido explícito. Da conferência da volta, só as
+     quatro respostas voltam: a observação e as fotos que alguém pôs depois
+     do lote ficam (revisão da F14). */
   function montarVolta(atual, it) {
     const a = it.antes, d = it.depois || {}, m = it.mexeu || {}, volta = copia(atual), notas = [];
     let algo = false;
     if (m.alocacao || m.pessoas) {
-      const mesma = genteDe(atual.equipe) === genteDe(d.equipe) && (!m.alocacao || nucleoAloc(atual.alocacao) === nucleoAloc(d.alocacao));
-      if (!mesma) notas.push('a equipe mudou depois do lote e ficou como está');
-      else {
+      const igualA = x => genteDe(atual.equipe) === genteDe(x.equipe) && (!m.alocacao || nucleoAloc(atual.alocacao) === nucleoAloc(x.alocacao));
+      if (igualA(d)) {
         volta.equipe = copia(a.equipe);
         if (m.alocacao) {
           if (objeto(a.alocacao)) {
@@ -648,31 +761,41 @@ const LOTE = (() => {
           } else volta.alocacao = null;
         }
         algo = true;
-      }
+      } else if (!igualA(a)) notas.push('a equipe mudou depois do lote e ficou como está');
     }
     if (m.chegada) {
-      const ch = objeto(atual.retornoConferido) ? atual.retornoConferido : {}, dd = d.retornoConferido || {};
-      if (ch.dia !== dd.dia || ch.hora !== dd.hora) notas.push('a chegada do carro mudou depois do lote e ficou como está');
-      else { volta.retornoConferido = a.retornoConferido ? {dia: a.retornoConferido.dia, hora: a.retornoConferido.hora, fonte: a.retornoConferido.fonte || 'lote', em: a.retornoConferido.em || ''} : null; algo = true; }
+      const ch = objeto(atual.retornoConferido) ? atual.retornoConferido : {}, dd = d.retornoConferido || {}, aa = a.retornoConferido || {};
+      if (ch.dia === dd.dia && ch.hora === dd.hora) { volta.retornoConferido = a.retornoConferido ? {dia: a.retornoConferido.dia, hora: a.retornoConferido.hora, fonte: a.retornoConferido.fonte || 'lote', em: a.retornoConferido.em || ''} : null; algo = true; }
+      else if (ch.dia !== aa.dia || ch.hora !== aa.hora) notas.push('a chegada do carro mudou depois do lote e ficou como está');
     }
     if (m.volta) {
-      const igual = PERGUNTAS().every(k => OPERACAO.respostaVolta((atual.retornoConf || {})[k]) === OPERACAO.respostaVolta((d.retornoConf || {})[k]));
-      if (!igual) notas.push('a conferência da volta mudou depois do lote e ficou como está');
-      else { volta.retornoConf = a.retornoConf ? copia(a.retornoConf) : {...Object.fromEntries(PERGUNTAS().map(k => [k, ''])), obs: '', fotos: []}; algo = true; }
+      const rcAtual = objeto(atual.retornoConf) ? atual.retornoConf : {}, rcAntes = objeto(a.retornoConf) ? a.retornoConf : {}, rcDepois = objeto(d.retornoConf) ? d.retornoConf : {};
+      const respostas = rc => PERGUNTAS().map(k => OPERACAO.respostaVolta(rc[k])).join(',');
+      if (respostas(rcAtual) === respostas(rcDepois)) {
+        const rc = {...rcAtual};
+        for (const k of PERGUNTAS()) rc[k] = OPERACAO.respostaVolta(rcAntes[k]);
+        // A observação e as fotos: voltam ao antes só se estão como o lote deixou; as de outra pessoa ficam.
+        if (texto(rcAtual.obs) === texto(rcDepois.obs)) rc.obs = String(rcAntes.obs || '');
+        else notas.push('a observação da volta mudou depois do lote e ficou');
+        if (JSON.stringify(lista(rcAtual.fotos)) === JSON.stringify(lista(rcDepois.fotos))) rc.fotos = copia(lista(rcAntes.fotos));
+        else notas.push('as fotos da volta mudaram depois do lote e ficaram');
+        rc.por = String(rcAntes.por || ''); rc.em = String(rcAntes.em || '');
+        volta.retornoConf = rc;
+        algo = true;
+      } else if (respostas(rcAtual) !== respostas(rcAntes)) notas.push('a conferência da volta mudou depois do lote e ficou como está');
     }
     if (m.retrabalho) {
-      const igual = texto((atual.retrabalhoPerguntado || {}).em) === texto((d.retrabalhoPerguntado || {}).em) && !!atual.retrabalho === !!d.retrabalho;
-      if (!igual) notas.push('o retrabalho mudou depois do lote e ficou como está');
-      else {
+      const igualA = x => texto((atual.retrabalhoPerguntado || {}).em) === texto((x.retrabalhoPerguntado || {}).em) && !!atual.retrabalho === !!x.retrabalho;
+      if (igualA(d)) {
         for (const k of CAMPOS_RETRAB) volta[k] = a[k] === undefined ? null : copia(a[k]);
         if (objeto(volta.checkout) && (volta.checkout.situacao === 'Retrabalho' || a.checkoutSituacao === 'Retrabalho')) volta.checkout = {...volta.checkout, situacao: a.checkoutSituacao};
         algo = true;
-      }
+      } else if (!igualA(a)) notas.push('o retrabalho mudou depois do lote e ficou como está');
     }
     if (m.lancamento) {
-      const el = objeto(atual.entregaLancada) ? atual.entregaLancada : null;
-      if (!el || el.data !== (d.entregaLancada || {}).data) notas.push('o lançamento mudou depois do lote e ficou como está');
-      else { volta.entregaLancada = a.entregaLancada ? {data: a.entregaLancada.data} : {desfazer: true}; algo = true; }
+      const el = lancada(atual), antes = objeto(a.entregaLancada) ? a.entregaLancada : null;
+      if (el && el.data === (d.entregaLancada || {}).data) { volta.entregaLancada = antes ? {data: antes.data} : {desfazer: true}; algo = true; }
+      else if (antes ? !(el && el.data === antes.data) : !!el) notas.push('o lançamento mudou depois do lote e ficou como está');
     }
     if (lista(it.marcas).length && temMotor()) {
       volta.itens = lista(atual.itens).map(x => objeto(x) ? {...x, ...(Array.isArray(x.entregas) ? {entregas: x.entregas.slice()} : {})} : x);
@@ -689,6 +812,10 @@ const LOTE = (() => {
     }
     return {volta, algo, notas};
   }
+  const LOTE_NA_FILA = 'A gravação do lote nesta O.S. ainda não chegou ao servidor (está na fila deste aparelho). O Desfazer não mexeu na fila, para não tomar o lugar dela: desfaça de novo quando ela subir.';
+  const LOTE_EM_CONFLITO = 'A gravação do lote nesta O.S. está com aviso de conflito neste aparelho. Resolva o aviso ("Recarregar" ou "Sobrescrever") e desfaça de novo.';
+  const DESFAZER_NA_FILA = 'O Desfazer desta O.S. está na fila deste aparelho e o servidor ainda não confirmou: ele vai na próxima sincronização.';
+  const DESFAZER_EM_CONFLITO = 'O Desfazer desta O.S. está com aviso de conflito neste aparelho. Resolva o aviso e desfaça de novo.';
   async function desfazer(relId, o = {}) {
     const S = loja(o);
     if (!gestao()) return {erro: SO_GESTAO};
@@ -697,21 +824,58 @@ const LOTE = (() => {
     if (!rel) return {erro: 'Este lote não está mais guardado neste aparelho.'};
     const alvo = lista(rel.itens).filter(desfazivel).reverse();
     if (!alvo.length) return {erro: 'Nada a desfazer neste lote.'};
+    if (est.salvando) return {erro: 'O lote está sendo salvo ou desfeito agora: espere terminar.'};
     ouvir(S);
     est.salvando = true;
     let mudas = 0;
+    // A resposta do servidor a uma gravação que está na fila (a do lote ou a do Desfazer).
+    const esperar = async (id, em) => {
+      if (_emConflito.has(id)) return {estado: 'conflito'};
+      const r = await esperarResposta(S, id, em, {...o, semEsperar: mudas >= 2});
+      mudas = r.semResposta ? mudas + 1 : 0;
+      return r;
+    };
     try {
       for (const it of alvo) {
         if (it.estado === 'conflito') continue;
+        /* (1) O DESFAZER QUE FICOU NA FILA só conta como feito com a
+           confirmação do servidor: enquanto está na fila, espera por ela e
+           não manda outro por cima. */
+        if (it.desfazer && it.desfazer.estado === 'na-fila' && pendenteNaFila(S, it.id, it.desfazer.enviado)) {
+          const r = await esperar(it.id, it.desfazer.enviado);
+          if (r.estado === 'gravada') { const {motivo: _m, ...resto} = it.desfazer; it.desfazer = {...resto, estado: 'gravada', em: agoraISO()}; }
+          else it.desfazer = {...it.desfazer, motivo: r.estado === 'conflito' ? DESFAZER_EM_CONFLITO : DESFAZER_NA_FILA};
+          await gravarRelatorios();
+          continue;
+        }
+        /* (2) A GRAVAÇÃO DO PRÓPRIO LOTE AINDA NA FILA (a resposta se perdeu,
+           ou a rede caiu): espera ela subir. Se continuar pendente, diz e não
+           troca a fila: o Desfazer tomaria o lugar dela e, se o servidor já
+           tivesse gravado o lote, viraria conflito calado. */
+        if (pendenteNaFila(S, it.id, it.em)) {
+          const r = await esperar(it.id, it.em);
+          if (r.estado !== 'gravada') { it.desfazer = {estado: 'pulada', motivo: r.estado === 'conflito' ? LOTE_EM_CONFLITO : LOTE_NA_FILA, em: agoraISO()}; await gravarRelatorios(); continue; }
+          if (it.estado === 'na-fila' || it.estado === 'enviando') { it.estado = 'gravada'; delete it.motivo; }
+        }
         const atual = typeof S.getOS === 'function' ? S.getOS(it.id) : null;
         if (!atual) { it.desfazer = {estado: 'pulada', motivo: 'A O.S. não está mais neste aparelho.', em: agoraISO()}; continue; }
         const {volta, algo, notas} = montarVolta(atual, it);
-        if (!algo) { it.desfazer = {estado: 'pulada', motivo: 'Nada a desfazer: ' + (notas.join('; ') || 'a O.S. já está como antes') + '.', em: agoraISO()}; continue; }
+        if (!algo) {
+          /* O Desfazer que estava na fila saiu dela e a O.S. já está como antes:
+             ele chegou. Com outra gravação desta O.S. ainda na fila (ela leva o
+             Desfazer junto), continua "na fila" até o servidor aceitar. */
+          if (it.desfazer && it.desfazer.estado === 'na-fila' && !notas.length) {
+            if (naFilaDe(S, it.id)) it.desfazer = {...it.desfazer, motivo: DESFAZER_NA_FILA};
+            else { const {motivo: _m, ...resto} = it.desfazer; it.desfazer = {...resto, estado: 'gravada', em: agoraISO()}; }
+          } else it.desfazer = {estado: 'pulada', motivo: 'Nada a desfazer: ' + (notas.join('; ') || 'a O.S. já está como antes') + '.', em: agoraISO()};
+          continue;
+        }
         volta.atualizadoEm = emUnico();
         volta.atualizadoPor = nomeUsuario();
         const r = await gravarEsperando(S, volta, {...o, semEsperar: mudas >= 2});
         mudas = r.semResposta ? mudas + 1 : 0;
-        it.desfazer = {estado: r.estado, ...(r.motivo ? {motivo: r.motivo} : {}), ...(notas.length ? {notas} : {}), em: agoraISO()};
+        // `enviado`: o atualizadoEm do Desfazer, para a confirmação que chega depois (e o "na fila" que ainda não é feito).
+        it.desfazer = {estado: r.estado, ...(r.motivo ? {motivo: r.motivo} : {}), ...(notas.length ? {notas} : {}), enviado: volta.atualizadoEm, em: agoraISO()};
         const l = est.rascunho && est.rascunho.linhas[it.id];
         if (l) { l.visto = assinatura(S.getOS(it.id) || volta); delete l.salvaEm; }
         await gravarRelatorios();
@@ -739,12 +903,14 @@ const LOTE = (() => {
     const g = gruposDe(osDaTela(S && typeof S.getAllOS === 'function' ? S.getAllOS() : []).os).find(x => x.chave === chave);
     return g ? {g, rg: grupoDe(g)} : null;
   }
-  // Uma linha só confirma sem falta que trave; confirmar confere também a equipe da volta.
+  /* Uma linha só confirma sem falta que trave. Confirmar a linha NÃO confere
+     a equipe da volta (revisão da F14): a sugestão confirmada por tabela
+     trocava a participação antiga (70/30) pela conta nova (60/40) calada. A
+     equipe só vai com "✓ Equipe certa" ou quando a pessoa muda a equipe. */
   function confirmarLinha(x) {
     const f = faltasDaLinha(x.o, x.l, x.g, x.rg);
     if (f.trava.length) return 'Falta: ' + f.trava.join(', ') + '.';
     x.l.confirmada = true;
-    if (!x.rg.equipeConfirmada) { iniciarEquipe(x.g, x.rg, false); guardarEquipeNoRascunho(x.g, x.rg); }
     return '';
   }
   /* UMA AÇÃO: o nome é o de data-lote-acao. Devolve '' ou o motivo (a tela
@@ -820,21 +986,41 @@ const LOTE = (() => {
       for (const g of gruposDe(osDaTela(S && typeof S.getAllOS === 'function' ? S.getAllOS() : []).os)) iniciarEquipe(g, grupoDe(g), true);
     }
     await carregarRelatorios();
+    // A confirmação do servidor que chega depois (e o aviso de conflito) é ouvida desde a abertura.
+    ouvir(loja());
     return est.rascunho;
   }
 
   /* ─────────────────────────────── ATALHOS ─────────────────────────────── */
   const ehCampo = t => !!t && (['INPUT', 'SELECT', 'TEXTAREA'].includes(String(t.tagName || '').toUpperCase()) || t.isContentEditable === true || (typeof t.getAttribute === 'function' && t.getAttribute('role') === 'textbox'));
   const telaAtiva = () => typeof STATE !== 'undefined' && STATE._entAba === 'lote' && (!STATE.activeTab || STATE.activeTab === 'entregas');
-  const temDialogo = () => typeof document !== 'undefined' && !!(document.getElementById && (document.getElementById('retrab-pergunta') || document.getElementById('lancar-box'))) ;
+  /* UM DIÁLOGO POR CIMA DO LOTE (revisão da F14): a pergunta do retrabalho,
+     o Lançar entrega, a ficha (#modal-overlay sem .hidden), a entrega por
+     item, qualquer [aria-modal=true] visível e qualquer <dialog open>. Com
+     ele aberto, nenhum atalho do lote dispara: o Ctrl+Enter com a ficha
+     aberta salvava o lote escondido atrás dela. */
+  const visivel = el => !!el && el.hidden !== true && !(typeof el.closest === 'function' && el.closest('[hidden], .hidden')) && (typeof el.getClientRects !== 'function' || el.getClientRects().length > 0);
+  function temDialogo() {
+    if (typeof document === 'undefined' || !document) return false;
+    const porId = id => typeof document.getElementById === 'function' ? document.getElementById(id) : null;
+    const um = s => { try { return typeof document.querySelector === 'function' ? document.querySelector(s) : null; } catch (e) { return null; } };
+    const todos = s => { try { return typeof document.querySelectorAll === 'function' ? [...document.querySelectorAll(s)] : []; } catch (e) { return []; } };
+    if (porId('retrab-pergunta') || porId('lancar-box') || porId('entrega-item-box')) return true;
+    if (um('#modal-overlay:not(.hidden)') || um('dialog[open]')) return true;
+    return todos('[aria-modal="true"]').some(visivel);
+  }
+  // A tecla é do lote só quando nasce dentro dele, ou com nada em foco (no body).
+  const noLote = t => !!t && typeof document !== 'undefined' && !!document && (t === document.body || t === document.documentElement || (typeof t.closest === 'function' && !!t.closest('#lote-raiz')));
   /* SETAS ENTRE AS LINHAS, ENTER CONFIRMA A LINHA EM FOCO, CTRL+ENTER SALVA.
      Dentro de campo (data, hora, observação, busca do componente) nenhuma
      tecla simples dispara: a seta mexe no campo e o Enter é do campo. Só o
-     Ctrl+Enter (ou Cmd+Enter) salva de qualquer lugar. Com a pergunta do
-     retrabalho aberta, nada dispara. Devolve o que fez ('' = nada). */
+     Ctrl+Enter (ou Cmd+Enter) salva de qualquer lugar DO LOTE. Com um
+     diálogo aberto, ou com a tecla vinda de fora do lote, nada dispara.
+     Devolve o que fez ('' = nada). */
   function teclado(ev) {
-    if (!ev || !telaAtiva() || temDialogo() || !est.rascunho) return '';
+    if (!ev || !telaAtiva() || !est.rascunho || temDialogo()) return '';
     const t = ev.target;
+    if (!noLote(t)) return '';
     if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
       if (typeof ev.preventDefault === 'function') ev.preventDefault();
       void salvarPelaTela();
@@ -845,11 +1031,13 @@ const LOTE = (() => {
     if (!ids.length) return '';
     const linhaEl = t && typeof t.closest === 'function' ? t.closest('[data-lote-linha]') : null;
     const atual = (linhaEl && linhaEl.getAttribute('data-lote-linha')) || est.foco || '';
+    const focoAntes = est.foco;
     if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
       const i = ids.indexOf(atual);
       const j = i < 0 ? 0 : Math.max(0, Math.min(ids.length - 1, i + (ev.key === 'ArrowDown' ? 1 : -1)));
       est.foco = ids[j];
       if (typeof ev.preventDefault === 'function') ev.preventDefault();
+      marcarFoco(focoAntes);
       focarLinha(est.foco);
       return 'foco';
     }
@@ -863,7 +1051,8 @@ const LOTE = (() => {
       if (erro) { if (typeof toast === 'function') toast(erro, 'error'); return 'falta'; }
       const i = ids.indexOf(atual);
       est.foco = ids[Math.min(ids.length - 1, i + 1)] || atual;
-      render();
+      pintarParte({os: [atual]});
+      marcarFoco(atual);
       focarLinha(est.foco);
       return 'confirmar';
     }
@@ -873,10 +1062,21 @@ const LOTE = (() => {
     const S = loja();
     return gruposDe(osDaTela(S && typeof S.getAllOS === 'function' ? S.getAllOS() : []).os).flatMap(g => g.os.map(o => o.id));
   }
+  // O valor dentro de [atributo="..."]: aspas e barra escapadas.
+  const seletor = v => String(v == null ? '' : v).replace(/["\\]/g, '\\$&');
   function focarLinha(id) {
     if (typeof document === 'undefined' || !document.querySelector || !id) return;
-    const el = document.querySelector(`[data-lote-linha="${String(id).replace(/"/g, '')}"]`);
+    const el = document.querySelector(`[data-lote-linha="${seletor(id)}"]`);
     if (el && typeof el.focus === 'function') { try { el.focus({preventScroll: false}); } catch (e) { el.focus(); } if (typeof el.scrollIntoView === 'function') try { el.scrollIntoView({block: 'nearest'}); } catch (e) { /* sem rolagem */ } }
+  }
+  // A marca da linha em foco muda de linha sem repintar nenhuma.
+  function marcarFoco(antes) {
+    const el = painel();
+    if (!el || typeof el.querySelector !== 'function' || antes === est.foco) return;
+    const velho = antes ? el.querySelector(`[data-lote-linha="${seletor(antes)}"]`) : null;
+    const novo = est.foco ? el.querySelector(`[data-lote-linha="${seletor(est.foco)}"]`) : null;
+    if (velho && velho.classList) velho.classList.remove('em-foco');
+    if (novo && novo.classList) novo.classList.add('em-foco');
   }
 
   /* ─────────────────────────────── A TELA ──────────────────────────────── */
@@ -889,8 +1089,8 @@ const LOTE = (() => {
       <div class="lote-intro-corpo">
         <p><strong>O primeiro uso é acompanhado.</strong> Feche primeiro UMA volta real, junto com quem lança (o Thiago), e confira no card de cada O.S. e no histórico da ficha o que ficou gravado. Só depois aplique às pendências do mês inteiro.</p>
         <ul>
-          <li>Cada grupo é uma volta: dia, carro e equipe. Confirme a equipe (a divisão vale para todas as O.S. da volta), a hora em que o carro chegou e a conferência da volta.</li>
-          <li>Cada linha é uma O.S.: a data vem preenchida; responda o retrabalho (Não num toque, Sim abre a pergunta completa); diga se todos os itens foram entregues ou marque a parte; confira o que a equipe declarou pelo celular; e confirme a linha (✓ ou Enter).</li>
+          <li>Cada grupo é uma volta: dia, carro e equipe. Confirme a equipe em ✓ Equipe certa (ou mude a equipe): a divisão vale para todas as O.S. da volta, e só assim ela é gravada. Depois, a hora em que o carro chegou e a conferência da volta.</li>
+          <li>Cada linha é uma O.S.: a data vem preenchida; responda o retrabalho (Não num toque, Sim abre a pergunta completa); diga se todos os itens foram entregues ou marque a parte; confira o que a equipe declarou pelo celular; e confirme a linha (✓ ou Enter). Confirmar a linha não grava a equipe.</li>
           <li>Salvar grava só as linhas confirmadas, uma O.S. por vez, e mostra o resultado de cada uma. O lote inteiro tem Desfazer.</li>
           <li>No computador: setas entre as linhas, Enter confirma a linha em foco, Ctrl+Enter salva. Dentro de um campo, só o Ctrl+Enter vale.</li>
           <li>O rascunho fica guardado neste navegador (por modo e dia) e volta ao reabrir a tela. Sair do app apaga o rascunho.</li>
@@ -902,7 +1102,7 @@ const LOTE = (() => {
   }
   const seloOrigem = o => {
     if (aberta(o)) return '<span class="lote-selo aberta">Aberta no PCP</span>';
-    if (baixaERP(o)) return `<span class="lote-selo erp">Baixa do ERP${semProva(o) ? ' · sem prova' : ''}${o.entregaLancada ? ' · lançada' : ' · a lançar'}</span>`;
+    if (baixaERP(o)) return `<span class="lote-selo erp">Baixa do ERP${semProva(o) ? ' · sem prova' : ''}${lancada(o) ? ' · lançada' : antesDoCorte(o) ? ' · de antes do corte, já conta' : ' · a lançar'}</span>`;
     if (temMotor()) { const imp = ENTREGA_ITEM.entregaImplicita(o); if (imp && imp.declarado) return '<span class="lote-selo decl">Finalizada pelo celular · declarada</span>'; if (imp && imp.conferido) return '<span class="lote-selo ok">Finalizada pelo celular · conferida</span>'; }
     return '<span class="lote-selo ok">Finalizada no PCP</span>';
   };
@@ -979,8 +1179,15 @@ const LOTE = (() => {
     const partes = st.modo === 'pessoas'
       ? ALOCUI.paraEquipe(chaveAloc(g)).equipe.map(p => escL(OPERACAO.nomePessoa(p)))
       : grupos.map(gr => `${eqNome(gr) ? `<strong>${escL(eqNome(gr))}</strong>${grupos.length > 1 ? ' ' + pct(gr.cota) : ''}: ` : ''}${lista(gr.membros).map(m => `${escL(nome(m.pessoaId))}${m.pessoaId === gr.liderId ? ' (líder)' : ''} ${pct(m.cota)}`).join(', ')}`);
-    const origem = rg.equipeConfirmada ? '<span class="lote-selo ok">conferida</span>' : st.origem === 'gravada' ? '<span class="lote-selo ok">divisão gravada</span>' : partes.length ? '<span class="lote-selo sug">sugerida</span>' : '';
+    const origem = rg.equipeConfirmada ? '<span class="lote-selo ok">conferida</span>' : daParticipacao(st) ? '<span class="lote-selo ok">participação conferida antes</span>' : st.origem === 'gravada' ? '<span class="lote-selo ok">divisão gravada</span>' : partes.length ? '<span class="lote-selo sug">sugerida</span>' : '';
     return `${partes.length ? partes.join(' · ') : '<span class="lote-sem-equipe">Sem equipe: traga a equipe em "Mudar a equipe".</span>'} ${origem}`;
+  }
+  // A faixa da equipe da volta (o resumo e os dois botões). O componente, quando aberto, fica logo abaixo.
+  function equipeBlocoHTML(g, rg) {
+    const alocAberto = est.alocAberto === g.chave;
+    return `<div class="lote-g-equipe"><span class="lote-g-rot">Equipe</span><div class="lote-g-eq-txt">${equipeResumoHTML(g, rg)}</div>
+        <div class="lote-g-eq-acoes"><button type="button" class="lote-b ${rg.equipeConfirmada ? 'on' : ''}" aria-pressed="${rg.equipeConfirmada}" data-lote-acao="equipe-ok" data-grupo="${escL(g.chave)}" data-lote-k="eqok:${escL(g.chave)}">✓ Equipe certa</button>
+        <button type="button" class="lote-b" aria-expanded="${alocAberto}" data-lote-acao="equipe-mudar" data-grupo="${escL(g.chave)}" data-lote-k="eqmudar:${escL(g.chave)}">${alocAberto ? 'Fechar' : 'Mudar a equipe'}</button></div></div>`;
   }
   function grupoHTML(g, rg, ultimo) {
     const conf = rg.volta;
@@ -995,18 +1202,18 @@ const LOTE = (() => {
        mexeu) aparece resumida numa linha: nas pendências do mês são dezenas
        de voltas, e as quatro perguntas abertas em cada uma escondiam as O.S. */
     const compacta = !divergem && OPERACAO.voltaConferidaParaNota(conf) && !voltaMexida(rg) && !est.voltaAbertas.has(g.chave);
+    // Sem carro informado, a conferência não é pedida: fica fechada (dá para abrir e conferir mesmo assim).
+    const naoPedida = !compacta && !comCarro(g) && !divergem && !OPERACAO.voltaRespondida(conf) && !voltaMexida(rg) && !est.voltaAbertas.has(g.chave);
     const quemConferiu = (g.os.find(o => OPERACAO.voltaRespondida(o.retornoConf)) || {}).retornoConf || {};
     const selo = k => { const r = OPERACAO.respostaVolta(conf[k]); return `<span class="volta-resp ${r === 'sim' ? 'ok' : r === 'nao' ? 'ruim' : ''}">${r === 'sim' ? '✓' : r === 'nao' ? '✗' : '·'} ${escL(CURTO[k].toLowerCase())}</span>`; };
     const alocAberto = est.alocAberto === g.chave;
     return `<section class="lote-grupo" data-lote-grupo="${escL(g.chave)}">
       <header class="lote-g-head"><strong>${escL(dataBR(g.dia))}</strong> <span>🚗 ${escL(g.semCarro ? 'sem carro (instalação interna)' : (g.veiculo || 'carro não informado'))}</span> <span>👷 ${escL(g.equipe.join(', ') || 'sem equipe na O.S.')}</span> <span class="lote-g-n">${g.os.length} O.S.</span></header>
-      <div class="lote-g-equipe"><span class="lote-g-rot">Equipe</span><div class="lote-g-eq-txt">${equipeResumoHTML(g, rg)}</div>
-        <div class="lote-g-eq-acoes"><button type="button" class="lote-b ${rg.equipeConfirmada ? 'on' : ''}" aria-pressed="${rg.equipeConfirmada}" data-lote-acao="equipe-ok" data-grupo="${escL(g.chave)}" data-lote-k="eqok:${escL(g.chave)}">✓ Equipe certa</button>
-        <button type="button" class="lote-b" aria-expanded="${alocAberto}" data-lote-acao="equipe-mudar" data-grupo="${escL(g.chave)}" data-lote-k="eqmudar:${escL(g.chave)}">${alocAberto ? 'Fechar' : 'Mudar a equipe'}</button></div></div>
+      ${equipeBlocoHTML(g, rg)}
       ${alocAberto ? `<div class="lote-aloc aloc-host" data-lote-aloc="${escL(g.chave)}"></div>` : ''}
       ${g.semCarro ? '' : `<div class="lote-g-chegada"><label>Chegada do carro (conferida) <input type="time" value="${escL(rg.chegada || '')}" data-lote-campo="chegada" data-grupo="${escL(g.chave)}" data-lote-k="chegada:${escL(g.chave)}"></label>
-        <small>${prev ? `retorno previsto ${escL(prev)}` : 'sem retorno previsto'}${disse ? ` · a equipe anotou ${escL(disse)}` : ''}</small></div>
-      ${compacta ? `<div class="lote-g-volta compacta"><span class="lote-g-rot">Conferência da volta</span><span class="lote-volta-resumo">${PERGUNTAS().map(selo).join(' ')}${conf.obs ? ` <span class="volta-obs">“${escL(conf.obs)}”</span>` : ''}${quemConferiu.por ? ` <small>por ${escL(quemConferiu.por)}</small>` : ''}</span><button type="button" class="lote-b" data-lote-acao="volta-rever" data-grupo="${escL(g.chave)}" data-lote-k="rever:${escL(g.chave)}">Rever</button></div>` : `<div class="lote-g-volta"><span class="lote-g-rot">Conferência da volta</span>${PERGUNTAS().map(seg).join('')}
+        <small>${comCarro(g) ? '' : 'carro não informado: a chegada e a conferência da volta não são pedidas · '}${prev ? `retorno previsto ${escL(prev)}` : 'sem retorno previsto'}${disse ? ` · a equipe anotou ${escL(disse)}` : ''}</small></div>
+      ${naoPedida ? `<div class="lote-g-volta compacta"><span class="lote-g-rot">Conferência da volta</span><span class="lote-volta-resumo">Carro não informado: não é pedida.</span><button type="button" class="lote-b" data-lote-acao="volta-rever" data-grupo="${escL(g.chave)}" data-lote-k="rever:${escL(g.chave)}">Conferir</button></div>` : compacta ? `<div class="lote-g-volta compacta"><span class="lote-g-rot">Conferência da volta</span><span class="lote-volta-resumo">${PERGUNTAS().map(selo).join(' ')}${conf.obs ? ` <span class="volta-obs">“${escL(conf.obs)}”</span>` : ''}${quemConferiu.por ? ` <small>por ${escL(quemConferiu.por)}</small>` : ''}</span><button type="button" class="lote-b" data-lote-acao="volta-rever" data-grupo="${escL(g.chave)}" data-lote-k="rever:${escL(g.chave)}">Rever</button></div>` : `<div class="lote-g-volta"><span class="lote-g-rot">Conferência da volta</span>${PERGUNTAS().map(seg).join('')}
         <label class="lote-volta-obs">O que faltou ou precisa de atenção <input maxlength="300" value="${escL(conf.obs || '')}" data-lote-campo="volta-obs" data-grupo="${escL(g.chave)}" data-lote-k="obs:${escL(g.chave)}" placeholder="ex.: faltou a escada de 6 m"></label>
         ${declVolta && typeof voltaEquipeHTML === 'function' ? voltaEquipeHTML(declVolta, {fotos: false}) : ''}
         ${divergem ? '<p class="lote-aviso" role="note">As O.S. desta volta têm respostas diferentes (ou só parte foi conferida). Mexer na conferência põe a mesma resposta em todas.</p>' : ''}
@@ -1027,8 +1234,33 @@ const LOTE = (() => {
       ${pode ? `<button type="button" class="btn-ghost" data-lote-acao="desfazer-lote" data-rel="${escL(rel.id)}" ${est.salvando ? 'disabled' : ''}>↩ Desfazer este lote</button>` : ''}
     </section>`;
   }
+  const painel = () => typeof document !== 'undefined' && document && typeof document.getElementById === 'function' ? document.getElementById('panel-entregas') : null;
+  // O que a tela mostra numa passada: as O.S., os grupos e o último lote deste modo e dia.
+  function tela() {
+    const S = loja();
+    const d = osDaTela(S && typeof S.getAllOS === 'function' ? S.getAllOS() : []);
+    const r = est.relatorios[0];
+    return {...d, grupos: gruposDe(d.os), ultimo: r && r.modo === est.modo && r.chave === chaveAtual() ? r : null};
+  }
+  function contagem(t) {
+    let linhas = 0, conf = 0, falta = 0;
+    for (const g of t.grupos) { const rg = grupoDe(g); for (const o of g.os) { linhas++; const l = linhaDe(o, g); if (l.confirmada) conf++; else if (faltasDaLinha(o, l, g, rg).trava.length) falta++; } }
+    return {linhas, conf, falta};
+  }
+  // O cabeçalho das contas. Nas pendências, as duas contas vêm da mesma régua da lista (osPendentes).
+  function resumoHTML(t, c) {
+    const n = t.grupos.length, voltas = `${n} ${n === 1 ? 'volta' : 'voltas'}`;
+    const onde = est.modo === 'dia'
+      ? `${c.linhas} O.S. em ${voltas} no dia ${escL(dataBR(est.dia))}`
+      : `${t.semDivisao} ${t.semDivisao === 1 ? 'instalação entregue sem divisão' : 'instalações entregues sem divisão'} e ${t.aLancar} ${t.aLancar === 1 ? 'baixa' : 'baixas'} do ERP a lançar em ${escL(rotuloMes(est.mes))}, em ${voltas}`;
+    return `${onde} · <strong>${c.conf}</strong> ${c.conf === 1 ? 'confirmada' : 'confirmadas'}${c.falta ? ` · ${c.falta} com falta` : ''}${t.canceladas ? ` · ${t.canceladas} ${t.canceladas === 1 ? 'cancelada' : 'canceladas'} no ERP fora do lote` : ''}`;
+  }
+  const rodapeHTML = c => `<span>${est.progresso ? escL(est.progresso) : `${c.conf} ${c.conf === 1 ? 'linha confirmada' : 'linhas confirmadas'} para salvar`}</span>
+        <button type="button" class="btn-primary" data-lote-acao="salvar" ${est.salvando || !c.conf ? 'disabled' : ''}>Salvar o lote <kbd>Ctrl+Enter</kbd></button>`;
+  /* A TELA INTEIRA: ao abrir, ao trocar de modo ou de dia, e ao salvar ou
+     desfazer. O toque na linha ou no grupo repinta só o pedaço (pintarParte). */
   function render() {
-    const el = typeof document !== 'undefined' && document.getElementById ? document.getElementById('panel-entregas') : null;
+    const el = painel();
     if (!el) return;
     if (!gestao()) { el.innerHTML = `<div class="casa-pagina">${typeof abasEntregasHTML === 'function' ? abasEntregasHTML('lote') : ''}<p class="text-muted">${escL(SO_GESTAO)}</p></div>`; if (typeof wireAbasEntregas === 'function') wireAbasEntregas(el); return; }
     if (!est.rascunho || est.carregado !== chaveRascunho(est.modo, chaveAtual())) {
@@ -1037,16 +1269,9 @@ const LOTE = (() => {
       abrir({modo: STATE._loteModo || est.modo}).then(() => { if (telaAtiva()) render(); });
       return;
     }
-    const S = loja();
-    const todas = S && typeof S.getAllOS === 'function' ? S.getAllOS() : [];
-    const {os, canceladas} = osDaTela(todas);
-    const grupos = gruposDe(os);
-    const ultimo = est.relatorios[0] && est.relatorios[0].modo === est.modo && est.relatorios[0].chave === chaveAtual() ? est.relatorios[0] : null;
-    let nLinhas = 0, nConf = 0, nFalta = 0;
-    for (const g of grupos) { const rg = grupoDe(g); for (const o of g.os) { nLinhas++; const l = linhaDe(o, g); if (l.confirmada) nConf++; else if (faltasDaLinha(o, l, g, rg).trava.length) nFalta++; } }
+    const t = tela(), c = contagem(t);
     const ativa = focoAtual();
     const mesAnterior = (() => { const [a, m] = est.mes.split('-').map(Number); const d = new Date(Date.UTC(a, m - 2, 1)); return d.toISOString().slice(0, 7); })();
-    const nPend = est.modo === 'pendencias' ? {aLancar: os.filter(baixaERP).length, semDiv: os.filter(o => !baixaERP(o)).length} : null;
     const cabeca = est.modo === 'dia'
       ? `<label class="lote-quando">Dia <input type="date" value="${escL(est.dia)}" max="${escL(hoje())}" data-lote-campo="dia" data-lote-k="dia"></label>
          <button type="button" class="btn-ghost btn-sm" data-lote-acao="ir-dia" data-dia="${escL(hoje())}">Hoje</button>
@@ -1060,27 +1285,81 @@ const LOTE = (() => {
       ${introHTML()}
       <nav class="lote-modos" aria-label="Modo do lote"><button type="button" class="btn-ghost ${est.modo === 'dia' ? 'active' : ''}" aria-pressed="${est.modo === 'dia'}" data-lote-acao="modo" data-modo="dia">Dia</button><button type="button" class="btn-ghost ${est.modo === 'pendencias' ? 'active' : ''}" aria-pressed="${est.modo === 'pendencias'}" data-lote-acao="modo" data-modo="pendencias">Pendências do mês</button></nav>
       <div class="lote-filtro">${cabeca}</div>
-      <p class="lote-resumo">${est.modo === 'dia' ? `${nLinhas} O.S. em ${grupos.length} ${grupos.length === 1 ? 'volta' : 'voltas'} no dia ${escL(dataBR(est.dia))}` : `${nPend.semDiv} ${nPend.semDiv === 1 ? 'instalação entregue sem divisão' : 'instalações entregues sem divisão'} e ${nPend.aLancar} ${nPend.aLancar === 1 ? 'baixa' : 'baixas'} do ERP a lançar em ${escL(rotuloMes(est.mes))}, em ${grupos.length} ${grupos.length === 1 ? 'volta' : 'voltas'}`} · <strong>${nConf}</strong> ${nConf === 1 ? 'confirmada' : 'confirmadas'}${nFalta ? ` · ${nFalta} com falta` : ''}${canceladas ? ` · ${canceladas} ${canceladas === 1 ? 'cancelada' : 'canceladas'} no ERP fora do lote` : ''}</p>
-      ${est.modo === 'pendencias' && os.length ? '<p class="lote-dica">A equipe de cada volta vem sugerida pela composição da O.S. Confira antes de confirmar: confirmar a linha grava a equipe mostrada.</p>' : ''}
+      <p class="lote-resumo">${resumoHTML(t, c)}</p>
+      ${est.modo === 'pendencias' && t.os.length ? '<p class="lote-dica">A equipe de cada volta vem sugerida pela composição da O.S. Confirmar a linha não grava a equipe: toque em ✓ Equipe certa (ou mude a equipe) para gravá-la em todas as O.S. da volta.</p>' : ''}
       ${est.erroRascunho ? `<p class="lote-aviso" role="note">${escL(est.erroRascunho)}</p>` : ''}
       ${relatorioHTML()}
-      <div class="lote-grupos">${grupos.length ? grupos.map(g => grupoHTML(g, grupoDe(g), ultimo)).join('') : `<p class="ent-fila-vazia">${est.modo === 'dia' ? 'Nenhuma O.S. externa neste dia.' : 'Nenhuma pendência neste mês.'}</p>`}</div>
-      <div class="lote-rodape"><span>${est.progresso ? escL(est.progresso) : `${nConf} ${nConf === 1 ? 'linha confirmada' : 'linhas confirmadas'} para salvar`}</span>
-        <button type="button" class="btn-primary" data-lote-acao="salvar" ${est.salvando || !nConf ? 'disabled' : ''}>Salvar o lote <kbd>Ctrl+Enter</kbd></button></div>
+      <div class="lote-grupos">${t.grupos.length ? t.grupos.map(g => grupoHTML(g, grupoDe(g), t.ultimo)).join('') : `<p class="ent-fila-vazia">${est.modo === 'dia' ? 'Nenhuma O.S. externa neste dia.' : 'Nenhuma pendência neste mês.'}</p>`}</div>
+      <div class="lote-rodape">${rodapeHTML(c)}</div>
     </div>`;
     if (typeof wireAbasEntregas === 'function') wireAbasEntregas(el);
     ligar(el);
-    if (est.alocAberto) {
-      const host = el.querySelector(`[data-lote-aloc="${est.alocAberto.replace(/"/g, '')}"]`);
-      const gx = acharGrupo(est.alocAberto);
-      if (host && gx && temALOCUI()) {
-        iniciarEquipe(gx.g, gx.rg, false);
-        ALOCUI.montar(host, chaveAloc(gx.g), {aoAlterar: () => { guardarEquipeNoRascunho(gx.g, gx.rg); persistir(); const txt = el.querySelector(`[data-lote-grupo="${gx.g.chave.replace(/"/g, '')}"] .lote-g-eq-txt`); if (txt) txt.innerHTML = equipeResumoHTML(gx.g, gx.rg); },
-          // "Ir à ficha" abre a O.S. da volta; o nome sem ficha se liga em Performance, Conferir nomes.
-          aoIr: destino => { const o = representante(gx.g); if (destino === 'ficha' && o && typeof openModal === 'function') openModal(o, 'exec'); else if (typeof toast === 'function') toast('Ligue o nome à ficha do RH em Performance, Conferir nomes, e volte ao lote.'); }});
-      }
-    }
+    montarAloc(el);
     restaurarFoco(el, ativa);
+  }
+  // O componente da divisão da volta aberta em "Mudar a equipe".
+  function montarAloc(el) {
+    if (!est.alocAberto || !el || typeof el.querySelector !== 'function') return;
+    const host = el.querySelector(`[data-lote-aloc="${seletor(est.alocAberto)}"]`);
+    const gx = acharGrupo(est.alocAberto);
+    if (!host || !gx || !temALOCUI()) return;
+    iniciarEquipe(gx.g, gx.rg, false);
+    // Mudar a equipe no componente confere a equipe da volta: a faixa da equipe e as linhas da volta são repintadas, o componente não.
+    ALOCUI.montar(host, chaveAloc(gx.g), {aoAlterar: () => { guardarEquipeNoRascunho(gx.g, gx.rg); persistir(); pintarParte({equipe: gx.g.chave}); },
+      // "Ir à ficha" abre a O.S. da volta; o nome sem ficha se liga em Performance, Conferir nomes.
+      aoIr: destino => { const o = representante(gx.g); if (destino === 'ficha' && o && typeof openModal === 'function') openModal(o, 'exec'); else if (typeof toast === 'function') toast('Ligue o nome à ficha do RH em Performance, Conferir nomes, e volte ao lote.'); }});
+  }
+  /* A REPINTURA DE UM PEDAÇO (revisão da F14: cada toque repintava a tela
+     inteira, mais de 150 ms com 190 linhas). `os`: as linhas tocadas (Não,
+     Sim, Todos, Confirmar, a data, a parte, os itens). `grupos`: as voltas
+     tocadas (equipe, chegada, conferência), com as linhas delas. `equipe`: a
+     faixa da equipe e as linhas da volta, sem o componente aberto. Junto, as
+     contas do cabeçalho e do rodapé. O pedaço que não está na tela repinta a
+     tela inteira; com `semRecurso`, fica como está. */
+  function pintarParte(o = {}) {
+    const el = painel();
+    const inteira = () => { if (!o.semRecurso) render(); };
+    if (!el || typeof el.querySelector !== 'function' || !gestao() || !est.rascunho || est.carregado !== chaveRascunho(est.modo, chaveAtual())) return inteira();
+    const t = tela();
+    const ativa = focoAtual();
+    const trocar = (no, html) => { if (!no) return false; no.outerHTML = html; return true; };
+    for (const chave of [...new Set(lista(o.grupos).filter(Boolean))]) {
+      const g = t.grupos.find(x => x.chave === chave);
+      if (!g) continue;
+      if (!trocar(el.querySelector(`[data-lote-grupo="${seletor(chave)}"]`), grupoHTML(g, grupoDe(g), t.ultimo))) return inteira();
+      if (est.alocAberto === chave) montarAloc(el);
+    }
+    const linhas = new Set(lista(o.os).filter(Boolean));
+    if (o.equipe) {
+      const g = t.grupos.find(x => x.chave === o.equipe);
+      const faixa = g && el.querySelector(`[data-lote-grupo="${seletor(g.chave)}"] .lote-g-equipe`);
+      if (g && !trocar(faixa, equipeBlocoHTML(g, grupoDe(g)))) return inteira();
+      if (g) for (const x of g.os) linhas.add(x.id);
+    }
+    for (const id of linhas) {
+      const g = t.grupos.find(x => x.os.some(y => y.id === id));
+      if (!g) continue;
+      if (!trocar(el.querySelector(`[data-lote-linha="${seletor(id)}"]`), linhaHTML(g.os.find(y => y.id === id), g, grupoDe(g), t.ultimo))) return inteira();
+    }
+    const c = contagem(t);
+    const res = el.querySelector('.lote-resumo'), rod = el.querySelector('.lote-rodape');
+    if (res) res.innerHTML = resumoHTML(t, c);
+    if (rod) rod.innerHTML = rodapeHTML(c);
+    restaurarFoco(el, ativa);
+  }
+  // O relatório do último lote e as linhas dele (a confirmação que chega depois do servidor).
+  function pintarRelatorio(ids) {
+    const el = painel();
+    if (!el || typeof el.querySelector !== 'function') return;
+    const no = el.querySelector('.lote-rel');
+    if (no) no.outerHTML = relatorioHTML();
+    pintarParte({os: ids, semRecurso: true});
+  }
+  // Durante o Salvar, só o rodapé diz o andamento.
+  function pintarRodape() {
+    const el = painel();
+    const rod = el && typeof el.querySelector === 'function' ? el.querySelector('.lote-rodape') : null;
+    if (rod) rod.innerHTML = rodapeHTML({conf: 0});
   }
   // O foco sobrevive à repintura: o campo ou botão pelo data-lote-k, ou a linha.
   function focoAtual() {
@@ -1089,29 +1368,41 @@ const LOTE = (() => {
     return {k: typeof a.getAttribute === 'function' ? a.getAttribute('data-lote-k') : null, linha: typeof a.getAttribute === 'function' ? a.getAttribute('data-lote-linha') : null};
   }
   function restaurarFoco(el, ativa) {
-    if (!ativa || !el.querySelectorAll) return;
-    const alvo = ativa.k ? [...el.querySelectorAll('[data-lote-k]')].find(x => x.getAttribute('data-lote-k') === ativa.k) : ativa.linha ? el.querySelector(`[data-lote-linha="${String(ativa.linha).replace(/"/g, '')}"]`) : null;
+    if (!ativa || !el.querySelector) return;
+    if (typeof document !== 'undefined' && document.activeElement && typeof el.contains === 'function' && el.contains(document.activeElement) && document.activeElement !== el) {
+      // O foco ainda está num elemento que ficou (não foi repintado): nada a fazer.
+      const a = document.activeElement;
+      if ((ativa.k && a.getAttribute && a.getAttribute('data-lote-k') === ativa.k) || (ativa.linha && a.getAttribute && a.getAttribute('data-lote-linha') === ativa.linha)) return;
+    }
+    const alvo = ativa.k ? el.querySelector(`[data-lote-k="${seletor(ativa.k)}"]`) : ativa.linha ? el.querySelector(`[data-lote-linha="${seletor(ativa.linha)}"]`) : null;
     if (alvo && typeof alvo.focus === 'function') { try { alvo.focus({preventScroll: true}); } catch (e) { alvo.focus(); } }
   }
+  // O que cada ação repinta: a volta (equipe, chegada, conferência) ou as linhas.
+  const DO_GRUPO = new Set(['equipe-ok', 'equipe-mudar', 'equipe-refazer', 'chegada', 'volta', 'volta-obs', 'volta-rever']);
   function ligar(el) {
     el.onclick = ev => {
       const b = ev && ev.target && typeof ev.target.closest === 'function' ? ev.target.closest('[data-lote-acao]') : null;
       const linha = ev && ev.target && typeof ev.target.closest === 'function' ? ev.target.closest('[data-lote-linha]') : null;
+      const focoAntes = est.foco;
       if (linha) est.foco = linha.getAttribute('data-lote-linha');
-      if (!b || b.disabled) return;
+      if (!b || b.disabled) { marcarFoco(focoAntes); return; }
       const ds = {...(b.dataset || {})};
       const acao = ds.loteAcao;
       if (acao === 'entendi') { try { localStorage.setItem(INTRO + '|' + usuario(), '1'); } catch (e) { /* conveniência */ } render(); return; }
       if (acao === 'modo') { est.modo = ds.modo === 'pendencias' ? 'pendencias' : 'dia'; STATE._loteModo = est.modo; abrir({}).then(render); return; }
       if (acao === 'ir-dia') { abrir({dia: ds.dia}).then(render); return; }
       if (acao === 'ir-mes') { abrir({mes: ds.mes}).then(render); return; }
-      if (acao === 'ficha') { const o = loja() && loja().getOS(ds.os); if (o && typeof openModal === 'function') openModal(o, 'exec'); return; }
+      if (acao === 'ficha') { const o = loja() && loja().getOS(ds.os); if (o && typeof openModal === 'function') openModal(o, 'exec'); marcarFoco(focoAntes); return; }
       if (acao === 'salvar') { void salvarPelaTela(); return; }
       if (acao === 'desfazer-lote') { void desfazerPelaTela(ds.rel); return; }
-      if (acao === 'retrabalho-sim') { abrirRetrabalho(ds.os); return; }
+      if (acao === 'retrabalho-sim') { marcarFoco(focoAntes); abrirRetrabalho(ds.os); return; }
+      const itensAntes = est.itensAberto, alocAntes = est.alocAberto;
       const erro = executar({acao, os: ds.os, grupo: ds.grupo, k: ds.k, v: ds.v});
       if (erro && typeof toast === 'function') toast(erro, 'error');
-      render();
+      if (DO_GRUPO.has(acao)) pintarParte({grupos: [ds.grupo, alocAntes !== est.alocAberto ? alocAntes : '']});
+      else if (ds.os) pintarParte({os: [ds.os, acao === 'itens' ? itensAntes : '']});
+      else render();
+      marcarFoco(focoAntes);
     };
     el.onchange = ev => {
       const t = ev && ev.target, ds = t && t.dataset;
@@ -1126,7 +1417,8 @@ const LOTE = (() => {
       else if (c === 'parte') erro = executar({acao: 'parte', os: ds.os, uid: ds.uid, valor: t.value});
       else if (c === 'parte-um') erro = executar({acao: 'parte', os: ds.os, uid: ds.uid, valor: t.checked ? ds.saldo : 0});
       if (erro && typeof toast === 'function') toast(erro, 'error');
-      render();
+      if (c === 'chegada' || c === 'volta-obs') pintarParte({grupos: [ds.grupo]});
+      else pintarParte({os: [ds.os]});
     };
   }
   /* "SIM" ABRE A PERGUNTA DE SEMPRE (perguntarRetrabalho, app.js) sobre uma
@@ -1142,13 +1434,14 @@ const LOTE = (() => {
     perguntarRetrabalho(copiaOS, () => {
       const resp = respostaRetrabalhoDe(x.o, copiaOS);
       if (resp) { x.l.retrabalho = resp; persistir(); }
-      render(); focarLinha(osId);
+      if (telaAtiva()) pintarParte({os: [osId]});
+      focarLinha(osId);
     }, {rotulo: 'Voltar ao lote', aoVoltar: () => focarLinha(osId)});
   }
   async function salvarPelaTela() {
     if (est.salvando) return;
     const pintar = () => { if (telaAtiva()) render(); };
-    const r = await salvar({aoProgresso: pintar});
+    const r = await salvar({aoProgresso: () => { if (telaAtiva()) pintarRodape(); }});
     if (r && r.erro) { if (typeof toast === 'function') toast(r.erro, 'error'); pintar(); return; }
     if (r && r.cancelado) { pintar(); return; }
     const ok = lista(r && r.itens).filter(i => ['gravada', 'gravada-aviso', 'na-fila'].includes(i.estado)).length;
@@ -1162,8 +1455,12 @@ const LOTE = (() => {
     const n = rel.itens.filter(desfazivel).length;
     if (!confirmar(`Desfazer o lote: ${n} ${n === 1 ? 'O.S. volta' : 'O.S. voltam'} ao que ${n === 1 ? 'era' : 'eram'} antes (equipe, chegada, volta, retrabalho, lançamento e marcas dos itens). O que outra pessoa mudou depois fica como está. Continuar?`)) return;
     const r = await desfazer(relId);
-    if (r && r.erro && typeof toast === 'function') toast(r.erro, 'error');
-    else if (typeof toast === 'function') toast('Lote desfeito. Veja o resultado em cada O.S.', 'success');
+    if (r && r.erro) { if (typeof toast === 'function') toast(r.erro, 'error'); }
+    else if (typeof toast === 'function') {
+      const feitas = lista(r && r.itens).filter(i => i.desfazer && ['gravada', 'gravada-aviso'].includes(i.desfazer.estado)).length;
+      const faltam = lista(r && r.itens).filter(desfazivel).length;
+      toast(faltam ? `Desfazer: ${feitas} ${feitas === 1 ? 'O.S. voltou' : 'O.S. voltaram'}; ${faltam} ainda não (veja o motivo em cada O.S.).` : 'Lote desfeito. Veja o resultado em cada O.S.', faltam ? 'error' : 'success');
+    }
     if (telaAtiva()) render();
   }
   if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') document.addEventListener('keydown', ev => { teclado(ev); });

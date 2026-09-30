@@ -273,14 +273,15 @@ function periodoOuMes(chave) {
 // dela, lançamento manual. Regra explícita aqui, não 147 carimbos no banco.
 const CORTE_LANCAMENTO_MANUAL = '2026-09-15';
 function erpAntesDoCorte(o) {
-  return OPERACAO.encerradaERP(o) && !o.entregaLancada && OPERACAO.dia(o.finalizadaEm) < CORTE_LANCAMENTO_MANUAL;
+  return OPERACAO.encerradaERP(o) && !OPERACAO.entregaLancadaValida(o) && OPERACAO.dia(o.finalizadaEm) < CORTE_LANCAMENTO_MANUAL;
 }
 function classificarEntregas(lista) {
   const r = { retiradas: [], instalacoes: [], aLancar: [] };
   for (const o of lista || STORE.getAllOS()) {
     if (!OPERACAO.dia(o.finalizadaEm)) continue;
     if (OPERACAO.interno(o)) { r.retiradas.push(o); continue; }
-    if (OPERACAO.encerradaERP(o) && !o.entregaLancada && !erpAntesDoCorte(o)) { r.aLancar.push(o); continue; }
+    // O pedido de Desfazer do lote ainda na fila ({desfazer:true}) não é lançamento (OPERACAO.entregaLancadaValida).
+    if (OPERACAO.encerradaERP(o) && !OPERACAO.entregaLancadaValida(o) && !erpAntesDoCorte(o)) { r.aLancar.push(o); continue; }
     r.instalacoes.push(o);
   }
   return r;
@@ -299,7 +300,8 @@ function avisoJanelaCasa(f) {
 
 // Data que vale para o mês: a do lançamento manual, se houver; senão a finalização.
 function diaEntrega(o) {
-  return (o.entregaLancada && OPERACAO.dia(o.entregaLancada.data)) || OPERACAO.dia(o.finalizadaEm);
+  const l = OPERACAO.entregaLancadaValida(o);
+  return (l && OPERACAO.dia(l.data)) || OPERACAO.dia(o.finalizadaEm);
 }
 // Como a pessoa aparece nas telas da casa. Desde 14/09/2026 vem com a FICHA do
 // RH junto (foto, cargo, área) -- quando o apelido acha dona. A chave de
@@ -1689,7 +1691,7 @@ function renderEntregas() {
     // servidor. Dizer "fora do PCP" aqui culpava a equipe por um mês inteiro.
     if (!card && o.data && o.data < limiteEntregas) return { rotulo: 'sem cópia no aparelho', classe: 'st-aguardando_producao', dica: `Entregue há mais de ${janelaLocalCasa()} dias; o aparelho guarda só os últimos ${janelaLocalCasa()}` };
     if (!card) return { rotulo: 'fora do PCP', classe: 'st-aguardando_producao', dica: 'O ERP entregou, mas esta O.S nunca passou pelo PCP' };
-    if (card.entregaLancada) return { rotulo: 'lançada', classe: 'st-confirmada', dica: 'Baixa do ERP lançada à mão por ' + (card.entregaLancada.por || '') };
+    if (OPERACAO.entregaLancadaValida(card)) return { rotulo: 'lançada', classe: 'st-confirmada', dica: 'Baixa do ERP lançada à mão por ' + (card.entregaLancada.por || '') };
     if (registradas.has(n)) return { rotulo: 'registrada', classe: 'st-confirmada', dica: 'Entrega registrada no PCP' };
     if (aLancarSet.has(n)) return { rotulo: 'a lançar', classe: 'st-retrabalho', dica: 'Baixada pelo ERP; falta lançar no PCP' };
     if (card.finalizadaEm) return { rotulo: 'baixada', classe: 'st-aguardando_producao', dica: 'Finalizada no PCP' };
@@ -1999,7 +2001,7 @@ function agruparPorPessoaCasa(lista) {
       if (v == null) d.semValor++; else d.valor += v;
       if (h != null) d.horas.push(h);
       if (os.retrabalho) d.retrab++;
-      if (os.entregaLancada) d.erp++;
+      if (OPERACAO.entregaLancadaValida(os)) d.erp++;
       m.set(p.chave, d);
     }
   }
@@ -2472,7 +2474,7 @@ const PULA_SERVIDOR = nomes => `${nomes.map(n => `"${n}"`).join(', ')}: o servid
    é o do lançamento da entrega, senão o da finalização (o mesmo do servidor,
    perfFonte). Dentro de um período fechado, a O.S. fica como está. */
 function periodoFechadoCasa(o, fechados) {
-  const d = OPERACAO.dia((o && o.entregaLancada && o.entregaLancada.data) || (o && o.finalizadaEm) || '');
+  const d = OPERACAO.dia((OPERACAO.entregaLancadaValida(o) || {}).data || (o && o.finalizadaEm) || '');
   return d ? (fechados || []).find(f => d >= f.de && d <= f.ate) || null : null;
 }
 
