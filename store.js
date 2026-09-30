@@ -602,6 +602,52 @@ const STORE = (() => {
     lsSet(K.ALOCDESC, lista.slice(-20));
     _notifyListeners('alocacao-descartada', aviso);
   }
+  /* O CARIMBO DA DIVISÃO QUE O SERVIDOR ACEITOU (pendência da F08, resolvida
+     na F09). A divisão gravada leva o `em` do servidor, e a tela devolve esse
+     `em` ao editar; o servidor descarta a divisão que chega com o `em` de uma
+     versão que não é a gravada (cópia velha). A edição feita com a primeira
+     gravação no ar nasceu por cima dela, mas ficou com o `em` antigo: sem
+     isto a segunda edição da mesma divisão era descartada como cópia velha.
+     Adota o `em` novo quem ainda tem o `em` que foi enviado (a mesma base),
+     na cópia da lista (o rascunho aberto) e nos envios da fila. A divisão
+     descartada não entra aqui: quem cuida dela é o _reporAlocacao. */
+  const _emDaAloc = a => a && typeof a === 'object' && !Array.isArray(a) && typeof a.em === 'string' ? a.em : '';
+  function _emNaCopia(alvo, emEnviado, emServidor) {
+    const a = alvo && alvo.alocacao;
+    if (!a || typeof a !== 'object' || Array.isArray(a) || _emDaAloc(a) !== emEnviado) return false;
+    a.em = emServidor;
+    return true;
+  }
+  // Os dois carimbos (o enviado e o do servidor) quando há `em` novo a adotar; senão null.
+  function _emsDoEnvio(item, res) {
+    const servidor = res && res.os, enviado = item && item.os;
+    if (!servidor || !enviado || !enviado.alocacao || typeof enviado.alocacao !== 'object') return null;
+    if (Array.isArray(res.descartado) && res.descartado.includes('alocacao')) return null;
+    const emS = _emDaAloc(servidor.alocacao), emE = _emDaAloc(enviado.alocacao);
+    return emS && emS !== emE ? { emE, emS } : null;
+  }
+  function _adotarEmAlocacao(item, res) {
+    const ems = _emsDoEnvio(item, res), servidor = res && res.os;
+    if (!ems) return;
+    const { emE, emS } = ems;
+    const all = getAllOS(), idx = all.findIndex(o => o.id === servidor.id);
+    if (idx >= 0 && all[idx] !== servidor && _emNaCopia(all[idx], emE, emS)) _setAllOS(all);
+    const q = getQueue();
+    let mudou = false;
+    for (const it of q) if (it.action === 'upsert' && it.os && it.os.id === servidor.id && _emNaCopia(it.os, emE, emS)) mudou = true;
+    if (mudou) _gravarFila(q);
+  }
+  /* A O.S. DO HISTÓRICO (fora da janela do aparelho) segue a cópia da lista.
+     O getOS cai no _osHistorico quando o pull completo tira a O.S. da lista, e
+     ele guardava o objeto de antes da gravação: rev novo (o objeto que sai da
+     lista adota o rev), mas o `em` velho da divisão, e a segunda conferência
+     da mesma O.S. era descartada como cópia velha. Depois de cada gravação
+     aceita, o histórico passa a ser o que a lista tem (a resposta do servidor,
+     ou a edição feita durante o envio, que já adotou rev e `em`). */
+  function _historicoSegueALista(id, res) {
+    if (!_osHistorico.has(id)) return;
+    _osHistorico.set(id, getAllOS().find(o => o.id === id) || res.os);
+  }
   /* MARCA DE ENTREGA DESCARTADA PELO SERVIDOR (E3). A gravação passou, mas a
      marca de entrega do item (item.entregas) não: saldo, dia, papel. O
      servidor responde `descartado` com os ids em `entregasRecusadas`, e o
@@ -758,6 +804,9 @@ const STORE = (() => {
                    mesma ficha levava "Conflito de edição" contra a própria
                    escrita: marcar o item 2 depois do item 1, com sinal, bastava. */
                 if (typeof res.os.rev === 'number') all[idx].rev = res.os.rev;
+                // O `em` da divisão aceita também vai para o objeto que sai (o rascunho aberto), como o rev.
+                const ems = _emsDoEnvio(item, res);
+                if (ems) _emNaCopia(all[idx], ems.emE, ems.emS);
                 all[idx] = res.os; mudou = true;
               }
               // O rev é adotado SEMPRE, inclusive se editaram durante o envio:
@@ -779,8 +828,16 @@ const STORE = (() => {
             }
             _revNaFila(res.os);
             _uidsNaFila(res.os);
+            _adotarEmAlocacao(item, res);
             if (Array.isArray(res.descartado) && res.descartado.includes('alocacao')) _reporAlocacao(item, res);
             if (Array.isArray(res.descartado) && res.descartado.includes('entregas')) _tirarEntregasRecusadas(item, res);
+            _historicoSegueALista(res.os.id, res);
+            /* O RESULTADO DESTE ENVIO para quem espera por ele (a tela que
+               gravou a divisão diz "gravada", o motivo do descarte ou, com os
+               `avisos` do servidor, que a divisão ainda está a conferir no RH). */
+            _notifyListeners('os-gravada', { id: res.os.id, os: res.os, enviado: item.os,
+              descartado: Array.isArray(res.descartado) ? res.descartado.slice() : [], motivo: res.descartadoMotivo || null,
+              avisos: Array.isArray(res.avisos) ? res.avisos.map(String) : [] });
           }
           /* GRAVOU, MAS NÃO TUDO. Para o crachá de toque o servidor grava o
              resto e devolve em `avisos` o que ficou de fora (carro não

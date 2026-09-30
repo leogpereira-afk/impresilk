@@ -48,7 +48,8 @@ const PERF = (() => {
     return {pessoas:[...pessoas.values()].sort((a,b)=>b.equivalentes-a.equivalentes || a.nome.localeCompare(b.nome)),equipes:[...equipes.values()].sort((a,b)=>b.os-a.os || a.nome.localeCompare(b.nome))};
   };
   const incluiPessoa = (membros,chave) => !chave || membros.some(p=>String(p.chave)===String(chave));
-  const manterPesos = (anteriores,selecionados) => selecionados.map(p=>({...p,percentual:anteriores.find(a=>a.chave===p.chave)?.percentual || 0}));
+  /* manterPesos saiu na F09 (30/09/2026): quem entra na divisão entra pela
+     regra do programa (DIVISAO, alocacao-ui.js), não com 0% esperando acerto. */
   const dossie = registros => {
     const grupos=new Map();
     for(const r of registros){
@@ -333,7 +334,7 @@ const PERF = (() => {
     }
     return [...por.values()];
   };
-  return {unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,manterPesos,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,criteriosValidos,carroDaVolta,CRITERIOS_PADRAO,COBERTURA_MINIMA,
+  return {unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,criteriosValidos,carroDaVolta,CRITERIOS_PADRAO,COBERTURA_MINIMA,
     ANIMAIS,CORES,EMBLEMAS,LOGO_ANIMAL,COR_ANIMAL,animalDe,corValida,iconeEquipe,nomeEquipeNorm,conferirEquipes};
 })();
 if (typeof module !== 'undefined') module.exports = PERF;
@@ -746,43 +747,146 @@ function perfEditarEquipe(id,membrosIniciais=[]) {
     if(aviso) toast(aviso,'error');
   };
 }
-function perfEditarParticipacao(id) {
-  if(!perfPodeEditar()) return;
-  const os=perfOS(id); if(!os || perfFonteAtual()?.fechadoEm) return;
-  const c=perfConfig(), r=perfRegistro(os,c);
-  /* A equipe que a tela já mostra para esta entrega vem marcada. Sem isto, uma
-     entrega que o ranking chama de "Horizonte" abria em "avulsa", e confirmar
-     gravava equipeId vazio — o histórico ficava dependendo da composição. */
-  // A mesma regra do ranking: entrega já confirmada (como avulsa) não ganha, calada,
-  // a equipe criada depois. Não confirmada junta os apelidos da mesma pessoa, como
-  // a lista mostra; confirmada fica como foi gravada.
-  const equipeSugerida = r.equipeId || (PERF.equipeDoRegistro(r, c.equipes, perfOpcoesEquipe().resolver) || {}).id || '';
-  /* Confirmada com a chave de até a v133 (slug da ficha, que a aba presa na
-     v133 continua gravando): a chave passa ao ID de hoje, com o NOME e o
-     percentual gravados. Sem isto a mesma pessoa vinha duas vezes (slug
-     marcado, ID desmarcado) e dava para confirmar a entrega com ela em dobro. */
-  const chaveDeHoje=m=>{const t=perfChaveDeHoje(m);return t?{chave:t.chave,nome:m.nome}:null;};
-  let membros=(r.confirmado ? PERF.unirMembros(r.membros,chaveDeHoje) : perfUnirPessoas([r])[0].membros).map(p=>({...p}));
-  const d=perfDialog('Participação · O.S. '+(os.numero||''),`<p>${esc(os.cliente||'')} · ${esc(os.servico||'')}</p><form id="perf-part-form"><label>Usar uma equipe <select name="equipe"><option value="">Participação individual / avulsa</option>${c.equipes.filter(e=>e.ativo!==false || e.id===equipeSugerida).map(e=>`<option value="${esc(e.id)}" ${e.id===equipeSugerida?'selected':''}>${esc(PERF.iconeEquipe(e))} ${esc(e.nome)}</option>`).join('')}</select></label><p class="metricas-nota">Confirme quem trabalhou nesta entrega. A escolha não altera a programação da O.S.</p><div id="perf-part-members">${perfEscolherMembrosHTML(membros)}</div><div id="perf-pesos"></div><button type="button" class="btn-ghost" id="perf-igual">Dividir igualmente</button><p id="perf-soma" aria-live="polite"></p><label>Observação da apuração <input name="obs" maxlength="300" value="${esc(r.obs||'')}" placeholder="Motivo de um ajuste, participação extra…"></label><button class="btn-primary" type="submit">Confirmar participação</button></form>`);
-  const desenharPesos=()=>{
-    d.querySelector('#perf-pesos').innerHTML=membros.map(p=>`<label class="perf-peso"><span>${esc(p.nome)}</span><input aria-label="Percentual de ${esc(p.nome)}" type="number" min="0.01" max="100" step="0.01" required data-chave="${esc(p.chave)}" value="${p.percentual}"><span>%</span></label>`).join('');
-    const total=()=>{d.querySelector('#perf-soma').textContent='Total: '+perfFormato(membros.reduce((s,p)=>s+Number(p.percentual||0),0))+'% · precisa somar 100%';};
-    d.querySelectorAll('[data-chave]').forEach(i=>i.oninput=()=>{membros.find(p=>p.chave===i.dataset.chave).percentual=Number(i.value);total();});total();
+/* ------------------------------------------------ CONFERIR (F09, 30/09/2026)
+ * O Conferir da Conferência por entrega monta a DIVISÃO DA O.S. (os.alocacao)
+ * com o componente único (alocacao-ui.js) e grava pela porta da F08: só admin
+ * e pcp, conferida de novo no servidor. Até a v138 ele gravava a participação
+ * no blob (cfg.performancePCP.participacoes); agora nada novo vai para lá, com
+ * UMA exceção (decisão do dono, 30/09/2026): a O.S. com alguém só pelo nome,
+ * sem ID no RH, não pode ter divisão e confirma pelo jeito antigo, como a
+ * v138, senão o Fechar período de julho a setembro trava. Uma confirmação =
+ * um envio (o histórico da divisão tem teto de 40 linhas no servidor).
+ */
+// Data de um carimbo para a tela: dia puro não passa pelo fuso (o "2026-09-29" do UTC virava 28).
+function perfDataCurta(v) { const s = String(v || ''); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s.split('-').reverse().join('/') : (Number.isFinite(Date.parse(s)) ? new Date(s).toLocaleDateString('pt-BR') : ''); }
+// A mesma pessoa gravada pelo slug e pelo ID vira uma só (a regra do ranking).
+function perfMembrosAntigos(p) {
+  const chaveDeHoje = m => { const t = perfChaveDeHoje(m); return t ? {chave:t.chave, nome:m.nome} : null; };
+  return PERF.unirMembros(p && Array.isArray(p.membros) ? p.membros : [], chaveDeHoje);
+}
+/* A PARTICIPAÇÃO ANTIGA, SÓ LEITURA. A mesma pessoa gravada pelo slug e pelo
+   ID vira uma linha só, com os percentuais somados (a regra do ranking).
+   `jeitoAntigo`: a O.S. que ainda confirma por ela (nome sem ficha no RH). */
+function perfParticipacaoAntigaHTML(p, os, jeitoAntigo) {
+  if (!p || !Array.isArray(p.membros) || !p.membros.length) return '';
+  const ms = perfMembrosAntigos(p);
+  const vale = !!perfParticipacaoVale(os || {}, p);
+  const quem = [p.por ? 'por ' + p.por : '', perfDataCurta(p.em) ? 'em ' + perfDataCurta(p.em) : ''].filter(Boolean).join(' ');
+  const situacao = jeitoAntigo
+    ? (vale ? 'Ela conta na performance e abre abaixo como foi confirmada.' : 'Ela não conta mais: a divisão desta O.S. mudou depois dela.')
+    : (vale ? 'Ela ainda conta na performance; ao confirmar a divisão abaixo, passa a valer a divisão da O.S. e ela fica só para consulta.' : 'Ela não conta mais: vale a divisão gravada na O.S.') + ' Não é mais editada aqui.';
+  return `<section class="aloc-antiga" aria-label="Participação conferida antes">
+    <h4>Participação conferida antes <small>só leitura</small></h4>
+    <p class="aloc-aviso">Conferida${quem ? ' ' + esc(quem) : ''} no formato antigo. ${situacao}</p>
+    <ul>${ms.map(m => `<li>${esc(m.nome)} · ${perfFormato(m.percentual)}%</li>`).join('')}</ul>
+    ${p.equipeNome ? `<p class="aloc-antiga-extra">Equipe: ${esc(p.emblema || '')} ${esc(p.equipeNome)}</p>` : ''}${p.obs ? `<p class="aloc-antiga-extra">Observação: ${esc(p.obs)}</p>` : ''}
+  </section>`;
+}
+// Depois de gravar: a base do servidor ficou velha; a tela volta à prévia até a nova consulta.
+function perfDepoisDeGravar(r) {
+  perfRemoto.dados = null; perfRemoto.tentado = false;
+  if (r && r.estado === 'pendente') perfRemoto.erro = 'Divisão guardada neste aparelho: aguardando sincronização e nova consulta.';
+  renderPerformanceCasa();
+  if (r && r.estado === 'gravada') void perfCarregarFonte();
+}
+async function perfEditarParticipacao(id) {
+  if (!perfPodeEditar() || perfFonteAtual()?.fechadoEm) return;
+  const ref = perfOS(id) || {};
+  let os = STORE.getOS(id);
+  /* A O.S. fora da janela do aparelho (apuração de um mês antigo) vem do
+     servidor antes de abrir: a divisão grava na O.S. inteira, nunca num resumo.
+     A busca é SÓ PELO NÚMERO, sem período (de e até vazios): o servidor filtra
+     a finalização em UTC, e o dia da apuração é o de São Paulo ou o da entrega
+     lançada. A O.S. finalizada depois das 21h, ou lançada noutro dia, não
+     voltava. Das achadas, vale a do id. */
+  let busca = null;
+  if (!os && typeof STORE.buscarHistorico === 'function' && ref.numero) {
+    try { busca = await STORE.buscarHistorico({de:'', ate:'', q:String(ref.numero)}); } catch (e) { busca = {erro:e}; }
+    os = STORE.getOS(id);
+  }
+  const titulo = 'Conferir divisão · O.S. ' + (ref.numero || (os && os.numero) || '');
+  // Sem rede é "conecte-se"; com rede e sem a O.S. na resposta, é dito como é.
+  if (!os) { perfDialog(titulo, `<p class="aloc-aviso">${busca && !busca.offline && !busca.erro ? `Esta O.S. não está neste aparelho, e a busca pelo número ${esc(ref.numero)} no servidor não a trouxe. Atualize a apuração e toque em Conferir de novo.` : 'Esta O.S. não está neste aparelho e não deu para buscá-la agora. Conecte-se e toque em Conferir de novo.'}</p>`); return; }
+  if (typeof ALOCUI === 'undefined') { perfDialog(titulo, '<p class="aloc-aviso">Esta tela está desatualizada. Recarregue a página para conferir a divisão.</p>'); return; }
+  const c = perfConfig(), chave = 'perf:' + id;
+  const pAntiga = c.participacoes.find(p => p.id === id);
+  const pVale = perfParticipacaoVale(os, pAntiga);
+  const abrirComponente = reiniciar => ALOCUI.iniciar(chave, {os:STORE.getOS(id) || os, equipes:c.equipes, papel:STATE.user?.papel, valor:perfPodeEditar() ? valorDaOS(os) : null,
+    dia:diaEntrega(os), versoes:perfRegrasFonte().versoes, participacao:pVale ? perfMembrosAntigos(pVale) : null, reiniciar});
+  const jeitoAntigo = !!abrirComponente(true).antigo;
+  const antiga = perfParticipacaoAntigaHTML(pAntiga, os, jeitoAntigo);
+  const d = perfDialog(titulo, `<p class="aloc-os">${esc(os.cliente || '')}${os.servico ? ' · ' + esc(os.servico) : ''}${diaEntrega(os) ? ' · entrega em ' + esc(perfDataCurta(diaEntrega(os))) : ''}</p>
+    <p class="metricas-nota">${jeitoAntigo ? 'Quem fez esta entrega e com qual parte. Esta O.S. confirma pelo jeito antigo (a participação da apuração); a equipe da O.S. não muda.' : 'Quem fez esta entrega e com qual parte. Confirmar grava a divisão na própria O.S., e a equipe da O.S. passa a ser a desta divisão.'}</p>
+    ${antiga}<div id="perf-aloc"></div>
+    <div class="aloc-acoes"><button type="button" class="btn-primary" id="perf-aloc-ok">${jeitoAntigo ? 'Confirmar pelo jeito antigo' : 'Confirmar divisão'}</button><button type="button" class="btn-ghost" id="perf-aloc-recomecar" hidden>Recomeçar pela divisão gravada</button></div>
+    <p class="aloc-status" id="perf-aloc-status" role="status" aria-live="polite"></p>`);
+  const box = d.querySelector('#perf-aloc'), ok = d.querySelector('#perf-aloc-ok'), status = d.querySelector('#perf-aloc-status'), recomecar = d.querySelector('#perf-aloc-recomecar');
+  /* O <dialog> É UM SÓ (perfDialog troca o conteúdo). O resultado que chega
+     depois que esta tela saiu (fechada no X, ou o diálogo já é o Conferir de
+     outra O.S.) não fecha nem escreve no diálogo de ninguém: vira aviso. */
+  const meu = () => !!d.open && d.querySelector('#perf-aloc') === box;
+  let enviando = false;
+  // O botão diz por que não grava, em vez de falhar no clique.
+  const conferirBotao = () => {
+    if (enviando) return;
+    const motivo = ALOCUI.bloqueio(chave);
+    ok.disabled = !!motivo;
+    status.textContent = motivo ? 'Para gravar: ' + motivo : '';
+    status.classList.toggle('erro', false);
   };
-  const ligarMembros=()=>{perfWireBusca(d);d.querySelectorAll('[name="membro"]').forEach(cb=>cb.onchange=()=>{membros=PERF.manterPesos(membros,perfMarcados(d));desenharPesos();});};
-  d.querySelector('[name="equipe"]').onchange=ev=>{
-    const equipe=c.equipes.find(e=>e.id===ev.target.value);if(!equipe) return;
-    membros=PERF.iguais(perfMembrosDeHoje(equipe.membros));d.querySelector('#perf-part-members').innerHTML=perfEscolherMembrosHTML(membros);ligarMembros();desenharPesos();
+  const aoIr = destino => {
+    d.close();
+    if (destino === 'ficha') { const o = STORE.getOS(id); if (o && typeof openModal === 'function') openModal(o); return; }
+    const q = document.querySelector('[data-quadro="perf-rh"]');
+    if (q) { q.open = true; q.scrollIntoView({behavior:'smooth', block:'start'}); }
   };
-  d.querySelector('#perf-igual').onclick=()=>{membros=PERF.iguais(membros);desenharPesos();};ligarMembros();desenharPesos();
-  d.querySelector('form').onsubmit=ev=>{
-    ev.preventDefault();const erro=PERF.validar(membros);if(erro)return toast(erro,'error');
-    const fd=new FormData(ev.target), equipe=c.equipes.find(e=>e.id===fd.get('equipe'));
-    // O emblema gravado é o ícone da época (o do animal, na equipe fixa): o fechamento guarda nome e emblema, não a cor.
-    const novo={id,numero:String(os.numero||''),membros:membros.map(p=>({...p})),equipeId:equipe?.id||'',equipeNome:equipe?.nome||'',emblema:equipe?PERF.iconeEquipe(equipe):'🤝',obs:String(fd.get('obs')||'').trim(),em:new Date().toISOString(),por:STATE.user?.nome||''};
-    const atual=perfConfig();
-    if(JSON.stringify(atual.participacoes.find(p=>p.id===id))!==JSON.stringify(c.participacoes.find(p=>p.id===id))) return toast('Esta participação mudou enquanto você editava. Reabra a conferência.','error');
-    atual.participacoes=atual.participacoes.filter(p=>p.id!==id).concat(novo);perfSalvar(atual);d.close();renderPerformanceCasa();
+  ALOCUI.montar(box, chave, {aoMudar:conferirBotao, aoIr});
+  d.addEventListener('close', () => { if (!enviando) ALOCUI.esquecer(chave); }, {once:true});
+  recomecar.onclick = () => { abrirComponente(true); recomecar.hidden = true; ALOCUI.repintar(chave); };
+  /* O JEITO ANTIGO GRAVA COMO A v138: a participação do blob, com a trava de
+     "mudou enquanto você editava". O servidor confirma a O.S. que nunca teve
+     divisão por ela (participacaoVale), e o Fechar período não trava. */
+  const confirmarAntigo = () => {
+    const r = ALOCUI.paraParticipacao(chave);
+    if (r.erro) { status.textContent = r.erro; status.classList.add('erro'); return; }
+    const atual = perfConfig(), agora = atual.participacoes.find(p => p.id === id);
+    if (JSON.stringify(agora) !== JSON.stringify(pAntiga)) { status.textContent = 'A participação desta O.S. mudou em outro aparelho enquanto você editava. Nada foi gravado. Feche e toque em Conferir de novo.'; status.classList.add('erro'); return; }
+    const novo = {id, numero:String(os.numero || ref.numero || ''), membros:r.membros, equipeId:'', equipeNome:'', emblema:'🤝', obs:String((pAntiga && pAntiga.obs) || ''), em:new Date().toISOString(), por:STATE.user?.nome || ''};
+    atual.participacoes = atual.participacoes.filter(p => p.id !== id).concat(novo);
+    ALOCUI.esquecer(chave); d.close();
+    void perfSalvar(atual);
+    renderPerformanceCasa();
+  };
+  ok.onclick = async () => {
+    if (enviando || ALOCUI.bloqueio(chave)) return conferirBotao();
+    if (ALOCUI.estado(chave)?.antigo) return confirmarAntigo();
+    const st0 = ALOCUI.estado(chave);
+    enviando = true; ok.disabled = true; status.classList.remove('erro'); status.textContent = 'Gravando a divisão…';
+    let r;
+    try { r = await ALOCUI.gravarNaOS(chave, {usuario:STATE.user?.nome || ''}); }
+    catch (e) { r = {ok:false, estado:'erro', mensagem:'Não foi possível gravar: ' + perfErroTxt(e)}; }
+    finally { enviando = false; }
+    const numero = ref.numero || os.numero || '';
+    const dono = meu();
+    // Só esquece o estado desta abertura: o Conferir da mesma O.S. reaberto tem o seu.
+    const soltar = () => { if (ALOCUI.estado(chave) === st0) ALOCUI.esquecer(chave); };
+    if (r.estado === 'gravada' || r.estado === 'pendente' || r.estado === 'sem-mudanca') {
+      soltar();
+      if (dono) d.close();
+      toast(r.estado === 'gravada' ? `Divisão gravada na O.S. ${numero}.` : r.mensagem, r.estado === 'pendente' ? '' : 'success');
+      if (r.estado !== 'sem-mudanca') perfDepoisDeGravar(r);
+      return;
+    }
+    // A divisão foi ao servidor, mas ainda não conta (a conferir no RH): a base mudou.
+    if (r.estado === 'conferir-rh') perfDepoisDeGravar(r);
+    /* CONFLITO DE VERSÃO NO SERVIDOR (o 409 da O.S.): o aviso de conflito do
+       app abriu e fica atrás deste diálogo modal. Fecha, e o motivo vai junto. */
+    if (r.estado === 'conflito' && r.servidor) { soltar(); if (dono) d.close(); toast(`O.S. ${numero}: ${r.mensagem}`, 'error'); return; }
+    if (!dono) { soltar(); toast(`O.S. ${numero}: ${r.mensagem}`, 'error'); return; }
+    // Descarte, mudança em outro aparelho, recusa, fila ou RH: a tela fica aberta com o motivo inteiro.
+    status.textContent = r.mensagem; status.classList.add('erro');
+    recomecar.hidden = !(r.estado === 'descartada' || r.estado === 'conflito');
+    ok.disabled = r.estado === 'descartada' || r.estado === 'conflito';
   };
 }
 /* ---------------------------------------------------------------- LOGO
@@ -1307,7 +1411,8 @@ function wirePerformanceEquipes(el) {
   perfWireFonte(el);
   el.querySelectorAll('[data-perf-modo]').forEach(b=>b.onclick=()=>{STATE._perfModo=b.dataset.perfModo;renderPerformanceCasa();});
   el.querySelectorAll('[data-perf-equipe]').forEach(b=>b.onclick=()=>perfEditarEquipe(b.dataset.perfEquipe));
-  el.querySelectorAll('[data-perf-part]').forEach(b=>b.onclick=()=>perfEditarParticipacao(b.dataset.perfPart));
+  // O Conferir é assíncrono (pode buscar a O.S. no servidor): falha diz a causa, nunca some calada.
+  el.querySelectorAll('[data-perf-part]').forEach(b=>b.onclick=()=>perfEditarParticipacao(b.dataset.perfPart).catch(e=>{console.error('[perf] conferir',e);toast('Não deu para abrir o Conferir: '+perfErroTxt(e),'error');}));
   const nova=el.querySelector('#perf-nova-equipe');if(nova)nova.onclick=()=>perfEditarEquipe('');
   el.querySelectorAll('[data-perf-rank-medida]').forEach(b=>b.onclick=()=>{STATE._perfRankMedida=b.dataset.perfRankMedida;renderPerformanceCasa();});
   el.querySelectorAll('[data-perf-pessoa-medida]').forEach(b=>b.onclick=()=>{STATE._perfPessoaMedida=b.dataset.perfPessoaMedida;renderPerformanceCasa();});

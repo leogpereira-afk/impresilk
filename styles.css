@@ -3318,3 +3318,119 @@ img.perf-logo{object-fit:cover}
   .ent-lista-tabela tfoot td{grid-area:texto}
   .ent-lista-tabela tfoot td.num{grid-area:total;align-self:start}
 }
+
+/* ── COMPONENTE DE ALOCAÇÃO (F09, 30/09/2026) ─────────────────────────────
+   alocacao-ui.js: a divisão da O.S. entre equipes e pessoas (primeiro uso no
+   Conferir da Performance). Só classes novas (.aloc-*): o celular do
+   instalador, a ficha (#modal-os) e .card-fs não são tocados. A cor da
+   equipe vem por classe (perf-cor-<chave> define --equipe-cor), nunca por
+   style=. Alvos de toque: 44 px nos botões de equipe, na busca e no
+   confirmar; 40 px nos controles dos chips. Movimento só para quem não pediu
+   menos movimento. */
+.aloc{display:grid;gap:14px;margin:14px 0 6px}
+.aloc-aviso{margin:0;padding:10px 12px;border-radius:10px;background:#fff7e6;color:#7a4b00;border:1px solid #f3d9a4;font-size:.88rem;line-height:1.45}
+.aloc-aviso.neutro{background:#eef4fb;color:#1e3f66;border-color:#cfe0f3}
+.aloc-trava-aviso{background:#fdecec;color:#8a1c1c;border-color:#f3c1c1}
+.aloc-trava-aviso p,.aloc-trava-aviso ul{margin:6px 0}
+.aloc-trava-aviso ul{padding-left:18px}
+.aloc-aviso-acoes{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.aloc-aviso-acoes button{min-height:40px}
+.aloc-rapidas{display:grid;gap:6px}
+.aloc-rotulo{font-size:.75rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#5c6e78}
+.aloc-rapidas-lista{display:flex;flex-wrap:wrap;gap:8px}
+.aloc button.aloc-eq{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:5px 12px 5px 5px;border:1.5px solid #d8e2e7;border-radius:999px;background:#fff;color:inherit;font:inherit;font-weight:650;cursor:pointer}
+.aloc button.aloc-eq.perf-com-cor{border-color:var(--equipe-cor)}
+.aloc-eq-txt{display:grid;text-align:left;line-height:1.15;min-width:0}
+.aloc-eq-txt b{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aloc button.aloc-eq small{font-weight:500;color:#5c6e78;font-size:.74rem}
+.aloc button.aloc-eq:disabled{opacity:.55;cursor:default;background:#f1f5f9}
+.aloc-logo{width:32px;height:32px;border-radius:50%;object-fit:cover;flex:none;display:inline-flex;align-items:center;justify-content:center;background:#eef2f6;font-size:1rem}
+.perf-com-cor span.aloc-logo{background:var(--equipe-cor);color:#fff}
+.aloc-barra-bloco{display:grid;gap:6px}
+.aloc-barra{width:100%;height:18px;border-radius:9px;overflow:hidden;display:block}
+.aloc-trilho{fill:#e8eef3}
+.aloc-seg{fill:var(--equipe-cor,#64748b);opacity:.7}
+.aloc-seg.lider{opacity:1}
+.aloc-seg.sem-cor{fill:#64748b}
+.aloc-barra-pe{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;font-size:.82rem}
+.aloc-legenda{display:flex;flex-wrap:wrap;gap:4px 12px;list-style:none;margin:0;padding:0}
+.aloc-legenda li{display:inline-flex;align-items:center;gap:6px}
+.aloc-amostra{display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--equipe-cor,#64748b)}
+.aloc-soma{font-weight:700;color:#b42318}
+.aloc-soma.ok{color:#1c665b}
+.aloc-grupos{display:grid;gap:12px}
+.aloc-grupos:empty{display:none}
+.aloc-grupo{border:1px solid #d8e2e7;border-left:5px solid #94a3b8;border-radius:14px;padding:10px 12px;display:grid;gap:8px;background:#fff}
+.aloc-grupo.perf-com-cor{border-left-color:var(--equipe-cor)}
+.aloc-grupo-cab{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.aloc-grupo-cab h4{margin:0;flex:1;min-width:90px;font-size:1rem}
+.aloc-grupo-cab h4 small{font-weight:500;color:#5c6e78}
+.aloc-cota-eq{display:inline-flex;align-items:center;gap:6px}
+.aloc-rot-cota{font-size:.74rem;color:#5c6e78;margin-right:4px}
+.aloc-chips{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+/* Uma linha no computador (quem, controles, tirar); no celular o tirar sobe
+   para o lado do nome e os controles descem inteiros para a linha de baixo. */
+.aloc-chip{display:grid;grid-template-columns:minmax(0,1fr) auto auto;grid-template-areas:"quem ctrl x";align-items:center;gap:6px 8px;padding:8px;border-radius:12px;background:#f6f8fa}
+.aloc-chip.lider{background:#eef6f4}
+.aloc-chip>.aloc-x{grid-area:x}
+.aloc-quem{grid-area:quem;display:flex;align-items:center;gap:10px;min-width:0}
+.aloc .aloc-avatar{width:34px;height:34px;font-size:.75rem}
+.aloc-nome{display:grid;gap:3px;min-width:0}
+.aloc-nome b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aloc-badges{display:flex;flex-wrap:wrap;gap:4px}
+.aloc-badge{display:inline-block;padding:1px 7px;border-radius:999px;background:#e2e8f0;color:#334155;font-size:.68rem;font-weight:700}
+.aloc-badge.lider{background:#fef3c7;color:#92400e}
+.aloc-badge.alerta{background:#fdecec;color:#8a1c1c}
+.aloc-badges .tag-freelancer{margin-left:0}
+.aloc-ctrl{grid-area:ctrl;display:flex;align-items:center;justify-content:flex-end;gap:6px}
+.aloc-pct{display:inline-flex;align-items:center;gap:4px}
+.aloc .aloc-pct input{width:4.8em;min-height:40px;padding:6px 8px;text-align:right;font:inherit;border:1px solid #cbd5e1;border-radius:10px;background:#fff}
+.aloc .aloc-pct input[readonly]{background:#f1f5f9;color:#475569}
+.aloc-pct-fixa{font-weight:700;padding:0 6px}
+.aloc button.aloc-lider,.aloc button.aloc-trava,.aloc button.aloc-x,.aloc button.aloc-mais{min-height:40px;min-width:40px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:inherit;font:inherit;cursor:pointer;padding:4px 10px}
+.aloc button.aloc-lider{font-size:.8rem;font-weight:650}
+.aloc button.aloc-trava[aria-pressed="true"]{background:#fff7e6;border-color:#f3d9a4}
+.aloc button.aloc-x{font-size:1.1rem;line-height:1;padding:4px}
+.aloc button.aloc-mais{justify-self:start;font-weight:650;color:#1e4f8a;border-style:dashed}
+.aloc-dica{margin:0;font-size:.82rem;color:#5c6e78}
+.aloc-vazio{margin:0;color:#5c6e78}
+.aloc-painel{border:1px solid #cfe0f3;border-radius:14px;padding:10px;display:grid;gap:8px;background:#f8fbff}
+.aloc-painel-cab{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.aloc .aloc-busca{width:100%;min-height:44px}
+.aloc-opcoes{max-height:260px;overflow:auto;display:grid;gap:4px}
+.aloc-opcoes-grupo{font-size:.72rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#5c6e78;padding:6px 4px 2px}
+.aloc button.aloc-opcao{display:flex;align-items:center;gap:10px;min-height:44px;width:100%;text-align:left;padding:6px 8px;border:0;border-radius:10px;background:#fff;color:inherit;font:inherit;cursor:pointer}
+.aloc button.aloc-opcao:hover:not(:disabled){background:#eef4fb}
+.aloc button.aloc-opcao:disabled{opacity:.6;cursor:default}
+.aloc button.aloc-opcao[hidden]{display:none}
+.aloc-opcao-txt{display:grid;gap:2px}
+.aloc-opcao-txt small{color:#5c6e78;font-size:.75rem}
+.aloc-rodape{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.aloc-selo{display:inline-block;padding:3px 10px;border-radius:999px;background:#fff7e6;color:#7a4b00;font-size:.78rem;font-weight:700}
+.aloc-selo.padrao{background:#e7f3ef;color:#1c665b}
+.aloc-notas{margin:0;padding-left:18px;font-size:.82rem;color:#7a4b00}
+.aloc-erro{margin:0;color:#b42318;font-weight:600;font-size:.88rem}
+.aloc-erro:empty{display:none}
+.aloc-previa{display:grid;gap:8px;border-top:1px solid #e1e7ec;padding-top:10px}
+.aloc-previa h4{margin:0;font-size:.95rem}
+.aloc-tab-wrap{overflow-x:auto}
+.aloc-tab{width:100%;border-collapse:collapse;font-size:.86rem}
+.aloc-tab th,.aloc-tab td{padding:6px 8px;border-bottom:1px solid #eef2f6;text-align:left}
+.aloc-tab .num{text-align:right;white-space:nowrap}
+.aloc-tab th.num{white-space:normal}
+.aloc-valor,.aloc-nota{margin:0;font-size:.85rem;line-height:1.45}
+.aloc-nota{color:#5c6e78}
+.aloc-antiga{border:1px dashed #cbd5e1;border-radius:12px;padding:10px 12px;display:grid;gap:6px;background:#fbfcfd;margin-top:10px}
+.aloc-antiga h4{margin:0;font-size:.92rem}
+.aloc-antiga h4 small{font-weight:500;color:#5c6e78}
+.aloc-antiga ul{margin:0;padding-left:18px}
+.aloc-antiga-extra{margin:0;font-size:.85rem}
+.aloc-os{margin:0 0 4px;color:#5c6e78}
+.aloc-acoes{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.aloc-acoes button{min-height:44px}
+.aloc-acoes button[hidden]{display:none}
+.aloc-status{margin:8px 0 0;font-size:.88rem;color:#5c6e78}
+.aloc-status.erro{color:#b42318;font-weight:600}
+.aloc-status:empty{display:none}
+@media (prefers-reduced-motion:no-preference){.aloc-seg{transition:opacity .2s}.aloc-chip{transition:background-color .2s}}
+@media (max-width:640px){.aloc-rapidas-lista{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.aloc button.aloc-eq{min-width:0;border-radius:14px}.aloc-grupo{padding:8px}.aloc-chip{padding:6px;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"quem x" "ctrl ctrl"}.aloc-tab{font-size:.8rem}.aloc-tab th,.aloc-tab td{padding:5px 4px}}

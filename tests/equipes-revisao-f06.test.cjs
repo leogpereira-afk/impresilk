@@ -119,34 +119,28 @@ function tela(rh, cfg) {
   vm.createContext(c); vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'performance.js'), 'utf8'), c);
   return {c, toasts};
 }
-const caixas = html => [...html.matchAll(/<input type="checkbox" name="membro" value="([^"]*)"[^>]*?(checked)?>/g)].map(m => m[1] + (m[2] ? ' (marcada)' : ''));
-function abrirParticipacao(c, registro) {
-  const els = {}, el = q => (els[q] = els[q] || {innerHTML:'', textContent:'', onchange:null, onclick:null, onsubmit:null, oninput:null});
-  let corpo = '';
-  c.perfOS = () => ({id:'os1', numero:'77', cliente:'Cliente Ficticio', servico:'Adesivo'});
-  c.perfFonteAtual = () => null;
-  c.perfRegistro = () => registro;
-  c.perfDialog = (_t, html) => { corpo = html; return {querySelector:el, querySelectorAll:() => [], close(){}}; };
-  c.perfEditarParticipacao('os1');
-  return {corpo, els};
-}
+/* TROCADO DE PROPÓSITO NA F09 (30/09/2026). Este teste abria o Conferir
+   antigo, que editava a participação do blob (caixas marcadas e pesos). O
+   Conferir agora monta a divisão da própria O.S. (alocacao-ui.js, gravada em
+   os.alocacao) e a participação antiga só aparece para leitura. O caso ruim
+   desta revisão continua valendo nessa leitura: a mesma pessoa gravada pelo
+   slug e pelo ID é UMA linha, com o percentual gravado e o nome da época. */
+const linhasAntigas = html => [...html.matchAll(/<li>([^<]*)<\/li>/g)].map(m => m[1]);
 
-test('tela nova: participação confirmada pelo slug abre com uma caixa por pessoa, com o percentual gravado', () => {
+test('tela nova: participação confirmada pelo slug aparece só para leitura, uma linha por pessoa, com o percentual gravado', () => {
   const rh = [{chave:'carla-lima', id:'100003', nome:'Carla Ficticia Lima', apelido:'carla'}, {chave:'paulo-tx', id:'200009', nome:'Paulo Ficticio Teixeira', apelido:'paulo'}];
-  const equipeSlug = {id:'eq1', nome:'Horizonte', emblema:'🦅', ativo:true, membros:[{chave:'carla-lima', nome:'Carla Ficticia Lima'}, {chave:'paulo-tx', nome:'Paulo Ficticio Teixeira'}]};
-  const {c} = tela(rh, {performancePCP:{equipes:[equipeSlug], participacoes:[]}});
-  const {corpo, els} = abrirParticipacao(c, {id:'os1', confirmado:true, equipeId:'', membros:[
-    {chave:'carla-lima', nome:'Carla da Época', apelido:'carla', percentual:60}, {chave:'200009', nome:'Paulo', percentual:40}]});
-  assert.deepEqual(caixas(corpo), ['100003 (marcada)', '200009 (marcada)'], 'slug e ID da mesma pessoa não viram duas caixas');
-  const pesos = els['#perf-pesos'].innerHTML;
-  assert.match(pesos, /data-chave="100003" value="60"/, 'o percentual gravado fica');
-  assert.match(pesos, /Carla da Época/, 'o nome da época fica');
-  // Slug e ID da mesma pessoa na mesma entrega: uma caixa, percentuais somados.
-  const dup = abrirParticipacao(c, {id:'os1', confirmado:true, equipeId:'', membros:[
-    {chave:'carla-lima', nome:'Carla', percentual:30}, {chave:'100003', nome:'Carla', percentual:30}, {chave:'200009', nome:'Paulo', percentual:40}]});
-  assert.deepEqual(caixas(dup.corpo), ['100003 (marcada)', '200009 (marcada)']);
-  assert.match(dup.els['#perf-pesos'].innerHTML, /data-chave="100003" value="60"/);
-  // "Usar uma equipe" com a equipe salva pelo slug: também uma caixa por pessoa.
-  dup.els['[name="equipe"]'].onchange({target:{value:'eq1'}});
-  assert.deepEqual(caixas(dup.els['#perf-part-members'].innerHTML), ['100003 (marcada)', '200009 (marcada)']);
+  const {c} = tela(rh, {performancePCP:{equipes:[], participacoes:[]}});
+  const html = c.perfParticipacaoAntigaHTML({id:'os1', por:'Gestor', em:'2026-09-20', membros:[
+    {chave:'carla-lima', nome:'Carla da Época', apelido:'carla', percentual:60}, {chave:'200009', nome:'Paulo', percentual:40}]}, {id:'os1'});
+  assert.deepEqual(linhasAntigas(html), ['Carla da Época · 60%', 'Paulo · 40%'], 'o nome da época e o percentual gravado ficam');
+  assert.match(html, /só leitura/);
+  assert.match(html, /20\/09\/2026/, 'dia puro não recua um dia pelo fuso');
+  assert.match(html, /ainda conta na performance/, 'sem divisão na O.S., a antiga ainda vale');
+  assert.doesNotMatch(html, /<input|<button/, 'nada de editar a participação antiga');
+  // Slug e ID da mesma pessoa na mesma entrega: uma linha, percentuais somados.
+  const dup = c.perfParticipacaoAntigaHTML({membros:[
+    {chave:'carla-lima', nome:'Carla', percentual:30}, {chave:'100003', nome:'Carla', percentual:30}, {chave:'200009', nome:'Paulo', percentual:40}]}, {id:'os1'});
+  assert.deepEqual(linhasAntigas(dup), ['Carla · 60%', 'Paulo · 40%']);
+  // Com a divisão gravada na O.S., a participação antiga não conta mais, e a tela diz.
+  assert.match(c.perfParticipacaoAntigaHTML({membros:[{chave:'200009', nome:'Paulo', percentual:100}]}, {id:'os1', alocacao:{grupos:[]}}), /não conta mais/);
 });

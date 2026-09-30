@@ -51,11 +51,18 @@ test('filtro por identidade não confunde nome de cliente nem homônimos',()=>{
  assert.equal(P.incluiPessoa(membros,'rh-2'),false);
  assert.equal(P.incluiPessoa(membros,''),true);
 });
-test('alterar integrantes preserva percentuais e exige acertar o total explicitamente',()=>{
- const old=[{chave:'a',nome:'A',percentual:70},{chave:'b',nome:'B',percentual:30}];
- const next=P.manterPesos(old,[old[0],{chave:'c',nome:'C'}]);
- assert.equal(next[0].percentual,70);assert.equal(next[1].percentual,0);
- assert.ok(P.validar(next));assert.equal(P.validar(P.iguais(next)),'');
+/* TROCADO DE PROPÓSITO NA F09 (30/09/2026). Este teste fixava o Conferir
+   velho: a pessoa nova entrava com 0% e a gestão tinha de acertar o total na
+   mão (PERF.manterPesos). A regra do dono é por papel, e o componente de
+   alocação (alocacao-ui.js) reparte pela regra sozinho: dupla 60/40, com um
+   terceiro 40/30/30, soma sempre 100%. manterPesos saiu (ninguém mais usa);
+   o caminho pela tela está em tests/alocacao-ui.test.cjs. */
+test('pessoa nova na divisão entra pela regra (40/30/30), não com 0% esperando acerto',()=>{
+ assert.equal(P.manterPesos,undefined,'o caminho do 0% saiu');
+ const D=require('../divisao.js');
+ const a=D.montar([{equipeId:null,liderId:'100001',membros:['100001','100002','100003']}]);
+ assert.deepEqual(a.grupos[0].membros.map(m=>m.cota),[4000,3000,3000]);
+ assert.equal(D.validar(a),'');
 });
 test('cards e relatório usam somente valor confirmado e filtro de período é único',()=>{
  const fs=require('fs'),vm=require('vm');
