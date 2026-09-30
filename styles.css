@@ -3537,3 +3537,43 @@ img.perf-logo{object-fit:cover}
 .picker-opt.picker-sugestao .picker-pessoa small::after{content:" · parecido com o que você digitou"}
 @media (prefers-reduced-motion:no-preference){.aloc-seg{transition:opacity .2s}.aloc-chip{transition:background-color .2s}}
 @media (max-width:640px){.aloc-rapidas-lista{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.aloc button.aloc-eq{min-width:0;border-radius:14px}.aloc-grupo{padding:8px}.aloc-chip{padding:6px;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"quem x" "ctrl ctrl"}.aloc-tab{font-size:.8rem}.aloc-tab th,.aloc-tab td{padding:5px 4px}}
+/* ── NOMES ANTIGOS VIRAM ID (F12, 30/09/2026) ──────────────────────────────
+   Dentro de "Conferir nomes do PCP × fichas do RH": o painel da troca (o
+   que vai, a janela do aparelho, o relatório com o Desfazer, as pendências)
+   e as grafias parecidas agrupadas na tabela. No celular a tabela vira uma
+   ficha por nome, com o rótulo de cada campo. Só classes novas. */
+.lig-conv{display:grid;gap:10px;margin:10px 0 14px}
+.lig-conv .metricas-nota{margin:0}
+.lig-conv-resumo{margin:0;font-size:.86rem;color:#163654;line-height:1.5}
+.lig-conv-status{margin:0;padding:10px 12px;border-radius:10px;background:#eef6ff;color:#1d4ed8;font-weight:600;font-size:.86rem}
+.lig-conv > .btn-primary{justify-self:start;min-height:44px}
+.lig-rel{border:1px solid #d7e1ee;border-radius:12px;padding:10px 12px;background:#fbfdff}
+.lig-rel h4{margin:0 0 4px}
+.lig-rel-conta{margin:0 0 6px;font-size:.84rem;color:#163654}
+.lig-rel-os > summary{cursor:pointer;min-height:40px;display:flex;align-items:center;font-size:.84rem;color:#1d4ed8}
+.lig-rel-tabela td{vertical-align:top}
+.lig-rel-acoes{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.lig-rel-acoes button{min-height:40px}
+.lig-pend{border-left:4px solid #f0b45a;padding:4px 0 4px 12px}
+.lig-pend h4{margin:0 0 4px}
+.lig-pend ul{margin:0;padding-left:18px;font-size:.84rem;line-height:1.6}
+.lig-tabela tbody.lig-grupo{border-left:4px solid #93c5fd}
+.lig-tabela tr.lig-grupo-cab td{background:#eff6ff;color:#1e3a8a;font-size:.8rem;padding:8px 12px}
+.lig-tabela td.lig-vira button,.lig-tabela td.lig-acoes button{margin-top:6px}
+.lig-tabela td.lig-acoes select{max-width:100%}
+@media (max-width:640px){
+  .lig-tabela,.lig-tabela tbody,.lig-tabela tr,.lig-tabela td{display:block;width:100%}
+  .lig-tabela thead{display:none}
+  .lig-tabela tbody{border-bottom:1px solid #d7e1ee}
+  .lig-tabela tr{padding:6px 0}
+  .lig-tabela td{border-bottom:0;padding:4px 12px}
+  .lig-tabela td[data-rot]::before{content:attr(data-rot);display:block;font-size:.66rem;letter-spacing:.05em;text-transform:uppercase;color:#5b6f84;font-weight:700}
+  .lig-tabela td.num{text-align:left}
+  .lig-tabela td.num::before{display:inline;margin-right:8px}
+  .lig-tabela td.lig-acoes select{width:100%;min-height:40px}
+  .lig-rel-tabela,.lig-rel-tabela tbody,.lig-rel-tabela tr,.lig-rel-tabela td{display:block;width:100%}
+  .lig-rel-tabela thead{display:none}
+  .lig-rel-tabela tr{border-bottom:1px solid #eef2f7;padding:4px 0}
+  .lig-rel-tabela td{border-bottom:0;padding:3px 8px}
+  .lig-rel-tabela td.num{text-align:left;font-weight:700}
+}
