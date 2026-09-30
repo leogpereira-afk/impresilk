@@ -3162,6 +3162,12 @@ img.perf-logo{object-fit:cover}
 .badge.perf-st-ok{background:#e3f4ec;color:#1d6b4f}
 .badge.perf-st-sug{background:#fff1d6;color:#7a5300}
 .badge.perf-st-sem,.badge.perf-st-erro{background:#fdecea;color:#9b2c2c}
+/* F11: a divisão desatualizada (ou esperando o RH) tem marca própria, e a
+   equipe deduzida pela composição diz que é sugestão. */
+.badge.perf-st-desat{background:#fbe3cf;color:#8a3d00;border:1px dashed #d9894a}
+.perf-sugerida{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:999px;border:1px dashed #c89a42;color:#7a5300;font-size:.72rem;font-weight:650;vertical-align:1px}
+.perf-cob-valor{color:#5d7283;font-size:.8rem;white-space:nowrap}
+.perf-cob-valor-linha{color:#3d5566}
 /* Base e fechamento: o quadro recolhível do fim, com o motivo do Fechar desligado. */
 .perf-base{margin-top:16px}
 .perf-base-fonte{margin:10px 0 6px;font-size:.84rem;line-height:1.5;color:#3d5566;overflow-wrap:anywhere}

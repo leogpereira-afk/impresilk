@@ -43,6 +43,15 @@ const PV_ENTREGAS=[
  ['F19',18,[],2100,null,''],['F20',19,PV_EQ.aguia,3650,PV_OK,'Carro 1'],['F21',20,[],880,null,''],['F22',21,PV_EQ.lobo,4400,PV_OK,'Carro 3'],
 ];
 for(const [id,n,equipe,valor,rc,carro] of PV_ENTREGAS){const d=pvDoMes(n);lista.push(base(id,{cliente:'Cliente fictício '+id,instalacao:{data:d,periodo:'Manhã'},equipe:[...equipe],veiculo:carro,valorTotal:valor,saidaEm:d+'T08:00:00',horaSaida:'08:00',horaRetorno:'16:00',retornoEm:d+'T16:00:00',finalizadaEm:d+'T15:30:00',finalizadoPor:'Gestor de teste',retornoConf:rc}));}
+/* A DIVISÃO DA O.S. NA PERFORMANCE (F11): uma entrega com duas equipes
+   (Águia e Leão, cada uma com a sua cota) e uma com a divisão desatualizada
+   (uma aba antiga trocou a equipe sem mandar a divisão). Fictícias. */
+const pvAloc=(grupos,extra={})=>({grupos,por:'Gestor de teste',em:hoje+'T12:00:00',...extra});
+const pvAguia=cota=>({equipeId:'eq-aguia',cota,liderId:'900001',membros:[{pessoaId:'900001',papel:'lider',cota:6000},{pessoaId:'900002',papel:'ajudante',cota:4000}]});
+lista.push(base('F23',{cliente:'Cliente fictício F23 · duas equipes',instalacao:{data:pvDoMes(22),periodo:'Manhã'},equipe:['900001','900002','900004'],veiculo:'Carro 1',valorTotal:9000,finalizadaEm:pvDoMes(22)+'T15:30:00',finalizadoPor:'Gestor de teste',retornoConf:PV_OK,
+ alocacao:pvAloc([pvAguia(6667),{equipeId:'eq-leao',cota:3333,liderId:'900004',membros:[{pessoaId:'900004',papel:'lider',cota:10000}]}])}));
+lista.push(base('F24',{cliente:'Cliente fictício F24 · divisão desatualizada',instalacao:{data:pvDoMes(23),periodo:'Tarde'},equipe:['900001','900005'],veiculo:'Carro 1',valorTotal:1500,finalizadaEm:pvDoMes(23)+'T15:30:00',finalizadoPor:'Gestor de teste',retornoConf:PV_OK,
+ alocacao:pvAloc([pvAguia(10000)],{desatualizada:true})}));
 const pvMembro=(id,nome,pct)=>({chave:id,nome,percentual:pct});
 cfg.performancePCP={equipes:[
  {id:'eq-aguia',nome:'Águia',animal:'aguia',cor:'marinho',emblema:'🦅',liderPadraoId:'900001',membros:[{chave:'900001',nome:'Ana Paula Souza'},{chave:'900002',nome:'Beatriz Costa Lima'}],ativo:true},
@@ -65,8 +74,17 @@ async function previewApi(body){
   const nomeRH=n=>(ELENCO_PREVIA.pessoas.find(p=>p.id===n)||{}).nome||n;
   const registros=lista.filter(o=>o.finalizadaEm && !o.baixaAutoERP && o.tipo!=='interno' && o.finalizadaEm.slice(0,10)>=body.de && o.finalizadaEm.slice(0,10)<=body.ate).map(o=>{
    const p=cfg.performancePCP?.participacoes?.find(p=>p.id===o.id),eq=o.equipe||[];
-   const membros=p?.membros || eq.map((n,i)=>({chave:n,nome:nomeRH(n),percentual:(Math.floor(10000/eq.length)+(i<10000%eq.length?1:0))/100}));
-   return {id:o.id,numero:o.numero,cliente:o.cliente,dia:o.finalizadaEm.slice(0,10),valor:typeof o.valorTotal==='number'?o.valorTotal:null,origemValor:'Simulação local',membros,confirmado:!!p,equipeId:p?.equipeId||'',equipeNome:p?.equipeNome||'',emblema:p?.emblema||'🤝',por:p?.por||'',em:p?.em||'',obs:p?.obs||'',retrabalho:!!o.retrabalho,retornoConf:o.retornoConf||null,voltou:eq.length>0,volta:[o.finalizadaEm.slice(0,10),String(o.veiculo||'').toLowerCase(),[...eq].sort().join('+')].join('|')};
+   /* A mesma régua do servidor (F11): a divisão válida e atual confirma, com
+      as equipes dela (equipesDaDivisao); a desatualizada aparece com a marca e
+      não confirma, e a não confirmada leva a sugestão (sugestaoApurada: a
+      equipe da divisão, ou a da composição na O.S. sem divisão). */
+   const aloc=o.alocacao&&typeof o.alocacao==='object'?o.alocacao:null,alocOk=!!aloc&&DIVISAO.alocacaoConfirmada(o),finais=alocOk?DIVISAO.finais(aloc):[];
+   const d=alocOk?PERF.equipesDaDivisao(aloc,finais,cfg.performancePCP.equipes):null,um=d?d.unica:null;
+   const membros=alocOk?finais.filter(f=>f.cota>0).map(f=>({chave:f.pessoaId,nome:nomeRH(f.pessoaId),percentual:f.cota/100})):(!aloc&&p?.membros) || eq.map((n,i)=>({chave:n,nome:nomeRH(n),percentual:(Math.floor(10000/eq.length)+(i<10000%eq.length?1:0))/100}));
+   const confirmado=alocOk || (!aloc && !!p),fonte=alocOk?'alocacao':aloc?(aloc.conferirRH?'alocacao-conferir-rh':'alocacao-desatualizada'):p?'participacao':'sugestao';
+   const quem=alocOk?{equipeId:um?um.equipeId:'',equipeNome:um?um.equipeNome:'',emblema:um?um.emblema:'🤝',por:aloc.por||'',em:aloc.em||'',obs:''}:{equipeId:p?.equipeId||'',equipeNome:p?.equipeNome||'',emblema:p?.emblema||'🤝',por:p?.por||'',em:p?.em||'',obs:p?.obs||''};
+   return {id:o.id,numero:o.numero,cliente:o.cliente,dia:o.finalizadaEm.slice(0,10),valor:typeof o.valorTotal==='number'?o.valorTotal:null,origemValor:'Simulação local',membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf:o.retornoConf||null,voltou:eq.length>0,volta:[o.finalizadaEm.slice(0,10),String(o.veiculo||'').toLowerCase(),[...eq].sort().join('+')].join('|'),
+    ...(confirmado?(d&&d.grupos?{grupos:d.grupos}:{}):PERF.sugestaoApurada(membros,aloc,aloc?DIVISAO.finais(aloc):[],cfg.performancePCP.equipes,m=>m.chave))};
   });return {completo:true,periodo:{de:body.de,ate:body.ate},hash:'simulacao',registros,consultadoEm:new Date().toISOString(),fonte:'DADOS FICTÍCIOS — simulação local'};
  }
  if(body.action==='performanceFechamentos')return {fechamentos:revisoesPreview};

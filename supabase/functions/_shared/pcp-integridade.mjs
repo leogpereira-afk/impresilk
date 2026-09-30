@@ -2044,3 +2044,94 @@ export function participacaoVale(os, p) {
    exposta aqui para o pcp-sync. */
 export const alocacaoConfirmada = os => DIVISAO.alocacaoConfirmada(os);
 export const finaisAlocacao = a => DIVISAO.finais(a);
+/* ==== RÉGUA DA EQUIPE NA APURAÇÃO (F11): daqui até FIM DA RÉGUA DA EQUIPE, cópia byte a byte de _shared/pcp-integridade.mjs ==== */
+/* A MESMA CONTA NO APARELHO (performance.js, dentro do PERF) E NO SERVIDOR
+   (_shared/pcp-integridade.mjs, usada pela apuração do pcp-sync). Mudou numa,
+   muda na outra no mesmo commit: tests/performance-alocacao-f11.test.cjs
+   compara o texto, e tests/performance-alocacao-f11-revisao.test.cjs passa
+   casos gerados pela apuração do servidor e pela do aparelho, cada uma com a
+   régua de pessoas dela. Funções puras: não leem tela nem banco.
+   A COMPOSIÇÃO de uma lista de membros ({chave}): a chave de hoje de cada um
+   (`idDe(m)`, a régua de pessoas de cada lado; sem resposta, a chave como
+   está), sem repetir e em ordem. A mesma gente em qualquer ordem é a mesma
+   composição. */
+function composicaoApurada(membros, idDe) {
+  const ks = new Set();
+  for (const m of Array.isArray(membros) ? membros : []) {
+    if (!m || typeof m !== 'object') continue;
+    const k = String((idDe ? idDe(m) : '') || (m.chave == null ? '' : m.chave)).trim();
+    if (k) ks.add(k);
+  }
+  return [...ks].sort().join('|');
+}
+/* A EQUIPE PELA COMPOSIÇÃO (F06, F11): só quando EXATAMENTE UMA equipe ativa
+   tem a mesma gente. Com duas ou mais, nenhuma: a ordem do cadastro não é
+   mérito. É SUGESTÃO, para a entrega sem divisão e sem confirmação: aparece
+   marcada "sugerida", conta nas Entregas e nunca no valor confirmado. */
+function equipeDaComposicao(membros, equipes, idDe) {
+  const k = composicaoApurada(membros, idDe);
+  if (!k) return null;
+  const iguais = (Array.isArray(equipes) ? equipes : []).filter(e => e && typeof e === 'object' && e.id && e.ativo !== false && composicaoApurada(e.membros, idDe) === k);
+  return iguais.length === 1 ? iguais[0] : null;
+}
+/* A SUGESTÃO PELA COMPOSIÇÃO: o id, o nome e o emblema da equipe deduzida,
+   ou null. */
+function equipeSugeridaDe(membros, equipes, idDe) {
+  const e = equipeDaComposicao(membros, equipes, idDe);
+  return e ? {equipeId:String(e.id), equipeNome:String(e.nome || ''), emblema:e.emblema || '🤝'} : null;
+}
+/* AS EQUIPES DE UMA DIVISÃO (F11), para a apuração. `finais` é o
+   DIVISAO.finais da divisão. Cada equipe leva a cota dela na O.S. (em 0,01%)
+   e os IDs de quem tem parte nela; equipe com cota 0, ou sem ninguém com
+   parte, fica de fora (não entrou no valor). A equipe que não está no
+   cadastro fica sem id e vira composição avulsa, como a equipe única sempre
+   foi. O valor da equipe no ranking é a SOMA DAS COTAS: a O.S. com duas
+   equipes não conta inteira nas duas. `tamanho` é quanta gente a equipe tem
+   na divisão, contando quem ficou em 0%: é por ele que o motor dá o centavo
+   que sobra entre as equipes (DIVISAO.ratearCentavosLider), e o ranking dá
+   o mesmo centavo à mesma equipe. */
+function gruposApurados(aloc, finais, equipes) {
+  const gs = aloc && typeof aloc === 'object' && Array.isArray(aloc.grupos) ? aloc.grupos : [];
+  const fs = Array.isArray(finais) ? finais : [];
+  const cadastro = Array.isArray(equipes) ? equipes : [];
+  const out = [];
+  gs.forEach((g, gi) => {
+    if (!g || typeof g !== 'object') return;
+    const cota = Number.isInteger(g.cota) && g.cota > 0 ? g.cota : 0;
+    const membros = fs.filter(f => f && f.grupo === gi && Number.isInteger(f.cota) && f.cota > 0).map(f => String(f.pessoaId));
+    if (!cota || !membros.length) return;
+    const eq = g.equipeId ? cadastro.find(e => e && typeof e === 'object' && e.id === g.equipeId) || null : null;
+    const tamanho = (Array.isArray(g.membros) ? g.membros : []).filter(Boolean).length;
+    out.push({equipeId:eq ? String(eq.id) : '', equipeNome:eq ? String(eq.nome || '') : '', emblema:(eq && eq.emblema) || '🤝', cota, membros, tamanho});
+  });
+  return out;
+}
+/* O QUE A DIVISÃO DÁ AO REGISTRO (F11). Divisão com UMA equipe: ela é a
+   equipe do registro (`unica`), e o registro confirmado fica igual ao de
+   antes da F11, com o hash da performance-3. Divisão com DUAS OU MAIS, mesmo
+   que uma tenha ficado em 0%: as equipes com parte vão em `grupos` e o
+   registro fica sem equipe única. A de 0% não leva nada; a outra leva a O.S.
+   pela cota dela, e o registro diz que a divisão era de mais de uma equipe
+   (é o `grupos` que muda o hash, e só nesse período). */
+function equipesDaDivisao(aloc, finais, equipes) {
+  const n = aloc && typeof aloc === 'object' && Array.isArray(aloc.grupos) ? aloc.grupos.length : 0;
+  const gs = gruposApurados(aloc, finais, equipes);
+  return n > 1 ? {unica:null, grupos:gs} : {unica:gs.length === 1 ? gs[0] : null, grupos:null};
+}
+/* A SUGESTÃO DA ENTREGA NÃO CONFIRMADA (F11): os campos que vão no registro.
+   Com divisão na O.S. (desatualizada, esperando o RH ou inválida), vale a
+   equipe que a própria divisão escolheu (`equipeId`), nunca a composição:
+   quem dividiu disse qual equipe foi. Duas ou mais equipes na divisão vão em
+   `grupos`, como na confirmada. Sem divisão, a equipe pela composição
+   (equipeSugeridaDe). Entrega sem gente não tem sugestão: está sem equipe.
+   Sugestão nunca confirma nem entra no valor confirmado. */
+function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
+  if (!Array.isArray(membros) || !membros.length) return {equipeSugerida:null};
+  if (!aloc || typeof aloc !== 'object') return {equipeSugerida:equipeSugeridaDe(membros, equipes, idDe)};
+  const d = equipesDaDivisao(aloc, finais, equipes);
+  if (d.grupos) return d.grupos.length ? {equipeSugerida:null, grupos:d.grupos} : {equipeSugerida:null};
+  const u = d.unica;
+  return {equipeSugerida:u && u.equipeId ? {equipeId:u.equipeId, equipeNome:u.equipeNome, emblema:u.emblema} : null};
+}
+/* ==== FIM DA RÉGUA DA EQUIPE ==== */
+export { composicaoApurada, equipeDaComposicao, equipeSugeridaDe, gruposApurados, equipesDaDivisao, sugestaoApurada };

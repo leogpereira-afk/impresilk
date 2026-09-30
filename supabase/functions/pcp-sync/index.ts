@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
@@ -429,10 +429,20 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
        limpa de propósito não ressuscita a conferência velha do blob. */
     const pAntiga=participacaoVale(o,p);
     const sugestao=()=>nomes.map((n,i)=>({chave:pessoasPerf.idDe(n)||n,nome:pessoasPerf.nome(n),percentual:(Math.floor(10000/nomes.length)+(i<10000%nomes.length?1:0))/100}));
+    const finais=alocOk?finaisAlocacao(aloc):[];
     const membros=alocOk
-      ? finaisAlocacao(aloc).filter((f:any)=>f.cota>0).map((f:any)=>({chave:f.pessoaId,nome:pessoasPerf.nome(f.pessoaId),percentual:f.cota/100}))
+      ? finais.filter((f:any)=>f.cota>0).map((f:any)=>({chave:f.pessoaId,nome:pessoasPerf.nome(f.pessoaId),percentual:f.cota/100}))
       : pAntiga?.membros || sugestao();
-    const eqAloc=alocOk&&aloc.grupos.length===1&&aloc.grupos[0].equipeId?equipesPerf.find((e:any)=>e&&e.id===aloc.grupos[0].equipeId)||null:null;
+    /* AS EQUIPES DA DIVISÃO (F11), pela régua única (equipesDaDivisao, a
+       mesma do aparelho). Divisão de UMA equipe: ela é a equipe do registro,
+       como sempre foi, e o registro fica igual ao de antes (o hash da
+       performance-3 também). Divisão de DUAS OU MAIS, mesmo com uma em 0%: as
+       equipes com parte vão em `grupos`, cada uma com a cota dela, e o
+       registro fica sem equipe única; o valor de cada equipe no ranking é a
+       soma das cotas, nunca a O.S. inteira nas duas. Só nesse período o hash
+       muda (o campo novo). */
+    const divisao=alocOk?equipesDaDivisao(aloc,finais,equipesPerf):null;
+    const eqAloc=divisao?divisao.unica:null;
     const confirmado=alocOk
       ? !validarPerformance({equipes:[],participacoes:[{id:o.id,membros}]})
       : !!pAntiga && !validarPerformance({equipes:pAntiga.equipeId?[{id:pAntiga.equipeId,nome:pAntiga.equipeNome || "Equipe",emblema:pAntiga.emblema || "🤝",membros}]:[],participacoes:[pAntiga]});
@@ -462,9 +472,21 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     const voltou=nomes.length>0 && !semCarro && !!(o.retornoEm || o.horaRetorno || !baixaERP || o.entregaLancada);
     const diaVolta=perfDia(o.retornoEm) || (o.horaRetorno ? (perfDia(o.saidaEm) || perfDia(o.instalacao?.data)) : "") || (o.entregaLancada ? perfDia(o.entregaLancada.data) : "") || perfDia(o.finalizadaEm);
     const volta=[diaVolta,norm(o.veiculo),nomes.map((n:string)=>pessoasPerf.chave(n)).sort().join("+")].join("|");
-    const quem=alocOk?{equipeId:eqAloc?String(eqAloc.id):"",equipeNome:eqAloc?String(eqAloc.nome||""):"",emblema:eqAloc?.emblema||"🤝",obs:"",por:String(aloc.por||""),em:String(aloc.em||"")}
+    const quem=alocOk?{equipeId:eqAloc?eqAloc.equipeId:"",equipeNome:eqAloc?eqAloc.equipeNome:"",emblema:eqAloc?eqAloc.emblema:"🤝",obs:"",por:String(aloc.por||""),em:String(aloc.em||"")}
       :{equipeId:pAntiga?.equipeId||"",equipeNome:pAntiga?.equipeNome||"",emblema:pAntiga?.emblema||"🤝",obs:pAntiga?.obs||"",por:pAntiga?.por||"",em:pAntiga?.em||""};
-    return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf,voltou,volta};
+    /* A EQUIPE SUGERIDA (F11) vai só na entrega NÃO confirmada, pela régua
+       única (sugestaoApurada, a mesma do aparelho): com divisão na O.S.
+       (desatualizada, esperando o RH ou inválida), a equipe que a própria
+       divisão escolheu, e duas ou mais em `grupos`; sem divisão, a única
+       equipe ativa com exatamente a mesma gente. Entrega sem gente fica sem
+       sugestão. Nunca confirma nem entra no valor confirmado. Entrega não
+       confirmada não é selada (o fechamento exige todas confirmadas), então
+       a sugestão nunca entra num fechamento. */
+    const idMembro=(m:any)=>idDoMembro(m,pessoasPerf);
+    const camposEquipe=confirmado
+      ? (divisao&&divisao.grupos?{grupos:divisao.grupos}:{})
+      : sugestaoApurada(membros,aloc,aloc?finaisAlocacao(aloc):[],equipesPerf,idMembro);
+    return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf,voltou,volta,...camposEquipe};
   });
   /* performance-2: cada registro leva a conferência da volta, e a apuração
      leva os PESOS DA NOTA em vigor. Eles entram no hash: quem fecha sela os
@@ -844,7 +866,18 @@ Deno.serve(async (req: Request) => {
         const motivo=String(body.motivo || "").trim();
         if(motivo.length<5 || motivo.length>500)return resp({error:"Informe um motivo de 5 a 500 caracteres para o fechamento ou revisão."},422);
         const fonte=await perfFonte(body);
-        if(fonte.hash!==body.hash)return resp({error:"Os dados mudaram. Atualize, confira e tente novamente."},409);
+        /* A ABA PRESA NUMA VERSÃO ANTERIOR À F11 não lê `grupos`: mostra a O.S.
+           dividida entre duas equipes inteira numa composição avulsa, e o selo
+           gravaria a parte de cada equipe. Quem fecha aprovaria números que não
+           são os do registro. Só a tela que lê `grupos` manda leGrupos:true;
+           período sem `grupos` continua fechando pela aba antiga (o registro é
+           o mesmo de antes). O Fechar é chamado na hora, fora da fila: o 422
+           aqui não prende nada e a tela mostra a mensagem. Vem antes do hash
+           para a aba velha ouvir a causa certa, e não "os dados mudaram". */
+        if(body.leGrupos!==true && fonte.registros.some((r:any)=>Array.isArray(r.grupos)))return resp({error:"Recarregue a página para fechar: este período tem O.S. dividida entre duas equipes e esta tela é de uma versão anterior."},422);
+        /* A tela nova recarrega a apuração sozinha neste 409; a aba numa versão
+           anterior mostra a mensagem, então ela diz onde está o botão. */
+        if(fonte.hash!==body.hash)return resp({error:"Os dados mudaram desde a consulta. Toque em Atualizar apuração (no quadro Base e fechamento), confira e feche de novo."},409);
         if(!fonte.registros.length || fonte.registros.some((r:any)=>!r.confirmado || r.valor===null))return resp({error:"Confirme todas as participações e confira os valores antes de fechar."},422);
         const revisao=(anterior?.revisao || 0)+1,id=periodo.de+":"+periodo.ate+":"+String(revisao).padStart(6,"0");
         const registro={...fonte,...periodo,id,revisao,anterior:anterior?.id||null,requestId,motivo,fechadoEm:new Date().toISOString(),fechadoPor:cracha?.nome || "Integração autorizada"};

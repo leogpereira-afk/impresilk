@@ -28,6 +28,42 @@ const PERF = (() => {
     for(let i=0;i<falta;i++) ordem[i % ordem.length].centavos++;
     return partes.map(p=>sinal*p.centavos);
   };
+  /* A PARTE DE CADA EQUIPE NUMA O.S. COM DUAS OU MAIS (F11), em centavos, pela
+     cota de cada uma. A sobra do arredondamento fica com a equipe com mais
+     gente NA DIVISÃO (`tamanho`, que conta quem ficou em 0%; no empate, a
+     primeira), como no motor (DIVISAO.ratearCentavosLider): a mesma equipe
+     leva o mesmo centavo, e a soma é sempre o valor da O.S. Sem `tamanho`,
+     quem tem parte. */
+  const ratearGrupos = (valor, grupos) => {
+    const soma = grupos.reduce((s, g) => s + g.cota, 0);
+    if (valor == null || !soma) return grupos.map(() => null);
+    const total = Math.round(Math.abs(valor) * 100), sinal = valor < 0 ? -1 : 1;
+    const partes = grupos.map(g => Math.floor(total * g.cota / soma));
+    const gente = g => Number.isInteger(g.tamanho) && g.tamanho > 0 ? g.tamanho : g.membros.length;
+    let alvo = 0;
+    grupos.forEach((g, i) => { if (gente(g) > gente(grupos[alvo])) alvo = i; });
+    partes[alvo] += total - partes.reduce((a, b) => a + b, 0);
+    return partes.map(c => sinal * c);
+  };
+  /* AS EQUIPES DE UM REGISTRO (F11). Com `grupos` (divisão com duas equipes
+     ou mais, confirmada ou sugerida), cada equipe com quem tem parte nela e a
+     SUA parte do valor. Sem `grupos`, uma equipe só: a do registro (a da
+     divisão, a da participação antiga, a sugerida ou a composição avulsa), com
+     a O.S. inteira, como sempre foi. `chave` é a linha da equipe no ranking. */
+  const gruposDoRegistro = r => {
+    const ms = Array.isArray(r && r.membros) ? r.membros : [];
+    if (Array.isArray(r && r.grupos) && r.grupos.length) {
+      const gs = r.grupos.map(g => { const ids = new Set((g && Array.isArray(g.membros) ? g.membros : []).map(String)); return {...g, membros:ms.filter(m => ids.has(String(m.chave)))}; })
+        .filter(g => g.membros.length && Number.isInteger(g.cota) && g.cota > 0);
+      if (gs.length) {
+        const partes = ratearGrupos(r.valor, gs);
+        return gs.map((g, i) => ({...g, chave:g.equipeId || 'avulsa:' + composicao(g.membros), valor:partes[i] == null ? null : partes[i] / 100, centavos:partes[i]}));
+      }
+    }
+    return [{equipeId:r.equipeId || '', equipeNome:r.equipeNome || '', emblema:r.emblema, logo:r.logo, animal:r.animal, cor:r.cor, cota:10000, membros:ms, chave:r.equipeId || 'avulsa:' + composicao(ms), valor:r.valor == null ? null : r.valor, inteira:true}];
+  };
+  // As linhas de equipe do ranking em que o registro entra (uma, ou uma por equipe da divisão).
+  const chavesDeEquipe = r => gruposDoRegistro(r).map(g => g.chave);
   const resumir = registros => {
     const pessoas = new Map(), equipes = new Map();
     for (const r of registros) {
@@ -39,11 +75,16 @@ const PERF = (() => {
         if (r.valor == null) x.semValor++; else x.valor = (Math.round(x.valor*100) + centavos[indice])/100;
         pessoas.set(p.chave,x);
       }
-      // A equipe leva cada O.S. uma vez, mesmo com participação individual.
-      const k = r.equipeId || ('avulsa:'+composicao(r.membros));
-      const x = equipes.get(k) || {chave:k,nome:r.equipeNome || r.membros.map(p=>p.nome).join(' + '),emblema:r.emblema || '🤝',logo:r.logo || '',animal:r.animal || '',cor:r.cor || '',salva:!!r.equipeId,membros:r.membros.map(p=>({chave:p.chave,nome:p.nome})),os:0,valor:0,semValor:0,confirmadas:0};
-      x.os++; if(r.confirmado) x.confirmadas++; if(r.valor == null) x.semValor++; else x.valor+=r.valor;
-      equipes.set(k,x);
+      /* A equipe leva cada O.S. uma vez, mesmo com participação individual. Com
+         duas equipes na divisão (F11), cada uma leva a O.S. uma vez e SÓ a parte
+         dela no valor (a soma das cotas): a O.S. não conta inteira nas duas. */
+      for (const g of gruposDoRegistro(r)) {
+        const k = g.chave;
+        const x = equipes.get(k) || {chave:k,nome:g.equipeNome || g.membros.map(p=>p.nome).join(' + '),emblema:g.emblema || '🤝',logo:g.logo || '',animal:g.animal || '',cor:g.cor || '',salva:!!g.equipeId,membros:g.membros.map(p=>({chave:p.chave,nome:p.nome})),os:0,valor:0,semValor:0,confirmadas:0};
+        x.os++; if(r.confirmado) x.confirmadas++;
+        if (g.valor == null) x.semValor++; else if (g.inteira) x.valor += g.valor; else x.valor = (Math.round(x.valor*100) + g.centavos)/100;
+        equipes.set(k,x);
+      }
     }
     return {pessoas:[...pessoas.values()].sort((a,b)=>b.equivalentes-a.equivalentes || a.nome.localeCompare(b.nome)),equipes:[...equipes.values()].sort((a,b)=>b.os-a.os || a.nome.localeCompare(b.nome))};
   };
@@ -54,12 +95,15 @@ const PERF = (() => {
     const grupos=new Map();
     for(const r of registros){
       if(validar(r.membros))continue;
-      const chave=r.equipeId || 'avulsa:'+composicao(r.membros);
-      const g=grupos.get(chave)||{chave,nome:r.equipeNome || 'Composição avulsa',emblema:r.emblema||'🤝',logo:r.logo||'',animal:r.animal||'',cor:r.cor||'',registros:[],membros:new Map(),confirmadas:0,valor:0,semValor:0,retrabalhos:0};
-      g.registros.push(r);if(r.os?.retrabalho || r.retrabalho)g.retrabalhos++;
-      if(r.confirmado){g.confirmadas++;if(r.valor==null)g.semValor++;else g.valor+=r.valor;}
-      for(const m of r.membros){const pessoa=g.membros.get(m.chave)||{chave:m.chave,nome:m.nome,entregas:0,confirmadas:0,equivalentes:0};pessoa.entregas++;if(r.confirmado){pessoa.confirmadas++;pessoa.equivalentes+=m.percentual/100;}g.membros.set(m.chave,pessoa);}
-      grupos.set(chave,g);
+      // Com duas equipes na divisão (F11), a O.S. entra no dossiê de cada uma, com a parte dela.
+      for(const eq of gruposDoRegistro(r)){
+        const chave=eq.chave;
+        const g=grupos.get(chave)||{chave,nome:eq.equipeNome || 'Composição avulsa',emblema:eq.emblema||'🤝',logo:eq.logo||'',animal:eq.animal||'',cor:eq.cor||'',registros:[],membros:new Map(),confirmadas:0,valor:0,semValor:0,retrabalhos:0};
+        g.registros.push(r);if(r.os?.retrabalho || r.retrabalho)g.retrabalhos++;
+        if(r.confirmado){g.confirmadas++;if(eq.valor==null)g.semValor++;else if(eq.inteira)g.valor+=eq.valor;else g.valor=(Math.round(g.valor*100)+eq.centavos)/100;}
+        for(const m of eq.membros){const pessoa=g.membros.get(m.chave)||{chave:m.chave,nome:m.nome,entregas:0,confirmadas:0,equivalentes:0};pessoa.entregas++;if(r.confirmado){pessoa.confirmadas++;pessoa.equivalentes+=m.percentual/100;}g.membros.set(m.chave,pessoa);}
+        grupos.set(chave,g);
+      }
     }
     return [...grupos.values()].map(g=>({...g,membros:[...g.membros.values()]})).sort((a,b)=>b.registros.length-a.registros.length || a.nome.localeCompare(b.nome));
   };
@@ -132,25 +176,121 @@ const PERF = (() => {
      num aparelho em que o elenco ainda não desceu). A equipe guarda as chaves do
      dia em que foi salva; comparar cru faria a equipe sumir do ranking em
      silêncio depois de um "Ligar". `resolver` normaliza as duas pontas. */
-  const composicaoCom = (membros, resolver) => resolver
-    ? unicos((membros || []).map(m => ({...m, chave: String(resolver(m) || m.chave)}))).map(p => p.chave).sort().join('|')
-    : composicao(membros);
+/* ==== RÉGUA DA EQUIPE NA APURAÇÃO (F11): daqui até FIM DA RÉGUA DA EQUIPE, cópia byte a byte de _shared/pcp-integridade.mjs ==== */
+/* A MESMA CONTA NO APARELHO (performance.js, dentro do PERF) E NO SERVIDOR
+   (_shared/pcp-integridade.mjs, usada pela apuração do pcp-sync). Mudou numa,
+   muda na outra no mesmo commit: tests/performance-alocacao-f11.test.cjs
+   compara o texto, e tests/performance-alocacao-f11-revisao.test.cjs passa
+   casos gerados pela apuração do servidor e pela do aparelho, cada uma com a
+   régua de pessoas dela. Funções puras: não leem tela nem banco.
+   A COMPOSIÇÃO de uma lista de membros ({chave}): a chave de hoje de cada um
+   (`idDe(m)`, a régua de pessoas de cada lado; sem resposta, a chave como
+   está), sem repetir e em ordem. A mesma gente em qualquer ordem é a mesma
+   composição. */
+function composicaoApurada(membros, idDe) {
+  const ks = new Set();
+  for (const m of Array.isArray(membros) ? membros : []) {
+    if (!m || typeof m !== 'object') continue;
+    const k = String((idDe ? idDe(m) : '') || (m.chave == null ? '' : m.chave)).trim();
+    if (k) ks.add(k);
+  }
+  return [...ks].sort().join('|');
+}
+/* A EQUIPE PELA COMPOSIÇÃO (F06, F11): só quando EXATAMENTE UMA equipe ativa
+   tem a mesma gente. Com duas ou mais, nenhuma: a ordem do cadastro não é
+   mérito. É SUGESTÃO, para a entrega sem divisão e sem confirmação: aparece
+   marcada "sugerida", conta nas Entregas e nunca no valor confirmado. */
+function equipeDaComposicao(membros, equipes, idDe) {
+  const k = composicaoApurada(membros, idDe);
+  if (!k) return null;
+  const iguais = (Array.isArray(equipes) ? equipes : []).filter(e => e && typeof e === 'object' && e.id && e.ativo !== false && composicaoApurada(e.membros, idDe) === k);
+  return iguais.length === 1 ? iguais[0] : null;
+}
+/* A SUGESTÃO PELA COMPOSIÇÃO: o id, o nome e o emblema da equipe deduzida,
+   ou null. */
+function equipeSugeridaDe(membros, equipes, idDe) {
+  const e = equipeDaComposicao(membros, equipes, idDe);
+  return e ? {equipeId:String(e.id), equipeNome:String(e.nome || ''), emblema:e.emblema || '🤝'} : null;
+}
+/* AS EQUIPES DE UMA DIVISÃO (F11), para a apuração. `finais` é o
+   DIVISAO.finais da divisão. Cada equipe leva a cota dela na O.S. (em 0,01%)
+   e os IDs de quem tem parte nela; equipe com cota 0, ou sem ninguém com
+   parte, fica de fora (não entrou no valor). A equipe que não está no
+   cadastro fica sem id e vira composição avulsa, como a equipe única sempre
+   foi. O valor da equipe no ranking é a SOMA DAS COTAS: a O.S. com duas
+   equipes não conta inteira nas duas. `tamanho` é quanta gente a equipe tem
+   na divisão, contando quem ficou em 0%: é por ele que o motor dá o centavo
+   que sobra entre as equipes (DIVISAO.ratearCentavosLider), e o ranking dá
+   o mesmo centavo à mesma equipe. */
+function gruposApurados(aloc, finais, equipes) {
+  const gs = aloc && typeof aloc === 'object' && Array.isArray(aloc.grupos) ? aloc.grupos : [];
+  const fs = Array.isArray(finais) ? finais : [];
+  const cadastro = Array.isArray(equipes) ? equipes : [];
+  const out = [];
+  gs.forEach((g, gi) => {
+    if (!g || typeof g !== 'object') return;
+    const cota = Number.isInteger(g.cota) && g.cota > 0 ? g.cota : 0;
+    const membros = fs.filter(f => f && f.grupo === gi && Number.isInteger(f.cota) && f.cota > 0).map(f => String(f.pessoaId));
+    if (!cota || !membros.length) return;
+    const eq = g.equipeId ? cadastro.find(e => e && typeof e === 'object' && e.id === g.equipeId) || null : null;
+    const tamanho = (Array.isArray(g.membros) ? g.membros : []).filter(Boolean).length;
+    out.push({equipeId:eq ? String(eq.id) : '', equipeNome:eq ? String(eq.nome || '') : '', emblema:(eq && eq.emblema) || '🤝', cota, membros, tamanho});
+  });
+  return out;
+}
+/* O QUE A DIVISÃO DÁ AO REGISTRO (F11). Divisão com UMA equipe: ela é a
+   equipe do registro (`unica`), e o registro confirmado fica igual ao de
+   antes da F11, com o hash da performance-3. Divisão com DUAS OU MAIS, mesmo
+   que uma tenha ficado em 0%: as equipes com parte vão em `grupos` e o
+   registro fica sem equipe única. A de 0% não leva nada; a outra leva a O.S.
+   pela cota dela, e o registro diz que a divisão era de mais de uma equipe
+   (é o `grupos` que muda o hash, e só nesse período). */
+function equipesDaDivisao(aloc, finais, equipes) {
+  const n = aloc && typeof aloc === 'object' && Array.isArray(aloc.grupos) ? aloc.grupos.length : 0;
+  const gs = gruposApurados(aloc, finais, equipes);
+  return n > 1 ? {unica:null, grupos:gs} : {unica:gs.length === 1 ? gs[0] : null, grupos:null};
+}
+/* A SUGESTÃO DA ENTREGA NÃO CONFIRMADA (F11): os campos que vão no registro.
+   Com divisão na O.S. (desatualizada, esperando o RH ou inválida), vale a
+   equipe que a própria divisão escolheu (`equipeId`), nunca a composição:
+   quem dividiu disse qual equipe foi. Duas ou mais equipes na divisão vão em
+   `grupos`, como na confirmada. Sem divisão, a equipe pela composição
+   (equipeSugeridaDe). Entrega sem gente não tem sugestão: está sem equipe.
+   Sugestão nunca confirma nem entra no valor confirmado. */
+function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
+  if (!Array.isArray(membros) || !membros.length) return {equipeSugerida:null};
+  if (!aloc || typeof aloc !== 'object') return {equipeSugerida:equipeSugeridaDe(membros, equipes, idDe)};
+  const d = equipesDaDivisao(aloc, finais, equipes);
+  if (d.grupos) return d.grupos.length ? {equipeSugerida:null, grupos:d.grupos} : {equipeSugerida:null};
+  const u = d.unica;
+  return {equipeSugerida:u && u.equipeId ? {equipeId:u.equipeId, equipeNome:u.equipeNome, emblema:u.emblema} : null};
+}
+/* ==== FIM DA RÉGUA DA EQUIPE ==== */
+  const composicaoCom = (membros, resolver) => composicaoApurada(membros, resolver);
   /* EXATAMENTE UMA (F06, 29/09/2026). Com as dez equipes fixas, duas ativas
      podem ter a mesma gente (a regra "uma equipe ativa por composição" saiu).
      Com duas, `find` devolvia a primeira da lista: a entrega ia para quem
      estivesse antes no cadastro, e a ordem do cadastro não é mérito. Duas ou
      mais: nenhuma, e a entrega fica avulsa até alguém confirmar a equipe. A
-     mesma regra do motor de divisão (DIVISAO.alocacaoSugerida). */
+     régua é equipeDaComposicao, a mesma da apuração do servidor (F11). */
   const equipeDoRegistro = (r, salvas, resolver) => {
     const lista = Array.isArray(salvas) ? salvas : [];
     if (r && r.equipeId) return lista.find(e => e.id === r.equipeId) || null;
     /* Registro CONFIRMADO é histórico: vale só o id gravado na confirmação.
        Deduzir pela composição de hoje mudaria o passado a cada equipe nova. */
     if (r && r.confirmado) return null;
-    const k = composicaoCom(r && r.membros, resolver);
-    if (!k) return null;
-    const iguais = lista.filter(e => e && e.ativo !== false && composicaoCom(e.membros, resolver) === k);
-    return iguais.length === 1 ? iguais[0] : null;
+    /* A SUGESTÃO QUE VEIO NO REGISTRO (F11) manda: a apuração do servidor, ou
+       o perfRegistro do aparelho, já aplicou a régua (a equipe da divisão, ou
+       a da composição na O.S. sem divisão). Sem ela (registro de um servidor
+       de antes da F11), a composição só vale na O.S. SEM divisão: a que tem
+       divisão desatualizada ou esperando o RH não sabe aqui qual equipe a
+       divisão escolheu, e deduzir pela gente poria a entrega em outra. */
+    if (r && Object.prototype.hasOwnProperty.call(r, 'equipeSugerida')) {
+      const s = r.equipeSugerida;
+      return s && s.equipeId ? lista.find(e => e && e.id === s.equipeId) || null : null;
+    }
+    if (r && (r.fonte === 'alocacao-desatualizada' || r.fonte === 'alocacao-conferir-rh')) return null;
+    return equipeDaComposicao(r && r.membros, lista, resolver);
   };
   /* Cópias só para exibir: o registro original (que alimenta a apuração e o
      hash do fechamento) não é tocado. O nome que aparece é o ATUAL da equipe —
@@ -159,14 +299,29 @@ const PERF = (() => {
      é buscado pelo id, porque o fechamento não o guardava. */
   const comEquipes = (registros, salvas, opcoes) => {
     const o = opcoes || {};
+    const lista = Array.isArray(salvas) ? salvas : [];
+    const vestir = (x, e) => ({...x, equipeId:e.id, equipeNome:e.nome, emblema:e.emblema || '🤝', logo:e.logo || '', animal:animalDe(e.animal) ? e.animal : '', cor:corValida(e.cor) ? e.cor : ''});
     return (registros || []).map(r => {
-      const e = equipeDoRegistro(r, salvas, o.resolver);
+      /* DUAS EQUIPES OU MAIS NA DIVISÃO (F11): cada equipe com o nome, a logo e
+         a cor de hoje; numa revisão fechada, o nome da época e só a logo. Não
+         há equipe única nem dedução pela composição. Na entrega ainda não
+         confirmada, cada equipe da divisão aparece marcada "sugerida". */
+      if (Array.isArray(r.grupos) && r.grupos.length) {
+        const marca = r.confirmado ? {} : {sugerida:true};
+        return {...r, grupos:r.grupos.map(g => {
+          const e = g && g.equipeId ? lista.find(q => q.id === g.equipeId) : null;
+          if (!e) return {...g, ...marca};
+          return o.historico ? {...g, logo:e.logo || g.logo || ''} : {...vestir(g, e), ...marca};
+        })};
+      }
+      const e = equipeDoRegistro(r, lista, o.resolver);
       if (!e) return r;
       /* Cor e animal são de HOJE e o fechamento não os guarda: numa revisão
          fechada ficam de fora, para trocar a cor da equipe não repintar o
          mês fechado nem o PDF dele. */
       if (o.historico) return {...r, logo: e.logo || r.logo || ''};
-      return {...r, equipeId:e.id, equipeNome:e.nome, emblema:e.emblema || '🤝', logo:e.logo || '', animal:animalDe(e.animal) ? e.animal : '', cor:corValida(e.cor) ? e.cor : ''};
+      // A equipe que não veio de uma confirmação (a da divisão que ainda não vale, ou a da composição) é sugestão (F11): a tela diz.
+      return r.equipeId ? vestir(r, e) : {...vestir(r, e), sugerida:true};
     });
   };
   /* POSIÇÃO COM EMPATE. Duas equipes com 6 entregas dividem o 1º lugar e a
@@ -335,6 +490,7 @@ const PERF = (() => {
     return [...por.values()];
   };
   return {unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,criteriosValidos,carroDaVolta,CRITERIOS_PADRAO,COBERTURA_MINIMA,
+    ratearGrupos,gruposDoRegistro,chavesDeEquipe,composicaoApurada,equipeDaComposicao,equipeSugeridaDe,gruposApurados,equipesDaDivisao,sugestaoApurada,
     ANIMAIS,CORES,EMBLEMAS,LOGO_ANIMAL,COR_ANIMAL,animalDe,corValida,iconeEquipe,nomeEquipeNorm,conferirEquipes};
 })();
 if (typeof module !== 'undefined') module.exports = PERF;
@@ -457,7 +613,18 @@ function perfWireFonte(el){
    d.querySelector('form').onsubmit=async ev=>{
      ev.preventDefault();const btn=d.querySelector('[type="submit"]');btn.disabled=true;
      try{if(STORE.getQueue().length)throw new Error('Há alterações aguardando envio. Sincronize e atualize a apuração.');
-       const r=await STORE.api({action:'performanceFechar',...fonte.periodo,hash:fonte.hash,anterior,requestId,motivo:new FormData(ev.target).get('motivo')});
+       // leGrupos: esta tela lê a O.S. dividida entre duas equipes (F11); sem a marca, o servidor recusa fechar período que tem `grupos`.
+       const r=await STORE.api({action:'performanceFechar',...fonte.periodo,hash:fonte.hash,anterior,requestId,motivo:new FormData(ev.target).get('motivo'),leGrupos:true});
+       /* O 409 (a base mudou desde a consulta, ou outra revisão foi criada) é a
+          única recusa que STORE.api devolve em vez de lançar. Fechar de novo
+          com o mesmo hash daria o mesmo 409, e o "Atualizar apuração" mora no
+          quadro recolhido: a tela recarrega a apuração sozinha e pede para
+          conferir e fechar de novo, como quando os pesos mudam. */
+       if(r && !r.ok && !r.fechamento){
+         d.close();await perfCarregarFonte();
+         toast(perfRemoto.erro?'Os dados mudaram desde a consulta e a apuração não foi recarregada: '+perfRemoto.erro:'Os dados mudaram desde a consulta. A apuração foi atualizada: confira e feche de novo.','error');
+         return;
+       }
        if(!r?.ok||!r.fechamento)throw new Error(r?.error || 'Não foi possível confirmar o fechamento.');
        d.close();await perfCarregarFonte();if(perfRemoto.chave===fonte.periodo.de+'|'+fonte.periodo.ate){perfRemoto.selecionado=r.fechamento.id;renderPerformanceCasa();}toast('Fechamento preservado no servidor.','success');
      }catch(e){d.querySelector('#perf-fechar-erro').textContent=e.message;}finally{btn.disabled=false;}
@@ -484,12 +651,23 @@ function perfPessoa(n) { const p = nomeExibicaoCasa(n); const id = /^\d{6}$/.tes
    até a v133 guarda o slug da ficha ou o apelido; a leitura aceita os dois.
    Slug vai pela própria ficha (a mesma pessoa, sem adivinhar). Apelido só é
    resolvido quando a chave É o apelido (ou o nome): chave de ficha de quem
-   saiu do elenco nunca é resolvida pelo nome, senão iria parar num xará. */
+   saiu do elenco nunca é resolvida pelo nome, senão iria parar num xará.
+   O SLUG DE QUEM SAIU (F11): a equipe salva pela aba v133 guarda o slug, e a
+   pessoa pode ter saído depois. O servidor procura o slug em todas as fichas
+   (idDoMembro, com quem saiu); o aparelho procura também nos `antigos` do
+   elenco (quem saiu, só para admin e pcp), senão a mesma equipe era sugerida
+   num lado e não no outro. */
 function perfIdMembro(m) {
   const k = String(m && m.chave != null ? m.chave : '').trim();
   if (!k || /^\d{6}$/.test(k)) return k;
   const rh = typeof pessoasRH === 'function' ? pessoasRH() : [];
-  const ficha = rh.find(p => String(p.chave) === k && /^\d{6}$/.test(String(p.id || '')));
+  const doSlug = p => p && String(p.chave) === k && /^\d{6}$/.test(String(p.id || ''));
+  let ficha = rh.find(doSlug);
+  if (!ficha) {
+    let antigos = [];
+    try { const el = typeof STORE !== 'undefined' && STORE && typeof STORE.elenco === 'function' ? STORE.elenco() : null; antigos = el && Array.isArray(el.antigos) ? el.antigos : []; } catch (e) { antigos = []; }
+    ficha = antigos.find(doSlug);
+  }
   if (ficha) return String(ficha.id);
   if (k !== String((m && (m.apelido || m.nome)) || '')) return k;
   const p = perfPessoa(m.apelido || m.nome || k);
@@ -545,13 +723,24 @@ function perfRegistro(os,c) {
      confirmada. Sem divisão, a participação antiga continua valendo (leitura).
      divisao.js só existe no index.html: sem ele, fica a regra antiga. */
   const aloc = os.alocacao && typeof os.alocacao === 'object' && !Array.isArray(os.alocacao) ? os.alocacao : null;
+  /* A SUGESTÃO DE EQUIPE (F11) vai no registro que não está confirmado, pela
+     régua da apuração (PERF.sugestaoApurada, a mesma do servidor): com
+     divisão na O.S., a equipe que a divisão escolheu (duas ou mais em
+     `grupos`); sem divisão, a única equipe ativa daquela composição. */
+  const comSugestao = (r, divisao) => r.confirmado ? r : {...r, ...PERF.sugestaoApurada(r.membros, divisao, divisao ? DIVISAO.finais(divisao) : [], c.equipes, perfIdMembro)};
   if (aloc && typeof DIVISAO !== 'undefined' && DIVISAO && typeof DIVISAO.alocacaoConfirmada === 'function') {
     if (DIVISAO.alocacaoConfirmada(os)) {
-      const membros = DIVISAO.finais(aloc).filter(f => f.cota > 0).map(f => ({...perfPessoa(f.pessoaId), percentual:f.cota / 100}));
-      const eq = aloc.grupos.length === 1 && aloc.grupos[0].equipeId ? (c.equipes || []).find(e => e && e.id === aloc.grupos[0].equipeId) : null;
-      return {id:os.id,os,membros,valor:valorDaOS(os),confirmado:!PERF.validar(membros),fonte:'alocacao',equipeId:eq ? eq.id : '',equipeNome:eq ? eq.nome : '',emblema:(eq && eq.emblema) || '🤝',por:aloc.por || '',em:aloc.em || '',...extra};
+      const finais = DIVISAO.finais(aloc);
+      const membros = finais.filter(f => f.cota > 0).map(f => ({...perfPessoa(f.pessoaId), percentual:f.cota / 100}));
+      /* AS EQUIPES DA DIVISÃO (F11), pela régua do servidor (equipesDaDivisao).
+         Divisão de uma equipe: ela é a equipe do registro. Duas ou mais (mesmo
+         com uma em 0%): vão em `grupos`, cada uma com a sua cota, e o registro
+         fica sem equipe única. */
+      const d = PERF.equipesDaDivisao(aloc, finais, c.equipes);
+      const um = d.unica;
+      return comSugestao({id:os.id,os,membros,valor:valorDaOS(os),confirmado:!PERF.validar(membros),fonte:'alocacao',equipeId:um ? um.equipeId : '',equipeNome:um ? um.equipeNome : '',emblema:um ? um.emblema : '🤝',por:aloc.por || '',em:aloc.em || '',...extra,...(d.grupos ? {grupos:d.grupos} : {})}, aloc);
     }
-    return {id:os.id,os,membros:PERF.iguais(perfEquipeOS(os)),valor:valorDaOS(os),confirmado:false,fonte:aloc.conferirRH === true ? 'alocacao-conferir-rh' : 'alocacao-desatualizada',...extra};
+    return comSugestao({id:os.id,os,membros:PERF.iguais(perfEquipeOS(os)),valor:valorDaOS(os),confirmado:false,fonte:aloc.conferirRH === true ? 'alocacao-conferir-rh' : 'alocacao-desatualizada',...extra}, aloc);
   }
   /* A participação do blob só vale na O.S. que nunca teve divisão, ou quando
      foi confirmada DEPOIS da última mudança da divisão: a divisão limpa de
@@ -562,7 +751,7 @@ function perfRegistro(os,c) {
   const membros = salvo ? salvo.membros : PERF.iguais(perfEquipeOS(os));
   // voltou e volta: os mesmos da base do servidor (perfFonte) e da fila Volta do carro.
   // Conferido com typeof: aba com operacao.js antigo em cache não pode derrubar a tela.
-  return {...(salvo || {}),id:os.id,os,membros,valor:valorDaOS(os),confirmado:!!salvo && !PERF.validar(membros),fonte:salvo ? 'participacao' : 'sugestao',...extra};
+  return comSugestao({...(salvo || {}),id:os.id,os,membros,valor:valorDaOS(os),confirmado:!!salvo && !PERF.validar(membros),fonte:salvo ? 'participacao' : 'sugestao',...extra}, null);
 }
 async function perfSalvar(c) {
   const cfg = STORE.getCFG(); cfg.performancePCP = c; STORE.saveCFG(cfg);
@@ -1032,23 +1221,70 @@ function perfAnimarPodio(chave) { if (perfPodiosVistos.has(chave)) return false;
    equipe": é lá (botão Conferir) que se diz quem fez cada entrega. A fila de
    lançamento de Entregas só recebe as baixas do ERP ainda não lançadas, e
    essas nem entram na apuração até alguém lançar; quando existem no período,
-   a faixa diz quantas e leva até lá. */
+   a faixa diz quantas e leva até lá.
+   A COBERTURA DA ALOCAÇÃO (F11, 30/09/2026): a mesma faixa diz quantas estão
+   CONFIRMADAS (a divisão da O.S. válida e atual, ou a participação antiga
+   que ainda vale), quantas SUGERIDAS (com gente, mas sem confirmação: a
+   divisão desatualizada e a que espera o RH aparecem com a marca) e quantas
+   SEM EQUIPE, e quanto do valor do período cada grupo representa. O valor só
+   aparece para quem vê R$ na tela (admin e pcp). As contas saem de
+   perfCoberturaConta, a mesma que os testes conferem contra a lista. */
+/* A SITUAÇÃO DE UMA ENTREGA NA CONFERÊNCIA (F11): [classe do selo, texto,
+   marca]. A mesma no selo da lista, no filtro Situação e na faixa do topo, e
+   cada entrega cai num lugar só: verde confirmada, vermelho sem equipe ou
+   inconsistente, e âmbar a sugerida, com a MARCA quando é a divisão que uma
+   aba antiga deixou para trás (desatualizada) ou a que espera o RH. Nenhuma
+   das duas confirma. A desatualizada que ficou SEM gente (a aba antiga
+   esvaziou a equipe) é "Sem equipe", como o selo diz; a faixa não a conta
+   também entre as sugeridas. */
+function perfSituacaoEntrega(r) {
+  if (r.confirmado) return ['ok', 'Confirmada', ''];
+  if (!r.membros || !r.membros.length) return ['sem', 'Sem equipe', ''];
+  if (PERF.validar(r.membros)) return ['erro', 'Participação inconsistente', ''];
+  if (r.fonte === 'alocacao-desatualizada') return ['desat', 'Divisão desatualizada', 'desatualizada'];
+  if (r.fonte === 'alocacao-conferir-rh') return ['desat', 'Divisão a conferir no RH', 'conferir-rh'];
+  return ['sug', 'Divisão sugerida', ''];
+}
+function perfCoberturaConta(regs) {
+  const xs = Array.isArray(regs) ? regs : [];
+  const st = xs.map(perfSituacaoEntrega);
+  const grupo = i => st[i][0] === 'ok' ? 'conf' : (st[i][0] === 'sem' ? 'sem' : 'sug');
+  const n = {conf:0, sug:0, sem:0}, centavos = {conf:0, sug:0, sem:0};
+  let semValor = 0;
+  xs.forEach((r, i) => {
+    const g = grupo(i); n[g]++;
+    if (r.valor == null || !Number.isFinite(Number(r.valor))) semValor++; else centavos[g] += Math.round(Number(r.valor) * 100);
+  });
+  const valor = {conf:centavos.conf / 100, sug:centavos.sug / 100, sem:centavos.sem / 100, total:(centavos.conf + centavos.sug + centavos.sem) / 100};
+  const marca = m => st.filter(x => x[2] === m).length;
+  return {total:xs.length, confirmadas:n.conf, sugeridas:n.sug, sem:n.sem, valor, semValor,
+    antigas:xs.filter(r => r.confirmado && r.fonte === 'participacao').length,
+    desatualizadas:marca('desatualizada'), conferirRH:marca('conferir-rh'),
+    inconsistentes:st.filter(x => x[0] === 'erro').length};
+}
 function perfCoberturaHTML(regs, f) {
-  const total = regs.length, sem = regs.filter(r => !r.membros.length).length, com = total - sem;
-  const conf = regs.filter(r => r.confirmado).length;
-  const incons = regs.filter(r => r.membros.length && PERF.validar(r.membros)).length;
+  const k = perfCoberturaConta(regs);
+  const total = k.total, sem = k.sem, com = total - sem, conf = k.confirmadas, sug = k.sugeridas, incons = k.inconsistentes;
   const fechada = !!(perfFonteAtual() && perfFonteAtual().fechadoEm);
   const pode = perfPodeEditar() && !fechada;
+  // R$ só para quem vê valor na tela (a mesma regra da coluna de valor da conferência).
+  const verValor = perfPodeEditar();
   const pendLancar = (((typeof classificarEntregas === 'function' ? classificarEntregas(STORE.getAllOS()) : null) || {}).aLancar || [])
     .filter(o => OPERACAO.emIntervalo(diaEntrega(o), f.de, f.ate)).length;
   const lancar = pendLancar ? `<p class="perf-cob-extra">${pendLancar} ${pendLancar === 1 ? 'baixa do ERP deste período espera lançamento em Entregas e ainda não conta' : 'baixas do ERP deste período esperam lançamento em Entregas e ainda não contam'} aqui. <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento</button></p>` : '';
   const avisos = perfAvisosHTML(true);
   if (!total) return `<section class="perf-cobertura perf-cob-linha" aria-label="Cobertura das equipes"><p>Nenhuma entrega finalizada neste período.</p>${lancar}${avisos}</section>`;
+  // As marcas das sugeridas: a divisão que uma aba antiga deixou para trás, a que espera o RH e a quebrada.
+  const marcas = [k.desatualizadas ? `${k.desatualizadas} com a divisão desatualizada` : '', k.conferirRH ? `${k.conferirRH} com pessoa a conferir no RH` : '', incons ? `${incons} com percentuais inconsistentes` : ''].filter(Boolean);
+  const marcasTxt = marcas.length ? ` (${marcas.join(', ')})` : '';
+  const parte = v => verValor ? ` <span class="perf-cob-valor">${esc(dinheiroCasa(v))} · ${perfPctTxt(v, k.valor.total)} do valor</span>` : '';
+  const semValorTxt = k.semValor ? ` ${k.semValor} ${k.semValor === 1 ? 'entrega está sem valor e fica fora da conta' : 'entregas estão sem valor e ficam fora da conta'}.` : '';
+  const valorLinha = verValor && (k.valor.total || k.semValor) ? `<p class="perf-cob-extra perf-cob-valor-linha">Valor do período: ${esc(dinheiroCasa(k.valor.total))}, com ${esc(dinheiroCasa(k.valor.conf))} em entregas confirmadas (${perfPctTxt(k.valor.conf, k.valor.total)}).${semValorTxt}</p>` : '';
+  const antigasTxt = k.antigas ? ` (${k.antigas} pela participação antiga)` : '';
   if (!sem) {
     const falta = total - conf;
-    return `<section class="perf-cobertura perf-cob-linha perf-cob-ok" aria-label="Cobertura das equipes"><p><span class="perf-cob-icone" aria-hidden="true">✓</span> Todas as ${total} entregas do período têm equipe · ${falta ? `${conf} de ${total} confirmadas` : 'todas confirmadas'}${incons ? ` · ${incons} com percentuais inconsistentes` : ''}${falta && !fechada ? ` <button type="button" class="inline-link" data-perf-filtrar="pendente">${pode ? 'Conferir' : 'Ver'} as ${falta} a conferir</button>` : ''}</p>${lancar}${avisos}</section>`;
+    return `<section class="perf-cobertura perf-cob-linha perf-cob-ok" aria-label="Cobertura das equipes"><p><span class="perf-cob-icone" aria-hidden="true">✓</span> Todas as ${total} entregas do período têm equipe · ${falta ? `${conf} de ${total} confirmadas${antigasTxt} · ${falta} ${falta === 1 ? 'sugerida' : 'sugeridas'}${marcasTxt}` : `todas confirmadas${antigasTxt}`}${falta && !fechada ? ` <button type="button" class="inline-link" data-perf-filtrar="pendente">${pode ? 'Conferir' : 'Ver'} as ${falta} a conferir</button>` : ''}</p>${valorLinha}${lancar}${avisos}</section>`;
   }
-  const sug = com - conf;
   // Barra empilhada: confirmadas por cima das que têm equipe; o trilho é o que falta.
   const barra = `<svg class="perf-cob-barra" viewBox="0 0 1000 14" preserveAspectRatio="none" role="img" aria-label="${com} de ${total} entregas com equipe, ${conf} confirmadas" focusable="false"><rect class="trilho" width="1000" height="14"/>${com ? `<rect class="sug" width="${Math.round(com / total * 1000)}" height="14"/>` : ''}${conf ? `<rect class="conf" width="${Math.round(conf / total * 1000)}" height="14"/>` : ''}</svg>`;
   return `<section class="perf-cobertura perf-cob-parcial" aria-labelledby="perf-cob-titulo">
@@ -1059,10 +1295,11 @@ function perfCoberturaHTML(regs, f) {
     </div>
     ${barra}
     <ul class="perf-cob-legenda">
-      <li class="conf"><b>${conf}</b> ${conf === 1 ? 'confirmada' : 'confirmadas'}</li>
-      <li class="sug"><b>${sug}</b> com equipe, a conferir${incons ? ` (${incons} com percentuais inconsistentes)` : ''}</li>
-      <li class="sem"><b>${sem}</b> sem equipe</li>
+      <li class="conf"><span><b>${conf}</b> ${conf === 1 ? 'confirmada' : 'confirmadas'}${antigasTxt}${parte(k.valor.conf)}</span></li>
+      <li class="sug"><span><b>${sug}</b> ${sug === 1 ? 'sugerida' : 'sugeridas'}, a conferir${marcasTxt}${parte(k.valor.sug)}</span></li>
+      <li class="sem"><span><b>${sem}</b> sem equipe${parte(k.valor.sem)}</span></li>
     </ul>
+    ${valorLinha}
     <p class="perf-cob-dica">Enquanto houver entrega sem equipe o ranking é parcial: quem trabalhou nela ainda não aparece.</p>
     ${lancar}${avisos}
   </section>`;
@@ -1369,7 +1606,7 @@ function perfRankingEquipesHTML(regs, c) {
         ${pode ? '<button type="button" class="btn-ghost btn-sm" id="perf-nova-equipe">+ Nova equipe</button>' : ''}
       </div>
     </header>
-    <p class="perf-ranking-lead">Cada entrega conta uma vez na equipe que a fez, confirmada ou sugerida. Mostra volume, não qualidade, e não é bônus. A avaliação de cada pessoa é individual e está na vista Pessoas.</p>
+    <p class="perf-ranking-lead">Cada entrega conta uma vez em cada equipe que a fez, confirmada ou sugerida (sugerida é a equipe escolhida na divisão da O.S. que ainda não foi confirmada, ou, na O.S. sem divisão, a única equipe ativa com exatamente a mesma gente). No valor, cada equipe leva a parte dela na divisão da O.S.: a entrega com duas equipes não conta inteira nas duas. Mostra volume, não qualidade, e não é bônus. A avaliação de cada pessoa é individual e está na vista Pessoas.</p>
     ${vazio}
     ${podioHTML}
     ${cartoes}
@@ -1395,8 +1632,16 @@ function performanceEquipesHTML() {
      na ordem do banco (id sorteado) ou do cache, e cada confirmação a
      reembaralhava; a próxima linha fugia do dedo. */
   const linhas=[...regs].sort((a,b)=>String(diaEntrega(b.os)||'').localeCompare(String(diaEntrega(a.os)||'')) || String(a.os.numero||'').localeCompare(String(b.os.numero||''),'pt-BR',{numeric:true}));
-  // A situação com cor própria: verde confirmada, âmbar sugerida, vermelho sem equipe ou inconsistente.
-  const situacao=r=>r.confirmado?['ok','Confirmada']:!r.membros.length?['sem','Sem equipe']:PERF.validar(r.membros)?['erro','Participação inconsistente']:['sug','Divisão sugerida'];
+  // A situação com cor própria, pela mesma função da faixa do topo (perfSituacaoEntrega).
+  const situacao=perfSituacaoEntrega;
+  // As linhas já com o nome de hoje das equipes (a mesma regra do ranking): a sugerida vem marcada.
+  const vistos=new Map(PERF.comEquipes(regs,c.equipes,perfOpcoesEquipe()).map(r=>[r.id,r]));
+  const equipeTxt=r=>{
+    const v=vistos.get(r.id)||r;
+    if(Array.isArray(v.grupos)&&v.grupos.length)return v.grupos.map(g=>`<strong>${esc(g.equipeNome?`${g.emblema||'🤝'} ${g.equipeNome}`:'Pessoas avulsas')}</strong> <small>${perfFormato(g.cota/100)}% da O.S.</small>${g.sugerida?' <span class="perf-sugerida">sugerida</span>':''}`).join('<br>')+'<br>';
+    if(!v.equipeNome)return '';
+    return `<strong>${esc(v.emblema||'🤝')} ${esc(v.equipeNome)}</strong>${v.sugerida?' <span class="perf-sugerida">sugerida</span>':''}<br>`;
+  };
   const vista=v=>`<button type="button" class="btn-ghost ${modo===v?'active':''}" aria-pressed="${modo===v}" data-perf-modo="${v}">${v==='pessoas'?'👤 Pessoas':'🤝 Equipes'}</button>`;
   return `<section class="perf-workspace"><div class="filter-bar">${filtroPeriodoHTML('_fPerf')}<button type="button" class="btn-ghost" id="perf-pdf">📄 Relatório PDF</button></div>
     ${perfCoberturaHTML(regs, f)}
@@ -1404,8 +1649,8 @@ function performanceEquipesHTML() {
     ${modo==='equipes' ? perfRankingEquipesHTML(regs, c) : perfRankingPessoasHTML(regs, c)}
     <details class="perf-method"><summary>Como interpretar os indicadores</summary><p>Entregas conta as O.S. em que a pessoa participou; não some essa coluna entre pessoas. O.S. equivalentes divide cada entrega pelos percentuais, sem duplicação. Divisões sugeridas ainda não foram confirmadas. Valores rateados não são faturamento pessoal nem bônus. Qualidade, complexidade e retrabalho precisam de revisão. ${esc(perfFonteTexto())}</p></details>
     <section class="perf-entregas" aria-labelledby="perf-entregas-titulo"><div class="perf-entregas-cabeca"><h3 id="perf-entregas-titulo">Conferência por entrega</h3><p>Quem fez cada entrega e com qual percentual. É daqui que o ranking tira os nomes.</p></div>
-      <div class="perf-filtros"><label>Situação <select id="perf-situacao"><option value="">Todas</option><option value="pendente">A conferir</option><option value="confirmada">Confirmadas</option><option value="sem-equipe">Sem equipe</option><option value="invalida">Participação inconsistente</option>${verValor?'<option value="sem-valor">Sem valor</option>':''}</select></label><label class="perf-busca">Buscar O.S., cliente ou pessoa <input id="perf-busca-os" type="search" value="${esc(pesquisa)}" placeholder="Digite para localizar"></label><button type="button" class="btn-ghost" id="perf-limpar">Limpar filtros</button><span id="perf-recorte" role="status"></span></div>
-      <div class="casa-tabela-wrap"><table class="casa-tabela perf-conf-tabela"><thead><tr><th scope="col">O.S. / Cliente</th><th scope="col">Data</th><th scope="col">Equipe e percentuais</th><th scope="col">Situação e volta</th><th scope="col"><span class="perf-sr">Ações</span></th></tr></thead><tbody>${linhas.map(r=>{const st=situacao(r);return `<tr data-perf-id="${esc(r.id)}"><td><button type="button" class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button><small class="bloco">${esc(r.os.cliente)}</small></td><td>${esc(diaEntrega(r.os).split('-').reverse().join('/'))}</td><td>${r.equipeNome?`<strong>${esc(r.emblema)} ${esc(r.equipeNome)}</strong><br>`:''}${r.membros.map(p=>`${esc(p.nome)} · ${perfFormato(p.percentual)}%`).join('<br>') || '<span class="perf-nada">Sem equipe</span>'}</td><td><span class="badge perf-st-${st[0]}">${st[1]}</span>${r.os.retrabalho?'<small class="bloco">Serviço de retrabalho</small>':''}<small class="bloco perf-volta">${perfVoltaTxt(r.retornoConf)}</small>${verValor?`<small class="bloco">${r.valor==null?'Sem valor':esc(dinheiroCasa(r.valor))}</small>`:''}</td><td>${podeConferir?`<button type="button" class="btn-ghost btn-sm" data-perf-part="${esc(r.id)}">Conferir</button>`:''}</td></tr>`;}).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div></section></section>`;
+      <div class="perf-filtros"><label>Situação <select id="perf-situacao"><option value="">Todas</option><option value="pendente">A conferir</option><option value="confirmada">Confirmadas</option><option value="sem-equipe">Sem equipe</option><option value="desatualizada">Divisão desatualizada ou a conferir no RH</option><option value="invalida">Participação inconsistente</option>${verValor?'<option value="sem-valor">Sem valor</option>':''}</select></label><label class="perf-busca">Buscar O.S., cliente ou pessoa <input id="perf-busca-os" type="search" value="${esc(pesquisa)}" placeholder="Digite para localizar"></label><button type="button" class="btn-ghost" id="perf-limpar">Limpar filtros</button><span id="perf-recorte" role="status"></span></div>
+      <div class="casa-tabela-wrap"><table class="casa-tabela perf-conf-tabela"><thead><tr><th scope="col">O.S. / Cliente</th><th scope="col">Data</th><th scope="col">Equipe e percentuais</th><th scope="col">Situação e volta</th><th scope="col"><span class="perf-sr">Ações</span></th></tr></thead><tbody>${linhas.map(r=>{const st=situacao(r);return `<tr data-perf-id="${esc(r.id)}"><td><button type="button" class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button><small class="bloco">${esc(r.os.cliente)}</small></td><td>${esc(diaEntrega(r.os).split('-').reverse().join('/'))}</td><td>${equipeTxt(r)}${r.membros.map(p=>`${esc(p.nome)} · ${perfFormato(p.percentual)}%`).join('<br>') || '<span class="perf-nada">Sem equipe</span>'}</td><td><span class="badge perf-st-${st[0]}">${st[1]}</span>${r.os.retrabalho?'<small class="bloco">Serviço de retrabalho</small>':''}<small class="bloco perf-volta">${perfVoltaTxt(r.retornoConf)}</small>${verValor?`<small class="bloco">${r.valor==null?'Sem valor':esc(dinheiroCasa(r.valor))}</small>`:''}</td><td>${podeConferir?`<button type="button" class="btn-ghost btn-sm" data-perf-part="${esc(r.id)}">Conferir</button>`:''}</td></tr>`;}).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div></section></section>`;
 }
 function wirePerformanceEquipes(el) {
   perfWireFonte(el);
@@ -1433,9 +1678,12 @@ function wirePerformanceEquipes(el) {
       // A MESMA regra do ranking: sem ela, "Ver entregas" de uma equipe nomeada
       // pela composição filtraria por uma chave que nenhuma linha tem.
       const rv=PERF.comEquipes([r],cfgAtual.equipes,perfOpcoesEquipe())[0];
-      const grupo=rv.equipeId || 'avulsa:'+PERF.composicao(r.membros);
+      // Com duas equipes na divisão (F11), a entrega aparece no "Ver entregas" de cada uma.
+      const grupos=PERF.chavesDeEquipe(rv);
       const status=!r.membros.length?'sem-equipe':PERF.validar(r.membros)?'invalida':r.confirmado?'confirmada':'pendente';
-      const ok=(!situacao.value || (situacao.value==='pendente'?!r.confirmado:situacao.value==='sem-valor'?r.valor==null:status===situacao.value)) && PERF.incluiPessoa(r.membros,STATE._perfPessoa) && (!STATE._perfGrupo || grupo===STATE._perfGrupo) && normCasa(tr.textContent).includes(normCasa(busca.value));
+      // A marca pela mesma função do selo e da faixa: a desatualizada sem gente está em "Sem equipe", não aqui.
+      const marcada=!!perfSituacaoEntrega(r)[2];
+      const ok=(!situacao.value || (situacao.value==='pendente'?!r.confirmado:situacao.value==='sem-valor'?r.valor==null:situacao.value==='desatualizada'?marcada:status===situacao.value)) && PERF.incluiPessoa(r.membros,STATE._perfPessoa) && (!STATE._perfGrupo || grupos.includes(STATE._perfGrupo)) && normCasa(tr.textContent).includes(normCasa(busca.value));
       tr.hidden=!ok;if(ok)n++;
     });
     el.querySelector('#perf-recorte').textContent=n+(n===1?' entrega na lista':' entregas na lista')+(STATE._perfPessoa || STATE._perfGrupo?' · participante/equipe selecionado':'')+'. Os números do ranking valem para o período inteiro.';
@@ -1465,7 +1713,7 @@ function wirePerformanceEquipes(el) {
   };
   el.querySelectorAll('[data-perf-os]').forEach(b=>b.onclick=()=>{
     const r=perfUnirPessoas([perfRegistro(perfOS(b.dataset.perfOs),perfConfig())])[0];
-    perfDialog('O.S. '+(r.os.numero||''),`<p>${esc(r.os.cliente||'')}</p><p>Entrega: ${esc(diaEntrega(r.os))}</p><p>Valor: ${r.valor==null?'Não disponível':dinheiroCasa(r.valor)} · ${esc(r.origemValor||'Base local')}</p><p>${r.confirmado?'Participação confirmada':'Participação aguardando confirmação'}</p><p>Volta: ${perfVoltaTxt(r.retornoConf)}${r.retornoConf&&r.retornoConf.por?` · conferida por ${esc(r.retornoConf.por)}${r.retornoConf.em?' em '+esc(new Date(r.retornoConf.em).toLocaleString('pt-BR')):''}`:''}</p><ul>${r.membros.map(p=>`<li>${esc(p.nome)} · ${perfFormato(p.percentual)}%</li>`).join('')}</ul>${r.por?`<p>Participação confirmada por ${esc(r.por)} · ${esc(r.em||'')}</p>`:''}${r.obs?`<p>${esc(r.obs)}</p>`:''}<p>${esc(perfFonteTexto())}</p>`);
+    perfDialog('O.S. '+(r.os.numero||''),`<p>${esc(r.os.cliente||'')}</p><p>Entrega: ${esc(diaEntrega(r.os))}</p><p>Valor: ${r.valor==null?'Não disponível':dinheiroCasa(r.valor)} · ${esc(r.origemValor||'Base local')}</p><p>${r.confirmado?'Participação confirmada':r.fonte==='alocacao-desatualizada'?'Divisão desatualizada: a equipe da O.S. mudou depois da divisão (numa aba antiga). Não conta como confirmada; confira de novo.':r.fonte==='alocacao-conferir-rh'?'Divisão gravada com o RH fora do ar: não conta como confirmada até a pessoa ser conferida no RH.':'Participação aguardando confirmação'}</p><p>Volta: ${perfVoltaTxt(r.retornoConf)}${r.retornoConf&&r.retornoConf.por?` · conferida por ${esc(r.retornoConf.por)}${r.retornoConf.em?' em '+esc(new Date(r.retornoConf.em).toLocaleString('pt-BR')):''}`:''}</p><ul>${r.membros.map(p=>`<li>${esc(p.nome)} · ${perfFormato(p.percentual)}%</li>`).join('')}</ul>${r.por?`<p>Participação confirmada por ${esc(r.por)} · ${esc(r.em||'')}</p>`:''}${r.obs?`<p>${esc(r.obs)}</p>`:''}<p>${esc(perfFonteTexto())}</p>`);
   });
   bindCardClicks(el);
 }
@@ -1499,7 +1747,7 @@ function performanceRelatorioHTML() {
   const fmtDia=v=>String(v||'').slice(0,10).split('-').reverse().join('/');
   const valorTexto=(n,conhecidas,total)=>!total?'A conferir':!conhecidas?'Sem valor':dinheiroCasa(n)+(conhecidas<total?' · parcial':'');
   const tabela=(titulo,linhas,equipe=false)=>`<section class="perf-report-section"><h3>${titulo}</h3><p class="metricas-nota">${equipe?'Cada entrega conta uma vez na equipe.':'O.S. equivalentes somam os percentuais confirmados: duas participações de 50% equivalem a uma O.S.'}</p><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>${equipe?'Equipe':'Pessoa'}</th><th>Entregas</th><th>Confirmadas</th><th>A conferir</th>${equipe?'':'<th>O.S. equivalentes confirmadas</th>'}<th>Valor confirmado${equipe?'':' rateado'}</th></tr></thead><tbody>${linhas.map(p=>{const cf=(equipe?confirmado.equipes:confirmado.pessoas).find(x=>x.chave===p.chave);return `<tr><td><strong>${esc(p.nome)}</strong></td><td>${p.os}</td><td>${p.confirmadas}</td><td>${p.os-p.confirmadas}</td>${equipe?'':`<td>${perfFormato(cf?.equivalentes || 0)}</td>`}<td>${!cf?'—':cf.semValor===cf.os?'Sem valor':dinheiroCasa(cf.valor)+(cf.semValor?' (parcial)':'')}</td></tr>`;}).join('') || `<tr><td colspan="${equipe?5:6}">Sem participantes registrados neste período.</td></tr>`}</tbody></table></div></section>`;
-  const equipes=grupos.map(g=>`<article class="perf-team-report${perfCorClasse(g)}"><header>${perfLogoHTML(g,'perf-emblema')}<div><h4>${esc(g.nome)}</h4><p>${g.membros.length} participantes no período · ${g.registros.length} entrega${g.registros.length===1?'':'s'}</p></div><strong>${valorTexto(g.valor,g.confirmadas-g.semValor,g.confirmadas)}<small>valor confirmado da equipe</small></strong></header><div class="perf-team-numbers"><span><b>${g.confirmadas}</b> ${g.confirmadas===1?'confirmada':'confirmadas'}</span><span><b>${g.registros.length-g.confirmadas}</b> a conferir</span><span><b>${g.retrabalhos}</b> com marca de retrabalho</span></div><div class="perf-member-list">${g.membros.map(m=>`<span><strong>${esc(m.nome)}</strong><small>${m.entregas} entrega${m.entregas===1?'':'s'} · ${m.confirmadas} ${m.confirmadas===1?'confirmada':'confirmadas'} · ${perfFormato(m.equivalentes)} O.S. equivalentes</small></span>`).join('')}</div><details><summary>Ver O.S., percentuais e dados de conferência</summary><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / cliente</th><th>Entrega</th><th>Participação nesta O.S.</th><th>Valor da O.S.</th><th>Conferência</th></tr></thead><tbody>${g.registros.map(r=>`<tr><td><button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os?.numero || r.id)}</button><small class="bloco">${esc(r.os?.cliente || '')}</small>${r.os?.retrabalho?'<small class="bloco">Retrabalho marcado</small>':''}</td><td>${fmtDia(diaEntrega(r.os))}</td><td>${r.membros.map(m=>`${esc(m.nome)} · <strong>${perfFormato(m.percentual)}%</strong>`).join('<br>')}</td><td>${r.valor==null?'Sem valor':dinheiroCasa(r.valor)}<small class="bloco">${esc(r.origemValor || 'Base da apuração')}</small></td><td>${r.confirmado?'Confirmada':'Divisão sugerida'}${r.por?`<small class="bloco">${esc(r.por)} · ${fmtDia(r.em)}</small>`:''}${r.obs?`<small class="bloco">${esc(r.obs)}</small>`:''}</td></tr>`).join('')}</tbody></table></div></details></article>`).join('');
+  const equipes=grupos.map(g=>`<article class="perf-team-report${perfCorClasse(g)}"><header>${perfLogoHTML(g,'perf-emblema')}<div><h4>${esc(g.nome)}</h4><p>${g.membros.length} participantes no período · ${g.registros.length} entrega${g.registros.length===1?'':'s'}</p></div><strong>${valorTexto(g.valor,g.confirmadas-g.semValor,g.confirmadas)}<small>valor confirmado da equipe</small></strong></header><div class="perf-team-numbers"><span><b>${g.confirmadas}</b> ${g.confirmadas===1?'confirmada':'confirmadas'}</span><span><b>${g.registros.length-g.confirmadas}</b> a conferir</span><span><b>${g.retrabalhos}</b> com marca de retrabalho</span></div><div class="perf-member-list">${g.membros.map(m=>`<span><strong>${esc(m.nome)}</strong><small>${m.entregas} entrega${m.entregas===1?'':'s'} · ${m.confirmadas} ${m.confirmadas===1?'confirmada':'confirmadas'} · ${perfFormato(m.equivalentes)} O.S. equivalentes</small></span>`).join('')}</div><details><summary>Ver O.S., percentuais e dados de conferência</summary><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / cliente</th><th>Entrega</th><th>Participação nesta O.S.</th><th>Valor da O.S.</th><th>Conferência</th></tr></thead><tbody>${g.registros.map(r=>`<tr><td><button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os?.numero || r.id)}</button><small class="bloco">${esc(r.os?.cliente || '')}</small>${r.os?.retrabalho?'<small class="bloco">Retrabalho marcado</small>':''}</td><td>${fmtDia(diaEntrega(r.os))}</td><td>${r.membros.map(m=>`${esc(m.nome)} · <strong>${perfFormato(m.percentual)}%</strong>`).join('<br>')}</td><td>${r.valor==null?'Sem valor':dinheiroCasa(r.valor)}<small class="bloco">${esc(r.origemValor || 'Base da apuração')}</small></td><td>${r.confirmado?'Confirmada':r.fonte==='alocacao-desatualizada'?'Divisão desatualizada':r.fonte==='alocacao-conferir-rh'?'Divisão a conferir no RH':'Divisão sugerida'}${r.por?`<small class="bloco">${esc(r.por)} · ${fmtDia(r.em)}</small>`:''}${r.obs?`<small class="bloco">${esc(r.obs)}</small>`:''}</td></tr>`).join('')}</tbody></table></div></details></article>`).join('');
   return `<section class="perf-report"><header class="perf-report-heading"><div><span class="perf-report-eyebrow">PRODUÇÃO · PESSOAS · EQUIPES</span><h3>Relatório de performance</h3><p>${fmtDia(f.de)} a ${fmtDia(f.ate)} · ${resumo.pessoas.length} participantes · ${grupos.length} ${grupos.length===1?'equipe / composição utilizada':'equipes / composições utilizadas'}</p></div><span class="perf-report-state">${perfFonteAtual()?.fechadoEm?'Fechamento preservado':'Apuração em acompanhamento'}</span></header><div class="perf-summary"><div><b>${regs.length}</b><span>entregas no período</span></div><div><b>${cobertura}%</b><span>com participação confirmada (${confirmados.length})</span></div><div><b>${semEquipe}</b><span>sem equipe informada</span></div></div><div class="perf-report-value"><span>Valor das entregas com participação confirmada</span><strong>${valorTexto(valor,confirmados.length-semValor,confirmados.length)}</strong><small>${semValor} entrega(s) confirmada(s) sem valor. Valores por pessoa são rateados; não representam pagamento ou bônus.</small></div><p class="perf-coverage">${!regs.length?'Nenhuma instalação registrada neste período.':confirmados.length<regs.length?`Apuração parcial: ${regs.length-confirmados.length} ${regs.length-confirmados.length===1?'participação':'participações'} a conferir, incluindo ${semEquipe} sem equipe e ${inconsistentes} inconsistentes.`:'Participações conferidas. Quantidade de entregas não mede sozinha qualidade, esforço ou complexidade.'}</p><section class="perf-report-section"><h3>Equipes e composição real do período</h3><p class="metricas-nota">Participantes das entregas, incluindo avulsos. Os percentuais variam por O.S.; o cadastro atual da equipe não reescreve o histórico.</p>${equipes || '<p>Nenhuma equipe com participação válida registrada no período.</p>'}</section>${tabela('Participação por pessoa',resumo.pessoas)}${tabela('Resumo das equipes',resumo.equipes,true)}<details class="perf-report-section perf-report-pendencias"><summary>Entregas que ainda não permitem apuração por pessoa</summary><p>${semEquipe} sem equipe · ${inconsistentes} com percentuais inconsistentes.</p><ul>${regs.filter(r=>PERF.validar(r.membros)).map(r=>`<li>O.S. <button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button> · ${esc(r.os.cliente)} · ${r.membros.length?'rever percentuais':'informar participantes'}</li>`).join('') || '<li>Nenhuma pendência de composição.</li>'}</ul></details><p class="metricas-nota">Entregas inclui participações sugeridas e confirmadas. A mesma O.S. pode aparecer para mais de uma pessoa; não some a coluna entre colaboradores. Valores incluem somente participações confirmadas, sem duplicar o valor entre pessoas. Não representam lucro, recebimento ou bônus. Retrabalho indica a marca registrada, não uma avaliação automática do colaborador. ${esc(perfFonteTexto())}</p></section>`;
 }
 
