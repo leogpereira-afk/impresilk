@@ -6,7 +6,12 @@
    Servidor de verdade: o pcp-mubisys (gravarImportadas, com o mapearOS) e o
    pcp-sync no MESMO banco (helpers/edge.cjs), e o motor da entrega por item
    (ENTREGA_ITEM) para o saldo. Cada teste começa pelo caso ruim. Dados
-   fictícios: o repositório é público. */
+   fictícios: o repositório é público.
+   A MESCLA ESTÁ DESLIGADA EM PRODUÇÃO (MESCLA_ITENS_ERP = false, em _shared,
+   até medir o formato do item no ERP). Aqui ela roda LIGADA POR INJEÇÃO: o
+   servidor de teste troca a constante só dentro do pcp-sync e do
+   pcp-mubisys de teste (o vm de cada um), sem mudar o _shared. O desligado
+   está provado em tests/itens-erp-revisao.test.cjs. */
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -44,6 +49,9 @@ async function servidor(registros = []) {
   const mub = await edge('pcp-mubisys', {});
   mub.db.pcp_registros = sync.db.pcp_registros;
   mub.run('console = {...console, warn(){}, log(){}}');
+  // A mescla ligada por injeção (a constante de _shared continua false).
+  sync.run('MESCLA_ITENS_ERP = true');
+  mub.run('MESCLA_ITENS_ERP = true');
   const linha = () => sync.db.pcp_registros.find(r => r.colecao === 'os' && r.id === ID);
   return {sync, mub, linha,
     importar: itens => mub.run(`gravarImportadas(sb, [mapearOS(${JSON.stringify(osERP(itens))})])`),
@@ -188,25 +196,45 @@ test('ERP tira item com entrega: ele fica, com a marca "saiu do ERP"; o vizinho 
   assert.ok(ultimaAlteracao(os).some(c => c.depois === 'voltou ao ERP'));
 });
 
-test('produto trocado na mesma posição: sem marca o item é atualizado; com marca a entrega não pula para o produto novo', async () => {
+test('produto trocado na mesma posição: o código não passa para o produto novo; com marca e os mesmos números a mescla pergunta, sem duplicar', async () => {
   const R = await regras();
   const base = {id:ID, numero:NUM, origemMubisys:true, rev:3, itens:[
     {uid:'9101:1:1', item:'1', descricao:'Placa ACM', medidas:'', qtde:'1', valorUnit:'100', subtotal:'100'},
     {uid:'9101:2:1', item:'2', descricao:'Faixa', medidas:'', qtde:'1', valorUnit:'100', subtotal:'100'}]};
   const remoto = [{item:'1', descricao:'Placa ACM', medidas:'', qtde:'1', valorUnit:'100', subtotal:'100'},
     {item:'2', descricao:'Banner', medidas:'', qtde:'1', valorUnit:'100', subtotal:'100'}];
-  const sem = R.mesclarItensERP(base, remoto, {em:'2026-10-01T12:00:00Z'});
-  assert.deepEqual(sem.itens.map(i => [i.uid, i.descricao]), [['9101:1:1', 'Placa ACM'], ['9101:2:1', 'Banner']]);
-  // Caso ruim: a faixa já foi entregue.
+  // Sem marca: a Faixa sai (o código dela vai para itensForaERP) e o Banner entra com código próprio.
+  const sem = R.mesclarItensERP(base, remoto, {em:'2026-10-01T12:00:00Z', sortear:() => 's-banner00001'});
+  assert.deepEqual(sem.itens.map(i => [i.uid, i.descricao]), [['9101:1:1', 'Placa ACM'], ['s-banner00001', 'Banner']]);
+  assert.equal(sem.itens[1].chaveERP, '9101:2:1', 'a chave do ERP casa o Banner na hora seguinte');
+  assert.deepEqual(sem.foraERP.map(f => f.uid), ['9101:2:1'], 'o código da Faixa não é reaproveitado');
+  // Caso ruim 1: a faixa já foi entregue, e o ERP mostra outro nome com a mesma medida, quantidade e valor.
   const comMarca = js(base);
   comMarca.itens[1].entregas = [{id:'e-f', tipo:'entregue', qtde:1, dia:'2026-09-30', via:'gestao'}];
   const com = R.mesclarItensERP(comMarca, remoto, {em:'2026-10-01T12:00:00Z', sortear:() => 's-sorteado01'});
-  const faixa = com.itens.find(i => i.uid === '9101:2:1'), banner = com.itens.find(i => i.descricao === 'Banner');
-  assert.equal(faixa.descricao, 'Faixa', 'o item marcado não muda de produto');
-  assert.deepEqual(faixa.saiuDoERP, {em:'2026-10-01T12:00:00Z'});
-  assert.equal(banner.uid, 's-sorteado01');
+  assert.equal(com.itens.length, 2, 'não entra um segundo item com saldo');
+  const faixa = com.itens.find(i => i.uid === '9101:2:1');
+  assert.equal(faixa.descricao, 'Faixa', 'o item marcado não muda de produto sozinho');
+  assert.equal(faixa.saiuDoERP, undefined);
+  assert.equal(faixa.produtoNoERP, 'Banner', 'o nome do ERP fica guardado');
+  assert.deepEqual(faixa.entregas.map(e => e.id), ['e-f']);
+  assert.deepEqual(com.alteracoes, [{campo:'item 2 (Faixa): produto', antes:'Faixa', depois:'no ERP: Banner. O item tem marca e não troca de produto sozinho: confira'}]);
+  assert.ok(com.alteracoes.some(R.pedeConferencia), 'acende o selo');
+  // A mesma resposta de novo: nada (a pergunta é feita uma vez por nome).
+  assert.equal(R.mesclarItensERP({...comMarca, itens:com.itens}, remoto, {em:'2026-10-01T13:00:00Z'}).mudou, false);
+  // A gestão corrige o nome na ficha: a hora seguinte tira a pergunta, sem acender o selo de novo.
+  const corrigido = js(com.itens); corrigido[1].descricao = 'Banner';
+  const conf = R.mesclarItensERP({...comMarca, itens:corrigido}, remoto, {em:'2026-10-01T14:00:00Z'});
+  assert.equal(conf.itens[1].produtoNoERP, undefined);
+  assert.equal(conf.alteracoes.some(R.pedeConferencia), false);
+  // Caso ruim 2: com marca e outro valor (o vendedor trocou o produto): a Faixa fica 'saiu do ERP' e o Banner entra.
+  const outro = js(remoto); outro[1].valorUnit = '300'; outro[1].subtotal = '300';
+  const troca = R.mesclarItensERP(comMarca, outro, {em:'2026-10-01T12:00:00Z', sortear:() => 's-sorteado02'});
+  assert.deepEqual(troca.itens.find(i => i.uid === '9101:2:1').saiuDoERP, {em:'2026-10-01T12:00:00Z'});
+  const banner = troca.itens.find(i => i.descricao === 'Banner');
+  assert.equal(banner.uid, 's-sorteado02');
   assert.equal(banner.chaveERP, '9101:2:1');
-  assert.equal(banner.entregas, undefined);
+  assert.equal(banner.entregas, undefined, 'a entrega da Faixa não pula para o Banner');
 });
 
 /* ── O que não muda ────────────────────────────────────────────────────── */
@@ -403,13 +431,13 @@ test('sem cópia no aparelho: a mescla mora só no servidor, e a tela lê só a 
   for (const f of ['app.js', 'operacao.js', 'equipe.js', 'store.js', 'entrega-item.js']) {
     assert.doesNotMatch(ler(f), /mesclarItensERP|itensForaERP|chaveERP/, f + ' não decide a mescla');
   }
-  assert.match(ler('supabase/functions/pcp-mubisys/index.ts'), /atualizarOrigemERP\(linha\.registro, remoto, em\)/);
-  assert.match(ler('supabase/functions/pcp-sync/index.ts'), /guardarItensERP\(os, existing,/);
+  assert.match(ler('supabase/functions/pcp-mubisys/index.ts'), /atualizarOrigemERP\(linha\.registro, remoto, em, \{ mesclarItens: MESCLA_ITENS_ERP \}\)/);
+  assert.match(ler('supabase/functions/pcp-sync/index.ts'), /if \(MESCLA_ITENS_ERP\) \{\s+const gi = guardarItensERP\(os, existing,/);
 });
 
 /* ── O diagnóstico do formato (só leitura, só admin) ──────────────────── */
 
-test('formatoItens: só o administrador; devolve nomes e tipos dos campos do item, nunca os valores', async () => {
+test('formatoItens: só o administrador; devolve nomes e tipos dos campos do item e o retrato dele, nunca os valores', async () => {
   const e = await edge('pcp-mubisys', {pcp_meta:[{chave:'mubisys', valor:{publicKey:'pk-ficticia', accessToken:'tk-ficticio'}}]});
   e.run('console = {...console, warn(){}, log(){}, error(){}}');
   const os = {id:777, sequencial_ordem:NUM, cliente:'Cliente Secreto Ltda', cliente_cnpj_cpf:'00.000.000/0001-00', data_cadastro:'2026-09-20 10:00:00',
@@ -422,22 +450,84 @@ test('formatoItens: só o administrador; devolve nomes e tipos dos campos do ite
   for (const who of [GESTOR, {papel:'operacao', nome:'Olga'}, 'machine']) {
     assert.equal((await e.call({action:'formatoItens', numero:NUM}, who)).status, 403, JSON.stringify(who));
   }
-  const r = await e.call({action:'formatoItens', numero:NUM, lista:true}, ADMIN);
+  const r = await e.call({action:'formatoItens', numero:NUM}, ADMIN);
   assert.equal(r.status, 200, JSON.stringify(r));
-  const it = r.porNumero.itens;
+  assert.equal(r.os.length, 1);
+  assert.deepEqual(r.naoMedidas, []);
+  const m = r.os[0], it = m.porNumero.itens;
+  assert.equal(m.numero, NUM);
   assert.equal(it.objetos, 2);
   assert.deepEqual(it.campos.id, {tipos:['número'], em:2, distintos:2});
   assert.deepEqual(it.campos.posicao.tipos, ['texto numérico']);
   assert.deepEqual(it.campos.item.tipos, ['texto', 'texto vazio']);
   assert.deepEqual(Object.keys(it.campos.itens_agrupados.dentro.campos), ['item', 'quantidade', 'sub_total']);
-  assert.equal(r.porNumero.chaveDosItens, 'itens');
-  assert.ok(r.lista && r.lista.itens.objetos === 2, 'mede também a forma da lista');
-  const texto = JSON.stringify(r);
+  assert.equal(m.porNumero.chaveDosItens, 'itens');
+  // O retrato: posições como número, id provável, tamanho dos textos, qual o PCP lê, e o kit.
+  const ret = m.porNumero.retrato;
+  assert.deepEqual(ret.posicoes, [1, 2]);
+  assert.deepEqual(ret.numerosNoPCP, [1, 2]);
+  assert.deepEqual(ret.posicao, {comecaEm:1, temZero:false, semPosicao:0, repetida:false, repetidaNoPCP:false, lacuna:false, emOrdem:true});
+  assert.deepEqual(ret.idProvavel, [{campo:'id', peloNome:true, unicoPorItem:true, tipos:['número']}]);
+  assert.deepEqual(ret.textos, [{descricao:'ausente', item:9, produto:'ausente', nome:'ausente'}, {descricao:'ausente', item:0, produto:'ausente', nome:'ausente'}]);
+  assert.deepEqual(ret.textoQueOPCPLe, ['item', "nenhum (vira 'Item')"]);
+  assert.deepEqual(ret.kits, [{linha:2, pecas:1, textoDoPai:0, textosDasPecas:[{descricao:'ausente', item:11, produto:'ausente', nome:'ausente'}], paiVsSomaDasPecas:'igual'}]);
+  // A lista vem por padrão, e as duas rotas são comparadas sem valor nenhum.
+  assert.ok(m.lista && m.lista.itens.objetos === 2, 'mede também a forma da lista');
+  assert.deepEqual(m.compara, {mesmaQuantidade:true, soNaBuscaPorNumero:[], soNaLista:[], mesmasPosicoes:true, mesmosTextos:true, mesmosNumeros:true, mesmosKits:true, mesmoIdPorItem:{id:true}});
+  const texto = JSON.stringify({...r, medidoEm:''});
   for (const segredo of ['Cliente Secreto', '0001-00', 'Placa ACM', 'Letra caixa', '1000.00', '5501', '1500']) {
     assert.ok(!texto.includes(segredo), 'não devolve o valor: ' + segredo);
   }
   const chamadas = e.run('JSON.stringify(globalThis.__urls)');
   assert.match(chamadas, /ordem-servico\/numero\/9101/);
   assert.match(chamadas, /datainicial=2026-09-20&datafinal=2026-09-21/, 'janela de um dia, com o dia seguinte');
+  assert.equal(e.db.pcp_registros.length, 0, 'só leitura: nada gravado');
+});
+
+test('formatoItens com várias O.S.: até 10; o par "1,1", a lacuna e o kit abaixo das peças aparecem; a que falha não derruba as outras', async () => {
+  const e = await edge('pcp-mubisys', {pcp_meta:[{chave:'mubisys', valor:{publicKey:'pk-ficticia', accessToken:'tk-ficticio'}}]});
+  e.run('console = {...console, warn(){}, log(){}, error(){}}');
+  const dia = '2026-09-22 08:00:00';
+  const ordens = {
+    // O par "1,1": posição 0 no primeiro item (o PCP dá 1) e 1 no segundo.
+    '9201': {sequencial_ordem:'9201', cliente:'Cliente Sigiloso', data_cadastro:dia, itens:[
+      {posicao:0, descricao:'Lona front', medidas:'3.00x1.00', quantidade:'10', sub_total:'900', valor_final:'850'},
+      {posicao:1, descricao:'Lona front', medidas:'5.00x1.00', quantidade:'4', sub_total:'400', valor_final:'400'},
+      {posicao:3, descricao:'', item:'', quantidade:'1', sub_total:'85', itens_agrupados:[{item:'Chapa Sigilosa', sub_total:'300'}, {item:'Perfil Sigiloso', sub_total:'295'}]}]},
+    // A mesma O.S. vem diferente na lista (outro campo no item).
+    '9202': {sequencial_ordem:'9202', cliente:'Outro Sigiloso', data_cadastro:dia, itens:[{posicao:'1', item:'Adesivo leitoso', quantidade:'2', sub_total:'200'}]},
+  };
+  const naLista = [ordens['9201'], {...ordens['9202'], itens:[{posicao:'1', item:'Adesivo leitoso', quantidade:'2', sub_total:'200', id_item:'77'}]}];
+  e.run(`globalThis.__ordens = ${JSON.stringify(ordens)}; globalThis.__lista = ${JSON.stringify(naLista)}; globalThis.__listas = 0;
+    fetchERP = async (url) => { const n = url.split('/').pop(); const o = globalThis.__ordens[n];
+      return new Response(o ? JSON.stringify({data:o}) : '{}', {status: o ? 201 : 404}); };
+    erpGet = async () => { globalThis.__listas++; return {data:globalThis.__lista}; };`);
+  assert.equal((await e.call({action:'formatoItens', numeros:['1','2','3','4','5','6','7','8','9','10','11']}, ADMIN)).status, 400, 'no máximo 10');
+  assert.equal((await e.call({action:'formatoItens', numeros:['9201', 'abc']}, ADMIN)).status, 400, 'só dígitos');
+  const r = await e.call({action:'formatoItens', numeros:['9201', '9202', '9299', '9201']}, ADMIN);
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.deepEqual(r.os.map(o => o.numero), ['9201', '9202'], 'repetida conta uma vez');
+  assert.deepEqual(r.naoMedidas, [{numero:'9299', motivo:'o Mubisys respondeu HTTP 404'}]);
+  assert.equal(e.run('globalThis.__listas'), 1, 'uma busca da lista por dia, para as O.S. do mesmo dia');
+  const a = r.os[0].porNumero.retrato;
+  assert.deepEqual(a.posicoes, [0, 1, 3]);
+  assert.deepEqual(a.numerosNoPCP, [1, 1, 3], 'a posição 0 vira 1 no PCP e colide com a 1');
+  assert.equal(a.posicao.temZero, true);
+  assert.equal(a.posicao.repetida, false);
+  assert.equal(a.posicao.repetidaNoPCP, true);
+  assert.equal(a.posicao.lacuna, true);
+  assert.deepEqual(a.subtotalVsFinal, ['maior', 'igual', 'sem valor']);
+  assert.equal(a.kits[0].paiVsSomaDasPecas, 'menor', 'o kit grava menos que a soma das peças (D8)');
+  assert.equal(a.kits[0].pecas, 2);
+  assert.deepEqual(a.textoQueOPCPLe, ['descricao', 'descricao', "nenhum (vira 'Item')"]);
+  const b = r.os[1].compara;
+  assert.deepEqual(b.soNaLista, ['id_item']);
+  assert.equal(b.mesmosNumeros, true);
+  assert.deepEqual(b.mesmoIdPorItem, {});
+  assert.deepEqual(r.os[1].lista.retrato.idProvavel, [{campo:'id_item', peloNome:true, unicoPorItem:null, tipos:['texto numérico']}], 'com um item só, não dá para dizer se é único');
+  const texto = JSON.stringify({...r, medidoEm:''});
+  for (const segredo of ['Sigilos', 'Lona', 'Chapa', 'Perfil', 'Adesivo', '3.00x1.00', '900', '850', '595', '"77"']) {
+    assert.ok(!texto.includes(segredo), 'não devolve o valor: ' + segredo);
+  }
   assert.equal(e.db.pcp_registros.length, 0, 'só leitura: nada gravado');
 });
