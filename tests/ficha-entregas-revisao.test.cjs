@@ -276,7 +276,7 @@ test('revisão: o Finalizar deixa o item com problema aberto fora da marcação,
   assert.deepEqual(resumo(marcasDe(g, '8101:1:1')), [['entregue', 6], ['problema', null]], 'o item com problema não foi marcado');
   assert.deepEqual(resumo(marcasDe(g, '8101:3:1')), [['entregue', 2]]);
   assert.equal(M.lancamentosDaOS(g).retido, retidoSemMarcar, 'o saldo do item com problema continua retido');
-  assert.ok(b.toasts.some(([m]) => /Instalação finalizada 🏁 · 1 item marcado entregue hoje/.test(m)));
+  assert.ok(b.toasts.some(([m]) => /Instalação da O\.S\. \S+ finalizada 🏁 · 1 item marcado entregue hoje/.test(m)));
 });
 
 test('revisão: só o item com problema pendente: a pergunta diz que ele fica com problema, e finalizar não cria marca', async () => {

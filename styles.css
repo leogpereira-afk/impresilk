@@ -3042,7 +3042,9 @@ img.perf-logo{object-fit:cover}
 /* Régua de toque: o "Detalhes e outras ações" tinha 32px. */
 .card-detalhes>summary{min-height:44px;display:flex;align-items:center}
 /* Toast com Desfazer: recebe toque (o container não recebe) e fica 6 s. */
-.toast.toast-acao{pointer-events:auto;display:flex;align-items:center;gap:12px;padding:4px 6px 4px 16px;animation:toastIn .2s ease,toastOut .3s ease 5.7s forwards}
+/* O aviso com Desfazer sai quando o JS manda (revisão da F24): 10 s ou mais, e o mouse em cima ou o foco dentro seguram. O sumiço
+   pelo CSS aos 5,7 s deixava o aviso invisível com o tempo ainda correndo (e o Desfazer clicável no escuro). */
+.toast.toast-acao{pointer-events:auto;display:flex;align-items:center;gap:12px;padding:4px 6px 4px 16px;animation:toastIn .2s ease}
 .toast-acao button{min-height:44px;padding:0 14px;border-radius:8px;border:1px solid rgba(255,255,255,.55);background:transparent;color:#fff;font-weight:700;cursor:pointer}
 .login-aviso{background:#fff7e6;border:1px solid #f5c26b;color:#5b3b00;border-radius:10px;padding:10px 12px;font-size:.85rem;margin:0 0 10px}
 #login-choose>a.btn-primary{display:flex;align-items:center;justify-content:center;min-height:44px;margin-bottom:12px;text-decoration:none}
@@ -4003,3 +4005,83 @@ img.perf-logo{object-fit:cover}
 .ent-kpi-aviso{margin:8px 0 0;font-size:.8rem;line-height:1.5;color:#1e4f8a;background:#eef5fc;border:1px solid #cfe0f1;border-radius:10px;padding:6px 10px}
 .ent-kpi-aviso[hidden]{display:none}
 @media(max-width:600px){.poros-filtros{padding:10px}.poros-campo{flex:1 1 100%}.poros-campo select{width:100%}.poros-fatos div{grid-template-columns:1fr;gap:0}.poros-tl-lista li{grid-template-columns:1fr;gap:0}.poros-card{padding:12px}}
+
+/* ── ENTRADAS RÁPIDAS (F24, 01/10/2026) ──────────────────────────────────── */
+/* Fotos de antes e de depois: a câmera e a galeria lado a lado. No computador
+   (mouse) só a galeria, que abre a janela de arquivo: a câmera faria o mesmo. */
+.fotos-acoes-f24 .foto-box { min-height: 48px; display: flex; align-items: center; justify-content: center; padding: 10px; }
+.fotos-acoes-f24 .foto-mouse { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .fotos-acoes-f24 { grid-template-columns: minmax(0, 1fr); }
+  .fotos-acoes-f24 .foto-camera, .fotos-acoes-f24 .foto-toque { display: none; }
+  .fotos-acoes-f24 .foto-mouse { display: inline; }
+}
+/* O valor do item da O.S. manual (só a gestão vê R$). */
+.valor-row td { padding-top: 0; }
+.valor-item { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; font-size: .85rem; color: var(--muted); }
+.valor-item-rot { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.valor-item-campo { display: inline-flex; align-items: center; gap: 4px; }
+.valor-item-campo input { width: 9rem; max-width: 100%; min-height: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+.valor-item-campo input[aria-invalid="true"] { border-color: var(--red); }
+.valor-item-sub strong { color: var(--text); font-variant-numeric: tabular-nums; }
+/* De qual item é o valor: só a 375 px, onde a linha vira cartão (revisão da F24, B6). */
+.valor-item-de { display: none; font-weight: 700; color: var(--text); flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; }
+.valor-item-aviso { margin: 4px 0 0; }
+@media (max-width: 600px) {
+  .valor-item-de { display: block; }
+  /* A linha do valor cola no cartão do item (como a da Entrega). */
+  .items-cards tr[data-item-row]:has(+ tr.valor-row), .items-cards tr.entrega-row:has(+ tr.valor-row) { margin-bottom: 0; border-bottom: 0; padding-bottom: 2px; }
+  .items-cards tr[data-item-row]:has(+ tr.valor-row) { border-radius: 10px 10px 0 0; }
+  .items-cards tr.entrega-row:has(+ tr.valor-row) { border-radius: 0; }
+  .items-cards tr.valor-row { border-top: 0; border-radius: 0 0 10px 10px; padding-top: 2px; }
+  .items-cards tr.valor-row td { display: block; padding: 2px 0 4px; }
+  .items-cards tr.valor-row td::before { content: none; }
+  .items-cards tr.item-ok + tr.valor-row, .items-cards tr.item-ok + tr.entrega-row + tr.valor-row { background: #f0fdf4; border-color: #bbf7d0; }
+  .items-cards tr.item-reprov + tr.valor-row, .items-cards tr.item-reprov + tr.entrega-row + tr.valor-row { background: #fff7f7; border-color: #fecaca; }
+}
+/* O cliente que já existe nas O.S. do aparelho. A lista fica POR CIMA dos
+   campos de baixo (revisão da F24, M3): empurrar Contato e WhatsApp a cada
+   letra fazia o clique cair no lugar errado. O nome comprido quebra a linha
+   (o white-space: nowrap dos botões alargava a ficha a 375 px). */
+.cli-campo { position: relative; }
+.cli-sug { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 40; max-height: min(60vh, 320px); overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface); box-shadow: 0 6px 18px rgba(15, 23, 42, .18); }
+.cli-sug[hidden] { display: none; }
+.cli-sug-op { display: flex; width: 100%; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--border); background: transparent; text-align: left; font: inherit; color: var(--text); cursor: pointer; white-space: normal; }
+.cli-sug-op:last-child { border-bottom: 0; }
+.cli-sug-op:hover, .cli-sug-op:focus-visible { background: #f0f7ff; outline: none; }
+/* A opção destacada pelas setas: contraste firme, não só um azul claro. */
+.cli-sug-op.ativa, .cli-sug-op[aria-selected="true"] { background: #dbeafe; box-shadow: inset 3px 0 0 var(--blue); }
+.cli-sug-op span { min-width: 0; overflow-wrap: anywhere; }
+.cli-sug-op small { flex: 0 0 auto; color: var(--muted); }
+.cli-sug-tit { margin: 0; padding: 6px 12px; font-size: .75rem; font-weight: 600; color: var(--muted); background: #f8fafc; }
+/* O rascunho do diálogo que voltou. */
+.rasc-aviso { margin: 0 0 8px; padding: 6px 10px; border-radius: var(--radius-s); background: #eff6ff; color: #1e3a8a; font-size: .82rem; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.rasc-aviso span { flex: 1 1 200px; min-width: 0; }
+/* Descartar o rascunho que voltou (revisão da F24, B4): controle, 40 px. */
+.rasc-aviso .rasc-descartar { min-height: 40px; }
+/* A dica embaixo das fotos de antes e de depois: o que a foto faz com a hora (revisão da F24, B2). */
+.foto-dica { margin: 4px 0 0; font-size: .74rem; line-height: 1.35; color: var(--muted); }
+/* A linha dos atalhos da ficha (revisão da F24, B1): discreta, e só com mouse; no toque ela some. */
+.fe-atalhos { margin: 4px 16px 0; font-size: .72rem; color: var(--muted); }
+@media (hover: none), (pointer: coarse) { .fe-atalhos { display: none; } }
+/* Animações curtas, só com o movimento liberado: a etapa que chega, a lista
+   do cliente e o realce do passo do stepper. */
+@media (prefers-reduced-motion: no-preference) {
+  .ficha-etapa.fe-entrou { animation: f24-etapa .16s ease-out; }
+  .cli-sug:not([hidden]) { animation: f24-surgir .12s ease-out; }
+  .fe-passo { transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+}
+@keyframes f24-etapa { from { opacity: .4; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes f24-surgir { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+/* MOVIMENTO REDUZIDO DESLIGA TUDO, no app inteiro (o aviso, a celebração, o
+   pódio, os cartões, o carregando), não só o da F24: cada animação termina
+   na hora, no estado final, e nenhuma transição anda. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}

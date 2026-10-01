@@ -1343,10 +1343,10 @@ function renderModal() {
       <summary>${n.chegada}. Chegada no cliente <span class="item-progress" style="margin-left:auto">📷 ${fotos.length}</span></summary>
       <div class="fs-body">
         <div class="field">
-          <label>Fotos de check-in, ao chegar (pelo menos 1 para finalizar)</label>
+          <label>Fotos de antes (ao chegar, antes de começar; pelo menos 1 para finalizar)</label>
           <div class="fotos-grid">${fotos.map(fid => thumb(fid, `data-rm="${esc(fid)}"`)).join('')}</div>
           ${ro ? '' : `<label class="foto-box" style="margin-top:6px">
-            <span class="foto-hint">📷 Foto de check-in</span>
+            <span class="foto-hint">📷 Tirar foto de antes</span>
             <input type="file" accept="image/*" capture="environment" data-checkin>
           </label>`}
         </div>
@@ -1375,10 +1375,10 @@ function renderModal() {
       <summary>${n.pronto}. Serviço pronto <span class="item-progress" style="margin-left:auto">📷 ${fotosRet.length}</span></summary>
       <div class="fs-body">
         <div class="field">
-          <label>Fotos do serviço pronto (pelo menos 1 para finalizar)</label>
+          <label>Fotos de depois (serviço pronto; pelo menos 1 para finalizar)</label>
           <div class="fotos-grid">${fotosRet.map(fid => thumb(fid, `data-rm-ret="${esc(fid)}"`)).join('')}</div>
           ${ro ? '' : `<div class="eq-fotos-acoes">
-            <label class="foto-box"><span class="foto-hint">📷 Tirar foto</span><input type="file" accept="image/*" capture="environment" data-retorno></label>
+            <label class="foto-box"><span class="foto-hint">📷 Tirar foto de depois</span><input type="file" accept="image/*" capture="environment" data-retorno></label>
             <label class="foto-box"><span class="foto-hint">🖼 Da galeria</span><input type="file" accept="image/*" multiple data-retorno></label>
           </div>`}
         </div>

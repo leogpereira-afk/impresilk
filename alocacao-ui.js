@@ -1214,9 +1214,46 @@ const ALOCUI = (() => {
   }
   /* Opções: {aoMudar(st)} a cada pintura; {aoAlterar(st)} só quando uma ação
      mudou a montagem (a ficha grava a equipe por ele); {aoIr(destino)}. */
+  /* DESFAZER A TIRADA (F24, 01/10/2026). Tirar alguém (ou uma equipe) é um
+     toque no ×, sem pergunta: quem hospeda o componente pode oferecer o
+     Desfazer (`aoTirar(mensagem, voltar)`, a ficha usa o toast). `voltar()`
+     devolve o retrato de antes, SÓ se nada mudou depois da tirada (outra
+     pessoa entrou, o percentual mudou: diz o motivo e não mexe), repinta e
+     chama o aoMudar. Não chama o aoAlterar: quem hospeda decide o que gravar
+     (a ficha devolve a equipe da O.S. como estava). Nada vai ao servidor
+     daqui, como em toda ação do componente. */
+  const TIRAR = new Set(['remover', 'remover-equipe', 'remover-nome']);
+  const retratoDe = st => ({aloc: copia(st.aloc), soNome: copia(lista(st.soNome)), trazidas: copia(lista(st.trazidas)), tocado: st.tocado === true, antigo: st.antigo ? copia(st.antigo) : null});
+  const nucleoRetrato = r => JSON.stringify([r.aloc, r.soNome, r.antigo]);
+  // Quem saiu: o nome da pessoa, o nome solto ou o nome da equipe.
+  function quemSaiu(st, ds) {
+    if (ds.alocAcao === 'remover-nome') return String(ds.nome || 'O nome');
+    if (ds.alocAcao === 'remover-equipe') { const g = st.aloc.grupos[Number(ds.g)]; return g ? nomeGrupo(st, g) : 'A equipe'; }
+    return pessoa(String(ds.p || '')).nome;
+  }
+  function textoTirada(st, ds) {
+    return `${quemSaiu(st, ds)} saiu ${st.modo === 'pessoas' ? 'da equipe' : 'da divisão'}.`;
+  }
+  /* O DUPLO CLIQUE NO × TIRA UMA PESSOA SÓ (revisão da F24): o primeiro
+     clique tira e repinta, a linha de baixo sobe para o lugar do botão e o
+     segundo clique tirava a pessoa seguinte. O segundo clique do duplo
+     (detail 2) e um toque a menos de 450 ms do anterior, no mesmo
+     componente, não tiram ninguém. */
+  const INTERVALO_TIRADA_MS = 450;
+  const ultimasTiradas = new Map();   // chave -> timeStamp do último clique que tirou (a ficha remonta o componente a cada pintura)
+  function devolverRetrato(chave, antes, depois) {
+    const st = estados.get(chave);
+    if (!st) return 'A equipe não está mais aberta nesta tela: não deu para desfazer.';
+    if (nucleoRetrato(retratoDe(st)) !== nucleoRetrato(depois)) return 'A equipe mudou depois de tirar: não deu para desfazer.';
+    st.aloc = copia(antes.aloc); st.soNome = copia(antes.soNome); st.trazidas = copia(antes.trazidas); st.tocado = antes.tocado;
+    if (antes.antigo || st.antigo) st.antigo = copia(antes.antigo);
+    st.erro = ''; st.notas = []; st.painel = null;
+    repintar(chave);
+    return '';
+  }
   function montar(root, chave, o = {}) {
     if (!root) return;
-    hosts.set(chave, {root, aoMudar: o.aoMudar, aoIr: o.aoIr, aoAlterar: o.aoAlterar});
+    hosts.set(chave, {root, aoMudar: o.aoMudar, aoIr: o.aoIr, aoAlterar: o.aoAlterar, aoTirar: o.aoTirar});
     const alterou = (ds, erro) => { const h = hosts.get(chave); if (!erro && MUDAM.has(ds.alocAcao) && h && typeof h.aoAlterar === 'function') h.aoAlterar(estados.get(chave)); };
     root.onclick = ev => {
       const b = ev && ev.target && typeof ev.target.closest === 'function' ? ev.target.closest('[data-aloc-acao]') : null;
@@ -1224,8 +1261,22 @@ const ALOCUI = (() => {
       const ds = b.dataset || {};
       if (ds.alocAcao === 'ir-rh' || ds.alocAcao === 'ir-ficha') { const h = hosts.get(chave); if (h && typeof h.aoIr === 'function') h.aoIr(ds.alocAcao === 'ir-rh' ? 'rh' : 'ficha'); return; }
       if (ds.alocAcao === 'atualizar-elenco') { void atualizarElenco(chave); return; }
+      // O retrato de antes da tirada, para o Desfazer (F24); a mensagem leva o nome de quem saiu.
+      const h0 = hosts.get(chave), st0 = estados.get(chave);
+      if (TIRAR.has(ds.alocAcao)) {
+        const t = ev && typeof ev.timeStamp === 'number' && ev.timeStamp > 0 ? ev.timeStamp : null, ult = ultimasTiradas.get(chave);
+        if ((ev && ev.detail > 1) || (t != null && ult != null && t - ult >= 0 && t - ult < INTERVALO_TIRADA_MS)) return;
+        if (t != null) ultimasTiradas.set(chave, t);
+      }
+      const desfazivel = TIRAR.has(ds.alocAcao) && !!st0 && !!h0 && typeof h0.aoTirar === 'function';
+      const antes = desfazivel ? retratoDe(st0) : null, msg = desfazivel ? textoTirada(st0, ds) : '';
       const erro = executar(chave, ds);
       repintar(chave);
+      if (desfazivel && !erro) {
+        const depois = retratoDe(estados.get(chave));
+        // O aviso nunca impede o resto: a tirada já valeu, e quem hospeda grava logo abaixo (alterou).
+        try { h0.aoTirar(msg, () => devolverRetrato(chave, antes, depois), {nome: quemSaiu(st0, ds)}); } catch (e) { if (typeof console !== 'undefined') console.warn('[alocacao-ui] aviso do desfazer', e); }
+      }
       alterou(ds, erro);
     };
     root.onchange = ev => {

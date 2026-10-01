@@ -250,12 +250,13 @@ test('revisão: D4, digitar a Exceção de encerramento atualiza a lista do que 
   const t = tela({lista: [osPronta({fotosRetornoIds: [], horaRetorno: '', retornoEm: ''})]});
   t.abrirOS('f1', 'fechamento');
   const finalNaTela = () => { const el = t.el('fe-final'); return el && el.innerHTML ? el.innerHTML : t.secoes().fechamento; };
-  assert.match(finalNaTela(), /Para finalizar, falta:[\s\S]*?pelo menos 1 foto de retorno/);
+  // A F24 chama a foto do serviço pronto de "foto de depois" (o mesmo nome do celular).
+  assert.match(finalNaTela(), /Para finalizar, falta:[\s\S]*?pelo menos 1 foto de depois/);
   // O caminho do campo de texto (bindModalEvents): setField e a pintura ao vivo, sem repintar a ficha.
   t.run(`setField('justificativaConclusao', 'Cliente não deixou fotografar o serviço'); pintarPendenciasFicha();`);
   assert.equal(t.run('validarFinalizacao(_modalDraft).length'), 0, 'com a exceção, nada falta');
   // Caso ruim: o stepper já dizia "pronta" e a lista logo abaixo seguia pedindo a foto e a hora.
-  assert.doesNotMatch(finalNaTela(), /pelo menos 1 foto de retorno|hora do retorno/);
+  assert.doesNotMatch(finalNaTela(), /pelo menos 1 foto de depois|hora do retorno/);
   assert.match(finalNaTela(), /<p>Pronta para finalizar\.<\/p>/);
   assert.match(t.passoVivo('fechamento'), /pronta para finalizar/);
 });

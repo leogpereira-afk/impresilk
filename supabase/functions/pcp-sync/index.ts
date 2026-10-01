@@ -2194,11 +2194,15 @@ Deno.serve(async (req: Request) => {
            com o RH e o Brief, e foi criado sem limite. O app sobe JPEG de até
            1280 px (STORE.pushPhoto, uns 300 KB) com id foto_<hora>_<sorteio>.
            Tipo que o navegador executaria (html, svg), arquivo grande ou id
-           com caminho é recusado. A máquina (backup do Hub) segue livre. */
+           com caminho é recusado. A máquina (backup do Hub) segue livre.
+           A FOTO LIGADA À O.S. (F24, 01/10/2026): a ficha da gestão manda
+           foto_<id da O.S.>_<hora>_<sorteio> (letras, números e hífen no id
+           da O.S., até 60; o UUID dá 62 no total, o mub-<número> uns 35). O
+           total cabe nos 100 do idFoto do _shared. O formato antigo continua. */
         if (!ehMaquina) {
           if (bytes.length > 2_000_000) return resp({ error: "Foto grande demais. Tire a foto de novo." }, 422);
           if (!["image/jpeg", "image/png", "image/webp"].includes(tipo)) return resp({ error: "Tipo de arquivo não aceito. Envie uma foto." }, 422);
-          if (!/^foto_\d{10,}_[a-z0-9]{1,16}$/.test(id)) return resp({ error: "Identificação da foto inválida." }, 422);
+          if (id.length > 100 || !/^foto_(?:[A-Za-z0-9-]{1,60}_)?\d{10,}_[a-z0-9]{1,16}$/.test(id)) return resp({ error: "Identificação da foto inválida." }, 422);
         }
         const { error } = await sb.storage.from(BUCKET).upload(id, bytes, {
           contentType: tipo,
