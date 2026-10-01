@@ -1025,7 +1025,7 @@ async function perfEditarParticipacao(id) {
   };
   const aoIr = destino => {
     d.close();
-    if (destino === 'ficha') { const o = STORE.getOS(id); if (o && typeof openModal === 'function') openModal(o); return; }
+    if (destino === 'ficha') { const o = STORE.getOS(id); if (o && typeof openModal === 'function') openModal(o, 'agenda'); return; }
     const q = document.querySelector('[data-quadro="perf-rh"]');
     if (q) { q.open = true; q.scrollIntoView({behavior:'smooth', block:'start'}); }
   };

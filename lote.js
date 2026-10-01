@@ -1575,7 +1575,7 @@ const LOTE = (() => {
     // Mudar a equipe no componente confere a equipe da volta: a faixa da equipe e as linhas da volta são repintadas, o componente não.
     ALOCUI.montar(host, chaveAloc(gx.g), {aoAlterar: () => { guardarEquipeNoRascunho(gx.g, gx.rg); persistir(); pintarParte({equipe: gx.g.chave}); },
       // "Ir à ficha" abre a O.S. da volta; o nome sem ficha se liga em Performance, Conferir nomes.
-      aoIr: destino => { const o = representante(gx.g); if (destino === 'ficha' && o && typeof openModal === 'function') openModal(o, 'exec'); else if (typeof toast === 'function') toast('Ligue o nome à ficha do RH em Performance, Conferir nomes, e volte ao lote.'); }});
+      aoIr: destino => { const o = representante(gx.g); if (destino === 'ficha' && o && typeof openModal === 'function') openModal(o, 'agenda'); else if (typeof toast === 'function') toast('Ligue o nome à ficha do RH em Performance, Conferir nomes, e volte ao lote.'); }});
   }
   /* A REPINTURA DE UM PEDAÇO (revisão da F14: cada toque repintava a tela
      inteira, mais de 150 ms com 190 linhas). `os`: as linhas tocadas (Não,

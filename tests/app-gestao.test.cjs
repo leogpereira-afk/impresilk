@@ -148,7 +148,10 @@ test('F10 ficha: os blocos abertos sobrevivem à repintura com o bloco novo "div
   const t = fichaReal('pcp', [osFicha()]);
   t.run(`_modalDraft = ${JSON.stringify(osFicha())}; renderModal();`);
   const chaves = t.blocos().map(b => b.dataset.bloco);
-  assert.deepEqual(chaves, ['pcp', 'itens', 'agenda', 'exec', 'divisao'], 'o bloco da divisão vem depois da execução');
+  /* F23: a ficha em etapas segue a ordem Dados > Equipe > Divisão > Jornada >
+     Fechamento, e a divisão (etapa 3) vem antes da execução (etapa 4). As
+     chaves continuam as mesmas. */
+  assert.deepEqual(chaves, ['pcp', 'itens', 'agenda', 'divisao', 'exec'], 'cada bloco na sua etapa, na ordem do stepper');
   // O usuário abre a divisão e a execução e fecha a agenda (que o render abriu).
   const porChave = k => t.blocos().find(b => b.dataset.bloco === k);
   porChave('divisao').open = true; porChave('exec').open = true; porChave('agenda').open = false;

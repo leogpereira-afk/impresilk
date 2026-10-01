@@ -742,7 +742,7 @@ function porOSCardHTML(l) {
     const aberta = f.abertas.includes(c.id);
     corpo = `<div class="poros-equipe" aria-label="Equipe">${equipe}</div>
         ${l.doServidor ? '<p class="poros-nota">Carregada do servidor: some deste aparelho ao recarregar a página.</p>' : ''}
-        <div class="poros-acoes"><button type="button" class="btn-ghost btn-sm poros-abrir" data-os-id="${esc(c.id)}" aria-label="Abrir a ficha da O.S ${esc(l.numero)}">Abrir a ficha</button>${abonar}</div>
+        <div class="poros-acoes"><button type="button" class="btn-ghost btn-sm poros-abrir" data-os-id="${esc(c.id)}" data-ficha-etapa="fechamento" aria-label="Abrir a ficha da O.S ${esc(l.numero)}">Abrir a ficha</button>${abonar}</div>
         <details class="poros-tl" data-poros-tl="${esc(c.id)}"${aberta ? ' open' : ''}><summary>Linha do tempo</summary><div class="poros-tl-corpo">${aberta ? porOSLinhaHTML(l) : ''}</div></details>`;
   } else {
     /* TODA LINHA SEM FICHA pode estar no servidor (revisão da F18): o

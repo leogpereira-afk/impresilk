@@ -488,28 +488,6 @@ function urgenciaOS(os) {
   return 'urg-6';                    // vermelho forte
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
-   CHECKLIST DE PRONTIDÃO
-   ══════════════════════════════════════════════════════════════════════════ */
-function checklist(os) {
-  const inst = os.instalacao || {};
-  // Interno: checklist enxuto (só as duas etapas).
-  if (isInterno(os)) {
-    return [
-      { k: 'pcp',   label: 'PCP liberou',     ok: !!os.liberadoPCP },
-      { k: 'itens', label: 'Itens definidos', ok: (os.itens || []).length >= 1 }
-    ];
-  }
-  return [
-    { k: 'pcp',     label: 'PCP liberou',        ok: !!os.liberadoPCP },
-    { k: 'itens',   label: 'Itens definidos',    ok: (os.itens || []).length >= 1 },
-    { k: 'agenda',  label: 'Programação completa', ok: OPERACAO.agendaCompleta(os) },
-    { k: 'conf',    label: 'Cliente confirmado', ok: os.confirmacao === 'Confirmado', warn: os.confirmacao !== 'Confirmado' },
-    { k: 'carro',   label: 'Carro liberado',     ok: !!os.carroLiberado },
-    { k: 'exec',    label: 'Execução + fotos',   ok: !!(os.instalacaoOK && os.conferidoPor && (os.fotosCheckinIds || []).length) }
-  ];
-}
-
 // Conclusão de cada bloco do modal (para colorir de verde quando completo)
 function blocosCompletos(os) {
   const inst = os.instalacao || {};
@@ -1481,6 +1459,14 @@ let _modalBlocoForcado = null; // bloco a abrir por escolha do usuário (botões
 
 function openModal(os, blocoForcado) {
   if (!os) { toast('O.S não encontrada.', 'error'); return; }
+  /* A ETAPA DA FICHA (F23). O alvo (bloco ou etapa) escolhe a etapa; sem
+     alvo, a ficha que já estava aberta nesta O.S. (o conflito recarrega por
+     aqui) fica onde estava, e a que abre agora começa pela que a situação
+     pede (etapaPadraoFicha). */
+  const mesmaFicha = !!_modalDraft && STATE.modalOSId === os.id;
+  const etapaAlvo = blocoForcado ? etapaDoAlvoFicha(blocoForcado) : '';
+  if (etapaAlvo) _etapaFicha.set(os.id, etapaAlvo);
+  else if (!mesmaFicha) _etapaFicha.delete(os.id);
   _modalDraft = JSON.parse(JSON.stringify(os));
   /* O.S. nova que já chega preenchida (importada do PDF) nasce suja: o
      "Salvar O.S." só fecha, e fechar sem nada marcado não gravava, então a
@@ -1502,6 +1488,12 @@ function openModal(os, blocoForcado) {
         : null);
   renderModal();
   $('#modal-overlay').classList.remove('hidden');
+  /* A ficha que abre agora começa no alto, com o stepper à vista (F23): o
+     #modal-os guardava a rolagem da O.S. anterior e a etapa certa abria
+     escondida no meio. Só depois de mostrar: com a sobreposição escondida, o
+     navegador ignora a rolagem. O conflito, que reabre a mesma ficha, não rola. */
+  const caixa = $('#modal-os');
+  if (!mesmaFicha && caixa) caixa.scrollTop = 0;
 }
 
 function closeModal() {
@@ -1511,6 +1503,7 @@ function closeModal() {
   // A montagem da equipe e da divisão desta ficha acaba aqui (a divisão em envio espera a resposta).
   if (typeof ALOCUI !== 'undefined' && _modalDraft && !_fichaDivEnviando) { const k = chavesFicha(_modalDraft.id); ALOCUI.esquecer(k.eq); ALOCUI.esquecer(k.div); }
   $('#modal-overlay').classList.add('hidden');
+  if (_modalDraft) _etapaFicha.delete(_modalDraft.id);   // abrir de novo começa pela etapa que a situação pede
   STATE.modalOSId = null;
   _modalDraft = null;
   renderActiveTab();
@@ -1614,25 +1607,347 @@ function blocoRelevante(os, st, interno) {
   }
 }
 
+/* ── A FICHA DA O.S. EM ETAPAS (F23, 30/09/2026) ───────────────────────────
+   O renderModal reparte os blocos de sempre em 5 etapas: Dados (blocos pcp e
+   itens), Equipe (agenda), Divisão (divisao), Jornada (exec) e Fechamento (o
+   checklist, o Finalizar, a exceção de encerramento e o Status da entrega
+   com ocorrências e abonos). Todas ficam no DOM; só a ativa aparece. As
+   chaves data-bloco e as funções dos blocos não mudam: quem abre a ficha pelo
+   bloco (os botões do card, o CTA, a fila da volta) cai na etapa dele.
+   A etapa atual mora aqui, por O.S.: a repintura da sincronização
+   (atualizarFichaAberta), a do conflito e a de cada campo gravado leem a
+   mesma etapa, e a ficha não volta para a primeira. Abrir de novo (a ficha
+   estava fechada) começa pela etapa que a situação pede.
+   A navegação é livre e nada trava: a pendência fica presa ao campo
+   (aria-describedby) e o checklist do Fechamento, incompleto, fica pendente
+   para a pontuação SEM impedir a finalização (decisão de 23/09: a
+   conferência não trava a finalização; validarFinalizacao e a
+   validarConclusao do servidor continuam as mesmas). */
+const ETAPAS_FICHA = [
+  { k: 'dados',      nome: 'Dados',      blocos: ['pcp', 'itens'] },
+  { k: 'equipe',     nome: 'Equipe',     blocos: ['agenda'] },
+  { k: 'divisao',    nome: 'Divisão',    blocos: ['divisao'] },
+  { k: 'jornada',    nome: 'Jornada',    blocos: ['exec'] },
+  { k: 'fechamento', nome: 'Fechamento', blocos: [] }
+];
+const ETAPA_FICHA = Object.fromEntries(ETAPAS_FICHA.map(e => [e.k, e]));
+const ETAPA_DO_BLOCO = Object.fromEntries(ETAPAS_FICHA.flatMap(e => e.blocos.map(b => [b, e.k])));
+// O próximo passo (proximoPasso().acao) e a etapa em que ele se faz.
+const ETAPA_DO_PASSO = { pcp: 'dados', itens: 'dados', liberou: 'equipe', agenda: 'equipe', confirmar: 'equipe', saida: 'jornada', exec: 'jornada', finalizar: 'fechamento' };
+const _etapaFicha = new Map();   // id da O.S. -> etapa da ficha aberta
+// O alvo de quem abre a ficha: a chave de um bloco (pcp, itens, agenda, exec, divisao) ou de uma etapa.
+const etapaDoAlvoFicha = alvo => ETAPA_DO_BLOCO[alvo] || (ETAPA_FICHA[alvo] ? alvo : '');
+/* As etapas que cabem à O.S.: a retirada no balcão (interna) só tem Dados e
+   Fechamento; a Divisão é só da gestão em O.S. externa (podeDividirFicha). */
+function etapasDaFicha(os) {
+  if (isInterno(os)) return ['dados', 'fechamento'];
+  return ['dados', 'equipe', ...(podeDividirFicha(os) ? ['divisao'] : []), 'jornada', 'fechamento'];
+}
+/* Onde a ficha abre sem alvo: a cancelada em Dados, com o aviso; a
+   finalizada (a baixa do ERP inclusive) em Fechamento, sem trava; a aberta,
+   na etapa do bloco que a situação pede (blocoRelevante). */
+function etapaPadraoFicha(os) {
+  const lista = etapasDaFicha(os);
+  if (canceladaNaTela(os)) return 'dados';
+  if (os.finalizadaEm) return 'fechamento';
+  const e = ETAPA_DO_BLOCO[blocoRelevante(os, calcStatus(os), isInterno(os))] || 'dados';
+  return lista.includes(e) ? e : lista[0];
+}
+function etapaAtualFicha(os) {
+  const e = _etapaFicha.get(os.id);
+  return e && etapasDaFicha(os).includes(e) ? e : etapaPadraoFicha(os);
+}
+
+/* AS PENDÊNCIAS DA FICHA, cada uma presa ao seu campo. As que impedem
+   finalizar saem de validarFinalizacao (a mesma lista do Finalizar e do
+   card); as que só deixam a etapa incompleta, de blocosCompletos. Nenhuma
+   impede gravar: a mensagem fica ao lado do campo e o resto da ficha grava
+   como sempre. Falta que a tabela não conhece vai para a Jornada sem campo:
+   aparece no Fechamento, nunca some calada. */
+const FALTA_FINALIZAR_CAMPO = {
+  'PCP liberar': ['dados', 'liberar', 'Para finalizar: o PCP precisa liberar a O.S.'],
+  '≥1 item': ['dados', 'itens', 'Para finalizar: inclua pelo menos 1 item.'],
+  'confirmação do cliente': ['equipe', 'confirmacao', 'Para finalizar: confirme com o cliente.'],
+  'embarque conferido': ['jornada', 'embarqueConferidoPor', 'Para finalizar: marque Embarque conferido.'],
+  'produtos conferidos': ['jornada', 'produtosConferidosPor', 'Para finalizar: marque Produtos conferidos.'],
+  'ferramentas conferidas': ['jornada', 'ferramentasConferidas', 'Para finalizar: marque Ferramentas conferidas.'],
+  'liberar carro / saída': ['jornada', 'carro', 'Para finalizar: libere o carro (ou a saída) ou digite a hora de saída.'],
+  'marcar Instalação OK': ['jornada', 'instalacaoOK', 'Para finalizar: marque Instalação OK.'],
+  '≥1 foto de saída': ['jornada', 'fotosSaida', 'Para finalizar: pelo menos 1 foto de saída.'],
+  'foto de retorno (serviço pronto)': ['jornada', 'fotosRetorno', 'Para finalizar: pelo menos 1 foto de retorno, com o serviço pronto.'],
+  'data e hora do retorno': ['jornada', 'horaRetorno', 'Para finalizar: digite a hora do retorno.'],
+  'descrição do problema (retrabalho)': ['jornada', 'problema', 'Para finalizar: descreva o problema do retrabalho.']
+};
+function faltaFinalizarNaFicha(f) {
+  const t = FALTA_FINALIZAR_CAMPO[f];
+  if (t) return { etapa: t[0], campo: t[1], texto: t[2] };
+  if (/^trocar a Situação/.test(f)) return { etapa: 'jornada', campo: 'checkout.situacao', texto: 'Para finalizar: troque a Situação para Finalizado (a equipe marcou mais um dia de trabalho).' };
+  return { etapa: 'jornada', campo: '', texto: 'Para finalizar: ' + f + '.' };
+}
+function pendenciasFicha(os) {
+  if (!os || os.finalizadaEm || canceladaNaTela(os)) return [];
+  const out = [], campos = new Set();
+  const por = (etapa, campo, texto, finalizar, dica) => {
+    if (campo && campos.has(campo)) return;
+    if (campo) campos.add(campo);
+    out.push({ etapa, campo, texto, finalizar: !!finalizar, dica: dica || '' });
+  };
+  const gestao = ['admin', 'pcp'].includes(String((STATE.user || {}).papel || ''));
+  for (const f of validarFinalizacao(os)) {
+    const p = faltaFinalizarNaFicha(f);
+    // A exceção de encerramento (só a gestão) dispensa a foto e a hora do retorno.
+    const dica = gestao && ['fotosRetorno', 'horaRetorno'].includes(p.campo) ? 'Sem ela, a gestão pode usar a Exceção de encerramento, no Fechamento.' : '';
+    por(p.etapa, p.campo, p.texto, true, dica);
+  }
+  // O que deixa a etapa incompleta (blocosCompletos), sem impedir finalizar.
+  if (!os.numero) por('dados', 'numero', 'Falta o número da O.S.');
+  if (!os.cliente) por('dados', 'cliente', 'Falta o cliente.');
+  if (!os.responsavelPCP) por('dados', 'responsavelPCP', 'Escolha o responsável do PCP.');
+  const itens = os.itens || [];
+  const semVerificar = itens.filter(i => !i.pronto).length;
+  if (!itens.length) por('dados', 'itens', 'Inclua pelo menos 1 item.');
+  else if (semVerificar) por('dados', 'itens', `Falta verificar ${semVerificar} ${semVerificar === 1 ? 'item' : 'itens'}: toque no ✓ de cada um.`);
+  if (!isInterno(os)) {
+    // A programação completa (OPERACAO.agendaCompleta), parte por parte.
+    const i = os.instalacao || {};
+    if (!OPERACAO.dia(i.data)) por('equipe', 'instalacao.data', 'Falta a data da instalação.');
+    if (!i.periodo) por('equipe', 'instalacao.periodo', 'Falta o período.');
+    else if (i.periodo === 'Horário' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(i.hora || '')) por('equipe', 'instalacao.hora', 'No período "Horário", digite a hora.');
+    if (!OPERACAO.equipe(os).length) por('equipe', 'equipe', 'Falta a equipe.');
+    if (os.confirmacao !== 'Confirmado') por('equipe', 'confirmacao', 'Falta confirmar com o cliente.');
+  }
+  return out;
+}
+// A mensagem presa ao campo: o campo aponta para ela (aria-describedby) e ela fica vazia quando nada falta.
+const fmsgId = k => 'fmsg-' + String(k).replace(/[^\w-]/g, '-');
+const fmsgAttr = k => ` aria-describedby="${fmsgId(k)}"`;
+const textoPendencia = p => p ? p.texto + (p.dica ? ' ' + p.dica : '') : '';
+function fmsgHTML(os, k) {
+  const p = pendenciasFicha(os).find(x => x.campo === k);
+  return `<p class="fe-msg" id="${fmsgId(k)}" data-fmsg="${esc(k)}" aria-live="polite">${esc(textoPendencia(p))}</p>`;
+}
+// Onde fazer o que falta para finalizar: a etapa da primeira falta (Fechamento quando nada falta).
+function etapaParaFinalizar(os) {
+  const p = pendenciasFicha(os).find(x => x.finalizar);
+  return p ? p.etapa : 'fechamento';
+}
+
+/* O CHECKLIST DE FECHAMENTO: fotos antes e depois, prazo, retrabalho,
+   limpeza e equipamentos da volta, ocorrências e abonos. Só mostra: nada
+   aqui trava a finalização. O item que falta "fica pendente para a
+   pontuação". Na baixa do ERP, a foto que falta não pesa (a recomendação do
+   plano: entra sem prova, com equipe e chegada conferida). Ocorrências e
+   abonos são para ver e decidir no Status da entrega: não contam como
+   pendência. A retirada no balcão não tem checklist de instalação. */
+function checklistFechamento(os) {
+  if (!os || isInterno(os)) return [];
+  const erp = OPERACAO.encerradaERP(os);
+  const st = statusEntregaDe(os);
+  const lista = [];
+  const nS = (os.fotosCheckinIds || []).length, nR = (os.fotosRetornoIds || []).length;
+  const fotosOk = nS > 0 && nR > 0;
+  lista.push({ k: 'fotos', rotulo: 'Fotos antes e depois', etapa: 'jornada', estado: fotosOk ? 'ok' : erp ? 'na' : 'pendente',
+    texto: `${nS} ${nS === 1 ? 'foto' : 'fotos'} de saída e ${nR} de retorno${!fotosOk && erp ? '; baixa do ERP, entra sem prova' : ''}` });
+  const pc = OPERACAO.prazoCombinadoDe(os);
+  const semPrazo = !pc && !!os.prazoCombinado && typeof os.prazoCombinado === 'object' && os.prazoCombinado.fonte === OPERACAO.PRAZO_SEM_AGENDA;
+  const aplic = st && Array.isArray(st.aplicaveis) ? st.aplicaveis : [];
+  const atraso = aplic.find(a => a.estado === 'atraso'), noPrazo = aplic.some(a => a.estado === 'no_prazo');
+  lista.push({ k: 'prazo', rotulo: 'Prazo', etapa: 'equipe', estado: pc || semPrazo ? 'ok' : 'pendente',
+    texto: pc ? `combinado para ${fmtDataBR(pc.data)}${atraso ? ', ' + String(atraso.rotulo || '').toLowerCase() : noPrazo ? ', entregue no prazo' : ''}`
+      : semPrazo ? 'sem prazo: a O.S. já estava entregue quando ganhou data no PCP'
+      : 'sem prazo combinado: ele nasce com a primeira data agendada no PCP' });
+  const resp = os.retrabalhoPerguntado && typeof os.retrabalhoPerguntado === 'object' ? os.retrabalhoPerguntado.resposta : '';
+  lista.push({ k: 'retrabalho', rotulo: 'Retrabalho', etapa: 'jornada', estado: os.retrabalho || resp === 'sim' || resp === 'nao' ? 'ok' : 'pendente',
+    texto: os.retrabalho ? `gerou retrabalho${os.problema ? ': ' + String(os.problema).slice(0, 80) : ''}`
+      : resp === 'nao' ? 'respondido: não gerou' : resp === 'sim' ? 'respondido: gerou'
+      : 'falta responder se gerou retrabalho (a pergunta vem ao finalizar e no Fechar o dia)' });
+  const rc = os.retornoConf || {};
+  const sn = k => { const r = OPERACAO.respostaVolta(rc[k]); return r === 'sim' ? 'sim' : r === 'nao' ? 'não' : 'sem resposta'; };
+  const ROT_VOLTA = 'Limpeza e equipamentos da volta';
+  if (OPERACAO.semCarro(os)) lista.push({ k: 'volta', rotulo: ROT_VOLTA, etapa: 'jornada', estado: 'na', texto: 'instalação interna, sem carro' });
+  else {
+    const conferida = OPERACAO.voltaConferidaParaNota(rc);
+    lista.push({ k: 'volta', rotulo: ROT_VOLTA, etapa: 'jornada', estado: conferida ? 'ok' : 'pendente',
+      texto: conferida ? `conferida: limpo ${sn('carroLimpo')}, arrumado ${sn('carroArrumado')}, equipamentos ${sn('equipamentosOk')}`
+        : OPERACAO.voltaRespondida(rc) ? 'conferida em parte: falta o carro (limpo ou arrumado) ou os equipamentos'
+        : 'falta conferir o carro e os equipamentos (na Jornada ou na fila PCP, Volta do carro)' });
+  }
+  const ocs = st && Array.isArray(st.ocorrencias) ? st.ocorrencias : [];
+  lista.push({ k: 'ocorrencias', rotulo: 'Ocorrências e abonos', etapa: 'fechamento', estado: 'info',
+    texto: !st ? 'o status da entrega não carregou neste aparelho'
+      : ocs.length ? `${contaOcorrenciasTxt(ocs, st.perdas)}. Abonar e registrar ficam no Status da entrega, abaixo`
+      : 'nenhuma ocorrência' });
+  return lista;
+}
+
+/* O PROGRESSO DE CADA ETAPA, para o stepper: das pendências (validarFinalizacao
+   e blocosCompletos), da divisão confirmada e, no Fechamento, do checklist. */
+function progressoEtapasFicha(os) {
+  const canc = canceladaNaTela(os), fin = !!os.finalizadaEm;
+  const done = blocosCompletos(os), pend = pendenciasFicha(os);
+  const neutro = (texto, descricao) => ({ estado: 'neutro', n: 0, texto, descricao: descricao || texto });
+  const pela = (k, completa) => {
+    if (canc) return neutro('', 'O.S. cancelada');   // o "cancelada" fica só no Fechamento, onde mora o desfazer
+    const n = pend.filter(p => p.etapa === k).length;
+    if (n) return { estado: 'falta', n, texto: n === 1 ? 'falta 1' : `faltam ${n}`, descricao: n === 1 ? '1 pendência' : `${n} pendências` };
+    return completa ? { estado: 'ok', n: 0, texto: 'ok', descricao: 'completa' } : neutro('incompleta');
+  };
+  const out = { dados: pela('dados', done.pcp && done.itens) };
+  if (!isInterno(os)) {
+    out.equipe = pela('equipe', done.agenda);
+    out.divisao = canc ? neutro('', 'O.S. cancelada')
+      : divisaoConfirmadaFicha(os) ? { estado: 'ok', n: 0, texto: 'ok', descricao: 'divisão confirmada' }
+      : { estado: 'falta', n: 0, texto: 'a confirmar', descricao: 'divisão a confirmar' };
+    out.jornada = pela('jornada', done.exec);
+  }
+  if (canc) out.fechamento = neutro('cancelada', 'O.S. cancelada: o status e o desfazer ficam aqui');
+  else if (fin) {
+    const k = checklistFechamento(os).filter(c => c.estado === 'pendente').length;
+    out.fechamento = k
+      ? { estado: 'aviso', n: k, texto: 'pendente', descricao: `finalizada; ${k} ${k === 1 ? 'item do checklist fica pendente' : 'itens do checklist ficam pendentes'} para a pontuação` }
+      : { estado: 'ok', n: 0, texto: 'ok', descricao: 'finalizada, com o checklist completo' };
+  } else {
+    const f = validarFinalizacao(os).length;
+    out.fechamento = f ? neutro('a finalizar', `a finalizar; ${f === 1 ? 'falta 1 item' : `faltam ${f} itens`} nas outras etapas`)
+      : { estado: 'pronto', n: 0, texto: 'pronta', descricao: 'pronta para finalizar' };
+  }
+  return out;
+}
+// O stepper: um botão por etapa, com o progresso dela. Classe própria (.stepper e .step são do funil).
+function passosEtapasHTML(os, lista, atual) {
+  const prog = progressoEtapasFicha(os);
+  return lista.map(k => {
+    const p = prog[k] || { estado: 'neutro', n: 0, texto: '', descricao: '' };
+    const marca = p.estado === 'ok' || p.estado === 'pronto' ? '✓' : p.estado === 'falta' && p.n ? String(p.n) : p.estado === 'neutro' ? '·' : '!';
+    return `<li><button type="button" class="fe-passo fe-${p.estado}" data-ir-etapa="${k}" data-ir-foco="passo"${k === atual ? ' aria-current="step"' : ''} aria-label="${esc(ETAPA_FICHA[k].nome + ': ' + p.descricao)}"><span class="fe-marca" aria-hidden="true">${esc(marca)}</span><span class="fe-nome" aria-hidden="true">${esc(ETAPA_FICHA[k].nome)}</span><span class="fe-prog" aria-hidden="true">${esc(p.texto)}</span></button></li>`;
+  }).join('');
+}
+// Uma etapa: o título (o foco vai para ele ao trocar), o corpo e o voltar e avançar.
+function secaoEtapaHTML(k, lista, atual, corpo) {
+  const i = lista.indexOf(k), ant = lista[i - 1], prox = lista[i + 1];
+  const nome = x => esc(ETAPA_FICHA[x].nome);
+  return `<section class="ficha-etapa" data-etapa-sec="${k}" aria-labelledby="fe-tit-${k}"${k === atual ? '' : ' hidden'}>
+    <h3 class="fe-titulo" id="fe-tit-${k}" tabindex="-1">Etapa ${i + 1} de ${lista.length}: ${nome(k)}</h3>
+    ${corpo}
+    <div class="fe-rodape">${ant ? `<button type="button" class="btn-ghost btn-sm" data-ir-etapa="${ant}" data-ir-foco="titulo">← ${nome(ant)}</button>` : '<span></span>'}${prox ? `<button type="button" class="btn-ghost btn-sm fe-avancar" data-ir-etapa="${prox}" data-ir-foco="titulo">${nome(prox)} →</button>` : ''}</div>
+  </section>`;
+}
+// A O.S. cancelada abre em Dados com este aviso, visível em qualquer etapa.
+function canceladaAvisoFichaHTML(os) {
+  if (!canceladaNaTela(os)) return '';
+  const c = OPERACAO.cancelamentoDe(os) || {};
+  const quem = c.origem === 'erp' ? ' no ERP' : c.por ? ' por ' + esc(c.por) : '';
+  const quando = c.em ? ' em ' + esc(fmtDataBR(c.em)) : '';
+  const motivo = c.origem !== 'erp' && c.motivo ? `<br>Motivo: ${esc(c.motivo)}` : '';
+  const botao = podeCancelarOS() && c.origem === 'manual' ? 'Desfazer no Fechamento' : 'Ver o status no Fechamento';
+  return `<div class="fe-cancelada lock-allow" role="note"><p><strong>⛔ O.S. cancelada${quem}${quando}${c.pendente ? ' (a enviar)' : ''}.</strong> Ela saiu da fila a lançar e da apuração da performance.${motivo}</p><button type="button" class="btn-ghost btn-sm" data-ir-etapa="fechamento" data-ir-foco="titulo">${botao}</button></div>`;
+}
+// O conteúdo da etapa Fechamento.
+function fechamentoFichaHTML(os) {
+  const fin = !!os.finalizadaEm, canc = canceladaNaTela(os), interno = isInterno(os);
+  const etapas = etapasDaFicha(os);
+  const lista = checklistFechamento(os);
+  const pend = lista.filter(c => c.estado === 'pendente').length;
+  const ICONE = { ok: '✓', pendente: '!', na: '·', info: 'i' };
+  const ESTADO = { ok: 'feito', pendente: 'pendente', na: 'não se aplica', info: 'para conferir' };
+  const ir = k => etapas.includes(k) && k !== 'fechamento' ? `<button type="button" class="btn-ghost btn-sm fe-ir" data-ir-etapa="${k}" data-ir-foco="titulo">Ir para ${esc(ETAPA_FICHA[k].nome)}</button>` : '';
+  const linha = c => `<li class="fe-ck fe-ck-${c.estado}"><span class="fe-ck-ic" aria-hidden="true">${ICONE[c.estado]}</span><span class="fe-ck-txt"><strong>${esc(c.rotulo)}</strong><span class="sr-only"> (${ESTADO[c.estado]})</span>: ${esc(c.texto)}.${c.estado === 'pendente' ? '<em class="fe-ck-pend">Fica pendente para a pontuação.</em>' : ''}</span>${c.estado === 'pendente' ? ir(c.etapa) : ''}</li>`;
+  const resumo = OPERACAO.encerradaERP(os) ? 'Baixa do ERP: a ficha abre aqui, sem trava. A foto que faltar não pesa (a entrega entra sem prova); o resto que faltar fica pendente para a pontuação.'
+    : fin ? (pend ? `${pend} ${pend === 1 ? 'item fica pendente' : 'itens ficam pendentes'} para a pontuação. A O.S. continua finalizada.` : 'Checklist completo.')
+    : 'O que conta na pontuação. Incompleto não impede finalizar: o que faltar fica pendente para a pontuação.';
+  const checklist = lista.length ? `<section class="fe-bloco fe-checklist" aria-labelledby="fe-ck-tit">
+      <h4 class="fe-bloco-tit" id="fe-ck-tit">Checklist de fechamento</h4>
+      <p class="fe-ck-resumo">${esc(resumo)}</p>
+      <ul class="fe-ck-lista">${lista.map(linha).join('')}</ul>
+    </section>` : '';
+  let final = '';
+  if (!fin) {
+    const faltas = pendenciasFicha(os).filter(p => p.finalizar);
+    const grupos = etapas.map(k => [k, faltas.filter(p => p.etapa === k)]).filter(([, xs]) => xs.length);
+    const li = ([k, xs]) => `<li><strong>${esc(ETAPA_FICHA[k].nome)}:</strong> ${esc(xs.map(p => p.texto.replace(/^Para finalizar: /, '').replace(/\.$/, '')).join('; '))}. ${ir(k)}</li>`;
+    const botao = interno ? '<button class="btn-success w-100" id="btn-finalizar-interno">📦 Cliente retirou: finalizar</button>'
+      : '<button type="button" class="btn-primary w-100" data-fech-finalizar>🏁 Finalizar instalação</button>';
+    final = `<section class="fe-bloco fe-final" aria-labelledby="fe-final-tit">
+      <h4 class="fe-bloco-tit" id="fe-final-tit">${interno ? 'Retirada' : 'Finalizar'}</h4>
+      ${canc ? FINALIZAR_CANCELADA_HTML
+        : `${grupos.length ? `<p>Para finalizar, falta:</p><ul class="fe-faltas">${grupos.map(li).join('')}</ul>` : `<p>${interno ? 'Pronta para a retirada.' : 'Pronta para finalizar.'}</p>`}
+           <div class="edit-only">${botao}</div>`}
+    </section>`;
+  }
+  const excecao = !interno && !fin && ['admin', 'pcp'].includes(STATE.user.papel)
+    ? `<details class="cfg-grupo"><summary>Exceção de encerramento</summary><p>Use apenas quando não for possível obter a foto final ou a data do retorno. O motivo e o responsável ficam registrados.</p><label>Justificativa (mínimo 15 caracteres)<textarea data-f="justificativaConclusao">${esc(os.justificativaConclusao || '')}</textarea></label></details>` : '';
+  return `<div class="fe-fechamento">${checklist}${final}${excecao}</div>${statusEntregaFichaHTML(os)}`;
+}
+
+/* TROCAR DE ETAPA: a ficha repinta (os blocos abertos ficam, pela chave, F01)
+   e a etapa que chega com todos os blocos fechados abre o principal (o
+   bloco pedido, se veio). O foco vai para o passo clicado ou para o título
+   da etapa, e a ficha sobe até o stepper. */
+function irParaEtapaFicha(k, opt = {}) {
+  const os = _modalDraft;
+  if (!os || !etapasDaFicha(os).includes(k)) return false;
+  _etapaFicha.set(os.id, k);
+  reRenderModalKeepOpen();
+  const blocos = $$('#modal-os .card-fs').filter(d => d.dataset && ETAPA_DO_BLOCO[d.dataset.bloco] === k);
+  const pedido = opt.bloco ? blocos.find(d => d.dataset.bloco === opt.bloco) : null;
+  if (pedido) pedido.open = true;
+  else if (blocos.length && !blocos.some(d => d.open)) blocos[0].open = true;
+  focarEtapaFicha(k, opt.foco);
+  return true;
+}
+function focarEtapaFicha(k, foco) {
+  if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+  const modal = document.getElementById('modal-os');
+  const nav = modal && typeof modal.querySelector === 'function' ? modal.querySelector('.ficha-etapas-nav') : null;
+  const cab = modal && typeof modal.querySelector === 'function' ? modal.querySelector('.modal-header') : null;
+  if (foco !== 'passo' && nav && typeof nav.offsetTop === 'number') {
+    const topo = Math.max(0, nav.offsetTop - (cab ? cab.offsetHeight : 0) - 8);
+    if (modal.scrollTop > topo) modal.scrollTop = topo;
+  }
+  const alvo = foco === 'passo'
+    ? [...$$('#ficha-etapas [data-ir-etapa]')].find(b => b.dataset && b.dataset.irEtapa === k)
+    : document.getElementById('fe-tit-' + k);
+  if (alvo && typeof alvo.focus === 'function') try { alvo.focus({ preventScroll: foco !== 'passo' }); } catch {}
+}
+function ligarEtapasDaFicha(raiz) {
+  const r = raiz || $('#modal-os');
+  if (!r || typeof r.querySelectorAll !== 'function') return;
+  $$('[data-ir-etapa]', r).forEach(b => { b.onclick = () => irParaEtapaFicha(b.dataset.irEtapa, { foco: b.dataset.irFoco || 'titulo' }); });
+  $$('[data-fech-finalizar]', r).forEach(b => { b.onclick = () => finalizarDaFicha(false); });
+}
+/* A PENDÊNCIA AO VIVO: o campo de texto não repinta a ficha (o teclado não
+   cai), então a mensagem ao lado de cada campo e o stepper se atualizam
+   aqui, sem gravar nada. */
+let _passosFichaHTML = '';   // o stepper pintado por último (renderModal e a pintura ao vivo)
+function pintarPendenciasFicha() {
+  if (!_modalDraft || typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+  const os = _modalDraft;
+  const texto = new Map(pendenciasFicha(os).filter(p => p.campo).map(p => [p.campo, textoPendencia(p)]));
+  $$('#modal-os [data-fmsg]').forEach(el => {
+    const t = texto.get(el.dataset.fmsg) || '';
+    if (el.textContent !== t) el.textContent = t;
+  });
+  // O stepper só é trocado quando o progresso muda (cada tecla passa por aqui).
+  const nav = document.getElementById('ficha-etapas');
+  const passos = passosEtapasHTML(os, etapasDaFicha(os), etapaAtualFicha(os));
+  if (nav && passos !== _passosFichaHTML) { _passosFichaHTML = passos; nav.innerHTML = passos; ligarEtapasDaFicha(nav); }
+}
+
 function renderModal() {
   const os = _modalDraft;
   const st = calcStatus(os);
   // O.S finalizada fica em somente-leitura: só permite reabrir (voltar status).
   const finalizada = !!os.finalizadaEm;
   const ro = !podeEditar() || finalizada;
-  const chk = checklist(os);
-
-  const checklistBar = chk.map(c => {
-    const cls = c.ok ? 'ok' : (c.warn ? 'warn' : 'nok');
-    const icon = c.ok ? '✓' : (c.warn ? '⚠' : '⬜');
-    return `<span class="check-item ${cls}">${icon} ${esc(c.label)}</span>`;
-  }).join('');
-
   const done = blocosCompletos(os);
   const pct = fichaPercent(os);
   const interno = isInterno(os);
+  // F23: as etapas que cabem a esta O.S. e a atual, lembrada por O.S. (a sincronização não volta à primeira).
+  const etapas = etapasDaFicha(os);
+  const etapa = etapaAtualFicha(os);
+  _etapaFicha.set(os.id, etapa);
 
-  // Régua de etapas + próximo passo + tempos do processo (doutor em processos).
+  // Régua do funil (o selo compacto) + próximo passo + tempos do processo.
   const pp = proximoPasso(os);
   const histAtual = (Array.isArray(os.historico) ? os.historico : []).filter(h => h.etapa === st).slice(-1)[0];
   const diasPedido = os.dataEntrada ? diasDesde(os.dataEntrada)
@@ -1641,6 +1956,11 @@ function renderModal() {
   const temposTags = [];
   if (diasPedido != null && diasPedido >= 0) temposTags.push(`⏱ ${diasPedido}d desde o pedido`);
   if (diasEtapa != null && diasEtapa >= 0 && !finalizada) temposTags.push(`📍 ${diasEtapa}d nesta etapa`);
+  const stEnt = statusEntregaDe(os);
+  // O próximo passo leva à etapa em que ele se faz.
+  const etapaPP = pp && ETAPA_DO_PASSO[pp.acao];
+  const irPP = etapaPP && etapaPP !== etapa && etapas.includes(etapaPP)
+    ? ` <button type="button" class="btn-ghost btn-sm fe-ir" data-ir-etapa="${etapaPP}" data-ir-foco="titulo">Ir para ${esc(ETAPA_FICHA[etapaPP].nome)}</button>` : '';
 
   // Seletor de tipo do pedido (Interno / Externo)
   const tipoSelector = `
@@ -1649,18 +1969,15 @@ function renderModal() {
       <button type="button" class="tipo-opt ${interno ? 'active' : ''}" data-set-tipo="interno">🏬 Cliente retira</button>
     </div>`;
 
-  // Para pedido interno, só os dois primeiros blocos. Finalização direta.
-  const blocosHTML = interno
-    ? `${blocoPCP(os, ro, done.pcp)}
-       ${blocoItens(os, ro, done.itens)}
-       ${finalizada ? '' : `<div class="fs-body interno-finalizar edit-only" style="padding:14px 16px">
-         ${canceladaNaTela(os) ? FINALIZAR_CANCELADA_HTML : '<button class="btn-success" id="btn-finalizar-interno" style="width:100%">📦 Cliente retirou — finalizar</button>'}
-       </div>`}`
-    : `${blocoPCP(os, ro, done.pcp)}
-       ${blocoItens(os, ro, done.itens)}
-       ${blocoAgenda(os, ro, done.agenda)}
-       ${blocoExec(os, ro, done.exec)}
-       ${podeDividirFicha(os) ? blocoDivisao(os, divisaoConfirmadaFicha(os)) : ''}`;
+  /* Os blocos de sempre, cada um na sua etapa. Pedido interno (cliente
+     retira) só tem Dados e Fechamento, onde fica o "Cliente retirou". */
+  const corpo = {
+    dados: `${finalizada ? '' : tipoSelector}${blocoPCP(os, ro, done.pcp)}${blocoItens(os, ro, done.itens)}`,
+    equipe: interno ? '' : blocoAgenda(os, ro, done.agenda),
+    divisao: etapas.includes('divisao') ? blocoDivisao(os, divisaoConfirmadaFicha(os)) : '',
+    jornada: interno ? '' : blocoExec(os, ro, done.exec),
+    fechamento: fechamentoFichaHTML(os)
+  };
 
   $('#modal-os').innerHTML = `
     <div class="modal-header">
@@ -1677,23 +1994,23 @@ function renderModal() {
       <span>🔒 O.S finalizada por <strong>${esc(os.finalizadoPor || '—')}</strong>${os.finalizadaEm ? ' · ' + new Date(os.finalizadaEm).toLocaleString('pt-BR') : ''} — somente leitura.</span>
       <button class="btn-ghost btn-sm" id="btn-reabrir-os">↩ Reabrir / voltar status</button>
     </div>` : ''}
+    ${canceladaAvisoFichaHTML(os)}
 
-    ${finalizada ? '' : tipoSelector}
-
-    ${stepperHTML(os, false)}
-    ${temposTags.length ? `<div class="modal-tempos">${temposTags.join(' · ')}</div>` : ''}
-    ${pp ? `<div class="prox-passo prox-passo-modal"><span class="prox-passo-tag">Próximo passo</span> <strong>${esc(pp.label)}</strong></div>` : ''}
-    ${statusEntregaFichaHTML(os)}
+    <div class="ficha-resumo">
+      <div class="ficha-funil" role="img" aria-label="Situação no funil: ${esc(statusLabelDe(os, st))}">${stepperHTML(os, true)}</div>
+      ${stEnt ? seloStatusEntregaHTML(stEnt) : ''}
+      ${temposTags.length ? `<span class="modal-tempos">${temposTags.join(' · ')}</span>` : ''}
+    </div>
+    ${pp ? `<div class="prox-passo prox-passo-modal"><span class="prox-passo-tag">Próximo passo</span> <strong>${esc(pp.label)}</strong>${irPP}</div>` : ''}
 
     <div class="ficha-pct">
       <div class="ficha-pct-bar"><div class="ficha-pct-fill" style="width:${pct}%"></div></div>
       <span class="ficha-pct-num">${pct}% preenchida</span>
     </div>
 
-    <div class="checklist-bar">${checklistBar}</div>
+    <nav class="ficha-etapas-nav" aria-label="Etapas da ficha"><ol class="ficha-etapas" id="ficha-etapas">${_passosFichaHTML = passosEtapasHTML(os, etapas, etapa)}</ol></nav>
+    ${etapas.map(k => secaoEtapaHTML(k, etapas, etapa, corpo[k])).join('')}
 
-    ${blocosHTML}
-    ${!interno && !finalizada && ['admin','pcp'].includes(STATE.user.papel) ? `<details class="cfg-grupo"><summary>Exceção de encerramento</summary><p>Use apenas quando não for possível obter a foto final ou a data do retorno. O motivo e o responsável ficam registrados.</p><label>Justificativa (mínimo 15 caracteres)<textarea data-f="justificativaConclusao">${esc(os.justificativaConclusao || '')}</textarea></label></details>` : ''}
     ${os.erpAlteracoes?.length ? `<details class="cfg-grupo"><summary>Histórico de atualização do Mubisys</summary>${os.erpAlteracoes.slice(-10).reverse().map(h => `<p><strong>${esc(new Date(h.em).toLocaleString('pt-BR'))}</strong><br>${h.campos.map(c => `${esc(c.campo)}: ${esc(c.antes ?? '—')} → ${esc(c.depois)}`).join('<br>')}</p>`).join('')}</details>` : ''}
     ${['admin','pcp'].includes(STATE.user.papel) ? `<details class="cfg-grupo lock-allow" id="os-auditoria"><summary>Histórico de alterações</summary><div class="os-auditoria-corpo"></div></details>` : ''}
 
@@ -1722,8 +2039,12 @@ function renderModal() {
   }
   _modalBlocoForcado = null;
   $$('#modal-os .card-fs').forEach(d => { d.open = (d.dataset.bloco === blocoAlvo); });
+  // F23: a etapa ativa sem bloco aberto (a cancelada em Dados, por exemplo) abre o primeiro dela.
+  const daEtapa = $$('#modal-os .card-fs').filter(d => ETAPA_DO_BLOCO[d.dataset.bloco] === etapa);
+  if (daEtapa.length && !daEtapa.some(d => d.open)) daEtapa[0].open = true;
 
   bindModalEvents(os, ro);
+  ligarEtapasDaFicha();
   ligarEquipeDaFicha(ro);
   ligarHistoricoAlteracoes(os);
   ligarStatusEntregaDaFicha();
@@ -1921,7 +2242,7 @@ function blocoPCP(os, ro, done) {
     <summary>1 · PCP &amp; Cliente ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
     <div class="fs-body">
       <div class="field-row">
-        <div class="field"><label>Nº O.S</label><input data-f="numero" value="${esc(os.numero)}" ${lockPed}></div>
+        <div class="field"><label>Nº O.S</label><input data-f="numero" value="${esc(os.numero)}" ${lockPed}${fmsgAttr('numero')}>${fmsgHTML(os, 'numero')}</div>
         <div class="field"><label>Serviço (Ref.)</label><input data-f="servico" list="dl-servicos" value="${esc(os.servico)}" placeholder="tipo de instalação" ${lockPed}>
           <datalist id="dl-servicos">${tiposServicoHist().map(s=>`<option value="${esc(s)}">`).join('')}</datalist>
         </div>
@@ -1940,7 +2261,7 @@ function blocoPCP(os, ro, done) {
           <datalist id="os-orig-${esc(os.id)}">${mesmoCliente.map(o => `<option value="${esc(o.numero)}">${esc(o.numero)} — ${esc((o.servico || '').slice(0, 40))}</option>`).join('')}</datalist>
         </div>`;
       })()}
-      <div class="field"><label>Cliente <span class="req">*</span></label><input data-f="cliente" value="${esc(os.cliente)}" ${lockPed}></div>
+      <div class="field"><label>Cliente <span class="req">*</span></label><input data-f="cliente" value="${esc(os.cliente)}" ${lockPed}${fmsgAttr('cliente')}>${fmsgHTML(os, 'cliente')}</div>
       <div class="field-row">
         <div class="field"><label>Contato</label><input type="text" data-f="contato" value="${esc(os.contato)}"></div>
         <div class="field"><label>WhatsApp <span class="req">*</span></label><input type="tel" inputmode="tel" data-f="whatsapp" data-mask="tel" value="${esc(maskTel(os.whatsapp))}" placeholder="(00) 00000-0000">
@@ -1959,7 +2280,7 @@ function blocoPCP(os, ro, done) {
       <div class="field-row3">
         <div class="field"><label>Data entrada</label><input type="date" data-f="dataEntrada" value="${esc(os.dataEntrada)}" ${lockPed}></div>
         <div class="field"><label>Responsável PCP *</label>
-          <select data-f="responsavelPCP"><option value="">— selecionar —</option>${respOpts}${respExtra}</select>
+          <select data-f="responsavelPCP"${fmsgAttr('responsavelPCP')}><option value="">— selecionar —</option>${respOpts}${respExtra}</select>${fmsgHTML(os, 'responsavelPCP')}
         </div>
         <div class="field"><label>Vendedor</label><input data-f="vendedor" value="${esc(os.vendedor)}" ${lockPed}></div>
       </div>
@@ -1975,8 +2296,9 @@ function blocoPCP(os, ro, done) {
         ${lib
           ? `<div class="liberar-status">✓ Liberado para instalação por ${esc(os.aptoPor || '—')}${os.aptoEm ? ' · ' + new Date(os.aptoEm).toLocaleDateString('pt-BR') : ''}
                <button class="btn-xs btn-ghost" id="btn-cancelar-liberar" style="margin-left:auto">Cancelar</button></div>`
-          : `<button class="btn-liberar" id="btn-liberar">✓ Liberar para instalação</button>`}
+          : `<button class="btn-liberar" id="btn-liberar"${fmsgAttr('liberar')}>✓ Liberar para instalação</button>`}
       </div>
+      ${fmsgHTML(os, 'liberar')}
     </div>
   </details>`;
 }
@@ -2650,10 +2972,11 @@ function blocoItens(os, ro, done) {
         <label>Suprimentos (ex.: álcool, flanela)</label>
         ${chipsField('suprimentos', os.suprimentos || [], cfg.suprimentos, ro)}
       </div>
-      <table class="items-table items-cards">
+      <table class="items-table items-cards"${fmsgAttr('itens')}>
         <thead><tr><th>Item</th><th>Descrição</th><th>Medidas</th><th>Qtde</th><th>OK</th><th></th></tr></thead>
         <tbody id="itens-tbody">${rows || `<tr><td colspan="${cols}" class="text-muted" style="text-align:center;padding:12px">Nenhum item</td></tr>`}</tbody>
       </table>
+      ${fmsgHTML(os, 'itens')}
       ${itens.length ? `<div class="items-total">${itens.length} ${itens.length === 1 ? 'item' : 'itens'}${resumoEnt ? ` · <span class="ent-resumo">${esc(resumoEnt)}</span>` : ''}</div>` : ''}
       ${(saldoERP => saldoERP ? erpSaldoAvisoHTML(saldoERP) : '')(canceladaNaTela(os) ? null : erpSaldoDoCard(os))}
       <div class="flex gap-8 edit-only">
@@ -2783,9 +3106,9 @@ function blocoAgenda(os, ro, done) {
     <summary>3 · Agendamento &amp; Confirmação ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
     <div class="fs-body">
       <div class="field-row3">
-        <div class="field"><label>Data instalação</label><input type="date" data-f="instalacao.data" value="${esc(inst.data)}"></div>
-        <div class="field"><label>Período *</label><select data-f="instalacao.periodo"><option value=""></option>${periodoOpts}</select></div>
-        <div class="field"><label>Hora (se "Horário")</label><input type="time" data-f="instalacao.hora" value="${esc(inst.hora)}"></div>
+        <div class="field"><label>Data instalação</label><input type="date" data-f="instalacao.data" value="${esc(inst.data)}"${fmsgAttr('instalacao.data')}>${fmsgHTML(os, 'instalacao.data')}</div>
+        <div class="field"><label>Período *</label><select data-f="instalacao.periodo"${fmsgAttr('instalacao.periodo')}><option value=""></option>${periodoOpts}</select>${fmsgHTML(os, 'instalacao.periodo')}</div>
+        <div class="field"><label>Hora (se "Horário")</label><input type="time" data-f="instalacao.hora" value="${esc(inst.hora)}"${fmsgAttr('instalacao.hora')}>${fmsgHTML(os, 'instalacao.hora')}</div>
       </div>
       <div class="field-row3">
         <div class="field"><label>Duração (dias)</label><input type="number" min="1" data-f="instalacao.duracaoDias" value="${esc(inst.duracaoDias || 1)}"></div>
@@ -2796,7 +3119,8 @@ function blocoAgenda(os, ro, done) {
       </div>
       <div class="field aloc-campo">
         <label>Equipe</label>
-        ${!ro && typeof ALOCUI !== 'undefined' ? '<div class="aloc-host" id="ficha-equipe" aria-label="Equipe da O.S."></div>' : chipsField('equipe', os.equipe || [], cfg.instaladores, ro)}
+        ${!ro && typeof ALOCUI !== 'undefined' ? `<div class="aloc-host" id="ficha-equipe" role="group" aria-label="Equipe da O.S."${fmsgAttr('equipe')}></div>` : chipsField('equipe', os.equipe || [], cfg.instaladores, ro)}
+        ${fmsgHTML(os, 'equipe')}
       </div>
       ${isInterno(os) ? '' : `<div class="prazo-retorno" id="prazo-retorno">${prazoRetornoHTML(os, ro)}</div>`}
       <div class="field"><label>Obs agenda</label><textarea data-f="obsAgenda">${esc(os.obsAgenda)}</textarea></div>
@@ -2819,7 +3143,7 @@ function blocoAgenda(os, ro, done) {
           })()}
         </div>
         <div class="field-row3">
-          <div class="field"><label>Situação</label><select data-f="confirmacao">${confOpts}</select></div>
+          <div class="field"><label>Situação</label><select data-f="confirmacao"${fmsgAttr('confirmacao')}>${confOpts}</select>${fmsgHTML(os, 'confirmacao')}</div>
           <div class="field"><label>Canal</label><select data-f="confCanal"><option value="">— selecionar —</option>${canalOpts}${canalSel}</select></div>
           <div class="field"><label>Hora</label><input type="time" data-f="confHora" value="${esc(os.confHora)}"></div>
         </div>
@@ -3010,17 +3334,18 @@ function blocoExec(os, ro, done) {
     <div class="fs-body">
       <!-- ── Processo 1: Embarque · Saída ───────────────────────── -->
       <div class="exec-step"><span class="exec-step-tit">📦 Embarque · Saída</span></div>
-      <label class="check-toggle"><input type="checkbox" data-conf-por="embarqueConferidoPor" ${os.embarqueConferidoPor?'checked':''} ${ro?'disabled':''}> 📦 Embarque conferido${os.embarqueConferidoPor?`<span class="conf-por">✓ por ${esc(os.embarqueConferidoPor)}</span>`:''}</label>
-      <label class="check-toggle"><input type="checkbox" data-conf-por="produtosConferidosPor" ${os.produtosConferidosPor?'checked':''} ${ro?'disabled':''}> 📋 Produtos conferidos${os.produtosConferidosPor?`<span class="conf-por">✓ por ${esc(os.produtosConferidosPor)}</span>`:''}</label>
-      <label class="check-toggle"><input type="checkbox" data-f-check="ferramentasConferidas" data-conf-por="ferramentasConferidasPor" ${os.ferramentasConferidas?'checked':''} ${ro?'disabled':''}> 🧰 Ferramentas conferidas${os.ferramentasConferidasPor?`<span class="conf-por">✓ por ${esc(os.ferramentasConferidasPor)}</span>`:''}</label>
+      <label class="check-toggle"><input type="checkbox" data-conf-por="embarqueConferidoPor" ${os.embarqueConferidoPor?'checked':''} ${ro?'disabled':''}${fmsgAttr('embarqueConferidoPor')}> 📦 Embarque conferido${os.embarqueConferidoPor?`<span class="conf-por">✓ por ${esc(os.embarqueConferidoPor)}</span>`:''}</label>${fmsgHTML(os, 'embarqueConferidoPor')}
+      <label class="check-toggle"><input type="checkbox" data-conf-por="produtosConferidosPor" ${os.produtosConferidosPor?'checked':''} ${ro?'disabled':''}${fmsgAttr('produtosConferidosPor')}> 📋 Produtos conferidos${os.produtosConferidosPor?`<span class="conf-por">✓ por ${esc(os.produtosConferidosPor)}</span>`:''}</label>${fmsgHTML(os, 'produtosConferidosPor')}
+      <label class="check-toggle"><input type="checkbox" data-f-check="ferramentasConferidas" data-conf-por="ferramentasConferidasPor" ${os.ferramentasConferidas?'checked':''} ${ro?'disabled':''}${fmsgAttr('ferramentasConferidas')}> 🧰 Ferramentas conferidas${os.ferramentasConferidasPor?`<span class="conf-por">✓ por ${esc(os.ferramentasConferidasPor)}</span>`:''}</label>${fmsgHTML(os, 'ferramentasConferidas')}
 
       ${!confirmado ? `<div class="trava-msg">🔒 Confirme o horário com o cliente (POP EXI‑002) antes de liberar o carro / sair.</div>` : ''}
       <div class="edit-only">
         ${os.carroLiberado
           ? `<div class="liberar-status">${OPERACAO.semCarro(os) ? '🏠 Saída liberada (sem carro)' : '🚗 Carro liberado'} por ${esc(os.carroLiberadoPor||'—')}${os.carroLiberadoEm?' · '+new Date(os.carroLiberadoEm).toLocaleString('pt-BR'):''}
                <button class="btn-xs btn-ghost" id="btn-cancelar-carro" style="margin-left:auto">Cancelar</button></div>`
-          : `<button class="btn-primary btn-sm" id="btn-liberar-carro" ${!confirmado?'disabled style="opacity:.5"':''}>${OPERACAO.semCarro(os) ? '🏠 Liberar saída (sem carro)' : '🚗 Liberar carro / Saída'}</button>`}
+          : `<button class="btn-primary btn-sm" id="btn-liberar-carro" ${!confirmado?'disabled style="opacity:.5"':''}${fmsgAttr('carro')}>${OPERACAO.semCarro(os) ? '🏠 Liberar saída (sem carro)' : '🚗 Liberar carro / Saída'}</button>`}
       </div>
+      ${fmsgHTML(os, 'carro')}
       <div class="field">
         <label>Fotos de saída (≥1 p/ finalizar · carimba a hora de saída)</label>
         <div class="fotos-grid" id="fotos-checkin">
@@ -3028,8 +3353,9 @@ function blocoExec(os, ro, done) {
         </div>
         <div class="foto-box edit-only" style="margin-top:6px">
           <span class="foto-hint">📷 Adicionar foto de saída</span>
-          <input type="file" accept="image/*" multiple data-foto-checkin-input ${ro?'disabled':''}>
+          <input type="file" accept="image/*" multiple data-foto-checkin-input ${ro?'disabled':''}${fmsgAttr('fotosSaida')}>
         </div>
+        ${fmsgHTML(os, 'fotosSaida')}
         ${(() => {
           /* A coordenada vem do celular da montagem e o servidor guarda o campo
              como chegou: só número entra no HTML. Texto ali rodaria script na
@@ -3047,11 +3373,11 @@ function blocoExec(os, ro, done) {
 
       <!-- ── Processo 2: Retorno · Execução ─────────────────────── -->
       <div class="exec-step"><span class="exec-step-tit">🔧 Retorno · Execução</span></div>
-      <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" data-conf-por="conferidoPor" ${os.instalacaoOK?'checked':''} ${ro?'disabled':''}> ✅ Instalação OK${os.conferidoPor?`<span class="conf-por">✓ por ${esc(os.conferidoPor)}</span>`:''}</label>
+      <label class="check-toggle ok"><input type="checkbox" data-f-check="instalacaoOK" data-conf-por="conferidoPor" ${os.instalacaoOK?'checked':''} ${ro?'disabled':''}${fmsgAttr('instalacaoOK')}> ✅ Instalação OK${os.conferidoPor?`<span class="conf-por">✓ por ${esc(os.conferidoPor)}</span>`:''}</label>${fmsgHTML(os, 'instalacaoOK')}
 
       <label class="check-toggle retrab"><input type="checkbox" data-f-check="retrabalho" ${os.retrabalho?'checked':''} ${ro?'disabled':''}> 🔴 Retrabalho?</label>
       <div data-retrabalho-fields style="${os.retrabalho?'':'display:none'}">
-        <div class="field"><label>Problema</label><input data-f="problema" value="${esc(os.problema)}"></div>
+        <div class="field"><label>Problema</label><input data-f="problema" value="${esc(os.problema)}"${fmsgAttr('problema')}>${fmsgHTML(os, 'problema')}</div>
         <div class="field-row">
           <div class="field"><label>Causa</label><select data-f="causa"><option value=""></option>${causaOpts}</select></div>
           <div class="field"><label>Quem resolveu</label><input data-f="resolvidoPor" value="${esc(OPERACAO.nomePessoa(os.resolvidoPor))}"></div>
@@ -3076,16 +3402,17 @@ function blocoExec(os, ro, done) {
         </div>
         <div class="foto-box edit-only" style="margin-top:6px">
           <span class="foto-hint">📷 Adicionar foto de retorno</span>
-          <input type="file" accept="image/*" multiple data-foto-retorno-input ${ro?'disabled':''}>
+          <input type="file" accept="image/*" multiple data-foto-retorno-input ${ro?'disabled':''}${fmsgAttr('fotosRetorno')}>
         </div>
+        ${fmsgHTML(os, 'fotosRetorno')}
       </div>
       <div class="field-row">
-        <div class="field"><label>Hora retorno</label><input type="time" data-f="horaRetorno" value="${esc(os.horaRetorno)}"></div>
+        <div class="field"><label>Hora retorno</label><input type="time" data-f="horaRetorno" value="${esc(os.horaRetorno)}"${fmsgAttr('horaRetorno')}>${fmsgHTML(os, 'horaRetorno')}</div>
         ${OPERACAO.semCarro(os) ? '' : `<div class="field"><label>KM retorno</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>`}
       </div>
       ${conferenciaVoltaHTML(os, ro)}
       <div class="field-row">
-        <div class="field"><label>Situação</label><select data-f="checkout.situacao"><option value="">— selecionar —</option>${sitOpts}${sitExtra}</select></div>
+        <div class="field"><label>Situação</label><select data-f="checkout.situacao"${fmsgAttr('checkout.situacao')}><option value="">— selecionar —</option>${sitOpts}${sitExtra}</select>${fmsgHTML(os, 'checkout.situacao')}</div>
         <div class="field"><label>Obs de fechamento</label><input data-f="checkout.obs" value="${esc(co.obs)}"></div>
       </div>
       <div class="field"><label>Obs técnicas</label><textarea data-f="obsTecnicas">${esc(os.obsTecnicas)}</textarea></div>
@@ -3840,6 +4167,8 @@ function bindModalEvents(os, ro) {
       // Texto livre grava sozinho (como os itens): antes só gravava ao fechar,
       // e o WhatsApp que descarta a aba ou o voltar do aparelho levavam tudo.
       _debouncedSaveDraft();
+      // A pendência ao lado do campo e o stepper acompanham o que foi digitado (F23).
+      pintarPendenciasFicha();
       if (['instalacao.data','instalacao.periodo','instalacao.hora','instalacao.duracaoDias','veiculo'].includes(el.dataset.f)) {
         const alertas = $('#agenda-alertas',root); if(alertas) alertas.innerHTML=alertasAgendaHTML(_modalDraft);
       }
@@ -3903,6 +4232,7 @@ function bindModalEvents(os, ro) {
           if (box) $$('input,select,textarea', box).forEach(i => { i.value = ''; });
         }
         saveDraft();
+        pintarPendenciasFicha();
         return;
       }
       if (el.dataset.confPor) { saveDraft(); reRenderModalKeepOpen(); }
@@ -5015,7 +5345,8 @@ function bindCardClicks(container) {
     c.onclick = e => {
       if (e.target.closest('summary, details button, details input, .card-etapa, .card-erp-conferir')) return;
       const os = STORE.getOS(c.dataset.osId);
-      if (os) openModal(os);
+      // data-ficha-etapa: quem abre diz a etapa (o "Abrir a ficha" da vista Por O.S. abre no Fechamento, F23).
+      if (os) openModal(os, c.dataset.fichaEtapa || undefined);
     };
   });
   // F17: "Abonar" direto no card (só a gestão).
@@ -5437,7 +5768,7 @@ function finalizarServicoDoCard(osId) {
   const faltas = validarFinalizacao(os);
   if (faltas.length) {
     toast('Para finalizar, falta: ' + faltas.join(', '), 'error');
-    openModal(os);
+    openModal(os, etapaParaFinalizar(os));   // a ficha abre na etapa da primeira falta (F23)
     return;
   }
   /* O saldo da entrega por item vem antes (E4): "Manter aberta" não grava
@@ -6723,7 +7054,7 @@ function renderExecucao() {
   });
   $$('[data-inline="checkout"]', el).forEach(b => b.onclick = () => {
     const os = STORE.getOS(b.dataset.id);
-    if (os) openModal(os);
+    if (os) openModal(os, 'exec');
   });
   $$('[data-inline="passo"]', el).forEach(b => b.onclick = () => agirProximoPasso(b.dataset.id, b.dataset.acao));
 }
