@@ -265,7 +265,7 @@ function toastContainer() {
   if (c.parentNode !== alvo) alvo.appendChild(c);
   return c;
 }
-function toast(msg, type = '') {
+function toast(msg, type = '', opt = {}) {
   const c = toastContainer();
   const el = document.createElement('div');
   el.className = 'toast' + (type ? ' ' + type : '');
@@ -275,7 +275,8 @@ function toast(msg, type = '') {
   // longas; 3 s não dava) e sai com um toque.
   const ms = type === 'error' ? Math.max(6000, String(msg).length * 60) : 3000;
   el.onclick = () => el.remove();
-  setTimeout(() => el.remove(), ms);
+  // O aviso que fica (revisão da F23): a divisão que não gravou com a ficha em outra etapa só sai com um toque.
+  if (!(opt && opt.fica)) setTimeout(() => el.remove(), ms);
 }
 
 /* Toast com DESFAZER: ação de um toque no card precisa de volta de um toque.
@@ -1467,6 +1468,8 @@ function openModal(os, blocoForcado) {
   const etapaAlvo = blocoForcado ? etapaDoAlvoFicha(blocoForcado) : '';
   if (etapaAlvo) _etapaFicha.set(os.id, etapaAlvo);
   else if (!mesmaFicha) _etapaFicha.delete(os.id);
+  // A ficha que abre agora começa sem as faltas vistas e sem o aviso da divisão da vez anterior.
+  if (!mesmaFicha) { _faltasFicha.delete(os.id); _divErroFicha.delete(os.id); }
   _modalDraft = JSON.parse(JSON.stringify(os));
   /* O.S. nova que já chega preenchida (importada do PDF) nasce suja: o
      "Salvar O.S." só fecha, e fechar sem nada marcado não gravava, então a
@@ -1503,7 +1506,7 @@ function closeModal() {
   // A montagem da equipe e da divisão desta ficha acaba aqui (a divisão em envio espera a resposta).
   if (typeof ALOCUI !== 'undefined' && _modalDraft && !_fichaDivEnviando) { const k = chavesFicha(_modalDraft.id); ALOCUI.esquecer(k.eq); ALOCUI.esquecer(k.div); }
   $('#modal-overlay').classList.add('hidden');
-  if (_modalDraft) _etapaFicha.delete(_modalDraft.id);   // abrir de novo começa pela etapa que a situação pede
+  if (_modalDraft) { _etapaFicha.delete(_modalDraft.id); _faltasFicha.delete(_modalDraft.id); _divErroFicha.delete(_modalDraft.id); }   // abrir de novo começa pela etapa que a situação pede
   STATE.modalOSId = null;
   _modalDraft = null;
   renderActiveTab();
@@ -1617,12 +1620,15 @@ function blocoRelevante(os, st, interno) {
    A etapa atual mora aqui, por O.S.: a repintura da sincronização
    (atualizarFichaAberta), a do conflito e a de cada campo gravado leem a
    mesma etapa, e a ficha não volta para a primeira. Abrir de novo (a ficha
-   estava fechada) começa pela etapa que a situação pede.
+   estava fechada) começa pela etapa que a situação pede. TROCAR DE ETAPA NÃO
+   REPINTA (revisão da F23): só esconde e mostra as seções, que já estão no
+   DOM; nada digitado se perde e os recolhíveis não fecham.
    A navegação é livre e nada trava: a pendência fica presa ao campo
-   (aria-describedby) e o checklist do Fechamento, incompleto, fica pendente
-   para a pontuação SEM impedir a finalização (decisão de 23/09: a
-   conferência não trava a finalização; validarFinalizacao e a
-   validarConclusao do servidor continuam as mesmas). */
+   (aria-describedby) e o checklist do Fechamento não impede a finalização
+   (decisão de 23/09: validarFinalizacao e a validarConclusao do servidor
+   continuam as mesmas). O CHECKLIST SÓ DIZ O EFEITO QUE EXISTE (revisão da
+   F23): nenhuma régua de pontuação lê o checklist. Cada item diz o que o
+   motor do programa (F19, pontuacao.js) faz com aquilo, ou só "falta". */
 const ETAPAS_FICHA = [
   { k: 'dados',      nome: 'Dados',      blocos: ['pcp', 'itens'] },
   { k: 'equipe',     nome: 'Equipe',     blocos: ['agenda'] },
@@ -1644,12 +1650,14 @@ function etapasDaFicha(os) {
   return ['dados', 'equipe', ...(podeDividirFicha(os) ? ['divisao'] : []), 'jornada', 'fechamento'];
 }
 /* Onde a ficha abre sem alvo: a cancelada em Dados, com o aviso; a
-   finalizada (a baixa do ERP inclusive) em Fechamento, sem trava; a aberta,
-   na etapa do bloco que a situação pede (blocoRelevante). */
+   finalizada (a baixa do ERP inclusive) em Fechamento, sem trava; a retirada
+   pronta, também no Fechamento, onde mora o "Cliente retirou" (revisão da
+   F23); a aberta, na etapa do bloco que a situação pede (blocoRelevante). */
 function etapaPadraoFicha(os) {
   const lista = etapasDaFicha(os);
   if (canceladaNaTela(os)) return 'dados';
   if (os.finalizadaEm) return 'fechamento';
+  if (isInterno(os)) { const pp = proximoPasso(os); if (pp && pp.acao === 'finalizar') return 'fechamento'; }
   const e = ETAPA_DO_BLOCO[blocoRelevante(os, calcStatus(os), isInterno(os))] || 'dados';
   return lista.includes(e) ? e : lista[0];
 }
@@ -1722,9 +1730,49 @@ function pendenciasFicha(os) {
 const fmsgId = k => 'fmsg-' + String(k).replace(/[^\w-]/g, '-');
 const fmsgAttr = k => ` aria-describedby="${fmsgId(k)}"`;
 const textoPendencia = p => p ? p.texto + (p.dica ? ' ' + p.dica : '') : '';
+/* A FALTA AO LADO DO CAMPO NÃO MEXE NO LAYOUT (revisão da F23). Cada caixa
+   marcada na Jornada apagava a mensagem dela, o que estava embaixo subia
+   34 px e o clique seguinte caía no vazio. Duas regras:
+   - na Jornada, o que falta para finalizar só aparece ao lado do campo
+     depois de um Finalizar recusado; antes, o resumo fica junto do botão
+     Finalizar e no stepper;
+   - a mensagem que já apareceu e foi resolvida guarda o lugar dela
+     (.fe-msg-feita, invisível; o texto velho vai num aria-hidden, para não
+     virar a descrição do campo) até a ficha fechar.
+   Por O.S. aberta: {recusado, vistas: campo -> último texto}. */
+const _faltasFicha = new Map();
+function faltasDaFicha(id) {
+  let f = _faltasFicha.get(id);
+  if (!f) { f = { recusado: false, vistas: new Map() }; _faltasFicha.set(id, f); }
+  return f;
+}
+function fmsgEstadoFicha(os, k, pend) {
+  const f = faltasDaFicha(os.id);
+  const p = (pend || pendenciasFicha(os)).find(x => x.campo === k);
+  const espera = !!p && p.finalizar && p.etapa === 'jornada' && !f.recusado;
+  if (p && !espera) { const t = textoPendencia(p); f.vistas.set(k, t); return { texto: t, feita: false }; }
+  const antes = f.vistas.get(k);
+  return antes ? { texto: antes, feita: true } : { texto: '', feita: false };
+}
+const fmsgReservaHTML = t => `<span aria-hidden="true">${esc(t)}</span>`;
 function fmsgHTML(os, k) {
-  const p = pendenciasFicha(os).find(x => x.campo === k);
-  return `<p class="fe-msg" id="${fmsgId(k)}" data-fmsg="${esc(k)}" aria-live="polite">${esc(textoPendencia(p))}</p>`;
+  const e = fmsgEstadoFicha(os, k);
+  return `<p class="fe-msg${e.feita ? ' fe-msg-feita' : ''}" id="${fmsgId(k)}" data-fmsg="${esc(k)}" aria-live="polite">${e.feita ? fmsgReservaHTML(e.texto) : esc(e.texto)}</p>`;
+}
+/* O Finalizar recusado (o da ficha e o do card): as faltas da Jornada passam
+   a aparecer ao lado dos campos, e o foco vai para a primeira falta da etapa
+   em que a pessoa está. */
+function finalizarRecusadoNaFicha() {
+  const os = _modalDraft;
+  if (!os) return;
+  faltasDaFicha(os.id).recusado = true;
+  pintarPendenciasFicha();
+  const p = pendenciasFicha(os).find(x => x.finalizar);
+  if (!p || !p.campo || p.etapa !== etapaAtualFicha(os) || typeof document === 'undefined' || typeof document.querySelector !== 'function') return;
+  const campo = document.querySelector(`#modal-os [aria-describedby="${fmsgId(p.campo)}"]`);
+  if (!campo) return;
+  try { campo.scrollIntoView({ block: 'center' }); } catch {}
+  if (typeof campo.focus === 'function') try { campo.focus({ preventScroll: true }); } catch {}
 }
 // Onde fazer o que falta para finalizar: a etapa da primeira falta (Fechamento quando nada falta).
 function etapaParaFinalizar(os) {
@@ -1733,78 +1781,158 @@ function etapaParaFinalizar(os) {
 }
 
 /* O CHECKLIST DE FECHAMENTO: fotos antes e depois, prazo, retrabalho,
-   limpeza e equipamentos da volta, ocorrências e abonos. Só mostra: nada
-   aqui trava a finalização. O item que falta "fica pendente para a
-   pontuação". Na baixa do ERP, a foto que falta não pesa (a recomendação do
-   plano: entra sem prova, com equipe e chegada conferida). Ocorrências e
-   abonos são para ver e decidir no Status da entrega: não contam como
-   pendência. A retirada no balcão não tem checklist de instalação. */
+   limpeza e equipamentos da volta, o lançamento da baixa do ERP, ocorrências
+   e abonos. Só mostra: nada aqui trava a finalização.
+   O EFEITO DE CADA ITEM É O QUE O MOTOR DO PROGRAMA FAZ (revisão da F23;
+   pontuacao.js da F19, que não lê o checklist). Antes, todo item que
+   faltava "ficava pendente para a pontuação", regra que nenhuma régua tem:
+   - prazo: a entrega com atraso tira a O.S. da pontuação (o abono devolve);
+     sem prazo combinado, o atraso não é medido;
+   - retrabalho: tira a O.S. da pontuação para todos e não se abona; a
+     pergunta sem resposta não muda nada;
+   - volta do carro: limpo e arrumado dão o bônus da volta, equipamento
+     faltando dá o redutor; a volta não conferida fica neutra;
+   - baixa do ERP sem lançamento: entra "sem prova" e não pontua até ser
+     lançada (Entregas, fila a lançar);
+   - fotos: não pesam na pontuação (o Finalizar é que pede).
+   O efeito só aparece para o que entra no programa (entregue de 01/10/2026
+   em diante). O item sem efeito é só "falta", com "não impede finalizar".
+   O "Ir para" só aparece quando o campo de destino aceita a mudança: na
+   finalizada, só a conferência da volta (a gestão confere depois); a foto
+   e a resposta do retrabalho dizem onde se faz. A cancelada está fora da
+   apuração e não tem checklist. A retirada no balcão também não. */
+// O início do programa: o do motor (F19, PONTUACAO.INICIO_PROGRAMA) quando ele está carregado.
+const inicioProgramaFicha = () => (typeof PONTUACAO !== 'undefined' && PONTUACAO && PONTUACAO.INICIO_PROGRAMA) || '2026-10-01';
+// A baixa do ERP que espera o lançamento à mão: a mesma régua da fila "a lançar" (casa.js, classificarEntregas).
+function aLancarNaFicha(os) {
+  if (!os || isInterno(os) || !os.finalizadaEm || canceladaNaTela(os)) return false;
+  if (!OPERACAO.encerradaERP(os) || OPERACAO.entregaLancadaValida(os)) return false;
+  // A baixa de antes do corte da direção conta sem lançamento (o corte mora só no casa.js, que o index.html sempre carrega).
+  return typeof erpAntesDoCorte === 'function' ? !erpAntesDoCorte(os) : true;
+}
 function checklistFechamento(os) {
-  if (!os || isInterno(os)) return [];
-  const erp = OPERACAO.encerradaERP(os);
+  if (!os || isInterno(os) || canceladaNaTela(os)) return [];
+  const fin = !!os.finalizadaEm, erp = OPERACAO.encerradaERP(os);
+  const programa = !fin || OPERACAO.dia(os.finalizadaEm) >= inicioProgramaFicha();
+  const efeito = t => (programa ? t : '');
+  const editavel = !fin && podeEditar();
   const st = statusEntregaDe(os);
   const lista = [];
+  const item = (x) => lista.push({ efeito: '', impede: false, ir: '', como: '', ...x });
   const nS = (os.fotosCheckinIds || []).length, nR = (os.fotosRetornoIds || []).length;
   const fotosOk = nS > 0 && nR > 0;
-  lista.push({ k: 'fotos', rotulo: 'Fotos antes e depois', etapa: 'jornada', estado: fotosOk ? 'ok' : erp ? 'na' : 'pendente',
-    texto: `${nS} ${nS === 1 ? 'foto' : 'fotos'} de saída e ${nR} de retorno${!fotosOk && erp ? '; baixa do ERP, entra sem prova' : ''}` });
+  const fotoFalta = !fotosOk && !erp;
+  const fotoImpede = fotoFalta && !fin && validarFinalizacao(os).some(f => f === '≥1 foto de saída' || f === 'foto de retorno (serviço pronto)');
+  item({ k: 'fotos', rotulo: 'Fotos antes e depois', etapa: 'jornada', estado: fotosOk ? 'ok' : erp ? 'na' : 'falta',
+    texto: `${nS} ${nS === 1 ? 'foto' : 'fotos'} de saída e ${nR} de retorno${!fotosOk && erp ? '; na baixa do ERP a foto não é pedida' : ''}`,
+    impede: fotoImpede, ir: fotoFalta && editavel ? 'jornada' : '',
+    como: fotoFalta && fin ? 'A ficha finalizada não recebe foto: só reabrindo a O.S.' : '' });
   const pc = OPERACAO.prazoCombinadoDe(os);
   const semPrazo = !pc && !!os.prazoCombinado && typeof os.prazoCombinado === 'object' && os.prazoCombinado.fonte === OPERACAO.PRAZO_SEM_AGENDA;
   const aplic = st && Array.isArray(st.aplicaveis) ? st.aplicaveis : [];
   const atraso = aplic.find(a => a.estado === 'atraso'), noPrazo = aplic.some(a => a.estado === 'no_prazo');
-  lista.push({ k: 'prazo', rotulo: 'Prazo', etapa: 'equipe', estado: pc || semPrazo ? 'ok' : 'pendente',
+  item({ k: 'prazo', rotulo: 'Prazo', etapa: 'equipe', estado: pc ? 'ok' : semPrazo ? 'na' : 'falta',
     texto: pc ? `combinado para ${fmtDataBR(pc.data)}${atraso ? ', ' + String(atraso.rotulo || '').toLowerCase() : noPrazo ? ', entregue no prazo' : ''}`
       : semPrazo ? 'sem prazo: a O.S. já estava entregue quando ganhou data no PCP'
-      : 'sem prazo combinado: ele nasce com a primeira data agendada no PCP' });
+      : 'sem prazo combinado: ele nasce com a primeira data agendada no PCP',
+    efeito: efeito(!pc ? 'Sem prazo, o atraso não é medido.'
+      : atraso && atraso.abonado ? 'Atraso abonado: não tira a O.S. da pontuação.'
+      : atraso && fin ? 'Entregue com atraso: a O.S. não pontua. O abono devolve.'
+      : atraso ? 'Já passou do prazo: entregue com atraso, a O.S. não pontua. O abono devolve.'
+      : fin ? '' : 'Entregar depois dele tira a O.S. da pontuação.'),
+    ir: !pc && !semPrazo && editavel ? 'equipe' : '' });
   const resp = os.retrabalhoPerguntado && typeof os.retrabalhoPerguntado === 'object' ? os.retrabalhoPerguntado.resposta : '';
-  lista.push({ k: 'retrabalho', rotulo: 'Retrabalho', etapa: 'jornada', estado: os.retrabalho || resp === 'sim' || resp === 'nao' ? 'ok' : 'pendente',
+  const gerou = !!os.retrabalho || resp === 'sim';
+  const respondido = gerou || resp === 'nao';
+  item({ k: 'retrabalho', rotulo: 'Retrabalho', etapa: 'jornada', estado: respondido ? 'ok' : 'falta',
     texto: os.retrabalho ? `gerou retrabalho${os.problema ? ': ' + String(os.problema).slice(0, 80) : ''}`
       : resp === 'nao' ? 'respondido: não gerou' : resp === 'sim' ? 'respondido: gerou'
-      : 'falta responder se gerou retrabalho (a pergunta vem ao finalizar e no Fechar o dia)' });
+      : 'falta responder se gerou retrabalho',
+    efeito: efeito(gerou ? 'Retrabalho tira a O.S. da pontuação para todos e não se abona.' : ''),
+    como: respondido ? '' : fin ? 'Responda no Fechar o dia, em Entregas.' : 'A pergunta vem ao finalizar.' });
   const rc = os.retornoConf || {};
   const sn = k => { const r = OPERACAO.respostaVolta(rc[k]); return r === 'sim' ? 'sim' : r === 'nao' ? 'não' : 'sem resposta'; };
   const ROT_VOLTA = 'Limpeza e equipamentos da volta';
-  if (OPERACAO.semCarro(os)) lista.push({ k: 'volta', rotulo: ROT_VOLTA, etapa: 'jornada', estado: 'na', texto: 'instalação interna, sem carro' });
+  if (OPERACAO.semCarro(os)) item({ k: 'volta', rotulo: ROT_VOLTA, etapa: 'jornada', estado: 'na', texto: 'instalação interna, sem carro' });
   else {
     const conferida = OPERACAO.voltaConferidaParaNota(rc);
-    lista.push({ k: 'volta', rotulo: ROT_VOLTA, etapa: 'jornada', estado: conferida ? 'ok' : 'pendente',
+    const r = k => OPERACAO.respostaVolta(rc[k]);
+    const carro = r('carroLimpo') === 'nao' || r('carroArrumado') === 'nao' ? false : r('carroLimpo') === 'sim' || r('carroArrumado') === 'sim' ? true : null;
+    const partes = [];
+    if (carro === true) partes.push('Carro limpo e arrumado: bônus da volta.');
+    if (carro === false) partes.push('Carro com "não": a volta fica sem o bônus.');
+    if (r('equipamentosOk') === 'nao') partes.push('Equipamento com "não": redutor da volta.');
+    item({ k: 'volta', rotulo: ROT_VOLTA, etapa: 'jornada', estado: conferida ? 'ok' : 'falta',
       texto: conferida ? `conferida: limpo ${sn('carroLimpo')}, arrumado ${sn('carroArrumado')}, equipamentos ${sn('equipamentosOk')}`
         : OPERACAO.voltaRespondida(rc) ? 'conferida em parte: falta o carro (limpo ou arrumado) ou os equipamentos'
-        : 'falta conferir o carro e os equipamentos (na Jornada ou na fila PCP, Volta do carro)' });
+        : 'falta conferir o carro e os equipamentos (na Jornada ou na fila PCP, Volta do carro)',
+      efeito: efeito(conferida ? partes.join(' ') : 'Sem a conferência, a volta fica neutra: sem bônus e sem redutor.'),
+      ir: !conferida && voltaGestao() ? 'jornada' : '', como: !conferida && !voltaGestao() ? 'A gestão confere.' : '' });
   }
+  if (aLancarNaFicha(os)) item({ k: 'lancar', rotulo: 'Lançar a entrega', etapa: 'fechamento', estado: 'falta',
+    texto: 'a baixa do ERP ainda não foi lançada', efeito: efeito('Sem o lançamento, a entrega fica sem prova e não pontua.'),
+    como: 'Lance em Entregas, na fila a lançar.' });
   const ocs = st && Array.isArray(st.ocorrencias) ? st.ocorrencias : [];
-  lista.push({ k: 'ocorrencias', rotulo: 'Ocorrências e abonos', etapa: 'fechamento', estado: 'info',
+  item({ k: 'ocorrencias', rotulo: 'Ocorrências e abonos', etapa: 'fechamento', estado: 'info',
     texto: !st ? 'o status da entrega não carregou neste aparelho'
       : ocs.length ? `${contaOcorrenciasTxt(ocs, st.perdas)}. Abonar e registrar ficam no Status da entrega, abaixo`
       : 'nenhuma ocorrência' });
   return lista;
 }
+// O que falta no checklist e não impede finalizar (o que impede já está em "Para finalizar").
+const faltasChecklistFicha = os => checklistFechamento(os).filter(c => c.estado === 'falta' && !c.impede);
+// O resumo curto do checklist, junto do botão Finalizar (no Fechamento e na Jornada).
+function resumoChecklistFicha(os, onde) {
+  const n = faltasChecklistFicha(os).length;
+  return `Checklist de fechamento: ${n ? `${n === 1 ? 'falta 1 item' : `faltam ${n} itens`}${onde ? ', ' + onde : ''}. Não impede finalizar.` : 'completo.'}`;
+}
 
-/* O PROGRESSO DE CADA ETAPA, para o stepper: das pendências (validarFinalizacao
-   e blocosCompletos), da divisão confirmada e, no Fechamento, do checklist. */
+/* O PROGRESSO DE CADA ETAPA, para o stepper (revisão da F23). Dois estados
+   diferentes na O.S. aberta: o que IMPEDE finalizar (amarelo, com o número)
+   e o que só falta completar (neutro, "a completar"). Na finalizada, nada
+   impede nada: a etapa mostra "!" quando o checklist diz que falta algo dela
+   (nunca "ok" ao lado de um "falta"), e não diz "incompleta" sem dizer o quê.
+   A Divisão segue a régua da Performance: confirmada pela divisão da O.S. ou,
+   sem ela, pela participação antiga da apuração (F11). */
+const _divErroFicha = new Map();   // id da O.S. -> a divisão que não gravou com a pessoa em outra etapa (D8)
 function progressoEtapasFicha(os) {
   const canc = canceladaNaTela(os), fin = !!os.finalizadaEm;
   const done = blocosCompletos(os), pend = pendenciasFicha(os);
+  const faltasCk = fin ? checklistFechamento(os).filter(c => c.estado === 'falta') : [];
   const neutro = (texto, descricao) => ({ estado: 'neutro', n: 0, texto, descricao: descricao || texto });
+  const qt = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
   const pela = (k, completa) => {
     if (canc) return neutro('', 'O.S. cancelada');   // o "cancelada" fica só no Fechamento, onde mora o desfazer
-    const n = pend.filter(p => p.etapa === k).length;
-    if (n) return { estado: 'falta', n, texto: n === 1 ? 'falta 1' : `faltam ${n}`, descricao: n === 1 ? '1 pendência' : `${n} pendências` };
-    return completa ? { estado: 'ok', n: 0, texto: 'ok', descricao: 'completa' } : neutro('incompleta');
+    if (fin) {
+      const n = faltasCk.filter(c => c.etapa === k).length;
+      if (n) return { estado: 'aviso', n, texto: n === 1 ? 'falta 1' : `faltam ${n}`, descricao: `finalizada; ${qt(n, 'item do checklist falta', 'itens do checklist faltam')}` };
+      return completa ? { estado: 'ok', n: 0, texto: 'ok', descricao: 'completa' } : neutro('', 'O.S. finalizada');
+    }
+    const impede = pend.filter(p => p.etapa === k && p.finalizar).length;
+    const resto = pend.filter(p => p.etapa === k && !p.finalizar).length;
+    if (impede) return { estado: 'falta', n: impede, texto: impede === 1 ? 'falta 1' : `faltam ${impede}`,
+      descricao: `${qt(impede, 'pendência impede', 'pendências impedem')} finalizar${resto ? '; ' + qt(resto, 'item a completar', 'itens a completar') : ''}` };
+    if (resto) return neutro('a completar', `${qt(resto, 'item a completar', 'itens a completar')}; não impede finalizar`);
+    return completa ? { estado: 'ok', n: 0, texto: 'ok', descricao: 'completa' } : neutro('a completar', 'a completar; não impede finalizar');
   };
   const out = { dados: pela('dados', done.pcp && done.itens) };
   if (!isInterno(os)) {
     out.equipe = pela('equipe', done.agenda);
+    const div = estadoDivisaoFicha(os), erro = _divErroFicha.get(os.id);
+    const doPrograma = !fin || OPERACAO.dia(os.finalizadaEm) >= inicioProgramaFicha();
     out.divisao = canc ? neutro('', 'O.S. cancelada')
-      : divisaoConfirmadaFicha(os) ? { estado: 'ok', n: 0, texto: 'ok', descricao: 'divisão confirmada' }
-      : { estado: 'falta', n: 0, texto: 'a confirmar', descricao: 'divisão a confirmar' };
+      : erro ? { estado: 'erro', n: 0, texto: 'não gravou', descricao: 'a divisão não foi gravada: ' + erro }
+      : div === 'alocacao' ? { estado: 'ok', n: 0, texto: 'ok', descricao: 'divisão confirmada' }
+      : div === 'antiga' ? { estado: 'ok', n: 0, texto: 'ok', descricao: 'divisão confirmada pelo jeito antigo (a participação da apuração)' }
+      : fin && !doPrograma ? neutro('sem divisão', 'finalizada antes do programa, sem divisão confirmada')
+      : { estado: 'aviso', n: 0, texto: 'a confirmar', descricao: 'divisão a confirmar' };
     out.jornada = pela('jornada', done.exec);
   }
   if (canc) out.fechamento = neutro('cancelada', 'O.S. cancelada: o status e o desfazer ficam aqui');
   else if (fin) {
-    const k = checklistFechamento(os).filter(c => c.estado === 'pendente').length;
+    const k = faltasCk.length;
     out.fechamento = k
-      ? { estado: 'aviso', n: k, texto: 'pendente', descricao: `finalizada; ${k} ${k === 1 ? 'item do checklist fica pendente' : 'itens do checklist ficam pendentes'} para a pontuação` }
+      ? { estado: 'aviso', n: k, texto: k === 1 ? 'falta 1' : `faltam ${k}`, descricao: `finalizada; ${qt(k, 'item do checklist falta', 'itens do checklist faltam')}` }
       : { estado: 'ok', n: 0, texto: 'ok', descricao: 'finalizada, com o checklist completo' };
   } else {
     const f = validarFinalizacao(os).length;
@@ -1842,52 +1970,83 @@ function canceladaAvisoFichaHTML(os) {
   const botao = podeCancelarOS() && c.origem === 'manual' ? 'Desfazer no Fechamento' : 'Ver o status no Fechamento';
   return `<div class="fe-cancelada lock-allow" role="note"><p><strong>⛔ O.S. cancelada${quem}${quando}${c.pendente ? ' (a enviar)' : ''}.</strong> Ela saiu da fila a lançar e da apuração da performance.${motivo}</p><button type="button" class="btn-ghost btn-sm" data-ir-etapa="fechamento" data-ir-foco="titulo">${botao}</button></div>`;
 }
-// O conteúdo da etapa Fechamento.
-function fechamentoFichaHTML(os) {
-  const fin = !!os.finalizadaEm, canc = canceladaNaTela(os), interno = isInterno(os);
-  const etapas = etapasDaFicha(os);
+// O botão "Ir para" de uma etapa da ficha (navegação: 44 px).
+function irParaFichaHTML(k, etapas) {
+  return etapas.includes(k) && k !== 'fechamento' ? `<button type="button" class="btn-ghost btn-sm fe-ir" data-ir-etapa="${k}" data-ir-foco="titulo">Ir para ${esc(ETAPA_FICHA[k].nome)}</button>` : '';
+}
+// O checklist do Fechamento (o miolo da seção #fe-checklist, repintado ao vivo).
+function checklistFichaHTML(os) {
+  if (isInterno(os)) return '';
+  const tit = '<h4 class="fe-bloco-tit" id="fe-ck-tit">Checklist de fechamento</h4>';
+  if (canceladaNaTela(os)) return `${tit}<p class="fe-ck-resumo">Cancelada: fora da apuração.</p>`;
+  const fin = !!os.finalizadaEm, etapas = etapasDaFicha(os);
   const lista = checklistFechamento(os);
-  const pend = lista.filter(c => c.estado === 'pendente').length;
-  const ICONE = { ok: '✓', pendente: '!', na: '·', info: 'i' };
-  const ESTADO = { ok: 'feito', pendente: 'pendente', na: 'não se aplica', info: 'para conferir' };
-  const ir = k => etapas.includes(k) && k !== 'fechamento' ? `<button type="button" class="btn-ghost btn-sm fe-ir" data-ir-etapa="${k}" data-ir-foco="titulo">Ir para ${esc(ETAPA_FICHA[k].nome)}</button>` : '';
-  const linha = c => `<li class="fe-ck fe-ck-${c.estado}"><span class="fe-ck-ic" aria-hidden="true">${ICONE[c.estado]}</span><span class="fe-ck-txt"><strong>${esc(c.rotulo)}</strong><span class="sr-only"> (${ESTADO[c.estado]})</span>: ${esc(c.texto)}.${c.estado === 'pendente' ? '<em class="fe-ck-pend">Fica pendente para a pontuação.</em>' : ''}</span>${c.estado === 'pendente' ? ir(c.etapa) : ''}</li>`;
-  const resumo = OPERACAO.encerradaERP(os) ? 'Baixa do ERP: a ficha abre aqui, sem trava. A foto que faltar não pesa (a entrega entra sem prova); o resto que faltar fica pendente para a pontuação.'
-    : fin ? (pend ? `${pend} ${pend === 1 ? 'item fica pendente' : 'itens ficam pendentes'} para a pontuação. A O.S. continua finalizada.` : 'Checklist completo.')
-    : 'O que conta na pontuação. Incompleto não impede finalizar: o que faltar fica pendente para a pontuação.';
-  const checklist = lista.length ? `<section class="fe-bloco fe-checklist" aria-labelledby="fe-ck-tit">
-      <h4 class="fe-bloco-tit" id="fe-ck-tit">Checklist de fechamento</h4>
-      <p class="fe-ck-resumo">${esc(resumo)}</p>
-      <ul class="fe-ck-lista">${lista.map(linha).join('')}</ul>
-    </section>` : '';
-  let final = '';
-  if (!fin) {
-    const faltas = pendenciasFicha(os).filter(p => p.finalizar);
-    const grupos = etapas.map(k => [k, faltas.filter(p => p.etapa === k)]).filter(([, xs]) => xs.length);
-    const li = ([k, xs]) => `<li><strong>${esc(ETAPA_FICHA[k].nome)}:</strong> ${esc(xs.map(p => p.texto.replace(/^Para finalizar: /, '').replace(/\.$/, '')).join('; '))}. ${ir(k)}</li>`;
-    const botao = interno ? '<button class="btn-success w-100" id="btn-finalizar-interno">📦 Cliente retirou: finalizar</button>'
-      : '<button type="button" class="btn-primary w-100" data-fech-finalizar>🏁 Finalizar instalação</button>';
-    final = `<section class="fe-bloco fe-final" aria-labelledby="fe-final-tit">
-      <h4 class="fe-bloco-tit" id="fe-final-tit">${interno ? 'Retirada' : 'Finalizar'}</h4>
-      ${canc ? FINALIZAR_CANCELADA_HTML
-        : `${grupos.length ? `<p>Para finalizar, falta:</p><ul class="fe-faltas">${grupos.map(li).join('')}</ul>` : `<p>${interno ? 'Pronta para a retirada.' : 'Pronta para finalizar.'}</p>`}
-           <div class="edit-only">${botao}</div>`}
-    </section>`;
-  }
+  const nFalta = lista.filter(c => c.estado === 'falta').length;
+  const ICONE = { ok: '✓', falta: '!', na: '·', info: 'i' };
+  const ESTADO = { ok: 'feito', na: 'não se aplica', info: 'para conferir' };
+  const linha = c => {
+    const resto = [c.efeito, c.estado === 'falta' ? c.como : '', c.estado === 'falta' && !fin ? (c.impede ? 'O Finalizar pede: veja o que falta, acima.' : 'Não impede finalizar.') : ''].filter(Boolean).join(' ');
+    const estado = c.estado === 'falta' ? ': <span class="fe-ck-selo">Falta</span> ' : `<span class="sr-only"> (${ESTADO[c.estado]})</span>: `;
+    return `<li class="fe-ck fe-ck-${c.estado}"><span class="fe-ck-ic" aria-hidden="true">${ICONE[c.estado]}</span><span class="fe-ck-txt"><strong>${esc(c.rotulo)}</strong>${estado}${esc(c.texto)}.${resto ? `<span class="fe-ck-efeito">${esc(resto)}</span>` : ''}</span>${c.estado === 'falta' && c.ir ? irParaFichaHTML(c.ir, etapas) : ''}</li>`;
+  };
+  const faltaTxt = nFalta ? (nFalta === 1 ? 'Falta 1 item.' : `Faltam ${nFalta} itens.`) : 'Checklist completo.';
+  const antes = fin && OPERACAO.dia(os.finalizadaEm) < inicioProgramaFicha() ? ' Entregue antes de 01/10/2026: os efeitos do programa não valem para ela.' : '';
+  const resumo = OPERACAO.encerradaERP(os) ? `Baixa do ERP: a ficha abre aqui, sem trava. ${faltaTxt}${antes}`
+    : fin ? `${faltaTxt}${nFalta ? ' A O.S. continua finalizada.' : ''}${antes}`
+    : 'O que a O.S. leva para a pontuação e o efeito de cada item. O checklist não trava o Finalizar.';
+  return `${tit}<p class="fe-ck-resumo">${esc(resumo)}</p><ul class="fe-ck-lista">${lista.map(linha).join('')}</ul>`;
+}
+// O Finalizar do Fechamento (o miolo da seção #fe-final, repintado ao vivo): o botão primeiro, à vista sem rolar.
+function finalFichaHTML(os) {
+  const interno = isInterno(os), etapas = etapasDaFicha(os);
+  const tit = `<h4 class="fe-bloco-tit" id="fe-final-tit">${interno ? 'Retirada' : 'Finalizar'}</h4>`;
+  if (canceladaNaTela(os)) return tit + FINALIZAR_CANCELADA_HTML;
+  const faltas = pendenciasFicha(os).filter(p => p.finalizar);
+  const grupos = etapas.map(k => [k, faltas.filter(p => p.etapa === k)]).filter(([, xs]) => xs.length);
+  const li = ([k, xs]) => `<li><span><strong>${esc(ETAPA_FICHA[k].nome)}:</strong> ${esc(xs.map(p => p.texto.replace(/^Para finalizar: /, '').replace(/\.$/, '')).join('; '))}.</span>${irParaFichaHTML(k, etapas)}</li>`;
+  const botao = interno ? '<button class="btn-success w-100" id="btn-finalizar-interno" data-fech-finalizar="interno">📦 Cliente retirou: finalizar</button>'
+    : '<button type="button" class="btn-primary w-100" data-fech-finalizar>🏁 Finalizar instalação</button>';
+  return `${tit}<div class="edit-only">${botao}</div>${grupos.length ? `<p>Para finalizar, falta:</p><ul class="fe-faltas">${grupos.map(li).join('')}</ul>` : `<p>${interno ? 'Pronta para a retirada.' : 'Pronta para finalizar.'}</p>`}${interno ? '' : `<p class="fe-ck-mini">${esc(resumoChecklistFicha(os, 'abaixo'))}</p>`}`;
+}
+// O conteúdo da etapa Fechamento: o Finalizar, o checklist, a exceção de encerramento e o Status da entrega.
+function fechamentoFichaHTML(os) {
+  const fin = !!os.finalizadaEm, interno = isInterno(os);
+  const fi = fin ? '' : finalFichaHTML(os), ck = checklistFichaHTML(os);
+  _hostsFicha.set('fe-final', fi); _hostsFicha.set('fe-checklist', ck);
+  const final = fin ? '' : `<section class="fe-bloco fe-final" id="fe-final" aria-labelledby="fe-final-tit">${fi}</section>`;
+  const checklist = ck ? `<section class="fe-bloco fe-checklist" id="fe-checklist" aria-labelledby="fe-ck-tit">${ck}</section>` : '';
   const excecao = !interno && !fin && ['admin', 'pcp'].includes(STATE.user.papel)
     ? `<details class="cfg-grupo"><summary>Exceção de encerramento</summary><p>Use apenas quando não for possível obter a foto final ou a data do retorno. O motivo e o responsável ficam registrados.</p><label>Justificativa (mínimo 15 caracteres)<textarea data-f="justificativaConclusao">${esc(os.justificativaConclusao || '')}</textarea></label></details>` : '';
-  return `<div class="fe-fechamento">${checklist}${final}${excecao}</div>${statusEntregaFichaHTML(os)}`;
+  const status = statusEntregaFichaHTML(os);
+  _hostsFicha.set('fe-status', status);
+  return `<div class="fe-fechamento">${final}${checklist}${excecao}</div><div class="fe-status" id="fe-status" tabindex="-1">${status}</div>`;
+}
+/* O resumo junto do Finalizar da Jornada (revisão da F23): o que falta para
+   finalizar e quantos itens do checklist faltam, sem bloquear. Fica embaixo
+   do botão: encolher não mexe em nada acima dele. */
+function resumoFinalizarJornadaHTML(os) {
+  if (!os || os.finalizadaEm || canceladaNaTela(os) || isInterno(os)) return '';
+  const faltas = pendenciasFicha(os).filter(p => p.finalizar).map(p => p.texto.replace(/^Para finalizar: /, '').replace(/\.$/, ''));
+  const n = faltas.length;
+  return `<p class="fe-fin-faltas">${n ? `Para finalizar, ${n === 1 ? 'falta 1' : `faltam ${n}`}: ${esc(faltas.join('; '))}.` : 'Pronta para finalizar.'}</p>
+    <p class="fe-ck-mini">${esc(resumoChecklistFicha(os, 'no Fechamento'))} <button type="button" class="btn-ghost btn-sm fe-ir" data-ir-etapa="fechamento" data-ir-foco="titulo">Ver o checklist</button></p>`;
 }
 
-/* TROCAR DE ETAPA: a ficha repinta (os blocos abertos ficam, pela chave, F01)
-   e a etapa que chega com todos os blocos fechados abre o principal (o
-   bloco pedido, se veio). O foco vai para o passo clicado ou para o título
-   da etapa, e a ficha sobe até o stepper. */
+/* TROCAR DE ETAPA NÃO REPINTA (revisão da F23). As seções já estão no DOM:
+   a troca só esconde e mostra, acerta o stepper (aria-current) e o "Ir
+   para" do próximo passo, grava a etapa e foca. O motivo digitado na
+   correção do prazo e os recolhíveis abertos ficam como estavam. A etapa
+   que chega com todos os blocos fechados abre o principal (o bloco pedido,
+   se veio). O foco vai para o passo clicado, para o título da etapa ou, pelo
+   selo do topo, para o Status da entrega. */
 function irParaEtapaFicha(k, opt = {}) {
   const os = _modalDraft;
   if (!os || !etapasDaFicha(os).includes(k)) return false;
   _etapaFicha.set(os.id, k);
-  reRenderModalKeepOpen();
+  mostrarEtapaFicha(k);
+  pintarPendenciasFicha();
+  // O Status da entrega acompanha o que foi digitado nas outras etapas (a hora do retorno, por exemplo).
+  if (k === 'fechamento' && typeof document !== 'undefined' && typeof document.getElementById === 'function') pintarHostFicha('fe-status', () => statusEntregaFichaHTML(os), ligarStatusEntregaDaFicha);
   const blocos = $$('#modal-os .card-fs').filter(d => d.dataset && ETAPA_DO_BLOCO[d.dataset.bloco] === k);
   const pedido = opt.bloco ? blocos.find(d => d.dataset.bloco === opt.bloco) : null;
   if (pedido) pedido.open = true;
@@ -1895,9 +2054,26 @@ function irParaEtapaFicha(k, opt = {}) {
   focarEtapaFicha(k, opt.foco);
   return true;
 }
+function mostrarEtapaFicha(k) {
+  if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
+  $$('#modal-os .ficha-etapa').forEach(s => { s.hidden = !(s.dataset && s.dataset.etapaSec === k); });
+  /* O "Ir para" do próximo passo some na etapa dele SEM sair do lugar: a
+     caixa guarda a altura e o stepper não pula (revisão da F23, B1). */
+  const ir = typeof document.getElementById === 'function' ? document.getElementById('fe-ir-pp') : null;
+  if (!ir) return;
+  const aqui = !!ir.dataset && ir.dataset.irEtapa === k;
+  ir.classList.toggle('fe-invisivel', aqui);
+  if (aqui) { ir.setAttribute('aria-hidden', 'true'); ir.setAttribute('tabindex', '-1'); }
+  else { ir.removeAttribute('aria-hidden'); ir.removeAttribute('tabindex'); }
+}
 function focarEtapaFicha(k, foco) {
   if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
   const modal = document.getElementById('modal-os');
+  if (foco === 'status') {
+    const alvo = document.getElementById('fe-status');
+    if (alvo) { try { alvo.scrollIntoView({ block: 'start' }); } catch {} if (typeof alvo.focus === 'function') try { alvo.focus({ preventScroll: true }); } catch {} }
+    return;
+  }
   const nav = modal && typeof modal.querySelector === 'function' ? modal.querySelector('.ficha-etapas-nav') : null;
   const cab = modal && typeof modal.querySelector === 'function' ? modal.querySelector('.modal-header') : null;
   if (foco !== 'passo' && nav && typeof nav.offsetTop === 'number') {
@@ -1913,24 +2089,47 @@ function ligarEtapasDaFicha(raiz) {
   const r = raiz || $('#modal-os');
   if (!r || typeof r.querySelectorAll !== 'function') return;
   $$('[data-ir-etapa]', r).forEach(b => { b.onclick = () => irParaEtapaFicha(b.dataset.irEtapa, { foco: b.dataset.irFoco || 'titulo' }); });
-  $$('[data-fech-finalizar]', r).forEach(b => { b.onclick = () => finalizarDaFicha(false); });
+  $$('[data-fech-finalizar]', r).forEach(b => { b.onclick = () => finalizarDaFicha(b.dataset.fechFinalizar === 'interno'); });
+  // O atalho da ocorrência na Jornada abre o mesmo formulário do Status da entrega (revisão da F23).
+  $$('#btn-jornada-ocorrencia', r).forEach(b => { b.onclick = () => { if (_modalDraft) registrarOcorrenciaEm(_modalDraft, gravarNaFichaF17, { fonte: 'ficha' }); }; });
 }
 /* A PENDÊNCIA AO VIVO: o campo de texto não repinta a ficha (o teclado não
-   cai), então a mensagem ao lado de cada campo e o stepper se atualizam
-   aqui, sem gravar nada. */
+   cai), então a mensagem ao lado de cada campo, o stepper, o Finalizar e o
+   checklist do Fechamento e o resumo junto do Finalizar da Jornada se
+   atualizam aqui, sem gravar nada (revisão da F23: digitar a Exceção de
+   encerramento deixava a lista do que falta velha, logo abaixo do stepper
+   dizendo "pronta"). Cada pedaço só é trocado quando muda. */
 let _passosFichaHTML = '';   // o stepper pintado por último (renderModal e a pintura ao vivo)
+const _hostsFicha = new Map();   // id do pedaço repintado ao vivo -> o HTML pintado por último
+function pintarHostFicha(id, gerar, ligar) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const h = gerar();
+  if (_hostsFicha.get(id) === h) return;
+  _hostsFicha.set(id, h);
+  el.innerHTML = h;
+  ligarEtapasDaFicha(el);
+  if (typeof ligar === 'function') ligar();
+}
 function pintarPendenciasFicha() {
   if (!_modalDraft || typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
   const os = _modalDraft;
-  const texto = new Map(pendenciasFicha(os).filter(p => p.campo).map(p => [p.campo, textoPendencia(p)]));
+  const pend = pendenciasFicha(os);
   $$('#modal-os [data-fmsg]').forEach(el => {
-    const t = texto.get(el.dataset.fmsg) || '';
-    if (el.textContent !== t) el.textContent = t;
+    const e = fmsgEstadoFicha(os, el.dataset.fmsg, pend);
+    const feitaAntes = !!(el.classList && el.classList.contains('fe-msg-feita'));
+    if (e.feita !== feitaAntes || el.textContent !== e.texto) {
+      if (e.feita) el.innerHTML = fmsgReservaHTML(e.texto); else el.textContent = e.texto;
+      if (el.classList) el.classList.toggle('fe-msg-feita', e.feita);
+    }
   });
   // O stepper só é trocado quando o progresso muda (cada tecla passa por aqui).
   const nav = document.getElementById('ficha-etapas');
   const passos = passosEtapasHTML(os, etapasDaFicha(os), etapaAtualFicha(os));
   if (nav && passos !== _passosFichaHTML) { _passosFichaHTML = passos; nav.innerHTML = passos; ligarEtapasDaFicha(nav); }
+  if (!os.finalizadaEm) pintarHostFicha('fe-final', () => finalFichaHTML(os));
+  pintarHostFicha('fe-checklist', () => checklistFichaHTML(os));
+  pintarHostFicha('fe-fin-jornada', () => resumoFinalizarJornadaHTML(os));
 }
 
 function renderModal() {
@@ -1957,10 +2156,17 @@ function renderModal() {
   if (diasPedido != null && diasPedido >= 0) temposTags.push(`⏱ ${diasPedido}d desde o pedido`);
   if (diasEtapa != null && diasEtapa >= 0 && !finalizada) temposTags.push(`📍 ${diasEtapa}d nesta etapa`);
   const stEnt = statusEntregaDe(os);
-  // O próximo passo leva à etapa em que ele se faz.
+  /* O próximo passo leva à etapa em que ele se faz. Na própria etapa o botão
+     fica invisível, sem sair do lugar: a caixa não muda de altura e o
+     stepper não pula ao trocar de etapa (revisão da F23). */
   const etapaPP = pp && ETAPA_DO_PASSO[pp.acao];
-  const irPP = etapaPP && etapaPP !== etapa && etapas.includes(etapaPP)
-    ? ` <button type="button" class="btn-ghost btn-sm fe-ir" data-ir-etapa="${etapaPP}" data-ir-foco="titulo">Ir para ${esc(ETAPA_FICHA[etapaPP].nome)}</button>` : '';
+  const aquiPP = etapaPP === etapa;
+  const irPP = etapaPP && etapas.includes(etapaPP)
+    ? ` <button type="button" class="btn-ghost btn-sm fe-ir${aquiPP ? ' fe-invisivel' : ''}" id="fe-ir-pp" data-ir-etapa="${etapaPP}" data-ir-foco="titulo"${aquiPP ? ' aria-hidden="true" tabindex="-1"' : ''}>Ir para ${esc(ETAPA_FICHA[etapaPP].nome)}</button>` : '';
+  /* O selo do status da entrega é um botão (revisão da F23): leva ao Status
+     da entrega no Fechamento, com o retorno antecipado, as ocorrências e o
+     Cancelar O.S., que antes ficavam no alto da ficha. */
+  const seloStatusBotao = stEnt ? `<button type="button" class="fe-selo" data-ir-etapa="fechamento" data-ir-foco="status" aria-label="${esc('Status da entrega: ' + stEnt.rotulo + '. Ver no Fechamento, com as ocorrências')}">${seloStatusEntregaHTML(stEnt)}</button>` : '';
 
   // Seletor de tipo do pedido (Interno / Externo)
   const tipoSelector = `
@@ -1974,7 +2180,7 @@ function renderModal() {
   const corpo = {
     dados: `${finalizada ? '' : tipoSelector}${blocoPCP(os, ro, done.pcp)}${blocoItens(os, ro, done.itens)}`,
     equipe: interno ? '' : blocoAgenda(os, ro, done.agenda),
-    divisao: etapas.includes('divisao') ? blocoDivisao(os, divisaoConfirmadaFicha(os)) : '',
+    divisao: etapas.includes('divisao') ? blocoDivisao(os, !!estadoDivisaoFicha(os)) : '',
     jornada: interno ? '' : blocoExec(os, ro, done.exec),
     fechamento: fechamentoFichaHTML(os)
   };
@@ -1991,14 +2197,14 @@ function renderModal() {
 
     ${finalizada ? `
     <div class="finalizada-lock lock-allow">
-      <span>🔒 O.S finalizada por <strong>${esc(os.finalizadoPor || '—')}</strong>${os.finalizadaEm ? ' · ' + new Date(os.finalizadaEm).toLocaleString('pt-BR') : ''} — somente leitura.</span>
+      <span>🔒 O.S finalizada por <strong>${esc(os.finalizadoPor || '—')}</strong>${os.finalizadaEm ? ' · ' + new Date(os.finalizadaEm).toLocaleString('pt-BR') : ''}. Somente leitura.</span>
       <button class="btn-ghost btn-sm" id="btn-reabrir-os">↩ Reabrir / voltar status</button>
     </div>` : ''}
     ${canceladaAvisoFichaHTML(os)}
 
     <div class="ficha-resumo">
       <div class="ficha-funil" role="img" aria-label="Situação no funil: ${esc(statusLabelDe(os, st))}">${stepperHTML(os, true)}</div>
-      ${stEnt ? seloStatusEntregaHTML(stEnt) : ''}
+      ${seloStatusBotao}
       ${temposTags.length ? `<span class="modal-tempos">${temposTags.join(' · ')}</span>` : ''}
     </div>
     ${pp ? `<div class="prox-passo prox-passo-modal"><span class="prox-passo-tag">Próximo passo</span> <strong>${esc(pp.label)}</strong>${irPP}</div>` : ''}
@@ -2239,7 +2445,7 @@ function blocoPCP(os, ro, done) {
     ? `<option selected>${esc(os.responsavelPCP)}</option>` : '';
   return `
   <details class="card-fs ${done ? 'done' : ''}" data-bloco="pcp">
-    <summary>1 · PCP &amp; Cliente ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
+    <summary>PCP &amp; Cliente ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
     <div class="fs-body">
       <div class="field-row">
         <div class="field"><label>Nº O.S</label><input data-f="numero" value="${esc(os.numero)}" ${lockPed}${fmsgAttr('numero')}>${fmsgHTML(os, 'numero')}</div>
@@ -2830,7 +3036,8 @@ function finalizarDaFicha(interno) {
      o card e o celular. Vale o cancelamento gravado e o pedido no rascunho. */
   if (canceladaNaTela(_modalDraft)) { toast(`O.S ${_modalDraft.numero || ''} cancelada pelo PCP: para finalizar, desfaça o cancelamento no Status da entrega.`, 'error'); return; }
   const faltas = validarFinalizacao(_modalDraft);
-  if (faltas.length) { toast('Falta: ' + faltas.join(', '), 'error'); return; }
+  // Recusado: as faltas da Jornada passam a aparecer ao lado dos campos (revisão da F23).
+  if (faltas.length) { toast('Falta: ' + faltas.join(', '), 'error'); finalizarRecusadoNaFicha(); return; }
   const id = _modalDraft.id;
   juntarMarcasDoStore(_modalDraft);
   // "Manter aberta" com o ERP dizendo entregue: a decisão vai no próprio rascunho (revisão da E7).
@@ -2841,6 +3048,7 @@ function finalizarDaFicha(interno) {
     saveDraft(); reRenderModalKeepOpen();
     return { erro: '' };
   };
+  const daJornada = !interno && etapaAtualFicha(_modalDraft) === 'jornada';
   finalizarComSaldo(_modalDraft, escolha => {
     const d = _modalDraft;
     if (!d || d.id !== id) return;   // a ficha fechou no meio da pergunta
@@ -2854,6 +3062,7 @@ function finalizarDaFicha(interno) {
       if (m.erro) { toast(m.erro, 'error'); markDirty(); return; }
       aplicarFinalizacao(alvo);
       saveDraft(); reRenderModalKeepOpen();
+      if (daJornada) irParaEtapaFicha('fechamento', { foco: 'titulo' });   // finalizou pela Jornada: o checklist à vista (revisão da F23)
       const extra = !m.marcadas ? '' : papelDeclara()
         ? ` · ${m.marcadas} ${m.marcadas === 1 ? 'item declarado' : 'itens declarados'} pela equipe hoje; a gestão confere no Fechar o dia`
         : ` · ${m.marcadas} ${m.marcadas === 1 ? 'item marcado' : 'itens marcados'} ${interno ? 'retirado' : 'entregue'}${m.marcadas === 1 ? '' : 's'} ${m.quando || 'hoje'}`;
@@ -2958,7 +3167,7 @@ function blocoItens(os, ro, done) {
 
   return `
   <details class="card-fs ${done ? 'done' : ''}" data-bloco="itens">
-    <summary>2 · Serviço &amp; Itens ${done ? '<span class="sum-check">✓</span>' : ''}<span class="item-progress" style="margin-left:auto">${prontos}/${itens.length} prontos</span></summary>
+    <summary>Serviço &amp; Itens ${done ? '<span class="sum-check">✓</span>' : ''}<span class="item-progress" style="margin-left:auto">${prontos}/${itens.length} prontos</span></summary>
     <div class="fs-body">
       <div class="field-row">
         <div class="field"><label>Acesso</label>${markGroup('acesso', ACESSO_OPTS)}</div>
@@ -3050,7 +3259,10 @@ function retornoRodapeHTML(os, d) {
   const aviso = saida && !hora ? 'Digite o retorno previsto: a saída sozinha não vale.'
     : saida && hora && saida >= hora ? 'A saída prevista precisa ser antes do retorno.' : '';
   const quem = e.por && hora ? `<small class="text-muted">digitado por ${esc(e.por)}${e.em ? ' em ' + esc(fmtDataBR(e.em)) : ''}</small>` : '';
-  return `${aviso ? `<p class="retorno-aviso" role="alert">${esc(aviso)}</p>` : ''}${quem}`;
+  /* O retorno previsto não é obrigatório (decisão do dono): a Equipe fica
+     "ok" sem ele, e a ficha só avisa o que se perde (revisão da F23). */
+  const dica = !hora && !aviso ? '<p class="fe-dica">Sem retorno previsto: o retorno antecipado não é medido.</p>' : '';
+  return `${aviso ? `<p class="retorno-aviso" role="alert">${esc(aviso)}</p>` : ''}${quem}${dica}`;
 }
 function prazoRetornoHTML(os, ro) {
   const pc = OPERACAO.prazoCombinadoDe(os);
@@ -3103,7 +3315,7 @@ function blocoAgenda(os, ro, done) {
 
   return `
   <details class="card-fs ${done ? 'done' : ''}" data-bloco="agenda">
-    <summary>3 · Agendamento &amp; Confirmação ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
+    <summary>Agendamento &amp; Confirmação ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
     <div class="fs-body">
       <div class="field-row3">
         <div class="field"><label>Data instalação</label><input type="date" data-f="instalacao.data" value="${esc(inst.data)}"${fmsgAttr('instalacao.data')}>${fmsgHTML(os, 'instalacao.data')}</div>
@@ -3139,7 +3351,7 @@ function blocoAgenda(os, ro, done) {
               const sem55 = (dig.startsWith('55') && dig.length > 11) ? dig : '55' + dig;
               return `· <a class="inline-link" target="_blank" href="https://wa.me/${esc(sem55)}">📱 ${esc(maskTel(os.whatsapp))}</a>`;
             }
-            return `· <span class="conf-falta">⚠ sem WhatsApp — preencha no bloco 1 · PCP</span>`;
+            return `· <span class="conf-falta">⚠ sem WhatsApp: preencha na etapa Dados</span>`;
           })()}
         </div>
         <div class="field-row3">
@@ -3178,19 +3390,50 @@ function blocoAgenda(os, ro, done) {
 const podeDividirFicha = os => !!os && !isInterno(os) && typeof ALOCUI !== 'undefined'
   && ['admin', 'pcp'].includes(STATE.user && STATE.user.papel) && podeEditar();
 function blocoDivisao(os, done) {
+  /* A O.S. confirmada pela participação antiga da apuração (revisão da F23):
+     a divisão dela aparece como confirmada, com os percentuais, e o
+     componente fica recolhido, para quem quiser gravar uma divisão nova. */
+  const antiga = participacaoAntigaFicha(os);
+  const componente = `<div id="ficha-divisao" class="aloc-host"></div>
+      <div class="aloc-acoes"><button type="button" class="btn-primary" id="ficha-div-ok">Confirmar divisão</button><button type="button" class="btn-ghost" id="ficha-div-recomecar" hidden>Recomeçar pela divisão gravada</button></div>
+      <p class="aloc-status" id="ficha-div-status" role="status" aria-live="polite"></p>`;
   return `
   <details class="card-fs aloc-bloco-divisao lock-allow ${done ? 'done' : ''}" data-bloco="divisao">
-    <summary>5 · Divisão da equipe ${done ? '<span class="sum-check">✓ confirmada</span>' : ''}</summary>
+    <summary>Divisão da equipe ${done ? '<span class="sum-check">✓ confirmada</span>' : ''}</summary>
     <div class="fs-body">
       <p class="aloc-dica">Quem liderou e a parte de cada um nesta O.S. Só a gestão (admin e PCP) divide. Confirmar grava a divisão, e a equipe da O.S. passa a ser a desta divisão.</p>
-      <div id="ficha-divisao" class="aloc-host"></div>
-      <div class="aloc-acoes"><button type="button" class="btn-primary" id="ficha-div-ok">Confirmar divisão</button><button type="button" class="btn-ghost" id="ficha-div-recomecar" hidden>Recomeçar pela divisão gravada</button></div>
-      <p class="aloc-status" id="ficha-div-status" role="status" aria-live="polite"></p>
+      ${antiga ? `${divisaoAntigaFichaHTML(antiga)}<details class="fe-div-refazer"><summary>Gravar uma divisão nova nesta O.S.</summary>${componente}</details>` : componente}
     </div>
   </details>`;
 }
 // A divisão desta O.S. conta como confirmada (a régua da F08: válida, não desatualizada, mesma gente).
 const divisaoConfirmadaFicha = os => typeof DIVISAO !== 'undefined' && typeof DIVISAO.alocacaoConfirmada === 'function' && DIVISAO.alocacaoConfirmada(os);
+/* A PARTICIPAÇÃO ANTIGA QUE AINDA CONFIRMA A O.S. (a régua da F11, a mesma
+   da Performance, perfRegistro): sem divisão na O.S., a participação gravada
+   no blob da apuração vale, se é válida e não é mais velha que a última
+   mudança da divisão. Sem performance.js (o celular), não há. */
+function participacaoAntigaFicha(os) {
+  if (!os || isInterno(os) || typeof perfParticipacaoVale !== 'function' || typeof PERF === 'undefined') return null;
+  if (os.alocacao && typeof os.alocacao === 'object' && !Array.isArray(os.alocacao)) return null;
+  const pp = ((STORE.getCFG() || {}).performancePCP) || {};
+  const p = (Array.isArray(pp.participacoes) ? pp.participacoes : []).find(x => x && x.id === os.id);
+  const vale = p ? perfParticipacaoVale(os, p) : null;
+  return vale && Array.isArray(vale.membros) && vale.membros.length && !PERF.validar(vale.membros) ? vale : null;
+}
+// 'alocacao' (a divisão da O.S.), 'antiga' (a participação da apuração) ou '' (a confirmar).
+const estadoDivisaoFicha = os => (divisaoConfirmadaFicha(os) ? 'alocacao' : participacaoAntigaFicha(os) ? 'antiga' : '');
+function divisaoAntigaFichaHTML(p) {
+  const ms = typeof perfMembrosAntigos === 'function' ? perfMembrosAntigos(p) : p.membros;
+  const pct = v => Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+  const quando = p.em && Number.isFinite(Date.parse(p.em)) ? new Date(p.em).toLocaleDateString('pt-BR') : '';
+  const quem = [p.por ? 'por ' + p.por : '', quando ? 'em ' + quando : ''].filter(Boolean).join(' ');
+  return `<section class="aloc-antiga fe-div-antiga" aria-label="Divisão confirmada pelo jeito antigo">
+      <h4>Confirmada pelo jeito antigo <small>a participação da apuração</small></h4>
+      <p class="aloc-aviso">Esta O.S. conta na Performance com a divisão abaixo${quem ? ', conferida ' + esc(quem) : ''}. Não falta nada aqui. Gravar uma divisão nova nesta O.S. passa a valer no lugar dela.</p>
+      <ul>${ms.map(m => `<li>${esc(m.nome)} · ${pct(m.percentual)}%</li>`).join('')}</ul>
+      ${p.equipeNome ? `<p class="aloc-antiga-extra">Equipe: ${esc(p.emblema || '')} ${esc(p.equipeNome)}</p>` : ''}
+    </section>`;
+}
 // Quem já está em outra O.S. no mesmo horário (e quem o RH diz que está fora), pelo que a ficha mostra agora.
 function ocupadosDaFicha(os) {
   const i = (os && os.instalacao) || {};
@@ -3208,7 +3451,7 @@ function ligarEquipeDaFicha(ro) {
   const host = document.getElementById('ficha-equipe');
   if (host && !ro) {
     ALOCUI.iniciar(k.eq, {os, equipes: equipesDoCadastro(), papel, modo: 'pessoas', seguirEquipe: true, ocupados: oc,
-      dica: podeDividirFicha(os) ? 'Quem vai. Líder e percentuais ficam no bloco 5, Divisão da equipe.' : ''});
+      dica: podeDividirFicha(os) ? 'Quem vai. Líder e percentuais ficam na etapa Divisão.' : ''});
     ALOCUI.montar(host, k.eq, {aoAlterar: () => equipeDaFichaMudou(k.eq)});
   }
   const box = document.getElementById('ficha-divisao');
@@ -3242,12 +3485,12 @@ function divisaoAoFecharFicha() {
   const k = chavesFicha(_modalDraft.id), eq = ALOCUI.estado(k.eq), div = ALOCUI.estado(k.div);
   if (!div || div.modo !== 'divisao' || !ALOCUI.mudou(k.div)) return;
   const num = _modalDraft.numero || '';
-  if (div.tocado) { toast(`O.S. ${num}: a divisão mexida no bloco 5 não foi confirmada e não foi gravada. Para gravar, abra a ficha e toque em Confirmar divisão.`, 'error'); return; }
+  if (div.tocado) { toast(`O.S. ${num}: a divisão mexida na etapa Divisão não foi confirmada e não foi gravada. Para gravar, abra a ficha e toque em Confirmar divisão.`, 'error'); return; }
   const trazidas = eq && eq.tocado && Array.isArray(eq.trazidas) ? eq.trazidas : [];
   if (!(ALOCUI.estrutura(k.eq) || []).some(g => g.equipeId != null && trazidas.includes(String(g.equipeId)))) return;
   const r = ALOCUI.aplicarNaOS(k.div, _modalDraft);
   if (r.ok && r.estado === 'aplicada') markDirty();
-  else if (!r.ok) toast(`O.S. ${num}: a equipe foi gravada, mas a divisão não: ${r.mensagem} Complete no bloco 5, Divisão da equipe.`, 'error');
+  else if (!r.ok) toast(`O.S. ${num}: a equipe foi gravada, mas a divisão não: ${r.mensagem} Complete na etapa Divisão.`, 'error');
 }
 // A hora e a duração não repintam a ficha (o teclado não cai): só os chips.
 function repintarOcupadosDaFicha() {
@@ -3287,12 +3530,22 @@ function ligarDivisaoDaFicha(box, oc) {
         salvar: () => { markDirty(); saveDraft(); }});
     } catch (e) { r = {ok: false, estado: 'erro', mensagem: 'Não foi possível gravar: ' + ((e && e.message) || e)}; }
     finally { _fichaDivEnviando = false; }
-    const aberta = !!_modalDraft && _modalDraft.id === id && !!document.getElementById('ficha-div-status');
-    if (!aberta) { toast(`O.S. ${os.numero || ''}: ${r.mensagem}`, r.ok ? 'success' : 'error'); return; }
+    /* A FICHA AINDA ESTÁ NESTA O.S., MAS TALVEZ EM OUTRA ETAPA (revisão da
+       F23): com todas as etapas no DOM, o #ficha-div-status sempre existe, e
+       a falha ia calada para a etapa Divisão escondida. Fora dela, a falha
+       vira um aviso que fica até um toque e marca a Divisão no stepper. */
+    const mesma = !!_modalDraft && _modalDraft.id === id;
+    const naEtapa = mesma && etapaAtualFicha(_modalDraft) === 'divisao' && !!document.getElementById('ficha-div-status');
+    if (!mesma) { toast(`O.S. ${os.numero || ''}: ${r.mensagem}`, r.ok ? 'success' : 'error', r.ok ? undefined : { fica: true }); return; }
     if (r.ok) {
+      _divErroFicha.delete(id);
       toast(r.estado === 'gravada' ? `Divisão gravada na O.S. ${os.numero || ''}.` : r.mensagem, r.estado === 'pendente' ? '' : 'success');
       reRenderModalKeepOpen();
       return;
+    }
+    if (!naEtapa) {
+      _divErroFicha.set(id, r.mensagem);
+      toast(`O.S. ${os.numero || ''}: a divisão não foi gravada. ${r.mensagem}`, 'error', { fica: true });
     }
     /* DESCARTE: a cópia do aparelho voltou à do servidor (o store repôs). O
        rascunho da ficha segue o store e a ficha repinta: a divisão recomeça
@@ -3312,6 +3565,7 @@ function ligarDivisaoDaFicha(box, oc) {
     if (st2) { st2.textContent = r.mensagem; st2.classList.add('erro'); }
     if (rec2) rec2.hidden = r.estado !== 'conflito';
     if (ok2) ok2.disabled = r.estado === 'conflito' || !!ALOCUI.bloqueio(k.div);
+    if (!naEtapa) pintarPendenciasFicha();
   };
   conferirBotao();
 }
@@ -3327,10 +3581,13 @@ function blocoExec(os, ro, done) {
   const SIT_OPTS = ['Finalizado', 'Retrabalho', 'Mais um dia de trabalho'];
   const sitOpts = SIT_OPTS.map(s => `<option ${co.situacao === s ? 'selected' : ''}>${esc(s)}</option>`).join('');
   const sitExtra = co.situacao && !SIT_OPTS.includes(co.situacao) ? `<option selected>${esc(co.situacao)}</option>` : '';
+  // O resumo junto do Finalizar (revisão da F23), repintado ao vivo por pintarPendenciasFicha.
+  const resumoFin = resumoFinalizarJornadaHTML(os);
+  _hostsFicha.set('fe-fin-jornada', resumoFin);
 
   return `
   <details class="card-fs ${done ? 'done' : ''}" data-bloco="exec">
-    <summary>4 · Embarque &amp; Execução ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
+    <summary>Embarque &amp; Execução ${done ? '<span class="sum-check">✓ completo</span>' : ''}</summary>
     <div class="fs-body">
       <!-- ── Processo 1: Embarque · Saída ───────────────────────── -->
       <div class="exec-step"><span class="exec-step-tit">📦 Embarque · Saída</span></div>
@@ -3411,6 +3668,7 @@ function blocoExec(os, ro, done) {
         ${OPERACAO.semCarro(os) ? '' : `<div class="field"><label>KM retorno</label><input type="number" inputmode="numeric" data-f="kmRetorno" value="${esc(os.kmRetorno)}" placeholder="km do veículo"></div>`}
       </div>
       ${conferenciaVoltaHTML(os, ro)}
+      ${atalhoOcorrenciaJornadaHTML(os)}
       <div class="field-row">
         <div class="field"><label>Situação</label><select data-f="checkout.situacao"${fmsgAttr('checkout.situacao')}><option value="">— selecionar —</option>${sitOpts}${sitExtra}</select>${fmsgHTML(os, 'checkout.situacao')}</div>
         <div class="field"><label>Obs de fechamento</label><input data-f="checkout.obs" value="${esc(co.obs)}"></div>
@@ -3421,12 +3679,20 @@ function blocoExec(os, ro, done) {
         ${os.finalizadaEm
           ? `<div class="liberar-status" style="background:#dcfce7;color:var(--green)">✓ Finalizada por ${esc(os.finalizadoPor||'—')} · ${new Date(os.finalizadaEm).toLocaleString('pt-BR')}</div>`
           : canceladaNaTela(os) ? FINALIZAR_CANCELADA_HTML
-          : `<button class="btn-primary w-100" id="btn-finalizar">🏁 Finalizar instalação</button>`}
+          : `<button class="btn-primary w-100" id="btn-finalizar">🏁 Finalizar instalação</button>
+             <div class="fe-fin-resumo" id="fe-fin-jornada" aria-live="polite">${resumoFin}</div>`}
       </div>
     </div>
   </details>`;
 }
 
+/* O ATALHO DA OCORRÊNCIA NA JORNADA (revisão da F23): quem lança a jornada é
+   quem fica sabendo da avaria ou do cliente ausente. O formulário é o mesmo
+   do Status da entrega (no Fechamento), só da gestão. */
+function atalhoOcorrenciaJornadaHTML(os) {
+  if (!os || isInterno(os) || !temF17() || !podeAbonar() || !statusEntregaDe(os)) return '';
+  return `<div class="fe-atalho-oc lock-allow"><button type="button" class="btn-ghost btn-sm" id="btn-jornada-ocorrencia">+ Registrar ocorrência</button><span class="text-muted">Equipamento faltante ou danificado, ou outra ocorrência. Ela fica no Status da entrega, no Fechamento.</span></div>`;
+}
 /* ── CONFERÊNCIA DA VOLTA: carro e equipamentos ───────────────────────────
    Pedido do dono (23/09/2026): "a limpeza do carro e a gestão dos equipamentos
    têm que ter peso nesse critério de avaliação". Esta conferência é feita pela
@@ -5769,6 +6035,7 @@ function finalizarServicoDoCard(osId) {
   if (faltas.length) {
     toast('Para finalizar, falta: ' + faltas.join(', '), 'error');
     openModal(os, etapaParaFinalizar(os));   // a ficha abre na etapa da primeira falta (F23)
+    finalizarRecusadoNaFicha();               // e as faltas aparecem ao lado dos campos (revisão da F23)
     return;
   }
   /* O saldo da entrega por item vem antes (E4): "Manter aberta" não grava
@@ -7181,7 +7448,8 @@ function renderRetrabalho() {
         const d = dataPar(p);
         const pendente = !(fi ? fi.finalizadaEm : (o && o.dataResolvido));
         const abre = o || fi;
-        return `<tr class="os-list-item st-${pendente ? 'retrabalho' : 'finalizada'}" data-os-id="${esc(abre.id)}">
+        // A ficha abre na Jornada, onde ficam etapa de origem e causa raiz (revisão da F23: a finalizada caía no Fechamento).
+        return `<tr class="os-list-item st-${pendente ? 'retrabalho' : 'finalizada'}" data-os-id="${esc(abre.id)}" data-ficha-etapa="exec">
           <td>${o ? `O.S ${esc(p.num)}` : `O.S ${esc(p.num)} <span class="text-muted">(fora do que este aparelho guarda)</span>`} ${pendente ? '<span class="badge st-retrabalho">pendente</span>' : '<span class="badge st-finalizada">resolvido</span>'}</td>
           <td>${fi ? `<button type="button" class="btn-ghost btn-xs" data-abrir-os="${esc(fi.id)}">O.S ${esc(fi.numero || '—')}</button>${fi.finalizadaEm ? ' <span class="badge st-finalizada">feita</span>' : ' <span class="badge st-agendada">aberta</span>'}` : '<span class="badge st-aguardando_producao">sem O.S de retrabalho</span>'}</td>
           <td>${esc((o || fi || {}).cliente || '')}</td>
@@ -7199,7 +7467,7 @@ function renderRetrabalho() {
   wireFiltroPeriodo(el, '_fRetra', () => renderRetrabalho());
   bindCardClicks(el);
   // A O.S de retrabalho abre pelo botão da célula, sem abrir a original junto.
-  $$('[data-abrir-os]', el).forEach(b => b.onclick = ev => { ev.stopPropagation(); const os = STORE.getOS(b.dataset.abrirOs); if (os) openModal(os); });
+  $$('[data-abrir-os]', el).forEach(b => b.onclick = ev => { ev.stopPropagation(); const os = STORE.getOS(b.dataset.abrirOs); if (os) openModal(os, os.finalizadaEm ? 'exec' : undefined); });
   const imprimir = $('#retra-pdf',el);
   if (imprimir) imprimir.onclick = () => imprimirAnalisePCP('Retrabalho',el,STATE._fRetra || {});
 
@@ -8303,13 +8571,24 @@ function abrirInstrucoes() {
         <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + conferências do embarque (embarque, produtos e ferramentas) + saída registrada + Instalação OK + conferido por + ≥1 foto de saída + foto de retorno (serviço pronto) + data e hora do retorno (+ descrição do problema, se retrabalho). PCP e admin podem trocar a foto de retorno e a hora do retorno por uma exceção de encerramento com justificativa.<br>
           <em>Pedido interno (retirada) é diferente:</em> basta PCP liberado + ≥1 item — não há agenda, nem embarque, nem foto.</li>
       </ul>
-      <p>Todo o resto é guia — nenhum campo trava por ordem. Preencha na ordem que quiser; a barra de <strong>% preenchida</strong> no topo da ficha mostra o quanto falta.</p>
+      <p>Todo o resto é guia: nenhum campo trava por ordem. Preencha na ordem que quiser; a barra de <strong>% preenchida</strong> no topo da ficha mostra o quanto falta.</p>
+
+      <h2>A ficha em etapas</h2>
+      <p>A ficha da O.S. tem cinco etapas, na barra logo abaixo do próximo passo: <strong>Dados</strong>, <strong>Equipe</strong>, <strong>Divisão</strong>, <strong>Jornada</strong> e <strong>Fechamento</strong>. Toque numa etapa para ir até ela; nada trava a troca, e o que você digitou fica onde estava. A ficha abre na etapa que a situação pede.</p>
+      <ul>
+        <li><strong>Dados:</strong> PCP e cliente, liberar para instalação, serviço e itens.</li>
+        <li><strong>Equipe:</strong> data, período, veículo, quem vai, prazo combinado, retorno previsto e a confirmação com o cliente. Sem retorno previsto, o retorno antecipado não é medido.</li>
+        <li><strong>Divisão:</strong> líder e percentuais, só da gestão (admin e PCP). A O.S. confirmada pela participação antiga da apuração aparece como confirmada.</li>
+        <li><strong>Jornada:</strong> embarque, saída, fotos, retorno, conferência da volta, <em>+ Registrar ocorrência</em> e o botão <em>Finalizar instalação</em>, com o resumo do que falta logo abaixo dele.</li>
+        <li><strong>Fechamento:</strong> o Finalizar, o checklist de fechamento, a Exceção de encerramento e o <strong>Status da entrega</strong>, com o retorno antecipado, as ocorrências, os abonos e o <em>Cancelar O.S.</em> O selo do status no alto da ficha é um atalho: toque nele para ir ao Status da entrega.</li>
+      </ul>
+      <p>Na barra das etapas, o número em amarelo conta o que <strong>impede finalizar</strong>; "a completar" é o que falta e não impede. O <strong>checklist de fechamento</strong> não trava o Finalizar: cada item diz o efeito que tem na pontuação (atraso e retrabalho tiram a O.S. da pontuação, a volta conferida dá bônus ou redutor, a baixa do ERP só pontua depois de lançada) ou só que falta.</p>
 
       <h2>Fluxo típico</h2>
       <ol>
         <li><strong>PCP:</strong> cria/importa a O.S, define itens, clica <em>"✓ Liberar para instalação"</em>.</li>
         <li><strong>Agendamento:</strong> data + período (obrigatório) + equipe → confirma com o cliente.</li>
-        <li><strong>Equipe e divisão:</strong> no campo Equipe, <em>Trazer equipe</em> traz os integrantes num toque. A busca acha pelo nome, pelo apelido ou pelo ID inteiro (6 dígitos); o nome digitado com erro aparece em <em>Você quis dizer</em>. Quem já está em outra O.S. no mesmo horário (ou de férias) aparece marcado antes de gravar. Líder e percentuais ficam no bloco <strong>Divisão da equipe</strong>, só da gestão (admin e PCP); operação e montagem escolhem só as pessoas. A Agenda e o Lançar entrega usam o mesmo quadro.</li>
+        <li><strong>Equipe e divisão:</strong> no campo Equipe, <em>Trazer equipe</em> traz os integrantes num toque. A busca acha pelo nome, pelo apelido ou pelo ID inteiro (6 dígitos); o nome digitado com erro aparece em <em>Você quis dizer</em>. Quem já está em outra O.S. no mesmo horário (ou de férias) aparece marcado antes de gravar. Líder e percentuais ficam na etapa <strong>Divisão</strong>, só da gestão (admin e PCP); operação e montagem escolhem só as pessoas. A Agenda e o Lançar entrega usam o mesmo quadro.</li>
         <li><strong>⏸ Parado no cliente</strong> (quando for o caso): a O.S está pronta e o cliente ainda não liberou a instalação. No card, toque em <strong>Etapa</strong> e escolha <em>"⏸ Marcar parado"</em>. Ela some da fila de agendamento e passa a aparecer na vista <strong>Parado Cliente</strong>, que separa o que está parado <em>por culpa nossa</em> do que está parado esperando o cliente. Quando ele liberar, a mesma lista traz <em>"▶ Cliente liberou"</em> e ela volta para a fila; o tempo que ficou parada fica guardado.</li>
         <li><strong>Etapa no card:</strong> todo card tem a linha <strong>Etapa</strong>, com as etapas da barra lateral (PCP, Instalação, Parado Cliente, Execução, Retrabalho, Finalizados). O que é de um toque acontece no toque e o aviso traz <em>Desfazer</em>; o que precisa de dado (data, saída, retrabalho, finalização) abre a ficha no lugar certo. Etapa que ainda não dá diz por quê.</li>
         <li><strong>Embarque:</strong> confere embarque/produtos/ferramentas e registra o <strong>KM de saída</strong>.</li>

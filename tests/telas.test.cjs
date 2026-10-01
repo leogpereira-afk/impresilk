@@ -218,6 +218,21 @@ test('o manual do app conhece todas as abas da lateral', () => {
     'o Netlify foi desligado em 08/2026; a fonte da verdade e o Supabase');
 });
 
+/* A FICHA EM ETAPAS (F23) tambem envelhece o manual: cada etapa da ficha
+   (ETAPAS_FICHA do app.js) tem de aparecer pelo nome nas Instrucoes, com o
+   que mora nela (revisao da F23). */
+test('o manual do app conhece todas as etapas da ficha da O.S.', () => {
+  const app = fs.readFileSync(path.join(root,'app.js'),'utf8');
+  const ini = app.indexOf('function abrirInstrucoes()');
+  const manual = app.slice(ini, app.indexOf('\n}', ini));
+  const bloco = /const ETAPAS_FICHA = \[([\s\S]*?)\];/.exec(app);
+  assert.ok(bloco, 'as etapas da ficha sumiram do app.js');
+  const nomes = [...bloco[1].matchAll(/nome: '([^']+)'/g)].map(m => m[1]);
+  assert.equal(nomes.length, 5);
+  const faltando = nomes.filter(n => !manual.includes(`<strong>${n}:</strong>`));
+  assert.deepEqual(faltando, [], `o manual nao explica estas etapas da ficha: ${faltando.join(', ')}`);
+});
+
 /* O filtro de período serve quatro abas. Ele passou a mostrar qual recorte está
    aceso — antes eram botões de 22 px e a única pista vinha depois do clique. */
 test('filtro de período: o recorte escolhido vem aceso, e "Todos" só sem limites', () => {

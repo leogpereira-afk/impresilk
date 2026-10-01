@@ -218,7 +218,7 @@ test('revisão: fechar a ficha não grava divisão que ninguém trouxe, nem a me
   assert.equal(c.run(`ALOCUI.executar('ficha-div:f1', {alocAcao: 'lider', g: '0', p: '100003'})`), '');
   c.run('closeModal()');
   assert.equal(c.salvos.at(-1).alocacao ?? null, null);
-  assert.ok(c.toasts.some(([m, tp]) => /divisão mexida no bloco 5 não foi confirmada e não foi gravada/.test(m) && tp === 'error'), JSON.stringify(c.toasts));
+  assert.ok(c.toasts.some(([m, tp]) => /divisão mexida na etapa Divisão não foi confirmada e não foi gravada/.test(m) && tp === 'error'), JSON.stringify(c.toasts));
   assert.doesNotMatch(c.toasts.map(([m]) => m).join(' '), /—/, 'sem travessão no texto');
   // A operação não divide: a equipe vai, a divisão não.
   const d = ficha({papel: 'operacao', lista: [osBase({id: 'f1', equipe: []})]});
