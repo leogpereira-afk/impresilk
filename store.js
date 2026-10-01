@@ -2030,14 +2030,26 @@ const STORE = (() => {
      arquivo (o servidor aceita o mesmo id duas vezes).
      Foto que não deu para ler ou guardar devolve null e é DITA ('foto-falhou'):
      antes sumia calada, e o instalador achava que era só lentidão. */
-  async function pushPhoto(file) {
+  /* A FOTO SABE DE QUAL O.S. É (F24, 01/10/2026). Com o id da O.S., a foto
+     nasce foto_<osId>_<hora>_<sorteio>: o arquivo no servidor diz a O.S. sem
+     ninguém varrer as listas. Cabe nas duas réguas do servidor (o putPhoto do
+     pcp-sync e o idFoto do _shared, [\w.-]{1,100}): o UUID da O.S. manual dá
+     62 caracteres; o mub-<número> do ERP, uns 35. Id de O.S. com outro
+     caractere (ou comprido demais) e quem não passa a O.S. (o celular) ficam
+     no formato antigo, foto_<hora>_<sorteio>. As fotos antigas não migram. */
+  const ID_OS_NA_FOTO = /^[A-Za-z0-9-]{1,60}$/;
+  function novoIdFoto(osId) {
+    const os = String(osId == null ? '' : osId).trim();
+    return 'foto_' + (ID_OS_NA_FOTO.test(os) ? os + '_' : '') + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  }
+  async function pushPhoto(file, osId) {
     const base64 = await compressImage(file);
     if (!base64) {
       _notifyListeners('foto-falhou', { motivo: 'Não deu para ler esta foto. Tire de novo pela câmera.' });
       return null;
     }
     const mime   = 'image/jpeg';
-    const fileId = 'foto_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    const fileId = novoIdFoto(osId);
 
     try {
       await putFoto(fileId, base64, mime);
@@ -2145,6 +2157,8 @@ const STORE = (() => {
        não do trabalho que ainda está na fila. A gravação na fila continua
        sendo mandada; só o Desfazer do lote deixa de existir neste aparelho. */
     try { indexedDB.deleteDatabase('impresilk_lote'); } catch {}
+    // O rascunho dos diálogos da ficha (F24: Abonar, Cancelar, retrabalho) também é da sessão que saiu.
+    try { indexedDB.deleteDatabase('impresilk_rascunhos'); } catch {}
     if (getQueue().length) return false;
     try {
       localStorage.removeItem(K.OS);
@@ -2343,7 +2357,7 @@ const STORE = (() => {
     // Regras do programa (só gestão; cópia local para a prévia offline)
     regrasLocais, lerRegrasDisco, pullRegras,
     // Fotos
-    pushPhoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
+    pushPhoto, novoIdFoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos
     onSync, onConflict, on, conflitoCFG, resolverCFG,
     // Divisão da equipe recusada pelo servidor (aviso fixo, F08)
