@@ -174,7 +174,8 @@ export const CAMPOS_GESTAO = ['alocacao', 'alocacaoLog', 'prazoCombinado', 'reto
 // também não (F16): cancelar e desfazer são pedidos explícitos
 // ({ cancelar: true, motivo } e { desfazer: true }, carimbarCancelamento em
 // _shared/pcp-status.mjs), e o desfeito fica guardado com quem desfez.
-const GESTAO_SO_ACRESCIMO = new Set(['alocacaoLog', 'prazoCombinado', 'cancelamento']);
+// As ocorrências e os abonos (F17) também: só acréscimo; anular e revogar são novo carimbo.
+const GESTAO_SO_ACRESCIMO = new Set(['alocacaoLog', 'prazoCombinado', 'cancelamento', 'ocorrencias', 'abonos']);
 const vazioGestao = v => v == null || v === '' || (Array.isArray(v) && !v.length) || (objeto(v) && !Object.keys(v).length);
 // Algum campo da gestão preenchido = a O.S. tem trabalho (o esqueleto do ERP não passa por cima).
 export const temCampoGestao = o => !!o && CAMPOS_GESTAO.some(c => !vazioGestao(o[c]));
@@ -1682,6 +1683,17 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
     }
     m[k] = cortar(veio[k]);
   }
+  /* O RETRABALHO GRAVADO NÃO SE DESMARCA PELO CELULAR (F17). O espelho
+     recalcula os.retrabalho pelos itens a cada toque (rollupRetrab) e
+     desmarcava o retrabalho que a gestão marcou ou confirmou. Marcar vale na
+     hora, venha de onde vier (retrabalho zera sempre); desmarcar é só da
+     gestão (admin e pcp). O que o toque escreveu no problema e na causa
+     também não apaga o que estava gravado. */
+  if (atual?.retrabalho && !m.retrabalho) {
+    m.retrabalho = atual.retrabalho;
+    for (const c of ['problema', 'causa']) if (vazio(m[c]) && !vazio(atual[c])) m[c] = atual[c];
+    avisos.push('O retrabalho continua marcado: só a gestão do PCP desmarca. Fale com o PCP.');
+  }
   m.rev = revAtual;
   if (Array.isArray(veio?.itens) && Array.isArray(atual?.itens)) {
     const txt = v => String(v ?? '');
@@ -1735,6 +1747,19 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
     }
   }
   return { os: m, erro: '', avisos, entregasFora: entregasFora.slice(0, 200) };
+}
+/* DESMARCAR O RETRABALHO É DA GESTÃO (F17), também fora do toque. A
+   montagem com senha usa o mesmo espelho (que recalcula o retrabalho pelos
+   itens), a operação e a máquina gravam a O.S. inteira: nenhum deles tira o
+   retrabalho gravado. Só admin e pcp (`pode`) desmarcam. O retrabalho
+   marcado por qualquer um vale na hora (retrabalho zera sempre). Quem tem
+   senha ouve o porquê (`avisar`). Nunca 422. Devolve { os, aviso }. */
+export function guardarRetrabalho(os, antes, { pode = false, avisar = false } = {}) {
+  const r = { ...os };
+  if (pode || !antes?.retrabalho || r.retrabalho) return { os: r, aviso: '' };
+  r.retrabalho = antes.retrabalho;
+  for (const c of ['problema', 'causa', 'causaRaiz', 'etapaOrigem']) if (vazio(r[c]) && !vazio(antes[c])) r[c] = antes[c];
+  return { os: r, aviso: avisar ? 'O retrabalho continua marcado: só a gestão do PCP (admin ou pcp) desmarca o retrabalho.' : '' };
 }
 /* HORÁRIOS DO ESPELHO QUE FEREM A REGRA NÃO DERRUBAM O ENVIO (crachá de toque).
    O espelho carimba saída e retorno com o dia AGENDADO: serviço que vira a
@@ -1827,6 +1852,21 @@ export function podarCarimbosF15(r) {
     const { porId: _pi, porConta: _pc, ...x } = out.retornoConferido;
     out.retornoConferido = x;
   }
+  /* AS OCORRÊNCIAS MANUAIS E OS ABONOS (F17) descem com o nome de quem
+     registrou, anulou, abonou ou revogou, sem o ID e sem o login. A volta sem
+     eles não apaga nada: as duas listas só crescem por pedido (guardarOcorrencias
+     e guardarAbonos, em _shared/pcp-status.mjs). */
+  if (Array.isArray(out.ocorrencias)) out.ocorrencias = out.ocorrencias.map(x => {
+    if (!objeto(x)) return x;
+    const { porId: _pi, porConta: _pc, ...y } = x;
+    if (objeto(y.anulada)) { const { porId: _ai, porConta: _ac, ...an } = y.anulada; y.anulada = an; }
+    return y;
+  });
+  if (Array.isArray(out.abonos)) out.abonos = out.abonos.map(x => {
+    if (!objeto(x)) return x;
+    const { porId: _pi, porConta: _pc, revogadoPorId: _ri, revogadoPorConta: _rc, ...y } = x;
+    return y;
+  });
   // Quem finalizou pelo celular (revisão da E5) desce com o nome, sem o ID; a volta sem ele não apaga.
   if (objeto(out.finalizadaPorCampo)) {
     const { porId: _pi, ...x } = out.finalizadaPorCampo;
@@ -2008,6 +2048,17 @@ export function diffAuditavel(antes, depois, campos = CAMPOS_AUDITADOS) {
       const velhas = new Set((Array.isArray(va) ? va : []).map(canon));
       out.antes[c] = { linhas: Array.isArray(va) ? va.length : 0 };
       out.depois[c] = { linhas: vd.length, novas: semDocumento(vd.filter(x => !velhas.has(canon(x)))) };
+      continue;
+    }
+    /* AS OCORRÊNCIAS E OS ABONOS (F17) só crescem, e anular ou revogar é novo
+       carimbo no mesmo item: o diário guarda quantos havia, os itens novos e
+       os que ganharam carimbo, não a lista inteira duas vezes. */
+    if ((c === 'ocorrencias' || c === 'abonos') && Array.isArray(vd)) {
+      const velhos = new Map((Array.isArray(va) ? va : []).filter(objeto).map(x => [String(x.id ?? ''), canon(x)]));
+      const novos = vd.filter(x => objeto(x) && !velhos.has(String(x.id ?? '')));
+      const mudados = vd.filter(x => objeto(x) && velhos.has(String(x.id ?? '')) && velhos.get(String(x.id ?? '')) !== canon(x));
+      out.antes[c] = { itens: Array.isArray(va) ? va.length : 0 };
+      out.depois[c] = { itens: vd.length, novos: semDocumento(novos), mudados: semDocumento(mudados) };
       continue;
     }
     out.antes[c] = semDocumento(va ?? null);

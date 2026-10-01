@@ -33,7 +33,12 @@ test('o texto do status é o mesmo nas duas cópias', () => {
 test('as duas cópias exportam o mesmo status, e o operacao.js não chama o motor pelo nome', async () => {
   const S = await servidor();
   const nomes = Object.keys(S.STATUS_ENTREGA).sort();
-  assert.deepEqual(nomes, ['ESTADOS_ENTREGA', 'MOTIVO_CANCELAMENTO_MAX', 'MOTIVO_CANCELAMENTO_MIN', 'ROTULOS_ENTREGA', 'cancelada', 'cancelamentoDe', 'motivoCancelamentoInvalido', 'prazoDaEntrega', 'statusEntrega']);
+  /* TROCADO DE PROPÓSITO NA F17 (30/09/2026): as ocorrências, o retorno
+     antecipado e os abonos entraram no mesmo bloco copiado. */
+  assert.deepEqual(nomes, ['ESTADOS_ENTREGA', 'MOTIVO_ABONO_MAX', 'MOTIVO_ABONO_MIN', 'MOTIVO_CANCELAMENTO_MAX', 'MOTIVO_CANCELAMENTO_MIN', 'OCORRENCIAS_ABONAVEIS',
+    'ROTULOS_ENTREGA', 'ROTULOS_OCORRENCIA', 'TIPOS_OCORRENCIA', 'TIPOS_OCORRENCIA_MANUAL', 'TOLERANCIA_RETORNO_PADRAO', 'abonoVigente', 'abonosDe', 'cancelada', 'cancelamentoDe',
+    'chegadaConferida', 'motivoAbonoInvalido', 'motivoCancelamentoInvalido', 'ocorrenciasDaOS', 'ocorrenciasDerivadas', 'ocorrenciasManuais', 'prazoDaEntrega',
+    'retornoAntecipado', 'statusEntrega', 'toleranciaRetorno', 'voltaDoRetorno']);
   for (const k of nomes) assert.equal(typeof O[k], typeof S.STATUS_ENTREGA[k], k);
   assert.deepEqual(O.ESTADOS_ENTREGA, S.ESTADOS_ENTREGA);assert.deepEqual(O.ROTULOS_ENTREGA, S.ROTULOS_ENTREGA);
   assert.equal(O.MOTIVO_CANCELAMENTO_MIN, 15);assert.equal(S.MOTIVO_CANCELAMENTO_MIN, 15);
@@ -120,7 +125,7 @@ test('600 O.S. geradas dão o mesmo status no aparelho e no servidor; o cancelam
     if (a.estado === 'cancelado') canceladas++;
     if (a.fonteEntrega === 'itens') comItens++;
   }
-  // Os casos exercitam todos os estados (menos o retorno antecipado, que é "sem dado" até a F17).
+  // Os casos exercitam todos os estados (menos o retorno antecipado: estas O.S. não têm chegada conferida; a paridade dele está em tests/ocorrencias-f17.test.cjs).
   assert.deepEqual([...vistos].sort(), ['agendado', 'atraso', 'cancelado', 'entregue', 'execucao', 'no_prazo', 'retrabalho']);
   assert.ok(canceladas > 60, `canceladas: ${canceladas}`);
   assert.ok(comItens > 20, `entregas julgadas pelos itens: ${comItens}`);

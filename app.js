@@ -1751,6 +1751,7 @@ const AUD_ROTULOS = {
   prazoCombinado: 'Prazo combinado', retornoPrevisto: 'Retorno previsto', retornoConferido: 'Chegada conferida do carro',
   agendaLog: 'Histórico de remarcações', origemPDF: 'Lida do PDF do ERP',
   alocacao: 'Divisão da equipe', alocacaoLog: 'Histórico da divisão', cancelamento: 'Cancelamento da O.S.',
+  ocorrencias: 'Ocorrências', abonos: 'Abonos',
   apagado: 'Excluída'
 };
 // Por dentro dos campos que são objeto (conferência da volta, limpeza do
@@ -1818,6 +1819,15 @@ function audValor(campo, v) {
     return `${n} ${n === 1 ? 'marca' : 'marcas'}` + (novos.length ? ` (${novos.length === 1 ? 'nova' : 'novas'}: ${novos.join('; ')})` : '');
   }
   if (campo.startsWith('fotos') && Array.isArray(v)) return v.length + (v.length === 1 ? ' foto' : ' fotos');
+  /* F17: quantas havia, as novas e as que ganharam carimbo (anulada, revogado). */
+  if ((campo === 'ocorrencias' || campo === 'abonos') && v && typeof v === 'object' && !Array.isArray(v)) {
+    const n = Number(v.itens) || 0, nome = campo === 'abonos' ? ['abono', 'abonos'] : ['ocorrência', 'ocorrências'];
+    const linha = x => campo === 'abonos'
+      ? `${x.revogadoEm ? 'revogado' + (x.revogadoPor ? ' por ' + x.revogadoPor : '') : 'abono' + (x.por ? ' de ' + x.por : '')}${x.tipo ? ' (' + String(x.tipo).replace('_', ' ') + ')' : ''}${x.motivo && !x.revogadoEm ? ': ' + x.motivo : ''}`
+      : `${x.anulada ? 'anulada' + (x.anulada.por ? ' por ' + x.anulada.por : '') : TIPOS_MANUAIS_TXT[x.tipo] || x.tipo}${x.item ? ': ' + x.item : ''}${x.obs && !x.anulada ? ' (' + x.obs + ')' : ''}`;
+    const xs = [...(Array.isArray(v.novos) ? v.novos : []), ...(Array.isArray(v.mudados) ? v.mudados : [])].filter(x => x && typeof x === 'object').map(linha);
+    return `${n} ${n === 1 ? nome[0] : nome[1]}` + (xs.length ? ` (${xs.join('; ')})` : '');
+  }
   // F16: "cancelada por Ana: cliente desistiu" / "desfeito por Bia em 30/09 (era: ...)".
   if (campo === 'cancelamento' && v && typeof v === 'object' && !Array.isArray(v)) {
     if (v.ativo === false) return `cancelamento desfeito${v.desfeitoPor ? ' por ' + v.desfeitoPor : ''}${v.desfeitoEm ? ' em ' + audTexto(v.desfeitoEm) : ''}${v.motivo ? ' (o motivo era: ' + v.motivo + ')' : ''}`;
@@ -3270,6 +3280,8 @@ function abrirConferenciaVolta(g) {
   const ini = respostasIniciaisVolta(g);
   const resp = Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, ini[k]]));
   let obs = ini.obs;
+  // F17: o equipamento faltante ou danificado vira ocorrência em cada O.S. da volta.
+  let ocTipo = 'equipamento_faltante', ocItem = '';
   const fotos = ini.fotos;
   let enviando = 0; // fotos ainda subindo: o Salvar espera, senão elas ficavam fora da volta
   let d = document.getElementById('volta-dialog');
@@ -3290,12 +3302,19 @@ function abrirConferenciaVolta(g) {
         </div></div>`).join('')}
       <p class="volta-dica">Avaria não entra na nota: nem sempre é culpa da equipe. Serve para o PCP agir (oficina, seguro).</p>
       <label class="volta-campo">O que faltou ou precisa de atenção<input id="volta-obs" maxlength="300" value="${esc(obs)}" placeholder="ex.: faltou a escada de 6 m; sobra de lona na caçamba"></label>
+      ${podeAbonar() ? `<div class="volta-campo volta-oc">Ocorrência de equipamento (opcional)
+        <div class="volta-oc-linha"><select id="volta-oc-tipo" aria-label="Tipo da ocorrência">${Object.entries(TIPOS_MANUAIS_TXT).map(([k, v]) => `<option value="${k}" ${ocTipo === k ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
+        <input id="volta-oc-item" maxlength="120" value="${esc(ocItem)}" placeholder="qual item (ex.: escada de 6 m)" aria-label="Qual item"></div>
+        <small class="text-muted">Fica registrada com o seu nome em cada O.S. da volta. Não desconta de novo: o desconto de equipamento é o da pergunta acima.</small></div>` : ''}
       <div class="volta-campo">Fotos da volta (opcional)
         <div class="fotos-grid">${fotos.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}" alt="foto da volta"><button type="button" class="foto-rm" data-volta-foto-rm="${esc(fid)}" aria-label="Tirar a foto">×</button></div>`).join('')}</div>
         <label class="foto-box"><span class="foto-hint">📷 Foto de como o carro voltou</span><input type="file" accept="image/*" multiple data-volta-foto></label>
       </div>
       <div class="volta-dialog-acoes"><button type="button" class="btn-ghost" data-volta-fechar>Cancelar</button><button type="button" class="btn-primary" id="volta-salvar" ${enviando ? 'disabled' : ''}>${enviando ? `Enviando ${enviando} foto(s)…` : g.os.length > 1 ? `Salvar para as ${g.os.length} O.S.` : 'Salvar'}</button></div>`;
     $$('[data-volta-fechar]', d).forEach(b => b.onclick = () => d.close());
+    const ocT = $('#volta-oc-tipo', d), ocI = $('#volta-oc-item', d);
+    if (ocT) ocT.onchange = () => { ocTipo = ocT.value; };
+    if (ocI) ocI.oninput = () => { ocItem = ocI.value; };
     $$('[data-volta-r]', d).forEach(b => b.onclick = () => { const [k, v] = b.dataset.voltaR.split('|'); obs = $('#volta-obs', d).value; resp[k] = v; desenhar(); });
     $$('[data-volta-foto-rm]', d).forEach(b => b.onclick = () => {
       // Só desliga da volta: a mesma foto pode estar em outra O.S. da volta.
@@ -3328,7 +3347,8 @@ function abrirConferenciaVolta(g) {
       // Em branco não conta como OK: salvar pela metade tirava a volta de "A conferir" para sempre.
       const faltam = ['carroLimpo', 'carroArrumado', 'equipamentosOk'].filter(k => !resp[k]).length;
       if (faltam && !confirm(`Faltam ${faltam} pergunta(s) da nota do instalador. Salvar assim?`)) return;
-      const n = salvarConferenciaVolta(g, { ...resp, obs: $('#volta-obs', d).value.trim().slice(0, 300), fotos: fotos.slice(0, 10) });
+      const ocorrencia = ocItem.trim() ? { tipo: ocTipo, item: ocItem.trim().slice(0, 120) } : null;
+      const n = salvarConferenciaVolta(g, { ...resp, obs: $('#volta-obs', d).value.trim().slice(0, 300), fotos: fotos.slice(0, 10) }, ocorrencia);
       d.close();
       toast(n ? `Volta conferida · ${n} O.S. ${n === 1 ? 'atualizada' : 'atualizadas'}` : 'Nada mudou nesta volta.', n ? 'success' : '');
       pcpRenderCards();
@@ -3338,10 +3358,14 @@ function abrirConferenciaVolta(g) {
   if (!d.open) d.showModal();
 }
 // Grava a resposta em cada O.S. da volta. Devolve quantas mudaram.
-function salvarConferenciaVolta(g, resp) {
+/* `ocorrencia` (F17, opcional): {tipo, item}, o equipamento faltante ou
+   danificado, registrado como pedido em cada O.S. da volta, com o mesmo
+   grupo (conta uma vez só). Autor e hora são do servidor. */
+function salvarConferenciaVolta(g, resp, ocorrencia) {
   if (!voltaGestao()) return 0;
   const quem = (STATE.user && STATE.user.nome) || '';
   const agora = nowISO();
+  const grupo = ocorrencia && typeof OPERACAO.novoIdF17 === 'function' ? OPERACAO.novoIdF17('vl') : '';
   let n = 0;
   for (const o of g.os) {
     const os = STORE.getOS(o.id);   // relê: a fila pode ter sido desenhada antes do último sync
@@ -3352,7 +3376,8 @@ function salvarConferenciaVolta(g, resp) {
     const mudou = OPERACAO.PERGUNTAS_VOLTA.some(k => OPERACAO.respostaVolta(rc[k]) !== OPERACAO.respostaVolta(antes[k]));
     if (!OPERACAO.voltaRespondida(rc)) { rc.por = ''; rc.em = ''; }
     else if (mudou) { rc.por = quem; rc.em = agora; }
-    if (JSON.stringify(rc) === JSON.stringify(antes)) continue;
+    const comOcorrencia = !!grupo && !OPERACAO.pedirOcorrencia(os, { tipo: ocorrencia.tipo, item: ocorrencia.item, fonte: 'volta', dia: g.dia, grupo });
+    if (!comOcorrencia && JSON.stringify(rc) === JSON.stringify(antes)) continue;
     os.retornoConf = rc;
     os.atualizadoEm = agora; os.atualizadoPor = quem;
     STORE.saveOS(os);
@@ -4409,9 +4434,23 @@ function aplicarFinalizacao(os) {
    servidor guarda o pedido (carimbarCancelamento) e desfazer fica no
    histórico. Sem o operacao.js novo (cache misto), a tela segue sem o selo. */
 const temStatusEntrega = () => typeof OPERACAO !== 'undefined' && typeof OPERACAO.statusEntrega === 'function';
+/* O CONTEXTO DO STATUS (F17): a regra vigente no dia (a tolerância do retorno
+   e as perdas) e as O.S. da mesma volta, porque o retorno antecipado é medido
+   pela volta. A volta só é procurada quando a O.S. tem chegada conferida. */
+const temF17 = () => temStatusEntrega() && typeof OPERACAO.voltaNaLista === 'function';
+function contextoStatusDe(os) {
+  const ctx = { regra: null, volta: null };
+  if (!temF17() || !os || typeof os !== 'object') return ctx;
+  const ch = OPERACAO.chegadaConferida(os);
+  const dia = ch ? ch.dia : hojeISO();
+  try { if (typeof REGRAS !== 'undefined' && typeof versoesRegrasCasa === 'function') ctx.regra = REGRAS.regraVigente(versoesRegrasCasa(), dia); } catch { ctx.regra = null; }
+  if (ch) try { ctx.volta = OPERACAO.voltaNaLista(os, STORE.getAllOS()); } catch { ctx.volta = null; }
+  return ctx;
+}
 function statusEntregaDe(os) {
   if (!temStatusEntrega() || !os || typeof os !== 'object') return null;
-  try { return OPERACAO.statusEntrega(os); } catch { return null; }
+  const ctx = contextoStatusDe(os);
+  try { return OPERACAO.statusEntrega(os, undefined, ctx.regra, ctx.volta); } catch { return null; }
 }
 const canceladaNaTela = os => temStatusEntrega() && typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(os);
 // No lugar do "Finalizar" e do "Cliente retirou" da ficha da O.S. cancelada (revisão da junção F16+E7).
@@ -4421,7 +4460,9 @@ const ICONE_STATUS_ENTREGA = { cancelado: '⛔', retrabalho: '🔴', retorno_ant
 function seloStatusEntregaHTML(st) {
   if (!st || !st.estado) return '';
   const dica = (st.aplicaveis || []).map(a => `${a.rotulo}: ${a.motivo}`).join('\n');
-  return `<span class="selo-entrega se-${esc(st.estado)}" title="${esc(dica)}"><span aria-hidden="true">${ICONE_STATUS_ENTREGA[st.estado] || ''}</span> ${esc(st.rotulo)}</span>`;
+  // O abonado (F17) tem cor própria: não é perda.
+  const abonado = st.aplicaveis && st.aplicaveis[0] && st.aplicaveis[0].abonado ? ' se-abonado' : '';
+  return `<span class="selo-entrega se-${esc(st.estado)}${abonado}" title="${esc(dica)}"><span aria-hidden="true">${ICONE_STATUS_ENTREGA[st.estado] || ''}</span> ${esc(st.rotulo)}</span>`;
 }
 const podeCancelarOS = () => ['admin', 'pcp'].includes(String((STATE.user || {}).papel || '')) && !(typeof crachaEhToque === 'function' && crachaEhToque());
 /* NA FICHA: o selo, o motivo, os outros estados que também valem, o retorno
@@ -4444,10 +4485,173 @@ function statusEntregaFichaHTML(os) {
       <div class="st-ent-linha"><span class="st-ent-rot">Status da entrega</span>${seloStatusEntregaHTML(st)}</div>
       <p class="st-ent-motivo">${esc(st.motivo.charAt(0).toUpperCase() + st.motivo.slice(1))}.</p>
       ${outros ? `<ul class="st-ent-outros" aria-label="Também vale">${outros}</ul>` : ''}
-      <p class="st-ent-retorno">Retorno antecipado: ${esc(st.retornoAntecipado.situacao)} ainda.</p>
+      ${retornoFichaHTML(st.retornoAntecipado, st.motivo)}
       ${erp}${desfeito}
       ${acao ? `<div class="st-ent-acoes">${acao}</div>` : ''}
+      ${ocorrenciasFichaHTML(os, st)}
     </section>`;
+}
+/* ── OCORRÊNCIAS, RETORNO ANTECIPADO E ABONOS (F17, 30/09/2026) ────────────
+   Toda perda aponta para uma ocorrência com id (OPERACAO.ocorrenciasDaOS, a
+   mesma régua do servidor em _shared/pcp-status.mjs). Abonar (atraso e
+   retorno antecipado, motivo de 15 letras ou mais), revogar o abono,
+   registrar e anular a ocorrência manual (equipamento faltante ou danificado)
+   são só da gestão (admin e pcp). A tela grava o PEDIDO; autor e hora são do
+   servidor. Os botões moram na ficha, no card (Abonar) e no Fechar o dia. */
+const podeAbonar = () => ['admin', 'pcp'].includes(String((STATE.user || {}).papel || '')) && !(typeof crachaEhToque === 'function' && crachaEhToque());
+const RETORNO_SITUACAO_TXT = { antecipado: 'conta como perda', abonado: 'abonado', 'no horário': 'no horário', 'na volta': 'medido na volta',
+  'sem retorno previsto': 'sem retorno previsto', 'sem dado': 'chegada ainda não conferida', 'não se aplica': 'não se aplica' };
+// `jaDito`: o motivo que a ficha já mostrou em cima (quando o retorno é o estado principal), para não repetir.
+function retornoFichaHTML(r, jaDito) {
+  if (!r) return '';
+  const cls = r.situacao === 'antecipado' ? 'ruim' : r.situacao === 'abonado' ? 'abonado' : r.situacao === 'no horário' ? 'ok' : '';
+  const motivo = r.motivo && r.motivo !== jaDito ? ` ${esc(r.motivo.charAt(0).toUpperCase() + r.motivo.slice(1))}.` : '';
+  return `<p class="st-ent-retorno ${cls}"><strong>Retorno antecipado:</strong> ${esc(RETORNO_SITUACAO_TXT[r.situacao] || r.situacao)}.${motivo}</p>`;
+}
+// Uma ocorrência na lista: o rótulo, o motivo, o abono (ou a anulação) e os botões da gestão.
+function ocorrenciaLinhaHTML(oc, gestao) {
+  const ab = oc.abono;
+  const selo = oc.origem === 'manual' ? (oc.anulada ? '<span class="oc-selo anulada">anulada</span>' : '<span class="oc-selo manual">registrada</span>')
+    : oc.abonado ? '<span class="oc-selo abonado">abonada</span>' : oc.perda ? '<span class="oc-selo perda">perda</span>' : oc.volta ? '<span class="oc-selo volta">volta do carro</span>' : '';
+  const pend = (oc.pendente || oc.anulacaoPendente || (ab && (ab.pendente || ab.revogacaoPendente))) ? ' <small class="oc-pend">(a enviar)</small>' : '';
+  const quem = oc.origem === 'manual' && oc.por ? ` <small>por ${esc(oc.por)}</small>` : '';
+  const anulacao = oc.anulada && oc.anuladaPor ? ` <small>anulada por ${esc(oc.anuladaPor)}</small>` : '';
+  let botoes = '';
+  if (gestao && oc.abonavel && !oc.abonado) botoes = `<button type="button" class="btn-ghost btn-sm" data-f17-acao="abonar" data-oc="${esc(oc.id)}">Abonar</button>`;
+  else if (gestao && oc.abonado && ab && !ab.pendente) botoes = `<button type="button" class="btn-ghost btn-sm" data-f17-acao="revogar" data-ab="${esc(ab.id)}">Revogar abono</button>`;
+  else if (gestao && oc.origem === 'manual' && !oc.anulada) botoes = `<button type="button" class="btn-ghost btn-sm" data-f17-acao="anular" data-oc="${esc(oc.id)}">Anular</button>`;
+  return `<li class="oc-linha${oc.anulada ? ' oc-anulada' : ''}"><div><strong>${esc(oc.rotulo)}</strong> ${selo}${pend}${quem}${anulacao}<br><small>${esc(oc.motivo)}</small></div>${botoes ? `<div class="oc-acoes">${botoes}</div>` : ''}</li>`;
+}
+function ocorrenciasFichaHTML(os, st) {
+  if (!temF17() || !st) return '';
+  const lista = Array.isArray(st.ocorrencias) ? st.ocorrencias : [];
+  const gestao = podeAbonar();
+  const registrar = gestao ? '<button type="button" class="btn-ghost btn-sm" data-f17-acao="registrar">+ Registrar ocorrência</button>' : '';
+  if (!lista.length && !registrar) return '';
+  return `<div class="st-ocorrencias" aria-label="Ocorrências da O.S.">
+      <div class="st-ent-linha"><span class="st-ent-rot">Ocorrências</span><span class="text-muted">${lista.length ? lista.filter(o => !o.anulada).length + ' valendo' : 'nenhuma'}</span></div>
+      ${lista.length ? `<ul class="oc-lista">${lista.map(oc => ocorrenciaLinhaHTML(oc, gestao)).join('')}</ul>` : ''}
+      ${registrar ? `<div class="st-ent-acoes">${registrar}</div>` : ''}
+    </div>`;
+}
+/* O DIÁLOGO DA F17: abonar (a ocorrência, quando há mais de uma, e o motivo)
+   ou registrar a ocorrência manual (tipo, item e o que aconteceu). A frase
+   de erro vem da mesma régua do servidor. */
+const TIPOS_MANUAIS_TXT = { equipamento_faltante: 'Equipamento faltante', equipamento_danificado: 'Equipamento danificado', outra: 'Outra ocorrência' };
+function abrirDialogoF17(cfg, aoConfirmar) {
+  const velho = document.getElementById('f17-box'); if (velho) velho.remove();
+  const box = document.createElement('div');
+  box.id = 'f17-box';
+  box.className = 'wpp-picker-overlay';
+  const escolha = Array.isArray(cfg.escolhas) && cfg.escolhas.length > 1
+    ? `<div class="field"><label>Ocorrência <span class="req">*</span><select name="oc">${cfg.escolhas.map(o => `<option value="${esc(o.id)}">${esc(o.rotulo)}: ${esc(o.motivo.slice(0, 90))}</option>`).join('')}</select></label></div>` : '';
+  const tipos = cfg.registrar ? `<div class="field"><label>Tipo <span class="req">*</span><select name="tipo">${Object.entries(TIPOS_MANUAIS_TXT).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></label></div>
+      <div class="field"><label>Qual item <span class="text-muted">(ex.: escada de 6 m)</span><input name="item" maxlength="120" autocomplete="off"></label></div>` : '';
+  const obrigatorio = !cfg.registrar && !cfg.semObrigatorio;
+  const titulo = [cfg.prefixo, cfg.titulo].filter(Boolean).join(' ');
+  box.innerHTML = `
+    <div class="wpp-picker retrab-box" role="dialog" aria-modal="true" aria-labelledby="f17-tit">
+      <div class="wpp-picker-head"><strong id="f17-tit">${esc(titulo)}</strong><button type="button" class="modal-close" data-f17-fechar aria-label="Fechar">×</button></div>
+      <form class="wpp-picker-body ent-form" novalidate>
+        <p class="text-muted ent-texto">${esc(cfg.texto)}</p>
+        ${escolha}${tipos}
+        <div class="field"><label>${esc(cfg.rotuloTexto || 'Motivo')} ${obrigatorio ? '<span class="req">*</span>' : ''}<textarea name="motivo" rows="3" maxlength="300" ${obrigatorio ? 'required' : ''}></textarea></label></div>
+        <p class="ent-erro" role="alert" hidden></p>
+        <div class="wpp-acoes"><button type="submit" class="btn-primary">${esc(cfg.botao)}</button><button type="button" class="btn-ghost" data-f17-fechar>Voltar</button></div>
+      </form>
+    </div>`;
+  document.body.appendChild(box);
+  const form = box.querySelector('form'), erro = box.querySelector('.ent-erro');
+  const fechar = () => box.remove();
+  box.querySelectorAll('[data-f17-fechar]').forEach(b => { b.onclick = fechar; });
+  form.onsubmit = ev => {
+    ev.preventDefault();
+    const val = n => { const el = form.querySelector(`[name="${n}"]`); return el ? String(el.value || '').trim() : ''; };
+    const oc = val('oc') || (cfg.escolhas && cfg.escolhas[0] ? cfg.escolhas[0].id : '');
+    const msg = aoConfirmar({ oc, motivo: val('motivo'), tipo: val('tipo'), item: val('item') });
+    if (msg) { erro.textContent = msg; erro.hidden = false; return; }
+    fechar();
+  };
+  const primeiro = form.querySelector('select,input,textarea');
+  if (primeiro) try { primeiro.focus(); } catch {}
+}
+const TEXTO_ABONO = 'O abono devolve o valor da O.S. na pontuação e fica registrado com o seu nome. Use para a remarcação pedida pelo cliente ou para o retorno antecipado que tem explicação. Retrabalho não se abona.';
+// Abonar e revogar, registrar e anular: no rascunho que a função entrega (a ficha aberta ou a O.S. do STORE).
+function abonarOcorrenciaEm(os, ocorrencias, gravar) {
+  const abonaveis = (ocorrencias || []).filter(o => o.abonavel && !o.abonado);
+  if (!abonaveis.length) { toast('Nenhuma ocorrência para abonar nesta O.S.', 'error'); return; }
+  abrirDialogoF17({ titulo: `Abonar na O.S ${os.numero || ''}`, texto: TEXTO_ABONO, escolhas: abonaveis, botao: 'Abonar',
+    rotuloTexto: 'Motivo do abono (15 letras ou mais)' }, dados => {
+    const ctx = contextoStatusDe(os);
+    return gravar(alvo => OPERACAO.pedirAbono(alvo, dados.oc, dados.motivo, { regra: ctx.regra, volta: ctx.volta, hoje: hojeISO() }), 'Abono registrado. Para voltar atrás, use Revogar abono.');
+  });
+}
+function registrarOcorrenciaEm(os, gravar, extra = {}) {
+  abrirDialogoF17({ titulo: `Registrar ocorrência na O.S ${os.numero || ''}`, registrar: true,
+    texto: 'Equipamento faltante ou danificado, ou outra ocorrência. Fica registrada com o seu nome e não se apaga: se foi engano, use Anular.',
+    rotuloTexto: 'O que aconteceu', botao: 'Registrar' }, dados =>
+    gravar(alvo => OPERACAO.pedirOcorrencia(alvo, { tipo: dados.tipo, item: dados.item, obs: dados.motivo, fonte: extra.fonte || 'ficha', dia: extra.dia || '' }), 'Ocorrência registrada.'));
+}
+// Grava na ficha aberta (o rascunho): o autosave leva o pedido.
+function gravarNaFichaF17(mudar, ok) {
+  const d = _modalDraft;
+  if (!d || !podeAbonar()) return 'Só a gestão do PCP (admin ou pcp) faz isso.';
+  const erro = mudar(d);
+  if (erro) return erro;
+  saveDraft(); reRenderModalKeepOpen();
+  toast(ok, 'success');
+  return '';
+}
+// Grava direto na O.S. do STORE (card e Fechar o dia): relê a O.S. na hora.
+function gravarNaOSF17(osId, mudar, ok, depois) {
+  if (!podeAbonar()) return 'Só a gestão do PCP (admin ou pcp) faz isso.';
+  const os = STORE.getOS(osId);
+  if (!os) return 'Esta O.S. não está mais neste aparelho.';
+  const erro = mudar(os);
+  if (erro) return erro;
+  os.atualizadoEm = nowISO(); os.atualizadoPor = STATE.user.nome;
+  STORE.saveOS(os);
+  toast(ok, 'success');
+  if (typeof depois === 'function') depois(); else if (typeof renderActiveTab === 'function') renderActiveTab();
+  return '';
+}
+function ligarOcorrenciasDaFicha() {
+  const raiz = document.querySelector('#modal-os .st-ocorrencias');
+  if (!raiz) return;
+  raiz.querySelectorAll('[data-f17-acao]').forEach(b => {
+    b.onclick = () => {
+      const d = _modalDraft;
+      if (!d) return;
+      const acao = b.dataset.f17Acao;
+      if (acao === 'abonar') {
+        const st = statusEntregaDe(d);
+        return abonarOcorrenciaEm(d, (st && st.ocorrencias || []).filter(o => o.id === b.dataset.oc), gravarNaFichaF17);
+      }
+      if (acao === 'registrar') return registrarOcorrenciaEm(d, gravarNaFichaF17, { fonte: 'ficha' });
+      if (acao === 'revogar') {
+        if (!confirm('Revogar o abono? A ocorrência volta a contar. O abono fica no histórico, marcado como revogado.')) return;
+        const erro = gravarNaFichaF17(alvo => OPERACAO.pedirRevogarAbono(alvo, b.dataset.ab), 'Abono revogado.');
+        if (erro) toast(erro, 'error');
+        return;
+      }
+      if (acao === 'anular') {
+        abrirDialogoF17({ titulo: 'Anular a ocorrência', texto: 'A ocorrência fica no histórico, marcada como anulada, com o seu nome.', botao: 'Anular', rotuloTexto: 'Motivo (opcional)', semObrigatorio: true },
+          dados => gravarNaFichaF17(alvo => OPERACAO.pedirAnularOcorrencia(alvo, b.dataset.oc, dados.motivo), 'Ocorrência anulada.'));
+      }
+    };
+  });
+}
+// No card: "Abonar" quando há atraso ou retorno antecipado sem abono (só a gestão).
+function abonarCardHTML(os, st) {
+  if (!podeAbonar() || !st || !Array.isArray(st.ocorrencias)) return '';
+  const n = st.ocorrencias.filter(o => o.abonavel && !o.abonado).length;
+  return n ? `<button class="btn-ghost btn-sm card-abonar" data-abonar-os="${esc(os.id)}" title="Abonar o atraso ou o retorno antecipado, com motivo">Abonar</button>` : '';
+}
+function abonarDoCard(osId) {
+  const os = STORE.getOS(osId);
+  if (!os) return;
+  const st = statusEntregaDe(os);
+  abonarOcorrenciaEm(os, st && st.ocorrencias, (mudar, ok) => gravarNaOSF17(osId, mudar, ok));
 }
 /* CANCELAR A O.S. (só admin e pcp): o motivo é obrigatório (15 letras ou mais,
    a mesma frase do servidor). Grava o PEDIDO no rascunho da hora; o servidor
@@ -4480,6 +4684,7 @@ function desfazerCancelamentoDaFicha() {
 function ligarStatusEntregaDaFicha() {
   const c = document.getElementById('btn-cancelar-os'); if (c) c.onclick = cancelarOSDaFicha;
   const u = document.getElementById('btn-desfazer-cancelamento'); if (u) u.onclick = desfazerCancelamentoDaFicha;
+  ligarOcorrenciasDaFicha();
 }
 
 function osCardHTML(os) {
@@ -4585,7 +4790,7 @@ function osCardHTML(os) {
         ${arquivarBtn}
       </div>
       </details>
-      <div class="card-principal">${prazoPrincipalHTML(os)}<small>${esc(os.responsavelPCP || OPERACAO.equipeTexto(os, ', ') || 'Responsável a definir')}</small>${pp ? `<p>${esc(pp.label)}</p>` : ''}${ctaBtn}${avisarBtn}</div>
+      <div class="card-principal">${prazoPrincipalHTML(os)}<small>${esc(os.responsavelPCP || OPERACAO.equipeTexto(os, ', ') || 'Responsável a definir')}</small>${pp ? `<p>${esc(pp.label)}</p>` : ''}${ctaBtn}${avisarBtn}${abonarCardHTML(os, stE)}</div>
     </div>`;
 }
 
@@ -4720,6 +4925,10 @@ function bindCardClicks(container) {
       const os = STORE.getOS(c.dataset.osId);
       if (os) openModal(os);
     };
+  });
+  // F17: "Abonar" direto no card (só a gestão).
+  $$('[data-abonar-os]', container).forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); abonarDoCard(b.dataset.abonarOs); };
   });
   // Item 6: botão "Finalizar Serviço" direto no card.
   $$('[data-finalizar-os]', container).forEach(b => {

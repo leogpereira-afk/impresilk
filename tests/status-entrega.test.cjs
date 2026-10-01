@@ -81,13 +81,18 @@ test('precedência: retrabalho com atraso mostra Retrabalho e diz que também at
   assert.deepEqual(estados(ae), ['atraso', 'execucao']);assert.equal(ae.entregue, false);
 });
 
-test('retorno antecipado: "sem dado" até a F17, mesmo com o retorno antes do previsto', () => {
-  // Caso ruim: retorno previsto 17:00, a equipe voltou às 10:00. Ainda não há régua (tolerância, abono, volta).
+/* TROCADO DE PROPÓSITO NA F17 (30/09/2026): o retorno antecipado passou a ser
+   medido pela chegada conferida da gestão (tests/ocorrencias-f17.test.cjs).
+   Aqui fica o que continua: a hora que a EQUIPE anotou é só declaração, e
+   sem chegada conferida o retorno é "sem dado", nunca perda. */
+test('retorno antecipado: a hora anotada pela equipe é declaração; sem chegada conferida, "sem dado"', () => {
+  // Caso ruim: retorno previsto 17:00, a equipe anotou 10:00. Quem decide é a chegada conferida pela gestão, que não veio.
   const o = os({...fin('2026-09-10'), retornoPrevisto:[{dia:'2026-09-10', hora:'17:00'}], horaSaida:'08:00', horaRetorno:'10:00', retornoEm:'2026-09-10T13:00:00.000Z'});
   const s = st(o, HOJE, R.REGRA_EMBUTIDA);
   assert.equal(s.estado, 'no_prazo');
   assert.ok(!estados(s).includes('retorno_antecipado'));
   assert.equal(s.retornoAntecipado.situacao, 'sem dado');
+  assert.match(s.retornoAntecipado.motivo, /a equipe anotou 10:00, que é só declaração/);
   assert.ok(!s.perdas.includes('retornoAntecipado'));
 });
 

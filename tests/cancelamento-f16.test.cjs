@@ -313,7 +313,10 @@ test('tela: selo no card e na ficha; Cancelar O.S. com motivo só para a gestão
   assert.match(ficha, /class="st-entrega lock-allow"/, 'vale na O.S. finalizada (a baixa fora da carteira)');
   // A baixa fora da carteira depois do corte, sem lançamento: neutra, "a lançar" (revisão da F16), não "No prazo".
   assert.match(ficha, /selo-entrega se-entregue/);assert.match(ficha, /Entregue \(baixa do ERP a lançar\)/);assert.match(ficha, /Baixa do ERP em 22\/09, ainda a lançar/);
-  assert.match(ficha, /Retorno antecipado: sem dado ainda\./);
+  /* TROCADO DE PROPÓSITO NA F17 (30/09/2026): o retorno antecipado deixou de
+     ser "sem dado ainda" e passou a ser medido. Esta O.S. não tem retorno
+     previsto digitado: não há perda (decisão do dono). */
+  assert.match(ficha, /<strong>Retorno antecipado:<\/strong> sem retorno previsto\. Sem retorno previsto digitado: não há perda/);
   assert.match(ficha, /id="btn-cancelar-os">Cancelar O\.S\.</);
   // Caso ruim: motivo curto. O diálogo mostra a frase e não grava nada.
   b.run('cancelarOSDaFicha()');

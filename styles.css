@@ -3768,3 +3768,39 @@ img.perf-logo{object-fit:cover}
 .lote-g-volta.compacta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
 .lote-volta-resumo{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;flex:1 1 240px;min-width:0}
 .lote-volta-resumo small{color:#526378}
+
+/* ── Ocorrências, retorno antecipado e abonos (F17, 30/09/2026) ────────────
+   Na ficha (dentro do Status da entrega), no card (Abonar) e no Fechar o
+   dia (a linha e a volta). Perda em vermelho, abonada em azul, anulada
+   riscada. Botões com 40px de toque. Só classes novas. */
+.selo-entrega.se-abonado { background: #e0f2fe; color: #075985; }
+.st-ent-retorno.ruim { color: #9a3412; }
+.st-ent-retorno.abonado { color: #075985; }
+.st-ent-retorno.ok { color: #166534; }
+.st-ocorrencias { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.oc-lista { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.oc-linha { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.oc-linha > div:first-child { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.oc-linha small { color: var(--muted); }
+.oc-linha.oc-anulada strong { text-decoration: line-through; color: var(--muted); }
+.oc-acoes button { min-height: 40px; }
+.oc-selo { display: inline-block; padding: 0 6px; border-radius: 999px; font-size: .66rem; font-weight: 700; vertical-align: middle; }
+.oc-selo.perda { background: #fee2e2; color: #b91c1c; }
+.oc-selo.abonado { background: #e0f2fe; color: #075985; }
+.oc-selo.volta { background: #f1f5f9; color: #334155; }
+.oc-selo.manual { background: #fef3c7; color: #92400e; }
+.oc-selo.anulada { background: #f1f5f9; color: #64748b; }
+.oc-pend { color: #92400e !important; }
+.card-principal .card-abonar { min-height: 40px; justify-self: start; }
+.volta-oc-linha { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.volta-oc-linha select, .volta-oc-linha input { min-height: 40px; flex: 1 1 160px; min-width: 0; }
+.lote-oc { grid-column: 1 / -1; list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.lote-oc-item { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; font-size: .8rem; padding: 6px 8px; border-radius: 8px; border: 1px solid #e2e8f0; background: #f8fafc; color: #163654; }
+.lote-oc-item > span { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.lote-oc-item.perda { border-color: #fecaca; background: #fef2f2; color: #7f1d1d; }
+.lote-oc-item.abonada { border-color: #bae6fd; background: #f0f9ff; color: #075985; }
+.lote-retorno { margin: 0; font-size: .82rem; padding: 6px 8px; border-radius: 8px; overflow-wrap: anywhere; }
+.lote-retorno.ruim { background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }
+.lote-retorno.abonado { background: #f0f9ff; color: #075985; border: 1px solid #bae6fd; }
+.lote-retorno.ok { color: #166534; }
+.lote-g-oc { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: .78rem; color: #526378; }

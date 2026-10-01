@@ -1,6 +1,6 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, guardarAgendaLog, podarCarimbosF15, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
-import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas } from "../_shared/pcp-status.mjs";
+import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, chegadaConferida } from "../_shared/pcp-status.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -1296,7 +1296,19 @@ Deno.serve(async (req: Request) => {
         const veioChegada = Object.prototype.hasOwnProperty.call(os, "retornoConferido") ? os.retornoConferido : undefined;
         // A divisão da equipe que o aparelho mandou (F08), antes da preservação.
         const veioAlocacao = Object.prototype.hasOwnProperty.call(os, "alocacao") ? os.alocacao : undefined;
+        // As ocorrências manuais e os abonos (F17), antes da preservação: só os PEDIDOS entram.
+        const veioOcorrencias = Object.prototype.hasOwnProperty.call(os, "ocorrencias") ? os.ocorrencias : undefined;
+        const veioAbonos = Object.prototype.hasOwnProperty.call(os, "abonos") ? os.abonos : undefined;
         trocarOS(preservarAusentes(os, existing, { podeLimpar: !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp) }));
+        /* O RETRABALHO GRAVADO SÓ A GESTÃO DESMARCA (F17). Regras em _shared
+           (guardarRetrabalho): marcar vale na hora, venha de onde vier;
+           montagem com senha, operação e máquina ficam com o gravado, com
+           aviso para quem tem senha. O toque já partiu do gravado na mescla. */
+        {
+          const gr = guardarRetrabalho(os, existing, { pode: !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp), avisar: !ehMaquina && !ehToqueNoNome });
+          trocarOS(gr.os);
+          if (gr.aviso) avisosToque.push(gr.aviso);
+        }
         /* ERP DIZ ENTREGUE, PCP TEM SALDO (E7). Regras em _shared
            (guardarSaldoERP): a marca da baixa (erpComSaldo) é só do servidor,
            e a cópia do aparelho não a cria nem a apaga; o "Manter aberta"
@@ -1508,6 +1520,50 @@ Deno.serve(async (req: Request) => {
            marca que volta (Desfazer, Sobrescrever) reusa o ID do par que o
            servidor ja carimbou; nome de outra pessoa fica sem ID. O que o
            aparelho mandou como ID nunca entra. Sem carimbo novo, nem le o RH. */
+        /* OCORRÊNCIAS MANUAIS E ABONOS (F17). Regras em _shared/pcp-status.mjs
+           (guardarOcorrencias, guardarAbonos): só acréscimo a partir do
+           gravado; só o PEDIDO entra (registrar, anular, abonar, revogar); só
+           admin e pcp; autor e hora do crachá e daqui; nada é 422. O abono só
+           aponta ocorrência que a O.S. tem DEPOIS das regras acima (a chegada
+           e a conferência deste mesmo envio contam), abonável (atraso e
+           retorno antecipado) e sem outro abono valendo. O retorno antecipado
+           é medido pela volta: as O.S. com a mesma chegada conferida são lidas
+           do banco só quando um abono novo aponta para ele; a regra do dia
+           (tolerância) também. Falha dessas leituras cai na O.S. sozinha e na
+           tolerância embutida. O RH só é lido quando algo muda. */
+        {
+          const gestaoF17 = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
+          const avisarF17 = !ehMaquina && !ehToqueNoNome;
+          const agoraF17 = new Date().toISOString();
+          const rodarOc = (autor: any) => guardarOcorrencias(veioOcorrencias, os, existing, autor, agoraF17, { pode: gestaoF17, avisar: avisarF17 });
+          let go = rodarOc({ nome: String(cracha?.nome || cracha?.sub || ""), login: String(cracha?.sub ?? ""), porId: "" });
+          if (go.mudou) go = rodarOc(await autorAuditoria());
+          trocarOS(go.os);
+          avisosToque.push(...go.avisos);
+          const pedidos = gestaoF17 ? abonosPedidos(veioAbonos, existing) : [];
+          let volta: any[] = [os], regraDia: any = null;
+          const alvoRetorno = pedidos.some((p: any) => String(p?.ocorrenciaId ?? "") === `${os.id}:retorno_antecipado`);
+          const chegadaF17 = alvoRetorno ? chegadaConferida(os) : null;
+          if (chegadaF17) {
+            try {
+              const { data, error } = await sb.from("pcp_registros").select("registro").eq("colecao", "os").eq("apagado", false)
+                .eq("registro->retornoConferido->>dia", chegadaF17.dia).limit(300);
+              if (error) throw new Error(error.message);
+              volta = voltaDoRetorno(os, (data || []).map((r: any) => r.registro).filter((r: any) => r && r.id !== os.id));
+            } catch { volta = [os]; }
+            try {
+              const { data, error } = await sb.from("pcp_registros").select("registro").eq("colecao", "performance_regras").eq("apagado", false).limit(1000);
+              if (error) throw new Error(error.message);
+              regraDia = REGRAS.regraVigente((data || []).map((r: any) => r.registro), chegadaF17.dia);
+            } catch { regraDia = null; }
+          }
+          const ocorrenciasF17 = pedidos.length ? ocorrenciasDaOS(os, regraDia, volta, perfDia(agoraF17)) : [];
+          const rodarAb = (autor: any) => guardarAbonos(veioAbonos, os, existing, autor, agoraF17, { pode: gestaoF17, avisar: avisarF17, ocorrencias: ocorrenciasF17 });
+          let ga = rodarAb({ nome: String(cracha?.nome || cracha?.sub || ""), login: String(cracha?.sub ?? ""), porId: "" });
+          if (ga.mudou) ga = rodarAb(await autorAuditoria());
+          trocarOS(ga.os);
+          avisosToque.push(...ga.avisos);
+        }
         const executado = carimbarExecucao(os, existing, cracha?.nome || cracha?.sub || "Integração", new Date().toISOString());
         const autorCarimbo = carimbosQueMudaram(executado, existing).length ? await autorAuditoria() : { nome: "", login: "", porId: "" };
         const gravar = { ...carimbarIds(executado, existing, autorCarimbo), rev: revAtual + 1 };

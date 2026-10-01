@@ -925,6 +925,58 @@ const LOTE = (() => {
     return rel;
   }
 
+  /* ─────────────────────────────── OCORRÊNCIAS E ABONOS (F17) ────────── */
+  /* No lote, abonar, revogar, registrar e anular são AÇÕES NA HORA, fora do
+     rascunho e do Desfazer do lote (que não desfaria: as duas listas só
+     crescem). Cada uma relê a O.S. do STORE, põe o PEDIDO (OPERACAO.pedir…)
+     e grava; autor e hora são do servidor, que confere tudo de novo. Só
+     admin e pcp. O retorno antecipado é medido pela volta, com a regra do
+     dia (tolerância). */
+  const temF17 = () => typeof OPERACAO !== 'undefined' && typeof OPERACAO.pedirAbono === 'function';
+  function regraDoDia(dia) {
+    try { return typeof REGRAS !== 'undefined' && typeof versoesRegrasCasa === 'function' ? REGRAS.regraVigente(versoesRegrasCasa(), dia) : null; } catch (e) { return null; }
+  }
+  function contextoF17(o) {
+    const S = loja(), ch = temF17() ? OPERACAO.chegadaConferida(o) : null;
+    const volta = ch && S && typeof S.getAllOS === 'function' ? OPERACAO.voltaNaLista(o, S.getAllOS()) : null;
+    return {regra: regraDoDia(ch ? ch.dia : hoje()), volta, hoje: hoje()};
+  }
+  function ocorrenciasDe(o) {
+    if (!temF17()) return [];
+    const c = contextoF17(o);
+    try { return OPERACAO.ocorrenciasDaOS(o, c.regra, c.volta, c.hoje); } catch (e) { return []; }
+  }
+  function gravarF17(osId, mudar) {
+    const S = loja();
+    const atual = S && typeof S.getOS === 'function' ? S.getOS(osId) : null;
+    if (!objeto(atual)) return 'Esta O.S. não está mais neste aparelho.';
+    const nova = copia(atual);
+    const erro = mudar(nova);
+    if (erro) return erro;
+    nova.atualizadoEm = emUnico(); nova.atualizadoPor = nomeUsuario();
+    S.saveOS(nova);
+    return '';
+  }
+  // Abonar, revogar, anular uma O.S.; registrar a ocorrência em todas as O.S. da volta (o mesmo grupo).
+  function acaoF17(acao, ds, x, gx) {
+    if (!temF17()) return 'Atualize a página: esta aba não tem as ocorrências.';
+    if (acao === 'ocorrencia-volta') {
+      if (!gx) return 'Esta volta não está mais no lote.';
+      const grupo = OPERACAO.novoIdF17('vl');
+      for (const o of gx.g.os) {
+        const erro = gravarF17(o.id, n => OPERACAO.pedirOcorrencia(n, {tipo: ds.tipo, item: ds.item, obs: ds.obs, fonte: 'lote', dia: gx.g.dia, grupo}));
+        if (erro) return erro;
+      }
+      return '';
+    }
+    if (!x) return 'Esta O.S. não está mais no lote.';
+    if (acao === 'abonar') return gravarF17(x.o.id, n => OPERACAO.pedirAbono(n, String(ds.oc || ''), ds.motivo, contextoF17(n)));
+    if (acao === 'revogar-abono') return gravarF17(x.o.id, n => OPERACAO.pedirRevogarAbono(n, String(ds.ab || '')));
+    if (acao === 'anular-ocorrencia') return gravarF17(x.o.id, n => OPERACAO.pedirAnularOcorrencia(n, String(ds.oc || ''), ds.motivo));
+    return 'Ação desconhecida.';
+  }
+  const ACOES_F17 = new Set(['abonar', 'revogar-abono', 'ocorrencia-volta', 'anular-ocorrencia']);
+
   /* ─────────────────────────────── AÇÕES DA TELA ───────────────────────── */
   function achar(osId) {
     const S = loja();
@@ -960,6 +1012,7 @@ const LOTE = (() => {
     const x = ds.os ? achar(ds.os) : null;
     const gx = ds.grupo ? acharGrupo(ds.grupo) : null;
     const precisa = () => { if (!x) erro = 'Esta O.S. não está mais no lote.'; return !!x; };
+    if (ACOES_F17.has(acao)) return acaoF17(acao, ds, x, gx);
     switch (acao) {
       case 'data': if (precisa()) { x.l.data = String(ds.valor || ''); if (!diaOk(x.l.data)) x.l.confirmada = false; } break;
       case 'retrabalho-nao':
@@ -1179,6 +1232,38 @@ const LOTE = (() => {
   }
   // O motivo, o que ficou (notas) e o aviso do servidor no Desfazer de uma O.S.
   const extraDesfazer = d => { const partes = [d.motivo, ...lista(d.notas), ...lista(d.avisos)].map(texto).filter(Boolean); return partes.length ? ' (' + escL(partes.join('; ')) + ')' : ''; };
+  /* AS OCORRÊNCIAS DA LINHA (F17): as perdas (atraso, retrabalho, retorno
+     antecipado) e as registradas à mão, com Abonar ou Revogar. As da
+     conferência da volta já estão no grupo. */
+  function ocorrenciasLinhaHTML(o) {
+    const xs = ocorrenciasDe(o).filter(oc => !oc.volta && !oc.anulada);
+    if (!xs.length) return '';
+    const item = oc => {
+      const ab = oc.abono;
+      const pend = oc.pendente || (ab && (ab.pendente || ab.revogacaoPendente)) ? ' <small>(a enviar)</small>' : '';
+      const botao = oc.abonavel && !oc.abonado
+        ? `<button type="button" class="lote-b" data-lote-acao="abonar" data-os="${escL(o.id)}" data-oc="${escL(oc.id)}" data-lote-k="abonar:${escL(oc.id)}">Abonar</button>`
+        : oc.abonado && ab && !ab.pendente ? `<button type="button" class="lote-b" data-lote-acao="revogar-abono" data-os="${escL(o.id)}" data-ab="${escL(ab.id)}" data-lote-k="revogar:${escL(ab.id)}">Revogar abono</button>`
+        : oc.origem === 'manual' ? `<button type="button" class="lote-b" data-lote-acao="anular-ocorrencia" data-os="${escL(o.id)}" data-oc="${escL(oc.id)}" data-lote-k="anular:${escL(oc.id)}">Anular</button>` : '';
+      return `<li class="lote-oc-item${oc.abonado ? ' abonada' : oc.perda ? ' perda' : ''}"><span><strong>${escL(oc.rotulo)}${oc.abonado ? ' (abonada)' : ''}</strong>${pend}: ${escL(oc.motivo)}</span>${botao}</li>`;
+    };
+    return `<ul class="lote-oc" aria-label="Ocorrências da O.S.">${xs.map(item).join('')}</ul>`;
+  }
+  /* O RETORNO DA VOLTA (F17), pela chegada digitada no lote (antes de salvar)
+     ou pela gravada: a régua do status (pela volta, com a tolerância da
+     regra do dia). Mostra onde a perda cai. */
+  function retornoGrupoHTML(g, rg) {
+    if (!temF17() || g.semCarro) return '';
+    const h = horaOk(rg.chegada) ? rg.chegada : '';
+    const membros = g.os.map(o => h ? {...o, retornoConferido: {dia: g.dia, hora: h}} : o);
+    if (!membros.some(o => OPERACAO.chegadaConferida(o))) return '';
+    const regra = regraDoDia(g.dia);
+    const rs = membros.map(o => ({o, r: OPERACAO.retornoAntecipado(o, regra, membros)}));
+    const conta = rs.find(x => x.r.situacao === 'antecipado' || x.r.situacao === 'abonado');
+    if (conta) return `<p class="lote-retorno ${conta.r.situacao === 'abonado' ? 'abonado' : 'ruim'}">↩ <strong>Retorno antecipado${conta.r.situacao === 'abonado' ? ' (abonado)' : ''}</strong> na O.S ${escL(conta.o.numero || '')}: ${escL(conta.r.motivo)}.</p>`;
+    const ok = rs.find(x => x.r.situacao === 'no horário');
+    return ok ? `<p class="lote-retorno ok">✓ Chegada no horário: ${escL(ok.r.motivo)}.</p>` : '';
+  }
   function linhaHTML(o, g, rg, ultimo) {
     const l = linhaDe(o, g);
     const f = faltasDaLinha(o, l, g, rg);
@@ -1206,6 +1291,7 @@ const LOTE = (() => {
       ${retrab}
       <div class="lote-l-entrega">${entregaBtn}<button type="button" class="lote-b" aria-expanded="${est.itensAberto === o.id}" data-lote-acao="itens" data-os="${escL(o.id)}" data-lote-k="itens:${escL(o.id)}">${aberta(o) && !e7 ? 'Marcar a parte' : 'Ver os itens'}</button></div>
       ${declHTML}
+      ${ocorrenciasLinhaHTML(o)}
       ${baixaERP(o) ? saldoItensHTML(o, true) : ''}
       <p class="lote-faltas">${f.trava.length ? `<span class="trava">Falta: ${escL(f.trava.join(', '))}.</span> ` : ''}${f.nota.length ? `<span class="nota">Ainda: ${escL(f.nota.join(', '))}.</span>` : ''}${!f.trava.length && !f.nota.length ? '<span class="nota">Tudo preenchido.</span>' : ''}</p>
       <div class="lote-l-acoes">${l.confirmada
@@ -1258,12 +1344,14 @@ const LOTE = (() => {
       ${equipeBlocoHTML(g, rg)}
       ${alocAberto ? `<div class="lote-aloc aloc-host" data-lote-aloc="${escL(g.chave)}"></div>` : ''}
       ${g.semCarro ? '' : `<div class="lote-g-chegada"><label>Chegada do carro (conferida) <input type="time" value="${escL(rg.chegada || '')}" data-lote-campo="chegada" data-grupo="${escL(g.chave)}" data-lote-k="chegada:${escL(g.chave)}"></label>
-        <small>${comCarro(g) ? '' : 'carro não informado: a chegada e a conferência da volta não são pedidas · '}${prev ? `retorno previsto ${escL(prev)}` : 'sem retorno previsto'}${disse ? ` · a equipe anotou ${escL(disse)}` : ''}</small></div>
+        <small>${comCarro(g) ? '' : 'carro não informado: a chegada e a conferência da volta não são pedidas · '}${prev ? `retorno previsto ${escL(prev)}` : 'sem retorno previsto'}${disse ? ` · a equipe anotou ${escL(disse)} (só declaração)` : ''}</small></div>
+      ${retornoGrupoHTML(g, rg)}
       ${naoPedida ? `<div class="lote-g-volta compacta"><span class="lote-g-rot">Conferência da volta</span><span class="lote-volta-resumo">Carro não informado: não é pedida.</span><button type="button" class="lote-b" data-lote-acao="volta-rever" data-grupo="${escL(g.chave)}" data-lote-k="rever:${escL(g.chave)}">Conferir</button></div>` : compacta ? `<div class="lote-g-volta compacta"><span class="lote-g-rot">Conferência da volta</span><span class="lote-volta-resumo">${PERGUNTAS().map(selo).join(' ')}${conf.obs ? ` <span class="volta-obs">“${escL(conf.obs)}”</span>` : ''}${quemConferiu.por ? ` <small>por ${escL(quemConferiu.por)}</small>` : ''}</span><button type="button" class="lote-b" data-lote-acao="volta-rever" data-grupo="${escL(g.chave)}" data-lote-k="rever:${escL(g.chave)}">Rever</button></div>` : `<div class="lote-g-volta"><span class="lote-g-rot">Conferência da volta</span>${PERGUNTAS().map(seg).join('')}
         <label class="lote-volta-obs">O que faltou ou precisa de atenção <input maxlength="300" value="${escL(conf.obs || '')}" data-lote-campo="volta-obs" data-grupo="${escL(g.chave)}" data-lote-k="obs:${escL(g.chave)}" placeholder="ex.: faltou a escada de 6 m"></label>
         ${declVolta && typeof voltaEquipeHTML === 'function' ? voltaEquipeHTML(declVolta, {fotos: false}) : ''}
         ${divergem ? '<p class="lote-aviso" role="note">As O.S. desta volta têm respostas diferentes (ou só parte foi conferida). Mexer na conferência põe a mesma resposta em todas.</p>' : ''}
         <p class="lote-dica">Vale para todas as O.S. da volta. Em branco não conta como OK. Avaria não entra na nota.</p></div>`}`}
+      ${temF17() ? `<div class="lote-g-oc"><button type="button" class="lote-b" data-lote-acao="ocorrencia-volta" data-grupo="${escL(g.chave)}" data-lote-k="ocvolta:${escL(g.chave)}">+ Ocorrência de equipamento</button><small>Faltante ou danificado: fica em cada O.S. da volta, com o seu nome.</small></div>` : ''}
       <div class="lote-linhas">${g.os.map(o => linhaHTML(o, g, rg, ultimo)).join('')}</div>
     </section>`;
   }
@@ -1443,6 +1531,7 @@ const LOTE = (() => {
       if (acao === 'desfazer-lote') { void desfazerPelaTela(ds.rel); return; }
       if (acao === 'retrabalho-sim') { marcarFoco(focoAntes); abrirRetrabalho(ds.os); return; }
       if (acao === 'erp-lista') { if (typeof abrirListaErpSaldo === 'function') abrirListaErpSaldo(); return; }
+      if (ACOES_F17.has(acao)) { pelaTelaF17(acao, ds); marcarFoco(focoAntes); return; }
       const itensAntes = est.itensAberto, alocAntes = est.alocAberto;
       const erro = executar({acao, os: ds.os, grupo: ds.grupo, k: ds.k, v: ds.v});
       if (erro && typeof toast === 'function') toast(erro, 'error');
@@ -1484,6 +1573,36 @@ const LOTE = (() => {
       if (telaAtiva()) pintarParte({os: [osId]});
       focarLinha(osId);
     }, {rotulo: 'Voltar ao lote', aoVoltar: () => focarLinha(osId)});
+  }
+  /* AS AÇÕES DA F17 PELA TELA: o diálogo da ficha (abrirDialogoF17, app.js)
+     pede o motivo ou o item; a frase de erro volta para ele. */
+  function pelaTelaF17(acao, ds) {
+    const fim = erro => { if (!erro) { if (typeof toast === 'function') toast(acao === 'abonar' ? 'Abono registrado.' : acao === 'revogar-abono' ? 'Abono revogado.' : acao === 'anular-ocorrencia' ? 'Ocorrência anulada.' : 'Ocorrência registrada nas O.S. da volta.', 'success'); if (telaAtiva()) render(); } return erro; };
+    const rodar = extra => fim(executar({acao, os: ds.os, grupo: ds.grupo, oc: ds.oc, ab: ds.ab, ...extra}));
+    if (acao === 'revogar-abono') {
+      if (!confirmar('Revogar o abono? A ocorrência volta a contar. O abono fica no histórico, marcado como revogado.')) return;
+      const erro = rodar({});
+      if (erro && typeof toast === 'function') toast(erro, 'error');
+      return;
+    }
+    if (typeof abrirDialogoF17 !== 'function') { if (typeof toast === 'function') toast('Atualize a página: o diálogo das ocorrências não carregou nesta aba.', 'error'); return; }
+    if (acao === 'abonar') {
+      const x = achar(ds.os);
+      const oc = x ? ocorrenciasDe(x.o).find(c => c.id === ds.oc) : null;
+      if (!oc) { if (typeof toast === 'function') toast('Esta ocorrência não está mais na O.S.', 'error'); return; }
+      abrirDialogoF17({titulo: `Abonar na O.S ${x.o.numero || ''}`, texto: typeof TEXTO_ABONO === 'string' ? TEXTO_ABONO : '', escolhas: [oc], botao: 'Abonar',
+        rotuloTexto: 'Motivo do abono (15 letras ou mais)'}, d => rodar({motivo: d.motivo}));
+      return;
+    }
+    if (acao === 'anular-ocorrencia') {
+      abrirDialogoF17({titulo: 'Anular a ocorrência', texto: 'A ocorrência fica no histórico, marcada como anulada, com o seu nome.', botao: 'Anular', rotuloTexto: 'Motivo (opcional)', registrar: false, semObrigatorio: true},
+        d => rodar({motivo: d.motivo}));
+      return;
+    }
+    const gx = acharGrupo(ds.grupo);
+    abrirDialogoF17({titulo: gx ? `da volta de ${dataBR(gx.g.dia)}` : '', registrar: true, prefixo: 'Registrar ocorrência',
+      texto: `Equipamento faltante ou danificado, ou outra ocorrência. Fica em cada O.S. da volta (${gx ? gx.g.os.length : 0}), com o seu nome, e não se apaga: se foi engano, use Anular.`,
+      rotuloTexto: 'O que aconteceu', botao: 'Registrar'}, d => rodar({tipo: d.tipo, item: d.item, obs: d.motivo}));
   }
   async function salvarPelaTela() {
     if (est.salvando) return;

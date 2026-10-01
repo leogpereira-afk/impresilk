@@ -182,6 +182,26 @@ lista.push(base('LT3',{cliente:'Cliente fictício LT3 · pelo celular',equipe:['
  voltaEquipe:{carroLimpo:'sim',carroArrumado:'sim',equipamentosOk:'sim',semAvaria:'sim',por:'Ana',em:hoje+'T15:06:00Z'},
  itens:[{uid:'LT3:1:1',item:'1',descricao:'Placa ACM 2x1',qtde:'10',subtotal:'2000',entregas:[pvDecl('pv-lt3a',6,hoje)]},{uid:'LT3:2:1',item:'2',descricao:'Totem de sinalização',qtde:'2',subtotal:'600'}]}));
 lista.push(base('LT4',{cliente:'Cliente fictício LT4 · entrega em partes',equipe:['900004','900007'],veiculo:'Carro 2',valorTotal:5400,saidaEm:hoje+'T07:30:00',horaSaida:'07:30',itens:pvItens('LT4')}));
+/* RETORNO ANTECIPADO, OCORRÊNCIAS E ABONOS (F17, 30/09/2026): uma volta de hoje
+   com 3 O.S. (Carro 4, a dupla 900001 e 900002) que chegou às 15:40, 50
+   minutos antes do retorno previsto da última (16:30), com a conferência da
+   volta dizendo que faltou equipamento; e uma O.S. entregue com atraso, já
+   abonada (a remarcação pedida pelo cliente), com uma ocorrência registrada.
+   #ficha=RA2&bloco=pcp abre a ficha; #aba=entregas&lote=dia&intro=0, o lote.
+   Tudo fictício. */
+const pvChegada={dia:hoje,hora:'15:40',fonte:'lote',por:'Gestor de teste',em:hoje+'T18:41:00.000Z',recebidoEm:hoje+'T18:41:05.000Z'};
+const pvConfFalta={carroLimpo:'sim',carroArrumado:'sim',equipamentosOk:'nao',semAvaria:'sim',obs:'faltou a escada de 6 m',por:'Gestor de teste',em:hoje+'T18:45:00.000Z'};
+const pvVoltaRA=(id,cliente,previsto,saida)=>base(id,{cliente,equipe:['900001','900002'],veiculo:'Carro 4',valorTotal:2800,prazoCombinado:{data:hoje,fonte:'agenda'},
+ saidaEm:hoje+'T'+saida+':00',horaSaida:saida,horaRetorno:'17:00',retornoEm:hoje+'T17:00:00',finalizadaEm:hoje+'T15:30:00',finalizadoPor:'Gestor de teste',
+ retornoPrevisto:[{dia:hoje,hora:previsto,por:'Gestor de teste',em:deslocar(-1)+'T12:00:00Z'}],retornoConferido:pvChegada,retornoConf:pvConfFalta,itens:pvItens(id),
+ ocorrencias:[{id:'oc-pv'+id.toLowerCase()+'escada',tipo:'equipamento_faltante',item:'Escada de 6 m',obs:'não voltou no carro',fonte:'volta',dia:hoje,grupo:'vl-previewvolta4',por:'Gestor de teste',em:hoje+'T18:46:00Z'}]});
+lista.push(pvVoltaRA('RA1','Cliente fictício RA1 · placa de obra','11:00','08:00'));
+lista.push(pvVoltaRA('RA2','Cliente fictício RA2 · fachada em ACM','16:30','13:00'));
+lista.push(pvVoltaRA('RA3','Cliente fictício RA3 · adesivagem','14:00','11:30'));
+lista.push(base('AB1',{cliente:'Cliente fictício AB1 · remarcado pelo cliente',instalacao:{data:hoje,periodo:'Manhã'},equipe:['900004','900007'],veiculo:'Carro 2',valorTotal:3900,
+ prazoCombinado:{data:deslocar(-4),fonte:'agenda'},saidaEm:hoje+'T08:00:00',horaSaida:'08:00',horaRetorno:'11:30',retornoEm:hoje+'T11:30:00',finalizadaEm:hoje+'T11:40:00',finalizadoPor:'Gestor de teste',
+ retrabalho:false,abonos:[{id:'ab-preview0001',ocorrenciaId:'AB1:atraso',tipo:'atraso',motivo:'Cliente pediu para remarcar a instalação por telefone',por:'Gestor de teste',em:hoje+'T12:00:00Z'}],
+ ocorrencias:[{id:'oc-preview0001',tipo:'equipamento_danificado',item:'Furadeira de impacto',obs:'cabo partido na volta',fonte:'ficha',dia:hoje,por:'Gestor de teste',em:hoje+'T12:05:00Z'}],itens:pvItens('AB1')}));
 /* A FILA DE LANÇAMENTO COMO NO PRINT DO DONO (revisão de Entregas, 29/09/2026).
    No ar a fila passou de 50 baixas do ERP esperando lançamento, quase todas sem
    equipe. Aqui são 56 (57 com a 109, que já estava na prévia), com valor
@@ -222,11 +242,11 @@ for(let m=1;m<=Number(hoje.slice(5,7));m++){
    (FINALIZADO sem data de entrega, um item com problema) manda marcar na
    ficha; a E7C saiu da carteira aberta e o pacote de entregues do ERP a traz
    com a data. Aparecem em Entregas para admin e pcp (#aba=entregas). Fictícias. */
-const pvItens=(id,marcas)=>[1,2,3,4,5].map(k=>({uid:id+':'+k+':1',item:String(k),descricao:['Placa ACM 2x1','Adesivo de vitrine','Totem de sinalização','Lona com estrutura','Letreiro luminoso'][k-1],qtde:k===1?'10':'1',subtotal:'400.00',...(marcas[k]?{entregas:marcas[k]}:{})}));
+const pvItensE7=(id,marcas)=>[1,2,3,4,5].map(k=>({uid:id+':'+k+':1',item:String(k),descricao:['Placa ACM 2x1','Adesivo de vitrine','Totem de sinalização','Lona com estrutura','Letreiro luminoso'][k-1],qtde:k===1?'10':'1',subtotal:'400.00',...(marcas[k]?{entregas:marcas[k]}:{})}));
 const pvE7=(id,erp,extra={})=>base(id,{cliente:'Cliente fictício '+id+' · entrega parcial',servico:'Fachada em ACM',instalacao:{data:deslocar(-6),periodo:'Manhã'},horaSaida:'08:00',horaRetorno:'17:00',saidaEm:deslocar(-6)+'T08:00:00',retornoEm:deslocar(-6)+'T17:00:00',...erp,...extra});
-lista.push(pvE7('E7A',{erpComSaldo:{status:'ENTREGUE',dataEntregue:deslocar(-3),selo:'ENTREGUE|'+deslocar(-3),desde:deslocar(-2)+'T13:20:00.000Z',em:deslocar(-2)+'T13:20:00.000Z'}},{itens:pvItens('E7A',{1:[pvMarca('pv-7a1','entregue',6,deslocar(-6))],2:[pvDecl('pv-7a2',1,deslocar(-6))]})}));
-lista.push(pvE7('E7B',{erpComSaldo:{status:'FINALIZADO',dataEntregue:'',selo:'FINALIZADO|',desde:deslocar(-1)+'T13:20:00.000Z',em:deslocar(-1)+'T13:20:00.000Z'}},{itens:pvItens('E7B',{1:[pvMarca('pv-7b1','entregue',10,deslocar(-5))],4:[pvMarca('pv-7b4','problema',0,deslocar(-4),{motivo:'Estrutura amassada no transporte'})]})}));
-lista.push(pvE7('E7C',{erpSaiuDaCarteiraEm:deslocar(-1)+'T13:20:00.000Z'},{itens:pvItens('E7C',{2:[pvMarca('pv-7c2','entregue',1,deslocar(-5))],3:[pvMarca('pv-7c3','entregue',1,deslocar(-5))]})}));
+lista.push(pvE7('E7A',{erpComSaldo:{status:'ENTREGUE',dataEntregue:deslocar(-3),selo:'ENTREGUE|'+deslocar(-3),desde:deslocar(-2)+'T13:20:00.000Z',em:deslocar(-2)+'T13:20:00.000Z'}},{itens:pvItensE7('E7A',{1:[pvMarca('pv-7a1','entregue',6,deslocar(-6))],2:[pvDecl('pv-7a2',1,deslocar(-6))]})}));
+lista.push(pvE7('E7B',{erpComSaldo:{status:'FINALIZADO',dataEntregue:'',selo:'FINALIZADO|',desde:deslocar(-1)+'T13:20:00.000Z',em:deslocar(-1)+'T13:20:00.000Z'}},{itens:pvItensE7('E7B',{1:[pvMarca('pv-7b1','entregue',10,deslocar(-5))],4:[pvMarca('pv-7b4','problema',0,deslocar(-4),{motivo:'Estrutura amassada no transporte'})]})}));
+lista.push(pvE7('E7C',{erpSaiuDaCarteiraEm:deslocar(-1)+'T13:20:00.000Z'},{itens:pvItensE7('E7C',{2:[pvMarca('pv-7c2','entregue',1,deslocar(-5))],3:[pvMarca('pv-7c3','entregue',1,deslocar(-5))]})}));
 {const d=deslocar(-2);if(PV_ERP[d.slice(0,7)])PV_ERP[d.slice(0,7)].os.push({numero:'T-E7C',cliente:'Cliente fictício E7C · entrega parcial',servico:'Fachada em ACM',data:d,valor:2000,tipo:'externo',previsao:d});}
 const STORE={JANELA_LOCAL_DIAS:60,historico:()=>[...pvHist.values()],faixaHistorico:async()=>({de:deslocar(-120),ate:hoje}),
  buscarHistorico:async q=>{const itens=PV_ANTIGAS.filter(o=>(!q.de||o.finalizadaEm.slice(0,10)>=q.de)&&(!q.ate||o.finalizadaEm.slice(0,10)<=q.ate));for(const o of itens)pvHist.set(o.id,structuredClone(o));return {itens,truncou:false};},
@@ -263,6 +283,10 @@ document.addEventListener('DOMContentLoaded',()=>{
  // &ficha=E4A abre a ficha dessa O.S. (no bloco &bloco=, padrão itens); &papel=operacao entra como operação.
  if(pv.get('ficha'))setTimeout(()=>{openModal(STORE.getOS(pv.get('ficha')),pv.get('bloco')||'itens');},700);
  if(pv.get('rolar'))setTimeout(()=>{const alvo=document.querySelector(pv.get('rolar'));if(alvo)alvo.scrollIntoView({block:'start'});},900);
+ // &tarde=<seletor> rola até o elemento depois que o lote abriu (o rascunho pode levar até 3 s) (F17).
+ if(pv.get('tarde')){let n=0;const t=setInterval(()=>{const a=document.querySelector(pv.get('tarde'));if(a||++n>60){clearInterval(t);if(a){a.scrollIntoView({block:'start'});window.scrollBy(0,-Number(pv.get('acima')||0));}}},250);}
+ // &naFicha=<seletor> rola a ficha aberta até o elemento, abaixo do cabeçalho preso (F17).
+ if(pv.get('naFicha'))setTimeout(()=>{const m=document.querySelector('#modal-os'),a=m&&m.querySelector(pv.get('naFicha')),h=m&&m.querySelector('.modal-header');if(a){m.scrollTop+=a.getBoundingClientRect().top-m.getBoundingClientRect().top-(h?h.offsetHeight:0)-8;}},1100);
  // &antigas=1 busca as O.S. antigas; &converter=1 grava o ID (a confirmação responde sim, só na prévia).
  if(pv.get('antigas')||pv.get('converter'))setTimeout(async()=>{if(pv.get('antigas'))await buscarAntigasConferenciaCasa();if(pv.get('converter')){window.confirm=()=>true;await iniciarConversaoNomesCasa(null);}const alvo=pv.get('rolar')&&document.querySelector(pv.get('rolar'));if(alvo)alvo.scrollIntoView({block:'start'});},1000);
 });`;
