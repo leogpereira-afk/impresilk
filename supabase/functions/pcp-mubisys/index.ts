@@ -1,4 +1,4 @@
-import { atualizarOrigemERP, atualizarSituacaoERP, temTrabalhoHumano, motivoAgendaViva, carimbarUidsERP, decisaoBaixaERP, marcarErpComSaldo } from "../_shared/pcp-integridade.mjs";
+import { atualizarOrigemERP, atualizarSituacaoERP, temTrabalhoHumano, motivoAgendaViva, carimbarUidsERP, decisaoBaixaERP, marcarErpComSaldo, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-mubisys — integracao com o ERP (substitui mubisys.js + mubisys-sync.mjs)
 //
@@ -6,7 +6,8 @@ import { atualizarOrigemERP, atualizarSituacaoERP, temTrabalhoHumano, motivoAgen
 // um POST em process.env.URL -- variavel que so existe no Netlify. Juntando,
 // a dependencia some e sobra uma chamada de funcao.
 //
-// Acoes: salvarConfig, statusConfig, ping, preview, listarOS, getOS, importar.
+// Acoes: salvarConfig, statusConfig, ping, preview, listarOS, getOS, importar,
+// formatoItens (diagnostico so leitura do formato do item, so admin; E8).
 // "importar" e o que o pg_cron chama de hora em hora.
 //
 // De-para: store "integracoes" chave "mubisys" -> pcp_meta chave "mubisys";
@@ -161,6 +162,152 @@ function mapearItem(it: any, i: number) {
     valorUnit: String(pick(it, "valor_unitario", "valorUnitario", "preco", "valor") || ""),
     subtotal: String(pick(it, "sub_total", "subtotal", "valor_final", "total") || ""),
     pronto: false,
+  };
+}
+
+/* O FORMATO DE UMA LISTA DE OBJETOS DO ERP, SEM OS VALORES (E8, ação
+   formatoItens). Para cada nome de campo: os tipos que apareceram, em quantos
+   objetos ele veio e quantos valores diferentes teve (um id do item tem um
+   valor diferente por item). Lista e objeto dentro do item descem até
+   `fundo` níveis (itens_agrupados, o kit). O valor só existe aqui dentro,
+   para contar: nenhum sai na resposta. */
+const tipoDoCampo = (v: any): string => v === null || v === undefined ? "nulo"
+  : Array.isArray(v) ? "lista" : typeof v === "object" ? "objeto"
+  : typeof v === "number" ? "número" : typeof v === "boolean" ? "sim/não"
+  : String(v).trim() === "" ? "texto vazio" : /^-?\d+(?:[.,]\d+)?$/.test(String(v).trim()) ? "texto numérico" : "texto";
+export function formatoDosCampos(lista: any[], fundo = 1): any {
+  const campos: Record<string, any> = {};
+  let objetos = 0;
+  for (const o of Array.isArray(lista) ? lista : []) {
+    if (!o || typeof o !== "object" || Array.isArray(o)) continue;
+    objetos++;
+    for (const [k, v] of Object.entries(o)) {
+      const c = campos[k] ||= { tipos: [] as string[], em: 0, valores: new Set<string>(), filhos: [] as any[] };
+      c.em++;
+      const t = tipoDoCampo(v);
+      if (!c.tipos.includes(t)) c.tipos.push(t);
+      if (t === "lista") c.filhos.push(...(v as any[]));
+      else if (t === "objeto") c.filhos.push(v);
+      else if (t !== "nulo" && t !== "texto vazio") c.valores.add(String(v));
+    }
+  }
+  const out: Record<string, any> = {};
+  for (const k of Object.keys(campos).sort()) {
+    const c = campos[k];
+    out[k] = { tipos: c.tipos, em: c.em, distintos: c.valores.size,
+      ...(fundo > 0 && c.filhos.length ? { dentro: formatoDosCampos(c.filhos, fundo - 1) } : {}) };
+  }
+  return { objetos, campos: out };
+}
+/* O RETRATO DOS ITENS, SEM VALORES (E8, ação formatoItens): as perguntas que
+   decidem se a mescla dos itens pode ser ligada (MESCLA_ITENS_ERP, em _shared).
+   Só sai o que não é dado de cliente nem de preço:
+   - a POSIÇÃO de cada item, como número (é o número da linha; texto que não
+     é número sai só como "texto"), e o número que o PCP dá a ela (o
+     mapearItem usa `posicao || (i + 1)`: a posição 0 vira 1 e colide com a 1);
+   - os campos com cara de id (pelo nome, ou número único em cada item);
+   - os campos de texto do nome do produto (descricao, item, produto, nome):
+     só se veio, se veio vazio e o tamanho; e qual deles o PCP lê;
+   - o kit (itens_agrupados): quantas peças, e o valor que o PCP lê do pai
+     comparado com a soma das peças ("igual", "menor", "maior");
+   - o subtotal comparado com o valor final do mesmo item;
+   - campos com nome de entrega ou expedição. */
+const NOMES_DE_TEXTO = ["descricao", "item", "produto", "nome"];
+const ehObjeto = (v: any) => !!v && typeof v === "object" && !Array.isArray(v);
+const NUMERO_TXT = /^-?\d+(?:[.,]\d+)?$/;
+const comoNumero = (v: any): number | null => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  const t = String(v ?? "").trim();
+  return NUMERO_TXT.test(t) ? Number(t.replace(",", ".")) : null;
+};
+// A posição como número; nula quando não veio; "texto" quando não é número (o texto não sai).
+const posicaoOuNada = (v: any): number | string | null =>
+  v === null || v === undefined || String(v).trim() === "" ? null : (comoNumero(v) ?? "texto");
+const NOMES_DE_VALOR = new Set(["posicao", "quantidade", "qtde", "qtd", "valor_unitario", "valorUnitario", "preco", "valor",
+  "sub_total", "subtotal", "valor_final", "total", "largura", "altura", "pcp_largura", "pcp_altura", "desconto", "acrescimo"]);
+const nomeDeId = (k: string) => /(^|_)(id|uuid|guid|codigo|cod|seq|sequencial|chave)(_|$)/i.test(k) || /^id[A-Z]|[a-z]Id$/.test(k);
+const nomeDeEntrega = (k: string) => /entreg|expedi|baixad|separad|produzid|despach/i.test(k);
+const valorQueOPCPLe = (o: any) => comoNumero(pick(o, "sub_total", "subtotal", "valor_final", "total"));
+const comparar = (a: number | null, b: number | null) =>
+  a === null || b === null ? "sem valor" : Math.abs(a - b) < 0.005 ? "igual" : a < b ? "menor" : "maior";
+const itensDaOS = (o: any): any[] => {
+  const k = ["itens", "produtos", "items"].find(c => ehObjeto(o) && Array.isArray(o[c]));
+  return k ? o[k].filter(ehObjeto) : [];
+};
+function retratoDosItens(itens: any[]): any {
+  const posicoes = itens.map(it => posicaoOuNada(it.posicao));
+  // O mesmo que o mapearItem faz: String(pick(it, "posicao") || (i + 1)).
+  const numerosNoPCP = itens.map((it, i) => posicaoOuNada(pick(it, "posicao") || (i + 1)));
+  const numeros = posicoes.filter((p): p is number => typeof p === "number");
+  const unicos = [...new Set(numeros)].sort((a, b) => a - b);
+  const repete = (l: any[]) => l.length !== new Set(l.map(String)).size;
+  const campos = formatoDosCampos(itens, 0).campos;
+  const ids = Object.keys(campos).filter(k => !NOMES_DE_VALOR.has(k) && (nomeDeId(k) ||
+    (itens.length > 1 && campos[k].distintos === itens.length && campos[k].tipos.every((t: string) => t === "número" || t === "texto numérico"))))
+    .map(k => ({ campo: k, peloNome: nomeDeId(k),
+      // Com um item só não dá para dizer se o valor é único por item.
+      unicoPorItem: itens.length > 1 ? campos[k].distintos === itens.length && campos[k].em === itens.length : null, tipos: campos[k].tipos }));
+  const tamanho = (o: any, k: string) => !(k in o) ? "ausente" : o[k] === null ? "nulo"
+    : typeof o[k] === "string" ? o[k].trim().length : tipoDoCampo(o[k]);
+  const textos = (l: any[]) => l.map(o => Object.fromEntries(NOMES_DE_TEXTO.map(k => [k, tamanho(o, k)])));
+  const lido = (o: any) => NOMES_DE_TEXTO.find(k => o[k] != null && o[k] !== "") || "nenhum (vira 'Item')";
+  return {
+    quantidade: itens.length,
+    posicoes, numerosNoPCP,
+    posicao: {
+      comecaEm: numeros.length ? numeros[0] : null,
+      temZero: numeros.includes(0),
+      semPosicao: posicoes.filter(p => p === null).length,
+      repetida: repete(numeros),
+      repetidaNoPCP: repete(numerosNoPCP),
+      lacuna: unicos.some((n, i) => i > 0 && n - unicos[i - 1] > 1),
+      emOrdem: numeros.every((n, i) => i === 0 || n >= numeros[i - 1]),
+    },
+    idProvavel: ids,
+    textos: textos(itens),
+    textoQueOPCPLe: itens.map(lido),
+    subtotalVsFinal: itens.map(it => comparar(comoNumero(it.sub_total), comoNumero(it.valor_final))),
+    kits: itens.map((it, i) => !Array.isArray(it.itens_agrupados) || !it.itens_agrupados.length ? null : {
+      linha: i + 1,
+      pecas: it.itens_agrupados.length,
+      textoDoPai: tamanho(it, "item"),
+      textosDasPecas: textos(it.itens_agrupados.filter(ehObjeto)),
+      // O valor que o PCP grava no kit (o do pai) contra a soma das peças: "menor" é o defeito D8.
+      paiVsSomaDasPecas: comparar(valorQueOPCPLe(it), it.itens_agrupados.filter(ehObjeto)
+        .reduce((t: number | null, p: any) => t === null || valorQueOPCPLe(p) === null ? null : t + (valorQueOPCPLe(p) as number), 0)),
+    }).filter(Boolean),
+    camposDeEntrega: Object.keys(campos).filter(nomeDeEntrega),
+  };
+}
+// A O.S.: os nomes e tipos dos campos dela (sem descer), o formato dos itens e o retrato deles.
+function formatoDaOS(o: any): any {
+  o = ehObjeto(o) ? o : {};
+  const chaveItens = ["itens", "produtos", "items"].find(k => Array.isArray(o[k])) || "";
+  const { campos } = formatoDosCampos([o], 0);
+  const itens = itensDaOS(o);
+  return { chaveDosItens: chaveItens || "nenhuma (itens, produtos, items)", campos,
+    camposDeEntregaNaOS: Object.keys(campos).filter(nomeDeEntrega),
+    itens: formatoDosCampos(chaveItens ? o[chaveItens] : [], 2), retrato: retratoDosItens(itens) };
+}
+/* A LISTA (o que a hora lê) contra a BUSCA POR NÚMERO, item a item, na ordem
+   em que vieram. Só sim ou não: nenhum valor sai. */
+function compararRotas(porNumero: any, daLista: any): any {
+  const a = itensDaOS(porNumero), b = itensDaOS(daLista);
+  const nomes = (l: any[]) => new Set(l.flatMap(o => Object.keys(o)));
+  const na = nomes(a), nb = nomes(b);
+  const mesmaQuantidade = a.length === b.length;
+  const porItem = (f: (x: any, y: any) => boolean) => mesmaQuantidade && a.every((x, i) => f(x, b[i]));
+  const igual = (x: any, y: any, k: string) => JSON.stringify(x?.[k] ?? null) === JSON.stringify(y?.[k] ?? null);
+  const ids = [...na].filter(k => nb.has(k) && !NOMES_DE_VALOR.has(k) && nomeDeId(k)).sort();
+  return {
+    mesmaQuantidade,
+    soNaBuscaPorNumero: [...na].filter(k => !nb.has(k)).sort(),
+    soNaLista: [...nb].filter(k => !na.has(k)).sort(),
+    mesmasPosicoes: porItem((x, y) => igual(x, y, "posicao")),
+    mesmosTextos: porItem((x, y) => NOMES_DE_TEXTO.every(k => igual(x, y, k))),
+    mesmosNumeros: porItem((x, y) => ["quantidade", "valor_unitario", "sub_total", "valor_final"].every(k => igual(x, y, k))),
+    mesmosKits: porItem((x, y) => igual(x, y, "itens_agrupados")),
+    mesmoIdPorItem: Object.fromEntries(ids.map(k => [k, porItem((x, y) => x[k] != null && igual(x, y, k))])),
   };
 }
 
@@ -727,6 +874,18 @@ function janelaDatas(body: any) {
   return { datainicial: ymd(ini), datafinal: ymd(fim) };
 }
 
+/* O CARIMBO DA LINHA (atualizado_em) É A HORA DA GRAVAÇÃO DELA, nunca a do
+   começo do laço (revisão de 01/10/2026). O pull incremental do aparelho
+   pede `atualizado_em > cursor`, e o cursor é o relógio do servidor na hora
+   do pull. A importação carimbava todas as linhas com o `em` de antes do
+   laço: o aparelho que puxava no meio do laço guardava um cursor depois do
+   `em` e NUNCA recebia as O.S. gravadas depois disso (só no próximo pull
+   completo), e a gravação seguinte dele caía em conflito. Agora cada linha
+   leva a hora em que é gravada, no mínimo um milissegundo depois da que ela
+   tinha (como no pcp-sync e na baixa automática). O `em` continua sendo a
+   hora da importação DENTRO do registro (histórico do ERP, selo). */
+const carimboDaLinha = (anterior: any) => new Date(Math.max(Date.now(), (Date.parse(String(anterior ?? "")) || 0) + 1)).toISOString();
+
 /* GRAVACAO DAS O.S IMPORTADAS -- usada por DOIS caminhos.
    `importar` busca no ERP aqui dentro (e morre aos 150s quando o Mubisys
    esta lento). `importarLote` recebe a lista JA BUSCADA pelo GitHub Actions,
@@ -777,22 +936,34 @@ async function gravarImportadas(sb: any, remotas: any[]) {
       // reconciliada na próxima importação. Lápides e conclusões são preservadas.
       const porNumeroERP = new Map(remotas.map(r => [String(r.numero ?? '').trim(), r]));
       let atualizadas = 0, conflitosAtualizacao = 0;
+      /* OS ITENS DA O.S. ABERTA ACOMPANHAM O ERP (E8): a mescla mora em
+         _shared (mesclarItensERP, dentro do atualizarOrigemERP), na mesma
+         gravação dos campos do ERP, com a mesma trava de versão. ESTÁ
+         DESLIGADA (MESCLA_ITENS_ERP = false, em _shared: falta medir o
+         formato do item no ERP com a ação formatoItens): desligada, o
+         atualizarOrigemERP não chama a mescla e os itens ficam como na v143.
+         A contagem vai para o batimento: O.S. cujos itens mudaram e O.S. que
+         ficaram de fora porque a lista tem item do PCP (manual ou do PDF);
+         as duas ficam em zero com a mescla desligada. */
+      let itensAtualizados = 0, itensListaPCP = 0;
       const em = new Date().toISOString();
       for (const linha of (jaTem ?? [])) {
         if (linha.apagado) continue;
         const remoto = porNumeroERP.get(String(linha.registro?.numero)) || {};
-        const r = atualizarOrigemERP(linha.registro, remoto, em);
+        const r = atualizarOrigemERP(linha.registro, remoto, em, { mesclarItens: MESCLA_ITENS_ERP });
+        if (r.itens?.pulou === "a lista tem item do PCP") itensListaPCP++;
+        const itensMudaram = !!r.itens && (r.itens.novos + r.itens.mudados + r.itens.sairam + r.itens.marcados + r.itens.perguntas) > 0;
         // A situação do ERP anda sem somar ao rev: o pcp-sync a preserva contra a
         // cópia do aparelho, então ela não precisa (nem deve) virar conflito.
         const sit = atualizarSituacaoERP(r.registro, remoto.statusCarteira || remoto.statusERP, em);
         if (!r.alteracoes.length && !sit) continue;
         const registroNovo = sit || r.registro;
         const {data, error} = await sb.from("pcp_registros")
-          .update({registro:registroNovo, atualizado_em:em})
+          .update({registro:registroNovo, atualizado_em:carimboDaLinha(linha.atualizado_em)})
           .eq("colecao","os").eq("id",linha.id).eq("apagado",false)
           .eq("atualizado_em",linha.atualizado_em).select("id");
         if (error) throw new Error(error.message);
-        if (data?.length) atualizadas++; else conflitosAtualizacao++;
+        if (data?.length) { atualizadas++; if (itensMudaram && r.alteracoes.length) itensAtualizados++; } else conflitosAtualizacao++;
       }
       // Deduplicação de novas O.S. dentro do lote.
       const porId = new Map<string, any>();
@@ -807,7 +978,7 @@ async function gravarImportadas(sb: any, remotas: any[]) {
       }
       const novas = novasLinhas.length;
       const jaExistiam = linhas.length - novas;
-  return { novas, atualizadas, conflitosAtualizacao, jaExistiam, total: remotas.length, semNumero };
+  return { novas, atualizadas, conflitosAtualizacao, jaExistiam, total: remotas.length, semNumero, itensAtualizados, itensListaPCP };
 }
 
 // Carteira do acompanhamento: concluída na produção ainda aguarda entrega.
@@ -929,7 +1100,7 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
       r.baixaAutoERP={em,status:'FORA DA CARTEIRA ABERTA',carteira:true};
       r.erpCarteira={aberta:false,em};
     }
-    const {data,error:e}=await sb.from('pcp_registros').update({registro:r,apagado:false,atualizado_em:em})
+    const {data,error:e}=await sb.from('pcp_registros').update({registro:r,apagado:false,atualizado_em:carimboDaLinha(l.atualizado_em)})
       .eq('colecao','os').eq('id',l.id).eq('atualizado_em',l.atualizado_em).select('id');
     if(e) throw new Error(e.message);
     if(!data?.length) conflitos++;else if(volta) restauradas++;else if(marcarIds.has(l.id)) marcadas++;else arquivadas++;
@@ -1185,6 +1356,67 @@ Deno.serve(async (req: Request) => {
       if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
       const lista = extrairLista(data);
       return resp({ os: lista.map(mapearOS), total: lista.length });
+    }
+
+    /* FORMATO DO ITEM DA O.S. NO ERP (E8): diagnóstico SÓ LEITURA, só do
+       administrador. O openapi do Mubisys não descreve o item, e nenhum código
+       nosso lê um id dele: a mescla dos itens (MESCLA_ITENS_ERP, em _shared)
+       fica desligada até esta medição responder o que o parametros.md lista.
+       Devolve os NOMES e os TIPOS dos campos (e quantos valores diferentes
+       cada um tem) e o retrato dos itens (retratoDosItens: posições como
+       número, tamanhos de texto, comparações de valor), NUNCA os valores: a
+       O.S. tem cliente, documento e preço.
+       { numero } ou { numeros: [até 10] }, e { lista: false } para pular a
+       LISTA. Sem ele, mede também o item como vem na lista (a forma que a
+       atualização horária lê), buscando o dia do cadastro da O.S. (janela de
+       um dia, com o dia seguinte: datainicial = datafinal é intervalo vazio
+       no ERP; uma busca por dia, mesmo com várias O.S. do mesmo dia), e
+       compara as duas rotas item a item. Uma O.S. que falha não derruba as
+       outras: vai para naoMedidas com o motivo. Cada chamada ao ERP tem o
+       prazo do que sobra até 140 s (a função morre aos 150 s); sem tempo, as
+       que faltam vão para naoMedidas, para pedir de novo. */
+    if (action === "formatoItens") {
+      if (!cracha || String(cracha.papel ?? "") !== "admin") return resp({ error: "Só o administrador mede o formato do ERP." }, 403);
+      const pedidos = Array.isArray(body.numeros) ? body.numeros : [body.numero];
+      const numeros = [...new Set(pedidos.map((n: any) => String(n ?? "").trim()).filter(Boolean))] as string[];
+      if (!numeros.length || numeros.some(n => !/^\d{1,12}$/.test(n))) return resp({ error: "numero (ou numeros) da O.S., só dígitos" }, 400);
+      if (numeros.length > 10) return resp({ error: "No máximo 10 O.S. por vez." }, 400);
+      const comLista = body.lista !== false;
+      const inicio = Date.now();
+      const sobra = () => 140000 - (Date.now() - inicio);
+      const listaDoDia = new Map<string, any>();
+      const medidas: any[] = [], naoMedidas: any[] = [];
+      for (const numero of numeros) {
+        if (sobra() < 35000) { naoMedidas.push({ numero, motivo: "o tempo acabou: peça de novo só as que faltaram" }); continue; }
+        try {
+          const r = await fetchERP(`${creds.base}/${creds.publicKey}/ordem-servico/numero/${encodeURIComponent(numero)}`, headers, Math.min(30000, sobra() - 5000));
+          const data = await r.json().catch(() => null);
+          if (!r.ok) { naoMedidas.push({ numero, motivo: `o Mubisys respondeu HTTP ${r.status}` }); continue; }
+          const um = extrairUm(data);
+          const saida: any = { numero, porNumero: formatoDaOS(um) };
+          if (comLista) {
+            const dia = isoData(pick(um, "data_cadastro"));
+            if (!dia) saida.lista = { motivo: "a O.S. não trouxe data_cadastro: não dá para achar o dia na lista" };
+            else if (!listaDoDia.has(dia) && sobra() < 15000) saida.lista = { motivo: "sem tempo para a lista: peça esta O.S. de novo" };
+            else {
+              if (!listaDoDia.has(dia)) {
+                const q2 = new URLSearchParams({ status: "TODOS", filtrodata: "CADASTRO", datainicial: dia, datafinal: addDias(dia, 1), per_page: "500", page: "1" });
+                try { listaDoDia.set(dia, extrairLista(await erpGet(`${creds.base}/${creds.publicKey}/ordem-servico?${q2}`, headers, Math.min(60000, sobra() - 5000)))); }
+                catch (e) { listaDoDia.set(dia, { falhou: semCredencial((e as Error)?.message || e) }); }
+              }
+              const l = listaDoDia.get(dia);
+              const achada = Array.isArray(l) ? l.find((o: any) => String(pick(o, "sequencial_ordem", "numero", "numeroOS", "codigo") ?? "") === numero) : null;
+              if (!Array.isArray(l)) saida.lista = { motivo: "a lista do dia do cadastro falhou: " + l.falhou };
+              else if (!achada) saida.lista = { motivo: "a O.S. não veio na lista do dia do cadastro" };
+              else { saida.lista = formatoDaOS(achada); saida.compara = compararRotas(um, achada); }
+            }
+          }
+          medidas.push(saida);
+        } catch (e) {
+          naoMedidas.push({ numero, motivo: semCredencial((e as Error)?.message || e) });
+        }
+      }
+      return resp({ medidoEm: new Date().toISOString(), os: medidas, naoMedidas });
     }
 
     if (action === "getOS") {

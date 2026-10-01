@@ -3138,7 +3138,8 @@ function blocoItens(os, ro, done) {
      botões de quem pode marcar. Item com marca de entrega não sai da lista
      (o servidor o devolveria), e a quantidade dele não desce abaixo do que
      já foi entregue (o handler segura). Sem o motor (cache misto), a tabela
-     é a de antes. */
+     é a de antes. O item que saiu do ERP (E8: a mescla horária o manteve
+     porque tem marca) leva a linha 'Saiu do ERP' logo embaixo. */
   const comEntrega = temMotorEntrega();
   const cols = 6;
   const rows = itens.map((it, i) => {
@@ -3160,6 +3161,7 @@ function blocoItens(os, ro, done) {
       </td>
       <td class="item-del-cell">${del}</td>
     </tr>
+    ${it.saiuDoERP && typeof it.saiuDoERP === 'object' ? `<tr class="motivo-row item-saiu-erp"><td colspan="${cols}" data-label="ERP">Saiu do ERP${fmtDataBR(it.saiuDoERP.em) ? ' em ' + fmtDataBR(it.saiuDoERP.em) : ''}. Fica na O.S. porque tem marca.</td></tr>` : ''}
     ${comEntrega ? linhaEntregaHTML(it, i, os, ro, u, cols) : ''}
     ${it.reprovado ? `<tr class="motivo-row"><td colspan="${cols}" data-label="O que deu errado?"><input data-item="${i}.motivoReprovado" ${u} value="${esc(it.motivoReprovado || '')}" placeholder="❗ O que deu errado neste item?"></td></tr>` : ''}
     ${it.statusInst === 'retrab' ? `<tr class="motivo-row"><td colspan="${cols}" data-label="Retrabalho na instalação">🔴 Retrabalho na instalação: ${esc(it.motivo || 'sem motivo')}${it.obsProb ? ` (${esc(it.obsProb)})` : ''}${it.fotoProbId ? `<div class="fotos-grid"><div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(it.fotoProbId)}" alt="foto do problema"></div></div>` : ''}</td></tr>` : ''}`;
