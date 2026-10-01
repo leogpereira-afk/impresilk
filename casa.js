@@ -344,13 +344,20 @@ function diaDaBaixaERP(o) {
    NEUTRA da F16: o dia da baixa é o da sincronização, não o da entrega, e o
    status não julga o prazo por ele. */
 function diaRealDaBaixaERP(o) {
-  if (!o || typeof o !== 'object' || typeof ENTREGA_ITEM === 'undefined' || !ENTREGA_ITEM || typeof ENTREGA_ITEM.resumoOS !== 'function') return '';
-  try { if (ENTREGA_ITEM.canceladaNoERP(o)) return ''; } catch { return ''; }
+  return fonteRealDaBaixaERP(o).dia;
+}
+// O mesmo dia, com a origem: 'erp' (a data que o ERP informou) ou 'marca' (a última marca, com todo item marcado).
+function fonteRealDaBaixaERP(o) {
+  const nada = { dia: '', origem: '' };
+  if (!o || typeof o !== 'object' || typeof ENTREGA_ITEM === 'undefined' || !ENTREGA_ITEM || typeof ENTREGA_ITEM.resumoOS !== 'function') return nada;
+  try { if (ENTREGA_ITEM.canceladaNoERP(o)) return nada; } catch { return nada; }
   const m = o.erpComSaldo && typeof o.erpComSaldo === 'object' && !Array.isArray(o.erpComSaldo) ? o.erpComSaldo : null;
   const dec = o.erpSaldoDecisao;
   const mantida = !!(m && dec && typeof dec === 'object' && dec.tipo === 'manter' && String(dec.selo || '') === String(m.selo || ''));
   const doERP = m && !mantida && /^\d{4}-\d{2}-\d{2}$/.test(String(m.dataEntregue || '')) ? String(m.dataEntregue) : '';
-  return doERP || ultimoDiaDeMarcaCasa(o);
+  if (doERP) return { dia: doERP, origem: 'erp' };
+  const marca = ultimoDiaDeMarcaCasa(o);
+  return marca ? { dia: marca, origem: 'marca' } : nada;
 }
 /* A DATA QUE SE PROPÕE PARA LANÇAR A BAIXA DO ERP (junção da v142): uma
    régua só, no Lançar entrega e no Fechar o dia (lote.js), para a mesma O.S.
@@ -358,18 +365,63 @@ function diaRealDaBaixaERP(o) {
      1. o dia real da E7 (diaRealDaBaixaERP: a data do ERP, ou a última marca
         com todo item marcado);
      2. na baixa neutra (F16: o dia da baixa é o da sincronização), o retorno
-        registrado até a baixa, ou o último dia da agenda até a baixa: o ERP
-        costuma baixar 2 a 4 dias depois da entrega real;
-     3. só então o dia da baixa.
-   Sem finalização: ''. */
-function diaSugeridoDaBaixaERP(o) {
+        registrado, ou o último dia da agenda, SÓ quando cai numa janela curta
+        antes da baixa: até 7 dias antes dela (o ERP costuma baixar 2 a 4 dias
+        depois da entrega real) e fora de período já fechado na Performance;
+     3. senão, o dia da baixa (como na v141).
+   A JANELA CURTA (revisão da junção da v142): o importador grava em
+   instalacao.data a PREVISÃO de entrega do ERP, e na O.S. que o PCP nunca
+   agendou a "agenda" é essa previsão. A O.S. atrasada (previsão em 12/06,
+   baixa em 25/09) recebia 12/06: um dia num período fechado, o status virava
+   "No prazo" e o lote a punha nas Pendências de junho.
+   Devolve {dia, origem, ref}: origem 'erp', 'marca', 'retorno', 'agenda' ou
+   'baixa'; ref é o dia de onde a sugestão saiu. Sem finalização, dia ''. */
+const JANELA_SUGESTAO_BAIXA_DIAS = 7;
+function sugestaoDaBaixaERP(o) {
   const fim = OPERACAO.dia(o && o.finalizadaEm);
-  if (!fim) return '';
-  const real = diaRealDaBaixaERP(o);
-  if (real) return real;
+  if (!fim) return { dia: '', origem: '', ref: '' };
+  const real = fonteRealDaBaixaERP(o);
+  if (real.dia) return { dia: real.dia, origem: real.origem, ref: real.dia };
+  const desde = OPERACAO.somarDias(fim, -JANELA_SUGESTAO_BAIXA_DIAS);
+  const fechados = periodosFechadosConhecidosCasa();
+  const vale = d => !!d && d <= fim && d >= desde && !fechados.some(f => d >= f.de && d <= f.ate);
   const ret = OPERACAO.dia(o.retornoEm);
-  if (ret && ret <= fim) return ret;
-  return OPERACAO.diasAgenda(o).filter(d => d <= fim).pop() || fim;
+  if (vale(ret)) return { dia: ret, origem: 'retorno', ref: ret };
+  const ag = OPERACAO.diasAgenda(o).filter(vale).pop();
+  if (ag) return { dia: ag, origem: 'agenda', ref: ag };
+  return { dia: fim, origem: 'baixa', ref: fim };
+}
+function diaSugeridoDaBaixaERP(o) {
+  return sugestaoDaBaixaERP(o).dia;
+}
+/* De onde a data veio, ao lado do campo (no Lançar e na linha do lote): a
+   pessoa vê se é a agenda, o retorno ou o dia da baixa antes de aceitar. */
+function textoOrigemSugestaoCasa(s) {
+  const br = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : '';
+  if (!s || !s.dia) return '';
+  if (s.origem === 'agenda') return `sugerida pela agenda de ${br(s.ref)}`;
+  if (s.origem === 'retorno') return `sugerida pelo retorno de ${br(s.ref)}`;
+  if (s.origem === 'erp') return 'sugerida pela data de entrega do ERP';
+  if (s.origem === 'marca') return 'sugerida pela última entrega marcada';
+  if (s.origem === 'baixa') return 'sugerida pelo dia da baixa do ERP';
+  return '';
+}
+/* OS PERÍODOS FECHADOS QUE ESTE APARELHO CONHECE, sem ir ao servidor: o
+   "fechado até" das regras (STORE.regrasLocais, o maior fim de fechamento
+   gravado) e as revisões que a Performance consultou (perfRemoto). Sem
+   nenhum dos dois, a lista vem vazia e vale só a janela curta. */
+function periodosFechadosConhecidosCasa() {
+  const out = [];
+  let loc = null;
+  try { loc = typeof STORE !== 'undefined' && STORE && typeof STORE.regrasLocais === 'function' ? STORE.regrasLocais() : null; } catch { loc = null; }
+  const ate = OPERACAO.dia(loc && loc.fechadoAte);
+  if (ate) out.push({ de: '', ate });
+  const revisoes = typeof perfRemoto !== 'undefined' && perfRemoto && Array.isArray(perfRemoto.fechamentos) ? perfRemoto.fechamentos : [];
+  for (const f of revisoes) {
+    const de = OPERACAO.dia(f && f.de), fim = OPERACAO.dia(f && f.ate);
+    if (de && fim) out.push({ de, ate: fim });
+  }
+  return out;
 }
 // O último dia de marca, só quando TODO item físico está entregue, retirado ou cancelado por marca.
 function ultimoDiaDeMarcaCasa(o) {
@@ -810,17 +862,21 @@ function lancarEntregaManual(osId) {
     : '<p class="text-muted" style="font-size:.8rem">A equipe não registrou a limpeza desta volta.</p>';
   /* O dia que o Lançar cita é o da entrega que o ERP baixou (diaDaBaixaERP,
      revisão da E7), e não o dia em que a baixa rodou. O que ele PROPÕE é o
-     do Fechar o dia (diaSugeridoDaBaixaERP, junção da v142): na baixa neutra
-     (F16), o retorno ou a agenda até a baixa, e não o dia da sincronização. */
+     do Fechar o dia (sugestaoDaBaixaERP, junção da v142): a data da E7; na
+     baixa neutra (F16), o retorno ou a agenda só até 7 dias antes da baixa e
+     fora de período fechado; senão, o dia da baixa. Ao lado do campo, de
+     onde a data veio. */
   const diaBaixa = diaDaBaixaERP(os);
-  const diaProposto = diaSugeridoDaBaixaERP(os) || diaBaixa;
+  const sugestao = sugestaoDaBaixaERP(os);
+  const diaProposto = sugestao.dia || diaBaixa;
+  const origemTxt = sugestao.dia ? textoOrigemSugestaoCasa(sugestao) : '';
   box.innerHTML = `
     <div class="wpp-picker retrab-box" role="dialog" aria-modal="true">
       <div class="wpp-picker-head"><strong>📦 Lançar entrega · O.S ${esc(os.numero || '—')}</strong><button class="modal-close" id="lancar-x">×</button></div>
       <div class="wpp-picker-body">
         <p class="text-muted" style="font-size:.8rem;margin-bottom:8px">${esc(os.cliente || '')} · ${esc(os.servico || '')}. O ERP baixou em ${esc(diaBaixa ? diaBaixa.slice(8, 10) + '/' + diaBaixa.slice(5, 7) : '—')}.</p>
         <form id="lancar-form" class="retrab-form">
-          <div class="field"><label>Data da entrega <span class="req">*</span></label><input name="data" type="date" required value="${esc(diaProposto || hojeISO())}"></div>
+          <div class="field"><label>Data da entrega <span class="req">*</span></label><input name="data" type="date" required value="${esc(diaProposto || hojeISO())}">${origemTxt ? `<small class="text-muted lancar-data-origem" id="lancar-data-origem">${esc(origemTxt[0].toUpperCase() + origemTxt.slice(1))}.</small>` : ''}</div>
           <div class="field"><label>Equipe que instalou</label>${componente ? '<div class="aloc-host" id="lancar-aloc"></div>' : `<div class="casa-chips">${chipsEquipe}</div>`}</div>
           ${equipeRegistrou}
           ${conferencia}
@@ -829,18 +885,25 @@ function lancarEntregaManual(osId) {
       </div>
     </div>`;
   document.body.appendChild(box);
+  const campoData = typeof box.querySelector === 'function' ? box.querySelector('#lancar-form input[name="data"]') : null;
+  const origemData = origemTxt && typeof box.querySelector === 'function' ? box.querySelector('#lancar-data-origem') : null;
   if (componente) {
     const papel = STATE.user && STATE.user.papel;
     /* A prévia (regra do dia e "não pontua") segue a DATA DIGITADA, não a da
        baixa do ERP, que é a da sincronização (revisão da F16). Ao abrir, o
-       campo traz a data da baixa, que ninguém digitou: a prévia fica sem
-       julgar o prazo (o status da baixa a lançar) até a data mudar. */
-    const campoData = typeof box.querySelector === 'function' ? box.querySelector('#lancar-form input[name="data"]') : null;
+       campo traz a data SUGERIDA (sugestaoDaBaixaERP: a da E7, o retorno ou
+       a agenda na janela curta, ou o dia da baixa), que ninguém digitou: a
+       prévia fica sem julgar o prazo (o status da baixa a lançar) até a data
+       mudar. */
     ALOCUI.iniciar(chaveAloc, { os, equipes: equipesCadastradasCasa(), papel, modo: ALOCUI.modoPara(papel, os), dica: ALOCUI.dicaModo(papel, os), semAntigo: true, reiniciar: true,
       dia: diaProposto || hojeISO(), valor: typeof valorDaOS === 'function' ? valorDaOS(os) : os.valorTotal, versoes: versoesRegrasCasa() });
     ALOCUI.montar(document.getElementById('lancar-aloc'), chaveAloc);
-    if (campoData && typeof ALOCUI.definirDataEntrega === 'function') campoData.onchange = () => ALOCUI.definirDataEntrega(chaveAloc, campoData.value);
   }
+  if (campoData) campoData.onchange = () => {
+    // A origem fala da data sugerida: com outra data no campo, ela some.
+    if (origemData) origemData.hidden = campoData.value !== diaProposto;
+    if (componente && typeof ALOCUI.definirDataEntrega === 'function') ALOCUI.definirDataEntrega(chaveAloc, campoData.value);
+  };
   // Miniaturas da foto do carro que a equipe registrou.
   box.querySelectorAll('[data-foto-img]').forEach(async img => { const b64 = await STORE.pullPhoto(img.dataset.fotoImg); if (b64) img.src = b64; });
   const fechar = () => box.remove();

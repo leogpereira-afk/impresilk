@@ -3768,3 +3768,7 @@ img.perf-logo{object-fit:cover}
 .lote-g-volta.compacta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
 .lote-volta-resumo{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;flex:1 1 240px;min-width:0}
 .lote-volta-resumo small{color:#526378}
+/* De onde a data sugerida veio (revisão da junção da v142): no Lançar entrega e na linha do Fechar o dia. */
+.lancar-data-origem{font-size:.75rem}
+.lote-l-data{flex-wrap:wrap}
+.lote-l-origem{flex-basis:100%;font-size:.72rem;color:#526378}
