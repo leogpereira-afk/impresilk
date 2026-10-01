@@ -6,7 +6,8 @@ import { atualizarOrigemERP, atualizarSituacaoERP, temTrabalhoHumano, motivoAgen
 // um POST em process.env.URL -- variavel que so existe no Netlify. Juntando,
 // a dependencia some e sobra uma chamada de funcao.
 //
-// Acoes: salvarConfig, statusConfig, ping, preview, listarOS, getOS, importar.
+// Acoes: salvarConfig, statusConfig, ping, preview, listarOS, getOS, importar,
+// formatoItens (diagnostico so leitura do formato do item, so admin; E8).
 // "importar" e o que o pg_cron chama de hora em hora.
 //
 // De-para: store "integracoes" chave "mubisys" -> pcp_meta chave "mubisys";
@@ -162,6 +163,48 @@ function mapearItem(it: any, i: number) {
     subtotal: String(pick(it, "sub_total", "subtotal", "valor_final", "total") || ""),
     pronto: false,
   };
+}
+
+/* O FORMATO DE UMA LISTA DE OBJETOS DO ERP, SEM OS VALORES (E8, ação
+   formatoItens). Para cada nome de campo: os tipos que apareceram, em quantos
+   objetos ele veio e quantos valores diferentes teve (um id do item tem um
+   valor diferente por item). Lista e objeto dentro do item descem até
+   `fundo` níveis (itens_agrupados, o kit). O valor só existe aqui dentro,
+   para contar: nenhum sai na resposta. */
+const tipoDoCampo = (v: any): string => v === null || v === undefined ? "nulo"
+  : Array.isArray(v) ? "lista" : typeof v === "object" ? "objeto"
+  : typeof v === "number" ? "número" : typeof v === "boolean" ? "sim/não"
+  : String(v).trim() === "" ? "texto vazio" : /^-?\d+(?:[.,]\d+)?$/.test(String(v).trim()) ? "texto numérico" : "texto";
+export function formatoDosCampos(lista: any[], fundo = 1): any {
+  const campos: Record<string, any> = {};
+  let objetos = 0;
+  for (const o of Array.isArray(lista) ? lista : []) {
+    if (!o || typeof o !== "object" || Array.isArray(o)) continue;
+    objetos++;
+    for (const [k, v] of Object.entries(o)) {
+      const c = campos[k] ||= { tipos: [] as string[], em: 0, valores: new Set<string>(), filhos: [] as any[] };
+      c.em++;
+      const t = tipoDoCampo(v);
+      if (!c.tipos.includes(t)) c.tipos.push(t);
+      if (t === "lista") c.filhos.push(...(v as any[]));
+      else if (t === "objeto") c.filhos.push(v);
+      else if (t !== "nulo" && t !== "texto vazio") c.valores.add(String(v));
+    }
+  }
+  const out: Record<string, any> = {};
+  for (const k of Object.keys(campos).sort()) {
+    const c = campos[k];
+    out[k] = { tipos: c.tipos, em: c.em, distintos: c.valores.size,
+      ...(fundo > 0 && c.filhos.length ? { dentro: formatoDosCampos(c.filhos, fundo - 1) } : {}) };
+  }
+  return { objetos, campos: out };
+}
+// A O.S.: os nomes e tipos dos campos dela (sem descer) e o formato dos itens.
+function formatoDaOS(o: any): any {
+  o = o && typeof o === "object" ? o : {};
+  const chaveItens = ["itens", "produtos", "items"].find(k => Array.isArray(o[k])) || "";
+  const { campos } = formatoDosCampos([o], 0);
+  return { chaveDosItens: chaveItens || "nenhuma (itens, produtos, items)", campos, itens: formatoDosCampos(chaveItens ? o[chaveItens] : [], 2) };
 }
 
 function mapearOS(o: any) {
@@ -777,11 +820,19 @@ async function gravarImportadas(sb: any, remotas: any[]) {
       // reconciliada na próxima importação. Lápides e conclusões são preservadas.
       const porNumeroERP = new Map(remotas.map(r => [String(r.numero ?? '').trim(), r]));
       let atualizadas = 0, conflitosAtualizacao = 0;
+      /* OS ITENS DA O.S. ABERTA ACOMPANHAM O ERP (E8): a mescla mora em
+         _shared (mesclarItensERP, dentro do atualizarOrigemERP), na mesma
+         gravação dos campos do ERP, com a mesma trava de versão. A contagem
+         vai para o batimento: O.S. cujos itens mudaram e O.S. que ficaram de
+         fora porque a lista tem item do PCP (manual ou do PDF). */
+      let itensAtualizados = 0, itensListaPCP = 0;
       const em = new Date().toISOString();
       for (const linha of (jaTem ?? [])) {
         if (linha.apagado) continue;
         const remoto = porNumeroERP.get(String(linha.registro?.numero)) || {};
         const r = atualizarOrigemERP(linha.registro, remoto, em);
+        if (r.itens?.pulou === "a lista tem item do PCP") itensListaPCP++;
+        const itensMudaram = !!r.itens && (r.itens.novos + r.itens.mudados + r.itens.sairam + r.itens.marcados) > 0;
         // A situação do ERP anda sem somar ao rev: o pcp-sync a preserva contra a
         // cópia do aparelho, então ela não precisa (nem deve) virar conflito.
         const sit = atualizarSituacaoERP(r.registro, remoto.statusCarteira || remoto.statusERP, em);
@@ -792,7 +843,7 @@ async function gravarImportadas(sb: any, remotas: any[]) {
           .eq("colecao","os").eq("id",linha.id).eq("apagado",false)
           .eq("atualizado_em",linha.atualizado_em).select("id");
         if (error) throw new Error(error.message);
-        if (data?.length) atualizadas++; else conflitosAtualizacao++;
+        if (data?.length) { atualizadas++; if (itensMudaram && r.alteracoes.length) itensAtualizados++; } else conflitosAtualizacao++;
       }
       // Deduplicação de novas O.S. dentro do lote.
       const porId = new Map<string, any>();
@@ -807,7 +858,7 @@ async function gravarImportadas(sb: any, remotas: any[]) {
       }
       const novas = novasLinhas.length;
       const jaExistiam = linhas.length - novas;
-  return { novas, atualizadas, conflitosAtualizacao, jaExistiam, total: remotas.length, semNumero };
+  return { novas, atualizadas, conflitosAtualizacao, jaExistiam, total: remotas.length, semNumero, itensAtualizados, itensListaPCP };
 }
 
 // Carteira do acompanhamento: concluída na produção ainda aguarda entrega.
@@ -1185,6 +1236,37 @@ Deno.serve(async (req: Request) => {
       if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}`, detalhe: data }, 502);
       const lista = extrairLista(data);
       return resp({ os: lista.map(mapearOS), total: lista.length });
+    }
+
+    /* FORMATO DO ITEM DA O.S. NO ERP (E8): diagnóstico SÓ LEITURA, só do
+       administrador. O openapi do Mubisys não descreve o item, e nenhum código
+       nosso lê um id dele: antes de usar um campo novo como base do código do
+       item, medir. Devolve os NOMES e os TIPOS dos campos (e quantos valores
+       diferentes cada um tem), NUNCA os valores: a O.S. tem cliente,
+       documento e preço. { numero, lista?: true } -- com `lista`, mede também
+       o item como vem na LISTA (a forma que a atualização horária lê),
+       buscando o dia do cadastro da O.S. (janela de um dia, com o dia
+       seguinte: datainicial = datafinal é intervalo vazio no ERP). */
+    if (action === "formatoItens") {
+      if (!cracha || String(cracha.papel ?? "") !== "admin") return resp({ error: "Só o administrador mede o formato do ERP." }, 403);
+      const numero = String(body.numero ?? "").trim();
+      if (!/^\d{1,12}$/.test(numero)) return resp({ error: "numero da O.S. (só dígitos) ausente" }, 400);
+      const r = await fetchERP(`${creds.base}/${creds.publicKey}/ordem-servico/numero/${encodeURIComponent(numero)}`, headers, 30000);
+      const data = await r.json().catch(() => null);
+      if (!r.ok) return resp({ error: `Mubisys retornou HTTP ${r.status}` }, 502);
+      const um = extrairUm(data);
+      const saida: any = { numero, porNumero: formatoDaOS(um) };
+      if (body.lista === true) {
+        const dia = isoData(pick(um, "data_cadastro"));
+        if (!dia) saida.lista = { motivo: "a O.S. não trouxe data_cadastro: não dá para achar o dia na lista" };
+        else {
+          const q2 = new URLSearchParams({ status: "TODOS", filtrodata: "CADASTRO", datainicial: dia, datafinal: addDias(dia, 1), per_page: "500", page: "1" });
+          const d2 = await erpGet(`${creds.base}/${creds.publicKey}/ordem-servico?${q2}`, headers, 60000);
+          const achada = extrairLista(d2).find((o: any) => String(pick(o, "sequencial_ordem", "numero", "numeroOS", "codigo") ?? "") === numero);
+          saida.lista = achada ? formatoDaOS(achada) : { motivo: "a O.S. não veio na lista do dia do cadastro" };
+        }
+      }
+      return resp(saida);
     }
 
     if (action === "getOS") {

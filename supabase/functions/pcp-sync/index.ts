@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno } from "../_shared/pcp-status.mjs";
 // ============================================================================
@@ -1493,6 +1493,20 @@ Deno.serve(async (req: Request) => {
             if (campo in existing) os[campo] = existing[campo];
           }
           if (conferiuERP) { os.erpConferirEm = ""; os.erpConferidoEm = new Date().toISOString(); os.erpConferidoPor = cracha?.nome || cracha?.sub || ""; }
+        }
+        /* OS ITENS DO ERP (E8). Regras em _shared (guardarItensERP), no molde
+           do bloco acima: o que a mescla horária do ERP gravou nos itens não
+           muda pela cópia do aparelho. Item que o ERP tirou não volta pela
+           cópia velha; a marca 'saiu do ERP' e a chave do ERP do item são as
+           gravadas (descrição, quantidade e valor não são travados aqui: a
+           mescla da hora seguinte os acerta). Roda depois das marcas de
+           entrega (E3): a entrega feita
+           sem rede num item que o ERP tirou fica, com a marca 'saiu do ERP'.
+           Vale para todos, toque e máquina inclusive. Nada aqui recusa. */
+        {
+          const gi = guardarItensERP(os, existing, { avisar: !ehMaquina && !ehToqueNoNome, agora: new Date().toISOString() });
+          trocarOS(gi.os);
+          avisosToque.push(...gi.avisos);
         }
         if (os.carroLiberado && !existing?.carroLiberado) {
           const diaSP = (x: string) => Number.isFinite(Date.parse(x)) ? new Date(Date.parse(x)-3*3600*1000).toISOString().slice(0,10) : '';

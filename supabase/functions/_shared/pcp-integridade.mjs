@@ -777,8 +777,227 @@ export function carimbarIds(os, antes, autor = {}) {
   return r;
 }
 export const pedeConferencia = a => a && a.campo !== 'valorTotal' && a.antes != null && String(a.antes).trim() !== '';
-export function atualizarOrigemERP(atual, remoto, em) {
-  if (!atual?.origemMubisys || atual.finalizadaEm) return {registro: atual, alteracoes: []};
+/* ── OS ITENS DA O.S. ABERTA ACOMPANHAM O ERP (E8, 01/10/2026) ──────────────
+   Antes, os itens só entravam na primeira importação: o ERP acrescentava,
+   mudava ou tirava item e o PCP ficava com a lista velha (88 O.S. com itens
+   abaixo do ERP). Agora a atualização horária mescla a lista do ERP na O.S.
+   ainda aberta, sem tocar no que é do PCP.
+   O QUE O ERP MANDA (medido em 01/10/2026, ver Dre/mubisys/api/parametros.md):
+   nenhum código que lê a resposta do ERP lê um id do item. O código do item é
+   o da E1 ('<numero>:<posicao>:<k>'), e a posição NÃO é prova de identidade
+   (não se sabe se o ERP renumera quando um item sai). Por isso o casamento é
+   pelo código E pelo produto, e só depois pelo conteúdo:
+     A. o mesmo código (ou a chave do ERP que o item guardou, chaveERP) e o
+        mesmo produto;
+     B. o mesmo produto e a mesma medida, quando só um de cada lado tem esse
+        par (o item que mudou de posição);
+     C. o mesmo produto, com a mesma regra;
+     D. o mesmo código com o produto trocado, só no item SEM marca nenhuma
+        (o vendedor trocou o produto da linha). Item com marca nunca muda de
+        produto pela mescla: a marca não pula para outro produto.
+   O "produto" é a descrição até o ' - ' (o texto livre depois dele, dia,
+   local, evento, muda à vontade), sem acento e sem caixa. O kit (a linha
+   genérica 'Item') não casa por conteúdo: todo kit se chama 'Item'.
+   O QUE A MESCLA FAZ:
+   - item casado: descrição, medida, quantidade e valor seguem o ERP
+     (CAMPOS_ITEM_ERP). Marcas (entregas, pronto, statusInst, reprovado...)
+     nunca são tocadas. Quantidade nova abaixo do já entregue não apaga
+     marca: o saldo é que muda (o motor da E2 lê);
+   - item novo do ERP: entra no fim da lista com código novo. O código da E1
+     quando está livre; senão um sorteado, e a chave do ERP fica em chaveERP
+     (é ela que casa na hora seguinte);
+   - item que saiu do ERP com marca: fica, carimbado saiuDoERP {em}. Voltou
+     ao ERP: a marca sai;
+   - item que saiu do ERP sem marca: sai da lista, e o código vai para
+     itensForaERP (o servidor não o dá a outro item, e a cópia velha do
+     aparelho não o traz de volta: guardarItensERP);
+   - O.S. finalizada, cancelada (no ERP ou à mão), fora do ERP, com item do
+     PCP na lista (manual ou do PDF: a lista é do PCP) ou com a lista do ERP
+     vazia (ausência não é prova) NÃO muda;
+   - idempotente: a mesma resposta do ERP duas vezes não muda nada na
+     segunda (sem rev novo). A mudança só de chaveERP não grava sozinha.
+   Kits ('Item', itens_agrupados): pela decisão do dono (pergunta 2, opção C)
+   a entrega é da linha; abrir o kit em peças fica para depois desta fatia.
+   Função pura, sem cópia no aparelho. `sortear` só existe para o teste.
+   Devolve { mudou, itens, foraERP, alteracoes (linhas de erpAlteracoes, sem
+   R$), resumo: { novos, mudados, sairam, marcados, voltaram, pulou } }. */
+export const CAMPOS_ITEM_ERP = ['descricao', 'medidas', 'qtde', 'valorUnit', 'subtotal'];
+const ITENS_FORA_ERP_MAX = 200;
+const TETO_LINHAS_ITENS_ERP = 12;
+const semAcentoItemERP = v => String(v ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+const produtoDoItem = it => semAcentoItemERP(String(it?.descricao ?? '').split(' - ')[0]).replace(/\s+/g, ' ').trim();
+const medidaDoItem = it => semAcentoItemERP(it?.medidas).replace(/\s+/g, '');
+// 'Item' é o nome que o kit do ERP recebe (sem descrição): não identifica nada.
+const produtoQueIdentifica = p => !!p && p !== 'item';
+// '10' e '10.00' (ou '10,00') são o mesmo número: mudança de formato não é mudança do ERP.
+const NUM_ITEM = /^\d+(?:[.,]\d+)?$/;
+const mesmoValorItem = (a, b) => {
+  const x = String(a ?? '').trim(), y = String(b ?? '').trim();
+  return x === y || (NUM_ITEM.test(x) && NUM_ITEM.test(y) && Number(x.replace(',', '.')) === Number(y.replace(',', '.')));
+};
+/* MARCA DE GENTE NO ITEM: entrega (E3), o Verificado e o Reprovado da gestão,
+   a marca e a foto do instalador. Item com qualquer uma não sai da lista. */
+export function itemTemMarca(it) {
+  if (!objeto(it)) return false;
+  if ((Array.isArray(it.entregas) && it.entregas.length) || it.pronto === true || it.reprovado === true) return true;
+  return ['statusInst', 'motivo', 'obsProb', 'fotoProbId', 'motivoReprovado'].some(c => String(it[c] ?? '').trim() !== '');
+}
+const listaForaERP = v => Array.isArray(v) ? v.filter(f => objeto(f) && uidItemValido(f.uid)) : [];
+const cortarTxt = (v, n) => String(v ?? '').slice(0, n);
+export function mesclarItensERP(atual, remotos, { em = '', sortear = sortearUid } = {}) {
+  const resumo = { novos: 0, mudados: 0, sairam: 0, marcados: 0, voltaram: 0, pulou: '' };
+  const nada = pulou => ({ mudou: false, itens: atual?.itens, foraERP: listaForaERP(atual?.itensForaERP), alteracoes: [], resumo: { ...resumo, pulou } });
+  if (!objeto(atual) || !atual.origemMubisys) return nada('não é O.S. do ERP');
+  if (String(atual.finalizadaEm ?? '').trim()) return nada('finalizada');
+  if (ENTREGA_ITEM.canceladaOS(atual)) return nada('cancelada');
+  const veio = Array.isArray(remotos) ? remotos.filter(objeto) : [];
+  if (!veio.length) return nada('o ERP não mandou itens');
+  const gravados = Array.isArray(atual.itens) ? atual.itens : [];
+  if (gravados.some(it => objeto(it) && it.manual)) return nada('a lista tem item do PCP');
+  const numero = String(atual.numero ?? '').trim();
+  // O código que cada item do ERP tem (a importação já o dá; aqui só confere).
+  const R = carimbarUidsERP(numero, veio);
+  // Os gravados com o código que a próxima gravação normal daria (E1): sem gravar nada se nada mudar.
+  const S = preservarItens({ ...atual, itens: gravados }, atual, { sortear }).os.itens;
+  const chave = it => uidItemValido(it.chaveERP) ? it.chaveERP : it.uid;
+  const par = R.map(() => -1), usadoS = new Set();
+  const livresS = () => S.map((_, i) => i).filter(i => !usadoS.has(i) && objeto(S[i]));
+  const livresR = () => R.map((_, j) => j).filter(j => par[j] < 0);
+  const casar = (i, j) => { par[j] = i; usadoS.add(i); };
+  // A. o mesmo código (ou a chave do ERP gravada) e o mesmo produto.
+  for (const j of livresR()) {
+    const i = livresS().find(x => chave(S[x]) === R[j].uid && produtoDoItem(S[x]) === produtoDoItem(R[j]));
+    if (i !== undefined) casar(i, j);
+  }
+  // B e C. o conteúdo, quando só um de cada lado o tem (o kit genérico fica de fora).
+  for (const k of [it => produtoDoItem(it) + '|' + medidaDoItem(it), produtoDoItem]) {
+    for (const j of livresR()) {
+      if (!produtoQueIdentifica(produtoDoItem(R[j]))) continue;
+      const v = k(R[j]);
+      const is = livresS().filter(i => k(S[i]) === v);
+      if (is.length === 1 && livresR().filter(x => k(R[x]) === v).length === 1) casar(is[0], j);
+    }
+  }
+  // D. o mesmo código com o produto trocado, só no item sem marca.
+  for (const j of livresR()) {
+    const i = livresS().find(x => chave(S[x]) === R[j].uid && !itemTemMarca(S[x]));
+    if (i !== undefined) casar(i, j);
+  }
+  const doR = new Map();
+  par.forEach((i, j) => { if (i >= 0) doR.set(i, j); });
+  const foraAntes = listaForaERP(atual.itensForaERP);
+  const usados = new Set([...foraAntes.map(f => f.uid)]);
+  for (const it of S) if (objeto(it)) { usados.add(it.uid); if (uidItemValido(it.chaveERP)) usados.add(it.chaveERP); }
+  const linhas = [], foraNovos = [];
+  const linha = (campo, antes, depois) => linhas.push({ campo, antes, depois });
+  let mudou = false;
+  const itens = [];
+  S.forEach((it, i) => {
+    if (!objeto(it)) { itens.push(it); return; }
+    const rot = rotuloItem(it);
+    if (doR.has(i)) {
+      const r = R[doR.get(i)], novo = { ...it };
+      let mexeu = false, valor = false;
+      for (const c of CAMPOS_ITEM_ERP) {
+        // Resposta sem o campo não apaga o gravado (a mesma regra dos campos da O.S.).
+        if (String(r[c] ?? '').trim() === '' || mesmoValorItem(it[c], r[c])) continue;
+        novo[c] = r[c]; mexeu = true;
+        if (c === 'valorUnit' || c === 'subtotal') { valor = true; continue; }
+        if (c === 'qtde') {
+          // O saldo é do motor: a marca fica, e a quantidade abaixo do entregue zera o saldo.
+          const antesS = ENTREGA_ITEM.situacaoItem(it, atual), depoisS = ENTREGA_ITEM.situacaoItem(novo, atual);
+          const extra = antesS.entregue > 0
+            ? ` (${antesS.entregue} já ${antesS.entregue === 1 ? 'entregue' : 'entregues'}, saldo ${depoisS.saldo}${ENTREGA_ITEM.qtdeNum(novo) < antesS.entregue ? ': a quantidade ficou abaixo do entregue' : ''})` : '';
+          linha(`${rot}: quantidade`, cortarTxt(it.qtde, 20), cortarTxt(r.qtde, 20) + extra);
+        } else linha(`${rot}: ${c === 'descricao' ? 'descrição' : 'medidas'}`, cortarTxt(it[c], 80), cortarTxt(r[c], 80));
+      }
+      if (valor) linha(`${rot}: valor`, null, 'atualizado pelo ERP');
+      if (objeto(it.saiuDoERP)) { delete novo.saiuDoERP; mexeu = true; resumo.voltaram++; linha(rot, 'saiu do ERP', 'voltou ao ERP'); }
+      if (mexeu) { resumo.mudados++; mudou = true; }
+      if (r.uid !== novo.uid) novo.chaveERP = r.uid; else delete novo.chaveERP;
+      itens.push(novo);
+      return;
+    }
+    if (itemTemMarca(it)) {
+      if (objeto(it.saiuDoERP)) { itens.push(it); return; }
+      itens.push({ ...it, saiuDoERP: { em: String(em) } });
+      resumo.marcados++; mudou = true;
+      linha(rot, 'no ERP', 'saiu do ERP; fica na O.S. porque tem marca');
+      return;
+    }
+    foraNovos.push({ uid: it.uid, item: cortarTxt(it.item, 20), em: String(em) });
+    usados.add(it.uid);
+    resumo.sairam++; mudou = true;
+    linha(rot, 'no ERP', 'saiu do ERP e da O.S.');
+  });
+  R.forEach((r, j) => {
+    if (par[j] >= 0) return;
+    let uid = r.uid;
+    for (let t = 0; !uidItemValido(uid) || usados.has(uid); t++) uid = t < 5 ? sortear('s-') : sortearUid('s-') + t;
+    usados.add(uid);
+    const { manual: _m, saiuDoERP: _s, entregas: _e, chaveERP: _c, ...base } = r;
+    const novo = { ...base, uid };
+    if (uid !== r.uid) novo.chaveERP = r.uid;
+    itens.push(novo);
+    resumo.novos++; mudou = true;
+    linha('item novo do ERP', 'não estava na O.S.', `${rotuloItem(novo)}, quantidade ${cortarTxt(novo.qtde, 20)}`);
+  });
+  if (!mudou) return nada('');
+  const alteracoes = linhas.slice(0, TETO_LINHAS_ITENS_ERP);
+  if (linhas.length > TETO_LINHAS_ITENS_ERP) alteracoes.push({ campo: 'itens', antes: null, depois: `mais ${linhas.length - TETO_LINHAS_ITENS_ERP} mudanças nos itens` });
+  const vistos = new Set(), foraERP = [];
+  for (const f of [...foraAntes, ...foraNovos].reverse()) if (!vistos.has(f.uid)) { vistos.add(f.uid); foraERP.unshift(f); }
+  return { mudou: true, itens, foraERP: foraERP.slice(-ITENS_FORA_ERP_MAX), alteracoes, resumo };
+}
+/* A PORTA DO APARELHO PARA OS ITENS DO ERP (E8; roda no pcp-sync em toda
+   gravação de O.S., no molde da proteção dos campos do ERP). O que é do ERP
+   e da mescla não muda pela cópia do aparelho:
+   - itensForaERP (os códigos que o ERP tirou) é só do servidor: fica o gravado;
+   - saiuDoERP e chaveERP do item vêm do item gravado de mesmo código: o
+     aparelho não cria, não muda e não apaga (a cópia velha não desfaz a
+     marca 'saiu do ERP');
+   - descrição, medida, quantidade e valor do item NÃO são travados aqui: o
+     "Substituir" do PDF atualiza o item com entrega (E4), e a lista com item
+     do PDF (manual) passa a ser do PCP (a mescla não mexe mais nela). Fora
+     disso, o que a cópia velha (ou o PDF) mudou num item do ERP volta ao
+     que o ERP diz na mescla da hora seguinte;
+   - item que o ERP tirou (código em itensForaERP, fora da lista gravada) não
+     volta pela cópia velha. Se ele chega com marca NOVA (a entrega feita sem
+     rede antes de a lista mudar), fica, com a marca 'saiu do ERP': a marca
+     não se perde e não vira item do ERP.
+   Nada aqui recusa: o que não entra vira aviso (`avisar`, só para quem tem
+   senha). Devolve { os, avisos, tirados }. */
+export function guardarItensERP(os, antes, { avisar = false, agora = '' } = {}) {
+  if (!objeto(os)) return { os, avisos: [], tirados: 0 };
+  const out = { ...os }, avisos = [];
+  const fora = listaForaERP(antes?.itensForaERP);
+  if (fora.length) out.itensForaERP = antes.itensForaERP; else delete out.itensForaERP;
+  if (!Array.isArray(os.itens)) return { os: out, avisos, tirados: 0 };
+  const porUid = new Map();
+  for (const g of Array.isArray(antes?.itens) ? antes.itens : []) if (objeto(g) && uidItemValido(g.uid) && !porUid.has(g.uid)) porUid.set(g.uid, g);
+  const foraPorUid = new Map(fora.map(f => [f.uid, f]));
+  const doERP = !!antes?.origemMubisys;
+  let tirados = 0;
+  const voltaram = [], itens = [];
+  for (const it of os.itens) {
+    if (!objeto(it)) { itens.push(it); continue; }
+    const g = uidItemValido(it.uid) ? porUid.get(it.uid) : null;
+    const r = { ...it };
+    for (const c of ['saiuDoERP', 'chaveERP']) { if (g && proprio(g, c)) r[c] = g[c]; else delete r[c]; }
+    if (!g && doERP && !r.manual && uidItemValido(r.uid) && foraPorUid.has(r.uid)) {
+      if (!itemTemMarca(r)) { tirados++; continue; }
+      r.saiuDoERP = { em: String(foraPorUid.get(r.uid).em || agora) };
+      voltaram.push(r);
+    }
+    itens.push(r);
+  }
+  out.itens = itens;
+  if (avisar && tirados) avisos.push(`${tirados === 1 ? 'Um item que saiu do ERP não voltou' : tirados + ' itens que saíram do ERP não voltaram'} para a O.S.: a cópia deste aparelho era de antes da mudança.`);
+  if (avisar && voltaram.length) avisos.push(`O ${rotuloItem(voltaram[0])} saiu do ERP e ficou na O.S. com a marca 'saiu do ERP', porque recebeu marca deste aparelho.`);
+  return { os: out, avisos, tirados };
+}
+export function atualizarOrigemERP(atual, remoto, em, { sortear = sortearUid } = {}) {
+  if (!atual?.origemMubisys || atual.finalizadaEm) return {registro: atual, alteracoes: [], itens: null};
   const registro = {...atual}, alteracoes = [];
   for (const campo of CAMPOS_ERP) {
     if (!proprio(remoto, campo) || remoto[campo] == null) continue;
@@ -789,6 +1008,19 @@ export function atualizarOrigemERP(atual, remoto, em) {
     if (igual(atual[campo], valor)) continue;
     alteracoes.push({campo, antes: atual[campo] ?? null, depois: valor});
     registro[campo] = valor;
+  }
+  /* OS ITENS (E8): só quando a resposta trouxe a lista (a resposta sem ela não
+     diz nada sobre os itens). Mesma gravação, mesmo rev, mesma linha do
+     histórico do ERP. */
+  let itens = null;
+  if (proprio(remoto, 'itens')) {
+    const mi = mesclarItensERP(atual, remoto.itens, { em, sortear });
+    itens = mi.resumo;
+    if (mi.mudou) {
+      registro.itens = mi.itens;
+      if (mi.foraERP.length) registro.itensForaERP = mi.foraERP; else delete registro.itensForaERP;
+      alteracoes.push(...mi.alteracoes);
+    }
   }
   if (alteracoes.length) {
     registro.erpAlteracoes = [...(atual.erpAlteracoes || []), {em, campos: alteracoes}].slice(-20);
@@ -802,7 +1034,7 @@ export function atualizarOrigemERP(atual, remoto, em) {
     registro.atualizadoPor = 'Mubisys · atualização de origem';
     registro.rev = (Number(atual.rev) || 0) + 1;
   }
-  return {registro, alteracoes};
+  return {registro, alteracoes, itens};
 }
 // Mescla de três vias. Coleções com id são comparadas item a item; excluir ou
 // alterar o mesmo item simultaneamente gera conflito, nunca vence por relógio.
