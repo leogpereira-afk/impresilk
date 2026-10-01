@@ -267,8 +267,13 @@ const STORE = (() => {
     return getAllOS().find(o => o.id === id) || _osHistorico.get(id) || null;
   }
 
+  /* Conta as gravações da lista: quem guarda uma conta feita sobre ela (o
+     índice das voltas do retorno antecipado, F17) sabe quando refazer, mesmo
+     quando o saveOS troca a O.S. dentro da mesma lista. */
+  let _osVersao = 0;
   function _setAllOS(arr) {
     _osMem = Array.isArray(arr) ? arr : [];
+    _osVersao++;
     _persistirOS();
   }
 
@@ -2319,7 +2324,7 @@ const STORE = (() => {
   // ── API pública ───────────────────────────────────────────────────────────
   return {
     // CRUD O.S
-    getAllOS, getOS, saveOS, deleteOS, pronto,
+    getAllOS, getOS, saveOS, deleteOS, pronto, versaoOS: () => _osVersao,
     // CFG
     getCFG, saveCFG,
     // Identidade

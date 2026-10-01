@@ -101,8 +101,16 @@ const ALOCUI = (() => {
     const O = oper();
     if (!O || typeof O.statusEntrega !== 'function') return '';
     const alvo = /^\d{4}-\d{2}-\d{2}$/.test(String(dataEntrega || '')) && objeto(os) ? {...os, entregaLancada: {data: dataEntrega}} : os;
+    /* O retorno antecipado é medido PELA VOLTA (revisão da F17): sem ela, a
+       O.S. que não é a última da volta dizia "não pontua" aqui e "no prazo"
+       na ficha. A volta vem das O.S. do aparelho, a mesma do status da ficha. */
+    let volta = null;
+    try {
+      const S = loja();
+      if (typeof O.voltaNaLista === 'function' && typeof O.chegadaConferida === 'function' && O.chegadaConferida(alvo) && S && typeof S.getAllOS === 'function') volta = O.voltaNaLista(alvo, S.getAllOS());
+    } catch (e) { volta = null; }
     let s;
-    try { s = O.statusEntrega(alvo, undefined, programa); } catch (e) { return ''; }
+    try { s = O.statusEntrega(alvo, undefined, programa, volta); } catch (e) { return ''; }
     if (!s || !s.estado) return '';
     if (s.estado === 'cancelado') return 'O.S. cancelada: não pontua nem paga comissão.';
     if (!programa || !lista(s.perdas).length) return '';

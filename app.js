@@ -1748,7 +1748,7 @@ const AUD_ROTULOS = {
   finalizadaPorCampo: 'Finalizada pelo celular (declarada)',
   entregaLancada: 'Entrega lançada', retrabalho: 'Retrabalho', causa: 'Causa', causaRaiz: 'Causa raiz', etapaOrigem: 'Etapa de origem',
   tipo: 'Tipo', numero: 'Número da O.S.', baixaAutoERP: 'Baixa pelo ERP', justificativaConclusao: 'Justificativa da conclusão',
-  prazoCombinado: 'Prazo combinado', retornoPrevisto: 'Retorno previsto', retornoConferido: 'Chegada conferida do carro',
+  prazoCombinado: 'Prazo combinado', retornoPrevisto: 'Retorno previsto', retornoConferido: 'Chegada conferida do carro', chegadasConferidas: 'Chegadas conferidas por dia',
   agendaLog: 'Histórico de remarcações', origemPDF: 'Lida do PDF do ERP',
   alocacao: 'Divisão da equipe', alocacaoLog: 'Histórico da divisão', cancelamento: 'Cancelamento da O.S.',
   ocorrencias: 'Ocorrências', abonos: 'Abonos',
@@ -4357,6 +4357,14 @@ function perguntarRetrabalho(os, aoResponder, volta = {}) {
        por hábito gravava "não gerou" ao lado do 🔴 e a base ficava
        contraditória. Pergunta; confirmado, desmarca de verdade. */
     const marcado = !!os.retrabalho || (os.checkout && os.checkout.situacao === 'Retrabalho');
+    /* SÓ A GESTÃO DESMARCA (revisão da F17): para quem não é admin nem pcp, o
+       "Não" numa O.S. marcada não mexe no retrabalho nem na resposta (o
+       servidor também não aceitaria) e segue a finalização. */
+    if (marcado && !['admin', 'pcp'].includes(String((STATE.user || {}).papel || ''))) {
+      if (!confirm('Esta O.S. está marcada como retrabalho. O retrabalho fica marcado; só o PCP desmarca. Continuar assim?')) return;
+      box.remove(); aoResponder();
+      return;
+    }
     if (marcado) {
       if (!confirm('Esta O.S. está marcada como retrabalho. Responder Não desmarca o retrabalho. Continuar?')) return;
       os.retrabalho = false;
@@ -4438,12 +4446,41 @@ const temStatusEntrega = () => typeof OPERACAO !== 'undefined' && typeof OPERACA
    e as perdas) e as O.S. da mesma volta, porque o retorno antecipado é medido
    pela volta. A volta só é procurada quando a O.S. tem chegada conferida. */
 const temF17 = () => temStatusEntrega() && typeof OPERACAO.voltaNaLista === 'function';
+/* A REGRA DO DIA NA REPINTURA (revisão da F17): as versões são lidas uma vez
+   por volta do laço de eventos e a regra de cada dia, uma vez só. A lista de
+   cards pergunta pela regra de centenas de O.S. de uma vez. */
+let _regrasTela = null;
+function regraDoDiaTela(dia) {
+  if (typeof REGRAS === 'undefined' || typeof versoesRegrasCasa !== 'function') return null;
+  if (!_regrasTela) {
+    let versoes = [];
+    try { versoes = versoesRegrasCasa(); } catch { versoes = []; }
+    const c = _regrasTela = { versoes, porDia: new Map() };
+    Promise.resolve().then(() => { if (_regrasTela === c) _regrasTela = null; });
+  }
+  if (!_regrasTela.porDia.has(dia)) {
+    let r = null;
+    try { r = REGRAS.regraVigente(_regrasTela.versoes, dia); } catch { r = null; }
+    _regrasTela.porDia.set(dia, r);
+  }
+  return _regrasTela.porDia.get(dia);
+}
+/* A volta vem do índice das voltas (OPERACAO.voltaNaLista): feito uma vez por
+   repintura, não uma vez por card (revisão da F17: era O(N²)). */
+/* A regra é a do dia do serviço (a chegada conferida, senão a entrega lançada
+   ou a finalização), nunca a de hoje: a O.S. de setembro vista em outubro
+   segue fora do programa (revisão da F17). A aberta, a de hoje. */
+function diaDaRegraDe(os) {
+  const ch = OPERACAO.chegadaConferida(os);
+  if (ch) return ch.dia;
+  const l = typeof OPERACAO.entregaLancadaValida === 'function' ? OPERACAO.entregaLancadaValida(os) : null;
+  return OPERACAO.dia(l && l.data) || OPERACAO.dia(os.finalizadaEm) || hojeISO();
+}
 function contextoStatusDe(os) {
   const ctx = { regra: null, volta: null };
   if (!temF17() || !os || typeof os !== 'object') return ctx;
   const ch = OPERACAO.chegadaConferida(os);
-  const dia = ch ? ch.dia : hojeISO();
-  try { if (typeof REGRAS !== 'undefined' && typeof versoesRegrasCasa === 'function') ctx.regra = REGRAS.regraVigente(versoesRegrasCasa(), dia); } catch { ctx.regra = null; }
+  ctx.regra = regraDoDiaTela(diaDaRegraDe(os));
   if (ch) try { ctx.volta = OPERACAO.voltaNaLista(os, STORE.getAllOS()); } catch { ctx.volta = null; }
   return ctx;
 }
@@ -4485,7 +4522,7 @@ function statusEntregaFichaHTML(os) {
       <div class="st-ent-linha"><span class="st-ent-rot">Status da entrega</span>${seloStatusEntregaHTML(st)}</div>
       <p class="st-ent-motivo">${esc(st.motivo.charAt(0).toUpperCase() + st.motivo.slice(1))}.</p>
       ${outros ? `<ul class="st-ent-outros" aria-label="Também vale">${outros}</ul>` : ''}
-      ${retornoFichaHTML(st.retornoAntecipado, st.motivo)}
+      ${retornoFichaHTML(st.retornoAntecipado, st.motivo, st.perdas)}
       ${erp}${desfeito}
       ${acao ? `<div class="st-ent-acoes">${acao}</div>` : ''}
       ${ocorrenciasFichaHTML(os, st)}
@@ -4501,18 +4538,34 @@ function statusEntregaFichaHTML(os) {
 const podeAbonar = () => ['admin', 'pcp'].includes(String((STATE.user || {}).papel || '')) && !(typeof crachaEhToque === 'function' && crachaEhToque());
 const RETORNO_SITUACAO_TXT = { antecipado: 'conta como perda', abonado: 'abonado', 'no horário': 'no horário', 'na volta': 'medido na volta',
   'sem retorno previsto': 'sem retorno previsto', 'sem dado': 'chegada ainda não conferida', 'não se aplica': 'não se aplica' };
-// `jaDito`: o motivo que a ficha já mostrou em cima (quando o retorno é o estado principal), para não repetir.
-function retornoFichaHTML(r, jaDito) {
+/* O RETORNO NA FICHA, um por dia da jornada (revisão da F17). "Conta como
+   perda" só quando o status conta (st.perdas: sem regra do programa, nada
+   conta); senão "antes do previsto". O motivo que já começa pela situação não
+   a repete ("sem retorno previsto. Sem retorno previsto digitado..."), e o
+   que a ficha já mostrou em cima (`jaDito`) não volta. */
+function retornoFichaHTML(r, jaDito, perdas) {
   if (!r) return '';
-  const cls = r.situacao === 'antecipado' ? 'ruim' : r.situacao === 'abonado' ? 'abonado' : r.situacao === 'no horário' ? 'ok' : '';
-  const motivo = r.motivo && r.motivo !== jaDito ? ` ${esc(r.motivo.charAt(0).toUpperCase() + r.motivo.slice(1))}.` : '';
-  return `<p class="st-ent-retorno ${cls}"><strong>Retorno antecipado:</strong> ${esc(RETORNO_SITUACAO_TXT[r.situacao] || r.situacao)}.${motivo}</p>`;
+  const conta = Array.isArray(perdas) && perdas.includes('retornoAntecipado');
+  const linha = d => {
+    const sit = d.situacao === 'antecipado' && !conta ? 'antes do previsto, sem perda pela regra do dia' : RETORNO_SITUACAO_TXT[d.situacao] || d.situacao;
+    const m = String(d.motivo || '');
+    const repete = m.toLowerCase().startsWith(String(RETORNO_SITUACAO_TXT[d.situacao] || '').toLowerCase());
+    const motivo = !m || (jaDito && jaDito.includes(m)) ? '' : ` ${esc(m.charAt(0).toUpperCase() + m.slice(1))}.`;
+    const cls = d.situacao === 'antecipado' && conta ? 'ruim' : d.situacao === 'abonado' ? 'abonado' : d.situacao === 'no horário' ? 'ok' : '';
+    return `<p class="st-ent-retorno ${cls}"><strong>Retorno antecipado:</strong> ${repete && motivo ? motivo.trim() : `${esc(sit)}.${motivo}`}</p>`;
+  };
+  const dias = Array.isArray(r.dias) && r.dias.length > 1 ? r.dias : [r];
+  return dias.map(linha).join('');
 }
 // Uma ocorrência na lista: o rótulo, o motivo, o abono (ou a anulação) e os botões da gestão.
-function ocorrenciaLinhaHTML(oc, gestao) {
+/* O selo "perda" sai das perdas do status (revisão da F17): a ocorrência que
+   conta agora (oc.conta, a mesma conta de st.perdas). O atraso da aberta, a
+   abonada e a de antes do programa não são perda. */
+function ocorrenciaLinhaHTML(oc, gestao, perdas) {
   const ab = oc.abono;
+  const ePerda = !!oc.conta && (!Array.isArray(perdas) || perdas.includes(oc.perda));
   const selo = oc.origem === 'manual' ? (oc.anulada ? '<span class="oc-selo anulada">anulada</span>' : '<span class="oc-selo manual">registrada</span>')
-    : oc.abonado ? '<span class="oc-selo abonado">abonada</span>' : oc.perda ? '<span class="oc-selo perda">perda</span>' : oc.volta ? '<span class="oc-selo volta">volta do carro</span>' : '';
+    : oc.abonado ? '<span class="oc-selo abonado">abonada</span>' : ePerda ? '<span class="oc-selo perda">perda</span>' : oc.volta ? '<span class="oc-selo volta">volta do carro</span>' : '';
   const pend = (oc.pendente || oc.anulacaoPendente || (ab && (ab.pendente || ab.revogacaoPendente))) ? ' <small class="oc-pend">(a enviar)</small>' : '';
   const quem = oc.origem === 'manual' && oc.por ? ` <small>por ${esc(oc.por)}</small>` : '';
   const anulacao = oc.anulada && oc.anuladaPor ? ` <small>anulada por ${esc(oc.anuladaPor)}</small>` : '';
@@ -4522,6 +4575,22 @@ function ocorrenciaLinhaHTML(oc, gestao) {
   else if (gestao && oc.origem === 'manual' && !oc.anulada) botoes = `<button type="button" class="btn-ghost btn-sm" data-f17-acao="anular" data-oc="${esc(oc.id)}">Anular</button>`;
   return `<li class="oc-linha${oc.anulada ? ' oc-anulada' : ''}"><div><strong>${esc(oc.rotulo)}</strong> ${selo}${pend}${quem}${anulacao}<br><small>${esc(oc.motivo)}</small></div>${botoes ? `<div class="oc-acoes">${botoes}</div>` : ''}</li>`;
 }
+/* "N valendo" conta só as perdas que valem (revisão da F17); as abonadas, as
+   da volta do carro, as registradas à mão e as que ainda não contam vêm à
+   parte. */
+function contaOcorrenciasTxt(lista, perdas) {
+  const vivas = lista.filter(o => !o.anulada);
+  const n = f => vivas.filter(f).length;
+  const valendo = n(o => o.conta && (!Array.isArray(perdas) || perdas.includes(o.perda)));
+  const partes = [`${valendo} ${valendo === 1 ? 'perda valendo' : 'perdas valendo'}`];
+  const abonadas = n(o => o.abonado), volta = n(o => o.volta), manuais = n(o => o.origem === 'manual');
+  const semContar = n(o => o.origem === 'derivada' && !o.volta && !o.abonado && !(o.conta && (!Array.isArray(perdas) || perdas.includes(o.perda))));
+  if (abonadas) partes.push(`${abonadas} ${abonadas === 1 ? 'abonada' : 'abonadas'}`);
+  if (semContar) partes.push(`${semContar} sem perda agora`);
+  if (volta) partes.push(`${volta} da volta do carro`);
+  if (manuais) partes.push(`${manuais} ${manuais === 1 ? 'registrada' : 'registradas'}`);
+  return partes.join(' · ');
+}
 function ocorrenciasFichaHTML(os, st) {
   if (!temF17() || !st) return '';
   const lista = Array.isArray(st.ocorrencias) ? st.ocorrencias : [];
@@ -4529,8 +4598,8 @@ function ocorrenciasFichaHTML(os, st) {
   const registrar = gestao ? '<button type="button" class="btn-ghost btn-sm" data-f17-acao="registrar">+ Registrar ocorrência</button>' : '';
   if (!lista.length && !registrar) return '';
   return `<div class="st-ocorrencias" aria-label="Ocorrências da O.S.">
-      <div class="st-ent-linha"><span class="st-ent-rot">Ocorrências</span><span class="text-muted">${lista.length ? lista.filter(o => !o.anulada).length + ' valendo' : 'nenhuma'}</span></div>
-      ${lista.length ? `<ul class="oc-lista">${lista.map(oc => ocorrenciaLinhaHTML(oc, gestao)).join('')}</ul>` : ''}
+      <div class="st-ent-linha"><span class="st-ent-rot">Ocorrências</span><span class="text-muted">${lista.length ? contaOcorrenciasTxt(lista, st.perdas) : 'nenhuma'}</span></div>
+      ${lista.length ? `<ul class="oc-lista">${lista.map(oc => ocorrenciaLinhaHTML(oc, gestao, st.perdas)).join('')}</ul>` : ''}
       ${registrar ? `<div class="st-ent-acoes">${registrar}</div>` : ''}
     </div>`;
 }
@@ -4557,21 +4626,24 @@ function abrirDialogoF17(cfg, aoConfirmar) {
         ${escolha}${tipos}
         <div class="field"><label>${esc(cfg.rotuloTexto || 'Motivo')} ${obrigatorio ? '<span class="req">*</span>' : ''}<textarea name="motivo" rows="3" maxlength="300" ${obrigatorio ? 'required' : ''}></textarea></label></div>
         <p class="ent-erro" role="alert" hidden></p>
-        <div class="wpp-acoes"><button type="submit" class="btn-primary">${esc(cfg.botao)}</button><button type="button" class="btn-ghost" data-f17-fechar>Voltar</button></div>
+        <div class="wpp-acoes">${cfg.botaoTodas ? `<button type="button" class="btn-primary" data-f17-todas>${esc(cfg.botaoTodas)}</button>` : ''}<button type="submit" class="${cfg.botaoTodas ? 'btn-ghost' : 'btn-primary'}">${esc(cfg.botao)}</button><button type="button" class="btn-ghost" data-f17-fechar>Voltar</button></div>
       </form>
     </div>`;
   document.body.appendChild(box);
   const form = box.querySelector('form'), erro = box.querySelector('.ent-erro');
   const fechar = () => box.remove();
   box.querySelectorAll('[data-f17-fechar]').forEach(b => { b.onclick = fechar; });
-  form.onsubmit = ev => {
-    ev.preventDefault();
+  // `todas`: o botão da volta inteira (anular a ocorrência em todas as O.S. dela, num toque).
+  const enviar = todas => {
     const val = n => { const el = form.querySelector(`[name="${n}"]`); return el ? String(el.value || '').trim() : ''; };
     const oc = val('oc') || (cfg.escolhas && cfg.escolhas[0] ? cfg.escolhas[0].id : '');
-    const msg = aoConfirmar({ oc, motivo: val('motivo'), tipo: val('tipo'), item: val('item') });
+    const msg = aoConfirmar({ oc, motivo: val('motivo'), tipo: val('tipo'), item: val('item'), todas });
     if (msg) { erro.textContent = msg; erro.hidden = false; return; }
     fechar();
   };
+  form.onsubmit = ev => { ev.preventDefault(); enviar(false); };
+  const bTodas = box.querySelector('[data-f17-todas]');
+  if (bTodas) bTodas.onclick = () => enviar(true);
   const primeiro = form.querySelector('select,input,textarea');
   if (primeiro) try { primeiro.focus(); } catch {}
 }
@@ -4635,17 +4707,37 @@ function ligarOcorrenciasDaFicha() {
         return;
       }
       if (acao === 'anular') {
-        abrirDialogoF17({ titulo: 'Anular a ocorrência', texto: 'A ocorrência fica no histórico, marcada como anulada, com o seu nome.', botao: 'Anular', rotuloTexto: 'Motivo (opcional)', semObrigatorio: true },
-          dados => gravarNaFichaF17(alvo => OPERACAO.pedirAnularOcorrencia(alvo, b.dataset.oc, dados.motivo), 'Ocorrência anulada.'));
+        /* A ocorrência registrada na volta está em cada O.S. dela (o mesmo
+           grupo): anular em todas num toque (revisão da F17). As outras O.S.
+           são gravadas direto, esta pela ficha aberta. */
+        const x = (Array.isArray(d.ocorrencias) ? d.ocorrencias : []).find(y => y && String(y.id) === b.dataset.oc);
+        const outras = x && x.grupo && typeof OPERACAO.ocorrenciasDoGrupo === 'function'
+          ? OPERACAO.ocorrenciasDoGrupo(STORE.getAllOS(), x.grupo).filter(g => g.os.id !== d.id) : [];
+        abrirDialogoF17({ titulo: 'Anular a ocorrência', texto: 'A ocorrência fica no histórico, marcada como anulada, com o seu nome.', botao: outras.length ? 'Anular só nesta O.S.' : 'Anular',
+          rotuloTexto: 'Motivo (opcional)', semObrigatorio: true, ...(outras.length ? { botaoTodas: `Anular nas ${outras.length + 1} O.S. da volta` } : {}) },
+          dados => {
+            const erro = gravarNaFichaF17(alvo => OPERACAO.pedirAnularOcorrencia(alvo, b.dataset.oc, dados.motivo), 'Ocorrência anulada.');
+            if (erro || !dados.todas) return erro;
+            for (const g of outras) gravarNaOSF17(g.os.id, alvo => OPERACAO.pedirAnularOcorrencia(alvo, g.ocorrenciaId, dados.motivo), `Ocorrência anulada nas ${outras.length + 1} O.S. da volta.`, () => {});
+            return '';
+          });
       }
     };
   });
 }
-// No card: "Abonar" quando há atraso ou retorno antecipado sem abono (só a gestão).
+/* NO CARD, "Abonar" só em dois casos (revisão da F17; aparecia em 35% dos
+   cards abertos, sem perda nenhuma): (a) a O.S. tem uma perda que conta
+   agora (st.perdas) numa ocorrência abonável; (b) a O.S. aberta está
+   atrasada e foi remarcada (o agendaLog tem a remarcação: o cliente pediu
+   para mudar a data). Nos outros casos, Abonar fica na ficha e no Fechar o
+   dia. Só a gestão. */
 function abonarCardHTML(os, st) {
   if (!podeAbonar() || !st || !Array.isArray(st.ocorrencias)) return '';
-  const n = st.ocorrencias.filter(o => o.abonavel && !o.abonado).length;
-  return n ? `<button class="btn-ghost btn-sm card-abonar" data-abonar-os="${esc(os.id)}" title="Abonar o atraso ou o retorno antecipado, com motivo">Abonar</button>` : '';
+  const perdas = Array.isArray(st.perdas) ? st.perdas : [];
+  const perdaAbonavel = st.ocorrencias.some(o => o.abonavel && !o.abonado && o.conta && perdas.includes(o.perda));
+  const remarcada = !st.entregue && st.ocorrencias.some(o => o.tipo === 'atraso' && o.abonavel && !o.abonado)
+    && (Array.isArray(os.agendaLog) ? os.agendaLog : []).some(x => x && typeof x === 'object' && OPERACAO.dia(x.data));
+  return perdaAbonavel || remarcada ? `<button class="btn-ghost btn-sm card-abonar" data-abonar-os="${esc(os.id)}" title="Abonar o atraso ou o retorno antecipado, com motivo">Abonar</button>` : '';
 }
 function abonarDoCard(osId) {
   const os = STORE.getOS(osId);

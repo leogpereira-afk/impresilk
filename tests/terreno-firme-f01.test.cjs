@@ -31,7 +31,7 @@ const shared=()=>import('../supabase/functions/_shared/pcp-integridade.mjs');
 
 test('CAMPOS_GESTAO nasce com os campos das próximas fatias e todos entram no diário',async()=>{
  const {CAMPOS_GESTAO,CAMPOS_AUDITADOS}=await shared();
- assert.deepEqual([...CAMPOS_GESTAO].sort(),['abonos','alocacao','alocacaoLog','cancelamento','ocorrencias','osOriginalId','prazoCombinado','retornoConferido','retornoPrevisto']);
+ assert.deepEqual([...CAMPOS_GESTAO].sort(),['abonos','alocacao','alocacaoLog','cancelamento','chegadasConferidas','ocorrencias','osOriginalId','prazoCombinado','retornoConferido','retornoPrevisto']);
  for(const c of CAMPOS_GESTAO)assert.ok(CAMPOS_AUDITADOS.includes(c),c+' fora do diário');
  assert.ok(!CAMPOS_GESTAO.some(c=>/cpf/i.test(c)));
 });

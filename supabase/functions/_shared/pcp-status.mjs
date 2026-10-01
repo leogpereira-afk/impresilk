@@ -71,20 +71,37 @@ const MOTIVO_CANCELAMENTO_MIN = 15;
 const MOTIVO_CANCELAMENTO_MAX = 300;
 const txtSt = v => v == null ? '' : String(v).trim();
 const objSt = v => !!v && typeof v === 'object' && !Array.isArray(v);
-/* O MOTIVO É TEXTO, e as letras contam sem os caracteres invisíveis (largura
-   zero, controle, marca de direção): quinze espaços de largura zero não
-   dizem motivo nenhum, e um objeto não é motivo (revisão da F16). */
+/* O MOTIVO É TEXTO, e só contam as LETRAS E OS NÚMEROS que se veem, depois
+   de normalizar em NFC (revisão da F17): quinze espaços de largura zero, o
+   braille em branco, o seletor de variação e a marca combinante não dizem
+   motivo nenhum, e um objeto não é motivo (revisão da F16). O preenchimento
+   do Hangul é letra para o Unicode e não aparece: também não conta. A régua
+   vale para o abono e para o cancelamento (F16). INVISIVEIS_ST continua
+   limpando o texto que se grava. */
 const INVISIVEIS_ST = /[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
-const letrasMotivoSt = v => typeof v === 'string' ? Array.from(v.replace(INVISIVEIS_ST, '').trim()).length : 0;
+const LETRA_VISIVEL_ST = /[\p{L}\p{N}]/gu;
+const LETRA_QUE_NAO_APARECE_ST = /[\u115f\u1160\u3164\uffa0]/g;
+const letrasMotivoSt = v => typeof v === 'string' ? (v.normalize('NFC').replace(LETRA_QUE_NAO_APARECE_ST, '').match(LETRA_VISIVEL_ST) || []).length : 0;
+/* O dia que existe no calendário. A resposta de cada texto é guardada
+   (revisão da F17: o status de centenas de cards confere os mesmos dias
+   milhares de vezes, e montar uma data a cada vez pesava). */
+const DIAS_VALIDOS_ST = new Map();
 function diaValidoSt(v) {
-  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return '';
-  const d = new Date(v + 'T12:00:00Z');
-  return Number.isFinite(+d) && d.toISOString().slice(0, 10) === v ? v : '';
+  if (typeof v !== 'string') return '';
+  let r = DIAS_VALIDOS_ST.get(v);
+  if (r !== undefined) return r;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) r = '';
+  else { const d = new Date(v + 'T12:00:00Z'); r = Number.isFinite(+d) && d.toISOString().slice(0, 10) === v ? v : ''; }
+  if (DIAS_VALIDOS_ST.size > 5000) DIAS_VALIDOS_ST.clear();
+  DIAS_VALIDOS_ST.set(v, r);
+  return r;
 }
 /* O DIA NO FUSO DE SÃO PAULO, igual no aparelho e no servidor (UTC): a
    finalização às 23h30 de 29/09 na fábrica é 02h30 de 30/09 em UTC. Horário
    sem fuso já é o da fábrica. A mesma conta do diaSP do motor da entrega por
-   item. */
+   item. O formatador é feito uma vez só (revisão da F17: fazer um por
+   chamada pesava no status de centenas de cards). */
+let formatoDiaSt = null;
 function diaSt(v) {
   if (v == null || v === '') return '';
   if (typeof v === 'string') {
@@ -95,7 +112,8 @@ function diaSt(v) {
   if (!Number.isFinite(+d)) return '';
   try {
     const p = {};
-    for (const x of new Intl.DateTimeFormat('en-US', {timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit'}).formatToParts(d)) p[x.type] = x.value;
+    if (!formatoDiaSt) formatoDiaSt = new Intl.DateTimeFormat('en-US', {timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit'});
+    for (const x of formatoDiaSt.formatToParts(d)) p[x.type] = x.value;
     return diaValidoSt(`${p.year}-${p.month}-${p.day}`);
   } catch (e) {
     // Sem a tabela de fusos: São Paulo não tem horário de verão desde 2019.
@@ -247,7 +265,10 @@ function motivoAgendadoSt(o, prazo) {
 }
 /* OCORRÊNCIAS, RETORNO ANTECIPADO E ABONOS (F17). Toda perda aponta para uma
    ocorrência com id. As DERIVADAS são lidas da O.S., sem gravar nada, e têm
-   o id 'osId:tipo' (o mesmo em toda apuração):
+   o id 'osId:tipo' (o mesmo em toda apuração); o retorno antecipado é um por
+   dia da jornada, 'osId:retorno_antecipado:AAAA-MM-DD' (revisão da F17: a
+   O.S. de vários dias tem uma volta por dia, e a chegada do segundo dia não
+   apaga a perda do primeiro):
      atraso              o prazo combinado vencido (a entregue e a aberta)
      retrabalho          a marca de retrabalho, venha de onde vier
      retorno_antecipado  a chegada conferida pela gestão antes do retorno
@@ -261,22 +282,34 @@ function motivoAgendadoSt(o, prazo) {
    os.ocorrencias, com id próprio ('oc-...'): detalham o item e não descontam
    de novo (o redutor de equipamento é um só, o da conferência). Só
    acréscimo; anular é novo carimbo.
-   O ABONO ({id, ocorrenciaId, motivo, autor}) vale para o atraso (a
+   O ABONO ({id, ocorrenciaId, motivo, autor, medida}) vale para o atraso (a
    remarcação pedida pelo cliente, decisão do dono) e para o retorno
    antecipado. Retrabalho não se abona. Revogar é novo carimbo (revogadoEm,
    revogadoPor), nunca apagar. O pedido que o aparelho ainda vai mandar
    ({pedido: true}, {revogar: true}, {anular: true}) já vale na tela, marcado
    "a enviar"; quem carimba autor e hora é o servidor.
+   O ABONO FICA PRESO À MEDIDA QUE ABONOU (revisão da F17): no retorno, o dia,
+   a chegada e o previsto; no atraso, o prazo e a data da entrega (o abono
+   dado antes da entrega, com a data vazia, vale para a entrega que vier,
+   desde que o prazo seja o mesmo: é a remarcação pedida pelo cliente). Se a
+   medida mudou (a chegada foi corrigida, o prazo foi corrigido, a entrega
+   mudou de dia), o abono não vale: aparece como "abono de outra medida" e
+   um abono novo é aceito. Nada é revogado sozinho.
    O RETORNO ANTECIPADO é medido PELA VOLTA (recomendação do plano): o
    retorno previsto mais tarde das O.S. da volta naquele dia (o da última O.S.
-   do carro) contra a chegada conferida pela gestão (retornoConferido: dia e
-   hora da fábrica, sem fuso; o recebidoEm em UTC não entra na conta). A hora
-   que a equipe anotou (horaRetorno) é só declaração e nunca decide. Chegar
-   até `toleranciaRetornoMin` minutos antes não conta. A perda cai só na O.S.
-   do último retorno previsto (regra.retornoNaVolta 'ultima', o padrão: a
-   volta é uma só, e zerar as três O.S. puniria quem faz três serviços na
-   mesma saída) ou em todas ('todas'). Sem retorno previsto digitado não há
-   perda (decisão do dono); sem chegada conferida, "sem dado". */
+   do carro) contra a chegada conferida pela gestão (chegadasConferidas: dia
+   da jornada, hora e o dia em que o carro chegou, no calendário da fábrica,
+   sem fuso; o recebidoEm em UTC não entra na conta). A conta é entre
+   INSTANTES (dia e hora): a chegada às 00:40 do dia seguinte é 70 minutos
+   DEPOIS do previsto das 23:30, nunca 22 h 50 antes. A hora que a equipe
+   anotou (horaRetorno) é só declaração e nunca decide. Chegar até
+   `toleranciaRetornoMin` minutos antes não conta. A perda cai só na O.S. do
+   último retorno previsto (regra.retornoNaVolta 'ultima', o padrão: a volta
+   é uma só, e zerar as três O.S. puniria quem faz três serviços na mesma
+   saída) ou em todas ('todas'). A O.S. cancelada e a retirada no balcão não
+   são da volta: a cancelada era a "última" e levava a perda embora (revisão
+   da F17). Sem retorno previsto digitado não há perda (decisão do dono); sem
+   chegada conferida, "sem dado". */
 const TIPOS_OCORRENCIA = Object.freeze(['atraso', 'retrabalho', 'retorno_antecipado', 'carro', 'avaria', 'equipamentos', 'equipamento_faltante', 'equipamento_danificado', 'outra']);
 const TIPOS_OCORRENCIA_MANUAL = Object.freeze(['equipamento_faltante', 'equipamento_danificado', 'outra']);
 const ROTULOS_OCORRENCIA = Object.freeze({atraso:'Entrega com atraso', retrabalho:'Retrabalho', retorno_antecipado:'Retorno antecipado',
@@ -293,9 +326,11 @@ const TOLERANCIA_RETORNO_PADRAO = 15;
 const RETORNO_NA_VOLTA_PADRAO = 'ultima';
 const HORA_ST = /^([01]\d|2[0-3]):[0-5]\d$/;
 const minutosSt = h => HORA_ST.test(h) ? Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5)) : NaN;
+// O instante (dia e hora da fábrica, sem fuso) em minutos: a conta da chegada contra o previsto.
+const instanteSt = (dia, hora) => Date.parse(dia + 'T00:00:00Z') / 60000 + minutosSt(hora);
 const minTxtSt = n => n === 1 ? '1 minuto' : n < 60 ? `${n} minutos` : `${Math.floor(n / 60)} h${n % 60 ? ` ${n % 60} min` : ''}`;
 const cortarSt = (v, n) => Array.from(txtSt(v)).slice(0, n).join('');
-// O motivo do abono: '' quando serve; senão a frase, igual na tela e na porta (contado sem os invisíveis, como o do cancelamento).
+// O motivo do abono: '' quando serve; senão a frase, igual na tela e na porta (contado só pelas letras que se veem, como o do cancelamento).
 function motivoAbonoInvalido(motivo) {
   const n = letrasMotivoSt(motivo);
   if (n < MOTIVO_ABONO_MIN) return `Escreva o motivo do abono com ${MOTIVO_ABONO_MIN} letras ou mais.`;
@@ -304,14 +339,60 @@ function motivoAbonoInvalido(motivo) {
 }
 const toleranciaRetorno = regra => { const t = objSt(regra) ? regra.toleranciaRetornoMin : undefined; return Number.isInteger(t) && t >= 0 && t <= 240 ? t : TOLERANCIA_RETORNO_PADRAO; };
 const retornoNaVolta = regra => objSt(regra) && (regra.retornoNaVolta === 'todas' || regra.retornoNaVolta === 'ultima') ? regra.retornoNaVolta : RETORNO_NA_VOLTA_PADRAO;
-// A chegada conferida pela gestão: {dia, hora} no calendário da fábrica, ou null.
+/* AS CHEGADAS CONFERIDAS PELA GESTÃO, uma por dia da jornada (revisão da
+   F17): a lista chegadasConferidas ({dia, hora, diaChegada, por, porId, em})
+   e, no dia que ela ainda não tem, o retornoConferido (a aba v142 e o que foi
+   gravado antes da lista só têm ele). `dia` é o dia da jornada, o da volta,
+   onde está o retorno previsto; `diaChegada` é o dia em que o carro chegou:
+   o mesmo, ou o seguinte quando a volta passou da meia-noite. Em ordem de
+   dia; o mesmo dia repetido na lista fica com o último. O pedido de tirar a
+   chegada de um dia ({dia, limpar: true}, o Desfazer do lote) já vale na
+   tela, antes de o servidor responder. */
+function chegadaSt(c) {
+  if (!objSt(c)) return null;
+  const dia = diaValidoSt(txtSt(c.dia)), hora = HORA_ST.test(txtSt(c.hora)) ? txtSt(c.hora) : '';
+  if (!dia || !hora) return null;
+  const dc = diaValidoSt(txtSt(c.diaChegada));
+  return {dia, hora, diaChegada:dc && dc === somarDiasSt(dia, 1) ? dc : dia, por:txtSt(c.por)};
+}
+function chegadasConferidas(o) {
+  if (!objSt(o)) return [];
+  const porDia = new Map(), tiradas = new Set();
+  for (const c of Array.isArray(o.chegadasConferidas) ? o.chegadasConferidas : []) {
+    if (objSt(c) && c.limpar === true) { const d = diaValidoSt(txtSt(c.dia)); if (d) { porDia.delete(d); tiradas.add(d); } continue; }
+    const x = chegadaSt(c);
+    if (x) { porDia.set(x.dia, x); tiradas.delete(x.dia); }
+  }
+  const rc = chegadaSt(o.retornoConferido);
+  if (rc && !porDia.has(rc.dia) && !tiradas.has(rc.dia)) porDia.set(rc.dia, rc);
+  return [...porDia.values()].sort((a, b) => a.dia < b.dia ? -1 : a.dia > b.dia ? 1 : 0);
+}
+// A chegada conferida de um dia da jornada, ou null.
+const chegadaDoDia = (o, dia) => chegadasConferidas(o).find(c => c.dia === dia) || null;
+// A última chegada conferida (a do último dia da jornada), ou null.
 function chegadaConferida(o) {
-  const c = objSt(o) && objSt(o.retornoConferido) ? o.retornoConferido : null;
-  const dia = c ? diaValidoSt(txtSt(c.dia)) : '', hora = c && HORA_ST.test(txtSt(c.hora)) ? txtSt(c.hora) : '';
-  return dia && hora ? {dia, hora, por:txtSt(c.por)} : null;
+  const cs = chegadasConferidas(o);
+  return cs.length ? cs[cs.length - 1] : null;
+}
+/* A CHEGADA QUE PARECE DO DIA SEGUINTE (revisão da F17): a hora digitada
+   antes da saída prevista, ou mais de 12 h antes do retorno previsto, é a
+   volta que passou da meia-noite. A tela pergunta "chegou no dia seguinte?";
+   quem decide é a gestão. */
+function pareceDiaSeguinte(hora, previsto, saida) {
+  const h = minutosSt(txtSt(hora));
+  if (!Number.isFinite(h)) return false;
+  const s = minutosSt(txtSt(saida)), p = minutosSt(txtSt(previsto));
+  return (Number.isFinite(s) && h < s) || (Number.isFinite(p) && p - h > 12 * 60);
 }
 /* OS ABONOS da O.S., na ordem gravada: o carimbado pelo servidor (com `em`)
    e o pedido que ainda vai (pedido: true, com motivo que serve). */
+const CAMPOS_MEDIDA_ST = ['dia', 'chegada', 'previsto', 'prazo', 'entrega'];
+function medidaSt(m) {
+  if (!objSt(m)) return null;
+  const out = {};
+  for (const k of CAMPOS_MEDIDA_ST) if (Object.prototype.hasOwnProperty.call(m, k)) out[k] = txtSt(m[k]);
+  return Object.keys(out).length ? out : null;
+}
 function abonosDe(o) {
   const out = [];
   for (const a of objSt(o) && Array.isArray(o.abonos) ? o.abonos : []) {
@@ -319,17 +400,38 @@ function abonosDe(o) {
     const id = txtSt(a.id), ocorrenciaId = txtSt(a.ocorrenciaId), pendente = a.pedido === true && !txtSt(a.em);
     if (!id || !ocorrenciaId || (pendente ? !!motivoAbonoInvalido(a.motivo) : !txtSt(a.em))) continue;
     const revogadoEm = txtSt(a.revogadoEm);
-    out.push({id, ocorrenciaId, motivo:cortarSt(a.motivo, MOTIVO_ABONO_MAX), por:txtSt(a.por), em:txtSt(a.em), pendente,
+    out.push({id, ocorrenciaId, motivo:cortarSt(a.motivo, MOTIVO_ABONO_MAX), por:txtSt(a.por), em:txtSt(a.em), pendente, medida:medidaSt(a.medida),
       revogado:!!revogadoEm || a.revogar === true, revogadoEm, revogadoPor:txtSt(a.revogadoPor), revogacaoPendente:a.revogar === true && !revogadoEm});
   }
   return out;
 }
-// O abono que vale para a ocorrência: o último não revogado.
-function abonoVigente(o, ocorrenciaId) {
-  let v = null;
-  for (const a of abonosDe(o)) if (a.ocorrenciaId === ocorrenciaId && !a.revogado) v = a;
-  return v;
+// A medida do abono é a de agora? No atraso, o abono dado antes da entrega (entrega vazia) vale para a entrega que vier.
+function mesmaMedidaSt(a, atual) {
+  if (!a || !atual) return false;
+  if (Object.prototype.hasOwnProperty.call(atual, 'chegada')) return a.dia === atual.dia && a.chegada === atual.chegada && a.previsto === atual.previsto;
+  return a.prazo === atual.prazo && (a.entrega === atual.entrega || a.entrega === '');
 }
+/* O ABONO DA OCORRÊNCIA: o último não revogado da MESMA medida (`vigente`)
+   e, quando nenhum vale, o último não revogado de outra medida (`outra`, que
+   só se mostra). O pedido que ainda vai sem medida é sobre a medida de agora
+   (o servidor carimba a dele). */
+function abonoDaOcorrencia(o, ocorrenciaId, medida) {
+  let vigente = null, outra = null;
+  for (const a of abonosDe(o)) {
+    if (a.ocorrenciaId !== ocorrenciaId || a.revogado) continue;
+    if (a.medida ? mesmaMedidaSt(a.medida, medida) : a.pendente) vigente = a;
+    else outra = a;
+  }
+  return {vigente, outra:vigente ? null : outra};
+}
+const abonoVigente = (o, ocorrenciaId, medida) => abonoDaOcorrencia(o, ocorrenciaId, medida).vigente;
+// "abono de outra medida (05/10 14:00)": o que ele abonou, para quem lê saber que não vale mais.
+function medidaTxtSt(m) {
+  if (!m) return '';
+  if (m.chegada) return `${ddmmSt(m.chegada.slice(0, 10))} ${m.chegada.slice(11, 16)}`;
+  return [m.prazo ? 'prazo ' + ddmmSt(m.prazo) : '', m.entrega ? 'entrega ' + ddmmSt(m.entrega) : 'antes da entrega'].filter(Boolean).join(', ');
+}
+const comOutraSt = (motivo, outra) => outra ? `${motivo}; o abono de outra medida (${medidaTxtSt(outra.medida)}) não vale para esta` : motivo;
 /* AS OCORRÊNCIAS MANUAIS (os.ocorrencias): as gravadas e os pedidos que
    ainda vão. A anulada fica na lista, marcada. */
 function ocorrenciasManuais(o) {
@@ -340,86 +442,132 @@ function ocorrenciasManuais(o) {
     if (!id || (!pendente && !txtSt(x.em))) continue;
     const an = objSt(x.anulada) && txtSt(x.anulada.em) ? x.anulada : null;
     const item = cortarSt(x.item, 120), obs = cortarSt(x.obs, 300);
-    out.push({id, tipo:x.tipo, rotulo:ROTULOS_OCORRENCIA[x.tipo], origem:'manual', perda:'', volta:false, abonavel:false, abonado:false, abono:null,
+    out.push({id, tipo:x.tipo, rotulo:ROTULOS_OCORRENCIA[x.tipo], origem:'manual', perda:'', volta:false, abonavel:false, abonado:false, abono:null, conta:false,
       motivo:[item, obs].filter(Boolean).join(': ') || ROTULOS_OCORRENCIA[x.tipo].toLowerCase(), item, obs, fonte:txtSt(x.fonte), grupo:txtSt(x.grupo),
       dia:diaValidoSt(txtSt(x.dia)), por:txtSt(x.por), em:txtSt(x.em), pendente,
       anulada:!!an || x.anular === true, anulacaoPendente:x.anular === true && !an, anuladaPor:an ? txtSt(an.por) : '', anuladaEm:an ? txtSt(an.em) : ''});
   }
   return out;
 }
-/* AS O.S. DA MESMA VOLTA do retorno: a mesma chegada conferida (o dia), o
-   mesmo carro e a mesma equipe, como o lote as juntou. `chave` lê a pessoa
-   (no aparelho, OPERACAO.chavePessoa; sem ela, o texto da equipe). Sem carro
-   e sem equipe nada liga uma O.S. à outra: a volta é ela sozinha. A retirada
-   no balcão não tem volta. */
+/* AS O.S. DA MESMA VOLTA do retorno: uma chegada conferida no mesmo dia da
+   jornada, o mesmo carro e a mesma equipe, como o lote as juntou. `chave` lê
+   a pessoa (no aparelho, OPERACAO.chavePessoa; sem ela, o texto da equipe).
+   Sem carro e sem equipe nada liga uma O.S. à outra: a volta é ela sozinha.
+   A retirada no balcão não tem volta, e a O.S. cancelada sai da volta. */
+const carroSt = x => txtSt(x.veiculo).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+const chaveVoltaSt = (x, pessoa) => carroSt(x) + '|' + (Array.isArray(x.equipe) ? x.equipe : []).map(p => txtSt(pessoa(p))).filter(Boolean).sort().join('+');
+const foraDaVoltaSt = x => !objSt(x) || x.tipo === 'interno' || !!cancelamentoDe(x);
 function voltaDoRetorno(o, lista, chave) {
   if (!objSt(o)) return [];
-  const c = chegadaConferida(o);
-  if (!c || o.tipo === 'interno') return [o];
+  const dias = new Set(chegadasConferidas(o).map(c => c.dia));
+  if (!dias.size || o.tipo === 'interno') return [o];
   const pessoa = typeof chave === 'function' ? chave : txtSt;
-  const carro = x => txtSt(x.veiculo).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-  const gente = x => (Array.isArray(x.equipe) ? x.equipe : []).map(p => txtSt(pessoa(p))).filter(Boolean).sort().join('+');
-  const k = carro(o) + '|' + gente(o);
+  const k = chaveVoltaSt(o, pessoa);
   if (k === '|') return [o];
   const out = [o], vistos = new Set([txtSt(o.id)]);
   for (const x of Array.isArray(lista) ? lista : []) {
-    if (!objSt(x) || x.tipo === 'interno' || vistos.has(txtSt(x.id))) continue;
-    const cx = chegadaConferida(x);
-    if (!cx || cx.dia !== c.dia || carro(x) + '|' + gente(x) !== k) continue;
+    if (foraDaVoltaSt(x) || vistos.has(txtSt(x.id))) continue;
+    if (!chegadasConferidas(x).some(c => dias.has(c.dia)) || chaveVoltaSt(x, pessoa) !== k) continue;
     vistos.add(txtSt(x.id));
     out.push(x);
   }
   return out;
 }
-/* O RETORNO ANTECIPADO da O.S.: {situacao, conta, abonado, motivo, ...}.
-   situacao: 'antecipado' (conta como perda), 'abonado', 'no horário', 'na
-   volta' (a volta chegou antes, e a perda fica na O.S. do último retorno
-   previsto), 'sem retorno previsto' (sem perda), 'sem dado' (a gestão ainda
-   não conferiu a chegada) ou 'não se aplica' (retirada no balcão). */
-function retornoAntecipado(o, regra, volta) {
-  const os = objSt(o) ? o : {};
-  const tolerancia = toleranciaRetorno(regra), modo = retornoNaVolta(regra);
-  const declarada = HORA_ST.test(txtSt(os.horaRetorno)) ? txtSt(os.horaRetorno) : '';
-  const r = {situacao:'sem dado', conta:false, abonado:false, abono:null, ocorrenciaId:'', dia:'', previsto:'', chegada:'', minutos:0,
-    tolerancia, medida:'volta', modo, osDaVolta:1, ultimaId:'', declarada, medicao:'', motivo:''};
-  const decl = declarada ? `; a equipe anotou ${declarada}, que é só declaração` : '';
-  if (os.tipo === 'interno') return {...r, situacao:'não se aplica', motivo:'retirada no balcão: não há volta do carro'};
-  const c = chegadaConferida(os);
-  if (!c) {
-    const semPrev = !retornosPrevistos(os).length;
-    return {...r, situacao:semPrev ? 'sem retorno previsto' : 'sem dado',
-      motivo:(semPrev ? 'sem retorno previsto digitado: não há perda por retorno antecipado' : 'a chegada do carro ainda não foi conferida pela gestão') + decl};
+/* O ÍNDICE DAS VOLTAS (revisão da F17): a mesma conta do voltaDoRetorno,
+   feita uma vez para a lista inteira. A tela pergunta pela volta de centenas
+   de cards de uma vez, e procurar em toda a lista a cada card era O(N²).
+   voltaNoIndice(o, indiceDasVoltas(lista, chave)) dá as mesmas O.S. que
+   voltaDoRetorno(o, lista, chave). */
+function indiceDasVoltas(lista, chave) {
+  const pessoa = typeof chave === 'function' ? chave : txtSt, ind = new Map();
+  for (const x of Array.isArray(lista) ? lista : []) {
+    if (foraDaVoltaSt(x)) continue;
+    const cs = chegadasConferidas(x);
+    if (!cs.length) continue;
+    const k = chaveVoltaSt(x, pessoa);
+    if (k === '|') continue;
+    for (const c of cs) { const l = ind.get(c.dia + '|' + k); if (l) l.push(x); else ind.set(c.dia + '|' + k, [x]); }
   }
-  // As O.S. da volta naquele dia, uma vez cada; a própria entra como está (o rascunho da ficha).
-  const id = txtSt(os.id), membros = [os], vistos = new Set([id]);
-  for (const x of Array.isArray(volta) ? volta : []) {
-    if (!objSt(x) || vistos.has(txtSt(x.id))) continue;
-    const cx = chegadaConferida(x);
-    if (!cx || cx.dia !== c.dia) continue;
+  return {pessoa, ind};
+}
+function voltaNoIndice(o, indice) {
+  if (!objSt(o)) return [];
+  const cs = chegadasConferidas(o);
+  if (!cs.length || o.tipo === 'interno' || !objSt(indice) || !(indice.ind instanceof Map)) return [o];
+  const k = chaveVoltaSt(o, typeof indice.pessoa === 'function' ? indice.pessoa : txtSt);
+  if (k === '|') return [o];
+  const out = [o], vistos = new Set([txtSt(o.id)]);
+  for (const c of cs) for (const x of indice.ind.get(c.dia + '|' + k) || []) {
+    if (vistos.has(txtSt(x.id))) continue;
     vistos.add(txtSt(x.id));
-    membros.push(x);
+    out.push(x);
   }
+  return out;
+}
+/* O RETORNO ANTECIPADO da O.S.: {situacao, conta, abonado, motivo, ...,
+   dias}. `dias` traz a medida de cada dia da jornada com chegada conferida;
+   o resto é o resumo: o dia que conta como perda, senão o abonado, senão o
+   da volta, senão o no horário. situacao: 'antecipado' (conta como perda),
+   'abonado', 'no horário', 'na volta' (a volta chegou antes, e a perda fica
+   na O.S. do último retorno previsto), 'sem retorno previsto' (sem perda),
+   'sem dado' (a gestão ainda não conferiu a chegada) ou 'não se aplica'
+   (retirada no balcão). */
+const PRIORIDADE_RETORNO_ST = ['antecipado', 'abonado', 'na volta', 'no horário', 'sem retorno previsto'];
+function retornoDoDiaSt(os, c, outras, r, varios, decl) {
+  const id = txtSt(os.id), membros = [os];
+  for (const x of outras) if (chegadaDoDia(x, c.dia)) membros.push(x);
   let ultima = null, previsto = '';
   for (const x of membros) {
     const e = retornosPrevistos(x).find(p => p.dia === c.dia);
     if (e && (!ultima || e.hora > previsto || (e.hora === previsto && txtSt(x.id) > txtSt(ultima.id)))) { ultima = x; previsto = e.hora; }
   }
-  const n = membros.length, prevTxt = n > 1 ? `retorno previsto da volta (${previsto}, ${n} O.S.)` : `retorno previsto (${previsto})`;
-  const base = {...r, dia:c.dia, chegada:c.hora, osDaVolta:n, medida:n > 1 ? 'volta' : 'os'};
-  if (!ultima) return {...base, situacao:'sem retorno previsto', motivo:`chegada conferida às ${c.hora} de ${ddmmSt(c.dia)}, sem retorno previsto digitado para o dia: não há perda`};
-  const antes = minutosSt(previsto) - minutosSt(c.hora);
-  const comPrev = {...base, previsto, ultimaId:txtSt(ultima.id), minutos:Math.max(0, antes)};
-  if (antes <= 0) return {...comPrev, situacao:'no horário', motivo:`chegou às ${c.hora}, ${antes < 0 ? 'depois do' : 'no'} ${prevTxt}`};
-  if (antes <= tolerancia) return {...comPrev, situacao:'no horário', motivo:`chegou às ${c.hora}, ${minTxtSt(antes)} antes do ${prevTxt}, dentro da tolerância de ${minTxtSt(tolerancia)}`};
-  const como = `chegou às ${c.hora}, ${minTxtSt(antes)} antes do ${prevTxt}, além da tolerância de ${minTxtSt(tolerancia)}`;
-  if (modo === 'ultima' && txtSt(ultima.id) !== id) return {...comPrev, situacao:'na volta', motivo:`a volta ${como}: a perda fica na O.S. ${txtSt(ultima.numero) || txtSt(ultima.id)}, a do último retorno previsto`};
-  const ocorrenciaId = id + ':retorno_antecipado', ab = abonoVigente(os, ocorrenciaId);
-  if (ab) return {...comPrev, situacao:'abonado', abonado:true, abono:ab, ocorrenciaId, medicao:como, motivo:comAbonoSt(como, ab)};
-  return {...comPrev, situacao:'antecipado', conta:true, ocorrenciaId, medicao:como, motivo:como + decl};
+  const n = membros.length, pre = varios ? `${ddmmSt(c.dia)}: ` : '';
+  const quando = c.diaChegada !== c.dia ? `${c.hora} de ${ddmmSt(c.diaChegada)}` : c.hora;
+  const base = {...r, dia:c.dia, diaChegada:c.diaChegada, chegada:c.hora, osDaVolta:n, medida:n > 1 ? 'volta' : 'os'};
+  if (!ultima) return {...base, situacao:'sem retorno previsto', motivo:`${pre}chegada conferida às ${c.hora} de ${ddmmSt(c.diaChegada)}, sem retorno previsto digitado para o dia: não há perda`};
+  const prevTxt = n > 1 ? `retorno previsto da volta (${previsto}, ${n} O.S.)` : `retorno previsto (${previsto})`;
+  const antes = instanteSt(c.dia, previsto) - instanteSt(c.diaChegada, c.hora);
+  const ocorrenciaId = id + ':retorno_antecipado:' + c.dia;
+  const medidaAbono = {dia:c.dia, chegada:c.diaChegada + 'T' + c.hora, previsto:c.dia + 'T' + previsto};
+  const comPrev = {...base, previsto, ultimaId:txtSt(ultima.id), minutos:Math.max(0, antes), ocorrenciaId:'', medidaAbono};
+  if (antes <= 0) return {...comPrev, situacao:'no horário', motivo:`${pre}chegou às ${quando}, ${antes < 0 ? `${minTxtSt(-antes)} depois do` : 'no'} ${prevTxt}`};
+  if (antes <= r.tolerancia) return {...comPrev, situacao:'no horário', motivo:`${pre}chegou às ${quando}, ${minTxtSt(antes)} antes do ${prevTxt}, dentro da tolerância de ${minTxtSt(r.tolerancia)}`};
+  const como = `${pre}chegou às ${quando}, ${minTxtSt(antes)} antes do ${prevTxt}, além da tolerância de ${minTxtSt(r.tolerancia)}`;
+  if (r.modo === 'ultima' && txtSt(ultima.id) !== id) return {...comPrev, situacao:'na volta', motivo:`${pre}a volta ${como.slice(pre.length)}: a perda fica na O.S. ${txtSt(ultima.numero) || txtSt(ultima.id)}, a do último retorno previsto`};
+  const ab = abonoDaOcorrencia(os, ocorrenciaId, medidaAbono);
+  if (ab.vigente) return {...comPrev, situacao:'abonado', abonado:true, abono:ab.vigente, ocorrenciaId, medicao:como, motivo:comAbonoSt(como, ab.vigente)};
+  return {...comPrev, situacao:'antecipado', conta:true, ocorrenciaId, abonoOutraMedida:ab.outra, medicao:como, motivo:comOutraSt(como + decl, ab.outra)};
+}
+function retornoAntecipado(o, regra, volta) {
+  const os = objSt(o) ? o : {};
+  const tolerancia = toleranciaRetorno(regra), modo = retornoNaVolta(regra);
+  const declarada = HORA_ST.test(txtSt(os.horaRetorno)) ? txtSt(os.horaRetorno) : '';
+  const r = {situacao:'sem dado', conta:false, abonado:false, abono:null, abonoOutraMedida:null, ocorrenciaId:'', dia:'', diaChegada:'', previsto:'', chegada:'', minutos:0,
+    tolerancia, medida:'volta', modo, osDaVolta:1, ultimaId:'', declarada, medicao:'', medidaAbono:null, motivo:'', dias:[]};
+  const decl = declarada ? `; a equipe anotou ${declarada}, que é só declaração` : '';
+  if (os.tipo === 'interno') return {...r, situacao:'não se aplica', motivo:'retirada no balcão: não há volta do carro'};
+  const cs = chegadasConferidas(os);
+  if (!cs.length) {
+    const semPrev = !retornosPrevistos(os).length;
+    return {...r, situacao:semPrev ? 'sem retorno previsto' : 'sem dado',
+      motivo:(semPrev ? 'sem retorno previsto digitado: não há perda por retorno antecipado' : 'a chegada do carro ainda não foi conferida pela gestão') + decl};
+  }
+  // As outras O.S. da volta, uma vez cada, sem a cancelada e sem a retirada; a própria entra como está (o rascunho da ficha).
+  const outras = [], vistos = new Set([txtSt(os.id)]);
+  for (const x of Array.isArray(volta) ? volta : []) {
+    if (foraDaVoltaSt(x) || vistos.has(txtSt(x.id))) continue;
+    vistos.add(txtSt(x.id));
+    outras.push(x);
+  }
+  const dias = cs.map(c => retornoDoDiaSt(os, c, outras, r, cs.length > 1, decl));
+  let resumo = dias[0];
+  for (const d of dias) if (PRIORIDADE_RETORNO_ST.indexOf(d.situacao) < PRIORIDADE_RETORNO_ST.indexOf(resumo.situacao)) resumo = d;
+  return {...resumo, dias};
 }
 /* A CONTA DA ENTREGA, uma vez só para o status e para as ocorrências: o
    cancelamento, o prazo, a entrega e o atraso (a entregue depois do prazo, ou
-   a aberta com o prazo vencido). */
+   a aberta com o prazo vencido). A medida do atraso (o prazo e a data da
+   entrega) é a que o abono guarda. */
 function apurarSt(os, hoje) {
   const dHoje = diaValidoSt(txtSt(hoje)) || diaSt(Date.now());
   const M = motorItem();
@@ -432,10 +580,10 @@ function apurarSt(os, hoje) {
   if (!canc && entrega && entrega.dia && prazo && entrega.dia > prazo.fim) {
     const dias = diasEntreSt(prazo.fim, entrega.dia);
     const como = `${os.tipo === 'interno' ? 'retirada' : 'entregue'} em ${ddmmSt(entrega.dia)} (${FONTE_TXT_ST[entrega.fonte]})`;
-    atraso = {dias, entregue:true, motivo:`${como}, ${diasTxtSt(dias)} depois do prazo (${prazoTxtSt(prazo)})`};
+    atraso = {dias, entregue:true, medida:{prazo:prazo.fim, entrega:entrega.dia}, motivo:`${como}, ${diasTxtSt(dias)} depois do prazo (${prazoTxtSt(prazo)})`};
   } else if (!canc && !entrega && prazo && dHoje > prazo.fim) {
     const dias = diasEntreSt(prazo.fim, dHoje);
-    atraso = {dias, entregue:false, motivo:`prazo (${prazoTxtSt(prazo)}) vencido há ${diasTxtSt(dias)}, sem entrega registrada`};
+    atraso = {dias, entregue:false, medida:{prazo:prazo.fim, entrega:''}, motivo:`prazo (${prazoTxtSt(prazo)}) vencido há ${diasTxtSt(dias)}, sem entrega registrada`};
   }
   return {dHoje, M, temMarca, r, canc, prazo, entrega, atraso};
 }
@@ -444,18 +592,24 @@ const motivoRetrabalhoSt = os => {
   return `retrabalho marcado${prob ? ': ' + prob : ''}${diaSt(os.dataResolvido) ? ` (resolvido em ${ddmmSt(diaSt(os.dataResolvido))})` : ''}`;
 };
 const comAbonoSt = (motivo, ab) => ab ? `${motivo}; abonado${ab.por ? ' por ' + ab.por : ''}: ${ab.motivo}${ab.pendente ? ' (a enviar)' : ''}` : motivo;
-// As derivadas, com a apuração e o retorno já feitos.
-function derivadasDe(os, ap, ret) {
+/* As derivadas, com a apuração e o retorno já feitos. `conta` diz se a
+   ocorrência é uma perda que vale agora pela regra (a mesma conta das
+   `perdas` do status): o abonado não conta, o atraso da aberta ainda não, e
+   sem regra (antes do programa) nada conta. */
+function derivadasDe(os, ap, ret, regra) {
   const id = txtSt(os.id), out = [];
-  const poe = (tipo, motivo, extra) => {
-    const ocorrenciaId = id + ':' + tipo, abonavel = OCORRENCIAS_ABONAVEIS.includes(tipo);
-    const abono = abonavel ? abonoVigente(os, ocorrenciaId) : null;
-    out.push({id:ocorrenciaId, tipo, rotulo:ROTULOS_OCORRENCIA[tipo], origem:'derivada', perda:PERDA_DA_OCORRENCIA[tipo] || '', volta:false,
-      abonavel, abonado:!!abono, abono, motivo:comAbonoSt(motivo, abono), ...extra});
+  const perdasRegra = objSt(regra) && Array.isArray(regra.perdas) ? regra.perdas : [];
+  const poe = (tipo, motivo, extra, medida, idDela) => {
+    const ocorrenciaId = idDela || id + ':' + tipo, abonavel = OCORRENCIAS_ABONAVEIS.includes(tipo), perda = PERDA_DA_OCORRENCIA[tipo] || '';
+    const ab = abonavel ? abonoDaOcorrencia(os, ocorrenciaId, medida) : {vigente:null, outra:null};
+    const x = {id:ocorrenciaId, tipo, rotulo:ROTULOS_OCORRENCIA[tipo], origem:'derivada', perda, volta:false,
+      abonavel, abonado:!!ab.vigente, abono:ab.vigente, abonoOutraMedida:ab.outra, medida:medida || null, motivo:comOutraSt(comAbonoSt(motivo, ab.vigente), ab.outra), ...extra};
+    x.conta = !!perda && !x.volta && !x.abonado && perdasRegra.includes(perda) && (tipo !== 'atraso' || x.entregue === true);
+    out.push(x);
   };
-  if (ap.atraso) poe('atraso', ap.atraso.motivo, {entregue:ap.atraso.entregue, dias:ap.atraso.dias});
+  if (ap.atraso) poe('atraso', ap.atraso.motivo, {entregue:ap.atraso.entregue, dias:ap.atraso.dias}, ap.atraso.medida);
   if (os.retrabalho) poe('retrabalho', motivoRetrabalhoSt(os), {});
-  if (!ap.canc && (ret.situacao === 'antecipado' || ret.situacao === 'abonado')) poe('retorno_antecipado', ret.medicao, {minutos:ret.minutos, dia:ret.dia});
+  if (!ap.canc) for (const d of ret.dias) if (d.situacao === 'antecipado' || d.situacao === 'abonado') poe('retorno_antecipado', d.medicao, {minutos:d.minutos, dia:d.dia}, d.medidaAbono, d.ocorrenciaId);
   const rc = os.tipo !== 'interno' && objSt(os.retornoConf) ? os.retornoConf : null;
   const nao = k => !!rc && (rc[k] === 'nao' || rc[k] === false);
   const quem = rc && txtSt(rc.por) ? ` (conferida por ${txtSt(rc.por)})` : '';
@@ -466,10 +620,10 @@ function derivadasDe(os, ap, ret) {
   if (nao('semAvaria')) poe('avaria', `a conferência da volta aponta avaria nova no carro${quem}`, {volta:true});
   return out;
 }
-// As ocorrências derivadas da O.S. (id 'osId:tipo'), sem as manuais.
+// As ocorrências derivadas da O.S. (id 'osId:tipo' e, no retorno, 'osId:retorno_antecipado:dia'), sem as manuais.
 function ocorrenciasDerivadas(o, regra, volta, hoje) {
   const os = objSt(o) ? o : {};
-  return derivadasDe(os, apurarSt(os, hoje), retornoAntecipado(os, regra, volta));
+  return derivadasDe(os, apurarSt(os, hoje), retornoAntecipado(os, regra, volta), regra);
 }
 // Todas: as derivadas e as manuais (a anulada vem marcada).
 function ocorrenciasDaOS(o, regra, volta, hoje) {
@@ -481,8 +635,9 @@ function statusEntrega(o, hoje, regra, volta) {
   const {dHoje, M, temMarca, r, canc, prazo, entrega} = ap;
   const parcial = !canc && !entrega ? parcialDe(os, M, r) : null;
   const ret = retornoAntecipado(os, regra, volta);
-  const ocorrencias = [...derivadasDe(os, ap, ret), ...ocorrenciasManuais(os)];
-  const abonoAtraso = ap.atraso ? abonoVigente(os, txtSt(os.id) + ':atraso') : null;
+  const ocorrencias = [...derivadasDe(os, ap, ret, regra), ...ocorrenciasManuais(os)];
+  const abAtraso = ap.atraso ? abonoDaOcorrencia(os, txtSt(os.id) + ':atraso', ap.atraso.medida) : {vigente:null, outra:null};
+  const abonoAtraso = abAtraso.vigente;
   const aplicaveis = [];
   const poe = (estado, motivo, rotulo, abonado) => { aplicaveis.push({estado, rotulo:rotulo || ROTULOS_ENTREGA[estado], motivo, ...(abonado ? {abonado:true} : {})}); };
   let diasAtraso = 0;
@@ -492,8 +647,13 @@ function statusEntrega(o, hoje, regra, volta) {
       : `cancelada${canc.por ? ' por ' + canc.por : ''}${diaSt(canc.em) ? ' em ' + ddmmSt(diaSt(canc.em)) : ''}: ${canc.motivo}${canc.pendente ? ' (a enviar)' : ''}${foi}`);
   }
   if (os.retrabalho) poe('retrabalho', motivoRetrabalhoSt(os));
-  if (!canc && (ret.situacao === 'antecipado' || ret.situacao === 'abonado'))
-    poe('retorno_antecipado', ret.motivo, ret.abonado ? 'Retorno antecipado (abonado)' : '', ret.abonado);
+  if (!canc) {
+    // Um selo para os dias que contam e outro para os abonados (a O.S. de vários dias pode ter os dois).
+    const contam = ret.dias.filter(d => d.situacao === 'antecipado'), abonados = ret.dias.filter(d => d.situacao === 'abonado');
+    if (contam.length) poe('retorno_antecipado', contam.map(d => d.motivo).join('; '));
+    if (abonados.length) poe('retorno_antecipado', abonados.map(d => d.motivo).join('; '), 'Retorno antecipado (abonado)', true);
+  }
+  const motivoAtraso = () => comOutraSt(comAbonoSt(ap.atraso.motivo, abonoAtraso), abAtraso.outra);
   if (!canc && entrega && !entrega.dia) {
     const baixa = ddmmSt(diaSt(os.finalizadaEm));
     if (entrega.fonte === 'aLancar') poe('entregue', `baixa do ERP em ${baixa}, ainda a lançar: a data real da entrega vem no lançamento, e só com ela o prazo é julgado`, ROTULO_A_LANCAR_ST);
@@ -502,16 +662,17 @@ function statusEntrega(o, hoje, regra, volta) {
     const como = `${os.tipo === 'interno' ? 'retirada' : 'entregue'} em ${ddmmSt(entrega.dia)} (${FONTE_TXT_ST[entrega.fonte]})`;
     if (ap.atraso) {
       diasAtraso = ap.atraso.dias;
-      poe('atraso', comAbonoSt(ap.atraso.motivo, abonoAtraso), abonoAtraso ? 'Com atraso (abonado)' : '', !!abonoAtraso);
+      poe('atraso', motivoAtraso(), abonoAtraso ? 'Com atraso (abonado)' : '', !!abonoAtraso);
     } else if (prazo) poe('no_prazo', `${como}, dentro do prazo (${prazoTxtSt(prazo)})`);
     // Sem prazo combinado não há o que medir: neutro, nunca o verde do "No prazo".
     else poe('entregue', `${como}; sem prazo combinado no PCP, não há atraso a medir`, ROTULO_SEM_PRAZO_ST);
   } else if (!canc) {
+    const exec = motivoExecucaoSt(os, dHoje, parcial, prazo);
     if (ap.atraso) {
       diasAtraso = ap.atraso.dias;
-      poe('atraso', comAbonoSt(ap.atraso.motivo, abonoAtraso), abonoAtraso ? 'Com atraso (abonado)' : '', !!abonoAtraso);
+      // A aberta abonada (a remarcação pedida pelo cliente) diz também a data nova (revisão da F17).
+      poe('atraso', motivoAtraso() + (abonoAtraso && !exec ? '; ' + motivoAgendadoSt(os, prazo) : ''), abonoAtraso ? 'Com atraso (abonado)' : '', !!abonoAtraso);
     }
-    const exec = motivoExecucaoSt(os, dHoje, parcial, prazo);
     if (exec) poe('execucao', exec);
     else if (!diasAtraso) poe('agendado', motivoAgendadoSt(os, prazo));
   }
@@ -536,8 +697,8 @@ function statusEntrega(o, hoje, regra, volta) {
   };
 }
 /* ==== FIM DO STATUS ==== */
-export const STATUS_ENTREGA = { ESTADOS_ENTREGA, ROTULOS_ENTREGA, MOTIVO_CANCELAMENTO_MIN, MOTIVO_CANCELAMENTO_MAX, motivoCancelamentoInvalido, cancelamentoDe, cancelada, prazoDaEntrega, statusEntrega, TIPOS_OCORRENCIA, TIPOS_OCORRENCIA_MANUAL, ROTULOS_OCORRENCIA, OCORRENCIAS_ABONAVEIS, MOTIVO_ABONO_MIN, MOTIVO_ABONO_MAX, TOLERANCIA_RETORNO_PADRAO, motivoAbonoInvalido, toleranciaRetorno, chegadaConferida, abonosDe, abonoVigente, ocorrenciasManuais, voltaDoRetorno, retornoAntecipado, ocorrenciasDerivadas, ocorrenciasDaOS };
-export { ESTADOS_ENTREGA, ROTULOS_ENTREGA, MOTIVO_CANCELAMENTO_MIN, MOTIVO_CANCELAMENTO_MAX, motivoCancelamentoInvalido, cancelamentoDe, cancelada, prazoDaEntrega, statusEntrega, TIPOS_OCORRENCIA, TIPOS_OCORRENCIA_MANUAL, ROTULOS_OCORRENCIA, OCORRENCIAS_ABONAVEIS, MOTIVO_ABONO_MIN, MOTIVO_ABONO_MAX, TOLERANCIA_RETORNO_PADRAO, motivoAbonoInvalido, toleranciaRetorno, chegadaConferida, abonosDe, abonoVigente, ocorrenciasManuais, voltaDoRetorno, retornoAntecipado, ocorrenciasDerivadas, ocorrenciasDaOS };
+export const STATUS_ENTREGA = { ESTADOS_ENTREGA, ROTULOS_ENTREGA, MOTIVO_CANCELAMENTO_MIN, MOTIVO_CANCELAMENTO_MAX, motivoCancelamentoInvalido, cancelamentoDe, cancelada, prazoDaEntrega, statusEntrega, TIPOS_OCORRENCIA, TIPOS_OCORRENCIA_MANUAL, ROTULOS_OCORRENCIA, OCORRENCIAS_ABONAVEIS, MOTIVO_ABONO_MIN, MOTIVO_ABONO_MAX, TOLERANCIA_RETORNO_PADRAO, motivoAbonoInvalido, toleranciaRetorno, chegadaConferida, chegadasConferidas, chegadaDoDia, pareceDiaSeguinte, abonosDe, abonoVigente, abonoDaOcorrencia, ocorrenciasManuais, voltaDoRetorno, indiceDasVoltas, voltaNoIndice, retornoAntecipado, ocorrenciasDerivadas, ocorrenciasDaOS, letrasMotivoSt };
+export { ESTADOS_ENTREGA, ROTULOS_ENTREGA, MOTIVO_CANCELAMENTO_MIN, MOTIVO_CANCELAMENTO_MAX, motivoCancelamentoInvalido, cancelamentoDe, cancelada, prazoDaEntrega, statusEntrega, TIPOS_OCORRENCIA, TIPOS_OCORRENCIA_MANUAL, ROTULOS_OCORRENCIA, OCORRENCIAS_ABONAVEIS, MOTIVO_ABONO_MIN, MOTIVO_ABONO_MAX, TOLERANCIA_RETORNO_PADRAO, motivoAbonoInvalido, toleranciaRetorno, chegadaConferida, chegadasConferidas, chegadaDoDia, pareceDiaSeguinte, abonosDe, abonoVigente, abonoDaOcorrencia, ocorrenciasManuais, voltaDoRetorno, indiceDasVoltas, voltaNoIndice, retornoAntecipado, ocorrenciasDerivadas, ocorrenciasDaOS, letrasMotivoSt };
 
 /* ── Só do servidor, fora do bloco copiado ─────────────────────────────── */
 /* GRAVAR O CANCELAMENTO À MÃO (F16). Roda depois do preservarAusentes, que
@@ -684,7 +845,11 @@ export const abonosPedidos = (veio, antes) => pedidosF17(veio, listaObjSt(antes?
 /* `ocorrencias` é a lista de ocorrências que a O.S. tem DEPOIS das outras
    regras deste envio (ocorrenciasDaOS, com a volta e a regra do dia): o
    abono só aponta ocorrência que existe, abonável, e uma de cada vez (a
-   segunda espera a primeira ser revogada). */
+   segunda espera a primeira ser revogada). O abono grava a MEDIDA da
+   ocorrência que abonou (revisão da F17: no retorno, o dia, a chegada e o
+   previsto; no atraso, o prazo e a data da entrega), calculada aqui, nunca a
+   que o aparelho mandou. O abono de outra medida não segura o novo: ele já
+   não vale (abonoDaOcorrencia) e fica como estava, sem revogar sozinho. */
 export function guardarAbonos(veio, os, antes, autor, agora, { pode = false, avisar = false, ocorrencias = [] } = {}) {
   const r = { ...os }, avisos = [];
   manterGravado(r, antes, 'abonos');
@@ -713,9 +878,11 @@ export function guardarAbonos(veio, os, antes, autor, agora, { pode = false, avi
     }
     const erro = motivoAbonoInvalido(p.motivo);
     if (erro) { avisos.push('O abono não foi gravado: ' + minusculaInicio(erro)); continue; }
-    if (out.some(x => txtSt(x.ocorrenciaId) === alvoId && !txtSt(x.revogadoEm))) { avisos.push('O abono não foi gravado: a ocorrência já está abonada. Revogue o abono antes de abonar de novo.'); continue; }
+    const medida = medidaSt(alvo.medida);
+    if (!medida) { avisos.push('O abono não foi gravado: a ocorrência que ele aponta não tem medida. Confira o status da entrega.'); continue; }
+    if (out.some(x => txtSt(x.ocorrenciaId) === alvoId && !txtSt(x.revogadoEm) && mesmaMedidaSt(medidaSt(x.medida), medida))) { avisos.push('O abono não foi gravado: a ocorrência já está abonada. Revogue o abono antes de abonar de novo.'); continue; }
     if (out.length >= ABONOS_MAX) { avisos.push(`A O.S. já tem ${ABONOS_MAX} abonos: o novo não foi gravado. Fale com o PCP.`); break; }
-    out.push({ id, ocorrenciaId: alvoId, tipo: alvo.tipo, motivo: semInvisiveis(p.motivo, MOTIVO_ABONO_MAX), ...quem, em });
+    out.push({ id, ocorrenciaId: alvoId, tipo: alvo.tipo, motivo: semInvisiveis(p.motivo, MOTIVO_ABONO_MAX), medida, ...quem, em });
   }
   if (canon(out) === canon(gravados)) return { os: r, avisos, mudou: false };
   r.abonos = out;

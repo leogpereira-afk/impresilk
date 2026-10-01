@@ -43,7 +43,7 @@ test('retorno 1 minuto antes, com tolerância de 15, não conta; 15 também não
   assert.match(um.motivo, /1 minuto antes do retorno previsto \(17:00\), dentro da tolerância de 15 minutos/);
   assert.equal(caso('16:45').situacao, 'no horário', 'exatamente a tolerância não conta');
   const conta = caso('16:44');
-  assert.equal(conta.situacao, 'antecipado');assert.equal(conta.conta, true);assert.equal(conta.minutos, 16);assert.equal(conta.ocorrenciaId, 'a:retorno_antecipado');
+  assert.equal(conta.situacao, 'antecipado');assert.equal(conta.conta, true);assert.equal(conta.minutos, 16);assert.equal(conta.ocorrenciaId, 'a:retorno_antecipado:' + DIA, 'um por dia da jornada (revisão da F17)');
   assert.equal(caso('17:10').situacao, 'no horário');assert.match(caso('17:10').motivo, /depois do retorno previsto/);
   // A tolerância é a da regra vigente: com 0, um minuto antes conta.
   assert.equal(caso('16:59', {...REGRA, toleranciaRetornoMin:0}).situacao, 'antecipado');
@@ -87,7 +87,7 @@ test('volta com 3 O.S.: medida pelo retorno previsto da última O.S. da volta; a
   }
   // A ocorrência existe só na última: uma perda para a volta, não três.
   const ocs = [a, b, d].map(o => O.ocorrenciasDerivadas(o, REGRA, volta).filter(x => x.tipo === 'retorno_antecipado').map(x => x.id));
-  assert.deepEqual(ocs, [[], [], ['d:retorno_antecipado']]);
+  assert.deepEqual(ocs, [[], [], ['d:retorno_antecipado:' + DIA]]);
   // Regra que manda a perda para todas as O.S. da volta.
   const todas = {...REGRA, retornoNaVolta:'todas'};
   assert.deepEqual([a, b, d].map(o => O.retornoAntecipado(o, todas, volta).situacao), ['antecipado', 'antecipado', 'antecipado']);
@@ -124,7 +124,7 @@ test('a ocorrência derivada tem o mesmo id em duas apurações (e no servidor);
   const ids = x => x.map(y => y.id);
   const um = O.ocorrenciasDerivadas(o, REGRA, null, '2026-10-08');
   const dois = O.ocorrenciasDerivadas(plano(o), REGRA, null, '2026-10-20');
-  assert.deepEqual(ids(um), ['os-77:atraso', 'os-77:retrabalho', 'os-77:retorno_antecipado', 'os-77:carro', 'os-77:equipamentos', 'os-77:avaria']);
+  assert.deepEqual(ids(um), ['os-77:atraso', 'os-77:retrabalho', 'os-77:retorno_antecipado:' + DIA, 'os-77:carro', 'os-77:equipamentos', 'os-77:avaria']);
   assert.deepEqual(ids(dois), ids(um), 'outra apuração, outro dia: os mesmos ids');
   assert.deepEqual(ids(S.ocorrenciasDerivadas(o, REGRA, null, '2026-10-08')), ids(um), 'o servidor dá os mesmos ids');
   // Toda perda do status aponta para uma ocorrência com a mesma perda.
@@ -161,9 +161,17 @@ function osGerada(g, i) {
   if (g.r() < 0.2) o.horaRetorno = g.um(HORAS);
   if (g.r() < 0.2) { o.retrabalho = true; o.problema = 'Adesivo descolou'; }
   if (g.r() < 0.3) o.retornoConf = {carroLimpo:g.um(SN), carroArrumado:g.um(SN), equipamentosOk:g.um(SN), semAvaria:g.um(SN), por:'Gestor Teste'};
-  if (g.r() < 0.4) o.abonos = Array.from({length:g.int(1, 3)}, (_, k) => ({id:'ab-' + i + 'x' + k + 'abcdef', ocorrenciaId:o.id + ':' + g.um(['atraso', 'retorno_antecipado', 'retrabalho', 'nada']),
+  // O retorno antecipado é um por dia (revisão da F17), e o abono guarda a medida que abonou (às vezes a de agora, às vezes outra).
+  const rc = o.retornoConferido || {}, rp = (o.retornoPrevisto || [])[0] || {};
+  const medidaRet = {dia:rc.dia, chegada:rc.dia + 'T' + rc.hora, previsto:rp.dia + 'T' + rp.hora};
+  const medidaDe = oc => oc.includes(':retorno_antecipado') ? g.um([medidaRet, medidaRet, medidaRet, undefined, {dia:DIA, chegada:DIA + 'T15:30', previsto:DIA + 'T16:00'}])
+    : g.um([{prazo:o.prazoCombinado.data, entrega:''}, undefined, {prazo:'2026-10-01', entrega:''}]);
+  if (g.r() < 0.5) o.abonos = Array.from({length:g.int(1, 3)}, (_, k) => {
+    const ocorrenciaId = o.id + ':' + g.um(['atraso', 'retorno_antecipado:' + (rc.dia || DIA), 'retorno_antecipado:' + (rc.dia || DIA), 'retorno_antecipado', 'retrabalho', 'nada']);
+    return {id:'ab-' + i + 'x' + k + 'abcdef', ocorrenciaId, medida:medidaDe(ocorrenciaId),
     motivo:g.um(['Cliente pediu para remarcar a instalação', 'curto', '\u200b'.repeat(20)]), por:'Gestor Teste', em:g.r() < 0.7 ? '2026-10-06T10:00:00Z' : '',
-    pedido:g.r() < 0.4, revogar:g.r() < 0.15, revogadoEm:g.r() < 0.15 ? '2026-10-06T11:00:00Z' : undefined}));
+    pedido:g.r() < 0.4, revogar:g.r() < 0.15, revogadoEm:g.r() < 0.15 ? '2026-10-06T11:00:00Z' : undefined};
+  });
   if (g.r() < 0.3) o.ocorrencias = [{id:'oc-' + i + 'abcdef', tipo:g.um(['equipamento_faltante', 'equipamento_danificado', 'outra', 'lixo']), item:'Escada', obs:g.um(['', 'quebrou']),
     em:g.r() < 0.7 ? '2026-10-06T10:00:00Z' : '', pedido:g.r() < 0.5, anular:g.r() < 0.2}];
   if (g.r() < 0.15) o.cancelamento = {ativo:true, motivo:'Cliente desistiu do serviço', por:'Gestor Teste', em:DIA + 'T10:00:00Z'};
@@ -331,7 +339,7 @@ test('Fechar o dia: a ocorrência de equipamento entra em cada O.S. da volta (me
     // O grupo mostra o retorno pela volta (chegada 15:00, previsto da volta 17:00) e a linha da O.S. p1 a ocorrência.
     const html = b.run(`(() => { const d = {innerHTML:'', querySelector:() => null, querySelectorAll:() => []}; document.getElementById = () => d; LOTE.render(); return d.innerHTML; })()`);
     assert.match(html, /Retorno antecipado<\/strong> na O\.S 7p1: chegou às 15:00, 2 h antes do retorno previsto da volta \(17:00, 2 O\.S\.\)/);
-    assert.match(html, /data-lote-acao="abonar" data-os="p1" data-oc="p1:retorno_antecipado"/);
+    assert.match(html, /data-lote-acao="abonar" data-os="p1" data-oc="p1:retorno_antecipado:2026-09-29"/);
     assert.doesNotMatch(html, /data-oc="p2:retorno_antecipado"/, 'a perda cai só na O.S. do último retorno previsto');
     assert.match(html, /Equipamento faltante/);
   } finally { b.fechar(); }

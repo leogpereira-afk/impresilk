@@ -142,8 +142,11 @@ test('revisão: o motivo do cancelamento é texto, e as letras contam sem os inv
     assert.ok(!('cancelamento' in gravada(e)), nome + ': ' + JSON.stringify(gravada(e).cancelamento));
     assert.match(String(r.avisos), /A O\.S\. não foi cancelada: escreva o motivo do cancelamento com 15 letras ou mais/, nome);
   }
-  // O motivo de verdade continua valendo; acento e espaço comum contam, o invisível no meio não atrapalha.
-  for (const bom of ['Cliente desistiu do serviço', 'Obra embargada.', 'Obra​ embargada, sim']) {
+  /* O motivo de verdade continua valendo; o invisível no meio não atrapalha.
+     Revisão da F17 (decidida): contam só as letras e os números que se veem,
+     sem o espaço e a pontuação; "Obra embargada." (13 letras) já não basta. */
+  assert.equal(O.motivoCancelamentoInvalido('Obra embargada.'), FRASE);assert.equal(S.motivoCancelamentoInvalido('Obra embargada.'), FRASE);
+  for (const bom of ['Cliente desistiu do serviço', 'Obra embargada pela prefeitura', 'Obra​ embargada, sim']) {
     assert.equal(O.motivoCancelamentoInvalido(bom), '', bom);assert.equal(S.motivoCancelamentoInvalido(bom), '', bom);
   }
   assert.equal(O.motivoCancelamentoInvalido('x'.repeat(301)), 'O motivo do cancelamento vai até 300 letras.');

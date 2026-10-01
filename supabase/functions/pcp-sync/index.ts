@@ -1,6 +1,6 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP } from "../_shared/pcp-integridade.mjs";
+import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
-import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, chegadaConferida } from "../_shared/pcp-status.mjs";
+import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno } from "../_shared/pcp-status.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -1294,6 +1294,8 @@ Deno.serve(async (req: Request) => {
         const veioPrazo = Object.prototype.hasOwnProperty.call(os, "prazoCombinado") ? os.prazoCombinado : undefined;
         // A chegada conferida do carro (F14), antes da preservacao.
         const veioChegada = Object.prototype.hasOwnProperty.call(os, "retornoConferido") ? os.retornoConferido : undefined;
+        // As chegadas conferidas por dia da jornada (revisão da F17), antes da preservação.
+        const veioChegadas = Object.prototype.hasOwnProperty.call(os, "chegadasConferidas") ? os.chegadasConferidas : undefined;
         // A divisão da equipe que o aparelho mandou (F08), antes da preservação.
         const veioAlocacao = Object.prototype.hasOwnProperty.call(os, "alocacao") ? os.alocacao : undefined;
         // As ocorrências manuais e os abonos (F17), antes da preservação: só os PEDIDOS entram.
@@ -1305,7 +1307,12 @@ Deno.serve(async (req: Request) => {
            montagem com senha, operação e máquina ficam com o gravado, com
            aviso para quem tem senha. O toque já partiu do gravado na mescla. */
         {
-          const gr = guardarRetrabalho(os, existing, { pode: !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp), avisar: !ehMaquina && !ehToqueNoNome });
+          const podeRetrab = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
+          const agoraRetrab = new Date().toISOString();
+          const rodarRetrab = (autor: any) => guardarRetrabalho(os, existing, { pode: podeRetrab, avisar: !ehMaquina && !ehToqueNoNome, autor, agora: agoraRetrab });
+          let gr = rodarRetrab({ nome: String(cracha?.nome || cracha?.sub || ""), login: String(cracha?.sub ?? ""), porId: "" });
+          // A resposta nova da pergunta leva o ID do RH de quem respondeu (o RH só é lido quando ela muda).
+          if (gr.mudouPergunta) gr = rodarRetrab(await autorAuditoria());
           trocarOS(gr.os);
           if (gr.aviso) avisosToque.push(gr.aviso);
         }
@@ -1395,6 +1402,16 @@ Deno.serve(async (req: Request) => {
           if (canon(rc.os.retornoConferido) !== canon(existing?.retornoConferido)) rc = rodarChegada(await autorAuditoria());
           trocarOS(rc.os);
           avisosToque.push(...rc.avisos);
+          /* AS CHEGADAS POR DIA DA JORNADA (revisão da F17). Regras em _shared
+             (carimbarChegadas): cada dia muda só pelo pedido do dia, sem
+             apagar os outros; a aba v142, que só manda o retornoConferido,
+             alimenta a lista no dia dele; o retornoConferido vira a chegada
+             do último dia. Só admin e pcp; nada aqui é 422. */
+          const rodarChegadas = (autor: any) => carimbarChegadas(veioChegadas, os, existing, autor, agoraChegada, { pode: gestaoChegada, avisar: !ehMaquina && !ehToqueNoNome });
+          let cs = rodarChegadas({ nome: String(cracha?.nome || cracha?.sub || ""), login: String(cracha?.sub ?? ""), porId: "" });
+          if (canon(cs.os.chegadasConferidas ?? null) !== canon(existing?.chegadasConferidas ?? null)) cs = rodarChegadas(await autorAuditoria());
+          trocarOS(cs.os);
+          avisosToque.push(...cs.avisos);
         }
         /* ENTREGA LANCADA (F01): carimbo do servidor (por, porConta, porId, em).
            Lanca quem tem o botao e entrou com senha; o toque sem senha, a
@@ -1542,19 +1559,27 @@ Deno.serve(async (req: Request) => {
           avisosToque.push(...go.avisos);
           const pedidos = gestaoF17 ? abonosPedidos(veioAbonos, existing) : [];
           let volta: any[] = [os], regraDia: any = null;
-          const alvoRetorno = pedidos.some((p: any) => String(p?.ocorrenciaId ?? "") === `${os.id}:retorno_antecipado`);
-          const chegadaF17 = alvoRetorno ? chegadaConferida(os) : null;
-          if (chegadaF17) {
+          /* O retorno antecipado é um por dia da jornada (revisão da F17): o id
+             termina no dia ('osId:retorno_antecipado:AAAA-MM-DD'). A volta
+             daquele dia é lida das O.S. cuja última chegada é desse dia até
+             31 dias depois (a O.S. de vários dias guarda no retornoConferido
+             a chegada do último dia); voltaDoRetorno fica só com as que têm
+             chegada no mesmo dia, o mesmo carro e a mesma equipe. */
+          const prefixoRetorno = `${os.id}:retorno_antecipado:`;
+          const diasRetorno = [...new Set(pedidos.map((p: any) => String(p?.ocorrenciaId ?? "")).filter((x: string) => x.startsWith(prefixoRetorno)).map((x: string) => x.slice(prefixoRetorno.length)))]
+            .filter((d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+          if (diasRetorno.length) {
+            const ateDia = new Date(Date.parse(diasRetorno[diasRetorno.length - 1] + "T12:00:00Z") + 31 * 864e5).toISOString().slice(0, 10);
             try {
               const { data, error } = await sb.from("pcp_registros").select("registro").eq("colecao", "os").eq("apagado", false)
-                .eq("registro->retornoConferido->>dia", chegadaF17.dia).limit(300);
+                .gte("registro->retornoConferido->>dia", diasRetorno[0]).lte("registro->retornoConferido->>dia", ateDia).limit(1000);
               if (error) throw new Error(error.message);
               volta = voltaDoRetorno(os, (data || []).map((r: any) => r.registro).filter((r: any) => r && r.id !== os.id));
             } catch { volta = [os]; }
             try {
               const { data, error } = await sb.from("pcp_registros").select("registro").eq("colecao", "performance_regras").eq("apagado", false).limit(1000);
               if (error) throw new Error(error.message);
-              regraDia = REGRAS.regraVigente((data || []).map((r: any) => r.registro), chegadaF17.dia);
+              regraDia = REGRAS.regraVigente((data || []).map((r: any) => r.registro), diasRetorno[0]);
             } catch { regraDia = null; }
           }
           const ocorrenciasF17 = pedidos.length ? ocorrenciasDaOS(os, regraDia, volta, perfDia(agoraF17)) : [];
