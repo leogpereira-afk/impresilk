@@ -7897,7 +7897,7 @@ function abrirInstrucoes() {
       <h2>A barra lateral</h2>
       <ul>
         <li><strong>Operação</strong> — 📋 <strong>PCP</strong> (todas as O.S por data de entrega, com % preenchido e responsável), 🚚 <strong>Instalação</strong> (quadro <em>Kanban</em> por dia; o 🖨 gera o espelho), ⚡ <strong>Execução</strong> (o que está na rua agora), ⏸ <strong>Parado Cliente</strong>, 🔧 <strong>Retrabalho</strong>, 🏁 <strong>Finalizados</strong> e 🚗 <strong>Volta do carro</strong>.</li>
-        <li><strong>Entrega</strong>: 📦 Entregas e 🏅 Performance. Em Entregas fica a aba ✅ Fechar o dia, o lote da gestão, por dia ou pelas pendências do mês.</li>
+        <li><strong>Entrega</strong>: 📦 Entregas e 🏅 Performance. Em Entregas fica a aba ✅ Fechar o dia, o lote da gestão, por dia ou pelas pendências do mês. A vista Por O.S. mostra um cartão por O.S. entregue, com status, prazo, retorno, equipe e a linha do tempo, e filtra por status, equipe e busca (número, cliente ou pessoa) sem mudar os cartões de cima.</li>
         <li><strong>Agenda</strong> — 📅 Calendário, ⏰ Plantões e 🗓️ Programação.</li>
         <li><strong>Casa</strong> — 📊 <strong>Painel</strong> (indicadores, ranking e tendências; clique nos números para abrir o detalhe) e ⚙️ <strong>Configurações</strong> (admin: listas, usuários, contatos e níveis de acesso).</li>
       </ul>

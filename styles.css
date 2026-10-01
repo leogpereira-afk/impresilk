@@ -3809,3 +3809,78 @@ img.perf-logo{object-fit:cover}
 .lancar-data-origem{font-size:.75rem}
 .lote-l-data{flex-wrap:wrap}
 .lote-l-origem{flex-basis:100%;font-size:.72rem;color:#526378}
+
+/* ── Entregas: a vista Por O.S. (F18, 30/09/2026) ──────────────────────────
+   Um cartão por O.S. entregue no período (a lista do ERP), com status, prazo
+   × entrega, retorno previsto × conferido, equipe com a cor e a logo, valor e
+   comissão prevista (admin e pcp) e a linha do tempo, que abre sob pedido.
+   Filtros de status em chips de 40px; a cor da equipe só por classe
+   (perf-cor-<chave>). Uma coluna no celular, sem rolagem lateral. */
+.poros{display:grid;gap:12px;margin-top:4px;min-width:0}
+.poros-filtros{display:grid;gap:10px;background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:14px;padding:12px 14px;min-width:0}
+.poros-chips{display:flex;flex-wrap:wrap;gap:6px}
+.poros-chip{min-height:40px;padding:4px 12px;border-radius:999px;border:1px solid #d5dee8;background:#f8fafc;color:#203849;font-size:.82rem;font-weight:600;white-space:normal;text-align:left}
+.poros-chip b{font-variant-numeric:tabular-nums;color:#526378;font-weight:700}
+.poros-chip.ativo{background:#163654;border-color:#163654;color:#fff}
+.poros-chip.ativo b{color:#dbe7f3}
+.poros-campos{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-end}
+.poros-campo{display:grid;gap:5px;font-size:13px;font-weight:600;color:var(--muted,#64748b);min-width:0}
+.poros-campo select,.poros-campo input{min-height:42px;max-width:100%;border:1px solid #dce3e9;border-radius:10px;background:#f8fafc;padding:8px 12px;font:inherit;color:#203849}
+.poros-busca{flex:1 1 260px}
+.poros-busca input{width:100%}
+.poros-limpar{min-height:42px}
+.poros-limpar[hidden]{display:none}
+.poros-resumo{margin:0;font-size:.88rem;line-height:1.5;color:#3d4b5a}
+.poros-resumo strong{color:#163654;font-variant-numeric:tabular-nums}
+.poros-grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));gap:12px;align-items:start}
+.poros-card{display:flex;flex-direction:column;gap:8px;min-width:0;background:var(--surface,#fff);border:1px solid #dbe3ed;border-radius:14px;padding:12px 14px;box-shadow:0 1px 3px rgba(15,23,42,.05)}
+.poros-card.pc-sem_ficha{background:#fbfcfd;border-style:dashed}
+.poros-cab{display:grid;gap:2px;min-width:0}
+.poros-id{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.poros-id strong{font-size:1rem;color:#163654;font-variant-numeric:tabular-nums}
+.poros-cliente{font-weight:650;color:var(--text,#0f172a);overflow-wrap:anywhere}
+.poros-end{margin:0;font-size:.8rem;color:#526378;overflow-wrap:anywhere}
+.poros-motivo{margin:0;font-size:.8rem;line-height:1.45;color:#475569;overflow-wrap:anywhere}
+.poros-fatos{display:grid;gap:4px;margin:0;padding:8px 0 0;border-top:1px solid #edf1f5}
+.poros-fatos div{display:grid;grid-template-columns:minmax(0,9.5em) minmax(0,1fr);gap:8px;align-items:baseline;font-size:.82rem}
+.poros-fatos dt{color:#5d7283;font-weight:600}
+.poros-fatos dd{margin:0;color:#1f2f3d;overflow-wrap:anywhere}
+.poros-fatos dd b{font-variant-numeric:tabular-nums;color:#163654}
+.poros-fatos small{color:#5d7283}
+.poros-equipe{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.poros-eq{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:2px 10px 2px 3px;border-radius:999px;border:1px solid #d8e2e7;background:#fff;font-size:.78rem;font-weight:650;color:#173c50}
+.poros-eq.perf-com-cor{border-color:var(--equipe-cor);box-shadow:inset 0 0 0 1px var(--equipe-cor)}
+.poros-eq.pelas-pessoas{border-style:dashed}
+.poros-eq-logo{width:24px;height:24px;border-radius:50%;object-fit:cover;flex:none;display:inline-flex;align-items:center;justify-content:center;background:#eef2f6;font-size:.78rem}
+.perf-com-cor span.poros-eq-logo{background:var(--equipe-cor);color:#fff}
+.poros-pessoa{display:inline-flex;align-items:center;max-width:100%;padding:2px 9px;border-radius:999px;background:#f1f5f9;font-size:.76rem;color:#334155;overflow-wrap:anywhere}
+.poros-pessoa .tag-freelancer{margin-left:4px}
+.poros-sem-equipe{font-size:.78rem;color:#8a5a00}
+.poros-nota{margin:0;font-size:.74rem;color:#5d7283}
+.poros-acoes{display:flex;flex-wrap:wrap;gap:6px}
+.poros-acoes button{min-height:40px}
+.poros-aviso{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:0;font-size:.8rem;line-height:1.5;color:#7a4a00;background:#fffaf0;border:1px solid #f0d9a6;border-radius:8px;padding:6px 8px}
+.poros-aviso span{flex:1 1 200px;min-width:0}
+.poros-aviso button{min-height:40px}
+.poros-vazio{margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:.88rem;color:#526378}
+.poros-vazio button{min-height:40px}
+.poros-tl{border-top:1px solid #edf1f5}
+.poros-tl>summary{cursor:pointer;min-height:40px;display:flex;align-items:center;font-size:.82rem;font-weight:650;color:#1e4f8a}
+.poros-tl-lista{list-style:none;margin:4px 0 0 4px;padding:0 0 0 14px;border-left:2px solid #dbe3ed;display:grid;gap:8px}
+.poros-tl-lista li{position:relative;display:grid;grid-template-columns:minmax(0,7.4em) minmax(0,1fr);gap:8px;font-size:.78rem;line-height:1.45}
+.poros-tl-lista li::before{content:'';position:absolute;left:-19px;top:5px;width:8px;height:8px;border-radius:50%;background:#94a3b8;box-shadow:0 0 0 2px var(--surface,#fff)}
+.poros-tl-lista li.tl-ocorrencia::before{background:#dc2626}
+.poros-tl-lista li.tl-abono::before{background:#0284c7}
+.poros-tl-lista li.tl-cancelamento::before{background:#475569}
+.poros-tl-lista li.tl-finalizacao::before,.poros-tl-lista li.tl-lancamento::before{background:#16a34a}
+.poros-tl-lista li.tl-diario::before{background:#8b5cf6}
+.poros-tl-lista time{color:#5d7283;font-variant-numeric:tabular-nums}
+.poros-tl-lista div{min-width:0;color:#1f2f3d;overflow-wrap:anywhere}
+.poros-tl-lista small{color:#5d7283}
+.poros-tl-diario{color:#6d28d9!important}
+.poros-tl-nota{margin:8px 0 2px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:.74rem;color:#5d7283}
+.poros-tl-nota button{min-height:40px}
+.poros-mais{min-height:44px;justify-self:center}
+.ent-kpi-aviso{margin:8px 0 0;font-size:.8rem;line-height:1.5;color:#1e4f8a;background:#eef5fc;border:1px solid #cfe0f1;border-radius:10px;padding:6px 10px}
+.ent-kpi-aviso[hidden]{display:none}
+@media(max-width:600px){.poros-filtros{padding:10px}.poros-campo{flex:1 1 100%}.poros-campo select{width:100%}.poros-fatos div{grid-template-columns:1fr;gap:0}.poros-tl-lista li{grid-template-columns:1fr;gap:0}.poros-card{padding:12px}}

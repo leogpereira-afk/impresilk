@@ -3,7 +3,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','relatorios-entregas.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','lote.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
+const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','relatorios-entregas.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
@@ -220,6 +220,11 @@ for(let i=1;i<=56;i++){
  const valor=i===17||i===41?undefined:Math.round((180+Math.pow(pvSorte(),2)*13800)*100)/100;
  lista.push(base(id,{numero:'T-'+id,cliente:'Cliente fictício '+id,servico:PV_SERVICOS[i%PV_SERVICOS.length],instalacao:{data:d,periodo:'Manhã'},equipe:eq,veiculo:'',valorTotal:valor,finalizadaEm:d+'T18:00:00',finalizadoPor:'Mubisys (auto)',baixaAutoERP:{em:d+'T18:00:00',status:'ENTREGUE'}}));
 }
+/* 500 O.S. FICTÍCIAS PARA MEDIR A VISTA POR O.S. (F18, 30/09/2026):
+   #aba=entregas&vista=poros&muitas=500. Datas do mês corrente até ontem,
+   para entrarem no pacote do ERP abaixo. Tudo fictício. */
+{const pvN=Number(new URLSearchParams(location.hash.slice(1)).get('muitas'))||0,pvDias=Math.max(1,Number(hoje.slice(8,10))-1);
+ for(let i=0;i<pvN;i++){const d=pvDoMes(i%pvDias);lista.push(base('M'+i,{numero:'M-'+String(i).padStart(3,'0'),cliente:'Cliente fictício em massa '+i,instalacao:{data:d,periodo:'Manhã'},equipe:i%3?['900001','900002']:['900004','900007'],veiculo:'Carro '+(1+i%3),valorTotal:300+i,prazoCombinado:{data:i%7?d:pvDoMes(Math.max(0,(i%pvDias)-2)),fonte:'agenda'},saidaEm:d+'T08:00:00',horaSaida:'08:00',finalizadaEm:d+'T15:30:00',finalizadoPor:'Gestor de teste',retornoConf:PV_OK}));}}
 /* O PACOTE DO ERP (entreguesMes): sem ele a tela ficava "carregando" e não havia
    lista do período nem cartões para comparar. O mês corrente leva as O.S. do
    aparelho que já saíram (menos as de hoje, para reproduzir o "R$ 0,00 entregue
@@ -275,8 +280,23 @@ document.addEventListener('DOMContentLoaded',()=>{
  // &intro=0 dá o quadro do primeiro uso por lido; &itens=LT4 abre os itens da linha; &rolar= desce até o seletor.
  if(pv.get('intro')==='0')try{localStorage.setItem('impresilk_lote_intro_visto|'+STATE.user.nome,'1');}catch(e){}
  if(pv.get('itens'))setTimeout(()=>{LOTE.executar({acao:'itens',os:pv.get('itens')});LOTE.render();},600);
+ // &vista=poros abre Entregas na vista Por O.S. (F18); &abrir=RA2,AB1 abre a linha do tempo dessas; &status= e &busca= filtram.
+ if(pv.get('vista'))STATE._entVista=pv.get('vista');
+ if(pv.get('abrir')||pv.get('status')||pv.get('busca'))STATE._porOS={status:pv.get('status')||'',equipe:pv.get('equipe')||'',busca:pv.get('busca')||'',abertas:(pv.get('abrir')||'').split(',').filter(Boolean)};
  const pvAba=pv.get('aba')&&document.querySelector('.tab[data-tab="'+pv.get('aba')+'"]:not([data-vista])');
  if(pvAba)pvAba.click();
+ // &posicao=1 escreve no título onde cada pedaço de Entregas começa (para recortar a foto sem rolar a página).
+ if(pv.get('posicao'))document.title=JSON.stringify(Object.fromEntries(['.ent-kpis','#ent-kpi-poros','.ent-controles','#ent-poros','.poros-grade','.poros-tl[open]'].map(q=>{const e=document.querySelector(q);return [q,e?Math.round(e.getBoundingClientRect().top+scrollY):null];}).concat([['largura',[document.documentElement.scrollWidth,document.documentElement.clientWidth]]])));
+ // &medir=1 (com &vista=poros&muitas=500): mede cada toque da vista Por O.S. com o DOM de verdade e escreve o resultado no topo da página (F18).
+ if(pv.get('medir')&&document.getElementById('ent-poros')){const sec=()=>document.getElementById('ent-poros'),r={};
+  const med=(n,f,k=7)=>{const ts=[];for(let i=0;i<k;i++){const t0=performance.now();f(i);document.body.offsetHeight;ts.push(performance.now()-t0);}ts.sort((a,b)=>a-b);r[n]={mediana:+ts[k>>1].toFixed(1),pior:+ts[k-1].toFixed(1)};};
+  med('pintura completa',()=>renderEntregas(),3);
+  med('chip de status',i=>sec().querySelector(i%2?'[data-poros-status=""]':'[data-poros-status="no_prazo"]').click());
+  med('equipe',i=>{const x=sec().querySelector('#poros-equipe');x.value=i%2?'':'eq-aguia';x.dispatchEvent(new Event('change'));});
+  med('busca, uma letra',i=>{const x=sec().querySelector('#poros-busca');x.value=['M','M-','M-1','M-12','M-1','M-',''][i];x.dispatchEvent(new Event('input'));});
+  med('mostrar mais',()=>{const b=sec().querySelector('[data-poros-mais]');if(b)b.click();},5);
+  med('abrir a linha do tempo',()=>{const d=[...sec().querySelectorAll('details.poros-tl')].find(x=>!x.open);d.open=true;d.dispatchEvent(new Event('toggle'));});
+  r.os=_porOSDados.total;r.cartoes=sec().querySelectorAll('.poros-card').length;document.body.insertAdjacentHTML('afterbegin','<pre id="pv-medida">'+JSON.stringify(r)+'</pre>');}
  if(pv.get('base'))setTimeout(()=>{const d=document.querySelector('[data-quadro="perf-base"]');if(d)d.open=true;},900);
  // &tv=1 abre o Modo TV no painel das equipes; &tv=2 no das pessoas.
  if(pv.get('tv'))setTimeout(()=>{abrirTVCasa();for(let i=1;i<Number(pv.get('tv'));i++)document.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight'}));},1200);

@@ -2059,9 +2059,13 @@ function renderEntregas() {
   const aLancarSet = new Set(cls.aLancar.map(o => String(o.numero || '').trim()));
   const hoje = OPERACAO.dia(new Date());
   const f = periodoEntregas();
-  const tecnico = STATE._entTecnico || '';
-  const tipo = STATE._entTipo || '';
   if (!STATE._entVista) STATE._entVista = 'tabela';
+  /* A VISTA POR O.S. (F18, entregas-os.js) tem os filtros dela (status,
+     equipe e busca), que não mexem nos cartões de cima. Técnico e Tipo ficam
+     com a Tabela e os Cards. Sem o arquivo (cache misto), volta a Tabela. */
+  const porOS = STATE._entVista === 'poros' && typeof porOSMontar === 'function';
+  const tecnico = porOS ? '' : (STATE._entTecnico || '');
+  const tipo = porOS ? '' : (STATE._entTipo || '');
 
   /* TRÊS FIXOS PELO ERP — hoje, mês corrente, ano corrente — e UM QUE SEGUE O
      PERÍODO ESCOLHIDO. Os três primeiros são o pulso da casa e nunca se mexem;
@@ -2175,7 +2179,9 @@ function renderEntregas() {
     + (principalMes ? '' : kpiHTML(kMes, 'entregue no mês', 'ent-kpi-sec'))
     + (principalAno ? '' : kpiHTML(kAno, 'entregue no ano', 'ent-kpi-sec'));
 
-  const tabela = `<div class="casa-tabela-wrap"><table class="casa-tabela ent-lista-tabela">
+  /* Tabela e Cards só são montados na vista escolhida (F18): os Cards
+     calculam o status de até 300 O.S., e a vista Por O.S. não usa nenhum dos dois. */
+  const tabela = () => `<div class="casa-tabela-wrap"><table class="casa-tabela ent-lista-tabela">
     <thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Entrega (ERP)</th><th class="num">Valor</th></tr></thead>
     <tbody>${visiveis.map(({ erp, card }) => { const st = estadoPCP(erp); const eqTxt = card ? OPERACAO.equipeTexto(card, ', ') : ''; return `<tr ${card ? `data-os-id="${esc(card.id)}"` : ''}>
         <td class="ent-l-os"><strong>${esc(erp.numero || '—')}</strong> <span class="badge ${st.classe}" title="${esc(st.dica)}">${esc(st.rotulo)}</span>${card && card.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</td>
@@ -2192,8 +2198,8 @@ function renderEntregas() {
      saíram da janela, sumiam da visão sem contagem: num mês antigo a tela
      ficava em branco. O rodapé diz quantas ficaram só na Tabela. */
   const semCard = visiveis.filter(x => !x.card).length;
-  const cards = cardFn ? `<div class="cards-grid">${visiveis.filter(x => x.card).map(x => cardFn(x.card)).join('')}</div>
-    <p class="metricas-nota">${lista.length} O.S entregues no período · ${dinheiroCasa(totLista)}${semCard ? ` · ${semCard} sem card neste aparelho aparece${semCard === 1 ? '' : 'm'} só na Tabela` : ''}.</p>` : tabela;
+  const cards = () => cardFn ? `<div class="cards-grid">${visiveis.filter(x => x.card).map(x => cardFn(x.card)).join('')}</div>
+    <p class="metricas-nota">${lista.length} O.S entregues no período · ${dinheiroCasa(totLista)}${semCard ? ` · ${semCard} sem card neste aparelho aparece${semCard === 1 ? '' : 'm'} só na Tabela` : ''}.</p>` : tabela();
   /* A fila de lançamento é a única lista de tarefas desta tela. Ficava no
      fim da rolagem e ninguém a via; depois subiu inteira para cima da lista e
      passou a esconder a lista. Agora é uma faixa compacta logo abaixo dos
@@ -2204,13 +2210,15 @@ function renderEntregas() {
      o De e o Até, e a grade ano × mês voltava para janeiro. */
   const grade0 = el.querySelector('.casa-grade-meses');
   const rolGrade = grade0 && grade0.parentElement ? grade0.parentElement.scrollLeft : 0;
+  if (porOS) porOSMontar(lista.map(x => x.erp), todas, hoje);
+  const voltarFocoPorOS = porOS ? porOSGuardarFoco() : null;
   el.innerHTML = `
     <div class="casa-pagina">
       ${abasEntregasHTML('lista')}
       <div class="casa-pagina-head">
         <div><h2>Entregas</h2><p>Acompanhe as O.S. entregues, os valores e a equipe responsável.</p></div>
       </div>
-      <div class="ent-kpis">${kpiPrincipal}<div class="ent-kpi-secs">${kpiSecundarios}</div></div>
+      <div class="ent-kpis">${kpiPrincipal}<div class="ent-kpi-secs">${kpiSecundarios}</div></div>${porOS ? porOSAvisoKpiHTML() : ''}
       <details class="ent-dados" ${STATE._entDadosAberto ? 'open' : ''}><summary>Origem dos valores e sincronização</summary>
       <p>Valores líquidos de desconto das O.S. marcadas como entregues no ERP, pela data de entrega. Não representam recebimentos ou lucro. Instalações realizadas dependem do registro no PCP; retiradas pelo cliente entram apenas nos valores.</p>
       <p class="metricas-nota">Registradas no PCP neste mês: <strong>${registradasMes}</strong> instalaç${registradasMes === 1 ? 'ão' : 'ões'}${cls.aLancar.length ? ` · a lançar: <strong>${cls.aLancar.length}</strong>` : ''}. Fonte do valor: ERP${STORE.entreguesMes(hoje.slice(0, 7)) ? `, atualizado ${new Date(STORE.entreguesMes(hoje.slice(0, 7)).em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' (carregando…)'}.</p>
@@ -2221,12 +2229,12 @@ function renderEntregas() {
       <section class="ent-controles" aria-label="Filtros de entregas">
       ${chipsPeriodoEntregas(f)}
       <div class="casa-filtros">
-        <label>Técnico <select id="ent-tecnico"><option value="">Todos</option>${tecnicos.map(([chave, nome]) => `<option value="${esc(chave)}" ${chave === tecnico ? 'selected' : ''}>${esc(nome)}</option>`).join('')}</select></label>
-        <label>Tipo de serviço <select id="ent-tipo"><option value="">Todos</option>${tipos.map(t => opt(t, tipo)).join('')}</select></label>
-        <span class="casa-vista"><button class="btn-ghost btn-sm ${STATE._entVista === 'tabela' ? 'active' : ''}" data-ent-vista="tabela">Tabela</button><button class="btn-ghost btn-sm ${STATE._entVista === 'cards' ? 'active' : ''}" data-ent-vista="cards">Cards</button></span>
+        ${porOS ? '' : `<label>Técnico <select id="ent-tecnico"><option value="">Todos</option>${tecnicos.map(([chave, nome]) => `<option value="${esc(chave)}" ${chave === tecnico ? 'selected' : ''}>${esc(nome)}</option>`).join('')}</select></label>
+        <label>Tipo de serviço <select id="ent-tipo"><option value="">Todos</option>${tipos.map(t => opt(t, tipo)).join('')}</select></label>`}
+        <span class="casa-vista"><button class="btn-ghost btn-sm ${STATE._entVista === 'tabela' ? 'active' : ''}" data-ent-vista="tabela">Tabela</button><button class="btn-ghost btn-sm ${STATE._entVista === 'cards' ? 'active' : ''}" data-ent-vista="cards">Cards</button>${typeof porOSMontar === 'function' ? `<button class="btn-ghost btn-sm ${porOS ? 'active' : ''}" data-ent-vista="poros">Por O.S.</button>` : ''}</span>
       </div>
       </section>
-      ${lista.length ? (STATE._entVista === 'cards' ? cards : tabela) : emptyState('', vazioEntregas(per).titulo, vazioEntregas(per).dica)}
+      ${lista.length ? (porOS ? porOSSecaoHTML() : STATE._entVista === 'cards' ? cards() : tabela()) : emptyState('', vazioEntregas(per).titulo, vazioEntregas(per).dica)}
       ${lista.length ? prazoEntregasHTML(lista.map(x => x.erp), porNumero) : ''}
       ${relatoriosEntregasHTML(lista.map(x => x.erp), porNumero, estadoPCP)}
       ${relatorioAnosHTML()}
@@ -2371,6 +2379,7 @@ function renderEntregas() {
   el.querySelectorAll('[data-lancar-os]').forEach(b => b.onclick = () => lancarEntregaManual(b.dataset.lancarOs));
   wireErpComSaldo(el);
   bindCardClicks(el);
+  if (porOS) { ligarPorOS(el); if (voltarFocoPorOS) voltarFocoPorOS(); }
 }
 
 function chipFichaHTML(osId, f, on) {

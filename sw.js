@@ -9,7 +9,7 @@ const CACHE = 'impresilk-shell-v142';
 // index.html/equipe.html sobem JUNTOS.
 const SHELL = [
   './', 'index.html', 'equipe.html', 'styles.css?v=v142',
-  'config.js?v=v142', 'logo.js?v=v142', 'frases.js?v=v142', 'store.js?v=v142', 'auth.js?v=v142', 'operacao.js?v=v142', 'divisao.js?v=v142', 'regras.js?v=v142', 'entrega-item.js?v=v142', 'app.js?v=v142', 'casa.js?v=v142', 'performance.js?v=v142', 'alocacao-ui.js?v=v142', 'lote.js?v=v142', 'relatorios-entregas.js?v=v142', 'equipe.js?v=v142',
+  'config.js?v=v142', 'logo.js?v=v142', 'frases.js?v=v142', 'store.js?v=v142', 'auth.js?v=v142', 'operacao.js?v=v142', 'divisao.js?v=v142', 'regras.js?v=v142', 'entrega-item.js?v=v142', 'app.js?v=v142', 'casa.js?v=v142', 'performance.js?v=v142', 'alocacao-ui.js?v=v142', 'lote.js?v=v142', 'entregas-os.js?v=v142', 'relatorios-entregas.js?v=v142', 'equipe.js?v=v142',
   'manifest.json', 'icon.svg', 'favicon.svg',
   // Logos das 10 equipes (29/09/2026): arquivo do site, não da configuração.
   'equipe-aguia.webp', 'equipe-leao.webp', 'equipe-pantera.webp', 'equipe-lobo.webp', 'equipe-tigre.webp', 'equipe-falcao.webp', 'equipe-carcara.webp', 'equipe-onca.webp', 'equipe-lobo-guara.webp', 'equipe-touro.webp'
