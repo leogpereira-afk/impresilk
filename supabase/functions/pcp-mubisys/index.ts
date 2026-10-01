@@ -535,7 +535,11 @@ async function varrerMesEntregues(
 const pacoteEntregues = (mes: string, os: any[]) =>
   ({ v: ENTREGUES_V, em: new Date().toISOString(), mes, total: os.length, os });
 
-async function erpGet(url: string, headers: any, prazoTotalMs: number): Promise<any> {
+/* `opts` (revisão da junção v144, só a formatoItens usa): `corpo` põe a
+   leitura do corpo dentro do prazo de cada chamada (fetchERP), e
+   `pararNo429` não repete o 429: o ERP pediu calma, a chamada para ali. Sem
+   eles, a importação segue como sempre. */
+async function erpGet(url: string, headers: any, prazoTotalMs: number, opts: { corpo?: boolean; pararNo429?: boolean } = {}): Promise<any> {
   const ate = Date.now() + Math.max(8000, prazoTotalMs);
   const ESPERA = 1500;
   let n404 = 0, ultimoFoi404 = false, ultimoFoiRede = false, ultimoErro: Error | null = null;
@@ -543,7 +547,8 @@ async function erpGet(url: string, headers: any, prazoTotalMs: number): Promise<
     const sobra = ate - Date.now();
     if (sobra < 6000) break;
     try {
-      const r = await fetchERP(url, headers, Math.min(sobra - 2000, 60000));
+      const r = await fetchERP(url, headers, Math.min(sobra - 2000, 60000), { corpo: !!opts.corpo });
+      if (r.status === 429 && opts.pararNo429) throw Object.assign(new Error(ERP_PEDIU_CALMA), { fatal: true, pediuCalma: true });
       if (r.status === 401) throw Object.assign(new Error("o Mubisys recusou a credencial (401)"), { fatal: true });
       if (r.status === 403) throw Object.assign(new Error("o Mubisys recusou (403): o plano precisa do pacote MubiPro"), { fatal: true });
       if (r.status === 404) {
@@ -569,14 +574,23 @@ async function erpGet(url: string, headers: any, prazoTotalMs: number): Promise<
   throw ultimoErro || new Error("o Mubisys não respondeu dentro do prazo");
 }
 
-async function fetchERP(url: string, headers: any, ms: number): Promise<Response> {
+/* O PRAZO ATÉ O CORPO INTEIRO (revisão da junção v144, E). Sem `corpo`, o
+   relógio solta quando chegam os cabeçalhos (a importação, como sempre): um
+   ERP que manda os cabeçalhos e segura o corpo prendia o r.json() até a
+   função morrer no limite de parede. Com `corpo: true`, o corpo é lido aqui
+   dentro, no mesmo prazo, e volta numa Response já lida: estourou, aborta. */
+const ERP_PEDIU_CALMA = "o ERP pediu para esperar (HTTP 429); peça de novo mais tarde";
+async function fetchERP(url: string, headers: any, ms: number, opts: { corpo?: boolean } = {}): Promise<Response> {
   const ctrl = new AbortController();
   const limite = Math.max(5000, ms);
   const t = setTimeout(() => ctrl.abort(), limite);
   try {
-    return await fetch(url, { headers, signal: ctrl.signal });
+    const r = await fetch(url, { headers, signal: ctrl.signal });
+    if (!opts.corpo) return r;
+    const texto = await r.text();
+    return new Response([204, 205, 304].includes(r.status) ? null : texto, { status: r.status, statusText: r.statusText });
   } catch (e) {
-    if ((e as Error)?.name === "AbortError") {
+    if ((e as Error)?.name === "AbortError" || ctrl.signal.aborted) {
       throw new Error(`o ERP (Mubisys) nao respondeu em ${Math.round(limite / 1000)}s`);
     }
     throw e;
@@ -1373,8 +1387,12 @@ Deno.serve(async (req: Request) => {
        no ERP; uma busca por dia, mesmo com várias O.S. do mesmo dia), e
        compara as duas rotas item a item. Uma O.S. que falha não derruba as
        outras: vai para naoMedidas com o motivo. Cada chamada ao ERP tem o
-       prazo do que sobra até 140 s (a função morre aos 150 s); sem tempo, as
-       que faltam vão para naoMedidas, para pedir de novo. */
+       prazo do que sobra até 140 s (a função morre aos 150 s), com a leitura
+       do corpo dentro dele (revisão da junção v144); sem tempo, as que faltam
+       vão para naoMedidas, para pedir de novo. O primeiro 429 do ERP (na
+       busca por número ou na lista) para tudo, sem repetir: o limitador do
+       ERP é o mesmo da importação horária. Devolve o que já mediu, e as que
+       faltam vão para naoMedidas com o motivo. */
     if (action === "formatoItens") {
       if (!cracha || String(cracha.papel ?? "") !== "admin") return resp({ error: "Só o administrador mede o formato do ERP." }, 403);
       const pedidos = Array.isArray(body.numeros) ? body.numeros : [body.numero];
@@ -1386,11 +1404,14 @@ Deno.serve(async (req: Request) => {
       const sobra = () => 140000 - (Date.now() - inicio);
       const listaDoDia = new Map<string, any>();
       const medidas: any[] = [], naoMedidas: any[] = [];
+      let calma = false;   // o ERP respondeu 429: nada mais é pedido
       for (const numero of numeros) {
+        if (calma) { naoMedidas.push({ numero, motivo: ERP_PEDIU_CALMA }); continue; }
         if (sobra() < 35000) { naoMedidas.push({ numero, motivo: "o tempo acabou: peça de novo só as que faltaram" }); continue; }
         try {
-          const r = await fetchERP(`${creds.base}/${creds.publicKey}/ordem-servico/numero/${encodeURIComponent(numero)}`, headers, Math.min(30000, sobra() - 5000));
+          const r = await fetchERP(`${creds.base}/${creds.publicKey}/ordem-servico/numero/${encodeURIComponent(numero)}`, headers, Math.min(30000, sobra() - 5000), { corpo: true });
           const data = await r.json().catch(() => null);
+          if (r.status === 429) { calma = true; naoMedidas.push({ numero, motivo: ERP_PEDIU_CALMA }); continue; }
           if (!r.ok) { naoMedidas.push({ numero, motivo: `o Mubisys respondeu HTTP ${r.status}` }); continue; }
           const um = extrairUm(data);
           const saida: any = { numero, porNumero: formatoDaOS(um) };
@@ -1401,8 +1422,11 @@ Deno.serve(async (req: Request) => {
             else {
               if (!listaDoDia.has(dia)) {
                 const q2 = new URLSearchParams({ status: "TODOS", filtrodata: "CADASTRO", datainicial: dia, datafinal: addDias(dia, 1), per_page: "500", page: "1" });
-                try { listaDoDia.set(dia, extrairLista(await erpGet(`${creds.base}/${creds.publicKey}/ordem-servico?${q2}`, headers, Math.min(60000, sobra() - 5000)))); }
-                catch (e) { listaDoDia.set(dia, { falhou: semCredencial((e as Error)?.message || e) }); }
+                try { listaDoDia.set(dia, extrairLista(await erpGet(`${creds.base}/${creds.publicKey}/ordem-servico?${q2}`, headers, Math.min(60000, sobra() - 5000), { corpo: true, pararNo429: true }))); }
+                catch (e) {
+                  if ((e as any)?.pediuCalma) calma = true;
+                  listaDoDia.set(dia, { falhou: semCredencial((e as Error)?.message || e) });
+                }
               }
               const l = listaDoDia.get(dia);
               const achada = Array.isArray(l) ? l.find((o: any) => String(pick(o, "sequencial_ordem", "numero", "numeroOS", "codigo") ?? "") === numero) : null;

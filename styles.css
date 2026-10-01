@@ -427,6 +427,8 @@ body:not(.equipe-app) #modal-os .modal-meta { white-space: nowrap; overflow: hid
 .prox-passo-modal .fe-ir { margin-left: auto; }
 /* O "Ir para" do próximo passo na etapa dele: invisível, mas guarda a altura da caixa (o stepper não pula). */
 .fe-invisivel { visibility: hidden; }
+/* O selo do topo e o próximo passo moram num pedaço repintado ao vivo (revisão da junção v144): o pedaço não ocupa lugar. */
+.fe-host { display: contents; }
 /* O selo do status da entrega é um botão que leva ao Status da entrega, no Fechamento (44 px). */
 .fe-selo { min-height: 44px; display: inline-flex; align-items: center; padding: 0 4px; margin: 0; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
 .fe-selo:hover .selo-entrega, .fe-selo:focus-visible .selo-entrega { text-decoration: underline; }

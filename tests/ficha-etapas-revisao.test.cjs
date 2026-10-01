@@ -135,7 +135,8 @@ function tela({papel = 'admin', lista = [], cfg: cfgExtra = {}, comPerformance =
   vm.runInContext(`STATE.user = {nome: 'Gestor Fictício', papel: '${papel}'};
     bindModalEvents = () => {}; ligarEquipeDaFicha = () => {}; ligarHistoricoAlteracoes = () => {};
     renderActiveTab = () => {}; toast = (m, t, o) => __toasts.push([m, t || '', o || null]);
-    registrarOcorrenciaEm = (os, gravar, extra) => __ocorrencias.push([os.id, typeof gravar, extra && extra.fonte]);`, ctx);
+    registrarOcorrenciaEm = (os, gravar, extra) => __ocorrencias.push([os.id, typeof gravar, extra && extra.fonte]);
+    var versoesRegrasCasa = () => [];   // o index.html sempre carrega o casa.js: a regra do dia vem dele (revisão da junção v144)`, ctx);
   const run = code => vm.runInContext(code, ctx);
   // O HTML de cada etapa, até o rodapé comum da ficha.
   const secoes = () => Object.fromEntries(d.html().split('<section class="ficha-etapa" ').slice(1).map(p => {
@@ -499,7 +500,7 @@ test('revisão: B3, a O.S. aberta diz "Falta" (não "pendente para a pontuação
   // Caso ruim: a O.S. que nem saiu já dizia "Fica pendente para a pontuação".
   assert.doesNotMatch(fech, /pendente para a pontua/i);
   const retr = doChecklist(fech, 'Retrabalho');
-  assert.match(retr.html, /<strong>Retrabalho<\/strong>: <span class="fe-ck-selo">Falta<\/span> falta responder se gerou retrabalho\.<span class="fe-ck-efeito">A pergunta vem ao finalizar\. Não impede finalizar\.<\/span>/);
+  assert.match(retr.html, /<strong>Retrabalho<\/strong>: <span class="fe-ck-selo">Falta<\/span> responder se gerou retrabalho\.<span class="fe-ck-efeito">A pergunta vem ao finalizar\. Não impede finalizar\.<\/span>/);
   // A cancelada pela gestão (o S16B da prévia): nenhum "Ir para Jornada" no checklist.
   const c = tela({lista: [osBase({cancelamento: {ativo: true, motivo: 'Cliente desistiu do pedido fictício', por: 'Gestor Fictício', em: HOJE + 'T09:00:00'}})]});
   c.abrirOS('f1');

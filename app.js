@@ -913,6 +913,7 @@ function atualizarFichaAberta() {
   if (ae && ae.closest && ae.closest('#modal-os') && ['INPUT', 'TEXTAREA', 'SELECT'].includes(ae.tagName)) return;
   _modalDraft = JSON.parse(JSON.stringify(novo));
   _modalAgendaSalva = OPERACAO.agendaCompleta(novo);
+  divisaoChegouNaFicha(_modalDraft);
   reRenderModalKeepOpen();
 }
 
@@ -1368,7 +1369,8 @@ function initConflictDialog() {
     dlg.classList.remove('hidden');
     $('#conflict-reload').onclick = () => {
       STORE.aceitarServidor(remote);
-      if (STATE.modalOSId === remote.id) openModal(STORE.getOS(remote.id));
+      // A divisão confirmada que veio do servidor apaga o "não gravou" da Divisão (revisão da junção v144, C).
+      if (STATE.modalOSId === remote.id) { divisaoChegouNaFicha(STORE.getOS(remote.id)); openModal(STORE.getOS(remote.id)); }
       renderActiveTab();
       toast('O.S recarregada do servidor', 'success');
       proximo();
@@ -1795,14 +1797,35 @@ function etapaParaFinalizar(os) {
    - baixa do ERP sem lançamento: entra "sem prova" e não pontua até ser
      lançada (Entregas, fila a lançar);
    - fotos: não pesam na pontuação (o Finalizar é que pede).
-   O efeito só aparece para o que entra no programa (entregue de 01/10/2026
-   em diante). O item sem efeito é só "falta", com "não impede finalizar".
+   O efeito só aparece para o que entra no programa, e cada um sai da regra
+   do dia (revisão da junção v144): o MESMO dia e a MESMA regra do Status da
+   entrega e da apuração (regraDaFicha). O item sem efeito é só "falta", com
+   "não impede finalizar".
    O "Ir para" só aparece quando o campo de destino aceita a mudança: na
    finalizada, só a conferência da volta (a gestão confere depois); a foto
    e a resposta do retrabalho dizem onde se faz. A cancelada está fora da
    apuração e não tem checklist. A retirada no balcão também não. */
-// O início do programa: o do motor (F19, PONTUACAO.INICIO_PROGRAMA) quando ele está carregado.
-const inicioProgramaFicha = () => (typeof PONTUACAO !== 'undefined' && PONTUACAO && PONTUACAO.INICIO_PROGRAMA) || '2026-10-01';
+/* A REGRA DO PROGRAMA NA FICHA (revisão da junção v144, A). O checklist, o
+   progresso da Divisão e o resumo decidem "vale o programa" pelo MESMO dia e
+   pela MESMA regra do Status da entrega, das ocorrências e da apuração
+   (diaDaRegraDe e regraDoDiaTela): a chegada conferida, senão a entrega
+   lançada, senão a finalização; a aberta, hoje. Antes era o dia da
+   finalização: a O.S. entregue em 30/09 e finalizada em 01/10 dizia "não
+   pontua" logo acima das ocorrências dizendo "0 perdas valendo". Cada efeito
+   sai da própria regra: atraso e retrabalho só se estão nas perdas dela, o
+   bônus da volta só com carroLimpoBp, o redutor só com equipamentoFaltaBp.
+   Sem as regras carregadas (regras.js ou casa.js fora, cache misto), a ficha
+   não sabe: não diz efeito nem "antes do programa". */
+const regrasNaFicha = () => typeof REGRAS !== 'undefined' && typeof versoesRegrasCasa === 'function';
+const regraDaFicha = os => (regrasNaFicha() ? regraDoDiaTela(diaDaRegraDe(os)) : null);
+// Fora do programa de verdade: a regra está carregada e não vale no dia da O.S.
+const foraDoProgramaFicha = os => regrasNaFicha() && !regraDaFicha(os);
+/* A APURAÇÃO DO PROGRAMA AINDA NÃO ESTÁ NA TELA (revisão da junção v144, D):
+   o checklist diz a regra que vale desde 01/10, e a aba Performance ainda
+   conta como hoje até o motor do programa (F19, pontuacao.js) subir. A linha
+   sai sozinha quando o PONTUACAO estiver carregado. */
+const APURACAO_DEPOIS_FICHA = 'A apuração do programa (pontos e comissão de outubro) entra numa versão seguinte. Até lá, a aba Performance mostra a contagem de hoje.';
+const apuracaoDepoisFicha = () => typeof PONTUACAO === 'undefined';
 // A baixa do ERP que espera o lançamento à mão: a mesma régua da fila "a lançar" (casa.js, classificarEntregas).
 function aLancarNaFicha(os) {
   if (!os || isInterno(os) || !os.finalizadaEm || canceladaNaTela(os)) return false;
@@ -1813,8 +1836,11 @@ function aLancarNaFicha(os) {
 function checklistFechamento(os) {
   if (!os || isInterno(os) || canceladaNaTela(os)) return [];
   const fin = !!os.finalizadaEm, erp = OPERACAO.encerradaERP(os);
-  const programa = !fin || OPERACAO.dia(os.finalizadaEm) >= inicioProgramaFicha();
+  const regra = regraDaFicha(os), programa = !!regra;
   const efeito = t => (programa ? t : '');
+  const perde = k => programa && Array.isArray(regra.perdas) && regra.perdas.includes(k);
+  const volta = programa && regra.volta && typeof regra.volta === 'object' ? regra.volta : {};
+  const bonusVolta = (Number(volta.carroLimpoBp) || 0) > 0, redutorVolta = (Number(volta.equipamentoFaltaBp) || 0) > 0;
   const editavel = !fin && podeEditar();
   const st = statusEntregaDe(os);
   const lista = [];
@@ -1835,11 +1861,11 @@ function checklistFechamento(os) {
     texto: pc ? `combinado para ${fmtDataBR(pc.data)}${atraso ? ', ' + String(atraso.rotulo || '').toLowerCase() : noPrazo ? ', entregue no prazo' : ''}`
       : semPrazo ? 'sem prazo: a O.S. já estava entregue quando ganhou data no PCP'
       : 'sem prazo combinado: ele nasce com a primeira data agendada no PCP',
-    efeito: efeito(!pc ? 'Sem prazo, o atraso não é medido.'
+    efeito: !perde('atraso') ? '' : !pc ? 'Sem prazo, o atraso não é medido.'
       : atraso && atraso.abonado ? 'Atraso abonado: não tira a O.S. da pontuação.'
       : atraso && fin ? 'Entregue com atraso: a O.S. não pontua. O abono devolve.'
       : atraso ? 'Já passou do prazo: entregue com atraso, a O.S. não pontua. O abono devolve.'
-      : fin ? '' : 'Entregar depois dele tira a O.S. da pontuação.'),
+      : fin ? '' : 'Entregar depois dele tira a O.S. da pontuação.',
     ir: !pc && !semPrazo && editavel ? 'equipe' : '' });
   const resp = os.retrabalhoPerguntado && typeof os.retrabalhoPerguntado === 'object' ? os.retrabalhoPerguntado.resposta : '';
   const gerou = !!os.retrabalho || resp === 'sim';
@@ -1847,8 +1873,8 @@ function checklistFechamento(os) {
   item({ k: 'retrabalho', rotulo: 'Retrabalho', etapa: 'jornada', estado: respondido ? 'ok' : 'falta',
     texto: os.retrabalho ? `gerou retrabalho${os.problema ? ': ' + String(os.problema).slice(0, 80) : ''}`
       : resp === 'nao' ? 'respondido: não gerou' : resp === 'sim' ? 'respondido: gerou'
-      : 'falta responder se gerou retrabalho',
-    efeito: efeito(gerou ? 'Retrabalho tira a O.S. da pontuação para todos e não se abona.' : ''),
+      : 'responder se gerou retrabalho',
+    efeito: gerou && perde('retrabalho') ? 'Retrabalho tira a O.S. da pontuação para todos e não se abona.' : '',
     como: respondido ? '' : fin ? 'Responda no Fechar o dia, em Entregas.' : 'A pergunta vem ao finalizar.' });
   const rc = os.retornoConf || {};
   const sn = k => { const r = OPERACAO.respostaVolta(rc[k]); return r === 'sim' ? 'sim' : r === 'nao' ? 'não' : 'sem resposta'; };
@@ -1859,14 +1885,15 @@ function checklistFechamento(os) {
     const r = k => OPERACAO.respostaVolta(rc[k]);
     const carro = r('carroLimpo') === 'nao' || r('carroArrumado') === 'nao' ? false : r('carroLimpo') === 'sim' || r('carroArrumado') === 'sim' ? true : null;
     const partes = [];
-    if (carro === true) partes.push('Carro limpo e arrumado: bônus da volta.');
-    if (carro === false) partes.push('Carro com "não": a volta fica sem o bônus.');
-    if (r('equipamentosOk') === 'nao') partes.push('Equipamento com "não": redutor da volta.');
+    if (carro === true && bonusVolta) partes.push('Carro limpo e arrumado: bônus da volta.');
+    if (carro === false && bonusVolta) partes.push('Carro com "não": a volta fica sem o bônus.');
+    if (r('equipamentosOk') === 'nao' && redutorVolta) partes.push('Equipamento com "não": redutor da volta.');
+    const neutra = bonusVolta && redutorVolta ? 'sem bônus e sem redutor' : bonusVolta ? 'sem bônus' : redutorVolta ? 'sem redutor' : '';
     item({ k: 'volta', rotulo: ROT_VOLTA, etapa: 'jornada', estado: conferida ? 'ok' : 'falta',
       texto: conferida ? `conferida: limpo ${sn('carroLimpo')}, arrumado ${sn('carroArrumado')}, equipamentos ${sn('equipamentosOk')}`
-        : OPERACAO.voltaRespondida(rc) ? 'conferida em parte: falta o carro (limpo ou arrumado) ou os equipamentos'
-        : 'falta conferir o carro e os equipamentos (na Jornada ou na fila PCP, Volta do carro)',
-      efeito: efeito(conferida ? partes.join(' ') : 'Sem a conferência, a volta fica neutra: sem bônus e sem redutor.'),
+        : OPERACAO.voltaRespondida(rc) ? 'o carro (limpo ou arrumado) ou os equipamentos: a volta foi conferida em parte'
+        : 'conferir o carro e os equipamentos (na Jornada ou na fila PCP, Volta do carro)',
+      efeito: conferida ? partes.join(' ') : neutra ? `Sem a conferência, a volta fica neutra: ${neutra}.` : '',
       ir: !conferida && voltaGestao() ? 'jornada' : '', como: !conferida && !voltaGestao() ? 'A gestão confere.' : '' });
   }
   if (aLancarNaFicha(os)) item({ k: 'lancar', rotulo: 'Lançar a entrega', etapa: 'fechamento', estado: 'falta',
@@ -1895,6 +1922,16 @@ function resumoChecklistFicha(os, onde) {
    A Divisão segue a régua da Performance: confirmada pela divisão da O.S. ou,
    sem ela, pela participação antiga da apuração (F11). */
 const _divErroFicha = new Map();   // id da O.S. -> a divisão que não gravou com a pessoa em outra etapa (D8)
+/* A DIVISÃO CONFIRMADA QUE CHEGA DO SERVIDOR APAGA O "NÃO GRAVOU" (revisão da
+   junção v144, C). A marca só saía com um Confirmar que desse certo ou ao
+   fechar a ficha: a sincronização ou o Recarregar do conflito traziam a O.S.
+   com a divisão gravada (pela outra aba), a etapa dizia "✓ confirmada" e o
+   stepper continuava "não gravou". Vale quando o rascunho é trocado pelo do
+   servidor (atualizarFichaAberta e o Recarregar do conflito); o aviso que
+   fica continua até um toque. */
+function divisaoChegouNaFicha(os) {
+  if (os && _divErroFicha.has(os.id) && estadoDivisaoFicha(os)) _divErroFicha.delete(os.id);
+}
 function progressoEtapasFicha(os) {
   const canc = canceladaNaTela(os), fin = !!os.finalizadaEm;
   const done = blocosCompletos(os), pend = pendenciasFicha(os);
@@ -1919,12 +1956,11 @@ function progressoEtapasFicha(os) {
   if (!isInterno(os)) {
     out.equipe = pela('equipe', done.agenda);
     const div = estadoDivisaoFicha(os), erro = _divErroFicha.get(os.id);
-    const doPrograma = !fin || OPERACAO.dia(os.finalizadaEm) >= inicioProgramaFicha();
     out.divisao = canc ? neutro('', 'O.S. cancelada')
       : erro ? { estado: 'erro', n: 0, texto: 'não gravou', descricao: 'a divisão não foi gravada: ' + erro }
       : div === 'alocacao' ? { estado: 'ok', n: 0, texto: 'ok', descricao: 'divisão confirmada' }
       : div === 'antiga' ? { estado: 'ok', n: 0, texto: 'ok', descricao: 'divisão confirmada pelo jeito antigo (a participação da apuração)' }
-      : fin && !doPrograma ? neutro('sem divisão', 'finalizada antes do programa, sem divisão confirmada')
+      : foraDoProgramaFicha(os) ? neutro('sem divisão', 'entregue antes do programa, sem divisão confirmada')
       : { estado: 'aviso', n: 0, texto: 'a confirmar', descricao: 'divisão a confirmar' };
     out.jornada = pela('jornada', done.exec);
   }
@@ -1990,11 +2026,13 @@ function checklistFichaHTML(os) {
     return `<li class="fe-ck fe-ck-${c.estado}"><span class="fe-ck-ic" aria-hidden="true">${ICONE[c.estado]}</span><span class="fe-ck-txt"><strong>${esc(c.rotulo)}</strong>${estado}${esc(c.texto)}.${resto ? `<span class="fe-ck-efeito">${esc(resto)}</span>` : ''}</span>${c.estado === 'falta' && c.ir ? irParaFichaHTML(c.ir, etapas) : ''}</li>`;
   };
   const faltaTxt = nFalta ? (nFalta === 1 ? 'Falta 1 item.' : `Faltam ${nFalta} itens.`) : 'Checklist completo.';
-  const antes = fin && OPERACAO.dia(os.finalizadaEm) < inicioProgramaFicha() ? ' Entregue antes de 01/10/2026: os efeitos do programa não valem para ela.' : '';
+  const fora = foraDoProgramaFicha(os);
+  const antes = fora ? ' Entregue antes de 01/10/2026: os efeitos do programa não valem para ela.' : '';
   const resumo = OPERACAO.encerradaERP(os) ? `Baixa do ERP: a ficha abre aqui, sem trava. ${faltaTxt}${antes}`
     : fin ? `${faltaTxt}${nFalta ? ' A O.S. continua finalizada.' : ''}${antes}`
-    : 'O que a O.S. leva para a pontuação e o efeito de cada item. O checklist não trava o Finalizar.';
-  return `${tit}<p class="fe-ck-resumo">${esc(resumo)}</p><ul class="fe-ck-lista">${lista.map(linha).join('')}</ul>`;
+    : `O que a O.S. leva para a pontuação e o efeito de cada item. O checklist não trava o Finalizar.${antes}`;
+  const depois = regraDaFicha(os) && apuracaoDepoisFicha() ? `<p class="fe-ck-resumo fe-ck-depois">${esc(APURACAO_DEPOIS_FICHA)}</p>` : '';
+  return `${tit}<p class="fe-ck-resumo">${esc(resumo)}</p>${depois}<ul class="fe-ck-lista">${lista.map(linha).join('')}</ul>`;
 }
 // O Finalizar do Fechamento (o miolo da seção #fe-final, repintado ao vivo): o botão primeiro, à vista sem rolar.
 function finalFichaHTML(os) {
@@ -2111,6 +2149,30 @@ function pintarHostFicha(id, gerar, ligar) {
   ligarEtapasDaFicha(el);
   if (typeof ligar === 'function') ligar();
 }
+/* O ALTO DA FICHA ACOMPANHA A FICHA (revisão da junção v144, B). Trocar de
+   etapa não repinta a ficha (D3), e a caixa Retrabalho da Jornada só repinta
+   as pendências: o selo do topo seguia "Em execução" e o Próximo passo
+   seguia "7 pendências" com o Status da entrega, logo abaixo, dizendo
+   "Retrabalho" e já 8 faltas. Os dois moram num pedaço próprio
+   (#fe-selo-topo e #fe-pp), repintado aqui só quando muda.
+   O selo é um botão (revisão da F23): leva ao Status da entrega no
+   Fechamento, com o retorno antecipado, as ocorrências e o Cancelar O.S. */
+function seloTopoFichaHTML(os) {
+  const st = statusEntregaDe(os);
+  return st ? `<button type="button" class="fe-selo" data-ir-etapa="fechamento" data-ir-foco="status" aria-label="${esc('Status da entrega: ' + st.rotulo + '. Ver no Fechamento, com as ocorrências')}">${seloStatusEntregaHTML(st)}</button>` : '';
+}
+/* O próximo passo leva à etapa em que ele se faz. Na própria etapa o botão
+   fica invisível, sem sair do lugar: a caixa não muda de altura e o
+   stepper não pula ao trocar de etapa (revisão da F23). */
+function proximoPassoFichaHTML(os) {
+  const pp = proximoPasso(os);
+  if (!pp) return '';
+  const etapas = etapasDaFicha(os), etapaPP = ETAPA_DO_PASSO[pp.acao];
+  const aquiPP = etapaPP === etapaAtualFicha(os);
+  const irPP = etapaPP && etapas.includes(etapaPP)
+    ? ` <button type="button" class="btn-ghost btn-sm fe-ir${aquiPP ? ' fe-invisivel' : ''}" id="fe-ir-pp" data-ir-etapa="${etapaPP}" data-ir-foco="titulo"${aquiPP ? ' aria-hidden="true" tabindex="-1"' : ''}>Ir para ${esc(ETAPA_FICHA[etapaPP].nome)}</button>` : '';
+  return `<div class="prox-passo prox-passo-modal"><span class="prox-passo-tag">Próximo passo</span> <strong>${esc(pp.label)}</strong>${irPP}</div>`;
+}
 function pintarPendenciasFicha() {
   if (!_modalDraft || typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
   const os = _modalDraft;
@@ -2130,6 +2192,8 @@ function pintarPendenciasFicha() {
   if (!os.finalizadaEm) pintarHostFicha('fe-final', () => finalFichaHTML(os));
   pintarHostFicha('fe-checklist', () => checklistFichaHTML(os));
   pintarHostFicha('fe-fin-jornada', () => resumoFinalizarJornadaHTML(os));
+  pintarHostFicha('fe-selo-topo', () => seloTopoFichaHTML(os));
+  pintarHostFicha('fe-pp', () => proximoPassoFichaHTML(os));
 }
 
 function renderModal() {
@@ -2147,7 +2211,6 @@ function renderModal() {
   _etapaFicha.set(os.id, etapa);
 
   // Régua do funil (o selo compacto) + próximo passo + tempos do processo.
-  const pp = proximoPasso(os);
   const histAtual = (Array.isArray(os.historico) ? os.historico : []).filter(h => h.etapa === st).slice(-1)[0];
   const diasPedido = os.dataEntrada ? diasDesde(os.dataEntrada)
                    : (os.criadoEm ? diasEntre(os.criadoEm, todayISO()) : null);
@@ -2155,18 +2218,9 @@ function renderModal() {
   const temposTags = [];
   if (diasPedido != null && diasPedido >= 0) temposTags.push(`⏱ ${diasPedido}d desde o pedido`);
   if (diasEtapa != null && diasEtapa >= 0 && !finalizada) temposTags.push(`📍 ${diasEtapa}d nesta etapa`);
-  const stEnt = statusEntregaDe(os);
-  /* O próximo passo leva à etapa em que ele se faz. Na própria etapa o botão
-     fica invisível, sem sair do lugar: a caixa não muda de altura e o
-     stepper não pula ao trocar de etapa (revisão da F23). */
-  const etapaPP = pp && ETAPA_DO_PASSO[pp.acao];
-  const aquiPP = etapaPP === etapa;
-  const irPP = etapaPP && etapas.includes(etapaPP)
-    ? ` <button type="button" class="btn-ghost btn-sm fe-ir${aquiPP ? ' fe-invisivel' : ''}" id="fe-ir-pp" data-ir-etapa="${etapaPP}" data-ir-foco="titulo"${aquiPP ? ' aria-hidden="true" tabindex="-1"' : ''}>Ir para ${esc(ETAPA_FICHA[etapaPP].nome)}</button>` : '';
-  /* O selo do status da entrega é um botão (revisão da F23): leva ao Status
-     da entrega no Fechamento, com o retorno antecipado, as ocorrências e o
-     Cancelar O.S., que antes ficavam no alto da ficha. */
-  const seloStatusBotao = stEnt ? `<button type="button" class="fe-selo" data-ir-etapa="fechamento" data-ir-foco="status" aria-label="${esc('Status da entrega: ' + stEnt.rotulo + '. Ver no Fechamento, com as ocorrências')}">${seloStatusEntregaHTML(stEnt)}</button>` : '';
+  // O selo do status e o próximo passo: repintados ao vivo (pintarPendenciasFicha), sem repintar a ficha.
+  const seloStatusBotao = seloTopoFichaHTML(os), ppHTML = proximoPassoFichaHTML(os);
+  _hostsFicha.set('fe-selo-topo', seloStatusBotao); _hostsFicha.set('fe-pp', ppHTML);
 
   // Seletor de tipo do pedido (Interno / Externo)
   const tipoSelector = `
@@ -2204,10 +2258,10 @@ function renderModal() {
 
     <div class="ficha-resumo">
       <div class="ficha-funil" role="img" aria-label="Situação no funil: ${esc(statusLabelDe(os, st))}">${stepperHTML(os, true)}</div>
-      ${seloStatusBotao}
+      <span class="fe-host" id="fe-selo-topo">${seloStatusBotao}</span>
       ${temposTags.length ? `<span class="modal-tempos">${temposTags.join(' · ')}</span>` : ''}
     </div>
-    ${pp ? `<div class="prox-passo prox-passo-modal"><span class="prox-passo-tag">Próximo passo</span> <strong>${esc(pp.label)}</strong>${irPP}</div>` : ''}
+    <div class="fe-host" id="fe-pp">${ppHTML}</div>
 
     <div class="ficha-pct">
       <div class="ficha-pct-bar"><div class="ficha-pct-fill" style="width:${pct}%"></div></div>
@@ -8584,7 +8638,7 @@ function abrirInstrucoes() {
         <li><strong>Jornada:</strong> embarque, saída, fotos, retorno, conferência da volta, <em>+ Registrar ocorrência</em> e o botão <em>Finalizar instalação</em>, com o resumo do que falta logo abaixo dele.</li>
         <li><strong>Fechamento:</strong> o Finalizar, o checklist de fechamento, a Exceção de encerramento e o <strong>Status da entrega</strong>, com o retorno antecipado, as ocorrências, os abonos e o <em>Cancelar O.S.</em> O selo do status no alto da ficha é um atalho: toque nele para ir ao Status da entrega.</li>
       </ul>
-      <p>Na barra das etapas, o número em amarelo conta o que <strong>impede finalizar</strong>; "a completar" é o que falta e não impede. O <strong>checklist de fechamento</strong> não trava o Finalizar: cada item diz o efeito que tem na pontuação (atraso e retrabalho tiram a O.S. da pontuação, a volta conferida dá bônus ou redutor, a baixa do ERP só pontua depois de lançada) ou só que falta.</p>
+      <p>Na barra das etapas, o número em amarelo conta o que <strong>impede finalizar</strong>; "a completar" é o que falta e não impede. O <strong>checklist de fechamento</strong> não trava o Finalizar: cada item diz o efeito que tem na pontuação (atraso e retrabalho tiram a O.S. da pontuação, a volta conferida dá bônus ou redutor, a baixa do ERP só pontua depois de lançada) ou só que falta. O efeito segue o dia da entrega, o mesmo do Status da entrega: o que foi entregue antes de 01/10/2026 fica fora do programa. A apuração do programa (pontos e comissão de outubro) entra numa versão seguinte; até lá, a aba Performance mostra a contagem de hoje.</p>
 
       <h2>Fluxo típico</h2>
       <ol>
