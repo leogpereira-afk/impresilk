@@ -2239,6 +2239,9 @@ body.nav-aberta .nav-fundo { display: block; }
 .wpp-texto { width:100%; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; border:1px solid var(--border); border-radius:10px; padding:10px; resize:vertical; background:#fbfcfe; color:#163654; }
 .wpp-acoes { display:flex; gap:8px; margin-top:10px; }
 .wpp-acoes button { flex:1; }
+/* Os botões dos diálogos de entrega, cancelamento e abono (F16, F17): alvo de toque de 40 px. */
+.ent-form .wpp-acoes { flex-wrap:wrap; }
+.ent-form .wpp-acoes button { min-height:40px; flex:1 1 140px; }
 .casa-toggle { display:inline-flex; align-items:center; gap:6px; font-size:.78rem; color:#526378; min-height:40px; cursor:pointer; }
 .casa-toggle input { width:16px; height:16px; }
 .field-discreto label { color:#7a90a6; }
@@ -3689,6 +3692,11 @@ img.perf-logo{object-fit:cover}
 .lote-g-chegada label{display:flex;gap:8px;align-items:center;font-weight:600;color:#163654}
 .lote-g-chegada input{min-height:40px;padding:4px 8px;border:1px solid var(--border);border-radius:8px;font:inherit}
 .lote-g-chegada small{color:#526378}
+/* A chegada da equipe na linha da instalação sem carro com retorno previsto (revisão da F17). */
+.lote-l-chegada{grid-column:1/-1;display:flex;gap:6px 12px;flex-wrap:wrap;align-items:center;font-size:.84rem}
+.lote-l-chegada label{display:flex;gap:8px;align-items:center;font-weight:600;color:#163654}
+.lote-l-chegada input{min-height:40px;padding:4px 8px;border:1px solid var(--border);border-radius:8px;font:inherit}
+.lote-l-chegada small{color:#526378}
 .lote-volta-q{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .lote-volta-q > span:first-child{min-width:112px;color:#163654;font-weight:600}
 .lote-volta-q .seg{margin-top:0}

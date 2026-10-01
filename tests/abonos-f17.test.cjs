@@ -83,12 +83,12 @@ test('retorno antecipado pela volta: o servidor lê as O.S. da volta; abonar a O
   const a = noPrazo('a', {...c, retornoPrevisto:[{dia:DIA, hora:'12:00'}]}), d = noPrazo('d', {...c, retornoPrevisto:[{dia:DIA, hora:'17:00'}]});
   const e = await edge('pcp-sync', banco([a, d]));
   // Caso ruim: sozinha, a O.S. "a" (previsto 12:00, chegada 15:00) nem é antecipada; e sozinha a "d" seria. O servidor mede pela volta.
-  let r = await e.call({action:'upsert', os:com(e, 'a', pedido('a:retorno_antecipado'))}, B.GESTOR);
+  let r = await e.call({action:'upsert', os:com(e, 'a', pedido('a:retorno_antecipado:' + DIA))}, B.GESTOR);
   assert.equal(r.status, 200);assert.ok(!('abonos' in gravada(e, 'a')));assert.match(String(r.avisos), /não existe nesta O\.S\./);
-  r = await e.call({action:'upsert', os:com(e, 'd', pedido('d:retorno_antecipado', {motivo:'Cliente liberou o local mais cedo'}))}, B.GESTOR);
+  r = await e.call({action:'upsert', os:com(e, 'd', pedido('d:retorno_antecipado:' + DIA, {motivo:'Cliente liberou o local mais cedo'}))}, B.GESTOR);
   assert.equal(r.status, 200, JSON.stringify(r));
   const ab = gravada(e, 'd').abonos[0];
-  assert.equal(ab.ocorrenciaId, 'd:retorno_antecipado');assert.equal(ab.tipo, 'retorno_antecipado');assert.equal(ab.por, 'Gestor Teste');assert.equal(ab.porId, '111222');
+  assert.equal(ab.ocorrenciaId, 'd:retorno_antecipado:' + DIA);assert.equal(ab.tipo, 'retorno_antecipado');assert.equal(ab.por, 'Gestor Teste');assert.equal(ab.porId, '111222');
   const volta = O.voltaNaLista(gravada(e, 'd'), [gravada(e, 'a')]);
   const st = O.statusEntrega(gravada(e, 'd'), '2026-10-06', REGRA, volta);
   assert.equal(st.estado, 'retorno_antecipado');assert.equal(st.rotulo, 'Retorno antecipado (abonado)');
@@ -97,7 +97,7 @@ test('retorno antecipado pela volta: o servidor lê as O.S. da volta; abonar a O
   assert.equal(st.retornoAntecipado.situacao, 'abonado');
   // O abono junto com a chegada no mesmo envio: a chegada deste envio conta (a regra roda depois das outras).
   const e2 = await edge('pcp-sync', banco([noPrazo('z', {retornoPrevisto:[{dia:DIA, hora:'17:00'}]})]));
-  r = await e2.call({action:'upsert', os:{...gravada(e2, 'z'), retornoConferido:{dia:DIA, hora:'14:00', fonte:'lote'}, abonos:[pedido('z:retorno_antecipado')]}}, B.GESTOR);
+  r = await e2.call({action:'upsert', os:{...gravada(e2, 'z'), retornoConferido:{dia:DIA, hora:'14:00', fonte:'lote'}, abonos:[pedido('z:retorno_antecipado:' + DIA)]}}, B.GESTOR);
   assert.equal(r.status, 200, JSON.stringify(r));assert.equal(gravada(e2, 'z').retornoConferido.hora, '14:00');assert.equal(gravada(e2, 'z').abonos.length, 1);
 });
 
@@ -216,12 +216,15 @@ async function tela(registros, quem = B.GESTOR) {
     setTimeout:() => 1, clearTimeout() {}, setInterval:() => 1, clearInterval() {}, AbortController, API_BASE:'http://teste',
     fetch:async (_u, req) => { const r = await e.call(JSON.parse(req.body), quem); return {ok:!(r.status >= 400), status:r.status || 200, json:async () => r}; },
     document:d.doc, confirm:() => true});
-  for (const f of ['store.js', 'operacao.js', 'entrega-item.js', 'app.js']) vm.runInContext(ler(f), ctx, {filename:f});
+  // A regra do programa (revisão da F17): o Abonar do card só aparece quando há perda que conta.
+  for (const f of ['store.js', 'operacao.js', 'entrega-item.js', 'divisao.js', 'regras.js', 'app.js']) vm.runInContext(ler(f), ctx, {filename:f});
+  vm.runInContext('var versoesRegrasCasa = () => [];', ctx);
   const run = c => vm.runInContext(c, ctx);
   ctx.__toasts = toasts;
   run(`STATE.user = {nome:${JSON.stringify(quem.nome)}, papel:${JSON.stringify(quem.papel)}};
     renderModal = () => {}; renderActiveTab = () => {}; reRenderModalKeepOpen = () => {}; toast = (m, t) => __toasts.push([m, t]);
-    abrirDialogoF17 = (cfg, cb) => { __dialogo = cfg; __confirmar = cb; };`);
+    abrirDialogoF17 = (cfg, cb) => { __dialogo = cfg; __confirmar = cb; };
+    hojeISO = () => '2026-10-06';`);
   const S = run('STORE');
   await S.pronto();
   const esvaziar = async () => { for (let i = 0; i < 100 && S.getQueue().length; i++) { await S.trySync(); await new Promise(r => setTimeout(r, 2)); } };

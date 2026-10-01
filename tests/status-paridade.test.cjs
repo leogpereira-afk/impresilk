@@ -34,11 +34,13 @@ test('as duas cópias exportam o mesmo status, e o operacao.js não chama o moto
   const S = await servidor();
   const nomes = Object.keys(S.STATUS_ENTREGA).sort();
   /* TROCADO DE PROPÓSITO NA F17 (30/09/2026): as ocorrências, o retorno
-     antecipado e os abonos entraram no mesmo bloco copiado. */
+     antecipado e os abonos entraram no mesmo bloco copiado. E na revisão da
+     F17: as chegadas por dia, o índice das voltas, o abono preso à medida e a
+     régua das letras do motivo. */
   assert.deepEqual(nomes, ['ESTADOS_ENTREGA', 'MOTIVO_ABONO_MAX', 'MOTIVO_ABONO_MIN', 'MOTIVO_CANCELAMENTO_MAX', 'MOTIVO_CANCELAMENTO_MIN', 'OCORRENCIAS_ABONAVEIS',
-    'ROTULOS_ENTREGA', 'ROTULOS_OCORRENCIA', 'TIPOS_OCORRENCIA', 'TIPOS_OCORRENCIA_MANUAL', 'TOLERANCIA_RETORNO_PADRAO', 'abonoVigente', 'abonosDe', 'cancelada', 'cancelamentoDe',
-    'chegadaConferida', 'motivoAbonoInvalido', 'motivoCancelamentoInvalido', 'ocorrenciasDaOS', 'ocorrenciasDerivadas', 'ocorrenciasManuais', 'prazoDaEntrega',
-    'retornoAntecipado', 'statusEntrega', 'toleranciaRetorno', 'voltaDoRetorno']);
+    'ROTULOS_ENTREGA', 'ROTULOS_OCORRENCIA', 'TIPOS_OCORRENCIA', 'TIPOS_OCORRENCIA_MANUAL', 'TOLERANCIA_RETORNO_PADRAO', 'abonoDaOcorrencia', 'abonoVigente', 'abonosDe', 'cancelada', 'cancelamentoDe',
+    'chegadaConferida', 'chegadaDoDia', 'chegadasConferidas', 'indiceDasVoltas', 'letrasMotivoSt', 'motivoAbonoInvalido', 'motivoCancelamentoInvalido', 'ocorrenciasDaOS', 'ocorrenciasDerivadas', 'ocorrenciasManuais',
+    'pareceDiaSeguinte', 'prazoDaEntrega', 'retornoAntecipado', 'statusEntrega', 'toleranciaRetorno', 'voltaDoRetorno', 'voltaNoIndice']);
   for (const k of nomes) assert.equal(typeof O[k], typeof S.STATUS_ENTREGA[k], k);
   assert.deepEqual(O.ESTADOS_ENTREGA, S.ESTADOS_ENTREGA);assert.deepEqual(O.ROTULOS_ENTREGA, S.ROTULOS_ENTREGA);
   assert.equal(O.MOTIVO_CANCELAMENTO_MIN, 15);assert.equal(S.MOTIVO_CANCELAMENTO_MIN, 15);

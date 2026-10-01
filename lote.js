@@ -326,9 +326,14 @@ const LOTE = (() => {
     const rc = objeto(o && o.retornoConf) ? o.retornoConf : {};
     const ch = objeto(o && o.retornoConferido) ? o.retornoConferido : {};
     const rp = objeto(o && o.retrabalhoPerguntado) ? o.retrabalhoPerguntado : {};
+    /* As chegadas de cada dia da jornada (revisão da F17) entram no fim, só
+       quando a O.S. tem a lista: a assinatura da O.S. sem ela fica a mesma da
+       v142, e o rascunho guardado antes não vira "mudou em outro aparelho". */
+    const cs = lista(o && o.chegadasConferidas).filter(objeto);
+    const porDia = cs.length ? [cs.map(c => [texto(c.dia), texto(c.hora), texto(c.diaChegada), c.limpar === true]).join(';')] : [];
     return JSON.stringify([genteDe(o && o.equipe), nucleoAloc(o && o.alocacao), !!(o && o.alocacao && o.alocacao.desatualizada === true),
       PERGUNTAS().map(k => OPERACAO.respostaVolta(rc[k])), texto(rc.obs), texto(ch.dia), texto(ch.hora),
-      !!(o && o.retrabalho), texto(rp.resposta), texto(rp.em), texto(o && o.finalizadaEm), texto(o && o.entregaLancada && o.entregaLancada.data), marcasIds(o)]);
+      !!(o && o.retrabalho), texto(rp.resposta), texto(rp.em), texto(o && o.finalizadaEm), texto(o && o.entregaLancada && o.entregaLancada.data), marcasIds(o), ...porDia]);
   }
   // O que o motor diz de cada item (sem R$): a situação, o saldo e a origem.
   function itensDe(o) {
@@ -366,19 +371,54 @@ const LOTE = (() => {
     v.obs = String(base.obs || '');
     return v;
   }
+  /* O DIA DA JORNADA DA VOLTA (revisão da F17): o dia do lote, ou o anterior
+     quando nenhuma O.S. da volta tem o dia do lote na agenda e alguma tem o
+     anterior (o carro voltou depois da meia-noite: a O.S. entregue aparece no
+     dia em que ele chegou). O retorno previsto é achado por ele, nunca pelo
+     dia em que o carro chegou; a chegada é gravada nele. */
+  const jornadaDaOS = (o, d) => typeof OPERACAO.diaDaJornada === 'function' ? OPERACAO.diaDaJornada(o, d) : d;
+  function jornadaDoGrupo(g) {
+    const ds = g.os.map(o => jornadaDaOS(o, g.dia));
+    return !ds.length || ds.includes(g.dia) ? g.dia : ds[0];
+  }
+  // A chegada gravada da O.S. no dia da jornada: {hora, diaChegada} ou null.
+  function chegadaGravada(o, j) {
+    if (typeof OPERACAO.chegadaDoDia === 'function') return OPERACAO.chegadaDoDia(o, j);
+    const rc = objeto(o && o.retornoConferido) ? o.retornoConferido : null;
+    return rc && rc.dia === j && horaOk(rc.hora) ? {dia: j, hora: rc.hora, diaChegada: j} : null;
+  }
+  // O retorno previsto mais tarde e a saída mais cedo das O.S. no dia da jornada.
+  function previstoDoDia(os, j) {
+    const es = os.map(o => OPERACAO.retornoPrevistoDoDia(o, j)).filter(Boolean);
+    return {previsto: es.map(e => e.hora).sort().pop() || '', saida: es.map(e => e.saida).filter(Boolean).sort()[0] || ''};
+  }
   function chegadaInicial(g) {
-    const hs = [...new Set(g.os.map(o => objeto(o.retornoConferido) && o.retornoConferido.dia === g.dia ? texto(o.retornoConferido.hora) : ''))];
-    return hs.length === 1 && horaOk(hs[0]) ? hs[0] : '';
+    const j = jornadaDoGrupo(g);
+    const hs = [...new Set(g.os.map(o => { const c = chegadaGravada(o, j); return c ? `${c.hora}|${c.diaChegada !== j ? c.diaChegada : ''}` : ''; }))];
+    const [hora, dia] = hs.length === 1 ? hs[0].split('|') : ['', ''];
+    return horaOk(hora) ? {hora, dia: dia || ''} : {hora: '', dia: ''};
   }
   function grupoDe(g) {
     const r = est.rascunho;
     let rg = r.grupos[g.chave];
     if (!rg) {
       const v = voltaInicial(g), h = chegadaInicial(g);
-      rg = {equipeConfirmada: false, aloc: null, pessoas: null, chegada: h, chegadaVista: h, volta: {...v}, voltaVista: {...v}};
+      rg = {equipeConfirmada: false, aloc: null, pessoas: null, chegada: h.hora, chegadaVista: h.hora, chegadaDia: h.dia, volta: {...v}, voltaVista: {...v}};
       r.grupos[g.chave] = rg;
     }
     return rg;
+  }
+  /* "CHEGOU NO DIA SEGUINTE?" (revisão da F17): a hora digitada antes da saída
+     prevista, ou mais de 12 h antes do retorno previsto, é a volta que passou
+     da meia-noite. Pergunta e devolve o dia em que o carro chegou ('' = o
+     próprio dia da jornada). */
+  function perguntarDiaSeguinte(hora, os, j) {
+    if (!horaOk(hora) || typeof OPERACAO.pareceDiaSeguinte !== 'function') return '';
+    const p = previstoDoDia(os, j);
+    if (!OPERACAO.pareceDiaSeguinte(hora, p.previsto, p.saida)) return '';
+    const seguinte = OPERACAO.somarDias(j, 1);
+    const porque = p.saida && hora < p.saida ? `é antes da saída prevista (${p.saida})` : `é mais de 12 h antes do retorno previsto (${p.previsto})`;
+    return confirmar(`A chegada às ${hora} ${porque} da volta de ${dataBR(j)}. O carro chegou no dia seguinte (${dataBR(seguinte)})?`) ? seguinte : '';
   }
   const voltaMexida = rg => PERGUNTAS().some(k => (rg.volta[k] || '') !== (rg.voltaVista[k] || '')) || texto(rg.volta.obs) !== texto(rg.voltaVista.obs);
   const chaveAloc = g => 'lote:' + g.chave;
@@ -489,19 +529,28 @@ const LOTE = (() => {
     else if (!rg.equipeConfirmada && !confirmadaNaOS(o)) nota.push(EQUIPE_NAO_CONFERIDA);
     if (declaracoesDe(o).length && !l.conferir) nota.push('conferir o que a equipe declarou');
     if (comCarro(g)) {
-      // A chegada e a conferência que VALEM nesta O.S.: as da volta, se a pessoa mexeu; senão, as gravadas nela.
-      const chegou = horaOk(rg.chegada) || (objeto(o.retornoConferido) && o.retornoConferido.dia === g.dia && horaOk(o.retornoConferido.hora));
+      // A chegada e a conferência que VALEM nesta O.S.: as da volta, se a pessoa mexeu; senão, as gravadas nela (no dia da jornada).
+      const chegou = horaOk(rg.chegada) || !!chegadaGravada(o, jornadaDoGrupo(g));
       if (!chegou) nota.push('chegada do carro');
       if (!OPERACAO.voltaConferidaParaNota(voltaMexida(rg) ? rg.volta : o.retornoConf)) nota.push('conferência da volta');
-    }
+    } else if (pedeChegadaNaLinha(o, g) && !horaOk(l.chegada) && !chegadaGravada(o, jornadaDaOS(o, g.dia))) nota.push('chegada da equipe');
     return {trava, nota};
   }
+  /* A INSTALAÇÃO SEM CARRO com retorno previsto (revisão da F17): a volta não
+     tem chegada do carro, e a O.S. ficava "não conferida" para sempre. O lote
+     pede a chegada da equipe NA LINHA dela. */
+  const pedeChegadaNaLinha = (o, g) => !!g.semCarro && !!OPERACAO.retornoPrevistoDoDia(o, jornadaDaOS(o, g.dia));
+  // O dia da jornada em que a linha grava a chegada: o da volta, ou o da própria O.S. sem carro.
+  const jornadaDaLinha = (o, g) => g.semCarro ? jornadaDaOS(o, g.dia) : jornadaDoGrupo(g);
 
   /* ─────────────────────────────── MONTAR A GRAVAÇÃO DE UMA O.S. ───────── */
   const CAMPOS_RETRAB = ['retrabalho', 'problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho', 'retrabalhoPerguntado'];
   // O que o Desfazer devolve: o antes de cada campo que o lote pode mexer.
-  function retrato(o) {
+  // `j`: o dia da jornada da chegada que o lote mexe (a chegada daquele dia vai junto, revisão da F17).
+  function retrato(o, j) {
+    const c = j ? chegadaGravada(o, j) : null;
     const r = {equipe: copia(lista(o.equipe)), alocacao: objeto(o.alocacao) ? copia(o.alocacao) : null,
+      chegadaDia: j || '', chegada: c ? {hora: c.hora, diaChegada: c.diaChegada && c.diaChegada !== j ? c.diaChegada : ''} : null,
       retornoConferido: objeto(o.retornoConferido) ? copia(o.retornoConferido) : null, retornoConf: objeto(o.retornoConf) ? copia(o.retornoConf) : null,
       entregaLancada: lancada(o) ? copia(o.entregaLancada) : null, checkoutSituacao: objeto(o.checkout) ? texto(o.checkout.situacao) : ''};
     for (const k of CAMPOS_RETRAB) r[k] = o[k] === undefined ? null : copia(o[k]);
@@ -556,10 +605,20 @@ const LOTE = (() => {
     const lancar = !aberta(atual) && ((baixaERP(atual) && !antesDoCorte(atual)) || l.data !== diaEntrega(atual));
     if (!lancar) { if ('entregaLancada' in atual) nova.entregaLancada = atual.entregaLancada; else delete nova.entregaLancada; }
     else if (!(lancada(atual) && atual.entregaLancada.data === l.data)) mexeu.lancamento = true;
-    // A CHEGADA CONFERIDA (retornoConferido): a mesma hora em toda O.S. da volta.
-    if (!g.semCarro && horaOk(rg.chegada)) {
-      const ch = objeto(atual.retornoConferido) ? atual.retornoConferido : null;
-      if (!(ch && ch.dia === g.dia && ch.hora === rg.chegada)) { nova.retornoConferido = {dia: g.dia, hora: rg.chegada, fonte: 'lote', em: agoraISO()}; mexeu.chegada = true; }
+    /* A CHEGADA CONFERIDA, no dia da jornada (revisão da F17): uma por dia,
+       em chegadasConferidas, sem mexer nos outros dias; a mesma hora em toda
+       O.S. da volta, com o dia em que o carro chegou quando foi o seguinte.
+       A O.S. sem carro com retorno previsto leva a chegada da própria linha. */
+    const j = jornadaDaLinha(atual, g);
+    const hora = g.semCarro ? (pedeChegadaNaLinha(atual, g) && horaOk(l.chegada) ? l.chegada : '') : (horaOk(rg.chegada) ? rg.chegada : '');
+    const diaChegada = texto(g.semCarro ? l.chegadaDia : rg.chegadaDia);
+    if (hora) {
+      const ch = chegadaGravada(atual, j);
+      if (!(ch && ch.hora === hora && (ch.diaChegada !== j ? ch.diaChegada : '') === diaChegada)) {
+        if (typeof OPERACAO.pedirChegada === 'function') OPERACAO.pedirChegada(nova, {dia: j, hora, diaChegada, fonte: 'lote', em: agoraISO()});
+        else nova.retornoConferido = {dia: j, hora, fonte: 'lote', em: agoraISO()};
+        mexeu.chegada = true;
+      }
     }
     // AS MARCAS DOS ITENS: a entrega (O.S. aberta) e a conferência do declarado.
     const marcas = [];
@@ -755,7 +814,8 @@ const LOTE = (() => {
         nova.atualizadoEm = emUnico();
         nova.atualizadoPor = nomeUsuario();
         // `em`: o atualizadoEm desta gravação (o Desfazer sabe se ela ainda está na fila, e a confirmação que chega depois a acha).
-        Object.assign(item, {antes: retrato(atual), depois: retrato(nova), mexeu: grav.mexeu, marcas: grav.marcas, avisos: grav.avisos.slice(), em: nova.atualizadoEm});
+        const jornada = jornadaDaLinha(atual, g);
+        Object.assign(item, {antes: retrato(atual, jornada), depois: retrato(nova, jornada), mexeu: grav.mexeu, marcas: grav.marcas, avisos: grav.avisos.slice(), em: nova.atualizadoEm});
         // Vai ao relatório ANTES de gravar: a aba que fecha no meio deixa o Desfazer alcançar esta O.S.
         await gravarRelatorios();
         const r = await gravarEsperando(S, nova, {...o, semEsperar: mudas >= 2});
@@ -805,7 +865,16 @@ const LOTE = (() => {
         algo = true;
       } else if (!igualA(a)) notas.push('a equipe mudou depois do lote e ficou como está');
     }
-    if (m.chegada) {
+    if (m.chegada && texto(a.chegadaDia) && typeof OPERACAO.pedirChegada === 'function') {
+      /* A chegada do dia da jornada volta à de antes (revisão da F17): só ela,
+         os outros dias ficam. Sem chegada antes, o pedido tira o dia. */
+      const j = texto(a.chegadaDia), c = chegadaGravada(atual, j);
+      const agora = c ? {hora: c.hora, diaChegada: c.diaChegada && c.diaChegada !== j ? c.diaChegada : ''} : null;
+      const igual = (x, y) => (!x && !y) || (!!x && !!y && x.hora === y.hora && texto(x.diaChegada) === texto(y.diaChegada));
+      if (igual(agora, d.chegada)) { OPERACAO.pedirChegada(volta, a.chegada ? {dia: j, hora: a.chegada.hora, diaChegada: a.chegada.diaChegada, fonte: 'lote'} : {dia: j, hora: ''}); algo = true; }
+      else if (!igual(agora, a.chegada)) notas.push('a chegada do carro mudou depois do lote e ficou como está');
+    } else if (m.chegada) {
+      // O relatório guardado por uma versão anterior (sem o dia da jornada): a chegada única de antes.
       const ch = objeto(atual.retornoConferido) ? atual.retornoConferido : {}, dd = d.retornoConferido || {}, aa = a.retornoConferido || {};
       if (ch.dia === dd.dia && ch.hora === dd.hora) { volta.retornoConferido = a.retornoConferido ? {dia: a.retornoConferido.dia, hora: a.retornoConferido.hora, fonte: a.retornoConferido.fonte || 'lote', em: a.retornoConferido.em || ''} : null; algo = true; }
       else if (ch.dia !== aa.dia || ch.hora !== aa.hora) notas.push('a chegada do carro mudou depois do lote e ficou como está');
@@ -855,6 +924,8 @@ const LOTE = (() => {
         algo = true;
       }
     }
+    // O ABONO QUE FICA SEM OCORRÊNCIA (revisão da F17): o Desfazer tirou a medida que ele abonou. Ele não é revogado sozinho; o relatório avisa.
+    if (algo) notas.push(...abonosSemOcorrencia(atual, volta));
     return {volta, algo, notas};
   }
   const LOTE_NA_FILA = 'A gravação do lote nesta O.S. ainda não chegou ao servidor (está na fila deste aparelho). O Desfazer não mexeu na fila, para não tomar o lugar dela: desfaça de novo quando ela subir.';
@@ -943,19 +1014,29 @@ const LOTE = (() => {
      e grava; autor e hora são do servidor, que confere tudo de novo. Só
      admin e pcp. O retorno antecipado é medido pela volta, com a regra do
      dia (tolerância). */
-  const temF17 = () => typeof OPERACAO !== 'undefined' && typeof OPERACAO.pedirAbono === 'function';
+  const temF17 = () => typeof OPERACAO !== 'undefined' && typeof OPERACAO.pedirAbono === 'function' && typeof OPERACAO.pedirChegada === 'function';
   function regraDoDia(dia) {
     try { return typeof REGRAS !== 'undefined' && typeof versoesRegrasCasa === 'function' ? REGRAS.regraVigente(versoesRegrasCasa(), dia) : null; } catch (e) { return null; }
   }
+  // A regra é a do dia do serviço (a chegada, a entrega lançada ou a finalização; a aberta, a de hoje), como na ficha.
   function contextoF17(o) {
     const S = loja(), ch = temF17() ? OPERACAO.chegadaConferida(o) : null;
     const volta = ch && S && typeof S.getAllOS === 'function' ? OPERACAO.voltaNaLista(o, S.getAllOS()) : null;
-    return {regra: regraDoDia(ch ? ch.dia : hoje()), volta, hoje: hoje()};
+    const dia = ch ? ch.dia : OPERACAO.dia((lancada(o) || {}).data) || OPERACAO.dia(o && o.finalizadaEm) || hoje();
+    return {regra: regraDoDia(dia), volta, hoje: hoje()};
   }
   function ocorrenciasDe(o) {
     if (!temF17()) return [];
     const c = contextoF17(o);
     try { return OPERACAO.ocorrenciasDaOS(o, c.regra, c.volta, c.hoje); } catch (e) { return []; }
+  }
+  // Os abonos que valiam antes e não valem depois (a ocorrência sumiu, ou a medida mudou): a frase do relatório.
+  function abonosSemOcorrencia(antes, depois) {
+    if (!temF17()) return [];
+    const valendo = o => ocorrenciasDe(o).filter(oc => oc.abonado && oc.abono && !oc.abono.pendente);
+    const ficam = new Set(valendo(depois).map(oc => oc.abono.id));
+    return valendo(antes).filter(oc => !ficam.has(oc.abono.id))
+      .map(oc => `o abono de ${oc.rotulo.toLowerCase()}${oc.dia ? ' de ' + dataBR(oc.dia) : ''} ficou sem ocorrência (não foi revogado; revogue na ficha, se for o caso)`);
   }
   function gravarF17(osId, mudar) {
     const S = loja();
@@ -968,9 +1049,14 @@ const LOTE = (() => {
     S.saveOS(nova);
     return '';
   }
-  // Abonar, revogar, anular uma O.S.; registrar a ocorrência em todas as O.S. da volta (o mesmo grupo).
+  /* Abonar, revogar, anular uma O.S.; registrar a ocorrência em todas as O.S.
+     da volta (o mesmo grupo); anular a da volta em todas, num toque
+     (`todas`). Durante o Salvar, nada: a gravação de agora tomaria o lugar
+     da do lote, que voltaria "recusada" (revisão da F17). */
+  const SALVANDO_F17 = 'Espere o Salvar do lote terminar: ele está gravando estas O.S.';
   function acaoF17(acao, ds, x, gx) {
     if (!temF17()) return 'Atualize a página: esta aba não tem as ocorrências.';
+    if (est.salvando) return SALVANDO_F17;
     if (acao === 'ocorrencia-volta') {
       if (!gx) return 'Esta volta não está mais no lote.';
       const grupo = OPERACAO.novoIdF17('vl');
@@ -983,8 +1069,22 @@ const LOTE = (() => {
     if (!x) return 'Esta O.S. não está mais no lote.';
     if (acao === 'abonar') return gravarF17(x.o.id, n => OPERACAO.pedirAbono(n, String(ds.oc || ''), ds.motivo, contextoF17(n)));
     if (acao === 'revogar-abono') return gravarF17(x.o.id, n => OPERACAO.pedirRevogarAbono(n, String(ds.ab || '')));
-    if (acao === 'anular-ocorrencia') return gravarF17(x.o.id, n => OPERACAO.pedirAnularOcorrencia(n, String(ds.oc || ''), ds.motivo));
+    if (acao === 'anular-ocorrencia') {
+      const doGrupo = ds.todas ? grupoDaOcorrencia(x.o, String(ds.oc || '')) : [];
+      if (doGrupo.length > 1) {
+        for (const g of doGrupo) { const erro = gravarF17(g.os.id, n => OPERACAO.pedirAnularOcorrencia(n, g.ocorrenciaId, ds.motivo)); if (erro) return erro; }
+        return '';
+      }
+      return gravarF17(x.o.id, n => OPERACAO.pedirAnularOcorrencia(n, String(ds.oc || ''), ds.motivo));
+    }
     return 'Ação desconhecida.';
+  }
+  // As O.S. (do aparelho) com a mesma ocorrência da volta ainda não anulada: [{os, ocorrenciaId}].
+  function grupoDaOcorrencia(o, ocId) {
+    const x = lista(o && o.ocorrencias).find(y => objeto(y) && texto(y.id) === ocId);
+    const S = loja();
+    if (!x || !texto(x.grupo) || typeof OPERACAO.ocorrenciasDoGrupo !== 'function' || !S || typeof S.getAllOS !== 'function') return [];
+    return OPERACAO.ocorrenciasDoGrupo(S.getAllOS(), x.grupo);
   }
   const ACOES_F17 = new Set(['abonar', 'revogar-abono', 'ocorrencia-volta', 'anular-ocorrencia']);
 
@@ -1055,6 +1155,16 @@ const LOTE = (() => {
         if (!gx) { erro = 'Esta volta não está mais no lote.'; break; }
         if (ds.valor && !horaOk(ds.valor)) { erro = 'Hora inválida: use HH:MM.'; break; }
         gx.rg.chegada = String(ds.valor || '');
+        // A volta que passou da meia-noite (revisão da F17): pergunta e grava o dia certo.
+        gx.rg.chegadaDia = perguntarDiaSeguinte(gx.rg.chegada, gx.g.os, jornadaDoGrupo(gx.g));
+        break;
+      case 'chegada-os':
+        // A instalação sem carro com retorno previsto: a chegada da equipe na linha (revisão da F17).
+        if (!precisa()) break;
+        if (!pedeChegadaNaLinha(x.o, x.g)) { erro = 'Esta O.S. não pede a chegada na linha.'; break; }
+        if (ds.valor && !horaOk(ds.valor)) { erro = 'Hora inválida: use HH:MM.'; break; }
+        x.l.chegada = String(ds.valor || '');
+        x.l.chegadaDia = perguntarDiaSeguinte(x.l.chegada, [x.o], jornadaDaOS(x.o, x.g.dia));
         break;
       case 'volta':
         if (!gx) { erro = 'Esta volta não está mais no lote.'; break; }
@@ -1256,7 +1366,8 @@ const LOTE = (() => {
         ? `<button type="button" class="lote-b" data-lote-acao="abonar" data-os="${escL(o.id)}" data-oc="${escL(oc.id)}" data-lote-k="abonar:${escL(oc.id)}">Abonar</button>`
         : oc.abonado && ab && !ab.pendente ? `<button type="button" class="lote-b" data-lote-acao="revogar-abono" data-os="${escL(o.id)}" data-ab="${escL(ab.id)}" data-lote-k="revogar:${escL(ab.id)}">Revogar abono</button>`
         : oc.origem === 'manual' ? `<button type="button" class="lote-b" data-lote-acao="anular-ocorrencia" data-os="${escL(o.id)}" data-oc="${escL(oc.id)}" data-lote-k="anular:${escL(oc.id)}">Anular</button>` : '';
-      return `<li class="lote-oc-item${oc.abonado ? ' abonada' : oc.perda ? ' perda' : ''}"><span><strong>${escL(oc.rotulo)}${oc.abonado ? ' (abonada)' : ''}</strong>${pend}: ${escL(oc.motivo)}</span>${botao}</li>`;
+      // "perda" só quando ela conta agora (a mesma conta das perdas do status, revisão da F17).
+      return `<li class="lote-oc-item${oc.abonado ? ' abonada' : oc.conta ? ' perda' : ''}"><span><strong>${escL(oc.rotulo)}${oc.abonado ? ' (abonada)' : ''}</strong>${pend}: ${escL(oc.motivo)}</span>${botao}</li>`;
     };
     return `<ul class="lote-oc" aria-label="Ocorrências da O.S.">${xs.map(item).join('')}</ul>`;
   }
@@ -1265,15 +1376,24 @@ const LOTE = (() => {
      regra do dia). Mostra onde a perda cai. */
   function retornoGrupoHTML(g, rg) {
     if (!temF17() || g.semCarro) return '';
-    const h = horaOk(rg.chegada) ? rg.chegada : '';
-    const membros = g.os.map(o => h ? {...o, retornoConferido: {dia: g.dia, hora: h}} : o);
-    if (!membros.some(o => OPERACAO.chegadaConferida(o))) return '';
-    const regra = regraDoDia(g.dia);
-    const rs = membros.map(o => ({o, r: OPERACAO.retornoAntecipado(o, regra, membros)}));
+    // A medida do dia da jornada (revisão da F17), com o dia em que o carro chegou.
+    const j = jornadaDoGrupo(g), h = horaOk(rg.chegada) ? rg.chegada : '';
+    const membros = g.os.map(o => { if (!h) return o; const c = {...o}; OPERACAO.pedirChegada(c, {dia: j, hora: h, diaChegada: texto(rg.chegadaDia), fonte: 'lote'}); return c; });
+    if (!membros.some(o => OPERACAO.chegadaDoDia(o, j))) return '';
+    const regra = regraDoDia(j);
+    const rs = membros.map(o => { const r = OPERACAO.retornoAntecipado(o, regra, membros); return {o, r: lista(r.dias).find(d => d.dia === j) || r}; });
     const conta = rs.find(x => x.r.situacao === 'antecipado' || x.r.situacao === 'abonado');
     if (conta) return `<p class="lote-retorno ${conta.r.situacao === 'abonado' ? 'abonado' : 'ruim'}">↩ <strong>Retorno antecipado${conta.r.situacao === 'abonado' ? ' (abonado)' : ''}</strong> na O.S ${escL(conta.o.numero || '')}: ${escL(conta.r.motivo)}.</p>`;
     const ok = rs.find(x => x.r.situacao === 'no horário');
     return ok ? `<p class="lote-retorno ok">✓ Chegada no horário: ${escL(ok.r.motivo)}.</p>` : '';
+  }
+  // A chegada da equipe na linha da instalação sem carro com retorno previsto (revisão da F17).
+  function chegadaLinhaHTML(o, g, l) {
+    if (!pedeChegadaNaLinha(o, g)) return '';
+    const j = jornadaDaOS(o, g.dia), gravada = chegadaGravada(o, j), prev = (OPERACAO.retornoPrevistoDoDia(o, j) || {}).hora || '';
+    const valor = horaOk(l.chegada) ? l.chegada : gravada ? gravada.hora : '';
+    return `<div class="lote-l-chegada"><label>Chegada da equipe (conferida) <input type="time" value="${escL(valor)}" data-lote-campo="chegada-os" data-os="${escL(o.id)}" data-lote-k="chegada-os:${escL(o.id)}"></label>
+        <small>sem carro: a chegada é pedida aqui · retorno previsto ${escL(prev)}${l.chegadaDia ? ` · chegou em ${escL(dataBR(l.chegadaDia))} (dia seguinte)` : ''}</small></div>`;
   }
   function linhaHTML(o, g, rg, ultimo) {
     const l = linhaDe(o, g);
@@ -1303,6 +1423,7 @@ const LOTE = (() => {
       ${retrab}
       <div class="lote-l-entrega">${entregaBtn}<button type="button" class="lote-b" aria-expanded="${est.itensAberto === o.id}" data-lote-acao="itens" data-os="${escL(o.id)}" data-lote-k="itens:${escL(o.id)}">${aberta(o) && !e7 ? 'Marcar a parte' : 'Ver os itens'}</button></div>
       ${declHTML}
+      ${chegadaLinhaHTML(o, g, l)}
       ${ocorrenciasLinhaHTML(o)}
       ${baixaERP(o) ? saldoItensHTML(o, true) : ''}
       <p class="lote-faltas">${f.trava.length ? `<span class="trava">Falta: ${escL(f.trava.join(', '))}.</span> ` : ''}${f.nota.length ? `<span class="nota">Ainda: ${escL(f.nota.join(', '))}.</span>` : ''}${!f.trava.length && !f.nota.length ? '<span class="nota">Tudo preenchido.</span>' : ''}</p>
@@ -1336,7 +1457,8 @@ const LOTE = (() => {
   function grupoHTML(g, rg, ultimo) {
     const conf = rg.volta;
     const seg = k => `<div class="lote-volta-q"><span>${escL(CURTO[k])}</span><span class="seg" role="group" aria-label="${escL(CURTO[k])}">${[['sim', 'Sim'], ['nao', 'Não'], ['', '—']].map(([v, r]) => `<button type="button" ${v ? '' : 'title="Não conferido" aria-label="Não conferido"'} class="${(conf[k] || '') === v ? 'active' : ''}" aria-pressed="${(conf[k] || '') === v}" data-lote-acao="volta" data-grupo="${escL(g.chave)}" data-k="${k}" data-v="${v}" data-lote-k="volta:${escL(g.chave)}:${k}:${v}">${r}</button>`).join('')}</span></div>`;
-    const prev = g.os.map(o => OPERACAO.retornoPrevistoDoDia(o, g.dia)).filter(Boolean).map(e => e.hora).sort().pop() || '';
+    // O previsto do dia da jornada (o anterior, quando o carro chegou depois da meia-noite).
+    const jornada = jornadaDoGrupo(g), prev = previstoDoDia(g.os, jornada).previsto;
     const disse = g.os.map(o => texto(o.horaRetorno)).filter(Boolean).sort().pop() || '';
     const declVolta = g.os.map(o => o.voltaEquipe).find(v => OPERACAO.voltaRespondida(v));
     // As O.S. da volta com respostas diferentes: mexer na conferência põe a mesma em todas (como a fila da volta do carro).
@@ -1356,7 +1478,7 @@ const LOTE = (() => {
       ${equipeBlocoHTML(g, rg)}
       ${alocAberto ? `<div class="lote-aloc aloc-host" data-lote-aloc="${escL(g.chave)}"></div>` : ''}
       ${g.semCarro ? '' : `<div class="lote-g-chegada"><label>Chegada do carro (conferida) <input type="time" value="${escL(rg.chegada || '')}" data-lote-campo="chegada" data-grupo="${escL(g.chave)}" data-lote-k="chegada:${escL(g.chave)}"></label>
-        <small>${comCarro(g) ? '' : 'carro não informado: a chegada e a conferência da volta não são pedidas · '}${prev ? `retorno previsto ${escL(prev)}` : 'sem retorno previsto'}${disse ? ` · a equipe anotou ${escL(disse)} (só declaração)` : ''}</small></div>
+        <small>${comCarro(g) ? '' : 'carro não informado: a chegada e a conferência da volta não são pedidas · '}${prev ? `retorno previsto ${escL(prev)}${jornada !== g.dia ? ` da volta de ${escL(dataBR(jornada))}` : ''}` : 'sem retorno previsto'}${rg.chegadaDia ? ` · chegou em ${escL(dataBR(rg.chegadaDia))} (dia seguinte)` : ''}${disse ? ` · a equipe anotou ${escL(disse)} (só declaração)` : ''}</small></div>
       ${retornoGrupoHTML(g, rg)}
       ${naoPedida ? `<div class="lote-g-volta compacta"><span class="lote-g-rot">Conferência da volta</span><span class="lote-volta-resumo">Carro não informado: não é pedida.</span><button type="button" class="lote-b" data-lote-acao="volta-rever" data-grupo="${escL(g.chave)}" data-lote-k="rever:${escL(g.chave)}">Conferir</button></div>` : compacta ? `<div class="lote-g-volta compacta"><span class="lote-g-rot">Conferência da volta</span><span class="lote-volta-resumo">${PERGUNTAS().map(selo).join(' ')}${conf.obs ? ` <span class="volta-obs">“${escL(conf.obs)}”</span>` : ''}${quemConferiu.por ? ` <small>por ${escL(quemConferiu.por)}</small>` : ''}</span><button type="button" class="lote-b" data-lote-acao="volta-rever" data-grupo="${escL(g.chave)}" data-lote-k="rever:${escL(g.chave)}">Rever</button></div>` : `<div class="lote-g-volta"><span class="lote-g-rot">Conferência da volta</span>${PERGUNTAS().map(seg).join('')}
         <label class="lote-volta-obs">O que faltou ou precisa de atenção <input maxlength="300" value="${escL(conf.obs || '')}" data-lote-campo="volta-obs" data-grupo="${escL(g.chave)}" data-lote-k="obs:${escL(g.chave)}" placeholder="ex.: faltou a escada de 6 m"></label>
@@ -1561,6 +1683,7 @@ const LOTE = (() => {
       let erro = '';
       if (c === 'data') erro = executar({acao: 'data', os: ds.os, valor: t.value});
       else if (c === 'chegada') erro = executar({acao: 'chegada', grupo: ds.grupo, valor: t.value});
+      else if (c === 'chegada-os') erro = executar({acao: 'chegada-os', os: ds.os, valor: t.value});
       else if (c === 'volta-obs') erro = executar({acao: 'volta-obs', grupo: ds.grupo, valor: t.value});
       else if (c === 'parte') erro = executar({acao: 'parte', os: ds.os, uid: ds.uid, valor: t.value});
       else if (c === 'parte-um') erro = executar({acao: 'parte', os: ds.os, uid: ds.uid, valor: t.checked ? ds.saldo : 0});
@@ -1589,6 +1712,7 @@ const LOTE = (() => {
   /* AS AÇÕES DA F17 PELA TELA: o diálogo da ficha (abrirDialogoF17, app.js)
      pede o motivo ou o item; a frase de erro volta para ele. */
   function pelaTelaF17(acao, ds) {
+    if (est.salvando) { if (typeof toast === 'function') toast(SALVANDO_F17, 'error'); return; }
     const fim = erro => { if (!erro) { if (typeof toast === 'function') toast(acao === 'abonar' ? 'Abono registrado.' : acao === 'revogar-abono' ? 'Abono revogado.' : acao === 'anular-ocorrencia' ? 'Ocorrência anulada.' : 'Ocorrência registrada nas O.S. da volta.', 'success'); if (telaAtiva()) render(); } return erro; };
     const rodar = extra => fim(executar({acao, os: ds.os, grupo: ds.grupo, oc: ds.oc, ab: ds.ab, ...extra}));
     if (acao === 'revogar-abono') {
@@ -1607,8 +1731,11 @@ const LOTE = (() => {
       return;
     }
     if (acao === 'anular-ocorrencia') {
-      abrirDialogoF17({titulo: 'Anular a ocorrência', texto: 'A ocorrência fica no histórico, marcada como anulada, com o seu nome.', botao: 'Anular', rotuloTexto: 'Motivo (opcional)', registrar: false, semObrigatorio: true},
-        d => rodar({motivo: d.motivo}));
+      // A ocorrência registrada na volta está em cada O.S. dela: anular em todas num toque (revisão da F17).
+      const x = achar(ds.os), n = x ? grupoDaOcorrencia(x.o, String(ds.oc || '')).length : 0;
+      abrirDialogoF17({titulo: 'Anular a ocorrência', texto: 'A ocorrência fica no histórico, marcada como anulada, com o seu nome.', botao: n > 1 ? 'Anular só nesta O.S.' : 'Anular', rotuloTexto: 'Motivo (opcional)', registrar: false, semObrigatorio: true,
+        ...(n > 1 ? {botaoTodas: `Anular nas ${n} O.S. da volta`} : {})},
+        d => rodar({motivo: d.motivo, todas: !!d.todas}));
       return;
     }
     const gx = acharGrupo(ds.grupo);

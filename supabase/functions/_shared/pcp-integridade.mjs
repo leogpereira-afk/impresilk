@@ -167,7 +167,7 @@ export function guardarSaldoERP(os, antes, { pode = false, avisar = false, autor
    (F15: carimbarRetornoPrevisto e carimbarPrazoCombinado; F16:
    carimbarCancelamento, em _shared/pcp-status.mjs).
    Toda a lista entra no diário (CAMPOS_AUDITADOS). */
-export const CAMPOS_GESTAO = ['alocacao', 'alocacaoLog', 'prazoCombinado', 'retornoPrevisto', 'retornoConferido', 'ocorrencias', 'abonos', 'cancelamento', 'osOriginalId'];
+export const CAMPOS_GESTAO = ['alocacao', 'alocacaoLog', 'prazoCombinado', 'retornoPrevisto', 'retornoConferido', 'chegadasConferidas', 'ocorrencias', 'abonos', 'cancelamento', 'osOriginalId'];
 // O log da alocação é histórico: nem a gestão o apaga com null. O prazo
 // combinado também não: mudar o prazo exige motivo, e o único caminho é o
 // pedido { corrigir: true, data, motivo } (revisão da F15). O cancelamento
@@ -175,7 +175,8 @@ export const CAMPOS_GESTAO = ['alocacao', 'alocacaoLog', 'prazoCombinado', 'reto
 // ({ cancelar: true, motivo } e { desfazer: true }, carimbarCancelamento em
 // _shared/pcp-status.mjs), e o desfeito fica guardado com quem desfez.
 // As ocorrências e os abonos (F17) também: só acréscimo; anular e revogar são novo carimbo.
-const GESTAO_SO_ACRESCIMO = new Set(['alocacaoLog', 'prazoCombinado', 'cancelamento', 'ocorrencias', 'abonos']);
+// As chegadas conferidas por dia (revisão da F17): cada dia muda só pelo pedido do dia (carimbarChegadas).
+const GESTAO_SO_ACRESCIMO = new Set(['alocacaoLog', 'prazoCombinado', 'cancelamento', 'ocorrencias', 'abonos', 'chegadasConferidas']);
 const vazioGestao = v => v == null || v === '' || (Array.isArray(v) && !v.length) || (objeto(v) && !Object.keys(v).length);
 // Algum campo da gestão preenchido = a O.S. tem trabalho (o esqueleto do ERP não passa por cima).
 export const temCampoGestao = o => !!o && CAMPOS_GESTAO.some(c => !vazioGestao(o[c]));
@@ -396,6 +397,100 @@ export function carimbarRetornoConferido(veio, os, antes, autor, agora, { pode =
     por: String(autor?.nome ?? '').slice(0, 120), porConta: String(autor?.login ?? '').slice(0, 120),
     porId: ehIdPessoa(autor?.porId) ? String(autor.porId).trim() : '', em, recebidoEm: String(agora ?? ''),
   };
+  return { os: r, avisos };
+}
+/* AS CHEGADAS CONFERIDAS POR DIA DA JORNADA (revisão da F17,
+   chegadasConferidas). A O.S. de vários dias tem uma volta por dia, e o
+   retornoConferido é um só: a chegada do segundo dia apagava a medida do
+   primeiro. A lista guarda {dia, hora, diaChegada, fonte, por, porConta,
+   porId, em, recebidoEm}, uma por dia da jornada (`dia`, onde está o retorno
+   previsto); `diaChegada` é o dia em que o carro chegou, quando foi o
+   seguinte (a volta que passou da meia-noite). Roda DEPOIS do
+   carimbarRetornoConferido. Regras:
+   - a base é a lista gravada; o retornoConferido gravado de antes da lista
+     entra nela no dia dele (a O.S. conferida pela v142);
+   - o pedido da lista (aba F17) muda SÓ o dia dele: hora nova é carimbo novo
+     (quem do crachá, recebidoEm daqui; o `em` do aparelho só se for data
+     válida e não depois de agora), a mesma hora mantém o carimbo, e
+     {dia, limpar: true} tira aquele dia (o Desfazer do lote). O dia que não
+     veio fica como está: nada apaga os outros dias;
+   - a cópia de outra versão (recebidoEm diferente do gravado no dia) não
+     troca o dia, como no retornoConferido;
+   - a ABA V142 só manda o retornoConferido: o que o carimbarRetornoConferido
+     aceitou dele alimenta a lista no dia dele, e o vazio de propósito da
+     gestão (o Desfazer da v142) tira só o dia do que estava gravado;
+   - só admin e pcp (`pode`); para os outros fica o gravado, e quem tem senha
+     ouve o porquê (`avisar`);
+   - o retornoConferido passa a ser a chegada do ÚLTIMO dia da lista, para a
+     v142 continuar lendo a última chegada. Nada aqui é 422.
+   Devolve { os, avisos }. */
+const MAX_CHEGADAS = 62;
+export function carimbarChegadas(veio, os, antes, autor, agora, { pode = false, avisar = false } = {}) {
+  const r = { ...os }, avisos = [];
+  const somar1 = d => { const t = new Date(d + 'T12:00:00Z'); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10); };
+  const valida = c => objeto(c) && !!diaPlausivel(c.dia) && HORA_F15.test(String(c.hora ?? '').trim());
+  const diaChegadaDe = c => { const d = diaPlausivel(c?.diaChegada), j = diaPlausivel(c?.dia); return d && j && d === somar1(j) ? d : ''; };
+  const igual = (a, b) => !!a && !!b && String(a.hora ?? '').trim() === String(b.hora ?? '').trim() && diaChegadaDe(a) === diaChegadaDe(b);
+  // A base: a lista gravada e, no dia que ela não tem, o retornoConferido gravado.
+  const lista = new Map();
+  for (const c of Array.isArray(antes?.chegadasConferidas) ? antes.chegadasConferidas : []) if (valida(c)) lista.set(diaPlausivel(c.dia), c);
+  const rcAntes = objeto(antes?.retornoConferido) ? antes.retornoConferido : null;
+  if (valida(rcAntes) && !lista.has(diaPlausivel(rcAntes.dia))) lista.set(diaPlausivel(rcAntes.dia), rcAntes);
+  const gravadaAntes = canon([...lista.entries()].sort());
+  const quem = { por: String(autor?.nome ?? '').slice(0, 120), porConta: String(autor?.login ?? '').slice(0, 120), porId: ehIdPessoa(autor?.porId) ? String(autor.porId).trim() : '' };
+  const tAgora = Date.parse(String(agora ?? ''));
+  const carimbo = (dia, v) => {
+    const tEm = Date.parse(String(v.em ?? ''));
+    const dc = diaChegadaDe(v);
+    return { dia, hora: String(v.hora).trim(), ...(dc ? { diaChegada: dc } : {}), fonte: FONTES_RETORNO_CONFERIDO.includes(v.fonte) ? v.fonte : 'ficha',
+      ...quem, em: Number.isFinite(tEm) && Number.isFinite(tAgora) && tEm <= tAgora ? new Date(tEm).toISOString() : String(agora ?? ''), recebidoEm: String(agora ?? '') };
+  };
+  // 1. O pedido da lista, dia a dia (aba F17).
+  if (Array.isArray(veio)) {
+    const pedidos = veio.filter(objeto).slice(0, MAX_CHEGADAS);
+    const mexe = pedidos.filter(c => {
+      const d = diaPlausivel(c.dia), g = d ? lista.get(d) : null;
+      return c.limpar === true ? !!g : !igual(c, g);
+    });
+    if (mexe.length && !pode) {
+      if (avisar) avisos.push('A chegada conferida do carro não foi trocada: só a gestão do PCP (admin ou pcp) confere a chegada.');
+    } else for (const c of mexe) {
+      const d = diaPlausivel(c.dia);
+      if (!d) { avisos.push('Uma chegada conferida sem dia válido ficou de fora.'); continue; }
+      const g = lista.get(d);
+      const recebido = String(c.recebidoEm ?? '').trim();
+      if (recebido && recebido !== String(g?.recebidoEm ?? '')) {
+        if (avisar) avisos.push(`A chegada conferida de ${diaBR(d)} não foi trocada: este aparelho mandou a de uma versão anterior à gravada no servidor.`);
+        continue;
+      }
+      if (c.limpar === true) { lista.delete(d); continue; }
+      if (!valida(c)) { avisos.push(`A chegada conferida de ${diaBR(d)} não foi gravada: hora inválida. Ficou a que estava gravada.`); continue; }
+      lista.set(d, carimbo(d, c));
+    }
+  }
+  // 2. O que o retornoConferido deste envio mudou (a aba v142): alimenta a lista no dia dele.
+  const rcDepois = objeto(r.retornoConferido) ? r.retornoConferido : null;
+  if (canon(rcDepois ?? null) !== canon(rcAntes ?? null)) {
+    if (valida(rcDepois)) {
+      const d = diaPlausivel(rcDepois.dia), g = lista.get(d);
+      if (!igual(rcDepois, g)) lista.set(d, rcDepois);
+    } else if (!rcDepois && valida(rcAntes)) {
+      const d = diaPlausivel(rcAntes.dia), g = lista.get(d);
+      if (g && igual(g, rcAntes)) lista.delete(d);
+    }
+  }
+  const nova = [...lista.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, c]) => c).slice(-MAX_CHEGADAS);
+  if (canon([...lista.entries()].sort()) === gravadaAntes && canon(rcDepois ?? null) === canon(rcAntes ?? null)) {
+    // Nada mudou: fica o gravado, como estava.
+    if (proprio(antes, 'chegadasConferidas')) r.chegadasConferidas = antes.chegadasConferidas; else delete r.chegadasConferidas;
+    return { os: r, avisos };
+  }
+  if (nova.length) r.chegadasConferidas = nova;
+  else if (proprio(antes, 'chegadasConferidas')) r.chegadasConferidas = null;
+  else delete r.chegadasConferidas;
+  // O retornoConferido é a chegada do último dia (a v142 lê só ele).
+  if (nova.length) r.retornoConferido = nova[nova.length - 1];
+  else if (rcAntes || proprio(antes, 'retornoConferido') || rcDepois === null) r.retornoConferido = null;
   return { os: r, avisos };
 }
 /* GRAVAR O PRAZO COMBINADO (roda depois do preservarAusentes e do
@@ -1736,6 +1831,21 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
     for (const v of soDoAparelho) for (const e of marcasNovasDoToque(v, idsGravados)) fora(v, e, 'O item não está mais na O.S.: a entrega não foi gravada. Fale com o PCP.');
     if (perdidas.length) avisos.push(`${perdidas.length === 1 ? 'A marca do item ' + txt(perdidas[0].item || perdidas[0].descricao) + ' não foi gravada' : perdidas.length + ' marcas de item não foram gravadas'}: o PCP mudou a lista de itens. Confira os itens com o PCP.`);
   }
+  /* CÓPIA VELHA NÃO REMARCA O RETRABALHO QUE A GESTÃO DESMARCOU (revisão da
+     F17). O espelho recalcula o retrabalho pelos itens (rollupRetrab) a cada
+     toque: a cópia lida antes do "não é retrabalho" da gestão mandava
+     retrabalho:true só porque os itens dela ainda diziam 'retrab'. Numa cópia
+     velha, marcar só vale quando algum item PASSOU a 'retrab' neste envio (em
+     relação ao gravado); senão fica o gravado, com aviso. A cópia em dia
+     marca na hora, como sempre (retrabalho zera sempre). */
+  if (velha && m.retrabalho && !atual?.retrabalho) {
+    const itensAntes = Array.isArray(atual?.itens) ? atual.itens : [];
+    const passou = (Array.isArray(m.itens) ? m.itens : []).some((it, i) => objeto(it) && it.statusInst === 'retrab' && !(objeto(itensAntes[i]) && itensAntes[i].statusInst === 'retrab'));
+    if (!passou) {
+      for (const c of ['retrabalho', 'problema', 'causa']) if (proprio(atual, c)) m[c] = atual[c]; else delete m[c];
+      avisos.push('O retrabalho não foi marcado: a gestão do PCP conferiu a O.S. depois que este aparelho a leu. Se gerou retrabalho de novo, marque o item outra vez.');
+    }
+  }
   if (!atual?.finalizadaEm && veio?.finalizadaEm) {
     const t = Date.parse(String(veio.finalizadaEm)), reaberta = Date.parse(String(atual?.reabertaEm || ''));
     if (!atual.liberadoPCP) avisos.push('A O.S. não foi finalizada: o PCP ainda não liberou. Fale com o PCP.');
@@ -1748,18 +1858,62 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
   }
   return { os: m, erro: '', avisos, entregasFora: entregasFora.slice(0, 200) };
 }
-/* DESMARCAR O RETRABALHO É DA GESTÃO (F17), também fora do toque. A
-   montagem com senha usa o mesmo espelho (que recalcula o retrabalho pelos
-   itens), a operação e a máquina gravam a O.S. inteira: nenhum deles tira o
-   retrabalho gravado. Só admin e pcp (`pode`) desmarcam. O retrabalho
-   marcado por qualquer um vale na hora (retrabalho zera sempre). Quem tem
-   senha ouve o porquê (`avisar`). Nunca 422. Devolve { os, aviso }. */
-export function guardarRetrabalho(os, antes, { pode = false, avisar = false } = {}) {
+/* O RETRABALHO MARCADO É DA GESTÃO (F17 e a revisão dela), também fora do
+   toque. A montagem com senha usa o mesmo espelho (que recalcula o
+   retrabalho pelos itens), a operação e a máquina gravam a O.S. inteira.
+   Para quem não é admin nem pcp (`pode`):
+   - o retrabalho gravado (a marca ou a situação 'Retrabalho' do checkout)
+     não se desmarca, e os cinco campos da taxonomia (problema, etapa de
+     origem, causa raiz, responsável da etapa e data) e a situação do
+     checkout ficam os gravados (o "Não" da operação apagava o responsável e
+     a situação); a causa (do espelho) só não se apaga;
+   - a resposta da pergunta (retrabalhoPerguntado) fica a gravada: só a
+     gestão responde por ela.
+   Para a gestão, a resposta nova leva o carimbo daqui: quem é do crachá, e o
+   `em` do aparelho só se for data válida e não depois de agora (a resposta
+   dada sem rede foi dada naquela hora), com o recebidoEm do servidor. A
+   resposta que voltou igual mantém o carimbo. O retrabalho marcado por
+   qualquer um vale na hora (retrabalho zera sempre). Quem tem senha ouve o
+   porquê (`avisar`). Nunca 422. Devolve { os, aviso, mudouPergunta }. */
+export const TAXONOMIA_RETRABALHO = ['problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho'];
+const marcadaRetrabalhoSrv = o => !!(o?.retrabalho || (objeto(o?.checkout) && o.checkout.situacao === 'Retrabalho'));
+export function guardarRetrabalho(os, antes, { pode = false, avisar = false, autor = null, agora = '' } = {}) {
   const r = { ...os };
-  if (pode || !antes?.retrabalho || r.retrabalho) return { os: r, aviso: '' };
-  r.retrabalho = antes.retrabalho;
-  for (const c of ['problema', 'causa', 'causaRaiz', 'etapaOrigem']) if (vazio(r[c]) && !vazio(antes[c])) r[c] = antes[c];
-  return { os: r, aviso: avisar ? 'O retrabalho continua marcado: só a gestão do PCP (admin ou pcp) desmarca o retrabalho.' : '' };
+  const pAntes = objeto(antes?.retrabalhoPerguntado) ? antes.retrabalhoPerguntado : null;
+  const pVeio = r.retrabalhoPerguntado;
+  if (pode) {
+    let mudouPergunta = false;
+    if (objeto(pVeio) && (pVeio.resposta === 'sim' || pVeio.resposta === 'nao')) {
+      const mesma = !!pAntes && pAntes.resposta === pVeio.resposta && String(pAntes.em ?? '') === String(pVeio.em ?? '');
+      if (mesma) r.retrabalhoPerguntado = pAntes;
+      else {
+        const tEm = Date.parse(String(pVeio.em ?? '')), tAgora = Date.parse(String(agora ?? ''));
+        r.retrabalhoPerguntado = { resposta: pVeio.resposta, por: String(autor?.nome ?? '').slice(0, 120), porConta: String(autor?.login ?? '').slice(0, 120),
+          porId: ehIdPessoa(autor?.porId) ? String(autor.porId).trim() : '', em: Number.isFinite(tEm) && Number.isFinite(tAgora) && tEm <= tAgora ? String(pVeio.em) : String(agora ?? ''),
+          recebidoEm: String(agora ?? '') };
+        mudouPergunta = true;
+      }
+    }
+    return { os: r, aviso: '', mudouPergunta };
+  }
+  const avisos = [];
+  // A resposta da pergunta fica a gravada.
+  if (canon(pVeio ?? null) !== canon(pAntes ?? null)) {
+    if (proprio(antes, 'retrabalhoPerguntado')) r.retrabalhoPerguntado = antes.retrabalhoPerguntado; else delete r.retrabalhoPerguntado;
+    if (objeto(pVeio)) avisos.push('A resposta da pergunta do retrabalho não foi gravada: só a gestão do PCP (admin ou pcp) responde por ela.');
+  }
+  if (marcadaRetrabalhoSrv(antes)) {
+    if (antes.retrabalho && !r.retrabalho) { r.retrabalho = antes.retrabalho; avisos.unshift('O retrabalho continua marcado: só a gestão do PCP (admin ou pcp) desmarca o retrabalho.'); }
+    for (const c of TAXONOMIA_RETRABALHO) {
+      if (canon(r[c] ?? null) === canon(antes[c] ?? null)) continue;
+      if (proprio(antes, c)) r[c] = antes[c]; else delete r[c];
+    }
+    // A causa é do espelho (o motivo do item): só não se apaga.
+    if (vazio(r.causa) && !vazio(antes.causa)) r.causa = antes.causa;
+    if (objeto(antes.checkout) && antes.checkout.situacao === 'Retrabalho' && !(objeto(r.checkout) && r.checkout.situacao === 'Retrabalho'))
+      r.checkout = { ...(objeto(r.checkout) ? r.checkout : {}), situacao: 'Retrabalho' };
+  }
+  return { os: r, aviso: avisar && avisos.length ? avisos.join(' ') : '', mudouPergunta: false };
 }
 /* HORÁRIOS DO ESPELHO QUE FEREM A REGRA NÃO DERRUBAM O ENVIO (crachá de toque).
    O espelho carimba saída e retorno com o dia AGENDADO: serviço que vira a
@@ -1852,6 +2006,12 @@ export function podarCarimbosF15(r) {
     const { porId: _pi, porConta: _pc, ...x } = out.retornoConferido;
     out.retornoConferido = x;
   }
+  // As chegadas por dia (revisão da F17) descem do mesmo jeito: o nome, sem o ID e sem o login.
+  if (Array.isArray(out.chegadasConferidas)) out.chegadasConferidas = out.chegadasConferidas.map(c => {
+    if (!objeto(c)) return c;
+    const { porId: _pi, porConta: _pc, ...x } = c;
+    return x;
+  });
   /* AS OCORRÊNCIAS MANUAIS E OS ABONOS (F17) descem com o nome de quem
      registrou, anulou, abonou ou revogou, sem o ID e sem o login. A volta sem
      eles não apaga nada: as duas listas só crescem por pedido (guardarOcorrencias

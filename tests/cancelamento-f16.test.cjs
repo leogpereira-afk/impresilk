@@ -316,7 +316,7 @@ test('tela: selo no card e na ficha; Cancelar O.S. com motivo só para a gestão
   /* TROCADO DE PROPÓSITO NA F17 (30/09/2026): o retorno antecipado deixou de
      ser "sem dado ainda" e passou a ser medido. Esta O.S. não tem retorno
      previsto digitado: não há perda (decisão do dono). */
-  assert.match(ficha, /<strong>Retorno antecipado:<\/strong> sem retorno previsto\. Sem retorno previsto digitado: não há perda/);
+  assert.match(ficha, /<strong>Retorno antecipado:<\/strong> Sem retorno previsto digitado: não há perda/);
   assert.match(ficha, /id="btn-cancelar-os">Cancelar O\.S\.</);
   // Caso ruim: motivo curto. O diálogo mostra a frase e não grava nada.
   b.run('cancelarOSDaFicha()');
