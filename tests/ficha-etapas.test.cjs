@@ -4,8 +4,9 @@
  * Jornada > Fechamento. Todas as etapas ficam no DOM e só a ativa aparece; a
  * etapa atual é lembrada por O.S. (a sincronização não volta à primeira); a
  * pendência fica presa ao campo (aria-describedby) sem impedir gravar; o
- * checklist do Fechamento, incompleto, fica pendente para a pontuação SEM
- * travar a finalização (decisão de 23/09). O celular do instalador não muda.
+ * checklist do Fechamento, incompleto, diz o que falta e o efeito verdadeiro
+ * de cada item, SEM travar a finalização (decisão de 23/09; revisão da F23).
+ * O celular do instalador não muda.
  *
  * O app.js roda inteiro num DOM falso que transforma o HTML da ficha em
  * blocos e botões a cada pintura, como o navegador. Dados fictícios.
@@ -31,7 +32,7 @@ function classes() {
    data-fech-finalizar, id). O mesmo objeto vale até a próxima pintura, então
    o onclick ligado pelo app é o que o teste toca. */
 function domFalso() {
-  let html = '', blocos = [], cache = new Map(), porId = new Map();
+  let html = '', blocos = [], secs = [], cache = new Map(), porId = new Map();
   const doc = {activeElement: null, body: {contains: () => false, classList: classes(), appendChild() {}}, visibilityState: 'visible', addEventListener() {}};
   const novoEl = (p = {}) => ({id: '', textContent: '', innerHTML: '', hidden: false, disabled: false, tagName: 'DIV', dataset: {}, classList: classes(),
     focus() { doc.activeElement = this; }, querySelector: () => null, querySelectorAll: () => [], getAttribute: () => null, setAttribute() {}, removeAttribute() {}, closest: () => null, ...p});
@@ -57,14 +58,16 @@ function domFalso() {
   };
   const modal = {classList: classes(),
     get innerHTML() { return html; },
-    set innerHTML(v) { html = v; cache = new Map(); porId = new Map(); blocos = [...v.matchAll(/<details class="card-fs[^"]*"[^>]*data-bloco="([^"]+)"/g)].map(m => ({dataset: {bloco: m[1]}, open: false})); },
+    set innerHTML(v) { html = v; cache = new Map(); porId = new Map(); blocos = [...v.matchAll(/<details class="card-fs[^"]*"[^>]*data-bloco="([^"]+)"/g)].map(m => ({dataset: {bloco: m[1]}, open: false}));
+      // As seções das etapas: trocar de etapa só mexe no hidden delas (revisão da F23), como o navegador.
+      secs = [...v.matchAll(/<section class="ficha-etapa" data-etapa-sec="(\w+)"([^>]*)>/g)].map(m => ({dataset: {etapaSec: m[1]}, hidden: /\shidden(\s|$)/.test(m[2])})); },
     querySelector: () => null,
     querySelectorAll: s => (s === '[data-ir-etapa]' ? comAtributo('data-ir-etapa') : s === '[data-fech-finalizar]' ? comAtributo('data-fech-finalizar') : [])};
   const overlay = {classList: classes()};
   doc.querySelector = s => (s === '#modal-os' ? modal : s === '#modal-overlay' ? overlay : null);
-  doc.querySelectorAll = s => (s === '#modal-os .card-fs' ? blocos : s === '#modal-os [data-fmsg]' ? comAtributo('data-fmsg') : []);
+  doc.querySelectorAll = s => (s === '#modal-os .card-fs' ? blocos : s === '#modal-os .ficha-etapa' ? secs : s === '#modal-os [data-fmsg]' ? comAtributo('data-fmsg') : []);
   doc.getElementById = id => porIdDoHTML(id);
-  return {doc, modal, overlay, html: () => html, blocos: () => blocos};
+  return {doc, modal, overlay, html: () => html, blocos: () => blocos, secs: () => secs};
 }
 
 function tela({papel = 'admin', lista = []} = {}) {
@@ -90,7 +93,7 @@ function tela({papel = 'admin', lista = []} = {}) {
     const fim = p.indexOf('id="modal-pdf"');
     return {k, visivel: !/\shidden(\s|$)/.test(' ' + cab), html: fim >= 0 ? p.slice(0, fim) : p};
   });
-  const visivel = () => secoes().filter(s => s.visivel).map(s => s.k);
+  const visivel = () => d.secs().filter(s => !s.hidden).map(s => s.dataset.etapaSec);
   const passos = () => [...d.html().matchAll(/<button type="button" class="fe-passo[^"]*" data-ir-etapa="(\w+)"/g)].map(m => m[1]);
   const abrirOS = (id, alvo) => run(`openModal(STORE.getOS(${JSON.stringify(id)})${alvo ? ', ' + JSON.stringify(alvo) : ''})`);
   return {run, d, salvos, toasts, lista, secoes, visivel, passos, abrirOS,
@@ -248,7 +251,7 @@ test('F23: a cancelada abre em Dados com o aviso; a baixa do ERP abre direto em 
   assert.deepEqual(t.visivel(), ['fechamento'], 'a baixa do ERP abre no Fechamento');
   const fech = t.secoes().find(s => s.k === 'fechamento').html;
   assert.match(fech, /Baixa do ERP: a ficha abre aqui, sem trava/);
-  assert.match(fech, /fe-ck fe-ck-na"[\s\S]*?Fotos antes e depois[\s\S]*?baixa do ERP, entra sem prova/, 'a foto que falta na baixa do ERP não fica pendente');
+  assert.match(fech, /fe-ck fe-ck-na"[\s\S]*?Fotos antes e depois[\s\S]*?na baixa do ERP a foto não é pedida/, 'a foto que falta na baixa do ERP não é falta (revisão da F23: "sem prova" é do lançamento)');
   assert.doesNotMatch(fech, /disabled/, 'nada travado no Fechamento');
 });
 
@@ -287,7 +290,7 @@ test('F23: a pendência aparece ao lado do campo (aria-describedby), sem gravar 
   assert.match(h, /data-f="responsavelPCP" aria-describedby="fmsg-responsavelPCP">[\s\S]*?<\/select><p class="fe-msg" id="fmsg-responsavelPCP"[^>]*>Escolha o responsável do PCP\.<\/p>/);
   assert.match(h, /data-f="confirmacao" aria-describedby="fmsg-confirmacao">[\s\S]*?<\/select><p class="fe-msg" id="fmsg-confirmacao"[^>]*>Para finalizar: confirme com o cliente\.<\/p>/,
     'a falta para finalizar (validarFinalizacao) fica no campo dela');
-  assert.match(h, /data-ir-etapa="dados" data-ir-foco="passo" aria-current="step" aria-label="Dados: 2 pendências"/, 'o stepper conta as pendências da etapa');
+  assert.match(h, /data-ir-etapa="dados" data-ir-foco="passo" aria-current="step" aria-label="Dados: 2 itens a completar; não impede finalizar"/, 'o stepper conta o que falta na etapa (revisão da F23: sem impedir finalizar, é "a completar")');
   // Sem pendência, a mensagem existe vazia (o campo continua apontando para ela).
   assert.match(h, /<p class="fe-msg" id="fmsg-numero" data-fmsg="numero" aria-live="polite"><\/p>/);
   // Os outros campos gravam com a pendência na tela.
@@ -295,13 +298,15 @@ test('F23: a pendência aparece ao lado do campo (aria-describedby), sem gravar 
   assert.equal(t.salvos.length, 1);
   assert.equal(t.salvos[0].obsPCP, 'anotação fictícia');
   assert.equal(t.salvos[0].cliente, '', 'a pendência não trava a gravação');
-  // Digitar o cliente apaga a mensagem e atualiza o stepper ao vivo, sem repintar a ficha.
+  // Digitar o cliente resolve a mensagem e atualiza o stepper ao vivo, sem repintar a ficha.
   const msg = t.el('fmsg-cliente');
   t.run(`setField('cliente', 'Cliente Novo Fictício'); pintarPendenciasFicha();`);
   assert.equal(t.el('fmsg-cliente'), msg, 'o mesmo elemento: a ficha não foi repintada');
-  assert.equal(msg.textContent, '');
+  // Revisão da F23: a mensagem resolvida guarda o lugar (invisível, o texto num aria-hidden) até a ficha fechar.
+  assert.equal(msg.classList.contains('fe-msg-feita'), true);
+  assert.equal(msg.innerHTML, '<span aria-hidden="true">Falta o cliente.</span>');
   assert.equal(t.el('fmsg-responsavelPCP').textContent, 'Escolha o responsável do PCP.');
-  assert.match(t.el('ficha-etapas').innerHTML, /aria-label="Dados: 1 pendência"/);
+  assert.match(t.el('ficha-etapas').innerHTML, /aria-label="Dados: 1 item a completar; não impede finalizar"/);
   // Toda falta que validarFinalizacao conhece tem um campo: nenhuma some calada.
   const faltas = JSON.parse(t.run(`JSON.stringify([
     ...validarFinalizacao({tipo: 'externo', retrabalho: true, checkout: {situacao: 'Mais um dia de trabalho'}}),
@@ -312,18 +317,19 @@ test('F23: a pendência aparece ao lado do campo (aria-describedby), sem gravar 
 
 /* ───────────── 6. O checklist incompleto não impede finalizar ───────────── */
 
-test('F23: o checklist incompleto aparece como pendente para a pontuação e não impede finalizar', () => {
+test('F23: o checklist incompleto aparece como falta, com o efeito verdadeiro, e não impede finalizar', () => {
   const t = tela({lista: [osPronta()]});
   t.abrirOS('f1');
   assert.deepEqual(t.run(`validarFinalizacao(_modalDraft)`).length, 0, 'pela régua de sempre, pronta para finalizar');
-  const pend = JSON.parse(t.run(`JSON.stringify(checklistFechamento(_modalDraft).filter(c => c.estado === 'pendente').map(c => c.k))`));
+  const pend = JSON.parse(t.run(`JSON.stringify(checklistFechamento(_modalDraft).filter(c => c.estado === 'falta').map(c => c.k))`));
   assert.deepEqual(pend, ['retrabalho', 'volta'], 'sem a resposta do retrabalho e sem a conferência da volta');
   // A conferência e a resposta não entram na régua de finalizar (decisão de 23/09).
   assert.equal(t.run(`validarFinalizacao({..._modalDraft, retornoConf: {carroLimpo: 'sim', equipamentosOk: 'sim'}, retrabalhoPerguntado: {resposta: 'nao'}}).length`), 0);
   t.run(`irParaEtapaFicha('fechamento')`);
   const fech = t.secoes().find(s => s.k === 'fechamento').html;
-  assert.match(fech, /Incompleto não impede finalizar: o que faltar fica pendente para a pontuação/);
-  assert.equal((fech.match(/Fica pendente para a pontuação\./g) || []).length, 2);
+  assert.match(fech, /O checklist não trava o Finalizar\./);
+  assert.doesNotMatch(fech, /pendente para a pontuação/i, 'revisão da F23: nenhuma régua tem essa regra');
+  assert.equal((fech.match(/Não impede finalizar\./g) || []).length, 3, 'os 2 itens e o resumo junto do Finalizar');
   assert.match(fech, /<p>Pronta para finalizar\.<\/p>/);
   // O Finalizar do Fechamento finaliza com o checklist incompleto.
   t.run(`perguntarRetrabalho = (d, fn) => fn();`);
@@ -334,8 +340,8 @@ test('F23: o checklist incompleto aparece como pendente para a pontuação e nã
   assert.ok(t.salvos.at(-1).finalizadaEm, 'e gravou');
   // Finalizada, a ficha diz o que ficou pendente e segue no Fechamento.
   assert.deepEqual(t.visivel(), ['fechamento']);
-  assert.match(t.html(), /2 itens ficam pendentes para a pontuação\. A O\.S\. continua finalizada\./);
-  assert.match(t.html(), /data-ir-etapa="fechamento" data-ir-foco="passo" aria-current="step" aria-label="Fechamento: finalizada; 2 itens do checklist ficam pendentes para a pontuação"/);
+  assert.match(t.html(), /Faltam 2 itens\. A O\.S\. continua finalizada\./);
+  assert.match(t.html(), /data-ir-etapa="fechamento" data-ir-foco="passo" aria-current="step" aria-label="Fechamento: finalizada; 2 itens do checklist faltam"/);
   // Conferida a volta e respondido o retrabalho, o checklist fica completo.
   t.run(`_modalDraft.retornoConf = {carroLimpo: 'sim', carroArrumado: 'sim', equipamentosOk: 'sim', semAvaria: 'sim'}; _modalDraft.retrabalhoPerguntado = {resposta: 'nao', em: '${HOJE}T15:00:00', por: 'Gestor Fictício'}; reRenderModalKeepOpen();`);
   assert.match(t.html(), /Checklist completo\./);

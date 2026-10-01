@@ -168,7 +168,7 @@ test('F10 ficha: blocoExec(os, ro, done) continua com a mesma assinatura e o mes
   const t = fichaReal('pcp');
   const html = t.run(`blocoExec(${JSON.stringify(osFicha())}, false, true)`);
   assert.match(html, /<details class="card-fs done" data-bloco="exec">/);
-  assert.match(html, /4 · Embarque &amp; Execução/);
+  assert.match(html, /<summary>Embarque &amp; Execução /, 'revisão da F23: sem o número, que brigava com a ordem das etapas');
   assert.equal(t.run('blocoExec.length'), 3);
 });
 

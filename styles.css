@@ -418,8 +418,18 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .ficha-resumo { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 16px 0; }
 .ficha-funil { flex: 0 1 190px; min-width: 0; }
 .ficha-funil .stepper { margin: 0; }
-.ficha-resumo .modal-tempos { margin: 0; }
+.ficha-resumo .modal-tempos { margin: 0; line-height: 20px; }
+/* Gravar um campo não mexe no alto da ficha (revisão da F23): o "Atualizado por"
+   e o "📍 0d nesta etapa" que chegam com a 1ª gravação faziam a ficha descer
+   16 a 20 px no celular, sob o clique seguinte. O celular do instalador não muda. */
+body:not(.equipe-app) #modal-os .modal-header > div:first-child { min-width: 0; }
+body:not(.equipe-app) #modal-os .modal-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .prox-passo-modal .fe-ir { margin-left: auto; }
+/* O "Ir para" do próximo passo na etapa dele: invisível, mas guarda a altura da caixa (o stepper não pula). */
+.fe-invisivel { visibility: hidden; }
+/* O selo do status da entrega é um botão que leva ao Status da entrega, no Fechamento (44 px). */
+.fe-selo { min-height: 44px; display: inline-flex; align-items: center; padding: 0 4px; margin: 0; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
+.fe-selo:hover .selo-entrega, .fe-selo:focus-visible .selo-entrega { text-decoration: underline; }
 .ficha-etapas-nav { padding: 10px 16px 0; }
 .ficha-etapas { list-style: none; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
 .fe-passo {
@@ -431,17 +441,20 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .fe-passo[aria-current="step"] { border-color: var(--blue); background: #eff6ff; box-shadow: inset 0 -3px 0 var(--blue); }
 .fe-marca {
   width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
-  font-size: .7rem; font-weight: 800; line-height: 1; background: #e2e8f0; color: var(--muted);
+  font-size: .7rem; font-weight: 800; line-height: 1; background: #e2e8f0; color: #475569;
 }
-.fe-ok .fe-marca { background: var(--green); color: #fff; }
-.fe-pronto .fe-marca { background: var(--blue); color: #fff; }
+/* Contraste de 4,5:1 ou mais em branco e no passo atual (revisão da F23). */
+.fe-ok .fe-marca { background: #15803d; color: #fff; }
+.fe-pronto .fe-marca { background: var(--blue-d); color: #fff; }
+.fe-erro .fe-marca { background: #fee2e2; color: #b91c1c; }
 .fe-falta .fe-marca { background: #fef3c7; color: #92400e; }
 .fe-aviso .fe-marca { background: #fde68a; color: #78350f; }
 .fe-nome, .fe-prog { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.15; }
 .fe-nome { font-size: .74rem; font-weight: 700; }
-.fe-prog { font-size: .64rem; color: var(--muted); font-weight: 600; }
+.fe-prog { font-size: .64rem; color: #475569; font-weight: 600; }
 .fe-falta .fe-prog, .fe-aviso .fe-prog { color: #92400e; }
-.fe-ok .fe-prog { color: var(--green); }
+.fe-ok .fe-prog { color: #166534; }
+.fe-erro .fe-prog { color: #b91c1c; }
 /* No celular (375 px) as 5 etapas cabem com o nome inteiro: menos borda e letra menor. */
 @media (max-width: 480px) {
   .ficha-etapas-nav { padding: 10px 10px 0; }
@@ -467,6 +480,8 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   border-left: 3px solid var(--amber); border-radius: 6px; padding: 4px 8px;
 }
 .fe-msg:empty { display: none; }
+/* A falta resolvida guarda o lugar até a ficha fechar: o que está embaixo não sobe sob o clique (revisão da F23). */
+.fe-msg.fe-msg-feita { visibility: hidden; }
 .fe-cancelada {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 16px 0; padding: 10px 14px;
   border-radius: 10px; background: #f1f5f9; border: 1px solid #94a3b8; color: #334155; font-size: .82rem;
@@ -483,14 +498,32 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   flex: 0 0 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
   font-size: .72rem; font-weight: 800; background: #e2e8f0; color: var(--muted);
 }
-.fe-ck-ok .fe-ck-ic { background: var(--green); color: #fff; }
-.fe-ck-pendente .fe-ck-ic { background: #fde68a; color: #78350f; }
+.fe-ck-ok .fe-ck-ic { background: #15803d; color: #fff; }
+.fe-ck-falta .fe-ck-ic { background: #fde68a; color: #78350f; }
 .fe-ck-txt { flex: 1 1 200px; min-width: 0; font-size: .82rem; overflow-wrap: anywhere; }
-.fe-ck-pend { display: block; font-style: normal; font-size: .74rem; font-weight: 700; color: #92400e; }
-.fe-faltas li { font-size: .82rem; overflow-wrap: anywhere; }
+/* O efeito do item na pontuação (ou só "não impede finalizar") e o selo "Falta". */
+.fe-ck-efeito { display: block; font-size: .76rem; color: #475569; }
+.fe-ck-selo { font-size: .7rem; font-weight: 800; color: #92400e; background: #fef3c7; border-radius: 999px; padding: 0 6px; }
+/* O "Ir para" do que falta para finalizar fica numa linha própria, sem abrir vão no meio do texto (revisão da F23). */
+.fe-faltas li { font-size: .82rem; overflow-wrap: anywhere; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .fe-faltas .fe-ir, .fe-ck .fe-ir { margin-top: 4px; }
 .fe-ck .fe-ir { margin-left: 30px; }   /* quebrado na linha de baixo (celular), alinha com o texto */
 .fe-final .w-100 { min-height: 44px; justify-content: center; }
+/* O Finalizar da Jornada fica com 44 px, e o resumo do que falta vem embaixo dele (revisão da F23). */
+#btn-finalizar { min-height: 44px; }
+.fe-fin-resumo { display: grid; gap: 6px; margin-top: 8px; font-size: .8rem; color: #475569; }
+.fe-fin-resumo:empty { display: none; }
+.fe-ck-mini { font-size: .8rem; color: #475569; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.fe-fin-faltas { color: #92400e; }
+/* O atalho da ocorrência na Jornada (44 px) e a dica do retorno previsto. */
+.fe-atalho-oc { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 10px 0; font-size: .78rem; }
+#modal-os .fe-atalho-oc .btn-sm { min-height: 44px; }
+.fe-dica { margin: 4px 0 0; font-size: .76rem; color: #475569; }
+#fe-status { scroll-margin-top: 90px; }
+#fe-status:focus { outline: none; }
+/* A divisão confirmada pelo jeito antigo: o componente fica recolhido. */
+.fe-div-antiga { margin-bottom: 8px; }
+.fe-div-refazer > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: .85rem; font-weight: 600; }
 
 /* ── Campos de formulário ────────────────────────────────────────────────── */
 .field { display: flex; flex-direction: column; gap: 4px; }
@@ -1375,6 +1408,11 @@ body.somente-leitura textarea { pointer-events: none; background: #f8fafc; }
 .check-toggle.ok:has(input:checked)     { border-color: var(--green); background: #ecfdf5; color: var(--green); }
 .check-toggle.retrab:has(input:checked) { border-color: var(--red);   background: #fef2f2; color: var(--red); }
 .conf-por { font-size: .8rem; color: var(--green); font-weight: 600; margin-left: auto; white-space: nowrap; }
+/* A marca "✓ por <nome>" não quebra a linha da caixa marcada (revisão da F23): no
+   celular o nome encolhe com reticências, e a caixa de baixo não sai do lugar
+   sob o clique seguinte. */
+.check-toggle:has(> .conf-por) { white-space: nowrap; min-width: 0; }   /* min-width: 0, senão a grade do bloco alarga */
+.check-toggle > .conf-por { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Cor semântica de alerta: vermelho = retrabalho ou atrasada ─────── */
 .os-card.alerta-retrab, .os-card.alerta-atraso,
