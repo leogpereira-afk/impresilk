@@ -198,6 +198,83 @@ test('junção: a baixa do ERP de antes do corte sugere o dia em que já conta p
   b.fechar();
 });
 
+/* ─────────────── 3b. revisão: a agenda só sugere perto da baixa ─────────────── */
+
+/* O Lançar entrega de verdade, devolvendo a data proposta, a origem escrita ao
+   lado do campo e se a origem some quando a data muda. */
+function lancarAbre(b, id, outraData) {
+  const ids = new Map(['lancar-x', 'lancar-form', 'lancar-aloc'].map(k => [k, elemento()]));
+  const antes = b.ctx.document.getElementById;
+  b.ctx.document.getElementById = k => ids.get(k) || null;
+  const n = b.criados.length;
+  b.run(`lancarEntregaManual('${id}')`);
+  b.ctx.document.getElementById = antes;
+  const box = b.criados.slice(n).find(x => /lancar-form/.test(x.innerHTML));
+  assert.ok(box, 'o Lançar abriu');
+  const data = (/name="data" type="date" required value="([^"]*)"/.exec(box.innerHTML) || [])[1];
+  const origem = (/id="lancar-data-origem">([^<]*)</.exec(box.innerHTML) || [])[1] || '';
+  let someAoMudar = null;
+  if (outraData) {
+    const campo = box.querySelector('#lancar-form input[name="data"]');
+    campo.value = outraData;
+    campo.onchange();
+    someAoMudar = box.querySelector('#lancar-data-origem').hidden === true;
+  }
+  b.run(`ALOCUI.esquecer('lancar:${id}')`);
+  return {data, origem, someAoMudar};
+}
+
+test('revisão: a previsão do ERP de meses antes não vira a data sugerida; a agenda só sugere até 7 dias antes da baixa e fora de período fechado, e a origem aparece ao lado do campo', async () => {
+  // A O.S. que o importador criou: instalacao.data é a PREVISÃO do ERP, sem agenda do PCP.
+  const importada = (id, previsao, baixa) => erp(id, {liberadoPCP:false, veiculo:'', previsaoEntrega:previsao, instalacao:{data:previsao, hora:'', periodo:''},
+    finalizadaEm:baixa + 'T18:00:00', baixaAutoERP:{em:baixa + 'T18:00:00', status:'ENTREGUE'}});
+  const os = [
+    importada('r1', '2026-06-12', '2026-09-25'),   // previsão 3 meses antes da baixa
+    importada('r2', '2026-09-26', '2026-09-28'),   // agenda 2 dias antes da baixa
+    importada('r3', '2026-09-20', '2026-09-23'),   // agenda 3 dias antes, num período que vai estar fechado
+  ];
+  const b = await montar({os});
+  // Caso ruim: a v142 propunha 12/06 (período fechado, status "No prazo") e o lote a punha nas Pendências de junho.
+  assert.equal(await b.json(`diaSugeridoDaBaixaERP(STORE.getOS('r1'))`), '2026-09-25');
+  assert.deepEqual(lancarAbre(b, 'r1'), {data:'2026-09-25', origem:'Sugerida pelo dia da baixa do ERP.', someAoMudar:null});
+  assert.equal(await b.json(`LOTE.diaSugerido(STORE.getOS('r1'))`), '2026-09-25');
+  assert.deepEqual(await b.json(`LOTE.osPendentes(STORE.getAllOS(), '2026-06').os.map(o => o.id)`), []);
+  assert.ok((await b.json(`LOTE.osPendentes(STORE.getAllOS(), '2026-09').os.map(o => o.id)`)).includes('r1'), 'volta às Pendências de setembro');
+  assert.equal(await b.json(`OPERACAO.statusEntrega({...STORE.getOS('r1'), entregaLancada:{data:'2026-09-25', por:'Gestor Teste', em:'2026-09-30T12:00:00Z'}}, '${HOJE}').estado`), 'atraso',
+    'aceitar a data sugerida não põe no prazo a O.S. de previsão em junho');
+  // A agenda 2 dias antes da baixa continua sugerida, e a origem some quando a pessoa digita outra data.
+  assert.equal(await b.json(`diaSugeridoDaBaixaERP(STORE.getOS('r2'))`), '2026-09-26');
+  assert.deepEqual(lancarAbre(b, 'r2', '2026-09-27'), {data:'2026-09-26', origem:'Sugerida pela agenda de 26/09.', someAoMudar:true});
+  assert.equal(await b.json(`LOTE.diaSugerido(STORE.getOS('r2'))`), '2026-09-26');
+  // Sem período fechado conhecido, a r3 sugere a agenda (20/09).
+  assert.equal(await b.json(`diaSugeridoDaBaixaERP(STORE.getOS('r3'))`), '2026-09-20');
+  // A Performance fecha de 15/09 a 21/09 e o aparelho lê as regras (o "fechado até"): a agenda dentro do fechado cede ao dia da baixa.
+  b.e.db.pcp_registros.push({colecao:'performance_fechamentos', id:'2026-09-15:2026-09-21:000001', apagado:false, atualizado_em:'2026-09-22T10:00:00Z',
+    registro:{id:'2026-09-15:2026-09-21:000001', de:'2026-09-15', ate:'2026-09-21', revisao:1}});
+  await b.run('STORE.pullRegras()');
+  assert.equal(await b.json('STORE.regrasLocais().fechadoAte'), '2026-09-21');
+  assert.equal(await b.json(`diaSugeridoDaBaixaERP(STORE.getOS('r3'))`), '2026-09-23');
+  assert.deepEqual(lancarAbre(b, 'r3'), {data:'2026-09-23', origem:'Sugerida pelo dia da baixa do ERP.', someAoMudar:null});
+  assert.equal(await b.json(`LOTE.diaSugerido(STORE.getOS('r3'))`), '2026-09-23');
+  // A mesma régua com o período que a Performance consultou (perfRemoto), sem as regras.
+  b.run(`perfRemoto.fechamentos = [{de:'2026-09-01', ate:'2026-09-26', revisao:1}]`);
+  assert.equal(await b.json(`diaSugeridoDaBaixaERP(STORE.getOS('r2'))`), '2026-09-28', 'a agenda de 26/09 caiu no período consultado');
+  b.run('perfRemoto.fechamentos = []');
+  // A linha do lote diz de onde veio a data; com outra data no campo, não diz.
+  await abrirPendencias(b);
+  const p = painel(b);
+  b.run('LOTE.render()');
+  const linha = id => { const h = p.innerHTML, i = h.indexOf(`data-lote-linha="${id}"`); return h.slice(i, h.indexOf('lote-faltas', i)); };
+  assert.match(linha('r1'), /value="2026-09-25"[^>]*><small class="lote-l-origem">sugerida pelo dia da baixa do ERP<\/small>/);
+  assert.match(linha('r2'), /value="2026-09-26"[^>]*><small class="lote-l-origem">sugerida pela agenda de 26\/09<\/small>/);
+  assert.match(linha('r3'), /<small class="lote-l-origem">sugerida pelo dia da baixa do ERP<\/small>/);
+  assert.equal(await b.json(`LOTE.origemSugerida(STORE.getOS('r2'), '2026-09-27')`), '');
+  // O retorno registrado segue a mesma janela.
+  assert.equal(await b.json(`textoOrigemSugestaoCasa(sugestaoDaBaixaERP({...STORE.getOS('r2'), retornoEm:'2026-09-27T19:00:00.000Z'}))`), 'sugerida pelo retorno de 27/09');
+  assert.equal(await b.json(`sugestaoDaBaixaERP({...STORE.getOS('r2'), retornoEm:'2026-09-10T19:00:00.000Z'}).dia`), '2026-09-26', 'retorno de 18 dias antes não vale; a agenda vale');
+  b.fechar();
+});
+
 /* ─────────────── 4. o pedido {desfazer:true} numa cancelada ─────────────── */
 
 test('junção: o Desfazer do lote na fila e a O.S. cancelada por outra pessoa: o "Sobrescrever" não quebra, o lançamento fica e o aviso diz por quê', async () => {

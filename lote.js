@@ -43,8 +43,9 @@
    - NÃO CANCELA O.S. (PENDÊNCIA: a F16 pediu o cancelamento pelo lote; fica
      para depois). Cancelar é na ficha, com o motivo.
    JUNÇÃO DA v142 (F14 com F16 e E7): a data sugerida é a mesma do Lançar
-   entrega (diaSugeridoDaBaixaERP, casa.js) e a do dia em que a O.S. já conta
-   (diaEntrega); o Desfazer não pede para tirar o lançamento de O.S.
+   entrega (diaSugeridoDaBaixaERP, casa.js: o retorno ou a agenda só até 7
+   dias antes da baixa e fora de período fechado, e a linha diz de onde a
+   data veio) e a do dia em que a O.S. já conta (diaEntrega); o Desfazer não pede para tirar o lançamento de O.S.
    cancelada, e diz o aviso que o servidor devolver.
    Textos para quem usa: português, sem travessão. */
 const LOTE = (() => {
@@ -210,10 +211,13 @@ const LOTE = (() => {
      e a da baixa do ERP de antes do corte, que já contam num dia (diaEntrega,
      casa.js: sugerir outro mudaria o dia, ou o mês, da entrega calado; na
      baixa do ERP é o dia da E7, diaDaBaixaERP); e, na baixa do ERP a lançar,
-     a MESMA régua do Lançar entrega (diaSugeridoDaBaixaERP, junção da v142):
-     o dia real da E7 (a data do ERP ou a última marca), e na baixa neutra da
-     F16 o retorno registrado ou o último dia da agenda até a baixa (o ERP
-     baixa 2 a 4 dias depois da entrega real). Uma régua só por O.S. */
+     a MESMA régua do Lançar entrega (sugestaoDaBaixaERP, junção da v142):
+     o dia real da E7 (a data do ERP ou a última marca); na baixa neutra da
+     F16, o retorno registrado ou o último dia da agenda só até 7 dias antes
+     da baixa e fora de período fechado (o ERP baixa 2 a 4 dias depois da
+     entrega real, e a "agenda" da O.S. que o PCP nunca agendou é a previsão
+     do ERP, que pode ser de meses antes); senão, o dia da baixa. Uma régua
+     só por O.S. */
   function diaSugerido(o) {
     const lancado = OPERACAO.dia((lancada(o) || {}).data);
     if (lancado) return lancado;
@@ -221,18 +225,25 @@ const LOTE = (() => {
     if (!fim) return '';
     if (!baixaERP(o) || antesDoCorte(o)) return (typeof diaEntrega === 'function' && OPERACAO.dia(diaEntrega(o))) || fim;
     if (typeof diaSugeridoDaBaixaERP === 'function') return OPERACAO.dia(diaSugeridoDaBaixaERP(o)) || fim;
-    // Cache misto (casa.js de antes da v142): a régua de antes.
-    const ret = OPERACAO.dia(o.retornoEm);
-    if (ret && ret <= fim) return ret;
-    return OPERACAO.diasAgenda(o).filter(d => d <= fim).pop() || fim;
+    // Cache misto (casa.js de antes da v142, cujo Lançar propõe o dia da baixa): a mesma data dele.
+    return fim;
+  }
+  /* DE ONDE A DATA SUGERIDA VEIO, ao lado do campo da linha: só na baixa do
+     ERP a lançar (a régua do Lançar entrega), e só enquanto o campo traz a
+     data sugerida. '' no resto. */
+  function origemSugerida(o, data) {
+    if (!baixaERP(o) || lancada(o) || antesDoCorte(o) || typeof sugestaoDaBaixaERP !== 'function' || typeof textoOrigemSugestaoCasa !== 'function') return '';
+    const s = sugestaoDaBaixaERP(o);
+    return s && s.dia && s.dia === data ? textoOrigemSugestaoCasa(s) : '';
   }
   // O dia da volta nas pendências: o do carro que voltou; na baixa do ERP, o dia sugerido da entrega.
   const diaVoltaPendencia = o => baixaERP(o) && !lancada(o) ? diaSugerido(o) : diaLinha(o);
   /* DIA: as instalações que voltaram (ou foram entregues) no dia, a baixa do
-     ERP ainda não lançada NO DIA SUGERIDO dela (o último dia da agenda até a
-     baixa: a baixa costuma chegar 2 a 4 dias depois da entrega, e o dia da
-     baixa não é o da entrega), e as O.S. abertas com agenda no dia e equipe,
-     liberação ou saída. Retirada no balcão não tem volta. */
+     ERP ainda não lançada NO DIA SUGERIDO dela (diaSugerido: o retorno ou o
+     último dia da agenda até 7 dias antes da baixa, que costuma chegar 2 a 4
+     dias depois da entrega; senão, o dia da baixa), e as O.S. abertas com
+     agenda no dia e equipe, liberação ou saída. Retirada no balcão não tem
+     volta. */
   function noDia(o, dia) {
     if (!o || OPERACAO.interno(o)) return false;
     if (!aberta(o)) return baixaERP(o) && !lancada(o) ? diaSugerido(o) === dia : diaLinha(o) === dia;
@@ -1273,6 +1284,7 @@ const LOTE = (() => {
     const v = typeof valorDaOS === 'function' ? valorDaOS(o) : o.valorTotal;
     const valor = v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) && typeof dinheiroCasa === 'function' ? dinheiroCasa(Number(v)) : '';
     const e7 = aberta(o) ? erpPendente(o) : null;
+    const origem = origemSugerida(o, l.data);
     const entregaBtn = e7
       ? `<span class="lote-b estatico lote-erp-decidir">${escL(typeof textoERPDiz === 'function' ? textoERPDiz(e7.aviso) : 'O ERP diz entregue')}: decida em Entregas</span><button type="button" class="lote-b" data-lote-acao="erp-lista" data-os="${escL(o.id)}" data-lote-k="erp:${escL(o.id)}">Abrir a lista</button>`
       : aberta(o)
@@ -1287,7 +1299,7 @@ const LOTE = (() => {
     return `<div class="lote-linha${l.confirmada ? ' confirmada' : ''}${f.trava.length ? ' com-falta' : ''}${est.foco === o.id ? ' em-foco' : ''}" data-lote-linha="${escL(o.id)}" tabindex="0" aria-label="O.S. ${escL(o.numero || '')}, ${escL(o.cliente || '')}${l.confirmada ? ', confirmada' : ''}">
       <div class="lote-l-os"><button type="button" class="inline-link" data-lote-acao="ficha" data-os="${escL(o.id)}"><strong>O.S ${escL(o.numero || '—')}</strong></button> <span class="lote-l-cli">${escL(o.cliente || '')}</span>
         <small>${escL(o.servico || '')}${valor ? ' · ' + escL(valor) : ''}</small> ${seloOrigem(o)}</div>
-      <label class="lote-l-data">Entrega <input type="date" value="${escL(l.data)}" max="${escL(hoje())}" data-lote-campo="data" data-os="${escL(o.id)}" data-lote-k="data:${escL(o.id)}"></label>
+      <label class="lote-l-data">Entrega <input type="date" value="${escL(l.data)}" max="${escL(hoje())}" data-lote-campo="data" data-os="${escL(o.id)}" data-lote-k="data:${escL(o.id)}">${origem ? `<small class="lote-l-origem">${escL(origem)}</small>` : ''}</label>
       ${retrab}
       <div class="lote-l-entrega">${entregaBtn}<button type="button" class="lote-b" aria-expanded="${est.itensAberto === o.id}" data-lote-acao="itens" data-os="${escL(o.id)}" data-lote-k="itens:${escL(o.id)}">${aberta(o) && !e7 ? 'Marcar a parte' : 'Ver os itens'}</button></div>
       ${declHTML}
@@ -1632,7 +1644,7 @@ const LOTE = (() => {
   if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') document.addEventListener('keydown', ev => { teclado(ev); });
 
   return {abrir, render, executar, salvar, desfazer, teclado, estado: () => est, faltasDaLinha, montarGravacao, assinatura, osDoDia, osPendentes, gruposDe,
-    diaSugerido, erpPendente,
+    diaSugerido, origemSugerida, erpPendente,
     linha: osId => { const x = achar(osId); return x ? x.l : null; }, grupo: chave => { const x = acharGrupo(chave); return x ? x.rg : null; },
     gruposDaTela: () => { const S = loja(); return gruposDe(osDaTela(S && typeof S.getAllOS === 'function' ? S.getAllOS() : []).os); },
     gravando: () => _cadeia, relatorios: () => est.relatorios, chaveAloc, abrirRetrabalho,

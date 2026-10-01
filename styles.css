@@ -3804,3 +3804,8 @@ img.perf-logo{object-fit:cover}
 .lote-retorno.abonado { background: #f0f9ff; color: #075985; border: 1px solid #bae6fd; }
 .lote-retorno.ok { color: #166534; }
 .lote-g-oc { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: .78rem; color: #526378; }
+
+/* De onde a data sugerida veio (revisão da junção da v142): no Lançar entrega e na linha do Fechar o dia. */
+.lancar-data-origem{font-size:.75rem}
+.lote-l-data{flex-wrap:wrap}
+.lote-l-origem{flex-basis:100%;font-size:.72rem;color:#526378}
