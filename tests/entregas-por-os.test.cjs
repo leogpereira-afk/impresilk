@@ -35,7 +35,9 @@ const PESSOAS = [
   {id: '900004', nome: 'Carlos Prado Exemplo', apelido: 'Carlos'},
 ];
 
-// O mesmo arranjo de tests/entregas-vitrine.test.cjs, com os arquivos que a vista lê.
+/* O mesmo arranjo de tests/entregas-vitrine.test.cjs, com os arquivos que a
+   vista lê. O performance.js entra (revisão da F18): a equipe da vista é a da
+   Performance (perfRegistro), e o index.html o carrega antes da vista. */
 function casa(lista, {erp = [], papel = 'pcp', agora = AGORA, equipes = EQUIPES, pessoas = PESSOAS, hist = [], buscar = null, estado = {}} = {}) {
   const historico = hist.slice();
   const ctx = vm.createContext({
@@ -58,7 +60,7 @@ function casa(lista, {erp = [], papel = 'pcp', agora = AGORA, equipes = EQUIPES,
     emptyState: (i, t) => `<div class="vazio">${t}</div>`, bindCardClicks() {}, toast() {}, fmtInstalacao: () => '', filtroPeriodoHTML: () => '',
     parseLocalDate: () => null, pessoaDoElenco: () => null,
   });
-  for (const f of ['operacao.js', 'divisao.js', 'regras.js', 'entrega-item.js', 'casa.js', 'relatorios-entregas.js', 'entregas-os.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, {filename: f});
+  for (const f of ['operacao.js', 'divisao.js', 'regras.js', 'entrega-item.js', 'casa.js', 'relatorios-entregas.js', 'performance.js', 'entregas-os.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, {filename: f});
   vm.runInContext(`OPERACAO.usarPessoas(() => ({pessoas: STORE.elenco().pessoas, vinculos: [], lista: []}));
     var wireFiltroPeriodo = () => {}; var wireQuadrosCasa = () => {};
     var __el = {innerHTML: '', querySelectorAll: () => [], querySelector: () => ({value: ''})};
@@ -78,9 +80,16 @@ const noPrazo = os('np', '5001', {cliente: 'Padaria Fictícia', endereco: 'Rua I
   finalizadaEm: '2026-10-05T18:00:00Z', finalizadoPor: 'Gestão de teste'});
 const atrasada = os('at', '5002', {equipe: ['900004'], instalacao: {data: '2026-10-08'}, prazoCombinado: {data: '2026-10-06', fonte: 'agenda'},
   finalizadaEm: '2026-10-08T18:00:00Z', finalizadoPor: 'Gestão de teste'});
+/* O abono carimbado guarda a medida que abonou (revisão da F17, decidida): no
+   atraso, o prazo e a data da entrega. O servidor sempre carimba a medida
+   (guardarAbonos); o abono sem ela é "de outra medida" e não vale. Este
+   fixture era de antes dessa regra e vinha sem a medida: a junção F17+F18
+   deixou a 5003 como atraso comum, e três testes ficaram vermelhos pelo
+   fixture, não pela vista. */
 const abonada = os('ab', '5003', {equipe: ['900004'], instalacao: {data: '2026-10-09'}, prazoCombinado: {data: '2026-10-07', fonte: 'agenda'},
   finalizadaEm: '2026-10-09T18:00:00Z', finalizadoPor: 'Gestão de teste',
-  abonos: [{id: 'ab-ficticio01', ocorrenciaId: 'ab:atraso', motivo: 'Cliente pediu para remarcar a instalação', por: 'Gestão de teste', em: '2026-10-09T19:00:00Z'}]});
+  abonos: [{id: 'ab-ficticio01', ocorrenciaId: 'ab:atraso', motivo: 'Cliente pediu para remarcar a instalação', por: 'Gestão de teste', em: '2026-10-09T19:00:00Z',
+    medida: {prazo: '2026-10-07', entrega: '2026-10-09'}}]});
 // Retrabalho E atraso: a precedência da statusEntrega diz Retrabalho; o filtro "Com atraso" não a pega.
 const retrab = os('rt', '5004', {equipe: ['Ana'], instalacao: {data: '2026-10-10'}, prazoCombinado: {data: '2026-10-08', fonte: 'agenda'},
   finalizadaEm: '2026-10-10T18:00:00Z', finalizadoPor: 'Gestão de teste', retrabalho: true, problema: 'Placa desalinhada'});
@@ -133,16 +142,22 @@ test('o filtro de status usa a statusEntrega: a mesma chave do selo, com o abona
   assert.equal(cartoes(t.tela('STATE._porOS = {status: "atraso"}')).join(), '5003,5002');
 });
 
+/* Revisão da F18 (decidida): a equipe da vista é a que a Performance conta
+   (perfRegistro: a divisão confirmada, a participação confirmada ou a
+   sugestão da apuração), e a sugerida vem marcada. Este teste fixava a régua
+   antiga da vista (a divisão desatualizada voltava às pessoas, e as pessoas
+   davam a equipe por qualquer integrante em comum); a 6004 agora é da
+   equipe que a divisão escolheu (Águia, sugerida), como na Performance. */
 test('o filtro de equipe usa o ID: o equipeId da divisão, ou as pessoas pelo ID, nunca o nome', () => {
   const lista = [
-    // Ana e Bia pelo apelido: o ID delas (900001 e 900002) é da Águia.
+    // Ana e Bia pelo apelido: o ID delas (900001 e 900002) é a composição da Águia (sugerida).
     os('p1', '6001', {equipe: ['Ana', 'Bia'], finalizadaEm: '2026-10-05T18:00:00Z'}),
     // "Ana Fictícia Outra" não é ficha de ninguém: o nome parecido não põe a O.S. na Águia.
     os('p2', '6002', {equipe: ['Ana Fictícia Outra'], finalizadaEm: '2026-10-05T18:00:00Z'}),
     // A divisão diz Leão: vale a divisão, mesmo com gente da Águia na O.S.
     os('p3', '6003', {equipe: ['900001'], finalizadaEm: '2026-10-05T18:00:00Z',
       alocacao: {grupos: [{equipeId: 'eq-leao', cota: 10000, liderId: '900001', membros: [{pessoaId: '900001', papel: 'lider', cota: 10000}]}]}}),
-    // Divisão desatualizada (a equipe mudou depois): volta às pessoas.
+    // Divisão desatualizada (a equipe mudou depois): vale a equipe que a divisão escolheu, como sugestão (a régua da Performance).
     os('p4', '6004', {equipe: ['900004'], finalizadaEm: '2026-10-05T18:00:00Z',
       alocacao: {desatualizada: true, grupos: [{equipeId: 'eq-aguia', cota: 10000, liderId: '900001', membros: [{pessoaId: '900001', papel: 'lider', cota: 10000}]}]}}),
     os('p5', '6005', {equipe: [], finalizadaEm: '2026-10-05T18:00:00Z'}),
@@ -152,11 +167,11 @@ test('o filtro de equipe usa o ID: o equipeId da divisão, ou as pessoas pelo ID
   const equipes = [{...EQUIPES[0], nome: 'Águia Dourada'}, EQUIPES[1]];
   const t = casa(lista, {erp, equipes});
   t.tela('STATE._entVista = "poros"');
-  assert.equal(cartoes(t.tela('STATE._porOS = {equipe: "eq-aguia"}')).sort().join(), '6001');
-  assert.equal(cartoes(t.tela('STATE._porOS = {equipe: "eq-leao"}')).sort().join(), '6003,6004');
+  assert.equal(cartoes(t.tela('STATE._porOS = {equipe: "eq-aguia"}')).sort().join(), '6001,6004');
+  assert.equal(cartoes(t.tela('STATE._porOS = {equipe: "eq-leao"}')).sort().join(), '6003');
   assert.equal(cartoes(t.tela('STATE._porOS = {equipe: "_sem"}')).sort().join(), '6005');
   const html = t.tela('STATE._porOS = {}');
-  assert.match(html, /<span class="poros-eq perf-cor-marinho perf-com-cor pelas-pessoas"[^>]*>[\s\S]*?<span>Águia Dourada<\/span>/, 'chip com a cor da equipe e o nome de hoje');
+  assert.match(html, /<span class="poros-eq perf-cor-marinho perf-com-cor sugerida"[^>]*>[\s\S]*?<span>Águia Dourada<\/span> <small class="poros-sugerida">sugerida<\/small>/, 'chip com a cor da equipe, o nome de hoje e a marca de sugerida');
   assert.match(html, /<span class="poros-eq perf-cor-laranja perf-com-cor" title="Equipe da divisão da O.S."/);
 });
 
@@ -367,7 +382,8 @@ test('O.S. fora dos 60 dias do aparelho: aviso e carga sob demanda pelo buscarHi
   const antes = secao(t.tela('STATE._entVista = "poros"'));
   assert.match(antes, /sem cópia no aparelho/);
   assert.match(antes, /Entregue há mais de 60 dias: o aparelho guarda só os últimos 60\./);
-  assert.match(antes, /data-poros-carregar="4001">Carregar do servidor</);
+  // Revisão da F18: toda linha sem ficha tem o mesmo botão, "Procurar no servidor" (o "Carregar do servidor" de cima carrega todas as antigas).
+  assert.match(antes, /data-poros-carregar="4001">Procurar no servidor</);
   assert.match(antes, /1 O\.S\. foi entregue há mais de 60 dias e não tem cópia neste aparelho\./);
   await t.run('porOSCarregar("4001")');
   assert.deepEqual(JSON.parse(JSON.stringify(pedidos)), [{q: '4001'}], 'um pedido, pelo número');
@@ -448,10 +464,14 @@ test('500 O.S.: cada filtro ou toque repinta em menos de 100 ms, sem recalcular 
   const periodo = Number(process.hrtime.bigint() - ini) / 1e6;
   assert.equal(t.run('__statusChamadas'), 500, 'trocar o período não recalcula');
   assert.ok(periodo < 100, `período: ${periodo.toFixed(1)} ms`);
-  // Mudou uma O.S.: a próxima pintura completa recalcula (o volta e o abono de uma mexem nas outras).
-  t.run('STORE.getOS("x3").atualizadoEm = "2026-10-20T11:00:00Z"');
+  /* Mudou uma O.S.: a próxima pintura completa recalcula ela e as da volta
+     dela (o retorno é medido pela volta), não as outras (revisão da F18: a
+     memória é por O.S.). A x3 deste teste ficou fora do período de 05 a 12 e
+     nem precisa do status; a x5 (dia 06, com chegada) está dentro. */
+  t.run('STORE.getOS("x5").atualizadoEm = "2026-10-20T11:00:00Z"');
   t.tela('');
-  assert.ok(t.run('__statusChamadas') > 500);
+  const depois = t.run('__statusChamadas');
+  assert.ok(depois > 500 && depois < 520, `recalculou ${depois - 500}`);
   if (process.env.F18_MEDIR) console.log('F18 tempos (ms):', JSON.stringify({...tempos, periodo}));
 });
 

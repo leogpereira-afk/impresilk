@@ -2052,6 +2052,11 @@ function renderEntregas() {
   if(STATE._entAba==='relatorios')return renderRelatoriosEntregas();
   // Fechar o dia (F14): o lote da gestão, em lote.js. Sem ele (cache misto), a lista de sempre.
   if (STATE._entAba === 'lote' && typeof renderLoteEntregas === 'function') return renderLoteEntregas();
+  /* O SELECT ABERTO NA VISTA POR O.S. (revisão da F18): a repintura completa
+     (a cada mês que chega do ERP) trocava o select e fechava a lista na mão de
+     quem escolhia a equipe. Com o foco num select da vista, a repintura espera
+     o foco sair (entregas-os.js, porOSAdiarRepintura). */
+  if (STATE._entVista === 'poros' && typeof porOSAdiarRepintura === 'function' && porOSAdiarRepintura()) return;
   const todas = STORE.getAllOS();
   const porNumero = new Map(todas.map(o => [String(o.numero || '').trim(), o]));
   const cls = classificarEntregas(todas);
@@ -2218,7 +2223,7 @@ function renderEntregas() {
       <div class="casa-pagina-head">
         <div><h2>Entregas</h2><p>Acompanhe as O.S. entregues, os valores e a equipe responsável.</p></div>
       </div>
-      <div class="ent-kpis">${kpiPrincipal}<div class="ent-kpi-secs">${kpiSecundarios}</div></div>${porOS ? porOSAvisoKpiHTML() : ''}
+      <div class="ent-kpis">${kpiPrincipal}<div class="ent-kpi-secs">${kpiSecundarios}</div></div>${porOS && lista.length ? porOSAvisoKpiHTML() : ''}
       <details class="ent-dados" ${STATE._entDadosAberto ? 'open' : ''}><summary>Origem dos valores e sincronização</summary>
       <p>Valores líquidos de desconto das O.S. marcadas como entregues no ERP, pela data de entrega. Não representam recebimentos ou lucro. Instalações realizadas dependem do registro no PCP; retiradas pelo cliente entram apenas nos valores.</p>
       <p class="metricas-nota">Registradas no PCP neste mês: <strong>${registradasMes}</strong> instalaç${registradasMes === 1 ? 'ão' : 'ões'}${cls.aLancar.length ? ` · a lançar: <strong>${cls.aLancar.length}</strong>` : ''}. Fonte do valor: ERP${STORE.entreguesMes(hoje.slice(0, 7)) ? `, atualizado ${new Date(STORE.entreguesMes(hoje.slice(0, 7)).em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' (carregando…)'}.</p>
@@ -2234,7 +2239,7 @@ function renderEntregas() {
         <span class="casa-vista"><button class="btn-ghost btn-sm ${STATE._entVista === 'tabela' ? 'active' : ''}" data-ent-vista="tabela">Tabela</button><button class="btn-ghost btn-sm ${STATE._entVista === 'cards' ? 'active' : ''}" data-ent-vista="cards">Cards</button>${typeof porOSMontar === 'function' ? `<button class="btn-ghost btn-sm ${porOS ? 'active' : ''}" data-ent-vista="poros">Por O.S.</button>` : ''}</span>
       </div>
       </section>
-      ${lista.length ? (porOS ? porOSSecaoHTML() : STATE._entVista === 'cards' ? cards() : tabela()) : emptyState('', vazioEntregas(per).titulo, vazioEntregas(per).dica)}
+      ${lista.length ? (porOS ? porOSSecaoHTML() : STATE._entVista === 'cards' ? cards() : tabela()) : emptyState('', vazioEntregas(per).titulo, vazioEntregas(per).dica) + (porOS && typeof porOSVazioPeriodoHTML === 'function' ? porOSVazioPeriodoHTML() : '')}
       ${lista.length ? prazoEntregasHTML(lista.map(x => x.erp), porNumero) : ''}
       ${relatoriosEntregasHTML(lista.map(x => x.erp), porNumero, estadoPCP)}
       ${relatorioAnosHTML()}

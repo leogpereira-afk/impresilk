@@ -3858,7 +3858,9 @@ img.perf-logo{object-fit:cover}
 .poros-equipe{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .poros-eq{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:2px 10px 2px 3px;border-radius:999px;border:1px solid #d8e2e7;background:#fff;font-size:.78rem;font-weight:650;color:#173c50}
 .poros-eq.perf-com-cor{border-color:var(--equipe-cor);box-shadow:inset 0 0 0 1px var(--equipe-cor)}
-.poros-eq.pelas-pessoas{border-style:dashed}
+/* A equipe sugerida pela Performance (ainda não confirmada): borda tracejada e a marca escrita (revisão da F18). */
+.poros-eq.sugerida{border-style:dashed}
+.poros-sugerida{font-size:.7rem;font-weight:600;color:#7a5300}
 .poros-eq-logo{width:24px;height:24px;border-radius:50%;object-fit:cover;flex:none;display:inline-flex;align-items:center;justify-content:center;background:#eef2f6;font-size:.78rem}
 .perf-com-cor span.poros-eq-logo{background:var(--equipe-cor);color:#fff}
 .poros-pessoa{display:inline-flex;align-items:center;max-width:100%;padding:2px 9px;border-radius:999px;background:#f1f5f9;font-size:.76rem;color:#334155;overflow-wrap:anywhere}

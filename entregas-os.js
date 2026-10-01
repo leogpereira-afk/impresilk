@@ -11,8 +11,8 @@
    (status, equipe e busca) não mexem neles; a vista diz isso quando há filtro
    ligado e mostra o número dela, que acompanha o filtro. Técnico e Tipo
    ficam com a Tabela e os Cards.
-   DESEMPENHO: o status de cada O.S. é calculado uma vez por pintura completa
-   (e guardado enquanto nenhuma O.S. mudar); tocar num filtro, buscar, abrir a
+   DESEMPENHO: o status de cada O.S. é calculado uma vez e guardado por O.S.
+   (até ela, a volta dela, o elenco ou a regra mudarem); tocar num filtro, buscar, abrir a
    linha do tempo ou "Mostrar mais" repinta só os chips e a lista desta vista,
    no máximo 24 cartões por vez. A linha do tempo só é montada quando abre.
    A parte de cima deste arquivo (POR_OS) é pura: não lê tela nem grava nada,
@@ -98,22 +98,31 @@ const POR_OS = ((O) => {
   const ETAPAS_INT = {apto: 'Pronta para retirada', finalizada: 'Retirada'};
   const ORDEM = ['pedido', 'criada', 'etapa', 'remarcacao', 'prazo', 'retorno_previsto', 'saida', 'chegada', 'retorno', 'item', 'finalizacao', 'lancamento', 'conferencia', 'ocorrencia', 'abono', 'cancelamento', 'reabertura', 'diario'];
   const MARCA_TXT = {entregue: 'entregue', retirado: 'retirado pelo cliente', problema: 'problema na entrega', cancelado: 'saldo cancelado', desfeito: 'marca desfeita', conferido: 'declaração conferida'};
-  // O campo do diário e o fato da linha que ele registra (para não contar duas vezes).
+  /* O campo do diário e o fato da linha que ele registra (para não contar duas
+     vezes). O retrabalho e a resposta da pergunta são o fato "Retrabalho
+     marcado" (uma ocorrência): sem eles aqui, a linha do diário repetia o
+     retrabalho (revisão da F18). A lista de chegadas por dia (F17) é a
+     chegada conferida. */
   const CAMPO_TIPO = {
     cancelamento: 'cancelamento', entregaLancada: 'lancamento', finalizadaEm: 'finalizacao', finalizadoPor: 'finalizacao', finalizadaPorCampo: 'finalizacao',
     baixaAutoERP: 'finalizacao', justificativaConclusao: 'finalizacao', reabertaEm: 'reabertura', reabertaPor: 'reabertura', retornoConf: 'conferencia',
-    voltaEquipe: 'conferencia', retornoConferido: 'chegada', abonos: 'abono', ocorrencias: 'ocorrencia', agendaLog: 'remarcacao', 'instalacao.data': 'remarcacao',
+    voltaEquipe: 'conferencia', retornoConferido: 'chegada', chegadasConferidas: 'chegada', abonos: 'abono', ocorrencias: 'ocorrencia',
+    retrabalho: 'ocorrencia', retrabalhoPerguntado: 'ocorrencia', agendaLog: 'remarcacao', 'instalacao.data': 'remarcacao',
     'itens.entregas': 'item', saidaEm: 'saida', horaSaida: 'saida', retornoEm: 'retorno', horaRetorno: 'retorno', prazoCombinado: 'prazo', retornoPrevisto: 'retorno_previsto',
   };
   const JANELA_DIARIO = 15 * 60000;
   const DIARIO_ACOES = {criar: 'criou a O.S.', alterar: 'alterou', excluir: 'excluiu a O.S.', restaurar: 'restaurou a O.S.', descartar: 'tentou alterar a divisão (recusado)'};
   const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
   const minTxt = n => n === 1 ? '1 minuto' : n < 60 ? `${n} minutos` : `${Math.floor(n / 60)} h${n % 60 ? ` ${n % 60} min` : ''}`;
+  /* O rótulo da ocorrência que o abono aponta. O id é 'osId:tipo' e, no
+     retorno antecipado, 'osId:retorno_antecipado:dia' (revisão da F17): o
+     tipo é o pedaço que tem rótulo, não o último. */
   function rotuloOcorrencia(id, ocs) {
     const achada = lista(ocs).find(o => o && o.id === id);
     if (achada && achada.rotulo) return achada.rotulo;
-    const tipo = String(id || '').split(':').pop();
-    return (O && O.ROTULOS_OCORRENCIA && O.ROTULOS_OCORRENCIA[tipo]) || 'ocorrência';
+    const rotulos = (O && O.ROTULOS_OCORRENCIA) || {};
+    const tipo = String(id || '').split(':').find(p => Object.prototype.hasOwnProperty.call(rotulos, p));
+    return (tipo && rotulos[tipo]) || 'ocorrência';
   }
 
   function linhaDoTempo(os, opc = {}) {
@@ -176,12 +185,18 @@ const POR_OS = ((O) => {
     }
     poe('saida', os.saidaEm, 'Saída da equipe', txt(os.horaSaida) ? 'hora anotada ' + txt(os.horaSaida) : '', {k: 'saida'});
     poe('retorno', os.retornoEm, 'Volta anotada pela equipe', 'só declaração: a chegada que vale é a conferida pela gestão', {k: 'retorno'});
-    const ch = fn('chegadaConferida') ? O.chegadaConferida(os) : null;
-    if (ch) {
-      const rc = obj(os.retornoConferido) ? os.retornoConferido : {};
-      const ra = st && obj(st.retornoAntecipado) ? st.retornoAntecipado : null;
-      const det = ra && ['antecipado', 'abonado', 'no horário', 'na volta'].includes(ra.situacao) ? cap(ra.motivo) : '';
-      poe('chegada', `${ch.dia}T${ch.hora}`, 'Chegada do carro conferida', det, {k: 'chegada', por: ch.por, ato: rc.em || rc.recebidoEm});
+    /* AS CHEGADAS CONFERIDAS, uma por dia da jornada (revisão da F17): cada
+       uma no instante em que o carro chegou (o dia seguinte, quando a volta
+       passou da meia-noite), com a medida do retorno daquele dia. */
+    const chs = fn('chegadasConferidas') ? O.chegadasConferidas(os) : (fn('chegadaConferida') && O.chegadaConferida(os) ? [O.chegadaConferida(os)] : []);
+    const ra = st && obj(st.retornoAntecipado) ? st.retornoAntecipado : null;
+    const rc0 = obj(os.retornoConferido) ? os.retornoConferido : {};
+    for (const ch of chs) {
+      if (!obj(ch) || !txt(ch.dia) || !txt(ch.hora)) continue;
+      const doDia = ra ? (lista(ra.dias).find(d => obj(d) && d.dia === ch.dia) || (ra.dia === ch.dia ? ra : null)) : null;
+      const det = doDia && ['antecipado', 'abonado', 'no horário', 'na volta'].includes(doDia.situacao) ? cap(doDia.motivo) : '';
+      const bruta = lista(os.chegadasConferidas).filter(c => obj(c) && txt(c.dia) === ch.dia && c.limpar !== true).pop() || (txt(rc0.dia) === ch.dia ? rc0 : {});
+      poe('chegada', `${txt(ch.diaChegada) || ch.dia}T${ch.hora}`, 'Chegada do carro conferida', det, {k: 'chegada|' + ch.dia, por: ch.por, ato: bruta.em || bruta.recebidoEm});
     }
     for (const it of lista(os.itens)) {
       if (!obj(it)) continue;
@@ -293,13 +308,15 @@ const POR_OS = ((O) => {
      de fora: é a contagem de cada chip de status, que segue a equipe e a
      busca. A busca casa cada palavra (sem acento, sem caixa) com o texto da
      linha: número, cliente, nome e ID de cada pessoa e o nome da equipe. A
-     equipe casa pelo ID (o equipeId da divisão, ou as pessoas da O.S. pelo
-     ID, nunca pelo nome); '_sem' é a O.S. sem ninguém na equipe. */
+     equipe casa pelo ID da equipe que a Performance conta (ver porOSEquipesDe);
+     '_sem' é a O.S. sem ninguém na equipe. A retirada no balcão não tem
+     equipe por natureza e a cancelada saiu da Performance: nenhuma das duas
+     é "sem ninguém na equipe" (revisão da F18). */
   const termosDe = b => norm(b).split(' ').filter(Boolean);
   function passa(l, f, sem, termos) {
     if (sem !== 'status' && f.status && l.chave !== f.status) return false;
     if (sem !== 'equipe' && f.equipe) {
-      if (f.equipe === '_sem') { if (!l.card || lista(l.pessoas).length) return false; }
+      if (f.equipe === '_sem') { if (!l.card || l.interno || l.chave === 'cancelado' || lista(l.pessoas).length) return false; }
       else if (!lista(l.equipes).some(e => e.id === f.equipe)) return false;
     }
     if (sem !== 'busca' && termos.length && !termos.every(t => String(l.busca || '').includes(t))) return false;
@@ -313,25 +330,6 @@ const POR_OS = ((O) => {
   }
   // O texto em que a busca procura, pronto (sem acento, sem caixa).
   function textoBusca(partesTexto) { return norm(lista(partesTexto).filter(x => x != null && x !== '').join(' ')); }
-  /* A EQUIPE DA O.S. PELO ID. A divisão (os.alocacao, F08) diz a equipe pelo
-     equipeId, e vale mesmo para a equipe desativada depois (é história). Sem
-     equipe na divisão (ou com a divisão desatualizada), a equipe ativa que tem
-     alguém da O.S. entre os integrantes, pelo ID da pessoa. `equipes` são
-     {id, nome, ativo, ids: Set de IDs dos integrantes}. */
-  function equipesDaOS(os, idsDaOS, equipes) {
-    const out = [];
-    const aloc = obj(os && os.alocacao) && !os.alocacao.desatualizada ? os.alocacao : null;
-    const ditas = aloc ? [...new Set(lista(aloc.grupos).map(g => obj(g) ? txt(g.equipeId) : '').filter(Boolean))] : [];
-    for (const id of ditas) {
-      const e = lista(equipes).find(x => x.id === id);
-      out.push(e ? {...e, como: 'divisao'} : {id, nome: 'Equipe que não existe mais', ativo: false, ids: new Set(), cor: '', como: 'divisao'});
-    }
-    if (!ditas.length) {
-      const ids = idsDaOS instanceof Set ? idsDaOS : new Set(lista(idsDaOS));
-      for (const e of lista(equipes)) if (e.ativo !== false && [...(e.ids || [])].some(i => ids.has(i))) out.push({...e, como: 'pessoas'});
-    }
-    return out;
-  }
   /* A PERDA PELA REGRA DO DIA DA ENTREGA, para a comissão prevista: a mesma
      conta do statusEntrega (o abonado nunca é perda; o atraso só é perda da
      O.S. entregue), lida dos estados que a O.S. já tem. */
@@ -343,7 +341,7 @@ const POR_OS = ((O) => {
   }
 
   return {FUSO, instante, quando, diaDe, ddmm, ddmmaa, cortar, cap, minTxt, norm, linhaDoTempo, ORDEM_STATUS, ROTULO_STATUS, chaveStatus,
-    filtrar, contarStatus, textoBusca, equipesDaOS, perdasPelaRegra, CAMPO_TIPO};
+    filtrar, contarStatus, textoBusca, perdasPelaRegra, CAMPO_TIPO};
 })(typeof OPERACAO !== 'undefined' ? OPERACAO : (typeof require === 'function' ? require('./operacao.js') : null));
 if (typeof module !== 'undefined' && module.exports) module.exports = POR_OS;
 
@@ -351,8 +349,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = POR_OS;
    A TELA (lê STATE, STORE e as funções da casa.js e da app.js na hora)
    ══════════════════════════════════════════════════════════════════════════ */
 const POR_OS_LOTE = 24;
-// O status de cada O.S., guardado enquanto nenhuma O.S. do aparelho mudar (ver porOSMontar).
-let _porOSMemo = {fp: '', st: new Map()};
+/* A MEMÓRIA DA VISTA, por O.S. (revisão da F18): {k, st, pessoas, eqs}. `k`
+   é a chave da O.S. (porOSChaveOS); `glob` é a impressão digital do que não
+   é O.S. (porOSAssinatura). Antes, qualquer O.S. que mudasse apagava a
+   memória inteira e a pintura seguinte recalculava o status de todas. */
+let _porOSMemo = {glob: '', st: new Map()};
 let _porOSDados = null;
 // O.S. antiga pedida ao servidor (por número): 'carregando' | 'achou' | 'nao' | 'nao-periodo' | 'offline' | 'erro'.
 const _porOSCarga = new Map();
@@ -372,14 +373,28 @@ const porOSTemFiltro = f => !!(f && (f.status || f.equipe || String(f.busca || '
 const porOSVerValor = () => ['admin', 'pcp'].includes(String((STATE.user || {}).papel || '')) && !(typeof crachaEhToque === 'function' && crachaEhToque());
 const porOSDia = v => (typeof OPERACAO !== 'undefined' && OPERACAO.dia ? OPERACAO.dia(v) : POR_OS.diaDe(v)) || '';
 
+/* O DIA DA REGRA DO STATUS (revisão da F17, a mesma conta do diaDaRegraDe da
+   app.js): o dia do serviço (a chegada conferida, senão a entrega lançada,
+   senão a finalização), nunca o de hoje: a O.S. de setembro vista em outubro
+   segue fora do programa. A aberta, o de hoje. */
+function porOSDiaDaRegra(os, hoje) {
+  const ch = typeof OPERACAO.chegadaConferida === 'function' ? OPERACAO.chegadaConferida(os) : null;
+  if (ch) return ch.dia;
+  const l = typeof OPERACAO.entregaLancadaValida === 'function' ? OPERACAO.entregaLancadaValida(os) : null;
+  return porOSDia(l && l.data) || porOSDia(os.finalizadaEm) || hoje;
+}
 /* O STATUS DA O.S.: o mesmo da ficha e do card (statusEntregaDe, app.js),
-   com a regra do dia e a volta; sem a app.js (teste), a mesma conta aqui. */
-function porOSStatusDe(os, todas, hoje) {
+   com a regra do dia do serviço e a volta; sem a app.js (teste), a mesma
+   conta aqui. A volta vem do índice das voltas da F17 (voltaNaLista), feito
+   uma vez por repintura. */
+function porOSStatusDe(os, todas, hoje, versoes) {
   if (typeof statusEntregaDe === 'function') return statusEntregaDe(os);
   if (typeof OPERACAO === 'undefined' || typeof OPERACAO.statusEntrega !== 'function') return null;
   let regra = null, volta = null;
   const ch = typeof OPERACAO.chegadaConferida === 'function' ? OPERACAO.chegadaConferida(os) : null;
-  try { if (typeof REGRAS !== 'undefined' && typeof versoesRegrasCasa === 'function') regra = REGRAS.regraVigente(versoesRegrasCasa(), ch ? ch.dia : hoje); } catch (e) { regra = null; }
+  try {
+    if (typeof REGRAS !== 'undefined') regra = REGRAS.regraVigente(versoes || (typeof versoesRegrasCasa === 'function' ? versoesRegrasCasa() : []), porOSDiaDaRegra(os, hoje));
+  } catch (e) { regra = null; }
   if (ch && typeof OPERACAO.voltaNaLista === 'function') try { volta = OPERACAO.voltaNaLista(os, todas); } catch (e) { volta = null; }
   try { return OPERACAO.statusEntrega(os, undefined, regra, volta); } catch (e) { return null; }
 }
@@ -393,27 +408,105 @@ function porOSCorDe(e) {
   // Sem a paleta carregada: a chave como veio, só se for só letras (vira nome de classe).
   return /^[a-z]{3,12}$/.test(String(e.cor || '')) ? e.cor : '';
 }
-// As equipes cadastradas (F06), com os integrantes pelo ID de hoje.
-function porOSEquipesCfg() {
-  const cfg = STORE.getCFG ? (STORE.getCFG() || {}) : {};
-  const eqs = ((cfg.performancePCP || {}).equipes || []).filter(e => e && e.id);
-  return eqs.map(e => {
-    const ids = new Set();
-    for (const m of Array.isArray(e.membros) ? e.membros : []) {
-      const bruto = typeof perfIdMembro === 'function' ? perfIdMembro(m) : String(m && (m.pessoaId || m.chave) || '').trim();
-      const id = /^\d{6}$/.test(bruto) ? bruto : OPERACAO.idPessoa(bruto);
-      if (id) ids.add(id);
-    }
-    if (/^\d{6}$/.test(String(e.liderPadraoId || ''))) ids.add(String(e.liderPadraoId));
-    return {id: String(e.id), nome: String(e.nome || e.id), ativo: e.ativo !== false, cor: porOSCorDe(e), e, ids};
+// As equipes cadastradas (F06): o id, o nome e a cor de hoje (o nome só exibe; o id é quem identifica).
+function porOSEquipesCfg(cfg) {
+  const eqs = (((cfg || {}).performancePCP || {}).equipes || []).filter(e => e && e.id);
+  return eqs.map(e => ({id: String(e.id), nome: String(e.nome || e.id), ativo: e.ativo !== false, cor: porOSCorDe(e), e}));
+}
+
+/* A EQUIPE DA O.S. É A QUE A PERFORMANCE CONTA (revisão da F18). A vista
+   deduzia a equipe por qualquer integrante em comum, e 10 de 86 O.S. da
+   prévia saíam com uma equipe que a Performance não dava (a O.S. só da Ana
+   ia para a Águia; a de duas equipes, para as duas). Agora é a régua do
+   perfRegistro (performance.js), vestida por PERF.comEquipes, a mesma da
+   tela da Performance: a divisão confirmada, a participação confirmada do
+   blob, ou a SUGESTÃO da apuração (PERF.sugestaoApurada: a equipe que a
+   divisão escolheu, ou a única equipe ativa daquela composição). A sugerida
+   vem marcada. Retirada no balcão e O.S. cancelada ficam fora da
+   Performance: aqui também não têm equipe. Sem o performance.js (cache
+   misto), nenhuma equipe: melhor nada do que uma equipe que a Performance
+   não conta. */
+function porOSReguaEquipe() {
+  if (typeof PERF === 'undefined' || !PERF || typeof PERF.comEquipes !== 'function' || typeof perfRegistro !== 'function' || typeof perfConfig !== 'function') return null;
+  try {
+    const c = perfConfig(), resolver = m => (typeof perfIdMembro === 'function' ? perfIdMembro(m) : String(m && m.chave || ''));
+    const comParticipacao = new Set((Array.isArray(c.participacoes) ? c.participacoes : []).map(p => p && String(p.id)));
+    return {c, opcoes: {resolver}, comParticipacao, porGente: new Map()};
+  } catch (e) { return null; }
+}
+/* [{id, como: 'divisao' | 'confirmada' | 'sugerida'}], na ordem da
+   Performance. A O.S. sem divisão e sem participação no blob só tem a
+   sugestão pela composição: a mesma gente dá a mesma equipe, e a conta é
+   feita uma vez por gente nesta pintura (1.500 O.S. de poucas equipes). */
+function porOSEquipesDe(card, st, regua) {
+  if (!regua || card.tipo === 'interno' || (st && st.estado === 'cancelado')) return [];
+  const aloc = card.alocacao && typeof card.alocacao === 'object' && !Array.isArray(card.alocacao);
+  const kGente = !aloc && !card._perf && !regua.comParticipacao.has(String(card.id)) ? JSON.stringify(OPERACAO.equipe(card)) : '';
+  if (kGente && regua.porGente.has(kGente)) return regua.porGente.get(kGente);
+  let r = null;
+  try {
+    const reg = perfRegistro(card, regua.c);
+    const regs = typeof perfUnirPessoas === 'function' ? perfUnirPessoas([reg]) : [reg];
+    r = PERF.comEquipes(regs, regua.c.equipes, regua.opcoes)[0] || null;
+  } catch (e) { return []; }
+  let out = [];
+  if (r && Array.isArray(r.grupos) && r.grupos.length)
+    out = r.grupos.filter(g => g && g.equipeId).map(g => ({id: String(g.equipeId), como: g.sugerida === true ? 'sugerida' : 'divisao'}));
+  else if (r && r.equipeId) out = [{id: String(r.equipeId), como: r.sugerida === true ? 'sugerida' : r.fonte === 'alocacao' ? 'divisao' : 'confirmada'}];
+  if (kGente) regua.porGente.set(kGente, out);
+  return out;
+}
+// As pessoas da O.S.: o ID, o nome de exibição e os nomes do RH (para a busca).
+function porOSPessoasDe(card) {
+  return OPERACAO.equipe(card).map(x => {
+    const id = OPERACAO.idPessoa(x), p = id && typeof OPERACAO.pessoaDe === 'function' ? OPERACAO.pessoaDe(x) : null;
+    return {entrada: String(x), id, nome: OPERACAO.nomePessoa(x), nomeRH: (p && p.nome) || '', apelido: (p && p.apelido) || '', freelancer: !!(p && p.freelancer === true)};
   });
 }
 
+/* A IMPRESSÃO DIGITAL DO QUE NÃO É A O.S. (revisão da F18): o dia, as
+   versões da regra, a régua de pessoas (o elenco do RH, com quem saiu, o
+   vinculosRH e a lista de instaladores: é ela que diz que "Ana" e 900001 são
+   a mesma pessoa, a mesma volta e a mesma equipe), as equipes e as
+   participações do blob. Mudou qualquer um, a memória inteira cai. O nome,
+   a cor e a logo da equipe não entram: são lidos de novo a cada pintura. */
+function porOSAssinatura(hoje, versoes, cfg) {
+  let d = null;
+  try { d = typeof OPERACAO.dadosPessoas === 'function' ? OPERACAO.dadosPessoas() : null; } catch (e) { d = null; }
+  if (!d || !Array.isArray(d.pessoas)) {
+    let el = {};
+    try { el = typeof STORE.elenco === 'function' ? (STORE.elenco() || {}) : {}; } catch (e) { el = {}; }
+    d = {pessoas: [...(el.pessoas || []), ...(el.antigos || [])], vinculos: cfg.vinculosRH, lista: cfg.instaladores};
+  }
+  const pessoas = d.pessoas.map(p => p && typeof p === 'object' ? [p.id, p.chave, p.nome, p.apelido, p.desligado === true, p.freelancer === true, p.idRepetido === true, p.ativo !== false] : null);
+  const perf = (cfg && cfg.performancePCP) || {};
+  const equipes = (Array.isArray(perf.equipes) ? perf.equipes : []).map(e => e && typeof e === 'object'
+    ? [e.id, e.ativo !== false, e.liderPadraoId || '', (Array.isArray(e.membros) ? e.membros : []).map(m => m && typeof m === 'object' ? [m.chave, m.pessoaId, m.nome, m.apelido] : m)] : null);
+  return JSON.stringify([hoje, (versoes || []).map(v => v && [v.id, v.versao, v.validaDesde]), pessoas, d.vinculos || [], d.lista || [], equipes, perf.participacoes || []]);
+}
+const porOSCarimbo = o => o ? `${o.id}:${o.atualizadoEm || ''}:${o.rev == null ? '' : o.rev}:${o.finalizadaEm || ''}` : '';
+/* A CHAVE DE UMA O.S. NA MEMÓRIA: o carimbo dela (id, atualizadoEm, rev e
+   finalização) e, quando ela tem chegada conferida, o de cada O.S. da mesma
+   volta: o retorno antecipado é medido pela volta, e mudar o previsto de
+   outra O.S. da volta muda o status desta. A volta sai do índice das voltas
+   da F17 (OPERACAO.voltaNaLista), montado uma vez por repintura e o mesmo que
+   o status usa: aqui não se monta outro. */
+function porOSChaveOS(o, todas) {
+  let k = porOSCarimbo(o);
+  // Sem chegada conferida, a volta é a própria O.S. (voltaNoIndice): nada mais entra na chave.
+  if (typeof OPERACAO.voltaNaLista === 'function') {
+    try { for (const x of OPERACAO.voltaNaLista(o, todas)) if (x !== o) k += '+' + porOSCarimbo(x); } catch (e) { k += '+?'; }
+  }
+  return k;
+}
+// Esvazia a memória da vista (a próxima pintura recalcula tudo).
+function porOSEsquecer() { _porOSMemo = {glob: '', st: new Map()}; }
+
 /* AS LINHAS DA VISTA, uma por O.S. da lista do ERP no período (a mesma lista
    da Tabela). Monta na pintura completa; os toques só filtram estas linhas.
-   O status é guardado por O.S. enquanto a "impressão digital" das O.S. do
-   aparelho (id, atualizadoEm, rev, finalizadaEm), o dia e as regras não
-   mudam: trocar o período não recalcula o que já foi calculado. */
+   O status, as pessoas e as equipes de cada O.S. ficam na memória enquanto a
+   chave dela e a impressão digital do resto não mudam: trocar o período, ou
+   uma O.S. mudar, não recalcula as outras. */
 function porOSMontar(erpLista, todas, hoje) {
   const hist = typeof STORE.historico === 'function' ? (STORE.historico() || []) : [];
   const porNumero = new Map(), doServidor = new Set();
@@ -423,35 +516,42 @@ function porOSMontar(erpLista, todas, hoje) {
     if (n && !porNumero.has(n)) { porNumero.set(n, o); doServidor.add(o.id); }
   }
   const versoes = typeof versoesRegrasCasa === 'function' ? (versoesRegrasCasa() || []) : [];
-  const fp = [hoje, todas.length, hist.length, JSON.stringify(versoes.map(v => v && [v.id, v.versao, v.validaDesde]))].join('|') + '#'
-    + todas.concat(hist).map(o => o ? `${o.id}:${o.atualizadoEm || ''}:${o.rev || ''}:${o.finalizadaEm || ''}` : '').join(',');
-  if (fp !== _porOSMemo.fp) _porOSMemo = {fp, st: new Map()};
-  const equipes = porOSEquipesCfg();
+  const cfg = typeof STORE.getCFG === 'function' ? (STORE.getCFG() || {}) : {};
+  const glob = porOSAssinatura(hoje, versoes, cfg);
+  if (glob !== _porOSMemo.glob) _porOSMemo = {glob, st: new Map()};
+  const equipes = porOSEquipesCfg(cfg), porId = new Map(equipes.map(e => [e.id, e]));
   const limite = typeof limiteJanelaCasa === 'function' ? limiteJanelaCasa() : '';
-  const linhas = [];
+  const linhas = [], usadas = new Set();
+  let regua;
   for (const erp of erpLista) {
     const numero = String(erp.numero || '').trim();
     const card = porNumero.get(numero) || null;
-    let st = null;
+    let m = null;
     if (card) {
-      if (_porOSMemo.st.has(card.id)) st = _porOSMemo.st.get(card.id);
-      else { st = porOSStatusDe(card, todas, hoje); _porOSMemo.st.set(card.id, st); }
+      const k = porOSChaveOS(card, todas);
+      m = _porOSMemo.st.get(card.id);
+      if (!m || m.k !== k) {
+        const st = porOSStatusDe(card, todas, hoje, versoes);
+        if (regua === undefined) regua = porOSReguaEquipe();
+        m = {k, st, pessoas: porOSPessoasDe(card), eqs: porOSEquipesDe(card, st, regua)};
+        _porOSMemo.st.set(card.id, m);
+      }
+      usadas.add(card.id);
     }
-    const pessoas = card ? OPERACAO.equipe(card).map(x => {
-      const id = OPERACAO.idPessoa(x), p = id && typeof OPERACAO.pessoaDe === 'function' ? OPERACAO.pessoaDe(x) : null;
-      return {entrada: String(x), id, nome: OPERACAO.nomePessoa(x), nomeRH: (p && p.nome) || '', apelido: (p && p.apelido) || '', freelancer: !!(p && p.freelancer === true)};
-    }) : [];
-    const eqs = card ? POR_OS.equipesDaOS(card, new Set(pessoas.map(p => p.id).filter(Boolean)), equipes) : [];
+    const st = m ? m.st : null, pessoas = m ? m.pessoas : [];
+    const eqs = m ? m.eqs.map(x => porId.has(x.id) ? {...porId.get(x.id), como: x.como} : {id: x.id, nome: 'Equipe que não existe mais', ativo: false, cor: '', e: null, como: x.como}) : [];
     const cliente = String(erp.cliente || (card && card.cliente) || '').trim();
     const valor = erp.valor !== null && erp.valor !== undefined && erp.valor !== '' && Number.isFinite(Number(erp.valor)) ? Number(erp.valor) : null;
     linhas.push({
-      numero, erp, card, st, valor, cliente, doServidor: !!(card && doServidor.has(card.id)),
+      numero, erp, card, st, valor, cliente, interno: (card || erp).tipo === 'interno', doServidor: !!(card && doServidor.has(card.id)),
       fora: !card && !!porOSDia(erp.data) && !!limite && porOSDia(erp.data) < limite,
       chave: card ? POR_OS.chaveStatus(st) : 'sem_ficha',
       pessoas, equipes: eqs,
       busca: POR_OS.textoBusca([numero, cliente, card && card.cliente, ...pessoas.flatMap(p => [p.nome, p.nomeRH, p.apelido, p.id, p.entrada]), ...eqs.map(e => e.nome)]),
     });
   }
+  // Só as O.S. das últimas listas ficam: trocar muito de período não faz a memória crescer sem fim.
+  if (_porOSMemo.st.size > usadas.size + 3000) for (const id of [..._porOSMemo.st.keys()]) if (!usadas.has(id)) _porOSMemo.st.delete(id);
   _porOSDados = {linhas, equipes, versoes, hoje, total: linhas.length, verValor: porOSVerValor()};
   return _porOSDados;
 }
@@ -488,6 +588,13 @@ function porOSAvisoKpiHTML() {
 }
 function porOSAvisoKpiTexto() {
   return 'Estes cartões são o total do ERP no período e não seguem os filtros da vista Por O.S. O número com os filtros está na própria vista, mais abaixo.';
+}
+/* O PERÍODO SEM NENHUMA O.S. com os filtros da vista ligados (revisão da
+   F18): a vista não aparece, então o aviso do topo (que aponta para ela) não
+   aparece; os filtros guardados ganham o "Limpar filtros" aqui. */
+function porOSVazioPeriodoHTML() {
+  if (!porOSTemFiltro(porOSFiltro())) return '';
+  return `<p class="poros-vazio" id="ent-poros-vazio">Os filtros da vista Por O.S. continuam ligados e valem quando o período tiver O.S. <button type="button" class="btn-ghost btn-sm" data-poros-limpar>Limpar filtros</button></p>`;
 }
 // A seção inteira: os filtros e o corpo. Os filtros de equipe e busca não se repintam no toque (o foco fica no campo).
 function porOSSecaoHTML() {
@@ -578,6 +685,8 @@ function porOSRetornoTxt(l) {
 function porOSComissaoHTML(l) {
   const {card, st} = l;
   const nota = t => `<small>${esc(t)}</small>`;
+  // A retirada no balcão fica fora da Performance (perfFonte pula a O.S. interna): não há comissão a prever (revisão da F18).
+  if (l.interno) return nota('retirada no balcão fica fora da performance');
   if (!card || !st) return nota('sem ficha neste aparelho');
   if (typeof REGRAS === 'undefined' || !REGRAS || typeof REGRAS.regraVigente !== 'function') return nota('a regra do programa não carregou nesta aba');
   const dia = st.dataEntrega || porOSDia(l.erp.data);
@@ -596,16 +705,24 @@ function porOSComissaoHTML(l) {
   const centavos = REGRAS.comissaoCentavos(Math.round(l.valor * 100), regra);
   return `<b>${esc(dinheiroCasa(centavos / 100))}</b> ${nota(`prevista, ${pct} da O.S. que pontua${provisoria}`)}`;
 }
-function porOSCargaTxt(numero) {
+/* O QUE O SERVIDOR RESPONDEU sobre a O.S. sem ficha. "Nunca passou pelo
+   PCP" só depois que o servidor disser que não tem (revisão da F18): o
+   aparelho guarda só as finalizadas dos últimos dias, e a O.S. finalizada no
+   PCP antes disso (com a baixa do ERP dias depois) está no servidor. */
+function porOSCargaTxt(numero, interno) {
   return {carregando: 'Procurando no servidor…', offline: 'Sem rede: tente de novo quando houver sinal.', erro: 'O servidor não respondeu: tente de novo.',
-    nao: 'O servidor também não tem esta O.S. no PCP: ela saiu pelo ERP sem passar pelo PCP.',
+    nao: interno ? 'O servidor também não tem esta retirada no PCP: ela saiu pelo ERP e nunca passou pelo PCP.'
+      : 'O servidor também não tem esta O.S. no PCP: ela saiu pelo ERP e nunca passou pelo PCP.',
     'nao-periodo': 'Não veio na busca do período: procure só esta.'}[_porOSCarga.get(numero)] || '';
 }
+const POR_OS_TITULO_EQ = {divisao: 'Equipe da divisão da O.S.', confirmada: 'Equipe confirmada na Performance',
+  sugerida: 'Equipe sugerida pela Performance, ainda não confirmada'};
 function porOSCardHTML(l) {
   const d = _porOSDados, f = porOSFiltro(), c = l.card, st = l.st;
-  const interno = (c || l.erp).tipo === 'interno';
+  const interno = l.interno, estado = _porOSCarga.get(l.numero);
   const janela = typeof janelaLocalCasa === 'function' ? janelaLocalCasa() : 60;
-  const selo = st ? porOSSeloHTML(st) : `<span class="selo-entrega se-agendado">${l.fora ? 'sem cópia no aparelho' : interno ? 'retirada sem ficha' : 'fora do PCP'}</span>`;
+  const seloSem = estado === 'nao' ? 'fora do PCP' : l.fora ? 'sem cópia no aparelho' : interno ? 'retirada sem ficha no aparelho' : 'sem ficha no aparelho';
+  const selo = st ? porOSSeloHTML(st) : `<span class="selo-entrega se-agendado">${seloSem}</span>`;
   const endereco = c && String(c.endereco || '').trim() ? `<p class="poros-end"><span aria-hidden="true">📍</span> ${esc(String(c.endereco).trim())}</p>` : '';
   const motivo = st && st.motivo ? `<p class="poros-motivo">${esc(POR_OS.cap(st.motivo))}.</p>` : '';
   const fatos = [['Prazo × entrega', esc(porOSPrazoTxt(l))]];
@@ -617,7 +734,8 @@ function porOSCardHTML(l) {
   const fatosHTML = `<dl class="poros-fatos">${fatos.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
   let corpo = '';
   if (c) {
-    const eqs = l.equipes.map(e => `<span class="poros-eq${e.cor ? ` perf-cor-${esc(e.cor)} perf-com-cor` : ''}${e.como === 'pessoas' ? ' pelas-pessoas' : ''}" title="${e.como === 'divisao' ? 'Equipe da divisão da O.S.' : 'Equipe de quem está na O.S. (sem divisão gravada)'}">${porOSLogoHTML(e)}<span>${esc(e.nome)}</span></span>`).join('');
+    // A equipe que a Performance conta; a sugerida (ainda não confirmada) vem marcada, como na Performance.
+    const eqs = l.equipes.map(e => `<span class="poros-eq${e.cor ? ` perf-cor-${esc(e.cor)} perf-com-cor` : ''}${e.como === 'sugerida' ? ' sugerida' : ''}" title="${esc(POR_OS_TITULO_EQ[e.como] || '')}">${porOSLogoHTML(e)}<span>${esc(e.nome)}</span>${e.como === 'sugerida' ? ' <small class="poros-sugerida">sugerida</small>' : ''}</span>`).join('');
     const gente = l.pessoas.map(p => `<span class="poros-pessoa">${esc(p.nome)}${p.freelancer ? ' <small class="tag-freelancer">Freelancer</small>' : ''}</span>`).join('');
     const equipe = eqs || gente ? eqs + gente : `<span class="poros-sem-equipe">${interno ? 'retirada no balcão' : 'sem equipe na O.S.'}</span>`;
     const abonar = typeof abonarCardHTML === 'function' ? abonarCardHTML(c, st) : '';
@@ -627,12 +745,16 @@ function porOSCardHTML(l) {
         <div class="poros-acoes"><button type="button" class="btn-ghost btn-sm poros-abrir" data-os-id="${esc(c.id)}" aria-label="Abrir a ficha da O.S ${esc(l.numero)}">Abrir a ficha</button>${abonar}</div>
         <details class="poros-tl" data-poros-tl="${esc(c.id)}"${aberta ? ' open' : ''}><summary>Linha do tempo</summary><div class="poros-tl-corpo">${aberta ? porOSLinhaHTML(l) : ''}</div></details>`;
   } else {
-    const carga = porOSCargaTxt(l.numero), estado = _porOSCarga.get(l.numero);
-    const botao = l.fora && typeof STORE.buscarHistorico === 'function' && estado !== 'carregando' && estado !== 'nao'
-      ? `<button type="button" class="btn-ghost btn-sm" data-poros-carregar="${esc(l.numero)}">Carregar do servidor</button>` : '';
-    const texto = l.fora ? `Entregue há mais de ${janela} dias: o aparelho guarda só os últimos ${janela}.`
-      : interno ? 'Retirada no balcão que não passou pelo PCP.' : 'O ERP entregou, mas esta O.S. nunca passou pelo PCP.';
-    corpo = `<div class="poros-aviso"><span>${esc(texto)}${carga ? ' ' + esc(carga) : ''}</span>${botao}</div>`;
+    /* TODA LINHA SEM FICHA pode estar no servidor (revisão da F18): o
+       aparelho guarda só as finalizadas dos últimos dias pela finalização no
+       PCP, e o ERP dá a entrega pela data dele. Toda linha ganha "Procurar no
+       servidor"; "nunca passou pelo PCP" só depois da resposta. */
+    const carga = porOSCargaTxt(l.numero, interno);
+    const botao = typeof STORE.buscarHistorico === 'function' && estado !== 'carregando' && estado !== 'nao'
+      ? `<button type="button" class="btn-ghost btn-sm" data-poros-carregar="${esc(l.numero)}">Procurar no servidor</button>` : '';
+    const texto = estado === 'nao' ? '' : l.fora ? `Entregue há mais de ${janela} dias: o aparelho guarda só os últimos ${janela}.`
+      : `${interno ? 'Retirada no balcão' : 'O.S.'} sem ficha neste aparelho, que guarda só as finalizadas no PCP nos últimos ${janela} dias.`;
+    corpo = `<div class="poros-aviso"><span>${esc([texto, carga].filter(Boolean).join(' '))}</span>${botao}</div>`;
   }
   return `<article class="poros-card pc-${esc(l.chave)}" aria-label="O.S ${esc(l.numero)}">
       <header class="poros-cab">
@@ -702,16 +824,90 @@ function porOSMais() {
   const alvo = primeiro && primeiro.querySelector('button');
   if (alvo) try { alvo.focus(); } catch (e) { /* sem foco, segue */ }
 }
-// A busca com o cursor dentro sobrevive à repintura completa (a tela repinta a cada mês que chega do ERP).
+/* O FOCO NA REPINTURA COMPLETA (revisão da F18). A tela repinta a cada mês
+   que chega do ERP (~10 s), e o foco ia para o corpo da página: quem estava
+   no chip, no "Mostrar mais" ou na busca perdia o lugar. Antes de repintar,
+   guarda um seletor do elemento com foco dentro da vista (o id, o atributo
+   data- dele, ou o resumo da linha do tempo); depois, devolve o foco a ele
+   (e a seleção da busca). */
+const porOSAspas = v => '"' + String(v).replace(/["\\]/g, '\\$&') + '"';
+function porOSDentro(sec, a) {
+  if (!sec || !a || a === sec) return false;
+  if (typeof sec.contains === 'function') return sec.contains(a);
+  return !!(typeof a.closest === 'function' && a.closest('#ent-poros'));
+}
+function porOSSeletorDe(a) {
+  if (!a || typeof a.getAttribute !== 'function') return '';
+  if (a.id && /^[A-Za-z][\w-]*$/.test(a.id)) return '#' + a.id;
+  for (const nome of ['data-poros-status', 'data-poros-carregar', 'data-poros-diario', 'data-abonar-os', 'data-os-id']) {
+    const v = a.getAttribute(nome);
+    if (v != null) return `[${nome}=${porOSAspas(v)}]`;
+  }
+  for (const nome of ['data-poros-mais', 'data-poros-limpar', 'data-poros-antigas']) if (a.getAttribute(nome) != null) return `[${nome}]`;
+  if (String(a.tagName || '').toUpperCase() === 'SUMMARY') {
+    const det = a.parentElement, id = det && typeof det.getAttribute === 'function' ? det.getAttribute('data-poros-tl') : null;
+    if (id != null) return `details[data-poros-tl=${porOSAspas(id)}] > summary`;
+  }
+  return '';
+}
 function porOSGuardarFoco() {
-  const a = typeof document !== 'undefined' ? document.activeElement : null;
-  if (!a || a.id !== 'poros-busca') return null;
-  const ini = a.selectionStart, fim = a.selectionEnd;
+  if (typeof document === 'undefined') return null;
+  const a = document.activeElement, sec = document.getElementById('ent-poros');
+  if (!porOSDentro(sec, a)) return null;
+  const sel = porOSSeletorDe(a);
+  if (!sel) return null;
+  let ini = null, fim = null;
+  try { if (typeof a.selectionStart === 'number') { ini = a.selectionStart; fim = a.selectionEnd; } } catch (e) { /* campo sem seleção */ }
   return () => {
-    const i = document.getElementById('poros-busca');
-    if (!i) return;
-    try { i.focus(); if (ini != null) i.setSelectionRange(ini, fim); } catch (e) { /* campo sem seleção */ }
+    const s = document.getElementById('ent-poros'), alvo = s && typeof s.querySelector === 'function' ? s.querySelector(sel) : null;
+    if (!alvo || typeof alvo.focus !== 'function') return;
+    try {
+      alvo.focus({preventScroll: true});
+      if (ini != null && typeof alvo.setSelectionRange === 'function') alvo.setSelectionRange(ini, fim);
+    } catch (e) { /* sem foco, segue */ }
   };
+}
+/* O SELECT ABERTO NÃO FECHA (revisão da F18): a repintura completa troca o
+   select por outro e fecha a lista na mão de quem escolhe. Com o foco num
+   select da vista, renderEntregas espera: quando o foco sai, repinta. Se o
+   foco saiu por um clique (num chip, num botão), a repintura espera o clique
+   terminar, senão o botão some debaixo do dedo e o clique se perde. */
+let _porOSAdiada = null, _porOSPonteiro = false, _porOSVigia = false;
+function porOSVigiarPonteiro() {
+  if (_porOSVigia || typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+  _porOSVigia = true;
+  const solta = () => { _porOSPonteiro = false; };
+  document.addEventListener('pointerdown', () => { _porOSPonteiro = true; }, true);
+  document.addEventListener('pointerup', solta, true);
+  document.addEventListener('pointercancel', solta, true);
+}
+function porOSAdiarRepintura() {
+  if (typeof document === 'undefined') return false;
+  const a = document.activeElement;
+  if (!a || String(a.tagName || '').toUpperCase() !== 'SELECT' || !porOSDentro(document.getElementById('ent-poros'), a)) return false;
+  if (_porOSAdiada === a) return true;
+  _porOSAdiada = a;
+  if (typeof a.addEventListener === 'function') a.addEventListener('blur', () => porOSRepintarAdiada(a), {once: true});
+  return true;
+}
+function porOSRepintarAdiada(a) {
+  if (_porOSAdiada !== a) return;
+  const ir = () => { if (_porOSAdiada !== a) return; _porOSAdiada = null; renderEntregas(); };
+  const depois = () => { if (typeof setTimeout === 'function') setTimeout(ir, 0); else ir(); };
+  if (!_porOSPonteiro || typeof document.addEventListener !== 'function') { depois(); return; }
+  const solta = () => { document.removeEventListener('pointerup', solta, true); document.removeEventListener('pointercancel', solta, true); depois(); };
+  document.addEventListener('pointerup', solta, true);
+  document.addEventListener('pointercancel', solta, true);
+}
+// "Limpar filtros", na vista ou no período vazio: zera os filtros e repinta.
+function porOSLimparFiltros() {
+  const f = porOSFiltro();
+  f.status = ''; f.equipe = ''; f.busca = ''; f.limite = POR_OS_LOTE;
+  const sec = typeof document !== 'undefined' ? document.getElementById('ent-poros') : null;
+  if (!sec || typeof sec.querySelector !== 'function') { renderEntregas(); return; }
+  const i = sec.querySelector('#poros-busca'); if (i) i.value = '';
+  const s = sec.querySelector('#poros-equipe'); if (s) s.value = '';
+  pintarPorOS('#poros-busca');
 }
 function porOSRepintarLinha(id) {
   const sec = document.getElementById('ent-poros');
@@ -769,6 +965,13 @@ async function porOSCarregarAntigas() {
 }
 // Liga a seção (uma vez por pintura completa): um ouvinte para os botões, a busca, a equipe e a linha do tempo.
 function ligarPorOS(el) {
+  porOSVigiarPonteiro();
+  // O período sem O.S. com os filtros ligados: o "Limpar filtros" fica fora da vista (porOSVazioPeriodoHTML).
+  const vazio = el && el.querySelector ? el.querySelector('#ent-poros-vazio') : null;
+  if (vazio && typeof vazio.addEventListener === 'function') vazio.addEventListener('click', ev => {
+    const b = ev.target && ev.target.closest ? ev.target.closest('[data-poros-limpar]') : null;
+    if (b) porOSLimparFiltros();
+  });
   const sec = el && el.querySelector ? el.querySelector('#ent-poros') : null;
   if (!sec || typeof sec.addEventListener !== 'function') return;
   sec.addEventListener('click', ev => {
@@ -779,12 +982,8 @@ function ligarPorOS(el) {
       const k = b.dataset.porosStatus || '';
       f.status = f.status === k ? '' : k; f.limite = POR_OS_LOTE;
       pintarPorOS(`[data-poros-status="${f.status}"]`);
-    } else if (b.hasAttribute('data-poros-limpar')) {
-      f.status = ''; f.equipe = ''; f.busca = ''; f.limite = POR_OS_LOTE;
-      const i = sec.querySelector('#poros-busca'); if (i) i.value = '';
-      const s = sec.querySelector('#poros-equipe'); if (s) s.value = '';
-      pintarPorOS('#poros-busca');
-    } else if (b.hasAttribute('data-poros-mais')) porOSMais();
+    } else if (b.hasAttribute('data-poros-limpar')) porOSLimparFiltros();
+    else if (b.hasAttribute('data-poros-mais')) porOSMais();
     else if (b.dataset.porosCarregar) porOSCarregar(b.dataset.porosCarregar);
     else if (b.hasAttribute('data-poros-antigas')) porOSCarregarAntigas();
     else if (b.dataset.porosDiario) porOSCarregarDiario(b.dataset.porosDiario);
