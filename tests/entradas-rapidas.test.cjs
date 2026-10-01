@@ -91,7 +91,8 @@ test('F24: desfazer o Liberar carro devolve os carimbos, na tela e no servidor (
   b.abrir('1');
   b.tocar('#btn-liberar-carro');
   assert.deepEqual(b.perguntas, [], 'liberar não pergunta');
-  assert.ok(b.toasts.some(([m, t]) => m === 'Carro liberado' && t === 'desfazer'), JSON.stringify(b.toasts));
+  // O aviso diz a ação e a O.S. (revisão da F24, M1).
+  assert.ok(b.toasts.some(([m, t]) => m === 'Carro da O.S. 9101 liberado' && t === 'desfazer'), JSON.stringify(b.toasts));
   await b.esvaziar();
   let g = gravada(b.e);
   assert.equal(g.carroLiberado, true);
@@ -108,18 +109,20 @@ test('F24: desfazer o Liberar carro devolve os carimbos, na tela e no servidor (
   assert.equal(g.carroLiberadoEm, '');
   assert.equal(g.carroLiberadoPorId ?? '', '', 'nem o ID de quem liberou');
   assert.ok(em, 'a liberação tinha um carimbo de hora');
-  assert.ok(b.toasts.some(([m, t]) => m === 'Desfeito' && t === 'success'));
+  assert.ok(b.toasts.some(([m, t]) => m === 'Desfeito: o carro da O.S. 9101 voltou a não estar liberado.' && t === 'success'), JSON.stringify(b.toasts));
 });
 
-test('F24: Cancelar o carro no mesmo dia da confirmação não pergunta; o Desfazer devolve quem liberou, a hora e o ID', async () => {
+/* Revisão da F24 (A2, decisão do dono): o Cancelar do carro VOLTA a perguntar
+   antes; o aviso com Desfazer fica como segunda proteção. */
+test('F24: Cancelar o carro no mesmo dia da confirmação pergunta; o aviso traz o Desfazer, que devolve quem liberou, a hora e o ID', async () => {
   const b = await bancada({registros: [row('1', agendada({confirmacao: 'Confirmado', confPor: 'Gestor Teste', confEm: agora(), confHora: '08:00'}))]});
   b.abrir('1');
   b.tocar('#btn-liberar-carro');
   await b.esvaziar();
   const antes = gravada(b.e);
   b.tocar('#btn-cancelar-carro');
-  assert.deepEqual(b.perguntas, [], 'o Desfazer entra no lugar da pergunta');
-  assert.ok(b.toasts.some(([m, t]) => m === 'Carro cancelado' && t === 'desfazer'));
+  assert.deepEqual(b.perguntas, ['Cancelar o carro liberado da O.S. 9101?\n\nDá para desfazer no aviso que aparece em seguida.']);
+  assert.ok(b.toasts.some(([m, t]) => m === 'Liberação do carro da O.S. 9101 cancelada' && t === 'desfazer'), JSON.stringify(b.toasts));
   await b.esvaziar();
   assert.equal(gravada(b.e).carroLiberado, false);
   // Caso ruim: devolver só o "true" carimbaria quem desfez, e a hora de agora.
@@ -139,8 +142,10 @@ test('F24: Cancelar o carro liberado em outro dia que não o da confirmação co
   b.abrir('1');
   assert.equal(b.run('podeVoltarCarro(_modalDraft)'), false);
   b.tocar('#btn-cancelar-carro');
-  assert.deepEqual(b.perguntas, ['Cancelar o carro liberado desta O.S.?']);
+  // A pergunta diz o que custa voltar (revisão da F24, A2): aqui a confirmação é de hoje, e liberar de novo é só tocar em Liberar.
+  assert.deepEqual(b.perguntas, ['Cancelar o carro liberado da O.S. 9101?\n\nPara liberar de novo, toque em Liberar: o carro volta liberado com a hora de agora.']);
   assert.ok(!b.toasts.some(([, t]) => t === 'desfazer'), 'sem o Desfazer que levaria 422');
+  assert.ok(b.toasts.some(([m]) => /^Liberação do carro da O\.S\. 9101 cancelada\. Para liberar de novo, toque em Liberar/.test(m)), 'o aviso de depois também diz (revisão da F24, B3)');
   await b.esvaziar();
   assert.equal(gravada(b.e).carroLiberado, false);
   // A régua é a do servidor: a liberação de volta com outro dia é recusada lá.
@@ -169,11 +174,15 @@ test('F24: o Desfazer do Confirmei apaga a confirmação no servidor (e o confRe
   const c = await bancada({registros: [row('1', agendada({confirmacao: 'Confirmado', confPor: 'Outra Pessoa', confEm: ontem(), confHora: '09:00'}))]});
   c.abrir('1');
   c.tocar('#btn-confirmei');
-  assert.ok(c.toasts.some(([m, t]) => m === 'Cliente confirmado' && t === 'success'));
+  // O aviso sem Desfazer é diferente do aviso com Desfazer (revisão da F24, B3).
+  assert.ok(c.toasts.some(([m, t]) => m === 'Confirmação do cliente da O.S. 9101 renovada para agora.' && t === 'success'), JSON.stringify(c.toasts));
   assert.equal(c.desfazer.length, 0, 'sem Desfazer');
 });
 
-test('F24: Liberar do PCP e Cancelar a liberação se desfazem num toque, sem pergunta; o ID de quem liberou volta com o par', async () => {
+/* Revisão da F24 (B5, decisão do dono): o Cancelar da liberação VOLTA a
+   perguntar antes (liberar de novo recomeça a contagem de espera); o aviso
+   com Desfazer fica como segunda proteção. */
+test('F24: Liberar do PCP se desfaz num toque; Cancelar a liberação pergunta e também se desfaz; o ID de quem liberou volta com o par', async () => {
   const b = await bancada({registros: [row('1', agendada({liberadoPCP: false, aptoPor: '', aptoEm: ''}))]});
   b.abrir('1');
   b.tocar('#btn-liberar');
@@ -183,7 +192,8 @@ test('F24: Liberar do PCP e Cancelar a liberação se desfazem num toque, sem pe
   assert.equal(g.aptoPorId, '111222');
   const par = [g.aptoPor, g.aptoEm];
   b.tocar('#btn-cancelar-liberar');
-  assert.deepEqual(b.perguntas, [], 'a pergunta saiu');
+  assert.equal(b.perguntas.length, 1, 'a pergunta voltou');
+  assert.match(b.perguntas[0], /^Cancelar a liberação do PCP da O\.S\. 9101\?\n\nSe liberar de novo depois, a contagem de dias de espera recomeça\./);
   await b.esvaziar();
   assert.equal(gravada(b.e).liberadoPCP, false);
   b.desfazer.at(-1)();
@@ -209,7 +219,7 @@ test('F24: o Desfazer não mexe se a O.S. mudou depois (confirmou e liberou o ca
   const d = b.draft();
   assert.equal(d.confirmacao, 'Confirmado', 'a confirmação fica: o carro saiu em cima dela');
   assert.equal(d.carroLiberado, true);
-  assert.ok(b.toasts.some(([m, t]) => /Não deu para desfazer: a O\.S\. mudou depois/.test(m) && t === 'error'));
+  assert.ok(b.toasts.some(([m, t]) => /Não deu para desfazer: a O\.S\. 9101 mudou depois/.test(m) && t === 'error'));
 });
 
 /* ───────────── 3. Desfazer: Finalizar da ficha ───────────── */
@@ -229,7 +239,7 @@ test('F24: o Desfazer do Finalizar da ficha volta a finalização e desfaz as ma
   b.run(`perguntarRetrabalho = (d, fn) => { d.retrabalhoPerguntado = {em: nowISO(), por: STATE.user.nome, resposta: 'nao'}; fn(); };
     finalizarComSaldo = (os, seguir) => seguir('marcar');`);
   b.run('finalizarDaFicha(false)');
-  assert.ok(b.toasts.some(([m, t]) => /^Instalação finalizada 🏁 · 2 itens marcados entregues hoje$/.test(m) && t === 'desfazer'), JSON.stringify(b.toasts));
+  assert.ok(b.toasts.some(([m, t]) => /^Instalação da O\.S\. 9105 finalizada 🏁 · 2 itens marcados entregues hoje$/.test(m) && t === 'desfazer'), JSON.stringify(b.toasts));
   await b.esvaziar();
   let g = gravada(b.e);
   assert.ok(g.finalizadaEm);
@@ -246,8 +256,16 @@ test('F24: o Desfazer do Finalizar da ficha volta a finalização e desfaz as ma
   for (const id of marcas) assert.ok(g.itens.some(it => (it.entregas || []).some(x => x.tipo === 'desfeito' && x.alvo === id)), 'cada marca ganhou o desfeito');
   assert.ok(!g.itens.some(it => (it.entregas || []).some(x => x.tipo === 'desfeito' && x.alvo === 'mk-parcial')), 'a entrega de antes da finalização fica');
   assert.ok(g.reabertaEm, 'o rastro do servidor: desfazer a finalização que chegou lá é reabrir');
-  assert.equal(g.retrabalhoPerguntado.resposta, 'nao', 'a resposta do retrabalho fica (só a gestão responde por ela)');
-  assert.ok(b.toasts.some(([m]) => m === 'Desfeito: a finalização e 2 marcas de entrega'));
+  /* TROCADO NA REVISÃO DA F24 (corretude M1): este teste fixava "a resposta do
+     retrabalho fica", e era o defeito. A pergunta do retrabalho é parte do
+     mesmo gesto do Finalizar: o "Não" numa O.S. marcada desmarca o
+     retrabalho, e o Desfazer que não a devolvesse deixava a O.S. sem
+     retrabalho (pontuando) depois do "Desfeito". Agora a resposta dada no
+     gesto volta junto: aqui a O.S. não tinha resposta antes, e volta a não
+     ter (a gestão, admin e pcp, responde e desfaz; ver
+     entradas-rapidas-revisao.test.cjs). */
+  assert.equal(g.retrabalhoPerguntado ?? null, null, 'a resposta dada no mesmo gesto voltou com o Desfazer');
+  assert.ok(b.toasts.some(([m]) => m === 'Desfeito: a O.S. 9105 voltou a ficar aberta, 2 marcas de entrega desfeitas e a resposta do retrabalho voltou a ser a de antes.'), JSON.stringify(b.toasts));
 });
 
 test('F24: quem não desfaz marca de entrega (operação) não recebe o Desfazer da finalização que marcou saldo', async () => {
@@ -336,14 +354,16 @@ test('F24: tirar alguém da equipe na ficha se desfaz num toque: a equipe da O.S
   t.run(`openModal(STORE.getOS('f1'))`);
   t.clicar('ficha-equipe', {alocAcao: 'remover', g: '0', p: '100002'});
   assert.deepEqual(t.salvos.at(-1).equipe, ['100001'], 'tirar grava na hora, como sempre');
-  assert.ok(t.toasts.some(([m, tp]) => m === 'Bia saiu da equipe.' && tp === 'desfazer'), JSON.stringify(t.toasts));
+  assert.ok(t.toasts.some(([m, tp]) => m === 'Bia saiu da equipe da O.S. 8001.' && tp === 'desfazer'), JSON.stringify(t.toasts));
   t.desfazer.at(-1)();
   assert.deepEqual(t.salvos.at(-1).equipe, ['100002', '100001'], 'a equipe de antes, na ordem de antes (não a ordem do componente)');
   assert.deepEqual(js(t.run(`ALOCUI.paraEquipe('ficha-eq:f1').equipe`)).sort(), ['100001', '100002']);
-  assert.ok(t.toasts.some(([m, tp]) => m === 'Desfeito' && tp === 'success'));
+  assert.ok(t.toasts.some(([m, tp]) => m === 'Desfeito: Bia voltou para a equipe da O.S. 8001.' && tp === 'success'), JSON.stringify(t.toasts));
 });
 
-test('F24: o Desfazer da tirada não mexe se a equipe mudou depois; o da última tirada vale', () => {
+/* Revisão da F24 (M1): as tiradas seguidas da mesma O.S. viram um aviso só,
+   que devolve todas; o aviso velho, se ainda for tocado, não mexe. */
+test('F24: o Desfazer da tirada não mexe se a equipe mudou depois; o da última tirada devolve as duas', () => {
   const t = telaFicha({lista: [osFicha({equipe: ['100001', '100002']})]});
   t.run(`openModal(STORE.getOS('f1'))`);
   t.clicar('ficha-equipe', {alocAcao: 'remover', g: '0', p: '100002'});
@@ -353,9 +373,9 @@ test('F24: o Desfazer da tirada não mexe se a equipe mudou depois; o da última
   const n = t.salvos.length;
   primeiro();
   assert.equal(t.salvos.length, n, 'nada gravado');
-  assert.ok(t.toasts.some(([m, tp]) => /Não deu para desfazer: a O\.S\. mudou depois/.test(m) && tp === 'error'));
+  assert.ok(t.toasts.some(([m, tp]) => /Não deu para desfazer: a O\.S\. 8001 mudou depois/.test(m) && tp === 'error'));
   t.desfazer.at(-1)();
-  assert.deepEqual(t.salvos.at(-1).equipe, ['100001']);
+  assert.deepEqual(t.salvos.at(-1).equipe, ['100001', '100002'], 'as duas voltam, na ordem de antes');
 });
 
 test('F24: no componente, voltar a tirada depois de outra mudança é recusado com o motivo (ALOCUI)', () => {
@@ -384,8 +404,9 @@ test('F24: capture="environment" só nas fotos de antes e de depois, com a galer
   const layout = inputs('data-foto-input="layoutFotoId"');
   assert.equal(layout.length, 1);
   assert.doesNotMatch(layout[0], /capture=/, 'o Layout costuma vir do WhatsApp: galeria');
-  assert.match(h, /Fotos de antes \(check-in;/);
-  assert.match(h, /Fotos de depois \(serviço pronto;/);
+  // Os rótulos da revisão da F24 (B2): os mesmos do celular.
+  assert.match(h, /Fotos de antes \(ao chegar, antes de começar\)/);
+  assert.match(h, /Fotos de depois \(serviço pronto\)/);
   // A foto da ficha nasce com o id da O.S. (as três chamadas da ficha passam o id).
   const app = ler('app.js');
   assert.equal((app.match(/STORE\.pushPhoto\((?:f|file), draft\.id\)/g) || []).length, 3);
@@ -538,7 +559,8 @@ test('F24: o cliente é achado com erro de digitação, a partir dos clientes da
   assert.equal(t.ctx.__inp.attrs['aria-controls'], 'cli-sug');
   t.ctx.__inp.value = 'padaira sao jose'; ouv.input();
   assert.equal(caixa.hidden, false);
-  assert.match(caixa.innerHTML, /Você quis dizer<\/p><button type="button" role="option" class="cli-sug-op" data-cli-nome="Padaria São José">/);
+  // As opções não entram no Tab (revisão da F24, M3): tabindex -1, e as setas destacam pelo aria-activedescendant.
+  assert.match(caixa.innerHTML, /Você quis dizer<\/p><button type="button" role="option" tabindex="-1" id="cli-sug-op-0" aria-selected="false" class="cli-sug-op" data-cli-nome="Padaria São José">/);
   // A O.S. do ERP (cliente travado) não liga a lista.
   const ouv2 = {};
   t.ctx.__inp2 = {readOnly: true, setAttribute() {}, addEventListener: (tp, fn) => { ouv2[tp] = fn; }};
@@ -640,7 +662,7 @@ test('F24: o celular do instalador (equipe.js) só mudou os rótulos de antes e 
   const atual = ler('equipe.js');
   // A troca que a F24 fez, ao contrário: desfeita, o arquivo é byte a byte o da v143 (5fbf568).
   const TROCAS = [
-    ['Fotos de check-in, ao chegar (pelo menos 1 para finalizar)', 'Fotos de antes (check-in, ao chegar; pelo menos 1 para finalizar)'],
+    ['Fotos de check-in, ao chegar (pelo menos 1 para finalizar)', 'Fotos de antes (ao chegar, antes de começar; pelo menos 1 para finalizar)'],
     ['📷 Foto de check-in', '📷 Tirar foto de antes'],
     ['Fotos do serviço pronto (pelo menos 1 para finalizar)', 'Fotos de depois (serviço pronto; pelo menos 1 para finalizar)'],
     ['<span class="foto-hint">📷 Tirar foto</span><input type="file" accept="image/*" capture="environment" data-retorno>', '<span class="foto-hint">📷 Tirar foto de depois</span><input type="file" accept="image/*" capture="environment" data-retorno>'],
@@ -656,7 +678,7 @@ test('F24: o celular do instalador (equipe.js) só mudou os rótulos de antes e 
   assert.equal(crypto.createHash('sha256').update(velho).digest('hex'), BASE_V143, 'fora os rótulos, nada mudou no celular');
   // A gestão usa os mesmos rótulos.
   const app = ler('app.js');
-  assert.match(atual, /Fotos de antes \(check-in/); assert.match(app, /Fotos de antes \(check-in/);
+  assert.match(atual, /Fotos de antes \(ao chegar, antes de começar/); assert.match(app, /Fotos de antes \(ao chegar, antes de começar/);
   assert.match(atual, /Fotos de depois \(serviço pronto/); assert.match(app, /Fotos de depois \(serviço pronto/);
   assert.match(atual, /📷 Tirar foto de antes/); assert.match(app, /📷 Tirar foto de \$\{quando\}/);
   // O celular não chama nada da F24.

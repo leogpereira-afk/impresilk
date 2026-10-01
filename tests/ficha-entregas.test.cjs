@@ -201,7 +201,7 @@ test('Finalizar com saldo pergunta; "Manter aberta" não grava finalizadaEm; "Ma
   assert.deepEqual(marcasDe(g, '8101:4:1'), [], 'serviço não recebe marca');
   const M = await motorServidor();
   assert.equal(M.resumoOS({...g, finalizadaEm:''}).situacao, 'completa');
-  assert.ok(b.toasts.some(([m]) => /Instalação finalizada 🏁 · 3 itens marcados entregues hoje/.test(m)));
+  assert.ok(b.toasts.some(([m]) => /Instalação da O\.S\. \S+ finalizada 🏁 · 3 itens marcados entregues hoje/.test(m)));
 });
 
 test('Finalizar pelo card: pergunta o saldo, "Manter aberta" deixa aberta, e a O.S. sem marca finaliza como hoje, sem pergunta', async () => {

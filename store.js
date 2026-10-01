@@ -796,7 +796,19 @@ const STORE = (() => {
             _notifyListeners('foto-falhou', { item, motivo: 'Uma foto não estava mais neste aparelho e não foi enviada. Confira as fotos da O.S.' });
             continue;
           }
-          const res = await apiFn('os', { action: 'putPhoto', base64, mime: item.mime, fileId: item.fileId }, PRAZO_FOTO_MS);
+          let res;
+          try {
+            res = await apiFn('os', { action: 'putPhoto', base64, mime: item.mime, fileId: item.fileId }, PRAZO_FOTO_MS);
+          } catch (e) {
+            // O servidor de antes da F24 recusa o id com a O.S.: a foto vai com o id antigo (idFotoAntigo).
+            const antigo = recusaDoIdNovo(e, item.fileId);
+            if (!antigo) throw e;
+            await renomearFotoNoAparelho(item.fileId, antigo, base64, item.mime);
+            const res2 = await apiFn('os', { action: 'putPhoto', base64, mime: item.mime, fileId: antigo }, PRAZO_FOTO_MS);
+            if (res2 && res2.fileId) { _removeFromQueue({ action: 'putPhoto', fileId: antigo }); _failCount.delete('putPhoto:' + antigo); }
+            consecutiveNetFails = 0;
+            continue;
+          }
           if (res && res.fileId) { _removeFromQueue(item); _failCount.delete(sig); }
         } else {
           // O motivo da última recusa é anotação do aparelho, não vai ao servidor.
@@ -2038,6 +2050,66 @@ const STORE = (() => {
      caractere (ou comprido demais) e quem não passa a O.S. (o celular) ficam
      no formato antigo, foto_<hora>_<sorteio>. As fotos antigas não migram. */
   const ID_OS_NA_FOTO = /^[A-Za-z0-9-]{1,60}$/;
+  /* O APARELHO SE DEFENDE DO SERVIDOR VELHO (revisão da F24, M4 e B2). O
+     pcp-sync de antes da F24 só aceita foto_<hora>_<sorteio> e responde 422
+     "Identificação da foto inválida." ao id com a O.S. Se a tela subir antes
+     do servidor (aconteceu em 25/09), toda foto da ficha ficaria presa na
+     fila, sem chegar aos outros aparelhos e prendendo o Sair. Recebido esse
+     422 numa foto de id novo, o aparelho:
+     - guarda o arquivo com o id antigo (a mesma hora e o mesmo sorteio,
+       sem a O.S.) e só depois apaga o de id novo: a foto não se perde;
+     - troca o id no envio da foto, nas O.S. que esperam envio na fila e nas
+       O.S. do aparelho; a O.S. que já tinha subido citando o id novo volta
+       para a fila com o id antigo;
+     - avisa a tela ('foto-renomeada'), que troca no rascunho da ficha aberta;
+     - e manda a foto de novo, na mesma volta da fila.
+     Outro 422 (foto grande, tipo errado) segue como antes. */
+  const ID_FOTO_COM_OS = /^foto_([A-Za-z0-9-]{1,60})_(\d{10,})_([a-z0-9]{1,16})$/;
+  function idFotoAntigo(id) {
+    const m = ID_FOTO_COM_OS.exec(String(id || ''));
+    return m ? `foto_${m[2]}_${m[3]}` : '';
+  }
+  function recusaDoIdNovo(e, fileId) {
+    if (!e || (e.status !== 422 && e.status !== 400)) return '';
+    if (!/identifica[cç][aã]o da foto/i.test(String(e.servidor || e.message || ''))) return '';
+    return idFotoAntigo(fileId);
+  }
+  // Troca o id em qualquer lugar do valor; devolve o mesmo objeto quando nada mudou.
+  function trocarIdFoto(v, de, para) {
+    if (v === de) return para;
+    if (Array.isArray(v)) {
+      let mudou = false;
+      const r = v.map(x => { const y = trocarIdFoto(x, de, para); if (y !== x) mudou = true; return y; });
+      return mudou ? r : v;
+    }
+    if (v && typeof v === 'object') {
+      let mudou = false;
+      const r = {};
+      for (const [k, x] of Object.entries(v)) { const y = trocarIdFoto(x, de, para); if (y !== x) mudou = true; r[k] = y; }
+      return mudou ? r : v;
+    }
+    return v;
+  }
+  async function renomearFotoNoAparelho(de, para, base64, mime) {
+    try { await putFoto(para, base64, mime || 'image/jpeg'); } catch (e) { console.warn('[store] foto renomeada sem cópia local', e); }
+    const q = getQueue().map(x => {
+      if ((x.action === 'putPhoto' || x.action === 'deletePhoto') && x.fileId === de) return { ...x, fileId: para };
+      if (x.action === 'upsert' && x.os) { const os2 = trocarIdFoto(x.os, de, para); return os2 === x.os ? x : { ...x, os: os2 }; }
+      return x;
+    });
+    _gravarFila(q);
+    _failCount.delete('putPhoto:' + de);
+    const mudaram = [];
+    const all = getAllOS().map(o => { const o2 = trocarIdFoto(o, de, para); if (o2 !== o) mudaram.push(o2); return o2; });
+    if (mudaram.length) {
+      _setAllOS(all);
+      // A O.S. que já subiu citando o id novo volta para a fila com o antigo.
+      for (const o of mudaram) if (!getQueue().some(x => x.action === 'upsert' && x.os && x.os.id === o.id))
+        _enqueue({ action: 'upsert', os: o, fila: Date.now() + '-' + Math.random().toString(36).slice(2, 8) });
+    }
+    try { await delFoto(de); } catch {}
+    _notifyListeners('foto-renomeada', { de, para });
+  }
   function novoIdFoto(osId) {
     const os = String(osId == null ? '' : osId).trim();
     return 'foto_' + (ID_OS_NA_FOTO.test(os) ? os + '_' : '') + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -2065,7 +2137,13 @@ const STORE = (() => {
         try {
           const res = await apiFn('os', { action: 'putPhoto', base64, mime, fileId }, PRAZO_FOTO_MS);
           if (res && res.fileId) return res.fileId;
-        } catch {}
+        } catch (e) {
+          // O servidor de antes da F24 recusa o id com a O.S.: vai com o id antigo.
+          const antigo = recusaDoIdNovo(e, fileId);
+          if (antigo) {
+            try { const res = await apiFn('os', { action: 'putPhoto', base64, mime, fileId: antigo }, PRAZO_FOTO_MS); if (res && res.fileId) return res.fileId; } catch {}
+          }
+        }
       }
       _notifyListeners('foto-falhou', { motivo: 'Celular sem espaço para guardar a foto. Libere espaço e tire de novo.' });
       return null;
@@ -2357,7 +2435,7 @@ const STORE = (() => {
     // Regras do programa (só gestão; cópia local para a prévia offline)
     regrasLocais, lerRegrasDisco, pullRegras,
     // Fotos
-    pushPhoto, novoIdFoto, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
+    pushPhoto, novoIdFoto, idFotoAntigo, pullPhoto, putFoto, getFoto, delFoto, delFotoSync,
     // Eventos
     onSync, onConflict, on, conflitoCFG, resolverCFG,
     // Divisão da equipe recusada pelo servidor (aviso fixo, F08)

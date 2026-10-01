@@ -2289,6 +2289,26 @@ export function entradaAuditoria({ id, osId, numero, acao, diff, autor, origem, 
    - alocacaoLog é só de acréscimo (teto 40), montado aqui com autor, antes
      e depois. O que o aparelho manda nele nunca entra. */
 export const ALOCACAO_LOG_MAX = 40;
+/* O HISTÓRICO DA DIVISÃO AGRUPA POR AUTOR E SESSÃO (revisão da F24, crítica 3
+   do plano). Tirar alguém da equipe e tocar Desfazer gravava duas linhas
+   ('desatualizar' e 'reatualizar'): 20 voltas enchiam o teto de 40 e
+   expulsavam a linha 'criar', a de quem fez a divisão e com que percentuais.
+   Agora 'desatualizar' e 'reatualizar' do MESMO autor (o ID do RH, ou o nome
+   quando não há ID), a menos de 10 minutos da última linha, se anulam: a
+   linha anterior sai em vez de entrar mais uma (a divisão voltou a ser o que
+   era). O diário da O.S. (F03) continua com o rastro inteiro. Linha de
+   outro autor, de outra ação (criar, alterar, limpar, conferir) ou de mais
+   de 10 minutos atrás não se junta. */
+export const ALOCACAO_LOG_JANELA_MS = 10 * 60 * 1000;
+const PAR_DESATUALIZAR = new Set(['desatualizar', 'reatualizar']);
+function anulaUltimaDoLog(ult, entrada, carimbo) {
+  if (!objeto(ult) || !objeto(entrada) || !PAR_DESATUALIZAR.has(ult.acao) || !PAR_DESATUALIZAR.has(entrada.acao) || ult.acao === entrada.acao) return false;
+  const mesmoAutor = carimbo.porId && ult.porId ? String(ult.porId) === String(carimbo.porId)
+    : !carimbo.porId && !ult.porId && !!carimbo.por && String(ult.por ?? '') === String(carimbo.por);
+  if (!mesmoAutor) return false;
+  const t0 = Date.parse(String(ult.em ?? '')), t1 = Date.parse(String(carimbo.em ?? ''));
+  return Number.isFinite(t0) && Number.isFinite(t1) && t1 >= t0 && t1 - t0 <= ALOCACAO_LOG_JANELA_MS;
+}
 /* O que a gestão edita: as duas camadas de cotas, papéis, cadeados e o selo
    "editado à mão". O final, as marcas (desatualizada, conferirRH), o carimbo
    e a marca de freelancer (que vem do RH) são do servidor e não contam como
@@ -2491,7 +2511,12 @@ export function sanearAlocacao(veio, os, antes, { pode = false, avisar = false, 
   }
   if (a === undefined) delete r.alocacao; else r.alocacao = a;
   // O LOG: o gravado e, quando algo mudou aqui, uma linha a mais. Nunca o do aparelho.
-  if (entrada) r.alocacaoLog = [...(log0 || []), { ...entrada, ...carimbo }].slice(-ALOCACAO_LOG_MAX);
+  if (entrada) {
+    const log = [...(log0 || [])];
+    if (anulaUltimaDoLog(log[log.length - 1], entrada, carimbo)) log.pop();
+    else log.push({ ...entrada, ...carimbo });
+    r.alocacaoLog = log.slice(-ALOCACAO_LOG_MAX);
+  }
   else if (objeto(antes) && proprio(antes, 'alocacaoLog')) r.alocacaoLog = antes.alocacaoLog;
   else delete r.alocacaoLog;
   return { os: r, avisos, descartado: motivo ? { motivo } : null, mudou: !!entrada };

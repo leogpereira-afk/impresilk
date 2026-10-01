@@ -1343,7 +1343,7 @@ function renderModal() {
       <summary>${n.chegada}. Chegada no cliente <span class="item-progress" style="margin-left:auto">📷 ${fotos.length}</span></summary>
       <div class="fs-body">
         <div class="field">
-          <label>Fotos de antes (check-in, ao chegar; pelo menos 1 para finalizar)</label>
+          <label>Fotos de antes (ao chegar, antes de começar; pelo menos 1 para finalizar)</label>
           <div class="fotos-grid">${fotos.map(fid => thumb(fid, `data-rm="${esc(fid)}"`)).join('')}</div>
           ${ro ? '' : `<label class="foto-box" style="margin-top:6px">
             <span class="foto-hint">📷 Tirar foto de antes</span>

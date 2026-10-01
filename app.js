@@ -272,27 +272,81 @@ function toast(msg, type = '', opt = {}) {
   el.textContent = msg;
   c.appendChild(el);
   // Erro fica o tempo de ler (a lista do "Falta:" e a recusa do servidor são
-  // longas; 3 s não dava) e sai com um toque.
-  const ms = type === 'error' ? Math.max(6000, String(msg).length * 60) : 3000;
+  // longas; 3 s não dava) e sai com um toque. O aviso comum também cresce com
+  // o texto (revisão da F24): 125 letras em 3 s não se leem.
+  const ms = type === 'error' ? Math.max(6000, String(msg).length * 60) : Math.max(3000, String(msg).length * 60);
+  // O esmaecer do CSS (2,7 s) acompanha o tempo do texto: sem isso o aviso longo sumia da vista antes da hora.
+  if (type !== 'error' && el.style) el.style.animationDelay = '0s, ' + Math.max(0, ms - 300) / 1000 + 's';
   el.onclick = () => el.remove();
   // O aviso que fica (revisão da F23): a divisão que não gravou com a ficha em outra etapa só sai com um toque.
   if (!(opt && opt.fica)) setTimeout(() => el.remove(), ms);
 }
 
 /* Toast com DESFAZER: ação de um toque no card precisa de volta de um toque.
-   Fica 6 s (o toast comum some em 3, cedo demais para ler e decidir). */
-function toastDesfazer(msg, desfazer) {
+   O TEMPO DE DECIDIR (revisão da F24): 6 s fixos não davam para ler, mirar e
+   tocar, e o teclado não chegava (34 Tabs até o botão). Agora:
+   - fica 10 s, mais com texto longo (70 ms por letra);
+   - o mouse em cima ou o foco dentro dele seguram o tempo, que volta a
+     correr quando saem;
+   - Ctrl+Z (Cmd+Z no Mac), fora de campo de texto, aciona o Desfazer do
+     aviso mais recente que ainda está na tela (desfazerPeloTeclado);
+   - um aviso por O.S. e ação (`opt.chave`): o novo da mesma O.S. e ação tira
+     o anterior da tela.
+   Devolve { vivo(), tirar() }: quem junta duas ações num Desfazer só (as
+   tiradas seguidas da equipe) sabe se o anterior ainda vale. */
+const _avisosDesfazer = [];
+const TEMPO_DESFAZER_MS = 10000;
+function toastDesfazer(msg, desfazer, opt = {}) {
+  const chave = opt && opt.chave ? String(opt.chave) : '';
+  if (chave) _avisosDesfazer.filter(a => a.chave === chave).forEach(a => a.tirar());
   const c = toastContainer();
   const el = document.createElement('div');
   el.className = 'toast success toast-acao';
   el.setAttribute('role', 'status');
   const t = document.createElement('span'); t.textContent = msg;
   const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Desfazer';
-  let feito = false;
-  b.onclick = () => { if (feito) return; feito = true; el.remove(); desfazer(); };
+  b.title = 'Desfazer (Ctrl+Z)';
+  b.setAttribute('aria-keyshortcuts', 'Control+Z Meta+Z');
+  const reg = { chave, vivo: true, feito: false };
+  let timer = null, inicio = 0, mouse = false, foco = false;
+  let resta = Math.max(TEMPO_DESFAZER_MS, String(msg).length * 70);
+  reg.tirar = () => {
+    if (!reg.vivo) return;
+    reg.vivo = false;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    el.remove();
+    const i = _avisosDesfazer.indexOf(reg);
+    if (i >= 0) _avisosDesfazer.splice(i, 1);
+  };
+  reg.acionar = () => { if (reg.feito || !reg.vivo) return false; reg.feito = true; reg.tirar(); desfazer(); return true; };
+  const correr = () => { if (timer || !reg.vivo || mouse || foco) return; inicio = Date.now(); timer = setTimeout(reg.tirar, resta); };
+  const pausar = () => { if (!timer) return; clearTimeout(timer); timer = null; resta = Math.max(2000, resta - (Date.now() - inicio)); };
+  b.onclick = () => { reg.acionar(); };
+  if (typeof el.addEventListener === 'function') {
+    el.addEventListener('mouseenter', () => { mouse = true; pausar(); });
+    el.addEventListener('mouseleave', () => { mouse = false; correr(); });
+    el.addEventListener('focusin', () => { foco = true; pausar(); });
+    el.addEventListener('focusout', ev => {
+      if (ev && ev.relatedTarget && typeof el.contains === 'function' && el.contains(ev.relatedTarget)) return;
+      foco = false; correr();
+    });
+  }
   el.append(t, b);
   c.appendChild(el);
-  setTimeout(() => el.remove(), 6000);
+  _avisosDesfazer.push(reg);
+  correr();
+  return { vivo: () => reg.vivo && !reg.feito, tirar: reg.tirar };
+}
+// Ctrl+Z (Cmd+Z) fora de campo de texto: o Desfazer do aviso mais recente. No campo, o Ctrl+Z é do campo.
+function desfazerPeloTeclado(ev) {
+  if (!ev || ev.defaultPrevented || ev.altKey || ev.shiftKey || !(ev.ctrlKey || ev.metaKey)) return false;
+  if (String(ev.key || '').toLowerCase() !== 'z' && ev.code !== 'KeyZ') return false;
+  if (typeof campoDeTexto === 'function' && campoDeTexto(ev.target)) return false;
+  const reg = _avisosDesfazer.slice().reverse().find(a => a.vivo && !a.feito);
+  if (!reg) return false;
+  if (typeof ev.preventDefault === 'function') ev.preventDefault();
+  return reg.acionar();
 }
 
 /* Retrabalho pendente com a O.S. filha, a mesma régua da aba Retrabalho. O
@@ -609,20 +663,20 @@ function initLogin() {
   /* Crachá de OUTRA pessoa que não a salva (tablet dividido, entrada pelo
      Painel com outra conta): vale o dono do crachá -- é ele que o servidor vê.
      Abrir com o nome salvo mostraria uma pessoa e gravaria como outra. */
-  if (saved && donoCracha && saved.usuario && donoCracha.usuario !== saved.usuario) { STORE.setUser(null); saved = null; }
+  if (saved && donoCracha && saved.usuario && donoCracha.usuario !== saved.usuario) { STORE.setUser(null); saved = null; apagarRascunhosF24(); }
   const doCracha = (!saved && temCracha) ? AUTH.dono() : null;
   if (doCracha) {
     STATE.user = { nome: doCracha.nome, papel: doCracha.papel, usuario: doCracha.usuario };
     STORE.setUser(STATE.user);
     enterApp();
     AUTH.eu().then(r => {
-      if (r === false) { AUTH.esquecer(); STORE.setUser(null); toast('Sua sessão expirou — entre de novo.', 'error'); setTimeout(() => location.reload(), 1500); }
+      if (r === false) { AUTH.esquecer(); STORE.setUser(null); apagarRascunhosF24(); toast('Sua sessão expirou. Entre de novo.', 'error'); setTimeout(() => location.reload(), 1500); }
     }).catch(() => {});
   } else if (saved && temCracha) {
     STATE.user = saved; enterApp();
     // Em 2º plano confirma o crachá: se estiver morto, encerra a sessão.
     AUTH.eu().then(r => {
-      if (r === false) { AUTH.esquecer(); STORE.setUser(null); toast('Sua sessão expirou — entre de novo.', 'error'); setTimeout(() => location.reload(), 1500); }
+      if (r === false) { AUTH.esquecer(); STORE.setUser(null); apagarRascunhosF24(); toast('Sua sessão expirou. Entre de novo.', 'error'); setTimeout(() => location.reload(), 1500); }
     }).catch(() => {});
   } else if (saved) {
     // Sessão órfã (sem crachá): limpa e mostra o login em vez de um app morto.
@@ -1165,6 +1219,8 @@ function initSyncIndicator() {
   STORE.on('quota', () => toast('Pouco espaço no aparelho. O trabalho segue guardado para envio: não limpe os dados do navegador; libere espaço (fotos, apps) e recarregue.', 'error'));
   // Foto que não deu para ler ou guardar: o motivo vem do store.
   STORE.on('foto-falhou', ({ motivo } = {}) => toast('⚠️ ' + (motivo || 'Uma foto não foi guardada. Tente de novo.'), 'error'));
+  // O servidor velho recusou o id da foto com a O.S.: o store trocou pelo id antigo, e a ficha aberta troca no rascunho (revisão da F24, M4).
+  STORE.on('foto-renomeada', ({ de, para } = {}) => trocarIdFotoNaFicha(de, para));
   // O servidor gravou a O.S. e deixou algo de fora: dizer o quê.
   STORE.on('item-aviso', ({ item, avisos } = {}) => {
     const ref = item && item.os && item.os.numero ? 'O.S ' + item.os.numero + ': ' : '';
@@ -1672,6 +1728,11 @@ function etapaAtualFicha(os) {
    impede gravar: a mensagem fica ao lado do campo e o resto da ficha grava
    como sempre. Falta que a tabela não conhece vai para a Jornada sem campo:
    aparece no Fechamento, nunca some calada. */
+/* O nome da foto que falta, como a tela chama (revisão da F24, B2): "foto de
+   antes" e "foto de depois", os mesmos rótulos da ficha e do celular. A
+   chave de validarFinalizacao continua a mesma (os testes e o mapa abaixo). */
+const ROTULO_FALTA_TELA = { '≥1 foto de saída': 'foto de antes', 'foto de retorno (serviço pronto)': 'foto de depois (serviço pronto)' };
+const faltaNaTela = f => ROTULO_FALTA_TELA[f] || f;
 const FALTA_FINALIZAR_CAMPO = {
   'PCP liberar': ['dados', 'liberar', 'Para finalizar: o PCP precisa liberar a O.S.'],
   '≥1 item': ['dados', 'itens', 'Para finalizar: inclua pelo menos 1 item.'],
@@ -1681,7 +1742,7 @@ const FALTA_FINALIZAR_CAMPO = {
   'ferramentas conferidas': ['jornada', 'ferramentasConferidas', 'Para finalizar: marque Ferramentas conferidas.'],
   'liberar carro / saída': ['jornada', 'carro', 'Para finalizar: libere o carro (ou a saída) ou digite a hora de saída.'],
   'marcar Instalação OK': ['jornada', 'instalacaoOK', 'Para finalizar: marque Instalação OK.'],
-  '≥1 foto de saída': ['jornada', 'fotosSaida', 'Para finalizar: pelo menos 1 foto de antes (check-in).'],
+  '≥1 foto de saída': ['jornada', 'fotosSaida', 'Para finalizar: pelo menos 1 foto de antes (ao chegar, antes de começar).'],
   'foto de retorno (serviço pronto)': ['jornada', 'fotosRetorno', 'Para finalizar: pelo menos 1 foto de depois, com o serviço pronto.'],
   'data e hora do retorno': ['jornada', 'horaRetorno', 'Para finalizar: digite a hora do retorno.'],
   'descrição do problema (retrabalho)': ['jornada', 'problema', 'Para finalizar: descreva o problema do retrabalho.']
@@ -1947,7 +2008,8 @@ function passosEtapasHTML(os, lista, atual) {
   return lista.map(k => {
     const p = prog[k] || { estado: 'neutro', n: 0, texto: '', descricao: '' };
     const marca = p.estado === 'ok' || p.estado === 'pronto' ? '✓' : p.estado === 'falta' && p.n ? String(p.n) : p.estado === 'neutro' ? '·' : '!';
-    return `<li><button type="button" class="fe-passo fe-${p.estado}" data-ir-etapa="${k}" data-ir-foco="passo"${k === atual ? ' aria-current="step"' : ''} aria-label="${esc(ETAPA_FICHA[k].nome + ': ' + p.descricao)}"><span class="fe-marca" aria-hidden="true">${esc(marca)}</span><span class="fe-nome" aria-hidden="true">${esc(ETAPA_FICHA[k].nome)}</span><span class="fe-prog" aria-hidden="true">${esc(p.texto)}</span></button></li>`;
+    const atalho = lista.indexOf(k) < 5 ? ` aria-keyshortcuts="Alt+${lista.indexOf(k) + 1}"` : '';
+    return `<li><button type="button" class="fe-passo fe-${p.estado}" data-ir-etapa="${k}" data-ir-foco="passo"${k === atual ? ' aria-current="step"' : ''} aria-label="${esc(ETAPA_FICHA[k].nome + ': ' + p.descricao)}"${atalho}><span class="fe-marca" aria-hidden="true">${esc(marca)}</span><span class="fe-nome" aria-hidden="true">${esc(ETAPA_FICHA[k].nome)}</span><span class="fe-prog" aria-hidden="true">${esc(p.texto)}</span></button></li>`;
   }).join('');
 }
 // Uma etapa: o título (o foco vai para ele ao trocar), o corpo e o voltar e avançar.
@@ -2042,8 +2104,9 @@ function resumoFinalizarJornadaHTML(os) {
 function irParaEtapaFicha(k, opt = {}) {
   const os = _modalDraft;
   if (!os || !etapasDaFicha(os).includes(k)) return false;
+  const de = etapaAtualFicha(os);
   _etapaFicha.set(os.id, k);
-  mostrarEtapaFicha(k);
+  mostrarEtapaFicha(k, de);
   pintarPendenciasFicha();
   // O Status da entrega acompanha o que foi digitado nas outras etapas (a hora do retorno, por exemplo).
   if (k === 'fechamento' && typeof document !== 'undefined' && typeof document.getElementById === 'function') pintarHostFicha('fe-status', () => statusEntregaFichaHTML(os), ligarStatusEntregaDaFicha);
@@ -2054,11 +2117,11 @@ function irParaEtapaFicha(k, opt = {}) {
   focarEtapaFicha(k, opt.foco);
   return true;
 }
-function mostrarEtapaFicha(k) {
+function mostrarEtapaFicha(k, de) {
   if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
   $$('#modal-os .ficha-etapa').forEach(s => { s.hidden = !(s.dataset && s.dataset.etapaSec === k); });
   // A troca sem repintar (revisão da F23) também anima uma vez a etapa que chega (F24).
-  if (typeof animarTrocaDeEtapa === 'function') animarTrocaDeEtapa();
+  if (typeof animarTrocaDeEtapa === 'function') animarTrocaDeEtapa(de);
   /* O "Ir para" do próximo passo some na etapa dele SEM sair do lugar: a
      caixa guarda a altura e o stepper não pula (revisão da F23, B1). */
   const ir = typeof document.getElementById === 'function' ? document.getElementById('fe-ir-pp') : null;
@@ -2217,6 +2280,7 @@ function renderModal() {
     </div>
 
     <nav class="ficha-etapas-nav" aria-label="Etapas da ficha"><ol class="ficha-etapas" id="ficha-etapas">${_passosFichaHTML = passosEtapasHTML(os, etapas, etapa)}</ol></nav>
+    <p class="fe-atalhos" title="Alt+1 a Alt+5 vão para a etapa; Ctrl+Enter (Cmd+Enter no Mac) avança; Esc fecha a ficha. Dentro de um campo, as teclas são do campo.">Atalhos: Alt+1 a Alt+5, Ctrl+Enter, Esc</p>
     ${etapas.map(k => secaoEtapaHTML(k, etapas, etapa, corpo[k])).join('')}
 
     ${os.erpAlteracoes?.length ? `<details class="cfg-grupo"><summary>Histórico de atualização do Mubisys</summary>${os.erpAlteracoes.slice(-10).reverse().map(h => `<p><strong>${esc(new Date(h.em).toLocaleString('pt-BR'))}</strong><br>${h.campos.map(c => `${esc(c.campo)}: ${esc(c.antes ?? '—')} → ${esc(c.depois)}`).join('<br>')}</p>`).join('')}</details>` : ''}
@@ -2469,7 +2533,7 @@ function blocoPCP(os, ro, done) {
           <datalist id="os-orig-${esc(os.id)}">${mesmoCliente.map(o => `<option value="${esc(o.numero)}">${esc(o.numero)} — ${esc((o.servico || '').slice(0, 40))}</option>`).join('')}</datalist>
         </div>`;
       })()}
-      <div class="field"><label>Cliente <span class="req">*</span></label><input data-f="cliente" value="${esc(os.cliente)}" ${lockPed}${fmsgAttr('cliente')}>${fmsgHTML(os, 'cliente')}${lockPed ? '' : '<div class="cli-sug" id="cli-sug" role="listbox" aria-label="Clientes que já existem" hidden></div>'}</div>
+      <div class="field"><label>Cliente <span class="req">*</span></label><div class="cli-campo"><input data-f="cliente" value="${esc(os.cliente)}" ${lockPed}${fmsgAttr('cliente')}>${fmsgHTML(os, 'cliente')}${lockPed ? '' : '<div class="cli-sug" id="cli-sug" role="listbox" aria-label="Clientes que já existem" hidden></div>'}</div></div>
       <div class="field-row">
         <div class="field"><label>Contato</label><input type="text" data-f="contato" value="${esc(os.contato)}"></div>
         <div class="field"><label>WhatsApp <span class="req">*</span></label><input type="tel" inputmode="tel" data-f="whatsapp" data-mask="tel" value="${esc(maskTel(os.whatsapp))}" placeholder="(00) 00000-0000">
@@ -2524,7 +2588,8 @@ function itemDoDraft(lista, idx, uid) {
 // remoções) e código próprio do aparelho (E1).
 function novoItemManual(lista) {
   const prox = Math.max(0, ...(lista || []).map(i => parseInt(i && i.item, 10) || 0)) + 1;
-  return { uid: novoUidItemSeguro(), item: String(prox), descricao: '', medidas: '', qtde: '1', valorUnit: '0', subtotal: 0, pronto: false, reprovado: false, motivoReprovado: '', manual: true };
+  // O valor nasce vazio (revisão da F24, A1): o "0,00" escrito no campo virava 1500,00 com um clique no meio.
+  return { uid: novoUidItemSeguro(), item: String(prox), descricao: '', medidas: '', qtde: '1', valorUnit: '', subtotal: 0, pronto: false, reprovado: false, motivoReprovado: '', manual: true };
 }
 
 /* ── ENTREGA POR ITEM NA FICHA E NO CARD (E4, 30/09/2026) ──────────────────
@@ -2762,7 +2827,7 @@ function abrirDialogoEntrega(cfg, aoConfirmar) {
   const fechar = () => box.remove();
   // O que foi digitado fica guardado até dar certo (F24): fechar a tela no meio não perde o motivo.
   const rasc = cfg.rascunho && typeof ligarRascunhoForm === 'function' ? ligarRascunhoForm(form, cfg.rascunho.tela, cfg.rascunho.osId) : null;
-  box.querySelectorAll('[data-ent-fechar]').forEach(b => { b.onclick = fechar; });
+  box.querySelectorAll('[data-ent-fechar]').forEach(b => { b.onclick = () => fecharDialogoComRascunho(rasc, fechar); });
   form.onsubmit = ev => {
     ev.preventDefault();
     const val = n => { const el = form.querySelector(`[name="${n}"]`); return el ? String(el.value || '').trim() : ''; };
@@ -3042,7 +3107,7 @@ function finalizarDaFicha(interno) {
   if (canceladaNaTela(_modalDraft)) { toast(`O.S ${_modalDraft.numero || ''} cancelada pelo PCP: para finalizar, desfaça o cancelamento no Status da entrega.`, 'error'); return; }
   const faltas = validarFinalizacao(_modalDraft);
   // Recusado: as faltas da Jornada passam a aparecer ao lado dos campos (revisão da F23).
-  if (faltas.length) { toast('Falta: ' + faltas.join(', '), 'error'); finalizarRecusadoNaFicha(); return; }
+  if (faltas.length) { toast('Falta: ' + faltas.map(faltaNaTela).join(', '), 'error'); finalizarRecusadoNaFicha(); return; }
   const id = _modalDraft.id;
   juntarMarcasDoStore(_modalDraft);
   // "Manter aberta" com o ERP dizendo entregue: a decisão vai no próprio rascunho (revisão da E7).
@@ -3058,6 +3123,8 @@ function finalizarDaFicha(interno) {
     const d = _modalDraft;
     if (!d || d.id !== id) return;   // a ficha fechou no meio da pergunta
     const foto = fotoRespostaRetrab(d);
+    // O retrato do retrabalho para o Desfazer é de ANTES da pergunta (revisão da F24, M1).
+    const antesRetrab = fotoCampos(d, CAMPOS_RETRAB_DESFAZER);
     const concluir = () => {
       const alvo = _modalDraft;
       if (!alvo || alvo.id !== id) return;
@@ -3065,14 +3132,15 @@ function finalizarDaFicha(interno) {
       juntarMarcasDoStore(alvo);
       const m = escolha === 'marcar' ? marcarSaldoNaFinalizacao(alvo) : { erro: '', marcadas: 0 };
       if (m.erro) { toast(m.erro, 'error'); markDirty(); return; }
-      const antesFin = fotoCampos(alvo, CAMPOS_DESFAZER.finalizar);
+      const antesFin = { ...fotoCampos(alvo, CAMPOS_DESFAZER.finalizar), ...antesRetrab };
       aplicarFinalizacao(alvo);
       saveDraft(); reRenderModalKeepOpen();
       if (daJornada) irParaEtapaFicha('fechamento', { foco: 'titulo' });   // finalizou pela Jornada: o checklist à vista (revisão da F23)
       const extra = !m.marcadas ? '' : papelDeclara()
         ? ` · ${m.marcadas} ${m.marcadas === 1 ? 'item declarado' : 'itens declarados'} pela equipe hoje; a gestão confere no Fechar o dia`
         : ` · ${m.marcadas} ${m.marcadas === 1 ? 'item marcado' : 'itens marcados'} ${interno ? 'retirado' : 'entregue'}${m.marcadas === 1 ? '' : 's'} ${m.quando || 'hoje'}`;
-      desfazerFinalizacaoDaFicha((interno ? 'Retirada registrada 📦' : 'Instalação finalizada 🏁') + extra, alvo, antesFin, m.eventos);
+      const n = numeroOSF24(alvo);
+      desfazerFinalizacaoDaFicha((interno ? `Retirada da ${n} registrada 📦` : `Instalação da ${n} finalizada 🏁`) + extra, alvo, antesFin, m.eventos, { interno });
     };
     if (interno) concluir(); else perguntarRetrabalho(d, concluir);
   }, { gravarManter });
@@ -3611,11 +3679,12 @@ function blocoExec(os, ro, done) {
       </div>
       ${fmsgHTML(os, 'carro')}
       <div class="field">
-        <label>Fotos de antes (check-in; pelo menos 1 para finalizar; carimba a hora de saída)</label>
+        <label>Fotos de antes (ao chegar, antes de começar)</label>
         <div class="fotos-grid" id="fotos-checkin">
           ${fotos.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}" data-foto-checkin="${esc(fid)}"><button class="foto-rm edit-only" data-foto-rm="${esc(fid)}">×</button></div>`).join('')}
         </div>
         ${fotoCameraGaleriaHTML('data-foto-checkin-input', 'antes', ro, fmsgAttr('fotosSaida'))}
+        <p class="foto-dica">Pelo menos 1 para finalizar. Com a hora de saída vazia, a primeira foto preenche a hora de saída com a hora em que foi anexada.</p>
         ${fmsgHTML(os, 'fotosSaida')}
         ${(() => {
           /* A coordenada vem do celular da montagem e o servidor guarda o campo
@@ -3657,11 +3726,12 @@ function blocoExec(os, ro, done) {
 
 
       <div class="field">
-        <label>Fotos de depois (serviço pronto; carimba a hora de retorno)</label>
+        <label>Fotos de depois (serviço pronto)</label>
         <div class="fotos-grid" id="fotos-retorno">
           ${fotosRet.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}"><button class="foto-rm edit-only" data-foto-rm-retorno="${esc(fid)}">×</button></div>`).join('')}
         </div>
         ${fotoCameraGaleriaHTML('data-foto-retorno-input', 'depois', ro, fmsgAttr('fotosRetorno'))}
+        <p class="foto-dica">Pelo menos 1 para finalizar. Com a hora do retorno vazia, a foto preenche a hora do retorno com a hora em que foi anexada.</p>
         ${fmsgHTML(os, 'fotosRetorno')}
       </div>
       <div class="field-row">
@@ -4633,16 +4703,18 @@ function bindModalEvents(os, ro) {
     _modalDraft.aptoPor = STATE.user.nome;
     _modalDraft.aptoEm = nowISO();
     saveDraft(); reRenderModalKeepOpen();
-    desfazerLiberacao('Liberado para instalação', antes, true);
+    desfazerLiberacao(antes, true);
   };
   const cancelLib = $('#btn-cancelar-liberar');
-  /* O "Cancelar" fica colado ao status no tablet: o toque torto se desfaz
-     num toque (F24), no lugar da pergunta. */
+  /* O "Cancelar" fica colado ao status no tablet: desfazer a liberação
+     PERGUNTA antes (revisão da F24, B5: liberar de novo depois recomeça a
+     contagem de espera). O aviso com Desfazer fica como segunda proteção. */
   if (cancelLib) cancelLib.onclick = () => {
+    if (!confirm(`Cancelar a liberação do PCP da ${numeroOSF24(_modalDraft)}?\n\nSe liberar de novo depois, a contagem de dias de espera recomeça. Para voltar como estava, use o Desfazer do aviso.`)) return;
     const antes = fotoCampos(_modalDraft, CAMPOS_DESFAZER.liberar);
     _modalDraft.liberadoPCP = false; _modalDraft.aptoPor = ''; _modalDraft.aptoEm = '';
     saveDraft(); reRenderModalKeepOpen();
-    desfazerLiberacao('Liberação do PCP cancelada', antes, false);
+    desfazerLiberacao(antes, false);
   };
 
   ligarPrazoRetorno(root, ro);
@@ -4675,20 +4747,27 @@ function bindModalEvents(os, ro) {
     _modalDraft.carroLiberadoPor = STATE.user.nome;
     _modalDraft.carroLiberadoEm = nowISO();
     saveDraft(); reRenderModalKeepOpen();
-    desfazerCarro(OPERACAO.semCarro(_modalDraft) ? 'Saída liberada' : 'Carro liberado', antes, true);
+    desfazerCarro(antes, true);
   };
   const cancelCarro = $('#btn-cancelar-carro');
-  /* Cancelar o carro se desfaz num toque (F24) quando o servidor aceita a
-     volta: a liberação de volta passa pela régua dele (confirmado no mesmo
-     dia da saída). Sem isso, o Desfazer levaria 422 e prenderia a fila:
-     fica a pergunta de antes (podeVoltarCarro). */
+  /* Cancelar o carro PERGUNTA antes (revisão da F24, A2): liberar de novo
+     obriga a confirmar o cliente hoje, e o serviço de vários dias perdia a
+     confirmação de ontem num toque. A pergunta diz a consequência. O aviso
+     com Desfazer fica como segunda proteção, só quando a volta passaria nas
+     duas réguas (podeVoltarCarro: a da tela e a do servidor). */
   if (cancelCarro) cancelCarro.onclick = () => {
-    const volta = podeVoltarCarro(_modalDraft);
-    if (!volta && !confirm('Cancelar o carro liberado desta O.S.?')) return;
-    const antes = fotoCampos(_modalDraft, CAMPOS_DESFAZER.carro);
-    _modalDraft.carroLiberado = false; _modalDraft.carroLiberadoPor = ''; _modalDraft.carroLiberadoEm = '';
+    const d = _modalDraft, n = numeroOSF24(d), c = carroOuSaidaF24(d);
+    const volta = podeVoltarCarro(d), hoje = OPERACAO.confirmadaHoje(d);
+    // O que custa liberar de novo, dito na pergunta e no aviso: confirmar o cliente hoje, ou só tocar em Liberar (com a hora de agora).
+    const religar = hoje ? `Para liberar de novo, toque em Liberar: ${c.o} volta liberad${c.a} com a hora de agora.`
+      : `Para liberar de novo será preciso confirmar o cliente hoje${d.confEm ? ' (a confirmação é de ' + fmtDataBR(d.confEm) + ')' : ''}.`;
+    const depois = volta ? 'Dá para desfazer no aviso que aparece em seguida.' : religar;
+    if (!confirm(`Cancelar ${c.o} liberad${c.a} da ${n}?\n\n${depois}`)) return;
+    const antes = fotoCampos(d, CAMPOS_DESFAZER.carro);
+    d.carroLiberado = false; d.carroLiberadoPor = ''; d.carroLiberadoEm = '';
     saveDraft(); reRenderModalKeepOpen();
-    if (volta) desfazerCarro(OPERACAO.semCarro(_modalDraft) ? 'Saída cancelada' : 'Carro cancelado', antes, false);
+    if (volta) desfazerCarro(antes, false);
+    else toast(`Liberação ${c.de} da ${n} cancelada. ${religar}`, 'success');
   };
 
   // TRAVA 2 — Finalizar (com a pergunta do saldo da entrega por item, E4)
@@ -4961,7 +5040,11 @@ function perguntarRetrabalho(os, aoResponder, volta = {}) {
   // Sem × e sem fechar no fundo: a regra diz "não pode ser pulado". Voltar
   // sem finalizar não pula a regra (não existe finalização sem resposta), e
   // quem tocou 🏁 por engano não é obrigado a finalizar para sair.
-  $('#retrab-voltar', box).onclick = () => { box.remove(); if (typeof volta.aoVoltar === 'function') volta.aoVoltar(); };
+  // Voltar com o cadastro digitado pergunta se descarta o rascunho (revisão da F24, B4).
+  $('#retrab-voltar', box).onclick = () => {
+    const sair = () => { box.remove(); if (typeof volta.aoVoltar === 'function') volta.aoVoltar(); };
+    if (typeof fecharDialogoComRascunho === 'function') fecharDialogoComRascunho(rasc, sair); else sair();
+  };
   const carimbo = resposta => ({ em: nowISO(), por: (STATE.user && STATE.user.nome) || '', resposta });
   $('#retrab-nao', box).onclick = () => {
     /* O.S. já marcada como retrabalho (o instalador marcou no espelho): "Não"
@@ -5251,7 +5334,7 @@ function abrirDialogoF17(cfg, aoConfirmar) {
   const fechar = () => box.remove();
   // O motivo digitado fica guardado até gravar (F24): fechar a tela no meio não perde o texto.
   const rasc = cfg.rascunho && typeof ligarRascunhoForm === 'function' ? ligarRascunhoForm(form, cfg.rascunho.tela, cfg.rascunho.osId) : null;
-  box.querySelectorAll('[data-f17-fechar]').forEach(b => { b.onclick = fechar; });
+  box.querySelectorAll('[data-f17-fechar]').forEach(b => { b.onclick = () => fecharDialogoComRascunho(rasc, fechar); });
   // `todas`: o botão da volta inteira (anular a ocorrência em todas as O.S. dela, num toque).
   const enviar = todas => {
     const val = n => { const el = form.querySelector(`[name="${n}"]`); return el ? String(el.value || '').trim() : ''; };
@@ -6057,7 +6140,7 @@ function finalizarServicoDoCard(osId) {
   if (!os.finalizadaEm && canceladaNaTela(os)) { toast(`O.S ${os.numero || ''} cancelada pelo PCP: para seguir, desfaça o cancelamento na ficha.`, 'error'); return; }
   const faltas = validarFinalizacao(os);
   if (faltas.length) {
-    toast('Para finalizar, falta: ' + faltas.join(', '), 'error');
+    toast('Para finalizar, falta: ' + faltas.map(faltaNaTela).join(', '), 'error');
     openModal(os, etapaParaFinalizar(os));   // a ficha abre na etapa da primeira falta (F23)
     finalizarRecusadoNaFicha();               // e as faltas aparecem ao lado dos campos (revisão da F23)
     return;
@@ -6067,11 +6150,16 @@ function finalizarServicoDoCard(osId) {
      pode ter durado um pull, e gravar o objeto de antes atropelaria. */
   finalizarComSaldo(os, escolha => {
     const alvo = STORE.getOS(osId) || os;
+    /* O RETRATO DO RETRABALHO É DE ANTES DA PERGUNTA (revisão da F24, M1): a
+       lista de campos já tinha a resposta, mas o retrato era tirado depois
+       dela, e o Desfazer devolvia a resposta dada. */
+    const antesPergunta = fotoCampos(alvo, CAMPOS_RETRAB_DESFAZER);
     const concluir = () => {
       // Um toque no card finaliza: a volta também é de um toque (a lista se
       // redesenha com o sync e o dedo acerta o card do lado).
       const campos = ['finalizadaEm', 'finalizadoPor', 'checkout', 'historico', 'retrabalhoPerguntado', 'retrabalho', 'problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho'];
-      const antes = JSON.parse(JSON.stringify(Object.fromEntries(campos.map(k => [k, alvo[k] === undefined ? null : alvo[k]]))));
+      const antes = { ...JSON.parse(JSON.stringify(Object.fromEntries(campos.map(k => [k, alvo[k] === undefined ? null : alvo[k]])))), ...antesPergunta };
+      const marcaRetrabMudou = CAMPOS_MARCA_RETRAB.some(k => canonF24(antes[k]) !== canonF24(alvo[k]));
       const m = escolha === 'marcar' ? marcarSaldoNaFinalizacao(alvo) : { erro: '', marcadas: 0, eventos: [] };
       if (m.erro) { toast(m.erro, 'error'); return; }
       aplicarFinalizacao(alvo);
@@ -6092,17 +6180,20 @@ function finalizarServicoDoCard(osId) {
          não desfaz marca (a operação) não recebe o Desfazer de um toque
          quando a finalização marcou saldo. Sem marca criada, como antes. */
       const criadas = Array.isArray(m.eventos) ? m.eventos : [];
-      if (criadas.length && !podeMarcarEntrega('desfeito')) { toast(msg + '. Para desfazer, fale com o PCP.', 'success'); return; }
+      // Quem não é da gestão não desmarca nem muda o retrabalho no servidor (guardarRetrabalho): sem o Desfazer de um toque.
+      const gestao = ['admin', 'pcp'].includes(String((STATE.user || {}).papel || ''));
+      if ((criadas.length && !podeMarcarEntrega('desfeito')) || (marcaRetrabMudou && !gestao)) { toast(msg + '. Para desfazer, fale com o PCP.', 'success'); return; }
+      const nOS = `O.S ${alvo.numero || ''}`.trim();
       toastDesfazer(msg, () => {
         const atual = STORE.getOS(osId); if (!atual) return;
         const d = criadas.length ? desfeitosDaFinalizacao(atual, criadas) : { erro: '', lista: [] };
         if (d.erro) { toast(d.erro, 'error'); return; }
-        for (const k of campos) { if (antes[k] === null) delete atual[k]; else atual[k] = antes[k]; }
+        for (const k of Object.keys(antes)) { if (antes[k] === null) delete atual[k]; else atual[k] = antes[k]; }
         for (const [it, ev] of d.lista) it.entregas = (Array.isArray(it.entregas) ? it.entregas : []).concat(ev);
         atual.atualizadoEm = nowISO(); atual.atualizadoPor = STATE.user.nome;
         STORE.saveOS(atual); renderActiveTab();
-        toast(d.lista.length ? `Desfeito: a finalização e ${d.lista.length} ${d.lista.length === 1 ? 'marca de entrega' : 'marcas de entrega'}` : 'Desfeito', 'success');
-      });
+        toast(d.lista.length ? `Desfeito: a finalização e ${d.lista.length} ${d.lista.length === 1 ? 'marca de entrega' : 'marcas de entrega'} da ${nOS}` : `Desfeito: a finalização da ${nOS}`, 'success');
+      }, { chave: osId + '|finalizar' });
     };
     // Retirada não é instalação: sem a pergunta. Instalação: sempre.
     if (isInterno(alvo)) concluir(); else perguntarRetrabalho(alvo, concluir);
@@ -8592,7 +8683,7 @@ function abrirInstrucoes() {
       <h2>As 2 únicas travas</h2>
       <ul>
         <li><strong>🔒 Saída / liberar carro:</strong> só após <em>Confirmação = Confirmado</em> (POP EXI‑002).</li>
-        <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + conferências do embarque (embarque, produtos e ferramentas) + saída registrada + Instalação OK + conferido por + ≥1 foto de saída + foto de retorno (serviço pronto) + data e hora do retorno (+ descrição do problema, se retrabalho). PCP e admin podem trocar a foto de retorno e a hora do retorno por uma exceção de encerramento com justificativa.<br>
+        <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + conferências do embarque (embarque, produtos e ferramentas) + saída registrada + Instalação OK + conferido por + ≥1 foto de antes (ao chegar, antes de começar) + foto de depois (serviço pronto) + data e hora do retorno (+ descrição do problema, se retrabalho). PCP e admin podem trocar a foto de retorno e a hora do retorno por uma exceção de encerramento com justificativa.<br>
           <em>Pedido interno (retirada) é diferente:</em> basta PCP liberado + ≥1 item — não há agenda, nem embarque, nem foto.</li>
       </ul>
       <p>Todo o resto é guia: nenhum campo trava por ordem. Preencha na ordem que quiser; a barra de <strong>% preenchida</strong> no topo da ficha mostra o quanto falta.</p>
@@ -8606,6 +8697,8 @@ function abrirInstrucoes() {
         <li><strong>Jornada:</strong> embarque, saída, fotos, retorno, conferência da volta, <em>+ Registrar ocorrência</em> e o botão <em>Finalizar instalação</em>, com o resumo do que falta logo abaixo dele.</li>
         <li><strong>Fechamento:</strong> o Finalizar, o checklist de fechamento, a Exceção de encerramento e o <strong>Status da entrega</strong>, com o retorno antecipado, as ocorrências, os abonos e o <em>Cancelar O.S.</em> O selo do status no alto da ficha é um atalho: toque nele para ir ao Status da entrega.</li>
       </ul>
+      <p><strong>Atalhos no computador</strong> (a linha "Atalhos" fica embaixo da barra das etapas; no tablet ela some): <em>Alt+1</em> a <em>Alt+5</em> vão direto para a etapa de mesmo número; <em>Ctrl+Enter</em> (<em>Cmd+Enter</em> no Mac) passa para a próxima; <em>Esc</em> fecha a ficha, gravando o que foi digitado. Dentro de um campo de texto as teclas são do campo. Fora de um campo, <em>Ctrl+Z</em> (<em>Cmd+Z</em>) usa o <em>Desfazer</em> do último aviso.</p>
+      <p><strong>Desfazer:</strong> liberar, cancelar a liberação, confirmar o cliente, liberar ou cancelar o carro, tirar alguém da equipe e finalizar mostram um aviso com <em>Desfazer</em>, que diz a ação e a O.S. O aviso fica 10 segundos e espera enquanto o mouse está em cima dele. Cancelar a liberação e cancelar o carro perguntam antes.</p>
       <p>Na barra das etapas, o número em amarelo conta o que <strong>impede finalizar</strong>; "a completar" é o que falta e não impede. O <strong>checklist de fechamento</strong> não trava o Finalizar: cada item diz o efeito que tem na pontuação (atraso e retrabalho tiram a O.S. da pontuação, a volta conferida dá bônus ou redutor, a baixa do ERP só pontua depois de lançada) ou só que falta.</p>
 
       <h2>Fluxo típico</h2>
@@ -9639,16 +9732,37 @@ const CAMPOS_DESFAZER = {
   finalizar: ['finalizadaEm', 'finalizadoPor', 'checkout', 'historico', 'excecaoConclusao'],
   equipe: ['equipe', 'historico'],
 };
+/* A RESPOSTA DO RETRABALHO VOLTA JUNTO COM A FINALIZAÇÃO (revisão da F24, M1).
+   O Finalizar pergunta do retrabalho no mesmo gesto: o "Não" numa O.S.
+   marcada desmarca o retrabalho e limpa a descrição; o "Sim" marca. O retrato
+   destes campos é tirado ANTES da pergunta: tirado depois, o Desfazer dizia
+   "Desfeito" e deixava o retrabalho desmarcado (a O.S. passava a pontuar). O
+   checkout também é o de antes da pergunta (o "Não" tira a situação
+   "Retrabalho"). Só a gestão (admin e pcp) desmarca e muda o retrabalho no
+   servidor (guardarRetrabalho): para os outros papéis, a finalização cuja
+   resposta mudou o retrabalho não ganha o Desfazer de um toque. */
+const CAMPOS_RETRAB_DESFAZER = ['retrabalhoPerguntado', 'retrabalho', 'problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho', 'checkout'];
+const CAMPOS_MARCA_RETRAB = ['retrabalho', 'problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho'];
 // A mesma lista do _shared (CAMPOS_GESTAO), separada pelo que a gestão limpa com null e pelo que só cresce.
 const F24_GESTAO_LIMPAVEL = ['alocacao', 'retornoPrevisto', 'retornoConferido', 'osOriginalId'];
 const F24_GESTAO_SO_ACRESCIMO = ['alocacaoLog', 'prazoCombinado', 'cancelamento', 'ocorrencias', 'abonos', 'chegadasConferidas'];
 const temCampoF24 = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k) && o[k] !== undefined;
 const copiaF24 = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
 const vazioF24 = v => v == null || v === '' || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length);
-// O aviso com Desfazer; sem como mostrar o botão (tela sem toast), fica o aviso simples: a ação já gravou.
-function avisoComDesfazer(msg, desfazer) {
-  try { toastDesfazer(msg, desfazer); } catch (e) { toast(msg, 'success'); }
+// O mesmo valor para a comparação: '' e ausente são o mesmo vazio.
+const canonF24 = v => JSON.stringify(v == null || v === '' ? null : v);
+// "O.S. 1234" (a O.S. manual ainda sem número também é dita).
+const numeroOSF24 = os => { const n = String((os && os.numero) || '').trim(); return n ? 'O.S. ' + n : 'O.S. sem número'; };
+// "Ana", "Ana e Bia", "Ana, Bia e Caio".
+const nomesEmFraseF24 = nomes => nomes.length <= 1 ? String(nomes[0] || '') : nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1];
+/* O aviso com Desfazer; sem como mostrar o botão (tela sem toast), fica o
+   aviso simples: a ação já gravou. `chave` (O.S. e ação): o aviso novo da
+   mesma O.S. e ação tira o anterior da tela. */
+function avisoComDesfazer(msg, desfazer, chave) {
+  try { return toastDesfazer(msg, desfazer, chave ? { chave } : {}); } catch (e) { toast(msg, 'success'); return null; }
 }
+// O aviso ainda vale? (sem o handle do toast, como nos testes, vale até ser usado).
+const avisoVivoF24 = (h, usado) => !usado() && (!h || typeof h.vivo !== 'function' || h.vivo());
 // O retrato dos campos: null = o campo não existia (ou era null).
 function fotoCampos(os, campos) {
   const f = {};
@@ -9671,19 +9785,25 @@ function devolverCampos(alvo, antes) {
 /* O toast com Desfazer. `marca(o)`: a ação ainda está na O.S.; `guarda`: os
    campos que não podem ter mudado depois; `conferir(o)`: a última régua (a do
    servidor), '' ou o motivo; `depois(o, aberta)`: o que vai junto na mesma
-   gravação; `feito()`: o texto do aviso final. A ficha aberta desfaz no
-   rascunho (o autosave leva); fechada, na O.S. do STORE. */
+   gravação; `feito()`: o texto do aviso final, que diz o que voltou e de qual
+   O.S. (revisão da F24); `grupo`: a ação, para um aviso só por O.S. e ação. A
+   ficha aberta desfaz no rascunho (o autosave leva); fechada, na O.S. do
+   STORE. O Desfazer de um aviso só mexe na O.S. dele (o id). Devolve
+   { vivo() }. */
 function oferecerDesfazer(msg, os, antes, opt = {}) {
   const id = os && os.id;
-  if (!id) return;
+  if (!id) return null;
+  const n = numeroOSF24(os);
   const guarda = Array.isArray(opt.guarda) ? opt.guarda : [];
   const fixo = JSON.stringify(fotoCampos(os, guarda));
-  avisoComDesfazer(msg, () => {
+  let usado = false;
+  const h = avisoComDesfazer(msg, () => {
+    usado = true;
     const aberta = !!_modalDraft && _modalDraft.id === id;
     const alvo = aberta ? _modalDraft : STORE.getOS(id);
-    if (!alvo) { toast('Não deu para desfazer: a O.S. não está mais neste aparelho.', 'error'); return; }
+    if (!alvo) { toast(`Não deu para desfazer: a ${n} não está mais neste aparelho.`, 'error'); return; }
     if ((typeof opt.marca === 'function' && !opt.marca(alvo)) || JSON.stringify(fotoCampos(alvo, guarda)) !== fixo) {
-      toast('Não deu para desfazer: a O.S. mudou depois. Confira a ficha.', 'error');
+      toast(`Não deu para desfazer: a ${n} mudou depois. Confira a ficha.`, 'error');
       return;
     }
     const motivo = typeof opt.conferir === 'function' ? opt.conferir(alvo) : '';
@@ -9697,65 +9817,90 @@ function oferecerDesfazer(msg, os, antes, opt = {}) {
       STORE.saveOS(alvo);
       if (typeof renderActiveTab === 'function') renderActiveTab();
     }
-    toast(typeof opt.feito === 'function' ? opt.feito() : 'Desfeito', 'success');
-  });
+    toast(typeof opt.feito === 'function' ? opt.feito() : `Desfeito na ${n}.`, 'success');
+  }, opt.grupo ? id + '|' + opt.grupo : '');
+  return { vivo: () => avisoVivoF24(h, () => usado) };
 }
-// Liberar do PCP (liberou) e Cancelar a liberação.
-function desfazerLiberacao(msg, antes, liberou) {
+/* Liberar do PCP (liberou) e Cancelar a liberação. O Cancelar pergunta antes
+   (revisão da F24, B5: liberar de novo depois recomeça a contagem de espera
+   da O.S.); o aviso com Desfazer fica como segunda proteção. */
+function desfazerLiberacao(antes, liberou) {
   const d = _modalDraft;
   if (!d) return;
-  const em = d.aptoEm;
-  oferecerDesfazer(msg, d, antes, {
+  const em = d.aptoEm, n = numeroOSF24(d);
+  oferecerDesfazer(liberou ? `${n} liberada para instalação` : `Liberação do PCP da ${n} cancelada`, d, antes, {
+    grupo: 'liberacao',
     marca: o => liberou ? (o.liberadoPCP === true && o.aptoEm === em) : !o.liberadoPCP,
     guarda: ['carroLiberado', 'finalizadaEm', 'historico'],
+    feito: () => liberou ? `Desfeito: a ${n} voltou a aguardar a liberação do PCP.` : `Desfeito: a ${n} está liberada para instalação de novo, como antes.`,
   });
 }
 /* "Confirmei agora". A O.S. que já estava confirmada fica sem o Desfazer: a
    confirmação de antes voltaria e o servidor (confPor do crachá) a daria a
-   quem desfez. A primeira confirmação se desfaz: confirmacao vazia não é
-   carimbada. */
+   quem desfez. O aviso diz que a confirmação foi renovada, diferente do
+   aviso com Desfazer (revisão da F24, B3). A primeira confirmação se desfaz:
+   confirmacao vazia não é carimbada. */
 function desfazerConfirmacao(antes) {
   const d = _modalDraft;
   if (!d) return;
-  if (antes.confirmacao === 'Confirmado') { toast('Cliente confirmado', 'success'); return; }
+  const n = numeroOSF24(d);
+  if (antes.confirmacao === 'Confirmado') { toast(`Confirmação do cliente da ${n} renovada para agora.`, 'success'); return; }
   const em = d.confEm;
-  oferecerDesfazer('Cliente confirmado', d, antes, {
+  oferecerDesfazer(`Cliente da ${n} confirmado`, d, antes, {
+    grupo: 'confirmacao',
     marca: o => o.confirmacao === 'Confirmado' && o.confEm === em,
     guarda: ['carroLiberado', 'finalizadaEm', 'historico'],
+    feito: () => `Desfeito: a ${n} voltou a ficar sem a confirmação do cliente.`,
   });
 }
 // O dia em São Paulo como o pcp-sync conta (o instante menos 3 horas): a mesma régua da liberação do carro.
 const diaSPServidor = x => { const t = Date.parse(String(x || '')); return Number.isFinite(t) ? new Date(t - 3 * 3600 * 1000).toISOString().slice(0, 10) : ''; };
-/* O servidor só aceita o carro liberado (de novo) com o cliente confirmado no
-   dia da saída (pcp-sync, upsert). O Cancelar do carro só troca a pergunta
-   pelo Desfazer quando a volta passaria. */
+/* O CARRO LIBERADO DE VOLTA PASSA PELAS DUAS RÉGUAS (revisão da F24, A2):
+   - a do servidor (pcp-sync, upsert): cliente confirmado no dia da saída;
+   - a da tela (o botão Liberar carro): cliente confirmado HOJE.
+   Só com as duas o Desfazer do Cancelar carro é oferecido. Num serviço de
+   vários dias (carro liberado e cliente confirmado ontem), o Desfazer
+   passava pela régua do servidor e, passado o aviso, o botão recusava: o
+   único caminho de volta era confirmar sem ter ligado. */
 function podeVoltarCarro(o) {
   if (!o || !o.carroLiberado) return false;
   const dia = diaSPServidor(o.carroLiberadoEm);
-  return !!dia && o.confirmacao === 'Confirmado' && diaSPServidor(o.confEm) === dia;
+  return !!dia && o.confirmacao === 'Confirmado' && diaSPServidor(o.confEm) === dia && OPERACAO.confirmadaHoje(o);
 }
+// O nome do que se libera: o carro, ou a saída da instalação interna (sem carro).
+const carroOuSaidaF24 = os => OPERACAO.semCarro(os) ? { nome: 'Saída', o: 'a saída', de: 'da saída', a: 'a' } : { nome: 'Carro', o: 'o carro', de: 'do carro', a: 'o' };
 // Liberar o carro (liberou) e Cancelar o carro.
-function desfazerCarro(msg, antes, liberou) {
+function desfazerCarro(antes, liberou) {
   const d = _modalDraft;
   if (!d) return;
-  const em = d.carroLiberadoEm;
-  oferecerDesfazer(msg, d, antes, {
+  const em = d.carroLiberadoEm, n = numeroOSF24(d), c = carroOuSaidaF24(d);
+  oferecerDesfazer(liberou ? `${c.nome} da ${n} liberad${c.a}` : `Liberação ${c.de} da ${n} cancelada`, d, antes, {
+    grupo: 'carro',
     marca: o => liberou ? (o.carroLiberado === true && o.carroLiberadoEm === em) : !o.carroLiberado,
     guarda: ['confirmacao', 'confEm', 'finalizadaEm', 'historico'],
     conferir: o => liberou || podeVoltarCarro({ ...o, ...antes }) ? ''
-      : 'Não deu para desfazer: o servidor só aceita o carro liberado com o cliente confirmado no dia da saída. Libere o carro de novo.',
+      : `Não deu para desfazer: para liberar ${c.o} da ${n} de novo, confirme o cliente hoje e toque em Liberar.`,
+    feito: () => liberou ? `Desfeito: ${c.o} da ${n} voltou a não estar liberad${c.a}.` : `Desfeito: ${c.o} da ${n} está liberad${c.a} de novo, como antes.`,
   });
 }
 /* O Finalizar da ficha, como o do card (revisão da E4): o Desfazer volta a
    finalização E as marcas de entrega que ela criou (um 'desfeito' para cada,
-   na mesma gravação). Quem não desfaz marca de entrega não recebe o Desfazer
-   de um toque quando a finalização marcou saldo. */
-function desfazerFinalizacaoDaFicha(msg, os, antes, eventos) {
+   na mesma gravação), E a resposta do retrabalho dada no mesmo gesto
+   (revisão da F24: `antes` traz o retrato de antes da pergunta). Quem não
+   desfaz marca de entrega não recebe o Desfazer de um toque quando a
+   finalização marcou saldo; quem não é da gestão, quando a resposta mudou o
+   retrabalho (o servidor não deixaria voltar). */
+function desfazerFinalizacaoDaFicha(msg, os, antes, eventos, opt = {}) {
   const criadas = Array.isArray(eventos) ? eventos : [];
-  if (criadas.length && !podeMarcarEntrega('desfeito')) { toast(msg + '. Para desfazer, fale com o PCP.', 'success'); return; }
+  const n = numeroOSF24(os);
+  const gestao = ['admin', 'pcp'].includes(String((STATE.user || {}).papel || ''));
+  const marcaMudou = CAMPOS_MARCA_RETRAB.some(k => Object.prototype.hasOwnProperty.call(antes, k) && canonF24(antes[k]) !== canonF24(os[k]));
+  const respostaMudou = marcaMudou || (Object.prototype.hasOwnProperty.call(antes, 'retrabalhoPerguntado') && canonF24(antes.retrabalhoPerguntado) !== canonF24(os.retrabalhoPerguntado));
+  if ((criadas.length && !podeMarcarEntrega('desfeito')) || (marcaMudou && !gestao)) { toast(msg + '. Para desfazer, fale com o PCP.', 'success'); return; }
   const em = os.finalizadaEm;
   let desfeitos = [];
   oferecerDesfazer(msg, os, antes, {
+    grupo: 'finalizar',
     marca: o => !!o.finalizadaEm && o.finalizadaEm === em,
     guarda: ['historico'],
     conferir: o => {
@@ -9764,30 +9909,98 @@ function desfazerFinalizacaoDaFicha(msg, os, antes, eventos) {
       return d.erro;
     },
     depois: () => { for (const [it, ev] of desfeitos) it.entregas = (Array.isArray(it.entregas) ? it.entregas : []).concat(ev); },
-    feito: () => desfeitos.length ? `Desfeito: a finalização e ${desfeitos.length} ${desfeitos.length === 1 ? 'marca de entrega' : 'marcas de entrega'}` : 'Desfeito',
+    feito: () => {
+      const partes = [`Desfeito: ${opt.interno ? 'a retirada saiu e ' : ''}a ${n} voltou a ficar aberta`];
+      if (desfeitos.length) partes.push(`${desfeitos.length} ${desfeitos.length === 1 ? 'marca de entrega desfeita' : 'marcas de entrega desfeitas'}`);
+      if (respostaMudou) partes.push('a resposta do retrabalho voltou a ser a de antes');
+      return partes.length === 1 ? partes[0] + '.' : partes.slice(0, -1).join(', ') + ' e ' + partes[partes.length - 1] + '.';
+    },
   });
+}
+/* TIRAR GENTE DA EQUIPE E DA DIVISÃO (revisão da F24, M1). Tirar a Ana e
+   depois a Bia dava dois avisos: o da Ana respondia "a O.S. mudou depois"
+   (quem mudou foi a mesma pessoa), e só a Bia voltava. Agora as tiradas
+   seguidas da mesma O.S. viram um aviso só ("Ana e Bia saíram da equipe da
+   O.S. 1234"), que devolve todas: o retrato é o de antes da primeira, e as
+   voltas do componente (ALOCUI) rodam da última para a primeira. Junta só
+   enquanto o aviso anterior está na tela e não foi usado. */
+const _tiradasF24 = new Map();   // `${id da O.S.}|equipe` ou `|divisao` -> { antes, voltas, nomes, aviso }
+const nomeDaTiradaF24 = (msg, info) => (info && info.nome) || String(msg || '').replace(/\s+sa(?:iu|íram) d[ao] (?:equipe|divisão)\.?$/, '');
+function juntarTiradaF24(chave, msg, voltar, info, antesNovo) {
+  const ant = _tiradasF24.get(chave);
+  const junta = !!ant && !!ant.aviso && ant.aviso.vivo();
+  const reg = {
+    antes: junta ? ant.antes : antesNovo,
+    voltas: (junta ? ant.voltas : []).concat(typeof voltar === 'function' ? [voltar] : []),
+    nomes: (junta ? ant.nomes : []).concat(nomeDaTiradaF24(msg, info)),
+    aviso: null,
+  };
+  _tiradasF24.set(chave, reg);
+  return reg;
 }
 /* Tirar alguém do campo Equipe da ficha grava os.equipe na hora
    (equipeDaFichaMudou). O Desfazer devolve a equipe da O.S. como estava (a
    mesma ordem) e o componente como estava (ALOCUI, `voltar`). A divisão que
    o servidor marcou "desatualizada" volta a valer sozinha quando a gente
-   volta a ser a mesma (sanearAlocacao: "reatualizar"). */
-function tirouDaEquipeDaFicha(msg, voltar) {
+   volta a ser a mesma (sanearAlocacao: "reatualizar"; o histórico da divisão
+   junta as duas linhas do mesmo autor na mesma janela). */
+function tirouDaEquipeDaFicha(msg, voltar, info) {
   const d = _modalDraft;
   if (!d || typeof ALOCUI === 'undefined') return;
   const nova = JSON.stringify(ALOCUI.paraEquipe(chavesFicha(d.id).eq).equipe || []);
-  oferecerDesfazer(msg, d, fotoCampos(d, CAMPOS_DESFAZER.equipe), {
+  const reg = juntarTiradaF24(d.id + '|equipe', msg, voltar, info, fotoCampos(d, CAMPOS_DESFAZER.equipe));
+  const n = numeroOSF24(d), quem = nomesEmFraseF24(reg.nomes), varios = reg.nomes.length > 1;
+  const voltas = reg.voltas.slice();
+  reg.aviso = oferecerDesfazer(`${quem} ${varios ? 'saíram' : 'saiu'} da equipe da ${n}.`, d, reg.antes, {
+    grupo: 'equipe',
     marca: o => JSON.stringify(Array.isArray(o.equipe) ? o.equipe : []) === nova,
     guarda: ['finalizadaEm', 'carroLiberado'],
-    depois: (o, aberta) => { if (aberta && typeof voltar === 'function') voltar(); },
+    depois: (o, aberta) => { if (aberta) for (const v of voltas.slice().reverse()) v(); },
+    feito: () => `Desfeito: ${quem} ${varios ? 'voltaram' : 'voltou'} para a equipe da ${n}.`,
   });
 }
-// Na Divisão (bloco 5) nada é gravado até "Confirmar divisão": o Desfazer só devolve a montagem.
-function tirouDaDivisaoDaFicha(msg, voltar) {
-  avisoComDesfazer(msg, () => {
-    const erro = typeof voltar === 'function' ? voltar() : '';
-    toast(erro || 'Desfeito', erro ? 'error' : 'success');
-  });
+// Na Divisão nada é gravado até "Confirmar divisão": o Desfazer só devolve a montagem.
+function tirouDaDivisaoDaFicha(msg, voltar, info) {
+  const d = _modalDraft;
+  const id = d && d.id ? d.id : '';
+  const reg = juntarTiradaF24(id + '|divisao', msg, voltar, info, null);
+  const n = numeroOSF24(d), quem = nomesEmFraseF24(reg.nomes), varios = reg.nomes.length > 1;
+  const voltas = reg.voltas.slice();
+  let usado = false;
+  const h = avisoComDesfazer(`${quem} ${varios ? 'saíram' : 'saiu'} da divisão da ${n}.`, () => {
+    usado = true;
+    let erro = '';
+    for (const v of voltas.slice().reverse()) { const e = v(); if (e && !erro) erro = e; }
+    toast(erro || `Desfeito: ${quem} ${varios ? 'voltaram' : 'voltou'} para a divisão da ${n}.`, erro ? 'error' : 'success');
+  }, id ? id + '|divisao' : '');
+  reg.aviso = { vivo: () => avisoVivoF24(h, () => usado) };
+}
+
+/* A FOTO QUE O STORE RENOMEOU (revisão da F24, M4: o pcp-sync velho recusa o
+   id com a O.S.) troca de id também no rascunho da ficha aberta: sem isso, a
+   próxima gravação da ficha mandaria de novo o id recusado. Troca no lugar
+   (o rascunho é o mesmo objeto) e nos atributos da tela (miniatura e ×). */
+function trocarIdFotoNoObjeto(o, de, para) {
+  let n = 0;
+  if (Array.isArray(o)) o.forEach((x, i) => { if (x === de) { o[i] = para; n++; } else if (x && typeof x === 'object') n += trocarIdFotoNoObjeto(x, de, para); });
+  else if (o && typeof o === 'object') for (const k of Object.keys(o)) { if (o[k] === de) { o[k] = para; n++; } else if (o[k] && typeof o[k] === 'object') n += trocarIdFotoNoObjeto(o[k], de, para); }
+  return n;
+}
+function trocarIdFotoNaFicha(de, para) {
+  if (!de || !para || !_modalDraft) return 0;
+  const n = trocarIdFotoNoObjeto(_modalDraft, de, para);
+  if (!n) return 0;
+  if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
+    for (const el of Array.from(document.querySelectorAll('#modal-os *'))) {
+      for (const a of Array.from(el.attributes || [])) if (a.name.startsWith('data-') && a.value === de) el.setAttribute(a.name, para);
+    }
+  }
+  /* A ficha aberta grava o próprio rascunho com o id trocado: ele toma o
+     lugar da cópia que o store pôs na fila, e o número de versão que o
+     servidor devolver volta para o rascunho (sem isso, a gravação seguinte
+     da ficha levava "Conflito de edição"). */
+  markDirty(); saveDraft();
+  return n;
 }
 
 /* ── A CÂMERA NAS FOTOS DE ANTES E DE DEPOIS ──────────────────────────────
@@ -9813,8 +10026,10 @@ function fotoCameraGaleriaHTML(attr, quando, ro, extra = '') {
    "1234.56" e "1,234.56" são 1234,56; "1.234" é mil duzentos e trinta e
    quatro (o milhar à brasileira); "12,5" e "12.5" são doze e meio. Guarda o
    valor unitário com ponto decimal, como o PDF ('1234.56'). */
-function valorBR(v) {
-  if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v * 100) / 100 : NaN;
+/* O número à brasileira e o do PDF, SEM arredondar (a quantidade usa este;
+   o valor arredonda para centavos). NaN quando não é número. */
+function numeroBR(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;
   let t = String(v == null ? '' : v).replace(/R\$/gi, '').replace(/\s/g, '');
   if (!/^[\d.,]+$/.test(t) || !/\d/.test(t)) return NaN;
   const virg = t.lastIndexOf(','), ponto = t.lastIndexOf('.');
@@ -9834,7 +10049,22 @@ function valorBR(v) {
     else t = partes[0] + '.' + partes[1];   // o ponto decimal: 12.5 e 1234.56 (o do PDF)
   }
   const n = Number(t);
+  return Number.isFinite(n) ? n : NaN;
+}
+function valorBR(v) {
+  const n = numeroBR(v);
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
+}
+/* A QUANTIDADE DO ITEM PELA MESMA RÉGUA DO VALOR (revisão da F24, B3): o
+   parseBRNumber apaga o ponto, e "1.5" virava 15 no subtotal (e no valor da
+   O.S. manual, que entra no ranking e na comissão). "1.5" e "1,5" são um e
+   meio; "1.500" é mil e quinhentos (o milhar à brasileira); a unidade depois
+   do número não conta ("2 un", "1,5 m²"). Sem número, zero, como antes. */
+function qtdeBR(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  const m = /^\s*([\d.,]+)/.exec(String(v == null ? '' : v));
+  const n = m ? numeroBR(m[1].replace(/[.,]$/, '')) : NaN;
+  return Number.isFinite(n) ? n : 0;
 }
 // 1234.5 -> "1.234,50" (sem depender do Intl do aparelho).
 function fmtValorBR(n) {
@@ -9845,20 +10075,33 @@ function fmtValorBR(n) {
 // O subtotal do item, em centavos redondos: a quantidade vezes o valor unitário.
 function subtotalDoItem(it) {
   const u = valorBR(it && it.valorUnit);
-  return Number.isFinite(u) ? Math.round(parseBRNumber(it.qtde) * u * 100) / 100 : 0;
+  return Number.isFinite(u) ? Math.round(qtdeBR(it.qtde) * u * 100) / 100 : 0;
 }
 const verValorDosItens = os => !!os && !os.origemMubisys && ['admin', 'pcp'].includes(String((STATE.user || {}).papel || ''));
-// A linha do valor, embaixo do item: o campo só no item manual da O.S. manual, e o subtotal ao lado.
+/* O ITEM COM DESCRIÇÃO E SEM VALOR É DITO AO LADO DO CAMPO (revisão da F24,
+   A1): zero ou vazio entra no valor da O.S. manual como R$ 0,00, calado. */
+const itemSemValorF24 = it => !!it && !!String(it.descricao || '').trim() && !(valorBR(it.valorUnit) > 0);
+const TEXTO_ITEM_SEM_VALOR = 'Falta o valor unitário deste item: sem ele, o item entra com R$ 0,00 no valor da O.S.';
+const idAvisoValorF24 = i => 'valor-aviso-' + String(i).replace(/[^\w-]/g, '-');
+/* A linha do valor, embaixo do item: o campo só no item manual da O.S.
+   manual, e o subtotal ao lado. O CAMPO NASCE VAZIO (revisão da F24, A1): o
+   "0,00" escrito fazia o clique no meio virar 1500,00 e o clique no fim
+   virar 0,00150. Zero aparece vazio, com o "0,00" só de dica. A 375 px a
+   linha cola no cartão do item e diz de qual item é (B6). */
 function valorItemHTML(it, i, os, ro, u, cols) {
   if (!it || !verValorDosItens(os)) return '';
   const unit = valorBR(it.valorUnit), sub = it.subtotal == null || it.subtotal === '' ? NaN : Number(it.subtotal);
   // Item que não é manual e não tem valor nenhum: a linha só diria "—".
   if (!it.manual && !Number.isFinite(unit) && !Number.isFinite(sub)) return '';
   const subTxt = Number.isFinite(sub) ? 'R$ ' + fmtValorBR(sub) : '—';
+  const codigo = String(it.item || String(i + 1));
+  const deQual = `Item ${codigo}${String(it.descricao || '').trim() ? ': ' + String(it.descricao).trim().slice(0, 40) : ''}`;
+  const semValor = !ro && it.manual && itemSemValorF24(it);
+  const aviso = !ro && it.manual ? `<p class="fe-msg valor-item-aviso" id="${idAvisoValorF24(i)}" data-valor-aviso="${i}" aria-live="polite">${semValor ? esc(TEXTO_ITEM_SEM_VALOR) : ''}</p>` : '';
   const campo = !ro && it.manual
-    ? `<label class="valor-item-rot">Valor unitário <span class="valor-item-campo"><span aria-hidden="true">R$</span><input type="text" inputmode="decimal" autocomplete="off" data-valor-item="${i}" ${u} value="${esc(Number.isFinite(unit) ? fmtValorBR(unit) : '')}" placeholder="0,00" aria-label="Valor unitário do item ${esc(it.item || String(i + 1))}, em reais"></span></label>`
+    ? `<label class="valor-item-rot">Valor unitário <span class="valor-item-campo"><span aria-hidden="true">R$</span><input type="text" inputmode="decimal" autocomplete="off" data-valor-item="${i}" ${u} value="${esc(unit > 0 ? fmtValorBR(unit) : '')}" placeholder="0,00" aria-label="Valor unitário do item ${esc(codigo)}, em reais" aria-describedby="${idAvisoValorF24(i)}"${semValor ? ' aria-invalid="true"' : ''}></span></label>`
     : `<span class="valor-item-rot">Valor unitário R$ ${esc(Number.isFinite(unit) ? fmtValorBR(unit) : '—')}</span>`;
-  return `<tr class="valor-row"><td colspan="${cols}" data-label="Valor"><div class="valor-item">${campo}<span class="valor-item-sub">Subtotal <strong data-valor-sub="${i}" ${u}>${esc(subTxt)}</strong></span></div></td></tr>`;
+  return `<tr class="valor-row"><td colspan="${cols}" data-label="Valor"><div class="valor-item"><span class="valor-item-de">${esc(deQual)}</span>${campo}<span class="valor-item-sub">Subtotal <strong data-valor-sub="${i}" ${u}>${esc(subTxt)}</strong></span></div>${aviso}</td></tr>`;
 }
 function ligarValoresDaFicha(root, ro) {
   if (!root || typeof root.querySelectorAll !== 'function') return;
@@ -9866,39 +10109,76 @@ function ligarValoresDaFicha(root, ro) {
     const s = $$('[data-valor-sub]', root).find(x => x.dataset && x.dataset.valorSub === chave);
     if (s) s.textContent = 'R$ ' + fmtValorBR(Number(it.subtotal) || 0);
   };
+  // O aviso preso ao campo: aparece e some com o que está digitado.
+  const pintarAviso = (chave, it, el) => {
+    const p = $$('[data-valor-aviso]', root).find(x => x.dataset && x.dataset.valorAviso === chave);
+    const falta = itemSemValorF24(it);
+    /* Resolvido, o aviso guarda o lugar (fica invisível) até a ficha
+       repintar: o que está embaixo não sobe sob o próximo clique (a régua da
+       F23 para a falta ao lado do campo). */
+    if (p) {
+      if (falta) { if (p.textContent !== TEXTO_ITEM_SEM_VALOR) p.textContent = TEXTO_ITEM_SEM_VALOR; if (p.classList) p.classList.remove('fe-msg-feita'); }
+      else if (p.textContent && p.classList) p.classList.add('fe-msg-feita');
+    }
+    if (el && typeof el.setAttribute === 'function') { if (falta) el.setAttribute('aria-invalid', 'true'); else if (el.getAttribute('aria-invalid') === 'true' && !el.dataset.valorErrado) el.removeAttribute('aria-invalid'); }
+  };
   $$('[data-valor-item]', root).forEach(el => {
     const item = () => itemDoDraft(_modalDraft && _modalDraft.itens, el.dataset.valorItem, el.dataset.iuid);
+    /* SELECIONA TUDO AO RECEBER O FOCO (revisão da F24, A1), no clique e no
+       toque: o que se digita troca o valor inteiro, sem depender de onde o
+       cursor caiu. O soltar do mouse (ou do dedo) logo depois do foco não
+       desfaz a seleção. */
+    let soltar = false, prazo = null;
+    const selecionar = () => { try { if (typeof el.select === 'function') el.select(); } catch {} };
+    if (typeof el.addEventListener === 'function') {
+      el.addEventListener('focus', () => {
+        soltar = true; selecionar();
+        setTimeout(() => { if (typeof document !== 'undefined' && document.activeElement === el) selecionar(); }, 0);
+        if (prazo) clearTimeout(prazo);
+        prazo = setTimeout(() => { soltar = false; }, 600);
+      });
+      el.addEventListener('mouseup', ev => { if (soltar) { soltar = false; if (ev && typeof ev.preventDefault === 'function') ev.preventDefault(); selecionar(); } });
+      el.addEventListener('touchend', () => { if (soltar) setTimeout(selecionar, 0); });
+      el.addEventListener('keydown', () => { soltar = false; });
+    }
     el.oninput = () => {
       if (ro || !_modalDraft) return;
       const it = item();
       if (!it) return;
       const t = String(el.value || '').trim();
-      const n = t === '' ? 0 : valorBR(t);
-      if (!Number.isFinite(n)) { el.setAttribute('aria-invalid', 'true'); return; }
+      const n = t === '' ? null : valorBR(t);
+      if (n !== null && !Number.isFinite(n)) { el.dataset.valorErrado = '1'; el.setAttribute('aria-invalid', 'true'); return; }
+      delete el.dataset.valorErrado;
       el.removeAttribute('aria-invalid');
-      it.valorUnit = String(n);
+      it.valorUnit = n === null ? '' : String(n);
       it.subtotal = subtotalDoItem(it);
       pintarSub(el.dataset.valorItem, it);
+      pintarAviso(el.dataset.valorItem, it, el);
       markDirty(); _debouncedSaveDraft();
     };
     el.onblur = () => {
       const it = item();
       const valido = it ? valorBR(it.valorUnit) : NaN;
-      if (el.getAttribute('aria-invalid') === 'true') {
+      if (el.dataset.valorErrado) {
         toast('Valor inválido: use só números, com vírgula ou ponto nos centavos (ex.: 1.234,56).', 'error');
+        delete el.dataset.valorErrado;
         el.removeAttribute('aria-invalid');
       }
-      el.value = Number.isFinite(valido) ? fmtValorBR(valido) : '';
+      el.value = valido > 0 ? fmtValorBR(valido) : '';
+      if (it) pintarAviso(el.dataset.valorItem, it, el);
       if (_modalDirty) saveDraft();
     };
   });
-  // A quantidade muda o subtotal na hora (o handler dos itens já recalcula; aqui só a tela).
-  $$('[data-item]', root).filter(el => /\.qtde$/.test(el.dataset.item || '')).forEach(el => {
+  // A quantidade muda o subtotal na hora (o handler dos itens já recalcula; aqui só a tela); a descrição liga o aviso.
+  $$('[data-item]', root).filter(el => /\.(qtde|descricao)$/.test(el.dataset.item || '')).forEach(el => {
     if (typeof el.addEventListener !== 'function') return;
     el.addEventListener('input', () => {
-      const [idx] = String(el.dataset.item).split('.');
+      const [idx, campo] = String(el.dataset.item).split('.');
       const it = itemDoDraft(_modalDraft && _modalDraft.itens, idx, el.dataset.iuid);
-      if (it) pintarSub(idx, it);
+      if (!it) return;
+      if (campo === 'qtde') pintarSub(idx, it);
+      const inp = $$('[data-valor-item]', root).find(x => x.dataset && x.dataset.valorItem === idx);
+      if (inp) pintarAviso(idx, it, inp);
     });
   });
 }
@@ -9926,11 +10206,15 @@ function buscarClientes(consulta, clientes, max = 6) {
   const q = String(consulta || '').replace(/\s+/g, ' ').trim(), nq = normNome(q);
   if (nq.length < 2) return [];
   const comNumero = /\d/.test(q), tolerante = typeof OPERACAO.buscaTolerante === 'function';
+  /* Com 2 letras só o nome que começa por elas (ou uma palavra dele):
+     "Lo" achava "pelo" no meio do nome (revisão da F24). */
+  const curto = nq.length < 3;
   const out = [];
   for (const c of (Array.isArray(clientes) ? clientes : [])) {
     const nc = normNome(c.nome);
     if (!nc || nc === nq) continue;   // o que já está digitado não vira sugestão
-    const r = comNumero || !tolerante ? (nc.includes(nq) ? { tipo: 'direto', dist: 0 } : { tipo: '', dist: Infinity })
+    if (curto && !nc.split(/\s+/).some(p => p.startsWith(nq))) continue;
+    const r = comNumero || !tolerante || curto ? (nc.includes(nq) ? { tipo: 'direto', dist: 0 } : { tipo: '', dist: Infinity })
       : OPERACAO.buscaTolerante(q, { textos: [c.nome] });
     if (!r || !r.tipo) continue;
     out.push({ ...c, tipo: r.tipo === 'sugestao' ? 'sugestao' : 'achado', dist: Number(r.dist) || 0, comeca: nc.startsWith(nq) });
@@ -9939,17 +10223,33 @@ function buscarClientes(consulta, clientes, max = 6) {
   out.sort((a, b) => ordem(a.tipo) - ordem(b.tipo) || (b.comeca - a.comeca) || a.dist - b.dist || b.n - a.n || a.nome.localeCompare(b.nome, 'pt-BR'));
   return out.slice(0, max);
 }
+/* A LISTA DO CLIENTE NÃO TOMA O TECLADO (revisão da F24, M3). Tab ia para a
+   sugestão (o "Você quis dizer") e Enter trocava o cliente novo pelo antigo.
+   Agora o foco fica no campo: as setas destacam uma opção
+   (aria-activedescendant), Enter só escolhe a destacada, Tab sai do campo
+   sem escolher e Esc fecha a lista. As opções não entram no Tab
+   (tabindex -1); o clique e o toque escolhem. A lista fica POR CIMA dos
+   campos de baixo (styles.css), sem empurrar Contato e WhatsApp a cada
+   letra, e quebra o nome comprido em vez de alargar a ficha a 375 px. */
 function ligarClienteTolerante(root) {
   if (!root || typeof root.querySelector !== 'function') return;
   const inp = root.querySelector('input[data-f="cliente"]'), caixa = root.querySelector('#cli-sug');
   if (!inp || !caixa || inp.readOnly || typeof inp.addEventListener !== 'function') return;
   inp.setAttribute('autocomplete', 'off');
+  inp.setAttribute('role', 'combobox');
   inp.setAttribute('aria-autocomplete', 'list');
   inp.setAttribute('aria-controls', 'cli-sug');
   inp.setAttribute('aria-expanded', 'false');
-  let clientes = null;
-  const fechar = () => { caixa.hidden = true; caixa.innerHTML = ''; inp.setAttribute('aria-expanded', 'false'); };
+  let clientes = null, ativa = -1;
   const opcoes = () => Array.from(caixa.querySelectorAll('[data-cli-nome]'));
+  const destacar = i => {
+    const ops = opcoes();
+    ativa = ops.length ? Math.max(-1, Math.min(i, ops.length - 1)) : -1;
+    ops.forEach((b, k) => { b.setAttribute('aria-selected', k === ativa ? 'true' : 'false'); if (b.classList) b.classList.toggle('ativa', k === ativa); });
+    if (ativa >= 0) { inp.setAttribute('aria-activedescendant', ops[ativa].id); try { ops[ativa].scrollIntoView({ block: 'nearest' }); } catch {} }
+    else if (typeof inp.removeAttribute === 'function') inp.removeAttribute('aria-activedescendant');
+  };
+  const fechar = () => { caixa.hidden = true; caixa.innerHTML = ''; ativa = -1; inp.setAttribute('aria-expanded', 'false'); if (typeof inp.removeAttribute === 'function') inp.removeAttribute('aria-activedescendant'); };
   const escolher = nome => {
     if (!_modalDraft) return;
     inp.value = nome; fechar();
@@ -9961,24 +10261,33 @@ function ligarClienteTolerante(root) {
     if (!clientes) clientes = clientesDoAparelho(_modalDraft && _modalDraft.id);
     const r = buscarClientes(inp.value, clientes);
     if (!r.length) { fechar(); return; }
-    const op = c => `<button type="button" role="option" class="cli-sug-op" data-cli-nome="${esc(c.nome)}"><span>${esc(c.nome)}</span><small>${c.n} O.S.</small></button>`;
+    let k = 0;
+    const op = c => `<button type="button" role="option" tabindex="-1" id="cli-sug-op-${k++}" aria-selected="false" class="cli-sug-op" data-cli-nome="${esc(c.nome)}"><span>${esc(c.nome)}</span><small>${c.n} O.S.</small></button>`;
     const achados = r.filter(c => c.tipo === 'achado'), sug = r.filter(c => c.tipo === 'sugestao');
-    caixa.innerHTML = achados.map(op).join('') + (sug.length ? `<p class="cli-sug-tit">Você quis dizer</p>${sug.map(op).join('')}` : '');
+    caixa.innerHTML = achados.map(op).join('') + (sug.length ? `<p class="cli-sug-tit" aria-hidden="true">Você quis dizer</p>${sug.map(op).join('')}` : '');
     caixa.hidden = false; inp.setAttribute('aria-expanded', 'true');
-    opcoes().forEach((b, i, todas) => {
+    // Logo embaixo do campo, mesmo com a falta do campo (F23) guardando o lugar entre os dois.
+    if (caixa.style && typeof inp.offsetHeight === 'number' && inp.offsetHeight > 0) caixa.style.top = (inp.offsetTop + inp.offsetHeight + 4) + 'px';
+    ativa = -1;
+    if (typeof inp.removeAttribute === 'function') inp.removeAttribute('aria-activedescendant');
+    opcoes().forEach(b => {
       b.onmousedown = e => e.preventDefault();   // o clique escolhe sem tirar o foco do campo antes
       b.onclick = () => escolher(b.dataset.cliNome);
-      b.onkeydown = e => {
-        if (e.key === 'ArrowDown') { e.preventDefault(); (todas[i + 1] || b).focus(); }
-        else if (e.key === 'ArrowUp') { e.preventDefault(); (todas[i - 1] || inp).focus(); }
-        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fechar(); inp.focus(); }
-      };
     });
   };
   inp.addEventListener('input', pintar);
   inp.addEventListener('keydown', e => {
-    if (e.key === 'ArrowDown' && !caixa.hidden) { const p = opcoes()[0]; if (p) { e.preventDefault(); p.focus(); } }
-    else if (e.key === 'Escape' && !caixa.hidden) { e.preventDefault(); fechar(); }
+    if (caixa.hidden) return;
+    const n = opcoes().length;
+    if (e.key === 'ArrowDown') { e.preventDefault(); destacar(ativa + 1 >= n ? n - 1 : ativa + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); destacar(ativa - 1); }
+    else if (e.key === 'Enter') {
+      // Enter só escolhe a opção destacada pelas setas; sem destaque, fica o que foi digitado.
+      if (ativa >= 0) { e.preventDefault(); const b = opcoes()[ativa]; if (b) escolher(b.dataset.cliNome); }
+      else fechar();
+    }
+    else if (e.key === 'Escape') { e.preventDefault(); if (typeof e.stopPropagation === 'function') e.stopPropagation(); fechar(); }
+    else if (e.key === 'Tab') fechar();   // Tab sai do campo sem escolher
   });
   inp.addEventListener('blur', () => setTimeout(() => { if (!caixa.contains(document.activeElement)) fechar(); }, 150));
 }
@@ -10033,7 +10342,11 @@ function aoTeclarNaFicha(ev) {
   if (a.tipo === 'fechar') closeModal();
   else if (a.tipo === 'etapa') irParaEtapaFicha(a.k, { foco: 'titulo' });
 }
-if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') document.addEventListener('keydown', aoTeclarNaFicha);
+if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') {
+  document.addEventListener('keydown', aoTeclarNaFicha);
+  // Ctrl+Z (Cmd+Z) fora de campo: o Desfazer do aviso mais recente (revisão da F24, M2).
+  document.addEventListener('keydown', desfazerPeloTeclado);
+}
 
 /* ── A TROCA DE ETAPA ANIMA UMA VEZ ───────────────────────────────────────
    A ficha repinta a cada campo gravado: animar a etapa visível a cada
@@ -10044,11 +10357,12 @@ if (typeof document !== 'undefined' && document && typeof document.addEventListe
    reflow no meio para a animação recomeçar. O CSS só anima com
    prefers-reduced-motion: no-preference. */
 let _etapaPintadaF24 = { id: '', k: '' };
-function animarTrocaDeEtapa() {
+// `de`: a etapa de onde a troca saiu (irParaEtapaFicha); sem ela, a última pintada desta O.S.
+function animarTrocaDeEtapa(de) {
   const os = _modalDraft;
   if (!os) return;
   const k = etapaAtualFicha(os);
-  const trocou = _etapaPintadaF24.id === os.id && !!_etapaPintadaF24.k && _etapaPintadaF24.k !== k;
+  const trocou = de !== undefined ? !!de && de !== k : _etapaPintadaF24.id === os.id && !!_etapaPintadaF24.k && _etapaPintadaF24.k !== k;
   _etapaPintadaF24 = { id: os.id, k };
   if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
   $$('#modal-os .ficha-etapa.fe-entrou').forEach(s => { if (s.classList) s.classList.remove('fe-entrou'); });
@@ -10100,7 +10414,27 @@ function baseRascunhos() {
   }).finally(() => { _rascAbrindo = null; });
   return _rascAbrindo;
 }
-const chaveRascunhoF24 = (tela, osId) => [String((STATE.user && (STATE.user.login || STATE.user.nome)) || ''), tela, osId].join('|');
+/* A CHAVE É A CONTA (revisão da F24, B1): STATE.user.usuario. Pelo nome de
+   exibição, duas contas com o mesmo nome no mesmo aparelho viam o rascunho
+   uma da outra. O nome só fica de reserva (sessão antiga sem usuário). */
+const chaveRascunhoF24 = (tela, osId) => [String((STATE.user && (STATE.user.usuario || STATE.user.login || STATE.user.nome)) || ''), tela, osId].join('|');
+/* A base dos rascunhos sai junto com a sessão: no Sair (STORE.limparCache),
+   na sessão que expirou e quando o crachá passa a ser de outra pessoa
+   (revisão da F24, B1). Guardava o motivo do abono e o responsável do
+   retrabalho por até 7 dias depois disso. */
+function apagarRascunhosF24() {
+  _rascMem.clear();
+  try { if (_rascDb) { const db = _rascDb; _rascDb = null; db.close(); } } catch {}
+  try { if (typeof indexedDB !== 'undefined' && indexedDB && typeof indexedDB.deleteDatabase === 'function') indexedDB.deleteDatabase(RASC_BASE); } catch {}
+}
+/* FECHAR COM ALGO DIGITADO PERGUNTA (revisão da F24, B4): o motivo de um
+   cancelamento desistido voltava por 7 dias, com "Cancelar a O.S." ao lado.
+   OK descarta o rascunho; Cancelar fecha e guarda. */
+function fecharDialogoComRascunho(rasc, fechar) {
+  if (rasc && typeof rasc.sujo === 'function' && rasc.sujo()
+    && confirm('Descartar o rascunho?\n\nOK apaga o que você digitou aqui. Cancelar fecha e guarda o texto para quando abrir de novo.')) rasc.limpar();
+  fechar();
+}
 async function lerRascunhoF24(chave) {
   const mem = _rascMem.has(chave) ? _rascMem.get(chave) : null;
   const db = await baseRascunhos();
@@ -10126,17 +10460,31 @@ function gravarRascunhoF24(chave, valor) {
   _rascCadeia = _rascCadeia.then(passo, passo);
   return _rascCadeia;
 }
-/* Liga o rascunho a um <form> já na tela. Devolve { limpar() }, para quem
-   grava com sucesso. `opt.aoRecuperar()`: roda quando algo voltou. */
+/* Liga o rascunho a um <form> já na tela. Devolve { limpar(), sujo(),
+   descartar() }: limpar para quem grava com sucesso; sujo diz se há algo
+   digitado diferente do que o diálogo abriu; descartar volta o formulário
+   ao que abriu e apaga o rascunho (o botão "Descartar" do aviso azul).
+   `opt.aoRecuperar()`: roda quando algo voltou. */
 function ligarRascunhoForm(form, tela, osId, opt = {}) {
-  const nada = { limpar() {} };
+  const nada = { limpar() {}, sujo: () => false, descartar() {} };
   if (!form || !osId || typeof form.querySelectorAll !== 'function') return nada;
   const chave = chaveRascunhoF24(tela, osId);
   const campos = () => Array.from(form.querySelectorAll('input[name], textarea[name], select[name]'))
     .filter(el => !['hidden', 'file', 'password', 'submit', 'button'].includes(String(el.type || '').toLowerCase()));
   const iniciais = new Map(campos().map(el => [el.name, String(el.value ?? '')]));
   const tocados = new Set();
-  let timer = null, vivo = true;
+  let timer = null, vivo = true, aviso = null;
+  const sujo = () => campos().some(el => String(el.value ?? '') !== (iniciais.has(el.name) ? iniciais.get(el.name) : ''));
+  const descartar = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    for (const el of campos()) if (iniciais.has(el.name)) el.value = iniciais.get(el.name);
+    tocados.clear();
+    gravarRascunhoF24(chave, null);
+    if (aviso && typeof aviso.remove === 'function') aviso.remove();
+    aviso = null;
+    const primeiro = campos()[0];
+    if (primeiro && typeof primeiro.focus === 'function') try { primeiro.focus(); } catch {}
+  };
   const guardar = () => {
     timer = null;
     if (!vivo) return;
@@ -10165,14 +10513,19 @@ function ligarRascunhoForm(form, tela, osId, opt = {}) {
     }
     if (!voltou) return;
     if (typeof document !== 'undefined' && typeof document.createElement === 'function' && typeof form.insertBefore === 'function') {
-      const aviso = document.createElement('p');
+      aviso = document.createElement('p');
       aviso.className = 'rasc-aviso'; aviso.setAttribute('role', 'status');
-      aviso.textContent = 'Voltou o que você tinha digitado aqui e não chegou a gravar.';
+      const txt = document.createElement('span');
+      txt.textContent = 'Voltou o que você tinha digitado aqui e não chegou a gravar.';
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn-ghost btn-sm rasc-descartar'; b.textContent = 'Descartar';
+      b.onclick = descartar;
+      if (typeof aviso.append === 'function') aviso.append(txt, ' ', b); else aviso.textContent = txt.textContent;
       form.insertBefore(aviso, form.firstChild);
     }
     if (typeof opt.aoRecuperar === 'function') opt.aoRecuperar();
   });
-  return { limpar() { vivo = false; if (timer) { clearTimeout(timer); timer = null; } gravarRascunhoF24(chave, null); } };
+  return { limpar() { vivo = false; if (timer) { clearTimeout(timer); timer = null; } gravarRascunhoF24(chave, null); }, sujo, descartar };
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
