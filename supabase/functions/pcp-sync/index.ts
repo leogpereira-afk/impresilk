@@ -931,9 +931,14 @@ Deno.serve(async (req: Request) => {
         const vinculo={entregaId,grupo:indice,antes:grupo.equipeId || null,depois:equipe.id,equipeNome:equipe.nome,por:autor.nome,porId:autor.porId,em:agora};
         // Assinatura original da entrega fica preservada; a associação tem sua própria autoria.
         const gravar={...os,...(entrega?{conferenciasEntrega:os.conferenciasEntrega.map((x:any)=>x.id===entregaId?{...x,alocacao:nova}:x)}:{alocacao:nova}),vinculosEquipes:[...(os.vinculosEquipes || []),vinculo],rev:(Number(os.rev)||0)+1,atualizadoEm:agora,atualizadoPor:autor.nome};
-        const {data:salva,error:err}=await sb.from("pcp_registros").update({registro:gravar,atualizado_em:new Date(Math.max(Date.now(),Date.parse(row.atualizado_em)+1 || 0)).toISOString()}).eq("colecao","os").eq("id",osId).eq("atualizado_em",row.atualizado_em).select("id");
+        // The database locks configuration and checks both versions in one transaction.
+        const {data:salva,error:err}=await sb.rpc("pcp_vincular_equipe_cas", {
+          p_os_id:osId, p_os_versao:row.atualizado_em, p_cfg_versao:cfgAntes.versao,
+          p_equipe_id:equipe.id, p_registro:gravar,
+          p_atualizado_em:new Date(Math.max(Date.now(),Date.parse(row.atualizado_em)+1 || 0)).toISOString()
+        });
         if(err)throw new Error(err.message);
-        if(!salva?.length)return resp({error:"Outra pessoa alterou a O.S. Reabra a comparação.",conflito:true},409);
+        if(salva!==true)return resp({error:"O cadastro ou a O.S. mudou. Reabra a comparação.",conflito:true},409);
         await auditar(osId,"vincular-equipe",vinculo,os.numero);
         return resp({ok:true,os:saida(gravar)});
       }

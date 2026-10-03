@@ -8,8 +8,17 @@ const OPREV=(()=>{
   const h=numero(medicao.horas),km=numero(medicao.km),material=numero(medicao.material),rh=numero(tarifas.hora),rk=numero(tarifas.km);
   const partes={material:material==null?null:Math.round(material*100),tempo:h==null||rh==null?null:Math.round(h*rh*100),deslocamento:km==null||rk==null?null:Math.round(km*rk*100)};
   const conhecidos=Object.values(partes).filter(x=>x!=null),completo=conhecidos.length===3;
-  return {partes,completo,centavos:conhecidos.length?conhecidos.reduce((s,n)=>s+n,0):null,rotulo:completo?'Custo medido':conhecidos.length?'Custo parcial · componentes não medidos':'Custo não medido'};
+  return {horas:h,km,material,partes,completo,centavos:conhecidos.length?conhecidos.reduce((s,n)=>s+n,0):null,rotulo:completo?'Custo medido':conhecidos.length?'Custo parcial · componentes não medidos':'Custo não medido'};
  };
+ function custoCorrecao(o, cfg={}, op){
+  const medicao = cfg.medicoesRetrabalho?.[o?.id] || {};
+  const inicio = o?.kmSaida, fim = o?.kmRetorno;
+  const km = inicio != null && inicio !== '' && fim != null && fim !== '' && Number(fim) >= Number(inicio)
+   ? Number(fim) - Number(inicio) : null;
+  return custo(o, cfg.custoRetrabalho || {}, {
+   horas: o ? op.horas(o) : null, km, material: null, ...medicao
+  });
+ }
  function prioridades(lista,hoje,op,config={}){
   const out=[];
   for(const o of lista||[]){if(op.cancelada?.(o))continue;let motivo='',peso=9;
@@ -21,7 +30,7 @@ const OPREV=(()=>{
   }
   return out.sort((a,b)=>a.peso-b.peso||String(a.numero).localeCompare(String(b.numero),'pt-BR',{numeric:true})).slice(0,5);
  }
- return {CATEGORIAS,categoria,custo,prioridades};
+ return {CATEGORIAS,categoria,custo,custoCorrecao,prioridades};
 })();
 if(typeof module!=='undefined')module.exports=OPREV;
 function operacaoPrioridadesHTML(){

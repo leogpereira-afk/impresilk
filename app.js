@@ -7559,8 +7559,15 @@ function renderRetrabalho() {
     const reais = (rHora || rKm) && (h != null || km != null) ? (h || 0) * rHora + (km || 0) * rKm : null;
     return { horas: h, km, reais };
   };
-  const custosVistos=new Set();
-  const custos = lista.map(p => {if(p.filha?.id&&custosVistos.has(p.filha.id))return {horas:null,km:null,reais:null,rotulo:'Correção já contabilizada'};if(p.filha?.id)custosVistos.add(p.filha.id);const c=custoDe(p.filha);if(typeof OPREV==='undefined')return c;const m=OPREV.custo(p.filha,cc,{horas:c.horas,km:c.km,material:null,...(STORE.getCFG().medicoesRetrabalho?.[p.filha?.id]||{})});return {...c,reais:m.centavos==null?null:m.centavos/100,completo:m.completo,rotulo:m.rotulo};});
+  const custosVistos = new Set();
+  const custos = lista.map(p => {
+    if (p.filha?.id && custosVistos.has(p.filha.id))
+      return {horas:null, km:null, reais:null, rotulo:'Correção já contabilizada'};
+    if (p.filha?.id) custosVistos.add(p.filha.id);
+    if (typeof OPREV === 'undefined') return custoDe(p.filha);
+    const medido = OPREV.custoCorrecao(p.filha, STORE.getCFG(), OPERACAO);
+    return {...medido, reais:medido.centavos == null ? null : medido.centavos / 100};
+  });
   const somaH = custos.reduce((s, c) => s + (c.horas || 0), 0);
   const somaKm = custos.reduce((s, c) => s + (c.km || 0), 0);
   const somaR = custos.reduce((s, c) => s + (c.reais || 0), 0);

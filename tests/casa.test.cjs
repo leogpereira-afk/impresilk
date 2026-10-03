@@ -42,6 +42,7 @@ function casa(lista, cfg = {}, elenco = null, agora = null) {
       return ps.find(p => n(p.apelido) === n(apelido)) || ps.find(p => n(p.nome) === n(apelido)) || null;
     },
   });
+  vm.runInContext(fs.readFileSync(path.join(root, 'operacao-revisao.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(root, 'operacao.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(root, 'casa.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(root, 'relatorios-entregas.js'), 'utf8'), ctx);
@@ -1132,8 +1133,8 @@ test('retrabalho: dimensão vazia vira frase, não barra de "não informado"', (
      resposta e é ausência de resposta. */
   assert.ok(!/não informado/.test(html), 'ainda desenha "não informado" como categoria');
   assert.match(html, /Nenhuma das 2 O\.S tem isto preenchido/);
-  // e o que veio do ERP aparece
-  assert.match(html, /Instalação de fachada/);
+  // Descrição permanece na O.S.; categoria exige confirmação explícita.
+  assert.match(html, /Sem categoria/);
   assert.match(html, /Por tipo de serviço/);
 });
 
@@ -1431,4 +1432,19 @@ test('auditoria: valor líquido ausente não vira a soma incompleta ou bruta dos
  assert.equal(t.run("valorDaOS({itens:[{subtotal:100},{descricao:'sem preço'}]})"),null);
  assert.equal(t.run("valorDaOS({itens:[{subtotal:100},{subtotal:200}]})"),null);
  assert.equal(t.run("somaValores([{valorTotal:.1},{valorTotal:.2}]).total"),.3);
+});
+test('agenda conta identidade confirmada: aliases passam de dois veículos para um',()=>{
+ const cfg={},lista=['Uno fictício','UNO - 10 fictício'].map((veiculo,i)=>({id:String(i),numero:String(i),tipo:'externo',veiculo,equipe:[],instalacao:{data:'2026-09-01'}}));
+ const t=casa(lista,cfg);
+ const render=()=>t.run(`STATE._grDia='2026-09-01';var painel={innerHTML:'',querySelector:()=>null,querySelectorAll:()=>[]};document.getElementById=id=>id==='panel-grade'?painel:null;renderGradeCasa();painel.innerHTML`);
+ assert.match(render(),/<b>2<\/b><small>veículos programados/);
+ cfg.veiculosAliases=lista.map(o=>({alias:o.veiculo,id:'ativo-uno',nome:'Uno',placa:'TST1234'}));
+ assert.match(render(),/<b>1<\/b><small>veículos programados/);
+});
+test('Performance mede material isolado, zero e horas/km efetivos por ID de correção',()=>{
+ const mae=fin('900',{numero:'900',retrabalho:true}),filha=fin('901',{numero:'901',osOriginal:'900',horaSaida:'08:00',horaRetorno:'16:00',kmSaida:100,kmRetorno:120});
+ const render=med=>casa([mae,filha],{custoRetrabalho:{hora:10,km:2},medicoesRetrabalho:{901:{originalId:'900',...med}}}).run("retrabalhoHTML({de:'2026-09-01',ate:'2026-09-30'})");
+ assert.match(render({material:45,horas:null,km:null}),/R\$\s?45,00[^]*Custo parcial/);
+ assert.match(render({material:0,horas:0,km:0}),/R\$\s?0,00[^]*Custo medido/);
+ const html=render({material:5,horas:2,km:3});assert.match(html,/R\$\s?31,00/);assert.match(html,/3 km/);assert.doesNotMatch(html,/20 km/);
 });

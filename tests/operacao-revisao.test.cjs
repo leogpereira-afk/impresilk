@@ -18,3 +18,10 @@ test('custo zero medido é diferente de desconhecido e parcial; fecha em centavo
 test('assistente limita cinco ações com O.S., data, origem e dono; não altera registros',()=>{
  const lista=Array.from({length:8},(_,i)=>({...base('p'+i),criadoEm:dia})),antes=JSON.stringify(lista),a=R.prioridades(lista,dia,O);assert.equal(a.length,5);assert.ok(a.every(x=>x.osId&&x.numero&&x.motivo&&x.data&&x.origem&&x.dono));assert.equal(JSON.stringify(lista),antes);
 });
+test('custo da correção usa medição efetiva, material isolado e zero explícito',()=>{
+ const o={id:'c',kmSaida:100,kmRetorno:120},op={horas:()=>8},base={custoRetrabalho:{hora:10,km:2}};
+ const custo=med=>R.custoCorrecao(o,{...base,medicoesRetrabalho:{c:med}},op);
+ let c=custo({material:45,horas:null,km:null});assert.equal(c.centavos,4500);assert.equal(c.completo,false);assert.equal(c.horas,null);
+ c=custo({material:0,horas:0,km:0});assert.equal(c.centavos,0);assert.equal(c.completo,true);
+ c=custo({material:5,horas:2,km:3});assert.equal(c.centavos,3100);assert.equal(c.horas,2);assert.equal(c.km,3);
+});

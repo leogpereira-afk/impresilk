@@ -2648,7 +2648,7 @@ function retrabalhoHTML(f) {
      pergunta, respostas opostas -- e a errada e a que vai para a Gestao e
      para o Modo TV. Aqui passa a valer a MESMA regra da outra tela. */
   const etapas = contar('etapaOrigem'), causas = contar(o => o.causaRaiz || o.causa), responsaveis = contar('responsavelEtapa');
-  const tipos = contar(o=>typeof OPREV!=='undefined'?OPREV.categoria(o,STORE.getCFG()):o.servico), clientes = contar('cliente');
+  const tipos = contar(o=>o.servico && typeof OPREV!=='undefined'?OPREV.categoria(o,STORE.getCFG()):o.servico), clientes = contar('cliente');
   /* Uma dimensão 100% vazia não vira gráfico: vira uma frase que diz o que
      preencher e onde. Gráfico de um item só chamado "não informado" ocupa o
      lugar da informação sem ser informação. */
@@ -2657,18 +2657,29 @@ function retrabalhoHTML(f) {
     const barras = barrasCasa(d.itens, v => `${v}`);
     return barras + (d.vazios ? `<p class="text-muted" style="font-size:.78rem">${d.vazios} de ${d.total} sem preencher.</p>` : '');
   };
-  const cfgCusto = (STORE.getCFG().custoRetrabalho) || {};
-  const horaR = Number(cfgCusto.hora) || 0, kmR = Number(cfgCusto.km) || 0;
-  // Horas e km da CORREÇÃO (a filha), nunca da entrega original.
+  const cfg = STORE.getCFG(), vistos = new Set(), custos = [];
   let horas = 0, km = 0, semFilha = 0;
-  for (const o of doPeriodo) {
-    const c = filha(o);
-    if (!c) { semFilha++; continue; }
-    const h = OPERACAO.horas(c); if (h != null) horas += h;
-    const a = Number(c.kmSaida), b = Number(c.kmRetorno);
-    if (Number.isFinite(a) && Number.isFinite(b) && b > a) km += b - a;
+  for (const original of doPeriodo) {
+    const correcoes = todas.filter(c => {
+      const id = cfg.medicoesRetrabalho?.[c.id]?.originalId;
+      return c.osOriginal && (id ? id === original.id :
+        String(c.osOriginal).trim() === String(original.numero).trim() &&
+        todas.filter(o => String(o.numero).trim() === String(original.numero).trim()).length === 1);
+    });
+    if (!correcoes.length) semFilha++;
+    for (const correcao of correcoes) {
+      if (vistos.has(correcao.id)) continue;
+      vistos.add(correcao.id);
+      const medido = OPREV.custoCorrecao(correcao, cfg, OPERACAO);
+      custos.push(medido);
+      horas += medido.horas || 0;
+      km += medido.km || 0;
+    }
   }
-  const custo = horas * horaR + km * kmR;
+  const conhecidos = custos.filter(c => c.centavos != null);
+  const custo = conhecidos.length ? conhecidos.reduce((s,c) => s + c.centavos, 0) / 100 : null;
+  const custoRotulo = custo == null ? 'Custo não medido' :
+    !semFilha && custos.every(c => c.completo) ? 'Custo medido' : 'Custo parcial · componentes não medidos';
   /* A LEITURA QUE FALTAVA: numa linha só, quem entregou, quanto voltou e
      quantas vezes a pessoa foi refazer. Nos três gráficos separados dava para
      ver cada número e não dava para ver a PESSOA. Taxa alta com uma entrega só
@@ -2705,7 +2716,7 @@ function retrabalhoHTML(f) {
       <div class="casa-kpi alerta"><b>${doPeriodo.length}</b><small>O.S de retrabalho no período</small></div>
       <div class="casa-kpi"><b>${ind.taxa == null ? 'sem entregas' : String(ind.taxa).replace('.', ',') + '%'}</b><small>${ind.afetadas} de ${ind.entregues} entregas finalizadas voltaram (a taxa não conta O.S. aberta nem baixa do ERP)</small></div>
       <div class="casa-kpi"><b>${fmtHorasCasa(horas || null)}</b><small>horas na rua refazendo${km ? ` · ${Math.round(km)} km` : ''}${semFilha ? ` · <span class="badge sem-valor">${semFilha} sem O.S de correção ligada</span>` : ''}</small></div>
-      <div class="casa-kpi alerta"><b>${custo>0?dinheiroCasa(custo):'Custo não medido'}</b><small>Estimativa parcial de hora + km; material e componentes sem medição não equivalem a zero.</small></div>
+      <div class="casa-kpi alerta"><b>${custo!=null?dinheiroCasa(custo):'Custo não medido'}</b><small>${custoRotulo}; material, tempo e deslocamento por correção.</small></div>
     </div>
     <div class="casa-duas">
       <div><h4>Por tipo de serviço</h4>${dimensao(tipos, 'o serviço vem do ERP')}</div>
@@ -4976,7 +4987,7 @@ function renderGradeCasa() {
         <div class="casa-kpi-cards">
           <div class="casa-kpi"><b>${lista.length}</b><small>O.S neste dia</small></div>
           <div class="casa-kpi"><b>${escalados.length}</b><small>pessoas escaladas</small></div>
-          <div class="casa-kpi"><b>${new Set(lista.filter(o => !OPERACAO.semCarro(o)).map(o => o.veiculo).filter(Boolean)).size}</b><small>veículos programados</small></div>
+          <div class="casa-kpi"><b>${new Set(lista.filter(o => !OPERACAO.semCarro(o)).map(o => OPERACAO.chaveVeiculo(o)).filter(Boolean)).size}</b><small>veículos programados</small></div>
           <div class="casa-kpi ${valorDia.semValor ? 'alerta' : ''}"><b>${dinheiroCasa(valorDia.total)}</b><small>valor programado${valorDia.semValor ? ` · ${valorDia.semValor} sem valor` : ''}</small></div>
         </div>
         ${conflitos.length ? `<p class="metricas-nota alerta-ausencia">${conflitos.map(c=>esc(c.motivo)+' · O.S. '+esc(c.a.numero)+' / '+esc(c.b.numero)+' · '+esc([...c.equipe,c.veiculo].filter(Boolean).join(', '))).join('<br>')}</p>` : ''}${capacidade.length?`<p class="metricas-nota alerta-ausencia">${capacidade.map(esc).join('<br>')}</p>`:''}${typeof operacaoPrioridadesHTML==='function'?operacaoPrioridadesHTML():''}

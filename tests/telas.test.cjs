@@ -5,15 +5,16 @@ const vm = require('node:vm');
 const path = require('node:path');
 const root = path.join(__dirname,'..');
 const hoje='2026-09-09';
-function tela(lista) {
+function tela(lista,cfg={}) {
   const nodes=new Map();
   function node(sel) {
     if (!nodes.has(sel)) nodes.set(sel,{innerHTML:'',textContent:'',value:sel==='#prod-mes'?'2026-09':'',querySelector:node,querySelectorAll:()=>[],setAttribute(){},classList:{toggle(){},add(){},remove(){}},focus(){},scrollIntoView(){},insertAdjacentHTML(_,v){this.innerHTML+=v;}});
     return nodes.get(sel);
   }
   const doc={querySelector:node,querySelectorAll:()=>[],addEventListener(){}};
-  const ctx=vm.createContext({console,Date:class extends Date {constructor(...a){super(...(a.length?a:[hoje+'T12:00:00']));}},document:doc,window:{},localStorage:{getItem:()=>null},STORE:{getAllOS:()=>lista,getCFG:()=>({}),getOS:id=>lista.find(o=>o.id===id)},setTimeout(){}});
+  const ctx=vm.createContext({console,Date:class extends Date {constructor(...a){super(...(a.length?a:[hoje+'T12:00:00']));}},document:doc,window:{},localStorage:{getItem:()=>null},STORE:{getAllOS:()=>lista,getCFG:()=>cfg,getOS:id=>lista.find(o=>o.id===id)},setTimeout(){}});
   vm.runInContext(fs.readFileSync(path.join(root,'operacao.js'),'utf8'),ctx);
+  vm.runInContext(fs.readFileSync(path.join(root,'operacao-revisao.js'),'utf8'),ctx);
   vm.runInContext(fs.readFileSync(path.join(process.env.PCP_BASELINE || root,'app.js'),'utf8'),ctx);
   vm.runInContext(`STATE.user={nome:'Revisão',papel:'admin'}; STATE._painelDia='${hoje}'; wireLinhaTempo=()=>{};`,ctx);
   return {run:code=>vm.runInContext(code,ctx),node};
@@ -478,4 +479,12 @@ test('espelho: O.S. que o PCP conferiu com a tela aberta não recebe a declaraç
   lista[1] = {...lista[1], rev:5, retornoConf:{carroLimpo:'sim', por:'Gestor'}};
   assert.equal(t.run(`salvarLimpezaCarro(__g, {resp:${tudoSim}, obs:'', fotos:['fc']})`), 1);
   assert.equal(t.salvas.map(o => o.id).join(), '1');
+});
+test('Retrabalho exibe horas/km efetivos e custo medido, inclusive zero',()=>{
+ const lista=[{...final,retrabalho:true},{...final,id:'c',numero:'101',osOriginal:'100',horaSaida:'08:00',horaRetorno:'16:00',kmSaida:100,kmRetorno:120}];
+ for(const med of [{horas:2,km:3,material:5},{horas:0,km:0,material:0},{horas:null,km:null,material:45}]){
+  const t=tela(lista,{custoRetrabalho:{hora:10,km:2},medicoesRetrabalho:{c:med}});t.run('renderRetrabalho()');const html=t.node('#panel-retrabalho').innerHTML;
+  assert.match(html,new RegExp(med.material===45?'45,00':med.material===0?'0,00':'31,00'));
+  if(med.horas===2){assert.match(html,/2 h/);assert.match(html,/3 km/);assert.doesNotMatch(html,/8 h|20 km/);}
+ }
 });

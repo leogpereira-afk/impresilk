@@ -101,3 +101,10 @@ test('pódio: 1º no centro mesmo com 2º empatado; a ordem do HTML é a do rank
   // Repintar a mesma tela não repete a subida dos degraus.
   assert.doesNotMatch(c.perfRankingPessoasHTML(regs, {equipes:[]}), /perf-animar/);
 });
+test('Gestão distingue consulta rejeitada de carregamento e permite tentar novamente',async()=>{
+ const c=tela();c.renderPerformanceCasa=()=>{};let falha=true,consultas=0;
+ c.STORE.api=async action=>{consultas++;if(falha)throw new Error('Rede fictícia indisponível');return action.action==='performanceFechamentos'?{fechamentos:[]}:{completo:true,registros:[]};};
+ await c.perfCarregarFonte();let html=c.perfGestaoEquipesHTML();
+ assert.match(html,/Rede fictícia indisponível/);assert.match(html,/data-perf-atualizar/);assert.doesNotMatch(html,/Consultando vínculos|Vínculos em consulta/);
+ falha=false;await c.perfCarregarFonte();html=c.perfGestaoEquipesHTML();assert.doesNotMatch(html,/Rede fictícia indisponível/);assert.ok(consultas>=4);
+});

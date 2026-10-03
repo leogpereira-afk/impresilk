@@ -60,3 +60,22 @@ test('medição vincula correção por ID explícito e não aceita original dife
  const gravar=m=>e.call({action:'setCfg',baseCfg:base,cfg:{...base,medicoesRetrabalho:{correcao:m}}},gestor);
  assert.equal((await gravar(med)).status,422);const r=await gravar({...med,originalId:'os-teste'});assert.equal(r.status,200,JSON.stringify(r));assert.equal(r.cfg.medicoesRetrabalho.correcao.originalId,'os-teste');assert.equal(r.cfg.medicoesRetrabalho.correcao.material,0);assert.equal(r.cfg.medicoesRetrabalho.correcao.horas,null);
 });
+test('transação rejeita desativação cadastral entre leitura e gravação histórica',async()=>{
+ const {e,body,os}=await preparar();
+ e.cliente.beforeWrite=(db,t)=>{assert.equal(t,'pcp_registros');db.pcp_config_global[0].config.performancePCP.equipes[0].ativo=false;db.pcp_config_global[0].atualizado_em='2026-09-03';};
+ const r=await e.call(body,gestor);assert.equal(r.status,409);assert.deepEqual(e.db.pcp_registros[0].registro,os);
+});
+test('RPC ausente falha sem sucesso e sem alterar o histórico',async()=>{
+ const {e,body,os}=await preparar();e.cliente.rpc=async nome=>nome==='pcp_vincular_equipe_cas'?{data:null,error:{message:'RPC indisponível'}}:{data:false,error:null};
+ const r=await e.call(body,gestor);assert.ok(r.status>=400);assert.deepEqual(e.db.pcp_registros[0].registro,os);
+});
+test('migration restringe RPC, trava configuração antes do CAS e fixa resolução de schemas',()=>{
+ const sql=require('node:fs').readFileSync(require('node:path').join(__dirname,'../supabase/migrations/0004_vinculo_equipe_cas.sql'),'utf8');
+ assert.match(sql,/security definer set search_path = pg_catalog/i);
+ assert.ok(sql.indexOf('for update')<sql.indexOf('update public.pcp_registros'));
+ assert.match(sql,/v_versao is distinct from p_cfg_versao/);
+ assert.match(sql,/atualizado_em = p_os_versao/);
+ assert.match(sql,/from public, anon, authenticated/);
+ assert.match(sql,/grant execute[^;]+to service_role/);
+ assert.doesNotMatch(sql,/execute immediate|commit;|rollback;/i);
+});
