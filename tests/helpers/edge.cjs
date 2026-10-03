@@ -30,9 +30,10 @@ async function edge(tipo,initial={}) {
  const {REGRAS}=await import('../../supabase/functions/_shared/pcp-regras.mjs');
  // O status da entrega e o cancelamento (F16): o index.ts os importa de _shared/pcp-status.mjs.
  const status=await import('../../supabase/functions/_shared/pcp-status.mjs');
+ const fotos=await import('../../supabase/functions/_shared/foto-freelancer.mjs');
  const ctx=vm.createContext({console,URL,URLSearchParams,Request,Response,TextEncoder,TextDecoder,atob,btoa,crypto:webcrypto,setTimeout,clearTimeout,
   Deno:{env:{get:k=>({PCP_TOKEN:'machine-test',EQUIPE_JWT_SECRET:'test-secret',SUPABASE_URL:'https://example.invalid',SUPABASE_SERVICE_ROLE_KEY:'test'}[k]||'')},serve:fn=>handler=fn},
-  createClient:()=>cliente,...regras,...status,REGRAS});
+  createClient:()=>cliente,...regras,...status,...fotos,REGRAS});
  const file=path.join(__dirname,'../../supabase/functions',tipo,'index.ts');
  const src=fs.readFileSync(file,'utf8').replace(/^import .*?;\s*$/mg,'').replace(/^export (?=(?:async )?function|const|let)/mg,'');
  vm.runInContext(stripTypeScriptTypes(src,{mode:'transform'}),ctx);

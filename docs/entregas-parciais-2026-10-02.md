@@ -1,6 +1,6 @@
 # Entregas parciais por itens e equipes
 
-Implementação local de 02/10/2026, sobre `f1641109e16606f66885aa0c9cd791a14a9cc080` (PCP v145). Ainda não publicada. Nenhum dado de produção foi alterado.
+Implementação de 02/10/2026, sobre `f1641109e16606f66885aa0c9cd791a14a9cc080` (PCP v145), conciliada com `78da5e9` (foto de freelancer do RH). Publicação da **v146** autorizada pelo usuário. Nenhuma entrega real foi cadastrada ou alterada durante a implementação.
 
 ## Comportamento
 
@@ -26,20 +26,22 @@ Implementação local de 02/10/2026, sobre `f1641109e16606f66885aa0c9cd791a14a9c
 
 ## Verificação executada
 
-1. `node scripts/verificar.cjs`: **1.350 testes aprovados, zero falhas, zero ignorados**, com o histórico Git completo. Inclui 19 testes novos sobre cálculo, descontos, centavos, quantidade, equipes, meses, permissões, concorrência, preservação e revisões fechadas.
+1. `node scripts/verificar.cjs`: **1.354 testes aprovados, zero falhas, zero ignorados**, após conciliar a correção de fotos, com o histórico Git completo. Inclui 19 testes novos sobre cálculo, descontos, centavos, quantidade, equipes, meses, permissões, concorrência, preservação e revisões fechadas.
 2. `node scripts/testar-conferencia-entrega-ui.cjs` com a prévia fictícia: seleção de 2/4 itens, duas equipes, salvar e reabrir, saldo R$ 6.375,00, bloqueio da terceira entrega, atalhos Tabela e Por O.S., desktop 1366 × 900 e celular 390 × 844 sem transbordamento horizontal no diálogo. Nenhum erro JavaScript capturado.
 3. `git diff --check`: sem erros de espaço em branco.
 
 Os dados da prévia são fictícios; não há acesso ao banco de produção. Os testes de API usam armazenamento controlado para reproduzir conflitos e perfis, não uma implantação real do Supabase.
 
-## Publicação futura
+## Publicação
 
-Esta mudança foi preparada em checkout isolado, sem alterar outras frentes em andamento. Antes de publicar:
+Esta mudança foi preparada em checkout isolado. A correção publicada de fotos (`78da5e9`) foi preservada; as frentes F19–F22 ainda não publicadas permanecem em suas branches, sem inclusão neste pacote. Sequência de publicação:
 
-1. Reconciliar com as alterações mais recentes do PCP, especialmente o trabalho de apuração por itens (F19–F22), sem substituir trabalho alheio.
-2. Reservar a próxima versão livre e atualizar conjuntamente a versão dos arquivos e do cache. A base desta entrega mantém v145 porque ainda não é uma publicação.
-3. Executar novamente as verificações sobre a revisão conciliada.
+1. Reconciliar com a `main` atual, sem substituir trabalho alheio. Feito com `78da5e9`.
+2. Atualizar conjuntamente versão dos arquivos e cache. Feito: `config.js`, `index.html`, `equipe.html` e `sw.js` usam v146.
+3. Executar novamente as verificações sobre a revisão conciliada. Feito: 1.354 testes aprovados.
 4. Com autorização para publicação, implantar primeiro `pcp-sync` com os módulos compartilhados; depois publicar a interface.
 5. Confirmar a versão servida e testar a leitura autenticada e os atalhos publicados. Não registrar uma entrega real de teste nem alterar a O.S. de Osmane sem identificar os itens corretos.
 
 Não há migração de tabela nesta mudança; os registros utilizam o campo JSON existente.
+
+Uma futura publicação das frentes F19–F22 deve reconciliar sua apuração com `conferenciasEntrega`, em vez de substituir esta implementação. A v146 agora pertence a este pacote.

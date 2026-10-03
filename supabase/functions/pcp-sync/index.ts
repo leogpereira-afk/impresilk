@@ -1,3 +1,4 @@
+import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno } from "../_shared/pcp-status.mjs";
@@ -281,9 +282,9 @@ let _fichasRH: { ate: number; fichas: any[] } | null = null;
 /* CONTRATOS DE FREELANCER DO RH (F07, caminho B): o prestador que instala
    entra na régua pelo contrato, com o ID do CPF do contrato. Só os campos que
    a régua usa; o CPF inteiro fica neste servidor (juntarFreelancers). */
-async function contratosFreelancerRH(): Promise<any[]> {
+async function contratosFreelancerRH(comFoto = false): Promise<any[]> {
   const { data, error } = await sb.from("registros")
-    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>funcao, registro->>situacao, registro->>contratoFim")
+    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>funcao, registro->>situacao, registro->>contratoFim" + (comFoto ? ", registro->>exColaboradorId, registro->>fotoDataUrl" : ""))
     .eq("colecao", "freelancers").eq("apagado", false);
   if (error) throw new Error(error.message);
   return (data ?? []) as any[];
@@ -2024,15 +2025,18 @@ Deno.serve(async (req: Request) => {
         }
         let contratosRH: any[] = [];
         if (querContratos) {
-          try { contratosRH = await contratosFreelancerRH(); }
+          try { contratosRH = await contratosFreelancerRH(!body.leve); }
           catch (e) { return resp({ error: (e as Error).message }, 500); }
         }
         const junta = juntarFreelancers([...pessoas, ...antigos].map((p: any) => ({ ...p, cpf: cpfPorChave.get(p.chave) || "", statusId: statusPorChave.get(p.chave) || "" })),
           contratosRH, { hoje: perfDia(new Date().toISOString()) });
         const marcar = (p: any) => veContrato && junta.repetidos.has(p.id) ? { ...p, idRepetido: true } : p;
+        const contratosPorChave = new Map(contratosRH.map((c: any) => [`freelancer:${String(c.id).trim()}`, c]));
+        const fichasParaFoto = (col ?? []).map((r: any) => r.registro || {});
         const contratoParaTela = (c: any) => ({
           chave: c.chave, id: c.id, nome: c.nome, apelido: c.apelido, setor: "", area: "", cargo: veContrato ? c.funcao : "",
-          statusId: "", status: "", ativo: true, foto: "",
+          statusId: "", status: "", ativo: true,
+          foto: fotoFreelancerRH(contratosPorChave.get(c.chave), fichasParaFoto, { leve: !!body.leve }),
           ...(veContrato ? { freelancer: true } : {}),
           ...(veContrato && c.semCpf ? { semCpf: true } : {}), ...(veContrato && c.cpfInvalido ? { cpfInvalido: true } : {}),
           ...(veContrato && c.idRepetido ? { idRepetido: true } : {}),
