@@ -4388,7 +4388,7 @@ function renderAgendaCasa() {
     };
   });
   const wpp = document.getElementById('ag-wpp'); if (wpp) wpp.onclick = () => { if (typeof whatsappServicosDia === 'function') whatsappServicosDia(sel); };
-  const pdf = document.getElementById('ag-pdf'); if (pdf) pdf.onclick = () => { if (typeof relatorioServicosDia === 'function') relatorioServicosDia(sel); };
+  const pdf = document.getElementById('ag-pdf'); if (pdf) pdf.onclick = () => { if (typeof relatorioServicosDia === 'function') pdfAgendaRecorte('Calendário — dia selecionado',osDia,{de:sel,ate:sel},STATE._agendaConcluidas); };
   const add = el.querySelector('.casa-add-os'); if (add) add.ontoggle = () => { STATE._agAddAberto = add.open; };
   wireAddOSCasa(el, 'ag-add', sel, () => { STATE._agAddAberto = false; renderAgendaCasa(); });
   const form = document.getElementById('ag-form');
@@ -4970,7 +4970,7 @@ function renderGradeCasa() {
         </span>
       </div>
       <label class="agenda-recorte"><input type="checkbox" id="gr-concluidas" ${STATE._agendaConcluidas ? 'checked' : ''}> Incluir concluídas pela equipe</label>
-      <p class="metricas-nota">${STATE._agendaConcluidas ? 'Histórico incluído na tela. WhatsApp e PDF de saída: somente abertas.' : 'O.S. abertas programadas. Retiradas na loja ficam identificadas; o PDF de saída reúne instalações externas.'}</p>
+      <p class="metricas-nota">${STATE._agendaConcluidas ? 'Histórico incluído na tela e no PDF do recorte. WhatsApp de saída: somente abertas.' : 'O.S. abertas programadas; PDF acompanha o recorte da tela, incluindo retiradas identificadas.'}</p>
       <div class="casa-dia-nav">
         <button class="btn-ghost btn-sm" id="gr-ant" title="Dia anterior">‹</button>
         <input type="date" aria-label="Data da programação" id="gr-data" value="${esc(dia)}">
@@ -5014,7 +5014,7 @@ function renderGradeCasa() {
   el.querySelectorAll('[data-gr-vista]').forEach(b => b.onclick = () => { STATE._grVista = b.dataset.grVista; renderGradeCasa(); });
   el.querySelectorAll('[data-ir-dia]').forEach(b => b.onclick = () => { STATE._grDia = b.dataset.irDia; STATE._grVista = 'dia'; renderGradeCasa(); });
   const wpp = document.getElementById('gr-wpp'); if (wpp) wpp.onclick = () => { if (typeof whatsappServicosDia === 'function') whatsappServicosDia(dia); };
-  const pdf = document.getElementById('gr-pdf'); if (pdf) pdf.onclick = () => { if (typeof relatorioServicosDia === 'function') relatorioServicosDia(dia); };
+  const pdf = document.getElementById('gr-pdf'); if (pdf) pdf.onclick = () => { if (typeof relatorioServicosDia === 'function') pdfAgendaRecorte('Programação — '+(STATE._grVista==='mes'?'mês inteiro':'dia selecionado'),STATE._grVista==='mes'?diasDoMes.flatMap(k=>doDia(k).map(o=>({...o,_pdfDia:k}))):lista,STATE._grVista==='mes'?{de:mes+'-01',ate:diasDoMes.at(-1)}:{de:dia,ate:dia},STATE._agendaConcluidas); };
   const add = el.querySelector('.casa-add-os'); if (add) add.ontoggle = () => { STATE._grAddAberto = add.open; };
   wireAddOSCasa(el, 'gr-add', dia, () => { STATE._grAddAberto = false; renderGradeCasa(); });
   if(typeof wireOperacaoRevisao==='function')wireOperacaoRevisao(el);
@@ -5091,4 +5091,11 @@ function abrirEquipeCasa() {
   document.getElementById('eq-x').onclick = fechar;
   box.onclick = e => { if (e.target === box) fechar(); };
   if (typeof STORE.pullElenco === 'function') STORE.pullElenco();
+}
+
+function pdfAgendaRecorte(titulo,lista,periodo,historico) {
+ const el=document.createElement('section');
+ el.dataset.pdfCobertura=lista.length+' registros de agenda; uma O.S. pode ocupar vários dias';
+ el.innerHTML='<table><thead><tr><th>Data</th><th>O.S.</th><th>Cliente / serviço</th><th>Equipe</th><th>Veículo</th><th>Situação</th></tr></thead><tbody>'+lista.map(o=>'<tr>'+[o._pdfDia||periodo.de,o.numero,(o.cliente||'')+' — '+(o.servico||''),OPERACAO.equipeTexto(o,', '),o.veiculo,OPERACAO.status(o)].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+ imprimirAnalisePCP(titulo,el,periodo,'PCP local; '+(historico?'inclui histórico concluído':'somente abertas')+'; recorte de O.S. da agenda; plantões e eventos têm relatórios próprios.');
 }

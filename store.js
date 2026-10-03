@@ -146,9 +146,13 @@ const STORE = (() => {
   let _osTimer = null;
   let _semIDB  = false;  // navegador sem IndexedDB (aba privada): usa localStorage
 
+  function leituraAutorizada(v) {
+    const papel=getUser()?.papel;
+    return papel && !['admin','pcp'].includes(papel) && typeof PRIVACIDADE_VALORES!=='undefined' ? PRIVACIDADE_VALORES.podar(v) : v;
+  }
   function getAllOS() {
-    if (_osMem) return _osMem;
-    return lsGet(K.OS, []);   // antes do pronto(), ou sem IndexedDB
+    if (_osMem) return leituraAutorizada(_osMem);
+    return leituraAutorizada(lsGet(K.OS, []));   // antes do pronto(), ou sem IndexedDB
   }
 
   // Grava a lista no IndexedDB. Agrupa rajadas (o pull chama _setAllOS várias
@@ -262,9 +266,9 @@ const STORE = (() => {
   // Historico buscado sob demanda (Finalizados/Arquivados fora da janela local).
   // Nao vai para o disco: some ao recarregar, volta na proxima busca.
   const _osHistorico = new Map();
-  function historico() { return [..._osHistorico.values()]; }
+  function historico() { return leituraAutorizada([..._osHistorico.values()]); }
   function getOS(id) {
-    return getAllOS().find(o => o.id === id) || _osHistorico.get(id) || null;
+    return leituraAutorizada(getAllOS().find(o => o.id === id) || _osHistorico.get(id) || null);
   }
 
   /* Conta as gravações da lista: quem guarda uma conta feita sobre ela (o
@@ -318,7 +322,7 @@ const STORE = (() => {
   };
 
   function getCFG() {
-    return Object.assign({}, CFG_DEFAULT, lsGet(K.CFG, {}));
+    return leituraAutorizada(Object.assign({}, CFG_DEFAULT, lsGet(K.CFG, {})));
   }
 
   function saveCFG(cfg) {
@@ -380,11 +384,12 @@ const STORE = (() => {
   }
 
   function _enqueue(item) {
+    item = {...item, enfileiradoEm: item.enfileiradoEm || new Date().toISOString()};
     let q = getQueue();
     // Deduplica upserts da mesma O.S
     if (item.action === 'upsert') {
       const i = q.findIndex(x => x.action === 'upsert' && x.os.id === item.os.id);
-      if (i >= 0) { q[i] = item; _gravarFila(q); return; }
+      if (i >= 0) { q[i] = {...item, enfileiradoEm:q[i].enfileiradoEm || item.enfileiradoEm}; _gravarFila(q); return; }
     }
     // Quando deleta uma O.S, descarta upserts pendentes dela (não faz sentido
     // mandar uma versão "atualizada" de algo que vai ser apagado em seguida).
@@ -404,7 +409,7 @@ const STORE = (() => {
        primeiro já estiver em voo, o trySync rebaseia este quando ele for aceito. */
     if (item.action === 'setCfg') {
       const i = q.findIndex(x => x.action === 'setCfg');
-      if (i >= 0) { q[i] = Object.assign({}, item, { baseCfg: q[i].baseCfg || item.baseCfg }); _gravarFila(q); return; }
+      if (i >= 0) { q[i] = Object.assign({}, item, { baseCfg: q[i].baseCfg || item.baseCfg, enfileiradoEm:q[i].enfileiradoEm || item.enfileiradoEm }); _gravarFila(q); return; }
     }
     // Deletar uma foto descarta o upload pendente dela (senão o servidor
     // recebe o put depois do delete e a foto "excluída" ressuscita lá).
@@ -1463,7 +1468,7 @@ const STORE = (() => {
   // pequena no localStorage, ~12 KB, para a tela não abrir zerada offline).
   // Papel sem acesso recebe 403 e a tela mostra "sem valor", não erro.
   let _valores = lsGet(K.VALORES, { em: '', mapa: {} });
-  function valores() { return (_valores && _valores.mapa) || {}; }
+  function valores() { return getUser()?.papel && !['admin','pcp'].includes(getUser().papel) ? {} : (_valores && _valores.mapa) || {}; }
   function valoresEm() { return (_valores && _valores.em) || ''; }
   async function pullValores(forcar) {
     if (!navigator.onLine) return;
@@ -1557,7 +1562,7 @@ const STORE = (() => {
      ficava em "carregando…" para sempre — a versão do pacote tem de ser um
      piso, nunca uma igualdade, senão todo campo novo derruba quem não
      recarregou a aba ainda. */
-  function entreguesMes(mes) { const p = _entregues[mes]; return p && Number(p.v) >= 2 && Array.isArray(p.os) ? p : null; }
+  function entreguesMes(mes) { const p = _entregues[mes]; return p && Number(p.v) >= 2 && Array.isArray(p.os) ? leituraAutorizada(p) : null; }
   /* "NÃO VEIO" E "FALHOU" SÃO COISAS DIFERENTES na tela. `entreguesMes` devolve
      null nos dois casos, e a tela contava os dois como "carregando N meses" —
      mês que o ERP recusou (403) ou que voltou com erro ficava eternamente em
@@ -1670,7 +1675,7 @@ const STORE = (() => {
      `faltando` viaja junto: mês sem pacote é mês sem dado, nunca zero. */
   let _resumoEntregues = null;
   let _resumoPedindo = null;
-  function resumoEntregues() { return _resumoEntregues; }
+  function resumoEntregues() { return leituraAutorizada(_resumoEntregues); }
   async function pullEntreguesResumo(meses, forcar) {
     const lista = (meses || []).filter(m => /^\d{4}-\d{2}$/.test(m));
     if (!navigator.onLine || !lista.length) return _resumoEntregues;

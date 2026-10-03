@@ -3,7 +3,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','operacao-revisao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
+const permitidos=new Set(['privacidade-valores.js','diagnostico-itens.js','relatorios-pcp.js','alertas-sync.js','index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','operacao-revisao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
@@ -21,7 +21,7 @@ base('109',{finalizadaEm:hoje+'T11:00:00',finalizadoPor:'Mubisys (auto)',baixaAu
 base('110',{finalizadaEm:hoje+'T11:00:00',finalizadoPor:'Ana',retrabalho:true,problema:'Rever alinhamento da placa',causaRetrabalho:'Erro de medida',equipe:[]}),
 base('111',{instalacao:{data:deslocar(-4)},liberadoPCP:false,previsaoEntrega:deslocar(-4),equipe:[]})
 ];
-const APP_VERSAO='v106 · prévia'; const AUTH={dono:()=>({nome:'Ana',papel:'montagem'}),temCracha:()=>true,listarContas:async()=>({contas:[]})};
+const APP_VERSAO='v148 · prévia fictícia'; const AUTH={dono:()=>({nome:'Ana',papel:'montagem'}),temCracha:()=>true,listarContas:async()=>({contas:[]})};
 const cfg={instaladores:['Ana','Bia'],responsaveis:['Responsável de teste'],gerentes_montagem:[],veiculos:['Carro 1','Carro 2'],ferramentas:[],suprimentos:[],causasRetrabalho:['Erro de medida'],funcionarios:[],niveis:{}};
 /* A PERFORMANCE COM CARA DE MÊS DE VERDADE (revisão de experiência, 29/09/2026).
    Pódio, tabela, cobertura e equipes só aparecem de fato com várias entregas,

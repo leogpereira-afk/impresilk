@@ -1821,7 +1821,7 @@ function wirePerformanceEquipes(el) {
   el.querySelectorAll('[data-perf-lancar]').forEach(b=>b.onclick=perfAbrirLancamento);
   el.querySelectorAll('[data-perf-erp-saldo]').forEach(b=>b.onclick=()=>{ if (typeof abrirListaErpSaldo === 'function') abrirListaErpSaldo(); });
   const rankPdf=el.querySelector('#perf-pdf-ranking');if(rankPdf)rankPdf.onclick=()=>{const r=el.querySelector('.perf-ranking');const medida=[...r.querySelectorAll('[aria-pressed="true"]')].map(n=>n.textContent).join(' · ');imprimirAnalisePCP((r.querySelector('h3')?.textContent||'Ranking')+(medida?' · '+medida:''),r,periodoOuMes('_fPerf'),perfFonteTexto());};
-  const relPdf=el.querySelector('#perf-rel-pdf');if(relPdf)relPdf.onclick=()=>{const copy=el.querySelector('.perf-report').cloneNode(true);copy.querySelectorAll('.perf-team-report details,.perf-report-pendencias').forEach(n=>n.remove());imprimirAnalisePCP('Performance · resumo de pessoas e equipes',copy,periodoOuMes('_fPerf'),perfFonteTexto());};
+  const relPdf=el.querySelector('#perf-rel-pdf');if(relPdf)relPdf.onclick=()=>{const copy=el.querySelector('.perf-report').cloneNode(true);copy.dataset.pdfModo='resumo';copy.querySelectorAll('.perf-team-report details,.perf-report-pendencias').forEach(n=>n.remove());imprimirAnalisePCP('Performance · resumo de pessoas e equipes',copy,periodoOuMes('_fPerf'),perfFonteTexto());};
   const detalhado=el.querySelector('#perf-rel-detalhado');if(detalhado)detalhado.onclick=()=>{
     const copy=el.querySelector('.perf-report').cloneNode(true);
     imprimirAnalisePCP('Performance · resumo e O.S.',copy,periodoOuMes('_fPerf'),perfFonteTexto());

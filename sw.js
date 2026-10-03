@@ -1,15 +1,15 @@
 // sw.js — Service worker: deixa o app abrir offline (casca/shell em cache).
 // Os DADOS continuam sincronizando pela fila do store.js; aqui só cuidamos
 // dos arquivos estáticos para o app carregar sem internet.
-const CACHE = 'impresilk-shell-v147';
+const CACHE = 'impresilk-shell-v148';
 // ?v= nos arquivos do shell: a CDN do GitHub Pages (Fastly) segurou um casa.js
 // velho por mais de uma hora depois do deploy (14/09/2026) enquanto servia os
 // outros novos. Com a versão na URL, cada publicação é um endereço novo para a
 // CDN. Regra de deploy: CACHE aqui, APP_VERSAO no config.js e o ?v= no
 // index.html/equipe.html sobem JUNTOS.
 const SHELL = [
-  './', 'index.html', 'equipe.html', 'styles.css?v=v147',
-  'config.js?v=v147', 'logo.js?v=v147', 'frases.js?v=v147', 'store.js?v=v147', 'auth.js?v=v147', 'operacao.js?v=v147', 'operacao-revisao.js?v=v147', 'divisao.js?v=v147', 'regras.js?v=v147', 'entrega-item.js?v=v147', 'conferencia-entrega.js?v=v147', 'conferencia-entrega-ui.js?v=v147', 'controle-entrega-ui.js?v=v147', 'app.js?v=v147', 'casa.js?v=v147', 'comissao.js?v=v147', 'comissao-ui.js?v=v147', 'performance.js?v=v147', 'alocacao-ui.js?v=v147', 'lote.js?v=v147', 'entregas-os.js?v=v147', 'relatorios-entregas.js?v=v147', 'equipe.js?v=v147',
+  './', 'index.html', 'equipe.html', 'styles.css?v=v148',
+  'config.js?v=v148', 'logo.js?v=v148', 'frases.js?v=v148', 'privacidade-valores.js?v=v148', 'store.js?v=v148', 'auth.js?v=v148', 'operacao.js?v=v148', 'operacao-revisao.js?v=v148', 'divisao.js?v=v148', 'regras.js?v=v148', 'entrega-item.js?v=v148', 'conferencia-entrega.js?v=v148', 'conferencia-entrega-ui.js?v=v148', 'controle-entrega-ui.js?v=v148', 'diagnostico-itens.js?v=v148', 'alertas-sync.js?v=v148', 'relatorios-pcp.js?v=v148', 'app.js?v=v148', 'casa.js?v=v148', 'comissao.js?v=v148', 'comissao-ui.js?v=v148', 'performance.js?v=v148', 'alocacao-ui.js?v=v148', 'lote.js?v=v148', 'entregas-os.js?v=v148', 'relatorios-entregas.js?v=v148', 'equipe.js?v=v148',
   'manifest.json', 'icon.svg', 'favicon.svg',
   // Logos das 10 equipes (29/09/2026): arquivo do site, não da configuração.
   'equipe-aguia.webp', 'equipe-leao.webp', 'equipe-pantera.webp', 'equipe-lobo.webp', 'equipe-tigre.webp', 'equipe-falcao.webp', 'equipe-carcara.webp', 'equipe-onca.webp', 'equipe-lobo-guara.webp', 'equipe-touro.webp'

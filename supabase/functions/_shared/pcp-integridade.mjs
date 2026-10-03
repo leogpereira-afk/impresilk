@@ -2984,3 +2984,32 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
 }
 /* ==== FIM DA RÉGUA DA EQUIPE ==== */
 export { composicaoApurada, equipeDaComposicao, equipeSugeridaDe, gruposApurados, equipesDaDivisao, sugestaoApurada };
+
+// A18: projeção monetária aplicada no servidor, também a catálogos/históricos.
+const CAMPO_FINANCEIRO = /^(?:valor.*|montante|baseLiquida|totalCentavos|reais|subtotal|preco.*|custo.*|comissao.*|premio.*|orcamento.*|salario.*|desconto.*|acrescimo.*|liquido|bruto|centavos|bonusPCP|erpAlteracoes|medicoesRetrabalho)$/i;
+export function podarValoresPCP(v) {
+  if (Array.isArray(v)) return v.map(podarValoresPCP);
+  if (!v || typeof v !== 'object') return v;
+  return Object.fromEntries(Object.entries(v).filter(([k]) => !CAMPO_FINANCEIRO.test(k)).map(([k,x]) => [k,podarValoresPCP(x)]));
+}
+// Restitui somente campos invisíveis; o aparelho não tem autoridade para alterá-los.
+// Listas são casadas por identidade estável, nunca pela posição do produto.
+export function preservarValoresPCP(novo, antigo) {
+  const temValor = v => !!v && typeof v==='object' && Object.entries(v).some(([k,x])=>CAMPO_FINANCEIRO.test(k)||temValor(x));
+  if (Array.isArray(novo)) {
+    const chave = x => x?.uid ? 'u:'+x.uid : x?.id ? 'i:'+x.id : x?.chave ? 'c:'+x.chave : JSON.stringify([x?.item,x?.descricao,x?.medidas,x?.qtde,x?.unidade]);
+    for (const y of Array.isArray(antigo)?antigo:[]) {
+      if (y && Object.keys(y).some(k=>CAMPO_FINANCEIRO.test(k)) && novo.filter(x=>chave(x)===chave(y)).length!==1) throw new Error('Item com valor sem identidade correspondente. Peça à gestão para conferir a alteração do produto.');
+    }
+    return novo.map(x => {
+      const pares = (Array.isArray(antigo)?antigo:[]).filter(y => chave(y) === chave(x));
+      if (pares.length > 1 && pares.some(y => Object.keys(y || {}).some(k => CAMPO_FINANCEIRO.test(k)))) throw new Error('Identidade de item ambígua. A gestão precisa conferir os itens antes de salvar.');
+      return preservarValoresPCP(x, pares.length===1?pares[0]:null);
+    });
+  }
+  if (!novo || typeof novo !== 'object') return temValor(antigo) ? structuredClone(antigo) : novo;
+  const out = {};
+  for (const [k,v] of Object.entries(novo)) if (!CAMPO_FINANCEIRO.test(k)) out[k] = preservarValoresPCP(v,antigo?.[k]);
+  for (const [k,v] of Object.entries(antigo || {})) if (CAMPO_FINANCEIRO.test(k) || (!(k in novo) && temValor(v))) out[k] = structuredClone(v);
+  return out;
+}

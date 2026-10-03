@@ -1,5 +1,5 @@
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
-import { CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno } from "../_shared/pcp-status.mjs";
@@ -810,7 +810,7 @@ Deno.serve(async (req: Request) => {
   };
   const saidaBase = (r: any) => ehToqueNoNome ? podarToque(r) : gestaoVeTudo ? r : podarCarimbosF15(ehMontagem ? podarAlocacao(r) : podarIdsAlocacao(r));
 
-  const saida = (r:any) => podarControle(saidaBase(r));
+  const saida = (r:any) => gestaoVeTudo ? podarControle(saidaBase(r)) : podarValoresPCP(podarControle(saidaBase(r)));
 
   /* QUEM ASSINA A ENTRADA DO DIARIO: o cracha, nunca o corpo do pedido. Um
      `porId` que viesse do aparelho seria o aparelho dizendo quem ele e --
@@ -1470,6 +1470,10 @@ Deno.serve(async (req: Request) => {
            gravacao (sem gravacao em lote); a aba antiga que manda a lista sem
            codigo recebe de volta o codigo gravado, casando pelo casamento de
            hoje. Vale para todos, toque e maquina inclusive. Nada aqui recusa. */
+        if (!gestaoVeTudo) {
+          try { trocarOS(preservarValoresPCP(os, existing)); }
+          catch(e) { return resp({error:(e as Error).message},422); }
+        }
         trocarOS(preservarItens(os, existing).os);
         /* CANCELAMENTO DA O.S. (F16). Regras em _shared/pcp-status.mjs
            (carimbarCancelamento): so o PEDIDO muda o campo ({ cancelar: true,
@@ -2351,7 +2355,7 @@ Deno.serve(async (req: Request) => {
             const { participacoes: _p, ...perf } = publico.performancePCP;
             publico.performancePCP = perf;
           }
-          return resp({ cfg: publico, versao });
+          return resp({ cfg: gestaoVeTudo ? publico : podarValoresPCP(publico), versao });
         }
         return resp({ cfg, versao });
       }

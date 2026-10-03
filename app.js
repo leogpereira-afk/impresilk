@@ -1009,7 +1009,7 @@ function avaliarImportacao(s) {
   const ult = s && s.ultimaImportacao;
   // Ausência de heartbeat = importação NUNCA rodou (ou parou faz muito) — é o
   // caso-limite que o vigia existe para pegar, não sinal de saúde.
-  if (!ult || !ult.em) return { parada: true, motivo: 'nenhuma importação registrada — o robô horário pode estar desligado' };
+  if (!ult || !ult.em || !Number.isFinite(Date.parse(ult.em))) return { parada: true, motivo: 'nenhuma importação registrada — o robô horário pode estar desligado' };
   const horas = (Date.now() - new Date(ult.em).getTime()) / 3600000;
   if (ult.ok === false) {
     const bom = ult.ultimoSucesso && ult.ultimoSucesso.em
@@ -1028,11 +1028,13 @@ function avaliarImportacao(s) {
   return { parada: false };
 }
 function vigiarImportacao() {
+  vigiarFilaPCP();
   // Aviso só para quem pode agir (admin/pcp) — os demais não têm o que fazer.
   if (!STATE.user || !['admin', 'pcp'].includes(STATE.user.papel)) return Promise.resolve(null);
   if (!navigator.onLine) return Promise.resolve(null);
   return STORE.api({ action: 'saude' }).then(s => {
     const av = avaliarImportacao(s);
+    if(typeof ALERTAS_SYNC!=='undefined')ALERTAS_SYNC.registrar(localStorage,'importacao',av.parada?{tipo:!s?.ultimaImportacao?.em?'sem-heartbeat':s.ultimaImportacao.ok===false?'erro':s.ultimaImportacao.carteiraCompleta===false?'carteira-parcial':'atraso'}:null);
     let ban = $('#alerta-importacao');
     if (!av.parada) { if (ban) ban.remove(); return { s, av }; }
     if (!ban) {
@@ -1187,6 +1189,7 @@ function initSyncIndicator() {
     if (el.title) toast(el.title);
   };
   STORE.onSync((status, pending) => {
+    vigiarFilaPCP(status);
     _statusSync = status;
     el.className = 'sync-indicator ' + status;
     if (status === 'ok') {
@@ -1267,6 +1270,7 @@ function initSyncIndicator() {
   });
   // Perda de dados nunca é silenciosa: item descartado / lista truncada avisam.
   STORE.on('item-pendente', ({ item, motivo }) => {
+    vigiarFilaPCP('recusa');
     const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : (item && item.action) || 'alteração';
     toast(`⚠️ ${ref} continua na fila deste aparelho (${motivo || 'erro'}). Confira a conexão e o acesso.`, 'error');
   });
@@ -6607,7 +6611,7 @@ function renderPCP() {
         ${STATE.pcpVista === 'arquivados' ? `<div id="arq-chips" class="pcp-arq-chips">${arqChipsHTML()}</div><span id="arq-nota" class="text-muted" style="font-size:.75rem">${esc(_arqNotaTxt)}</span>` : ''}
       </div>
       <div class="pcp-controles-rodape">
-        <button class="pcp-limpar" id="pcp-limpar-filtros" hidden>Limpar filtros</button>
+        <button class="btn-ghost btn-sm" id="pcp-pdf">PDF do recorte</button><button class="pcp-limpar" id="pcp-limpar-filtros" hidden>Limpar filtros</button>
       </div>
     <details class="pcp-legenda" ${STATE.legendaAberta ? 'open' : ''} ${STATE.pcpVista === 'voltas' ? 'hidden' : ''}><summary>Entenda as cores dos cards</summary>
       <div class="leg-linhas">
@@ -6630,6 +6634,7 @@ function renderPCP() {
   // Legenda: lembra aberta/fechada entre re-renders (pull de 30s etc.).
   const leg = el.querySelector('.pcp-legenda');
   if (leg) leg.ontoggle = () => { STATE.legendaAberta = leg.open; };
+  const pdfRecorte=document.getElementById?.('pcp-pdf');if(pdfRecorte)pdfRecorte.onclick=pdfRecortePCP;
   $('#pcp-sort').onchange = (e) => { STATE.pcpSort = e.target.value; pcpRenderCards(); };
   $('#pcp-limpar-filtros').onclick = () => {
     STATE.filtroBusca = ''; STATE.pcpTipo = 'todos'; STATE.pcpStatus = 'todos';
@@ -6880,7 +6885,7 @@ function renderPainel() {
       </div>
       <div id="painel-range" class="flex gap-8"></div>
       <button class="btn-ghost btn-sm" id="btn-salvar-vista" title="Memorizar quais blocos ficam abertos e o modo de período" style="margin-left:auto">💾 Salvar visão</button>
-      <button class="btn-ghost btn-sm" id="btn-export-backup">⬇ Backup</button>
+      <button class="btn-ghost btn-sm" id="diagnostico-itens">Identidade dos itens</button><button class="btn-ghost btn-sm" id="btn-export-backup">⬇ Backup</button>
       <button class="btn-ghost btn-sm admin-only" id="btn-import-backup">⬆ Restaurar</button>
     </div>
     <div id="painel-content"></div>`;
@@ -6889,6 +6894,7 @@ function renderPainel() {
   $('#modo-periodo').onclick = () => { STATE.painelModo = 'periodo'; renderPainel(); };
   $('#painel-pdf').onclick = () => imprimirAnalisePCP('Painel da operação',document.getElementById('painel-content'),painelIntervalo());
   $('#btn-salvar-vista').onclick = salvarPainelVista;
+  $('#diagnostico-itens').onclick = mostrarDiagnosticoItens;
   $('#btn-export-backup').onclick = exportarBackup;
   $('#btn-import-backup').onclick = importarBackup;
 
@@ -8000,6 +8006,7 @@ function exportarFinalizadosPDF(list) {
     <h2>Detalhe das O.S</h2>
     <table><thead><tr><th>Data</th><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Equipe</th><th>Situação</th></tr></thead><tbody>${linhasOS}</tbody></table>
     <script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script></body></html>`);
+  prepararPDFJanela(w,{titulo:'Finalizados',periodo:f,filtros:JSON.stringify(f),cobertura:list.length+' O.S. no recorte carregado'});
   w.document.close();
 }
 
@@ -8450,27 +8457,25 @@ async function pintarAcessos(el) {
 /* ── Saúde da conexão: nuvem OK? importação automática rodando? fila local? ─ */
 function imprimirAnalisePCP(titulo,elemento,periodo,fonteApuracao) {
   const copia = elemento.cloneNode(true);
-  // cloneNode não conserva sempre o valor editado. O relatório mostra o que
-  // está na tela, inclusive o rascunho do lote, sem gravar esses campos.
-  const originais=[...elemento.querySelectorAll('input,select,textarea')];
-  copia.querySelectorAll('input,select,textarea').forEach((n,i)=>{
-    const original=originais[i], texto=document.createElement('span');texto.className='pdf-campo';
-    texto.textContent=original.type==='password'?'(protegido)':original.type==='checkbox'||original.type==='radio'?(original.checked?'Sim':'Não'):original.tagName==='SELECT'?[...original.selectedOptions].map(o=>o.textContent).join(', '):original.value||'—';
-    n.replaceWith(texto);
+  const completo=elemento.dataset?.pdfModo!=='resumo';
+  // Só campos operacionais explicitamente marcados no lote entram como texto.
+  const camposLote=[...elemento.querySelectorAll('[data-lote-campo]')];
+  copia.querySelectorAll('[data-lote-campo]').forEach((n,i)=>{
+    const o=camposLote[i];if(!o||!['INPUT','SELECT','TEXTAREA'].includes(o.tagName)||o.type==='password'||o.type==='hidden')return;
+    const texto=document.createElement('span');texto.textContent=o.type==='checkbox'?(o.checked?'Sim':'Não'):o.value||'—';n.replaceWith(texto);
   });
-  copia.querySelectorAll('[hidden]:not(.painel-bloco-corpo),[data-pdf-excluir],.pdf-secao-acao').forEach(n=>n.remove());
-  copia.querySelectorAll('details').forEach(n=>{if(n.querySelector('[data-rel-area]'))n.remove();});
+  if(typeof RELATORIOS_PCP!=='undefined')RELATORIOS_PCP.sanearCopia(copia,{completo,valores:podeVerValores()});
   copia.querySelectorAll('.rel-ent-indicador').forEach(n=>{const d=document.createElement('div');d.className=n.className;d.style.cssText=n.style.cssText;d.innerHTML=n.innerHTML;n.replaceWith(d);});
   copia.querySelectorAll('button,input,select,.filter-bar,.perf-toolbar').forEach(n => { if(n.matches('button.perf-equipe-chip')) { const s=document.createElement('span');s.className=n.className;s.textContent=n.textContent;n.replaceWith(s); } else if(n.matches('button[data-os-id],button[data-perf-os],button[data-rel-ponto]')) n.replaceWith(document.createTextNode(n.textContent)); else n.remove(); });
-  copia.querySelectorAll('.painel-bloco-corpo').forEach(n=>n.hidden=false);
-  copia.querySelectorAll('details').forEach(n => n.open = true);
+
   const fonte = STORE.getLastSync?.();
   const em = typeof fonte === 'string' && Number.isFinite(Date.parse(fonte)) ? new Date(fonte).toLocaleString('pt-BR') : 'consulte a conexão do aparelho';
   let box = document.getElementById('impressao-pcp');
   if (!box) { box = document.createElement('dialog'); box.id = 'impressao-pcp'; document.body.appendChild(box); }
-  box.innerHTML = `<div class="impressao-acoes"><button class="btn-ghost" id="impressao-fechar">Fechar prévia</button><button class="btn-primary" id="impressao-salvar">Imprimir ou salvar PDF</button></div>
+  box.innerHTML = `<div class="impressao-acoes"><button class="btn-ghost" id="impressao-fechar">Fechar prévia</button><label>Conteúdo <select id="impressao-modo"><option value="completo" ${completo?'selected':''}>Completo (inclui seções recolhidas)</option><option value="resumo" ${!completo?'selected':''}>Resumo (sem detalhes)</option></select></label><button class="btn-primary" id="impressao-salvar">Imprimir ou salvar PDF</button></div>
     <h1>${esc(titulo)} · Impresilk</h1><p>Período: ${esc(periodo.de || 'início do recorte carregado')} a ${esc(periodo.ate || 'fim do recorte carregado')} · Gerado em ${esc(new Date().toLocaleString('pt-BR'))}</p>
     <p>Fonte: ${esc(fonteApuracao || ('registros do PCP disponíveis neste aparelho. Última sincronização: '+em))}. ${STORE.getQueue().length} alterações locais aguardando envio.</p>
+    ${typeof RELATORIOS_PCP!=='undefined'?'<style>'+RELATORIOS_PCP.CSS+'</style>'+RELATORIOS_PCP.metadados({titulo,periodo,fonte:fonteApuracao||'Cópia local do PCP',consulta:em,versao:typeof APP_VERSAO!=='undefined'?APP_VERSAO:'prévia',modo:completo?'Completo (seções recolhidas incluídas)':'Resumo',cobertura:elemento.dataset?.pdfCobertura||'Recorte carregado indicado nesta prévia'}):''}
     ${copia.innerHTML}<footer>Conferir a cobertura e as medições indicadas. Esta análise não lança pagamentos.</footer>`;
   // Navegador que não dispara afterprint: fechar a prévia também devolve a tela.
   $('#impressao-fechar',box).onclick = () => { box.close(); document.body.classList.remove('imprimindo-pcp'); };
@@ -8483,6 +8488,7 @@ function imprimirAnalisePCP(titulo,elemento,periodo,fonteApuracao) {
     window.addEventListener('afterprint', () => document.body.classList.remove('imprimindo-pcp'), { once: true });
     window.print();
   };
+  const modoPDF=box.querySelector('#impressao-modo');if(modoPDF)modoPDF.onchange=()=>{elemento.dataset.pdfModo=modoPDF.value;box.close();imprimirAnalisePCP(titulo,elemento,periodo,fonteApuracao);};
   box.showModal();
 }
 
@@ -9020,6 +9026,7 @@ async function exportarFichaPDF(os) {
     })();
     <\/script>
     </body></html>`);
+  prepararPDFJanela(w,{titulo:'Ficha O.S. '+os.numero,periodo:{de:os.dataEntrada,ate:os.finalizadaEm?.slice(0,10)},cobertura:'Uma O.S.; revisão '+(os.rev||0)});
   w.document.close();
 }
 
@@ -9294,6 +9301,7 @@ function exportarDiaPDF(dia, lista) {
     <h2>Espelho do instalador — equipamentos &amp; suprimentos</h2>
     ${espelho || '<p style="color:#999">Sem O.S neste dia.</p>'}
     <script>window.onload=function(){window.print()}<\/script></body></html>`);
+  prepararPDFJanela(w,{titulo:'Execução do dia',periodo:{de:dia,ate:dia},cobertura:lista.length+' O.S. da lista selecionada'});
   w.document.close();
 }
 
@@ -9349,6 +9357,7 @@ function relatorioServicosDia(dataISO) {
     <tbody>${linhas}</tbody></table>
     <script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script>
     </body></html>`);
+  prepararPDFJanela(w,{titulo:'Instalação — serviços do dia',periodo:{de:dataISO,ate:dataISO},cobertura:lista.length+' serviços abertos de instalação externa'});
   w.document.close();
 }
 
@@ -9401,6 +9410,7 @@ function relatorioMensalPorPessoa(mesISO) {
     <tfoot><tr><td>O.S únicas concluídas</td><td>${total}</td><td>${r.retrabalho}</td></tr></tfoot></table>
     <script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script>
     </body></html>`);
+  prepararPDFJanela(w,{titulo:'Participação mensal',periodo:{de:mesISO+'-01',ate:mesISO+'-'+String(new Date(+mesISO.slice(0,4),+mesISO.slice(5,7),0).getDate())},cobertura:total+' O.S. únicas; '+cob.txt});
   w.document.close();
 }
 
@@ -10626,3 +10636,33 @@ function ligarRascunhoForm(form, tela, osId, opt = {}) {
    BOOT
    ══════════════════════════════════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', initLogin);
+
+// Metadados consistentes também nas janelas de ficha, serviços e produtividade.
+function prepararPDFJanela(w,meta) {
+  if(typeof RELATORIOS_PCP==='undefined')return;
+  RELATORIOS_PCP.prepararJanela(w,{consulta:STORE.getLastSync?.()||'Cópia local sem sincronização confirmada',versao:typeof APP_VERSAO!=='undefined'?APP_VERSAO:'prévia',...meta});
+}
+function pdfRecortePCP() {
+  const origem=document.querySelector('#panel-pcp .cards-grid');
+  if(!origem)return;
+  const nome=STATE.pcpVista==='voltas'?'Volta do carro':STATE.pcpVista==='parado'?'Parado · Cliente':'PCP';
+  const hoje=OPERACAO.dia(new Date()),volta=STATE.pcpVista==='voltas'?voltaEstado():null;
+  const periodo=volta?{de:OPERACAO.somarDias(hoje,1-volta.dias),ate:hoje}:{};
+  imprimirAnalisePCP(nome,origem,periodo,'Cópia local; vista '+nome+'; busca: '+(STATE.filtroBusca||'todas')+'; tipo: '+STATE.pcpTipo+'; situação: '+(volta?volta.filtro:STATE.pcpStatus)+'; somente cards e voltas exibidos, incluindo pendências, autoria e datas registradas.');
+}
+function mostrarDiagnosticoItens() {
+  if(!podeVerValores())return;
+  const r=DIAGNOSTICO_ITENS.medir(STORE.getAllOS()),el=document.createElement('section');
+  el.innerHTML='<h2>Identidade dos itens</h2><p>'+r.itens+' itens; '+r.semUID+' sem UID; '+r.ambiguos+' ambíguos. Ausência de UID não comprova perda de entrega. Mescla automática permanece desligada.</p><table><thead><tr><th>O.S.</th><th>Itens</th><th>Sem UID</th><th>Ambíguos</th><th>Alternativa válida</th><th>UID repetido</th><th>Posição ausente/repetida</th><th>Referência órfã</th></tr></thead><tbody>'+r.linhas.map(l=>'<tr>'+[l.numero,l.itens,l.semUID,l.ambiguos,l.alternativasValidas,l.uidDuplicado.join(', ')||'—',l.posicaoAusente+' / '+l.posicaoDuplicada.join(', '),l.referenciasOrfas].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table><p>Candidatos ERP por O.S.: '+esc(JSON.stringify(r.linhas.map(l=>({os:l.numero,candidatos:l.candidatosERP}))))+'</p>';
+  imprimirAnalisePCP('Diagnóstico de identidade',el,{},r.fonte);
+}
+function vigiarFilaPCP(status) {
+  if(typeof ALERTAS_SYNC==='undefined')return;
+  const av=ALERTAS_SYNC.fila(STORE.getQueue(),{online:navigator.onLine,sessao:!!STATE.user&&status!=='sem-sessao'&&(typeof AUTH==='undefined'||AUTH.temCracha()),recusada:status==='recusa'});
+  const r=ALERTAS_SYNC.registrar(localStorage,'fila',av);
+  let box=document.getElementById('alerta-fila');
+  if(!av){box?.remove();return;}
+  if(!box){box=document.createElement('div');box.id='alerta-fila';box.className='alerta-importacao';document.querySelector('main')?.prepend(box);}
+  if(r.notificar)box.setAttribute('role','alert');else box.removeAttribute('role');
+  box.textContent='Sincronização: '+({'sem-sessao':'entre novamente para enviar','offline':'aparelho sem conexão','recusa':'há edição recusada; confira o motivo exibido','fila-sem-data':'fila legada sem data confiável; conferir envio','fila-antiga':'há alterações aguardando há pelo menos 30 minutos'}[av.tipo])+'. '+av.quantidade+' pendência(s). Mais antiga: '+(av.desde||'não registrada');
+}

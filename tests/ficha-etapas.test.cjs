@@ -389,8 +389,8 @@ test('F23: o celular do instalador (equipe.js) não muda: a ficha dele não tem 
   const h = node('#modal-os').innerHTML;
   assert.match(h, /id="m-finalizar"/, 'a ficha do celular foi pintada');
   assert.doesNotMatch(h, /ficha-etapa|fe-passo|data-etapa-sec|data-ir-etapa|fe-msg|fmsg-|Checklist de fechamento/, 'nada da ficha em etapas no celular');
-  // O celular não carrega nada novo e o equipe.js não conhece a ficha em etapas.
+  // O celular adiciona apenas a proteção do cache; equipe.js não conhece a ficha em etapas.
   const scripts = [...ler('equipe.html').matchAll(/<script src="([\w-]+)\.js/g)].map(m => m[1]);
-  assert.deepEqual(scripts, ['config', 'logo', 'frases', 'store', 'auth', 'operacao', 'entrega-item', 'equipe']);
+  assert.deepEqual(scripts, ['config', 'logo', 'frases', 'privacidade-valores', 'store', 'auth', 'operacao', 'entrega-item', 'equipe']);
   assert.doesNotMatch(ler('equipe.js'), /etapasDaFicha|ficha-etapa|fe-passo|irParaEtapaFicha/);
 });
