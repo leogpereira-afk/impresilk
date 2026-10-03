@@ -10,6 +10,6 @@ Prévia isolada: `PORT=4217 node scripts/preview-auditoria.cjs`, endereço `http
 
 Validação visual: desktop e 390px, sem alargamento da página. Retiradas: total e tabela conferidos; conferência sem resultado: estado vazio e retorno a Todas conferidos. Testes cobrem filtros, valor desconhecido versus zero, ficha ausente versus equipe ausente, pendência anterior ao período, indicação de dados incompletos e saldo atual das conferências.
 
-Publicação pendente de autorização. Nenhuma gravação de dados ou alteração de servidor.
+Publicação autorizada pelo usuário em 03/10/2026. Versão preparada: v149. Nenhuma gravação de dados ou alteração de servidor.
 
 Resultado final: 1.451 testes passaram, zero falhas, com `TZ=America/Sao_Paulo node --test --test-concurrency=2 tests/*.test.cjs`. `npm run verificar` executou a checagem de sintaxe e a suíte; no paralelismo padrão, um benchmark de 100 ms variou para 156,9 ms. O arquivo passou isoladamente (15 testes) e a suíte completa passou com concorrência controlada, sem mudar o limite do benchmark. Outra execução paralela interrompeu um processo de testes; os 27 casos desse arquivo passaram isoladamente. Nenhuma regra foi relaxada.
