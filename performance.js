@@ -539,7 +539,7 @@ function perfFonteAtual(){
 }
 function perfLista(){
   const fonte=perfFonteAtual();
-  if(!fonte)return classificarEntregas(STORE.getAllOS()).instalacoes;
+  if(!fonte)return perfConsultaServidor()?[]:classificarEntregas(STORE.getAllOS()).instalacoes;
   return fonte.registros.map(r=>({id:r.id,numero:r.numero,cliente:r.cliente,finalizadaEm:r.dia,equipe:r.membros.map(p=>OPERACAO.ehIdPessoa(p.chave)?p.chave:p.nome),retrabalho:r.retrabalho,_perf:r}));
 }
 function perfOS(id){return perfLista().find(o=>o.id===id) || STORE.getOS(id);}
@@ -868,7 +868,7 @@ function perfEditarEquipe(id,membrosIniciais=[]) {
     </fieldset>
     ${perfEscolherMembrosHTML(membrosDeHoje)}
     <label>Líder da equipe <select name="lider" id="perf-equipe-lider"></select><small id="perf-lider-nota"></small></label>
-    <p class="metricas-nota">Equipe fixa: nome, animal, cor, líder e integrantes. Mudar aqui não altera entregas já confirmadas nem revisões fechadas, que guardam o nome da época. Uma entrega feita por exatamente estes integrantes aparece com este nome quando nenhuma outra equipe ativa tem a mesma composição.</p>
+    <p class="metricas-nota">Equipe fixa: nome, animal, cor, líder e integrantes. Mudar aqui não altera entregas já confirmadas nem revisões fechadas, que guardam o nome da época. Em participações ainda não confirmadas, os mesmos IDs podem gerar uma sugestão quando há uma única equipe ativa com essa composição. Entregas já confirmadas exigem Conferir vínculos; criar ou editar o cadastro não as associa.</p>
     <div class="perf-equipe-acoes">
       <button class="btn-primary" type="submit">Salvar equipe</button>
       ${id ? `<button type="button" class="btn-ghost ${e.ativo===false?'':'perf-perigo'}" id="perf-equipe-ativo">${e.ativo===false?'Reativar equipe':'Desativar equipe'}</button>` : ''}
@@ -1222,7 +1222,7 @@ function perfSituacao(regs) {
   const sem = regs.filter(r => !r.membros.length).length, conf = regs.filter(r => r.confirmado).length;
   if (sem) return {tipo:'parcial', texto:`Parcial: ${perfPctTxt(total - sem, total)} das entregas com equipe`};
   if (conf < total) return {tipo:'conferir', texto:`Em conferência: ${conf} de ${total} confirmadas`};
-  return {tipo:'ok', texto:'Tudo conferido'};
+  return {tipo:'ok', texto:'Participações confirmadas'};
 }
 function perfSituacaoHTML(s) { return s ? `<span class="perf-situacao ${s.tipo}">${esc(s.texto)}</span>` : ''; }
 /* O CONTROLE SEGMENTADO (Nota | Produção | Valor): botões de alternância com
@@ -1610,7 +1610,7 @@ function perfRankingEquipesHTML(regs, c) {
   const fichaDe = m => { const id = String(perfIdMembro(m)); return rh.find(p => String(p.id) === id || String(p.chave) === id || String(p.chave) === String(m.chave)); };
   const rostos = x => { const ms = membrosDe(x); return ms.length ? `<span class="perf-rostos" aria-hidden="true">${ms.slice(0, 5).map(m => avatarRH(fichaDe(m) || {nome: m.nome}, 'mini')).join('')}${ms.length > 5 ? `<span class="perf-rostos-mais">+${ms.length - 5}</span>` : ''}</span>` : ''; };
   const acoes = x => {
-    const ver = `<button type="button" class="inline-link" data-perf-grupo="${esc(x.chave)}">Ver entregas</button>`;
+    const ver = `<button type="button" class="inline-link" data-perf-fonte-medida="${medida}" data-perf-grupo="${esc(x.chave)}">Ver entregas</button>`;
     if (!pode) return ver;
     const salva = c.equipes.find(e => e.id === x.chave);
     return ver + (salva
@@ -1665,20 +1665,20 @@ function perfRankingEquipesHTML(regs, c) {
   return `<section class="perf-ranking" aria-labelledby="perf-rank-titulo">
     <header class="perf-ranking-head">
       <div class="perf-ranking-titulo"><h3 id="perf-rank-titulo">Ranking das equipes</h3>${perfSituacaoHTML(situacao)}</div>
-      <div class="perf-ranking-ctrl">
+      <details class="perf-ranking-opcoes"><summary>${medida==='producao'?'Produção confirmada':medida==='valor'?'Valor confirmado':'Entregas'} · opções</summary><div class="perf-ranking-ctrl">
         ${perfSegHTML(medida, [['producao', 'Produção confirmada'], ['entregas', 'Entregas'], ['valor', 'Valor confirmado']], 'perf-rank-medida', 'Ordenar o ranking por')}
         ${pode ? '<button type="button" class="btn-ghost btn-sm" id="perf-nova-equipe">+ Nova equipe</button>' : ''}
-      </div>
+      </div></details>
     </header>
-    <p class="perf-ranking-lead">${medida==='producao'?'O que a equipe realmente entregou, proporcional aos itens e à sua participação. Só entram divisões confirmadas.':medida==='valor'?'Valor líquido das entregas confirmadas, dividido entre as equipes.':'Quantidade de registros de entrega, incluindo sugestões. Uma mesma O.S. pode ter várias parciais.'}</p>
-    <details class="perf-method"><summary>Como funciona esta classificação</summary><p>A produção usa O.S. equivalentes: duas parciais de 25% e 75% somam uma O.S., não duas. Se duas equipes dividem o serviço, cada uma leva sua parte. Valores ausentes não viram zero; sugestões aguardam confirmação. Este ranking operacional não define sozinho a comissão ou os prêmios. Empates recebem a mesma posição.</p></details>
     ${medida==='producao'&&!linhas.length?'<p class="perf-rank-vazio">A corrida começa com a primeira entrega conferida. Confira os itens e a equipe para aparecer aqui.</p>':''}
 
     ${vazio}
     ${podioHTML}
     ${cartoes}
+    <p class="perf-ranking-lead">${medida==='producao'?'O que a equipe realmente entregou, proporcional aos itens e à sua participação. Só entram divisões confirmadas.':medida==='valor'?'Valor líquido das entregas confirmadas, dividido entre as equipes.':'Quantidade de registros de entrega, incluindo sugestões. Uma mesma O.S. pode ter várias parciais.'}</p>
+    <details class="perf-method"><summary>Como funciona esta classificação</summary><p>A produção usa O.S. equivalentes: duas parciais de 25% e 75% somam uma O.S., não duas. Se duas equipes dividem o serviço, cada uma leva sua parte. Valores ausentes não viram zero; sugestões aguardam confirmação. Este ranking operacional não define sozinho a comissão ou os prêmios. Empates recebem a mesma posição.</p></details>
     ${semValor.length ? `<p class="perf-rank-nota">${semValor.length} equipe${semValor.length === 1 ? '' : 's'} com entrega mas sem valor confirmado ficam fora deste ranking, e não como zero.</p>` : ''}
-    ${paradas.length ? `<div class="perf-equipes-paradas"><span>Sem entrega no período:</span>${paradas.map(e => `<button type="button" class="perf-equipe-chip${perfCorClasse(e)}" ${pode ? `data-perf-equipe="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}
+    ${paradas.length ? `<div class="perf-equipes-paradas"><span>Sem entregas vinculadas no período:</span>${paradas.map(e => `<button type="button" class="perf-equipe-chip${perfCorClasse(e)}" ${pode ? `data-perf-vinculos="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}
     ${desativadas.length ? `<div class="perf-equipes-paradas perf-desativadas"><span>Desativadas:</span>${desativadas.map(e => `<button type="button" class="perf-equipe-chip${perfCorClasse(e)}" ${pode ? `data-perf-equipe="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}
   </section>`;
 }
@@ -1694,15 +1694,45 @@ function perfJornadaHTML(regs,c) {
   const etapa=(titulo,feito,total,dica)=>`<div class="perf-jornada-etapa"><span>${titulo}</span><strong>${feito}<small> / ${total}</small></strong><progress value="${feito}" max="${Math.max(1,total)}" aria-label="${titulo}"></progress><small>${dica}</small></div>`;
   return `<section class="perf-jornada" aria-label="Jornada das equipes"><header><div><span class="perf-jornada-kicker">IMPRESILK · CADA ENTREGA CONTA</span><h3>Capricho na entrega. Orgulho da equipe.</h3><p>${esc(per.de.split('-').reverse().join('/'))} a ${esc(per.ate.split('-').reverse().join('/'))} · ${a.total} entregas em ${a.os} O.S.${a.parciais?` · ${a.parciais} por seleção de itens`:''}</p></div><span class="perf-jornada-selo">${perfFonteAtual()?.fechadoEm?'Revisão preservada':'Apuração em andamento'}</span></header>
     ${!ativas.length?`<div class="perf-proximo"><p><strong>Primeiro passo: dar identidade às equipes.</strong> Ainda não há equipes fixas cadastradas. As composições avulsas continuam visíveis no ranking.</p>${perfPodeEditar()?'<button type="button" class="btn-primary btn-sm" data-perf-criar-equipe>Cadastrar equipe</button>':''}</div>`:''}
-    <details class="perf-programa"><summary>Progresso da conferência e programa de reconhecimento</summary><div class="perf-jornada-etapas">${etapa('Participação confirmada',a.confirmadas,a.total,'Quem entregou e quanto fez')}${etapa('Valores identificados',a.total-a.semValor,a.total,'Base líquida para a conferência')}${etapa('Voltas conferidas',a.voltasConferidas,a.voltas,a.voltas?'Carro, organização, equipamentos e avarias':'Nenhuma volta aplicável no período')}</div><p>Outubro de 2026 é o mês de teste, com cesta básica para a equipe campeã. A operação de novembro depende da validação do programa. No prêmio anual, cada integrante da equipe campeã recebe uma diária no Bonjuá com acompanhante, R$ 150 e troféu; os integrantes da segunda colocada recebem o jantar no Chico’s com acompanhante.</p><p>Comissão prevista: 1% do serviço efetivamente entregue. Retrabalho, retorno por serviço incompleto e má condução comprovada zeram os pontos e a comissão da O.S. afetada. O regulamento e as ocorrências precisam estar conferidos antes da apuração final.</p><p>O repasse de 20% para a montagem interna sem retrabalho e a divisão de 60%/40% do restante precisam constar da apuração financeira. Esta classificação operacional não libera pagamentos nem determina os premiados.</p></details>
+    <details class="perf-programa"><summary>Progresso da conferência e programa de reconhecimento</summary><div class="perf-jornada-etapas">${etapa('Participação confirmada',a.confirmadas,a.total,'Quem entregou e quanto fez')}${etapa('Valores identificados',a.total-a.semValor,a.total,'Base líquida para a conferência')}${etapa('Voltas conferidas',a.voltasConferidas,a.voltas,a.voltas?'Carro, organização, equipamentos e avarias':'Nenhuma volta aplicável no período')}</div><p>Outubro de 2026 é teste. Início efetivo em novembro, prêmios, rateio interno, trios e desempates dependem de configuração explícita e validação da gestão. Participações confirmadas não significam todos os itens entregues nem qualidade comprovada.</p><p>Comissão prevista: 1% do serviço efetivamente entregue. Retrabalho, retorno por serviço incompleto e má condução comprovada zeram os pontos e a comissão da O.S. afetada. O regulamento e as ocorrências precisam estar conferidos antes da apuração final.</p><p>O repasse de 20% para a montagem interna sem retrabalho e a divisão de 60%/40% do restante precisam constar da apuração financeira. Esta classificação operacional não libera pagamentos nem determina os premiados.</p></details>
   </section>`;
 }
 function perfAuditoriaHTML(regs) {
   const a=PERF.auditar(regs), pode=perfPodeEditar()&&!perfFonteAtual()?.fechadoEm;
   return `<details class="perf-auditoria" ${a.pendencias.length?'open':''}><summary>Conferência dos lançamentos · ${a.pendencias.length?`${a.pendencias.length} pontos de atenção`:'sem pendência nas verificações automáticas'}</summary><p>Confere participantes, valores, repetição de registros, parciais e volta do carro. Não substitui a verificação do serviço entregue.</p>${a.pendencias.length?`<ul>${a.pendencias.map(p=>`<li><span><strong>O.S. ${esc(p.numero||'a conferir')}</strong> · ${esc(p.motivo)}</span>${pode&&regs.some(r=>r.id===p.id)?`<button type="button" class="inline-link" ${p.tipo==='volta'?'data-perf-audit-volta':['sem-valor','valor-erp'].includes(p.tipo)?'data-perf-os':'data-perf-audit-id'}="${esc(p.id)}">${p.tipo==='volta'?'Conferir volta':['sem-valor','valor-erp'].includes(p.tipo)?'Ver origem':'Conferir entrega'}</button>`:''}</li>`).join('')}</ul>`:'<p>As informações disponíveis estão consistentes nesses critérios. O fechamento continua sujeito à revisão da gestão.</p>'}</details>`;
 }
+// Gestão atual e associação histórica são atos distintos.
+function perfGestaoEquipesHTML(){
+ const c=perfConfig(),f=periodoOuMes('_fPerf'),fonte=perfFonteAtual(),regs=fonte?.registros || [];
+ return `<section class="perf-gestao"><h3>Gestão de equipes</h3><p>Cadastros atuais. Entregas confirmadas só mudam de equipe por conferência explícita; integrantes e revisões históricas são preservados.</p><div class="perf-filtros"><label>Pesquisar equipe <input type="search" id="perf-gestao-busca" placeholder="Nome ou integrante"></label><label>Situação <select id="perf-gestao-status"><option value="">Ativas e inativas</option><option value="ativa">Ativas</option><option value="inativa">Inativas</option></select></label><button class="btn-primary" data-perf-criar-equipe>+ Nova equipe</button></div><details><summary>Período dos vínculos · ${esc(f.de)} a ${esc(f.ate)}</summary>${filtroPeriodoHTML('_fPerf')}</details><p role="status">${fonte?esc(perfFonteTexto()):'Consultando vínculos. O cadastro abaixo já está disponível.'}</p><div class="perf-gestao-lista">${c.equipes.map(e=>{const n=regs.filter(r=>r.confirmado&&PERF.gruposDoRegistro(r).some(g=>g.equipeId===e.id)).length;return `<article class="perf-gestao-equipe" data-gestao-status="${e.ativo===false?'inativa':'ativa'}"><header>${perfLogoHTML(e,'perf-logo-grande')}<div><h4>${esc(e.nome)}</h4><span>${e.ativo===false?'Inativa':'Ativa'} · ID ${esc(e.id)}</span></div></header><p>${e.membros.map(m=>`${esc(m.nome)} · ID ${esc(m.chave)}`).join('<br>')}</p><p>Líder: ${esc(e.liderPadraoId?OPERACAO.nomePessoa(e.liderPadraoId):'a definir')}. ${esc(perfAvisoEmDuas(c.equipes,e.id)||'')}</p>${e.membros.some(m=>!/^\d{6}$/.test(m.chave))?'<p class="aloc-aviso">Há integrante sem identidade confirmada. Confira PCP × RH.</p>':''}<p>${!fonte?'Vínculos em consulta':n?`${n} entrega(s) confirmada(s) vinculada(s)`:'Sem entregas vinculadas no período. Criar o cadastro não associa as entregas anteriores; isso não significa que a equipe não trabalhou.'}</p><button class="btn-ghost" data-perf-equipe="${esc(e.id)}">Editar cadastro</button><button class="btn-primary" data-perf-vinculos="${esc(e.id)}" ${!fonte?'disabled':''}>Conferir vínculos</button></article>`;}).join('') || '<p>Nenhuma equipe cadastrada.</p>'}</div></section>`;
+}
+function perfConferirVinculos(equipeId){
+ const e=perfConfig().equipes.find(x=>x.id===equipeId),f=perfFonteAtual();if(!e||!f)return;
+ const ids=e.membros.map(m=>String(m.chave)).sort().join('|');
+ const regs=f.registros, candidatos=regs.flatMap(r=>PERF.gruposDoRegistro(r).map((g,i)=>({r,g,i,exato:g.membros.map(m=>String(m.chave)).sort().join('|')===ids}))).sort((a,b)=>Number(b.exato)-Number(a.exato)||Number(!!a.g.equipeId)-Number(!!b.g.equipeId)||String(b.r.dia).localeCompare(String(a.r.dia)));
+ const exatos=candidatos.filter(x=>x.exato).length,ambiguas=perfConfig().equipes.filter(x=>x.ativo!==false&&x.membros.map(m=>String(m.chave)).sort().join('|')===ids).length;
+ const d=perfDialog('Conferir vínculos · '+e.nome,`<p>Confira uma entrega por vez. A associação preserva pessoas, percentuais, itens e datas. Não transfere todas as entregas da composição.</p>${f.fechadoEm?'<p class="aloc-aviso">Revisão fechada: somente leitura. Selecione Dados atuais em Base e fechamento para criar nova associação.</p>':''}${e.ativo===false?'<p class="aloc-aviso">Equipe inativa. Reative o cadastro antes de associar uma entrega.</p>':''}<p>${exatos} grupo(s) com os mesmos IDs. ${ambiguas>1?'Composição ambígua: mais de uma equipe ativa tem estes IDs; confira a execução antes de associar.':'Nenhum vínculo será atribuído pela semelhança.'}</p><label><input type="checkbox" id="perf-vinculo-outras"> Ver outras composições e substituições</label><label>Buscar O.S. ou pessoa <input type="search" id="perf-vinculo-busca"></label><label>Vínculo <select id="perf-vinculo-filtro"><option value="">Todos</option><option value="sem">Sem vínculo</option><option value="outra">Outra equipe</option><option value="esta">Esta equipe</option></select></label><div id="perf-vinculo-lista">${candidatos.map(({r,g,i},n)=>{const exato=g.membros.map(m=>String(m.chave)).sort().join('|')===ids;return `<article class="perf-vinculo-candidato" data-vinculo-exato="${exato||g.equipeId===e.id?'sim':'nao'}" ${!exato&&g.equipeId!==e.id?'hidden':''} data-vinculo-tipo="${!g.equipeId?'sem':g.equipeId===e.id?'esta':'outra'}"><h4>O.S. ${esc(r.numero)} · ${esc(r.dia)}</h4><p>${esc(r.cliente)} · ${r.entregaId?'Entrega parcial '+esc(r.entregaId):'Entrega integral'}</p><p>${esc((r.itensEntrega||[]).map(i=>i.descricao+' × '+i.qtde).join('; ') || 'Itens na ficha da O.S.')}</p><p>${g.membros.map(m=>`${esc(m.nome)} · ID ${esc(m.chave)} · ${perfFormato(m.percentual)}%`).join('<br>')}</p><p>Grupo: ${perfFormato(g.cota/100)}% · Atual: ${esc(g.equipeNome||g.equipeId||'Composição avulsa')} → ${esc(e.nome)}<br>${exato?'Mesmos IDs da composição atual; conferir a execução.':'Composição diferente: pode ter ocorrido substituição. Revise os IDs históricos.'}</p><button class="btn-ghost" data-perf-comparar="${n}" ${f.fechadoEm||e.ativo===false||!r.confirmado||g.equipeId===e.id?'disabled':''}>Comparar e confirmar</button>${!r.confirmado?'<p>Confirme primeiro a participação desta entrega.</p>':''}</article>`;}).join('') || '<p>Nenhuma entrega na fonte deste período.</p>'}</div>`);
+ const filtrar=()=>{const q=d.querySelector('#perf-vinculo-busca').value.toLocaleLowerCase(),v=d.querySelector('#perf-vinculo-filtro').value;d.querySelectorAll('[data-vinculo-tipo]').forEach(a=>a.hidden=!!((!d.querySelector('#perf-vinculo-outras').checked&&a.dataset.vinculoExato!=='sim')||(v&&a.dataset.vinculoTipo!==v)||!a.textContent.toLocaleLowerCase().includes(q)));};
+ d.querySelector('#perf-vinculo-busca').oninput=filtrar;d.querySelector('#perf-vinculo-filtro').onchange=filtrar;d.querySelector('#perf-vinculo-outras').onchange=filtrar;
+ d.querySelectorAll('[data-perf-comparar]').forEach(b=>b.onclick=()=>{const x=candidatos[Number(b.dataset.perfComparar)];perfCompararVinculo(e,x.r,x.i).catch(er=>toast(perfErroTxt(er),'error'));});
+}
+async function perfCompararVinculo(e,r,indice){
+ if(!perfPodeEditar()||perfFonteAtual()?.fechadoEm)return;
+ if(STORE.getQueue().length)throw new Error('Sincronize as alterações pendentes antes de vincular.');
+ const osId=r.osId||r.id,res=await STORE.api({action:'conferenciaEntrega',osId});if(!res.os)throw new Error(res.error||'O.S. indisponível.');
+ const os=res.os,ent=r.entregaId?(os.conferenciasEntrega||[]).find(x=>x.id===r.entregaId):null,aloc=ent?ent.alocacao:os.alocacao,g=aloc?.grupos?.[indice];
+ if(!g){const d=perfDialog('Conferir a divisão primeiro',`<p>Esta participação usa um registro anterior à divisão por IDs. Confira a identidade e a divisão antes de associar. Nenhum nome foi convertido automaticamente.</p><button class="btn-primary" id="perf-vinculo-legado">Conferir entrega</button>`);d.querySelector('button#perf-vinculo-legado').onclick=()=>{d.close();void perfEditarParticipacao(r.id);};return;}
+ const antes=perfConfig().equipes.find(x=>x.id===g.equipeId),baseEquipe=JSON.stringify(e);
+ const ap=ent?CONFERENCIA_ENTREGA.apurar(os,res.valor):null,parcial=ap?.entregas?.find(x=>x.id===ent.id),valorEntrega=ent?(parcial?.valor==null?null:parcial.valor/100):res.valor,centavos=valorEntrega==null?null:PERF.ratearGrupos(valorEntrega,aloc.grupos)[indice];
+ const itensAtuais=parcial?.itens||os.itens||[];
+ const d=perfDialog('Confirmar associação · O.S. '+r.numero,`<p><strong>Antes:</strong> ${esc(antes?.nome||g.equipeId||'Composição avulsa')}<br><strong>Depois:</strong> ${esc(e.nome)}</p><p>Entrega ${esc(ent?.dia||r.dia)} · ${ent?'parcial '+esc(ent.id):'integral'} · grupo ${perfFormato(g.cota/100)}%.</p><p>${g.membros.map(m=>`${esc(OPERACAO.nomePessoa(m.pessoaId))} · ID ${esc(m.pessoaId)} · ${perfFormato(m.cota/100)}% do grupo`).join('<br>')}</p><p>${esc(itensAtuais.map(i=>i.descricao+' × '+(i.qtde??i.qtd??'')).join('; ')||'Itens da entrega integral preservados.')}</p><p>Base desta entrega: ${valorEntrega==null?'valor a conferir':dinheiroCasa(valorEntrega)}. Parcela deste grupo: ${centavos==null?'valor a conferir':dinheiroCasa(centavos/100)}.</p><p>Impacto: apenas este grupo muda de equipe no ranking da base aberta. Quantidades, cotas, pessoas, datas, valor total e revisões fechadas permanecem iguais. A associação será assinada pela gestão.</p><label><input type="checkbox" id="perf-vinculo-aceite"> Conferi os IDs e reconheço esta equipe nesta entrega.</label><p id="perf-vinculo-status" role="status"></p><button class="btn-primary" id="perf-vinculo-confirmar" disabled>Confirmar somente este vínculo</button>`);
+ const b=d.querySelector('#perf-vinculo-confirmar'),st=d.querySelector('#perf-vinculo-status');d.querySelector('#perf-vinculo-aceite').onchange=x=>b.disabled=!x.target.checked;
+ b.onclick=async()=>{b.disabled=true;st.textContent='Salvando associação…';try{const out=await STORE.api({action:'performanceVincularEquipe',osId,entregaId:ent?.id||'',rev:os.rev,grupo:indice,equipeId:e.id,baseEquipe});if(!out.ok)throw new Error(out.error||'Associação não confirmada.');await STORE.pull?.();conferenciaRefletirNaFicha(out.os);if(d.querySelector('#perf-vinculo-status')===st)d.close();await perfCarregarFonte();renderPerformanceCasa();toast('Vínculo confirmado. As demais entregas foram preservadas.','success');}catch(er){if(d.querySelector('#perf-vinculo-status')===st){st.textContent=perfErroTxt(er);b.disabled=false;}else toast(perfErroTxt(er),'error');}};
+}
+
 function performanceEquipesHTML() {
   const c=perfConfig(), f=periodoOuMes('_fPerf');
+  if(perfConsultaServidor()&&!perfFonteAtual())return `<section class="perf-workspace"><details class="perf-filtro-avancado"><summary>Período · ${esc(f.de)} a ${esc(f.ate)}</summary><div class="filter-bar">${filtroPeriodoHTML('_fPerf')}</div></details><p role="status">${perfRemoto.erro?'Não foi possível consultar a apuração. Nenhuma falta de cadastro foi inferida.':'Consultando entregas e equipes…'}</p>${perfAvisosHTML(true)}</section>`;
   const lista=perfLista().filter(o=>OPERACAO.emIntervalo(diaEntrega(o),f.de,f.ate));
   const regs=perfUnirPessoas(lista.map(o=>perfRegistro(o,c)));
   const modo=STATE._perfModo==='pessoas'?'pessoas':'equipes', pesquisa=STATE._perfBusca || '';
@@ -1722,10 +1752,11 @@ function performanceEquipesHTML() {
     return `<strong>${esc(v.emblema||'🤝')} ${esc(v.equipeNome)}</strong>${v.sugerida?' <span class="perf-sugerida">sugerida</span>':''}<br>`;
   };
   const vista=v=>`<button type="button" class="btn-ghost ${modo===v?'active':''}" aria-pressed="${modo===v}" data-perf-modo="${v}">${v==='pessoas'?'👤 Pessoas':'🤝 Equipes'}</button>`;
-  return `<section class="perf-workspace"><div class="filter-bar">${filtroPeriodoHTML('_fPerf')}</div>
-    <div class="perf-toolbar"><span class="perf-toolbar-rot" id="perf-vista-rot">Ranking de</span><div class="casa-vista" role="group" aria-labelledby="perf-vista-rot">${vista('equipes')}${vista('pessoas')}</div><span class="perf-pdf-principal"><button type="button" class="btn-ghost btn-sm" id="perf-pdf-ranking">📄 PDF do ranking</button><button type="button" class="btn-ghost btn-sm" id="perf-pdf">PDF completo</button></span></div>
+  return `<section class="perf-workspace"><details class="perf-filtro-avancado"><summary>Período · ${esc(f.de)} a ${esc(f.ate)}</summary><div class="filter-bar">${filtroPeriodoHTML('_fPerf')}</div></details>
+    <div class="perf-toolbar"><span class="perf-toolbar-rot" id="perf-vista-rot">Ranking de</span><div class="casa-vista" role="group" aria-labelledby="perf-vista-rot">${vista('equipes')}${vista('pessoas')}</div><details class="perf-pdf-principal"><summary>Exportar</summary><button type="button" class="btn-ghost btn-sm" id="perf-pdf-ranking">📄 PDF do ranking</button><button type="button" class="btn-ghost btn-sm" id="perf-pdf">PDF completo</button></details></div>
     ${modo==='equipes' ? perfRankingEquipesHTML(regs, c) : perfRankingPessoasHTML(regs, c)}
-    ${perfJornadaHTML(regs,c)}
+    <details class="perf-method"><summary>Jornada e cobertura</summary>${perfJornadaHTML(regs,c)}</details>
+    ${typeof operacaoPrioridadesHTML==='function'?operacaoPrioridadesHTML():''}
     <details class="perf-method"><summary>Como interpretar os indicadores</summary><p>Entregas conta as O.S. em que a pessoa participou; não some essa coluna entre pessoas. O.S. equivalentes considera os percentuais e a parcela do valor líquido entregue. As parciais somam no máximo uma O.S.; sem valor dos itens, a parcela fica a conferir. Divisões sugeridas ainda não foram confirmadas. Valores rateados não são faturamento pessoal nem bônus. Qualidade, complexidade e retrabalho precisam de revisão. ${esc(perfFonteTexto())}</p></details>
     ${perfCoberturaHTML(regs, f)}
     ${perfAuditoriaHTML(regs)}
@@ -1735,6 +1766,10 @@ function performanceEquipesHTML() {
 }
 function wirePerformanceEquipes(el) {
   perfWireFonte(el);
+  if(typeof wireOperacaoRevisao==='function')wireOperacaoRevisao(el);
+  if(typeof bindCardClicks==='function')bindCardClicks(el);
+  el.querySelectorAll("[data-perf-vinculos]").forEach(b=>b.onclick=()=>perfConferirVinculos(b.dataset.perfVinculos));
+  const gb=el.querySelector("#perf-gestao-busca"),gs=el.querySelector("#perf-gestao-status");if(gb&&gs){const f=()=>el.querySelectorAll("[data-gestao-status]").forEach(a=>a.hidden=!!((gs.value&&gs.value!==a.dataset.gestaoStatus)||!a.textContent.toLocaleLowerCase().includes(gb.value.toLocaleLowerCase())));gb.oninput=f;gs.onchange=f;}
   el.querySelectorAll('[data-perf-modo]').forEach(b=>b.onclick=()=>{STATE._perfModo=b.dataset.perfModo;renderPerformanceCasa();});
   el.querySelectorAll('[data-perf-equipe]').forEach(b=>b.onclick=()=>perfEditarEquipe(b.dataset.perfEquipe));
   // O Conferir é assíncrono (pode buscar a O.S. no servidor): falha diz a causa, nunca some calada.
@@ -1766,13 +1801,13 @@ function wirePerformanceEquipes(el) {
       const status=!r.membros.length?'sem-equipe':PERF.validar(r.membros)?'invalida':r.confirmado?'confirmada':'pendente';
       // A marca pela mesma função do selo e da faixa: a desatualizada sem gente está em "Sem equipe", não aqui.
       const marcada=!!perfSituacaoEntrega(r)[2];
-      const ok=(!situacao.value || (situacao.value==='pendente'?!r.confirmado:situacao.value==='sem-valor'?r.valor==null:situacao.value==='desatualizada'?marcada:status===situacao.value)) && PERF.incluiPessoa(r.membros,STATE._perfPessoa) && (!STATE._perfGrupo || grupos.includes(STATE._perfGrupo)) && normCasa(tr.textContent).includes(normCasa(busca.value));
+      const ok=(!STATE._perfApenasComValor || r.valor!=null)&&(!situacao.value || (situacao.value==='pendente'?!r.confirmado:situacao.value==='sem-valor'?r.valor==null:situacao.value==='desatualizada'?marcada:status===situacao.value)) && PERF.incluiPessoa(r.membros,STATE._perfPessoa) && (!STATE._perfGrupo || grupos.includes(STATE._perfGrupo)) && normCasa(tr.textContent).includes(normCasa(busca.value));
       tr.hidden=!ok;if(ok)n++;
     });
     el.querySelector('#perf-recorte').textContent=n+(n===1?' entrega na lista':' entregas na lista')+(STATE._perfPessoa || STATE._perfGrupo?' · participante/equipe selecionado':'')+'. Os números do ranking valem para o período inteiro.';
   };
-  el.querySelectorAll('[data-perf-pessoa],[data-perf-grupo]').forEach(b=>b.onclick=()=>{STATE._perfPessoa=b.dataset.perfPessoa||'';STATE._perfGrupo=b.dataset.perfGrupo||'';busca.value='';situacao.value='';filtrar();el.querySelector('.perf-entregas').scrollIntoView({behavior:'smooth',block:'start'});});
-  if(busca){situacao.value=STATE._perfSituacao||'';busca.oninput=filtrar;situacao.onchange=filtrar;el.querySelector('#perf-limpar').onclick=()=>{STATE._perfPessoa='';STATE._perfGrupo='';busca.value='';situacao.value='';filtrar();};filtrar();}
+  el.querySelectorAll('[data-perf-pessoa],[data-perf-grupo]').forEach(b=>b.onclick=()=>{STATE._perfPessoa=b.dataset.perfPessoa||'';STATE._perfGrupo=b.dataset.perfGrupo||'';STATE._perfApenasComValor=b.dataset.perfFonteMedida==='valor';busca.value='';situacao.value=b.dataset.perfFonteMedida&&b.dataset.perfFonteMedida!=='entregas'?'confirmada':'';filtrar();el.querySelector('.perf-entregas').scrollIntoView({behavior:'smooth',block:'start'});});
+  if(busca){situacao.value=STATE._perfSituacao||'';busca.oninput=filtrar;situacao.onchange=()=>{STATE._perfApenasComValor=false;filtrar();};el.querySelector('#perf-limpar').onclick=()=>{STATE._perfPessoa='';STATE._perfGrupo='';STATE._perfApenasComValor=false;busca.value='';situacao.value='';filtrar();};filtrar();}
   /* A FAIXA DE COBERTURA manda para a lista já filtrada ("Completar equipes"
      mostra as sem equipe, com o Conferir de cada uma) e o foco vai para o
      filtro, para quem usa teclado continuar dali. */
@@ -1818,6 +1853,7 @@ function perfWireModelo(form) {
 }
 
 function performanceRelatorioHTML() {
+  if(perfConsultaServidor()&&!perfFonteAtual())return `<p role="status">${perfRemoto.erro?'Consulta indisponível; tente atualizar a apuração.':'Consultando a apuração…'}</p>`;
   const f=periodoOuMes('_fPerf'),c=perfConfig();
   // Nome e logo das equipes pela mesma regra do ranking, em todos os quadros do
   // relatório: um quadro com o nome e outro com a composição crua seria a

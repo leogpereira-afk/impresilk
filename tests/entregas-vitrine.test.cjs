@@ -184,7 +184,7 @@ test('cartões: o do mês é o grande quando o período é o mês, e hoje sem en
   const erp = [{ numero: '7001', cliente: 'A', servico: 'Letreiro', data: '2026-09-10', valor: 5000, tipo: 'externo' }];
   const html = tela(casa([], { erp }));
   const cartoes = (html.match(/<div class="ent-kpis">[\s\S]*?<\/div><\/div>/) || [''])[0];
-  assert.match(cartoes, /casa-kpi ent-kpi-principal[^"]*">\s*<b>R\$\s?5\.000,00<\/b>\s*<small>entregue em set\/2026/);
+  assert.match(cartoes, /casa-kpi ent-kpi-principal[^"]*">\s*<button[^>]*data-total-fonte="\d+"[^>]*><b>R\$\s?5\.000,00<\/b><\/button>\s*<small>ERP · entregue em set\/2026/);
   assert.doesNotMatch(cartoes, /entregue no mês/, 'o mês não se repete ao lado dele mesmo');
   assert.match(cartoes, /entregue no ano/);
   assert.match(cartoes, /<div class="casa-kpi ent-kpi-sec ent-kpi-nada"><span>Nada entregue hoje<\/span><\/div>/);
@@ -194,8 +194,8 @@ test('cartões: o do mês é o grande quando o período é o mês, e hoje sem en
 test('cartões: período escolhido é o grande (marcado), e hoje carregando mantém o aviso', () => {
   const t = casa([]);   // nenhum mês do ERP chegou ainda
   const html = tela(t, "STATE._fEnt = { de: '2026-05-01', ate: '2026-05-31' };");
-  assert.match(html, /casa-kpi escolhido ent-kpi-principal alerta">\s*<b>…<\/b>\s*<small>entregue em mai\/2026/);
-  assert.match(html, /casa-kpi ent-kpi-sec alerta">\s*<b>…<\/b>\s*<small>entregue hoje/, 'hoje sem resposta do ERP não vira "Nada entregue hoje"');
+  assert.match(html, /casa-kpi escolhido ent-kpi-principal alerta">\s*<button[^>]*data-total-fonte="\d+"[^>]*><b>…<\/b><\/button>\s*<small>ERP · entregue em mai\/2026/);
+  assert.match(html, /casa-kpi ent-kpi-sec alerta">\s*<button[^>]*data-total-fonte="\d+"[^>]*><b>…<\/b><\/button>\s*<small>ERP · entregue hoje/, 'hoje sem resposta do ERP não vira "Nada entregue hoje"');
   assert.doesNotMatch(html, /Nada entregue hoje/);
   assert.match(html, /entregue no mês/);
   assert.match(html, /entregue no ano/);

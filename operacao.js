@@ -521,6 +521,16 @@ const OPERACAO = (() => {
     if (a.instalacao?.periodo === 'Horário' || b.instalacao?.periodo === 'Horário') return true;
     return !(['Manhã','Tarde'].includes(x) && ['Manhã','Tarde'].includes(y) && x !== y);
   }
+  // Só equivalências confirmadas por ID/placa. Texto original permanece na O.S.
+  let veiculosConfirmados=[];
+  function usarVeiculos(v){veiculosConfirmados=Array.isArray(v)?v:[];}
+  function veiculoConfirmado(o){
+    const nome=String(typeof o==='string'?o:o?.veiculo||'').trim();
+    const aliases=typeof STORE!=='undefined'&&STORE.getCFG?STORE.getCFG().veiculosAliases||[]:veiculosConfirmados;
+    const a=aliases.find(x=>(x.alias===nome||x.nome===nome)&&x.id&&x.placa);
+    return a?{chave:'ativo:'+a.id,nome:a.nome||nome,id:a.id,placa:a.placa}:{chave:nome,nome,id:'',placa:''};
+  }
+  const chaveVeiculo=o=>veiculoConfirmado(o).chave;
   function conflitos(lista, data) {
     const os = programadas(lista, data, data), out = [];
     for (let i=0; i<os.length; i++) for (let j=i+1; j<os.length; j++) {
@@ -528,9 +538,10 @@ const OPERACAO = (() => {
       const deB = new Set(equipe(b).map(chavePessoa));
       const nomes = equipe(a).filter(n => deB.has(chavePessoa(n))).map(nomePessoa);
       // "Instalação interna" não é carro: duas no mesmo turno não disputam nada.
-      const carro = semCarro(a) ? '' : String(a.veiculo || '').trim();
-      if (nomes.length || (carro && carro === String(b.veiculo || '').trim())) {
-        out.push({a,b,equipe:nomes,veiculo:carro && carro === String(b.veiculo || '').trim() ? carro : ''});
+      const carro = semCarro(a) ? '' : chaveVeiculo(a);
+      if (nomes.length || (carro && carro === chaveVeiculo(b))) {
+        const ja=janelaPrevista(a,data),jb=janelaPrevista(b,data),confirmado=!!(ja&&jb);
+        out.push({a,b,equipe:nomes,veiculo:carro && carro === chaveVeiculo(b) ? veiculoConfirmado(a).nome : '',confirmado,motivo:confirmado?`Sobreposição de intervalos ${ja.saida}–${ja.retorno} e ${jb.saida}–${jb.retorno}`:'Verificar disponibilidade: horário ou duração incompleto; mesmo turno não comprova sobreposição'});
       }
     }
     return out;
@@ -567,7 +578,7 @@ const OPERACAO = (() => {
       const info = {id:String(o.id), numero:String(o.numero || ''), cliente:String(o.cliente || ''), dia:dd, outroDia:dd !== dia0, periodo:String(o.instalacao?.periodo || ''), hora:String(o.instalacao?.hora || '')};
       for (const x of equipe(o)) anotar(pessoasOc, chavePessoa(x), info);
       const carro = semCarro(o) ? '' : String(o.veiculo || '').trim();
-      if (carro) anotar(veiculosOc, carro, info);
+      if (carro) { anotar(veiculosOc, carro, info); const v=veiculoConfirmado(o);if(v.nome!==carro)anotar(veiculosOc,v.nome,info); }
     }
     return vazio;
   }
@@ -1754,7 +1765,7 @@ function statusEntrega(o, hoje, regra, volta) {
     o.abonos = o.abonos.map((y, j) => j === i ? {...y, revogar:true} : y);
     return '';
   }
-  return {uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,...STATUS_ENTREGA,novoIdF17,voltaNaLista,diaDaJornada,pedirChegada,ocorrenciasDoGrupo,pedirOcorrencia,pedirAnularOcorrencia,pedirAbono,pedirRevogarAbono};
+  return {usarVeiculos,veiculoConfirmado,chaveVeiculo,uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,...STATUS_ENTREGA,novoIdF17,voltaNaLista,diaDaJornada,pedirChegada,ocorrenciasDoGrupo,pedirOcorrencia,pedirAnularOcorrencia,pedirAbono,pedirRevogarAbono};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
 // Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega

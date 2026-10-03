@@ -234,30 +234,13 @@ test('gravar nunca é chamado com divisão inválida: sem líder, a tela pede o 
 
 /* ───────────── R$ só para a gestão ───────────── */
 
-test('operação não vê R$: nem valor bruto nem comissão; admin e pcp veem "valor bruto" com a nota, nunca "valor que vai pontuar"', () => {
-  const lista = [osBase({equipe: ['100001', '100002']})];
-  const {A} = tela({lista});
-  A.iniciar('op', {os: lista[0], equipes: EQUIPES, papel: 'operacao', valor: 4200});
-  const op = A.html('op');
-  assert.doesNotMatch(op, /R\$/);
-  assert.doesNotMatch(op, /[Cc]omissão/);
-  assert.doesNotMatch(op, /[Vv]alor bruto/);
-  assert.equal(A.estado('op').valor, null, 'nem guarda o valor');
-  assert.match(op, /Prévia por pessoa/);
-  A.iniciar('pcp', {os: lista[0], equipes: EQUIPES, papel: 'pcp', valor: 4200});
-  const pcp = A.html('pcp');
-  assert.match(pcp, /Valor bruto da O\.S\.: <b>R\$ 4200,00<\/b>/);
-  assert.match(pcp, /Comissão prevista de 1%/);
-  assert.match(pcp, /R\$ 25,20/, 'líder: 60% de R$ 42,00');
-  assert.match(pcp, /R\$ 16,80/, 'ajudante: 40% de R$ 42,00');
-  assert.match(pcp, /Pontuação pela regra do programa a partir de 01\/10/);
-  assert.doesNotMatch(pcp, /vai pontuar/i);
-  // Setembro fica na regra de hoje: sem comissão do programa.
-  A.iniciar('set', {os: {...lista[0], finalizadaEm: '2026-09-20T10:00:00'}, equipes: EQUIPES, papel: 'admin', valor: 4200, reiniciar: true});
-  const set = A.html('set');
-  assert.match(set, /fica na regra atual, sem comissão do programa/);
-  assert.doesNotMatch(set, /R\$ 42,00/);
-  for (const h of [op, pcp, set]) assert.doesNotMatch(h, /—/, 'sem travessão no texto');
+test('divisão operacional preserva percentuais e base sem previsão financeira ou corte automático', () => {
+ const {A}=tela({lista:[osBase({equipe:['100001','100002']})]});
+ for(const papel of ['operacao','pcp','admin']){
+  A.iniciar(papel,{os:osBase({equipe:['100001','100002']}),equipes:EQUIPES,papel,valor:4200});
+  const h=A.html(papel);assert.match(h,/Divisão operacional por pessoa/);assert.doesNotMatch(h,/Comissão prevista|R\$ 25,20|R\$ 16,80/);
+  if(papel==='operacao'){assert.doesNotMatch(h,/R\$|[Cc]omissão/);assert.equal(A.estado(papel).valor,null);}else{assert.match(h,/Base da O.S. a conferir/);assert.match(h,/demonstrativo revisado e aprovado/);}
+ }
 });
 
 /* ───────────── terceiro só pelo nome ───────────── */

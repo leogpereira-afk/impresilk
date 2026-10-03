@@ -227,8 +227,8 @@ test('tela: equipe cadastrada sem entrega no período continua à vista, para ed
   const salvas = [{id:'q',nome:'Quieta',emblema:'🛡️',membros:[C],ativo:true}];
   const html = telaRanking({equipes:salvas,participacoes:[]}, 'admin', 'entregas')
     .perfRankingEquipesHTML([{id:'1',membros:P.iguais([A,B]),confirmado:false,valor:1,os:{}}], {equipes:salvas});
-  assert.match(html, /Sem entrega no período:/);
-  assert.match(html, /data-perf-equipe="q"[^>]*>.*Quieta/s);
+  assert.match(html, /Sem entregas vinculadas no período:/);
+  assert.match(html, /data-perf-vinculos="q"[^>]*>.*Quieta/s);
 });
 
 /* ---------------- Avaliação individual (23/09/2026) ----------------

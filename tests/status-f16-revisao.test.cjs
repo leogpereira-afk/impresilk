@@ -247,15 +247,15 @@ test('revisão: a prévia do Lançar entrega usa a data digitada, não a da baix
   // Caso ruim: antes de digitar a data real, a prévia já dizia "não pontua" pela data da sincronização.
   let v = valorDaPrevia(A.html('lancar:L1'));
   assert.doesNotMatch(v, /não pontua/, v);
-  assert.match(v, /Comissão prevista de 1%[^:]*: R\$ 42\.00/);
+  assert.doesNotMatch(v, /Comissão prevista/);
   // A gestão digita a data real (02/10, no prazo): pontua.
   A.definirDataEntrega('lancar:L1', '2026-10-02');
   v = valorDaPrevia(A.html('lancar:L1'));
-  assert.doesNotMatch(v, /não pontua/);assert.match(v, /R\$ 42\.00/);
+  assert.doesNotMatch(v, /não pontua/);assert.match(v, /Base da O.S. a conferir/);
   // Digita 05/10 (3 dias depois do prazo): não pontua, pelo atraso na entrega (texto da revisão).
   A.definirDataEntrega('lancar:L1', '2026-10-05');
   v = valorDaPrevia(A.html('lancar:L1'));
-  assert.match(v, /O\.S\. com atraso na entrega: pela regra do programa, não pontua nem paga comissão\./);
+  assert.doesNotMatch(v, /não pontua|Comissão prevista/);assert.equal(A.estado('lancar:L1').dia,'2026-10-05');
   assert.doesNotMatch(v, /entregue com atraso/);
   // Data apagada no campo: volta ao status da O.S. como está (a lançar, sem julgar).
   A.definirDataEntrega('lancar:L1', '');
@@ -305,7 +305,7 @@ test('revisão: no Lançar entrega, mudar o campo de data repinta a prévia com 
   assert.doesNotMatch(valorDaPrevia(t.A.html('lancar:L1')), /não pontua/);
   campo.value = '2026-10-05';
   campo.onchange();
-  assert.match(valorDaPrevia(t.A.html('lancar:L1')), /atraso na entrega: pela regra do programa, não pontua/);
+  assert.equal(t.A.estado('lancar:L1').dia,'2026-10-05');assert.doesNotMatch(valorDaPrevia(t.A.html('lancar:L1')), /não pontua|Comissão prevista/);
   campo.value = '2026-10-02';
   campo.onchange();
   assert.doesNotMatch(valorDaPrevia(t.A.html('lancar:L1')), /não pontua/);

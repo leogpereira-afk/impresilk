@@ -1096,24 +1096,13 @@ const ALOCUI = (() => {
   function previaHTML(st) {
     const D = motor(), fs = D.finais(st.aloc);
     if (!fs.length) return '';
-    const R = regras(), prog = st.programa;
-    const comissao = st.verValor && prog && st.valor != null && R && typeof R.comissaoCentavos === 'function' ? (st.naoPontua ? 0 : R.comissaoCentavos(st.valor, prog)) : null;
-    const partes = comissao != null ? D.ratearCentavosLider(comissao, st.aloc) : [];
     const papel = f => f.papel === 'lider' ? 'Líder' : f.papel === 'ajudante' ? 'Ajudante' : 'Sem líder';
-    const linhas = fs.map((f, i) => `<tr><td>${escA(pessoa(f.pessoaId).nome)}${f.freelancer ? ' <span class="tag-freelancer">Freelancer</span>' : ''}</td><td>${papel(f)}</td><td class="num">${escA(pctTexto(f.cota))}%</td>${st.verValor ? `<td class="num">${comissao != null && partes[i] && partes[i].centavos != null ? escA(reais(partes[i].centavos)) : '·'}</td>` : ''}</tr>`).join('');
-    let valor = '';
-    if (st.verValor) {
-      const bruto = st.valor == null ? 'sem valor informado' : escA(reais(st.valor));
-      const sobre = st.naoPontua ? escA(st.naoPontua)
-        : !prog ? `Esta O.S. é de ${dataBR(st.dia) || 'antes de 01/10/2026'}: fica na regra atual, sem comissão do programa.`
-        : st.valor == null ? 'Sem o valor não há comissão prevista.'
-        : `Comissão prevista de ${escA(pctTexto(prog.comissaoBp))}%${prog.provisoria ? ' (regra embutida, provisória)' : ''}: ${escA(reais(comissao || 0))}, dividida como na tabela.`;
-      valor = `<p class="aloc-valor"><span>${escA(st.rotuloValor || 'Valor bruto da O.S.') }: <b>${bruto}</b>.</span> ${sobre}</p>
-        <p class="aloc-nota">Pontuação pela regra do programa a partir de 01/10. A comissão só vale se a O.S. pontuar (no prazo, sem retrabalho e sem retorno antecipado), o que é conferido na apuração.</p>`;
-    }
-    return `<section class="aloc-previa" aria-label="Prévia por pessoa"><h4>Prévia por pessoa</h4>
-      <div class="aloc-tab-wrap"><table class="aloc-tab"><thead><tr><th scope="col">Pessoa</th><th scope="col">Papel</th><th scope="col" class="num">${st.rotuloValor ? 'Parte nesta entrega' : 'Parte na O.S.'}</th>${st.verValor ? '<th scope="col" class="num">Comissão prevista</th>' : ''}</tr></thead><tbody>${linhas}</tbody></table></div>${valor}</section>`;
+    const linhas = fs.map(f => `<tr><td>${escA(pessoa(f.pessoaId).nome)}${f.freelancer ? ' <span class="tag-freelancer">Freelancer</span>' : ''}</td><td>${papel(f)}</td><td class="num">${escA(pctTexto(f.cota))}%</td></tr>`).join('');
+    const valor = st.verValor ? `<p class="aloc-valor">${escA(st.rotuloValor || 'Base da O.S. a conferir')}: <b>${st.valor == null ? 'valor a conferir' : escA(reais(st.valor))}</b>.</p>` : '';
+    return `<section class="aloc-previa" aria-label="Divisão operacional por pessoa"><h4>Divisão operacional por pessoa</h4>
+      <div class="aloc-tab-wrap"><table class="aloc-tab"><thead><tr><th scope="col">Pessoa</th><th scope="col">Papel</th><th scope="col" class="num">${st.rotuloValor ? 'Parte nesta entrega' : 'Parte na O.S.'}</th></tr></thead><tbody>${linhas}</tbody></table></div>${valor}${st.verValor?'<p class="aloc-nota">Estes percentuais registram participação na entrega. Comissão e montagem interna são conferidas no demonstrativo revisado e aprovado em Performance → Regras → Comissão. Esta divisão não determina pagamento nem aplica cortes automáticos.</p>':''}</section>`;
   }
+
   /* O JEITO ANTIGO NA TELA: quem está na O.S. (com ficha ou só pelo nome), a
      parte de cada um, cadeado e "Dividir igualmente". Sem líder e sem R$: é
      a participação da v138, que a apuração lê como sempre leu. */

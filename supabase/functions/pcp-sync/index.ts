@@ -903,6 +903,41 @@ Deno.serve(async (req: Request) => {
           entregue:"O.S. com status entregue no Mubisys pela data de entrega, incluindo retiradas. Valores líquidos; alterações posteriores dependem de nova sincronização."}});
       }
 
+      // Alteração estreita: nunca reaplica os integrantes atuais sobre a entrega.
+      case "performanceVincularEquipe": {
+        if(ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha?.papel || "")))return resp({error:"Só a gestão pode conferir vínculos de equipes."},403);
+        if(body.revisaoFechada)return resp({error:"Revisão fechada é somente leitura. Abra os dados atuais."},422);
+        const osId=String(body.osId || ""), entregaId=String(body.entregaId || "");
+        const {data:row,error}=await sb.from("pcp_registros").select("registro,atualizado_em,apagado").eq("colecao","os").eq("id",osId).maybeSingle();
+        if(error)throw new Error(error.message);
+        const os=row?.registro;
+        if(!os || row.apagado)return resp({error:"O.S. não encontrada."},404);
+        if(body.rev!==os.rev)return resp({error:"A O.S. mudou. Reabra a comparação.",conflito:true},409);
+        const entrega=entregaId?(os.conferenciasEntrega || []).find((x:any)=>x.id===entregaId):null;
+        if(entregaId&&!entrega || !entregaId&&os.conferenciasEntrega?.length)return resp({error:"Selecione a entrega específica, preservando as outras parciais."},422);
+        const aloc=entrega?entrega.alocacao:os.alocacao, indice=body.grupo;
+        const virtual={...os,alocacao:aloc,equipe:entrega?finaisAlocacao(aloc).map((m:any)=>m.pessoaId):os.equipe};
+        if(!aloc || !alocacaoConfirmada(virtual) || !Number.isInteger(indice) || !aloc.grupos[indice])return resp({error:"Confirme a divisão e a identidade das pessoas antes de vincular."},422);
+        const cfgAntes=await getCfgComVersao(), equipe=(cfgAntes.config?.performancePCP?.equipes || []).find((x:any)=>x.id===body.equipeId);
+        if(!equipe || equipe.ativo===false)return resp({error:"Equipe indisponível ou inativa. Revise o cadastro."},422);
+        if(JSON.stringify(equipe)!==body.baseEquipe)return resp({error:"O cadastro da equipe mudou. Reabra a comparação.",conflito:true},409);
+        const pessoas=await pessoasReq(), grupo=aloc.grupos[indice];
+        if(grupo.membros.some((m:any)=>{const p=pessoas.pessoa(m.pessoaId);return !/^\d{6}$/.test(m.pessoaId)||!p||p.semFicha||p.idRepetido||pessoas.repetido?.(m.pessoaId)||(pessoas.fichas || []).filter((x:any)=>x.id===m.pessoaId).length>1;}))return resp({error:"Identidade de pessoa não confirmada. Confira os vínculos no RH."},422);
+        const nova=JSON.parse(JSON.stringify(aloc));nova.grupos[indice].equipeId=equipe.id;
+        if(grupo.equipeId===equipe.id)return resp({error:"Esta entrega já está vinculada a esta equipe."},422);
+        const cfgAgora=await getCfgComVersao();
+        if(cfgAgora.versao!==cfgAntes.versao)return resp({error:"O cadastro mudou durante a conferência.",conflito:true},409);
+        const autor=await autorAuditoria(), agora=new Date().toISOString();
+        const vinculo={entregaId,grupo:indice,antes:grupo.equipeId || null,depois:equipe.id,equipeNome:equipe.nome,por:autor.nome,porId:autor.porId,em:agora};
+        // Assinatura original da entrega fica preservada; a associação tem sua própria autoria.
+        const gravar={...os,...(entrega?{conferenciasEntrega:os.conferenciasEntrega.map((x:any)=>x.id===entregaId?{...x,alocacao:nova}:x)}:{alocacao:nova}),vinculosEquipes:[...(os.vinculosEquipes || []),vinculo],rev:(Number(os.rev)||0)+1,atualizadoEm:agora,atualizadoPor:autor.nome};
+        const {data:salva,error:err}=await sb.from("pcp_registros").update({registro:gravar,atualizado_em:new Date(Math.max(Date.now(),Date.parse(row.atualizado_em)+1 || 0)).toISOString()}).eq("colecao","os").eq("id",osId).eq("atualizado_em",row.atualizado_em).select("id");
+        if(err)throw new Error(err.message);
+        if(!salva?.length)return resp({error:"Outra pessoa alterou a O.S. Reabra a comparação.",conflito:true},409);
+        await auditar(osId,"vincular-equipe",vinculo,os.numero);
+        return resp({ok:true,os:saida(gravar)});
+      }
+
       case "conferenciaEntrega": {
         if(ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha?.papel || ""))) return resp({error:"Só a gestão confere itens e a divisão de cada entrega."},403);
         const osId=String(body.osId || "");
@@ -1806,6 +1841,7 @@ Deno.serve(async (req: Request) => {
           avisosToque.push(...ga.avisos);
         }
         for (const campo of ["conferenciaERP","regularizacaoSaida","revisaoSolicitada","cicloRegistro"]) { if (existing?.[campo]) os[campo]=existing[campo]; else delete os[campo]; }
+        if (existing?.vinculosEquipes) os.vinculosEquipes=existing.vinculosEquipes; else delete os.vinculosEquipes;
         if (existing?.conferenciasEntrega) os.conferenciasEntrega = existing.conferenciasEntrega; else delete os.conferenciasEntrega;
         const executado = carimbarExecucao(os, existing, cracha?.nome || cracha?.sub || "Integração", new Date().toISOString());
         const autorCarimbo = carimbosQueMudaram(executado, existing).length ? await autorAuditoria() : { nome: "", login: "", porId: "" };
@@ -2298,6 +2334,7 @@ Deno.serve(async (req: Request) => {
         // Maquina/Hub recebe tudo (backup).
         if (cracha && !ehMaquina && String(cracha.papel ?? "") !== "admin") {
           const { usuarios: _u, funcionarios: _f, ...publico } = cfg;
+          if(!["admin","pcp"].includes(String(cracha?.papel)))delete publico.medicoesRetrabalho;
           /* Quem entrou pelo nome também não recebe bônus (orçamento, teto e
              pontos de cada colega) nem a apuração da performance (percentuais,
              participações e logos): a ação "valores" já recusa esse crachá, e
@@ -2334,7 +2371,7 @@ Deno.serve(async (req: Request) => {
           if (!body.baseCfg) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:["Configuração salva por versão antiga; revise antes de reaplicar."]},409);
           const base = paraMescla(body.baseCfg), local = paraMescla(body.cfg), remoto = paraMescla(atual);
           if (cracha?.papel === "pcp" && !ehMaquina) {
-            const permitidas = new Set(["agendaPCP","bonusPCP","performancePCP","vinculosRH","mensagemDia"]);
+            const permitidas = new Set(["agendaPCP","bonusPCP","performancePCP","vinculosRH","mensagemDia","veiculosAliases","categoriasServico","medicoesRetrabalho","prioridadesPCP"]);
             for (const k of new Set([...Object.keys(base),...Object.keys(local),...Object.keys(remoto)])) {
               if (!permitidas.has(k)) { delete base[k]; delete local[k]; delete remoto[k]; }
             }
@@ -2369,6 +2406,10 @@ Deno.serve(async (req: Request) => {
               local.performancePCP = { ...local.performancePCP, criterios: vence };
               remoto.performancePCP = { ...remoto.performancePCP, criterios: vence };
             }
+          }
+          // Novos cadastros operacionais usam a mesma mescla/CAS e autoria do servidor.
+          for(const k of ["veiculosAliases","categoriasServico","medicoesRetrabalho","prioridadesPCP"]){
+            if(k in base && !(k in local))local[k]=base[k]; // aba anterior não apaga campo desconhecido
           }
           const result = mesclarConfiguracao(base,local,remoto);
           if (result.conflitos.length) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:result.conflitos},409);
@@ -2415,6 +2456,44 @@ Deno.serve(async (req: Request) => {
               return JSON.stringify(antes)===JSON.stringify(p) ? p : {...p,por:cracha?.nome || 'Gestão',em:new Date().toISOString()};
             });
           }
+          const mudancaOperacional=["veiculosAliases","categoriasServico","medicoesRetrabalho","prioridadesPCP"].filter(k=>JSON.stringify(limpo[k])!==JSON.stringify(atual[k]));
+          if(mudancaOperacional.length){
+            if(ehMaquina || !["admin","pcp"].includes(String(cracha?.papel)))return resp({error:"Só a gestão confirma cadastros operacionais."},403);
+            const autor=await autorAuditoria(),em=new Date().toISOString();
+            const assinar=(x:any)=>({...x,por:autor.nome,porId:autor.porId,em});
+            if(mudancaOperacional.includes("veiculosAliases")){
+              if(!Array.isArray(limpo.veiculosAliases)||limpo.veiculosAliases.length>1000)return resp({error:"Lista de veículos inválida."},422);
+              const {data:ativos,error}=await sb.from("painel_registros").select("id,registro").eq("colecao","ativo");if(error)throw new Error(error.message);
+              const vistos=new Set();const out=[];
+              for(const v of limpo.veiculosAliases){
+                if(!v || typeof v.alias!=="string" || !v.alias.trim() || v.alias.length>150 || vistos.has(v.alias))return resp({error:"Alias de veículo inválido ou repetido."},422);vistos.add(v.alias);
+                const antigo=(atual.veiculosAliases || []).find((x:any)=>x.alias===v.alias);
+                if(JSON.stringify(antigo)===JSON.stringify(v)){out.push(antigo);continue;}
+                const ficha=(ativos || []).find((x:any)=>String(x.id)===String(v.id)&&x.registro?.tipo==="veiculo"),placa=ficha?.registro?.especificacao?.placa || ficha?.registro?.identificacao;
+                if(!ficha || !placa || String(placa)!==String(v.placa))return resp({error:"Confira ID e placa na ficha atual do Ativos."},422);
+                out.push(assinar({alias:v.alias,id:String(ficha.id),nome:ficha.registro.nome,placa:String(placa)}));
+              }limpo.veiculosAliases=out;
+            }
+            if(mudancaOperacional.includes("categoriasServico")){
+              const permitidas=["Adesivos","Fachadas","Letreiros","Sinalização","Estruturas","Impressos","Outros"],vistos=new Set();
+              if(!Array.isArray(limpo.categoriasServico)||limpo.categoriasServico.length>3000)return resp({error:"Categorias inválidas."},422);
+              const out=[];for(const x of limpo.categoriasServico){if(!x||typeof x.descricao!=="string"||!x.descricao.trim()||x.descricao.length>1000||!permitidas.includes(x.categoria)||vistos.has(x.descricao))return resp({error:"Categoria ou descrição inválida/repetida."},422);vistos.add(x.descricao);const antigo=(atual.categoriasServico||[]).find((v:any)=>v.descricao===x.descricao);out.push(JSON.stringify(x)===JSON.stringify(antigo)?antigo:assinar({descricao:x.descricao,categoria:x.categoria}));}limpo.categoriasServico=out;
+            }
+            if(mudancaOperacional.includes("medicoesRetrabalho")){
+              if(!limpo.medicoesRetrabalho||typeof limpo.medicoesRetrabalho!=="object"||Array.isArray(limpo.medicoesRetrabalho)||Object.keys(limpo.medicoesRetrabalho).length>3000)return resp({error:"Medições inválidas."},422);
+              const out:any={};for(const [id,x] of Object.entries(limpo.medicoesRetrabalho) as [string,any][]){
+                if(JSON.stringify(x)===JSON.stringify(atual.medicoesRetrabalho?.[id])){out[id]=x;continue;}
+                const os=await getReg("os",id);if(!os?.osOriginal)return resp({error:"Medição exige O.S. de correção ligada à original."},422);
+                const original=await getReg("os",String(x?.originalId || ""));if(!original || original.id===os.id || String(original.numero)!==String(os.osOriginal))return resp({error:"Confirme a O.S. original por ID; o número deve corresponder ao da correção."},422);
+                if(!x || ["material","horas","km"].some(k=>x[k]!==null&&(typeof x[k]!=="number"||!Number.isFinite(x[k])||x[k]<0)) || typeof x.causa!=="string" || x.causa.length>500 || typeof x.prevencao!=="string" || x.prevencao.length>1000)return resp({error:"Medição, causa ou prevenção inválida."},422);
+                out[id]=assinar({material:x.material,horas:x.horas,km:x.km,causa:x.causa,prevencao:x.prevencao,osOriginal:os.osOriginal,originalId:original.id});
+              }limpo.medicoesRetrabalho=out;
+            }
+            if(mudancaOperacional.includes("prioridadesPCP")){
+              if(typeof limpo.prioridadesPCP?.dono!=="string"||limpo.prioridadesPCP.dono.length>150)return resp({error:"Responsável inválido."},422);
+              limpo.prioridadesPCP=assinar({dono:limpo.prioridadesPCP.dono.trim()});
+            }
+          }
           const comAvisos = avisosCfg.length ? { avisos: avisosCfg } : {};
           if (JSON.stringify(limpo) === JSON.stringify(atual)) return resp({ok:true,cfg:visivel(atual),versao,...comAvisos});
           const novaVersao = new Date(Math.max(Date.now(),Date.parse(versao || '')+1 || 0)).toISOString();
@@ -2425,6 +2504,7 @@ Deno.serve(async (req: Request) => {
           if (data?.length) {
             // Diário: quem instala, quem é quem no RH, equipes, pesos e percentuais.
             await auditar("cfg", "configuracao", diffCfgAuditavel(atual, limpo));
+            if(mudancaOperacional.length)await auditar("cfg","conferencia-operacional",{campos:mudancaOperacional,antes:Object.fromEntries(mudancaOperacional.map(k=>[k,atual[k]??null])),depois:Object.fromEntries(mudancaOperacional.map(k=>[k,limpo[k]]))});
             return resp({ok:true,cfg:visivel(limpo),versao:novaVersao,...comAvisos});
           }
         }

@@ -7532,13 +7532,13 @@ function renderRetrabalho() {
   const filhasVistas = new Set();
   for (const o of todas.filter(x => x.retrabalho)) {
     const num = String(o.numero || '').trim();
-    const fs = num ? (filhaDe.get(num) || []) : [];
+    const fs = num ? (filhaDe.get(num) || []).filter(f=>{const id=STORE.getCFG().medicoesRetrabalho?.[f.id]?.originalId;return id?id===o.id:todas.filter(x=>String(x.numero||'').trim()===num).length===1;}) : [];
     if (fs.length) for (const f of fs) { pares.push({ num, orig: o, filha: f }); filhasVistas.add(f.id); }
     else pares.push({ num, orig: o, filha: null });
   }
   for (const f of todas) {
     const num = String(f.osOriginal || '').trim();
-    if (num && !filhasVistas.has(f.id)) pares.push({ num, orig: porNumero.get(num) || null, filha: f });
+    if (num && !filhasVistas.has(f.id)) pares.push({ num, orig: STORE.getCFG().medicoesRetrabalho?.[f.id]?.originalId?todas.find(o=>o.id===STORE.getCFG().medicoesRetrabalho[f.id].originalId)||null:todas.filter(o=>String(o.numero||'').trim()===num).length===1?porNumero.get(num)||null:null, filha: f });
   }
   const dataPar = p => (p.orig && p.orig.dataRetrabalho) || (p.filha
     ? (OPERACAO.dia(p.filha.finalizadaEm) || OPERACAO.dia(p.filha.instalacao && p.filha.instalacao.data) || diaLocalISO(p.filha.criadoEm) || '')
@@ -7559,11 +7559,12 @@ function renderRetrabalho() {
     const reais = (rHora || rKm) && (h != null || km != null) ? (h || 0) * rHora + (km || 0) * rKm : null;
     return { horas: h, km, reais };
   };
-  const custos = lista.map(p => custoDe(p.filha));
+  const custosVistos=new Set();
+  const custos = lista.map(p => {if(p.filha?.id&&custosVistos.has(p.filha.id))return {horas:null,km:null,reais:null,rotulo:'Correção já contabilizada'};if(p.filha?.id)custosVistos.add(p.filha.id);const c=custoDe(p.filha);if(typeof OPREV==='undefined')return c;const m=OPREV.custo(p.filha,cc,{horas:c.horas,km:c.km,material:null,...(STORE.getCFG().medicoesRetrabalho?.[p.filha?.id]||{})});return {...c,reais:m.centavos==null?null:m.centavos/100,completo:m.completo,rotulo:m.rotulo};});
   const somaH = custos.reduce((s, c) => s + (c.horas || 0), 0);
   const somaKm = custos.reduce((s, c) => s + (c.km || 0), 0);
   const somaR = custos.reduce((s, c) => s + (c.reais || 0), 0);
-  const semCusto = custos.filter(c => c.horas == null && c.km == null).length;
+  const semCusto = custos.filter(c => c.reais == null).length;
   const f = STATE._fRetra || { de: '', ate: '' };
   const indicador = OPERACAO.taxaRetrabalho(todas, f.de, f.ate);
   const entregues = indicador.entregues, taxa = indicador.taxa;
@@ -7589,7 +7590,7 @@ function renderRetrabalho() {
     <div class="filter-bar">${filtroPeriodoHTML('_fRetra')}</div>
     <div class="casa-kpi-cards">
       <div class="casa-kpi"><b>${lista.length}</b><small>retrabalhos no período${pendentes ? ` · <span class="badge st-retrabalho">${pendentes} pendente${pendentes === 1 ? '' : 's'}</span>` : ''}</small></div>
-      <div class="casa-kpi ${semCusto ? 'alerta' : ''}"><b>${semCusto === custos.length ? 'Não apurado' : somaR ? brMoney(somaR) : `${custos.some(c => c.horas != null) ? fmtH(somaH) : 'tempo não apurado'} · ${custos.some(c => c.km != null) ? Math.round(somaKm) + ' km' : 'km não apurado'}`}</b><small>custo conhecido · ${custos.length - semCusto} de ${custos.length} intervenções com medição${somaR ? ` · ${fmtH(somaH)} · ${Math.round(somaKm)} km` : ''}${semCusto ? ` · ${semCusto} sem viagem registrada` : ''}${!(rHora || rKm) ? ' · sem R$/h e R$/km em Configurações' : ''}</small></div>
+      <div class="casa-kpi ${semCusto ? 'alerta' : ''}"><b>${semCusto === custos.length ? 'Custo não medido' : custos.some(c=>c.reais!=null) ? brMoney(somaR) : `${custos.some(c => c.horas != null) ? fmtH(somaH) : 'tempo não apurado'} · ${custos.some(c => c.km != null) ? Math.round(somaKm) + ' km' : 'km não apurado'}`}</b><small>custo conhecido · ${custos.length - semCusto} de ${custos.length} intervenções com medição${somaR ? ` · ${fmtH(somaH)} · ${Math.round(somaKm)} km` : ''}${semCusto ? ` · ${semCusto} sem custo monetário medido` : ''}${!(rHora || rKm) ? ' · sem R$/h e R$/km em Configurações' : ''}</small></div>
       <div class="casa-kpi"><b>${taxa == null ? '—' : taxa.toString().replace('.', ',') + '%'}</b><small>O.S. com retrabalho · ${indicador.afetadas} em ${entregues} entrega${entregues === 1 ? '' : 's'} no período</small></div>
     </div>
     <p class="metricas-nota">Taxa calculada sobre entregas originais concluídas pela equipe no período, com retrabalho conhecido até agora. Cancelamentos e O.S. filhas não entram na base. Duas correções da mesma O.S. contam uma vez na taxa. Original = O.S marcada com o problema. Retrabalho = a O.S nova que o ERP emite (aponte a original na ficha dela, campo "🔁 retrabalho da O.S nº"). Sem filha apontada, o custo fica em branco.${semTaxonomia ? ` <strong>${semTaxonomia} sem etapa de origem/causa raiz</strong> — abra a ficha e complete.` : ''}</p>
@@ -7599,7 +7600,8 @@ function renderRetrabalho() {
         const c = custos[i];
         const o = p.orig, fi = p.filha;
         const tec = fi && OPERACAO.equipe(fi).length ? OPERACAO.equipeTexto(fi, ', ') : (o && o.resolvidoPor && OPERACAO.nomePessoa(o.resolvidoPor)) || '—';
-        const motivo = o ? [o.problema, o.etapaOrigem && ('origem: ' + o.etapaOrigem), o.causaRaiz || o.causa, o.responsavelEtapa && ('resp.: ' + o.responsavelEtapa)].filter(Boolean).join(' · ') || '—' : '—';
+        const medicao=STORE.getCFG().medicoesRetrabalho?.[fi?.id];
+        const motivo = o ? [medicao?.causa,medicao?.prevencao&&('prevenção: '+medicao.prevencao),o.problema, o.etapaOrigem && ('origem: ' + o.etapaOrigem), o.causaRaiz || o.causa, o.responsavelEtapa && ('resp.: ' + o.responsavelEtapa)].filter(Boolean).join(' · ') || '—' : '—';
         const custoTxt = c.reais != null ? brMoney(c.reais) : (c.horas != null || c.km != null ? `${fmtH(c.horas)}${c.km != null ? ' · ' + Math.round(c.km) + ' km' : ''}` : '<span class="badge sem-valor">sem viagem</span>');
         const d = dataPar(p);
         const pendente = !(fi ? fi.finalizadaEm : (o && o.dataResolvido));
@@ -7611,7 +7613,7 @@ function renderRetrabalho() {
           <td>${esc((o || fi || {}).cliente || '')}</td>
           <td>${esc(motivo)}</td>
           <td>${esc(tec)}</td>
-          <td class="num">${custoTxt}</td>
+          <td class="num">${custoTxt}${c.rotulo?`<small class="bloco">${esc(c.rotulo)}</small>`:''}</td>
           <td>${d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'}</td>
         </tr>`;
       }).join('') || `<tr><td colspan="7">${emptyState('✅', 'Nenhum retrabalho no período', 'Ajuste o filtro de datas ou comemore: nada voltou para correção.')}</td></tr>`}</tbody>

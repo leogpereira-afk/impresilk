@@ -3,7 +3,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
+const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','operacao-revisao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
@@ -72,11 +72,22 @@ parcialFixture.conferenciasEntrega=[{id:'fixture-primeira',dia:deslocar(-1),iten
 lista.push(base('ERP-CONFERIR',{rev:1,numero:'TESTE-ERP',cliente:'Baixa ERP fictícia a classificar',finalizadaEm:hoje+'T10:00:00Z',baixaAutoERP:{em:hoje+'T10:00:00Z',status:'ENTREGUE'},valorTotal:4000}));
 lista.push({...structuredClone(parcialFixture),id:'PARCIAL-ABERTA',numero:'TESTE-PARCIAL-ABERTA',finalizadaEm:'',entregaLancada:null,cliente:'Parcial sem finalização fictícia'});
 lista.push(base('FOTO-ONTEM',{numero:'TESTE-FOTO-ONTEM',cliente:'Foto tardia fictícia · hora real a confirmar',horaSaida:'',saidaEm:'',horaRetorno:'',retornoEm:'',fotosCheckinIds:['foto_FOTO-ONTEM_1780000000000_teste']}));
+// A23: duas entregas já conferidas antes de criar a equipe; nenhuma recebe vínculo implícito.
+const a23Equipe={id:'eq-aguia-tardia',nome:'Águia criada depois · fictícia',animal:'aguia',cor:'marinho',emblema:'🦅',liderPadraoId:'900010',membros:[{chave:'900010',nome:'José Adilando Rocha'},{chave:'900011',nome:'Lucas Gabriel Souza'}],ativo:true};
+cfg.performancePCP.equipes.push(a23Equipe);
+const a23OS=base('A23-VINCULO',{numero:'TESTE-A23',cliente:'Entrega avulsa antes do cadastro · fictícia',equipe:['900010','900011'],valorTotal:1000,finalizadaEm:hoje+'T12:00:00Z',itens:[{uid:'a23-item',item:'1',descricao:'Painel fictício A23',qtde:'4',subtotal:'1000'}]});
+a23OS.conferenciasEntrega=[1,2].map(n=>({id:'a23-parcial-'+n,dia:hoje,itens:[itemFixture(a23OS.itens[0],1)],alocacao:pvAloc([{equipeId:null,cota:10000,liderId:'900010',membros:[{pessoaId:'900010',papel:'lider',cota:6000},{pessoaId:'900011',papel:'ajudante',cota:4000}]}]),por:'Autor original fictício',em:hoje+'T09:00:00Z'}));
+lista.push(a23OS);
+lista.push(base('FROTA-A',{numero:'TESTE-FROTA-A',servico:'ADESIVO',equipe:['900001'],veiculo:'Uno fictício',retornoPrevisto:[{dia:hoje,saida:'08:00',hora:'10:00'}]}));
+lista.push(base('FROTA-B',{numero:'TESTE-FROTA-B',servico:'adesivo',equipe:['900004'],veiculo:'UNO - 10 fictício',retornoPrevisto:[{dia:hoje,saida:'09:00',hora:'11:00'}]}));
+lista.push(base('RETRAB-ORIGINAL',{numero:'TESTE-ORIGINAL',cliente:'Original fictícia para custo',retrabalho:true,dataRetrabalho:hoje,finalizadaEm:hoje+'T12:00:00Z'}));
+lista.push(base('RETRAB-CORRECAO',{numero:'TESTE-CORRECAO',cliente:'Correção fictícia sem medição',osOriginal:'TESTE-ORIGINAL',valorTotal:0}));
+let pvCfgBase=structuredClone(cfg),pvCfgPendente=null;
 const revisoesPreview=[];
 async function previewApi(body){
- if(['controleEntrega','delete','restaurarOS','excluidasOS','fotosEvento','conferenciaEntrega'].includes(body.action)){
+ if(['previewEstado','getCfg','setCfg','performanceVincularEquipe','controleEntrega','delete','restaurarOS','excluidasOS','fotosEvento','conferenciaEntrega'].includes(body.action)||(!new URLSearchParams(location.hash.slice(1)).has('comissao')&&['performancePeriodo','performanceFechamentos','performanceFechar'].includes(body.action))){
   const r=await fetch('/controle-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,seed:lista,pessoas:ELENCO_PREVIA.pessoas,cfg})});const out=await r.json();
-  if(out.error)throw new Error(out.error);if(out.lista)lista=out.lista;return out;
+  if(out.error)throw new Error(out.error);if(out.lista)lista=out.lista;if(out.cfg){Object.assign(cfg,out.cfg);pvCfgBase=structuredClone(cfg);}return out;
  }
 
  if(new URLSearchParams(location.hash.slice(1)).has('comissao') && /^(performanceComissao|performancePeriodo|performanceFechamentos|performanceFechar)/.test(body.action))return fetch('/comissao-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
@@ -129,6 +140,10 @@ const ELENCO_PREVIA={pessoas:[
  {chave:'eduardo-farias',id:'900008',nome:'Eduardo Farias Neto',apelido:'',area:'Montagem Externa',cargo:'Instalador',ativo:true,foto:''},
  {chave:'fernanda-alves',id:'900009',nome:'Fernanda Alves Rocha',apelido:'',area:'Montagem Externa',cargo:'Instaladora',ativo:true,foto:''}],
  antigos:[{chave:'davi-antigo',id:'900006',nome:'Davi Antigo Nunes',apelido:'',ativo:false,desligado:true}],veiculos:[],ferias:[],ausencias:[]};
+ELENCO_PREVIA.pessoas.push({chave:'freela-teste',id:'900020',nome:'Freelancer fictício ativo',freelancer:true,ativo:true,area:'Montagem Externa'});
+ELENCO_PREVIA.fichaRH=['admin','pcp'].includes(new URLSearchParams(location.hash.slice(1)).get('papel')||'admin');
+ELENCO_PREVIA.ausencias=ELENCO_PREVIA.fichaRH?[{chave:'bia-costa',data:hoje,tipo:'Ausência fictícia'}]:[];
+ELENCO_PREVIA.veiculos=[{id:'ativo-uno',nome:'Uno fictício',placa:'TST1A23',lugares:2}];
 cfg.vinculosRH=[{apelido:'Bia',id:'900002',chave:'bia-costa',nome:'Beatriz Costa Lima'}];
 /* NOMES ANTIGOS VIRAM ID (F12, 30/09/2026): O.S. antigas com o nome que o PCP
    digitava, grafias variantes da mesma pessoa, xarás, "Terceiro" e uma O.S.
@@ -277,11 +292,12 @@ lista.push(pvE7('E7C',{erpSaiuDaCarteiraEm:deslocar(-1)+'T13:20:00.000Z'},{itens
 {const d=deslocar(-2);if(PV_ERP[d.slice(0,7)])PV_ERP[d.slice(0,7)].os.push({numero:'T-E7C',cliente:'Cliente fictício E7C · entrega parcial',servico:'Fachada em ACM',data:d,valor:2000,tipo:'externo',previsao:d});}
 const STORE={JANELA_LOCAL_DIAS:60,historico:()=>[...pvHist.values()],faixaHistorico:async()=>({de:deslocar(-120),ate:hoje}),
  buscarHistorico:async q=>{const itens=PV_ANTIGAS.filter(o=>(!q.de||o.finalizadaEm.slice(0,10)>=q.de)&&(!q.ate||o.finalizadaEm.slice(0,10)<=q.ate));for(const o of itens)pvHist.set(o.id,structuredClone(o));return {itens,truncou:false};},
- getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id)||pvHist.get(id)||null,getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>ELENCO_PREVIA, valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>true, entreguesMes:m=>PV_ERP[m]||null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>false,trySync:async()=>{},pronto:async()=>lista,api:previewApi,conferirNomes:async(nomes,ids)=>{const r=OPERACAO.resolverPessoas({pessoas:[...ELENCO_PREVIA.pessoas,...ELENCO_PREVIA.antigos],vinculos:cfg.vinculosRH,lista:cfg.instaladores});return {nomes:nomes.map(n=>({nome:n,id:r.idDe(n),fixado:r.fixado(n)})),os:Object.fromEntries(ids.map(i=>[i,'viva'])),fechados:[]};},apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{if(pvHist.has(o.id))pvHist.set(o.id,structuredClone(o));lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){},
+ getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id)||pvHist.get(id)||null,getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>ELENCO_PREVIA, valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>true, entreguesMes:m=>PV_ERP[m]||null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>pvCfgPendente?[{action:'setCfg'}]:[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>false,trySync:async()=>{if(pvCfgPendente){const p=pvCfgPendente;await previewApi({action:'setCfg',cfg:p,baseCfg:pvCfgBase});pvCfgPendente=null;}},pronto:async()=>lista,api:previewApi,conferirNomes:async(nomes,ids)=>{const r=OPERACAO.resolverPessoas({pessoas:[...ELENCO_PREVIA.pessoas,...ELENCO_PREVIA.antigos],vinculos:cfg.vinculosRH,lista:cfg.instaladores});return {nomes:nomes.map(n=>({nome:n,id:r.idDe(n),fixado:r.fixado(n)})),os:Object.fromEntries(ids.map(i=>[i,'viva'])),fechados:[]};},apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{if(pvHist.has(o.id))pvHist.set(o.id,structuredClone(o));lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){pvCfgPendente=structuredClone(c);Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){},
  /* o que o celular (equipe.html) chama */ setInstalador(){},setUser(){},limparCache(){},avisosEntregas:()=>[],dispensarAvisoEntregas(){},delFotoSync(){}};
 `;
 const boot=`
-document.addEventListener('DOMContentLoaded',()=>{
+document.addEventListener('DOMContentLoaded',async()=>{
+ await previewApi({action:'previewEstado'});
  STATE.user={nome:'PRÉVIA LOCAL · dados fictícios',papel:new URLSearchParams(location.hash.slice(1)).get('papel')||'admin'};
  document.querySelector('#login-screen').classList.add('hidden');document.querySelector('#app').classList.remove('hidden');
  document.querySelector('#user-badge').textContent=STATE.user.nome;

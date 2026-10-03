@@ -4194,3 +4194,33 @@ img.perf-logo{object-fit:cover}
 #perf-dialog.comissao-dialog input[type=checkbox]{width:auto;min-height:20px}
 #perf-dialog.comissao-dialog [data-rateio-linha]{display:grid;grid-template-columns:minmax(0,2fr) minmax(100px,1fr) auto;gap:12px;align-items:center}
 @media(max-width:680px){#perf-dialog.comissao-dialog{padding:16px}#perf-dialog.comissao-dialog [data-rateio-linha]{grid-template-columns:1fr}#perf-dialog.comissao-dialog button{min-height:44px}}
+/* Auditoria de experiência: resultados e ações acessíveis antes das explicações. */
+.perf-gestao-lista{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.perf-gestao-equipe,.perf-vinculo-candidato,.op-prioridades article{border:1px solid var(--border,#d5dce6);border-radius:12px;padding:16px;margin:10px 0;background:var(--bg-card,#fff)}
+.perf-gestao-equipe[hidden],.perf-vinculo-candidato[hidden]{display:none}
+.perf-gestao-equipe header{display:flex;gap:12px;align-items:center}.perf-gestao-equipe h4{margin:0 0 6px}
+.perf-gestao button,.perf-vinculo-candidato button,#perf-vinculo-confirmar{min-height:44px}
+.perf-filtro-avancado{margin:8px 0}.perf-filtro-avancado summary,.perf-pdf-principal summary{cursor:pointer;padding:10px}
+.op-prioridades small{margin:6px 0}.op-prioridades h3{margin-top:20px}
+@media(max-width:600px){
+ .casa-perf .casa-pagina-head{gap:8px;margin-bottom:8px}.casa-perf .casa-pagina-head h2{font-size:1.25rem;margin:0}
+ .casa-perf .casa-pagina-head>div>p{display:none}.casa-perf .casa-vista{gap:4px;flex-wrap:wrap}
+ .casa-perf .casa-vista button{min-height:44px;padding:8px 10px}
+ .perf-toolbar{margin:6px 0;gap:6px}.perf-toolbar-rot{display:none}
+ .perf-workspace .perf-ranking{padding:10px}.perf-gestao-lista{grid-template-columns:1fr}
+ .perf-pdf-principal{margin-left:auto}.perf-pdf-principal[open]{width:100%}
+ .casa-perf .perf-mais summary{min-height:44px;padding:10px;cursor:pointer}
+ .op-prioridades{margin-top:16px}
+}
+.perf-ranking-opcoes summary{padding:10px 4px;min-height:44px;box-sizing:border-box;cursor:pointer;font-weight:600}
+.perf-ranking-opcoes .perf-ranking-ctrl{margin:6px 0}
+@media(max-width:600px){.casa-perf .perf-ranking-head{gap:2px}.casa-perf .perf-podio{margin-top:6px}.casa-perf .perf-ranking-opcoes{width:100%}}
+.agenda-filtros{margin:8px 0}.agenda-filtros>summary,.agenda-mensal>summary{cursor:pointer;min-height:44px;padding:10px 4px;box-sizing:border-box;font-weight:600}
+.casa-agenda-page .casa-agenda{grid-template-columns:minmax(300px,.9fr) minmax(400px,1.4fr)}
+@media(max-width:1100px){.casa-agenda-page .casa-agenda{grid-template-columns:1fr}}
+@media(max-width:600px){.casa-agenda-page .casa-pagina-head>div>p{display:none}.casa-agenda-page .casa-pagina-head h2{font-size:1.2rem;margin:0}.casa-agenda-page .casa-pagina-head{gap:8px;margin-bottom:4px}.casa-agenda-page .casa-dia-painel{padding:12px}.casa-agenda-page .casa-mes-nav{gap:4px}.casa-agenda-page .casa-dia-item{padding:12px 0;min-height:44px}}
+@media(max-width:600px){
+ .casa-perf .perf-podio-topo{grid-template-columns:62px minmax(0,1fr);grid-template-areas:"vis nome" "vis num" "selo selo" "linha linha" "aviso aviso" "extra extra" "acoes acoes";column-gap:12px}
+ .casa-perf .perf-podio-nome{min-width:0;word-break:normal;overflow-wrap:break-word;hyphens:none}
+ .casa-perf .perf-podio-num{align-items:flex-start;text-align:left;min-width:0}
+}

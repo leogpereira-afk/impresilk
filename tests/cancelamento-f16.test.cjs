@@ -367,7 +367,7 @@ test('tela: a operação vê o selo e não vê Cancelar O.S.; a O.S. cancelada n
 });
 
 /* ───────────── a prévia da divisão (crítica 5.4) ───────────── */
-test('prévia da divisão: a O.S. cancelada, ou com a perda da regra, mostra a comissão prevista zerada e o porquê', () => {
+test('divisão de cancelada ou retrabalho não exibe comissão prevista nem corte automático', () => {
   const ELENCO = {pessoas:[{chave:'ana-f', id:'100001', nome:'Ana Fictícia', apelido:'ana', ativo:true}, {chave:'bia-f', id:'100002', nome:'Bia Fictícia', apelido:'bia', ativo:true}], antigos:[]};
   const escH = s => String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;'}[ch]));
   const c = vm.createContext({console, setTimeout, clearTimeout, navigator:{onLine:true}, esc:escH, toast() {},
@@ -380,21 +380,8 @@ test('prévia da divisão: a O.S. cancelada, ou com a perda da regra, mostra a c
   const A = vm.runInContext('ALOCUI', c);
   const base = (extra = {}) => ({id:'1', numero:'5001', tipo:'externo', cliente:'Cliente Fictício', equipe:['100001', '100002'], valorTotal:4200, finalizadaEm:'2026-10-02T15:00:00', rev:1, ...extra});
   const html = (k, os) => { A.iniciar(k, {os, equipes:[], papel:'pcp', valor:4200, reiniciar:true}); return A.html(k); };
-  // Caso ruim: a cancelada prometia R$ 42,00 de comissão.
-  const canc = html('c', base({cancelamento:{ativo:true, motivo:'Cliente desistiu do serviço'}}));
-  assert.match(canc, /O\.S\. cancelada: não pontua nem paga comissão\./);assert.doesNotMatch(canc, /R\$ 21\.00|Comissão prevista de 1%/);
-  assert.match(canc, /<td class="num">R\$ 0\.00<\/td>/, 'a coluna da comissão de cada um fica zerada');
-  assert.match(canc, /Valor bruto da O\.S\./, 'o valor bruto continua à vista');
-  const retrab = html('r', base({retrabalho:true}));
-  assert.match(retrab, /O\.S\. com retrabalho: pela regra do programa, não pontua nem paga comissão\./);
-  const atraso = html('a', base({instalacao:{data:'2026-10-01'}, prazoCombinado:{data:'2026-10-01', fonte:'agenda'}}));
-  // O texto (revisão da F16): "atraso na entrega", não "com entregue com atraso".
-  assert.match(atraso, /O\.S\. com atraso na entrega: pela regra do programa, não pontua nem paga comissão\./);
-  // Antes de 01/10 (regra atual, sem programa): só a cancelada muda a prévia.
-  assert.doesNotMatch(html('s', base({retrabalho:true, finalizadaEm:'2026-09-20T10:00:00'})), /não pontua/);
-  assert.match(html('s2', base({finalizadaEm:'2026-09-20T10:00:00', cancelamento:{ativo:true, motivo:'Cliente desistiu do serviço'}})), /O\.S\. cancelada: não pontua/);
-  // A que pontua segue como antes.
-  const ok = html('ok', base());
-  assert.match(ok, /Comissão prevista de 1%[^<]*: R\$ 42\.00/);assert.match(ok, /<td class="num">R\$ 21\.00<\/td>/);
-  for (const h of [canc, retrab, atraso, ok]) assert.doesNotMatch(h, /—/);
+  // Risco A23: o editor operacional não pode prometer pagamentos ou aplicar cortes.
+  for(const extra of [{},{cancelamento:{ativo:true,motivo:'Cancelada'}},{retrabalho:true},{prazoCombinado:{data:'2026-10-01',fonte:'agenda'}}]){
+   const h=html('caso',base(extra));assert.doesNotMatch(h,/Comissão prevista|não pontua nem paga|<td class="num">R\$/);assert.match(h,/não determina pagamento nem aplica cortes automáticos/);
+  }
 });

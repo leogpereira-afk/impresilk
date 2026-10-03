@@ -1588,7 +1588,7 @@ function relatoriosEntregasHTML(lista, porNumero, estadoPCP) {
   const mediaMes = meses.length ? total / meses.length : 0;
 
   // 2. Tipo de serviço
-  const tiposR = agrupar(o => o.servico, 12);
+  const tiposR = agrupar(o => typeof OPREV!=='undefined'?OPREV.categoria(o,STORE.getCFG()):o.servico, 12);
   const tiposHTML = barrasCasa(
     tiposR.map(t => ({ rotulo: t.rotulo, valor: t.valor, extra: `${t.n} O.S · ${dinheiroCurto(t.valor / t.n)}/O.S` })),
     dinheiroCurto
@@ -2082,7 +2082,7 @@ function renderEntregas() {
     const inst = r.os.filter(o => o.tipo !== 'interno');
     let total = 0, semValor = 0;
     for (const o of r.os) { if (Number.isFinite(Number(o.valor)) && o.valor !== null) total += Number(o.valor); else semValor++; }
-    return { total, n: r.os.length, inst: inst.length, retiradas: r.os.length - inst.length, semValor, faltando: r.faltando.length, comErro: r.comErro.length, meses: r.meses.length };
+    return { registros:r.os, total, n: r.os.length, inst: inst.length, retiradas: r.os.length - inst.length, semValor, faltando: r.faltando.length, comErro: r.comErro.length, meses: r.meses.length };
   };
   const kpi = (de, ate) => kpiDe(entreguesERP(de, ate));
   const kHoje = kpi(hoje, hoje), kMes = kpi(hoje.slice(0, 7) + '-01', hoje), kAno = kpi(hoje.slice(0, 4) + '-01-01', hoje);
@@ -2113,7 +2113,7 @@ function renderEntregas() {
     .map(o => ({ erp: o, card: porNumero.get(String(o.numero || '').trim()) || null }))
     // Técnico é a FICHA, não a grafia: "Osmane" e "Osmane V." são a mesma pessoa.
     .filter(x => !tecnico || (x.card && OPERACAO.equipe(x.card).some(a => nomeExibicaoCasa(a).chave === tecnico)))
-    .filter(x => !tipo || String((x.card && x.card.servico) || x.erp.servico || '').trim() === tipo)
+    .filter(x => !tipo || (typeof OPREV!=='undefined'?OPREV.categoria(x.card||x.erp,STORE.getCFG()):String((x.card && x.card.servico) || x.erp.servico || '').trim()) === tipo)
     .sort((a, b) => String(b.erp.data).localeCompare(String(a.erp.data)) || String(b.erp.numero).localeCompare(String(a.erp.numero)));
   let totLista = 0, semValorLista = 0;
   for (const x of lista) { if (x.erp.valor !== null && Number.isFinite(Number(x.erp.valor))) totLista += Number(x.erp.valor); else semValorLista++; }
@@ -2132,13 +2132,14 @@ function renderEntregas() {
     if (!tecMapa.has(n.chave)) tecMapa.set(n.chave, n.nome);
   }
   const tecnicos = [...tecMapa.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  const tipos = typeof tiposServicoHist === 'function' ? tiposServicoHist() : [];
+  const tipos = typeof OPREV!=='undefined'?['Sem categoria',...OPREV.CATEGORIAS]:typeof tiposServicoHist === 'function' ? tiposServicoHist() : [];
   const opt = (v, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(v)}</option>`;
   const dataBR = iso => { const d = OPERACAO.dia(iso); return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'; };
   const valorTxt = v => (v !== null && Number.isFinite(Number(v))) ? dinheiroCasa(Number(v)) : '<span class="badge sem-valor">sem valor</span>';
+  const totaisFonte=[];
   const kpiHTML = (k, rotulo, extra) => `<div class="casa-kpi ${extra || ''} ${k.semValor || k.faltando || k.comErro ? 'alerta' : ''}">
-      <b>${valorKpiCasa(k)}</b>
-      <small>${esc(rotulo)} · ${k.n} O.S${k.inst ? ` · ${k.inst} instalaç${k.inst === 1 ? 'ão' : 'ões'}` : ''}${k.retiradas ? ` · ${k.retiradas} retirada${k.retiradas === 1 ? '' : 's'}` : ''}${k.semValor ? ` · <span class="badge sem-valor">${k.semValor} sem valor</span>` : ''}${k.faltando ? ` · <span class="badge st-agendada">carregando ${k.faltando} de ${k.meses} mês${k.meses === 1 ? '' : 'es'}…</span>` : ''}${k.comErro ? ` · <span class="badge sem-valor">${k.comErro} mês${k.comErro === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}</small>
+      <button type="button" class="inline-link" data-total-fonte="${totaisFonte.push({k,rotulo})-1}"><b>${valorKpiCasa(k)}</b></button>
+      <small>ERP · ${esc(rotulo)} · ${k.n} O.S${k.inst ? ` · ${k.inst} instalaç${k.inst === 1 ? 'ão' : 'ões'}` : ''}${k.retiradas ? ` · ${k.retiradas} retirada${k.retiradas === 1 ? '' : 's'}` : ''}${k.semValor ? ` · <span class="badge sem-valor">${k.semValor} sem valor</span>` : ''}${k.faltando ? ` · <span class="badge st-agendada">carregando ${k.faltando} de ${k.meses} mês${k.meses === 1 ? '' : 'es'}…</span>` : ''}${k.comErro ? ` · <span class="badge sem-valor">${k.comErro} mês${k.comErro === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}</small>
     </div>`;
   /* O nome do período no cartão: "em mai/2026" quando é um mês inteiro, "em
      2026" quando é o ano, e as duas datas quando é qualquer outro recorte. */
@@ -2228,7 +2229,7 @@ function renderEntregas() {
       <div class="ent-kpis">${kpiPrincipal}<div class="ent-kpi-secs">${kpiSecundarios}</div></div>${porOS && lista.length ? porOSAvisoKpiHTML() : ''}
       <details class="ent-dados" ${STATE._entDadosAberto ? 'open' : ''}><summary>Origem dos valores e sincronização</summary>
       <p>Valores líquidos de desconto das O.S. marcadas como entregues no ERP, pela data de entrega. Não representam recebimentos ou lucro. Instalações realizadas dependem do registro no PCP; retiradas pelo cliente entram apenas nos valores.</p>
-      <p class="metricas-nota">Registradas no PCP neste mês: <strong>${registradasMes}</strong> instalaç${registradasMes === 1 ? 'ão' : 'ões'}${cls.aLancar.length ? ` · a lançar: <strong>${cls.aLancar.length}</strong>` : ''}. Fonte do valor: ERP${STORE.entreguesMes(hoje.slice(0, 7)) ? `, atualizado ${new Date(STORE.entreguesMes(hoje.slice(0, 7)).em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' (carregando…)'}.</p>
+      <p class="metricas-nota">Registradas no PCP neste mês: <button class="inline-link" id="ent-total-pcp"><strong>${registradasMes}</strong></button> instalaç${registradasMes === 1 ? 'ão' : 'ões'}${cls.aLancar.length ? ` · a lançar: <strong>${cls.aLancar.length}</strong>` : ''}. Fonte do valor: ERP${STORE.entreguesMes(hoje.slice(0, 7)) ? `, atualizado ${new Date(STORE.entreguesMes(hoje.slice(0, 7)).em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' (carregando…)'}.</p>
       ${barraCargaEntregas()}
       </details>
       ${typeof controleConferidasHTML==='function'?controleConferidasHTML(todas,f):''}
@@ -2248,8 +2249,10 @@ function renderEntregas() {
       ${relatorioAnosHTML()}
     </div>`;
   wireAbasEntregas(el);
+  el.querySelectorAll('[data-total-fonte]').forEach(b=>b.onclick=()=>{const {k,rotulo}=totaisFonte[Number(b.dataset.totalFonte)];perfDialog('Origem do total · '+rotulo,`<p>Fonte ERP · status entregue. ${k.n} registros; ${k.semValor} sem valor; ${k.faltando} meses pendentes. Baixa ERP não comprova entrega física. Os valores PCP não são somados aqui.</p><ul>${k.registros.map(o=>`<li>O.S. ${esc(o.numero)} · ${esc(o.data)} · ${esc(o.cliente)} · ${o.valor==null?'valor desconhecido':dinheiroCasa(o.valor)}</li>`).join('')||'<li>Nenhum registro recebido neste recorte.</li>'}</ul>`);});
   if(typeof wirePDFsEntregaPerformance==='function')wirePDFsEntregaPerformance(el);
   el.querySelectorAll('[data-ent-itens]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();void conferirItensEntrega(b.dataset.entItens).catch(e=>toast(perfErroTxt(e),'error'));});
+  const totalPCP=el.querySelector('#ent-total-pcp');if(totalPCP)totalPCP.onclick=()=>{const regs=cls.instalacoes.filter(o=>OPERACAO.emIntervalo(diaEntrega(o),hoje.slice(0,7)+'-01',hoje));perfDialog('Registros PCP · mês corrente',`<p>Fonte PCP · instalações registradas de ${esc(hoje.slice(0,7)+'-01')} a ${esc(hoje)}. Cobertura do aparelho; não somar aos valores ERP. Participação e saldo físico exigem suas próprias conferências.</p><ul>${regs.map(o=>`<li>O.S. ${esc(o.numero)} · ${esc(diaEntrega(o))} · ${esc(o.cliente)}</li>`).join('')}</ul>`);};
   const dDados = el.querySelector('details.ent-dados');
   if (dDados) dDados.ontoggle = () => { STATE._entDadosAberto = dDados.open; };
   /* A FILA ABERTA, A ORDEM E O "MOSTRAR TODAS" moram no STATE pelo mesmo
@@ -2645,7 +2648,7 @@ function retrabalhoHTML(f) {
      pergunta, respostas opostas -- e a errada e a que vai para a Gestao e
      para o Modo TV. Aqui passa a valer a MESMA regra da outra tela. */
   const etapas = contar('etapaOrigem'), causas = contar(o => o.causaRaiz || o.causa), responsaveis = contar('responsavelEtapa');
-  const tipos = contar('servico'), clientes = contar('cliente');
+  const tipos = contar(o=>typeof OPREV!=='undefined'?OPREV.categoria(o,STORE.getCFG()):o.servico), clientes = contar('cliente');
   /* Uma dimensão 100% vazia não vira gráfico: vira uma frase que diz o que
      preencher e onde. Gráfico de um item só chamado "não informado" ocupa o
      lugar da informação sem ser informação. */
@@ -2702,7 +2705,7 @@ function retrabalhoHTML(f) {
       <div class="casa-kpi alerta"><b>${doPeriodo.length}</b><small>O.S de retrabalho no período</small></div>
       <div class="casa-kpi"><b>${ind.taxa == null ? 'sem entregas' : String(ind.taxa).replace('.', ',') + '%'}</b><small>${ind.afetadas} de ${ind.entregues} entregas finalizadas voltaram (a taxa não conta O.S. aberta nem baixa do ERP)</small></div>
       <div class="casa-kpi"><b>${fmtHorasCasa(horas || null)}</b><small>horas na rua refazendo${km ? ` · ${Math.round(km)} km` : ''}${semFilha ? ` · <span class="badge sem-valor">${semFilha} sem O.S de correção ligada</span>` : ''}</small></div>
-      ${custo > 0 ? `<div class="casa-kpi alerta"><b>${dinheiroCasa(custo)}</b><small>custo estimado (hora + km de Configurações)</small></div>` : ''}
+      <div class="casa-kpi alerta"><b>${custo>0?dinheiroCasa(custo):'Custo não medido'}</b><small>Estimativa parcial de hora + km; material e componentes sem medição não equivalem a zero.</small></div>
     </div>
     <div class="casa-duas">
       <div><h4>Por tipo de serviço</h4>${dimensao(tipos, 'o serviço vem do ERP')}</div>
@@ -2731,7 +2734,7 @@ function retrabalhoHTML(f) {
 function carrosHTML(f) {
   const m = new Map();
   for (const os of STORE.getAllOS()) {
-    const nome = String(os.veiculo || '').trim();
+    const nome = OPERACAO.veiculoConfirmado(os).nome;
     if (!nome || OPERACAO.semCarro(os)) continue; // instalação interna não é carro
     const dia = OPERACAO.dia(os.instalacao && os.instalacao.data) || diaEntrega(os);
     if (!OPERACAO.emIntervalo(dia, f.de, f.ate)) continue;
@@ -3872,7 +3875,7 @@ function renderPerformanceCasa() {
      guardado cai na Equipe. Sem o regras.js carregado (cache quebrado), a
      aba some em vez de derrubar a tela. */
   const podeRegras = ['admin', 'pcp'].includes(String(STATE.user?.papel || '')) && typeof perfRegrasHTML === 'function' && typeof REGRAS !== 'undefined';
-  const abaPerf = STATE._perfAba === 'relatorio' ? 'relatorio' : STATE._perfAba === 'regras' && podeRegras ? 'regras' : 'equipe';
+  const abaPerf = STATE._perfAba === 'gestao' && typeof perfPodeEditar==='function' && perfPodeEditar() ? 'gestao' : STATE._perfAba === 'relatorio' ? 'relatorio' : STATE._perfAba === 'regras' && podeRegras ? 'regras' : 'equipe';
   const pendRH = pendentesConferenciaRH();
   /* Os <details> soltos da apuração ("Como interpretar os indicadores", "Ver
      O.S., percentuais...") fechavam a cada repintura: a apuração chega do
@@ -3891,12 +3894,13 @@ function renderPerformanceCasa() {
           : 'Compare participações confirmadas, identifique pendências e consulte os detalhes da operação.'}</p></div>
         <span class="casa-vista">
           <button class="btn-ghost btn-sm ${abaPerf === 'equipe' ? 'active' : ''}" data-perf-aba="equipe">Rankings</button>
+          ${typeof perfPodeEditar==='function'&&perfPodeEditar()?`<button class="btn-ghost btn-sm ${abaPerf === 'gestao'?'active':''}" data-perf-aba="gestao">Gestão de equipes</button>`:''}
           <button class="btn-ghost btn-sm ${abaPerf === 'relatorio' ? 'active' : ''}" data-perf-aba="relatorio">Relatório</button>
           ${podeRegras ? `<button class="btn-ghost btn-sm ${abaPerf === 'regras' ? 'active' : ''}" data-perf-aba="regras">Regras</button>` : ''}
-          <button class="btn-ghost btn-sm" id="perf-tv" title="Ranking em tela cheia para a TV da fábrica">📺 Modo TV</button>
+          <details class="perf-mais"><summary>Mais opções</summary><button class="btn-ghost btn-sm" id="perf-tv" title="Ranking em tela cheia para a TV da fábrica">📺 Modo TV</button></details>
         </span>
       </div>
-      ${abaPerf === 'regras' ? perfRegrasHTML() : `
+      ${abaPerf === 'gestao' ? perfGestaoEquipesHTML() : abaPerf === 'regras' ? perfRegrasHTML() : `
       ${abaPerf === 'equipe' ? `
         ${typeof performanceEquipesHTML === 'function' ? performanceEquipesHTML() : produtividadeHTML()}
         ${typeof perfFonteHTML === 'function' ? perfFonteHTML() : ''}
@@ -4142,8 +4146,8 @@ function optionsVeiculoCasa(selecionado) {
   /* SEM CARRO (pedido do Léo, 29/09/2026): "tem vezes que não precisa de
      carro". Primeira opção da lista; ver OPERACAO.SEM_CARRO. */
   const semCarro = `<optgroup label="Sem carro"><option value="${esc(OPERACAO.SEM_CARRO)}" ${OPERACAO.semCarro({ veiculo: selecionado }) ? 'selected' : ''}>🏠 ${esc(OPERACAO.SEM_CARRO)} (sem carro)</option></optgroup>`;
-  const doCfg = (STORE.getCFG().veiculos || []).filter(v => !doAtivos.some(x => normCasa(x.nome) === normCasa(v)));
-  return `${semCarro}${doAtivos.map(v => `<option value="${esc(v.nome)}" ${v.nome === selecionado ? 'selected' : ''}>${esc(v.nome)}${v.lugares ? ` · ${v.lugares} lugares` : ''}${v.placa ? ` · ${v.placa}` : ''}</option>`).join('')}
+  const doCfg = (STORE.getCFG().veiculos || []).filter(v => !doAtivos.some(x => x.nome===v || OPERACAO.veiculoConfirmado(v).id===String(x.id)));
+  return `${semCarro}${doAtivos.map(v => `<option value="${esc(v.nome)}" ${v.nome === selecionado || OPERACAO.veiculoConfirmado(selecionado).id===String(v.id) ? 'selected' : ''}>${esc(v.nome)}${v.lugares ? ` · ${v.lugares} lugares` : ''}${v.placa ? ` · ${v.placa}` : ''}</option>`).join('')}
     ${doCfg.length ? `<optgroup label="Só no PCP (cadastrar no Ativos)">${doCfg.map(v => `<option value="${esc(v)}" ${v === selecionado ? 'selected' : ''}>${esc(v)}</option>`).join('')}</optgroup>` : ''}`;
 }
 // Aviso quando a pessoa escalada está de férias/atestado no dia. Sem acesso à
@@ -4286,7 +4290,7 @@ function renderAgendaCasa() {
   const escalados = umaPorPessoa(osDia.flatMap(o => OPERACAO.equipe(o)));
 
   el.innerHTML = `
-    <div class="casa-pagina">
+    <div class="casa-pagina casa-agenda-page">
       <div class="casa-pagina-head">
         <div><h2>Calendário da produção</h2><p>Cada dia mostra quantas O.S estão programadas e os plantões. Clique no dia para ver a lista, programar e mandar a mensagem.</p></div>
         <span class="casa-mes-nav">
@@ -4295,16 +4299,10 @@ function renderAgendaCasa() {
           <button class="btn-ghost btn-sm" id="ag-prox" title="Próximo mês">›</button><button class="btn-ghost btn-sm" id="ag-hoje">Mês atual</button>
         </span>
       </div>
-      <label class="agenda-recorte"><input type="checkbox" id="ag-concluidas" ${STATE._agendaConcluidas ? 'checked' : ''}> Incluir concluídas pela equipe</label>
+      <details class="agenda-filtros"><summary>Filtros e visão do período</summary><label class="agenda-recorte"><input type="checkbox" id="ag-concluidas" ${STATE._agendaConcluidas ? 'checked' : ''}> Incluir concluídas pela equipe</label>
       <p class="metricas-nota">${STATE._agendaConcluidas ? 'A lista inclui histórico concluído. WhatsApp e PDF da saída usam somente as O.S. abertas.' : 'O.S. abertas. O calendário também identifica retiradas na loja; o PDF de saída reúne instalações externas.'}</p>
-      ${chipsAgendaCasa(mes)}
+      ${chipsAgendaCasa(mes)}</details>
       <div class="casa-agenda">
-        <div class="casa-cal-box">
-          <div class="casa-cal-dow">${dow.map(d => `<span>${d}</span>`).join('')}</div>
-          <div class="casa-cal">${grade}</div>
-          <p class="metricas-nota"><span class="casa-pill diarista">Diarista</span> <span class="casa-pill sobreaviso">Sobreaviso</span> <span class="casa-pill folga">Folga</span> — plantões vêm da aba Plantões.</p>
-          ${notaMesAgendaCasa(mes, osMes)}
-        </div>
         <aside class="casa-dia-painel">
           <h3>${esc(dataBR)}${sel === hoje ? ' · hoje' : ''}</h3>
           <p>${osDia.length} O.S · ${plDia.length} plantão · ${evDia.length} evento${conflitosDia.length ? ` · <strong>${conflitosDia.length} possível conflito</strong>` : ''}</p>
@@ -4329,6 +4327,14 @@ function renderAgendaCasa() {
             <button class="btn-ghost btn-sm" type="submit">Registrar evento</button>
           </form>
         </aside>
+        <details class="agenda-mensal"><summary>Calendário mensal · ${esc(mes)}</summary>
+        <div class="casa-cal-box">
+          <div class="casa-cal-dow">${dow.map(d => `<span>${d}</span>`).join('')}</div>
+          <div class="casa-cal">${grade}</div>
+          <p class="metricas-nota"><span class="casa-pill diarista">Diarista</span> <span class="casa-pill sobreaviso">Sobreaviso</span> <span class="casa-pill folga">Folga</span> — plantões vêm da aba Plantões.</p>
+          ${notaMesAgendaCasa(mes, osMes)}
+        </div>
+        </details>
       </div>
     </div>`;
   const concluidas = document.getElementById('ag-concluidas'); if (concluidas) concluidas.onchange = () => { STATE._agendaConcluidas = concluidas.checked; renderAgendaCasa(); };
@@ -4914,6 +4920,7 @@ function renderGradeCasa() {
     .sort((a, b) => (OPERACAO.prazo(a) || '9999').localeCompare(OPERACAO.prazo(b) || '9999') || String(b.numero).localeCompare(String(a.numero)));
   const escalados = umaPorPessoa(lista.flatMap(o => OPERACAO.equipe(o)));
   const valorDia = somaValores(lista);
+  const capacidade=lista.flatMap(o=>{const v=veiculosRH().find(v=>String(v.id)===OPERACAO.veiculoConfirmado(o).id||v.nome===o.veiculo),n=OPERACAO.equipe(o).length;return v?.lugares&&n>v.lugares?[`O.S. ${o.numero}: ${n} pessoas para ${v.lugares} lugares em ${v.nome}. Revise veículo/roteiro.`]:[];});
 
   const linha = os => {
     const st = OPERACAO.status(os);
@@ -4972,7 +4979,7 @@ function renderGradeCasa() {
           <div class="casa-kpi"><b>${new Set(lista.filter(o => !OPERACAO.semCarro(o)).map(o => o.veiculo).filter(Boolean)).size}</b><small>veículos programados</small></div>
           <div class="casa-kpi ${valorDia.semValor ? 'alerta' : ''}"><b>${dinheiroCasa(valorDia.total)}</b><small>valor programado${valorDia.semValor ? ` · ${valorDia.semValor} sem valor` : ''}</small></div>
         </div>
-        ${conflitos.length ? `<p class="metricas-nota alerta-ausencia">⚠️ ${conflitos.length} possível conflito: ${esc(conflitos.map(c => [...c.equipe, c.veiculo].filter(Boolean).join(', ')).join(' · '))} em mais de uma O.S no mesmo turno.</p>` : ''}
+        ${conflitos.length ? `<p class="metricas-nota alerta-ausencia">${conflitos.map(c=>esc(c.motivo)+' · O.S. '+esc(c.a.numero)+' / '+esc(c.b.numero)+' · '+esc([...c.equipe,c.veiculo].filter(Boolean).join(', '))).join('<br>')}</p>` : ''}${capacidade.length?`<p class="metricas-nota alerta-ausencia">${capacidade.map(esc).join('<br>')}</p>`:''}${typeof operacaoPrioridadesHTML==='function'?operacaoPrioridadesHTML():''}
         ${avisoAusenciaCasa(escalados, dia)}
         ${plDia.length ? `<p class="metricas-nota">Plantão hoje: ${plDia.map(p => `${pillPlantao(p)} ${esc(OPERACAO.nomePessoa(p.quem))} (${esc(p.inicio)}–${esc(p.fim)})`).join(' · ')}</p>` : ''}
         ${lista.length
@@ -4999,6 +5006,7 @@ function renderGradeCasa() {
   const pdf = document.getElementById('gr-pdf'); if (pdf) pdf.onclick = () => { if (typeof relatorioServicosDia === 'function') relatorioServicosDia(dia); };
   const add = el.querySelector('.casa-add-os'); if (add) add.ontoggle = () => { STATE._grAddAberto = add.open; };
   wireAddOSCasa(el, 'gr-add', dia, () => { STATE._grAddAberto = false; renderGradeCasa(); });
+  if(typeof wireOperacaoRevisao==='function')wireOperacaoRevisao(el);
   bindCardClicks(el);
 }
 
@@ -5061,6 +5069,7 @@ function abrirEquipeCasa() {
         ${sabeSituacao
           ? (ausentes.length ? `<h4 class="eq-titulo">Fora hoje</h4><ul class="eq-lista">${ausentes.map(a => cartao(a.p, `${a.motivo}${a.ate && a.tipo === 'ferias' ? ' até ' + a.ate.slice(8, 10) + '/' + a.ate.slice(5, 7) : ''}`, 'fora')).join('')}</ul>` : '')
           : '<p class="metricas-nota">Quem está de férias, de atestado ou em aviso prévio <strong>não foi conferido</strong>: essa parte é ficha do RH e só abre com crachá da gestão. A lista abaixo é quem está na empresa, não quem está na fábrica hoje.</p>'}
+        ${[...escalados.keys()].filter(k=>!pessoasRH().some(p=>p.chave===k)).length?`<h4 class="eq-titulo">Escalados sem ficha confirmada</h4><ul>${[...escalados.entries()].filter(([k])=>!pessoasRH().some(p=>p.chave===k)).map(([k,os])=>`<li>${esc(OPERACAO.nomePessoa(k))} · ${os.map(o=>'O.S. '+esc(o.numero)).join(', ')} · identidade a conferir</li>`).join('')}</ul>`:''}<h4 class="eq-titulo">Freelancers ativos · planejamento</h4><ul class="eq-lista">${pessoasRH().filter(p=>p.freelancer&&p.ativo!==false).map(p=>cartao(p,'Contrato ativo · identidade '+(p.id||'a conferir'))).join('')||'<li>Nenhum contrato ativo na fonte carregada.</li>'}</ul><p>Freelancers não compõem a presença de empregados. Situação RH ${sabeSituacao?'disponível à gestão':'não disponível neste perfil'}.</p>
         ${porArea(presentes).map(([area, ps]) => `<h4 class="eq-titulo">${esc(area)} <small>${ps.length}</small></h4><ul class="eq-lista">${ps.map(p => cartao(p)).join('')}</ul>`).join('')}
         ${presentes.length || ausentes.length ? '' : '<p class="text-muted">O elenco do RH ainda não chegou neste aparelho. Entre com um crachá da gestão e recarregue.</p>'}
         <p class="text-muted" style="font-size:.75rem;margin-top:10px">Fonte: fichas do RH${fora.length ? ` · ${fora.length} pessoa(s) inativa(s) fora desta lista` : ''}${elencoRH().em ? ` · atualizado ${new Date(elencoRH().em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}. Desligados não aparecem.</p>

@@ -261,7 +261,7 @@ test('filtro de período: o recorte escolhido vem aceso, e "Todos" só sem limit
 test('retrabalho sem medição não se apresenta como zero; taxa tem coorte explícita',()=>{
  const t=tela([{...final,retrabalho:true}]); t.run('renderRetrabalho()');
  const html=t.node('#panel-retrabalho').innerHTML;
- assert.match(html,/Não apurado/);assert.match(html,/0 de 1 intervenções com medição/);assert.match(html,/Cancelamentos e O.S. filhas não entram/);
+ assert.match(html,/Custo não medido/);assert.match(html,/0 de 1 intervenções com medição/);assert.match(html,/Cancelamentos e O.S. filhas não entram/);
 });
 test('finalização externa exige evidência ou exceção escrita pela gestão',()=>{
  const t=tela([]);
