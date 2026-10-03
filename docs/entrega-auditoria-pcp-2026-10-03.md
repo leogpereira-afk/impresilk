@@ -61,14 +61,14 @@ A base existente foi preservada: versões fechadas continuam históricas; ocorr�
 | Painel | Intervalo e blocos do painel, com escolha de resumo/completo. |
 | Configurações | Sem PDF operacional; não clonar usuários, senhas, contatos ou controles secretos. Diagnóstico de itens tem relatório próprio e autorizado. |
 
-Os documentos informam período, filtros, fonte, consulta, revisão e cobertura. Seções autorizadas recolhidas entram na modalidade completa; nós ocultos de outras telas não são revelados. Campos genéricos de formulário não são exportados. As tabelas repetem cabeçalho e permitem quebra de nomes/valores longos. Há numeração via CSS de página e orientação para cabeçalhos/rodapés do navegador quando necessário.
+Os documentos informam período, filtros, fonte, consulta, revisão e cobertura. Seções autorizadas recolhidas entram na modalidade completa; nós ocultos de outras telas não são revelados. Campos genéricos de formulário não são exportados. Os estilos solicitam repetição do cabeçalho e permitem quebra de nomes longos, preservando códigos, datas e valores. No Safari testado, o cabeçalho apareceu somente na primeira página e uma linha pôde continuar na página seguinte; o conteúdo permaneceu completo. Essa limitação de impressão está aberta. Há numeração via CSS de página e orientação para cabeçalhos/rodapés do navegador quando necessário.
 
 ## Validação e recuperação reproduzíveis
 
 Runtime utilizado: `/Users/leonardopereira/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node`.
 
 - `node --test tests/relatorios-integracao.test.cjs tests/telas.test.cjs tests/ficha-etapas.test.cjs`: 55 testes aprovados na rodada focal de auto-revisão; inclui 11 cenários novos de integração.
-- `node scripts/verificar.cjs`: 1.436 testes aprovados, zero falhas na suíte completa. Log `/private/tmp/task4-final-suite.log`; primeira rodada 1.429/1.434, com três contratos/mocks ajustados e dois testes que precisavam de loopback local.
+- `node scripts/verificar.cjs`: **1.447 testes aprovados, zero falhas, cancelamentos ou testes ignorados**, na árvore final `d74a2aa`. Sintaxe também conferida. Log completo: `evidencias/pcp-verificacao-final-20261003.log`.
 - `node scripts/ensaio-recuperacao.cjs`: cria diretório temporário próprio e gera `pacote.json`, `manifesto.json`, `resultado.json`. Dez verificações: contagens/hash, relações OS→entrega→item→foto, regra→fechamento, auditoria, parcelas 5100+12900=18000, reload, idempotência, interrupção, corrupção recusada e funções reais de exportação/importação v4 em sandbox. Nenhuma rede ou credencial.
 - `node scripts/preview-relatorios.cjs`: inicia somente `127.0.0.1:4240`; fixture de 180 linhas com nomes extensos e valores completos, navegação por 14 vistas e cinco perfis. É ensaio do contrato de página, não prova sozinho o funcionamento de todas as abas. QA real de fluxos ocorre na prévia isolada `4239`.
 - Migration `0004` executada pelo controlador em PostgreSQL 18.3 via PGlite 0.5.8 isolado: oito verificações (service_role, versões antigas de OS/config, equipe inativa, registro excluído, anon/authenticated recusados, parâmetros inválidos e rollback). Evidências temporárias `/private/tmp/pcp-sql-validation/validate.mjs` e `result.json`. **Limite:** conexão única; não é ensaio de duas sessões concorrentes. Nenhum SQL de produção.
@@ -88,4 +88,37 @@ O backup v4 do aplicativo contém somente O.S./configuração locais. Não cont�
 
 A projeção restrita também remove o identificador pessoal `porId` das novas autorias de vínculos e cadastros, no servidor e no cache, preservando autoria armazenada e respostas da gestão. Comissão pagina integralmente versões e revisões por chave estável, sem limite global de mil linhas, lendo versões antes do histórico e mantendo a disputa atômica de aprovação. Falha de página/cursor ou prazo de 25 segundos bloqueia cálculo/gravação incompleta.
 
-O contrato PDF reserva espaço para O.S., datas e valores sem fragmentá-los, mantendo quebra de nomes longos e conteúdo íntegro; repetição de cabeçalhos depende do motor do navegador (Safari observado não repetiu thead). Finalizados mobile quebra status longos e preserva ações. Nesta onda, 182 testes focados passaram; revalidação visual e suíte integral ficam com o controlador. Nenhuma publicação, alteração de registros reais ou nova migration foi executada.
+O contrato PDF reserva espaço para O.S., datas e valores sem fragmentá-los, mantendo quebra de nomes longos e conteúdo íntegro; repetição de cabeçalhos depende do motor do navegador (Safari observado não repetiu thead). Finalizados mobile quebra status longos e preserva ações. Nesta onda, 182 testes focados passaram; o controlador confirmou depois os 1.447 testes da suíte integral e a revisão visual indicada abaixo. Nenhuma publicação, alteração de registros reais ou nova migration foi executada.
+
+
+## Conferência final pelo controlador
+
+- **14 abas no computador (1366 × 900):** abriram sem erros de console observados e sem transbordamento horizontal da página.
+- **14 abas no celular (390 × 844):** 13 passaram inicialmente; Finalizados excedia a largura com o texto da entrega parcial. Após a correção, o caso TESTE-PARCIAL voltou a 390/390 px e manteve situação, valor conferido, saldo e botões. Ranking e calendário foram examinados visualmente; primeiro título de equipe aproximadamente a 562 px, dentro da primeira tela.
+- **Gestão de equipes:** pesquisa, edição de cadastro e conferência do vínculo da equipe fictícia criada depois das entregas. Associação de somente uma parcial, preservando a outra composição, quantidade e valor. Reabertura verificada. Nenhum registro real foi associado à Águia.
+- **Conferência operacional:** associação de veículo fictício por ID/placa, categoria exata ADESIVO e medição da correção (R$ 120 de material, 2 horas e 0 km). Salvamento e reabertura preservaram os campos; nenhum custo ou identidade real foi inferido.
+- **PDF extenso no Safari:** arquivo horizontal de 18 páginas, 180 identificadores presentes e 180 valores monetários íntegros; primeira e última páginas examinadas. Nomes completos preservados. Cabeçalho repetido e quebra de linha entre páginas continuam como limitações do Safari observado. A prova usa dados fictícios e o contrato comum; não é exportação de todas as abas reais.
+- **Recuperação:** dez verificações passaram no ensaio isolado, incluindo interrupção, corrupção recusada e backup v4 real no sandbox. Sem restauração do banco ou das fotos de produção.
+- **Revisão final independente:** os dois achados importantes (autoria pessoal em respostas restritas e limite global de mil versões financeiras) foram corrigidos e reavaliados. Nenhuma nova regressão importante/crítica identificada na onda de correção.
+
+## Como usar a nova gestão de equipes
+
+1. Abra **Performance → Gestão de equipes**.
+2. Pesquise **Águia**. Em **Editar cadastro**, ajuste nome, identidade visual, líder, integrantes e situação.
+3. Em **Conferir vínculos**, revise as entregas e as composições indicadas. A lista mostra a equipe anterior, os integrantes e a parcial.
+4. Use **Comparar e confirmar**, confira os dados e confirme somente o vínculo correspondente. O ranking da base aberta passa a identificar a equipe; revisões fechadas permanecem históricas.
+
+O aviso “sem entregas vinculadas” significa ausência de associação no período, não prova que a equipe deixou de trabalhar. O novo cadastro não pode adivinhar quais entregas antigas pertencem à equipe.
+
+## Decisões de execução registradas
+
+Estas decisões correspondem ao registro da implementação, em ordem; não são novos lançamentos ou política de pagamento:
+
+1. Rateio interno e critérios ainda não definidos ficaram configuráveis e pendentes, por falta de autorização para presumir beneficiários. Custo: uma etapa de configuração antes de pagar.
+2. As baixas ERP e aliases receberam ferramentas de conferência, sem saneamento automático por falta de evidência física/placas. Custo: revisão humana dos casos reais.
+3. Esta rodada ficou local, sem publicação. Custo: benefícios ainda indisponíveis na versão pública até a implantação autorizada.
+4. O pedido da Águia entrou na auditoria como A23, com gestão de equipes e associação explícita. Custo: confirmar as entregas históricas, preservando a composição original.
+5. A proteção geral de valores detectada durante a segunda etapa foi concentrada na integração final e concluída ali. Custo assumido: cobertura adicional no servidor e nos testes antes de concluir.
+6. O vínculo de equipe passou a exigir operação transacional no banco para evitar disputa entre alteração de cadastro e da O.S. Custo: aplicar a migração antes das funções/interface em futura publicação; o teste isolado não substitui duas sessões reais concorrentes.
+
+Código preservado na branch `codex/auditoria-performance-experiencia`, clone isolado `/private/tmp/impresilk-entregas-parciais-20261002`. **Implementado e validado localmente; ainda não publicado.**
