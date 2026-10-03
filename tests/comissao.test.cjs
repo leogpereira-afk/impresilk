@@ -114,7 +114,7 @@ function fonteSelada(ctx,periodo,rs,revisao=1) {
 }
 const parcial=(id,fracao,valor=100)=>({...registro(id,valor),osId:'os1',entregaId:id,fracaoOS:fracao});
 test('fix: versões por O.S. serializam períodos e entregas distintos após âncora existente',async()=>{
- let ctx=await ambiente();ctx.e.db.pcp_registros=ctx.e.db.pcp_registros.filter(r=>r.colecao!=='performance_fechamentos');
+ let ctx=await ambiente();encherHistorico(ctx);ctx.e.db.pcp_registros=ctx.e.db.pcp_registros.filter(r=>r.colecao!=='performance_fechamentos');
  ctx=fonteSelada(ctx,ctx.periodo,[parcial('primeira',.2,20)]);
  const p0=await previa(ctx),a0=await aprovar(ctx,p0.revisao);assert.equal(a0.ok,true,JSON.stringify(a0));
  ctx.e.db.pcp_registros.push({colecao:'performance_comissao_os',id:'os1',registro:{id:'os1',tipo:'parcial'},apagado:false}); // âncora legada preservada
@@ -131,7 +131,7 @@ test('fix: versões por O.S. serializam períodos e entregas distintos após ân
  assert.deepEqual(resultados.map(r=>r.status).sort(),[200,409]);assert.equal(chegaram,2);
  const ativas=C.ativas(ctx.e.db.pcp_registros.filter(r=>r.colecao==='performance_comissao').map(r=>r.registro),'efetivo');
  assert.ok(ativas.flatMap(r=>r.apuracao.linhas).reduce((s,l)=>s+l.fracaoOS,0)<=1);
- assert.equal(ctx.e.db.pcp_registros.filter(r=>r.colecao==='performance_comissao_os_versoes').length,2);
+ assert.equal(ctx.e.db.pcp_registros.filter(r=>r.colecao==='performance_comissao_os_versoes'&&r.registro.osId==='os1').length,2);
  ctx.e.cliente.from=from;
  const perdeu=resultados[0].status===409?a:b,pperdeu=resultados[0].status===409?pa:pb;
  assert.equal((await aprovar(perdeu,pperdeu.revisao,{requestId:'tentar-obsoleta-12345'})).status,409);
@@ -220,4 +220,32 @@ test('round2: cadeia exige conciliar anteriores e usa ordem estável, não ordem
  assert.deepEqual(C.apurar({...f,registros:rs.slice().reverse()},en).linhas.map(l=>[l.id,l.comissaoCentavos]),[['Y',1],['Z',0]]);
  const posterior={...ab.revisao,apuracao:{...ab.revisao.apuracao,linhas:[{osId:'os1',baseElegivelCentavos:50,comissaoCentavos:1}]}};
  assert.equal(C.apurar(a.f,entrada(a.f.registros),{aprovacoes:[posterior]}).totalCentavos,1,'aprovação posterior não consome centavo do período anterior');
+});
+function encherHistorico(ctx,n=1307){
+ for(let i=1;i<=n;i++){const k=String(i).padStart(6,'0');ctx.e.db.pcp_registros.push({colecao:'performance_comissao_os_versoes',id:'extra-'+k+':00000001',apagado:false,registro:{osId:'extra-'+k,versao:1}},{colecao:'performance_comissao',id:'2020-01-01:2020-01-31:'+k,apagado:false,registro:{id:'2020-01-01:2020-01-31:'+k,de:'2020-01-01',ate:'2020-01-31',tipo:'previa',revisao:i}});}
+}
+test('revisão final: mais de mil versões e revisões não bloqueiam listar/criar/aprovar/exportar/compensar',async()=>{
+ const ctx=await ambiente();encherHistorico(ctx);const r=await ctx.e.call({action:'performanceComissaoListar',de:'2020-01-01',ate:'2020-01-31'},who);assert.equal(r.status,200,JSON.stringify(r));assert.equal(r.revisoes.length,1307);assert.equal(r.revisoes[0].revisao,1307);
+ const p=await previa(ctx);assert.equal(p.ok,true,JSON.stringify(p));const a=await aprovar(ctx,p.revisao);assert.equal(a.ok,true,JSON.stringify(a));assert.equal((await ctx.e.call({action:'performanceComissaoExportar',...ctx.periodo,id:a.revisao.id},who)).status,200);
+ const comp=await previa(ctx,{anterior:a.revisao.id,compensarId:a.revisao.id,requestId:'compensa-mil-12345'});assert.equal(comp.ok,true,JSON.stringify(comp));const ac=await aprovar(ctx,comp.revisao,{requestId:'aprova-compensa-mil'});assert.equal(ac.ok,true,JSON.stringify(ac));assert.equal((await ctx.e.call({action:'performanceComissaoExportar',...ctx.periodo,id:ac.revisao.id},who)).status,200);
+ assert.equal(ctx.e.db.pcp_registros.filter(r=>r.colecao==='performance_comissao').length,1311);
+});
+test('paginação financeira: cursor ordenado, página curta não encerra e versões precedem todo histórico',async()=>{
+ const ctx=await ambiente();encherHistorico(ctx);ctx.e.db.pcp_registros.reverse();
+ const from=ctx.e.cliente.from.bind(ctx.e.cliente),leituras=[];
+ ctx.e.cliente.from=t=>{const q=from(t),eq=q.eq.bind(q),limit=q.limit.bind(q),then=q.then.bind(q);let col;
+ q.eq=(k,v)=>{if(k==='colecao')col=v;return eq(k,v)};
+ q.limit=n=>limit(col?.startsWith('performance_comissao')?137:n);
+ q.then=(resolve,reject)=>then(r=>{if(col?.startsWith('performance_comissao'))leituras.push({col,n:r.data?.length});return resolve(r)},reject);return q;};
+ const r=await ctx.e.call({action:'performanceComissaoListar',de:'2020-01-01',ate:'2020-01-31'},who);assert.equal(r.status,200);assert.equal(r.revisoes.length,1307);
+ const h=leituras.findIndex(x=>x.col==='performance_comissao');assert.ok(h>1);assert.equal(leituras[h-1].n,0);assert.ok(leituras.slice(h).every(x=>x.col==='performance_comissao'));assert.equal(leituras.at(-1).n,0);
+});
+test('paginação financeira: erro, página nula ou cursor repetido bloqueiam escrita após página inicial',async()=>{
+ for(const col of ['performance_comissao_os_versoes','performance_comissao'])for(const falha of ['erro','nula','repetida']){
+ const ctx=await ambiente();encherHistorico(ctx);const antes=JSON.stringify(ctx.e.db),from=ctx.e.cliente.from.bind(ctx.e.cliente);let primeira,cont=0;
+ ctx.e.cliente.from=t=>{const q=from(t),eq=q.eq.bind(q),then=q.then.bind(q);let c;
+ q.eq=(k,v)=>{if(k==='colecao')c=v;return eq(k,v)};
+ q.then=(resolve,reject)=>then(r=>{if(c===col){cont++;if(cont===1)primeira=r;if(cont===2)r=falha==='erro'?{data:null,error:{message:'Falha fictícia de página'}}:falha==='nula'?{data:null,error:null}:primeira;}return resolve(r)},reject);return q;};
+ const r=await previa(ctx);assert.equal(r.status,500,JSON.stringify(r));assert.equal(cont,2);assert.equal(JSON.stringify(ctx.e.db),antes);
+ }
 });

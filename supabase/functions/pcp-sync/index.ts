@@ -1033,14 +1033,29 @@ Deno.serve(async (req: Request) => {
         let periodo;try{periodo=perfPeriodo(body);}catch(e){return resp({error:(e as Error).message},422);}
         // Ler o relógio por O.S. ANTES do histórico: qualquer aprovação que
         // altere os saldos depois desta leitura disputa a mesma próxima versão.
-        const {data:versoes,error:erroVersoes}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_comissao_os_versoes").eq("apagado",false).order("id").limit(1000);
-        if(erroVersoes)throw new Error(erroVersoes.message);
-        if((versoes||[]).length>=1000)throw new Error("Limite de versões por O.S. atingido. Consulta incompleta; ação bloqueada.");
+        // Cursor de chave primária: o limite é de cada página, não do histórico.
+        // Só uma página vazia confirma o fim (PostgREST pode limitar abaixo de500).
+        const prazoLeitura = Date.now()+25000;
+        const lerFinanceiro = async (colecao:string) => {
+          const todos:any[]=[];let cursor="";
+          while(true){
+            if(Date.now()>prazoLeitura)throw new Error("Leitura financeira excedeu o tempo permitido. Consulta incompleta; ação bloqueada.");
+            let q=sb.from("pcp_registros").select("id,registro").eq("colecao",colecao).eq("apagado",false).order("id").limit(500);
+            if(cursor)q=q.gt("id",cursor);
+            const {data,error}=await q;
+            if(error)throw new Error(error.message);
+            if(!Array.isArray(data))throw new Error("Página financeira ausente. Consulta incompleta; ação bloqueada.");
+            if(!data.length)return todos;
+            for(const row of data){
+              if(typeof row?.id!=="string" || !row.id || row.id<=cursor || !row.registro || typeof row.registro!=="object")throw new Error("Cursor financeiro inconsistente. Consulta incompleta; ação bloqueada.");
+              cursor=row.id;todos.push(row);
+            }
+          }
+        };
+        const versoes=await lerFinanceiro("performance_comissao_os_versoes");
         const versoesOS=new Map<string,number>();
         for(const row of versoes||[]){const r=row.registro;versoesOS.set(String(r.osId),Math.max(versoesOS.get(String(r.osId))||0,r.versao));}
-        const {data:historico,error:erroHistorico}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_comissao").eq("apagado",false).order("id").limit(1000);
-        if(erroHistorico)throw new Error(erroHistorico.message);
-        if((historico||[]).length>=1000)throw new Error("Limite de revisões financeiras atingido. Consulta incompleta; ação bloqueada.");
+        const historico=await lerFinanceiro("performance_comissao");
         const todas=(historico||[]).map((r:any)=>r.registro);
         const revisoes=todas.filter((r:any)=>r.de===periodo.de&&r.ate===periodo.ate).sort((a:any,b:any)=>b.revisao-a.revisao);
         const ultima=revisoes[0], chave=periodo.de+":"+periodo.ate;

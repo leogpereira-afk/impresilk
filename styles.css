@@ -1069,11 +1069,12 @@ body:not(.equipe-app) #modal-os .modal-meta { white-space: nowrap; overflow: hid
 .os-list-item.st-retrabalho   { border-left-color: var(--amber); }
 .os-list-item.st-apto         { border-left-color: var(--purple); }
 
-.list-info { flex: 1; }
+.list-info { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.list-numero .badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .list-numero{ font-weight: 700; font-size: .9rem; }
 .list-cliente{ font-size: .78rem; color: var(--muted); }
 .list-date  { font-size: .75rem; color: #0f766e; font-weight: 600; margin-top: 2px; } /* o --teal dava 3,4:1; este dá 5,5:1 (a data é o "quando") */
-.list-actions{ display: flex; gap: 6px; }
+.list-actions{ display: flex; flex-shrink: 0; gap: 6px; }
 
 /* ── Seção de configurações (admin) ──────────────────────────────────────── */
 .cfg-section { margin-bottom: 24px; }

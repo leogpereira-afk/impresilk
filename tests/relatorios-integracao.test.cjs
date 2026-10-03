@@ -75,3 +75,35 @@ test('Performance resumo mantém fonte integral para alternar completo com O.S. 
  exportado.dataset.pdfModo='completo';const completo=R.sanearCopia(exportado.cloneNode(true),{completo:true,valores:true});assert.equal(completo.dados.detalhe,true);assert.equal(completo.dados.pendencia,true);assert.equal(completo.dados.aberto,true);assert.equal(origem.dados.aberto,false);
  const novamente=R.sanearCopia(exportado.cloneNode(true),{completo:false,valores:true});assert.equal(novamente.dados.detalhe,false);assert.equal(exportado.dados.detalhe,true);
 });
+test('revisão final: autorias de novos vínculos/cadastros não descem a restritos em nenhuma resposta',async()=>{
+ const assinatura={por:'Gestor',porId:'123456',em:'2026-10-03T10:00:00Z'},campos=['categoriasServico','veiculosAliases','prioridadesPCP'];
+ for(const papel of ['montagem','operacao','comercial']){
+  const o={...original(),vinculosEquipes:[{...assinatura,antes:'a',depois:'b'}]},cfg={categoriasServico:[{descricao:'Placa',categoria:'PLACA',...assinatura}],veiculosAliases:[{id:'veiculo-1',alias:'Carro',placa:'TST1234',...assinatura}],prioridadesPCP:{dono:'PCP',...assinatura}};
+  const e=await edge('pcp-sync',{pcp_registros:[{id:'o',colecao:'os',apagado:false,atualizado_em:'2026-10-03T10:00:00Z',registro:o}],equipe_contas:[{sistema:'pcp',usuario:'Ana'}],pcp_config_global:[{id:true,config:cfg,atualizado_em:'2026-10-03T10:00:00Z'}]});const who={papel,nome:'Ana'};
+  for(const body of [{action:'list'},{action:'list',since:'2026-10-02T00:00:00Z'}]){const r=await e.call(body,who);assert.equal(r.status,200);assert.equal(r.os[0].vinculosEquipes[0].porId,undefined);assert.equal(r.os[0].vinculosEquipes[0].por,'Gestor');}
+  const c=await e.call({action:'getCfg'},who);for(const k of campos){const v=Array.isArray(c.cfg[k])?c.cfg[k][0]:c.cfg[k];assert.equal(v.porId,undefined);assert.equal(v.por,'Gestor');}
+  if(papel!=='comercial'){
+   const conflict=await e.call({action:'upsert',os:{...o,rev:0}},who);assert.equal(conflict.conflito,true,JSON.stringify(conflict));assert.equal(conflict.servidor.vinculosEquipes[0].porId,undefined);
+   const l=await e.call({action:'list'},who),r=await e.call({action:'upsert',os:{...l.os[0],fotosCheckinIds:['foto-ficticia']}},who);assert.equal(r.status,200,JSON.stringify(r));assert.equal(r.os.vinculosEquipes[0].porId,undefined);
+  }
+  assert.equal(e.db.pcp_registros.find(r=>r.id==='o').registro.vinculosEquipes[0].porId,'123456');assert.deepEqual(e.db.pcp_config_global[0].config,cfg);
+  for(const papelGestao of ['admin','pcp']){assert.equal((await e.call({action:'list'},{papel:papelGestao})).os[0].vinculosEquipes[0].porId,'123456');assert.equal((await e.call({action:'getCfg'},{papel:papelGestao})).cfg.prioridadesPCP.porId,'123456');}
+ }
+});
+test('revisão final: cache de gestão não reexpõe porId em O.S./CFG após troca de papel',()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),id='123456',o={...original(),vinculosEquipes:[{por:'Gestor',porId:id}]},cfg={categoriasServico:[{porId:id,por:'Gestor'}],veiculosAliases:[{id:'carro',porId:id}],prioridadesPCP:{dono:'PCP',porId:id}};
+ const m=new Map([['impresilk_inst_os',JSON.stringify([o])],['impresilk_inst_cfg',JSON.stringify(cfg)]]),ctx=vm.createContext({console,navigator:{onLine:false},window:{addEventListener(){}},localStorage:{getItem:k=>m.get(k)||null,setItem:(k,v)=>m.set(k,v),removeItem:k=>m.delete(k)},setTimeout:()=>1,clearTimeout(){},AbortController});
+ vm.runInContext(fs.readFileSync('privacidade-valores.js','utf8'),ctx);vm.runInContext(fs.readFileSync('store.js','utf8'),ctx);
+ for(const papel of ['montagem','operacao','comercial']){ctx.papel=papel;vm.runInContext('STORE.setUser({papel})',ctx);assert.equal(vm.runInContext("STORE.getOS('o').vinculosEquipes[0].porId",ctx),undefined);assert.doesNotMatch(vm.runInContext('JSON.stringify(STORE.getCFG())',ctx),/123456/);assert.equal(vm.runInContext('STORE.getCFG().veiculosAliases[0].id',ctx),'carro');}
+ vm.runInContext("STORE.setUser({papel:'pcp'})",ctx);assert.equal(vm.runInContext("STORE.getOS('o').vinculosEquipes[0].porId",ctx),id);assert.equal(vm.runInContext('STORE.getCFG().prioridadesPCP.porId',ctx),id);
+});
+test('PDF preserva colunas curtas e valores sem truncar descrições ou células agrupadas',()=>{
+ const R=require('../relatorios-pcp.js');const cell=(textContent,colSpan=1)=>({textContent,colSpan,classes:[],classList:{add(c){this.owner.classes.push(c)}}});
+ const headers=['O.S.','Nome completo','Data','Valor completo'].map(x=>cell(x)),dados=['QA-0001','Nome longo '.repeat(20),'2026-10-03','123.456.789,99'].map(x=>cell(x)),grupo=[cell('Total extenso',3),cell('123.456.789,99')];
+ for(const c of [...headers,...dados,...grupo])c.classList.owner=c;
+ const tabela={tHead:{rows:[{cells:headers}]},rows:[{cells:headers},{cells:dados},{cells:grupo}]};R.prepararTabelas({querySelectorAll:()=>[tabela]});
+ assert.deepEqual(dados.map(c=>c.classes),[['pdf-col-id'],[],['pdf-col-data'],['pdf-col-valor']]);assert.deepEqual(grupo[0].classes,[]);assert.equal(dados[3].textContent,'123.456.789,99');assert.match(R.CSS,/td\.pdf-col-valor[^{]*\{white-space:nowrap!important/);assert.match(R.CSS,/text-overflow:clip!important/);
+});
+test('lista de finalizados permite status longo quebrar sem expulsar ações',()=>{
+ const css=require('node:fs').readFileSync('styles.css','utf8');assert.match(css,/\.list-info\s*\{[^}]*min-width:\s*0/);assert.match(css,/\.list-numero \.badge\s*\{[^}]*white-space:\s*normal/);assert.match(css,/\.list-actions\s*\{[^}]*flex-shrink:\s*0/);
+});

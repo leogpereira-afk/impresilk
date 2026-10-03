@@ -83,3 +83,9 @@ O backup v4 do aplicativo contém somente O.S./configuração locais. Não cont�
 4. Publicar a interface candidata v148 com todos os novos módulos e os arquivos `config.js`, `index.html`, `equipe.html` e `sw.js` coerentes. A atualização da casca não é autorização para publicar.
 5. Verificar versão pública, funções servidas, cache/service worker e fluxos por perfil com dados autorizados. Só então declarar implantação concluída.
 6. Resolver dados e decisões de gestão em rodada própria. Nenhuma versão fechada ou dado real deve ser reescrito por uma atualização de interface.
+
+## Correção da revisão final integrada
+
+A projeção restrita também remove o identificador pessoal `porId` das novas autorias de vínculos e cadastros, no servidor e no cache, preservando autoria armazenada e respostas da gestão. Comissão pagina integralmente versões e revisões por chave estável, sem limite global de mil linhas, lendo versões antes do histórico e mantendo a disputa atômica de aprovação. Falha de página/cursor ou prazo de 25 segundos bloqueia cálculo/gravação incompleta.
+
+O contrato PDF reserva espaço para O.S., datas e valores sem fragmentá-los, mantendo quebra de nomes longos e conteúdo íntegro; repetição de cabeçalhos depende do motor do navegador (Safari observado não repetiu thead). Finalizados mobile quebra status longos e preserva ações. Nesta onda, 182 testes focados passaram; revalidação visual e suíte integral ficam com o controlador. Nenhuma publicação, alteração de registros reais ou nova migration foi executada.
