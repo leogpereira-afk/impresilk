@@ -402,7 +402,8 @@ test('toque no nome: não reabre nem troca o autor de O.S. já finalizada',async
 });
 test('toque no nome: a foto do problema de um item pode ser aberta pela equipe',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[pronta({itens:[{item:'1',descricao:'Fachada',fotoProbId:'fp'}]})]});
- assert.notEqual((await e.call({action:'getPhoto',fileId:'fp'},toque)).status,403);
+ e.cliente.storage={from:()=>({download:async()=>({data:new Blob(['foto'],{type:'image/jpeg'}),error:null})})};
+ assert.equal((await e.call({action:'getPhoto',fileId:'fp'},toque)).status,200);
  assert.equal((await e.call({action:'getPhoto',fileId:'de-outra-os'},toque)).status,403);
 });
 /* A VOLTA DO CARRO (24/09/2026): "arrumado", "sem avaria" e as fotos da volta. */
@@ -505,7 +506,8 @@ test('limpeza do carro: O.S. finalizada aceita a declaração e continua finaliz
 });
 test('limpeza do carro: o crachá de toque abre a foto do carro da volta, e só a da sua equipe', async () => {
  const e = await edge('pcp-sync', {pcp_registros:[pronta({voltaEquipe:declarada()}), row('2', {numero:'2', equipe:['Outra'], voltaEquipe:declarada({fotos:['de-outra-os']})})]});
- assert.notEqual((await e.call({action:'getPhoto', fileId:'fc'}, toque)).status, 403);
+ e.cliente.storage={from:()=>({download:async()=>({data:new Blob(['foto'],{type:'image/jpeg'}),error:null})})};
+ assert.equal((await e.call({action:'getPhoto', fileId:'fc'}, toque)).status, 200);
  assert.equal((await e.call({action:'getPhoto', fileId:'de-outra-os'}, toque)).status, 403);
  assert.equal((await e.call({action:'deletePhoto', fileId:'fc'}, toque)).status, 403, 'apagar tiraria a foto das outras O.S. da volta');
 });

@@ -82,3 +82,47 @@ test('fila antiga de apagar foto não destrói anexo preservado de O.S. excluíd
  assert.equal((await e.call({action:'deletePhoto',fileId:'foto-preservada'},gestor)).status,409);assert.equal(removeu,false);
  assert.equal((await e.call({action:'deletePhoto',fileId:'foto-solta'},gestor)).ok,true);assert.equal(removeu,true);
 });
+test('classificação sem instalação exige resolução explícita nas duas ordens, inclusive reabertura ERP',async()=>{
+ const D=require('../divisao.js');
+ for(const classificacao of ['baixa_administrativa','retirada']) {
+  const o={...os(),baixaAutoERP:{em:'2026-09-30T12:00:00Z'},finalizadaEm:'2026-09-30T12:00:00Z'},e=await edge('pcp-sync',db(o));
+  const classificar=(rev,c)=>e.call({action:'controleEntrega',osId:o.id,rev,tipo:'erp',pedido:{...pedido,classificacao:c}},gestor);
+  const entrega={id:'e1',dia:'2026-09-29',itens:sel(o,1,1),alocacao:D.montar([{equipeId:null,liderId:'100001',membros:['100001']}])};
+  const conferir=rev=>e.call({action:'conferenciaEntrega',osId:o.id,rev,entrega},gestor);
+  assert.equal((await classificar(1,classificacao)).ok,true);
+  assert.equal((await conferir(2)).status,422);
+  const mub=await edge('pcp-mubisys',e.db);await mub.run(`reconciliarCarteira(sb,[{numero:'900',cliente:'Cliente'}])`);
+  const reaberta=mub.db.pcp_registros.find(r=>r.colecao==='os').registro;
+  assert.equal(reaberta.finalizadaEm,'');assert.equal(reaberta.conferenciaERP.classificacao,classificacao);
+  e.db.pcp_registros.find(r=>r.colecao==='os').registro=reaberta;
+  assert.equal((await conferir(reaberta.rev)).status,422);
+  assert.equal((await classificar(reaberta.rev,'divergencia')).ok,true);
+  assert.equal((await conferir(reaberta.rev+1)).ok,true);
+  assert.equal((await classificar(reaberta.rev+2,classificacao)).status,422);
+  await new Promise(ok=>setTimeout(ok,3));
+  const perf=await e.call({action:'performancePeriodo',de:'2026-09-01',ate:'2026-09-30'},gestor);assert.equal(perf.registros.length,1);
+ }
+});
+test('quadros complementares atribuem cada parcela ao mês e à equipe conferida',()=>{
+ const D=require('../divisao.js'),o={...os(),valorTotal:18000,equipe:['999999']};
+ const entrega=(id,dia,a,b,pessoa)=>({id,dia,itens:sel(o,a,b),alocacao:D.montar([{equipeId:null,liderId:pessoa,membros:[pessoa]}])});
+ o.conferenciasEntrega=[entrega('e1','2026-09-29',1,1,'100001'),entrega('e2','2026-10-02',3,2,'100002')];
+ const ctx=vm.createContext({console,STORE:{getAllOS:()=>[o],getCFG:()=>({}),valores:()=>({})},STATE:{user:{papel:'pcp'}},document:{addEventListener(){},querySelector(){return null;},querySelectorAll(){return [];},getElementById(){return null;}},localStorage:{getItem(){return null;}},window:{},setTimeout(){},clearTimeout(){},OPERACAO:O,DIVISAO:D,CONFERENCIA_ENTREGA:C,esc:x=>String(x||'')});
+ vm.runInContext(fs.readFileSync('casa.js','utf8'),ctx);ctx.nomeExibicaoCasa=id=>({chave:id,id,nome:id});
+ const set=vm.runInContext("pessoasDoPeriodo({de:'2026-09-01',ate:'2026-09-30'})",ctx);
+ assert.equal(set.noPeriodo.length,1);assert.equal(set.pessoas[0].chave,'100001');assert.equal(set.pessoas[0].valor,5100);assert.equal(set.pessoas[0].equivalentes,5100/18000);
+ const out=vm.runInContext("pessoasDoPeriodo({de:'2026-10-01',ate:'2026-10-31'})",ctx);assert.equal(out.pessoas[0].chave,'100002');assert.equal(out.pessoas[0].valor,12900);
+ const todas=vm.runInContext('agruparPorPessoaCasa(STORE.getAllOS())',ctx);assert.equal(todas.reduce((v,p)=>v+p.valor,0),18000);
+ const barras=[];ctx.barrasCasa=(dados,fmt)=>{barras.push(dados);return dados.map(d=>d.rotulo+' '+d.extra+' '+fmt(d.valor)).join('|');};
+ const html=vm.runInContext('servicosEntreguesHTML()',ctx);assert.equal(barras[1][0].valor,5100/18000);assert.equal(barras[1][1].valor,12900/18000);assert.match(barras[1][0].extra,/5[.]100/);assert.match(barras[1][1].extra,/12[.]900/);assert.match(html,/equivalentes/);
+});
+test('regularização legada identifica data e horário e não silencia uma nova saída',async()=>{
+ const o={...os(),horaSaida:'08:00',instalacao:{data:'2026-09-01'}},e=await edge('pcp-sync',db(o));
+ const r=await e.call({action:'controleEntrega',osId:o.id,rev:1,tipo:'saida',pedido:{...pedido,situacao:'regularizada'}},gestor);assert.equal(r.ok,true);
+ assert.equal(O.situacaoSaida(r.os,'2026-10-03'),'');
+ assert.equal(O.situacaoSaida({...r.os,horaSaida:'09:00',instalacao:{data:'2026-10-03'}},'2026-10-03'),'na-rua');
+ assert.equal(O.situacaoSaida({...r.os,instalacao:{data:'2026-10-03'}},'2026-10-03'),'na-rua');
+ assert.equal(O.situacaoSaida({...r.os,horaSaida:'09:00'},'2026-10-03'),'sem-retorno');
+ assert.equal(O.horas({...r.os,horaSaida:'09:00',horaRetorno:'10:00',instalacao:{data:'2026-10-03'}}),1);
+ assert.equal(O.situacaoSaida({...o,regularizacaoSaida:{situacao:'regularizada',saidaOriginal:''}},'2026-10-03'),'sem-retorno','metadado antigo sem identidade pede conferência');
+});

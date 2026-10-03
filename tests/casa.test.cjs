@@ -1077,7 +1077,7 @@ test('serviços entregues: ano e mês saem do histórico, não do filtro do per�
   ]);
   const html = t.run('servicosEntreguesHTML()');
   for (const ano of ['2024', '2025', '2026']) assert.match(html, new RegExp(ano), 'faltou o ano ' + ano);
-  assert.match(html, /4 instalações entregues entre as O\.S guardadas neste aparelho/);
+  assert.match(html, /4 registros de entrega \(incluindo parcelas\) entre as O\.S guardadas neste aparelho/);
   /* O ano corrente está pela metade: comparar de igual para igual com um ano
      fechado transformaria calendário em desempenho. */
   assert.match(html, /em curso/);

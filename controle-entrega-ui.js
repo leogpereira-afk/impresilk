@@ -9,7 +9,7 @@ function controleEntregaHTML(os) {
     ${erp?`<p>${esc(CONTROLE_CLASSIFICACOES[erp.classificacao] || erp.classificacao)} · ${esc(erp.responsavelNome)} · revisar até ${esc(erp.prazo)}<br>${esc(erp.evidencia)}<br>Motivo: ${esc(erp.motivo)} · ${esc(erp.por)} · ${esc(erp.em)}</p>`:''}
     ${saida?`<p>Saída ${saida.situacao==='regularizada'?'regularizada':'em conferência'} · ${esc(saida.responsavelNome)} · prazo ${esc(saida.prazo)}<br>${esc(saida.evidencia)}<br>Motivo: ${esc(saida.motivo)} · ${esc(saida.por)} · ${esc(saida.em)}</p>`:''}
     ${(os.revisaoSolicitada || []).map(r=>`<p>Revisão solicitada: ${esc(r.motivo)} · ${esc(r.por)} · ${esc(r.em)}</p>`).join('')}
-    ${gestao?`<button type="button" class="btn-ghost btn-sm" data-controle="itens" data-controle-os="${esc(os.id)}">Conferir itens e equipe</button>${os.baixaAutoERP || os.erpComSaldo || os.erpSaiuDaCarteiraEm?botao('erp','Classificar baixa ERP'):''}${os.saidaEm || os.horaSaida?botao('saida','Regularizar saída antiga'):''}`:botao('solicitarRevisao','Solicitar revisão à gestão')}
+    ${gestao?`<button type="button" class="btn-ghost btn-sm" data-controle="itens" data-controle-os="${esc(os.id)}">Conferir itens e equipe</button>${os.baixaAutoERP || os.erpComSaldo || os.erpSaiuDaCarteiraEm || os.conferenciaERP?botao('erp','Classificar baixa ERP'):''}${os.saidaEm || os.horaSaida?botao('saida','Regularizar saída antiga'):''}`:botao('solicitarRevisao','Solicitar revisão à gestão')}
     ${botao('fotos','Horários das fotos')}
     <p>Hora da foto, anexo e recebimento são registros separados. Nenhum deles preenche automaticamente saída ou retorno.</p></details>`;
 }
@@ -64,7 +64,7 @@ async function controleFotos(osId) {
   d.querySelectorAll('form').forEach(form=>form.onsubmit=async e=>{e.preventDefault();const f=fotos[+form.dataset.fotoEvento],v=new FormData(form),b=form.querySelector('button');b.disabled=true;try{await STORE.api({action:'fotosEvento',osId,fileId:f.id,rev:f.rev || 0,ocorridoEm:new Date(v.get('ocorridoEm')).toISOString(),motivo:v.get('motivo')});form.querySelector('[role="status"]').textContent='Horário confirmado. Feche e abra novamente para ver a revisão.';b.disabled=true;}catch(err){form.querySelector('[role="status"]').textContent=perfErroTxt(err);b.disabled=false;}});
 }
 function controleFila() {
-  const todas=typeof osDaConferencia==='function'?osDaConferencia():STORE.getAllOS(), pend=todas.filter(o=>o.baixaAutoERP || o.erpComSaldo || o.erpSaiuDaCarteiraEm || ['sem-retorno','conferir'].includes(OPERACAO.situacaoSaida(o)) || o.revisaoSolicitada?.length);
+  const todas=typeof osDaConferencia==='function'?osDaConferencia():STORE.getAllOS(), pend=todas.filter(o=>o.baixaAutoERP || o.erpComSaldo || o.erpSaiuDaCarteiraEm || o.conferenciaERP || ['sem-retorno','conferir'].includes(OPERACAO.situacaoSaida(o)) || o.revisaoSolicitada?.length);
   const d=perfDialog('Fila diária de conferência',`<p>Valores de baixas pendentes não representam receita perdida. Cada O.S. exige conferência individual. Ausência de evidência não prova ausência de entrega.</p>${pend.map(o=>`<article><h3>O.S. ${esc(o.numero)} · ${esc(o.cliente)}</h3>${controleEntregaHTML(o)}</article>`).join('') || '<p>Nenhuma pendência nesta cópia do aparelho.</p>'}<p>Fonte: cópia local e histórico carregado. Consulte o período completo em Entregas para conferir cobertura.</p>`);return d;
 }
 if(typeof document!=='undefined')document.addEventListener('click',e=>{

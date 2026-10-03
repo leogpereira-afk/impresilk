@@ -353,8 +353,16 @@ const OPERACAO = (() => {
   const programadas = (lista, de = '', ate = '') => lista.filter(o => !o.finalizadaEm && !STATUS_ENTREGA.cancelada(o) && diasAgenda(o).some(d => emIntervalo(d, de, ate)));
   // Liberação do veículo é autorização. Saída registrada é evidência de deslocamento.
   // Um horário antigo sem retorno pede conferência; não prova presença na rua hoje.
+  function saidaRegularizada(o) {
+    const r=o?.regularizacaoSaida;
+    if(r?.situacao!=='regularizada')return false;
+    const ref=r.saidaReferencia;
+    // Metadado antigo sem timestamp não identifica qual jornada foi revista.
+    if(!ref)return !!r.saidaOriginal && r.saidaOriginal===o.saidaEm;
+    return ref.em===(o.saidaEm || '') && (ref.em || ref.dia===dia(o.instalacao?.data)) && ref.hora===(o.horaSaida || '');
+  }
   function situacaoSaida(o, hoje = dia(new Date())) {
-    if (o?.regularizacaoSaida?.situacao === 'regularizada' && o.regularizacaoSaida.saidaOriginal === (o.saidaEm || '')) return '';
+    if (saidaRegularizada(o)) return '';
     if (!o || interno(o) || o.finalizadaEm || o.horaRetorno || o.retornoEm || !(o.horaSaida || o.saidaEm)) return '';
     const saida = dia(o.saidaEm) || dia(o.instalacao?.data);
     if (!saida || saida > hoje) return 'conferir';
@@ -385,7 +393,7 @@ const OPERACAO = (() => {
   };
   const conclusoes = (lista, de = '', ate = '') => lista.filter(o => concluida(o) && emIntervalo(o.finalizadaEm, de, ate));
   function horas(o) {
-    if (o?.regularizacaoSaida?.situacao === 'regularizada' && o.regularizacaoSaida.saidaOriginal === (o.saidaEm || '') && !o.retornoEm) return null;
+    if (saidaRegularizada(o) && !o.retornoEm) return null;
     if (o?.saidaEm && o?.retornoEm) {
       const h = (new Date(o.retornoEm) - new Date(o.saidaEm)) / 3600000;
       return Number.isFinite(h) && h >= 0 ? h : null;

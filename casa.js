@@ -313,6 +313,7 @@ function avisoJanelaCasa(f) {
 // Data que vale para o mês: a do lançamento manual, se houver; senão a
 // finalização (na O.S. que o ERP baixou, o dia da entrega: diaDaBaixaERP).
 function diaEntrega(o) {
+  if (o?._parcelaConferida) return o._parcelaConferida.dia;
   if (o?.conferenciasEntrega?.length && typeof CONFERENCIA_ENTREGA !== 'undefined') return CONFERENCIA_ENTREGA.estado(o).ultimoDia;
   // O pedido de Desfazer do lote ainda na fila ({desfazer:true}) não é lançamento (OPERACAO.entregaLancadaValida).
   const l = OPERACAO.entregaLancadaValida(o);
@@ -2404,21 +2405,36 @@ function chipFichaHTML(osId, f, on) {
    Base de tudo em Performance: instalação registrada (finalizada no PCP ou
    baixa do ERP lançada à mão), agrupada pela FICHA DO RH quando o apelido
    acha dona, senão pelo próprio apelido — marcado "sem ficha". */
+// Cada parcela conserva seu dia, valor e equipe. A O.S. operacional permanece intacta.
+function parcelasEntreguesCasa(lista) {
+  return lista.flatMap(os => {
+    if (os._parcelaConferida || !os.conferenciasEntrega?.length) return [os];
+    const ap = CONFERENCIA_ENTREGA.apurar(os, valorDaOS(os));
+    if (ap.erro) return os.conferenciasEntrega.map(e => ({...os, equipe:[], _parcelaConferida:{dia:e.dia, valor:null, equivalente:null}, saidaEm:null, retornoEm:null, horaSaida:null, horaRetorno:null}));
+    return ap.entregas.map(e => ({...os, equipe: typeof DIVISAO !== 'undefined' ? DIVISAO.derivarEquipe(e.alocacao) : [],
+      _parcelaConferida:{dia:e.dia, valor:e.valor==null?null:e.valor/100, equivalente:ap.total>0 && e.valor!=null?e.valor/ap.total:null},
+      // Saída/retorno da O.S. não identificam qual das parcelas foi medida.
+      saidaEm:null, retornoEm:null, horaSaida:null, horaRetorno:null}));
+  });
+}
+const valorParcelaCasa = os => os._parcelaConferida ? os._parcelaConferida.valor : valorDaOS(os);
+const equivalenteParcelaCasa = os => os._parcelaConferida ? os._parcelaConferida.equivalente : 1;
+const fmtEquivalenteCasa = n => Number(n.toFixed(4)).toLocaleString('pt-BR',{maximumFractionDigits:4});
 function pessoasDoPeriodo(f) {
-  const concl = classificarEntregas(STORE.getAllOS()).instalacoes;
+  const concl = parcelasEntreguesCasa(classificarEntregas(STORE.getAllOS()).instalacoes);
   const noPeriodo = concl.filter(o => OPERACAO.emIntervalo(diaEntrega(o), f.de, f.ate));
   return { concl, noPeriodo, pessoas: agruparPorPessoaCasa(noPeriodo) };
 }
 function agruparPorPessoaCasa(lista) {
   const m = new Map();
-  for (const os of lista) {
-    const v = valorDaOS(os), h = OPERACAO.horas(os);
+  for (const os of parcelasEntreguesCasa(lista)) {
+    const v = valorParcelaCasa(os), h = OPERACAO.horas(os);
     const vistos = new Set();
     for (const ap of OPERACAO.equipe(os)) {
       const p = nomeExibicaoCasa(ap);
       if (vistos.has(p.chave)) continue; vistos.add(p.chave);
-      const d = m.get(p.chave) || { ...p, os: 0, valor: 0, semValor: 0, horas: [], retrab: 0, erp: 0, apelidos: new Set() };
-      d.os++; if (!OPERACAO.ehIdPessoa(ap)) d.apelidos.add(ap);
+      const d = m.get(p.chave) || { ...p, os: 0, equivalentes: 0, semEquivalente: 0, valor: 0, semValor: 0, horas: [], retrab: 0, erp: 0, apelidos: new Set() };
+      d.os++; const eq = equivalenteParcelaCasa(os); if(eq==null)d.semEquivalente++;else d.equivalentes+=eq; if (!OPERACAO.ehIdPessoa(ap)) d.apelidos.add(ap);
       if (v == null) d.semValor++; else d.valor += v;
       if (h != null) d.horas.push(h);
       if (os.retrabalho) d.retrab++;
@@ -2469,15 +2485,16 @@ function produtividadeHTML() {
       <div>
         <div class="casa-prod-nome">${esc(p.nome)}<small>${p.pessoa ? esc([p.pessoa.cargo, p.pessoa.area].filter(Boolean).join(' · ') || ('ID ' + (p.id || '—'))) : 'sem ficha do RH'}</small></div>
         <dl>
-          <dt>Entregas realizadas</dt><dd>${p.os}${p.erp ? ` <small>(${p.erp} lançada${p.erp === 1 ? '' : 's'})</small>` : ''}${p.retrab ? ` <small>(${p.retrab} retrab.)</small>` : ''}</dd>
-          <dt>Valor das O.S. (integral)</dt><dd>${valorPessoaHTML(p)}</dd>
+          <dt>Registros de entrega (inclui parcelas)</dt><dd>${p.os}${p.erp ? ` <small>(${p.erp} lançada${p.erp === 1 ? '' : 's'})</small>` : ''}${p.retrab ? ` <small>(${p.retrab} retrab.)</small>` : ''}</dd>
+          <dt>O.S. equivalentes</dt><dd>${fmtEquivalenteCasa(p.equivalentes)}${p.semEquivalente ? ` · ${p.semEquivalente} sem base para equivalência` : ''}</dd>
+          <dt>Valor das entregas (participação)</dt><dd>${valorPessoaHTML(p)}</dd>
           <dt>Tempo médio</dt><dd>${tempoPessoaHTML(p)}</dd>
         </dl>
       </div>
     </div>`).join('');
   return `<section class="casa-prod-box">
       <h3>Produtividade</h3>
-      <p>Visão operacional da equipe registrada na O.S.; pode diferir das participações conferidas acima. O valor é integral por pessoa e não deve ser somado entre colaboradores. Para apuração, use o relatório de participações. Tempo = saída → retorno registrados na O.S.</p>
+      <p>Cada parcela usa a data, o valor proporcional e a equipe conferidos; registros antigos usam a equipe da O.S. O valor da parcela é integral por participante e não deve ser somado entre colaboradores. O.S. equivalentes = valor da parcela ÷ líquido da O.S.; sem base, a equivalência fica pendente. Tempo disponível apenas para registros sem parcelas. Para apuração, use o relatório de participações.</p>
       ${avisoJanelaCasa(f)}
       ${semEquipe ? `<p class="metricas-nota">${semEquipe} O.S no período sem equipe registrada — não contam para ninguém.</p>` : ''}
       ${pessoas.length ? `<div class="casa-prod-grid">${cards}</div>` : foraDaJanelaCasa(f)
@@ -2496,8 +2513,8 @@ function produtividadeHTML() {
    disso responderia sempre "um mês". O filtro continua mandando nos quadros de
    retrabalho e de gente, que são do período. */
 function servicosEntreguesHTML() {
-  const entregues = classificarEntregas(STORE.getAllOS()).instalacoes
-    .map(o => ({ dia: diaEntrega(o), valor: valorDaOS(o), servico: String(o.servico || '').trim() }))
+  const entregues = parcelasEntreguesCasa(classificarEntregas(STORE.getAllOS()).instalacoes)
+    .map(o => ({ dia: diaEntrega(o), valor: valorParcelaCasa(o), equivalente:equivalenteParcelaCasa(o), servico: String(o.servico || '').trim() }))
     .filter(x => x.dia);
   /* O ESTADO VAZIO É JUSTO ONDE A RESSALVA MAIS IMPORTA: "nenhuma entrega
      registrada" lido sem ela vira "a casa não entregou nada", quando pode ser
@@ -2508,8 +2525,8 @@ function servicosEntreguesHTML() {
     const m = new Map();
     for (const x of entregues) {
       const k = chave(x); if (!k) continue;
-      const d = m.get(k) || { k, n: 0, valor: 0, semValor: 0 };
-      d.n++; if (x.valor == null) d.semValor++; else d.valor += x.valor;
+      const d = m.get(k) || { k, n: 0, valor: 0, semValor: 0, semEquivalente:0 };
+      if(x.equivalente==null)d.semEquivalente++;else d.n+=x.equivalente; if (x.valor == null) d.semValor++; else d.valor += x.valor;
       m.set(k, d);
     }
     return [...m.values()];
@@ -2524,12 +2541,12 @@ function servicosEntreguesHTML() {
   const anosHTML = barrasCasa(anos.map(a => ({
     rotulo: a.k + (a.k === anoAtual ? ' (em curso)' : ''),
     valor: a.n,
-    extra: `${dinheiroCurto(a.valor)}${a.semValor ? ` · ${a.semValor} sem valor` : ''}`
-  })), v => `${v} O.S`) || '<p class="text-muted">Sem ano apurado.</p>';
+    extra: `${a.semValor ? "valor conhecido: " : ""}${dinheiroCasa(a.valor)}${a.semValor ? ` · ${a.semValor} sem valor` : ''}${a.semEquivalente ? ` · ${a.semEquivalente} sem equivalência` : ''}`
+  })), v => `${fmtEquivalenteCasa(v)} O.S equivalentes`) || '<p class="text-muted">Sem ano apurado.</p>';
 
   const mesesHTML = barrasCasa(meses.map(m => ({
-    rotulo: rotuloMesCasa(m.k), valor: m.n, extra: dinheiroCurto(m.valor)
-  })), v => `${v} O.S`) || '<p class="text-muted">Sem mês apurado.</p>';
+    rotulo: rotuloMesCasa(m.k), valor: m.n, extra: `${m.semValor ? "valor conhecido: " : ""}${dinheiroCasa(m.valor)}${m.semValor ? ` · ${m.semValor} sem valor` : ''}${m.semEquivalente ? ` · ${m.semEquivalente} sem equivalência` : ''}`
+  })), v => `${fmtEquivalenteCasa(v)} O.S equivalentes`) || '<p class="text-muted">Sem mês apurado.</p>';
 
   /* NÃO EXISTE "MÉDIA POR ANO FECHADO" AQUI, e havia um cartão afirmando uma.
      `anos` sai do que está no aparelho, que é a janela de poucas semanas. Um
@@ -2556,10 +2573,10 @@ function servicosEntreguesHTML() {
      e manda o dono para onde a resposta inteira está. */
   const janela = (typeof STORE.JANELA_LOCAL_DIAS === 'number') ? STORE.JANELA_LOCAL_DIAS : 60;
 
-  return `<p class="text-muted" style="font-size:.8rem">${entregues.length} instalações entregues entre as O.S guardadas neste aparelho — as dos últimos ${janela} dias. Não entram as retiradas internas nem as que o ERP encerrou e ainda esperam lançamento. Este quadro ignora o filtro de período acima, de propósito; para o histórico de todos os anos, a aba 📦 Entregas.</p>
+  return `<p class="text-muted" style="font-size:.8rem">${entregues.length} registros de entrega (incluindo parcelas) entre as O.S guardadas neste aparelho — as dos últimos ${janela} dias. Não entram as retiradas internas nem as que o ERP encerrou e ainda esperam lançamento. Cada parcela permanece no seu mês. O.S. equivalentes = valor da parcela ÷ líquido da O.S.; sem base monetária, a equivalência não é somada. Este quadro ignora o filtro de período acima, de propósito; para o histórico de todos os anos, a aba 📦 Entregas.</p>
     <div class="casa-kpi-cards">
-      <div class="casa-kpi"><b>${entregues.length}</b><small>instalações entregues, no aparelho</small></div>
-      <div class="casa-kpi"><b>${esteAno ? esteAno.n : 0}</b><small>dessas, em ${anoAtual}</small></div>
+      <div class="casa-kpi"><b>${entregues.length}</b><small>registros de entrega, no aparelho</small></div>
+      <div class="casa-kpi"><b>${esteAno ? fmtEquivalenteCasa(esteAno.n) : 0}</b><small>O.S. equivalentes em ${anoAtual}</small></div>
     </div>
     <div class="casa-duas">
       <div><h4>Por ano</h4>${anosHTML}</div>

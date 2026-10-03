@@ -136,7 +136,8 @@ test('fotos e lista do espelho: a O.S. gravada por ID é da equipe; a do outro B
     row('1', {equipe:['100001'], fotosCheckinIds:['f1']}),
     row('2', {equipe:['100002'], fotosCheckinIds:['f2']}),
   ]});
-  assert.notEqual((await e.call({action:'getPhoto', fileId:'f1'}, toque('Bruno'))).status, 403);
+  e.cliente.storage={from:()=>({download:async()=>({data:new Blob(['foto'],{type:'image/jpeg'}),error:null})})};
+  assert.equal((await e.call({action:'getPhoto', fileId:'f1'}, toque('Bruno'))).status, 200);
   assert.equal((await e.call({action:'getPhoto', fileId:'f2'}, toque('Bruno'))).status, 403);
   const lista = await e.call({action:'list'}, toque('Bruno'));
   assert.equal(lista.status, 200, lista.error);

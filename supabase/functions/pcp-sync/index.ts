@@ -917,6 +917,7 @@ Deno.serve(async (req: Request) => {
           return resp({os:saida(os),valor:valorConferencia(os,erp || [])});
         }
         if(body.rev!==os.rev) return resp({error:"A O.S. mudou. Reabra a conferência antes de salvar.",conflito:true},409);
+        if(["baixa_administrativa","retirada"].includes(os.conferenciaERP?.classificacao)) return resp({error:"Revise a classificação ERP para divergência antes de conferir uma instalação. A classificação anterior será preservada no histórico."},422);
         const velho=(os.conferenciasEntrega || []).find((e:any)=>e.id===body.entrega.id);
         const pedido=body.entrega, hoje=perfDia(new Date().toISOString());
         const entrega={id:pedido.id,dia:pedido.dia,itens:pedido.itens,alocacao:pedido.alocacao};
@@ -1922,18 +1923,19 @@ Deno.serve(async (req: Request) => {
           Object.assign(evento,{responsavelId:p.responsavelId,responsavelNome:pessoa.nome,prazo,evidencia});
           if(body.tipo==="erp") {
             campo="conferenciaERP";
-            if(!os.baixaAutoERP && !os.erpComSaldo && !os.erpSaiuDaCarteiraEm)return resp({error:"Esta O.S. não tem baixa ERP a conferir."},422);
+            if(!os.baixaAutoERP && !os.erpComSaldo && !os.erpSaiuDaCarteiraEm && !os.conferenciaERP)return resp({error:"Esta O.S. não tem baixa ERP a conferir."},422);
             if(!["total","parcial","retirada","baixa_administrativa","divergencia"].includes(p.classificacao))return resp({error:"Selecione a classificação da diferença."},422);
             const estado=CONFERENCIA_ENTREGA.estado(os);
             if(p.classificacao==="total" && estado.situacao!=="saldo_concluido")return resp({error:"Confira todos os itens antes de classificar entrega total."},422);
             if(p.classificacao==="parcial" && estado.situacao!=="parcial")return resp({error:"Confira os itens da entrega parcial primeiro."},422);
-            if(p.classificacao==="baixa_administrativa" && os.conferenciasEntrega?.length)return resp({error:"Há entregas conferidas. Classifique a divergência para revisão, sem apagar a evidência."},422);
+            if(["baixa_administrativa","retirada"].includes(p.classificacao) && os.conferenciasEntrega?.length)return resp({error:"Há entregas conferidas. Classifique a divergência para revisão, sem apagar a evidência."},422);
             evento.classificacao=p.classificacao;
           } else {
             campo="regularizacaoSaida";
             if(perfDia(os.saidaEm || os.instalacao?.data)>=perfDia(em))return resp({error:"A saída de hoje permanece no acompanhamento atual. Regularize apenas saídas anteriores."},422);
             if(!(os.saidaEm || os.horaSaida))return resp({error:"Não há saída registrada para regularizar."},422);
             evento.saidaOriginal=os.saidaEm || "";
+            evento.saidaReferencia={em:os.saidaEm || "",dia:perfDia(os.saidaEm) || perfDia(os.instalacao?.data),hora:os.horaSaida || ""};
             evento.situacao=p.situacao==="regularizada"?"regularizada":"em_conferencia";
           }
           gravar[campo]={...evento,historico:[...(os[campo]?.historico || []),evento]};
