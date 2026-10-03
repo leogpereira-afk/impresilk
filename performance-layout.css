@@ -30,21 +30,30 @@
 #panel-performance .perf-ranking-opcoes[open]{flex:1 1 100%}
 #panel-performance .perf-ranking-opcoes[open] .perf-ranking-ctrl{max-width:none;justify-content:flex-start}
 #panel-performance .perf-equipes-cartoes{grid-template-columns:repeat(auto-fill,minmax(245px,1fr));gap:10px;margin:8px 0}
-#panel-performance .perf-equipe-cartao{padding:12px;gap:7px;border-radius:12px;border-top-width:4px}
+#panel-performance .perf-equipe-cartao{padding:10px;gap:6px;border-radius:12px;border-top-width:3px}
+#panel-performance .perf-ranking:not(.perf-ranking-lista) .perf-equipe-cartao>.perf-barra{height:6px}
+#panel-performance .perf-cartao-rodape{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-top:auto}
+#panel-performance .perf-cartao-rodape .perf-cartao-gente{min-width:0}
+#panel-performance .perf-cartao-rodape .perf-cartao-gente>small{overflow-wrap:anywhere}
+#panel-performance .perf-cartao-rodape .perf-rostos{flex:none}
+#panel-performance .perf-ranking:not(.perf-ranking-lista) .perf-cartao-acoes{justify-content:flex-end;margin:0 0 0 auto;gap:2px 6px}
+#panel-performance .perf-ranking:not(.perf-ranking-lista) .perf-cartao-acoes button{padding:5px 4px}
 #panel-performance .perf-cartao-topo{gap:8px}
-#panel-performance .perf-cartao-logo{width:42px;height:42px;border-radius:10px;font-size:1.5rem}
+#panel-performance .perf-cartao-logo{width:36px;height:36px;border-radius:9px;font-size:1.4rem}
 #panel-performance .perf-cartao-pos{min-width:1.6em;font-size:.9rem}
 #panel-performance .perf-cartao-nome h4{font-size:.9rem;line-height:1.2}
+#panel-performance .perf-cartao-nome .perf-sem-nome{font-size:.68rem;line-height:1.25;letter-spacing:.025em}
 #panel-performance .perf-cartao-num strong{font-size:1.6rem}
 #panel-performance .perf-cartao-num span{font-size:.74rem}
 #panel-performance .perf-cartao-linha{font-size:.78rem}
 #panel-performance .perf-cartao-gente{flex-direction:row;align-items:center;gap:8px}
-#panel-performance .perf-conquistas{gap:4px;margin:0}
-#panel-performance .perf-conquistas span{font-size:.72rem;padding:3px 6px}
+#panel-performance .perf-conquistas{justify-content:flex-start;gap:3px 8px;margin:0}
+#panel-performance .perf-conquistas span{font-size:.74rem;line-height:1.35;padding:2px 0;border:0;border-radius:0;background:transparent;color:#425d6e}
+#panel-performance .perf-conquistas .ok{color:#246042}
 #panel-performance .perf-cartao-acoes button{min-height:34px;font-size:.8rem}
 #panel-performance .perf-podio{align-items:stretch;gap:10px;margin:10px 0;max-width:none}
 #panel-performance .perf-podio-item{border:1px solid #d8e2eb;border-top:4px solid var(--equipe-cor,var(--anel,#b59b48));border-radius:12px;background:white;order:0}
-#panel-performance .perf-podio-topo{padding:12px;display:grid;grid-template-columns:50px minmax(0,1fr);grid-template-areas:'vis nome' 'vis selo' 'num num' 'linha linha' 'aviso aviso' 'extra extra' 'acoes acoes';gap:5px 10px;text-align:left}
+#panel-performance .perf-podio-topo{padding:10px;display:grid;grid-template-columns:42px minmax(0,1fr);grid-template-areas:'vis nome' 'vis selo' 'num num' 'linha linha' 'aviso aviso' 'extra extra' 'acoes acoes';gap:4px 8px;text-align:left}
 #panel-performance .perf-podio-visual,#panel-performance .perf-podio-item.pos-1 .perf-podio-visual{grid-area:vis;width:44px;height:44px;margin:0;box-shadow:none}
 #panel-performance .perf-medalha,#panel-performance .perf-podio-item.pos-1 .perf-medalha{font-size:1.2rem;right:-8px;top:-8px}
 #panel-performance .perf-podio-nome,#panel-performance .perf-podio-item.pos-1 .perf-podio-nome{grid-area:nome;min-height:0;justify-content:flex-start;font-size:.92rem}
@@ -53,8 +62,9 @@
 #panel-performance .perf-podio-num strong,#panel-performance .perf-podio-item.pos-1 .perf-podio-num strong{font-size:1.7rem}
 #panel-performance .perf-podio-linha{grid-area:linha;min-height:0}
 #panel-performance .perf-podio-aviso{grid-area:aviso;justify-content:flex-start;min-height:0}
-#panel-performance .perf-podio-extra{grid-area:extra;align-items:flex-start;gap:4px}
-#panel-performance .perf-podio-membros{min-height:0}
+#panel-performance .perf-podio-extra{grid-area:extra;flex-direction:row;align-items:center;gap:8px}
+#panel-performance .perf-podio-extra>.perf-rostos{flex:none}
+#panel-performance .perf-podio-membros{min-height:0;display:block;overflow:visible;overflow-wrap:anywhere}
 #panel-performance .perf-podio-acoes{grid-area:acoes;justify-content:flex-start}
 #panel-performance .perf-podio-acoes button{min-height:34px;font-size:.8rem}
 #panel-performance .perf-podio-topo>:empty{display:none}
@@ -65,6 +75,7 @@
 #panel-performance .perf-method>summary:before{content:'▸'}
 #panel-performance .perf-method[open]>summary:before{content:'▾'}
 #panel-performance .perf-ranking-lista .perf-equipes-cartoes,#panel-performance .perf-ranking-lista .perf-podio{grid-template-columns:1fr}
+#panel-performance .perf-ranking-lista .perf-cartao-rodape{display:contents}
 #panel-performance .perf-ranking-lista .perf-equipe-cartao{display:grid;grid-template-columns:minmax(180px,2fr) minmax(170px,1fr) minmax(130px,1fr);align-items:center;column-gap:16px;border-top:1px solid #d8e2eb;border-left:4px solid var(--equipe-cor,#b8c8d3)}
 #panel-performance .perf-ranking-lista .perf-equipe-cartao>.perf-barra{grid-column:2}
 #panel-performance .perf-ranking-lista .perf-cartao-gente{grid-column:1}
@@ -90,6 +101,8 @@ body:has(#panel-performance.active) .frase-bar{min-height:0;padding:4px 14px;fon
  .perf-controls summary,.perf-report-toolbar summary{min-height:44px}
  #panel-performance .perf-controls>.perf-toolbar{flex-basis:100%;min-height:44px}
  #panel-performance .perf-equipes-cartoes{grid-template-columns:1fr}
+ #panel-performance .perf-filtros label{min-width:0}
+ #panel-performance .perf-filtros select{max-width:100%;min-width:0}
  #panel-performance .perf-ranking{padding:10px}
  #panel-performance .perf-ranking-opcoes{width:auto}
  #panel-performance .perf-ranking-opcoes summary{min-height:44px}

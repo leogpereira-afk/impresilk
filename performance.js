@@ -1649,8 +1649,8 @@ function perfRankingEquipesHTML(regs, c) {
       <p class="perf-cartao-num"><strong>${esc(numero(x))}</strong> <span>${esc(rotulo(x))}</span></p>
       ${perfBarraHTML(topo > 0 ? (medida === 'valor' ? x.valorConf : medida === 'producao' ? x.equivalentes : x.os) / topo : 0)}
       <p class="perf-cartao-linha">${linha(x)} ${aConferir(x)}</p>${conquista(x)}
-      <div class="perf-cartao-gente">${rostos(x)}${x.salva ? `<small>${membrosTxt(x)}</small>` : ''}</div>
-      <div class="perf-cartao-acoes">${acoes(x)}</div>
+      <div class="perf-cartao-rodape"><div class="perf-cartao-gente">${rostos(x)}${x.salva ? `<small>${membrosTxt(x)}</small>` : ''}</div>
+      <div class="perf-cartao-acoes">${acoes(x)}</div></div>
     </li>`).join('')}</ol>` : '';
   // Equipes cadastradas que não aparecem no ranking deste período: ainda
   // precisam de um lugar para serem vistas e editadas.
