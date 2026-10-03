@@ -615,7 +615,7 @@ function perfFonteHTML(){
  const pode=perfPodeEditar(),bloqueio=pode?perfFechamentoBloqueio(f,pendentes):'';
  return quadro('🗂 Base e fechamento <small>atualizar, versão e fechar período</small>',`<p class="perf-base-fonte">${esc(perfFonteTexto())}</p>${perfAvisosHTML(false)}
    <div class="perf-base-acoes"><button type="button" class="btn-ghost" id="perf-atualizar-fonte" ${perfRemoto.carregando?'disabled':''}>${perfRemoto.carregando?'Consultando servidor…':'Atualizar apuração'}</button><label>Versão da apuração <select id="perf-versao"><option value="">Dados atuais</option>${perfRemoto.fechamentos.map(r=>`<option value="${esc(r.id)}" ${r.id===perfRemoto.selecionado?'selected':''}>Revisão ${r.revisao} · ${esc(r.fechadoEm.slice(0,10))} · ${esc(r.fechadoPor)}</option>`).join('')}</select></label>${pode?`<button type="button" class="btn-ghost" id="perf-fechar" ${bloqueio?'disabled aria-describedby="perf-fechar-motivo"':''}>${perfRemoto.fechamentos.length?'Criar nova revisão':'Fechar período'}</button>`:''}</div>
-   ${bloqueio?`<p class="perf-fechar-motivo" id="perf-fechar-motivo">${esc(bloqueio)}</p>`:''}${f?.motivo?`<p class="perf-base-fonte">Motivo: ${esc(f.motivo)}</p>`:''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p>`);
+   ${bloqueio?`<p class="perf-fechar-motivo" id="perf-fechar-motivo">${esc(bloqueio)}</p>`:''}${f?.motivo?`<p class="perf-base-fonte">Motivo: ${esc(f.motivo)}</p>`:''}${pode&&typeof perfComissaoBotaoHTML==='function'?perfComissaoBotaoHTML():''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p>`);
 }
 async function perfCarregarFonte(){
  const chave=perfChave(),f=periodoOuMes('_fPerf');
@@ -632,6 +632,7 @@ async function perfCarregarFonte(){
  finally{pedido.carregando=false;if(perfRemoto===pedido && perfChave()===chave)renderPerformanceCasa();}
 }
 function perfWireFonte(el){
+ if(typeof perfComissaoWire==='function')perfComissaoWire(el);
  const atualizar=el.querySelector('#perf-atualizar-fonte');if(atualizar)atualizar.onclick=perfCarregarFonte;
  const versao=el.querySelector('#perf-versao');if(versao)versao.onchange=()=>{perfRemoto.selecionado=versao.value;renderPerformanceCasa();};
  const fechar=el.querySelector('#perf-fechar');if(fechar)fechar.onclick=()=>{
@@ -803,6 +804,7 @@ function perfFormato(n) { return Number(n).toLocaleString('pt-BR',{maximumFracti
 function perfDialog(titulo,corpo) {
   let d = document.getElementById('perf-dialog');
   if (!d) {d=document.createElement('dialog');d.id='perf-dialog';document.body.appendChild(d);}
+  d.classList?.remove('comissao-dialog');
   d.innerHTML=`<div class="perf-dialog-head"><h2>${esc(titulo)}</h2><button type="button" class="btn-ghost" aria-label="Fechar edição">✕</button></div>${corpo}`;
   d.querySelector('[aria-label="Fechar edição"]').onclick=()=>d.close(); d.showModal(); return d;
 }
@@ -1894,7 +1896,7 @@ function perfRegrasHTML() {
     : 'Sem cópia das regras neste aparelho: mostrando a regra embutida, provisória, até consultar o servidor.';
   const titulo = vigente ? 'Regra em vigor hoje' : 'Próxima regra (ainda não vale hoje)';
   const historico = f.versoes.map(v => `<details class="perf-regra-versao"><summary>Versão ${esc(v.versao)} · vale a partir de ${esc(REGRAS.dataBR(v.validaDesde))} · ${esc(v.autor?.nome || 'sem autor')}${v.id === mostrada.id ? ' · <span class="badge">mostrada acima</span>' : ''}</summary><p>Criada em ${esc(new Date(v.criadaEm).toLocaleString('pt-BR'))}${v.autor?.login ? ' por ' + esc(v.autor.login) : ''}. Motivo: ${esc(v.motivo || '')}</p>${REGRAS.validarRegra(v) ? '<p role="alert">Versão com dado inválido no banco: não vale.</p>' : perfRegraResumoHTML(v)}</details>`).join('');
-  return `<section class="perf-regras">
+  return `<section class="perf-regras"><p class="metricas-nota">Histórico das regras operacionais. A apuração financeira com entrega comprovada, montagem interna e aprovação fica em Base e fechamento → Comissão. Cada revisão financeira guarda sua configuração própria; regras e fechamentos antigos permanecem preservados.</p>
     <p class="metricas-nota">Cada versão vale a partir de uma data e nunca é editada: para mudar, crie a próxima. Mês já fechado não muda. ${origem}${f.fechadoAte ? ` Fechado até ${esc(REGRAS.dataBR(f.fechadoAte))}.` : ''}</p>
     ${perfRegrasEstado.erro ? `<p role="alert">${esc(perfRegrasEstado.erro)}</p>` : ''}
     <article class="perf-regra-atual"><header><h3>${titulo}</h3>${provisoria ? `<span class="badge sem-valor">${f.versoes.length ? 'Provisória: regra embutida, vale até o início da primeira versão gravada' : 'Provisória: regra embutida, nenhuma versão gravada'}</span>` : `<span class="badge">Versão ${esc(mostrada.versao)}</span>`}</header>

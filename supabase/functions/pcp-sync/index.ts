@@ -1,5 +1,6 @@
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno } from "../_shared/pcp-status.mjs";
 // ============================================================================
@@ -440,9 +441,15 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     // Sem líquido não somar somente os produtos que têm preço: omite itens e descontos.
     if(!Number.isFinite(valor)||valor<0){valor=null;origem="Sem valor";}
     let dadosEntrega:any={}, voltaDaEntrega=true;
+    const subtotais=(Array.isArray(o.itens)?o.itens:[]).map((it:any)=>num(it.subtotal));
+    const bruto=subtotais.length&&subtotais.every((v:number)=>Number.isFinite(v)&&v>=0)?subtotais.reduce((a:number,b:number)=>a+b,0):null;
+    let valorBrutoCentavos=bruto===null?null:Math.round(bruto*100);
     if(o._conferencia) {
       const a=CONFERENCIA_ENTREGA.apurar(o,valorConferencia(o,valoresItens[String(o.numero)] || [])), e=a.entregas.find((x:any)=>x.id===o._conferencia.id);
-      dadosEntrega={osId:o._osId,entregaId:o._conferencia.id,itensEntrega:e?.itens || [],saldoItens:a.saldoItens?.length || 0,erroConferencia:a.erro || "",fracaoOS:a.total>0 && e?.valor!=null?e.valor/a.total:0};
+      if(bruto!==null){const bruta=CONFERENCIA_ENTREGA.apurar(o,bruto).entregas.find((x:any)=>x.id===o._conferencia.id);valorBrutoCentavos=bruta?.valor??null;}
+      const indiceEntrega=a.entregas.findIndex((x:any)=>x.id===o._conferencia.id);
+      const baseAnteriorCentavos=indiceEntrega>=0&&a.entregas.slice(0,indiceEntrega).every((x:any)=>x.valor!==null)?a.entregas.slice(0,indiceEntrega).reduce((s:number,x:any)=>s+x.valor,0):null;
+      dadosEntrega={baseAnteriorCentavos,osId:o._osId,entregaId:o._conferencia.id,itensEntrega:e?.itens || [],saldoItens:a.saldoItens?.length || 0,erroConferencia:a.erro || "",fracaoOS:a.total>0 && e?.valor!=null?e.valor/a.total:0};
       const idsEntrega=finaisAlocacao(o._conferencia.alocacao).map((m:any)=>m.pessoaId).sort();
       const idsOperacionais=(o.equipe || []).map((n:any)=>pessoasPerf.chave(String(n))).sort();
       const diaRetorno=perfDia(o.retornoEm) || perfDia(o.entregaLancada?.data) || perfDia(o.finalizadaEm);
@@ -526,7 +533,7 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     const camposEquipe=confirmado
       ? (divisao&&divisao.grupos?{grupos:divisao.grupos}:{})
       : sugestaoApurada(membros,aloc,aloc?finaisAlocacao(aloc):[],equipesPerf,idMembro);
-    return {id:o.id,...dadosEntrega,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,...(avisoValor?{avisoValor}:{}),membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf,voltou,volta,...camposEquipe};
+    return {id:o.id,...dadosEntrega,...(valorBrutoCentavos!==null&&valor!==null?{valorBrutoCentavos,descontoCentavos:valorBrutoCentavos-Math.round(valor*100)}:{}),numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,...(avisoValor?{avisoValor}:{}),membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf,voltou,volta,...camposEquipe};
   });
   /* performance-2: cada registro leva a conferência da volta, e a apuração
      leva os PESOS DA NOTA em vigor. Eles entram no hash: quem fecha sela os
@@ -965,6 +972,95 @@ Deno.serve(async (req: Request) => {
         const {error}=await sb.from("pcp_registros").insert({colecao:"performance_fechamentos",id,registro,apagado:false,atualizado_em:registro.fechadoEm});
         if(error){if(error.code==="23505")return resp({error:"O período recebeu outra revisão. Atualize antes de fechar."},409);throw new Error(error.message);}
         return resp({ok:true,fechamento:registro});
+      }
+
+      // Apuração financeira separada do ranking: fatos vêm de fechamento imutável.
+      // Todas as gravações são INSERT; aprovação é outro evento, nunca um campo do cliente.
+      case "performanceComissaoListar":
+      case "performanceComissaoNova":
+      case "performanceComissaoAprovar":
+      case "performanceComissaoExportar": {
+        if(!cracha || ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha.papel)))return resp({error:"Comissão restrita à gestão autenticada do PCP."},403);
+        let periodo;try{periodo=perfPeriodo(body);}catch(e){return resp({error:(e as Error).message},422);}
+        const {data:historico,error:erroHistorico}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_comissao").eq("apagado",false).order("id").limit(1000);
+        if(erroHistorico)throw new Error(erroHistorico.message);
+        if((historico||[]).length>=1000)throw new Error("Limite de revisões financeiras atingido. Consulta incompleta; ação bloqueada.");
+        const todas=(historico||[]).map((r:any)=>r.registro);
+        const revisoes=todas.filter((r:any)=>r.de===periodo.de&&r.ate===periodo.ate).sort((a:any,b:any)=>b.revisao-a.revisao);
+        const ultima=revisoes[0], chave=periodo.de+":"+periodo.ate;
+        if(acao==="performanceComissaoListar"){
+          const fichas=await fichasRH(), regua=resolverPessoas({pessoas:fichas});
+          const pessoas=[...new Map(fichas.filter((p:any)=>p.id&&regua.pessoa(p.id)&&!regua.pessoa(p.id).semFicha).map((p:any)=>[p.id,{id:p.id,nome:p.nome}])).values()];
+          return resp({revisoes,pessoas});
+        }
+        if(acao==="performanceComissaoExportar"){
+          if(!ultima || ultima.id!==body.id)return resp({error:"Selecione a última revisão aprovada. Uma nova prévia suspende a exportação anterior."},409);
+          const fechamentos=await perfFechamentos(periodo);
+          if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"Há outra revisão operacional. Concilie o demonstrativo antes de exportar."},409);
+          const fonteAtual=await perfFonte(body);
+          if(fonteAtual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Revise antes de exportar."},409);
+          try{return resp({ok:true,csv:COMISSAO.csv(ultima),arquivo:"comissao-"+periodo.de+"-r"+ultima.revisao+".csv",aviso:"Exportação para conferência; não realiza pagamento. Não importar novamente sem conciliação."});}catch(e){return resp({error:(e as Error).message},422);}
+        }
+        const requestId=String(body.requestId||""), motivo=String(body.motivo||"").trim();
+        if(!/^[a-zA-Z0-9-]{10,80}$/.test(requestId)||motivo.length<5||motivo.length>500)return resp({error:"Informe identificação do pedido e motivo de 5 a 500 caracteres."},422);
+        const assinatura=await perfHash({acao,fechamentoId:body.fechamentoId||null,entrada:body.entrada||null,anterior:body.anterior||"",hash:body.hash||null,motivo,confirmacao:body.confirmacao===true});
+        const repetida=revisoes.find((r:any)=>r.requestId===requestId);
+        if(repetida)return repetida.assinatura===assinatura?resp({ok:true,revisao:repetida,repetida:true}):resp({error:"Pedido já utilizado com conteúdo diferente."},409);
+        if(String(body.anterior||"")!==String(ultima?.id||""))return resp({error:"Outra revisão foi criada. Atualize o demonstrativo."},409);
+        let apuracao:any, entrada:any, tipo="previa", fechamentoId:string;
+        if(acao==="performanceComissaoNova"){
+          fechamentoId=String(body.fechamentoId||"");
+          const fechamentos=await perfFechamentos(periodo), fonte=fechamentos.find((f:any)=>f.id===fechamentoId);
+          if(!fonte || fonte.id!==fechamentos[0]?.id)return resp({error:"Selecione a última revisão do fechamento operacional para criar a prévia."},409);
+          entrada=body.entrada&&typeof body.entrada==="object"?body.entrada:{};
+          if(JSON.stringify(entrada).length>250000)return resp({error:"Demonstrativo excede o tamanho permitido."},422);
+          apuracao=COMISSAO.apurar(fonte,entrada);
+          // Nenhum nome inferido: o ID precisa existir no RH e não ser ambíguo.
+          const pessoas=await pessoasDoPCP();
+          for(const p of apuracao.pessoas){const ficha=pessoas.pessoa(p.pessoaId);if(!ficha||ficha.semFicha){apuracao.pendencias.push("Cadastro inexistente ou ambíguo: "+p.pessoaId);}else p.nome=ficha.nome;}
+          for(const l of apuracao.linhas)for(const p of l.pagamentos)p.nome=apuracao.pessoas.find((x:any)=>x.pessoaId===p.pessoaId)?.nome||p.pessoaId;
+          apuracao=COMISSAO.conciliar(apuracao,revisoes.find((r:any)=>r.tipo==="aprovacao"&&r.apuracao.config.modo===apuracao.config.modo));
+          apuracao.aprovavel=apuracao.pendencias.length===0;
+        }else{
+          const erro=COMISSAO.erroAprovacao(ultima,body.hash,body.confirmacao);
+          if(erro)return resp({error:erro},422);
+          const fechamentos=await perfFechamentos(periodo);
+          if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"O fechamento operacional recebeu outra revisão. Gere e confira uma nova prévia."},409);
+          const atual=await perfFonte(body);
+          if(atual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Crie uma revisão operacional e outra prévia financeira."},409);
+          apuracao=ultima.apuracao;entrada=ultima.entrada;fechamentoId=ultima.fechamentoId;tipo="aprovacao";
+        }
+        const revisao=(ultima?.revisao||0)+1,id=chave+":"+String(revisao).padStart(6,"0"),em=new Date().toISOString();
+        const hash=await perfHash({apuracao,entrada,fechamentoId});
+        const registro={...periodo,id,revisao,tipo,anterior:ultima?.id||null,requestId,assinatura,motivo,fechamentoId,entrada,apuracao,hash,em,autor:{login:String(cracha.sub||""),nome:String(cracha.nome||"")}};
+        const inserts:any[]=[];
+        if(tipo==="aprovacao"){
+          // Uma entrega tem um único período financeiro, ainda que consultada em
+          // intervalos sobrepostos. Claims e aprovação entram no mesmo INSERT atômico.
+          // Testes não reservam dinheiro/entregas para o programa efetivo.
+          if(apuracao.config.modo==="efetivo"){
+            const anteriores=new Map();
+            for(const r of todas.filter((r:any)=>r.tipo==="aprovacao"&&r.apuracao.config.modo==="efetivo").sort((a:any,b:any)=>b.revisao-a.revisao)){const k=r.de+":"+r.ate;if(k!==chave&&!anteriores.has(k))anteriores.set(k,r);}
+            const fracoes=new Map();
+            for(const r of anteriores.values())for(const l of (r as any).apuracao.linhas)fracoes.set(l.osId,(fracoes.get(l.osId)||0)+l.fracaoOS);
+            const tipos=new Map();
+            for(const l of apuracao.linhas){fracoes.set(l.osId,(fracoes.get(l.osId)||0)+l.fracaoOS);tipos.set(l.osId,l.entregaId?"parcial":"integral");}
+            if([...fracoes.values()].some(v=>v>1.000001))return resp({error:"As entregas aprovadas entre períodos ultrapassam a O.S. integral. Concilie a revisão anterior."},409);
+            for(const [osId,tipoEntrega] of tipos){const ancora=await getReg("performance_comissao_os",String(osId));
+              if(ancora&&ancora.tipo!==tipoEntrega)return resp({error:"Esta O.S. já teve aprovação com outra forma de entrega. Concilie integral e parciais antes de aprovar."},409);
+              if(!ancora)inserts.push({colecao:"performance_comissao_os",id:String(osId),registro:{id:osId,tipo:tipoEntrega},apagado:false,atualizado_em:em});
+            }
+          }
+          if(apuracao.config.modo==="efetivo")for(const linha of apuracao.linhas){
+            const claimId=String(linha.id), claim=await getReg("performance_comissao_entregas",claimId);
+            if(claim && claim.periodo!==chave)return resp({error:"Entrega "+linha.numero+" já aprovada em outro período. Concilie a revisão antes de exportar."},409);
+            if(!claim)inserts.push({colecao:"performance_comissao_entregas",id:claimId,registro:{id:claimId,periodo:chave,osId:linha.osId,entregaId:linha.entregaId},apagado:false,atualizado_em:em});
+          }
+        }
+        inserts.push({colecao:"performance_comissao",id,registro,apagado:false,atualizado_em:em});
+        const {error}=await sb.from("pcp_registros").insert(inserts);
+        if(error){if(error.code==="23505")return resp({error:"Outra aprovação ou revisão foi gravada ao mesmo tempo. Atualize e concilie."},409);throw new Error(error.message);}
+        return resp({ok:true,revisao:registro});
       }
 
       /* REGRAS DO PROGRAMA DAS EQUIPES (F05, 29/09/2026). Coleção própria

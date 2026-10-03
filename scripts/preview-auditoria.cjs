@@ -3,7 +3,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','relatorios-entregas.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
+const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
@@ -68,6 +68,7 @@ cfg.performancePCP={equipes:[
 lista.push(base('PARCIAL',{cliente:'Cliente fictício · entrega por itens',numero:'TESTE-PARCIAL',rev:1,valorTotal:8500,equipe:['900001'],finalizadaEm:hoje+'T12:00:00-03:00',entregaLancada:{data:hoje},itens:[{uid:'pv-parcial-a',item:'1',descricao:'Painel de fachada',qtde:'4',subtotal:'5000'},{uid:'pv-parcial-b',item:'2',descricao:'Letreiro da recepção',qtde:'1',subtotal:'5000'}]}));
 const revisoesPreview=[];
 async function previewApi(body){
+ if(new URLSearchParams(location.hash.slice(1)).has('comissao') && /^(performanceComissao|performancePeriodo|performanceFechamentos|performanceFechar)/.test(body.action))return fetch('/comissao-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
  if(body.action==='conferenciaEntrega'){
   const os=lista.find(o=>o.id===body.osId);if(!os)throw new Error('O.S. de teste não encontrada');
   if(!body.entrega)return {os:structuredClone(os),valor:os.valorTotal};
@@ -338,10 +339,14 @@ document.addEventListener('DOMContentLoaded', () => {
  const b=document.querySelector('#modal-os [data-bloco="'+(pv.get('bloco')||'itens')+'"]'),m=document.querySelector('#modal-os'),h=document.querySelector('#modal-os .modal-header');
  if(b&&m){b.scrollIntoView({block:'start'});m.scrollTop+=Number(pv.get('desce')||0)-(h?h.offsetHeight:0)-8;}
 });`;
-http.createServer((req,res)=>{
+const comissaoPreview=require('./preview-comissao-fixture.cjs');
+http.createServer(async(req,res)=>{
   const name=new URL(req.url,'http://localhost').pathname.slice(1)||'index.html';
   res.setHeader('Cache-Control','no-store');
-  res.setHeader('Content-Security-Policy',"default-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'none'; form-action 'none'");
+  res.setHeader('Content-Security-Policy',"default-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'none'");
+  if(name==='comissao-api' && req.method==='POST'){
+    try{let json='';for await(const chunk of req){json+=chunk;if(json.length>300000)throw new Error('Pedido grande demais.');}const out=await comissaoPreview(JSON.parse(json));res.setHeader('Content-Type','application/json');res.end(JSON.stringify(out));}catch(e){res.writeHead(500);res.end(JSON.stringify({error:e.message}));}return;
+  }
   if(name==='fixture.js'){res.setHeader('Content-Type','text/javascript');res.end(fixture);return;}
   if(!permitidos.has(name)){res.writeHead(404);res.end();return;}
   let body=fs.readFileSync(path.join(root,name));

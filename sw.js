@@ -9,7 +9,7 @@ const CACHE = 'impresilk-shell-v147';
 // index.html/equipe.html sobem JUNTOS.
 const SHELL = [
   './', 'index.html', 'equipe.html', 'styles.css?v=v147',
-  'config.js?v=v147', 'logo.js?v=v147', 'frases.js?v=v147', 'store.js?v=v147', 'auth.js?v=v147', 'operacao.js?v=v147', 'divisao.js?v=v147', 'regras.js?v=v147', 'entrega-item.js?v=v147', 'conferencia-entrega.js?v=v147', 'conferencia-entrega-ui.js?v=v147', 'app.js?v=v147', 'casa.js?v=v147', 'performance.js?v=v147', 'alocacao-ui.js?v=v147', 'lote.js?v=v147', 'entregas-os.js?v=v147', 'relatorios-entregas.js?v=v147', 'equipe.js?v=v147',
+  'config.js?v=v147', 'logo.js?v=v147', 'frases.js?v=v147', 'store.js?v=v147', 'auth.js?v=v147', 'operacao.js?v=v147', 'divisao.js?v=v147', 'regras.js?v=v147', 'entrega-item.js?v=v147', 'conferencia-entrega.js?v=v147', 'conferencia-entrega-ui.js?v=v147', 'app.js?v=v147', 'casa.js?v=v147', 'comissao.js?v=v147', 'comissao-ui.js?v=v147', 'performance.js?v=v147', 'alocacao-ui.js?v=v147', 'lote.js?v=v147', 'entregas-os.js?v=v147', 'relatorios-entregas.js?v=v147', 'equipe.js?v=v147',
   'manifest.json', 'icon.svg', 'favicon.svg',
   // Logos das 10 equipes (29/09/2026): arquivo do site, não da configuração.
   'equipe-aguia.webp', 'equipe-leao.webp', 'equipe-pantera.webp', 'equipe-lobo.webp', 'equipe-tigre.webp', 'equipe-falcao.webp', 'equipe-carcara.webp', 'equipe-onca.webp', 'equipe-lobo-guara.webp', 'equipe-touro.webp'

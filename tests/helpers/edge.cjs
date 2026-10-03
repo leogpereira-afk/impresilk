@@ -12,6 +12,7 @@ function banco(initial={}) {
     if(op!=='read' && cliente.beforeWrite) { const f=cliente.beforeWrite;cliente.beforeWrite=null;f(db,table); }
     const rows=db[table] ||= [];let result=rows.filter(r=>filters.every(f=>f(r))).slice(0,op==='read'?Math.min(take,cliente.maxRows):take);
     if(op==='update') {for(const r of result)Object.assign(r,clone(value));}
+    if(op==='insert'){const lote=Array.isArray(value)?value:[value],vistos=new Set();for(const r of lote){const chave=(r.colecao||'')+':'+r.id;if(vistos.has(chave)||rows.some(x=>x.id===r.id&&(!r.colecao||x.colecao===r.colecao))){resolve({data:null,error:{code:'23505',message:'duplicate key'}});return;}vistos.add(chave);}}
     if(op==='insert'||op==='upsert') {result=[];for(const r of Array.isArray(value)?value:[value]) {
      const old=rows.find(x=>x.id===r.id && (!r.colecao || x.colecao===r.colecao));
      if(old && op==='insert') {resolve({data:null,error:{code:'23505',message:'duplicate key'}});return;}
@@ -27,13 +28,14 @@ function banco(initial={}) {
 async function edge(tipo,initial={}) {
  const {db,cliente}=banco(initial);let handler;
  const regras=await import('../../supabase/functions/_shared/pcp-integridade.mjs');
+ const {COMISSAO}=await import('../../supabase/functions/_shared/pcp-comissao.mjs');
  const {REGRAS}=await import('../../supabase/functions/_shared/pcp-regras.mjs');
  // O status da entrega e o cancelamento (F16): o index.ts os importa de _shared/pcp-status.mjs.
  const status=await import('../../supabase/functions/_shared/pcp-status.mjs');
  const fotos=await import('../../supabase/functions/_shared/foto-freelancer.mjs');
  const ctx=vm.createContext({console,URL,URLSearchParams,Request,Response,TextEncoder,TextDecoder,atob,btoa,crypto:webcrypto,setTimeout,clearTimeout,
   Deno:{env:{get:k=>({PCP_TOKEN:'machine-test',EQUIPE_JWT_SECRET:'test-secret',SUPABASE_URL:'https://example.invalid',SUPABASE_SERVICE_ROLE_KEY:'test'}[k]||'')},serve:fn=>handler=fn},
-  createClient:()=>cliente,...regras,...status,...fotos,REGRAS});
+  createClient:()=>cliente,...regras,...status,...fotos,REGRAS,COMISSAO});
  const file=path.join(__dirname,'../../supabase/functions',tipo,'index.ts');
  const src=fs.readFileSync(file,'utf8').replace(/^import .*?;\s*$/mg,'').replace(/^export (?=(?:async )?function|const|let)/mg,'');
  vm.runInContext(stripTypeScriptTypes(src,{mode:'transform'}),ctx);

@@ -4180,3 +4180,17 @@ img.perf-logo{object-fit:cover}
  #impressao-pcp .perf-team-numbers{gap:12px;padding:8px 0}#impressao-pcp .perf-member-list>span{padding:5px 7px}
  #impressao-pcp .perf-report-value{gap:5px;padding:10px;margin:8px 0}#impressao-pcp .perf-report-section{margin-top:14px}
 }
+
+/* Apuração financeira: detalhes progressivos, controles nomeados e tabela contida. */
+#perf-dialog.comissao-dialog{width:min(1100px,calc(100vw - 32px));box-sizing:border-box;max-width:calc(100vw - 32px)}
+#perf-dialog.comissao-dialog .casa-tabela-wrap{max-width:100%;overflow-x:auto}
+#perf-dialog.comissao-dialog .casa-tabela{min-width:780px;table-layout:fixed;width:100%}
+#perf-dialog.comissao-dialog :is(td,th,p,li,dd){overflow-wrap:anywhere}
+#perf-dialog.comissao-dialog :is(fieldset,details){min-width:0;margin:16px 0;padding:14px;border:1px solid #d8e2e7;border-radius:12px}
+#perf-dialog.comissao-dialog summary{cursor:pointer;padding:8px;font-weight:600}
+#perf-dialog.comissao-dialog label{display:grid;gap:6px;margin:12px 0}
+#perf-dialog.comissao-dialog label:has(input[type=checkbox]){display:flex;align-items:flex-start;gap:10px}
+#perf-dialog.comissao-dialog :is(input,select,textarea){box-sizing:border-box;max-width:100%;width:100%}
+#perf-dialog.comissao-dialog input[type=checkbox]{width:auto;min-height:20px}
+#perf-dialog.comissao-dialog [data-rateio-linha]{display:grid;grid-template-columns:minmax(0,2fr) minmax(100px,1fr) auto;gap:12px;align-items:center}
+@media(max-width:680px){#perf-dialog.comissao-dialog{padding:16px}#perf-dialog.comissao-dialog [data-rateio-linha]{grid-template-columns:1fr}#perf-dialog.comissao-dialog button{min-height:44px}}
