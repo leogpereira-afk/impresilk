@@ -169,11 +169,11 @@ test('fila vazia: uma linha discreta no lugar da faixa', () => {
   assert.doesNotMatch(html, /<section class="ent-fila/);
 });
 
-test('ordem da página: cartões, faixa da fila, filtros, lista do período e só então os relatórios', () => {
+test('ordem da página: filtros e chips, cartões, fila, lista e relatórios', () => {
   const erp = [{ numero: '7001', cliente: 'Cliente fictício A', servico: 'Letreiro', data: '2026-09-10', valor: 5000, tipo: 'externo' }];
   const html = tela(casa(doze(), { erp }), 'STATE._entFilaAberta = false;');
   const pos = k => html.indexOf(k);
-  const ordem = ['class="ent-kpis"', 'class="ent-fila casa-lancar"', 'class="ent-controles"', 'ent-lista-tabela', 'class="casa-relatorios"'];
+  const ordem = ['class="ent-controles"', 'class="ent-chips"', 'class="ent-kpis"', 'class="ent-fila casa-lancar"', 'ent-lista-tabela', 'class="casa-relatorios"'];
   for (const k of ordem) assert.ok(pos(k) >= 0, `faltou ${k}`);
   for (let i = 1; i < ordem.length; i++) assert.ok(pos(ordem[i - 1]) < pos(ordem[i]), `${ordem[i - 1]} tem de vir antes de ${ordem[i]}`);
   // O intervalo do filtro sem travessão.
@@ -225,4 +225,35 @@ test('estilo: alvos de toque da fila e as linhas virando cartão no celular', ()
   assert.match(celular, /\.ent-fila-tabela thead\{display:none\}/);
   assert.match(celular, /\.ent-fila-tabela tr\{display:grid/);
   assert.match(celular, /\.ent-lista-tabela tr\{display:grid/);
+});
+
+test('chips operacionais usam o período ERP, sem confundir retirada, ficha ausente e equipe faltante', () => {
+  const t=casa([]);
+  t.ctx.regs=[
+    {erp:{numero:'1',tipo:'externo',data:'2026-09-01',valor:0},card:{equipe:[]}},
+    {erp:{numero:'2',tipo:'interno',data:'2026-09-01',valor:100},card:{equipe:[]}},
+    {erp:{numero:'3',tipo:'externo',data:'2026-09-02',valor:null},card:null},
+    {erp:{numero:'4',tipo:'externo',data:'2026-09-02',valor:''},card:{equipe:['Ana']}}
+  ];
+  assert.equal(t.run('acompanhamentoEntregas(regs).grupos.semEquipe.length'),1);
+  assert.equal(t.run('acompanhamentoEntregas(regs).grupos.semValor.length'),2);
+  assert.equal(t.run('acompanhamentoEntregas(regs).grupos.interno.length'),1);
+  assert.equal(t.run('acompanhamentoEntregas(regs).semFicha'),1);
+  assert.equal(t.run('acompanhamentoEntregas(regs).dias[0][1]'),2);
+});
+test('chips filtram tabela e total, preservando a fila de meses anteriores', () => {
+  const erp=[{numero:'1',tipo:'interno',data:'2026-09-20',valor:50},{numero:'2',tipo:'externo',data:'2026-09-20',valor:100}];
+  const t=casa([baixa(5,'2026-09-16')],{erp}), b={dataset:{entFoco:'interno'}};
+  const html=tela(t,"STATE._entFocoChip='interno'; STATE._fEnt={de:'2026-09-20',ate:'2026-09-29'}",{'[data-ent-foco]':[b]});
+  assert.match(html,/data-ent-foco="interno" aria-pressed="true"/);
+  assert.match(html,/1 O.S entregues no período/);
+  assert.match(html,/50,00/);
+  assert.match(html,/1 baixa do ERP espera/);
+  assert.ok(html.indexOf('Filtros de entregas')<html.indexOf('ent-kpis'));
+  b.onclick(); assert.equal(t.ctx.STATE._entFocoChip,'interno');
+});
+test('gráfico identifica dados incompletos e não transforma falta de valor em dinheiro',()=>{
+  const t=casa([]);
+  const html=t.run(`acompanhamentoGraficosHTML([{erp:{tipo:'interno',data:'2026-09-20',valor:null},card:null}],{faltando:['2026-08'],comErro:[],truncou:false},{de:'2026-08-01',ate:'2026-09-30'})`);
+  assert.match(html,/Leitura parcial/);assert.match(html,/1 sem valor informado/);assert.match(html,/Não comprova entrega física/);assert.doesNotMatch(html,/R\$/);
 });

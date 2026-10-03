@@ -201,8 +201,8 @@ test('o número da vista acompanha o filtro, e o topo diz que não acompanha', (
   const aviso = (com.match(/<p class="ent-kpi-aviso"[^>]*>[\s\S]*?<\/p>/) || [''])[0];
   assert.doesNotMatch(aviso, /hidden/);
   assert.match(aviso, /não seguem os filtros da vista Por O\.S\./);
-  // O aviso mora logo abaixo dos cartões, antes da fila e dos controles.
-  assert.ok(com.indexOf('ent-kpi-aviso') > com.indexOf('ent-kpis') && com.indexOf('ent-kpi-aviso') < com.indexOf('ent-controles'));
+  // O aviso fica abaixo dos cartões; os controles agora estão no topo.
+  assert.ok(com.indexOf('ent-kpi-aviso') > com.indexOf('ent-kpis') && com.indexOf('ent-kpi-aviso') > com.indexOf('ent-controles'));
   // Os filtros moram no STATE: a repintura completa (a cada mês do ERP) mantém o chip e a busca.
   const de_novo = t.tela('STATE._porOS.busca = "5002"');
   assert.match(de_novo, /data-poros-status="atraso" aria-pressed="true"/);
