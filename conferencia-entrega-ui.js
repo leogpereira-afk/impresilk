@@ -73,10 +73,30 @@ async function conferirItensEntrega(osId, entregaId = '') {
       if(minhaTela())d.close();
       // Pull respeita a fila local; não substitui uma edição feita durante a requisição.
       if(typeof STORE.pull==='function') await STORE.pull().catch(()=>{});
+      conferenciaRefletirNaFicha(resposta.os);
       toast(anterior?'Entrega atualizada com os itens e a equipe selecionados.':'Entrega confirmada com os itens e a equipe selecionados.','success');
       perfDepoisDeGravar({estado:'gravada'});
     } catch(e) {if(minhaTela()){status.textContent=perfErroTxt(e);status.classList.add('erro');salvar.disabled=false;}else toast(perfErroTxt(e),'error');}
     finally {enviando=false;}
   };
   atualizar();
+}
+
+// A ficha pode continuar aberta por baixo do diálogo. Pull atualiza o store,
+// mas o rascunho da ficha é uma cópia: só repintar a aba deixava o saldo antigo.
+function conferenciaRefletirNaFicha(confirmada) {
+  if(!confirmada || typeof _modalDraft==='undefined' || _modalDraft?.id!==confirmada.id)return;
+  const atual=STORE.getOS(confirmada.id),base=atual && Number(atual.rev)>=Number(confirmada.rev)?atual:confirmada;
+  if(Number(_modalDraft.rev)>Number(base.rev))return;
+  const modal=typeof document!=='undefined'?document.querySelector('#modal-os'):null;
+  const anterior=modal?.querySelector('[data-controle="itens"]'),aberto=anterior?.closest('details')?.open;
+  _modalDraft.conferenciasEntrega=JSON.parse(JSON.stringify(base.conferenciasEntrega || []));
+  const pendente=STORE.getQueue().some(x=>x.os?.id===base.id || x.id===base.id);
+  if(!pendente && !_modalDirty) _modalDraft=JSON.parse(JSON.stringify(base));
+  // Com edição local em andamento, não rebasa silenciosamente a revisão nem
+  // substitui campos operacionais: o controle de concorrência continua valendo.
+  reRenderModalKeepOpen();
+  const novo=modal?.querySelector('[data-controle="itens"]');
+  if(aberto && novo?.closest('details'))novo.closest('details').open=true;
+  novo?.focus();
 }
