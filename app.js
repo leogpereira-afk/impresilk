@@ -8456,9 +8456,18 @@ async function pintarAcessos(el) {
 /* ── Saúde da conexão: nuvem OK? importação automática rodando? fila local? ─ */
 function imprimirAnalisePCP(titulo,elemento,periodo,fonteApuracao) {
   const copia = elemento.cloneNode(true);
+  // cloneNode não conserva sempre o valor editado. O relatório mostra o que
+  // está na tela, inclusive o rascunho do lote, sem gravar esses campos.
+  const originais=[...elemento.querySelectorAll('input,select,textarea')];
+  copia.querySelectorAll('input,select,textarea').forEach((n,i)=>{
+    const original=originais[i], texto=document.createElement('span');texto.className='pdf-campo';
+    texto.textContent=original.type==='password'?'(protegido)':original.type==='checkbox'||original.type==='radio'?(original.checked?'Sim':'Não'):original.tagName==='SELECT'?[...original.selectedOptions].map(o=>o.textContent).join(', '):original.value||'—';
+    n.replaceWith(texto);
+  });
+  copia.querySelectorAll('[hidden]:not(.painel-bloco-corpo),[data-pdf-excluir],.pdf-secao-acao').forEach(n=>n.remove());
   copia.querySelectorAll('details').forEach(n=>{if(n.querySelector('[data-rel-area]'))n.remove();});
   copia.querySelectorAll('.rel-ent-indicador').forEach(n=>{const d=document.createElement('div');d.className=n.className;d.style.cssText=n.style.cssText;d.innerHTML=n.innerHTML;n.replaceWith(d);});
-  copia.querySelectorAll('button,input,select,.filter-bar,.perf-toolbar').forEach(n => { if(n.matches('button[data-os-id],button[data-perf-os],button[data-rel-ponto]')) n.replaceWith(document.createTextNode(n.textContent)); else n.remove(); });
+  copia.querySelectorAll('button,input,select,.filter-bar,.perf-toolbar').forEach(n => { if(n.matches('button.perf-equipe-chip')) { const s=document.createElement('span');s.className=n.className;s.textContent=n.textContent;n.replaceWith(s); } else if(n.matches('button[data-os-id],button[data-perf-os],button[data-rel-ponto]')) n.replaceWith(document.createTextNode(n.textContent)); else n.remove(); });
   copia.querySelectorAll('.painel-bloco-corpo').forEach(n=>n.hidden=false);
   copia.querySelectorAll('details').forEach(n => n.open = true);
   const fonte = STORE.getLastSync?.();
@@ -8471,6 +8480,7 @@ function imprimirAnalisePCP(titulo,elemento,periodo,fonteApuracao) {
     ${copia.innerHTML}<footer>Conferir a cobertura e as medições indicadas. Esta análise não lança pagamentos.</footer>`;
   // Navegador que não dispara afterprint: fechar a prévia também devolve a tela.
   $('#impressao-fechar',box).onclick = () => { box.close(); document.body.classList.remove('imprimindo-pcp'); };
+  box.onclose=()=>document.body.classList.remove('imprimindo-pcp');
   // No Safari do iPad e no Chrome do Android o print() volta antes de montar a
   // impressão: tirar a classe na linha seguinte fazia o PDF sair com o app por
   // trás. A classe só sai quando a impressão termina (afterprint).
@@ -8480,6 +8490,34 @@ function imprimirAnalisePCP(titulo,elemento,periodo,fonteApuracao) {
     window.print();
   };
   box.showModal();
+}
+
+/* A mesma saída em PDF em todas as vistas de Entregas e Performance.
+   Imprimir/salvar é explícito; nunca confirma a entrega ou paga comissão. */
+function wirePDFsEntregaPerformance(el) {
+  if(!el || !['panel-entregas','panel-performance'].includes(el.id))return;
+  const periodo=()=>{
+    if(el.id==='panel-performance')return periodoOuMes('_fPerf');
+    const dia=el.querySelector('[data-lote-campo="dia"]')?.value,mes=el.querySelector('[data-lote-campo="mes"]')?.value;
+    if(dia)return {de:dia,ate:dia};
+    if(mes){const [a,m]=mes.split('-').map(Number);return {de:mes+'-01',ate:mes+'-'+String(new Date(a,m,0).getDate()).padStart(2,'0')};}
+    return periodoEntregas();
+  };
+  const origem=()=>el.id==='panel-performance'?perfFonteTexto():el.querySelector('.lote')?'Rascunho de conferência exibido na tela. Campos editados podem não estar gravados.':'ERP e PCP. Cada indicador informa o período e a origem. Lista limitada aos registros exibidos; filtros e limites acompanham o relatório.';
+  const exportar=(alvo,titulo)=>{
+    const p=periodo(), filtros=[...el.querySelectorAll('.filter-bar input,.perf-filtros input,.perf-filtros select,.casa-filtros select,.lote-filtro input')].map(n=>`${n.closest('label')?.childNodes[0]?.textContent?.trim()||n.getAttribute('aria-label')||'Filtro'}: ${n.tagName==='SELECT'?n.selectedOptions[0]?.textContent:n.value}`).join(' · ');
+    imprimirAnalisePCP(titulo,alvo,p,origem()+(filtros?' Filtros: '+filtros:''));
+  };
+  const head=el.querySelector('.casa-pagina-head');
+  if(head&&!el.querySelector('#perf-pdf,#perf-rel-pdf,#rel-ent-pdf')&&!head.querySelector('[data-pdf-tela]')){
+    const b=document.createElement('button');b.type='button';b.className='btn-ghost btn-sm';b.dataset.pdfTela='';b.textContent='📄 PDF desta tela';
+    b.onclick=()=>exportar(el.querySelector('.casa-pagina')||el,(head.querySelector('h2')?.textContent||'Entregas')+(el.querySelector('[data-perf-aba].active')?' · '+el.querySelector('[data-perf-aba].active').textContent:''));head.appendChild(b);
+  }
+  el.querySelectorAll('details.casa-quadro').forEach(d=>{
+    const corpo=d.querySelector('.casa-quadro-corpo');if(!corpo||corpo.querySelector(':scope > .pdf-secao-acao'))return;
+    const b=document.createElement('button');b.type='button';b.className='btn-ghost btn-sm pdf-secao-acao';b.textContent='📄 PDF deste quadro';
+    b.onclick=()=>exportar(d,d.querySelector('summary')?.textContent.trim()||'Performance');corpo.prepend(b);
+  });
 }
 
 /* AVISO FIXO DA DIVISÃO RECUSADA (F08). Uma linha por O.S., com o motivo que

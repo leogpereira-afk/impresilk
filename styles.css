@@ -2786,7 +2786,7 @@ body.tv-ligada { overflow:hidden; }
 .perf-ranking-titulo{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
 .perf-ranking-titulo h3{margin:0;font-size:1.25rem;color:var(--navy,#173c50);letter-spacing:-.01em}
 .perf-ranking-ctrl{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.perf-ranking-lead{margin:0 0 10px;font-size:.86rem;line-height:1.5;color:#4f6475;max-width:760px}
+.perf-ranking-lead{margin:0 0 10px;font-size:.86rem;line-height:1.5;color:#4f6475;max-width:900px}
 .perf-situacao{display:inline-flex;align-items:center;gap:7px;font-size:.76rem;font-weight:700;border-radius:999px;padding:5px 12px;line-height:1.25}
 .perf-situacao::before{content:'';width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
 .perf-situacao.parcial{background:#fff1d6;color:#8a5a00}
@@ -4100,3 +4100,81 @@ img.perf-logo{object-fit:cover}
 .conf-resumo{margin:.75rem 0 0;padding:.7rem;border-radius:8px;background:var(--bg,#f1f5f9);font-weight:600;font-size:.87rem}
 .conf-item-resumo{max-width:32rem;overflow-wrap:anywhere;font-size:.8rem}
 @media(max-width:540px){.conf-itens{padding:.65rem}.conf-item{align-items:flex-start;gap:.5rem}.conf-qtde{flex-direction:column;align-items:flex-start}.conf-data{flex-wrap:wrap}}
+
+/* Jornada de entregas: progresso baseado em evidências, com leitura compacta. */
+.perf-jornada{margin:0 0 14px;padding:20px;border-radius:18px;background:linear-gradient(115deg,#142b42,#283256 65%,#452b62);color:#fff;border:1px solid #3a4567}
+.perf-jornada>header{display:flex;gap:16px;justify-content:space-between;align-items:flex-start}
+.perf-jornada-kicker{color:#c5b9fa;font-size:.67rem;font-weight:800;letter-spacing:.11em}
+.perf-jornada h3{color:#fff;font-size:1.35rem;margin:5px 0 7px;line-height:1.25}
+.perf-jornada p{font-size:.82rem;line-height:1.5;margin:0;color:#dbe6f5}
+.perf-jornada-selo{padding:7px 10px;border:1px solid #8395b5;border-radius:20px;font-size:.72rem;white-space:nowrap;color:#f3f7ff}
+.perf-jornada-etapas{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:18px}
+.perf-jornada-etapa{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:baseline;min-width:0}
+.perf-jornada-etapa>span{font-size:.79rem;color:#e5ebf6}
+.perf-jornada-etapa strong{font-size:1.3rem;font-variant-numeric:tabular-nums}
+.perf-jornada-etapa strong small{font-size:.85rem;font-weight:400;color:#c0cee1}
+.perf-jornada-etapa>small{grid-column:1/-1;color:#bfcde2;font-size:.7rem}
+.perf-jornada progress{width:100%;height:6px;grid-column:1/-1;appearance:none;border:none;border-radius:6px;background:#536077}
+.perf-jornada progress::-webkit-progress-bar{background:#536077;border-radius:6px}
+.perf-jornada progress::-webkit-progress-value{background:#b7eda6;border-radius:6px}
+.perf-jornada progress::-moz-progress-bar{background:#b7eda6;border-radius:6px}
+.perf-proximo{display:flex;align-items:center;gap:16px;justify-content:space-between;border-top:1px solid #66738b;margin-top:16px;padding-top:13px}
+.perf-proximo p{max-width:760px}.perf-proximo strong{color:#fff}.perf-proximo .btn-primary{background:#e6dcff;color:#302058;flex-shrink:0;box-shadow:none}
+.perf-programa{margin-top:12px}.perf-programa>summary{font-size:.8rem;cursor:pointer;color:#e1d7ff;padding:5px 0}.perf-programa p{margin-top:9px}
+.perf-auditoria{margin:14px 0;border:1px solid #d6dfe9;border-radius:12px;background:#fff;padding:12px 15px}
+.perf-auditoria>summary{font-weight:700;font-size:.9rem;cursor:pointer;color:#263e52}
+.perf-auditoria p{font-size:.79rem;color:#5a6d7d;line-height:1.5;margin:10px 0}
+.perf-auditoria ul{padding:0;margin:8px 0;list-style:none;max-height:340px;overflow:auto}
+.perf-auditoria li{display:flex;justify-content:space-between;align-items:baseline;gap:15px;padding:8px 0;border-top:1px solid #e5eaf0;font-size:.82rem}.perf-auditoria li>span{min-width:0;overflow-wrap:anywhere}.perf-auditoria li>button{flex-shrink:0}
+.casa-perf .casa-pagina-head{margin-bottom:12px}.casa-perf .casa-pagina-head h2{font-size:1.5rem}.casa-perf .casa-pagina-head p{font-size:.86rem;margin:4px 0}.casa-perf .perf-podio{margin-top:14px}.casa-perf .perf-method{margin:9px 0}
+.pdf-secao-acao{margin:0 0 12px}.pdf-campo{font-weight:600;white-space:pre-wrap;overflow-wrap:anywhere}
+.conf-item>label{min-width:0}.conf-item strong,.conf-item small{overflow-wrap:anywhere}.conf-itens-topo{gap:10px;flex-wrap:wrap}
+@media(max-width:700px){.perf-jornada{padding:15px}.perf-jornada>header{flex-direction:column;gap:8px}.perf-jornada h3{font-size:1.1rem}.perf-jornada-etapas{gap:12px;grid-template-columns:1fr}.perf-jornada-etapa>small{display:none}.perf-proximo{flex-direction:column;align-items:stretch;gap:10px}.perf-auditoria li{align-items:flex-start;flex-direction:column;gap:5px}.casa-perf .filter-bar{gap:6px}.casa-perf .perf-ranking-ctrl{flex-wrap:wrap}}
+@media(prefers-reduced-motion:reduce){.casa-perf *{animation:none!important;scroll-behavior:auto!important;transition:none!important}}
+@media print{.pdf-secao-acao,[data-pdf-tela]{display:none!important}.perf-jornada{background:#fff;color:#18293c;border-color:#79899d;break-inside:avoid}.perf-jornada h3,.perf-jornada p,.perf-jornada span,.perf-jornada small,.perf-proximo strong{color:#18293c!important}.perf-jornada-etapas{grid-template-columns:repeat(3,minmax(0,1fr))}.perf-auditoria ul{max-height:none;overflow:visible}.perf-auditoria li{break-inside:avoid}.perf-jornada progress{print-color-adjust:exact}.perf-auditoria,.perf-ranking,.perf-entregas{max-width:100%}.perf-podio,.perf-equipes-cartoes{grid-template-columns:repeat(3,minmax(0,1fr))}.perf-podio-item,.perf-equipe-cartao{break-inside:avoid}.casa-tabela-wrap,.perf-tabela-wrap{overflow:visible!important}.casa-tabela{width:100%;min-width:0!important}.casa-tabela td{overflow-wrap:anywhere}.perf-programa{display:block}}
+
+.perf-conquistas{display:flex;flex-wrap:wrap;justify-content:center;gap:5px;font-size:.71rem;margin:8px 0}
+.perf-conquistas span{padding:4px 7px;border:1px solid var(--border);border-radius:20px;background:var(--bg);color:var(--text-secondary)}
+.perf-conquistas .ok{background:#e9f5ed;color:#246042;border-color:#c4e1ce}
+.casa-perf .perf-jornada{padding:14px 18px}.casa-perf .perf-jornada h3{font-size:1.15rem}.casa-perf .perf-programa{margin-top:6px}
+.casa-perf .perf-workspace>.filter-bar{margin-bottom:12px}.casa-perf .perf-toolbar{margin:8px 0}
+.casa-perf .perf-ranking-head{gap:10px}.casa-perf .perf-ranking-lead{margin:6px 0}
+@media(max-width:700px){.casa-perf .perf-jornada{padding:12px}.perf-jornada-selo{font-size:.68rem;padding:4px 7px}.casa-perf .perf-jornada h3{font-size:1rem}}
+
+.casa-perf .perf-pdf-principal{margin-left:auto}.casa-perf .perf-ranking{margin-bottom:12px}
+
+.tv-pdf{position:absolute;top:14px;left:18px;z-index:5;background:#fff;color:#203448}.tv-overlay .tv-head{padding-top:36px}
+@media print{.tv-pdf{display:none!important}#impressao-pcp .tv-painel{color:#1d2939;background:#fff;padding:0}#impressao-pcp .tv-head,#impressao-pcp .tv-corpo{color:#1d2939}#impressao-pcp .tv-num{font-size:20pt}}
+
+.casa-perf .perf-ranking-ctrl,.casa-perf .perf-seg{min-width:0;max-width:100%}.casa-perf .perf-seg{flex-wrap:wrap}
+@media(max-width:540px){
+ .casa-perf .periodo-filtro{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);width:100%}
+ .casa-perf .periodo-filtro input[type=date]{min-width:0;width:100%;box-sizing:border-box}
+ .casa-perf .casa-chips-periodo{grid-column:1/-1;display:flex;flex-wrap:nowrap;overflow-x:auto;max-width:100%;padding-bottom:3px}
+ .casa-perf .casa-chips-periodo button{flex-shrink:0}
+ .casa-perf .periodo-indicador{grid-column:1/-1;justify-self:start}
+}
+@media print{
+ #impressao-pcp{font-size:10pt}#impressao-pcp h1{font-size:18pt;margin:0 0 5px}#impressao-pcp>p{margin:3px 0;font-size:9pt}
+ #impressao-pcp .perf-podio{display:flex!important;align-items:flex-end;gap:12px;max-width:none;margin:10px 0;break-inside:avoid}
+ #impressao-pcp .perf-podio-item{flex:1;min-width:0;--degrau-h:24px!important}
+ #impressao-pcp .perf-podio-item.pos-1{--degrau-h:36px!important}#impressao-pcp .perf-podio-item.pos-2{--degrau-h:28px!important}
+ #impressao-pcp .perf-degrau{padding-top:0;align-items:center}
+ #impressao-pcp .perf-podio-topo{display:flex;padding:4px;gap:3px}
+ #impressao-pcp .perf-podio-item .perf-podio-visual{width:54px!important;height:54px!important;box-shadow:none;margin:2px 0 5px}
+ #impressao-pcp .perf-podio-item.pos-1 .perf-podio-visual{width:66px!important;height:66px!important}
+ #impressao-pcp .perf-podio-item .perf-medalha{font-size:20px!important}
+ #impressao-pcp .perf-podio-item .perf-podio-nome{color:#173c50!important;font-size:12pt!important;margin:4px 0;min-height:0}
+ #impressao-pcp .perf-podio-item .perf-podio-num strong{font-size:20pt!important;color:#173c50!important}
+ #impressao-pcp .perf-podio-item .perf-podio-num span,#impressao-pcp .perf-podio-linha,#impressao-pcp .perf-podio-membros{color:#354d61!important;font-size:8pt!important;min-height:0}
+ #impressao-pcp .perf-podio-extra{gap:2px}#impressao-pcp .perf-podio-membros{display:block;overflow:visible}
+ #impressao-pcp .perf-degrau span{font-size:14pt!important}#impressao-pcp .perf-rostos .casa-avatar{width:22px;height:22px}
+ #impressao-pcp .perf-ranking{padding:12px;border-radius:8px}#impressao-pcp .perf-ranking-head{margin-bottom:5px}
+ #impressao-pcp .perf-method{margin:5px 0;font-size:8pt}#impressao-pcp .perf-method p{font-size:8pt;line-height:1.35}
+ #impressao-pcp .perf-conquistas{font-size:7pt;margin:3px 0}#impressao-pcp .perf-conquistas span{padding:2px 4px}
+ #impressao-pcp .tv-corpo,#impressao-pcp .tv-corpo p,#impressao-pcp .tv-head h2,#impressao-pcp .tv-relogio,#impressao-pcp .tv-rodape{color:#203b50!important}
+ #impressao-pcp .tv-head{padding:0;min-height:0}#impressao-pcp .tv-head h2{font-size:16pt;margin:6px 0}#impressao-pcp .tv-painel{min-height:0;height:auto}
+ #impressao-pcp .perf-team-report{padding:10px;margin:10px 0}#impressao-pcp .perf-report-heading{padding-bottom:8px}
+ #impressao-pcp .perf-team-numbers{gap:12px;padding:8px 0}#impressao-pcp .perf-member-list>span{padding:5px 7px}
+ #impressao-pcp .perf-report-value{gap:5px;padding:10px;margin:8px 0}#impressao-pcp .perf-report-section{margin-top:14px}
+}

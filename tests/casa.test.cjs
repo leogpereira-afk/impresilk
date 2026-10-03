@@ -948,10 +948,12 @@ test('performance: as duas abas existem e nenhuma seção se perde', () => {
     document.getElementById = () => el2;
     renderPerformanceCasa();
     el2.innerHTML`);
-  // Equipe: produtividade, ligação com o RH e bônus.
+  // Ranking: produtividade e vínculo com o RH; bônus antigo no relatório.
   assert.match(equipe, /Produtividade/);
   assert.match(equipe, /Conferir nomes do PCP/);
-  assert.match(equipe, /Bônus por ponto/);
+  assert.doesNotMatch(equipe, /Bônus por ponto/);
+  assert.match(rel, /Histórico de bônus manual/);
+  assert.match(rel, /Apontar quem leva o ponto/);
   assert.ok(!/Carros mais usados/.test(equipe), 'carros é relatório');
   // Relatório: retrabalho e carros, com o filtro de período junto.
   assert.match(rel, /Retrabalho/);
@@ -1422,4 +1424,11 @@ test('lista de veículos: "Instalação interna (sem carro)" é a primeira opç�
   assert.equal((html.match(/value="Instalação interna"/g) || []).length, 1, 'uma vez só');
   assert.doesNotMatch(t.run("optionsVeiculoCasa('Strada')"), /value="Instalação interna" selected/);
   assert.match(t.run('carrosHTML({de:"2026-01-01",ate:"2026-12-31"})') || '', /^(?![\s\S]*Instalação interna)/, 'sem carro não entra na lista de carros');
+});
+
+test('auditoria: valor líquido ausente não vira a soma incompleta ou bruta dos itens',()=>{
+ const t=casa([]);
+ assert.equal(t.run("valorDaOS({itens:[{subtotal:100},{descricao:'sem preço'}]})"),null);
+ assert.equal(t.run("valorDaOS({itens:[{subtotal:100},{subtotal:200}]})"),null);
+ assert.equal(t.run("somaValores([{valorTotal:.1},{valorTotal:.2}]).total"),.3);
 });

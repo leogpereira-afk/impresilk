@@ -1561,6 +1561,7 @@ const LOTE = (() => {
       <div class="lote-rodape">${rodapeHTML(c)}</div>
     </div>`;
     if (typeof wireAbasEntregas === 'function') wireAbasEntregas(el);
+    if (typeof wirePDFsEntregaPerformance === 'function') wirePDFsEntregaPerformance(el);
     ligar(el);
     montarAloc(el);
     restaurarFoco(el, ativa);

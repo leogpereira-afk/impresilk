@@ -219,7 +219,7 @@ function propostaCasa(osCount, total, orcamento, teto) {
 
 // ── Valor da O.S (uma base só) ───────────────────────────────────────────────
 // Ordem: painel_ordens (STORE.valores, verdade do Painel com rateio conferido)
-// > valorTotal que a importação gravou > soma dos itens. null = sem valor,
+// > valorTotal que a importação gravou. Subtotais não comprovam descontos. null = sem valor,
 // que a tela mostra em laranja em vez de fingir zero.
 function numBR(v) {
   if (v == null || v === '') return NaN;
@@ -230,22 +230,17 @@ function numBR(v) {
 function valorDaOS(os) {
   const num = String(os && os.numero || '').trim();
   const origemAtualizada = os?.erpAlteracoes?.some(h => h.campos?.some(c => c.campo === 'valorTotal'));
-  if (origemAtualizada && Number.isFinite(numBR(os.valorTotal))) return numBR(os.valorTotal);
+  if (origemAtualizada && Number.isFinite(numBR(os.valorTotal)) && numBR(os.valorTotal)>=0) return numBR(os.valorTotal);
   const doPainel = num && STORE.valores ? STORE.valores()[num] : undefined;
-  if (Number.isFinite(doPainel)) return doPainel;
+  if (Number.isFinite(doPainel) && doPainel>=0) return doPainel;
   const vt = numBR(os && os.valorTotal);
   if (Number.isFinite(vt) && vt >= 0) return vt;
-  let soma = 0, tem = false;
-  for (const it of (Array.isArray(os && os.itens) ? os.itens : [])) {
-    const n = numBR(it && it.subtotal);
-    if (Number.isFinite(n) && n > 0) { soma += n; tem = true; }
-  }
-  return tem ? soma : null;
+  return null;
 }
 function somaValores(lista) {
   let total = 0, semValor = 0;
-  for (const os of lista) { const v = valorDaOS(os); if (v == null) semValor++; else total += v; }
-  return { total, semValor };
+  for (const os of lista) { const v = valorDaOS(os); if (v == null) semValor++; else total += Math.round(v*100); }
+  return { total:total/100, semValor };
 }
 function iniciaisCasa(nome) {
   const p = String(nome || '').trim().split(/\s+/).filter(Boolean);
@@ -2245,6 +2240,7 @@ function renderEntregas() {
       ${relatorioAnosHTML()}
     </div>`;
   wireAbasEntregas(el);
+  if(typeof wirePDFsEntregaPerformance==='function')wirePDFsEntregaPerformance(el);
   el.querySelectorAll('[data-ent-itens]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();void conferirItensEntrega(b.dataset.entItens).catch(e=>toast(perfErroTxt(e),'error'));});
   const dDados = el.querySelector('details.ent-dados');
   if (dDados) dDados.ontoggle = () => { STATE._entDadosAberto = dDados.open; };
@@ -3653,10 +3649,15 @@ function painelTVCasa(i, f) {
     const cabe = podio.length ? 3 : 8;
     return pod + (resto.length ? `<ol class="tv-lista tv-lista-resto">${resto.slice(0, cabe).map(p => linhaTV(p, rosto, x => num(x) + ' ' + unidade)).join('')}</ol>` : '') + mais(resto.length - cabe);
   };
-  const previa = typeof perfFonteAtual === 'function' && !perfFonteAtual();
+  const fonteTV=typeof perfFonteAtual==='function'?perfFonteAtual():null;
+  const previa = !fonteTV;
+  const fechada=!!fonteTV?.fechadoEm;
+  const equipesTV=fechada?resumo.equipes:temPerf?PERF.resumir(PERF.comEquipes(regs.filter(r=>r.confirmado),c.equipes||[],opcoes)).equipes.filter(e=>e.equivalentes>0):[];
+  const medidaEquipe=p=>fechada?p.os:Math.round(p.equivalentes*1e8)/1e8;
+  equipesTV.sort((a,b)=>medidaEquipe(b)-medidaEquipe(a)||a.nome.localeCompare(b.nome));
   const nota='<p class="metricas-nota">Participação operacional; não é nota de mérito ou bonificação. Divisão igual quando ainda não confirmada.</p>';
   const paineis = [
-    {titulo:'🤝 Equipes em ação',corpo:resumo.equipes.length?ranking(resumo.equipes,p=>p.os,rostoEquipe,'perf-podio-logo',p=>String(p.os),'O.S.'):'<p class="tv-vazio">Sem entregas com equipe neste período.</p>'},
+    {titulo:fechada?'🤝 Equipes em ação':'🤝 Produção confirmada das equipes',corpo:(equipesTV.length?ranking(equipesTV,medidaEquipe,rostoEquipe,'perf-podio-logo',p=>perfFormato(medidaEquipe(p)),fechada?'O.S.':'O.S. equivalentes'):'<p class="tv-vazio">Nenhuma produção confirmada neste período. Confira as entregas na Performance.</p>')+'<p class="metricas-nota">Classificação operacional do período. O resultado do programa depende da apuração das regras e ocorrências.</p>'},
     {titulo:'📦 Participação nas entregas',corpo:(resumo.pessoas.length?ranking(resumo.pessoas,p=>p.equivalentes,rostoPessoa,'perf-podio-foto',p=>perfFormato(p.equivalentes),'O.S. equivalentes'):'<p class="tv-vazio">Sem participação registrada.</p>')+nota},
     {titulo:'🚚 Carros mais usados',corpo:carrosHTML(f)},
     {titulo:'🔧 Retrabalho no período',corpo:retrabalhoHTML(f)},
@@ -3700,10 +3701,11 @@ function abrirTVCasa() {
   document.body.classList.add('tv-ligada');
   const pintar = () => {
     const p = painelTVCasa(i, periodoTV());
-    box.innerHTML = `<button class="tv-x" title="Sair (Esc)">×</button>
+    box.innerHTML = `<button class="tv-pdf btn-ghost btn-sm" data-pdf-excluir>📄 PDF deste painel</button><button class="tv-x" title="Sair (Esc)">×</button>
       <button class="tv-seta tv-esq" title="Anterior">‹</button>
       <button class="tv-seta tv-dir" title="Próximo">›</button>
       <div class="tv-painel">${p.html}</div>`;
+    box.querySelector('.tv-pdf').onclick=async()=>{if(timer)clearInterval(timer);const copia=box.querySelector('.tv-painel').cloneNode(true);if(document.fullscreenElement&&document.exitFullscreen)await document.exitFullscreen().catch(()=>{});imprimirAnalisePCP('Performance · '+(copia.querySelector('h2')?.textContent||'Modo TV'),copia,periodoTV(),typeof perfFonteTexto==='function'?perfFonteTexto():'PCP');};
     box.querySelector('.tv-x').onclick = fechar;
     box.querySelector('.tv-esq').onclick = () => { i--; pintar(); rearmar(); };
     box.querySelector('.tv-dir').onclick = () => { i++; pintar(); rearmar(); };
@@ -3864,7 +3866,7 @@ function renderPerformanceCasa() {
           ? 'Regras do programa das equipes: divisão, comissão e volta do carro, com o exemplo de cada versão.'
           : 'Compare participações confirmadas, identifique pendências e consulte os detalhes da operação.'}</p></div>
         <span class="casa-vista">
-          <button class="btn-ghost btn-sm ${abaPerf === 'equipe' ? 'active' : ''}" data-perf-aba="equipe">Equipe</button>
+          <button class="btn-ghost btn-sm ${abaPerf === 'equipe' ? 'active' : ''}" data-perf-aba="equipe">Rankings</button>
           <button class="btn-ghost btn-sm ${abaPerf === 'relatorio' ? 'active' : ''}" data-perf-aba="relatorio">Relatório</button>
           ${podeRegras ? `<button class="btn-ghost btn-sm ${abaPerf === 'regras' ? 'active' : ''}" data-perf-aba="regras">Regras</button>` : ''}
           <button class="btn-ghost btn-sm" id="perf-tv" title="Ranking em tela cheia para a TV da fábrica">📺 Modo TV</button>
@@ -3874,9 +3876,9 @@ function renderPerformanceCasa() {
       ${abaPerf === 'equipe' ? `
         ${typeof performanceEquipesHTML === 'function' ? performanceEquipesHTML() : produtividadeHTML()}
         ${typeof perfFonteHTML === 'function' ? perfFonteHTML() : ''}
-        ${quadroCasa('perf-rh', `🔗 Conferir nomes do PCP × fichas do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), pendRH > 0)}
+        ${quadroCasa('perf-rh', `🔗 Conferir nomes do PCP × fichas do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), false)}
         ${quadroCasa('perf-plantoes', '🗓 Plantões vinculados às O.S.', plantaoPerformanceHTML(), false)}
-        ${quadroCasa('perf-bonus', '💰 Bônus por ponto <small>regra própria, independente dos percentuais acima</small>', bonusHTML, false)}
+
       ` : `
         <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}<button class="btn-ghost" id="perf-rel-pdf">📄 PDF resumido</button><button class="btn-ghost" id="perf-rel-detalhado">PDF com O.S.</button></div>
         ${typeof performanceRelatorioHTML === 'function' ? performanceRelatorioHTML() : ''}
@@ -3885,11 +3887,13 @@ function renderPerformanceCasa() {
         ${quadroCasa('perf-gente', '👷 Indicadores operacionais <small>horas e registros do período</small>', produtividadeHTML(), false)}
         ${quadroCasa('perf-retrab', '🔧 Retrabalho <small>de onde veio, de quem e de que tipo</small>', retrabalhoHTML(f), false)}
         ${quadroCasa('perf-carros', '🚚 Carros mais usados', carrosHTML(f), false)}
+        ${quadroCasa('perf-bonus', 'Histórico de bônus manual <small>separado do programa de comissão de 1%</small>', bonusHTML, false)}
       `}`}
     </div>`;
   if (detAbertos.size) { const detDepois = [...el.querySelectorAll('details')]; chaveDet(detDepois).forEach((k, i) => { if (detAbertos.has(k)) detDepois[i].open = true; }); }
   wireFiltroPeriodo(el, '_fPerf', renderPerformanceCasa);
   wireQuadrosCasa(el);
+  if(typeof wirePDFsEntregaPerformance==='function')wirePDFsEntregaPerformance(el);
   el.querySelectorAll('[data-perf-aba]').forEach(b => b.onclick = () => {
     STATE._perfAba = b.dataset.perfAba;
     // Entrar na aba Regras consulta o servidor de novo (outra versão pode ter sido criada).

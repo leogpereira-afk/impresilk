@@ -66,6 +66,14 @@ test('falta de valor impede fechamento; valor zero confirmado é válido',async(
  e.db.pcp_registros[0].registro.valorTotal=0;r=await e.call({action:'performancePeriodo',...periodo},who);
  assert.equal((await e.call({action:'performanceFechar',...periodo,hash:r.hash,requestId:'valor-zero-00001',motivo:'Entrega sem cobrança'},who)).ok,true);
 });
+test('valor ambíguo no ERP não permite selar apuração mesmo com participação confirmada',async()=>{
+ const d=dados();d.painel_ordens=[{numero:'0',valor:100},{numero:'0',valor:200}];
+ const e=await edge('pcp-sync',d),f=await e.call({action:'performancePeriodo',...periodo},who);
+ assert.equal(f.registros[0].confirmado,true);assert.ok(f.registros[0].avisoValor);
+ const r=await e.call({action:'performanceFechar',...periodo,hash:f.hash,requestId:'valor-ambiguo-0001',motivo:'Conferência inicial'},who);
+ assert.equal(r.status,422);assert.match(r.error,/valores conflitantes/);
+ assert.equal(e.db.pcp_registros.filter(r=>r.colecao==='performance_fechamentos').length,0);
+});
 
 /* ---------------- Revisão da avaliação individual (23/09/2026) ---------------- */
 test('fechamento sela os pesos da nota: trocar os pesos depois não reordena a revisão', async () => {

@@ -434,9 +434,11 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
   const registros=lista.map(o=>{
     const p=participacoes.find((x:any)=>x.id===o.id);
     let valor=num(o.valorTotal), origem="O.S. do PCP";
+    const avisoValor=valoresItens[String(o.numero)]?.length>1?"Há mais de um valor do ERP para este número. Confira a origem; foi preservado o líquido da O.S. no PCP.":"";
     const mudou=o.erpAlteracoes?.some((h:any)=>h.campos?.some((x:any)=>x.campo==="valorTotal"));
-    if(!mudou && Number.isFinite(valores[String(o.numero)])){valor=valores[String(o.numero)];origem="Painel / ERP";}
-    if(!Number.isFinite(valor)||valor<0){const itens=(o.itens||[]).map((x:any)=>num(x.subtotal)).filter((v:number)=>Number.isFinite(v)&&v>0);valor=itens.length?itens.reduce((a:number,b:number)=>a+b,0):null;origem="Itens da O.S.";}
+    if(!mudou && valoresItens[String(o.numero)]?.length===1 && Number.isFinite(valores[String(o.numero)])){valor=valores[String(o.numero)];origem="Painel / ERP";}
+    // Sem líquido não somar somente os produtos que têm preço: omite itens e descontos.
+    if(!Number.isFinite(valor)||valor<0){valor=null;origem="Sem valor";}
     let dadosEntrega:any={}, voltaDaEntrega=true;
     if(o._conferencia) {
       const a=CONFERENCIA_ENTREGA.apurar(o,valorConferencia(o,valoresItens[String(o.numero)] || [])), e=a.entregas.find((x:any)=>x.id===o._conferencia.id);
@@ -524,7 +526,7 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     const camposEquipe=confirmado
       ? (divisao&&divisao.grupos?{grupos:divisao.grupos}:{})
       : sugestaoApurada(membros,aloc,aloc?finaisAlocacao(aloc):[],equipesPerf,idMembro);
-    return {id:o.id,...dadosEntrega,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf,voltou,volta,...camposEquipe};
+    return {id:o.id,...dadosEntrega,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,...(avisoValor?{avisoValor}:{}),membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf,voltou,volta,...camposEquipe};
   });
   /* performance-2: cada registro leva a conferência da volta, e a apuração
      leva os PESOS DA NOTA em vigor. Eles entram no hash: quem fecha sela os
@@ -957,6 +959,7 @@ Deno.serve(async (req: Request) => {
            anterior mostra a mensagem, então ela diz onde está o botão. */
         if(fonte.hash!==body.hash)return resp({error:"Os dados mudaram desde a consulta. Toque em Atualizar apuração (no quadro Base e fechamento), confira e feche de novo."},409);
         if(!fonte.registros.length || fonte.registros.some((r:any)=>!r.confirmado || r.valor===null))return resp({error:"Confirme todas as participações e confira os valores antes de fechar."},422);
+        if(fonte.registros.some((r:any)=>r.avisoValor))return resp({error:"Confira os valores conflitantes no ERP antes de fechar. Veja as pendências da auditoria."},422);
         const revisao=(anterior?.revisao || 0)+1,id=periodo.de+":"+periodo.ate+":"+String(revisao).padStart(6,"0");
         const registro={...fonte,...periodo,id,revisao,anterior:anterior?.id||null,requestId,motivo,fechadoEm:new Date().toISOString(),fechadoPor:cracha?.nome || "Integração autorizada"};
         const {error}=await sb.from("pcp_registros").insert({colecao:"performance_fechamentos",id,registro,apagado:false,atualizado_em:registro.fechadoEm});
@@ -1805,14 +1808,17 @@ Deno.serve(async (req: Request) => {
         }
         const lista = [...new Set((nums ?? []).map((r: any) => String(r.numero || "").trim()).filter(Boolean))];
         const valores: Record<string, number> = {};
+        const vistos=new Set<string>(), duplicados=new Set<string>();
         // PostgREST corta em 1000 linhas por pedido: pergunta em fatias.
         for (let i = 0; i < lista.length; i += 500) {
           const { data: po, error: e2 } = await sb.from("painel_ordens")
             .select("numero, valor").in("numero", lista.slice(i, i + 500));
           if (e2) return resp({ error: e2.message }, 500);
           for (const r of po ?? []) {
-            const v = Number(r.valor);
-            if (r.numero && Number.isFinite(v)) valores[String(r.numero)] = v;
+            const n=String(r.numero || ""),v=Number(r.valor);
+            if(!n)continue;
+            if(vistos.has(n)){duplicados.add(n);delete valores[n];continue;}vistos.add(n);
+            if(r.valor!==null && r.valor!=="" && Number.isFinite(v) && v>=0)valores[n]=v;
           }
         }
         /* OS ANOS QUE EXISTEM SAO OS QUE O BANCO TEM, nao uma constante.
@@ -1830,7 +1836,7 @@ Deno.serve(async (req: Request) => {
         if (primeiro >= 2000 && primeiro <= anoAtual) {
           for (let a = anoAtual; a >= Math.max(primeiro, anoAtual - 19); a--) anos.push(a);
         }
-        return resp({ valores, anos, em: new Date().toISOString() });
+        return resp({ valores, anos, numerosDuplicados:[...duplicados], em: new Date().toISOString() });
       }
 
       // ---- elenco: quem instala (RH) e com que carro (Ativos do Painel) ----
