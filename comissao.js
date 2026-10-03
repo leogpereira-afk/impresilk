@@ -27,6 +27,22 @@ const COMISSAO = (() => {
     }
     return [...porPeriodo.values()];
   }
+  const chavePeriodo = r => r.de+':'+r.ate;
+  const baseElegivel = l => l.baseElegivelCentavos??(l.decisao!=='falha_comprovada'&&l.comissaoCentavos!=null?l.baseLiquidaCentavos:0);
+  // Revalida sem editar snapshots. Ordem fixa evita dependências circulares:
+  // revisão anterior pode exigir conciliação posterior, nunca o inverso.
+  function divergencias(historico, modo) {
+    const saldos=new Map(), erros=[];
+    for(const a of ativas(historico,modo).sort((a,b)=>chavePeriodo(a).localeCompare(chavePeriodo(b)))){
+      for(const l of lista(a.apuracao.linhas).slice().sort((a,b)=>String(a.dia).localeCompare(String(b.dia))||String(a.id).localeCompare(String(b.id)))){
+        const base=baseElegivel(l)||0, saldo=saldos.get(l.osId)||{base:0,comissao:0};
+        const esperado=base?percentual(saldo.base+base,100)-saldo.comissao:0;
+        if(esperado!==l.comissaoCentavos)erros.push({id:a.id,periodo:chavePeriodo(a),osId:l.osId,esperado,registrado:l.comissaoCentavos});
+        saldos.set(l.osId,{base:saldo.base+base,comissao:saldo.comissao+esperado});
+      }
+    }
+    return erros;
+  }
   function apurar(fonte, entrada={}, contexto={}) {
     const config=entrada.config || {}, decisoes=entrada.decisoes || {}, entregas=entrada.entregas || {};
     const pendencias=[], add=t=>{if(!pendencias.includes(t))pendencias.push(t);};
@@ -37,13 +53,15 @@ const COMISSAO = (() => {
     if(!['teste','efetivo'].includes(config.modo))add('Defina teste ou início efetivo do programa.');
     if(config.modo==='efetivo' && (!/^\d{4}-\d{2}-\d{2}$/.test(config.inicioEfetivo || '') || config.inicioEfetivo<'2026-11-01' || periodo.de<config.inicioEfetivo || !texto(config.decisaoGestao)))add('Início efetivo exige decisão da gestão, desde novembro, anterior ou igual ao período.');
     if(config.criteriosExtras!=='somente_falha_comprovada')add('Valide atraso e retorno antecipado: apenas falha comprovada pode cortar esta comissão.');
+    const osDaFonte=new Set(lista(fonte?.registros).map(r=>String(r.osId||r.id)));
+    for(const d of divergencias(contexto.aprovacoes,config.modo))if(d.periodo<chavePeriodo(periodo)&&osDaFonte.has(d.osId))add('Concilie primeiro a aprovação do período '+d.periodo+' da O.S. '+d.osId+'. O acumulado de centavos mudou.');
     const acumulados=new Map();
     const referencias=[];
     for(const a of ativas(contexto.aprovacoes,config.modo)){
-      if(a.de===periodo.de&&a.ate===periodo.ate)continue;
+      if(chavePeriodo(a)>=chavePeriodo(periodo))continue;
       referencias.push(a.id);
       for(const l of lista(a.apuracao.linhas)){
-        const base=l.baseElegivelCentavos??(l.decisao!=='falha_comprovada'&&l.comissaoCentavos!=null?l.baseLiquidaCentavos:0);
+        const base=baseElegivel(l);
         const x=acumulados.get(l.osId)||{base:0,comissao:0};x.base+=base||0;x.comissao+=l.comissaoCentavos||0;acumulados.set(l.osId,x);
       }
     }
@@ -145,7 +163,7 @@ const COMISSAO = (() => {
     for(const p of (revisao.apuracao.ajustes||[]))rows.push([revisao.id,revisao.apuracao.fechamentoId,revisao.apuracao.anteriorAprovacao||'',p.pessoaId,p.nome||'',p.tipo,(p.centavos/100).toFixed(2).replace('.',','),(p.diferencaCentavos/100).toFixed(2).replace('.',',')]);
     return '\uFEFF'+rows.map(r=>r.map(cel).join(';')).join('\r\n');
   }
-  return {apurar,ativas,ratear,erroAprovacao,conciliar,compensar,csv};
+  return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv};
 })();
 
 if (typeof module !== 'undefined') module.exports = COMISSAO;

@@ -171,3 +171,53 @@ test('fix: referências ativas do mesmo regime acumulam só base elegível e sal
  const compensada={...a,id:'compensacao',revisao:2,apuracao:{...a.apuracao,linhas:[]}};
  assert.equal(C.apurar(fonte([r]),entrada([r]),{aprovacoes:[a,compensada]}).totalCentavos,1);
 });
+
+test('round2: compensação/redução anterior bloqueia CSV dependente até conciliação append-only',async()=>{
+ for(const acao of ['compensar','reduzir']){
+  let a=await ambiente();a.e.db.pcp_registros=a.e.db.pcp_registros.filter(r=>r.colecao!=='performance_fechamentos');
+  a=fonteSelada(a,a.periodo,[parcial('A',.5,.5)]);
+  const pa=await previa(a),aa=await aprovar(a,pa.revisao);assert.equal(aa.revisao.apuracao.totalCentavos,1);
+  const b=fonteSelada(a,{de:'2026-12-01',ate:'2026-12-31'},[parcial('B',.5,.5)]);
+  const pb=await previa(b),ab=await aprovar(b,pb.revisao);assert.equal(ab.revisao.apuracao.totalCentavos,0);
+  const original=structuredClone(b.e.db.pcp_registros.find(r=>r.colecao==='performance_comissao'&&r.id===ab.revisao.id).registro);
+  const alterado=acao==='reduzir'?fonteSelada(a,a.periodo,[parcial('A',.5,.1)],2):a;
+  const pc=await previa(alterado,{anterior:aa.revisao.id,requestId:'alterar-anterior-12345',...(acao==='compensar'?{compensarId:aa.revisao.id}:{})});
+  const ac=await aprovar(alterado,pc.revisao,{requestId:'aprovar-alteracao-12345'});assert.equal(ac.ok,true,JSON.stringify(ac));
+  const exp=()=>b.e.call({action:'performanceComissaoExportar',...b.periodo,id:ab.revisao.id},who);
+  assert.equal((await exp()).status,409,'B com centavos desatualizados precisa conciliação');
+  const pn=await previa(b,{anterior:ab.revisao.id,requestId:'conciliar-dependente-12345'});
+  assert.equal(pn.revisao.apuracao.aprovavel,true,JSON.stringify(pn));assert.equal(pn.revisao.apuracao.totalCentavos,1);
+  assert.equal(pn.revisao.apuracao.ajustes.reduce((s,p)=>s+p.diferencaCentavos,0),1);
+  assert.equal((await exp()).status,409);
+  const an=await aprovar(b,pn.revisao,{requestId:'aprovar-dependente-12345'});assert.equal(an.ok,true,JSON.stringify(an));
+  assert.equal((await b.e.call({action:'performanceComissaoExportar',...b.periodo,id:an.revisao.id},who)).status,200);
+  assert.equal((await a.e.call({action:'performanceComissaoExportar',...a.periodo,id:ac.revisao.id},who)).status,200,'conciliar B não invalida A');
+  assert.deepEqual(b.e.db.pcp_registros.find(r=>r.colecao==='performance_comissao'&&r.id===original.id).registro,original);
+ }
+});
+
+test('round2: cadeia exige conciliar anteriores e usa ordem estável, não ordem de aprovação',async()=>{
+ let a=await ambiente();a.e.db.pcp_registros=a.e.db.pcp_registros.filter(r=>r.colecao!=='performance_fechamentos');
+ a=fonteSelada(a,a.periodo,[parcial('A',.3,.5)]);
+ const b=fonteSelada(a,{de:'2026-12-01',ate:'2026-12-31'},[parcial('B',.3,.5)]);
+ const c=fonteSelada(a,{de:'2027-01-01',ate:'2027-01-31'},[parcial('C',.3,.5)]);
+ const pa=await previa(a),aa=await aprovar(a,pa.revisao),pb=await previa(b),ab=await aprovar(b,pb.revisao),pc=await previa(c),ac=await aprovar(c,pc.revisao);
+ assert.deepEqual([aa,ab,ac].map(x=>x.revisao.apuracao.totalCentavos),[1,0,1]);
+ const comp=await previa(a,{anterior:aa.revisao.id,compensarId:aa.revisao.id,requestId:'compensar-cadeia-12345'});
+ assert.equal((await aprovar(a,comp.revisao,{requestId:'aprovar-cadeia-12345'})).ok,true);
+ const cp=await previa(c,{anterior:ac.revisao.id,requestId:'revisar-terceiro-12345'});
+ assert.equal(cp.revisao.apuracao.aprovavel,false);assert.match(cp.revisao.apuracao.pendencias.join(' '),/Concilie primeiro.*2026-12/);
+ assert.equal((await aprovar(c,cp.revisao,{requestId:'nao-pular-cadeia-12345'})).status,422);
+ assert.equal((await c.e.call({action:'performanceComissaoExportar',...c.periodo,id:ac.revisao.id},who)).status,409);
+ const bp=await previa(b,{anterior:ab.revisao.id,requestId:'revisar-segundo-12345'}),ba=await aprovar(b,bp.revisao,{requestId:'aprovar-segundo-12345'});assert.equal(ba.ok,true);
+ const cp2=await previa(c,{anterior:cp.revisao.id,requestId:'revisar-terceiro-novo-12345'}),ca=await aprovar(c,cp2.revisao,{requestId:'aprovar-terceiro-12345'});assert.equal(ca.ok,true);
+ assert.equal(ca.revisao.apuracao.ajustes.reduce((s,p)=>s+p.diferencaCentavos,0),-1);
+ assert.equal((await c.e.call({action:'performanceComissaoExportar',...c.periodo,id:ca.revisao.id},who)).status,200);
+ // Mesmo dia: ID da entrega desempata; revisões/id da aprovação não mudam a ordem.
+ const rs=[parcial('Z',.2,.5),parcial('Y',.2,.5)];
+ const f=fonte(rs),en=entrada(rs);
+ assert.deepEqual(C.apurar(f,en).linhas.map(l=>[l.id,l.comissaoCentavos]),[['Y',1],['Z',0]]);
+ assert.deepEqual(C.apurar({...f,registros:rs.slice().reverse()},en).linhas.map(l=>[l.id,l.comissaoCentavos]),[['Y',1],['Z',0]]);
+ const posterior={...ab.revisao,apuracao:{...ab.revisao.apuracao,linhas:[{osId:'os1',baseElegivelCentavos:50,comissaoCentavos:1}]}};
+ assert.equal(C.apurar(a.f,entrada(a.f.registros),{aprovacoes:[posterior]}).totalCentavos,1,'aprovação posterior não consome centavo do período anterior');
+});

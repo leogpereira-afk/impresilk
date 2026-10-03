@@ -1002,6 +1002,9 @@ Deno.serve(async (req: Request) => {
         }
         if(acao==="performanceComissaoExportar"){
           if(!ultima || ultima.id!==body.id)return resp({error:"Selecione a última revisão aprovada. Uma nova prévia suspende a exportação anterior."},409);
+          const osExportadas=new Set((ultima.apuracao?.linhas||[]).map((l:any)=>l.osId));
+          const divergencias=COMISSAO.divergencias(todas,ultima.apuracao?.config?.modo).filter((d:any)=>d.periodo<=chave&&osExportadas.has(d.osId));
+          if(divergencias.length)return resp({error:"O acumulado financeiro mudou. Gere e aprove a conciliação destes períodos, em ordem, antes de exportar: "+[...new Set(divergencias.map((d:any)=>d.periodo.split(":").map((data:string)=>data.split("-").reverse().join("/")).join(" a ")))].join("; "),conciliacoesPendentes:divergencias},409);
           if(!ultima.apuracao?.compensacaoDe){
           const fechamentos=await perfFechamentos(periodo);
           if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"Há outra revisão operacional. Concilie o demonstrativo antes de exportar."},409);
