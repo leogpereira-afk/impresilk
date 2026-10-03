@@ -289,10 +289,12 @@ const STORE = (() => {
     trySync();
   }
 
-  function deleteOS(id) {
-    _setAllOS(getAllOS().filter(o => o.id !== id));
-    _enqueue({ action: 'delete', id });
-    trySync();
+  async function deleteOS(id, motivo, rev) {
+    if(getQueue().some(x=>x.os?.id===id || x.id===id))throw new Error('Sincronize as alterações desta O.S. antes de excluir.');
+    const r=await apiFn('os',{action:'delete',id,motivo,rev});
+    if(!r?.ok)throw new Error(r?.error || 'Exclusão não confirmada.');
+    _setAllOS(getAllOS().filter(o=>o.id!==id));
+    return r;
   }
 
   // ── CFG ───────────────────────────────────────────────────────────────────
@@ -798,13 +800,13 @@ const STORE = (() => {
           }
           let res;
           try {
-            res = await apiFn('os', { action: 'putPhoto', base64, mime: item.mime, fileId: item.fileId }, PRAZO_FOTO_MS);
+            res = await apiFn('os', { action: 'putPhoto', base64, mime: item.mime, fileId: item.fileId, anexadoEm:item.anexadoEm }, PRAZO_FOTO_MS);
           } catch (e) {
             // O servidor de antes da F24 recusa o id com a O.S.: a foto vai com o id antigo (idFotoAntigo).
             const antigo = recusaDoIdNovo(e, item.fileId);
             if (!antigo) throw e;
             await renomearFotoNoAparelho(item.fileId, antigo, base64, item.mime);
-            const res2 = await apiFn('os', { action: 'putPhoto', base64, mime: item.mime, fileId: antigo }, PRAZO_FOTO_MS);
+            const res2 = await apiFn('os', { action: 'putPhoto', base64, mime: item.mime, fileId: antigo, anexadoEm:item.anexadoEm }, PRAZO_FOTO_MS);
             if (res2 && res2.fileId) { _removeFromQueue({ action: 'putPhoto', fileId: antigo }); _failCount.delete('putPhoto:' + antigo); }
             consecutiveNetFails = 0;
             continue;
@@ -2121,7 +2123,7 @@ const STORE = (() => {
       return null;
     }
     const mime   = 'image/jpeg';
-    const fileId = novoIdFoto(osId);
+    const fileId = novoIdFoto(osId), anexadoEm = new Date().toISOString();
 
     try {
       await putFoto(fileId, base64, mime);
@@ -2135,13 +2137,13 @@ const STORE = (() => {
       }
       if (navigator.onLine) {
         try {
-          const res = await apiFn('os', { action: 'putPhoto', base64, mime, fileId }, PRAZO_FOTO_MS);
+          const res = await apiFn('os', { action: 'putPhoto', base64, mime, fileId, anexadoEm }, PRAZO_FOTO_MS);
           if (res && res.fileId) return res.fileId;
         } catch (e) {
           // O servidor de antes da F24 recusa o id com a O.S.: vai com o id antigo.
           const antigo = recusaDoIdNovo(e, fileId);
           if (antigo) {
-            try { const res = await apiFn('os', { action: 'putPhoto', base64, mime, fileId: antigo }, PRAZO_FOTO_MS); if (res && res.fileId) return res.fileId; } catch {}
+            try { const res = await apiFn('os', { action: 'putPhoto', base64, mime, fileId: antigo, anexadoEm }, PRAZO_FOTO_MS); if (res && res.fileId) return res.fileId; } catch {}
           }
         }
       }
@@ -2149,7 +2151,7 @@ const STORE = (() => {
       return null;
     }
 
-    _enqueue({ action: 'putPhoto', mime, fileId });
+    _enqueue({ action: 'putPhoto', mime, fileId, anexadoEm });
     trySync();
     return fileId;
   }

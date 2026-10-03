@@ -1465,7 +1465,7 @@ async function anexarFotos(files, aplicar, depois) {
   toast(files.length > 1 ? `Enviando ${files.length} fotos…` : 'Enviando foto…');
   const ids = [];
   for (const f of files) {
-    const id = await STORE.pushPhoto(f);
+    const id = await STORE.pushPhoto(f, d.id);
     if (id) { aplicar(d, id); ids.push(id); }
   }
   // Foto que falhou já foi dita pelo 'foto-falhou' do store, com o motivo
@@ -1699,10 +1699,8 @@ function bindModal(os, ro) {
   // Fotos do serviço pronto (câmera ou galeria): a primeira carimba a hora de
   // retorno, se faltar, com o dia de hoje (carimbarAgora).
   $$('[data-retorno]', root).forEach(inp => inp.onchange = async () => {
-    await anexarFotos(Array.from(inp.files || []), porNaLista('fotosRetornoIds'), o => {
-      if (!o.horaRetorno) carimbarAgora(o, 'horaRetorno', 'retornoEm');
-      else STORE.carimbarMomento(o, 'horaRetorno', 'retornoEm');
-    });
+    await anexarFotos(Array.from(inp.files || []), porNaLista('fotosRetornoIds'));
+    toast('Foto anexada. A hora real do retorno deve ser confirmada no campo de horário.');
   });
   $$('[data-rm-ret]', root).forEach(b => b.onclick = () => {
     if (!apagarFoto(b.dataset.rmRet)) return;

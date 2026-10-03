@@ -1080,7 +1080,7 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
   if (abertas.length > 20 && numeros.size < abertas.length * 0.5) throw new Error('Carteira ERP caiu mais de 50%; mantida para conferência.');
   /* A marca da E7 (erpComSaldo: "ERP diz entregue, PCP tem saldo") sai quando a
      O.S. volta à carteira aberta: o ERP reabriu, e o aviso de entregue não vale mais. */
-  const restaurar = (linhas || []).filter((l:any) => numeros.has(String(l.registro.numero)) && (l.apagado || (l.registro.finalizadaEm && l.registro.baixaAutoERP?.em === l.registro.finalizadaEm) || (!l.registro.finalizadaEm && (l.registro.erpSaiuDaCarteiraEm || l.registro.erpComSaldo))));
+  const restaurar = (linhas || []).filter((l:any) => !l.apagado && numeros.has(String(l.registro.numero)) && ((l.registro.finalizadaEm && l.registro.baixaAutoERP?.em === l.registro.finalizadaEm) || (!l.registro.finalizadaEm && (l.registro.erpSaiuDaCarteiraEm || l.registro.erpComSaldo))));
   const fora = abertas.filter((l:any) => l.registro.origemMubisys && !numeros.has(String(l.registro.numero)));
   /* O.S COM TRABALHO DE GENTE NÃO É FECHADA PELO ERP. Ela fica aberta com a
      marca erpSaiuDaCarteiraEm, e o card pede "ERP fechou: confirmar". Sem
@@ -1100,8 +1100,7 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
     const volta = numeros.has(String(l.registro.numero));
     const r = {...l.registro,rev:(Number(l.registro.rev)||0)+1,atualizadoEm:em,atualizadoPor:'Mubisys · conciliação de carteira'};
     if (volta) {
-      // Excluída que o ERP ainda lista volta à mesa: o card precisa poder dizer por quê.
-      if (l.apagado) r.restauradaPeloERPEm = em;
+      // Reabrir baixa ERP ativa é distinto de recuperar uma exclusão da gestão.
       if (r.finalizadaEm && r.baixaAutoERP?.em === r.finalizadaEm) { r.finalizadaEm='';r.finalizadoPor='';r.finalizadoPorId='';delete r.baixaAutoERP;delete r.arquivadaEm; }
       delete r.erpSaiuDaCarteiraEm;
       delete r.erpComSaldo;
@@ -1115,7 +1114,7 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
       r.erpCarteira={aberta:false,em};
     }
     const {data,error:e}=await sb.from('pcp_registros').update({registro:r,apagado:false,atualizado_em:carimboDaLinha(l.atualizado_em)})
-      .eq('colecao','os').eq('id',l.id).eq('atualizado_em',l.atualizado_em).select('id');
+      .eq('colecao','os').eq('id',l.id).eq('apagado',false).eq('atualizado_em',l.atualizado_em).select('id');
     if(e) throw new Error(e.message);
     if(!data?.length) conflitos++;else if(volta) restauradas++;else if(marcarIds.has(l.id)) marcadas++;else arquivadas++;
   }

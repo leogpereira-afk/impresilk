@@ -69,7 +69,7 @@ test('fila fechada: uma faixa com quantas, o valor parado, a mais antiga e o bot
   assert.ok(html, 'a faixa da fila tem de existir');
   assert.match(html, /<strong>13 baixas do ERP esperam<\/strong> lançamento/);
   // 12 com valor (1001 a 1012) somam 12.078; a sem valor fica fora da soma e é contada à parte.
-  assert.match(html, /R\$\s?12\.078,00<\/strong> parados <span class="badge sem-valor">1 sem valor<\/span>/);
+  assert.match(html, /R\$\s?12\.078,00<\/strong> em valores conhecidos a conferir <span class="badge sem-valor">1 sem valor<\/span>/);
   assert.match(html, /a mais antiga é de <strong>15\/09\/26<\/strong>, há 14 dias/);
   assert.match(html, /<button type="button" class="btn-ghost ent-fila-botao" data-ent-fila aria-expanded="false">Ver a fila<\/button>/);
   assert.doesNotMatch(html, /<tr>|data-lancar-os/, 'fechada, a fila não desenha linha nenhuma');

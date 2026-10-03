@@ -112,7 +112,7 @@ test('revisão: a O.S. antiga excluída no servidor não volta pelo lote (confer
   const b = await montar({os:todas, local:[todas[2]]});
   await b.run('buscarAntigasConferenciaCasa()');
   assert.deepEqual((await b.json('planoConversaoNomes().tarefas.map(t => t.id)')).sort(), ['dup', 'ok', 'r1']);
-  const del = await b.e.call({action:'delete', id:'dup'}, {papel:'pcp', nome:'Outra Gestora', sub:'outra.gestora'});
+  const del = await b.e.call({action:'delete', id:'dup',rev:linhaOS(b.e,'dup').registro.rev,motivo:'Registro duplicado confirmado'}, {papel:'pcp', nome:'Outra Gestora', sub:'outra.gestora'});
   assert.equal(del.status, 200);
   assert.equal(linhaOS(b.e, 'dup').apagado, true);
   // (a) A lápide ainda não chegou a este aparelho: o lote pergunta ao servidor antes de gravar a antiga.

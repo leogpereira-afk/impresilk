@@ -111,10 +111,10 @@ test('resposta perdida por sinal ruim: o mesmo envio repetido não vira conflito
  assert.equal((await e.call({action:'upsert',os:{...envio,atualizadoEm:'2026-09-19T11:30:00Z'}},{papel:'pcp'})).conflito,true);
 });
 
-test('excluir O.S. não apaga as fotos do bucket (a O.S. pode voltar pela conciliação)',async()=>{
+test('excluir O.S. não apaga as fotos do bucket (a gestão pode recuperar com motivo)',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[pronta({fotosCheckinIds:['foto_a'],layoutFotoId:'foto_l'})]});
  const removidas=[];e.cliente.storage={from:()=>({remove:async ids=>{removidas.push(...ids);return {error:null};}})};
- const r=await e.call({action:'delete',id:'1'},{papel:'pcp'});assert.equal(r.ok,true);
+ const r=await e.call({action:'delete',id:'1',rev:1,motivo:'Registro duplicado confirmado'},{papel:'pcp'});assert.equal(r.ok,true);
  assert.equal(e.db.pcp_registros[0].apagado,true);assert.deepEqual(removidas,[]);
 });
 test('apagar foto pelo crachá de toque: nunca o layout do PCP nem a prova de O.S. finalizada',async()=>{
@@ -172,11 +172,11 @@ test('pcp-mubisys: o batimento gravado passa por semCredencial campo a campo',as
  const st=await e.run(`gravarBatimento({em:'2026-09-25T10:00:00Z',ok:true,entregues:{erro:'error sending request for url (https://x.mubisys.com/api/CHAVESECRETA123/ordem-servico?status=X)'}})`);
  assert.doesNotMatch(JSON.stringify(e.db.pcp_meta),/CHAVESECRETA123/);assert.match(st.entregues.erro,/<chave>/);
 });
-test('conciliação: excluída que o ERP ainda lista volta com a marca de por que voltou',async()=>{
+test('conciliação: excluída que o ERP ainda lista exige recuperação explícita da gestão',async()=>{
  const morta={...row('mub-1',{numero:'1',origemMubisys:true,equipe:['Ana']}),apagado:true};
  const e=await edge('pcp-mubisys',{pcp_registros:[morta]});
  await e.run(`reconciliarCarteira(sb,[{numero:'1',cliente:'Cliente'}])`);
- assert.equal(e.db.pcp_registros[0].apagado,false);assert.ok(e.db.pcp_registros[0].registro.restauradaPeloERPEm);
+ assert.equal(e.db.pcp_registros[0].apagado,true);assert.equal(e.db.pcp_registros[0].registro.restauradaPeloERPEm,undefined);
 });
 
 /* A NOTA DO CARRO CONTA VOLTAS, NÃO O.S. (performance-3). */

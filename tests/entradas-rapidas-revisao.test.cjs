@@ -696,8 +696,8 @@ test('revisão: B2, os rótulos das fotos são os mesmos nos dois lados, e a dic
   // Caso ruim: "Fotos de antes (check-in; ...; carimba a hora de saída)": check-in é a chegada, e o campo fala da saída.
   assert.match(h, /<label>Fotos de antes \(ao chegar, antes de começar\)<\/label>/);
   assert.match(h, /<label>Fotos de depois \(serviço pronto\)<\/label>/);
-  assert.match(h, /<p class="foto-dica">Pelo menos 1 para finalizar\. Com a hora de saída vazia, a primeira foto preenche a hora de saída com a hora em que foi anexada\.<\/p>/);
-  assert.match(h, /<p class="foto-dica">Pelo menos 1 para finalizar\. Com a hora do retorno vazia, a foto preenche a hora do retorno com a hora em que foi anexada\.<\/p>/);
+  assert.match(h, /Anexar foto não informa a hora real da saída/);
+  assert.match(h, /Anexar foto não informa a hora real do retorno/);
   assert.doesNotMatch(h, /check-in;|carimba a hora/);
   const eq = ler('equipe.js');
   assert.match(eq, /<label>Fotos de antes \(ao chegar, antes de começar; pelo menos 1 para finalizar\)<\/label>/);

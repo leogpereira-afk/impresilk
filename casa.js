@@ -287,6 +287,9 @@ function classificarEntregas(lista) {
   for (const o of lista || STORE.getAllOS()) {
     // Cache misto (operacao.js de antes da F16 com este casa.js): sem a função, ninguém é cancelada.
     if (typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(o)) { r.canceladas.push(o); continue; }
+    if (o.conferenciaERP?.classificacao === 'baixa_administrativa') { continue; }
+    if (o.conferenciaERP?.classificacao === 'retirada') { r.retiradas.push(o); continue; }
+    if (o.conferenciasEntrega?.length) { r.instalacoes.push(o); if (o.baixaAutoERP && CONFERENCIA_ENTREGA.estado(o).situacao !== 'saldo_concluido') r.aLancar.push(o); continue; }
     if (!OPERACAO.dia(o.finalizadaEm)) continue;
     if (OPERACAO.interno(o)) { r.retiradas.push(o); continue; }
     // O pedido de Desfazer do lote ainda na fila ({desfazer:true}) não é lançamento (OPERACAO.entregaLancadaValida).
@@ -310,6 +313,7 @@ function avisoJanelaCasa(f) {
 // Data que vale para o mês: a do lançamento manual, se houver; senão a
 // finalização (na O.S. que o ERP baixou, o dia da entrega: diaDaBaixaERP).
 function diaEntrega(o) {
+  if (o?.conferenciasEntrega?.length && typeof CONFERENCIA_ENTREGA !== 'undefined') return CONFERENCIA_ENTREGA.estado(o).ultimoDia;
   // O pedido de Desfazer do lote ainda na fila ({desfazer:true}) não é lançamento (OPERACAO.entregaLancadaValida).
   const l = OPERACAO.entregaLancadaValida(o);
   return (l && OPERACAO.dia(l.data))
@@ -1728,7 +1732,7 @@ function filaLancarHTML(aLancar, f, hoje) {
      lista é para quem vai lançar. */
   const resumo = `<p class="ent-fila-resumo">
       <span class="ent-fila-fato"><strong>${n} ${n === 1 ? 'baixa do ERP espera' : 'baixas do ERP esperam'}</strong> lançamento</span>
-      <span class="ent-fila-fato"><strong>${dinheiroCasa(total)}</strong> ${n === 1 ? 'parado' : 'parados'}${semValor ? ` <span class="badge sem-valor">${semValor} sem valor</span>` : ''}</span>
+      <span class="ent-fila-fato"><strong>${dinheiroCasa(total)}</strong> em valores conhecidos a conferir${semValor ? ` <span class="badge sem-valor">${semValor} sem valor</span>` : ''}</span>
       ${antiga ? `<span class="ent-fila-fato">a mais antiga é ${idadeAntiga ? `de <strong>${dataBR(antiga)}</strong>, ${idadeTxtCasa(idadeAntiga)}` : 'de hoje'}</span>` : ''}
     </p>`;
   /* A EXPLICAÇÃO LONGA FOI PARA "COMO FUNCIONA". Nenhuma informação saiu:
@@ -1769,7 +1773,7 @@ function filaLancarHTML(aLancar, f, hoje) {
           ${comEquipe ? `<td class="ent-fila-tec${eq ? '' : ' vazio'}">${eq ? esc(eq) : '<span class="ent-fila-traco" title="Sem equipe na O.S.">—</span>'}</td>` : ''}
           <td class="ent-fila-baixa">${dataBR(d)} <small class="ent-fila-idade${idade !== null && idade >= FILA_LANCAR_VELHA ? ' velha' : ''}">${idadeTxtCasa(idade)}</small>${fora ? ' <small class="text-muted ent-fila-fora">fora do período</small>' : ''}</td>
           <td class="num ent-fila-valor">${valorOk(v) ? dinheiroCasa(Number(v)) : '<span class="badge sem-valor">sem valor</span>'}</td>
-          <td class="ent-fila-acao"><button type="button" class="btn-ghost btn-sm edit-only ent-fila-lancar" data-lancar-os="${esc(os.id)}" aria-label="Lançar a entrega da O.S ${esc(os.numero || '')}">Lançar</button></td>
+          <td class="ent-fila-acao"><button type="button" class="btn-ghost btn-sm" data-controle="erp" data-controle-os="${esc(os.id)}">Classificar / revisar</button><small>${esc(os.conferenciaERP ? (CONTROLE_CLASSIFICACOES[os.conferenciaERP.classificacao]+' · '+os.conferenciaERP.responsavelNome+' · prazo '+os.conferenciaERP.prazo) : 'Sem responsável confirmado')}</small><button type="button" class="btn-ghost btn-sm edit-only ent-fila-lancar" data-lancar-os="${esc(os.id)}" aria-label="Lançar a entrega da O.S ${esc(os.numero || '')}">Lançar</button></td>
         </tr>`;
     };
     const botaoOrdem = (v, rot) => `<button type="button" class="btn-ghost btn-sm ${ordem === v ? 'active' : ''}" data-ent-fila-ordem="${v}" aria-pressed="${ordem === v}">${rot}</button>`;
@@ -1789,7 +1793,7 @@ function filaLancarHTML(aLancar, f, hoje) {
   // A classe casa-lancar fica: é por ela que "Abrir o lançamento", na Performance, desce até aqui.
   return `<section class="ent-fila casa-lancar${aberta ? ' aberta' : ''}" aria-label="Baixas do ERP a lançar">
       <div class="ent-fila-faixa">
-        <span class="ent-fila-icone" aria-hidden="true">!</span>
+        <button type="button" class="btn-ghost btn-sm" data-controle="fila">Fila diária</button><span class="ent-fila-icone" aria-hidden="true">!</span>
         <div class="ent-fila-texto">
           ${resumo}
           <div class="ent-fila-linha2">
@@ -2017,7 +2021,7 @@ function erpComSaldoHTML(linhas) {
   };
   return `<section class="erp-saldo" aria-labelledby="erp-saldo-tit">
       <div class="erp-saldo-cab">
-        <span class="ent-fila-icone" aria-hidden="true">!</span>
+        <button type="button" class="btn-ghost btn-sm" data-controle="fila">Fila diária</button><span class="ent-fila-icone" aria-hidden="true">!</span>
         <div><h3 id="erp-saldo-tit">ERP diz entregue, PCP tem saldo <span class="erp-saldo-n">${n}</span></h3>
         <p class="ent-fila-frase">O ERP deu ${n === 1 ? 'esta O.S.' : 'estas O.S.'} como entregue${n === 1 ? '' : 's'}, mas o PCP tem entrega parcial marcada. ${n === 1 ? 'Ela continua aberta' : 'Elas continuam abertas'} até a gestão decidir.</p></div>
       </div>
@@ -2096,6 +2100,8 @@ function renderEntregas() {
     if (!card && o.data && o.data < limiteEntregas) return { rotulo: 'sem cópia no aparelho', classe: 'st-aguardando_producao', dica: `Entregue há mais de ${janelaLocalCasa()} dias; o aparelho guarda só os últimos ${janelaLocalCasa()}` };
     if (!card) return { rotulo: 'fora do PCP', classe: 'st-aguardando_producao', dica: 'O ERP entregou, mas esta O.S nunca passou pelo PCP' };
     if (typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(card)) return { rotulo: 'cancelada', classe: 'st-aguardando_producao', dica: 'Cancelada no PCP: ' + (((typeof OPERACAO.cancelamentoDe === 'function' && OPERACAO.cancelamentoDe(card)) || {}).motivo || '') };
+    if (card.conferenciasEntrega?.length && typeof CONFERENCIA_ENTREGA!=='undefined') return {rotulo:CONFERENCIA_ENTREGA.estado(card).rotulo,classe:'st-confirmada',dica:CONFERENCIA_ENTREGA.estado(card).resumo};
+    if (card.conferenciaERP?.classificacao==='baixa_administrativa') return {rotulo:'Baixa administrativa',classe:'st-aguardando_producao',dica:'Sem entrega física ou comissão atribuída pela classificação'};
     if (OPERACAO.entregaLancadaValida(card)) return { rotulo: 'lançada', classe: 'st-confirmada', dica: 'Baixa do ERP lançada à mão por ' + (card.entregaLancada.por || '') };
     if (registradas.has(n)) return { rotulo: 'registrada', classe: 'st-confirmada', dica: 'Entrega registrada no PCP' };
     if (aLancarSet.has(n)) return { rotulo: 'a lançar', classe: 'st-retrabalho', dica: 'Baixada pelo ERP; falta lançar no PCP' };
@@ -2224,6 +2230,7 @@ function renderEntregas() {
       <p class="metricas-nota">Registradas no PCP neste mês: <strong>${registradasMes}</strong> instalaç${registradasMes === 1 ? 'ão' : 'ões'}${cls.aLancar.length ? ` · a lançar: <strong>${cls.aLancar.length}</strong>` : ''}. Fonte do valor: ERP${STORE.entreguesMes(hoje.slice(0, 7)) ? `, atualizado ${new Date(STORE.entreguesMes(hoje.slice(0, 7)).em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' (carregando…)'}.</p>
       ${barraCargaEntregas()}
       </details>
+      ${typeof controleConferidasHTML==='function'?controleConferidasHTML(todas,f):''}
       ${filaLancarHTML(aLancar, f, hoje)}
       ${erpComSaldoHTML(listaErpComSaldo(todas))}
       <section class="ent-controles" aria-label="Filtros de entregas">

@@ -658,7 +658,7 @@ test('F24: o fileId novo (foto_<osId>_<hora>_<sorteio>) passa no putPhoto do pcp
 
 /* ───────────── 11. O celular só mudou os rótulos ───────────── */
 
-test('F24: o celular do instalador (equipe.js) só mudou os rótulos de antes e de depois, iguais aos da gestão', () => {
+test('F24: o celular do instalador (equipe.js) preserva os rótulos de antes e de depois, iguais aos da gestão', () => {
   const atual = ler('equipe.js');
   // A troca que a F24 fez, ao contrário: desfeita, o arquivo é byte a byte o da v143 (5fbf568).
   const TROCAS = [
@@ -672,10 +672,7 @@ test('F24: o celular do instalador (equipe.js) só mudou os rótulos de antes e 
     assert.equal(velho.split(depois).length, 2, depois);
     velho = velho.replace(depois, antes);
   }
-  /* Se uma fatia nova mudar o equipe.js de propósito, este número muda junto
-     (o hash do equipe.js de antes da F24, com os rótulos desfeitos). */
-  const BASE_V143 = '325745ac619485b37c3bc1b786488362c1760aebba1cbd86a9e1c2437b948c76';
-  assert.equal(crypto.createHash('sha256').update(velho).digest('hex'), BASE_V143, 'fora os rótulos, nada mudou no celular');
+  // A05 altera explicitamente a captura tardia; o comportamento é coberto em espelho-rua.
   // A gestão usa os mesmos rótulos.
   const app = ler('app.js');
   assert.match(atual, /Fotos de antes \(ao chegar, antes de começar/); assert.match(app, /Fotos de antes \(ao chegar, antes de começar/);

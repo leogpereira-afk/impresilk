@@ -64,15 +64,15 @@ test('crachá de toque: a entrada diz origem toque e o ID que a gestão autorizo
 
 test('o delete registra quem apagou; apagar de novo a lápide não repete a entrada',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[base()]});
- const r=await e.call({action:'delete',id:'1'},gestor);
+ const r=await e.call({action:'delete',id:'1',rev:1,motivo:'Registro duplicado confirmado'},gestor);
  assert.equal(r.status,200);
  assert.equal(e.db.pcp_registros.find(x=>x.colecao==='os').apagado,true);
  const d=diario(e);assert.equal(d.length,1);
  const a=d[0].registro;
  assert.equal(a.acao,'excluir');assert.equal(a.osId,'1');assert.equal(a.numero,'5001');
- assert.deepEqual(a.campos,['apagado']);assert.equal(a.antes.apagado,false);assert.equal(a.depois.apagado,true);
+ assert.deepEqual(a.campos,['apagado','cicloRegistro']);assert.equal(a.antes.apagado,false);assert.equal(a.depois.apagado,true);
  assert.equal(a.autor.nome,'Gestor Teste');assert.equal(a.autor.login,'gestor');
- await e.call({action:'delete',id:'1'},gestor);
+ await e.call({action:'delete',id:'1',rev:1,motivo:'Registro duplicado confirmado'},gestor);
  assert.equal(diario(e).length,1,'lápide apagada de novo não é alteração');
  await e.call({action:'delete',id:'nunca-existiu'},gestor);
  assert.equal(diario(e).length,1,'O.S. que não existe não gera entrada');
@@ -249,7 +249,7 @@ test('gestão: nome de exibição e começo de nome nunca dão o ID do autor (co
  assert.equal(a.autor.porId,'','"Carla" casa por começo de nome com a ficha, mas nome não concede identidade');
  // Conta de alguém que não está no RH, login "carla" (não é o apelido de ninguém).
  const e2=await edge('pcp-sync',{pcp_registros:[base()],registros:rh});
- await e2.call({action:'delete',id:'1'},{sub:'carla',nome:'Carla Terceira',papel:'admin'});
+ await e2.call({action:'delete',id:'1',rev:1,motivo:'Registro duplicado confirmado'},{sub:'carla',nome:'Carla Terceira',papel:'admin'});
  a=diario(e2)[0].registro;assert.equal(a.acao,'excluir');
  assert.equal(a.autor.porId,'');
 });

@@ -57,5 +57,21 @@ export const CONFERENCIA_ENTREGA = (() => {
     const saldoItens = itens.filter(it => !it.cancelado && (usados.get(it.chave) || 0) < it.qtde).map(it => ({...it, saldo:it.qtde - (usados.get(it.chave) || 0)}));
     return {erro:'', entregas:saida, saldoItens, total:valorConhecido ? rateio.total : null, saldo:valorConhecido ? rateio.total - saida.reduce((s,e) => s + e.valor,0) : null};
   }
-  return {catalogo, validar, apurar};
+  // Conferência administrativa e declaração física são evidências distintas.
+  // Nunca altera finalizadaEm nem soma marcas físicas às quantidades conferidas.
+  function estado(os, liquido) {
+    const registros = lista(os?.conferenciasEntrega), ap = apurar(os || {}, liquido);
+    const itens = catalogo(os).map(it => {
+      const fisico = motor().situacaoItem(os.itens[it.indice], os);
+      const conferido = ap.erro ? null : registros.reduce((n,e) => n + lista(e.itens).filter(p => p.chave === it.chave).reduce((a,p) => a + p.qtde,0),0);
+      return {...it, declarado: Number(fisico.declarado) || 0, entregueFisico: Number(fisico.entregue) || 0, conferido, saldo: conferido === null ? null : it.cancelado ? 0 : it.qtde-conferido};
+    });
+    const saldoUnidades = ap.erro ? null : itens.reduce((n,i)=>n+(i.saldo || 0),0);
+    const situacao = ap.erro ? 'inconsistente' : !registros.length ? 'sem_conferencia' : saldoUnidades > 0 ? 'parcial' : 'saldo_concluido';
+    const divergencia = !!os?.finalizadaEm && registros.length > 0 && situacao !== 'saldo_concluido';
+    const rotulo = {inconsistente:'Conferência inconsistente',sem_conferencia:'Sem conferência por item',parcial:'Entrega parcial conferida',saldo_concluido:'Saldo de itens conferido'}[situacao];
+    const resumo = rotulo + (registros.length && !ap.erro ? ' · ' + itens.reduce((n,i)=>n+(i.conferido || 0),0) + ' unidades conferidas · ' + saldoUnidades + ' a conferir' : '') + (divergencia ? ' · finalização anterior com saldo: revisar' : '') + (ap.erro ? ' · '+ap.erro : '');
+    return {...ap,itens,situacao,rotulo,resumo,saldoUnidades,divergencia,conferidoValor:ap.saldo===null?null:ap.total-ap.saldo,ultimoDia:registros.map(e=>e.dia).sort().pop() || ''};
+  }
+  return {catalogo, validar, apurar, estado};
 })();

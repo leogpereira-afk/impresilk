@@ -43,7 +43,7 @@ async function conferirItensEntrega(osId, entregaId = '') {
     d.querySelector('#conf-resumo').textContent=erro || `${entrega.itens.length} item(ns) selecionado(s) · ${valor==null?'Valor a conferir: faltam valores dos itens.':dinheiroCasa(valor/100)} · ${ap.saldoItens.length} item(ns) com saldo para outra entrega.`;
     d.querySelector('#conf-parte-titulo').textContent=erro?'Confira os itens entregues':ap.saldoItens.length?'Entrega parcial':'Saldo de itens concluído';
     d.querySelector('#conf-parte-itens').textContent=catalogo.filter(it=>escolhidos.has(it.chave)).map(it=>`${it.descricao} · ${escolhidos.get(it.chave)} de ${it.qtde}`).join(' · ') || 'Nenhum item selecionado.';
-    d.querySelector('#conf-parte-valor').textContent=erro || `Esta entrega: ${valor==null?'valor a conferir':dinheiroCasa(valor/100)} · Falta entregar: ${ap.saldo==null?'valor a conferir':dinheiroCasa(ap.saldo/100)}`;
+    d.querySelector('#conf-parte-valor').textContent=erro || `Esta entrega: ${valor==null?'valor a conferir':dinheiroCasa(valor/100)} · Saldo a conferir: ${ap.saldo==null?'valor a conferir':dinheiroCasa(ap.saldo/100)}`;
   };
   const atualizar=()=>{conferir();ALOCUI.repintar(chave);};
   ALOCUI.montar(box,chave,{aoMudar:conferir});

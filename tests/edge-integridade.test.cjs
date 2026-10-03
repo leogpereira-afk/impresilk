@@ -66,15 +66,15 @@ test('remarcação limpa confirmação anterior e liberação do veículo',async
  const r=await e.call({action:'upsert',os:{id:'1',rev:1,instalacao:{data:'2026-09-20'},confirmacao:'Confirmado',confEm:'2026-09-19T10:00:00Z',carroLiberado:true}},{papel:'pcp'});
  assert.equal(r.os.confirmacao,'');assert.equal(r.os.confEm,'');assert.equal(r.os.carroLiberado,false);
 });
-test('carteira completa restaura exclusão, importa pendente, arquiva o fantasma e só MARCA a O.S. com trabalho de gente',async()=>{
+test('carteira completa preserva exclusão, importa pendente, arquiva o fantasma e só MARCA a O.S. com trabalho de gente',async()=>{
  const morta={...row('mub-1',{numero:'1',origemMubisys:true,equipe:['Ana'],fotosRetornoIds:['foto']}),apagado:true};
  const fora=row('mub-2',{numero:'2',origemMubisys:true,equipe:['Bia'],saidaEm:'2026-09-01T10:00:00Z'});
  const manual=row('local',{numero:'local',equipe:['Ana']});
  const fantasma=row('mub-4',{numero:'4',origemMubisys:true,instalacao:{data:'2026-09-01',periodo:'Manhã'}});
  const e=await edge('pcp-mubisys',{pcp_registros:[morta,fora,manual,fantasma]});
  const r=await e.run(`reconciliarCarteira(sb,[{numero:'1',cliente:'Cliente'},{numero:'3',cliente:'Pendente'}])`);
- assert.equal(r.restauradas,1);assert.equal(r.arquivadas,1);assert.equal(r.marcadasParaConferir,1);assert.equal(r.novas,1);
- assert.equal(e.db.pcp_registros[0].apagado,false);assert.deepEqual(e.db.pcp_registros[0].registro.equipe,['Ana']);
+ assert.equal(r.restauradas,0);assert.equal(r.arquivadas,1);assert.equal(r.marcadasParaConferir,1);assert.equal(r.novas,1);
+ assert.equal(e.db.pcp_registros[0].apagado,true);assert.deepEqual(e.db.pcp_registros[0].registro.equipe,['Ana']);
  assert.deepEqual(e.db.pcp_registros[0].registro.fotosRetornoIds,['foto']);
  const f=e.db.pcp_registros[1].registro;
  assert.equal(f.finalizadaEm,undefined,'equipe na rua: o ERP não fecha sozinho');
@@ -82,7 +82,7 @@ test('carteira completa restaura exclusão, importa pendente, arquiva o fantasma
  assert.equal(f.saidaEm,'2026-09-01T10:00:00Z');
  assert.equal(e.db.pcp_registros[3].registro.baixaAutoERP.status,'FORA DA CARTEIRA ABERTA','o fantasma (data só do ERP) segue a baixa');
  assert.equal(e.db.pcp_registros[2].registro.finalizadaEm,undefined);
- assert.equal(e.db.pcp_meta[0].valor.antes.length,3);
+ assert.equal(e.db.pcp_meta[0].valor.antes.length,2);
  const marca=f.erpSaiuDaCarteiraEm;
  const deNovo=await e.run(`reconciliarCarteira(sb,[{numero:'1',cliente:'Cliente'},{numero:'3',cliente:'Pendente'}])`);
  assert.equal(deNovo.arquivadas,0);assert.equal(deNovo.restauradas,0);assert.equal(deNovo.novas,0);assert.equal(deNovo.marcadasParaConferir,0);

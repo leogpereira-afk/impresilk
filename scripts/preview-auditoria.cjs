@@ -3,11 +3,11 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
+const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
-const base=(id,extra={})=>({id,numero:'T-'+id,cliente:'Cliente de teste '+id,servico:'Fachada e comunicação visual',tipo:'externo',instalacao:{data:hoje,periodo:'Manhã',duracaoDias:1},equipe:['Ana'],veiculo:'Carro 1',liberadoPCP:true,confirmacao:'Confirmado',confEm:hoje+'T08:00:00-03:00',criadoEm:deslocar(-20)+'T12:00:00',itens:[{descricao:'Painel',qtd:1,pronto:false}],...extra});
+const base=(id,extra={})=>({id,rev:1,numero:'T-'+id,cliente:'Cliente de teste '+id,servico:'Fachada e comunicação visual',tipo:'externo',instalacao:{data:hoje,periodo:'Manhã',duracaoDias:1},equipe:['Ana'],veiculo:'Carro 1',liberadoPCP:true,confirmacao:'Confirmado',confEm:hoje+'T08:00:00-03:00',criadoEm:deslocar(-20)+'T12:00:00',itens:[{descricao:'Painel',qtd:1,pronto:false}],...extra});
 let lista=[
 base('101',{cliente:'Clínica Horizonte · teste',liberadoPCP:false,equipe:[],veiculo:'',confirmacao:''}),
 base('102',{cliente:'Loja Central · teste'}),
@@ -65,9 +65,20 @@ cfg.performancePCP={equipes:[
  {id:'F03',equipeId:'eq-leao',equipeNome:'Leão',emblema:'🦁',membros:[pvMembro('900004','Carlos Lima Prado',60),pvMembro('900007','Diego Ramos Teixeira',40)],por:'Gestor de teste',em:hoje,obs:''},
  {id:'F08',equipeId:'eq-lobo',equipeNome:'Lobo',emblema:'🐺',membros:[pvMembro('900005','Carlos Melo Dias',50),pvMembro('900008','Eduardo Farias Neto',50)],por:'Gestor de teste',em:hoje,obs:''},
  {id:'F12',equipeId:'eq-leao',equipeNome:'Leão',emblema:'🦁',membros:[pvMembro('900004','Carlos Lima Prado',60),pvMembro('900007','Diego Ramos Teixeira',40)],por:'Gestor de teste',em:hoje,obs:''}]};
-lista.push(base('PARCIAL',{cliente:'Cliente fictício · entrega por itens',numero:'TESTE-PARCIAL',rev:1,valorTotal:8500,equipe:['900001'],finalizadaEm:hoje+'T12:00:00-03:00',entregaLancada:{data:hoje},itens:[{uid:'pv-parcial-a',item:'1',descricao:'Painel de fachada',qtde:'4',subtotal:'5000'},{uid:'pv-parcial-b',item:'2',descricao:'Letreiro da recepção',qtde:'1',subtotal:'5000'}]}));
+lista.push(base('PARCIAL',{cliente:'Cliente fictício · entrega por itens',numero:'TESTE-PARCIAL',rev:1,valorTotal:18000,equipe:['900001'],finalizadaEm:hoje+'T12:00:00-03:00',entregaLancada:{data:hoje},itens:[{uid:'pv-parcial-a',item:'1',descricao:'Painel de fachada',qtde:'4',subtotal:'12000'},{uid:'pv-parcial-b',item:'2',descricao:'Letreiro da recepção',qtde:'3',subtotal:'8000'}]}));
+const parcialFixture=lista.find(o=>o.id==='PARCIAL');
+const itemFixture=(i,q)=>({chave:'uid:'+i.uid,identidade:JSON.stringify([String(i.item||''),String(i.descricao||''),String(i.medidas||''),String(i.qtde??i.qtd??''),String(i.unidade||'')]),qtde:q});
+parcialFixture.conferenciasEntrega=[{id:'fixture-primeira',dia:deslocar(-1),itens:parcialFixture.itens.map(i=>itemFixture(i,1)),alocacao:pvAloc([pvAguia(10000)]),por:'Gestor fictício',em:hoje+'T09:00:00Z'}];
+lista.push(base('ERP-CONFERIR',{rev:1,numero:'TESTE-ERP',cliente:'Baixa ERP fictícia a classificar',finalizadaEm:hoje+'T10:00:00Z',baixaAutoERP:{em:hoje+'T10:00:00Z',status:'ENTREGUE'},valorTotal:4000}));
+lista.push({...structuredClone(parcialFixture),id:'PARCIAL-ABERTA',numero:'TESTE-PARCIAL-ABERTA',finalizadaEm:'',entregaLancada:null,cliente:'Parcial sem finalização fictícia'});
+lista.push(base('FOTO-ONTEM',{numero:'TESTE-FOTO-ONTEM',cliente:'Foto tardia fictícia · hora real a confirmar',horaSaida:'',saidaEm:'',horaRetorno:'',retornoEm:'',fotosCheckinIds:['foto_FOTO-ONTEM_1780000000000_teste']}));
 const revisoesPreview=[];
 async function previewApi(body){
+ if(['controleEntrega','delete','restaurarOS','excluidasOS','fotosEvento','conferenciaEntrega'].includes(body.action)){
+  const r=await fetch('/controle-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,seed:lista,pessoas:ELENCO_PREVIA.pessoas,cfg})});const out=await r.json();
+  if(out.error)throw new Error(out.error);if(out.lista)lista=out.lista;return out;
+ }
+
  if(new URLSearchParams(location.hash.slice(1)).has('comissao') && /^(performanceComissao|performancePeriodo|performanceFechamentos|performanceFechar)/.test(body.action))return fetch('/comissao-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
  if(body.action==='conferenciaEntrega'){
   const os=lista.find(o=>o.id===body.osId);if(!os)throw new Error('O.S. de teste não encontrada');
@@ -83,7 +94,7 @@ async function previewApi(body){
  if(body.action==='performancePeriodo'){
   // O mesmo formato do pcp-sync (perfFonte): membro sugerido pelo ID do RH, volta e conferência do carro.
   const nomeRH=n=>(ELENCO_PREVIA.pessoas.find(p=>p.id===n)||{}).nome||n;
-  const registros=lista.flatMap(o=>{if(!o.conferenciasEntrega?.length)return [o];const a=CONFERENCIA_ENTREGA.apurar(o,o.valorTotal);return a.entregas.map(e=>({...o,id:o.id+'::entrega:'+e.id,finalizadaEm:e.dia,alocacao:e.alocacao,equipe:DIVISAO.derivarEquipe(e.alocacao),valorTotal:e.valor==null?null:e.valor/100,_parcial:{osId:o.id,entregaId:e.id,itensEntrega:e.itens,saldoItens:a.saldoItens.length,fracaoOS:a.total>0?e.valor/a.total:0}}));}).filter(o=>o.finalizadaEm && !o.baixaAutoERP && o.tipo!=='interno' && o.finalizadaEm.slice(0,10)>=body.de && o.finalizadaEm.slice(0,10)<=body.ate).map(o=>{
+  const registros=lista.flatMap(o=>{if(!o.conferenciasEntrega?.length)return [o];const a=CONFERENCIA_ENTREGA.apurar(o,o.valorTotal);return a.entregas.map(e=>({...o,id:o.id+'::entrega:'+e.id,finalizadaEm:e.dia,alocacao:e.alocacao,equipe:DIVISAO.derivarEquipe(e.alocacao),valorTotal:e.valor==null?null:e.valor/100,_parcial:{estadoEntrega:CONFERENCIA_ENTREGA.estado(o,o.valorTotal),osId:o.id,entregaId:e.id,itensEntrega:e.itens,saldoItens:a.saldoItens.length,fracaoOS:a.total>0?e.valor/a.total:0}}));}).filter(o=>o.finalizadaEm && !o.baixaAutoERP && o.tipo!=='interno' && o.finalizadaEm.slice(0,10)>=body.de && o.finalizadaEm.slice(0,10)<=body.ate).map(o=>{
    const p=cfg.performancePCP?.participacoes?.find(p=>p.id===o.id),eq=o.equipe||[];
    /* A mesma régua do servidor (F11): a divisão válida e atual confirma, com
       as equipes dela (equipesDaDivisao); a desatualizada aparece com a marca e
@@ -340,12 +351,13 @@ document.addEventListener('DOMContentLoaded', () => {
  if(b&&m){b.scrollIntoView({block:'start'});m.scrollTop+=Number(pv.get('desce')||0)-(h?h.offsetHeight:0)-8;}
 });`;
 const comissaoPreview=require('./preview-comissao-fixture.cjs');
+const controlePreview=require('./preview-controle-fixture.cjs');
 http.createServer(async(req,res)=>{
   const name=new URL(req.url,'http://localhost').pathname.slice(1)||'index.html';
   res.setHeader('Cache-Control','no-store');
   res.setHeader('Content-Security-Policy',"default-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'none'");
-  if(name==='comissao-api' && req.method==='POST'){
-    try{let json='';for await(const chunk of req){json+=chunk;if(json.length>300000)throw new Error('Pedido grande demais.');}const out=await comissaoPreview(JSON.parse(json));res.setHeader('Content-Type','application/json');res.end(JSON.stringify(out));}catch(e){res.writeHead(500);res.end(JSON.stringify({error:e.message}));}return;
+  if(['comissao-api','controle-api'].includes(name) && req.method==='POST'){
+    try{let json='';for await(const chunk of req){json+=chunk;if(json.length>300000)throw new Error('Pedido grande demais.');}const out=await (name==='controle-api'?controlePreview:comissaoPreview)(JSON.parse(json));res.setHeader('Content-Type','application/json');res.end(JSON.stringify(out));}catch(e){res.writeHead(500);res.end(JSON.stringify({error:e.message}));}return;
   }
   if(name==='fixture.js'){res.setHeader('Content-Type','text/javascript');res.end(fixture);return;}
   if(!permitidos.has(name)){res.writeHead(404);res.end();return;}

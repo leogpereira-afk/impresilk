@@ -188,22 +188,22 @@ async function getReg(colecao: string, id: string): Promise<any | null> {
 }
 
 async function setReg(colecao: string, id: string, registro: any) {
+  // As gravações auxiliares também respeitam lápides e concorrência.
+  if (colecao === "os") {
+    const {data:row,error:err}=await sb.from("pcp_registros").select("apagado,atualizado_em").eq("colecao",colecao).eq("id",id).maybeSingle();
+    if(err) throw new Error(err.message);
+    if(row?.apagado) throw new Error("O.S. excluída: restauração exige gestão e motivo.");
+    const novo={colecao,id,registro,atualizado_em:new Date(Math.max(Date.now(),Date.parse(row?.atualizado_em)+1 || 0)).toISOString(),apagado:false};
+    const q=row?sb.from("pcp_registros").update(novo).eq("colecao",colecao).eq("id",id).eq("apagado",false).eq("atualizado_em",row.atualizado_em):sb.from("pcp_registros").insert(novo);
+    const {data,error}=await q.select("id");
+    if(error)throw new Error(error.message);
+    if(!data?.length)throw new Error("O.S. alterada durante a gravação. Atualize.");
+    return;
+  }
   const { error } = await sb.from("pcp_registros").upsert(
     { colecao, id, registro, atualizado_em: new Date().toISOString(), apagado: false },
     { onConflict: "colecao,id" },
   );
-  if (error) throw new Error(error.message);
-}
-
-// Gravacao escrita explicitamente RESSUSCITA a lapide (apagado: false acima). E
-// deliberado: um aparelho que estava offline com edicao pendente prefere ver o
-// trabalho de volta a perde-lo calado. Quem nao ressuscita e a importacao.
-async function delReg(colecao: string, id: string) {
-  // Confere o erro (o supabase-js NAO lanca — devolve {error}). Sem isso, um
-  // delete que falhou respondia ok:true e o cliente tirava o item da fila.
-  const { error } = await sb.from("pcp_registros")
-    .update({ apagado: true, atualizado_em: new Date().toISOString() })
-    .eq("colecao", colecao).eq("id", id);
   if (error) throw new Error(error.message);
 }
 
@@ -396,6 +396,7 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     const rows=data || [];
     for(const row of rows) {
       const o=row.registro, fim=perfDia(o?.finalizadaEm);
+      if(["baixa_administrativa","retirada"].includes(o?.conferenciaERP?.classificacao)) continue;
       if((!fim && !o?.conferenciasEntrega?.length) || o?.tipo==="interno") continue;
       /* A O.S. CANCELADA (F16), no ERP ou à mão pela gestão, não é entrega:
          sai da base. O hash do período aberto muda; a revisão selada é lida
@@ -449,7 +450,7 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
       if(bruto!==null){const bruta=CONFERENCIA_ENTREGA.apurar(o,bruto).entregas.find((x:any)=>x.id===o._conferencia.id);valorBrutoCentavos=bruta?.valor??null;}
       const indiceEntrega=a.entregas.findIndex((x:any)=>x.id===o._conferencia.id);
       const baseAnteriorCentavos=indiceEntrega>=0&&a.entregas.slice(0,indiceEntrega).every((x:any)=>x.valor!==null)?a.entregas.slice(0,indiceEntrega).reduce((s:number,x:any)=>s+x.valor,0):null;
-      dadosEntrega={baseAnteriorCentavos,osId:o._osId,entregaId:o._conferencia.id,itensEntrega:e?.itens || [],saldoItens:a.saldoItens?.length || 0,erroConferencia:a.erro || "",fracaoOS:a.total>0 && e?.valor!=null?e.valor/a.total:0};
+      dadosEntrega={estadoEntrega:CONFERENCIA_ENTREGA.estado(o,valorConferencia(o,valoresItens[String(o.numero)] || [])),baseAnteriorCentavos,osId:o._osId,entregaId:o._conferencia.id,itensEntrega:e?.itens || [],saldoItens:a.saldoItens?.length || 0,erroConferencia:a.erro || "",fracaoOS:a.total>0 && e?.valor!=null?e.valor/a.total:0};
       const idsEntrega=finaisAlocacao(o._conferencia.alocacao).map((m:any)=>m.pessoaId).sort();
       const idsOperacionais=(o.equipe || []).map((n:any)=>pessoasPerf.chave(String(n))).sort();
       const diaRetorno=perfDia(o.retornoEm) || perfDia(o.entregaLancada?.data) || perfDia(o.finalizadaEm);
@@ -802,7 +803,14 @@ Deno.serve(async (req: Request) => {
      recebe os percentuais nem o histórico deles (o celular não mostra
      divisão); os outros papéis recebem sem o ID de quem gravou. */
   const ehMontagem = String(cracha?.papel ?? "") === "montagem";
-  const saida = (r: any) => ehToqueNoNome ? podarToque(r) : gestaoVeTudo ? r : podarCarimbosF15(ehMontagem ? podarAlocacao(r) : podarIdsAlocacao(r));
+  const podarControle = (r:any) => {
+    if(!r || gestaoVeTudo)return r;
+    const limpo=(x:any):any=>Array.isArray(x)?x.map(limpo):x && typeof x==="object"?Object.fromEntries(Object.entries(x).filter(([k])=>!["porId","responsavelId"].includes(k)).map(([k,v])=>[k,limpo(v)])):x;
+    const out={...r};for(const campo of ["conferenciaERP","regularizacaoSaida","revisaoSolicitada","cicloRegistro"])if(out[campo])out[campo]=limpo(out[campo]);return out;
+  };
+  const saidaBase = (r: any) => ehToqueNoNome ? podarToque(r) : gestaoVeTudo ? r : podarCarimbosF15(ehMontagem ? podarAlocacao(r) : podarIdsAlocacao(r));
+
+  const saida = (r:any) => podarControle(saidaBase(r));
 
   /* QUEM ASSINA A ENTRADA DO DIARIO: o cracha, nunca o corpo do pedido. Um
      `porId` que viesse do aparelho seria o aparelho dizendo quem ele e --
@@ -1294,6 +1302,12 @@ Deno.serve(async (req: Request) => {
 
         const {data:linhaAtual,error:erroAtual} = await sb.from("pcp_registros").select("registro,atualizado_em,apagado").eq("colecao","os").eq("id",os.id).maybeSingle();
         if (erroAtual) throw new Error(erroAtual.message);
+        if(linhaAtual?.apagado) return resp({error:"O.S. excluída. Sua edição continua pendente; peça à gestão para recuperar o registro antes de reenviar.",restauracaoNecessaria:true},422);
+        if(!linhaAtual && os.numero) {
+          const {data:morta,error:err}=await sb.from("pcp_registros").select("id").eq("colecao","os").eq("apagado",true).eq("registro->>numero",String(os.numero).trim()).limit(1).maybeSingle();
+          if(err)throw new Error(err.message);
+          if(morta)return resp({error:"Número de O.S. excluída. A gestão precisa recuperar o registro original com motivo; sua edição permanece pendente.",restauracaoNecessaria:true},422);
+        }
         const existing = linhaAtual?.registro ?? null;
         /* REENVIO DA MESMA GRAVAÇÃO. Com sinal ruim a O.S. chega e grava, mas a
            resposta não volta em 15 s; o aparelho reenvia o mesmo item com o rev
@@ -1790,6 +1804,7 @@ Deno.serve(async (req: Request) => {
           trocarOS(ga.os);
           avisosToque.push(...ga.avisos);
         }
+        for (const campo of ["conferenciaERP","regularizacaoSaida","revisaoSolicitada","cicloRegistro"]) { if (existing?.[campo]) os[campo]=existing[campo]; else delete os[campo]; }
         if (existing?.conferenciasEntrega) os.conferenciasEntrega = existing.conferenciasEntrega; else delete os.conferenciasEntrega;
         const executado = carimbarExecucao(os, existing, cracha?.nome || cracha?.sub || "Integração", new Date().toISOString());
         const autorCarimbo = carimbosQueMudaram(executado, existing).length ? await autorAuditoria() : { nome: "", login: "", porId: "" };
@@ -1797,7 +1812,7 @@ Deno.serve(async (req: Request) => {
         try {
           if (linhaAtual) {
             const {data,error} = await sb.from("pcp_registros").update({registro:gravar,atualizado_em:new Date(Math.max(Date.now(),Date.parse(linhaAtual.atualizado_em)+1 || 0)).toISOString(),apagado:false})
-              .eq("colecao","os").eq("id",os.id).eq("atualizado_em",linhaAtual.atualizado_em).select("id");
+              .eq("colecao","os").eq("id",os.id).eq("apagado",false).eq("atualizado_em",linhaAtual.atualizado_em).select("id");
             if (error) throw new Error(error.message);
             if (!data?.length) return resp({conflito:true,servidor:saida(await getReg("os",os.id))});
           } else {
@@ -1824,25 +1839,13 @@ Deno.serve(async (req: Request) => {
             }
             if (sobrevivente) return resp({ ok: true, os: saida(sobrevivente), duplicataEvitada: true });
 
-            // Ninguem VIVO com esse numero: quem o ocupa e uma lapide (a O.S foi
-            // excluida e alguem esta criando outra com o mesmo numero). Devolver
-            // a lapide como se fosse a ficha ressuscitaria na tela uma O.S
-            // apagada; recusar prenderia a fila do aparelho. Entao a linha morta
-            // recebe o conteudo novo e volta a viver com o id dela — o aparelho
-            // converge no proximo pull, como no caso da duplicata canonica.
+            // Uma colisão com lápide continua pendente no aparelho; só a ação
+            // de recuperação assinada pela gestão pode restaurar o original.
             const { data: morta } = await sb.from("pcp_registros").select("id, registro")
               .eq("colecao", "os").eq("apagado", true)
               .eq("registro->>numero", num).limit(1).maybeSingle();
             if (morta?.id) {
-              const revMorta = typeof morta.registro?.rev === "number" ? morta.registro.rev : 0;
-              /* Parte de `gravar`, que ja passou pelo carimbarExecucao e pelo
-                 carimbarIds: o <campo>Id que o aparelho mandou nao entra por
-                 aqui (revisao da F01). */
-              const revivido = { ...gravar, id: morta.id, rev: revMorta + 1 };
-              await setReg("os", morta.id, revivido);
-              const dm = diffAuditavel(morta.registro, revivido);
-              await auditar(String(morta.id), "restaurar", { campos: ["apagado", ...(dm?.campos ?? [])], antes: { apagado: true, ...(dm?.antes ?? {}) }, depois: { apagado: false, ...(dm?.depois ?? {}) } }, num);
-              return resp({ ok: true, os: saida(revivido), duplicataEvitada: true });
+              return resp({error:"Número de O.S. excluída. Recupere o registro original pela gestão antes de reenviar.",restauracaoNecessaria:true},422);
             }
           }
           throw e;
@@ -1866,29 +1869,80 @@ Deno.serve(async (req: Request) => {
           ...(entregasRecusadas.length ? { entregasRecusadas } : {}) });
       }
 
-      case "delete": {
-        const id = body.id;
-        if (!id) return resp({ error: "id ausente" }, 400);
-        /* A LÁPIDE GUARDA A O.S. E AS FOTOS. Excluir removia os arquivos do
-           bucket, mas a O.S. volta: a conciliação do ERP restaura a exclusão que
-           ainda está na carteira, e um aparelho offline com edição pendente a
-           ressuscita (setReg). Voltava com equipe e agenda e as imagens
-           quebradas. Os arquivos ficam; limpar foto de lápide antiga, se um dia
-           for preciso, é rotina à parte que lê todas as listas. */
-        /* A LÁPIDE GANHA AUTOR (diário, F03). Lê a linha antes para saber se
-           havia O.S. viva: apagar de novo a lápide, ou um id que nunca existiu,
-           não é alteração. Falha dessa leitura não barra o delete (antes ele
-           nem lia); aí a entrada é gravada sem saber se já era lápide. */
-        let antesDel: any = undefined;
-        try {
-          const { data, error } = await sb.from("pcp_registros").select("registro,apagado").eq("colecao", "os").eq("id", String(id)).maybeSingle();
-          if (!error) antesDel = data ?? null;
-        } catch { antesDel = undefined; }
-        await delReg("os", id);
-        if (antesDel === undefined || (antesDel && !antesDel.apagado)) {
-          await auditar(String(id), "excluir", { campos: ["apagado"], antes: { apagado: false }, depois: { apagado: true } }, antesDel?.registro?.numero);
+      case "delete":
+      case "restaurarOS": {
+        if(ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha?.papel || ""))) return resp({error:"Só admin e PCP podem excluir ou recuperar O.S. Solicite revisão à gestão."},403);
+        const id=String(body.id || ""), motivo=String(body.motivo || "").trim(), apagar=acao==="delete";
+        if(motivo.length<5 || motivo.length>500)return resp({error:"Informe o motivo, de 5 a 500 caracteres."},422);
+        const {data:row,error}=await sb.from("pcp_registros").select("registro,apagado,atualizado_em").eq("colecao","os").eq("id",id).maybeSingle();
+        if(error)throw new Error(error.message);
+        if(!row)return resp({error:"O.S. não encontrada."},404);
+        if(body.rev!==row.registro.rev)return resp({error:"O.S. alterada. Atualize antes de continuar."},409);
+        if(row.apagado===apagar)return resp({error:apagar?"O.S. já excluída.":"O.S. já recuperada."},409);
+        const autor=await autorAuditoria(),em=new Date().toISOString();
+        const evento={acao:apagar?"excluir":"restaurar",motivo,em,por:autor.nome,porId:autor.porId};
+        const os={...row.registro,cicloRegistro:[...(row.registro.cicloRegistro || []),evento],rev:(Number(row.registro.rev)||0)+1};
+        const {data:salva,error:err}=await sb.from("pcp_registros").update({registro:os,apagado:apagar,atualizado_em:new Date(Math.max(Date.now(),Date.parse(row.atualizado_em)+1 || 0)).toISOString()}).eq("colecao","os").eq("id",id).eq("apagado",row.apagado).eq("atualizado_em",row.atualizado_em).select("id");
+        if(err)throw new Error(err.message);
+        if(!salva?.length)return resp({error:"O.S. alterada durante a operação. Atualize."},409);
+        await auditar(id,evento.acao,{campos:["apagado","cicloRegistro"],antes:{apagado:row.apagado},depois:{apagado:apagar,evento}},os.numero);
+        return resp({ok:true,...(!apagar?{os:saida(os)}:{})});
+      }
+      case "excluidasOS": {
+        if(ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha?.papel || "")))return resp({error:"Recuperação só para admin e PCP."},403);
+        const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","os").eq("apagado",true).order("id").gt("id",String(body.after || "")).limit(100);
+        if(error)throw new Error(error.message);
+        return resp({os:(data || []).map((r:any)=>saida(r.registro)),after:data?.length===100?data[99].id:null});
+      }
+      case "controleEntrega": {
+        const gestao=!ehMaquina && !ehToqueNoNome && ["admin","pcp"].includes(String(cracha?.papel || ""));
+        if(!gestao && body.tipo!=="solicitarRevisao")return resp({error:"Conferência e regularização só para admin e PCP."},403);
+        if(ehMaquina || ehToqueNoNome || !["admin","pcp","montagem","operacao","comercial"].includes(String(cracha?.papel || "")))return resp({error:"Entre com uma sessão autenticada."},403);
+        const id=String(body.osId || "");
+        const {data:row,error}=await sb.from("pcp_registros").select("registro,apagado,atualizado_em").eq("colecao","os").eq("id",id).maybeSingle();
+        if(error)throw new Error(error.message);
+        if(!row || row.apagado)return resp({error:"O.S. não encontrada."},404);
+        const os=row.registro;
+        if(String(cracha?.papel)==="montagem" && !(os.equipe || []).some((v:any)=>(v===cracha?.nome || v===cracha?.sub))) {
+          const pessoas=await pessoasReq(),quem=idDoCracha(quemToque(),pessoas);
+          if(!quem || !(os.equipe || []).some((v:any)=>pessoas.idDe(v)===quem))return resp({error:"O.S. fora da sua equipe."},403);
         }
-        return resp({ ok: true });
+        if(body.rev!==os.rev)return resp({error:"A O.S. mudou. Atualize a ficha."},409);
+        const p=body.pedido || {},motivo=String(p.motivo || "").trim();
+        if(motivo.length<5 || motivo.length>500)return resp({error:"Descreva o motivo, de 5 a 500 caracteres."},422);
+        const autor=await autorAuditoria(),em=new Date().toISOString(),evento:any={motivo,em,por:autor.nome,porId:autor.porId};
+        let campo="";
+        const gravar={...os,rev:(Number(os.rev)||0)+1,atualizadoEm:em,atualizadoPor:autor.nome};
+        if(body.tipo==="solicitarRevisao") {campo="revisaoSolicitada";gravar[campo]=[...(os[campo] || []),evento];}
+        else if(["erp","saida"].includes(body.tipo)) {
+          const pessoas=await pessoasReq(),pessoa=pessoas.pessoa(String(p.responsavelId || ""));
+          if(!pessoa || pessoa.semFicha || pessoa.idRepetido || pessoa.desligado || pessoa.ativo===false || pessoas.idDe(String(p.responsavelId || ""))!==String(p.responsavelId || ""))return resp({error:"Selecione um responsável com cadastro confirmado e ativo."},422);
+          const prazo=String(p.prazo || ""),evidencia=String(p.evidencia || "").trim();
+          if(!/^\d{4}-\d{2}-\d{2}$/.test(prazo) || !Number.isFinite(Date.parse(prazo)) || new Date(prazo).toISOString().slice(0,10)!==prazo || evidencia.length<5 || evidencia.length>1000)return resp({error:"Informe prazo válido e evidência ou última informação (5 a 1000 caracteres)."},422);
+          Object.assign(evento,{responsavelId:p.responsavelId,responsavelNome:pessoa.nome,prazo,evidencia});
+          if(body.tipo==="erp") {
+            campo="conferenciaERP";
+            if(!os.baixaAutoERP && !os.erpComSaldo && !os.erpSaiuDaCarteiraEm)return resp({error:"Esta O.S. não tem baixa ERP a conferir."},422);
+            if(!["total","parcial","retirada","baixa_administrativa","divergencia"].includes(p.classificacao))return resp({error:"Selecione a classificação da diferença."},422);
+            const estado=CONFERENCIA_ENTREGA.estado(os);
+            if(p.classificacao==="total" && estado.situacao!=="saldo_concluido")return resp({error:"Confira todos os itens antes de classificar entrega total."},422);
+            if(p.classificacao==="parcial" && estado.situacao!=="parcial")return resp({error:"Confira os itens da entrega parcial primeiro."},422);
+            if(p.classificacao==="baixa_administrativa" && os.conferenciasEntrega?.length)return resp({error:"Há entregas conferidas. Classifique a divergência para revisão, sem apagar a evidência."},422);
+            evento.classificacao=p.classificacao;
+          } else {
+            campo="regularizacaoSaida";
+            if(perfDia(os.saidaEm || os.instalacao?.data)>=perfDia(em))return resp({error:"A saída de hoje permanece no acompanhamento atual. Regularize apenas saídas anteriores."},422);
+            if(!(os.saidaEm || os.horaSaida))return resp({error:"Não há saída registrada para regularizar."},422);
+            evento.saidaOriginal=os.saidaEm || "";
+            evento.situacao=p.situacao==="regularizada"?"regularizada":"em_conferencia";
+          }
+          gravar[campo]={...evento,historico:[...(os[campo]?.historico || []),evento]};
+        } else return resp({error:"Ação de conferência inválida."},422);
+        const {data:salva,error:err}=await sb.from("pcp_registros").update({registro:gravar,atualizado_em:new Date(Math.max(Date.now(),Date.parse(row.atualizado_em)+1 || 0)).toISOString()}).eq("colecao","os").eq("id",id).eq("apagado",false).eq("atualizado_em",row.atualizado_em).select("id");
+        if(err)throw new Error(err.message);
+        if(!salva?.length)return resp({error:"Outra pessoa alterou a O.S. Atualize."},409);
+        await auditar(id,"controle-entrega",{campos:[campo],antes:{[campo]:os[campo] || null},depois:{[campo]:gravar[campo]}},os.numero);
+        return resp({ok:true,os:saida(gravar)});
       }
 
       // ---- valores: quanto vale cada O.S, lido do cache do Painel ----
@@ -2375,6 +2429,31 @@ Deno.serve(async (req: Request) => {
         return resp({error:"Outro aparelho está salvando. Sua alteração continua na fila; tente novamente."},503);
       }
 
+      case "fotosEvento": {
+        if(ehMaquina)return resp({error:"Entre com uma sessão do PCP."},403);
+        const os=await getReg("os",String(body.osId || ""));
+        if(!os)return resp({error:"O.S. não encontrada."},404);
+        if(String(cracha?.papel)==="montagem" && !pertenceEquipe(os,quemToque(),await pessoasReq()))return resp({error:"O.S. fora da sua equipe."},403);
+        const ids=[os.layoutFotoId,os.embarqueFotoId,...(os.fotosCheckinIds || []),...(os.fotosRetornoIds || []),...(os.itens || []).map((i:any)=>i.fotoProbId)].filter(Boolean);
+        if(body.fileId) {
+          if(!["admin","pcp","montagem","operacao"].includes(String(cracha?.papel || "")) || !ids.includes(body.fileId))return resp({error:"Foto fora do escopo de edição."},403);
+          const ocorridoEm=String(body.ocorridoEm || ""),motivo=String(body.motivo || "").trim();
+          if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(ocorridoEm) || !Number.isFinite(Date.parse(ocorridoEm)) || Date.parse(ocorridoEm)>Date.now() || motivo.length<5 || motivo.length>500)return resp({error:"Confirme a data/hora real até agora e o motivo (5 a 500 caracteres)."},422);
+          const {data:row,error}=await sb.from("pcp_registros").select("registro,atualizado_em").eq("colecao","foto_evento").eq("id",body.fileId).maybeSingle();
+          if(error)throw new Error(error.message);
+          if(!row)return resp({error:"Foto ainda sem recebimento confirmado. Aguarde sincronizar."},409);
+          if(body.rev!==(row.registro.rev || 0))return resp({error:"Horário corrigido por outra pessoa. Atualize."},409);
+          const autor=await autorAuditoria(),em=new Date().toISOString(),evento={ocorridoEm,motivo,por:autor.nome,porId:autor.porId,em};
+          const registro={...row.registro,ocorridoEm,capturadoEm:ocorridoEm,confirmacao:evento,historico:[...(row.registro.historico || []),evento],rev:(row.registro.rev || 0)+1};
+          const {data:salva,error:err}=await sb.from("pcp_registros").update({registro,atualizado_em:new Date(Math.max(Date.now(),Date.parse(row.atualizado_em)+1 || 0)).toISOString()}).eq("colecao","foto_evento").eq("id",body.fileId).eq("atualizado_em",row.atualizado_em).select("id");
+          if(err)throw new Error(err.message);
+          if(!salva?.length)return resp({error:"Outra pessoa corrigiu este horário. Atualize."},409);
+          await auditar(os.id,"horario-foto",{campos:["foto_evento"],antes:{ocorridoEm:row.registro.ocorridoEm || null},depois:{fileId:body.fileId,...evento}},os.numero);
+        }
+        const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","foto_evento").eq("apagado",false).in("id",ids);
+        if(error)throw new Error(error.message);
+        return resp({fotos:ids.map((id:any)=>{const foto={id,...((data || []).find((r:any)=>r.id===id)?.registro || {})};if(!gestaoVeTudo){const limpar=(x:any)=>{if(!x)return x;const {porId,...resto}=x;return resto;};foto.confirmacao=limpar(foto.confirmacao);foto.historico=(foto.historico || []).map(limpar);}return foto;})});
+      }
       case "putPhoto": {
         const { base64, mime, fileId } = body;
         if (!base64) return resp({ error: "base64 ausente" }, 400);
@@ -2399,11 +2478,31 @@ Deno.serve(async (req: Request) => {
           upsert: false,
         });
         if (error && !(String((error as any).statusCode) === "409" || /already exists|duplicate/i.test(error.message))) throw new Error("upload: " + error.message);
-        return resp({ fileId: id });
+        // O primeiro recebimento é imutável, inclusive após reenvio offline.
+        const em=new Date().toISOString(),anexo=String(body.anexadoEm || "");
+        const registro={id,anexadoEm:Number.isFinite(Date.parse(anexo)) && Date.parse(anexo)<=Date.now()?anexo:null,recebidoEm:em,capturadoEm:null,ocorridoEm:null,por:String(cracha?.nome || cracha?.sub || "Integração"),rev:0};
+        const {error:err}=await sb.from("pcp_registros").upsert({colecao:"foto_evento",id,registro,apagado:false,atualizado_em:em},{onConflict:"colecao,id",ignoreDuplicates:true});
+        if(err)throw new Error(err.message);
+        const eventoFoto=await getReg("foto_evento",id);
+        return resp({ fileId: id,evento:podarControle({cicloRegistro:[eventoFoto]}).cicloRegistro[0] });
       }
 
       case "deletePhoto": {
         if (!body.fileId) return resp({ error: "fileId ausente" }, 400);
+        // Fotos referenciadas por exclusão lógica fazem parte da recuperação.
+        // Nem uma fila antiga nem outra O.S. que reutilize o arquivo as apaga.
+        let cursor="",concluiu=false;
+        for(let pagina=0;pagina<100;pagina++) {
+          const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","os").eq("apagado",true).gt("id",cursor).order("id").limit(500);
+          if(error)throw new Error(error.message);
+          for(const row of data || []) {
+            const o=row.registro,refs=[o.layoutFotoId,o.embarqueFotoId,...(o.fotosCheckinIds || []),...(o.fotosRetornoIds || []),...(o.itens || []).map((i:any)=>i.fotoProbId),...(o.voltaEquipe?.fotos || []),...(o.retornoConf?.fotos || [])];
+            if(refs.includes(body.fileId))return resp({error:"Foto preservada para recuperar uma O.S. excluída. Solicite revisão à gestão."},409);
+          }
+          if(!data?.length || data.length<500){concluiu=true;break;}
+          cursor=data[data.length-1].id;
+        }
+        if(!concluiu)return resp({error:"Não foi possível conferir todas as referências da foto. Arquivo preservado."},409);
         const {error} = await sb.storage.from(BUCKET).remove([body.fileId]);
         if (error) throw new Error(error.message);
         return resp({ ok: true });
@@ -2475,8 +2574,7 @@ Deno.serve(async (req: Request) => {
          (pessoasDoPCP → resolverPessoas), sem cópia nova. O lote só troca o
          nome em que as duas respostas batem.
          Junto, para o lote não gravar às cegas: o estado de cada O.S. pedida
-         ('viva', 'excluida' ou 'ausente': o upsert ressuscita a excluída, por
-         desenho) e os períodos já fechados da Performance (o fechamento selado
+         ('viva', 'excluida' ou 'ausente': a excluída exige recuperação explícita) e os períodos já fechados da Performance (o fechamento selado
          não muda). SÓ LEITURA, SÓ admin e pcp: a régua cruza nomes com fichas
          do RH, e nada disso desce à operação, à montagem nem ao crachá sem
          senha. A tela chama na hora, fora da fila: o 403 e o 422 não prendem

@@ -63,12 +63,13 @@ test('espelho: fechar a ficha durante o envio não perde a foto do serviço pron
   const t = espelho({lista:[osRua('A', {fotosRetornoIds:[]})], pushPhoto: () => lenta});
   t.run(`openModal(STORE.getOS('A'))`);
   // Sem o DOM de verdade, o handler é o mesmo que o input chama.
-  const envio = t.run(`anexarFotos([{}], porNaLista('fotosRetornoIds'), o => { if (!o.horaRetorno) carimbarAgora(o, 'horaRetorno', 'retornoEm'); })`);
+  const envio = t.run(`anexarFotos([{}], porNaLista('fotosRetornoIds'))`);
   t.run('closeModal()');
   solta('foto_R'); await envio;
   const a = t.json(`STORE.getOS('A')`);
   assert.deepEqual(a.fotosRetornoIds, ['foto_R']);
-  assert.ok(a.retornoEm && a.retornoEm.startsWith(hojeReal), 'o carimbo é de hoje, não do dia agendado');
+  assert.equal(a.retornoEm, undefined, 'foto tardia não inventa retorno de hoje');
+  assert.equal(a.horaRetorno, undefined);
 });
 
 test('espelho: liberar o carro exige o cliente confirmado HOJE, a régua do servidor', () => {

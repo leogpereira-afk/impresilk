@@ -1554,7 +1554,7 @@ function openModal(os, blocoForcado) {
      escondida no meio. Só depois de mostrar: com a sobreposição escondida, o
      navegador ignora a rolagem. O conflito, que reabre a mesma ficha, não rola. */
   const caixa = $('#modal-os');
-  if (!mesmaFicha && caixa) caixa.scrollTop = 0;
+  if (!mesmaFicha && caixa) { caixa.scrollTop = 0; caixa.setAttribute?.('role','dialog'); caixa.setAttribute?.('aria-modal','true'); caixa.setAttribute?.('aria-labelledby','modal-os-titulo'); caixa.setAttribute?.('tabindex','-1'); caixa.focus?.(); }
 }
 
 function closeModal() {
@@ -1911,7 +1911,7 @@ function checklistFechamento(os) {
   const fotoFalta = !fotosOk && !erp;
   const fotoImpede = fotoFalta && !fin && validarFinalizacao(os).some(f => f === '≥1 foto de saída' || f === 'foto de retorno (serviço pronto)');
   item({ k: 'fotos', rotulo: 'Fotos antes e depois', etapa: 'jornada', estado: fotosOk ? 'ok' : erp ? 'na' : 'falta',
-    texto: `${nS} ${nS === 1 ? 'foto' : 'fotos'} de antes e ${nR} de depois${!fotosOk && erp ? '; na baixa do ERP a foto não é pedida' : ''}`,
+    texto: `Registradas: ${nS} ${nS === 1 ? 'foto' : 'fotos'} de antes e ${nR} de depois. Necessárias: 1 de antes e 1 de depois${!fotosOk && erp ? '; na baixa do ERP a foto não é pedida' : ''}`,
     impede: fotoImpede, ir: fotoFalta && editavel ? 'jornada' : '',
     como: fotoFalta && fin ? 'A ficha finalizada não recebe foto: só reabrindo a O.S.' : '' });
   const pc = OPERACAO.prazoCombinadoDe(os);
@@ -2307,11 +2307,11 @@ function renderModal() {
   $('#modal-os').innerHTML = `
     <div class="modal-header">
       <div style="flex:1">
-        <div class="modal-title">O.S ${esc(os.numero || '(nova)')} <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏬 Cliente retira' : '🚚 Externo'}</span></div>
+        <div class="modal-title" id="modal-os-titulo">O.S ${esc(os.numero || '(nova)')} <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏬 Cliente retira' : '🚚 Externo'}</span></div>
         <div class="modal-meta">Atualizado por ${esc(os.atualizadoPor || '—')}${os.atualizadoEm ? ' · ' + new Date(os.atualizadoEm).toLocaleString('pt-BR') : ''}</div>
       </div>
-      <span class="modal-status badge st-${st}">${statusLabelDe(os, st)}</span>
-      <button class="modal-close" id="modal-close-btn">×</button>
+      <span class="modal-status badge st-${st}">${os.conferenciasEntrega?.length && !canceladaNaTela(os)?esc(CONFERENCIA_ENTREGA.estado(os).rotulo):statusLabelDe(os, st)}</span>
+      <button class="modal-close" id="modal-close-btn" aria-label="Fechar ficha da O.S.">×</button>
     </div>
 
     ${finalizada ? `
@@ -2337,6 +2337,7 @@ function renderModal() {
     <p class="fe-atalhos" title="Alt+1 a Alt+5 vão para a etapa; Ctrl+Enter (Cmd+Enter no Mac) avança; Esc fecha a ficha. Dentro de um campo, as teclas são do campo.">Atalhos: Alt+1 a Alt+5, Ctrl+Enter, Esc</p>
     ${etapas.map(k => secaoEtapaHTML(k, etapas, etapa, corpo[k])).join('')}
 
+    ${typeof controleEntregaHTML === 'function' ? controleEntregaHTML(os) : ''}
     ${os.erpAlteracoes?.length ? `<details class="cfg-grupo"><summary>Histórico de atualização do Mubisys</summary>${os.erpAlteracoes.slice(-10).reverse().map(h => `<p><strong>${esc(new Date(h.em).toLocaleString('pt-BR'))}</strong><br>${h.campos.map(c => `${esc(c.campo)}: ${esc(c.antes ?? '—')} → ${esc(c.depois)}`).join('<br>')}</p>`).join('')}</details>` : ''}
     ${['admin','pcp'].includes(STATE.user.papel) ? `<details class="cfg-grupo lock-allow" id="os-auditoria"><summary>Histórico de alterações</summary><div class="os-auditoria-corpo"></div></details>` : ''}
 
@@ -2346,7 +2347,7 @@ function renderModal() {
       <button class="btn-primary btn-sm" id="modal-save" style="margin-left:auto">💾 Salvar O.S.</button>
       <!-- Excluir numa linha própria: colado no WhatsApp, um toque torto no tablet apagava a O.S. -->
       <div class="edit-only" style="flex-basis:100%;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-        <button class="btn-danger btn-sm" id="modal-delete">🗑 Excluir O.S</button>
+        ${['admin','pcp'].includes(STATE.user.papel) ? '<button class="btn-danger btn-sm" id="modal-delete">🗑 Excluir O.S</button>' : `<button class="btn-ghost btn-sm" data-controle="solicitarRevisao" data-controle-os="${esc(os.id)}">Solicitar revisão à gestão</button>`}
       </div>
     </div>
   `;
@@ -2961,6 +2962,7 @@ function linhaEntregaHTML(it, i, os, ro, u, cols) {
   let s = null;
   try { s = it && typeof it === 'object' ? ENTREGA_ITEM.situacaoItem(it, os) : null; } catch { s = null; }
   if (!s) return '';
+  const conf = os.conferenciasEntrega?.length && typeof CONFERENCIA_ENTREGA!=='undefined' ? CONFERENCIA_ENTREGA.estado(os).itens[i] : null;
   const acoes = ro ? [] : acoesEntregaDoItem(it, os);
   const principais = acoes.filter(a => a === 'tudo' || a === 'retirado');
   const outras = acoes.filter(a => !principais.includes(a));
@@ -2968,10 +2970,15 @@ function linhaEntregaHTML(it, i, os, ro, u, cols) {
   const mais = !outras.length ? '' : principais.length
     ? `<details class="ent-mais"><summary>Mais</summary><div class="ent-menu">${outras.map(btn).join('')}</div></details>`
     : outras.map(btn).join('');
-  return `<tr class="entrega-row" ${u}><td class="entrega-cell" colspan="${cols}" data-label="Entrega"><div class="ent-linha"><span class="ent-rotulo">Entrega</span>${seloEntregaItemHTML(it, s, os)}${acoes.length ? `<div class="ent-acoes">${principais.map(btn).join('')}${mais}</div>` : ''}</div></td></tr>`;
+  return `<tr class="entrega-row" ${u}><td class="entrega-cell" colspan="${cols}" data-label="Entrega"><div class="ent-linha"><span class="ent-rotulo">Entrega</span>${conf?`<strong>${conf.conferido===null?'Conferência a revisar':`${conf.conferido} de ${conf.qtde} unidades conferidas · ${conf.saldo} a conferir`}</strong><span>Registro físico anterior:</span>`:''}${seloEntregaItemHTML(it, s, os)}${acoes.length ? `<div class="ent-acoes">${principais.map(btn).join('')}${mais}</div>` : ''}</div></td></tr>`;
 }
 // A linha de baixo da tabela: "Entrega por item: 3 de 5 entregues · 1 em parte · saldo 7".
 function resumoEntregaFichaTexto(os) {
+  if (os?.conferenciasEntrega?.length && typeof CONFERENCIA_ENTREGA !== 'undefined') {
+    const ver=typeof STATE!=='undefined' && ['admin','pcp'].includes(STATE.user?.papel), valor=ver && typeof valorDaOS==='function'?valorDaOS(os):null;
+    const e=CONFERENCIA_ENTREGA.estado(os,valor);
+    return e.resumo + (ver && e.conferidoValor!==null && typeof dinheiroCasa==='function'?' · Conferido: '+dinheiroCasa(e.conferidoValor/100)+' · Saldo a conferir: '+dinheiroCasa(e.saldo/100):'');
+  }
   if (!temMotorEntrega()) return '';
   let r;
   try { r = ENTREGA_ITEM.resumoOS(os); } catch { return ''; }
@@ -2989,6 +2996,7 @@ function resumoEntregaFichaTexto(os) {
    aberta com parte entregue por marca. Com um item só, a conta é de
    unidades ("6 de 10"). Sem marca nenhuma, nada muda. */
 function seloEntregaCardHTML(os) {
+  if (os?.conferenciasEntrega?.length && typeof CONFERENCIA_ENTREGA !== 'undefined') return `<span class="badge">${esc(CONFERENCIA_ENTREGA.estado(os).resumo)}</span>`;
   if (!temMotorEntrega() || !os || os.finalizadaEm) return '';
   // O.S. cancelada (revisão da F16): o selo "Cancelado" diz tudo; "Itens entregues: falta finalizar" a contradizia.
   if (canceladaNaTela(os)) return '';
@@ -3276,7 +3284,7 @@ function blocoItens(os, ro, done) {
     const u = `data-iuid="${esc(uidItemOk(it.uid) ? it.uid : '')}"`;
     const del = !it.manual ? ''
       : marcado ? `<span class="ent-fica" title="Item com marca de entrega não sai da lista. Para tirar o saldo que falta, a gestão usa Cancelar item.">🔒 fica</span>`
-      : `<button class="btn-xs btn-danger edit-only" data-item-del="${i}" ${u} title="Remover item">× remover</button>`;
+      : `<button class="btn-xs btn-danger edit-only" data-item-del="${i}" ${u} title="Remover item" aria-label="Remover item ${esc(it.descricao || it.item || i+1)}">× remover</button>`;
     return `
     <tr data-item-row="${i}" ${u} class="${it.pronto ? 'item-ok' : ''} ${it.reprovado ? 'item-reprov' : ''}">
       <td data-label="Item"><input data-item="${i}.item" ${u} value="${esc(it.item)}" ${lock}></td>
@@ -3284,8 +3292,8 @@ function blocoItens(os, ro, done) {
       <td data-label="Medidas"><input data-item="${i}.medidas" ${u} value="${esc(it.medidas)}" ${lock}></td>
       <td data-label="Qtde"><input data-item="${i}.qtde" ${u} value="${esc(it.qtde)}" inputmode="numeric" ${lock}${marcado && it.manual ? ' title="Item com entrega: a quantidade não fica abaixo do que já foi entregue."' : ''}></td>
       <td class="verif-cell" data-label="Verificação">
-        <button type="button" class="verif-btn verif-ok ${it.pronto ? 'on' : ''}" data-item-verif="${i}.ok" ${u} title="Verificado" ${ro ? 'disabled' : ''}>✓</button>
-        <button type="button" class="verif-btn verif-no ${it.reprovado ? 'on' : ''}" data-item-verif="${i}.no" ${u} title="Reprovado" ${ro ? 'disabled' : ''}>✗</button>
+        <button type="button" class="verif-btn verif-ok ${it.pronto ? 'on' : ''}" data-item-verif="${i}.ok" ${u} title="Verificado" aria-label="Marcar verificado: ${esc(it.descricao || it.item || i+1)}" aria-pressed="${!!it.pronto}" ${ro ? 'disabled' : ''}>✓</button>
+        <button type="button" class="verif-btn verif-no ${it.reprovado ? 'on' : ''}" data-item-verif="${i}.no" ${u} title="Reprovado" aria-label="Marcar reprovado: ${esc(it.descricao || it.item || i+1)}" aria-pressed="${!!it.reprovado}" ${ro ? 'disabled' : ''}>✗</button>
       </td>
       <td class="item-del-cell">${del}</td>
     </tr>
@@ -3740,7 +3748,7 @@ function blocoExec(os, ro, done) {
           ${fotos.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}" data-foto-checkin="${esc(fid)}"><button class="foto-rm edit-only" data-foto-rm="${esc(fid)}">×</button></div>`).join('')}
         </div>
         ${fotoCameraGaleriaHTML('data-foto-checkin-input', 'antes', ro, fmsgAttr('fotosSaida'))}
-        <p class="foto-dica">Pelo menos 1 para finalizar. Com a hora de saída vazia, a primeira foto preenche a hora de saída com a hora em que foi anexada.</p>
+        <p class="foto-dica">Pelo menos 1 foto de antes para finalizar. Anexar foto não informa a hora real da saída. Confirme o horário, especialmente em envio posterior.</p>
         ${fmsgHTML(os, 'fotosSaida')}
         ${(() => {
           /* A coordenada vem do celular da montagem e o servidor guarda o campo
@@ -3787,7 +3795,7 @@ function blocoExec(os, ro, done) {
           ${fotosRet.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}"><button class="foto-rm edit-only" data-foto-rm-retorno="${esc(fid)}">×</button></div>`).join('')}
         </div>
         ${fotoCameraGaleriaHTML('data-foto-retorno-input', 'depois', ro, fmsgAttr('fotosRetorno'))}
-        <p class="foto-dica">Pelo menos 1 para finalizar. Com a hora do retorno vazia, a foto preenche a hora do retorno com a hora em que foi anexada.</p>
+        <p class="foto-dica">Pelo menos 1 foto de depois para finalizar. Anexar foto não informa a hora real do retorno. Confirme o horário, especialmente em envio posterior.</p>
         ${fmsgHTML(os, 'fotosRetorno')}
       </div>
       <div class="field-row">
@@ -4509,18 +4517,7 @@ function bindModalEvents(os, ro) {
   $('#modal-wpp').onclick = () => abrirWhatsApp(_modalDraft);
 
   const delBtn = $('#modal-delete');
-  if (delBtn) delBtn.onclick = () => {
-    if (confirm('Excluir esta O.S e suas fotos? Não há como desfazer.')) {
-      (os.fotosCheckinIds || []).forEach(f => STORE.delFoto(f));
-      (os.fotosRetornoIds || []).forEach(f => STORE.delFoto(f));
-      if (os.layoutFotoId) STORE.delFoto(os.layoutFotoId);
-      STORE.deleteOS(os.id);
-      $('#modal-overlay').classList.add('hidden');
-      STATE.modalOSId = null; _modalDraft = null;
-      renderActiveTab();
-      toast('O.S excluída', 'success');
-    }
-  };
+  if (delBtn) delBtn.onclick = () => controleExcluirOS(os);
 
   // Campos de texto/select genéricos
   $$('[data-f]', root).forEach(el => {
@@ -4913,20 +4910,8 @@ function bindModalEvents(os, ro) {
       const fileId = await STORE.pushPhoto(f, draft.id);
       if (fileId) draft.fotosCheckinIds.push(fileId);
     }
-    // A foto de saída registra a saída: preenche a hora se ainda estiver vazia.
-    // Hora que acabou de ser preenchida com o relógio é do DIA DE HOJE
-    // (aoVivo), não do agendado: a O.S. vencida executada hoje saía como
-    // "sem retorno" no dia da agenda. Hora digitada antes segue a agenda.
-    let agoraMesmo = false;
-    if (!draft.horaSaida) {
-      const agora = new Date();
-      draft.horaSaida = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
-      agoraMesmo = true;
-    }
-    // A hora sozinha não diz em QUE dia a equipe saiu (ver carimbarMomento).
-    STORE.carimbarMomento(draft, 'horaSaida', 'saidaEm', agoraMesmo);
-    if (_modalDraft === draft) capturarLocalCheckin();
-    persistirAposFoto(draft, ['fotosCheckinIds', 'horaSaida', 'saidaEm']);
+    persistirAposFoto(draft, ['fotosCheckinIds']);
+    toast('Fotos anexadas. Confirme a data e hora real em “Horários das fotos”; a saída não foi preenchida.', 'success');
   }; });
   $$('[data-foto-rm]', root).forEach(btn => {
     btn.onclick = () => {
@@ -4953,14 +4938,8 @@ function bindModalEvents(os, ro) {
       const fileId = await STORE.pushPhoto(f, draft.id);
       if (fileId) draft.fotosRetornoIds.push(fileId);
     }
-    let agoraMesmo = false;   // mesma regra da saída
-    if (!draft.horaRetorno) {
-      const agora = new Date();
-      draft.horaRetorno = String(agora.getHours()).padStart(2, '0') + ':' + String(agora.getMinutes()).padStart(2, '0');
-      agoraMesmo = true;
-    }
-    STORE.carimbarMomento(draft, 'horaRetorno', 'retornoEm', agoraMesmo);
-    persistirAposFoto(draft, ['fotosRetornoIds', 'horaRetorno', 'retornoEm']);
+    persistirAposFoto(draft, ['fotosRetornoIds']);
+    toast('Fotos anexadas. Confirme a data e hora real em “Horários das fotos”; o retorno não foi preenchido.', 'success');
   }; });
   $$('[data-foto-rm-retorno]', root).forEach(btn => {
     btn.onclick = () => {
@@ -5243,7 +5222,11 @@ function contextoStatusDe(os) {
 function statusEntregaDe(os) {
   if (!temStatusEntrega() || !os || typeof os !== 'object') return null;
   const ctx = contextoStatusDe(os);
-  try { return OPERACAO.statusEntrega(os, undefined, ctx.regra, ctx.volta); } catch { return null; }
+  try {
+    const st=OPERACAO.statusEntrega(os, undefined, ctx.regra, ctx.volta);
+    const conf=os.conferenciasEntrega?.length && typeof CONFERENCIA_ENTREGA!=='undefined'?CONFERENCIA_ENTREGA.estado(os):null;
+    return conf && ['parcial','inconsistente'].includes(conf.situacao) && st.estado!=='cancelado'?{...st,conferenciaParcial:conf.resumo}:st;
+  } catch { return null; }
 }
 const canceladaNaTela = os => temStatusEntrega() && typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(os);
 // No lugar do "Finalizar" e do "Cliente retirou" da ficha da O.S. cancelada (revisão da junção F16+E7).
@@ -5252,6 +5235,7 @@ const FINALIZAR_CANCELADA_HTML = '<div class="liberar-status" style="background:
 const ICONE_STATUS_ENTREGA = { cancelado: '⛔', retrabalho: '🔴', retorno_antecipado: '↩', atraso: '⏰', no_prazo: '✅', entregue: '📦', execucao: '🔧', agendado: '📅' };
 function seloStatusEntregaHTML(st) {
   if (!st || !st.estado) return '';
+  if(st.conferenciaParcial)return `<span class="selo-entrega se-agendado" title="${esc(st.conferenciaParcial)}">Conferência parcial · prazo do registro anterior: ${esc(st.rotulo)}</span>`;
   const dica = (st.aplicaveis || []).map(a => `${a.rotulo}: ${a.motivo}`).join('\n');
   // O abonado (F17) tem cor própria: não é perda.
   const abonado = st.aplicaveis && st.aplicaveis[0] && st.aplicaveis[0].abonado ? ' se-abonado' : '';
@@ -5266,6 +5250,7 @@ function statusEntregaFichaHTML(os) {
   const st = statusEntregaDe(os);
   if (!st) return '';
   const c = st.cancelamento;
+  const motivoExibido=st.conferenciaParcial?st.conferenciaParcial+'. Referência do registro anterior: '+st.motivo.replace(/entregue em/gi,'declarada em'):st.motivo;
   const outros = (st.aplicaveis || []).slice(1).map(a => `<li><strong>${esc(a.rotulo)}:</strong> ${esc(a.motivo)}</li>`).join('');
   const g = os.cancelamento && typeof os.cancelamento === 'object' ? os.cancelamento : null;
   const desfeito = !c && g && g.ativo === false && g.desfeitoEm
@@ -5276,7 +5261,7 @@ function statusEntregaFichaHTML(os) {
   const erp = c && c.origem === 'erp' ? '<p class="st-ent-hist">Cancelada no ERP: ela só volta se for reaberta no ERP.</p>' : '';
   return `<section class="st-entrega lock-allow" aria-label="Status da entrega">
       <div class="st-ent-linha"><span class="st-ent-rot">Status da entrega</span>${seloStatusEntregaHTML(st)}</div>
-      <p class="st-ent-motivo">${esc(st.motivo.charAt(0).toUpperCase() + st.motivo.slice(1))}.</p>
+      <p class="st-ent-motivo">${esc(motivoExibido.charAt(0).toUpperCase() + motivoExibido.slice(1))}.</p>
       ${outros ? `<ul class="st-ent-outros" aria-label="Também vale">${outros}</ul>` : ''}
       ${retornoFichaHTML(st.retornoAntecipado, st.motivo, st.perdas)}
       ${erp}${desfeito}
@@ -7661,8 +7646,8 @@ function iniciais(nome) {
 function finFinalizadasPeriodo() {
   const vistos = new Set();
   return STORE.getAllOS().concat(STORE.historico ? STORE.historico() : [])
-    .filter(o => o.finalizadaEm && !vistos.has(o.id) && vistos.add(o.id))
-    .filter(o => dentroPeriodo(o.finalizadaEm, '_fFin'))
+    .filter(o => (o.finalizadaEm || o.conferenciasEntrega?.length) && !vistos.has(o.id) && vistos.add(o.id))
+    .filter(o => dentroPeriodo(o.finalizadaEm, '_fFin') || (o.conferenciasEntrega || []).some(e=>dentroPeriodo(e.dia, '_fFin')))
     .sort((a, b) => (b.finalizadaEm || '').localeCompare(a.finalizadaEm || ''));
 }
 function finCorteLocal() {
@@ -7746,7 +7731,7 @@ function renderFinalizados() {
   if (!STATE.finView) STATE.finView = 'lista';
   el.innerHTML = `
     <div class="casa-pagina-head">
-      <div><h2>Finalizados</h2><p>Concluídas pela equipe e baixas recebidas do ERP. A baixa do ERP não comprova entrega na data — ela diz que a O.S saiu.</p></div>
+      <div><h2>Finalizados</h2>${typeof controleGestao==='function' && controleGestao()?'<button class="btn-ghost btn-sm" data-controle="fila">Fila diária de conferência</button> <button class="btn-ghost btn-sm" data-controle="recuperar">Recuperar excluídas</button>':''}<p>Conferências totais ou parciais, conclusões da equipe e baixas ERP. A baixa ERP não comprova a entrega física.</p></div>
     </div>
     <div class="filter-bar">
       <div class="view-toggle">
@@ -7784,15 +7769,15 @@ function finRenderCards() {
     // Toda O.S aqui já está finalizada (filtrada por finalizadaEm). O status
     // principal é sempre "Finalizado"; retrabalho vira apenas uma tag secundária.
     const teveRetrabalho = os.retrabalho || (os.checkout && os.checkout.situacao === 'Retrabalho');
-    const dF = parseLocalDate(diaLocalISO(os.finalizadaEm));
+    const dF = parseLocalDate(diaLocalISO(os.finalizadaEm || os.conferenciasEntrega?.at(-1)?.dia));
     const dataF = dF ? `${String(dF.getDate()).padStart(2,'0')}/${String(dF.getMonth()+1).padStart(2,'0')}/${dF.getFullYear()}` : '—';
     const diasFin = diasDesdeFinal(os);
-    const podeArquivar = !os.arquivadaEm && (diasFin == null || diasFin < 7);
+    const podeArquivar = !!os.finalizadaEm && !os.arquivadaEm && (diasFin == null || diasFin < 7);
     return `<div class="os-list-item st-finalizada" data-os-id="${esc(os.id)}">
       <div class="list-info">
-        <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge st-finalizada">${statusLabelDe(os,'finalizada')}</span>${teveRetrabalho ? ' <span class="badge st-retrabalho" title="Houve retrabalho neste serviço">↻ Retrabalho</span>' : ''}${estaArquivada(os) ? ' <span class="badge" title="Está na vista Arquivados do PCP">🗄 Arquivada</span>' : ''}</div>
+        <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge st-finalizada">${os.conferenciasEntrega?.length ? esc(resumoEntregaFichaTexto(os)) : statusLabelDe(os,'finalizada')}</span>${teveRetrabalho ? ' <span class="badge st-retrabalho" title="Houve retrabalho neste serviço">↻ Retrabalho</span>' : ''}${estaArquivada(os) ? ' <span class="badge" title="Está na vista Arquivados do PCP">🗄 Arquivada</span>' : ''}</div>
         <div class="list-cliente">${esc(os.cliente || 'Sem cliente')}${os.servico ? ' — ' + esc(os.servico) : ''}</div>
-        <div class="list-date">${OPERACAO.encerradaERP(os) ? '↻ Recebida do ERP em' : '🏁 Conclusão registrada em'} ${esc(dataF)}${(os.equipe||[]).length ? ' · 👷 ' + esc(OPERACAO.equipeTexto(os, ', ')) : ''}${OPERACAO.encerradaERP(os) ? ' · '+esc(os.baixaAutoERP?.status || 'encerramento')+' · não comprova entrega nesta data' : ''}</div>
+        <div class="list-date">${OPERACAO.encerradaERP(os) ? '↻ Recebida do ERP em' : os.finalizadaEm ? '🏁 Conclusão registrada em' : 'Última conferência em'} ${esc(dataF)}${(os.equipe||[]).length ? ' · 👷 ' + esc(OPERACAO.equipeTexto(os, ', ')) : ''}${OPERACAO.encerradaERP(os) ? ' · '+esc(os.baixaAutoERP?.status || 'encerramento')+' · não comprova entrega nesta data' : ''}</div>
       </div>
       ${podeArquivar ? `<button class="btn-ghost btn-sm edit-only" data-arquivar-os="${esc(os.id)}" title="Mandar agora para a vista Arquivados">🗄</button>` : ''}
     </div>`;
@@ -7958,11 +7943,11 @@ function exportarFinalizadosPDF(list) {
   const mediaH = horas.length ? (horas.reduce((a, b) => a + b, 0) / horas.length) : 0;
 
   const linhasOS = list.map(os => {
-    const dF = parseLocalDate(diaLocalISO(os.finalizadaEm));
+    const dF = parseLocalDate(diaLocalISO(os.finalizadaEm || os.conferenciasEntrega?.at(-1)?.dia));
     const dataF = dF ? `${String(dF.getDate()).padStart(2,'0')}/${String(dF.getMonth()+1).padStart(2,'0')}/${dF.getFullYear()}` : '—';
     // Toda O.S listada aqui está finalizada; retrabalho é apenas observação.
     const teveRetrabalho = os.retrabalho || (os.checkout && os.checkout.situacao === 'Retrabalho');
-    const sit = statusLabelDe(os,'finalizada') + (teveRetrabalho ? ' (c/ retrabalho)' : '');
+    const sit = (os.conferenciasEntrega?.length ? resumoEntregaFichaTexto(os) : statusLabelDe(os,'finalizada')) + (teveRetrabalho ? ' (c/ retrabalho)' : '');
     return `<tr>
       <td>${esc(dataF)}</td><td><strong>${esc(os.numero||'—')}</strong></td>
       <td>${esc(os.cliente||'')}</td><td>${esc(os.servico||'')}</td>
@@ -8985,6 +8970,7 @@ async function exportarFichaPDF(os) {
     <h2>2 · Serviço &amp; Itens</h2><table>${kv('Acesso', os.acesso)}${kv('Fixação', os.fixacao)}${kv('Ferramentas', (os.ferramentas||[]).join(', '))}${kv('Suprimentos', (os.suprimentos||[]).join(', '))}</table>
     <table style="margin-top:6px"><thead><tr><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">Item</th><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">Descrição</th><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">Medidas</th><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">Qtde</th><th style="text-align:left;padding:3px 6px;border-bottom:2px solid #ccc">OK</th></tr></thead><tbody>${itens}</tbody></table>
 
+    <p>${esc(resumoEntregaFichaTexto(os))}</p>
     <h2>3 · Agendamento &amp; Confirmação</h2><table>
       ${kv('Data', fmtInstalacao(os.instalacao))}${kv('Equipe', OPERACAO.equipeTexto(os, ', '))}
       ${kv('Veículo', os.veiculo)}${kv('Responsável pelo agendamento', Array.isArray(os.responsavelAgenda) ? os.responsavelAgenda.join(', ') : os.responsavelAgenda)}${kv('Obs', os.obsAgenda)}
@@ -9839,7 +9825,7 @@ const CAMPOS_RETRAB_DESFAZER = ['retrabalhoPerguntado', 'retrabalho', 'problema'
 const CAMPOS_MARCA_RETRAB = ['retrabalho', 'problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho'];
 // A mesma lista do _shared (CAMPOS_GESTAO), separada pelo que a gestão limpa com null e pelo que só cresce.
 const F24_GESTAO_LIMPAVEL = ['alocacao', 'retornoPrevisto', 'retornoConferido', 'osOriginalId'];
-const F24_GESTAO_SO_ACRESCIMO = ['alocacaoLog', 'prazoCombinado', 'cancelamento', 'ocorrencias', 'abonos', 'chegadasConferidas'];
+const F24_GESTAO_SO_ACRESCIMO = ['conferenciaERP', 'regularizacaoSaida', 'revisaoSolicitada', 'cicloRegistro', 'alocacaoLog', 'prazoCombinado', 'cancelamento', 'ocorrencias', 'abonos', 'chegadasConferidas'];
 const temCampoF24 = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k) && o[k] !== undefined;
 const copiaF24 = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
 const vazioF24 = v => v == null || v === '' || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length);
@@ -10429,6 +10415,11 @@ function fichaLivreParaAtalho() {
 }
 function aoTeclarNaFicha(ev) {
   if (!fichaLivreParaAtalho()) return;
+  if(ev.key==='Tab') {
+    const caixa=document.getElementById('modal-os'),lista=[...caixa.querySelectorAll('button,input,select,textarea,a[href],[tabindex="0"]')].filter(e=>!e.disabled && e.getClientRects().length);
+    const primeiro=lista[0],ultimo=lista[lista.length-1];
+    if(primeiro && ((ev.shiftKey && (document.activeElement===primeiro || document.activeElement===caixa)) || (!ev.shiftKey && document.activeElement===ultimo))) {ev.preventDefault();(ev.shiftKey?ultimo:primeiro).focus();return;}
+  }
   if (ev && ev.target && typeof ev.target.closest === 'function' && ev.target.closest('.cli-sug')) return;
   const a = acaoDoAtalhoFicha(ev, _modalDraft);
   if (!a) return;

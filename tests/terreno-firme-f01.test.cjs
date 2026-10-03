@@ -31,7 +31,7 @@ const shared=()=>import('../supabase/functions/_shared/pcp-integridade.mjs');
 
 test('CAMPOS_GESTAO nasce com os campos das próximas fatias e todos entram no diário',async()=>{
  const {CAMPOS_GESTAO,CAMPOS_AUDITADOS}=await shared();
- assert.deepEqual([...CAMPOS_GESTAO].sort(),['abonos','alocacao','alocacaoLog','cancelamento','chegadasConferidas','ocorrencias','osOriginalId','prazoCombinado','retornoConferido','retornoPrevisto']);
+ assert.deepEqual([...CAMPOS_GESTAO].sort(),['abonos','alocacao','alocacaoLog','cancelamento','chegadasConferidas','cicloRegistro','conferenciaERP','ocorrencias','osOriginalId','prazoCombinado','regularizacaoSaida','retornoConferido','retornoPrevisto','revisaoSolicitada']);
  for(const c of CAMPOS_GESTAO)assert.ok(CAMPOS_AUDITADOS.includes(c),c+' fora do diário');
  assert.ok(!CAMPOS_GESTAO.some(c=>/cpf/i.test(c)));
 });
@@ -345,18 +345,11 @@ test('revisão: "Conferido por" digitado no espelho com outro nome não ganha o 
  assert.equal(gravada(e).conferidoPorId,'100001');
 });
 
-test('revisão: a lápide que volta a viver pelo número não grava o <campo>Id que o aparelho mandou',async()=>{
+test('revisão: criar pelo número de lápide não restaura nem grava IDs forjados',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[row('morta',{numero:'8001',tipo:'externo',rev:3},{apagado:true})],registros:fichas});
- // O índice de número recusa o insert (23505): simulado com uma linha do mesmo id que a consulta por número não acha.
- e.cliente.beforeWrite=db=>{db.pcp_registros.push({colecao:'os',id:'nova-1',apagado:true,atualizado_em:'2026-09-19T10:00:00Z',registro:{id:'nova-1',numero:'zzz'}});};
- const os={id:'nova-1',numero:'8001',tipo:'externo',cliente:'Cliente Fictício',liberadoPCP:true,aptoPor:'Gestor Teste',aptoEm:T0,aptoPorId:'999999',finalizadoPorId:'888888',idsDosCarimbos:{confPor:[{nome:'x',em:'',id:'777777'}]}};
- const r=await e.call({action:'upsert',os},gestor);
- assert.equal(r.status,200,JSON.stringify(r));assert.equal(r.duplicataEvitada,true);
- const linha=e.db.pcp_registros.find(x=>x.id==='morta');
- assert.equal(linha.apagado,false);
- assert.equal(linha.registro.aptoPorId,'111222','o ID sai do crachá');
- assert.equal(linha.registro.finalizadoPorId||'','');
- assert.ok(!JSON.stringify(linha.registro).includes('777777'));assert.equal(linha.registro.rev,4);
+ const r=await e.call({action:'upsert',os:{id:'nova',numero:'8001',tipo:'externo',aptoPorId:'999999'}},gestor);
+ assert.equal(r.status,422);assert.equal(r.restauracaoNecessaria,true);
+ const linha=e.db.pcp_registros.find(x=>x.id==='morta');assert.equal(linha.apagado,true);assert.equal(linha.registro.rev,3);assert.equal(linha.registro.aptoPorId,undefined);
 });
 
 test('revisão: crachá de toque não recebe ID do RH de ninguém (lista, incremental e resposta do upsert), e o ID gravado não se perde',async()=>{

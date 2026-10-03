@@ -168,7 +168,7 @@ export function guardarSaldoERP(os, antes, { pode = false, avisar = false, autor
    (F15: carimbarRetornoPrevisto e carimbarPrazoCombinado; F16:
    carimbarCancelamento, em _shared/pcp-status.mjs).
    Toda a lista entra no diário (CAMPOS_AUDITADOS). */
-export const CAMPOS_GESTAO = ['alocacao', 'alocacaoLog', 'prazoCombinado', 'retornoPrevisto', 'retornoConferido', 'chegadasConferidas', 'ocorrencias', 'abonos', 'cancelamento', 'osOriginalId'];
+export const CAMPOS_GESTAO = ['conferenciaERP', 'regularizacaoSaida', 'revisaoSolicitada', 'cicloRegistro', 'alocacao', 'alocacaoLog', 'prazoCombinado', 'retornoPrevisto', 'retornoConferido', 'chegadasConferidas', 'ocorrencias', 'abonos', 'cancelamento', 'osOriginalId'];
 // O log da alocação é histórico: nem a gestão o apaga com null. O prazo
 // combinado também não: mudar o prazo exige motivo, e o único caminho é o
 // pedido { corrigir: true, data, motivo } (revisão da F15). O cancelamento
@@ -177,7 +177,7 @@ export const CAMPOS_GESTAO = ['alocacao', 'alocacaoLog', 'prazoCombinado', 'reto
 // _shared/pcp-status.mjs), e o desfeito fica guardado com quem desfez.
 // As ocorrências e os abonos (F17) também: só acréscimo; anular e revogar são novo carimbo.
 // As chegadas conferidas por dia (revisão da F17): cada dia muda só pelo pedido do dia (carimbarChegadas).
-const GESTAO_SO_ACRESCIMO = new Set(['alocacaoLog', 'prazoCombinado', 'cancelamento', 'ocorrencias', 'abonos', 'chegadasConferidas']);
+const GESTAO_SO_ACRESCIMO = new Set(['conferenciaERP', 'regularizacaoSaida', 'revisaoSolicitada', 'cicloRegistro', 'alocacaoLog', 'prazoCombinado', 'cancelamento', 'ocorrencias', 'abonos', 'chegadasConferidas']);
 const vazioGestao = v => v == null || v === '' || (Array.isArray(v) && !v.length) || (objeto(v) && !Object.keys(v).length);
 // Algum campo da gestão preenchido = a O.S. tem trabalho (o esqueleto do ERP não passa por cima).
 export const temCampoGestao = o => !!o && CAMPOS_GESTAO.some(c => !vazioGestao(o[c]));
