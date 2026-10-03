@@ -549,7 +549,9 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
   const criterios=pesosCfg && !validarPerformance({equipes:[],participacoes:[],criterios:pesosCfg})
     ? {producao:pesosCfg.producao,limpeza:pesosCfg.limpeza,equipamentos:pesosCfg.equipamentos}
     : {producao:60,limpeza:20,equipamentos:20};
-  const conteudo={periodo,regra:"performance-3",criterios,registros};
+  // A régua monetária entra no hash e na revisão. Clientes antigos mantêm
+  // sua régua explícita; uma revisão antiga nunca é reinterpretada pela tela.
+  const conteudo={periodo,regra:"performance-3",...(body.notaPorValor===true?{regraNota:"nota-valor-1"}:{}),criterios,registros};
   return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP."};
 }
 async function perfFechamentos(periodo:any) {

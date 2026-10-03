@@ -75,7 +75,9 @@ test('cobertura: UMA faixa com "30 de 163", a ação de completar e o selo de pa
   assert.match(tela({papel:'montagem'}).perfCoberturaHTML(regs, {de:'', ate:''}), /Ver as sem equipe/);
   const rank = c.perfRankingPessoasHTML(regs, {equipes:[]});
   assert.match(rank, /Parcial: 18% das entregas com equipe/);
-  assert.match(rank, /perf-podio n1 perf-animar perf-podio-parcial|perf-podio n1 perf-podio-parcial/);
+  assert.doesNotMatch(rank, /class="perf-podio /, 'sem valor confirmado não há pódio de nota');
+  regs[0].confirmado=true;
+  assert.match(c.perfRankingPessoasHTML(regs,{equipes:[]}), /perf-podio n1 perf-animar perf-podio-parcial|perf-podio n1 perf-podio-parcial/);
   // Cobertura total: a faixa encolhe para uma linha verde.
   const cheia = c.perfCoberturaHTML(regs.slice(0, 30), {de:'', ate:''});
   assert.match(cheia, /perf-cob-ok/);
@@ -87,7 +89,10 @@ test('ranking individual: sem style= (a barra é atributo de SVG) e sem valor n�
   const regs = ['Ana', 'Bia', 'Caio', 'Davi', 'Edu'].flatMap((n, i) => Array.from({length:5 - i}, (_, k) => ({id:n + k, membros:P.iguais([pe(n)]), confirmado:n === 'Davi', valor:1000, os:{}})));
   const html = c.perfRankingPessoasHTML(regs, {equipes:[]});
   assert.doesNotMatch(html, /style=/);
-  assert.match(html, /<rect class="perf-barra-valor" width="\d+"/, 'a distância para o 1º aparece na tabela');
+  assert.doesNotMatch(html, /<table/, 'só Davi tem valor confirmado e aparece no pódio');
+  const producao=tela({medida:'peso'}).perfRankingPessoasHTML(regs,{equipes:[]});
+  assert.doesNotMatch(producao, /style=/);
+  assert.match(producao, /<rect class="perf-barra-valor" width="\d+"/, 'a distância para o 1º aparece na tabela de produção');
   assert.match(html, /VALOR-2000/, 'Davi: 2 entregas confirmadas de 1000');
   assert.doesNotMatch(html, /VALOR-5000|VALOR-4000|VALOR-3000/, 'valor de entrega só sugerida não aparece');
 });

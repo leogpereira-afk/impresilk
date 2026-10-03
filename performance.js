@@ -377,7 +377,9 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
    * inteligência" e "a limpeza do carro e a gestão dos equipamentos têm que ter
    * peso nesse critério de avaliação".
    *
-   * PRODUÇÃO é o PESO, não a contagem. Quem está em seis entregas divididas ao
+   * REGRA ATUAL (03/10/2026, porValor): valor líquido confirmado, rateado pela
+   * participação de cada pessoa, comparado com o maior valor do período.
+   * REGRA LEGADA (revisões antigas): PRODUÇÃO é o PESO, não a contagem. Quem está em seis entregas divididas ao
    * meio produziu três, igual a quem fez três sozinho. Contar aparições premiaria
    * quem entra em muita equipe, não quem produz. É a soma dos percentuais de
    * cada pessoa (as "O.S. equivalentes"), comparada com a de quem mais produziu
@@ -392,6 +394,7 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
    * conta pela média do período, volta a volta (ver COBERTURA abaixo). Zero ali
    * afirmaria carro sujo que ninguém viu; cem premiaria fugir da conferência. */
   const CRITERIOS_PADRAO = {producao:60, limpeza:20, equipamentos:20};
+  const REGRA_NOTA_VALOR = 'nota-valor-1';
   const CRITERIOS = ['producao','limpeza','equipamentos'];
   /* COBERTURA MÍNIMA. Revisão de 23/09/2026: marcar só as exceções (os carros
      sujos) é o jeito natural de usar um campo que nasce em branco — e aí a
@@ -418,8 +421,14 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
     const l = sn(rc && rc.carroLimpo), a = sn(rc && rc.carroArrumado);
     return l === false || a === false ? false : (l || a ? true : null);
   };
-  const avaliar = (registros, criterios) => {
+  // Valor líquido já proporcional aos itens entregues: não multiplicar de novo
+  // pela fração da O.S. O rateio em centavos é o mesmo do ranking de valor.
+  const valoresConfirmados = registros => resumir((registros || []).filter(r => r.confirmado === true).map(r => ({...r,
+    valor: !r.avisoValor && Number.isFinite(r.valor) && r.valor >= 0 ? r.valor : null,
+  }))).pessoas;
+  const avaliar = (registros, criterios, {porValor=false}={}) => {
     const pesos = criteriosValidos(criterios);
+    const valores = porValor ? new Map(valoresConfirmados(registros).map(p => [String(p.chave), p])) : null;
     const pessoas = new Map();
     const cobertura = {limpeza:{conferidas:0,voltas:0}, equipamentos:{conferidas:0,voltas:0}};
     /* UMA VOLTA É UMA VIAGEM (performance-3, 25/09/2026). A fila Volta do
@@ -463,7 +472,12 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
       }
     }
     const lista = [...pessoas.values()];
-    const lider = lista.reduce((m, x) => Math.max(m, x.peso), 0);
+    if (porValor) for (const x of lista) {
+      const v = valores.get(x.chave);
+      x.valorConfirmado = v && v.os > v.semValor ? v.valor : null;
+      x.entregasSemValor = v?.semValor || 0;
+    }
+    const lider = lista.reduce((m, x) => Math.max(m, porValor ? (x.valorConfirmado ?? 0) : x.peso), 0);
     const arred = v => Math.round(v * 10) / 10;
     const duas = v => Math.round(v * 100) / 100;
     /* A MÉDIA ENTRA VOLTA A VOLTA. Antes ela só valia para quem não tinha
@@ -482,7 +496,9 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
       media[k] = mediaFrac[k] == null ? null : arred(mediaFrac[k] * 100);
     }
     for (const x of lista) {
-      const comp = {producao: lider > 0 ? arred(x.peso / lider * 100) : null};
+      const comp = {producao: porValor
+        ? (x.valorConfirmado == null ? null : lider > 0 ? arred(x.valorConfirmado / lider * 100) : 0)
+        : lider > 0 ? arred(x.peso / lider * 100) : null};
       const imputados = [];
       for (const k of ['limpeza', 'equipamentos']) {
         if (mediaFrac[k] == null || !(x.peso > 0)) { comp[k] = null; continue; }
@@ -499,7 +515,8 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
       x.componentes = comp;
       x.imputados = imputados;   // critérios em que a pessoa não teve nenhuma volta conferida
       x.faltam = faltam;         // critérios fora da conta (cobertura abaixo do mínimo)
-      x.nota = usado > 0 ? arred(soma / usado) : null;
+      // Sem valor confirmado não se ganha nota só por carro/equipamentos.
+      x.nota = porValor && pesos.producao > 0 && x.valorConfirmado == null ? null : usado > 0 ? arred(soma / usado) : null;
       // Só depois de toda a conta: arredondar antes distorceria a comparação com o líder.
       x.peso = duas(x.peso); x.pesoConferido = duas(x.pesoConferido);
     }
@@ -524,7 +541,7 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
     }
     return [...por.values()];
   };
-  return {auditar,fracaoRegistro,unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,criteriosValidos,carroDaVolta,CRITERIOS_PADRAO,COBERTURA_MINIMA,
+  return {auditar,fracaoRegistro,unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,valoresConfirmados,REGRA_NOTA_VALOR,criteriosValidos,carroDaVolta,CRITERIOS_PADRAO,COBERTURA_MINIMA,
     ratearGrupos,gruposDoRegistro,chavesDeEquipe,composicaoApurada,equipeDaComposicao,equipeSugeridaDe,gruposApurados,equipesDaDivisao,sugestaoApurada,
     ANIMAIS,CORES,EMBLEMAS,LOGO_ANIMAL,COR_ANIMAL,animalDe,corValida,iconeEquipe,nomeEquipeNorm,conferirEquipes};
 })();
@@ -625,7 +642,7 @@ async function perfCarregarFonte(){
  try{
    if(!f.de||!f.ate)throw new Error('Selecione as datas inicial e final para consultar a base completa.');
    // A configuração vem junto: os pesos da nota na tela têm de ser os que o fechamento vai selar.
-   const [dados,historico]=await Promise.all([STORE.api({action:'performancePeriodo',...f}),STORE.api({action:'performanceFechamentos',...f}),typeof STORE.pullCFG==='function'?STORE.pullCFG().catch(()=>false):null]);
+   const [dados,historico]=await Promise.all([STORE.api({action:'performancePeriodo',...f,notaPorValor:true}),STORE.api({action:'performanceFechamentos',...f}),typeof STORE.pullCFG==='function'?STORE.pullCFG().catch(()=>false):null]);
    if(!dados?.completo || !Array.isArray(dados.registros) || !Array.isArray(historico?.fechamentos))throw new Error(dados?.error||historico?.error||'Consulta incompleta. O fechamento permanece indisponível.');
    pedido.dados=dados;pedido.fechamentos=historico.fechamentos;
  }catch(e){pedido.erro=perfErroTxt(e);}
@@ -646,13 +663,14 @@ function perfWireFonte(el){
    // Quem fecha sela os pesos do SERVIDOR. Se o aparelho mostra outros (alguém
    // mudou em outro tablet), o ranking visto não é o que seria selado.
    if(fonte.criterios && JSON.stringify(PERF.criteriosValidos(fonte.criterios))!==JSON.stringify(perfCriterios())){perfRemoto.dados=null;perfRemoto.tentado=false;renderPerformanceCasa();return toast('Os pesos da nota mudaram. Atualize e confira o ranking antes de fechar.','error');}
+   if(fonte.regraNota!==PERF.REGRA_NOTA_VALOR)return toast('Atualize a apuração antes de fechar: a nota agora usa o valor entregue confirmado. Se o aviso continuar, a atualização do servidor ainda não chegou.','error');
    const d=perfDialog('Conferir fechamento',`<p>${esc(fonte.periodo.de)} a ${esc(fonte.periodo.ate)} · ${fonte.registros.length} entregas. A cópia será preservada no servidor.</p><form><label>Motivo do fechamento ou revisão <textarea name="motivo" minlength="5" maxlength="500" required></textarea></label><p>As revisões anteriores continuarão disponíveis. Não há lançamento de pagamento.</p><button class="btn-primary" type="submit">Confirmar fechamento</button><p role="alert" id="perf-fechar-erro"></p></form>`);
    const requestId=STORE.uuid(),anterior=perfRemoto.fechamentos[0]?.id || '';
    d.querySelector('form').onsubmit=async ev=>{
      ev.preventDefault();const btn=d.querySelector('[type="submit"]');btn.disabled=true;
      try{if(STORE.getQueue().length)throw new Error('Há alterações aguardando envio. Sincronize e atualize a apuração.');
        // leGrupos: esta tela lê a O.S. dividida entre duas equipes (F11); sem a marca, o servidor recusa fechar período que tem `grupos`.
-       const r=await STORE.api({action:'performanceFechar',...fonte.periodo,hash:fonte.hash,anterior,requestId,motivo:new FormData(ev.target).get('motivo'),leGrupos:true,leEntregasItens:true});
+       const r=await STORE.api({action:'performanceFechar',...fonte.periodo,hash:fonte.hash,anterior,requestId,motivo:new FormData(ev.target).get('motivo'),leGrupos:true,leEntregasItens:true,notaPorValor:true});
        /* O 409 (a base mudou desde a consulta, ou outra revisão foi criada) é a
           única recusa que STORE.api devolve em vez de lançar. Fechar de novo
           com o mesmo hash daria o mesmo 409, e o "Atualizar apuração" mora no
@@ -1373,16 +1391,17 @@ function perfAbrirLancamento() {
 
 /* ------------------------------------------------- RANKING INDIVIDUAL
  * "O peso é individual" (o dono, 23/09/2026). O ranking que vale é o da
- * pessoa, pela NOTA: produção pelo peso de cada entrega (não pela contagem),
+ * pessoa, pela NOTA. Desde 03/10/2026, a parcela principal usa o valor líquido
+ * confirmado e rateado; revisões antigas mantêm o peso de cada entrega,
  * mais limpeza do carro e equipamentos conferidos na volta, com os pesos que a
  * gestão define aqui mesmo. As outras duas medidas ficam à mão para quem quer
  * olhar um critério só.
  */
-const PERF_CRIT_ROTULO = {producao:'Produção', limpeza:'Carro (limpo e arrumado)', equipamentos:'Equipamentos'};
+const PERF_CRIT_ROTULO = {producao:'Valor entregue', limpeza:'Carro (limpo e arrumado)', equipamentos:'Equipamentos'};
 /* Na etiqueta de cada pessoa o rótulo curto: "Carro (limpo e arrumado)" em
    cada linha dobrava a altura da tabela. O nome inteiro fica na dica da
    etiqueta e na linha dos pesos, logo abaixo do título. */
-const PERF_CRIT_CURTO = {producao:'Produção', limpeza:'Carro', equipamentos:'Equipamentos'};
+const PERF_CRIT_CURTO = {producao:'Valor entregue', limpeza:'Carro', equipamentos:'Equipamentos'};
 function perfCriterios() { return PERF.criteriosValidos(perfConfig().criterios); }
 function perfEquipeDaPessoa(chave, salvas) {
   // Pelo ID de hoje dos dois lados: a equipe salva pelo slug antigo também acha a pessoa.
@@ -1395,8 +1414,11 @@ function perfRankingPessoasHTML(regs, c) {
   /* Revisão FECHADA usa os pesos selados no fechamento, nunca os de hoje:
      mexer nos pesos depois não pode reordenar um mês já fechado. */
   const fonte = perfFonteAtual(), fechada = !!(fonte && fonte.fechadoEm);
-  const av = PERF.avaliar(regs, fechada ? (fonte.criterios || {producao:100, limpeza:0, equipamentos:0}) : perfCriterios());
-  const apurado = PERF.resumir(regs.filter(r => r.confirmado)).pessoas;
+  const porValor = !fechada || fonte.regraNota === PERF.REGRA_NOTA_VALOR;
+  const rotulos = {...PERF_CRIT_ROTULO, producao:porValor ? 'Valor entregue' : 'Produção'};
+  const curtos = {...PERF_CRIT_CURTO, producao:rotulos.producao};
+  const av = PERF.avaliar(regs, fechada ? (fonte.criterios || {producao:100, limpeza:0, equipamentos:0}) : perfCriterios(), {porValor});
+  const apurado = porValor ? PERF.valoresConfirmados(regs) : PERF.resumir(regs.filter(r => r.confirmado)).pessoas;
   const valorDe = new Map(apurado.map(x => [String(x.chave), x]));
   // Entregas e confirmações de cada um (sugeridas incluídas): de onde sai o selo "a conferir".
   const contagem = new Map(PERF.resumir(regs).pessoas.map(x => [String(x.chave), x]));
@@ -1436,7 +1458,7 @@ function perfRankingPessoasHTML(regs, c) {
     // Voltas da pessoa, não O.S.: três serviços na mesma viagem são uma volta.
     const nv = p.voltas ?? p.entregas;
     const dica = k === 'producao' ? '' : ` · ${n} de ${nv} ${nv === 1 ? 'volta conferida' : 'voltas conferidas'}${n < nv && v != null ? '; as outras contam pela média do período' : ''}`;
-    return `<span class="perf-crit ${v == null ? 'sem' : ''} ${media ? 'media' : ''}" title="${esc(PERF_CRIT_ROTULO[k])} · peso ${av.pesos[k]}%${dica}">${esc(PERF_CRIT_CURTO[k])} <b>${v == null ? 'fora' : fmt(v)}</b>${media ? '<i>média</i>' : (n != null && v != null && n < nv ? `<i>${n}/${nv}</i>` : '')}</span>`;
+    return `<span class="perf-crit ${v == null ? 'sem' : ''} ${media ? 'media' : ''}" title="${esc(rotulos[k])} · peso ${av.pesos[k]}%${dica}">${esc(curtos[k])} <b>${v == null ? 'fora' : fmt(v)}</b>${media ? '<i>média</i>' : (n != null && v != null && n < nv ? `<i>${n}/${nv}</i>` : '')}</span>`;
   }).join('');
   const detalhe = p => medida === 'nota'
     ? `<div class="perf-crits">${partes(p)}</div>${(p.imputados || []).length ? `<small class="perf-parcial">sem volta conferida em ${p.imputados.map(k => PERF_CRIT_ROTULO[k].toLowerCase()).join(' e ')}: usa a média do período</small>` : ''}`
@@ -1497,7 +1519,7 @@ function perfRankingPessoasHTML(regs, c) {
       ? `${rot} ${plural ? 'ficaram' : 'ficou'} fora da nota nesta revisão: só ${cb.conferidas} de ${voltas(cb.voltas)} tinham resposta quando o período foi fechado.`
       : `${rot} ${plural ? 'estão' : 'está'} FORA da nota de todos: a conferência cobriu ${cb.conferidas} de ${voltas(cb.voltas)} (precisa de ${precisa}).`);
   }
-  const pesosTxt = ['producao', 'limpeza', 'equipamentos'].map(k => `${PERF_CRIT_ROTULO[k]} ${av.pesos[k]}%`).join(' · ');
+  const pesosTxt = ['producao', 'limpeza', 'equipamentos'].map(k => `${rotulos[k]} ${av.pesos[k]}%`).join(' · ');
   const vazio = !av.pessoas.length
     ? '<p class="perf-rank-vazio">Nenhuma entrega com participantes neste período.</p>'
     : (!linhas.length ? `<p class="perf-rank-vazio">${medida === 'valor' ? 'Ninguém tem valor CONFIRMADO neste período ainda. Confirme as participações na lista abaixo.' : 'Sem dado suficiente para a nota neste período.'}</p>` : '');
@@ -1506,8 +1528,8 @@ function perfRankingPessoasHTML(regs, c) {
     : medida === 'peso' ? 'Soma do peso de cada um nas entregas. Aparecer em mais entregas divididas não soma mais que fazer o mesmo sozinho.'
     : 'Valor das entregas rateado pelo peso de cada um. Só participações confirmadas. Não é bônus.';
   const como = medida === 'nota' ? `<details class="perf-como"><summary>Como a nota é calculada</summary><div>
-      <p>Produção conta o PESO de cada um em cada entrega: seis entregas divididas ao meio valem três, e quem mais produziu no período vale 100. Carro e equipamentos vêm da conferência da volta; volta sem resposta conta pela média do período, para ninguém ganhar nem perder por a conferência não ter sido feita.</p>
-      <p>Um critério só entra na nota quando pelo menos 80% das voltas do período têm resposta.${coberturaOk.length ? ' ' + esc(coberturaOk.join(' ')) : ''}</p>
+      <p>${porValor ? 'Valor entregue é o valor líquido dos itens realmente entregues, rateado pela participação confirmada de cada pessoa. Quem tem o maior valor confirmado no período recebe 100 nesse critério; os demais recebem proporcionalmente. Com os pesos 60/20/20, entregar metade do valor do líder soma 30 pontos; carro e equipamentos podem somar mais 20 cada. Entregas não confirmadas ou com valor ausente ou conflitante não somam valor; quem não tem nenhum valor confirmado fica fora da nota.' : 'Esta revisão preserva a regra antiga: Produção conta o PESO de cada um em cada entrega. Seis entregas divididas ao meio valem três; quem mais produziu no período vale 100.'} Carro e equipamentos vêm da conferência da volta; volta sem resposta conta pela média do período.</p>
+      <p>Carro e equipamentos só entram na nota quando pelo menos 80% das voltas do período têm resposta. Abaixo disso, o critério fica fora e os pesos disponíveis são redistribuídos.${coberturaOk.length ? ' ' + esc(coberturaOk.join(' ')) : ''}</p>
       <p>Nos detalhes de cada pessoa, "7/8" são as voltas dela que foram conferidas e "média" quer dizer que nenhuma foi; "fora" é critério que não entrou na nota.</p>
     </div></details>` : '';
   return `<section class="perf-ranking${STATE._perfLayout==='lista'?' perf-ranking-lista':''}" aria-labelledby="perf-rank-titulo">
@@ -1520,6 +1542,7 @@ function perfRankingPessoasHTML(regs, c) {
     </header>
     <p class="perf-ranking-lead">${lead}</p>
     ${medida === 'nota' && coberturaFora.length ? `<p class="perf-aviso">${esc(coberturaFora.join(' '))}</p>` : ''}
+    ${porValor && medida === 'nota' && av.pessoas.some(p => p.entregasSemValor > 0) ? '<p class="perf-aviso">Há entregas confirmadas sem valor válido. A nota usa somente os valores já conferidos e pode mudar quando as pendências forem resolvidas.</p>' : ''}
     ${como}
     ${vazio}
     ${podioHTML}
@@ -1534,7 +1557,7 @@ function perfEditarCriterios() {
     <p>Quanto cada critério vale na nota de 0 a 100. Os três somam 100.</p>
     ${['producao', 'limpeza', 'equipamentos'].map(k => `<label class="perf-peso"><span>${esc(PERF_CRIT_ROTULO[k])}</span><input type="number" name="${k}" min="0" max="100" step="1" required value="${atual[k]}"><span>%</span></label>`).join('')}
     <p id="perf-crit-soma" aria-live="polite"></p>
-    <p class="metricas-nota">Produção é o peso de cada pessoa nas entregas, comparado com quem mais produziu no período. Carro (limpo e arrumado) e equipamentos são a parte das voltas conferidas pela gestão que saiu certa; a conferência se faz em PCP › Volta do carro. Volta sem resposta conta pela média do período: ninguém perde nem ganha por a conferência não ter sido feita. O critério só entra na nota quando pelo menos 80% das voltas do período têm resposta; abaixo disso fica fora da nota de todos.</p>
+    <p class="metricas-nota">Valor entregue é o valor líquido dos itens entregues, rateado pela participação confirmada de cada pessoa e comparado com o maior valor confirmado do período. Quantidade de O.S. não entra nesse critério. Sem nenhum valor confirmado, a pessoa fica fora da nota. Carro (limpo e arrumado) e equipamentos são a parte das voltas conferidas pela gestão que saiu certa; a conferência se faz em PCP › Volta do carro. Volta sem resposta conta pela média do período: ninguém perde nem ganha por a conferência não ter sido feita. O critério só entra na nota quando pelo menos 80% das voltas do período têm resposta; abaixo disso fica fora da nota de todos.</p>
     <button class="btn-primary" type="submit">Salvar pesos</button>
   </form>`);
   const f = d.querySelector('form'), soma = d.querySelector('#perf-crit-soma');

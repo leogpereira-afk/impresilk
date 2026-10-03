@@ -58,7 +58,7 @@ const cfgBase = (equipes = EQUIPES, participacoes = []) => ({instaladores:['Ana'
 const bancoCom = (regs, cfg = cfgBase()) => ({pcp_registros:regs, registros:plano(FICHAS_RH), pcp_config_global:[{id:true, config:cfg, atualizado_em:'2026-09-19T10:00:00Z'}]});
 const gestor = {papel:'pcp', nome:'Gestor Teste', sub:'gestor'};
 const periodo = {de:'2026-09-01', ate:'2026-09-29'};
-async function apurar(e) { const r = await e.call({action:'performancePeriodo', ...periodo}, gestor); assert.equal(r.status, 200, JSON.stringify(r)); return r; }
+async function apurar(e, notaPorValor=false) { const r = await e.call({action:'performancePeriodo', ...periodo, notaPorValor}, gestor); assert.equal(r.status, 200, JSON.stringify(r)); return r; }
 const porId = (regs, id) => regs.find(r => r.id === id);
 const aloc = grupos => plano(D.montar(grupos));
 
@@ -260,7 +260,7 @@ test('revisão: o centavo que sobra entre as equipes vai para a mesma equipe que
 test('revisão: o 409 do Fechar recarrega a apuração sozinho e pede para conferir e fechar de novo', async () => {
   const a = aloc([{equipeId:'eq-aguia', liderId:'100001', membros:['100001', '100002']}]);
   const e = await edge('pcp-sync', bancoCom([row('H1', {numero:'8301', equipe:['100001', '100002'], alocacao:{...a, por:'G', em:'2026-09-25T18:00:00Z'}, valorTotal:100})]));
-  const antes = await apurar(e);
+  const antes = await apurar(e, true);
   const pedidos = [];
   const c = comBase(aparelho({api:apiDe(e, pedidos)}), antes);
   const {botoes, dialogo, enviar} = domDoFechar(c, 'Fechamento de setembro');
@@ -393,7 +393,7 @@ test('revisão: período com O.S. de duas equipes só fecha pela tela que lê `g
   }
   // A tela nova manda leGrupos:true e fecha.
   const pedidos = [];
-  const c = comBase(aparelho({api:apiDe(e, pedidos)}), fonte);
+  const c = comBase(aparelho({api:apiDe(e, pedidos)}), await apurar(e, true));
   const {botoes, enviar} = domDoFechar(c, 'Fechamento pela tela nova');
   botoes['#perf-fechar'].onclick();await enviar();
   assert.equal(e.db.pcp_registros.filter(x => x.colecao === 'performance_fechamentos').length, 1, JSON.stringify(c.toasts));
