@@ -564,8 +564,8 @@ async function perfFechamentos(periodo:any) {
 // permitida, após autenticação e revogação, para não reler toda a base por celular.
 const CACHE_RANKING_EQUIPE = new Map<string, {ate:number, dados:any}>();
 const RANKING_EQUIPE_EM_CURSO = new Map<string, Promise<any>>();
-async function rankingEquipeDoPeriodo(periodo:any) {
-  const chave = periodo.de + ":" + periodo.ate, cache = CACHE_RANKING_EQUIPE.get(chave);
+async function rankingEquipeDoPeriodo(periodo:any, porValor=false) {
+  const chave = periodo.de + ":" + periodo.ate + (porValor ? ":valor" : ":producao"), cache = CACHE_RANKING_EQUIPE.get(chave);
   if (cache && cache.ate > Date.now()) return cache.dados;
   if (RANKING_EQUIPE_EM_CURSO.has(chave)) return RANKING_EQUIPE_EM_CURSO.get(chave);
   const consulta = (async () => {
@@ -575,7 +575,7 @@ async function rankingEquipeDoPeriodo(periodo:any) {
     // Como a gestão, unifica a mesma ficha em formatos antigos só na visão.
     // Fonte, nome histórico da equipe e hash do fechamento ficam intactos.
     const pessoas = await pessoasDoPCP(cfg);
-    const dados = rankingEquipeSeguro(fonte, cfg?.performancePCP?.equipes || [], pessoas);
+    const dados = rankingEquipeSeguro(fonte, cfg?.performancePCP?.equipes || [], pessoas, porValor);
     if (CACHE_RANKING_EQUIPE.size >= 24) CACHE_RANKING_EQUIPE.delete(CACHE_RANKING_EQUIPE.keys().next().value!);
     CACHE_RANKING_EQUIPE.set(chave, {ate:Date.now()+60_000, dados});
     return dados;
@@ -894,7 +894,7 @@ Deno.serve(async (req: Request) => {
         if (!podeVerRankingEquipe(cracha)) return resp({error:"Entre com seu acesso de funcionário do PCP.",semSessao:!cracha},cracha?403:401);
         let periodo;try{periodo=perfPeriodo(body);}catch(e){return resp({error:(e as Error).message},422);}
         if (periodo.ate > perfDia(new Date().toISOString())) return resp({error:"Escolha um período até hoje."},422);
-        const resposta = resp(await rankingEquipeDoPeriodo(periodo));
+        const resposta = resp(await rankingEquipeDoPeriodo(periodo, body.ordemValor===true));
         resposta.headers.set("Cache-Control", "no-store");
         return resposta;
       }

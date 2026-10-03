@@ -1157,6 +1157,7 @@ const ALOCUI = (() => {
       ${st.dica ? `<p class="aloc-dica">${escA(st.dica)}</p>` : ''}
       ${avisosHTML(st)}
       ${rapidasHTML(st)}
+      <p class="aloc-dica">Serviço compartilhado: selecione cada equipe e ajuste sua porcentagem até somar 100%. O valor entregue e a participação vão para o ranking de cada equipe. Pessoas avulsas ficam separadas até você definir a equipe nesta divisão.</p>
       ${barraHTML(st)}
       <div class="aloc-grupos">${st.aloc.grupos.map((g, gi) => grupoHTML(st, g, gi)).join('')}</div>
       ${vazio ? '<p class="aloc-vazio">Ninguém na divisão ainda. Traga uma equipe ou adicione pessoas.</p>' : ''}

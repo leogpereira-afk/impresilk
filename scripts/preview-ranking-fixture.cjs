@@ -65,6 +65,6 @@ async function handler(body,authorization=''){
  const {rankingEquipeSeguro}=await import('../supabase/functions/_shared/pcp-ranking-publico.mjs');
  const {fonte,equipes}=fonteFicticia({de,ate});
  if(de.startsWith('2000-01'))fonte.registros=[];
- return out(200,rankingEquipeSeguro(fonte,equipes));
+ return out(200,rankingEquipeSeguro(fonte,equipes,null,body.ordemValor===true));
 }
 module.exports={script,handler,fonteFicticia};

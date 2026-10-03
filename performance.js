@@ -1597,17 +1597,17 @@ function perfCortarPodio(linhas) {
 }
 let perfUltimoRanking = new Map();
 function perfRankingEquipesHTML(regs, c) {
-  const medida = ['valor','entregas','producao'].includes(STATE._perfRankMedida) ? STATE._perfRankMedida : perfFonteAtual()?.fechadoEm ? 'entregas' : 'producao';
+  const medida = ['valor','entregas','producao'].includes(STATE._perfRankMedida) ? STATE._perfRankMedida : 'valor';
   const vis = PERF.comEquipes(regs, c.equipes, perfOpcoesEquipe());
   const todas = PERF.resumir(vis).equipes;
-  const confirmadas = PERF.resumir(vis.filter(r => r.confirmado)).equipes;
+  const confirmadas = PERF.resumir(vis.filter(r => r.confirmado).map(r => ({...r, valor: !r.avisoValor && Number.isFinite(r.valor) && r.valor >= 0 ? r.valor : null}))).equipes;
   const valorDe = new Map(confirmadas.map(x => [x.chave, x]));
   const pode = perfPodeEditar();
   let linhas, semValor = [];
   if (medida === 'valor') {
     const comValor = todas.filter(x => { const v = valorDe.get(x.chave); return v && v.os > v.semValor; });
     semValor = todas.filter(x => !comValor.includes(x));
-    linhas = PERF.ranquear(comValor.map(x => ({...x, valorConf: valorDe.get(x.chave).valor})), x => x.valorConf);
+    linhas = PERF.ranquear(comValor.map(x => ({...x, valorConf: valorDe.get(x.chave).valor})), x => Math.round(x.valorConf * 100));
   } else if (medida === 'producao') {
     linhas = PERF.ranquear(confirmadas.filter(x=>x.equivalentes>0), x => Math.round(x.equivalentes*1e8)/1e8);
   } else {
@@ -1618,12 +1618,12 @@ function perfRankingEquipesHTML(regs, c) {
   const rotulo = x => medida === 'producao' ? 'O.S. equivalentes confirmadas' : medida === 'valor' ? ('confirmado' + (semValorDe(x) ? ` · parcial (${semValorDe(x)} sem valor)` : '')) : (x.os === 1 ? 'entrega' : 'entregas');
   // A outra medida, pequena, embaixo do número: no modo Entregas, o valor (só o confirmado).
   const linha = x => {
-    if (medida === 'valor') return `${x.os} ${x.os === 1 ? 'entrega' : 'entregas'}`;
+    if (medida === 'valor') return `${x.confirmadas} ${x.confirmadas === 1 ? 'entrega confirmada' : 'entregas confirmadas'}`;
     const v = valorDe.get(x.chave);
     if (!v) return 'valor a conferir';
     return v.os > v.semValor ? esc(dinheiroCasa(v.valor)) + ' confirmado' + (v.semValor ? ' (parcial)' : '') : 'sem valor nas confirmadas';
   };
-  const aConferir = x => medida !== 'valor' && x.os > x.confirmadas ? `<span class="perf-a-conferir">${x.os - x.confirmadas} a conferir</span>` : '';
+  const aConferir = x => x.os > x.confirmadas ? `<span class="perf-a-conferir">${x.os - x.confirmadas} a conferir</span>` : '';
   /* Equipe salva mostra os integrantes do CADASTRO; a primeira entrega do
      período pode ter tido um ajudante avulso que não é da equipe. Os rostos
      vêm da ficha do RH (foto quando há), pelo ID de hoje de cada um. */
@@ -1689,7 +1689,7 @@ function perfRankingEquipesHTML(regs, c) {
     <header class="perf-ranking-head">
       <div class="perf-ranking-titulo"><h3 id="perf-rank-titulo">Ranking das equipes</h3>${perfSituacaoHTML(situacao)}</div>
       <details class="perf-ranking-opcoes"><summary>${medida==='producao'?'Produção confirmada':medida==='valor'?'Valor confirmado':'Entregas'} · opções</summary><div class="perf-ranking-ctrl">
-        ${perfSegHTML(medida, [['producao', 'Produção confirmada'], ['entregas', 'Entregas'], ['valor', 'Valor confirmado']], 'perf-rank-medida', 'Ordenar o ranking por')}
+        ${perfSegHTML(medida, [['valor', 'Valor confirmado'], ['producao', 'Produção confirmada'], ['entregas', 'Entregas']], 'perf-rank-medida', 'Ordenar o ranking por')}
         ${perfSegHTML(STATE._perfLayout==='lista'?'lista':'cards', [['cards','Cards'],['lista','Lista compacta']], 'perf-layout', 'Formato do ranking')}
         ${pode ? '<button type="button" class="btn-ghost btn-sm" id="perf-nova-equipe">+ Nova equipe</button>' : ''}
       </div></details>
@@ -1699,8 +1699,8 @@ function perfRankingEquipesHTML(regs, c) {
     ${vazio}
     ${podioHTML}
     ${cartoes}
-    <p class="perf-ranking-lead">${medida==='producao'?'O que a equipe realmente entregou, proporcional aos itens e à sua participação. Só entram divisões confirmadas.':medida==='valor'?'Valor líquido das entregas confirmadas, dividido entre as equipes.':'Quantidade de registros de entrega, incluindo sugestões. Uma mesma O.S. pode ter várias parciais.'}</p>
-    <details class="perf-method"><summary>Como funciona esta classificação</summary><p>A produção usa O.S. equivalentes: duas parciais de 25% e 75% somam uma O.S., não duas. Se duas equipes dividem o serviço, cada uma leva sua parte. Valores ausentes não viram zero; sugestões aguardam confirmação. Este ranking operacional não define sozinho a comissão ou os prêmios. Empates recebem a mesma posição.</p></details>
+    <p class="perf-ranking-lead">${medida==='producao'?'O que a equipe realmente entregou, proporcional aos itens e à sua participação. Só entram divisões confirmadas.':medida==='valor'?'Maior valor entregue confirmado primeiro. Valor líquido, dividido entre as equipes; só há empate com o mesmo valor em centavos.':'Quantidade de registros de entrega, incluindo sugestões. Uma mesma O.S. pode ter várias parciais.'}</p>
+    <details class="perf-method"><summary>Como funciona esta classificação</summary><p>A classificação padrão vai do maior para o menor valor líquido entregue confirmado, respeitando o rateio entre equipes. Valores iguais até os centavos compartilham a posição. Na opção Produção, a medida usa O.S. equivalentes: duas parciais de 25% e 75% somam uma O.S., não duas. Se duas equipes dividem o serviço, cada uma leva sua parte, somada às suas outras entregas. Na conferência da entrega, selecione as equipes e seus percentuais (total de 100%). Pessoas avulsas não são transferidas automaticamente para uma equipe; confira a divisão para definir o destino. Valores ausentes não viram zero; sugestões aguardam confirmação. Este ranking operacional não define sozinho a comissão ou os prêmios. Empates recebem a mesma posição.</p></details>
     ${semValor.length ? `<p class="perf-rank-nota">${semValor.length} equipe${semValor.length === 1 ? '' : 's'} com entrega mas sem valor confirmado ficam fora deste ranking, e não como zero.</p>` : ''}
     ${paradas.length ? `<div class="perf-equipes-paradas"><span>Sem entregas vinculadas no período:</span>${paradas.map(e => `<button type="button" class="perf-equipe-chip${perfCorClasse(e)}" ${pode ? `data-perf-vinculos="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}
     ${desativadas.length ? `<div class="perf-equipes-paradas perf-desativadas"><span>Desativadas:</span>${desativadas.map(e => `<button type="button" class="perf-equipe-chip${perfCorClasse(e)}" ${pode ? `data-perf-equipe="${esc(e.id)}"` : 'disabled'}>${perfLogoHTML(e, 'perf-chip-logo')} ${esc(e.nome)}</button>`).join('')}</div>` : ''}

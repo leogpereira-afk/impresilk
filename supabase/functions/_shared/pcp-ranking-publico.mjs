@@ -9,7 +9,7 @@ export function podeVerRankingEquipe(cracha) {
     ['admin','pcp','montagem','operacao','comercial'].includes(String(cracha.papel));
 }
 
-export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null) {
+export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porValor = false) {
   const salvas = new Map((Array.isArray(cadastro) ? cadastro : []).filter(e => e?.id).map(e => [String(e.id), e]));
   const historico = !!fonte?.fechadoEm, grupos = new Map(), vistos = new Set();
   let entregasConfirmadas = 0, equivalentes = 0, aConferir = 0, semBase = 0;
@@ -50,7 +50,15 @@ export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null) {
     // parcial. Preserva a confirmação sem transformar a entrega em O.S. inteira.
     if (!fracao) { semBase++; continue; }
     equivalentes += fracao;
-    for (const g of partes) {
+    const valorValido = !r.avisoValor && Number.isFinite(r.valor) && r.valor >= 0;
+    const totalCentavos = valorValido ? Math.round(r.valor * 100) : null;
+    const valores = partes.map(g => totalCentavos == null ? null : Math.floor(totalCentavos * g.cota / 10000));
+    if (totalCentavos != null) {
+      const tamanho = g => Number.isInteger(g.tamanho) && g.tamanho > 0 ? g.tamanho : g.membros.length;
+      let alvo=0;partes.forEach((g,i)=>{if(tamanho(g)>tamanho(partes[alvo]))alvo=i;});
+      valores[alvo] += totalCentavos - valores.reduce((s,v)=>s+v,0);
+    }
+    for (const [indice,g] of partes.entries()) {
       // Identidades só existem no cálculo em memória; nenhuma chave do RH sai.
       const chave = g.equipeId ? 'e:' + g.equipeId : 'a:' + g.membros.map(m => String(m.chave)).sort().join('|');
       const salva = salvas.get(String(g.equipeId || ''));
@@ -59,23 +67,25 @@ export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null) {
       const nome = texto(visual.nome || visual.equipeNome || g.membros.map(m => texto(m.nome, 70)).join(' + '));
       const row = grupos.get(chave) || { nome, logo:logoSeguro(salva?.logo || visual.logo), animal,
         emblema:texto(visual.emblema || '🤝', 12), cor:/^#[0-9a-f]{6}$/i.test(visual.cor) ? visual.cor : '',
-        tipo:g.equipeId ? 'equipe' : g.membros.length > 1 ? 'composicao' : 'individual', entregas:0, equivalentes:0 };
+        tipo:g.equipeId ? 'equipe' : g.membros.length > 1 ? 'composicao' : 'individual', entregas:0, equivalentes:0, centavos:0, comValor:0 };
+      if (valorValido) { row.centavos += valores[indice]; row.comValor++; }
       row.entregas++; row.equivalentes += fracao * g.cota / 10000;
       grupos.set(chave, row);
     }
   }
-  const linhas = [...grupos.values()].map(r => ({ ...r, equivalentes:numero(r.equivalentes) }))
-    .sort((a,b) => b.equivalentes-a.equivalentes || a.nome.localeCompare(b.nome, 'pt-BR'));
+  const linhas = [...grupos.values()].filter(r=>!porValor || r.comValor>0).map(r => ({ ...r, equivalentes:numero(r.equivalentes) }))
+    .sort((a,b) => (porValor ? b.centavos-a.centavos : b.equivalentes-a.equivalentes) || a.nome.localeCompare(b.nome, 'pt-BR'));
   let anterior = null, posicao = 0;
   const lider = linhas[0]?.equivalentes || 0;
   const equipes = linhas.map((r, i) => {
-    if (r.equivalentes !== anterior) posicao = i + 1;
-    anterior = r.equivalentes;
+    const medida=porValor?r.centavos:r.equivalentes;
+    if (medida !== anterior) posicao = i + 1;
+    anterior = medida;
     // Allowlist explícita: nem spread da fonte, nem membros, IDs ou dinheiro.
     return { posicao, nome:r.nome, tipo:r.tipo, logo:r.logo, animal:r.animal, emblema:r.emblema, cor:r.cor,
-      entregas:r.entregas, equivalentes:r.equivalentes, faltaLideranca:numero(lider-r.equivalentes) };
+      entregas:r.entregas, equivalentes:r.equivalentes, faltaLideranca:porValor ? null : numero(lider-r.equivalentes) };
   });
-  return { periodo:{de:texto(fonte?.periodo?.de,10),ate:texto(fonte?.periodo?.ate,10)},
+  return { ...(porValor ? {criterio:'valor-confirmado'} : {}), periodo:{de:texto(fonte?.periodo?.de,10),ate:texto(fonte?.periodo?.ate,10)},
     atualizadoEm:texto(fonte?.consultadoEm,40), fechado:historico,
     fechadoEm:historico ? texto(fonte.fechadoEm,40) : null,
     revisao:historico && Number.isInteger(fonte.revisao) ? fonte.revisao : null,
