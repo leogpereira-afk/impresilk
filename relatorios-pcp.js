@@ -19,6 +19,7 @@ const RELATORIOS_PCP = (() => {
     copia.querySelectorAll('input,select,textarea').forEach(n=>n.remove());
     copia.querySelectorAll('script,[data-pdf-excluir],.pdf-secao-acao,[hidden]:not(.painel-bloco-corpo)').forEach(n=>n.remove());
     if(!valores)copia.querySelectorAll('[data-valor],.valor-monetario,[data-pdf-valores]').forEach(n=>n.remove());
+    if(!completo)copia.querySelectorAll('.perf-report-pendencias').forEach(n=>n.remove());
     copia.querySelectorAll('details').forEach(n=>{if(completo)n.open=true;else n.remove();});
     copia.querySelectorAll('.painel-bloco-corpo').forEach(n=>{if(completo)n.hidden=false;else if(n.hidden)n.remove();});
     return copia;

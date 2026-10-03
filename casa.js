@@ -4950,6 +4950,9 @@ function renderGradeCasa() {
   const mes = dia.slice(0, 7);
   const [my, mm] = mes.split('-').map(Number);
   const diasDoMes = Array.from({ length: new Date(my, mm, 0).getDate() }, (_, i) => `${mes}-${String(i + 1).padStart(2, '0')}`);
+  const pdfMes = STATE._grVista === 'mes';
+  const listaPDF = pdfMes ? diasDoMes.flatMap(k=>doDia(k).map(o=>({...o,_pdfDia:k}))) : lista;
+  const periodoPDF = pdfMes ? {de:mes+'-01',ate:diasDoMes.at(-1)} : {de:dia,ate:dia};
   const mesHTML = diasDoMes.map(k => {
     const l = doDia(k);
     if (!l.length) return '';
@@ -4979,10 +4982,10 @@ function renderGradeCasa() {
         <strong class="casa-dia-rot">${esc(dataBR)}${dia === hoje ? ' · hoje' : ''}</strong>
         <span class="casa-dia-acoes">
           <button class="btn-success btn-sm" id="gr-wpp" ${lista.length ? '' : 'disabled'} title="Mensagem da programação no formato da casa">💬 WhatsApp${STATE._grVista === 'mes' ? ' de ' + esc(dia.slice(8, 10) + '/' + dia.slice(5, 7)) : ''}</button>
-          <button class="btn-ghost btn-sm" id="gr-pdf" ${lista.length ? '' : 'disabled'} title="Salvar ou imprimir o PDF do dia escolhido">🖨 PDF${STATE._grVista === 'mes' ? ' de ' + esc(dia.slice(8, 10) + '/' + dia.slice(5, 7)) : ''}</button>
+          <button class="btn-ghost btn-sm" id="gr-pdf" ${listaPDF.length ? '' : 'disabled'} title="Salvar ou imprimir o PDF ${pdfMes ? 'do mês inteiro' : 'do dia escolhido'}">🖨 PDF ${pdfMes ? 'do mês ' + esc(mes.slice(5,7)+'/'+mes.slice(0,4)) : 'do dia'}</button>
         </span>
       </div>
-      ${STATE._grVista === 'mes' ? '<p class="metricas-nota">A tela mostra o mês; o WhatsApp e o PDF saem sempre do <strong>dia escolhido acima</strong> — a programação é mandada dia a dia. Clique num dia da lista para trocá-lo.</p>' : ''}
+      ${STATE._grVista === 'mes' ? '<p class="metricas-nota">O PDF reúne o <strong>mês inteiro</strong> exibido. O WhatsApp usa somente o <strong>dia escolhido acima</strong>. Clique num dia da lista para abrir sua programação.</p>' : ''}
       ${STATE._grVista === 'dia' ? `
         <div class="casa-kpi-cards">
           <div class="casa-kpi"><b>${lista.length}</b><small>O.S neste dia</small></div>
@@ -5014,7 +5017,7 @@ function renderGradeCasa() {
   el.querySelectorAll('[data-gr-vista]').forEach(b => b.onclick = () => { STATE._grVista = b.dataset.grVista; renderGradeCasa(); });
   el.querySelectorAll('[data-ir-dia]').forEach(b => b.onclick = () => { STATE._grDia = b.dataset.irDia; STATE._grVista = 'dia'; renderGradeCasa(); });
   const wpp = document.getElementById('gr-wpp'); if (wpp) wpp.onclick = () => { if (typeof whatsappServicosDia === 'function') whatsappServicosDia(dia); };
-  const pdf = document.getElementById('gr-pdf'); if (pdf) pdf.onclick = () => { if (typeof relatorioServicosDia === 'function') pdfAgendaRecorte('Programação — '+(STATE._grVista==='mes'?'mês inteiro':'dia selecionado'),STATE._grVista==='mes'?diasDoMes.flatMap(k=>doDia(k).map(o=>({...o,_pdfDia:k}))):lista,STATE._grVista==='mes'?{de:mes+'-01',ate:diasDoMes.at(-1)}:{de:dia,ate:dia},STATE._agendaConcluidas); };
+  const pdf = document.getElementById('gr-pdf'); if (pdf) pdf.onclick = () => { if (listaPDF.length) pdfAgendaRecorte('Programação — '+(pdfMes?'mês inteiro':'dia selecionado'),listaPDF,periodoPDF,STATE._agendaConcluidas); };
   const add = el.querySelector('.casa-add-os'); if (add) add.ontoggle = () => { STATE._grAddAberto = add.open; };
   wireAddOSCasa(el, 'gr-add', dia, () => { STATE._grAddAberto = false; renderGradeCasa(); });
   if(typeof wireOperacaoRevisao==='function')wireOperacaoRevisao(el);

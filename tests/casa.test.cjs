@@ -1448,3 +1448,14 @@ test('Performance mede material isolado, zero e horas/km efetivos por ID de corr
  assert.match(render({material:0,horas:0,km:0}),/R\$\s?0,00[^]*Custo medido/);
  const html=render({material:5,horas:2,km:3});assert.match(html,/R\$\s?31,00/);assert.match(html,/3 km/);assert.doesNotMatch(html,/20 km/);
 });
+
+test('PDF mensal habilita com serviços em outros dias e exporta exatamente o mês; dia vazio continua desabilitado',()=>{
+ const lista=[4,5].map(d=>({id:'dia-'+d,numero:'QA-'+d,tipo:'externo',equipe:[],instalacao:{data:'2026-10-0'+d}}));
+ const t=casa(lista);
+ const html=t.run(`STATE._grDia='2026-10-03';STATE._grVista='mes';var painel={innerHTML:'',querySelector:()=>null,querySelectorAll:()=>[]},pdfBotao={};document.getElementById=id=>id==='panel-grade'?painel:id==='gr-pdf'?pdfBotao:null;var exportado;pdfAgendaRecorte=(...args)=>exportado=args;relatorioServicosDia=()=>{};renderGradeCasa();painel.innerHTML`);
+ const botao=html.match(/<button[^>]*id="gr-pdf"[^>]*>[^]*?<\/button>/)[0];
+ assert.doesNotMatch(botao,/disabled/);assert.match(botao,/mês|mensal/);assert.doesNotMatch(botao,/PDF de 03\/10/);assert.doesNotMatch(html,/WhatsApp e o PDF saem sempre/);
+ t.run('pdfBotao.onclick()');assert.deepEqual(JSON.parse(t.run('JSON.stringify(exportado[1].map(o=>[o.id,o._pdfDia]))')),[['dia-4','2026-10-04'],['dia-5','2026-10-05']]);assert.equal(t.run('exportado[2].de'),'2026-10-01');assert.equal(t.run('exportado[2].ate'),'2026-10-31');
+ const vazio=t.run("STATE._grVista='dia';renderGradeCasa();painel.innerHTML");assert.match(vazio.match(/<button[^>]*id="gr-pdf"[^>]*>/)[0],/disabled/);
+ t.run("STATE._grDia='2026-10-04';renderGradeCasa();pdfBotao.onclick()");assert.equal(t.run('exportado[1].length'),1);assert.equal(t.run('exportado[2].de'),'2026-10-04');assert.equal(t.run('exportado[2].ate'),'2026-10-04');
+});

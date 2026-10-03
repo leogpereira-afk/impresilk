@@ -60,3 +60,18 @@ test('cache previamente da gestão não expõe montantes após trocar papel e ma
 test('perfil restrito não duplica valores copiando UID financeiro',async()=>{
  const {preservarValoresPCP}=await import('../supabase/functions/_shared/pcp-integridade.mjs'),o=original();assert.throws(()=>preservarValoresPCP({...o,itens:[...o.itens,{...o.itens[0]}]},o),/identidade/);
 });
+test('Performance resumo mantém fonte integral para alternar completo com O.S. recolhidas e pendências',()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),R=require('../relatorios-pcp.js');
+ function fonte(){
+  const dados={detalhe:true,pendencia:true,aberto:false};
+  const detalhe={remove(){dados.detalhe=false;},set open(v){dados.aberto=v;}};
+  const pendencia={remove(){dados.pendencia=false;}};
+  return {dados,dataset:{},cloneNode(){const c=fonte();Object.assign(c.dados,dados);c.dataset={...this.dataset};return c;},querySelectorAll(sel){if(sel==='.perf-team-report details,.perf-report-pendencias')return [...(dados.detalhe?[detalhe]:[]),...(dados.pendencia?[pendencia]:[])];if(sel==='details')return dados.detalhe?[detalhe]:[];if(sel==='.perf-report-pendencias')return dados.pendencia?[pendencia]:[];return [];}};
+ }
+ const origem=fonte(),botao={},el={querySelector:s=>s==='#perf-rel-pdf'?botao:s==='.perf-report'?origem:null,querySelectorAll:()=>[]};let exportado;
+ const ctx=vm.createContext({console,STORE:{getAllOS:()=>[]},STATE:{},document:{},imprimirAnalisePCP:(titulo,f)=>exportado=f,periodoOuMes:()=>({de:'2026-10-01',ate:'2026-10-31'}),bindCardClicks(){},el});
+ vm.runInContext(fs.readFileSync('performance.js','utf8'),ctx);vm.runInContext('perfWireFonte=()=>{};perfConfig=()=>({equipes:[]});perfFonteTexto=()=>"Fixture";wirePerformanceEquipes(el)',ctx);botao.onclick();
+ assert.equal(exportado.dataset.pdfModo,'resumo');const resumo=R.sanearCopia(exportado.cloneNode(true),{completo:false,valores:true});assert.equal(resumo.dados.detalhe,false);assert.equal(resumo.dados.pendencia,false);
+ exportado.dataset.pdfModo='completo';const completo=R.sanearCopia(exportado.cloneNode(true),{completo:true,valores:true});assert.equal(completo.dados.detalhe,true);assert.equal(completo.dados.pendencia,true);assert.equal(completo.dados.aberto,true);assert.equal(origem.dados.aberto,false);
+ const novamente=R.sanearCopia(exportado.cloneNode(true),{completo:false,valores:true});assert.equal(novamente.dados.detalhe,false);assert.equal(exportado.dados.detalhe,true);
+});
