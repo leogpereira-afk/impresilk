@@ -4098,6 +4098,8 @@ img.perf-logo{object-fit:cover}
 .conf-item input[type=checkbox]{width:1.2rem;height:1.2rem;flex:none;accent-color:#1477d9}
 .conf-qtde{font-size:.78rem;display:flex;align-items:center;gap:.4rem;flex:none}.conf-qtde input{width:5rem;min-height:40px;border:1px solid var(--border,#d8dfe5);border-radius:8px;padding:.4rem;background:var(--surface,#fff);color:inherit}
 .conf-resumo{margin:.75rem 0 0;padding:.7rem;border-radius:8px;background:var(--bg,#f1f5f9);font-weight:600;font-size:.87rem}
+.conf-parte{border:1px solid var(--border,#d8dfe5);border-left:4px solid var(--brand,#21695f);border-radius:10px;padding:.75rem;margin:.6rem 0 1rem;min-width:0}
+.conf-parte-topo{display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap}.conf-parte p{margin:.4rem 0;font-size:.9rem;overflow-wrap:anywhere}.conf-parte small{display:block;color:var(--muted,#66737a);line-height:1.4}
 .conf-item-resumo{max-width:32rem;overflow-wrap:anywhere;font-size:.8rem}
 @media(max-width:540px){.conf-itens{padding:.65rem}.conf-item{align-items:flex-start;gap:.5rem}.conf-qtde{flex-direction:column;align-items:flex-start}.conf-data{flex-wrap:wrap}}
 

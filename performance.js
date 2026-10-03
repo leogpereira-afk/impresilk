@@ -1037,6 +1037,9 @@ async function perfEditarParticipacao(id) {
   if (!os) { perfDialog(titulo, `<p class="aloc-aviso">${busca && !busca.offline && !busca.erro ? `Esta O.S. não está neste aparelho, e a busca pelo número ${esc(ref.numero)} no servidor não a trouxe. Atualize a apuração e toque em Conferir de novo.` : 'Esta O.S. não está neste aparelho e não deu para buscá-la agora. Conecte-se e toque em Conferir de novo.'}</p>`); return; }
   if (typeof ALOCUI === 'undefined') { perfDialog(titulo, '<p class="aloc-aviso">Esta tela está desatualizada. Recarregue a página para conferir a divisão.</p>'); return; }
   if (os.conferenciasEntrega?.length) return conferirItensEntrega(id, os.conferenciasEntrega[0].id);
+  // Conferir começa pelo que foi entregue, antes de atribuir a O.S. inteira
+  // a uma pessoa. O caminho antigo permanece para fichas ainda sem itens.
+  if (os.itens?.length && typeof conferirItensEntrega === 'function') return conferirItensEntrega(id);
   const c = perfConfig(), chave = 'perf:' + id;
   const pAntiga = c.participacoes.find(p => p.id === id);
   const pVale = perfParticipacaoVale(os, pAntiga);
