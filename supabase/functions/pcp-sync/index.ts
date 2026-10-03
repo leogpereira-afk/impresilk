@@ -1,4 +1,5 @@
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
+import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
 import { podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
@@ -113,7 +114,7 @@ const CACHE_REVOG = new Map<string, { ate: number; revogado: boolean }>();
 const CACHE_FOTOS_EQUIPE = new Map<string, { ate: number; ids: string[] }>();
 const CACHE_REVOG_MS = 60_000; // uma consulta por pessoa por minuto, nao por request
 
-async function crachaRevogado(cracha: any): Promise<boolean> {
+async function crachaRevogado(cracha: any, estrito = false): Promise<boolean> {
   const sub = String(cracha?.sub ?? "").trim();
   const papel = String(cracha?.papel ?? "");
   if (!sub) return false;
@@ -145,11 +146,15 @@ async function crachaRevogado(cracha: any): Promise<boolean> {
       p_sistema: "pcp", p_sub: sub, p_papel: papel,
     });
     if (error) throw new Error(error.message);
+    if (estrito && typeof data !== "boolean") throw new Error("Resposta de revogação indisponível.");
     revogado = data === true;
   } catch (e) {
     // Banco fora do ar ACEITA e nao guarda no cache -- trancar a fabrica por
     // erro de infraestrutura custa mais que um cracha durar ate expirar.
     console.error("[pcp-sync] revogacao indisponivel:", (e as Error).message);
+    // Acompanhamento remoto não é execução offline. Sem conferir a conta,
+    // não libera o ranking; a operação conserva seu comportamento anterior.
+    if (estrito) throw new Error("Não foi possível conferir seu acesso ao ranking. Tente novamente.");
     return false;
   }
   CACHE_REVOG.set(chave, { ate: agora + CACHE_REVOG_MS, revogado });
@@ -553,6 +558,30 @@ async function perfFechamentos(periodo:any) {
   return (data||[]).map((r:any)=>r.registro).sort((a:any,b:any)=>b.revisao-a.revisao);
 }
 
+// Compartilhar o endereço não compartilha o crachá. Cache só da projeção
+// permitida, após autenticação e revogação, para não reler toda a base por celular.
+const CACHE_RANKING_EQUIPE = new Map<string, {ate:number, dados:any}>();
+const RANKING_EQUIPE_EM_CURSO = new Map<string, Promise<any>>();
+async function rankingEquipeDoPeriodo(periodo:any) {
+  const chave = periodo.de + ":" + periodo.ate, cache = CACHE_RANKING_EQUIPE.get(chave);
+  if (cache && cache.ate > Date.now()) return cache.dados;
+  if (RANKING_EQUIPE_EM_CURSO.has(chave)) return RANKING_EQUIPE_EM_CURSO.get(chave);
+  const consulta = (async () => {
+    const fechamentos = await perfFechamentos(periodo);
+    const fonte = fechamentos[0] || await perfFonte(periodo, {estrito:false});
+    const cfg = await getCfg();
+    // Como a gestão, unifica a mesma ficha em formatos antigos só na visão.
+    // Fonte, nome histórico da equipe e hash do fechamento ficam intactos.
+    const pessoas = await pessoasDoPCP(cfg);
+    const dados = rankingEquipeSeguro(fonte, cfg?.performancePCP?.equipes || [], pessoas);
+    if (CACHE_RANKING_EQUIPE.size >= 24) CACHE_RANKING_EQUIPE.delete(CACHE_RANKING_EQUIPE.keys().next().value!);
+    CACHE_RANKING_EQUIPE.set(chave, {ate:Date.now()+60_000, dados});
+    return dados;
+  })();
+  RANKING_EQUIPE_EM_CURSO.set(chave, consulta);
+  try { return await consulta; } finally { RANKING_EQUIPE_EM_CURSO.delete(chave); }
+}
+
 // ---------------------------------------------------------------- handler
 
 Deno.serve(async (req: Request) => {
@@ -579,8 +608,14 @@ Deno.serve(async (req: Request) => {
   // Assinatura valida nao basta: a conta pode ter sido desativada DEPOIS de o
   // cracha ser emitido (ele vale 30 dias). semSessao:true de proposito — o app
   // preserva a fila e pede para entrar de novo em vez de descartar trabalho.
-  if (cracha && !ehMaquina && (await crachaRevogado(cracha))) {
-    return resp({ error: "Seu acesso ao PCP foi encerrado. Fale com a gestão.", semSessao: true }, 401);
+  if (cracha && (!ehMaquina || acao === "performanceRankingEquipe")) {
+    try {
+      if (await crachaRevogado(cracha, acao === "performanceRankingEquipe")) {
+        return resp({ error: "Seu acesso ao PCP foi encerrado. Fale com a gestão.", semSessao: true }, 401);
+      }
+    } catch {
+      return resp({error:"Não foi possível conferir seu acesso ao ranking. Tente novamente."},503);
+    }
   }
 
   // Um nome sozinho não autoriza aparelho novo. Gestão autentica e autoriza
@@ -851,6 +886,16 @@ Deno.serve(async (req: Request) => {
 
   try {
     switch (acao) {
+      case "performanceRankingEquipe": {
+        // Nem token de backup nem parâmetros de papel/ID no corpo autorizam.
+        // O mesmo crachá já autorizado no espelho de montagem pode acompanhar.
+        if (!podeVerRankingEquipe(cracha)) return resp({error:"Entre com seu acesso de funcionário do PCP.",semSessao:!cracha},cracha?403:401);
+        let periodo;try{periodo=perfPeriodo(body);}catch(e){return resp({error:(e as Error).message},422);}
+        if (periodo.ate > perfDia(new Date().toISOString())) return resp({error:"Escolha um período até hoje."},422);
+        const resposta = resp(await rankingEquipeDoPeriodo(periodo));
+        resposta.headers.set("Cache-Control", "no-store");
+        return resposta;
+      }
       case "relatorioEntregas": {
         if(!ehMaquina && !["admin","pcp"].includes(String(cracha?.papel || "")))return resp({error:"Relatórios restritos à gestão do PCP."},403);
         const hoje=perfDia(new Date().toISOString()), ano=Number(body.ano);

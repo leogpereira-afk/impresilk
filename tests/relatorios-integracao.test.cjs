@@ -62,18 +62,28 @@ test('perfil restrito não duplica valores copiando UID financeiro',async()=>{
 });
 test('Performance resumo mantém fonte integral para alternar completo com O.S. recolhidas e pendências',()=>{
  const fs=require('node:fs'),vm=require('node:vm'),R=require('../relatorios-pcp.js');
- function fonte(){
+ function fonte(classe='perf-report'){
   const dados={detalhe:true,pendencia:true,aberto:false};
   const detalhe={remove(){dados.detalhe=false;},set open(v){dados.aberto=v;}};
   const pendencia={remove(){dados.pendencia=false;}};
-  return {dados,dataset:{},cloneNode(){const c=fonte();Object.assign(c.dados,dados);c.dataset={...this.dataset};return c;},querySelectorAll(sel){if(sel==='.perf-team-report details,.perf-report-pendencias')return [...(dados.detalhe?[detalhe]:[]),...(dados.pendencia?[pendencia]:[])];if(sel==='details')return dados.detalhe?[detalhe]:[];if(sel==='.perf-report-pendencias')return dados.pendencia?[pendencia]:[];return [];}};
+  return {className:classe,dados,dataset:{},cloneNode(){const c=fonte(classe);Object.assign(c.dados,dados);c.dataset={...this.dataset};return c;},querySelector(sel){return classe==='perf-dash'&&sel==='[data-perf-dash-vista][aria-pressed="true"]'?{textContent:'Evolução'}:null;},querySelectorAll(sel){if(sel==='.perf-team-report details,.perf-report-pendencias')return [...(dados.detalhe?[detalhe]:[]),...(dados.pendencia?[pendencia]:[])];if(sel==='details')return dados.detalhe?[detalhe]:[];if(sel==='.perf-report-pendencias')return dados.pendencia?[pendencia]:[];return [];}};
  }
- const origem=fonte(),botao={},el={querySelector:s=>s==='#perf-rel-pdf'?botao:s==='.perf-report'?origem:null,querySelectorAll:()=>[]};let exportado;
- const ctx=vm.createContext({console,STORE:{getAllOS:()=>[]},STATE:{},document:{},imprimirAnalisePCP:(titulo,f)=>exportado=f,periodoOuMes:()=>({de:'2026-10-01',ate:'2026-10-31'}),bindCardClicks(){},el});
+ // O exportador mantém a raiz .perf-dash dentro de um wrapper para preservar
+ // seus estilos. O DOM de teste precisa clonar/consultar os descendentes.
+ function wrapper(){return {children:[],dataset:{},append(n){this.children.push(n);},cloneNode(){const c=wrapper();c.dataset={...this.dataset};c.children=this.children.map(n=>n.cloneNode(true));return c;},querySelectorAll(sel){return this.children.flatMap(n=>n.querySelectorAll(sel));}};}
+ const origem=fonte(),botao={},detalhado={},el={querySelector:s=>s==='#perf-rel-pdf'?botao:s==='#perf-rel-detalhado'?detalhado:s==='.perf-report'?origem:null,querySelectorAll:()=>[]};let exportado,titulo;
+ const ctx=vm.createContext({console,STORE:{getAllOS:()=>[]},STATE:{},document:{createElement:tag=>{assert.equal(tag,'section');return wrapper();}},imprimirAnalisePCP:(t,f)=>{titulo=t;exportado=f;},periodoOuMes:()=>({de:'2026-10-01',ate:'2026-10-31'}),bindCardClicks(){},el});
  vm.runInContext(fs.readFileSync('performance.js','utf8'),ctx);vm.runInContext('perfWireFonte=()=>{};perfConfig=()=>({equipes:[]});perfFonteTexto=()=>"Fixture";wirePerformanceEquipes(el)',ctx);botao.onclick();
- assert.equal(exportado.dataset.pdfModo,'resumo');const resumo=R.sanearCopia(exportado.cloneNode(true),{completo:false,valores:true});assert.equal(resumo.dados.detalhe,false);assert.equal(resumo.dados.pendencia,false);
- exportado.dataset.pdfModo='completo';const completo=R.sanearCopia(exportado.cloneNode(true),{completo:true,valores:true});assert.equal(completo.dados.detalhe,true);assert.equal(completo.dados.pendencia,true);assert.equal(completo.dados.aberto,true);assert.equal(origem.dados.aberto,false);
- const novamente=R.sanearCopia(exportado.cloneNode(true),{completo:false,valores:true});assert.equal(novamente.dados.detalhe,false);assert.equal(exportado.dados.detalhe,true);
+ assert.equal(exportado.dataset.pdfModo,'resumo');assert.equal(exportado.children[0].className,'perf-report');
+ const resumo=R.sanearCopia(exportado.cloneNode(true),{completo:false,valores:true}).children[0];assert.equal(resumo.dados.detalhe,false);assert.equal(resumo.dados.pendencia,false);
+ exportado.dataset.pdfModo='completo';const completo=R.sanearCopia(exportado.cloneNode(true),{completo:true,valores:true}).children[0];assert.equal(completo.dados.detalhe,true);assert.equal(completo.dados.pendencia,true);assert.equal(completo.dados.aberto,true);assert.equal(origem.dados.aberto,false);
+ const novamente=R.sanearCopia(exportado.cloneNode(true),{completo:false,valores:true}).children[0];assert.equal(novamente.dados.detalhe,false);assert.equal(exportado.children[0].dados.detalhe,true);
+ // Com dashboard disponível, PDF deste painel imprime a vista selecionada;
+ // a exportação detalhada continua usando a fonte integral das O.S.
+ const dash=fonte('perf-dash');el.querySelector=s=>s==='#perf-rel-pdf'?botao:s==='#perf-rel-detalhado'?detalhado:s==='.perf-report'?origem:s==='.perf-dash'?dash:null;
+ botao.onclick();assert.equal(titulo,'Performance · Evolução');assert.equal(exportado.children[0].className,'perf-dash');assert.notEqual(exportado.children[0],dash);assert.equal(exportado.dataset.pdfModo,'resumo');
+ exportado.dataset.pdfModo='completo';const painelCompleto=R.sanearCopia(exportado.cloneNode(true),{completo:true,valores:true});assert.equal(painelCompleto.children[0].dados.aberto,true);assert.equal(dash.dados.aberto,false);
+ detalhado.onclick();assert.equal(titulo,'Performance · resumo e O.S.');assert.equal(exportado.className,'perf-report');assert.equal(exportado.dados.detalhe,true);assert.equal(exportado.dados.pendencia,true);assert.equal(exportado.dataset.pdfModo,undefined,'PDF com O.S. abre completo por padrão');
 });
 test('revisão final: autorias de novos vínculos/cadastros não descem a restritos em nenhuma resposta',async()=>{
  const assinatura={por:'Gestor',porId:'123456',em:'2026-10-03T10:00:00Z'},campos=['categoriasServico','veiculosAliases','prioridadesPCP'];
@@ -106,4 +116,29 @@ test('PDF preserva colunas curtas e valores sem truncar descrições ou células
 });
 test('lista de finalizados permite status longo quebrar sem expulsar ações',()=>{
  const css=require('node:fs').readFileSync('styles.css','utf8');assert.match(css,/\.list-info\s*\{[^}]*min-width:\s*0/);assert.match(css,/\.list-numero \.badge\s*\{[^}]*white-space:\s*normal/);assert.match(css,/\.list-actions\s*\{[^}]*flex-shrink:\s*0/);
+});
+
+test('permissão financeira é global e chega ao PDF real conforme o papel atual, fora do boot',()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),source=fs.readFileSync('app.js','utf8'),R=require('../relatorios-pcp.js');
+ const topo=source.slice(0,source.indexOf('// Permissões efetivas'));
+ assert.match(topo,/function podeVerValores\(\)/,'o helper precisa existir antes do boot e estar acessível aos relatórios');
+ assert.doesNotMatch(source,/const podeVerValores\s*=/,'uma sombra local no boot não pode esconder a regra global');
+ let permitiu=null,abriu=0;
+ const botao={},box={innerHTML:'',querySelector:()=>botao,showModal(){abriu++;},close(){}};
+ const documento={getElementById:()=>box,body:{classList:{add(){},remove(){}}}};
+ const origem={dataset:{},querySelectorAll:()=>[],cloneNode:()=>({innerHTML:'<p>Conteúdo da fonte</p>',querySelectorAll:()=>[]})};
+ const ctx=vm.createContext({console,STATE:{user:{papel:'pcp'}},document:documento,STORE:{getLastSync:()=>null,getQueue:()=>[]},esc:x=>String(x??''),$:()=>botao,origem,
+  RELATORIOS_PCP:{...R,sanearCopia(copia,options){permitiu=options.valores;return R.sanearCopia(copia,options);}}});
+ // As duas funções reais são avaliadas no mesmo contexto global; não há mock
+ // de podeVerValores nem execução de initApp para fornecer a permissão.
+ vm.runInContext(topo,ctx);
+ vm.runInContext(source.slice(source.indexOf('function imprimirAnalisePCP('),source.indexOf('function wirePDFsEntregaPerformance(')),ctx);
+ for(const papel of ['admin','pcp','montagem','operacao','comercial','leitura','toque',undefined]){
+  ctx.STATE.user={papel};const esperado=['admin','pcp'].includes(papel);
+  assert.equal(vm.runInContext('podeVerValores()',ctx),esperado,String(papel));
+  vm.runInContext("imprimirAnalisePCP('Teste',origem,{de:'2026-10-01',ate:'2026-10-03'},'Fixture')",ctx);
+  assert.equal(permitiu,esperado,'o PDF recebe a permissão atual de '+String(papel));
+  assert.match(box.innerHTML,/Conteúdo da fonte/);
+ }
+ assert.equal(abriu,8);
 });

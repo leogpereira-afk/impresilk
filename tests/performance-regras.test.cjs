@@ -411,7 +411,7 @@ function casaPerf(papel) {
   const ctx = vm.createContext({console, STORE:{getAllOS:() => [], getCFG:() => ({instaladores:[]}), saveCFG() {}, uuid:() => 'x', elenco:() => ({pessoas:[], veiculos:[], ferias:[], ausencias:[]}), entreguesMes:() => null, pullEntreguesMes() {}, anosEntregues:() => [2026], valores:() => ({})},
     STATE:{user:{papel}, _perfAba:'regras'}, document:{getElementById:() => null, querySelectorAll:() => [], body:{classList:{add() {}, remove() {}, contains:() => false}}},
     localStorage:{getItem:() => null, setItem() {}, removeItem() {}}, esc:s => String(s ?? ''), emptyState:() => '', bindCardClicks() {}, toast() {}, fmtInstalacao:() => '', filtroPeriodoHTML:() => '',
-    parseLocalDate:() => null, pessoaDoElenco:() => null, wireFiltroPeriodo() {}, abrirTVCasa() {}, CSS:{escape:x => x},
+    parseLocalDate:() => null, pessoaDoElenco:() => null, wireFiltroPeriodo() {}, abrirTVCasa() {}, perfCompartilharRanking() {}, CSS:{escape:x => x},
     perfRegrasHTML:() => '<p>CONTEUDO-REGRAS</p>', wirePerfRegras() { ctx.__wireRegras = true; }, REGRAS:{}});
   for (const f of ['operacao.js', 'casa.js', 'relatorios-entregas.js']) vm.runInContext(ler(f), ctx);
   const el = {innerHTML:'', querySelectorAll:() => [], querySelector:() => ({value:''})};

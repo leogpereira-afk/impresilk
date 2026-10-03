@@ -12,6 +12,9 @@ const PERMISSOES_PADRAO = {
   comercial: { abas: ['painel','pcp','programacao','finalizados','entregas'], editar: false, cadastrar: false }
 };
 
+// Usada também pelos relatórios e PDFs; não pode ficar restrita ao boot.
+function podeVerValores() { return ['admin','pcp'].includes(String(STATE.user?.papel || '')); }
+
 // Permissões efetivas = padrão sobrescrito pelos níveis configurados pelo admin (CFG.niveis)
 function getPermissoes() {
   const niveis = (STORE.getCFG().niveis) || {};
@@ -913,7 +916,6 @@ function enterApp() {
   // vez agora (com o que houver) e repinta assim que o cache estiver na mão.
   renderActiveTab();
   // Valor das O.S (Entregas/Performance): só para quem enxerga dinheiro.
-  const podeVerValores = () => ['admin', 'pcp'].includes(String((STATE.user || {}).papel || ''));
   // UM RELOGIO SO (14/09/2026): o maestro do store substitui a rajada do boot
   // e o timer fixo de 30 s. Ele faz o pull INCREMENTAL, espaca a config, os
   // valores e o elenco, desacelera com a aba escondida e recua em erro.

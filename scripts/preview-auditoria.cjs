@@ -3,7 +3,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['privacidade-valores.js','diagnostico-itens.js','relatorios-pcp.js','alertas-sync.js','index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','operacao-revisao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
+const permitidos=new Set(['performance-layout.css','performance-dashboards.js','performance-dashboards.css','ranking.html','ranking.js','ranking.css','privacidade-valores.js','diagnostico-itens.js','relatorios-pcp.js','alertas-sync.js','index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','operacao-revisao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
@@ -21,7 +21,7 @@ base('109',{finalizadaEm:hoje+'T11:00:00',finalizadoPor:'Mubisys (auto)',baixaAu
 base('110',{finalizadaEm:hoje+'T11:00:00',finalizadoPor:'Ana',retrabalho:true,problema:'Rever alinhamento da placa',causaRetrabalho:'Erro de medida',equipe:[]}),
 base('111',{instalacao:{data:deslocar(-4)},liberadoPCP:false,previsaoEntrega:deslocar(-4),equipe:[]})
 ];
-const APP_VERSAO='v148 · prévia fictícia'; const AUTH={dono:()=>({nome:'Ana',papel:'montagem'}),temCracha:()=>true,listarContas:async()=>({contas:[]})};
+const APP_VERSAO='v149 · prévia fictícia'; const AUTH={dono:()=>({nome:'Ana',papel:'montagem'}),temCracha:()=>true,listarContas:async()=>({contas:[]})};
 const cfg={instaladores:['Ana','Bia'],responsaveis:['Responsável de teste'],gerentes_montagem:[],veiculos:['Carro 1','Carro 2'],ferramentas:[],suprimentos:[],causasRetrabalho:['Erro de medida'],funcionarios:[],niveis:{}};
 /* A PERFORMANCE COM CARA DE MÊS DE VERDADE (revisão de experiência, 29/09/2026).
    Pódio, tabela, cobertura e equipes só aparecem de fato com várias entregas,
@@ -368,10 +368,17 @@ document.addEventListener('DOMContentLoaded', () => {
 });`;
 const comissaoPreview=require('./preview-comissao-fixture.cjs');
 const controlePreview=require('./preview-controle-fixture.cjs');
+const rankingPreview=require('./preview-ranking-fixture.cjs');
 http.createServer(async(req,res)=>{
   const name=new URL(req.url,'http://localhost').pathname.slice(1)||'index.html';
   res.setHeader('Cache-Control','no-store');
   res.setHeader('Content-Security-Policy',"default-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'none'");
+  if(name==='ranking-fixture.js'){res.setHeader('Content-Type','text/javascript');res.end(rankingPreview.script);return;}
+  if(name==='ranking-api' && req.method==='POST'){
+    try{let json='';for await(const chunk of req){json+=chunk;if(json.length>20000)throw new Error('Pedido grande demais.');}
+      const out=await rankingPreview.handler(JSON.parse(json),req.headers.authorization);res.statusCode=out.status;res.setHeader('Content-Type','application/json');res.end(JSON.stringify(out.body));
+    }catch(e){res.writeHead(500);res.end(JSON.stringify({error:e.message}));}return;
+  }
   if(['comissao-api','controle-api'].includes(name) && req.method==='POST'){
     try{let json='';for await(const chunk of req){json+=chunk;if(json.length>300000)throw new Error('Pedido grande demais.');}const out=await (name==='controle-api'?controlePreview:comissaoPreview)(JSON.parse(json));res.setHeader('Content-Type','application/json');res.end(JSON.stringify(out));}catch(e){res.writeHead(500);res.end(JSON.stringify({error:e.message}));}return;
   }
@@ -379,6 +386,7 @@ http.createServer(async(req,res)=>{
   if(!permitidos.has(name)){res.writeHead(404);res.end();return;}
   let body=fs.readFileSync(path.join(root,name));
   if(name==='index.html') body=body.toString().replace(/<script src="(?:config|store|auth)\.js(?:\?[^\"]*)?"><\/script>/g,'').replace(/<script src="operacao.js(?:\?[^"]*)?">/,'<script src="fixture.js"></script><script src="operacao.js">').replace(/<script>(?:if\('serviceWorker'|\s*\/\*\s*Service worker)[^]*?<\/script>/,'');
+  if(name==='ranking.html')body=body.toString().replace(/<script src="(?:config|auth)\.js(?:\?[^"]*)?"><\/script>/g,'').replace(/<script src="ranking.js/, '<script src="ranking-fixture.js"></script><script src="ranking.js');
   if(name==='app.js')body=body.toString().replace("document.addEventListener('DOMContentLoaded', initLogin);",boot);
   if(name==='equipe.html') body=body.toString().replace(/<script src="(?:config|store|auth)\.js(?:\?[^\"]*)?"><\/script>/g,'').replace(/<script src="operacao.js(?:\?[^"]*)?">/,'<script src="fixture.js"></script><script src="operacao.js">').replace(/<script>\s*\/\*\s*Service worker[^]*?<\/script>/,'');
   if(name==='equipe.js')body=body.toString().replace("document.addEventListener('DOMContentLoaded', initSelect);",bootEquipe);

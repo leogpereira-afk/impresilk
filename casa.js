@@ -3897,20 +3897,19 @@ function renderPerformanceCasa() {
   const detAbertos = new Set(chaveDet(detAntes).filter((k, i) => detAntes[i].open));
   el.innerHTML = `
     <div class="casa-pagina casa-perf">
-      <div class="casa-pagina-head">
-        <div><h2>Performance</h2><p>${abaPerf === 'equipe'
-          ? 'Entregas, equipes e participação de cada pessoa. Uma apuração que você pode conferir.'
-          : abaPerf === 'regras'
-          ? 'Regras do programa das equipes: divisão, comissão e volta do carro, com o exemplo de cada versão.'
-          : 'Compare participações confirmadas, identifique pendências e consulte os detalhes da operação.'}</p></div>
-        <span class="casa-vista">
-          <button class="btn-ghost btn-sm ${abaPerf === 'equipe' ? 'active' : ''}" data-perf-aba="equipe">Rankings</button>
-          ${typeof perfPodeEditar==='function'&&perfPodeEditar()?`<button class="btn-ghost btn-sm ${abaPerf === 'gestao'?'active':''}" data-perf-aba="gestao">Gestão de equipes</button>`:''}
-          <button class="btn-ghost btn-sm ${abaPerf === 'relatorio' ? 'active' : ''}" data-perf-aba="relatorio">Relatório</button>
-          ${podeRegras ? `<button class="btn-ghost btn-sm ${abaPerf === 'regras' ? 'active' : ''}" data-perf-aba="regras">Regras</button>` : ''}
-          <details class="perf-mais"><summary>Mais opções</summary><button class="btn-ghost btn-sm" id="perf-tv" title="Ranking em tela cheia para a TV da fábrica">📺 Modo TV</button></details>
-        </span>
-      </div>
+      <header class="casa-pagina-head perf-page-head">
+        <div><h2>Performance</h2><p>${abaPerf === 'regras' ? 'Regras, divisão e comissão do programa.' : 'Entregas conferidas. Equipes reconhecidas.'}</p></div>
+        <div class="perf-page-actions">
+          <button class="btn-ghost btn-sm" id="perf-compartilhar">🔗 Link para funcionários</button>
+          <button class="btn-ghost btn-sm" id="perf-tv" title="Ranking em tela cheia para a TV da fábrica">📺 Modo TV</button>
+        </div>
+      </header>
+      <nav class="perf-page-tabs" aria-label="Áreas de Performance">
+        <button class="btn-ghost btn-sm ${abaPerf === 'equipe' ? 'active' : ''}" aria-pressed="${abaPerf === 'equipe'}" data-perf-aba="equipe">Rankings</button>
+        ${typeof perfPodeEditar==='function'&&perfPodeEditar()?`<button class="btn-ghost btn-sm ${abaPerf === 'gestao'?'active':''}" aria-pressed="${abaPerf === 'gestao'}" data-perf-aba="gestao">Gestão de equipes</button>`:''}
+        <button class="btn-ghost btn-sm ${abaPerf === 'relatorio' ? 'active' : ''}" aria-pressed="${abaPerf === 'relatorio'}" data-perf-aba="relatorio">Relatório</button>
+        ${podeRegras ? `<button class="btn-ghost btn-sm ${abaPerf === 'regras' ? 'active' : ''}" aria-pressed="${abaPerf === 'regras'}" data-perf-aba="regras">Regras</button>` : ''}
+      </nav>
       ${abaPerf === 'gestao' ? perfGestaoEquipesHTML() : abaPerf === 'regras' ? perfRegrasHTML() : `
       ${abaPerf === 'equipe' ? `
         ${typeof performanceEquipesHTML === 'function' ? performanceEquipesHTML() : produtividadeHTML()}
@@ -3919,7 +3918,7 @@ function renderPerformanceCasa() {
         ${quadroCasa('perf-plantoes', '🗓 Plantões vinculados às O.S.', plantaoPerformanceHTML(), false)}
 
       ` : `
-        <div class="filter-bar">${filtroPeriodoHTML('_fPerf')}<button class="btn-ghost" id="perf-rel-pdf">📄 PDF resumido</button><button class="btn-ghost" id="perf-rel-detalhado">PDF com O.S.</button></div>
+        <div class="perf-report-toolbar">${perfPeriodoCompactoHTML(f)}<button class="btn-ghost btn-sm" id="perf-rel-pdf">📄 PDF deste painel</button><button class="btn-ghost btn-sm" id="perf-rel-detalhado">PDF com O.S.</button></div>
         ${typeof performanceRelatorioHTML === 'function' ? performanceRelatorioHTML() : ''}
         ${typeof perfFonteHTML === 'function' ? perfFonteHTML() : ''}
         ${quadroCasa('perf-entregues', '📦 Serviços entregues <small>ano a ano e mês a mês</small>', servicosEntreguesHTML(), false)}
@@ -3942,6 +3941,7 @@ function renderPerformanceCasa() {
   if (abaPerf === 'regras') { if (typeof wirePerfRegras === 'function') wirePerfRegras(el); }
   else if (typeof wirePerformanceEquipes === 'function') wirePerformanceEquipes(el);
   const tv = document.getElementById('perf-tv'); if (tv) tv.onclick = abrirTVCasa;
+  const compartilhar=el.querySelector('#perf-compartilhar'); if(compartilhar)compartilhar.onclick=perfCompartilharRanking;
   const mesEl = document.getElementById('perf-mes');
   if (mesEl) mesEl.onchange = () => { if (mesEl.value) { gravarBonusCasa(trocarMesBonus(lerBonusCasa(), mesEl.value)); renderPerformanceCasa(); } };
   /* O change do Orçamento dispara no toque do Teto: redesenhar na hora

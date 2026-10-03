@@ -935,8 +935,13 @@ test('performance: as duas abas existem e nenhuma seção se perde', () => {
   t.run(`
     var wireFiltroPeriodo = () => {};
     var abrirTVCasa = () => {};
+    var perfCompartilharRanking = () => {};
     var CSS = { escape: x => x };
   `);
+  // A casca usa agora o período compacto do módulo Performance; carregamos
+  // o helper real, mantendo o restante deste harness focado nas seções da casa.
+  const perfSource = fs.readFileSync(path.join(root, 'performance.js'), 'utf8');
+  t.run(perfSource.slice(perfSource.indexOf('function perfPeriodoCompactoHTML('), perfSource.indexOf('function perfCompartilharRanking(')));
   const equipe = t.run(`
     STATE._perfAba = 'equipe';
     const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => ({ value: '' }) };
@@ -961,6 +966,10 @@ test('performance: as duas abas existem e nenhuma seção se perde', () => {
   assert.match(rel, /Carros mais usados/);
   // filtroPeriodoHTML é stub neste harness; o que importa é a barra existir.
   assert.match(rel, /class="filter-bar"/, 'o relatório precisa do recorte à mão');
+  assert.match(rel, /class="perf-filtro-avancado"/, 'período permanece acessível na nova barra compacta');
+  assert.match(rel, /aria-label="Alterar período"/);
+  assert.match(rel, /id="perf-rel-pdf"[^>]*>📄 PDF deste painel/);
+  assert.match(rel, /id="perf-rel-detalhado"[^>]*>PDF com O.S./);
   // As duas abas aparecem nas duas telas, senão não há como voltar.
   for (const html of [equipe, rel]) {
     assert.match(html, /data-perf-aba="equipe"/);

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#153b4a">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Ranking das equipes · Impresilk</title>
+  <link rel="icon" href="icon.svg">
+  <link rel="stylesheet" href="ranking.css?v=v149">
+</head>
+<body>
+  <header class="ranking-topo">
+    <a class="ranking-marca" href="ranking.html"><img src="icon.svg" alt="" width="32" height="32"><span>Impresilk<small>Cada entrega conta</small></span></a>
+    <div class="ranking-sessao"><span id="ranking-nome"></span><button id="ranking-sair" class="botao discreto" type="button" hidden>Sair do acompanhamento</button></div>
+  </header>
+  <main>
+    <section id="ranking-login" class="ranking-login" aria-labelledby="login-titulo" hidden>
+      <div class="selo">Acompanhamento da equipe</div>
+      <h1 id="login-titulo">Seu trabalho faz a diferença.</h1>
+      <p>Entre para acompanhar a evolução das equipes e cada conquista do mês.</p>
+      <form id="ranking-login-form">
+        <label for="ranking-usuario">Usuário do PCP</label>
+        <input id="ranking-usuario" name="username" autocomplete="username" required>
+        <label for="ranking-senha">Senha</label>
+        <input id="ranking-senha" name="password" type="password" autocomplete="current-password" required>
+        <button class="botao principal" id="ranking-entrar" type="submit">Entrar no ranking</button>
+      </form>
+      <p class="aviso" id="ranking-login-erro" role="alert"></p>
+      <p class="ranking-ajuda">Use o mesmo acesso do PCP. Se este celular já foi autorizado para o Espelho do Instalador, o ranking abre com esse acesso. Em um aparelho novo, peça a autorização à gestão.</p>
+      <button id="ranking-retomar" class="botao discreto" type="button" hidden>Continuar com o acesso deste aparelho</button>
+      <a id="ranking-renovar" class="botao discreto" href="index.html" hidden>Renovar o acesso no PCP</a>
+    </section>
+    <section id="ranking-conteudo" aria-labelledby="ranking-titulo" hidden>
+      <div class="ranking-cabecalho">
+        <div><p class="selo">Juntos, vamos mais longe</p><h1 id="ranking-titulo">Ranking das equipes</h1><p>O que já foi entregue e conferido, em um só lugar.</p></div>
+        <button id="ranking-pdf" class="botao" type="button">Baixar PDF</button>
+      </div>
+      <form id="ranking-periodo" class="ranking-filtros">
+        <label for="ranking-mes">Mês <input type="month" id="ranking-mes" required></label>
+        <button class="botao" type="button" id="ranking-anterior" aria-label="Ver mês anterior">←</button>
+        <button class="botao" type="button" id="ranking-proximo" aria-label="Ver próximo mês">→</button>
+        <button class="botao" type="button" id="ranking-atual">Este mês</button>
+        <button class="botao principal" type="submit" id="ranking-atualizar">Atualizar</button>
+        <span id="ranking-atualizacao" role="status" aria-live="polite"></span>
+      </form>
+      <p id="ranking-erro" class="aviso" role="alert" hidden></p>
+      <div id="ranking-resultados" aria-busy="false">
+        <div class="ranking-resumo" id="ranking-resumo"></div>
+        <div class="ranking-lista-cabecalho"><h2>Produção confirmada</h2><label class="ranking-busca"><span class="sr-only">Buscar equipe</span><input id="ranking-busca" type="search" placeholder="Buscar equipe…" autocomplete="off"></label></div>
+        <p class="ranking-recorte" id="ranking-recorte"></p>
+        <p class="ranking-nota" id="ranking-sem-base" hidden></p>
+        <ol class="ranking-lista" id="ranking-lista" aria-label="Classificação das equipes"></ol>
+        <p id="ranking-vazio" class="ranking-vazio" hidden></p>
+      </div>
+      <details class="ranking-explicacao"><summary>Como este ranking funciona</summary>
+        <p>A posição considera apenas a produção com participação confirmada. Uma entrega parcial conta pela parte entregue da O.S.; quando há mais de uma equipe, a parte de cada uma é respeitada.</p>
+        <p>Produções iguais ficam na mesma posição. Este acompanhamento não confirma comissão nem prêmio: a apuração das regras é feita pela gestão. Se uma entrega estiver faltando, peça a conferência ao PCP.</p>
+      </details>
+    </section>
+    <noscript>Ative o JavaScript para entrar com seu acesso e consultar o ranking.</noscript>
+  </main>
+  <script src="config.js?v=v149"></script>
+  <script src="auth.js?v=v149"></script>
+  <script src="ranking.js?v=v149"></script>
+</body>
+</html>
