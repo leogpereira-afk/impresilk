@@ -1867,7 +1867,7 @@ function perfRegraExemploHTML(regra) {
     return `<li><strong>${rotulo}</strong>, O.S. de ${perfCentavos(valor)} no prazo: comissão total ${perfCentavos(ex.comissaoCentavos)}, ${n === 1 ? 'quem foi sozinho' : 'líder'} ${perfCentavos(lider.centavos)}${ajTxt}.</li>`;
   };
   const v = regra.volta, base = valor;
-  return `<div class="perf-regra-exemplo" aria-live="polite"><h4>Exemplo</h4><ul>${linha(2,'Dupla')}${linha(3,'Trio')}${linha(4,'Equipe de 4')}${linha(1,'Sozinho')}</ul>
+  return `<div class="perf-regra-exemplo" aria-live="polite"><h4>Exemplo legado — não configura a nova comissão</h4><ul>${linha(2,'Dupla')}${linha(3,'Trio')}${linha(4,'Equipe de 4')}${linha(1,'Sozinho')}</ul>
     <p>O.S. com ${regra.perdas.map(p => REGRAS.ROTULOS[p]).join(', ') || 'nenhuma perda marcada'}: não pontua e não paga comissão.</p>
     <p>Volta do carro, sobre o valor válido da volta: carro limpo e arrumado ${v.carroLimpoBp ? '+' + perfPct(v.carroLimpoBp) : 'sem bônus'} (${perfCentavos(base)} vira ${perfCentavos(base + Math.round(base * REGRAS.ajusteDaVolta(regra, {carroCerto:true}) / 10000))}); equipamento faltante ou danificado ${v.equipamentoFaltaBp ? '-' + perfPct(v.equipamentoFaltaBp) : 'sem redutor'} (vira ${perfCentavos(base + Math.round(base * REGRAS.ajusteDaVolta(regra, {equipamentoOk:false}) / 10000))}); volta não conferida fica como está.</p></div>`;
 }
@@ -1877,7 +1877,7 @@ function perfRegraResumoHTML(r) {
     <dt>Vale a partir de</dt><dd>${esc(REGRAS.dataBR(r.validaDesde))}</dd>
     <dt>Divisão dentro da equipe</dt><dd>1 pessoa: 100%. Dupla: líder ${perfPct(dupla[0])}, ajudante ${perfPct(dupla[1])}. Trio: líder ${perfPct(trio[0])}, ajudantes ${perfPct(trio[1])} e ${perfPct(trio[2])}. 4 ou mais: líder ${perfPct(r.divisao.maisLider)} e o resto igual entre os ajudantes.</dd>
     <dt>Entre equipes</dt><dd>Proporcional ao número de pessoas de cada equipe.</dd>
-    <dt>Comissão</dt><dd>${perfPct(r.comissaoBp)} do valor da O.S., só na O.S. que pontua (no prazo, sem retrabalho, sem retorno antecipado).</dd>
+    <dt>Comissão legada</dt><dd>Referência histórica; não configura a nova apuração financeira. ${perfPct(r.comissaoBp)} do valor da O.S., só na O.S. que pontua (no prazo, sem retrabalho, sem retorno antecipado).</dd>
     <dt>Tolerância do retorno</dt><dd>${r.toleranciaRetornoMin} minuto${r.toleranciaRetornoMin === 1 ? '' : 's'} antes do horário previsto não contam como retorno antecipado.</dd>
     <dt>Volta do carro</dt><dd>Carro limpo e arrumado: +${perfPct(r.volta.carroLimpoBp)}. Equipamento faltante ou danificado: -${perfPct(r.volta.equipamentoFaltaBp)}. Volta não conferida: neutra.</dd>
     <dt>Desempate</dt><dd>${(t => t.charAt(0).toUpperCase() + t.slice(1))(r.desempate.map(d => REGRAS.ROTULOS[d]).join(', depois '))}.</dd>
@@ -1894,7 +1894,7 @@ function perfRegrasHTML() {
   const origem = perfRegrasEstado.carregando ? 'Consultando o servidor…'
     : f.temCopia ? `Cópia do servidor de ${esc(new Date(f.em).toLocaleString('pt-BR'))}.`
     : 'Sem cópia das regras neste aparelho: mostrando a regra embutida, provisória, até consultar o servidor.';
-  const titulo = vigente ? 'Regra em vigor hoje' : 'Próxima regra (ainda não vale hoje)';
+  const titulo = vigente ? 'Regra operacional legada em vigor hoje' : 'Próxima regra operacional legada';
   const historico = f.versoes.map(v => `<details class="perf-regra-versao"><summary>Versão ${esc(v.versao)} · vale a partir de ${esc(REGRAS.dataBR(v.validaDesde))} · ${esc(v.autor?.nome || 'sem autor')}${v.id === mostrada.id ? ' · <span class="badge">mostrada acima</span>' : ''}</summary><p>Criada em ${esc(new Date(v.criadaEm).toLocaleString('pt-BR'))}${v.autor?.login ? ' por ' + esc(v.autor.login) : ''}. Motivo: ${esc(v.motivo || '')}</p>${REGRAS.validarRegra(v) ? '<p role="alert">Versão com dado inválido no banco: não vale.</p>' : perfRegraResumoHTML(v)}</details>`).join('');
   return `<section class="perf-regras"><p class="metricas-nota">Histórico das regras operacionais. A apuração financeira com entrega comprovada, montagem interna e aprovação fica em Base e fechamento → Comissão. Cada revisão financeira guarda sua configuração própria; regras e fechamentos antigos permanecem preservados.</p>
     <p class="metricas-nota">Cada versão vale a partir de uma data e nunca é editada: para mudar, crie a próxima. Mês já fechado não muda. ${origem}${f.fechadoAte ? ` Fechado até ${esc(REGRAS.dataBR(f.fechadoAte))}.` : ''}</p>
@@ -1967,7 +1967,7 @@ function perfNovaRegra() {
   const minimo = f.fechadoAte ? perfDiaSeguinte(f.fechadoAte) : '';
   const sugerida = perfRegraDataSugerida(f.fechadoAte, perfHojeISO());
   const campo = (nome, rotulo, valor, sufixo, dica) => `<label>${rotulo} <span class="perf-regra-campo"><input name="${nome}" inputmode="decimal" value="${esc(valor)}" required> ${sufixo}</span>${dica ? `<small>${dica}</small>` : ''}</label>`;
-  const d = perfDialog('Nova versão da regra', `<form id="perf-regra-form" novalidate>
+  const d = perfDialog('Nova versão da regra operacional legada', `<form id="perf-regra-form" novalidate>
     <p class="metricas-nota">A versão ${esc((Number(base.versao) || 0) + 1)} vale a partir da data escolhida, até a próxima. As versões anteriores ficam como estão.</p>
     <label>Vale a partir de <input type="date" name="validaDesde" value="${esc(sugerida)}" ${minimo ? `min="${esc(minimo)}"` : ''} required></label>
     <p class="perf-regra-aviso" id="perf-regra-aviso" aria-live="polite"></p>
@@ -1977,8 +1977,8 @@ function perfNovaRegra() {
       ${campo('ajudante3', 'Trio: primeiro ajudante', pct(trio[1]), '%', 'O segundo ajudante fica com o resto.')}
       ${campo('lider4', '4 ou mais: líder', pct(base.divisao.maisLider), '%', 'O resto é dividido igual entre os ajudantes.')}
     </fieldset>
-    <fieldset><legend>Comissão e perdas</legend>
-      ${campo('comissao', 'Comissão sobre a O.S. que pontua', pct(base.comissaoBp), '%', 'De 0% a 10%.')}
+    <fieldset><legend>Comissão e perdas legadas</legend><p>Estes campos preservam o programa operacional anterior. Não alteram a nova comissão de 1%, a montagem interna nem a exigência de responsabilidade comprovada; configure a nova apuração em Base e fechamento → Comissão.</p>
+      ${campo('comissao', 'Comissão legada sobre a O.S. que pontua', pct(base.comissaoBp), '%', 'De 0% a 10%.')}
       ${campo('tolerancia', 'Tolerância do retorno antecipado', String(base.toleranciaRetornoMin), 'min')}
     </fieldset>
     <fieldset><legend>Volta do carro (sobre o valor válido da volta)</legend>

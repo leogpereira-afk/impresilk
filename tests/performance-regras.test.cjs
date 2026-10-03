@@ -372,7 +372,7 @@ test('tela: sem cópia mostra a regra embutida como provisória e o exemplo ao v
 test('tela: com a cópia do servidor mostra a versão em vigor, o histórico recolhível e libera criar', () => {
   const v1 = {...regra({validaDesde:'2026-09-01', comissaoBp:50}), id:'a', versao:1, autor:{nome:'Gestor Teste', login:'gestor.teste'}, criadaEm:'2026-09-01T12:00:00Z', motivo:'Início'};
   const html = tela('admin', {versoes:[v1], fechadoAte:'2026-08-31', em:'2026-09-29T10:00:00Z'}).perfRegrasHTML();
-  assert.match(html, /Regra em vigor hoje/);
+  assert.match(html, /Regra operacional legada em vigor hoje/);
   assert.match(html, /Versão 1/);
   assert.match(html, /comissão total R\$\s50,00/);
   assert.match(html, /<details class="perf-regra-versao">/);
@@ -517,12 +517,12 @@ test('servidor: fechamento com "até" depois de hoje é recusado com a causa e n
   assert.equal((await e.call({action:'performanceFechamentos', de:hoje, ate:amanha}, PCP)).status ?? 200, 200);
 });
 
-test('tela: depois da v1 começar em 06/10, o dia 05/10 continua "Regra em vigor hoje" com a embutida, provisória', () => {
+test('tela: depois da v1 começar em 06/10, o dia 05/10 continua "Regra operacional legada em vigor hoje" com a embutida, provisória', () => {
   const v1 = {...regra({validaDesde:'2026-10-06', comissaoBp:150}), id:'v1', versao:1, autor:{nome:'Gestor Teste'}, criadaEm:'2026-10-05T12:00:00Z', motivo:'Nova comissão'};
   const c = tela('pcp', {versoes:[v1], fechadoAte:'', em:'2026-10-05T12:00:00Z'});
   c.perfHojeISO = () => '2026-10-05';
   const html = c.perfRegrasHTML();
-  assert.match(html, /Regra em vigor hoje/);
+  assert.match(html, /Regra operacional legada em vigor hoje/);
   assert.match(html, /Provisória: regra embutida, vale até o início da primeira versão gravada/);
   assert.match(html, /comissão total R\$\s100,00/, 'a embutida (1%) e não a v1 (1,5%)');
   c.perfHojeISO = () => '2026-10-06';

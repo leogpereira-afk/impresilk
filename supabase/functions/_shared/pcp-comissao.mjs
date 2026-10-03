@@ -17,7 +17,16 @@ const COMISSAO = (() => {
     return partes.map((p,i)=>({...p,centavos:valores[i]}));
   }
   const percentual = (v,bp) => Number((BigInt(v)*BigInt(bp)+5000n)/10000n);
-  function apurar(fonte, entrada={}) {
+  // Uma aprovação substitui somente a anterior do mesmo período/regime.
+  // Compensação aprovada é um estado vazio, preservando a trilha anterior.
+  function ativas(historico, modo) {
+    const porPeriodo=new Map();
+    for(const r of lista(historico).filter(r=>r.tipo==='aprovacao'&&r.apuracao?.config?.modo===modo).sort((a,b)=>b.revisao-a.revisao)){
+      const k=r.de+':'+r.ate;if(!porPeriodo.has(k))porPeriodo.set(k,r);
+    }
+    return [...porPeriodo.values()];
+  }
+  function apurar(fonte, entrada={}, contexto={}) {
     const config=entrada.config || {}, decisoes=entrada.decisoes || {}, entregas=entrada.entregas || {};
     const pendencias=[], add=t=>{if(!pendencias.includes(t))pendencias.push(t);};
     if(!fonte?.fechadoEm || !fonte.id) add('Selecione um fechamento operacional preservado.');
@@ -27,7 +36,17 @@ const COMISSAO = (() => {
     if(!['teste','efetivo'].includes(config.modo))add('Defina teste ou início efetivo do programa.');
     if(config.modo==='efetivo' && (!/^\d{4}-\d{2}-\d{2}$/.test(config.inicioEfetivo || '') || config.inicioEfetivo<'2026-11-01' || periodo.de<config.inicioEfetivo || !texto(config.decisaoGestao)))add('Início efetivo exige decisão da gestão, desde novembro, anterior ou igual ao período.');
     if(config.criteriosExtras!=='somente_falha_comprovada')add('Valide atraso e retorno antecipado: apenas falha comprovada pode cortar esta comissão.');
-    const rs=lista(fonte?.registros), ids=new Set(), fracoes=new Map(), linhas=[], pessoas=new Map();
+    const acumulados=new Map();
+    const referencias=[];
+    for(const a of ativas(contexto.aprovacoes,config.modo)){
+      if(a.de===periodo.de&&a.ate===periodo.ate)continue;
+      referencias.push(a.id);
+      for(const l of lista(a.apuracao.linhas)){
+        const base=l.baseElegivelCentavos??(l.decisao!=='falha_comprovada'&&l.comissaoCentavos!=null?l.baseLiquidaCentavos:0);
+        const x=acumulados.get(l.osId)||{base:0,comissao:0};x.base+=base||0;x.comissao+=l.comissaoCentavos||0;acumulados.set(l.osId,x);
+      }
+    }
+    const rs=lista(fonte?.registros).slice().sort((a,b)=>String(a.dia).localeCompare(String(b.dia))||String(a.id).localeCompare(String(b.id))), ids=new Set(), fracoes=new Map(), linhas=[], pessoas=new Map();
     if(!rs.length)add('Sem entregas no fechamento.');
     const creditar=(partes,tipo,id)=>{for(const p of partes){const k=tipo+':'+p.pessoaId;const anterior=pessoas.get(k)||{pessoaId:p.pessoaId,tipo,centavos:0,entregas:[]};anterior.centavos+=p.centavos;anterior.entregas.push(id);pessoas.set(k,anterior);}};
     for(const r of rs) {
@@ -35,7 +54,6 @@ const COMISSAO = (() => {
       const falta=t=>{lp.push(t);add('O.S. '+(r.numero||osId)+' · '+t);};
       if(ids.has(r.id))falta('Entrega repetida.');ids.add(r.id);
       const fracao=r.entregaId?r.fracaoOS:1;
-      if(r.entregaId&&(!Number.isSafeInteger(r.baseAnteriorCentavos)||r.baseAnteriorCentavos<0))falta('Esta parcial precisa de nova revisão operacional para preservar os centavos acumulados.');
       if(!Number.isFinite(fracao)||fracao<0||fracao>1)falta('Fração da entrega inválida.');
       fracoes.set(osId,(fracoes.get(osId)||0)+(Number.isFinite(fracao)?fracao:0));
       const liquido=centavos(r.valor);
@@ -68,10 +86,14 @@ const COMISSAO = (() => {
       });
       const partesInternas=lista(interna.partes).map(p=>({pessoaId:texto(p.pessoaId),cota:p.cota}));
       if(interna.situacao==='elegivel' && (!partesInternas.length||partesInternas.some(p=>!idPessoa(p.pessoaId)||!Number.isInteger(p.cota)||p.cota<0)||new Set(partesInternas.map(p=>p.pessoaId)).size!==partesInternas.length||soma(partesInternas.map(p=>p.cota))!==10000))falta('Defina o rateio interno de 100% entre pessoas identificadas.');
-      // Parcelas levam a diferença acumulada: duas entregas de R$0,50
-      // não geram dois centavos quando 1% de R$1,00 é um centavo.
-      const antes=Number.isSafeInteger(r.baseAnteriorCentavos)&&r.baseAnteriorCentavos>=0?r.baseAnteriorCentavos:0;
-      const comissao=liquido===null?0:percentual(antes+liquido,100)-percentual(antes,100), total=zerada?0:comissao;
+      // Nunca usar acumulado físico da O.S.: ele inclui teste e inelegíveis.
+      // O saldo vem de aprovações ativas do mesmo regime + elegíveis desta prévia.
+      const saldo=acumulados.get(osId)||{base:0,comissao:0};
+      const baseElegivelCentavos=lp.length||zerada?0:liquido;
+      const calculado=baseElegivelCentavos?percentual(saldo.base+baseElegivelCentavos,100)-saldo.comissao:0;
+      if(calculado<0)falta('Comissão anterior excede a base elegível. Prepare compensação da aprovação anterior.');
+      const total=Math.max(0,calculado);
+      if(!lp.length)acumulados.set(osId,{base:saldo.base+baseElegivelCentavos,comissao:saldo.comissao+total});
       const internos=interna.situacao==='elegivel'?percentual(total,2000):0, externo=total-internos;
       let pagamentos=[];
       if(!lp.length){
@@ -81,7 +103,7 @@ const COMISSAO = (() => {
         creditar(pagamentos.filter(p=>p.tipo==='externa'),'externa',r.id);creditar(pagamentos.filter(p=>p.tipo==='interna'),'interna',r.id);
       }
       // O líquido da fonte já contém descontos proporcionais; não descontar outra vez.
-      linhas.push({id:r.id,osId,entregaId:r.entregaId||null,numero:r.numero,dia:r.dia,fracaoOS:fracao,origemValor:r.origemValor,baseLiquidaCentavos:liquido,baseBrutaCentavos:r.valorBrutoCentavos??null,descontoCentavos:r.descontoCentavos??null,desconto:Number.isSafeInteger(r.descontoCentavos)?'Diferença entre subtotal bruto e líquido (já deduzida)':'Desconto já incluído no líquido; detalhamento indisponível neste fechamento',comissaoCentavos:lp.length?null:total,internaCentavos:lp.length?null:internos,externaCentavos:lp.length?null:externo,pontos:lp.length?null:zerada?0:fracao,pagamentos,pendencias:lp,decisao:d.decisao||'pendente'});
+      linhas.push({id:r.id,osId,entregaId:r.entregaId||null,numero:r.numero,dia:r.dia,fracaoOS:fracao,origemValor:r.origemValor,baseLiquidaCentavos:liquido,baseElegivelCentavos:lp.length?null:baseElegivelCentavos,baseBrutaCentavos:r.valorBrutoCentavos??null,descontoCentavos:r.descontoCentavos??null,desconto:Number.isSafeInteger(r.descontoCentavos)?'Diferença entre subtotal bruto e líquido (já deduzida)':'Desconto já incluído no líquido; detalhamento indisponível neste fechamento',comissaoCentavos:lp.length?null:total,internaCentavos:lp.length?null:internos,externaCentavos:lp.length?null:externo,pontos:lp.length?null:zerada?0:fracao,pagamentos,pendencias:lp,decisao:d.decisao||'pendente'});
     }
     for(const [os,fracao] of fracoes)if(fracao>1.000001)add('O.S. '+os+' · Parciais ultrapassam uma O.S.; não aprovar.');
     const reconhecimento=config.reconhecimento||{};
@@ -96,7 +118,7 @@ const COMISSAO = (() => {
     const equipes=[...quadro.values()].map(x=>{const avaliacao=reconhecimento.avaliacoes?.[x.chave]||{};return {...x,substituicao:x.composicoes.length>1,solo:x.composicoes.some(c=>c.length===1),situacao:['elegivel','inelegivel'].includes(avaliacao.situacao)&&texto(avaliacao.justificativa).length>=5?avaliacao.situacao:'pendente',justificativa:texto(avaliacao.justificativa)};});
     equipes.forEach(x=>x.empate=equipes.some(y=>y!==x&&!x.pendente&&!y.pendente&&Math.abs(x.pontos-y.pontos)<0.000001));
     const revisado=equipes.every(e=>e.situacao!=='pendente')&&['elegibilidade','identidade','substituicoes','empates','premios','decisao'].every(k=>texto(reconhecimento[k]).length>=5);
-    return {motor:'comissao-1',periodo,fechamentoId:fonte?.id,config,pendencias,aprovavel:pendencias.length===0,linhas,pessoas:[...pessoas.values()],totalCentavos:soma(linhas.map(l=>l.comissaoCentavos||0)),reconhecimento:{situacao:revisado?'criterios_documentados':'pendente',criterios:reconhecimento,equipes,campeao:null,aviso:'Ranking operacional não escolhe campeão nem autoriza prêmio. Resultado e prêmio exigem revisão humana específica.'}};
+    return {motor:'comissao-2',referencias,periodo,fechamentoId:fonte?.id,config,pendencias,aprovavel:pendencias.length===0,linhas,pessoas:[...pessoas.values()],totalCentavos:soma(linhas.map(l=>l.comissaoCentavos||0)),reconhecimento:{situacao:revisado?'criterios_documentados':'pendente',criterios:reconhecimento,equipes,campeao:null,aviso:'Ranking operacional não escolhe campeão nem autoriza prêmio. Resultado e prêmio exigem revisão humana específica.'}};
   }
   function erroAprovacao(revisao, hash, confirmacao) {
     if(!revisao || revisao.tipo!=='previa')return 'Selecione a última prévia financeira.';
@@ -111,6 +133,10 @@ const COMISSAO = (() => {
     for(const p of apuracao.pessoas){const k=p.tipo+':'+p.pessoaId;mapa.set(k,{...p,anteriorCentavos:mapa.get(k)?.anteriorCentavos||0});}
     return {...apuracao,anteriorAprovacao:anterior?.id||null,ajustes:[...mapa.values()].map(p=>({...p,diferencaCentavos:p.centavos-p.anteriorCentavos}))};
   }
+  function compensar(anterior) {
+    if(anterior?.tipo!=='aprovacao'||!anterior.apuracao?.aprovavel||anterior.apuracao.compensacaoDe)throw new Error('Selecione uma aprovação ativa para compensar.');
+    return conciliar({...anterior.apuracao,motor:'comissao-2',compensacaoDe:anterior.id,linhas:[],pessoas:[],totalCentavos:0,pendencias:[],aprovavel:true},anterior);
+  }
   function csv(revisao) {
     if(revisao?.tipo!=='aprovacao'||!revisao.apuracao?.aprovavel||revisao.apuracao.config.modo!=='efetivo')throw new Error('Pagamento exige aprovação de período efetivo. Outubro é teste.');
     const cel=v=>{let s=String(v??'');if(/^[=+@\-\t\r]/.test(s)&&!/^-[0-9]+,[0-9]{2}$/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
@@ -118,7 +144,7 @@ const COMISSAO = (() => {
     for(const p of (revisao.apuracao.ajustes||[]))rows.push([revisao.id,revisao.apuracao.fechamentoId,revisao.apuracao.anteriorAprovacao||'',p.pessoaId,p.nome||'',p.tipo,(p.centavos/100).toFixed(2).replace('.',','),(p.diferencaCentavos/100).toFixed(2).replace('.',',')]);
     return '\uFEFF'+rows.map(r=>r.map(cel).join(';')).join('\r\n');
   }
-  return {apurar,ratear,erroAprovacao,conciliar,csv};
+  return {apurar,ativas,ratear,erroAprovacao,conciliar,compensar,csv};
 })();
 
 export { COMISSAO };

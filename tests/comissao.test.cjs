@@ -67,7 +67,7 @@ test('API bloqueia restritos, pendências, teste, fonte alterada e períodos sob
  assert.equal((await ctx.e.call({action:'performanceComissaoListar',...ctx.periodo})).status,403);
  const p=await previa(ctx);ctx.e.db.pcp_registros.find(r=>r.colecao==='os').registro.valorTotal=200000;assert.equal((await aprovar(ctx,p.revisao)).status,409);
  ctx.e.db.pcp_registros.find(r=>r.colecao==='os').registro.valorTotal=120000;
- ctx.e.db.pcp_registros.push({colecao:'performance_comissao_entregas',id:'os1',registro:{periodo:'outro-periodo'},apagado:false});assert.equal((await aprovar(ctx,p.revisao)).status,409);
+ ctx.e.db.pcp_registros.push({colecao:'performance_comissao',id:'outra-aprovacao',registro:{...p.revisao,id:'outra-aprovacao',tipo:'aprovacao',de:'2026-11-02',ate:'2026-11-29'},apagado:false});assert.equal((await aprovar(ctx,p.revisao)).status,409);
  const testCtx=await ambiente(),en=entrada(testCtx.f.registros);en.config.modo='teste';const t=await previa(testCtx,{entrada:en});const at=await aprovar(testCtx,t.revisao);assert.equal(at.ok,true);assert.equal((await testCtx.e.call({action:'performanceComissaoExportar',...testCtx.periodo,id:at.revisao.id},who)).status,422);
  const pend=await ambiente(),ep=entrada(pend.f.registros);ep.entregas.os1.interna.situacao='pendente';const pp=await previa(pend,{entrada:ep});assert.equal((await aprovar(pend,pp.revisao)).status,422);
 });
@@ -87,11 +87,87 @@ test('arredondamento de parciais conserva comissão e revisão exporta diferenç
 test('conflito concorrente reverte também reserva de entregas no INSERT atômico',async()=>{
  const ctx=await ambiente(),p=await previa(ctx),id=ctx.periodo.de+':'+ctx.periodo.ate+':000002';
  ctx.e.cliente.beforeWrite=(db)=>db.pcp_registros.push({colecao:'performance_comissao',id,registro:{id,revisao:2},apagado:false});
- assert.equal((await aprovar(ctx,p.revisao)).status,409);assert.equal(ctx.e.db.pcp_registros.filter(r=>r.colecao==='performance_comissao_entregas').length,0);
+ assert.equal((await aprovar(ctx,p.revisao)).status,409);assert.equal(ctx.e.db.pcp_registros.filter(r=>r.colecao==='performance_comissao_os_versoes').length,0);
 });
 
 test('reconhecimento preserva composição, identifica substituição e empate, exige revisão específica',()=>{
  const rs=[registro('a'),{...registro('b'),membros:[{chave:'100001',nome:'A',percentual:60},{chave:'100004',nome:'D',percentual:40}]},{...registro('c'),equipeId:'eq2',fracaoOS:1}];
  const e=entrada(rs),a=C.apurar(fonte(rs),e);assert.equal(a.reconhecimento.equipes.find(g=>g.chave==='eq1').substituicao,true);assert.equal(a.reconhecimento.campeao,null);
  const empate=C.apurar(fonte([rs[0],rs[2]]),entrada([rs[0],rs[2]]));assert.ok(empate.reconhecimento.equipes.every(g=>g.empate));assert.ok(empate.reconhecimento.equipes.every(g=>g.situacao==='pendente'));
+});
+
+test('fix: outubro teste e entrega inelegível não consomem centavo efetivo de novembro',()=>{
+ const r={...registro('nov',.5),osId:'os1',entregaId:'nov',fracaoOS:.5,baseAnteriorCentavos:50};
+ const passada={id:'out-aprovada',tipo:'aprovacao',revisao:1,de:'2026-10-01',ate:'2026-10-31',apuracao:{config:{modo:'teste'},linhas:[{osId:'os1',baseLiquidaCentavos:50,comissaoCentavos:1,decisao:'sem_falha'}]}};
+ assert.equal(C.apurar(fonte([r]),entrada([r]),{aprovacoes:[passada]}).totalCentavos,1);
+ passada.apuracao.config.modo='efetivo';passada.apuracao.linhas[0].decisao='falha_comprovada';passada.apuracao.linhas[0].comissaoCentavos=0;
+ assert.equal(C.apurar(fonte([r]),entrada([r]),{aprovacoes:[passada]}).totalCentavos,1);
+});
+
+// Fixture de fonte selada estável: aqui isolamos a transação financeira.
+// Os testes anteriores usam perfFonte real para alteração de valores e hash.
+function fonteSelada(ctx,periodo,rs,revisao=1) {
+ const f={...fonte(rs),...periodo,periodo,id:'fechado-'+periodo.de+'-'+revisao,revisao,hash:'hash-'+periodo.de+'-'+revisao};
+ ctx.e.db.pcp_registros.push({colecao:'performance_fechamentos',id:f.id,registro:f,apagado:false});
+ ctx.e.run('perfFonte=async body=>(await perfFechamentos(perfPeriodo(body)))[0]');
+ return {e:ctx.e,periodo,f};
+}
+const parcial=(id,fracao,valor=100)=>({...registro(id,valor),osId:'os1',entregaId:id,fracaoOS:fracao});
+test('fix: versões por O.S. serializam períodos e entregas distintos após âncora existente',async()=>{
+ let ctx=await ambiente();ctx.e.db.pcp_registros=ctx.e.db.pcp_registros.filter(r=>r.colecao!=='performance_fechamentos');
+ ctx=fonteSelada(ctx,ctx.periodo,[parcial('primeira',.2,20)]);
+ const p0=await previa(ctx),a0=await aprovar(ctx,p0.revisao);assert.equal(a0.ok,true,JSON.stringify(a0));
+ ctx.e.db.pcp_registros.push({colecao:'performance_comissao_os',id:'os1',registro:{id:'os1',tipo:'parcial'},apagado:false}); // âncora legada preservada
+ const a=fonteSelada(ctx,{de:'2026-12-01',ate:'2026-12-31'},[parcial('entrega-A',.5,50)]);
+ const b=fonteSelada(ctx,{de:'2027-01-01',ate:'2027-01-31'},[parcial('entrega-B',.5,50)]);
+ const pa=await previa(a),pb=await previa(b);assert.equal(pa.revisao.versoesOS.os1,1);assert.equal(pb.revisao.versoesOS.os1,1);
+ // Barreira: AMBAS leem o mesmo saldo/versão e chegam ao INSERT antes de
+ // qualquer gravação. As chamadas percorrem o endpoint real e o lote atômico.
+ const from=ctx.e.cliente.from.bind(ctx.e.cliente);let chegaram=0,liberar;const barreira=new Promise(r=>liberar=r);
+ ctx.e.cliente.from=table=>{const q=from(table),insert=q.insert.bind(q),then=q.then.bind(q);let aprova=false;
+   q.insert=v=>{aprova=Array.isArray(v)&&v.some(r=>r.colecao==='performance_comissao'&&r.registro.tipo==='aprovacao');return insert(v);};
+   q.then=async(resolve,reject)=>{if(aprova){if(++chegaram===2)liberar();await barreira;}return then(resolve,reject);};return q;};
+ const resultados=await Promise.all([aprovar(a,pa.revisao),aprovar(b,pb.revisao)]);
+ assert.deepEqual(resultados.map(r=>r.status).sort(),[200,409]);assert.equal(chegaram,2);
+ const ativas=C.ativas(ctx.e.db.pcp_registros.filter(r=>r.colecao==='performance_comissao').map(r=>r.registro),'efetivo');
+ assert.ok(ativas.flatMap(r=>r.apuracao.linhas).reduce((s,l)=>s+l.fracaoOS,0)<=1);
+ assert.equal(ctx.e.db.pcp_registros.filter(r=>r.colecao==='performance_comissao_os_versoes').length,2);
+ ctx.e.cliente.from=from;
+ const perdeu=resultados[0].status===409?a:b,pperdeu=resultados[0].status===409?pa:pb;
+ assert.equal((await aprovar(perdeu,pperdeu.revisao,{requestId:'tentar-obsoleta-12345'})).status,409);
+ const nova=await previa(perdeu,{anterior:pperdeu.revisao.id,requestId:'reler-saldo-12345'});
+ assert.equal((await aprovar(perdeu,nova.revisao,{requestId:'validar-quota-12345'})).status,409); // saldo agora 1,2
+});
+test('fix: integral e parcial substituem aprovação do mesmo período por diferenças, sem editar história',async()=>{
+ const ctx=await ambiente(),p=await previa(ctx),a=await aprovar(ctx,p.revisao);assert.equal(a.ok,true);
+ const antes=structuredClone(a.revisao);
+ ctx.e.db.pcp_registros.push({colecao:'performance_comissao_os',id:'os1',registro:{id:'os1',tipo:'integral'},apagado:false});
+ const pctx=fonteSelada(ctx,ctx.periodo,[parcial('parte-nova',.5,60000)],2);
+ const pp=await previa(pctx,{anterior:a.revisao.id,requestId:'trocar-parcial-12345'}),ap=await aprovar(pctx,pp.revisao,{requestId:'aprovar-parcial-12345'});
+ assert.equal(ap.ok,true,JSON.stringify(ap));assert.equal(ap.revisao.apuracao.totalCentavos,60000);assert.equal(ap.revisao.apuracao.ajustes.reduce((s,p)=>s+p.diferencaCentavos,0),-60000);
+ const integral=fonteSelada(ctx,ctx.periodo,[registro()],3),pi=await previa(integral,{anterior:ap.revisao.id,requestId:'voltar-integral-12345'}),ai=await aprovar(integral,pi.revisao,{requestId:'aprovar-integral-12345'});
+ assert.equal(ai.ok,true,JSON.stringify(ai));assert.equal(ai.revisao.apuracao.ajustes.reduce((s,p)=>s+p.diferencaCentavos,0),60000);
+ assert.deepEqual(ctx.e.db.pcp_registros.find(r=>r.colecao==='performance_comissao'&&r.id===antes.id).registro,antes);
+ assert.equal(ctx.e.db.pcp_registros.filter(r=>r.colecao==='performance_comissao_os_versoes').length,3);
+});
+test('fix: compensação explícita após fonte mudar libera nova forma/período e exporta negativo',async()=>{
+ const ctx=await ambiente(),p=await previa(ctx),a=await aprovar(ctx,p.revisao);assert.equal(a.ok,true);
+ const novo=fonteSelada(ctx,{de:'2026-12-01',ate:'2026-12-31'},[parcial('outra-data',.5,60000)]),pn=await previa(novo);
+ assert.equal((await aprovar(novo,pn.revisao)).status,409);
+ // Fonte antiga agora diverge, mas a compensação se refere ao fato financeiro
+ // imutável. Não pede que a O.S. volte aos valores/forma incorretos para estornar.
+ ctx.e.run('perfFonte=async()=>{throw new Error("Fonte operacional corrigida e indisponível para este teste")}');
+ const pc=await previa(ctx,{anterior:a.revisao.id,requestId:'compensar-previa-12345',compensarId:a.revisao.id});assert.equal(pc.ok,true,JSON.stringify(pc));assert.equal(pc.revisao.tipo,'previa');
+ assert.equal((await aprovar(ctx,pc.revisao,{requestId:'compensar-sem-ok-12345',confirmacao:false})).status,422);
+ const ac=await aprovar(ctx,pc.revisao,{requestId:'compensar-aprovar-12345'});assert.equal(ac.ok,true,JSON.stringify(ac));assert.equal(ac.revisao.apuracao.totalCentavos,0);assert.equal(ac.revisao.apuracao.ajustes.reduce((s,p)=>s+p.diferencaCentavos,0),-120000);
+ const csv=await ctx.e.call({action:'performanceComissaoExportar',...ctx.periodo,id:ac.revisao.id},who);assert.equal(csv.ok,true,JSON.stringify(csv));assert.match(csv.csv,/"-576,00"/);
+ ctx.e.run('perfFonte=async body=>(await perfFechamentos(perfPeriodo(body)))[0]');
+ const pn2=await previa(novo,{anterior:pn.revisao.id,requestId:'nova-apos-compensar-12345'}),an2=await aprovar(novo,pn2.revisao,{requestId:'aprovar-apos-compensar-12345'});assert.equal(an2.ok,true,JSON.stringify(an2));
+ assert.equal(ctx.e.db.pcp_registros.find(r=>r.colecao==='performance_comissao'&&r.id===a.revisao.id).registro.apuracao.totalCentavos,120000);
+});
+test('fix: referências ativas do mesmo regime acumulam só base elegível e saldo real',()=>{
+ const r=parcial('segunda',.5,.5),a={id:'primeira-aprovada',tipo:'aprovacao',revisao:1,de:'2026-11-01',ate:'2026-11-15',apuracao:{config:{modo:'efetivo'},linhas:[{osId:'os1',baseElegivelCentavos:50,comissaoCentavos:1}]}};
+ assert.equal(C.apurar(fonte([r]),entrada([r]),{aprovacoes:[a]}).totalCentavos,0);
+ const compensada={...a,id:'compensacao',revisao:2,apuracao:{...a.apuracao,linhas:[]}};
+ assert.equal(C.apurar(fonte([r]),entrada([r]),{aprovacoes:[a,compensada]}).totalCentavos,1);
 });
