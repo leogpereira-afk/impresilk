@@ -2046,6 +2046,44 @@ function wireErpComSaldo(el) {
   });
 }
 
+/* Leitura operacional sobre o mesmo recorte ERP da tabela. Não declara entrega física. */
+function acompanhamentoEntregas(lista) {
+  const grupos = { todas: lista, externo: [], interno: [], semEquipe: [], semValor: [], aLancar: [] };
+  const dias = new Map();
+  for (const x of lista) {
+    const interno = x.erp.tipo === 'interno';
+    if (x.pendente) grupos.aLancar.push(x);
+    grupos[interno ? 'interno' : 'externo'].push(x);
+    if (!interno && x.card && !OPERACAO.equipe(x.card).length) grupos.semEquipe.push(x);
+    if (x.erp.valor == null || x.erp.valor === '' || !Number.isFinite(Number(x.erp.valor))) grupos.semValor.push(x);
+    const dia = OPERACAO.dia(x.erp.data);
+    if (dia) dias.set(dia, (dias.get(dia) || 0) + 1);
+  }
+  return { grupos, dias: [...dias].sort((a,b) => a[0].localeCompare(b[0])), semFicha: lista.filter(x => !x.card).length };
+}
+function acompanhamentoChipsHTML(a, foco) {
+  const nomes = {todas:'📦 Todas',externo:'🚚 Instalações',interno:'🛍️ Retiradas',aLancar:'📝 A lançar no PCP',semEquipe:'👥 Sem equipe no PCP',semValor:'💰 Sem valor'};
+  return `<nav class="ent-chips" aria-label="Acompanhar entregas do período">${Object.entries(nomes).map(([k,n]) => `<button type="button" data-ent-foco="${k}" aria-pressed="${foco === k}" class="ent-chip ent-chip-${k}">${n}<b>${a.grupos[k].length}</b></button>`).join('')}</nav>`;
+}
+function acompanhamentoGraficosHTML(lista, per, f) {
+  const a = acompanhamentoEntregas(lista), n = lista.length;
+  const incompleto = per.faltando.length || per.comErro.length || per.truncou;
+  const mensal = f.de && f.ate && (Date.parse(f.ate) - Date.parse(f.de)) / 86400000 > 45;
+  const baldes = new Map();
+  for (const [d,v] of a.dias) { const k = mensal ? d.slice(0,7) : d; baldes.set(k,(baldes.get(k)||0)+v); }
+  const pontos = [...baldes], max = Math.max(1,...pontos.map(x=>x[1]));
+  const largura = 640, altura = 116;
+  const tempo = d => Date.parse(d.length === 7 ? d+'-01' : d);
+  const amplitude = pontos.length > 1 ? tempo(pontos.at(-1)[0])-tempo(pontos[0][0]) : 0;
+  const xy = pontos.map(([d,n])=>({d,n,x:amplitude?18+(tempo(d)-tempo(pontos[0][0]))*(largura-36)/amplitude:largura/2,y:altura-12-n*(altura-30)/max}));
+  const fmt = d => mensal ? `${MES_CURTO[Number(d.slice(5,7))-1]}/${d.slice(2,4)}` : d.slice(8,10)+'/'+d.slice(5,7);
+  const grafico = pontos.length ? `<svg viewBox="0 0 ${largura} ${altura}" role="img" aria-label="Quantidade de O.S. por ${mensal?'mês':'data'} de baixa no ERP"><title>${esc(pontos.map(([d,n])=>fmt(d)+': '+n+' O.S.').join('; '))}</title>${[0,1,2].map(i=>`<line x1="18" x2="622" y1="${25+i*38}" y2="${25+i*38}" stroke="currentColor" opacity=".12"/>`).join('')}<polyline points="${xy.map(p=>p.x+','+p.y).join(' ')}" fill="none" stroke="#2563eb" stroke-width="3" stroke-linejoin="round"/>${xy.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="4" fill="white" stroke="#2563eb" stroke-width="2"><title>${esc(fmt(p.d))}: ${p.n} O.S.</title></circle>`).join('')}</svg><div class="ent-chart-axis"><span>${fmt(pontos[0][0])}</span><span>Pico: ${max} O.S. / ${mensal?'mês':'dia'}</span><span>${fmt(pontos.at(-1)[0])}</span></div>` : '<p class="ent-chart-empty">Nenhum registro disponível neste recorte.</p>';
+  return `<section class="ent-insights" aria-label="Análise das entregas">
+    <article class="ent-insight"><header><div><span class="ent-eyebrow">RITMO DO PERÍODO</span><h3>📈 Baixas no ERP</h3></div><strong>${n}<small> O.S.</small></strong></header>${grafico}<p class="ent-chart-note">${incompleto?'⚠️ Leitura parcial: há meses sem resposta, em carga ou fora do limite.':'Somente datas com registros; intervalos sem registros não são desenhados.'} Não comprova entrega física.</p></article>
+    <article class="ent-insight"><header><div><span class="ent-eyebrow">PERFIL E CADASTRO</span><h3>🎯 Composição das entregas</h3></div></header><div class="ent-composicao">${[['externo','🚚 Instalações'],['interno','🛍️ Retiradas']].map(([k,t])=>`<div><span>${t}</span><b>${a.grupos[k].length} <small>· ${n?Math.round(a.grupos[k].length/n*100):0}%</small></b><meter min="0" max="${Math.max(n,1)}" value="${a.grupos[k].length}" aria-label="${t}"></meter></div>`).join('')}</div><p class="ent-chart-note">${a.grupos.semEquipe.length} instalações com ficha sem equipe · ${a.semFicha} O.S. sem ficha neste aparelho · ${a.grupos.semValor.length} sem valor informado.</p></article>
+  </section>`;
+}
+
 function renderEntregas() {
   const el = document.getElementById('panel-entregas');
   if (!el) return;
@@ -2109,12 +2147,15 @@ function renderEntregas() {
     if (card.finalizadaEm) return { rotulo: 'baixada', classe: 'st-aguardando_producao', dica: 'Finalizada no PCP' };
     return { rotulo: 'aberta no PCP', classe: 'st-agendada', dica: 'O ERP marcou entregue, mas o card segue aberto' };
   };
-  const lista = per.os
-    .map(o => ({ erp: o, card: porNumero.get(String(o.numero || '').trim()) || null }))
+  const baseAcompanhamento = per.os
+    .map(o => ({ erp: o, card: porNumero.get(String(o.numero || '').trim()) || null, pendente: aLancarSet.has(String(o.numero || '').trim()) }))
     // Técnico é a FICHA, não a grafia: "Osmane" e "Osmane V." são a mesma pessoa.
     .filter(x => !tecnico || (x.card && OPERACAO.equipe(x.card).some(a => nomeExibicaoCasa(a).chave === tecnico)))
     .filter(x => !tipo || (typeof OPREV!=='undefined'?OPREV.categoria(x.card||x.erp,STORE.getCFG()):String((x.card && x.card.servico) || x.erp.servico || '').trim()) === tipo)
     .sort((a, b) => String(b.erp.data).localeCompare(String(a.erp.data)) || String(b.erp.numero).localeCompare(String(a.erp.numero)));
+  const acompanhamento = acompanhamentoEntregas(baseAcompanhamento);
+  const focoEntregas = Object.hasOwn(acompanhamento.grupos, STATE._entFocoChip || '') ? STATE._entFocoChip : 'todas';
+  const lista = acompanhamento.grupos[focoEntregas];
   let totLista = 0, semValorLista = 0;
   for (const x of lista) { if (x.erp.valor !== null && Number.isFinite(Number(x.erp.valor))) totLista += Number(x.erp.valor); else semValorLista++; }
   // A tabela mostra no máximo 300 linhas; o resto está nos relatórios.
@@ -2162,7 +2203,7 @@ function renderEntregas() {
     || (f.de === hoje.slice(0, 4) + '-01-01' && f.ate === hoje);
   /* Com Técnico ou Tipo ativos, o cartão do período segue a lista filtrada.
      Antes mostrava a empresa inteira ao lado da lista de uma pessoa. */
-  const filtrado = !!(tecnico || tipo);
+  const filtrado = !!(tecnico || tipo || focoEntregas !== 'todas');
   const kpiPeriodo = filtrado
     ? kpiHTML(kpiDe({ os: lista.map(x => x.erp), faltando: per.faltando, comErro: per.comErro, meses: per.meses }), rotuloPeriodo(f.de, f.ate) + ' · com o filtro', 'escolhido ent-kpi-principal')
     : (periodoRepetido ? '' : kpiHTML(kPer, rotuloPeriodo(f.de, f.ate), 'escolhido ent-kpi-principal'));
@@ -2224,17 +2265,8 @@ function renderEntregas() {
     <div class="casa-pagina">
       ${abasEntregasHTML('lista')}
       <div class="casa-pagina-head">
-        <div><h2>Entregas</h2><p>Acompanhe as O.S. entregues, os valores e a equipe responsável.</p></div>
+        <div><h2>Entregas</h2><p>Acompanhe o período, confira as pendências e avance até os itens e a equipe responsável.</p></div>
       </div>
-      <div class="ent-kpis">${kpiPrincipal}<div class="ent-kpi-secs">${kpiSecundarios}</div></div>${porOS && lista.length ? porOSAvisoKpiHTML() : ''}
-      <details class="ent-dados" ${STATE._entDadosAberto ? 'open' : ''}><summary>Origem dos valores e sincronização</summary>
-      <p>Valores líquidos de desconto das O.S. marcadas como entregues no ERP, pela data de entrega. Não representam recebimentos ou lucro. Instalações realizadas dependem do registro no PCP; retiradas pelo cliente entram apenas nos valores.</p>
-      <p class="metricas-nota">Registradas no PCP neste mês: <button class="inline-link" id="ent-total-pcp"><strong>${registradasMes}</strong></button> instalaç${registradasMes === 1 ? 'ão' : 'ões'}${cls.aLancar.length ? ` · a lançar: <strong>${cls.aLancar.length}</strong>` : ''}. Fonte do valor: ERP${STORE.entreguesMes(hoje.slice(0, 7)) ? `, atualizado ${new Date(STORE.entreguesMes(hoje.slice(0, 7)).em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' (carregando…)'}.</p>
-      ${barraCargaEntregas()}
-      </details>
-      ${typeof controleConferidasHTML==='function'?controleConferidasHTML(todas,f):''}
-      ${filaLancarHTML(aLancar, f, hoje)}
-      ${erpComSaldoHTML(listaErpComSaldo(todas))}
       <section class="ent-controles" aria-label="Filtros de entregas">
       ${chipsPeriodoEntregas(f)}
       <div class="casa-filtros">
@@ -2243,12 +2275,28 @@ function renderEntregas() {
         <span class="casa-vista"><button class="btn-ghost btn-sm ${STATE._entVista === 'tabela' ? 'active' : ''}" data-ent-vista="tabela">Tabela</button><button class="btn-ghost btn-sm ${STATE._entVista === 'cards' ? 'active' : ''}" data-ent-vista="cards">Cards</button>${typeof porOSMontar === 'function' ? `<button class="btn-ghost btn-sm ${porOS ? 'active' : ''}" data-ent-vista="poros">Por O.S.</button>` : ''}</span>
       </div>
       </section>
-      ${lista.length ? (porOS ? porOSSecaoHTML() : STATE._entVista === 'cards' ? cards() : tabela()) : emptyState('', vazioEntregas(per).titulo, vazioEntregas(per).dica) + (porOS && typeof porOSVazioPeriodoHTML === 'function' ? porOSVazioPeriodoHTML() : '')}
+      <p class="ent-chart-note">Baixas no ERP · período, técnico e serviço selecionados. Os chips podem conter a mesma O.S.</p>
+      ${acompanhamentoChipsHTML(acompanhamento, focoEntregas)}
+      <div class="ent-kpis">${kpiPrincipal}<div class="ent-kpi-secs">${kpiSecundarios}</div></div>${porOS && lista.length ? porOSAvisoKpiHTML() : ''}
+      ${aLancar.length ? '<p class="ent-chart-note">📌 Pendências gerais · todos os períodos, técnicos e tipos</p>' : ''}
+      ${filaLancarHTML(aLancar, f, hoje)}
+      ${acompanhamentoGraficosHTML(lista, per, f)}
+      <details class="ent-dados" ${STATE._entDadosAberto ? 'open' : ''}><summary>Origem dos valores e sincronização</summary>
+      <p>Valores líquidos de desconto das O.S. marcadas como entregues no ERP, pela data de entrega. Não representam recebimentos ou lucro. Instalações realizadas dependem do registro no PCP; retiradas pelo cliente entram apenas nos valores.</p>
+      <p class="metricas-nota">Registradas no PCP neste mês: <button class="inline-link" id="ent-total-pcp"><strong>${registradasMes}</strong></button> instalaç${registradasMes === 1 ? 'ão' : 'ões'}${cls.aLancar.length ? ` · a lançar: <strong>${cls.aLancar.length}</strong>` : ''}. Fonte do valor: ERP${STORE.entreguesMes(hoje.slice(0, 7)) ? `, atualizado ${new Date(STORE.entreguesMes(hoje.slice(0, 7)).em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' (carregando…)'}.</p>
+      ${barraCargaEntregas()}
+      </details>
+      ${typeof controleConferidasHTML==='function'?controleConferidasHTML(todas,f):''}
+      ${erpComSaldoHTML(listaErpComSaldo(todas))}
+
+      ${lista.length ? (porOS ? porOSSecaoHTML() : STATE._entVista === 'cards' ? cards() : tabela()) : emptyState('', focoEntregas !== 'todas' ? 'Nenhuma O.S. neste filtro' : vazioEntregas(per).titulo, focoEntregas !== 'todas' ? 'Escolha outro chip ou ajuste o período.' : vazioEntregas(per).dica) + (porOS && typeof porOSVazioPeriodoHTML === 'function' ? porOSVazioPeriodoHTML() : '')}
       ${lista.length ? prazoEntregasHTML(lista.map(x => x.erp), porNumero) : ''}
       ${relatoriosEntregasHTML(lista.map(x => x.erp), porNumero, estadoPCP)}
       ${relatorioAnosHTML()}
     </div>`;
   wireAbasEntregas(el);
+  el.querySelectorAll('[data-ent-conferencia]').forEach(b=>b.onclick=()=>{STATE._entConferencia=b.dataset.entConferencia;STATE._entFoco=`[data-ent-conferencia="${b.dataset.entConferencia}"]`;renderEntregas();});
+  el.querySelectorAll('[data-ent-foco]').forEach(b => b.onclick = () => { STATE._entFocoChip = b.dataset.entFoco; STATE._entFoco = `[data-ent-foco="${b.dataset.entFoco}"]`; renderEntregas(); });
   el.querySelectorAll('[data-total-fonte]').forEach(b=>b.onclick=()=>{const {k,rotulo}=totaisFonte[Number(b.dataset.totalFonte)];perfDialog('Origem do total · '+rotulo,`<p>Fonte ERP · status entregue. ${k.n} registros; ${k.semValor} sem valor; ${k.faltando} meses pendentes. Baixa ERP não comprova entrega física. Os valores PCP não são somados aqui.</p><ul>${k.registros.map(o=>`<li>O.S. ${esc(o.numero)} · ${esc(o.data)} · ${esc(o.cliente)} · ${o.valor==null?'valor desconhecido':dinheiroCasa(o.valor)}</li>`).join('')||'<li>Nenhum registro recebido neste recorte.</li>'}</ul>`);});
   if(typeof wirePDFsEntregaPerformance==='function')wirePDFsEntregaPerformance(el);
   el.querySelectorAll('[data-ent-itens]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();void conferirItensEntrega(b.dataset.entItens).catch(e=>toast(perfErroTxt(e),'error'));});

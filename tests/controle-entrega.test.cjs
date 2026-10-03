@@ -126,3 +126,15 @@ test('regularização legada identifica data e horário e não silencia uma nova
  assert.equal(O.horas({...r.os,horaSaida:'09:00',horaRetorno:'10:00',instalacao:{data:'2026-10-03'}}),1);
  assert.equal(O.situacaoSaida({...o,regularizacaoSaida:{situacao:'regularizada',saidaOriginal:''}},'2026-10-03'),'sem-retorno','metadado antigo sem identidade pede conferência');
 });
+
+test('painel de conferências filtra saldo atual sem somar unidades ou valores de outras datas',()=>{
+ const parcial=os(); parcial.numero='PARCIAL'; parcial.conferenciasEntrega=[{id:'e1',dia:'2026-10-01',itens:sel(parcial,1,1)}];
+ const completo=os(); completo.numero='COMPLETO'; completo.conferenciasEntrega=[{id:'e2',dia:'2026-10-02',itens:sel(completo,4,3)}];
+ const antigo=os(); antigo.numero='ANTIGO'; antigo.conferenciasEntrega=[{id:'e3',dia:'2026-09-01',itens:sel(antigo,1,1)}];
+ const ctx=vm.createContext({CONFERENCIA_ENTREGA:C,OPERACAO:{emIntervalo:(d,a,b)=>d>=a&&d<=b},STATE:{_entConferencia:'saldo_concluido'},esc:String,resumoEntregaFichaTexto:o=>C.estado(o).resumo,document:{addEventListener(){}},regs:[parcial,completo,antigo]});
+ vm.runInContext(fs.readFileSync(require.resolve('../controle-entrega-ui.js'),'utf8'),ctx);
+ const html=vm.runInContext(`controleConferidasHTML(regs,{de:'2026-10-01',ate:'2026-10-03'})`,ctx);
+ assert.match(html,/O.S. COMPLETO/); assert.doesNotMatch(html,/O.S. PARCIAL|O.S. ANTIGO/);assert.match(html,/saldo atual de cada ficha/);assert.match(html,/data-ent-conferencia="parcial"[^>]*>🟠 Parciais<b>1/);
+ assert.equal(parcial.conferenciasEntrega.length,1);
+ ctx.STATE._entConferencia='inconsistente';assert.match(vm.runInContext(`controleConferidasHTML(regs,{de:'2026-10-01',ate:'2026-10-03'})`,ctx),/Nenhuma conferência nesta situação/);
+});

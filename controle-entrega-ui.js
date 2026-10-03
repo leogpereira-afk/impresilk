@@ -14,9 +14,15 @@ function controleEntregaHTML(os) {
     <p>Hora da foto, anexo e recebimento são registros separados. Nenhum deles preenche automaticamente saída ou retorno.</p></details>`;
 }
 function controleConferidasHTML(todas,f) {
-  const lista=todas.filter(o=>o.conferenciasEntrega?.some(e=>OPERACAO.emIntervalo(e.dia,f.de,f.ate)));
-  if(!lista.length)return '';
-  return `<section aria-label="Conferência por itens"><h3>Entregas conferidas por item</h3><p>Saldo a conferir não prova falta de entrega física. As baixas financeiras do ERP têm sua própria data.</p>${lista.map(o=>`<article><strong>O.S. ${esc(o.numero)} · ${esc(o.cliente)}</strong><p>${esc(resumoEntregaFichaTexto(o))}</p><button type="button" class="btn-ghost btn-sm" data-controle="itens" data-controle-os="${esc(o.id)}">Itens, equipes e saldo</button></article>`).join('')}</section>`;
+  const base=todas.filter(o=>o.conferenciasEntrega?.some(e=>OPERACAO.emIntervalo(e.dia,f.de,f.ate)));
+  if(!base.length)return '';
+  const grupos={todas:base,parcial:[],saldo_concluido:[],inconsistente:[]};
+  for(const o of base){const estado=CONFERENCIA_ENTREGA.estado(o);if(grupos[estado.situacao])grupos[estado.situacao].push(o);}
+  const foco=Object.hasOwn(grupos,STATE._entConferencia || '')?STATE._entConferencia:'todas';
+  const nomes={todas:'📋 Todas',parcial:'🟠 Parciais',saldo_concluido:'✅ Saldo conferido',inconsistente:'🔎 Revisar itens'};
+  return `<section class="ent-conferidas" aria-label="Conferência por itens"><h3>Entregas conferidas por item</h3><p>O.S. com conferência no período · saldo atual de cada ficha. Saldo a conferir não prova falta de entrega física. As baixas financeiras do ERP têm sua própria data.</p>
+    <nav class="ent-chips" aria-label="Situação da conferência">${Object.entries(nomes).map(([k,n])=>`<button type="button" class="ent-chip" data-ent-conferencia="${k}" aria-pressed="${foco===k}">${n}<b>${grupos[k].length}</b></button>`).join('')}</nav>
+    <div class="ent-conferidas-grid">${grupos[foco].map(o=>`<article><strong>O.S. ${esc(o.numero)} · ${esc(o.cliente)}</strong><p>${esc(resumoEntregaFichaTexto(o))}</p><button type="button" class="btn-ghost btn-sm" data-controle="itens" data-controle-os="${esc(o.id)}">Itens, equipes e saldo →</button></article>`).join('') || '<p>Nenhuma conferência nesta situação e período.</p>'}</div></section>`;
 }
 async function controleSalvar(body,d) {
   const status=d.querySelector('[role="status"]'),botao=d.querySelector('[type="submit"]');
