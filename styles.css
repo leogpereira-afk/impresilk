@@ -4240,7 +4240,7 @@ img.perf-logo{object-fit:cover}
 #panel-entregas .ent-kpi-principal { background:linear-gradient(115deg,#15384f,#215875);border:0;box-shadow:none;color:white;border-radius:16px; }
 #panel-entregas .ent-kpi-principal .inline-link { background:transparent;color:inherit;text-align:left;padding:0; }
 #panel-entregas .ent-kpi-principal small { color:#d7e8f3; }
-#panel-entregas .ent-kpi-principal b { font-size:2rem;text-decoration:none; }
+#panel-entregas .ent-kpi-principal b { font-size:2rem;text-decoration:none;color:inherit; }
 #panel-entregas .ent-kpi-sec .inline-link { background:transparent;text-align:left; }
 .ent-insights { display:grid;grid-template-columns:minmax(0,1.45fr) minmax(280px,1fr);gap:14px;margin-bottom:16px; }
 .ent-insight { background:#fff;border:1px solid #dfe6ee;border-radius:16px;padding:18px 20px;min-width:0; }
