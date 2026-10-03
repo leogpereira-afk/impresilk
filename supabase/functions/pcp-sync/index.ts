@@ -1,4 +1,4 @@
-import { mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno } from "../_shared/pcp-status.mjs";
 // ============================================================================
@@ -371,6 +371,15 @@ async function perfHash(v:any) {
    dele em casa.js (CORTE_LANCAMENTO_MANUAL), e tests/cancelamento-f16.test.cjs
    confere que as duas dizem o mesmo dia (F16). */
 const CORTE_LANCAMENTO_MANUAL = "2026-09-15";
+// A conferência e a apuração por item precisam da mesma base líquida.
+// Não substituímos um líquido ausente pela soma bruta dos produtos.
+function valorConferencia(os:any, erp:any[]) {
+  const numero=(v:any)=>v==null||v===""?NaN:Number(typeof v==="string" && v.includes(",")?v.replace(/\./g,"").replace(",","."):v);
+  let valor=numero(os.valorTotal);
+  const mudou=os.erpAlteracoes?.some((h:any)=>h.campos?.some((x:any)=>x.campo==="valorTotal"));
+  if(!mudou && erp.length===1 && Number.isFinite(numero(erp[0].valor))) valor=numero(erp[0].valor);
+  return Number.isFinite(valor) && valor>=0 ? valor : null;
+}
 /* `estrito` é a trava de "a base mudou durante a consulta": vale para a
    apuração, que sela um hash. O relatório de entregas só lê; com a equipe
    sincronizando o dia inteiro, ele falhava sem motivo. */
@@ -385,26 +394,32 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     const rows=data || [];
     for(const row of rows) {
       const o=row.registro, fim=perfDia(o?.finalizadaEm);
-      if(!fim || o.tipo==="interno") continue;
+      if((!fim && !o?.conferenciasEntrega?.length) || o?.tipo==="interno") continue;
       /* A O.S. CANCELADA (F16), no ERP ou à mão pela gestão, não é entrega:
          sai da base. O hash do período aberto muda; a revisão selada é lida
          do selo e fica como foi. */
       if(cancelada(o)) continue;
       const erp=o.baixaAutoERP?.em===o.finalizadaEm || /^Mubisys\b/i.test(o.finalizadoPor || "");
-      if(erp && !o.entregaLancada && fim>=CORTE_LANCAMENTO_MANUAL) continue;
+      if(erp && !o.entregaLancada && !o.conferenciasEntrega?.length && fim>=CORTE_LANCAMENTO_MANUAL) continue;
       const dia=(o.entregaLancada && perfDia(o.entregaLancada.data)) || fim;
-      if(dia>=periodo.de && dia<=periodo.ate) lista.push({...o,id:row.id,_dia:dia});
+      if(o.conferenciasEntrega?.length) {
+        for(const e of o.conferenciasEntrega) if(e.dia>=periodo.de && e.dia<=periodo.ate) lista.push({...o,id:row.id+"::entrega:"+e.id,_osId:row.id,_dia:e.dia,_conferencia:e});
+      } else if(dia>=periodo.de && dia<=periodo.ate) lista.push({...o,id:row.id,_dia:dia});
     }
     if(rows.length<500){terminou=true;break;}
     const proximo=String(rows[rows.length-1].id);if(proximo<=after)throw new Error("Paginação inconsistente. Refaça a consulta.");after=proximo;
   }
   if(!terminou)throw new Error("Consulta excedeu o limite; nenhum fechamento foi criado.");
   const valores:Record<string,number>={};
+  const valoresItens:Record<string,any[]>={};
   const nums=[...new Set(lista.map(o=>String(o.numero || "").trim()).filter(Boolean))];
   for(let i=0;i<nums.length;i+=300){
     const {data,error}=await sb.from("painel_ordens").select("numero,valor").in("numero",nums.slice(i,i+300));
     if(error)throw new Error(error.message);
-    for(const r of data || []) if(r.valor!==null && r.valor!=="" && Number.isFinite(Number(r.valor)))valores[String(r.numero)]=Number(r.valor);
+    for(const r of data || []) {
+      (valoresItens[String(r.numero)] ||= []).push(r);
+      if(r.valor!==null && r.valor!=="" && Number.isFinite(Number(r.valor)))valores[String(r.numero)]=Number(r.valor);
+    }
   }
   const cfgDepois=await getCfgComVersao();
   const {data:mudancas,error:erroMudancas}=await sb.from("pcp_registros").select("id").eq("colecao","os").gte("atualizado_em",inicio).limit(1);
@@ -421,6 +436,17 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     const mudou=o.erpAlteracoes?.some((h:any)=>h.campos?.some((x:any)=>x.campo==="valorTotal"));
     if(!mudou && Number.isFinite(valores[String(o.numero)])){valor=valores[String(o.numero)];origem="Painel / ERP";}
     if(!Number.isFinite(valor)||valor<0){const itens=(o.itens||[]).map((x:any)=>num(x.subtotal)).filter((v:number)=>Number.isFinite(v)&&v>0);valor=itens.length?itens.reduce((a:number,b:number)=>a+b,0):null;origem="Itens da O.S.";}
+    let dadosEntrega:any={}, voltaDaEntrega=true;
+    if(o._conferencia) {
+      const a=CONFERENCIA_ENTREGA.apurar(o,valorConferencia(o,valoresItens[String(o.numero)] || [])), e=a.entregas.find((x:any)=>x.id===o._conferencia.id);
+      dadosEntrega={osId:o._osId,entregaId:o._conferencia.id,itensEntrega:e?.itens || [],saldoItens:a.saldoItens?.length || 0,erroConferencia:a.erro || "",fracaoOS:a.total>0 && e?.valor!=null?e.valor/a.total:0};
+      const idsEntrega=finaisAlocacao(o._conferencia.alocacao).map((m:any)=>m.pessoaId).sort();
+      const idsOperacionais=(o.equipe || []).map((n:any)=>pessoasPerf.chave(String(n))).sort();
+      const diaRetorno=perfDia(o.retornoEm) || perfDia(o.entregaLancada?.data) || perfDia(o.finalizadaEm);
+      voltaDaEntrega=JSON.stringify(idsEntrega)===JSON.stringify(idsOperacionais) && diaRetorno===o._dia;
+      valor=e?.valor==null?null:e.valor/100; origem="Itens desta entrega · líquido proporcional";
+      o={...o,alocacao:a.erro?null:o._conferencia.alocacao,equipe:a.erro?[]:finaisAlocacao(o._conferencia.alocacao).map((m:any)=>m.pessoaId),entregaLancada:{data:o._dia}};
+    }
     /* "Lucas" antigo e o ID dele na mesma O.S. são um membro só. O membro não
        confirmado leva o ID como chave e o nome de exibição; nome antigo sem
        ficha segue como era (chave = o próprio nome). */
@@ -462,7 +488,7 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
        na avaliação individual. Só "sim"/"nao" passam; o resto é "não
        conferido" (null) e não pesa contra ninguém. */
     const snv=(v:any)=>v==="sim"||v===true?"sim":(v==="nao"||v===false?"nao":null);
-    const rc=o.retornoConf&&typeof o.retornoConf==="object"?o.retornoConf:null;
+    const rc=voltaDaEntrega&&o.retornoConf&&typeof o.retornoConf==="object"?o.retornoConf:null;
     /* 24/09/2026: "arrumado" (conta junto com "limpo") e "sem avaria" (não
        conta, mas a tela mostra) vieram com a fila da volta do carro. */
     const PERGUNTAS=["carroLimpo","carroArrumado","equipamentosOk","semAvaria"];
@@ -480,7 +506,7 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
        não há volta do carro para conferir nem para pesar na nota. O mesmo nome
        de OPERACAO.SEM_CARRO na tela. */
     const semCarro=norm(o.veiculo)==="instalacao interna";
-    const voltou=nomes.length>0 && !semCarro && !!(o.retornoEm || o.horaRetorno || !baixaERP || o.entregaLancada);
+    const voltou=voltaDaEntrega && nomes.length>0 && !semCarro && !!(o.retornoEm || o.horaRetorno || !baixaERP || o.entregaLancada);
     const diaVolta=perfDia(o.retornoEm) || (o.horaRetorno ? (perfDia(o.saidaEm) || perfDia(o.instalacao?.data)) : "") || (o.entregaLancada ? perfDia(o.entregaLancada.data) : "") || perfDia(o.finalizadaEm);
     const volta=[diaVolta,norm(o.veiculo),nomes.map((n:string)=>pessoasPerf.chave(n)).sort().join("+")].join("|");
     const quem=alocOk?{equipeId:eqAloc?eqAloc.equipeId:"",equipeNome:eqAloc?eqAloc.equipeNome:"",emblema:eqAloc?eqAloc.emblema:"🤝",obs:"",por:String(aloc.por||""),em:String(aloc.em||"")}
@@ -497,7 +523,7 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     const camposEquipe=confirmado
       ? (divisao&&divisao.grupos?{grupos:divisao.grupos}:{})
       : sugestaoApurada(membros,aloc,aloc?finaisAlocacao(aloc):[],equipesPerf,idMembro);
-    return {id:o.id,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf,voltou,volta,...camposEquipe};
+    return {id:o.id,...dadosEntrega,numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf,voltou,volta,...camposEquipe};
   });
   /* performance-2: cada registro leva a conferência da volta, e a apuração
      leva os PESOS DA NOTA em vigor. Eles entram no hash: quem fecha sela os
@@ -859,6 +885,41 @@ Deno.serve(async (req: Request) => {
           entregue:"O.S. com status entregue no Mubisys pela data de entrega, incluindo retiradas. Valores líquidos; alterações posteriores dependem de nova sincronização."}});
       }
 
+      case "conferenciaEntrega": {
+        if(ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha?.papel || ""))) return resp({error:"Só a gestão confere itens e a divisão de cada entrega."},403);
+        const osId=String(body.osId || "");
+        const {data:row,error}=await sb.from("pcp_registros").select("registro,atualizado_em,apagado").eq("colecao","os").eq("id",osId).maybeSingle();
+        if(error) throw new Error(error.message);
+        const os=row?.registro;
+        if(!os || row.apagado) return resp({error:"O.S. não encontrada."},404);
+        if(os.tipo==="interno" || cancelada(os)) return resp({error:"Esta O.S. não permite conferir entrega de instalação."},422);
+        if(!body.entrega) {
+          const {data:erp,error:err}=await sb.from("painel_ordens").select("numero,valor").eq("numero",String(os.numero || "")).limit(2);
+          if(err) throw new Error(err.message);
+          return resp({os:saida(os),valor:valorConferencia(os,erp || [])});
+        }
+        if(body.rev!==os.rev) return resp({error:"A O.S. mudou. Reabra a conferência antes de salvar.",conflito:true},409);
+        const velho=(os.conferenciasEntrega || []).find((e:any)=>e.id===body.entrega.id);
+        const pedido=body.entrega, hoje=perfDia(new Date().toISOString());
+        const entrega={id:pedido.id,dia:pedido.dia,itens:pedido.itens,alocacao:pedido.alocacao};
+        const demais=(os.conferenciasEntrega || []).filter((e:any)=>e.id!==entrega.id);
+        const erro=CONFERENCIA_ENTREGA.validar(os,[...demais,entrega],hoje);
+        if(erro) return resp({error:erro},422);
+        const cfg=(await getCfg()) || {}, pessoas=await pessoasReq(), autor=await autorAuditoria(), agora=new Date().toISOString();
+        const anterior={...os,equipe:velho?.alocacao?finaisAlocacao(velho.alocacao).map((m:any)=>m.pessoaId):[],alocacao:velho?.alocacao};
+        const virtual={...os,entregaLancada:{data:entrega.dia},equipe:pedido.alocacao?.grupos?.flatMap((g:any)=>g.membros?.map((m:any)=>m.pessoaId) || []) || []};
+        const ra=sanearAlocacao(entrega.alocacao,virtual,anterior,{pode:true,avisar:true,autor,agora,equipes:cfg.performancePCP?.equipes || [],pessoas});
+        if(ra.descartado || !ra.os.alocacao || !alocacaoConfirmada(ra.os)) return resp({error:ra.descartado?.motivo || "Confira a equipe e os vínculos no RH antes de confirmar."},422);
+        const limpa={id:entrega.id,dia:entrega.dia,itens:entrega.itens.map((i:any)=>({chave:i.chave,identidade:i.identidade,qtde:i.qtde})),alocacao:ra.os.alocacao,por:autor.nome,porId:autor.porId,em:agora};
+        const conferenciasEntrega=[...demais,limpa].sort((a:any,b:any)=>a.dia.localeCompare(b.dia)||a.id.localeCompare(b.id));
+        const gravar={...os,conferenciasEntrega,rev:(Number(os.rev)||0)+1,atualizadoEm:agora,atualizadoPor:autor.nome};
+        const {data:salva,error:erroSalvar}=await sb.from("pcp_registros").update({registro:gravar,atualizado_em:new Date(Math.max(Date.now(),Date.parse(row.atualizado_em)+1 || 0)).toISOString()}).eq("colecao","os").eq("id",osId).eq("atualizado_em",row.atualizado_em).select("id");
+        if(erroSalvar) throw new Error(erroSalvar.message);
+        if(!salva?.length) return resp({error:"Outra pessoa alterou a O.S. Reabra a conferência.",conflito:true},409);
+        await auditar(osId,"conferir-entrega",{campos:["conferenciasEntrega"],antes:{conferenciasEntrega:os.conferenciasEntrega || []},depois:{conferenciasEntrega}},os.numero);
+        return resp({ok:true,os:saida(gravar)});
+      }
+
       case "performancePeriodo":
       case "performanceFechamentos":
       case "performanceFechar": {
@@ -890,6 +951,7 @@ Deno.serve(async (req: Request) => {
            aqui não prende nada e a tela mostra a mensagem. Vem antes do hash
            para a aba velha ouvir a causa certa, e não "os dados mudaram". */
         if(body.leGrupos!==true && fonte.registros.some((r:any)=>Array.isArray(r.grupos)))return resp({error:"Recarregue a página para fechar: este período tem O.S. dividida entre duas equipes e esta tela é de uma versão anterior."},422);
+        if(body.leEntregasItens!==true && fonte.registros.some((r:any)=>r.entregaId))return resp({error:"Recarregue a página para fechar: este período tem entregas por itens e esta tela é de uma versão anterior."},422);
         /* A tela nova recarrega a apuração sozinha neste 409; a aba numa versão
            anterior mostra a mensagem, então ela diz onde está o botão. */
         if(fonte.hash!==body.hash)return resp({error:"Os dados mudaram desde a consulta. Toque em Atualizar apuração (no quadro Base e fechamento), confira e feche de novo."},409);
@@ -1607,6 +1669,7 @@ Deno.serve(async (req: Request) => {
           trocarOS(ga.os);
           avisosToque.push(...ga.avisos);
         }
+        if (existing?.conferenciasEntrega) os.conferenciasEntrega = existing.conferenciasEntrega; else delete os.conferenciasEntrega;
         const executado = carimbarExecucao(os, existing, cracha?.nome || cracha?.sub || "Integração", new Date().toISOString());
         const autorCarimbo = carimbosQueMudaram(executado, existing).length ? await autorAuditoria() : { nome: "", login: "", porId: "" };
         const gravar = { ...carimbarIds(executado, existing, autorCarimbo), rev: revAtual + 1 };

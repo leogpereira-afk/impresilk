@@ -1,3 +1,4 @@
+export { CONFERENCIA_ENTREGA } from './pcp-conferencia-entrega.mjs';
 // Regras puras usadas pelas portas de dados e pelos testes de regressão.
 // O motor de divisão (F04) confere e recalcula a alocação dentro da O.S. (F08).
 import { DIVISAO } from './pcp-divisao.mjs';
@@ -2290,7 +2291,7 @@ export function podarToque(r) {
   /* A divisão da equipe (alocacao, F08) e o histórico dela (alocacaoLog)
      também não descem: são os percentuais de cada colega, e o log guarda o
      antes e o depois deles. A mescla parte do gravado: nada se perde. */
-  const { cnpjCpf: _c, valorTotal: _v, erpAlteracoes: _h, [MEMORIA_IDS]: _m, alocacao: _a, alocacaoLog: _al, ...resto } = r;
+  const { cnpjCpf: _c, valorTotal: _v, erpAlteracoes: _h, [MEMORIA_IDS]: _m, alocacao: _a, alocacaoLog: _al, conferenciasEntrega: _ce, ...resto } = r;
   for (const c of Object.keys(CARIMBOS_COM_ID)) delete resto[c + 'Id'];
   if (objeto(resto.entregaLancada)) {
     const { porId: _pi, porConta: _pc, ...el } = resto.entregaLancada;
@@ -2865,12 +2866,13 @@ export const diarioDescarteAlocacao = (antes, veio, motivo) => ({
    apaga nada: ausente fica o gravado. */
 export function podarAlocacao(r) {
   if (!objeto(r)) return r;
-  const { alocacao: _a, alocacaoLog: _l, ...x } = r;
+  const { alocacao: _a, alocacaoLog: _l, conferenciasEntrega: _ce, ...x } = r;
   return x;
 }
 export function podarIdsAlocacao(r) {
   if (!objeto(r)) return r;
   const out = { ...r };
+  if (Array.isArray(out.conferenciasEntrega)) out.conferenciasEntrega = out.conferenciasEntrega.map(e => { const {porId, ...x} = e; return {...x, alocacao: podarIdsAlocacao({alocacao:e.alocacao}).alocacao}; });
   if (objeto(out.alocacao) && 'porId' in out.alocacao) { const { porId: _p, ...a } = out.alocacao; out.alocacao = a; }
   if (Array.isArray(out.alocacaoLog)) out.alocacaoLog = out.alocacaoLog.map(e => { if (!objeto(e)) return e; const { porId: _p, ...x } = e; return x; });
   return out;

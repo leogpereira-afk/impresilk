@@ -2194,7 +2194,7 @@ function renderEntregas() {
         <td class="ent-l-serv">${esc((card && card.servico) || erp.servico || '—')}</td>
         <td class="ent-l-tec">${card ? (eqTxt ? esc(eqTxt) : `<span class="ent-sem-equipe">${erp.tipo === 'interno' ? 'balcão' : 'sem equipe'}</span>`) : '—'}</td>
         <td class="ent-l-data">${dataBR(erp.data)}</td>
-        <td class="num">${valorTxt(erp.valor)}</td>
+        <td class="num">${valorTxt(erp.valor)}${card && card.tipo!=='interno' && ['admin','pcp'].includes(STATE.user?.papel)?`<br><button type="button" class="btn-ghost btn-sm" data-ent-itens="${esc(card.id)}">Itens da entrega</button>`:""}</td>
       </tr>`; }).join('')}</tbody>
     <tfoot><tr><td colspan="5">${lista.length} O.S entregues no período${lista.length > TETO_LINHAS ? ` · mostrando as ${TETO_LINHAS} mais recentes` : ''}${semValorLista ? ` · ${semValorLista} sem valor` : ''}${per.faltando.length ? ` · carregando ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'}…` : ''}${per.comErro.length ? ` · <span class="badge sem-valor">${per.comErro.length} mês${per.comErro.length === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}${per.truncou ? ` · <span class="badge sem-valor">intervalo longo demais: entraram só os primeiros ${TETO_MESES} meses</span>` : ''}</td><td class="num">${dinheiroCasa(totLista)}</td></tr></tfoot>
   </table></div>`;
@@ -2245,6 +2245,7 @@ function renderEntregas() {
       ${relatorioAnosHTML()}
     </div>`;
   wireAbasEntregas(el);
+  el.querySelectorAll('[data-ent-itens]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();void conferirItensEntrega(b.dataset.entItens).catch(e=>toast(perfErroTxt(e),'error'));});
   const dDados = el.querySelector('details.ent-dados');
   if (dDados) dDados.ontoggle = () => { STATE._entDadosAberto = dDados.open; };
   /* A FILA ABERTA, A ORDEM E O "MOSTRAR TODAS" moram no STATE pelo mesmo

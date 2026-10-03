@@ -689,6 +689,19 @@ function porOSComissaoHTML(l) {
   if (l.interno) return nota('retirada no balcão fica fora da performance');
   if (!card || !st) return nota('sem ficha neste aparelho');
   if (typeof REGRAS === 'undefined' || !REGRAS || typeof REGRAS.regraVigente !== 'function') return nota('a regra do programa não carregou nesta aba');
+  if (card.conferenciasEntrega?.length && typeof CONFERENCIA_ENTREGA !== 'undefined') {
+    const a=CONFERENCIA_ENTREGA.apurar(card,l.valor);
+    if(a.erro) return nota('Itens alterados: confira as entregas novamente.');
+    if(a.entregas.some(e=>e.valor==null)) return nota('Confira os valores dos itens antes de calcular a comissão.');
+    let total=0;
+    for(const e of a.entregas) {
+      const r=REGRAS.regraVigente(_porOSDados.versoes,e.dia);
+      if(!r) return nota('Confira cada entrega: há datas sem regra de comissão.');
+      const estado=OPERACAO.statusEntrega({...card,finalizadaEm:e.dia+'T12:00:00-03:00',entregaLancada:{data:e.dia}});
+      if(estado.estado!=='cancelado' && !POR_OS.perdasPelaRegra(estado,r).length) total+=REGRAS.comissaoCentavos(e.valor,r);
+    }
+    return `<b>${esc(dinheiroCasa(total/100))}</b> ${nota(`prevista sobre os itens de ${a.entregas.length} entrega(s) conferida(s); saldo não incluído`)}`;
+  }
   const dia = st.dataEntrega || porOSDia(l.erp.data);
   const regra = REGRAS.regraVigente(_porOSDados.versoes, dia);
   if (!regra) return nota(`não se aplica: entregue em ${POR_OS.ddmmaa(dia) || 'data sem registro'}, antes de 01/10/2026 (fica na regra atual)`);
@@ -742,7 +755,7 @@ function porOSCardHTML(l) {
     const aberta = f.abertas.includes(c.id);
     corpo = `<div class="poros-equipe" aria-label="Equipe">${equipe}</div>
         ${l.doServidor ? '<p class="poros-nota">Carregada do servidor: some deste aparelho ao recarregar a página.</p>' : ''}
-        <div class="poros-acoes"><button type="button" class="btn-ghost btn-sm poros-abrir" data-os-id="${esc(c.id)}" data-ficha-etapa="fechamento" aria-label="Abrir a ficha da O.S ${esc(l.numero)}">Abrir a ficha</button>${abonar}</div>
+        <div class="poros-acoes"><button type="button" class="btn-ghost btn-sm poros-abrir" data-os-id="${esc(c.id)}" data-ficha-etapa="fechamento" aria-label="Abrir a ficha da O.S ${esc(l.numero)}">Abrir a ficha</button>${abonar}${d.verValor && !interno?`<button type="button" class="btn-ghost btn-sm" data-poros-itens="${esc(c.id)}">Itens e equipe da entrega</button>`:""}</div>
         <details class="poros-tl" data-poros-tl="${esc(c.id)}"${aberta ? ' open' : ''}><summary>Linha do tempo</summary><div class="poros-tl-corpo">${aberta ? porOSLinhaHTML(l) : ''}</div></details>`;
   } else {
     /* TODA LINHA SEM FICHA pode estar no servidor (revisão da F18): o
@@ -986,6 +999,7 @@ function ligarPorOS(el) {
     else if (b.hasAttribute('data-poros-mais')) porOSMais();
     else if (b.dataset.porosCarregar) porOSCarregar(b.dataset.porosCarregar);
     else if (b.hasAttribute('data-poros-antigas')) porOSCarregarAntigas();
+    else if (b.dataset.porosItens) void conferirItensEntrega(b.dataset.porosItens).catch(e=>toast(perfErroTxt(e),'error'));
     else if (b.dataset.porosDiario) porOSCarregarDiario(b.dataset.porosDiario);
   });
   // A linha do tempo só é montada quando abre; a aberta fica aberta nas repinturas.

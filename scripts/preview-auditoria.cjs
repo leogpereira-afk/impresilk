@@ -3,7 +3,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','relatorios-entregas.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
+const permitidos=new Set(['index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','relatorios-entregas.js','frases.js','operacao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
@@ -65,14 +65,24 @@ cfg.performancePCP={equipes:[
  {id:'F03',equipeId:'eq-leao',equipeNome:'Leão',emblema:'🦁',membros:[pvMembro('900004','Carlos Lima Prado',60),pvMembro('900007','Diego Ramos Teixeira',40)],por:'Gestor de teste',em:hoje,obs:''},
  {id:'F08',equipeId:'eq-lobo',equipeNome:'Lobo',emblema:'🐺',membros:[pvMembro('900005','Carlos Melo Dias',50),pvMembro('900008','Eduardo Farias Neto',50)],por:'Gestor de teste',em:hoje,obs:''},
  {id:'F12',equipeId:'eq-leao',equipeNome:'Leão',emblema:'🦁',membros:[pvMembro('900004','Carlos Lima Prado',60),pvMembro('900007','Diego Ramos Teixeira',40)],por:'Gestor de teste',em:hoje,obs:''}]};
+lista.push(base('PARCIAL',{cliente:'Cliente fictício · entrega por itens',numero:'TESTE-PARCIAL',rev:1,valorTotal:8500,equipe:['900001'],finalizadaEm:hoje+'T12:00:00-03:00',entregaLancada:{data:hoje},itens:[{uid:'pv-parcial-a',item:'1',descricao:'Painel de fachada',qtde:'4',subtotal:'5000'},{uid:'pv-parcial-b',item:'2',descricao:'Letreiro da recepção',qtde:'1',subtotal:'5000'}]}));
 const revisoesPreview=[];
 async function previewApi(body){
+ if(body.action==='conferenciaEntrega'){
+  const os=lista.find(o=>o.id===body.osId);if(!os)throw new Error('O.S. de teste não encontrada');
+  if(!body.entrega)return {os:structuredClone(os),valor:os.valorTotal};
+  if(os.rev!==body.rev)throw new Error('A O.S. mudou. Reabra a conferência.');
+  const entregas=(os.conferenciasEntrega||[]).filter(e=>e.id!==body.entrega.id).concat(structuredClone(body.entrega));
+  const erro=CONFERENCIA_ENTREGA.validar(os,entregas,hoje);if(erro)throw new Error(erro);
+  entregas[entregas.length-1].alocacao={...entregas[entregas.length-1].alocacao,por:'Gestor de teste',em:new Date().toISOString()};os.conferenciasEntrega=entregas;os.rev++;return {ok:true,os:structuredClone(os)};
+ }
+
  if(body.action==='equipeHistorico')return {desdeQuando:'2025-01-01',meses:body.meses.map(m=>({mes:m,total:22+Number(m.slice(5)),porArea:{Acabamento:10,Serralheria:8,'Comercial e Atendimento':8},piso:false}))};
  if(body.action==='relatorioEntregas')return {ano:body.ano,de:body.ano+'-01-01',ate:hoje,consultadoEm:new Date().toISOString(),recebimentosEm:new Date().toISOString(),notas:{entregue:'DADOS FICTÍCIOS — demonstração de entregas.',vendido:'DADOS FICTÍCIOS — O.S. por cadastro.',recebido:'DADOS FICTÍCIOS — pagamentos.',retrabalho:'DADOS FICTÍCIOS — taxa das instalações registradas.'},meses:Array.from({length:12},(_,i)=>({mes:body.ano+'-'+String(i+1).padStart(2,'0'),futuro:i+1>Number(hoje.slice(5,7)),entregue:i===3?null:120000+i*27000+Math.sin(i)*50000,vendido:180000+i*18000,recebido:140000+i*23000,retrabalho:8-i*.5,baseRetrabalho:40,entregasEm:new Date().toISOString(),entregas:[{numero:'TESTE-101',cliente:'Demonstração',data:hoje,valor:100}],vendas:[],retrabalhos:[]}))};
  if(body.action==='performancePeriodo'){
   // O mesmo formato do pcp-sync (perfFonte): membro sugerido pelo ID do RH, volta e conferência do carro.
   const nomeRH=n=>(ELENCO_PREVIA.pessoas.find(p=>p.id===n)||{}).nome||n;
-  const registros=lista.filter(o=>o.finalizadaEm && !o.baixaAutoERP && o.tipo!=='interno' && o.finalizadaEm.slice(0,10)>=body.de && o.finalizadaEm.slice(0,10)<=body.ate).map(o=>{
+  const registros=lista.flatMap(o=>{if(!o.conferenciasEntrega?.length)return [o];const a=CONFERENCIA_ENTREGA.apurar(o,o.valorTotal);return a.entregas.map(e=>({...o,id:o.id+'::entrega:'+e.id,finalizadaEm:e.dia,alocacao:e.alocacao,equipe:DIVISAO.derivarEquipe(e.alocacao),valorTotal:e.valor==null?null:e.valor/100,_parcial:{osId:o.id,entregaId:e.id,itensEntrega:e.itens,saldoItens:a.saldoItens.length,fracaoOS:a.total>0?e.valor/a.total:0}}));}).filter(o=>o.finalizadaEm && !o.baixaAutoERP && o.tipo!=='interno' && o.finalizadaEm.slice(0,10)>=body.de && o.finalizadaEm.slice(0,10)<=body.ate).map(o=>{
    const p=cfg.performancePCP?.participacoes?.find(p=>p.id===o.id),eq=o.equipe||[];
    /* A mesma régua do servidor (F11): a divisão válida e atual confirma, com
       as equipes dela (equipesDaDivisao); a desatualizada aparece com a marca e
@@ -83,7 +93,7 @@ async function previewApi(body){
    const membros=alocOk?finais.filter(f=>f.cota>0).map(f=>({chave:f.pessoaId,nome:nomeRH(f.pessoaId),percentual:f.cota/100})):(!aloc&&p?.membros) || eq.map((n,i)=>({chave:n,nome:nomeRH(n),percentual:(Math.floor(10000/eq.length)+(i<10000%eq.length?1:0))/100}));
    const confirmado=alocOk || (!aloc && !!p),fonte=alocOk?'alocacao':aloc?(aloc.conferirRH?'alocacao-conferir-rh':'alocacao-desatualizada'):p?'participacao':'sugestao';
    const quem=alocOk?{equipeId:um?um.equipeId:'',equipeNome:um?um.equipeNome:'',emblema:um?um.emblema:'🤝',por:aloc.por||'',em:aloc.em||'',obs:''}:{equipeId:p?.equipeId||'',equipeNome:p?.equipeNome||'',emblema:p?.emblema||'🤝',por:p?.por||'',em:p?.em||'',obs:p?.obs||''};
-   return {id:o.id,numero:o.numero,cliente:o.cliente,dia:o.finalizadaEm.slice(0,10),valor:typeof o.valorTotal==='number'?o.valorTotal:null,origemValor:'Simulação local',membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf:o.retornoConf||null,voltou:eq.length>0,volta:[o.finalizadaEm.slice(0,10),String(o.veiculo||'').toLowerCase(),[...eq].sort().join('+')].join('|'),
+   return {id:o.id,...(o._parcial||{}),numero:o.numero,cliente:o.cliente,dia:o.finalizadaEm.slice(0,10),valor:typeof o.valorTotal==='number'?o.valorTotal:null,origemValor:'Simulação local',membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf:o.retornoConf||null,voltou:eq.length>0,volta:[o.finalizadaEm.slice(0,10),String(o.veiculo||'').toLowerCase(),[...eq].sort().join('+')].join('|'),
     ...(confirmado?(d&&d.grupos?{grupos:d.grupos}:{}):PERF.sugestaoApurada(membros,aloc,aloc?DIVISAO.finais(aloc):[],cfg.performancePCP.equipes,m=>m.chave))};
   });return {completo:true,periodo:{de:body.de,ate:body.ate},hash:'simulacao',registros,consultadoEm:new Date().toISOString(),fonte:'DADOS FICTÍCIOS — simulação local'};
  }
@@ -301,6 +311,7 @@ document.addEventListener('DOMContentLoaded',()=>{
  // &tv=1 abre o Modo TV no painel das equipes; &tv=2 no das pessoas.
  if(pv.get('tv'))setTimeout(()=>{abrirTVCasa();for(let i=1;i<Number(pv.get('tv'));i++)document.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight'}));},1200);
  // &ficha=E4A abre a ficha dessa O.S. (no bloco &bloco=, padrão itens); &papel=operacao entra como operação.
+ if(pv.get('conferir'))setTimeout(()=>conferirItensEntrega(pv.get('conferir')).catch(e=>toast(e.message,'error')),500);
  if(pv.get('ficha'))setTimeout(()=>{openModal(STORE.getOS(pv.get('ficha')),pv.get('bloco')||'itens');},700);
  if(pv.get('rolar'))setTimeout(()=>{const alvo=document.querySelector(pv.get('rolar'));if(alvo)alvo.scrollIntoView({block:'start'});},900);
  // &tarde=<seletor> rola até o elemento depois que o lote abriu (o rascunho pode levar até 3 s) (F17).
@@ -339,4 +350,4 @@ http.createServer((req,res)=>{
   if(name==='equipe.html') body=body.toString().replace(/<script src="(?:config|store|auth)\.js(?:\?[^\"]*)?"><\/script>/g,'').replace(/<script src="operacao.js(?:\?[^"]*)?">/,'<script src="fixture.js"></script><script src="operacao.js">').replace(/<script>\s*\/\*\s*Service worker[^]*?<\/script>/,'');
   if(name==='equipe.js')body=body.toString().replace("document.addEventListener('DOMContentLoaded', initSelect);",bootEquipe);
   const ext=path.extname(name);res.setHeader('Content-Type',({'.json':'application/manifest+json','.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.webp':'image/webp'})[ext]);res.end(body);
-}).listen(Number(process.env.PORT) || 4201,'127.0.0.1',()=>console.log('Prévia com dados fictícios: http://127.0.0.1:4201'));
+}).listen(Number(process.env.PORT) || 4201,'127.0.0.1',()=>console.log('Prévia com dados fictícios: http://127.0.0.1:'+(Number(process.env.PORT)||4201)));

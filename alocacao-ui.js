@@ -411,7 +411,7 @@ const ALOCUI = (() => {
     const sug = D.alocacaoSugerida(os, {pessoas: r, equipes, regra: divisao});
     const semId = semIdDe(os);
     const st = {
-      chave, osId: os.id, numero: String(os.numero || ''), modo,
+      chave, rotuloValor:o.rotuloValor || '', osId: os.id, numero: String(os.numero || ''), modo,
       gravada: gravada ? copia(gravada) : null, conferirRH: !!(gravada && gravada.conferirRH === true),
       // A equipe e a marca de quando a tela abriu: a trava contra a mudança feita em outro aparelho.
       base: {equipe: genteDe(os.equipe), desatualizada: !!(gravada && gravada.desatualizada === true)},
@@ -1108,11 +1108,11 @@ const ALOCUI = (() => {
         : !prog ? `Esta O.S. é de ${dataBR(st.dia) || 'antes de 01/10/2026'}: fica na regra atual, sem comissão do programa.`
         : st.valor == null ? 'Sem o valor não há comissão prevista.'
         : `Comissão prevista de ${escA(pctTexto(prog.comissaoBp))}%${prog.provisoria ? ' (regra embutida, provisória)' : ''}: ${escA(reais(comissao || 0))}, dividida como na tabela.`;
-      valor = `<p class="aloc-valor"><span>Valor bruto da O.S.: <b>${bruto}</b>.</span> ${sobre}</p>
+      valor = `<p class="aloc-valor"><span>${escA(st.rotuloValor || 'Valor bruto da O.S.') }: <b>${bruto}</b>.</span> ${sobre}</p>
         <p class="aloc-nota">Pontuação pela regra do programa a partir de 01/10. A comissão só vale se a O.S. pontuar (no prazo, sem retrabalho e sem retorno antecipado), o que é conferido na apuração.</p>`;
     }
     return `<section class="aloc-previa" aria-label="Prévia por pessoa"><h4>Prévia por pessoa</h4>
-      <div class="aloc-tab-wrap"><table class="aloc-tab"><thead><tr><th scope="col">Pessoa</th><th scope="col">Papel</th><th scope="col" class="num">Parte na O.S.</th>${st.verValor ? '<th scope="col" class="num">Comissão prevista</th>' : ''}</tr></thead><tbody>${linhas}</tbody></table></div>${valor}</section>`;
+      <div class="aloc-tab-wrap"><table class="aloc-tab"><thead><tr><th scope="col">Pessoa</th><th scope="col">Papel</th><th scope="col" class="num">${st.rotuloValor ? 'Parte nesta entrega' : 'Parte na O.S.'}</th>${st.verValor ? '<th scope="col" class="num">Comissão prevista</th>' : ''}</tr></thead><tbody>${linhas}</tbody></table></div>${valor}</section>`;
   }
   /* O JEITO ANTIGO NA TELA: quem está na O.S. (com ficha ou só pelo nome), a
      parte de cada um, cadeado e "Dividir igualmente". Sem líder e sem R$: é
