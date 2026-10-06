@@ -1,15 +1,15 @@
 // sw.js — Service worker: deixa o app abrir offline (casca/shell em cache).
 // Os DADOS continuam sincronizando pela fila do store.js; aqui só cuidamos
 // dos arquivos estáticos para o app carregar sem internet.
-const CACHE = 'impresilk-shell-v158';
+const CACHE = 'impresilk-shell-v159';
 // ?v= nos arquivos do shell: a CDN do GitHub Pages (Fastly) segurou um casa.js
 // velho por mais de uma hora depois do deploy (14/09/2026) enquanto servia os
 // outros novos. Com a versão na URL, cada publicação é um endereço novo para a
 // CDN. Regra de deploy: CACHE aqui, APP_VERSAO no config.js e o ?v= no
 // index.html/equipe.html sobem JUNTOS.
 const SHELL = [
-  './', 'index.html', 'equipe.html', 'ranking.html', 'ranking.js?v=v158', 'ranking.css?v=v158', 'performance-dashboards.js?v=v158', 'performance-dashboards.css?v=v158', 'styles.css?v=v158', 'performance-layout.css?v=v158',
-  'config.js?v=v158', 'logo.js?v=v158', 'frases.js?v=v158', 'privacidade-valores.js?v=v158', 'store.js?v=v158', 'auth.js?v=v158', 'operacao.js?v=v158', 'operacao-revisao.js?v=v158', 'divisao.js?v=v158', 'regras.js?v=v158', 'entrega-item.js?v=v158', 'conferencia-entrega.js?v=v158', 'conferencia-entrega-ui.js?v=v158', 'controle-entrega-ui.js?v=v158', 'diagnostico-itens.js?v=v158', 'alertas-sync.js?v=v158', 'relatorios-pcp.js?v=v158', 'app.js?v=v158', 'casa.js?v=v158', 'comissao.js?v=v158', 'comissao-ui.js?v=v158', 'performance.js?v=v158', 'alocacao-ui.js?v=v158', 'lote.js?v=v158', 'entregas-os.js?v=v158', 'relatorios-entregas.js?v=v158', 'equipe.js?v=v158',
+  './', 'index.html', 'equipe.html', 'ranking.html', 'ranking.js?v=v159', 'ranking.css?v=v159', 'performance-dashboards.js?v=v159', 'performance-dashboards.css?v=v159', 'styles.css?v=v159', 'performance-layout.css?v=v159',
+  'config.js?v=v159', 'logo.js?v=v159', 'frases.js?v=v159', 'privacidade-valores.js?v=v159', 'store.js?v=v159', 'auth.js?v=v159', 'operacao.js?v=v159', 'operacao-revisao.js?v=v159', 'divisao.js?v=v159', 'regras.js?v=v159', 'entrega-item.js?v=v159', 'conferencia-entrega.js?v=v159', 'conferencia-entrega-ui.js?v=v159', 'controle-entrega-ui.js?v=v159', 'diagnostico-itens.js?v=v159', 'alertas-sync.js?v=v159', 'relatorios-pcp.js?v=v159', 'app.js?v=v159', 'casa.js?v=v159', 'comissao.js?v=v159', 'comissao-ui.js?v=v159', 'performance.js?v=v159', 'alocacao-ui.js?v=v159', 'lote.js?v=v159', 'entregas-os.js?v=v159', 'relatorios-entregas.js?v=v159', 'equipe.js?v=v159',
   'manifest.json', 'icon.svg', 'favicon.svg',
   // Logos das 10 equipes (29/09/2026): arquivo do site, não da configuração.
   'equipe-aguia.webp', 'equipe-leao.webp', 'equipe-pantera.webp', 'equipe-lobo.webp', 'equipe-tigre.webp', 'equipe-falcao.webp', 'equipe-carcara.webp', 'equipe-onca.webp', 'equipe-lobo-guara.webp', 'equipe-touro.webp'

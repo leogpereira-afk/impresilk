@@ -522,6 +522,28 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
     }
     return {pessoas: lista, pesos, lider: duas(lider), media, cobertura, coberturaMinima: COBERTURA_MINIMA};
   };
+  /* Comparativo Geral: conserva a Nota e sua regra histórica. Produção e
+     valor confirmados são normalizados antes da média, nunca se somam reais
+     com O.S. Ausência de qualquer componente não vira zero nem redistribui
+     o peso entre os restantes. Não altera a apuração ou os fechamentos. */
+  const avaliarGeral = (registros, criterios, opcoes) => {
+    const av = avaliar(registros, criterios, opcoes);
+    const confirmadas = valoresConfirmados(registros);
+    const porPessoa = new Map(confirmadas.map(p => [String(p.chave), p]));
+    const liderProducao = confirmadas.reduce((m,p) => Math.max(m,p.equivalentes),0);
+    const liderValor = confirmadas.reduce((m,p) => Math.max(m,p.os > p.semValor ? p.valor : 0),0);
+    const arred = v => Math.round(v * 10) / 10;
+    return {...av, pessoas:av.pessoas.map(p => {
+      const v = porPessoa.get(String(p.chave));
+      const componentesGeral = {
+        nota:p.nota,
+        producao:v && liderProducao > 0 ? arred(v.equivalentes / liderProducao * 100) : null,
+        valor:v && v.os > v.semValor ? (liderValor > 0 ? arred(v.valor / liderValor * 100) : 0) : null,
+      };
+      const valores = Object.values(componentesGeral);
+      return {...p, componentesGeral, geral:valores.every(Number.isFinite) ? arred(valores.reduce((s,n)=>s+n,0)/3) : null};
+    })};
+  };
   /* A MESMA PESSOA NUMA LINHA SÓ. A participação confirmada guarda a chave da
      época: quem era só apelido e depois foi ligado à ficha do RH ficava com
      duas chaves, e o ranking mostrava duas linhas com a produção dividida.
@@ -541,7 +563,7 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
     }
     return [...por.values()];
   };
-  return {auditar,fracaoRegistro,unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,valoresConfirmados,REGRA_NOTA_VALOR,criteriosValidos,carroDaVolta,CRITERIOS_PADRAO,COBERTURA_MINIMA,
+  return {auditar,fracaoRegistro,unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,avaliarGeral,valoresConfirmados,REGRA_NOTA_VALOR,criteriosValidos,carroDaVolta,CRITERIOS_PADRAO,COBERTURA_MINIMA,
     ratearGrupos,gruposDoRegistro,chavesDeEquipe,composicaoApurada,equipeDaComposicao,equipeSugeridaDe,gruposApurados,equipesDaDivisao,sugestaoApurada,
     ANIMAIS,CORES,EMBLEMAS,LOGO_ANIMAL,COR_ANIMAL,animalDe,corValida,iconeEquipe,nomeEquipeNorm,conferirEquipes};
 })();
@@ -1466,14 +1488,15 @@ function perfEquipeDaPessoa(chave, salvas) {
   return suas;
 }
 function perfRankingPessoasHTML(regs, c) {
-  const medida = ['nota', 'peso', 'valor'].includes(STATE._perfPessoaMedida) ? STATE._perfPessoaMedida : 'nota';
+  const medida = ['nota', 'peso', 'valor', 'geral'].includes(STATE._perfPessoaMedida) ? STATE._perfPessoaMedida : 'nota';
+  const geral = medida === 'geral', comNota = medida === 'nota' || geral;
   /* Revisão FECHADA usa os pesos selados no fechamento, nunca os de hoje:
      mexer nos pesos depois não pode reordenar um mês já fechado. */
   const fonte = perfFonteAtual(), fechada = !!(fonte && fonte.fechadoEm);
   const porValor = !fechada || fonte.regraNota === PERF.REGRA_NOTA_VALOR;
   const rotulos = {...PERF_CRIT_ROTULO, producao:porValor ? 'Valor entregue' : 'Produção'};
   const curtos = {...PERF_CRIT_CURTO, producao:rotulos.producao};
-  const av = PERF.avaliar(regs, fechada ? (fonte.criterios || {producao:100, limpeza:0, equipamentos:0}) : perfCriterios(), {porValor});
+  const av = (geral ? PERF.avaliarGeral : PERF.avaliar)(regs, fechada ? (fonte.criterios || {producao:100, limpeza:0, equipamentos:0}) : perfCriterios(), {porValor});
   const apurado = porValor ? PERF.valoresConfirmados(regs) : PERF.resumir(regs.filter(r => r.confirmado)).pessoas;
   const valorDe = new Map(apurado.map(x => [String(x.chave), x]));
   // Entregas e confirmações de cada um (sugeridas incluídas): de onde sai o selo "a conferir".
@@ -1486,12 +1509,13 @@ function perfRankingPessoasHTML(regs, c) {
   } else if (medida === 'peso') {
     linhas = PERF.ranquear(av.pessoas, p => p.peso);
   } else {
-    const com = av.pessoas.filter(p => p.nota != null);
-    fora = av.pessoas.filter(p => p.nota == null);
-    linhas = PERF.ranquear(com, p => p.nota);
+    const campo = geral ? 'geral' : 'nota';
+    const com = av.pessoas.filter(p => p[campo] != null);
+    fora = av.pessoas.filter(p => p[campo] == null);
+    linhas = PERF.ranquear(com, p => p[campo]);
   }
   const fmt = n => perfFormato(n);
-  const medidaDe = p => medida === 'valor' ? p.valorConf : (medida === 'peso' ? p.peso : p.nota);
+  const medidaDe = p => medida === 'valor' ? p.valorConf : (medida === 'peso' ? p.peso : geral ? p.geral : p.nota);
   const numero = p => medida === 'valor' ? dinheiroCasa(p.valorConf) : fmt(medidaDe(p));
   const semValorP = p => { const v = valorDe.get(String(p.chave)); return v ? v.semValor : 0; };
   const rotulo = p => medida === 'valor' ? ('rateado e confirmado' + (semValorP(p) ? ` · parcial (${semValorP(p)} sem valor)` : '')) : (medida === 'peso' ? 'O.S. equivalentes' : 'pontos de 100');
@@ -1507,7 +1531,7 @@ function perfRankingPessoasHTML(regs, c) {
     return `<span class="perf-selo-equipe${perfCorClasse(eqs[0])}" title="${esc(eqs.map(e => e.nome).join(', '))}">${perfLogoHTML(eqs[0], 'perf-selo-logo')}${esc(eqs[0].nome)}${eqs.length > 1 ? ` +${eqs.length - 1}` : ''}</span>`;
   };
   // A composição da nota, dita, para ninguém ter de adivinhar de onde veio.
-  const partes = p => ['producao', 'limpeza', 'equipamentos'].filter(k => av.pesos[k] > 0).map(k => {
+  const partes = p => geral ? ['nota', 'producao', 'valor'].map(k => `<span class="perf-crit" title="${{nota:'Nota atual, com seus pesos',producao:'Produção confirmada proporcional ao líder',valor:'Valor confirmado proporcional ao líder'}[k]} · um terço do Geral">${{nota:'Nota',producao:'Produção',valor:'Valor'}[k]} <b>${fmt(p.componentesGeral[k])}</b></span>`).join('') : ['producao', 'limpeza', 'equipamentos'].filter(k => av.pesos[k] > 0).map(k => {
     const v = p.componentes[k];
     const media = (p.imputados || []).includes(k);
     const n = k === 'producao' ? null : p[k].n;
@@ -1516,7 +1540,7 @@ function perfRankingPessoasHTML(regs, c) {
     const dica = k === 'producao' ? '' : ` · ${n} de ${nv} ${nv === 1 ? 'volta conferida' : 'voltas conferidas'}${n < nv && v != null ? '; as outras contam pela média do período' : ''}`;
     return `<span class="perf-crit ${v == null ? 'sem' : ''} ${media ? 'media' : ''}" title="${esc(rotulos[k])} · peso ${av.pesos[k]}%${dica}">${esc(curtos[k])} <b>${v == null ? 'fora' : fmt(v)}</b>${media ? '<i>média</i>' : (n != null && v != null && n < nv ? `<i>${n}/${nv}</i>` : '')}</span>`;
   }).join('');
-  const detalhe = p => medida === 'nota'
+  const detalhe = p => comNota
     ? `<div class="perf-crits">${partes(p)}</div>${(p.imputados || []).length ? `<small class="perf-parcial">sem volta conferida em ${p.imputados.map(k => PERF_CRIT_ROTULO[k].toLowerCase()).join(' e ')}: usa a média do período</small>` : ''}`
     : `<small class="perf-sub">${p.entregas} ${p.entregas === 1 ? 'entrega' : 'entregas'} · ${fmt(p.peso)} ${p.peso === 1 ? 'equivalente' : 'equivalentes'}${p.pesoConferido < p.peso ? ` · ${fmt(p.pesoConferido)} ${p.pesoConferido === 1 ? 'confirmada' : 'confirmadas'}` : ''}</small>`;
   const {podio, resto} = perfCortarPodio(linhas);
@@ -1528,7 +1552,7 @@ function perfRankingPessoasHTML(regs, c) {
     linha: esc(entregasTxt(p)) + (medida !== 'valor' && valorTxt(p) ? ' · ' + esc(valorTxt(p)) : ''),
     aviso: selinho(p),
     // No pódio, só os três critérios (a nota de "usa a média" está na etiqueta "média" de cada um).
-    extra: medida === 'nota' ? `<div class="perf-crits">${partes(p)}</div>` : '',
+    extra: comNota ? `<div class="perf-crits">${partes(p)}</div>` : '',
     acoes: acoes(p),
   })), {
     rotulo: 'Pódio do ranking individual',
@@ -1538,7 +1562,7 @@ function perfRankingPessoasHTML(regs, c) {
   /* A TABELA DO 4º EM DIANTE (ou de todos, quando o empate não cabe no pódio):
      a barra mostra a distância para o 1º, na cor da equipe da pessoa. */
   const topo = linhas.reduce((m, p) => Math.max(m, Number(medidaDe(p)) || 0), 0);
-  const colMedida = medida === 'valor' ? 'Valor confirmado' : (medida === 'peso' ? 'Produção' : 'Nota');
+  const colMedida = medida === 'valor' ? 'Valor confirmado' : (medida === 'peso' ? 'Produção' : geral ? 'Geral' : 'Nota');
   const comValor = medida !== 'valor';
   const posTxt = p => PERF_MEDALHAS[p.posicao] ? `<span aria-hidden="true">${PERF_MEDALHAS[p.posicao]}</span><span class="perf-sr">${p.posicao}º</span>` : `${p.posicao}º`;
   const linhaHTML = p => {
@@ -1554,7 +1578,7 @@ function perfRankingPessoasHTML(regs, c) {
   };
   const tabela = resto.length ? `<div class="perf-tabela-wrap"><table class="perf-tabela">
       <caption class="perf-sr">Ranking individual por ${colMedida.toLowerCase()}${podio.length ? `, do ${podio.length + 1}º lugar em diante` : ''}</caption>
-      <thead><tr><th scope="col" class="perf-th-pos">Pos.</th><th scope="col">Pessoa</th><th scope="col" class="perf-th-medida">${colMedida}${medida === 'nota' ? ' <small>(0 a 100)</small>' : medida === 'peso' ? ' <small>(O.S. equivalentes)</small>' : ' <small>(rateado)</small>'}</th><th scope="col" class="perf-th-num">Entregas</th>${comValor ? '<th scope="col" class="perf-th-num">Valor confirmado</th>' : ''}<th scope="col"><span class="perf-sr">Ações</span></th></tr></thead>
+      <thead><tr><th scope="col" class="perf-th-pos">Pos.</th><th scope="col">Pessoa</th><th scope="col" class="perf-th-medida">${colMedida}${comNota ? ' <small>(0 a 100)</small>' : medida === 'peso' ? ' <small>(O.S. equivalentes)</small>' : ' <small>(rateado)</small>'}</th><th scope="col" class="perf-th-num">Entregas</th>${comValor ? '<th scope="col" class="perf-th-num">Valor confirmado</th>' : ''}<th scope="col"><span class="perf-sr">Ações</span></th></tr></thead>
       <tbody>${resto.map(linhaHTML).join('')}</tbody></table></div>` : '';
   const pode = perfPodeEditar();
   /* Quanto da conferência existe, dito por critério. Abaixo de 80% o critério
@@ -1579,11 +1603,17 @@ function perfRankingPessoasHTML(regs, c) {
   const vazio = !av.pessoas.length
     ? '<p class="perf-rank-vazio">Nenhuma entrega com participantes neste período.</p>'
     : (!linhas.length ? `<p class="perf-rank-vazio">${medida === 'valor' ? 'Ninguém tem valor CONFIRMADO neste período ainda. Confirme as participações na lista abaixo.' : 'Sem dado suficiente para a nota neste período.'}</p>` : '');
-  const lead = medida === 'nota'
+  const lead = geral ? 'Geral de 0 a 100 · (Nota + Produção + Valor) ÷ 3 · mesma importância para os três'
+    : medida === 'nota'
     ? `Nota de 0 a 100 · ${fechada ? 'pesos desta revisão: ' : ''}${esc(pesosTxt)}`
     : medida === 'peso' ? 'Soma do peso de cada um nas entregas. Aparecer em mais entregas divididas não soma mais que fazer o mesmo sozinho.'
     : 'Valor das entregas rateado pelo peso de cada um. Só participações confirmadas. Não é bônus.';
-  const como = medida === 'nota' ? `<details class="perf-como"><summary>Como a nota é calculada</summary><div>
+  const como = geral ? `<details class="perf-como"><summary>Como o Geral é calculado</summary><div>
+      <p>A Nota é mantida exatamente como está, com ${fechada ? 'os pesos desta revisão' : 'os pesos atuais'}: ${esc(pesosTxt)}. Produção usa as O.S. equivalentes confirmadas, respeitando o percentual de participação e as entregas parciais. Valor usa o valor líquido confirmado e rateado.</p>
+      <p>Produção e Valor são convertidos para a escala de 0 a 100: o maior resultado de cada critério vale 100, e os demais são proporcionais. Geral = (Nota + Produção + Valor) ÷ 3. Cada componente vale um terço. Exemplo: Nota 90, Produção 60 e Valor 75 resultam em Geral 75.</p>
+      <p>${porValor ? 'Como a Nota atual já considera Valor entregue, o valor participa tanto dentro da Nota quanto como componente próprio do Geral.' : 'A Nota histórica continua usando a regra preservada no fechamento; a produção também participa como componente próprio do Geral.'} Os três resultados aparecem em cada pessoa para conferir a composição.</p>
+      <p>Sem Nota ou sem valor confirmado, a pessoa fica fora do Geral, sem receber zero. Valores parcialmente conhecidos continuam sujeitos à conferência. Carro e equipamentos mantêm a regra de cobertura da Nota. Este comparativo não modifica a Nota, fechamentos, comissões ou prêmios.</p>
+    </div></details>` : medida === 'nota' ? `<details class="perf-como"><summary>Como a nota é calculada</summary><div>
       <p>${porValor ? 'Valor entregue é o valor líquido dos itens realmente entregues, rateado pela participação confirmada de cada pessoa. Quem tem o maior valor confirmado no período recebe 100 nesse critério; os demais recebem proporcionalmente. Com os pesos 60/20/20, entregar metade do valor do líder soma 30 pontos; carro e equipamentos podem somar mais 20 cada. Entregas não confirmadas ou com valor ausente ou conflitante não somam valor; quem não tem nenhum valor confirmado fica fora da nota.' : 'Esta revisão preserva a regra antiga: Produção conta o PESO de cada um em cada entrega. Seis entregas divididas ao meio valem três; quem mais produziu no período vale 100.'} Carro e equipamentos vêm da conferência da volta; volta sem resposta conta pela média do período.</p>
       <p>Carro e equipamentos só entram na nota quando pelo menos 80% das voltas do período têm resposta. Abaixo disso, o critério fica fora e os pesos disponíveis são redistribuídos.${coberturaOk.length ? ' ' + esc(coberturaOk.join(' ')) : ''}</p>
       <p>Nos detalhes de cada pessoa, "7/8" são as voltas dela que foram conferidas e "média" quer dizer que nenhuma foi; "fora" é critério que não entrou na nota.</p>
@@ -1592,13 +1622,13 @@ function perfRankingPessoasHTML(regs, c) {
     <header class="perf-ranking-head">
       <div class="perf-ranking-titulo"><h3 id="perf-rank-titulo">Ranking individual</h3>${perfSituacaoHTML(situacao)}</div>
       <div class="perf-ranking-ctrl">
-        ${perfSegHTML(medida, [['nota', 'Nota'], ['peso', 'Produção'], ['valor', 'Valor']], 'perf-pessoa-medida', 'Ordenar o ranking por')}
+        ${perfSegHTML(medida, [['nota', 'Nota'], ['peso', 'Produção'], ['valor', 'Valor'], ['geral', 'Geral']], 'perf-pessoa-medida', 'Ordenar o ranking por')}
         ${pode && !fechada ? '<button type="button" class="btn-ghost btn-sm" id="perf-criterios">⚖️ Pesos da nota</button>' : ''}
       </div>
     </header>
     <p class="perf-ranking-lead">${lead}</p>
-    ${medida === 'nota' && coberturaFora.length ? `<p class="perf-aviso">${esc(coberturaFora.join(' '))}</p>` : ''}
-    ${porValor && medida === 'nota' && av.pessoas.some(p => p.entregasSemValor > 0) ? '<p class="perf-aviso">Há entregas confirmadas sem valor válido. A nota usa somente os valores já conferidos e pode mudar quando as pendências forem resolvidas.</p>' : ''}
+    ${comNota && coberturaFora.length ? `<p class="perf-aviso">${esc(coberturaFora.join(' '))}</p>` : ''}
+    ${porValor && comNota && av.pessoas.some(p => p.entregasSemValor > 0) ? '<p class="perf-aviso">Há entregas confirmadas sem valor válido. A nota usa somente os valores já conferidos e pode mudar quando as pendências forem resolvidas.</p>' : ''}
     ${como}
     ${vazio}
     ${podioHTML}
