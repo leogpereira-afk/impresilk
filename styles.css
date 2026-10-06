@@ -4322,6 +4322,37 @@ img.perf-logo{object-fit:cover}
 @media(max-width:1000px){.rel-ent-prazo-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.rel-ent-controles,.rel-ent-pontualidade{padding:14px}.rel-ent-prazo-cards{gap:8px}.rel-ent-prazo-cards article{padding:12px}.rel-ent-prazo-cards strong{font-size:24px}.rel-ent-prazo-cards article>span{font-size:13px}.rel-ent-pontualidade h3{font-size:18px}.rel-ent-periodo{gap:9px}.rel-ent-periodo>button{font-size:13px;padding:9px 12px}.rel-ent-atualizado{order:3;width:100%}.rel-ent-controles .rel-ent-meses{gap:6px;margin:12px 0}.rel-ent-controles .rel-ent-meses button{padding:8px 10px}.rel-ent-series-opcoes label{flex:1 1 140px}.rel-ent-prazo-filtro span{flex-basis:100%}.rel-ent-pontualidade>header{flex-wrap:wrap}}
 @media print{.rel-ent-prazo-cards{grid-template-columns:repeat(4,minmax(0,1fr));break-inside:avoid}.rel-ent-prazo-cards article{padding:10px}.rel-ent-prazo-cards strong{font-size:22px}.rel-ent-pontualidade{padding:12px}.rel-ent-pontualidade>header{break-after:avoid}.rel-ent-prazo-barra{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+/* Relatórios v156: cartões compactos e análises opcionais, com período explícito. */
+.rel-ent-pontualidade{padding:16px;margin:16px 0}
+.rel-ent-pontualidade>header{margin-bottom:12px}
+.rel-ent-prazo-cards{gap:10px}
+.rel-ent-prazo-cards article{padding:10px 12px;gap:6px}
+.rel-ent-prazo-cards article>span{font-size:13px}
+.rel-ent-prazo-cards strong{font-size:24px}
+.rel-ent-prazo-cards small{font-size:11px;line-height:1.4}
+.rel-ent-indicador{padding:12px;gap:8px}
+.rel-ent-indicador strong{font-size:1.1rem}
+.rel-ent-intervalo-form{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:end;margin-top:16px;border-top:1px solid #e2e9ee;padding-top:14px}
+.rel-ent-intervalo-form label{display:grid;gap:5px;font-size:13px;font-weight:650;color:#526378;margin:0}
+.rel-ent-intervalo-form input{font:inherit;min-height:44px;width:170px;max-width:100%;border:1px solid #d5dfe6;border-radius:10px;padding:8px 10px;background:#f8fafc;color:#233e50}
+.rel-ent-intervalo-form button{min-height:44px}
+.rel-ent-intervalo-form>span{font-size:12px;color:#617486;margin-bottom:10px}
+.rel-ent-intervalo-form [role=alert]{flex-basis:100%;margin:0;color:#a33224;font-size:13px}
+.rel-ent-intervalo-form [role=alert]:empty{display:none}
+.rel-ent-analises{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-top:12px}
+.rel-ent-analises label{display:flex;align-items:center;gap:8px;min-height:44px;margin:0;padding:8px 12px;border:1px solid #d8e2ea;border-radius:10px;font-size:13px;cursor:pointer}
+.rel-ent-analises label:has(input:checked){background:#edf5ff;border-color:#3763cf;color:#244f9b}
+.rel-ent-analises input{width:18px;height:18px;accent-color:#3763cf;margin:0}
+.rel-ent-analises small{color:#617486;font-size:12px}
+.rel-ent-grafico-periodo{font-size:12px;color:#627687;margin:-4px 0 14px}
+.rel-ent-prazo-evolucao{border:0;border-top:1px solid #e2e9ee;border-radius:0;padding:18px 0 0;margin:16px 0 0}
+.rel-ent-prazo-evolucao h3{font-size:17px;margin:0 0 10px}
+.rel-ent-estatistica{margin-top:12px;font-size:13px}
+.rel-ent-estatistica summary{cursor:pointer;color:#34546b;padding:8px 0;font-weight:650}
+.rel-ent-sem-base{background:#f7f9fc;padding:10px;border-radius:8px}
+.rel-ent-svg g:focus-visible circle{stroke:#122f43;stroke-width:4}
+@media(max-width:600px){.rel-ent-intervalo-form label{flex:1 1 140px}.rel-ent-intervalo-form input{width:100%;min-width:0}.rel-ent-analises label{flex:1 1 170px}.rel-ent-analises small{flex-basis:100%}.rel-ent-prazo-cards strong{font-size:22px}}
+@media print{.rel-ent-prazo-evolucao{break-inside:avoid}.rel-ent-estatistica{break-inside:auto}}
 #panel-entregas .ent-controles { display:grid;grid-template-columns:104px 100px auto auto minmax(120px,1fr) minmax(120px,1fr) auto;align-items:end;gap:6px 10px;padding:10px 12px; }
 #panel-entregas .ent-controles :is(.ent-periodo,.casa-filtros) { display:contents; }
 #panel-entregas .ent-controles label { min-width:0; }

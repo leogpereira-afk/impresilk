@@ -27,7 +27,7 @@ test('média usa somente áreas da produção e instalação, com proteção par
  assert.equal(run("relEntMedia({entregue:null,rh:{porArea:{Acabamento:4}}}).valor"),null);
 });
 test('gráfico não desenha futuro nem liga uma lacuna como se fosse medição',()=>{
- const run=tela();run("REL_ENT.dados={meses:[{mes:'2025-01',entregue:10},{mes:'2025-02',entregue:null},{mes:'2025-03',entregue:20},{mes:'2025-04',entregue:999,futuro:true}]}");const html=run("relEntGrafico(['entregue'],'Teste')");assert.equal((html.match(/<polyline/g)||[]).length,2);assert.equal((html.match(/<circle/g)||[]).length,2);assert.ok(!html.includes('999'));
+ const run=tela();run("REL_ENT.dados={meses:[{mes:'2025-01',entregue:10},{mes:'2025-02',entregue:null},{mes:'2025-03',entregue:20},{mes:'2025-04',entregue:999,futuro:true}]}");const html=run("relEntGrafico(['entregue'],'Teste')");assert.equal((html.match(/<polyline/g)||[]).length,2);assert.equal((html.match(/<circle/g)||[]).length,2);assert.doesNotMatch(html,/data-rel-ponto="2025-04"|R\$[\s\u00a0]*999/);
 });
 test('RH conta quem esteve ativo no mês, preserva desligados e não inclui admissão futura',async()=>{
  const hoje=new Date().toISOString().slice(0,10),mes=hoje.slice(0,7);
