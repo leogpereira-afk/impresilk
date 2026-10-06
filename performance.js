@@ -1622,7 +1622,7 @@ function perfRankingPessoasHTML(regs, c) {
     <header class="perf-ranking-head">
       <div class="perf-ranking-titulo"><h3 id="perf-rank-titulo">Ranking individual</h3>${perfSituacaoHTML(situacao)}</div>
       <div class="perf-ranking-ctrl">
-        ${perfSegHTML(medida, [['nota', 'Nota'], ['peso', 'Produção'], ['valor', 'Valor'], ['geral', 'Geral']], 'perf-pessoa-medida', 'Ordenar o ranking por')}
+        ${perfSegHTML(medida, [['geral', 'Geral'], ['valor', 'Valor'], ['peso', 'Produção'], ['nota', 'Nota']], 'perf-pessoa-medida', 'Ordenar o ranking por')}
         ${pode && !fechada ? '<button type="button" class="btn-ghost btn-sm" id="perf-criterios">⚖️ Pesos da nota</button>' : ''}
       </div>
     </header>
