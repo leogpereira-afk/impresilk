@@ -1,4 +1,4 @@
-# Relatórios de entregas — v156
+# Relatórios de entregas — v157
 
 ## Mudanças
 
@@ -20,7 +20,7 @@ O gráfico financeiro preserva totais negativos existentes e o gráfico de retra
 
 ## Verificação
 
-Verificação completa em 06/10/2026: 1.524 testes aprovados, zero falhas e zero testes ignorados. Revisão de diferenças sem erros de whitespace.
+Verificação completa em 06/10/2026: 1.530 testes aprovados, zero falhas e zero testes ignorados. Revisão de diferenças sem erros de whitespace.
 
 Testes cobrem médias ponderadas, mediana, faixa, meses parciais, lacunas, regressão, valores constantes, período entre anos, filtros, atalhos e exclusão de estimativas dos registros reais.
 
@@ -28,4 +28,4 @@ Prévia local com dados fictícios conferida em navegador: desktop, celular de 3
 
 ## Publicação
 
-Esta mudança utiliza os relatórios existentes do servidor e não requer função ou migração nova. Os cinco arquivos de versão/cache estão preparados para v156. Publicação deve ocorrer apenas após autorização específica do usuário.
+Esta mudança utiliza os relatórios existentes do servidor e não requer função ou migração nova. Os cinco arquivos de versão/cache estão preparados para v157. Publicação autorizada pelo usuário em 06/10/2026. A numeração passou de v156 para v157 para preservar a atualização de equipes que já havia ocupado a v156.
