@@ -6,7 +6,7 @@ A janela de cadastro/edição de equipes em Performance usava somente `equipeEsc
 
 Conferência de produção somente de leitura em 06/10/2026: 17 vínculos salvos, sendo 16 apontando para chave e ID correspondentes em cadastros não apagados do RH e um terceiro explicitamente sem ficha. Isso verifica a referência estrutural; não substitui a confirmação humana da pessoa em cada entrega. Nenhum vínculo, contrato ou equipe real foi alterado.
 
-## Correção local
+## Correção
 
 - Reutiliza `opcoesEquipe` no editor de equipe fixa: funcionários ativos, novos cadastros e contratos ativos de freelancers.
 - Busca por nome, apelido ou ID; nomes semelhantes continuam separados pela identidade.
@@ -24,6 +24,6 @@ Conferência de produção somente de leitura em 06/10/2026: 17 vínculos salvos
 
 ## Publicação
 
-Ainda não publicada. Mudança apenas de interface; sem implantação de servidor ou alteração de dados. Na liberação autorizada, atualizar versão/cache conforme o procedimento do PCP e verificar os arquivos no site público.
+Publicação autorizada pelo usuário em 06/10/2026. Versão v156 preparada com cache e referências dos arquivos atualizados. Mudança apenas de interface; sem implantação de servidor ou alteração de dados. A conclusão da publicação depende do workflow e da conferência dos arquivos no site público.
 
 Prévia: http://127.0.0.1:4241/#aba=performance
