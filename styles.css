@@ -4274,6 +4274,54 @@ img.perf-logo{object-fit:cover}
 #panel-entregas .ent-insights { margin-top:16px; }
 
 /* Faixa compacta: os grupos compartilham a mesma linha no desktop. */
+/* Relatórios têm grupos próprios: não recebem a grade de sete colunas da
+   lista de Entregas. O fieldset alto deslocava o ano e os meses até o rodapé. */
+.rel-ent-controles{background:#fff;border:1px solid #dfe6ee;border-radius:16px;padding:18px 20px;margin-bottom:20px;min-width:0}
+.rel-ent-periodo{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+.rel-ent-ano{display:grid;gap:5px;min-width:110px}
+.rel-ent-ano label{font-size:13px;font-weight:650;color:#526378}
+.rel-ent-ano select,.rel-ent-prazo-filtro select{font:inherit;border:1px solid #d5dfe6;border-radius:10px;background:#f8fafc;color:#233e50;min-height:44px;padding:8px 32px 8px 12px}
+.rel-ent-atualizado{font-size:13px;color:#617486;margin:auto 0}
+.rel-ent-periodo>button{margin-left:auto;min-height:44px}
+.rel-ent-controles .rel-ent-meses{margin:16px 0;padding:14px 0;border-block:1px solid #edf1f5;gap:7px}
+.rel-ent-controles .rel-ent-meses button{padding:8px 14px;min-width:48px;min-height:44px;font-size:14px}
+.rel-ent-series{min-width:0;border:0;margin:0;padding:0}
+.rel-ent-series legend{font-size:13px;font-weight:700;color:#526378;margin:0 0 8px;padding:0}
+.rel-ent-series-opcoes{display:flex;flex-wrap:wrap;gap:8px}
+.rel-ent-series-opcoes label{display:flex;align-items:center;gap:8px;min-height:44px;padding:9px 12px;border:1px solid #dce4eb;border-radius:10px;font-size:14px;line-height:1.3;cursor:pointer;margin:0;color:#324757;min-width:0}
+.rel-ent-series-opcoes label:has(input:checked){background:#f4f8fb;border-color:var(--serie-cor)}
+.rel-ent-series-opcoes input{width:18px;height:18px;flex-shrink:0;margin:0;accent-color:var(--serie-cor)}
+.rel-ent-series-acoes{display:flex;gap:8px;margin-top:10px}
+.rel-ent-series-acoes button{font-size:13px;min-height:38px;padding:7px 12px}
+.rel-ent-controles :is(button,select):focus-visible,.rel-ent-pontualidade :is(button,select,summary):focus-visible{outline:3px solid #3763cf;outline-offset:3px}
+.rel-ent-pontualidade{background:#fff;border:1px solid #dfe6ee;border-radius:18px;padding:22px;margin:20px 0;min-width:0}
+.rel-ent-pontualidade>header{display:flex;justify-content:space-between;gap:14px;align-items:start;margin-bottom:18px}
+.rel-ent-pontualidade h3{margin:5px 0 6px;color:#203c50;font-size:21px}
+.rel-ent-pontualidade header p{margin:0;color:#64748b;font-size:13px}
+.rel-ent-fonte{font-size:12px;border:1px solid #dae4eb;background:#f6f9fb;border-radius:20px;padding:6px 11px;white-space:nowrap;color:#486172}
+.rel-ent-prazo-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.rel-ent-prazo-cards article{border:1px solid #dfe6ee;border-top:3px solid #8798a7;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.rel-ent-prazo-cards article>span{font-size:14px;color:#455d6d}
+.rel-ent-prazo-cards strong{font-size:28px;line-height:1.2;font-variant-numeric:tabular-nums;color:#193c50}
+.rel-ent-prazo-cards small{font-size:12px;line-height:1.5;color:#627687}
+.rel-ent-prazo-cards .prazo-ok{border-top-color:#167a70;background:#f6fcfa}
+.rel-ent-prazo-cards .prazo-atraso{border-top-color:#c54738;background:#fff9f7}
+.rel-ent-prazo-cards .prazo-ok strong{color:#146d60}.rel-ent-prazo-cards .prazo-atraso strong{color:#b0392c}
+.rel-ent-prazo-barra{display:flex;width:100%;height:10px;overflow:hidden;border-radius:10px;background:#edf2f5;margin-top:16px}
+.rel-ent-prazo-barra span:first-child{background:#167a70}.rel-ent-prazo-barra span:last-child{background:#c54738}
+.rel-ent-prazo-detalhes{border-top:1px solid #e4ebf0;margin-top:16px;padding-top:14px}
+.rel-ent-prazo-detalhes summary{font-weight:700;color:#29495e;cursor:pointer;padding:7px 0}
+.rel-ent-prazo-filtro{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0}
+.rel-ent-prazo-filtro label{font-size:13px;margin:0}.rel-ent-prazo-filtro span{font-size:12px;color:#607482}
+.rel-ent-pontualidade caption{text-align:left;font-weight:700;padding:16px 0 10px}
+.rel-ent-prazo-status{display:inline-block;font-size:12px;line-height:1.5;font-weight:650;color:#64748b;white-space:normal}
+.rel-ent-prazo-status.prazo-ok{color:#146d60}.rel-ent-prazo-status.prazo-atraso{color:#ac3026}
+.rel-ent-indicador{min-width:0;overflow-wrap:anywhere}
+@media(max-width:680px){.rel-ent-resumo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:480px){.rel-ent-resumo-grid{grid-template-columns:1fr}}
+@media(max-width:1000px){.rel-ent-prazo-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.rel-ent-controles,.rel-ent-pontualidade{padding:14px}.rel-ent-prazo-cards{gap:8px}.rel-ent-prazo-cards article{padding:12px}.rel-ent-prazo-cards strong{font-size:24px}.rel-ent-prazo-cards article>span{font-size:13px}.rel-ent-pontualidade h3{font-size:18px}.rel-ent-periodo{gap:9px}.rel-ent-periodo>button{font-size:13px;padding:9px 12px}.rel-ent-atualizado{order:3;width:100%}.rel-ent-controles .rel-ent-meses{gap:6px;margin:12px 0}.rel-ent-controles .rel-ent-meses button{padding:8px 10px}.rel-ent-series-opcoes label{flex:1 1 140px}.rel-ent-prazo-filtro span{flex-basis:100%}.rel-ent-pontualidade>header{flex-wrap:wrap}}
+@media print{.rel-ent-prazo-cards{grid-template-columns:repeat(4,minmax(0,1fr));break-inside:avoid}.rel-ent-prazo-cards article{padding:10px}.rel-ent-prazo-cards strong{font-size:22px}.rel-ent-pontualidade{padding:12px}.rel-ent-pontualidade>header{break-after:avoid}.rel-ent-prazo-barra{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 #panel-entregas .ent-controles { display:grid;grid-template-columns:104px 100px auto auto minmax(120px,1fr) minmax(120px,1fr) auto;align-items:end;gap:6px 10px;padding:10px 12px; }
 #panel-entregas .ent-controles :is(.ent-periodo,.casa-filtros) { display:contents; }
 #panel-entregas .ent-controles label { min-width:0; }

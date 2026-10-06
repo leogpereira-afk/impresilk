@@ -101,7 +101,11 @@ async function previewApi(body){
  }
 
  if(body.action==='equipeHistorico')return {desdeQuando:'2025-01-01',meses:body.meses.map(m=>({mes:m,total:22+Number(m.slice(5)),porArea:{Acabamento:10,Serralheria:8,'Comercial e Atendimento':8},piso:false}))};
- if(body.action==='relatorioEntregas')return {ano:body.ano,de:body.ano+'-01-01',ate:hoje,consultadoEm:new Date().toISOString(),recebimentosEm:new Date().toISOString(),notas:{entregue:'DADOS FICTÍCIOS — demonstração de entregas.',vendido:'DADOS FICTÍCIOS — O.S. por cadastro.',recebido:'DADOS FICTÍCIOS — pagamentos.',retrabalho:'DADOS FICTÍCIOS — taxa das instalações registradas.'},meses:Array.from({length:12},(_,i)=>({mes:body.ano+'-'+String(i+1).padStart(2,'0'),futuro:i+1>Number(hoje.slice(5,7)),entregue:i===3?null:120000+i*27000+Math.sin(i)*50000,vendido:180000+i*18000,recebido:140000+i*23000,retrabalho:8-i*.5,baseRetrabalho:40,entregasEm:new Date().toISOString(),entregas:[{numero:'TESTE-101',cliente:'Demonstração',data:hoje,valor:100}],vendas:[],retrabalhos:[]}))};
+ if(body.action==='relatorioEntregas')return {ano:body.ano,de:body.ano+'-01-01',ate:hoje,consultadoEm:new Date().toISOString(),recebimentosEm:new Date().toISOString(),notas:{entregue:'DADOS FICTÍCIOS: demonstração de entregas.',vendido:'DADOS FICTÍCIOS: O.S. por cadastro.',recebido:'DADOS FICTÍCIOS: pagamentos.',retrabalho:'DADOS FICTÍCIOS: taxa das instalações registradas.',pontualidade:'DADOS FICTÍCIOS: previsão do Mubisys versus entrega efetiva; dias corridos.'},meses:Array.from({length:12},(_,i)=>{
+  const mes=body.ano+'-'+String(i+1).padStart(2,'0'),futuro=mes>hoje.slice(0,7),fim=mes===hoje.slice(0,7)?Number(hoje.slice(8)):28;
+  const entregas=Array.from({length:80},(_,j)=>{const data=mes+'-'+String(Math.min(fim,10+j%15)).padStart(2,'0');const prev=new Date(data+'T12:00:00Z');prev.setUTCDate(prev.getUTCDate()+(j%3===0?0:j%3===1?-3:2));return {numero:'TESTE-'+(i+1)+'-'+String(j+1).padStart(3,'0'),cliente:'Cliente fictício '+(j+1),data,previsao:j%8===0?'':prev.toISOString().slice(0,10),valor:1500};});
+  return {mes,futuro,entregue:i===3?null:120000+i*27000+Math.sin(i)*50000,vendido:180000+i*18000,recebido:140000+i*23000,retrabalho:8-i*.5,baseRetrabalho:40,entregasCarregadas:!futuro,entregasEm:new Date().toISOString(),entregas,vendas:[],retrabalhos:[]};
+ })};
  if(body.action==='performancePeriodo'){
   // O mesmo formato do pcp-sync (perfFonte): membro sugerido pelo ID do RH, volta e conferência do carro.
   const nomeRH=n=>(ELENCO_PREVIA.pessoas.find(p=>p.id===n)||{}).nome||n;
@@ -314,6 +318,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
  if(pv.get('ordem'))STATE._entFilaOrdem=pv.get('ordem');
  if(pv.get('todas'))STATE._entFilaTodas=true;
  // &lote=dia ou &lote=pendencias abre o Fechar o dia (F14) nesse modo.
+ if(pv.get('relatorios'))STATE._entAba='relatorios';
  if(pv.get('lote')){STATE._entAba='lote';STATE._loteModo=pv.get('lote');}
  // &intro=0 dá o quadro do primeiro uso por lido; &itens=LT4 abre os itens da linha; &rolar= desce até o seletor.
  if(pv.get('intro')==='0')try{localStorage.setItem('impresilk_lote_intro_visto|'+STATE.user.nome,'1');}catch(e){}

@@ -934,20 +934,21 @@ Deno.serve(async (req: Request) => {
           const entregas=(Array.isArray(pacote?.os)?pacote.os:[]).filter((r:any)=>{
             const dia=String(r.data || "").slice(0,10), n=String(r.numero || "");
             if(!n || vistos.has(n) || !dia.startsWith(mes) || dia>ate)return false;vistos.add(n);return true;
-          }).map((r:any)=>({numero:r.numero,cliente:r.cliente,data:r.data,valor:numero(r.valor)}));
+          }).map((r:any)=>({numero:r.numero,cliente:r.cliente,data:r.data,previsao:String(r.previsao || ""),valor:numero(r.valor)}));
           const vendas=ordens.filter(r=>String(r.data).startsWith(mes)).map(r=>({numero:r.numero,cliente:r.cliente,data:r.data,valor:numero(r.valor)}));
           const instalacoes=operacao.registros.filter((r:any)=>r.dia.startsWith(mes));
           const retrabalhos=instalacoes.filter((r:any)=>r.retrabalho===true).map((r:any)=>({numero:r.numero,cliente:r.cliente,data:r.dia}));
           return {mes,entregue:pacote?.v>=2 && Array.isArray(pacote.os)?soma(entregas):null,
             vendido:vendas.length?soma(vendas):null,recebido:entradas && Object.prototype.hasOwnProperty.call(entradas,mes)?numero(entradas[mes]):null,
             retrabalho:instalacoes.length?100*retrabalhos.length/instalacoes.length:null,baseRetrabalho:instalacoes.length,
-            entregas,vendas,retrabalhos,entregasEm:pacote?.em || null};
+            entregasCarregadas:!!(pacote?.v>=2 && Array.isArray(pacote.os)),entregas,vendas,retrabalhos,entregasEm:pacote?.em || null};
         });
         return resp({ano,de,ate,meses:linhas,consultadoEm:new Date().toISOString(),recebimentosEm:fluxo.data?.atualizado_em || null,
           notas:{vendido:"O.S. por data de cadastro no Mubisys, valor líquido. Não equivale a faturamento fiscal. Histórico depende da carga do ERP; mês sem registros não confirma venda zero.",
           recebido:"Pagamentos de contas a receber pela data de pagamento/crédito, no fluxo mensal do Painel. Fonte agregada: não contém títulos individuais. Anos preservados podem ter atualização anterior à carga indicada.",
           retrabalho:"Instalações finalizadas no PCP no mês com marca de retrabalho ÷ instalações finalizadas registradas no mesmo mês. Histórico operacional pode ser incompleto; ausência de marca não comprova inspeção de qualidade.",
-          entregue:"O.S. com status entregue no Mubisys pela data de entrega, incluindo retiradas. Valores líquidos; alterações posteriores dependem de nova sincronização."}});
+          entregue:"O.S. com status entregue no Mubisys pela data de entrega, incluindo retiradas. Valores líquidos; alterações posteriores dependem de nova sincronização.",
+          pontualidade:"Previsão do Mubisys comparada à entrega efetiva, por O.S., incluindo retiradas. Entrega antecipada ou na data conta como no prazo; atraso em dias corridos. Percentuais usam somente O.S. com as duas datas válidas. Previsão conforme a última carga do ERP (pode incluir previsão calculada a partir do prazo cadastrado); não é a primeira agenda congelada do PCP. Não mede pedidos ainda em aberto nem altera abonos ou comissões."}});
       }
 
       // Alteração estreita: nunca reaplica os integrantes atuais sobre a entrega.
