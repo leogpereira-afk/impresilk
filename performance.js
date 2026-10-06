@@ -826,13 +826,68 @@ function perfDialog(titulo,corpo) {
   d.innerHTML=`<div class="perf-dialog-head"><h2 id="perf-dialog-titulo">${esc(titulo)}</h2><button type="button" class="btn-ghost" aria-label="Fechar edição">✕</button></div>${corpo}`;
   d.querySelector('[aria-label="Fechar edição"]').onclick=()=>d.close(); d.setAttribute?.('aria-labelledby','perf-dialog-titulo'); const foco=document.activeElement; d.addEventListener?.('close',()=>{if(foco?.isConnected)foco.focus();},{once:true}); d.showModal(); return d;
 }
+/* A equipe fixa usa o mesmo catálogo da escala da O.S.: RH completo,
+   contratos ativos e bloqueios de identidade. A lista antiga de instaladores
+   sozinha omitia quem acabou de entrar. Não altera vínculos nem histórico. */
+function perfOpcoesMembros(membros) {
+  const selecionados = new Map((membros || []).map(m => [String(m.chave), m]));
+  const opcoes = opcoesEquipe([...selecionados.keys()]);
+  const vistos = new Set(), out = [];
+  for (const p of opcoes) {
+    const chave = String(p.valor || p.chave || p.rh || '');
+    const ficha = OPERACAO.pessoaDe(p.valor);
+    if (ficha && ficha.ativo === false && !selecionados.has(chave)) continue;
+    const identidade = p.bloqueio && !selecionados.has(chave) ? String(p.rh || chave) : chave;
+    if (!chave || vistos.has(identidade)) continue;
+    vistos.add(identidade);
+    out.push({chave, nome:p.completo || p.nome, apelido:p.apelido || p.nome,
+      freelancer:!!p.freelancer, bloqueio:p.bloqueio || '', selecionado:selecionados.has(chave)});
+  }
+  // Guarda também os membros legados/inativos, sem decidir por um homônimo.
+  for (const m of membros || []) if (!out.some(p => p.chave === String(m.chave))) {
+    out.push({...m, chave:String(m.chave), selecionado:true, bloqueio:''});
+  }
+  return out.sort((a,b) => Number(b.selecionado)-Number(a.selecionado) || String(a.nome).localeCompare(String(b.nome),'pt-BR'));
+}
+function perfMembrosListaHTML(membros) {
+  return perfOpcoesMembros(membros).map(p => `<label class="perf-member" data-busca="${esc([p.nome,p.apelido,p.chave].join(' '))}"><input type="checkbox" name="membro" value="${esc(p.chave)}" data-nome="${esc(p.nome)}" data-apelido="${esc(p.apelido || p.nome)}" ${p.selecionado?'checked':''} ${p.bloqueio&&!p.selecionado?'disabled':''}><span>${esc(p.nome)}${p.freelancer?' <small class="perf-membro-freelancer">Freelancer</small>':''}${p.bloqueio?`<small class="perf-membro-pendencia">${esc(p.bloqueio)}</small>`:''}</span></label>`).join('');
+}
 function perfEscolherMembrosHTML(membros) {
-  const conhecidos = PERF.unicos([...membros,...(equipeEscalavel().doPCP || []).map(perfPessoa)]);
-  return `<label>Buscar pessoa <input type="search" data-perf-busca placeholder="Nome ou apelido"></label><div class="perf-members">${conhecidos.map(p=>`<label class="perf-member"><input type="checkbox" name="membro" value="${esc(p.chave)}" data-nome="${esc(p.nome)}" data-apelido="${esc(p.apelido || p.nome)}" ${membros.some(m=>m.chave===p.chave)?'checked':''}><span>${esc(p.nome)}</span></label>`).join('')}</div>`;
+  return `<section class="perf-membros-rh"><div class="perf-membros-topo"><strong>Integrantes · RH e freelancers</strong><button type="button" class="btn-ghost btn-sm" data-perf-atualizar-rh>Atualizar pessoas</button></div><label>Buscar pessoa <input type="search" data-perf-busca placeholder="Nome, apelido ou ID"></label><small data-perf-rh-status role="status">Inclui novos funcionários e contratos de freelancer ativos do RH.</small><div class="perf-members">${perfMembrosListaHTML(membros)}</div><p data-perf-sem-pessoas hidden>Nenhuma pessoa encontrada. Atualize a lista ou confira o cadastro no RH.</p></section>`;
 }
 function perfWireBusca(box) {
   const busca=box.querySelector('[data-perf-busca]');
-  if(busca) busca.oninput=()=>box.querySelectorAll('.perf-member').forEach(n=>{n.hidden=!n.querySelector('input').checked && !normCasa(n.textContent).includes(normCasa(busca.value));});
+  if(busca) busca.oninput=()=>{
+    let encontrados=0;
+    box.querySelectorAll('.perf-member').forEach(n=>{
+      const bate=normCasa(n.dataset.busca || n.textContent).includes(normCasa(busca.value));
+      n.hidden=!n.querySelector('input').checked && !bate;
+      if(bate) encontrados++;
+    });
+    const vazio=box.querySelector('[data-perf-sem-pessoas]');
+    if(vazio) vazio.hidden=encontrados>0;
+  };
+}
+async function perfAtualizarMembrosRH(box, depois) {
+  const btn=box.querySelector('[data-perf-atualizar-rh]'), nota=box.querySelector('[data-perf-rh-status]');
+  if(!btn || btn.disabled) return;
+  if(typeof navigator!=='undefined' && navigator.onLine===false) {nota.textContent='Sem internet: mostrando a lista já carregada. Tente atualizar quando a conexão voltar.';return;}
+  btn.disabled=true;nota.textContent='Conferindo funcionários e freelancers no RH…';
+  const lista=box.querySelector('.perf-members');
+  try {
+    const ok=await STORE.pullElenco(true,{semCache:true});
+    // Outro formulário pode ter substituído este enquanto a leitura rodava.
+    if(!box.open || box.querySelector('.perf-members')!==lista) return;
+    if(!ok) throw new Error('Não foi possível atualizar. A lista e as escolhas foram mantidas; tente novamente.');
+    if(OPERACAO.esquecerPessoas) OPERACAO.esquecerPessoas();
+    // Lê depois da resposta para manter também mudanças feitas durante a carga.
+    const marcados=perfMarcados(box);
+    lista.innerHTML=perfMembrosListaHTML(marcados);
+    perfWireBusca(box);box.querySelector('[data-perf-busca]').oninput();
+    depois();nota.textContent='Lista atualizada do RH. Suas escolhas foram mantidas.';
+  } catch(e) {
+    if(box.open && box.querySelector('.perf-members')===lista) nota.textContent=e.message || 'Não foi possível atualizar a lista do RH.';
+  } finally {btn.disabled=false;}
 }
 function perfMarcados(box) { return [...box.querySelectorAll('input[name="membro"]:checked')].map(e=>({chave:e.value,nome:e.dataset.nome,apelido:e.dataset.apelido})); }
 /* A PESSOA EM DUAS EQUIPES ATIVAS (F06). Não trava: as equipes fixas podem
@@ -927,7 +982,8 @@ function perfEditarEquipe(id,membrosIniciais=[]) {
     liderNota.textContent=comId.length?'':'O líder é escolhido entre os integrantes com ficha do RH.';
   };
   liderSel.onchange=()=>{liderEscolhido=liderSel.value;};
-  d.querySelectorAll('input[name="membro"]').forEach(cb=>cb.addEventListener('change',desenharLider));
+  d.querySelector('.perf-members').addEventListener('change',desenharLider);
+  d.querySelector('[data-perf-atualizar-rh]').onclick=()=>perfAtualizarMembrosRH(d,desenharLider);
   desenharLider();
   d.querySelector('#perf-logo-arquivo').onchange=async ev=>{
     const arq=ev.target.files && ev.target.files[0]; if(!arq) return;

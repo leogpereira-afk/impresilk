@@ -118,3 +118,10 @@ body:has(#panel-performance.active) .frase-bar{min-height:0;padding:4px 14px;fon
 .perf-report-detail>.perf-report{border:0;padding:0 0 14px}
 #panel-performance .perf-page-head>[data-pdf-tela]{margin-left:auto}
 @media(max-width:600px){#panel-performance .pd-nav button,#panel-performance .pd-toggle button,#panel-performance .pd-detail summary,#panel-performance .pd-method summary{min-height:44px}}
+
+/* Catálogo completo de integrantes, compacto e sem esconder pendências. */
+.perf-membros-topo{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.perf-membros-rh [data-perf-rh-status]{display:block;margin:6px 0;color:var(--text-muted,#536471)}
+.perf-member[hidden]{display:none!important}
+.perf-membro-freelancer{display:inline-block;border-radius:12px;padding:2px 7px;background:#f0e8ff;color:#66359a;font-size:.75rem}
+.perf-membro-pendencia{display:block;color:#915400;line-height:1.4;margin-top:3px}
