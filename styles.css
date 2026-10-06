@@ -4353,6 +4353,73 @@ img.perf-logo{object-fit:cover}
 .rel-ent-svg g:focus-visible circle{stroke:#122f43;stroke-width:4}
 @media(max-width:600px){.rel-ent-intervalo-form label{flex:1 1 140px}.rel-ent-intervalo-form input{width:100%;min-width:0}.rel-ent-analises label{flex:1 1 170px}.rel-ent-analises small{flex-basis:100%}.rel-ent-prazo-cards strong{font-size:22px}}
 @media print{.rel-ent-prazo-evolucao{break-inside:avoid}.rel-ent-estatistica{break-inside:auto}}
+/* Relatórios compactos: filtros secundários e quadros recolhíveis. */
+#panel-entregas .rel-ent-controles{padding:10px 12px;margin:10px 0;border-radius:12px}
+.rel-ent-controles>summary,.rel-ent-filtros-avancados>summary,.rel-ent-cartoes>summary,.rel-ent-metodo>summary{cursor:pointer;font-size:12px;font-weight:650;color:#456174;padding:6px 0;min-height:30px;box-sizing:border-box}
+.rel-ent-controles>summary span{font-weight:400;margin-left:8px;color:#667888}
+#panel-entregas .rel-ent-periodo{gap:8px;justify-content:flex-start;padding:4px 0;margin:0;flex-wrap:wrap}
+#panel-entregas .rel-ent-ano{display:flex;align-items:center;gap:6px}
+#panel-entregas .rel-ent-ano label{font-size:12px;margin:0}
+#panel-entregas .rel-ent-ano select{width:94px;min-height:34px;padding:5px 8px;font-size:13px}
+#panel-entregas .rel-ent-periodo>button{margin-left:auto;min-height:34px;padding:6px 10px;font-size:12px}
+#panel-entregas .rel-ent-atualizado{font-size:11px;order:0;width:auto}
+#panel-entregas .rel-ent-controles .rel-ent-meses{gap:4px;margin:6px 0;padding:0;border:0}
+#panel-entregas .rel-ent-meses button{min-height:34px;padding:5px 10px;font-size:12px;line-height:1.2}
+.rel-ent-filtros-avancados{border-top:1px solid #e4eaf0;padding-top:3px}
+#panel-entregas .rel-ent-series{border:0;padding:6px 0;margin:0}
+#panel-entregas .rel-ent-series legend{font-size:12px;margin:0 0 5px}
+#panel-entregas .rel-ent-series-opcoes{gap:5px}
+#panel-entregas .rel-ent-series-opcoes label{min-height:34px;padding:6px 8px;font-size:12px;gap:6px}
+#panel-entregas .rel-ent-series-opcoes input{width:15px;height:15px}
+#panel-entregas .rel-ent-series-acoes{margin-top:5px;gap:6px}
+#panel-entregas .rel-ent-series-acoes button{padding:5px 8px;font-size:11px;min-height:30px}
+#panel-entregas .rel-ent-intervalo-form{margin-top:6px;padding-top:8px;gap:6px 10px}
+#panel-entregas .rel-ent-intervalo-form input{min-height:34px;padding:5px 8px;width:160px}
+#panel-entregas .rel-ent-intervalo-form button{min-height:34px;padding:6px 10px;font-size:12px}
+#panel-entregas .rel-ent-intervalo-form>span{margin-bottom:6px;font-size:11px}
+.rel-ent-quadro{border:1px solid #dfe6ed;background:white;border-radius:12px;margin:10px 0;padding:0;min-width:0}
+.rel-ent-quadro>summary{display:flex;align-items:center;gap:8px;padding:10px 12px;min-height:40px;cursor:pointer;list-style:none}
+.rel-ent-quadro>summary::-webkit-details-marker{display:none}
+.rel-ent-quadro>summary::before{content:'▸';color:#567284;font-size:14px}
+.rel-ent-quadro[open]>summary::before{content:'▾'}
+.rel-ent-quadro>summary h3{font-size:16px;margin:0;color:#193c50}
+.rel-ent-quadro>summary>header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex:1;margin:0}
+.rel-ent-quadro>summary header p{font-size:12px;margin:4px 0 0}
+.rel-ent-quadro>summary header .perf-report-eyebrow{font-size:10px}
+.rel-ent-recolher,.rel-ent-expandir{font-size:11px;font-weight:500;color:#627687;margin-left:auto}
+.rel-ent-quadro:not([open])>summary .rel-ent-recolher,.rel-ent-quadro[open]>summary .rel-ent-expandir{display:none}
+.rel-ent-quadro-corpo{padding:0 12px 12px;min-width:0}
+.rel-ent-quadro-corpo>.rel-ent-grafico{border:0;border-radius:0;padding:0;margin:0}
+.rel-ent-quadro:not(.rel-ent-pontualidade)>.rel-ent-quadro-corpo>.rel-ent-grafico>h3{display:none}
+.rel-ent-resumo-grid{padding:0 12px 12px}
+#panel-entregas .rel-ent-prazo-cards{gap:8px}
+#panel-entregas .rel-ent-prazo-cards article{padding:8px 10px;gap:4px;border-radius:9px}
+#panel-entregas .rel-ent-prazo-cards strong{font-size:22px}
+#panel-entregas .rel-ent-prazo-cards article>span{font-size:12px}
+#panel-entregas .rel-ent-prazo-cards small{font-size:10px;line-height:1.35}
+#panel-entregas .rel-ent-prazo-barra{margin-top:8px;height:7px}
+#panel-entregas .rel-ent-prazo-evolucao{margin-top:10px;padding-top:10px;border-top:1px solid #e4eaf0}
+#panel-entregas .rel-ent-analises{margin:4px 0 8px;gap:5px 10px}
+#panel-entregas .rel-ent-analises label{min-height:34px;padding:5px 8px;font-size:12px;gap:6px}
+#panel-entregas .rel-ent-analises input{width:15px;height:15px}
+#panel-entregas .rel-ent-analises small{font-size:11px}
+#panel-entregas .rel-ent-grafico-periodo{font-size:11px;margin:6px 0}
+#panel-entregas .rel-ent-legenda{gap:12px;margin:8px 0;font-size:12px}
+#panel-entregas #rel-ent-imprimir>.metricas-nota{font-size:11px;line-height:1.4;margin:8px 0}
+#panel-entregas .rel-ent-pontualidade .metricas-nota{font-size:11px;line-height:1.4;margin:8px 0}
+.rel-ent-svg .rel-ent-valor-destaque{font-size:12px;font-weight:750;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round}
+.rel-ent-svg .rel-ent-mes-destaque{font-size:11px;font-weight:700;fill:#34546b}
+@media(max-width:600px){
+ #panel-entregas .rel-ent-meses button{min-height:36px;padding:6px 9px}
+ .rel-ent-quadro>summary{padding:9px 10px;gap:6px}.rel-ent-quadro>summary h3{font-size:15px}
+ .rel-ent-quadro>summary>header{flex-wrap:wrap;gap:5px}.rel-ent-pontualidade .rel-ent-fonte{display:none}
+ .rel-ent-quadro-corpo{padding:0 10px 10px}.rel-ent-quadro .rel-ent-recolher,.rel-ent-quadro .rel-ent-expandir{font-size:10px}
+ #panel-entregas .rel-ent-analises label{flex:0 1 auto;min-height:36px;font-size:11px}
+ #panel-entregas .rel-ent-analises small{flex-basis:100%}
+ #panel-entregas .rel-ent-intervalo-form input{width:100%}
+}
+@media print{.rel-ent-recolher,.rel-ent-expandir,.rel-ent-analises{display:none!important}.rel-ent-quadro{break-inside:auto}.rel-ent-quadro>summary{break-after:avoid}.rel-ent-cartoes{break-inside:avoid}.rel-ent-quadro-corpo{padding:0 8px 8px}}
+
 #panel-entregas .ent-controles { display:grid;grid-template-columns:104px 100px auto auto minmax(120px,1fr) minmax(120px,1fr) auto;align-items:end;gap:6px 10px;padding:10px 12px; }
 #panel-entregas .ent-controles :is(.ent-periodo,.casa-filtros) { display:contents; }
 #panel-entregas .ent-controles label { min-width:0; }

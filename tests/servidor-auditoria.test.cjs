@@ -253,9 +253,9 @@ test('relatório: o mês em andamento aparece como parcial (ponto vazado, "até 
  // O mês que fechou no último dia não é parcial.
  run("REL_ENT.dados={ate:'2026-09-30',meses:[{mes:'2026-09',entregue:1}]}");assert.equal(run("relEntParcial(REL_ENT.dados.meses[0])"),false);
 });
-test('relatório: abre no último mês fechado e o erro de rede sai em português, com ponto',()=>{
+test('relatório: abre no mês corrente e o erro de rede sai em português, com ponto',()=>{
  const run=relatorio();
- const m=new Date().getMonth();assert.equal(run('REL_ENT.foco'),m?String(m).padStart(2,'0'):'');
+ const m=new Date().getMonth()+1;assert.equal(run('REL_ENT.foco'),String(m).padStart(2,'0'));
  assert.equal(run("relEntErroTxt(new TypeError('Load failed'))"),'Sem conexão com o servidor. Tente de novo.');
  assert.equal(run("relEntErroTxt(new Error('Failed to fetch'))"),'Sem conexão com o servidor. Tente de novo.');
  assert.equal(run("relEntErroTxt(new Error('Ano inválido'))"),'Ano inválido.');

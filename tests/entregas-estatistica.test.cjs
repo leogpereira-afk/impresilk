@@ -6,7 +6,7 @@ const ponto=(mes,valor,extra={})=>({mes,valor,...extra});
 test('previsão usa os três últimos meses fechados, não o mês parcial ou futuro',()=>{
  const t=tela();t.set([ponto('2025-01',10),ponto('2025-02',20),ponto('2025-03',30),ponto('2025-04',999,{parcial:true}),ponto('2025-05',888,{futuro:true})]);
  const a=t.run('relEntAnaliseSerie(fixture)');assert.equal(a.estatistica.media,20);assert.equal(a.estatistica.mediana,20);assert.equal(a.estatistica.min,10);assert.equal(a.estatistica.max,30);
- assert.deepEqual(Array.from(a.previsoes,p=>[p.mes,p.valor]),[['2025-04',20],['2025-05',20],['2025-06',20]]);
+ assert.deepEqual(Array.from(a.previsoes,p=>[p.mes,p.valor]),[['2025-05',20],['2025-06',20]]);
  assert.equal(a.tendencia.inclinacao,10);assert.equal(a.tendencia.r2,1);
 });
 test('lacuna ou cobertura incompleta no fim da base impede previsão sem fabricar zero',()=>{
@@ -31,8 +31,8 @@ test('período atravessa dezembro sem repetir meses e recorta também o gráfico
 test('projeção e tendência podem ser exibidas separadamente sem virar entregas reais',()=>{
  const t=tela();t.run("REL_ENT.dados={ate:'2025-12-31',meses:[{mes:'2025-01',entregue:10},{mes:'2025-02',entregue:20},{mes:'2025-03',entregue:30}]}");
  const render=()=>t.run("relEntGrafico(['entregue'],'Teste')");assert.doesNotMatch(render(),/data-rel-estimativa|data-rel-tendencia/);
- t.run('REL_ENT.mostrarPrevisao=true');let h=render();assert.match(h,/data-rel-estimativa/);assert.doesNotMatch(h,/data-rel-tendencia/);assert.equal((h.match(/data-rel-ponto=/g)||[]).length,3);
- t.run('REL_ENT.mostrarPrevisao=false;REL_ENT.mostrarTendencia=true');h=render();assert.doesNotMatch(h,/data-rel-estimativa/);assert.match(h,/data-rel-tendencia/);
+ t.run('REL_ENT.analises.financeiro.previsao=true');let h=render();assert.match(h,/data-rel-estimativa/);assert.doesNotMatch(h,/data-rel-tendencia/);assert.equal((h.match(/data-rel-ponto=/g)||[]).length,3);
+ t.run('REL_ENT.analises.financeiro.previsao=false;REL_ENT.analises.financeiro.tendencia=true');h=render();assert.doesNotMatch(h,/data-rel-estimativa/);assert.match(h,/data-rel-tendencia/);
 });
 test('gráfico de pontualidade deixa lacunas sem datas e não trata falta de comparação como 0%',()=>{
  const t=tela();t.set([{mes:'2025-01',entregasCarregadas:true,entregas:[{data:'2025-01-10',previsao:'2025-01-10'}]},{mes:'2025-02',entregasCarregadas:true,entregas:[{data:'2025-02-10',previsao:''}]},{mes:'2025-03',entregasCarregadas:true,entregas:[{data:'2025-03-11',previsao:'2025-03-10'}]}]);
@@ -55,7 +55,7 @@ test('atalhos indicam o período real sem chamar um intervalo entre anos de ano 
  t.run("REL_ENT.intervalo={inicio:'2025-09',fim:'2025-09'}");assert.match(t.run('relEntChipsHTML()'),/aria-label="set de 2025" aria-pressed="true"/);assert.equal(t.run('relEntPeriodoTxt()'),'set/25');
 });
 test('sem base suficiente, o título não promete estimativas e os meses entre anos ficam identificados',()=>{
- const t=tela();t.run("REL_ENT.mostrarPrevisao=true;REL_ENT.intervalo={inicio:'2024-12',fim:'2025-01'};REL_ENT.dados={ate:'2025-01-31',meses:[{mes:'2024-12',entregue:10},{mes:'2025-01',entregue:20}]}");
+ const t=tela();t.run("REL_ENT.analises.financeiro.previsao=true;REL_ENT.intervalo={inicio:'2024-12',fim:'2025-01'};REL_ENT.dados={ate:'2025-01-31',meses:[{mes:'2024-12',entregue:10},{mes:'2025-01',entregue:20}]}");
  const h=t.run("relEntGrafico(['entregue'],'Teste')");assert.doesNotMatch(h,/com estimativas para/);assert.match(h,/previsão indisponível neste recorte/);assert.equal(t.run("relEntMesTxt({mes:'2024-12'})"),'dez/24');
 });
 
