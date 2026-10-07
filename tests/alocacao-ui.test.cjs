@@ -59,6 +59,21 @@ const osBase = (extra = {}) => ({id: '1', numero: '5001', tipo: 'externo', clien
 const cotas = st => js(st.aloc.grupos.map(g => g.membros.map(m => [m.pessoaId, m.papel, m.cota])));
 const somaOk = a => a.grupos.reduce((s, g) => s + g.cota, 0) === 10000 && a.grupos.every(g => g.membros.reduce((s, m) => s + m.cota, 0) === 10000);
 
+test('auditoria: acrescentar avulso em 70/30 travado exige prévia; cancelar preserva percentuais e cadeados',()=>{
+ const {A,c,salvos}=tela();A.iniciar('audit',{os:osBase(),equipes:EQUIPES,papel:'pcp'});
+ A.executar('audit',{alocAcao:'equipe',e:'eq-aguia'});A.executar('audit',{alocAcao:'equipe',e:'eq-leao'});
+ A.executar('audit',{alocAcao:'pct-equipe',g:'0',valor:'70'});A.executar('audit',{alocAcao:'trava-equipe',g:'0'});
+ const antes=JSON.stringify(A.estado('audit').aloc),ds={alocAcao:'pessoa',p:'300004'};
+ const previa=A.previaEstrutura('audit',ds);assert.match(previa,/70%/);assert.match(previa,/40%/);assert.match(previa,/cadeados/);
+ assert.equal(JSON.stringify(A.estado('audit').aloc),antes,'a própria simulação não altera a divisão');
+ let chamadas=0,alteracoes=0;c.confirm=()=>{chamadas++;return false;};
+ const root={innerHTML:''};A.montar(root,'audit',{aoAlterar:()=>alteracoes++});
+ root.onclick({target:{closest:()=>({dataset:ds})}});
+ assert.equal(chamadas,1);assert.equal(alteracoes,0);assert.equal(JSON.stringify(A.estado('audit').aloc),antes);assert.equal(salvos.length,0);
+ c.confirm=()=>true;root.onclick({target:{closest:()=>({dataset:ds})}});
+ assert.equal(alteracoes,1);assert.equal(A.estado('audit').aloc.grupos.length,3);assert.ok(somaOk(A.estado('audit').aloc));
+});
+
 /* ───────────── a montagem ───────────── */
 
 test('equipe: um toque traz os integrantes fixos com o líder padrão, 60/40, com selos, cor e logo', () => {

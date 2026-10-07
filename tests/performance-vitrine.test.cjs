@@ -92,7 +92,9 @@ test('ranking individual: sem style= (a barra é atributo de SVG) e sem valor n�
   assert.doesNotMatch(html, /<table/, 'só Davi tem valor confirmado e aparece no pódio');
   const producao=tela({medida:'peso'}).perfRankingPessoasHTML(regs,{equipes:[]});
   assert.doesNotMatch(producao, /style=/);
-  assert.match(producao, /<rect class="perf-barra-valor" width="\d+"/, 'a distância para o 1º aparece na tabela de produção');
+  assert.match(producao,/1º lugar: <\/span>Davi/,'produção também exclui as sugestões');
+  const producaoConferida=tela({medida:'peso'}).perfRankingPessoasHTML(regs.map(r=>({...r,confirmado:true})),{equipes:[]});
+  assert.match(producaoConferida, /<rect class="perf-barra-valor" width="\d+"/, 'com cinco pessoas conferidas, a distância aparece na tabela de produção');
   assert.match(html, /VALOR-2000/, 'Davi: 2 entregas confirmadas de 1000');
   assert.doesNotMatch(html, /VALOR-5000|VALOR-4000|VALOR-3000/, 'valor de entrega só sugerida não aparece');
 });
@@ -100,7 +102,7 @@ test('ranking individual: sem style= (a barra é atributo de SVG) e sem valor n�
 test('pódio: 1º no centro mesmo com 2º empatado; a ordem do HTML é a do ranking', () => {
   const c = tela({medida:'peso'});
   const regs = [{id:'a1', membros:P.iguais([pe('Ana')])}, {id:'a2', membros:P.iguais([pe('Ana')])}, {id:'b', membros:P.iguais([pe('Bia')])}, {id:'c', membros:P.iguais([pe('Caio')])}]
-    .map(r => ({...r, confirmado:false, valor:1, os:{}}));
+    .map(r => ({...r, confirmado:true, valor:1, os:{}}));
   const html = c.perfRankingPessoasHTML(regs, {equipes:[]});
   assert.deepEqual(html.match(/perf-podio-item pos-\d lugar-\w+/g), ['perf-podio-item pos-1 lugar-centro', 'perf-podio-item pos-2 lugar-esq', 'perf-podio-item pos-2 lugar-dir']);
   // Repintar a mesma tela não repete a subida dos degraus.

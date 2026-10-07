@@ -139,6 +139,7 @@ test('revisão: a equipe da O.S. mudou em outro aparelho com o Conferir aberto; 
     // Recomeçar parte de quem está na O.S. agora: o Caio entra na sugestão e continua na O.S.
     rec.onclick();
     assert.deepEqual(js(D.derivarEquipe(A.estado('perf:1').aloc)).sort(), ['100001', '100002', '100003']);
+    c.confirm=()=>true; // A gestão aceita a prévia do novo líder; o conflito de outro aparelho continua protegido.
     box.onclick({target: alvo({alocAcao: 'lider', g: '0', p: '100001'})});
     ok.disabled = false;
     await ok.onclick();

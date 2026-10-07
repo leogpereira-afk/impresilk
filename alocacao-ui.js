@@ -1213,6 +1213,23 @@ const ALOCUI = (() => {
      (a ficha devolve a equipe da O.S. como estava). Nada vai ao servidor
      daqui, como em toda ação do componente. */
   const TIRAR = new Set(['remover', 'remover-equipe', 'remover-nome']);
+  const REFAZEM = new Set(['equipe','pessoa','remover','remover-equipe','lider','restaurar']);
+  // Simula antes de qualquer alteração na tela. A versão original, inclusive
+  // cadeados e autoria, permanece intacta se a gestão cancelar a confirmação.
+  function previaEstrutura(chave,ds){
+    const st=estados.get(chave);
+    if(!st || st.modo!=='divisao' || st.antigo || !REFAZEM.has(ds.alocAcao))return null;
+    const protegida=st.gravada || st.aloc.manual || st.aloc.grupos.some(g=>g.fixo || g.membros.some(m=>m.fixo));
+    if(!protegida)return null;
+    const simulado=copia(st);let erro;
+    try{estados.set(chave,simulado);erro=executar(chave,ds);}finally{estados.set(chave,st);}
+    if(erro || nucleo(st.aloc)===nucleo(simulado.aloc))return null;
+    const resumo=a=>a.grupos.map(g=>`${nomeGrupo(st,g)}: ${pctTexto(g.cota)}%`).join('; ');
+    const antes=new Map(motor().finais(st.aloc).map(m=>[m.pessoaId,m.cota]));
+    const depois=new Map(motor().finais(simulado.aloc).map(m=>[m.pessoaId,m.cota]));
+    const pessoas=[...new Set([...antes.keys(),...depois.keys()])].filter(id=>antes.get(id)!==depois.get(id));
+    return `Esta alteração refaz a divisão e pode retirar ajustes e cadeados. Confira antes de continuar.\n\nGrupos antes: ${resumo(st.aloc)}\nGrupos depois: ${resumo(simulado.aloc)}\n\n${pessoas.map(id=>`${pessoa(id).nome}: ${pctTexto(antes.get(id)||0)}% → ${pctTexto(depois.get(id)||0)}%`).join('\n') || 'Os percentuais individuais permanecem iguais; a composição será alterada.'}\n\nAplicar esta mudança na edição?`;
+  }
   const retratoDe = st => ({aloc: copia(st.aloc), soNome: copia(lista(st.soNome)), trazidas: copia(lista(st.trazidas)), tocado: st.tocado === true, antigo: st.antigo ? copia(st.antigo) : null});
   const nucleoRetrato = r => JSON.stringify([r.aloc, r.soNome, r.antigo]);
   // Quem saiu: o nome da pessoa, o nome solto ou o nome da equipe.
@@ -1253,6 +1270,11 @@ const ALOCUI = (() => {
       if (ds.alocAcao === 'atualizar-elenco') { void atualizarElenco(chave); return; }
       // O retrato de antes da tirada, para o Desfazer (F24); a mensagem leva o nome de quem saiu.
       const h0 = hosts.get(chave), st0 = estados.get(chave);
+      const previa=previaEstrutura(chave,ds);
+      if(previa && (typeof confirm!=='function' || !confirm(previa))){
+        st0.erro='Alteração cancelada. A composição, os percentuais e os cadeados foram mantidos.';
+        repintar(chave);return;
+      }
       if (TIRAR.has(ds.alocAcao)) {
         const t = ev && typeof ev.timeStamp === 'number' && ev.timeStamp > 0 ? ev.timeStamp : null, ult = ultimasTiradas.get(chave);
         if ((ev && ev.detail > 1) || (t != null && ult != null && t - ult >= 0 && t - ult < INTERVALO_TIRADA_MS)) return;
@@ -1302,7 +1324,7 @@ const ALOCUI = (() => {
     repintar(chave);
   }
 
-  return {TOTAL, iniciar, estado, esquecer, definirDataEntrega, executar, html, montar, repintar, bloqueio, paraGravar, paraParticipacao, gravarNaOS, mudou, nucleo, lerPct, pctTexto, dataBR,
+  return {TOTAL, iniciar, estado, esquecer, definirDataEntrega, executar, previaEstrutura, html, montar, repintar, bloqueio, paraGravar, paraParticipacao, gravarNaOS, mudou, nucleo, lerPct, pctTexto, dataBR,
     modoPara, dicaModo, paraEquipe, aplicarNaOS, aplicarEquipeNaOS, definirOcupados, estrutura, resultadosHTML: chave => { const st = estados.get(chave); return st ? resultadosHTML(st) : ''; }, textoOcupado, gente: genteDe};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = ALOCUI;

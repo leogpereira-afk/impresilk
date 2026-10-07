@@ -70,6 +70,9 @@
 #panel-performance .perf-podio-topo>:empty{display:none}
 #panel-performance .perf-degrau{display:none}
 #panel-performance .perf-ranking-lead{font-size:.76rem;margin:8px 0 4px}
+.perf-identidade{padding:10px 12px;margin:4px 0 12px;border:1px solid #d8e4eb;border-left:3px solid #227b76;border-radius:8px;background:#f4f9fa;font-size:.8rem;line-height:1.45;overflow-wrap:anywhere}
+.perf-identidade p{margin:0 0 4px}.perf-identidade small{display:block;color:#526471}.perf-identidade .inline-link{font-size:inherit}
+.perf-vinculo-sugerido{display:block;padding:6px 8px;border-radius:6px;background:#fff5dc;color:#765515;font-size:.72rem;line-height:1.4}
 #panel-performance .perf-method{font-size:.82rem;margin:6px 0}
 #panel-performance .perf-method>summary{cursor:pointer;min-height:34px;display:flex;align-items:center;gap:6px}
 #panel-performance .perf-method>summary:before{content:'▸'}
