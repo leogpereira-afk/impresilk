@@ -1335,7 +1335,7 @@ function perfSituacao(regs) {
   const total = (regs || []).length;
   if (!total) return null;
   const sem = regs.filter(r => !r.membros.length).length, conf = regs.filter(r => r.confirmado).length;
-  if (sem) return {tipo:'parcial', texto:`Parcial: ${perfPctTxt(total - sem, total)} das entregas com equipe`};
+  if (sem) return {tipo:'parcial', texto:`Parcial: ${perfPctTxt(total - sem, total)} das entregas com participantes`};
   if (conf < total) return {tipo:'conferir', texto:`Em conferência: ${conf} de ${total} confirmadas`};
   return {tipo:'ok', texto:'Participações confirmadas'};
 }
@@ -1442,7 +1442,7 @@ function perfCoberturaHTML(regs, f) {
   const lancar = (pendLancar ? `<p class="perf-cob-extra">${pendLancar} ${pendLancar === 1 ? 'baixa do ERP deste período espera lançamento em Entregas e ainda não conta' : 'baixas do ERP deste período esperam lançamento em Entregas e ainda não contam'} aqui. <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento</button></p>` : '')
     + (segurasERP ? `<p class="perf-cob-extra perf-cob-erp-saldo">${segurasERP} ${segurasERP === 1 ? 'entrega o ERP diz entregue e o PCP ainda tem saldo' : 'entregas o ERP diz entregues e o PCP ainda tem saldo'}; decida em Entregas. <button type="button" class="inline-link" data-perf-erp-saldo>Abrir a lista</button></p>` : '');
   const avisos = perfAvisosHTML(true);
-  if (!total) return `<section class="perf-cobertura perf-cob-linha" aria-label="Cobertura das equipes"><p>Nenhuma entrega finalizada neste período.</p>${lancar}${avisos}</section>`;
+  if (!total) return `<section class="perf-cobertura perf-cob-linha" aria-label="Cobertura das participações"><p>Nenhuma entrega finalizada neste período.</p>${lancar}${avisos}</section>`;
   // As marcas das sugeridas: a divisão que uma aba antiga deixou para trás, a que espera o RH e a quebrada.
   const marcas = [k.desatualizadas ? `${k.desatualizadas} com a divisão desatualizada` : '', k.conferirRH ? `${k.conferirRH} com pessoa a conferir no RH` : '', incons ? `${incons} com percentuais inconsistentes` : ''].filter(Boolean);
   const marcasTxt = marcas.length ? ` (${marcas.join(', ')})` : '';
@@ -1452,24 +1452,24 @@ function perfCoberturaHTML(regs, f) {
   const antigasTxt = k.antigas ? ` (${k.antigas} pela participação antiga)` : '';
   if (!sem) {
     const falta = total - conf;
-    return `<section class="perf-cobertura perf-cob-linha perf-cob-ok" aria-label="Cobertura das equipes"><p><span class="perf-cob-icone" aria-hidden="true">✓</span> Todas as ${total} entregas do período têm equipe · ${falta ? `${conf} de ${total} confirmadas${antigasTxt} · ${falta} ${falta === 1 ? 'sugerida' : 'sugeridas'}${marcasTxt}` : `todas confirmadas${antigasTxt}`}${falta && !fechada ? ` <button type="button" class="inline-link" data-perf-filtrar="pendente">${pode ? 'Conferir' : 'Ver'} as ${falta} a conferir</button>` : ''}</p>${valorLinha}${lancar}${avisos}</section>`;
+    return `<section class="perf-cobertura perf-cob-linha perf-cob-ok" aria-label="Cobertura das participações"><p><span class="perf-cob-icone" aria-hidden="true">✓</span> Todas as ${total} entregas do período têm participantes · ${falta ? `${conf} de ${total} confirmadas${antigasTxt} · ${falta} ${falta === 1 ? 'sugerida' : 'sugeridas'}${marcasTxt}` : `todas confirmadas${antigasTxt}`}${falta && !fechada ? ` <button type="button" class="inline-link" data-perf-filtrar="pendente">${pode ? 'Conferir' : 'Ver'} as ${falta} a conferir</button>` : ''}</p>${valorLinha}${lancar}${avisos}</section>`;
   }
-  // Barra empilhada: confirmadas por cima das que têm equipe; o trilho é o que falta.
-  const barra = `<svg class="perf-cob-barra" viewBox="0 0 1000 14" preserveAspectRatio="none" role="img" aria-label="${com} de ${total} entregas com equipe, ${conf} confirmadas" focusable="false"><rect class="trilho" width="1000" height="14"/>${com ? `<rect class="sug" width="${Math.round(com / total * 1000)}" height="14"/>` : ''}${conf ? `<rect class="conf" width="${Math.round(conf / total * 1000)}" height="14"/>` : ''}</svg>`;
+  // Barra empilhada: confirmadas por cima das que têm participantes; o trilho é o que falta.
+  const barra = `<svg class="perf-cob-barra" viewBox="0 0 1000 14" preserveAspectRatio="none" role="img" aria-label="${com} de ${total} entregas com participantes, ${conf} confirmadas" focusable="false"><rect class="trilho" width="1000" height="14"/>${com ? `<rect class="sug" width="${Math.round(com / total * 1000)}" height="14"/>` : ''}${conf ? `<rect class="conf" width="${Math.round(conf / total * 1000)}" height="14"/>` : ''}</svg>`;
   return `<section class="perf-cobertura perf-cob-parcial" aria-labelledby="perf-cob-titulo">
     <div class="perf-cob-cabeca">
-      <div class="perf-cob-texto"><h3 id="perf-cob-titulo">Equipe nas entregas</h3>
-        <p class="perf-cob-num"><strong>${com} de ${total}</strong> entregas com equipe <b>(${perfPctTxt(com, total)})</b></p></div>
-      <button type="button" class="${pode ? 'btn-primary' : 'btn-ghost'} btn-sm perf-cob-acao" data-perf-filtrar="sem-equipe">${pode ? 'Completar equipes' : 'Ver as sem equipe'}</button>
+      <div class="perf-cob-texto"><h3 id="perf-cob-titulo">Participantes nas entregas</h3>
+        <p class="perf-cob-num"><strong>${com} de ${total}</strong> entregas com participantes <b>(${perfPctTxt(com, total)})</b></p></div>
+      <button type="button" class="${pode ? 'btn-primary' : 'btn-ghost'} btn-sm perf-cob-acao" data-perf-filtrar="sem-equipe">${pode ? 'Informar participantes' : 'Ver as sem participantes'}</button>
     </div>
     ${barra}
     <ul class="perf-cob-legenda">
       <li class="conf"><span><b>${conf}</b> ${conf === 1 ? 'confirmada' : 'confirmadas'}${antigasTxt}${parte(k.valor.conf)}</span></li>
       <li class="sug"><span><b>${sug}</b> ${sug === 1 ? 'sugerida' : 'sugeridas'}, a conferir${marcasTxt}${parte(k.valor.sug)}</span></li>
-      <li class="sem"><span><b>${sem}</b> sem equipe${parte(k.valor.sem)}</span></li>
+      <li class="sem"><span><b>${sem}</b> sem participantes${parte(k.valor.sem)}</span></li>
     </ul>
     ${valorLinha}
-    <p class="perf-cob-dica">Enquanto houver entrega sem equipe o ranking é parcial: quem trabalhou nela ainda não aparece.</p>
+    <p class="perf-cob-dica">Enquanto houver entrega sem participantes o ranking é parcial: quem trabalhou nela ainda não aparece.</p>
     ${lancar}${avisos}
   </section>`;
 }

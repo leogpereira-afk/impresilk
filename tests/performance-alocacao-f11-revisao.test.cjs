@@ -134,7 +134,7 @@ test('revisão: a divisão desatualizada que ficou SEM gente conta só em "sem e
   const c = comBase(aparelho(), srv);
   const html = c.performanceEquipesHTML();
   const faixa = cortar(html.match(/<section class="perf-cobertura[\s\S]*?<\/section>/)[0]);
-  assert.match(faixa, /1 sem equipe/);
+  assert.match(faixa, /1 sem participantes/);
   assert.match(faixa, /2 sugeridas, a conferir \(1 com a divisão desatualizada\)/, 'só a X3 (com gente) leva a marca');
   // O selo da X2 é "Sem equipe", e a faixa bate com os selos da lista, marca por marca.
   assert.match(html.match(/<tr data-perf-id="X2">[\s\S]*?<\/tr>/)[0], /badge perf-st-sem">Sem equipe</);

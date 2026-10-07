@@ -67,21 +67,21 @@ test('cobertura: UMA faixa com "30 de 163", a ação de completar e o selo de pa
   const regs = [];
   for (let i = 0; i < 163; i++) regs.push({id:String(i), membros:i < 30 ? P.iguais([pe('Ana')]) : [], confirmado:false, valor:1, os:{}});
   const faixa = c.perfCoberturaHTML(regs, {de:'2026-09-01', ate:'2026-09-19'});
-  assert.match(faixa, /<strong>30 de 163<\/strong> entregas com equipe <b>\(18%\)<\/b>/);
-  assert.match(faixa, /data-perf-filtrar="sem-equipe">Completar equipes</);
+  assert.match(faixa, /<strong>30 de 163<\/strong> entregas com participantes <b>\(18%\)<\/b>/);
+  assert.match(faixa, /data-perf-filtrar="sem-equipe">Informar participantes</);
   assert.match(faixa, /<b>0<\/b> confirmadas/);
-  assert.match(faixa, /<b>133<\/b> sem equipe/);
+  assert.match(faixa, /<b>133<\/b> sem participantes/);
   // Quem não edita vê as entregas, não é convidado a completar.
-  assert.match(tela({papel:'montagem'}).perfCoberturaHTML(regs, {de:'', ate:''}), /Ver as sem equipe/);
+  assert.match(tela({papel:'montagem'}).perfCoberturaHTML(regs, {de:'', ate:''}), /Ver as sem participantes/);
   const rank = c.perfRankingPessoasHTML(regs, {equipes:[]});
-  assert.match(rank, /Parcial: 18% das entregas com equipe/);
+  assert.match(rank, /Parcial: 18% das entregas com participantes/);
   assert.doesNotMatch(rank, /class="perf-podio /, 'sem valor confirmado não há pódio de nota');
   regs[0].confirmado=true;
   assert.match(c.perfRankingPessoasHTML(regs,{equipes:[]}), /perf-podio n1 perf-animar perf-podio-parcial|perf-podio n1 perf-podio-parcial/);
   // Cobertura total: a faixa encolhe para uma linha verde.
   const cheia = c.perfCoberturaHTML(regs.slice(0, 30), {de:'', ate:''});
   assert.match(cheia, /perf-cob-ok/);
-  assert.match(cheia, /Todas as 30 entregas do período têm equipe/);
+  assert.match(cheia, /Todas as 30 entregas do período têm participantes/);
 });
 
 test('ranking individual: sem style= (a barra é atributo de SVG) e sem valor não confirmado', () => {

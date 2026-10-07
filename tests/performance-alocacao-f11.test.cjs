@@ -261,17 +261,17 @@ test('cobertura: a faixa "Equipe nas entregas" diz confirmadas, sugeridas, sem e
   const conf = conta(['ok']), sug = conta(['sug', 'desat', 'erro']), sem = conta(['sem']);
   assert.deepEqual([conf, sug, sem], [4, 5, 1], 'A1, A2, L1 e L4 confirmadas; A3, A4, L2, L3 e L5 sugeridas; S1 sem equipe');
   const faixa = html.match(/<section class="perf-cobertura[\s\S]*?<\/section>/)[0];
-  assert.match(faixa, /<strong>9 de 10<\/strong> entregas com equipe/);
+  assert.match(faixa, /<strong>9 de 10<\/strong> entregas com participantes/);
   assert.match(faixa, new RegExp(`<b>${conf}</b> confirmadas \\(2 pela participação antiga\\)`));
   assert.match(faixa, new RegExp(`<b>${sug}</b> sugeridas, a conferir`));
-  assert.match(faixa, new RegExp(`<b>${sem}</b> sem equipe`));
+  assert.match(faixa, new RegExp(`<b>${sem}</b> sem participantes`));
   // O valor: 1000 + 1000 + 500 + 150 confirmados de 3980 no período.
   const k = c.perfCoberturaConta(c.perfUnirPessoas(srv.registros.map(r => c.perfRegistro({id:r.id, _perf:r}, c.perfConfig()))));
   assert.deepEqual(plano(k.valor), {conf:2650, sug:1250, sem:80, total:3980});
   assert.match(cortar(faixa), /R\$2650\.00 · 67% do valor/);assert.match(cortar(faixa), /R\$80\.00 · 2% do valor/);
   assert.match(cortar(faixa), /Valor do período: R\$3980\.00, com R\$2650\.00 em entregas confirmadas \(67%\)/);
   // "Completar equipes" continua levando à conferência filtrada em "Sem equipe".
-  assert.match(faixa, /data-perf-filtrar="sem-equipe">Completar equipes</);
+  assert.match(faixa, /data-perf-filtrar="sem-equipe">Informar participantes</);
   // Quem não vê R$ (montagem) vê as contagens e não o valor.
   const m = comBase(aparelho({papel:'montagem'}), srv);
   const mont = m.perfCoberturaHTML(m.perfUnirPessoas(srv.registros.map(r => m.perfRegistro({id:r.id, _perf:r}, m.perfConfig()))), periodo);
