@@ -4293,6 +4293,7 @@ function chipsAgendaCasa(mes) {
 function renderAgendaCasa() {
   const el = document.getElementById('panel-agenda');
   if (!el) return;
+  if (typeof marcarLateral === 'function') marcarLateral();
   if (typeof DEMANDAS !== 'undefined' && DEMANDAS.ativa()) return DEMANDAS.render(el);
   if (!STATE._agMes) {
     const d = new Date();

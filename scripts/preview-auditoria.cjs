@@ -327,7 +327,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
  // &vista=poros abre Entregas na vista Por O.S. (F18); &abrir=RA2,AB1 abre a linha do tempo dessas; &status= e &busca= filtram.
  if(pv.get('vista'))STATE._entVista=pv.get('vista');
  if(pv.get('abrir')||pv.get('status')||pv.get('busca'))STATE._porOS={status:pv.get('status')||'',equipe:pv.get('equipe')||'',busca:pv.get('busca')||'',abertas:(pv.get('abrir')||'').split(',').filter(Boolean)};
- const pvAba=pv.get('aba')&&document.querySelector('.tab[data-tab="'+pv.get('aba')+'"]:not([data-vista])');
+ const pvAba=pv.get('aba')&&document.querySelector('.tab[data-tab="'+pv.get('aba')+'"]'+(pv.get('aba')==='agenda'&&pv.get('vista')==='demandas'?'[data-vista="demandas"]':':not([data-vista])'));
  if(pvAba)pvAba.click();
  // &posicao=1 escreve no título onde cada pedaço de Entregas começa (para recortar a foto sem rolar a página).
  if(pv.get('posicao'))document.title=JSON.stringify(Object.fromEntries(['.ent-kpis','#ent-kpi-poros','.ent-controles','#ent-poros','.poros-grade','.poros-tl[open]'].map(q=>{const e=document.querySelector(q);return [q,e?Math.round(e.getBoundingClientRect().top+scrollY):null];}).concat([['largura',[document.documentElement.scrollWidth,document.documentElement.clientWidth]]])));

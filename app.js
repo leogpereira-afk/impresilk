@@ -1112,6 +1112,7 @@ function initTabs() {
          entrasse por "Parado Cliente" e depois clicasse em "PCP" continuaria
          vendo so os parados, achando que a carteira sumiu. */
       if (tab === 'pcp') STATE.pcpVista = t.dataset.vista ?? '';
+      if (tab === 'agenda' && typeof DEMANDAS !== 'undefined') DEMANDAS.selecionar(t.dataset.vista === 'demandas' ? 'demandas' : 'calendario');
       /* Entrar pela lateral limpa a prioridade do dia: com uma prioridade
          escolhida antes, o atalho "Parado Cliente" mostrava a prioridade, não
          os parados (auditoria de 23/09/2026). */
@@ -1132,7 +1133,7 @@ function initTabs() {
    destaque da lateral, e as duas se desencontravam. */
 function marcarLateral() {
   const tab = STATE.activeTab;
-  const vista = tab === 'pcp' ? (STATE.pcpVista || '') : '';
+  const vista = tab === 'pcp' ? (STATE.pcpVista || '') : tab === 'agenda' && typeof DEMANDAS !== 'undefined' && DEMANDAS.ativa() ? 'demandas' : '';
   const tabs = $$('.tab');
   const alvo = tabs.find(x => x.dataset.tab === tab && (x.dataset.vista ?? '') === vista)
     || tabs.find(x => x.dataset.tab === tab && !x.dataset.vista);
@@ -8813,7 +8814,7 @@ function abrirInstrucoes() {
       <ul>
         <li><strong>Operação</strong> — 📋 <strong>PCP</strong> (todas as O.S por data de entrega, com % preenchido e responsável), 🚚 <strong>Instalação</strong> (quadro <em>Kanban</em> por dia; o 🖨 gera o espelho), ⚡ <strong>Execução</strong> (o que está na rua agora), ⏸ <strong>Parado Cliente</strong>, 🔧 <strong>Retrabalho</strong>, 🏁 <strong>Finalizados</strong> e 🚗 <strong>Volta do carro</strong>.</li>
         <li><strong>Entrega</strong>: 📦 Entregas e 🏅 Performance. Em Entregas fica a aba ✅ Fechar o dia, o lote da gestão, por dia ou pelas pendências do mês. A vista Por O.S. mostra um cartão por O.S. entregue, com status, prazo, retorno, equipe e a linha do tempo, e filtra por status, equipe e busca (número, cliente ou pessoa) sem mudar os cartões de cima.</li>
-        <li><strong>Agenda</strong> — 📅 Calendário, ⏰ Plantões e 🗓️ Programação.</li>
+        <li><strong>Agenda</strong> — 📅 Calendário, ☑️ Demandas, ⏰ Plantões e 🗓️ Programação. Em Demandas, use os chips de atenção e o botão Filtros para localizar responsáveis, situações e O.S.</li>
         <li><strong>Casa</strong> — 📊 <strong>Painel</strong> (indicadores, ranking e tendências; clique nos números para abrir o detalhe) e ⚙️ <strong>Configurações</strong> (admin: listas, usuários, contatos e níveis de acesso).</li>
       </ul>
       <p><strong>⏸ Parado Cliente e 🚗 Volta do carro são atalhos, não telas separadas:</strong> cada um abre o próprio PCP já na vista certa. É a mesma lista que o botão da barra de vistas mostra: um caminho a mais para o mesmo lugar, não um segundo lugar.</p>
