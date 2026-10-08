@@ -4293,6 +4293,7 @@ function chipsAgendaCasa(mes) {
 function renderAgendaCasa() {
   const el = document.getElementById('panel-agenda');
   if (!el) return;
+  if (typeof DEMANDAS !== 'undefined' && DEMANDAS.ativa()) return DEMANDAS.render(el);
   if (!STATE._agMes) {
     const d = new Date();
     STATE._agMes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -4396,6 +4397,7 @@ function renderAgendaCasa() {
         </details>
       </div>
     </div>`;
+  if (typeof DEMANDAS !== 'undefined') DEMANDAS.integrar(el, mes, sel);
   const concluidas = document.getElementById('ag-concluidas'); if (concluidas) concluidas.onchange = () => { STATE._agendaConcluidas = concluidas.checked; renderAgendaCasa(); };
   const hojeBtn=el.querySelector('#ag-hoje');if(hojeBtn)hojeBtn.onclick=()=>{STATE._agMes=hoje.slice(0,7);STATE._agDia=hoje;renderAgendaCasa();};
   const mesEl = document.getElementById('ag-mes');

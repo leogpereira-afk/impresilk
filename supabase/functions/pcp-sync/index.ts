@@ -1,3 +1,4 @@
+import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
 import { podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
@@ -612,7 +613,7 @@ Deno.serve(async (req: Request) => {
   // preserva a fila e pede para entrar de novo em vez de descartar trabalho.
   if (cracha && (!ehMaquina || acao === "performanceRankingEquipe")) {
     try {
-      if (await crachaRevogado(cracha, acao === "performanceRankingEquipe")) {
+      if (await crachaRevogado(cracha, acao === "performanceRankingEquipe" || acao === "demandas")) {
         return resp({ error: "Seu acesso ao PCP foi encerrado. Fale com a gestão.", semSessao: true }, 401);
       }
     } catch {
@@ -887,6 +888,10 @@ Deno.serve(async (req: Request) => {
   };
 
   try {
+    if (acao === "demandas") {
+      try { return resp(await demandasPCP(body,{sb,cracha,ehMaquina})); }
+      catch(e:any) { return resp({error:e.message||"Falha nas demandas."},e.status||503); }
+    }
     switch (acao) {
       case "performanceRankingEquipe": {
         // Nem token de backup nem parâmetros de papel/ID no corpo autorizam.

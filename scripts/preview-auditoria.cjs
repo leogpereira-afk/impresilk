@@ -3,7 +3,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['performance-layout.css','performance-dashboards.js','performance-dashboards.css','ranking.html','ranking.js','ranking.css','privacidade-valores.js','diagnostico-itens.js','relatorios-pcp.js','alertas-sync.js','index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','operacao-revisao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
+const permitidos=new Set(['demandas.js','demandas.css','performance-layout.css','performance-dashboards.js','performance-dashboards.css','ranking.html','ranking.js','ranking.css','privacidade-valores.js','diagnostico-itens.js','relatorios-pcp.js','alertas-sync.js','index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','operacao-revisao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
@@ -85,6 +85,7 @@ lista.push(base('RETRAB-CORRECAO',{numero:'TESTE-CORRECAO',cliente:'Correção f
 let pvCfgBase=structuredClone(cfg),pvCfgPendente=null;
 const revisoesPreview=[];
 async function previewApi(body){
+ if(body.action==='demandas')return fetch('/demandas-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
  if(['previewEstado','getCfg','setCfg','performanceVincularEquipe','controleEntrega','delete','restaurarOS','excluidasOS','fotosEvento','conferenciaEntrega'].includes(body.action)||(!new URLSearchParams(location.hash.slice(1)).has('comissao')&&['performancePeriodo','performanceFechamentos','performanceFechar'].includes(body.action))){
   const r=await fetch('/controle-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,seed:lista,pessoas:ELENCO_PREVIA.pessoas,cfg})});const out=await r.json();
   if(out.error)throw new Error(out.error);if(out.lista)lista=out.lista;if(out.cfg){Object.assign(cfg,out.cfg);pvCfgBase=structuredClone(cfg);}return out;
@@ -374,10 +375,12 @@ document.addEventListener('DOMContentLoaded', () => {
 const comissaoPreview=require('./preview-comissao-fixture.cjs');
 const controlePreview=require('./preview-controle-fixture.cjs');
 const rankingPreview=require('./preview-ranking-fixture.cjs');
+const demandasPreview=require('./preview-demandas-fixture.cjs')();
 http.createServer(async(req,res)=>{
   const name=new URL(req.url,'http://localhost').pathname.slice(1)||'index.html';
   res.setHeader('Cache-Control','no-store');
   res.setHeader('Content-Security-Policy',"default-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'none'");
+  if(name==='demandas-api' && req.method==='POST'){let raw='';for await(const c of req){raw+=c;if(raw.length>15000000){res.writeHead(413);res.end();return;}}try{const out=await (await demandasPreview).call(JSON.parse(raw));res.setHeader('Content-Type','application/json');res.end(JSON.stringify(out));}catch(e){res.writeHead(500);res.end(JSON.stringify({error:e.message}));}return;}
   if(name==='ranking-fixture.js'){res.setHeader('Content-Type','text/javascript');res.end(rankingPreview.script);return;}
   if(name==='ranking-api' && req.method==='POST'){
     try{let json='';for await(const chunk of req){json+=chunk;if(json.length>20000)throw new Error('Pedido grande demais.');}
