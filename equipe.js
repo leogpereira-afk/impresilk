@@ -1582,7 +1582,15 @@ function bindModal(os, ro) {
      pílula ficava em ⏳ para sempre e o Sair e a reautorização recusavam. */
   /* E fica anotada em fotosTiradas: com a O.S. mexida por outro antes, o
      servidor soma as listas e a foto apagada voltaria, com o arquivo já fora. */
+  /* Revisão da onda-w1-backup (R1/S1): a O.S. reaberta e a foto carimbada
+     pelo servidor (fotosProva) guardam a prova da entrega; só a gestão do PCP
+     apaga, com motivo. O servidor recusa e devolve a foto à lista; aqui o
+     espelho nem pede. */
   const apagarFoto = id => {
+    if (id && _draft && (_draft.reabertaEm || (Array.isArray(_draft.fotosProva) && _draft.fotosProva.includes(id)))) {
+      toast('Esta O.S. já foi finalizada e a foto é a prova da entrega. Só a gestão do PCP apaga, com motivo.', 'error');
+      return false;
+    }
     if (!id || !confirm('Apagar esta foto?')) return false;
     STORE.delFotoSync(id);
     _draft.fotosTiradas = [...new Set([...(_draft.fotosTiradas || []), id])].slice(-100);

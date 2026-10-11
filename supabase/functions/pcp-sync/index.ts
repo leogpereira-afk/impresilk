@@ -242,7 +242,8 @@ async function contarRegs(colecao: string): Promise<number> {
    contagem mesmo vazias: o Hub confere que nenhuma sumiu da porta.
 
    CURSOR ESTAVEL: [fase, colecao, id] da ULTIMA linha entregue (fase "r" =
-   pcp_registros, "d" = pcp_demandas), nunca da colecao em que o laco parou.
+   pcp_registros, "d" = pcp_demandas, "m" = pcp_meta, cuja chave e o id),
+   nunca da colecao em que o laco parou.
    Pagina que enche na fronteira entre colecoes retoma pela proxima sem pular
    nem repetir (a licao do Diamond, 25/08/2026).
 
@@ -253,6 +254,16 @@ async function contarRegs(colecao: string): Promise<number> {
 const COLECOES_EXPORTACAO = ["os", "auditoria", "foto_evento", "performance_fechamentos",
   "performance_regras", "performance_comissao", "performance_comissao_os_versoes"];
 const EXPORTACAO_PAGINA = 500; // abaixo do max_rows de 1000 do PostgREST
+/* pcp_META TAMBÉM VAI (revisão da onda-w1-backup, R4, 11/10/2026). Lá mora a
+   "cópia recuperável antes da primeira alteração" que o robô do ERP grava
+   antes de fechar, arquivar ou marcar O.S. (carteira-auditoria:*), o cache
+   mensal do ERP (entregues:*), o status da importação e a auditoria das
+   entregas. Numa volta só pelo Hub, a cópia de desfazer do robô se perdia.
+   FICA SEMPRE DE FORA a chave "mubisys": é onde o pcp-mubisys guarda a
+   credencial do ERP (salvarConfig). Segredo não vai para cópia nenhuma; ele
+   volta pela tela da integração. A fase "m" vem depois das demandas, com o
+   mesmo cursor ([fase, "", chave]) e a mesma contagem antes e depois. */
+const META_FORA_DA_COPIA = ["mubisys"];
 const EXPORTACAO_TETO_BYTES = 4_000_000;
 
 async function proximaColecao(depois: string): Promise<string | null> {
@@ -286,7 +297,12 @@ async function contagemExportacao() {
   const { count, error } = await sb.from("pcp_demandas").select("id", { count: "exact", head: true });
   if (error) throw new Error(error.message);
   if (typeof count !== "number") throw new Error("Contagem indisponível: pcp_demandas");
-  return { pcp_registros, pcp_demandas: count };
+  let qm = sb.from("pcp_meta").select("chave", { count: "exact", head: true });
+  for (const c of META_FORA_DA_COPIA) qm = qm.neq("chave", c);
+  const meta = await qm;
+  if (meta.error) throw new Error(meta.error.message);
+  if (typeof meta.count !== "number") throw new Error("Contagem indisponível: pcp_meta");
+  return { pcp_registros, pcp_demandas: count, pcp_meta: meta.count };
 }
 
 // null = começo; undefined = cursor que não foi esta porta que deu.
@@ -298,17 +314,17 @@ function lerCursorExportacao(v: unknown): { fase: string; colecao: string; id: s
   const [fase, colecao, id] = a;
   if (!id || id.length > 300) return undefined;
   if (fase === "r" && colecao && colecao.length <= 100) return { fase, colecao, id };
-  if (fase === "d" && colecao === "") return { fase, colecao, id };
+  if ((fase === "d" || fase === "m") && colecao === "") return { fase, colecao, id };
   return undefined;
 }
 
 async function paginaExportacao(cursor: { fase: string; colecao: string; id: string } | null, limite: number) {
-  const registros: any[] = [], demandas: any[] = [];
+  const registros: any[] = [], demandas: any[] = [], meta: any[] = [];
   let ultimo = cursor, bytes = 0, cheio = false, terminou = false;
   // A primeira linha de uma página sempre entra: página nunca volta vazia no meio.
   const cabe = (linha: unknown) => {
     const t = JSON.stringify(linha).length;
-    if (registros.length + demandas.length > 0 && bytes + t > EXPORTACAO_TETO_BYTES) return false;
+    if (registros.length + demandas.length + meta.length > 0 && bytes + t > EXPORTACAO_TETO_BYTES) return false;
     bytes += t;
     return true;
   };
@@ -352,30 +368,127 @@ async function paginaExportacao(cursor: { fase: string; colecao: string; id: str
         demandas.push(l);
         ultimo = { fase: "d", colecao: "", id: String(l.id) };
       }
+      // As demandas acabaram: segue para o pcp_meta, do começo.
+      if (!cheio && lote.length < falta) { fase = "m"; depois = ""; }
+    }
+  }
+  if (fase === "m" && !cheio) {
+    const falta = limite - registros.length - demandas.length;
+    if (falta <= 0) cheio = true;
+    else {
+      let q = sb.from("pcp_meta").select("chave, valor, atualizado_em");
+      for (const c of META_FORA_DA_COPIA) q = q.neq("chave", c);
+      q = q.order("chave").limit(falta);
+      if (depois) q = q.gt("chave", depois);
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      const lote = (data ?? []) as any[];
+      for (const l of lote) {
+        if (META_FORA_DA_COPIA.includes(String(l.chave))) continue;
+        if (!cabe(l)) { cheio = true; break; }
+        meta.push(l);
+        ultimo = { fase: "m", colecao: "", id: String(l.chave) };
+      }
       if (!cheio && lote.length < falta) terminou = true;
     }
   }
-  return { registros, demandas, terminou,
+  return { registros, demandas, meta, terminou,
     nextCursor: terminou ? null : JSON.stringify([ultimo!.fase, ultimo!.colecao, ultimo!.id]) };
 }
 
-/* AS O.S. FINALIZADAS QUE CITAM A FOTO (A2). Procura o id em QUALQUER campo
-   do registro (check-in, retorno, item, volta do carro, conferência, layout,
-   embarque e fotosTiradas): a tela tira a foto da lista e anota em
+/* A PROVA DA ENTREGA FICA CARIMBADA NO SERVIDOR (revisão da onda-w1-backup,
+   R1 e S1, 11/10/2026). A trava A2 olhava só o estado ATUAL da O.S., e
+   operação e montagem com senha mudam esse estado: regravar a O.S. finalizada
+   com a lista de fotos vazia, ou Reabrir (o botão da ficha não confere papel),
+   e depois pedir o deletePhoto tirava a prova do bucket sem motivo e sem
+   diário. Agora a prova é o que o SERVIDOR carimbou, não o que o aparelho
+   manda:
+
+   - fotosProva: os ids de foto que a O.S. citava enquanto estava finalizada
+     (check-in, retorno, item, volta do carro, conferência da volta, layout,
+     embarque e fotosTiradas). Só acréscimo, só do servidor: o valor que vem
+     do aparelho é ignorado, e reabrir, regravar ou mandar a lista vazia não o
+     apaga. Carimbado em toda gravação de O.S. cuja versão GRAVADA está
+     finalizada, então as O.S. finalizadas antes desta versão ganham o carimbo
+     na primeira gravação, antes de qualquer mudança passar;
+   - quem não é a gestão do PCP (admin ou pcp) não tira a prova da O.S.: a foto
+     carimbada que sumiu da lista volta para ela, com aviso (nada de 422, que
+     prenderia a fila). A gestão tira, e o arquivo continua protegido pelo
+     carimbo até o pedido de apagar com motivo. */
+const FOTOS_PROVA_TETO = 500;
+const idFotoProva = (x: unknown) => typeof x === "string" && x.length > 0 && x.length <= 200;
+function idsDeFotoDaOS(o: any): string[] {
+  if (!o || typeof o !== "object") return [];
+  const lista = (v: unknown) => (Array.isArray(v) ? v : []);
+  return [...new Set([o.layoutFotoId, o.embarqueFotoId, ...lista(o.fotosCheckinIds), ...lista(o.fotosRetornoIds),
+    ...lista(o.itens).map((i: any) => i?.fotoProbId), ...lista(o.voltaEquipe?.fotos), ...lista(o.retornoConf?.fotos),
+    ...lista(o.fotosTiradas)].filter(idFotoProva))] as string[];
+}
+function guardarFotosProva(os: any, existing: any, { gestao }: { gestao: boolean }) {
+  const avisos: string[] = [];
+  const prova = new Set<string>((Array.isArray(existing?.fotosProva) ? existing.fotosProva : []).filter(idFotoProva));
+  if (existing?.finalizadaEm) for (const id of idsDeFotoDaOS(existing)) prova.add(id);
+  if (prova.size) os.fotosProva = [...prova].slice(0, FOTOS_PROVA_TETO); else delete os.fotosProva;
+  if (gestao || !prova.size || !existing) return { os, avisos };
+  const voltaram = new Set<string>();
+  // Mesma ordem da versão gravada; o que é novo vem depois.
+  const repor = (velho: unknown, novo: unknown) => {
+    const v = Array.isArray(velho) ? velho : [], n = Array.isArray(novo) ? novo : [];
+    const faltam = v.filter((id) => prova.has(id) && !n.includes(id));
+    if (!faltam.length) return null;
+    for (const id of faltam) voltaram.add(id);
+    return [...v.filter((id) => n.includes(id) || faltam.includes(id)), ...n.filter((id) => !v.includes(id))];
+  };
+  for (const campo of ["fotosCheckinIds", "fotosRetornoIds"]) {
+    const r = repor(existing[campo], os[campo]);
+    if (r) os[campo] = r;
+  }
+  for (const campo of ["voltaEquipe", "retornoConf"]) {
+    const n = os[campo];
+    if (!n || typeof n !== "object" || Array.isArray(n)) continue;
+    const r = repor(existing[campo]?.fotos, n.fotos);
+    if (r) os[campo] = { ...n, fotos: r };
+  }
+  if (Array.isArray(existing.itens) && Array.isArray(os.itens)) {
+    os.itens = os.itens.map((it: any) => {
+      if (!it || typeof it !== "object" || !it.uid) return it;
+      const v = existing.itens.find((x: any) => x && x.uid === it.uid);
+      if (!v?.fotoProbId || !prova.has(v.fotoProbId) || it.fotoProbId === v.fotoProbId) return it;
+      voltaram.add(v.fotoProbId);
+      return { ...it, fotoProbId: v.fotoProbId };
+    });
+  }
+  if (voltaram.size) {
+    // A foto que voltou não fica anotada como tirada: a mescla do celular a tiraria de novo.
+    if (Array.isArray(os.fotosTiradas)) os.fotosTiradas = os.fotosTiradas.filter((id: unknown) => !voltaram.has(String(id)));
+    const n = voltaram.size;
+    avisos.push(`${n === 1 ? "Uma foto continua" : n + " fotos continuam"} na O.S.: a foto de O.S. que já foi finalizada é a prova da entrega, e só a gestão do PCP apaga, com motivo.`);
+  }
+  return { os, avisos };
+}
+
+/* AS O.S. QUE GUARDAM A FOTO COMO PROVA (A2, com a revisão R1/S1). Vale a O.S.
+   viva que (a) tem a foto no carimbo fotosProva, ou (b) está finalizada, ou já
+   foi reaberta (reabertaEm, carimbado pelo servidor), e cita a foto em
+   QUALQUER campo (check-in, retorno, item, volta do carro, conferência,
+   layout, embarque e fotosTiradas: a tela tira a foto da lista e anota em
    fotosTiradas ANTES de o pedido de apagar chegar, e a fila pode mandar a O.S.
-   gravada antes dele. null = a varredura não terminou (foto preservada). */
-async function osFinalizadasComFoto(fileId: string): Promise<{ id: string; numero: string }[] | null> {
+   gravada antes dele). O (b) cobre a O.S. finalizada ou reaberta antes do
+   carimbo existir. null = a varredura não terminou (foto preservada). */
+async function osComProvaDaFoto(fileId: string): Promise<{ id: string; numero: string }[] | null> {
   const alvo = JSON.stringify(fileId), achadas: { id: string; numero: string }[] = [];
   let cursor = "";
   for (let pagina = 0; pagina < 100; pagina++) {
-    let q = sb.from("pcp_registros").select("id, registro").eq("colecao", "os").eq("apagado", false)
-      .neq("registro->>finalizadaEm", "").order("id").limit(200);
+    let q = sb.from("pcp_registros").select("id, registro").eq("colecao", "os").eq("apagado", false).order("id").limit(200);
     if (cursor) q = q.gt("id", cursor);
     const { data, error } = await q;
     if (error) throw new Error(error.message);
     for (const row of (data ?? []) as any[]) {
       const o = row.registro;
-      if (o?.finalizadaEm && JSON.stringify(o).includes(alvo)) achadas.push({ id: String(row.id), numero: String(o.numero ?? "") });
+      if (!o || typeof o !== "object") continue;
+      const carimbada = Array.isArray(o.fotosProva) && o.fotosProva.includes(fileId);
+      if (carimbada || ((o.finalizadaEm || o.reabertaEm) && JSON.stringify(o).includes(alvo)))
+        achadas.push({ id: String(row.id), numero: String(o.numero ?? "") });
     }
     if (!data?.length || data.length < 200) return achadas;
     cursor = String((data[data.length - 1] as any).id);
@@ -534,6 +647,11 @@ function perfPeriodo(body: any) {
 }
 async function perfHash(v:any) {
   const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(JSON.stringify(v)));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+// A impressão digital de um texto (o CSV aprovado, M21): sha256 dos bytes UTF-8, em hexadecimal.
+async function sha256Texto(t:string) {
+  const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(t));
   return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
 }
 /* O CORTE DO LANÇAMENTO MANUAL (decisão do dono, 14/09/2026): baixa do ERP
@@ -1306,7 +1424,18 @@ Deno.serve(async (req: Request) => {
           const fonteAtual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo));
           if(fonteAtual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Revise antes de exportar."},409);
           }
-          try{return resp({ok:true,csv:COMISSAO.csv(ultima),arquivo:"comissao-"+periodo.de+"-r"+ultima.revisao+".csv",aviso:"Exportação para conferência; não realiza pagamento. Não importar novamente sem conciliação."});}catch(e){return resp({error:(e as Error).message},422);}
+          const arquivo="comissao-"+periodo.de+"-r"+ultima.revisao+".csv";
+          const aviso=(sha:string)=>"Exportação para conferência; não realiza pagamento. Não importar novamente sem conciliação. Impressão digital (sha256) do CSV: "+sha+".";
+          /* O CSV QUE FOI APROVADO (M21): a aprovação guardou o CSV e a
+             impressão digital dele; sai ESTE, conferido, e não um recalculado.
+             Guardado que não confere com a impressão digital não sai. */
+          if(typeof ultima.csv==="string"){
+            const sha=String(ultima.csvSha256||"");
+            if(!/^[a-f0-9]{64}$/.test(sha)||await sha256Texto(ultima.csv)!==sha)return resp({error:"O CSV guardado na aprovação não confere com a impressão digital dele. Nada foi exportado; avise a gestão."},409);
+            return resp({ok:true,csv:ultima.csv,csvSha256:sha,arquivo,aviso:aviso(sha)});
+          }
+          // Aprovação de antes desta versão (sem CSV guardado): o CSV sai do registro aprovado, como antes.
+          try{const csv=COMISSAO.csv(ultima),sha=await sha256Texto(csv);return resp({ok:true,csv,csvSha256:sha,arquivo,aviso:aviso(sha)});}catch(e){return resp({error:(e as Error).message},422);}
         }
         const requestId=String(body.requestId||""), motivo=String(body.motivo||"").trim();
         if(!/^[a-zA-Z0-9-]{10,80}$/.test(requestId)||motivo.length<5||motivo.length>500)return resp({error:"Informe identificação do pedido e motivo de 5 a 500 caracteres."},422);
@@ -1352,7 +1481,17 @@ Deno.serve(async (req: Request) => {
         const referenciaVersoes=Object.fromEntries(afetadas.map(osId=>[osId,versoesOS.get(osId)||0]));
         const revisao=(ultima?.revisao||0)+1,id=chave+":"+String(revisao).padStart(6,"0"),em=new Date().toISOString();
         const hash=await perfHash({apuracao,entrada,fechamentoId});
-        const registro={...periodo,id,revisao,tipo,anterior:ultima?.id||null,requestId,assinatura,motivo,fechamentoId,entrada,apuracao,hash,versoesOS:referenciaVersoes,em,autor:{login:String(cracha.sub||""),nome:String(cracha.nome||"")}};
+        const registro:any={...periodo,id,revisao,tipo,anterior:ultima?.id||null,requestId,assinatura,motivo,fechamentoId,entrada,apuracao,hash,versoesOS:referenciaVersoes,em,autor:{login:String(cracha.sub||""),nome:String(cracha.nome||"")}};
+        /* O CSV APROVADO E A IMPRESSÃO DIGITAL DELE (M21; revisão da onda
+           onda-w1-backup, R2 e S5). A aprovação de período efetivo guarda, no
+           próprio registro (só inserção, como tudo aqui), o CSV que vai à
+           conferência de pagamento e o sha256 dele. O registro vai inteiro na
+           porta de exportação do backup; a exportação da tela devolve este
+           CSV, conferido. Período de teste (outubro) não exporta, então não
+           guarda. O hash do registro (apuração, entrada, fechamento) não muda. */
+        if(tipo==="aprovacao"&&apuracao?.config?.modo==="efetivo"&&apuracao.aprovavel){
+          try{const csv=COMISSAO.csv(registro);registro.csv=csv;registro.csvSha256=await sha256Texto(csv);}catch{/* sem CSV de pagamento: a exportação diz o motivo */}
+        }
         const inserts:any[]=[];
         if(tipo==="aprovacao"){
           // Projeção ATIVA (histórico permanece imutável). Revisão do mesmo
@@ -1490,7 +1629,7 @@ Deno.serve(async (req: Request) => {
           out.cfg = config; out.cfgVersao = versao;
         }
         const pag = await paginaExportacao(cursor, limite);
-        out.registros = pag.registros; out.demandas = pag.demandas; out.nextCursor = pag.nextCursor;
+        out.registros = pag.registros; out.demandas = pag.demandas; out.meta = pag.meta; out.nextCursor = pag.nextCursor;
         if (pag.terminou) out.contagemFim = await contagemExportacao();
         return resp(out);
       }
@@ -2117,6 +2256,15 @@ Deno.serve(async (req: Request) => {
         for (const campo of ["conferenciaERP","regularizacaoSaida","revisaoSolicitada","cicloRegistro"]) { if (existing?.[campo]) os[campo]=existing[campo]; else delete os[campo]; }
         if (existing?.vinculosEquipes) os.vinculosEquipes=existing.vinculosEquipes; else delete os.vinculosEquipes;
         if (existing?.conferenciasEntrega) os.conferenciasEntrega = existing.conferenciasEntrega; else delete os.conferenciasEntrega;
+        /* A PROVA DA ENTREGA (revisão da onda-w1-backup, R1/S1): ver
+           guardarFotosProva. Depois de todas as regras acima (a mescla do
+           celular, a volta do carro, a conferência), para nenhuma delas
+           tirar de novo o que voltou. */
+        {
+          const gp = guardarFotosProva(os, existing, { gestao: !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp) });
+          trocarOS(gp.os);
+          if (!ehMaquina) avisosToque.push(...gp.avisos);
+        }
         const executado = carimbarExecucao(os, existing, cracha?.nome || cracha?.sub || "Integração", new Date().toISOString());
         const autorCarimbo = carimbosQueMudaram(executado, existing).length ? await autorAuditoria() : { nome: "", login: "", porId: "" };
         const gravar = { ...carimbarIds(executado, existing, autorCarimbo), rev: revAtual + 1 };
@@ -2862,24 +3010,28 @@ Deno.serve(async (req: Request) => {
         /* A PROVA DA ENTREGA (A2, auditoria de 11/10/2026). A foto citada por
            O.S. finalizada (check-in, retorno, item, volta do carro) é o que
            mostra a entrega física; até aqui qualquer crachá com senha a
-           apagava do bucket, sem cópia nenhuma. Agora só a gestão do PCP
-           (admin ou pcp) apaga, com motivo, e o pedido entra no diário da O.S.
-           ANTES de o arquivo sair: sem diário, a foto fica (503, a fila tenta
-           de novo). Os outros papéis, a máquina e o crachá de toque recebem
-           403 com o motivo: a fila do aparelho tira o item e diz a recusa
-           (403 não prende a fila; 422 prenderia). */
-        const finalizadas = await osFinalizadasComFoto(String(body.fileId));
+           apagava do bucket, sem cópia nenhuma. Vale também a O.S. já
+           reaberta e a foto carimbada em fotosProva (osComProvaDaFoto):
+           reabrir ou regravar a lista vazia não tira a proteção (R1/S1).
+           Agora só a gestão do PCP (admin ou pcp) apaga, com motivo, e o
+           pedido entra no diário da O.S. ANTES de o arquivo sair: sem
+           diário, a foto fica (503, a fila tenta de novo). Os outros papéis,
+           a máquina e o crachá de toque recebem 403 com o motivo: a fila do
+           aparelho tira o item e diz a recusa (403 não prende a fila; 422
+           prenderia). */
+        const finalizadas = await osComProvaDaFoto(String(body.fileId));
         if (finalizadas === null) return resp({error:"Não foi possível conferir todas as referências da foto. Arquivo preservado."},409);
         if (finalizadas.length) {
           if (!cracha || ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha.papel ?? "")))
-            return resp({error:"Foto de O.S. finalizada é a prova da entrega: só a gestão do PCP (admin ou pcp) apaga, com motivo. A foto continua guardada."},403);
+            return resp({error:"Foto de O.S. que já foi finalizada é a prova da entrega: só a gestão do PCP (admin ou pcp) apaga, com motivo. A foto continua guardada."},403);
           const motivo = String(body.motivo ?? "").trim();
           if (motivo.length < 5 || motivo.length > 500)
-            return resp({error:"Foto de O.S. finalizada: para apagar, informe o motivo (5 a 500 caracteres). A foto continua guardada."},403);
+            return resp({error:"Foto de O.S. que já foi finalizada: para apagar, informe o motivo (5 a 500 caracteres). A foto continua guardada."},403);
           const autor = await autorAuditoria(), em = new Date().toISOString();
           for (const o of finalizadas) {
             const entrada = entradaAuditoria({ id: crypto.randomUUID(), osId: o.id, numero: o.numero, acao: "foto-apagada",
-              diff: { campos: ["foto"], antes: { fileId: String(body.fileId) }, depois: { fileId: null, motivo } },
+              // Campos que a tela do histórico mostra (S2): "foto" e "motivo", antes e depois.
+              diff: { campos: ["foto", "motivo"], antes: { foto: String(body.fileId), motivo: null }, depois: { foto: null, motivo } },
               autor, origem: origemAuditoria, em });
             if (!(await gravarAuditoria(entrada)))
               return resp({error:"Não foi possível registrar o pedido no diário da O.S. A foto continua guardada; o pedido vai de novo."},503);

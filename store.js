@@ -415,7 +415,14 @@ const STORE = (() => {
     // recebe o put depois do delete e a foto "excluída" ressuscita lá).
     if (item.action === 'deletePhoto') {
       q = q.filter(x => !(x.action === 'putPhoto' && x.fileId === item.fileId));
-      if (q.some(x => x.action === 'deletePhoto' && x.fileId === item.fileId)) {
+      const i = q.findIndex(x => x.action === 'deletePhoto' && x.fileId === item.fileId);
+      if (i >= 0) {
+        /* O MOTIVO NÃO SE PERDE (revisão da onda-w1-backup, R3). O pedido com o
+           motivo da gestão troca, no mesmo lugar, o pedido da mesma foto que
+           está na fila sem ele (app antigo, clique sem sinal, recusa refeita):
+           descartar o novo mandava o sem motivo, o servidor recusava (403) e o
+           motivo digitado sumia calado. Sem motivo, o que já está fica. */
+        if (item.motivo && item.motivo !== q[i].motivo) q[i] = {...item, enfileiradoEm: q[i].enfileiradoEm || item.enfileiradoEm};
         _gravarFila(q);
         return;
       }
@@ -457,6 +464,8 @@ const STORE = (() => {
         if (item.action === 'upsert' && x.fila && item.fila && x.fila !== item.fila) return true;
         // Mesma regra para a configuração: a que foi salva durante o envio fica.
         if (item.action === 'setCfg' && x.em !== item.em) return true;
+        // E para a foto: o pedido com motivo feito durante o envio do sem motivo fica (R3).
+        if (item.action === 'deletePhoto' && (x.motivo || '') !== (item.motivo || '')) return true;
         removido = true;
         return false;
       }

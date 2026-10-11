@@ -2407,7 +2407,9 @@ const AUD_ROTULOS = {
   agendaLog: 'Histórico de remarcações', origemPDF: 'Lida do PDF do ERP',
   alocacao: 'Divisão da equipe', alocacaoLog: 'Histórico da divisão', cancelamento: 'Cancelamento da O.S.',
   ocorrencias: 'Ocorrências', abonos: 'Abonos',
-  apagado: 'Excluída'
+  apagado: 'Excluída',
+  // A foto apagada pela gestão, com o motivo (A2; revisão da onda-w1-backup, S2).
+  foto: 'Foto', motivo: 'Motivo'
 };
 // Por dentro dos campos que são objeto (conferência da volta, limpeza do
 // carro, exceção, entrega lançada, baixa do ERP): rótulo em português. O ID
@@ -2431,7 +2433,7 @@ function audTexto(v) {
   return t;
 }
 const AUD_ACOES = { criar: 'Criou a O.S.', alterar: 'Alterou', excluir: 'Excluiu a O.S.', restaurar: 'Restaurou a O.S.', configuracao: 'Alterou a configuração',
-  descartar: 'Tentou alterar a divisão da equipe (recusado)' };
+  descartar: 'Tentou alterar a divisão da equipe (recusado)', 'foto-apagada': 'Apagou a foto (prova da entrega), com motivo' };
 /* A DIVISÃO DA EQUIPE (F08) no histórico: cada pessoa com o percentual FINAL
    (o nome pela régua de hoje, nunca o ID de quem gravou), a equipe e as
    marcas. A recusa mostra o motivo e o que foi proposto. */
@@ -3752,7 +3754,7 @@ function blocoExec(os, ro, done) {
       <div class="field">
         <label>Fotos de antes (ao chegar, antes de começar)</label>
         <div class="fotos-grid" id="fotos-checkin">
-          ${fotos.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}" data-foto-checkin="${esc(fid)}"><button class="foto-rm edit-only" data-foto-rm="${esc(fid)}">×</button></div>`).join('')}
+          ${fotos.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}" data-foto-checkin="${esc(fid)}"><button class="${fotoRmClasse(os)}" data-foto-rm="${esc(fid)}">×</button></div>`).join('')}
         </div>
         ${fotoCameraGaleriaHTML('data-foto-checkin-input', 'antes', ro, fmsgAttr('fotosSaida'))}
         <p class="foto-dica">Pelo menos 1 foto de antes para finalizar. Anexar foto não informa a hora real da saída. Confirme o horário, especialmente em envio posterior.</p>
@@ -3799,7 +3801,7 @@ function blocoExec(os, ro, done) {
       <div class="field">
         <label>Fotos de depois (serviço pronto)</label>
         <div class="fotos-grid" id="fotos-retorno">
-          ${fotosRet.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}"><button class="foto-rm edit-only" data-foto-rm-retorno="${esc(fid)}">×</button></div>`).join('')}
+          ${fotosRet.map(fid => `<div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(fid)}"><button class="${fotoRmClasse(os)}" data-foto-rm-retorno="${esc(fid)}">×</button></div>`).join('')}
         </div>
         ${fotoCameraGaleriaHTML('data-foto-retorno-input', 'depois', ro, fmsgAttr('fotosRetorno'))}
         <p class="foto-dica">Pelo menos 1 foto de depois para finalizar. Anexar foto não informa a hora real do retorno. Confirme o horário, especialmente em envio posterior.</p>
@@ -4518,18 +4520,33 @@ function registrarRemarcacao(os, novaData) {
    antes de tirar a foto da ficha e recusa na hora os outros papéis: tirar da
    ficha e depois ouvir a recusa deixaria a ficha sem a foto que continua
    guardada. O.S. aberta segue como sempre (só confirma). */
-function motivoParaApagarFoto(os, papel, { confirmar, perguntar, avisar }) {
-  if (!(os && os.finalizadaEm)) return confirmar('Apagar esta foto? Ela sai do servidor e não volta.') ? { apagar: true, motivo: '' } : { apagar: false };
+/* Revisão da onda-w1-backup (R1/S1): a régua é a do servidor
+   (osComProvaDaFoto). Vale a O.S. finalizada, a O.S. que já foi reaberta e a
+   foto que o servidor carimbou em fotosProva: reabrir não tira a proteção. */
+function motivoParaApagarFoto(os, papel, { confirmar, perguntar, avisar }, fid) {
+  const prova = !!(os && (os.finalizadaEm || os.reabertaEm || (fid && Array.isArray(os.fotosProva) && os.fotosProva.includes(fid))));
+  if (!prova) return confirmar('Apagar esta foto? Ela sai do servidor e não volta.') ? { apagar: true, motivo: '' } : { apagar: false };
   if (!['admin', 'pcp'].includes(String(papel || ''))) {
-    avisar('Esta O.S. está finalizada e a foto é a prova da entrega. Só a gestão do PCP apaga, com motivo.');
+    avisar('Esta O.S. já foi finalizada e a foto é a prova da entrega. Só a gestão do PCP apaga, com motivo.');
     return { apagar: false };
   }
-  const motivo = String(perguntar('A O.S. está finalizada e esta foto é a prova da entrega. Para apagar, escreva o motivo (fica no histórico da O.S.):') || '').trim();
+  const motivo = String(perguntar('A O.S. já foi finalizada e esta foto é a prova da entrega. Para apagar, escreva o motivo (fica no histórico da O.S.):') || '').trim();
   if (motivo.length < 5 || motivo.length > 500) {
     if (motivo) avisar('O motivo precisa ter de 5 a 500 caracteres. A foto não foi apagada.');
     return { apagar: false };
   }
   return { apagar: true, motivo };
+}
+
+/* O × DA FOTO NA FICHA (revisão da onda-w1-backup, R1). A ficha da O.S.
+   finalizada é travada (#modal-os.os-locked esconde .edit-only), e o × ficava
+   escondido para todos: a gestão só apagava reabrindo, e sem motivo. Na O.S.
+   finalizada, o × é da gestão do PCP (admin e pcp) e fica fora da trava
+   (lock-allow); ele pede o motivo (motivoParaApagarFoto). Os outros papéis
+   não o veem. Na O.S. aberta, a regra de sempre. */
+function fotoRmClasse(os, papel) {
+  const p = papel === undefined ? String((typeof STATE !== 'undefined' && STATE.user && STATE.user.papel) || '') : String(papel || '');
+  return os && os.finalizadaEm && ['admin', 'pcp'].includes(p) ? 'foto-rm lock-allow' : 'foto-rm edit-only';
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -4947,7 +4964,7 @@ function bindModalEvents(os, ro) {
       // O × fica no canto da miniatura, que agora abre a foto grande: um toque
       // torto apagava a foto da rua do servidor, sem volta. Pergunta antes.
       // O.S. finalizada: só a gestão, com motivo (motivoParaApagarFoto).
-      const pedido = motivoParaApagarFoto(_modalDraft, STATE.user && STATE.user.papel, { confirmar: t => confirm(t), perguntar: t => prompt(t), avisar: t => toast(t, 'error') });
+      const pedido = motivoParaApagarFoto(_modalDraft, STATE.user && STATE.user.papel, { confirmar: t => confirm(t), perguntar: t => prompt(t), avisar: t => toast(t, 'error') }, fid);
       if (!pedido.apagar) return;
       STORE.delFotoSync(fid, pedido.motivo);
       _modalDraft.fotosCheckinIds = (_modalDraft.fotosCheckinIds || []).filter(x => x !== fid);
@@ -4974,7 +4991,7 @@ function bindModalEvents(os, ro) {
   $$('[data-foto-rm-retorno]', root).forEach(btn => {
     btn.onclick = () => {
       const fid = btn.dataset.fotoRmRetorno;
-      const pedido = motivoParaApagarFoto(_modalDraft, STATE.user && STATE.user.papel, { confirmar: t => confirm(t), perguntar: t => prompt(t), avisar: t => toast(t, 'error') });
+      const pedido = motivoParaApagarFoto(_modalDraft, STATE.user && STATE.user.papel, { confirmar: t => confirm(t), perguntar: t => prompt(t), avisar: t => toast(t, 'error') }, fid);
       if (!pedido.apagar) return;
       STORE.delFotoSync(fid, pedido.motivo);
       _modalDraft.fotosRetornoIds = (_modalDraft.fotosRetornoIds || []).filter(x => x !== fid);

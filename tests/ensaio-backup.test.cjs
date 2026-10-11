@@ -6,10 +6,11 @@
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const E = require('../scripts/ensaio-backup-pcp.cjs');
 
-test('ensaio do backup: ida pela porta nova e volta num PCP vazio, com as dez provas', async () => {
+test('ensaio do backup: ida pela porta nova e volta num PCP vazio, com as onze provas', async () => {
   const r = await E.executar({gravar: false});
   assert.deepEqual(r.checks, [
     'exportação pela porta nova: todas as linhas, sem repetir, com a contagem conferida',
+    'pcp_meta vai na cópia (a cópia de desfazer do robô e o cache do ERP), e a credencial do ERP não',
     'volta: as mesmas linhas, com o apagado e o atualizado_em de cada uma',
     'lápide continua lápide: fora da lista, na lista de excluídas, e o celular recebe "excluída"',
     'selo e comissão voltam: o servidor recalcula, o hash do selo confere e o CSV é idêntico',
@@ -21,6 +22,7 @@ test('ensaio do backup: ida pela porta nova e volta num PCP vazio, com as dez pr
     'a volta do jeito antigo (só o list do Hub) perdia a lápide e reabria o mês',
   ]);
   assert.equal(r.lapides, 1);
+  assert.equal(r.meta, 2, 'o pcp_meta voltou, sem a credencial do ERP');
   assert.ok(r.paginas > 1, 'a exportação passou por mais de uma página');
   for (const c of ['os', 'auditoria', 'foto_evento', 'performance_fechamentos', 'performance_regras', 'performance_comissao', 'performance_comissao_os_versoes'])
     assert.ok(r.contagem[c] >= 1, c);
@@ -30,6 +32,6 @@ test('pacote pcp-backup-5: as mesmas chaves que o painel-backup grava em pcp/AAA
   // A lista é a de montarArquivoPCP (painel-impresilk, supabase/functions/_shared/backup-pcp.mjs).
   const p = E.montarPacote({pcp_registros: [], pcp_demandas: [], cfg: {}, cfgVersao: '', contagemInicio: {}, contagemFim: {}, formato: 'pcp-exportacao-1', paginas: 1}, {});
   assert.deepEqual(Object.keys(p).sort(), ['arquivos', 'arquivosCompletos', 'arquivosPendentes', 'cfg', 'cfgVersao', 'contagem', 'destinoArquivos', 'divergencias',
-    'exportadoEm', 'formato', 'nome', 'origem', 'pcp_demandas', 'pcp_registros', 'sistema', 'versao']);
+    'exportadoEm', 'formato', 'nome', 'origem', 'pcp_demandas', 'pcp_meta', 'pcp_registros', 'sistema', 'versao']);
   assert.equal(p.formato, 'pcp-backup-5');
 });

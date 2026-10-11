@@ -12,7 +12,9 @@
         testes): O.S. viva, O.S. excluída pela ação delete (lápide), diário,
         fotos subidas pelo putPhoto (horário em foto_evento), demanda com
         anexo, versão de regra, o mês fechado pela performanceFechar (selo) e
-        a comissão prévia, aprovada e exportada (CSV);
+        a comissão prévia, aprovada e exportada (CSV, guardado na aprovação com
+        o sha256 dele), e o pcp_meta (a cópia de desfazer do robô do ERP e a
+        credencial do ERP, que nunca sai);
      2. a exportação pela porta nova exportarBackup (só da máquina), página a
         página, e a cópia dos buckets por sha256 no mesmo desenho do Hub
         (arquivos/<bucket>/<sha256>); o pacote sai no formato pcp-backup-5,
@@ -78,7 +80,7 @@ function storageMemoria() {
 
 // ---------------------------------------------------------------- ida: porta nova + cópia por sha256
 async function exportarPeloServidor(e, {limite} = {}) {
-  const registros = [], demandas = [], vistos = new Set(), cursores = new Set();
+  const registros = [], demandas = [], meta = [], vistos = new Set(), cursores = new Set();
   let cursor = null, primeira = null, ultima = null, paginas = 0;
   for (; paginas < 1000; paginas++) {
     const r = await e.call({action: 'exportarBackup', ...(cursor ? {cursor} : {}), ...(limite ? {limite} : {})});
@@ -86,12 +88,13 @@ async function exportarPeloServidor(e, {limite} = {}) {
     if (!primeira) primeira = r;
     for (const l of r.registros) { const k = l.colecao + '\u0000' + l.id; if (vistos.has(k)) throw new Error('Linha repetida na exportação.'); vistos.add(k); registros.push(l); }
     for (const d of r.demandas) { const k = 'd\u0000' + d.id; if (vistos.has(k)) throw new Error('Demanda repetida na exportação.'); vistos.add(k); demandas.push(d); }
+    for (const m of r.meta || []) { const k = 'm\u0000' + m.chave; if (vistos.has(k)) throw new Error('Linha do pcp_meta repetida na exportação.'); vistos.add(k); meta.push(m); }
     ultima = r;
     if (r.nextCursor == null) break;
     if (cursores.has(r.nextCursor)) throw new Error('Cursor repetido.');
     cursores.add(r.nextCursor); cursor = r.nextCursor;
   }
-  return {pcp_registros: registros, pcp_demandas: demandas, cfg: primeira.cfg, cfgVersao: primeira.cfgVersao,
+  return {pcp_registros: registros, pcp_demandas: demandas, pcp_meta: meta, cfg: primeira.cfg, cfgVersao: primeira.cfgVersao,
     contagemInicio: primeira.contagemInicio, contagemFim: ultima.contagemFim, formato: primeira.formato, paginas: paginas + 1};
 }
 
@@ -130,8 +133,8 @@ function contarLinhas(linhas) {
 function montarPacote(exp, manifesto, exportadoEm = new Date().toISOString()) {
   return {versao: 5, formato: 'pcp-backup-5', sistema: 'pcp', nome: 'PCP fictício', exportadoEm,
     origem: {acao: 'exportarBackup', formato: exp.formato, paginas: exp.paginas},
-    cfg: exp.cfg, cfgVersao: exp.cfgVersao, pcp_registros: exp.pcp_registros, pcp_demandas: exp.pcp_demandas,
-    contagem: {inicio: exp.contagemInicio, fim: exp.contagemFim, exportado: {pcp_registros: contarLinhas(exp.pcp_registros), pcp_demandas: exp.pcp_demandas.length}},
+    cfg: exp.cfg, cfgVersao: exp.cfgVersao, pcp_registros: exp.pcp_registros, pcp_demandas: exp.pcp_demandas, pcp_meta: exp.pcp_meta || [],
+    contagem: {inicio: exp.contagemInicio, fim: exp.contagemFim, exportado: {pcp_registros: contarLinhas(exp.pcp_registros), pcp_demandas: exp.pcp_demandas.length, pcp_meta: (exp.pcp_meta || []).length}},
     divergencias: [], destinoArquivos: 'arquivos/<bucket>/<sha256>', arquivos: manifesto,
     arquivosCompletos: true, arquivosPendentes: 0};
 }
@@ -158,6 +161,21 @@ function validarPacote(p) {
     if (la === lb && typeof la === 'number' && (real[c]?.apagados || 0) !== la) throw new Error(`A contagem de lápides não confere em ${c}.`);
   }
   if (p.pcp_demandas.length < (p.contagem.inicio.pcp_demandas || 0) || p.pcp_demandas.length > p.contagem.fim.pcp_demandas) throw new Error('A contagem de demandas não confere.');
+  /* O pcp_meta (revisão da onda-w1-backup, R4): o arquivo do Hub de antes
+     dele não o traz (fica 0); o que traz confere a contagem e nunca traz a
+     credencial do ERP. */
+  let meta = 0;
+  if (p.pcp_meta !== undefined) {
+    if (!Array.isArray(p.pcp_meta)) throw new Error('pcp_meta inválido no pacote.');
+    for (const m of p.pcp_meta) {
+      if (!m || typeof m.chave !== 'string' || !m.chave || vistos.has('m\u0000' + m.chave) || m.valor === undefined) throw new Error('Linha do pcp_meta inválida ou repetida.');
+      if (m.chave === 'mubisys') throw new Error('O pacote traz a credencial do ERP (pcp_meta mubisys): não use este arquivo.');
+      vistos.add('m\u0000' + m.chave);
+    }
+    const ma = p.contagem?.inicio?.pcp_meta, mb = p.contagem?.fim?.pcp_meta;
+    if (typeof mb !== 'number' || p.pcp_meta.length < (ma || 0) || p.pcp_meta.length > mb) throw new Error('A contagem do pcp_meta não confere.');
+    meta = p.pcp_meta.length;
+  }
   let arquivos = 0;
   for (const [bucket, lista] of Object.entries(p.arquivos || {})) {
     if (!BUCKETS.includes(bucket) || !Array.isArray(lista)) throw new Error('Bucket desconhecido no pacote.');
@@ -168,7 +186,7 @@ function validarPacote(p) {
       caminhos.add(a.caminho); arquivos++;
     }
   }
-  return {colecoes: real, lapides: Object.values(real).reduce((n, c) => n + c.apagados, 0), demandas: p.pcp_demandas.length, arquivos};
+  return {colecoes: real, lapides: Object.values(real).reduce((n, c) => n + c.apagados, 0), demandas: p.pcp_demandas.length, meta, arquivos};
 }
 
 /* A VOLTA, num PCP VAZIO (projeto novo): primeiro confere TODOS os arquivos
@@ -188,6 +206,7 @@ async function restaurarPacote(p, alvo) {
   for (const a of preparados) await alvo.subirArquivo(a.bucket, a.caminho, a.conteudo, a.tipo);
   await alvo.gravarRegistros(p.pcp_registros.map(l => ({colecao: l.colecao, id: l.id, registro: l.registro, apagado: l.apagado, atualizado_em: l.atualizado_em})));
   await alvo.gravarDemandas(p.pcp_demandas.map(d => ({id: d.id, registro: d.registro, revision: d.revision, mutation_id: d.mutation_id, atualizado_em: d.atualizado_em})));
+  if (Array.isArray(p.pcp_meta)) await alvo.gravarMeta(p.pcp_meta.map(m => ({chave: m.chave, valor: m.valor, atualizado_em: m.atualizado_em})));
   await alvo.gravarConfig(p.cfg, p.cfgVersao);
   return {...resumo, arquivosRestaurados: preparados.length};
 }
@@ -195,7 +214,7 @@ async function restaurarPacote(p, alvo) {
 // O alvo da volta numa caixa de areia: o banco falso e o Storage em memória do servidor real.
 function alvoSandbox(e, storage, destino) {
   return {
-    vazio: async () => !e.db.pcp_registros.length && !(e.db.pcp_demandas || []).length,
+    vazio: async () => !e.db.pcp_registros.length && !(e.db.pcp_demandas || []).length && !(e.db.pcp_meta || []).length,
     lerCopia: async (bucket, h) => destino.get(`arquivos/${bucket}/${h}`) || null,
     async subirArquivo(bucket, caminho, bytes, tipo) {
       const {data} = await storage.from(bucket).download(caminho);
@@ -205,6 +224,7 @@ function alvoSandbox(e, storage, destino) {
     },
     gravarRegistros: async linhas => { e.db.pcp_registros.push(...structuredClone(linhas)); },
     gravarDemandas: async linhas => { (e.db.pcp_demandas ||= []).push(...structuredClone(linhas)); },
+    gravarMeta: async linhas => { (e.db.pcp_meta ||= []).push(...structuredClone(linhas)); },
     gravarConfig: async (cfg, versao) => { e.db.pcp_config_global = [{id: true, config: structuredClone(cfg), atualizado_em: versao}]; },
   };
 }
@@ -224,6 +244,7 @@ const osFicticia = (id, extra) => ({colecao: 'os', id, apagado: false, atualizad
 // Um PNG de 1x1 e um "PDF" mínimo, fictícios.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=', 'base64');
 const PDF = Buffer.from('%PDF-1.4\n% anexo fictício do ensaio\n%%EOF\n');
+const CREDENCIAL_FICTICIA = 'credencial-ficticia-do-ensaio';
 
 async function servidorVazio(storage) {
   const e = await edge('pcp-sync', {pcp_registros: [], pcp_config_global: [], pcp_demandas: [],
@@ -253,6 +274,12 @@ async function montarOriginal() {
   // Uma demanda com anexo no bucket pcp-demandas (<demanda>/<sha256>, como o servidor grava).
   e.db.pcp_demandas.push({id: 'dem-1', registro: {id: 'dem-1', titulo: 'Demanda fictícia', anexos: [{id: 'm1', path: 'dem-1/' + sha256(PDF), nome: 'anexo.pdf'}]}, revision: 3, mutation_id: 'mut-3', atualizado_em: '2026-11-20T10:00:00Z'});
   await storage.from('pcp-demandas').upload('dem-1/' + sha256(PDF), PDF, {contentType: 'application/pdf'});
+  // O pcp_meta: a cópia de desfazer do robô do ERP, o cache de um mês e a credencial do ERP (fictícios).
+  e.db.pcp_meta = [
+    {chave: 'carteira-auditoria:2026-11-15T10:00:00Z', valor: {em: '2026-11-15T10:00:00Z', origem: 'Mubisys fictício', numeros: ['QA-os-aberta'], antes: [{id: 'os-aberta', numero: 'QA-os-aberta'}]}, atualizado_em: '2026-11-15T10:00:00Z'},
+    {chave: 'entregues:2026-10', valor: {mes: '2026-10', os: []}, atualizado_em: '2026-11-01T03:00:00Z'},
+    {chave: 'mubisys', valor: {publicKey: 'pk-ficticia', accessToken: CREDENCIAL_FICTICIA, base: '', status: 'PRODUCAO'}, atualizado_em: '2026-11-01T00:00:00Z'},
+  ];
   // Uma versão de regra vigente desde 01/11, igual à embutida.
   const R = require('../regras.js');
   ok(await e.call({action: 'performanceRegraNova', regra: JSON.parse(JSON.stringify({...R.REGRA_EMBUTIDA, validaDesde: '2026-11-01'})), motivo: 'Primeira versão fictícia', anterior: '', requestId: 'ensaio-regra-0001'}, GESTOR), 'regra');
@@ -285,6 +312,10 @@ async function executar({gravar = true} = {}) {
     assert.deepEqual(ordenar(pacote.pcp_registros), linhasOriginais);
     validarPacote(pacote);
   });
+  await provar('pcp_meta vai na cópia (a cópia de desfazer do robô e o cache do ERP), e a credencial do ERP não', () => {
+    assert.deepEqual(pacote.pcp_meta.map(m => m.chave), ['carteira-auditoria:2026-11-15T10:00:00Z', 'entregues:2026-10']);
+    assert.ok(!JSON.stringify(pacote).includes(CREDENCIAL_FICTICIA), 'a credencial do ERP não está no pacote');
+  });
   // O pacote passa por JSON, como o arquivo do Hub.
   const lido = JSON.parse(JSON.stringify(pacote));
 
@@ -294,6 +325,7 @@ async function executar({gravar = true} = {}) {
   await provar('volta: as mesmas linhas, com o apagado e o atualizado_em de cada uma', () => {
     assert.deepEqual(ordenar(e2.db.pcp_registros), linhasOriginais);
     assert.deepEqual(e2.db.pcp_demandas, orig.e.db.pcp_demandas);
+    assert.deepEqual(e2.db.pcp_meta, orig.e.db.pcp_meta.filter(m => m.chave !== 'mubisys'), 'o pcp_meta volta, sem a credencial');
     assert.deepEqual(e2.db.pcp_config_global[0].config, orig.e.db.pcp_config_global[0].config);
   });
   await provar('lápide continua lápide: fora da lista, na lista de excluídas, e o celular recebe "excluída"', async () => {
@@ -314,6 +346,8 @@ async function executar({gravar = true} = {}) {
     const x = await e2.call({action: 'performanceComissaoExportar', ...NOVEMBRO, id: orig.aprovada.id}, GESTOR);
     assert.equal(x.status, 200, JSON.stringify(x));
     assert.equal(sha256(x.csv), sha256(orig.csv));
+    // O CSV aprovado volta guardado na aprovação, com a impressão digital dele (M21).
+    assert.equal(ap.csvSha256, sha256(orig.csv)); assert.equal(x.csvSha256, ap.csvSha256);
   });
   await provar('mês fechado continua fechado: regra nova com data dentro dele é recusada (409)', async () => {
     const R = require('../regras.js');
@@ -362,7 +396,7 @@ async function executar({gravar = true} = {}) {
 
   const resultado = {ambiente: 'fictício, servidor real (pcp-sync) com banco e Storage em memória; sem rede nem credencial',
     paginas: exp.paginas, contagem: Object.fromEntries(Object.entries(volta.colecoes).map(([c, v]) => [c, v.total])),
-    lapides: volta.lapides, demandas: volta.demandas, arquivos: volta.arquivosRestaurados, checks};
+    lapides: volta.lapides, demandas: volta.demandas, meta: volta.meta, arquivos: volta.arquivosRestaurados, checks};
   if (gravar) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pcp-ensaio-backup-'));
     fs.writeFileSync(path.join(dir, 'pacote.json'), JSON.stringify(lido, null, 2));
@@ -399,7 +433,7 @@ async function conferirArquivoReal(arquivo, copia) {
   const lista = await e.call({action: 'list', escopo: 'tudo'}, GESTOR);
   if ((lista.os || []).some(o => e.db.pcp_registros.find(r => r.colecao === 'os' && r.id === o.id)?.apagado)) throw new Error('Lápide apareceu na lista depois da volta.');
   return {formato: p.formato, arquivosCompletos: p.arquivosCompletos, contagem: Object.fromEntries(Object.entries(resumo.colecoes).map(([c, v]) => [c, v.total])),
-    lapides, demandas: resumo.demandas, arquivosNoManifesto: resumo.arquivos, arquivosConferidos,
+    lapides, demandas: resumo.demandas, meta: resumo.meta, arquivosNoManifesto: resumo.arquivos, arquivosConferidos,
     fechamentos: resumo.colecoes.performance_fechamentos?.total || 0, comissoes: resumo.colecoes.performance_comissao?.total || 0};
 }
 
@@ -408,4 +442,4 @@ if (require.main === module) {
   const tarefa = arg('--arquivo') ? conferirArquivoReal(arg('--arquivo'), arg('--copia')) : executar();
   tarefa.then(r => console.log(JSON.stringify(r, null, 2)), e => { console.error('Ensaio reprovado: ' + e.message); process.exit(1); });
 }
-module.exports = {executar, conferirArquivoReal, validarPacote, restaurarPacote, exportarPeloServidor, copiarArquivos, montarPacote, storageMemoria};
+module.exports = {executar, conferirArquivoReal, validarPacote, restaurarPacote, exportarPeloServidor, copiarArquivos, montarPacote, storageMemoria, montarOriginal};

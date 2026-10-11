@@ -63,8 +63,10 @@ test('A2: a gestão (pcp, admin) só apaga a prova com motivo, e o pedido entra 
     const d=diario(e);
     assert.equal(d.length,1);
     assert.equal(d[0].osId,'final');assert.equal(d[0].numero,'N-final');assert.equal(d[0].acao,'foto-apagada');
-    assert.deepEqual(d[0].antes,{fileId:'foto_prova'});
-    assert.equal(d[0].depois.motivo,MOTIVO);assert.equal(d[0].depois.fileId,null);
+    // Os campos que a tela do histórico mostra (revisão da onda-w1-backup, S2): a foto e o motivo.
+    assert.deepEqual(d[0].campos,['foto','motivo']);
+    assert.deepEqual(d[0].antes,{foto:'foto_prova',motivo:null});
+    assert.deepEqual(d[0].depois,{foto:null,motivo:MOTIVO});
     assert.equal(d[0].autor.papel,quem.papel);assert.equal(d[0].autor.login,quem.sub);assert.equal(d[0].origem,'tela');
   }
 });
