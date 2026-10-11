@@ -3814,6 +3814,13 @@ function abrirTVCasa() {
   if (box.requestFullscreen) box.requestFullscreen().catch(() => {});
 }
 
+/* ESTA CASA TEM A ABA CONFERÊNCIA (revisão da onda w3, R5). O performance.js
+   tira a Conferência dos Rankings só quando a casa a mostra na aba própria.
+   O casa.js antigo, preso no cache ao lado do performance.js novo, não define
+   esta função: a conferência volta ao fim dos Rankings, em vez de sumir de
+   todas as abas. */
+function perfCasaTemAbaConferencia() { return true; }
+
 function renderPerformanceCasa() {
   const el = document.getElementById('panel-performance');
   if (!el) return;

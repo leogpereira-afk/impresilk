@@ -133,7 +133,7 @@ async function previewApi(body){
     revisão da comissão: tudo "a decidir pela gestão". Com #perdas=1, uma prévia
     FICTÍCIA da comissão calculada pelo motor de verdade (comissao.js), com falha
     comprovada na PERDA1 e abono na AB1, e o fechamento dela. Tudo fictício. */
- if(body.action==='performanceComissaoListar')return {revisoes:[],pessoas:[]};
+ if(body.action==='performanceComissaoListar')return {revisoes:[],pessoas:[],cobrem:[]};
  // Chamada no começo do previewApi (antes do roteamento do controle, que também atende performanceFechamentos).
  async function previewPerdas(body){
   const base=await previewApi({action:'performancePeriodo',de:body.de,ate:body.ate});
@@ -142,7 +142,8 @@ async function previewApi(body){
   const doc={origem:'Vistoria fictícia',evidencia:'Foto fictícia da prévia',justificativa:'Decisão fictícia para a prévia'};
   const entrada={config:{modo:'teste',criteriosExtras:'somente_falha_comprovada'},decisoes:{PERDA1:{...doc,decisao:'falha_comprovada',tipo:'incompleto'},AB1:{...doc,decisao:'abono',tipo:'atraso'}},
    entregas:Object.fromEntries(fech.registros.map(r=>[r.id,{...doc,entregue:true,grupos:[{montadorId:(r.membros[0]||{}).chave}],interna:{...doc,situacao:'nao_aplicavel'}}]))};
-  return {revisoes:[{id:body.de+':'+body.ate+':000001',revisao:1,tipo:'previa',em:new Date().toISOString(),fechamentoId:fech.id,entrada,apuracao:COMISSAO.apurar(fech,entrada,{aprovacoes:[]})}],pessoas:[]};
+  // cobrem: os demonstrativos de outros períodos que cobrem o recorte (revisão da onda w3, R1); a prévia só tem o do recorte.
+  return {revisoes:[{de:body.de,ate:body.ate,id:body.de+':'+body.ate+':000001',revisao:1,tipo:'previa',em:new Date().toISOString(),fechamentoId:fech.id,entrada,apuracao:COMISSAO.apurar(fech,entrada,{aprovacoes:[]})}],pessoas:[],cobrem:[]};
  }
  if(body.action==='performanceFechamentos')return {fechamentos:revisoesPreview};
  if(body.action==='performanceFechar'){

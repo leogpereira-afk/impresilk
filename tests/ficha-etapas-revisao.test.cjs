@@ -178,12 +178,13 @@ test('revisão: D1, o checklist não diz "fica pendente para a pontuação"; cad
   const volta = doChecklist(fech, 'Limpeza e equipamentos da volta');
   assert.equal(volta.estado, 'falta');
   assert.match(volta.html, /Sem a conferência, a volta fica neutra: sem bônus e sem redutor\./);
-  // Atraso e retrabalho tiram a O.S. da pontuação; o retrabalho não se abona, o atraso sim.
+  // Atraso e retrabalho viram ocorrência a decidir pela gestão (revisão da onda w3, U1: a regra deles está pendente, A3, e a ficha
+  // dizia "não pontua" ao lado da aba Perdas dizendo "a decidir"); o retrabalho não se abona, o atraso sim.
   const t2 = tela({lista: [finalizada({retrabalho: true, problema: 'Placa torta fictícia', retornoConf: VOLTA_OK, instalacao: {data: '2026-10-02', periodo: 'Manhã', duracaoDias: 1}})]});
   t2.abrirOS('f1');
   const f2 = t2.secoes().fechamento;
-  assert.match(doChecklist(f2, 'Retrabalho').html, /Retrabalho tira a O\.S\. da pontuação para todos e não se abona\./);
-  assert.match(doChecklist(f2, 'Prazo').html, /Entregue com atraso: a O\.S\. não pontua\. O abono devolve\./);
+  assert.match(doChecklist(f2, 'Retrabalho').html, /Retrabalho: ocorrência a decidir pela gestão\. Até a decisão, não tira pontos nem comissão\. Retrabalho não se abona\./);
+  assert.match(doChecklist(f2, 'Prazo').html, /Entregue com atraso: ocorrência a decidir pela gestão\. Até a decisão, não tira pontos nem comissão; o abono justifica o atraso\./);
   assert.match(doChecklist(f2, 'Limpeza e equipamentos da volta').html, /Carro limpo e arrumado: bônus da volta\./);
   // O item sem efeito na pontuação é só "falta": a foto que falta na finalizada não promete nada.
   const t3 = tela({lista: [finalizada({fotosRetornoIds: [], retornoConf: VOLTA_OK, retrabalhoPerguntado: RESPONDIDO_NAO})]});
@@ -195,7 +196,7 @@ test('revisão: D1, o checklist não diz "fica pendente para a pontuação"; cad
   const t4 = tela({lista: [finalizada({finalizadaEm: '2026-09-20T16:00:00'})]});
   t4.abrirOS('f1');
   const f4 = t4.secoes().fechamento;
-  assert.doesNotMatch(f4, /fica neutra|bônus|não pontua/);
+  assert.doesNotMatch(f4, /fica neutra|bônus|não pontua|a decidir pela gestão/);
   assert.match(f4, /Entregue antes de 01\/10\/2026: os efeitos do programa não valem para ela\./);
 });
 

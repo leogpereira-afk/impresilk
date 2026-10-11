@@ -75,7 +75,9 @@ function aparelho({cfg = cfgBase(), papel = 'pcp', src = null, api = null, fila 
     diaEntrega:o => String((o && o.entregaLancada && o.entregaLancada.data) || (o && o.finalizadaEm) || '').slice(0, 10),
     valorDaOS:o => o.valorTotal == null ? null : Number(o.valorTotal),
     pessoasRH:() => ELENCO, avatarRH:() => '', esc, dinheiroCasa:n => 'R$' + Number(n).toFixed(2), filtroPeriodoHTML:() => '', normCasa:s => String(s || '').toLowerCase(),
-    toast:(msg, tipo) => toasts.push([msg, tipo || '']), renderPerformanceCasa:() => {}};
+    toast:(msg, tipo) => toasts.push([msg, tipo || '']), renderPerformanceCasa:() => {},
+    // A casa nova (com a aba Conferência): os Rankings não repetem a lista (revisão da onda w3, R5).
+    perfCasaTemAbaConferencia:() => true};
   vm.createContext(c);
   vm.runInContext(ler('operacao.js'), c);
   vm.runInContext(ler('divisao.js'), c);

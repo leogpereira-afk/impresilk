@@ -442,7 +442,8 @@ test('revisão: o selo "perda" sai das perdas do status: a aberta atrasada e a d
   t.abrir('ab');
   let ficha = t.run('statusEntregaFichaHTML(_modalDraft)');
   assert.deepEqual(t.json('statusEntregaDe(_modalDraft).perdas'), []);
-  assert.doesNotMatch(ficha, /oc-selo perda/);assert.match(ficha, /0 perdas valendo · 1 sem perda agora/);
+  // "N perdas valendo" virou "N a decidir pela gestão" na revisão da onda w3 (U1); com zero, a parte some.
+  assert.doesNotMatch(ficha, /oc-selo perda/);assert.match(ficha, /<span class="text-muted">1 sem perda agora<\/span>/);assert.doesNotMatch(ficha, /a decidir pela gestão/);
   t.abrir('ra');
   ficha = t.run('statusEntregaFichaHTML(_modalDraft)');
   assert.deepEqual(t.json('statusEntregaDe(_modalDraft).perdas'), [], 'antes de 01/10 não há regra do programa');
@@ -451,7 +452,7 @@ test('revisão: o selo "perda" sai das perdas do status: a aberta atrasada e a d
   t.abrir('en');
   ficha = t.run('statusEntregaFichaHTML(_modalDraft)');
   assert.deepEqual(t.json('statusEntregaDe(_modalDraft).perdas'), ['retornoAntecipado']);
-  assert.match(ficha, /oc-selo perda/);assert.match(ficha, /1 perda valendo/);
+  assert.match(ficha, /oc-selo perda/);assert.match(ficha, /1 a decidir pela gestão/);
   // Toda ocorrência que conta tem a perda no status, e vice-versa (a mesma conta).
   for (const id of ['ab', 'ra', 'en']) {
     const st = t.json(`statusEntregaDe(STORE.getOS('${id}'))`);
@@ -641,9 +642,9 @@ test('revisão: toque e textos: botões de 40 px nos diálogos, sem a frase repe
   assert.match(f1, /<strong>Retorno antecipado:<\/strong> Sem retorno previsto digitado: não há perda por retorno antecipado\./);
   // "N valendo": antes contava a da volta do carro e a registrada como se valessem.
   t.abrir('f2');
-  assert.match(t.run('statusEntregaFichaHTML(_modalDraft)'), /1 perda valendo · 1 da volta do carro · 1 registrada/);
+  assert.match(t.run('statusEntregaFichaHTML(_modalDraft)'), /1 a decidir pela gestão · 1 da volta do carro · 1 registrada/);
   t.abrir('f3');
-  assert.match(t.run('statusEntregaFichaHTML(_modalDraft)'), /0 perdas valendo · 1 abonada/);
+  assert.match(t.run('statusEntregaFichaHTML(_modalDraft)'), /<span class="text-muted">1 abonada<\/span>/);
   // A instalação sem carro com retorno previsto: o lote pede a chegada NA LINHA, grava e mede.
   const semCarro = B.aberta('sc', {veiculo:'Instalação interna', retornoPrevisto:[{dia:'2026-09-30', hora:'17:00'}]});
   const b = await montar({os:[semCarro]});

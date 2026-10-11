@@ -301,7 +301,8 @@ test('Perdas: uma linha por O.S. com ocorrência, a regra pendente no topo e "a 
   assert.match(t, /causa: Material/);
   assert.match(t, /marcado por Gestora fictícia em 06\/11\/2026/);
   assert.match(t, /Ficha: prazo 05\/11, entrega 08\/11: 3 dias de atraso/, 'a régua da ficha');
-  assert.match(t, /Apuração \(ranking e comissão\): prazo 05\/11, entrega 05\/11: no prazo/, 'a régua da apuração, porque divergem');
+  // Rótulo trocado na revisão da onda w3 (U9): o ranking não desconta atraso, e "Apuração (ranking e comissão)" fazia crer que sim.
+  assert.match(t, /Dia da entrega usado no ranking \(não desconta atraso\): prazo 05\/11, entrega 05\/11: no prazo/, 'a régua do ranking, porque divergem');
   assert.match(html, /data-os-id="R1"/, 'o número da O.S. abre a ficha');
   assert.equal((html.match(/<article class="perf-perda /g) || []).length, 3, 'R1, R2 e A1; a S1 não tem ocorrência');
   assert.doesNotMatch(t, /R\$/, 'sem falha comprovada não há valor perdido');
@@ -313,8 +314,9 @@ test('Perdas: com falha comprovada, o valor que deixa de pontuar e a comissão p
   const fonte = fechamento(registros);
   const rev = revisaoDe(fonte, {R1:{...doc, decisao:'falha_comprovada', tipo:'incompleto'}});
   const html = tela({lista, registros, revisoes:[rev], fechamentos:[fonte], aba:'perdas'}).render(), t = texto(html);
-  assert.match(t, /Falha comprovada da instalação: a O\.S\. não pontua no programa e não gera comissão/);
-  assert.match(t, /Deixa de pontuar: R\$\s?1\.200,00/);
+  // Texto trocado na revisão da onda w3 (R2 e U2): "não pontua no programa" e "Deixa de pontuar" eram desmentidos pelo ranking, que conta a O.S.
+  assert.match(t, /Falha comprovada da instalação: fica fora da comissão e dos pontos do demonstrativo da comissão/);
+  assert.match(t, /Base que deixa de gerar comissão: R\$\s?1\.200,00/);
   assert.match(t, /Comissão perdida: R\$\s?12,00/);
   assert.match(t, /revisão 1/);
   // A R2 continua a decidir, e o ponto de atenção conta só ela.
@@ -353,7 +355,7 @@ test('decisão da comissão: o diálogo mostra a ocorrência julgada (retrabalho
   assert.match(tx, /causa: Material/);
   assert.match(tx, /marcado por Gestora fictícia em 06\/11\/2026/);
   assert.match(tx, /Ficha: prazo 05\/11, entrega 08\/11: 3 dias de atraso/);
-  assert.match(tx, /Apuração \(ranking e comissão\): prazo 05\/11, entrega 05\/11: no prazo/);
+  assert.match(tx, /Dia da entrega usado no ranking \(não desconta atraso\): prazo 05\/11, entrega 05\/11: no prazo/);
   assert.match(tx, /Retorno antecipado em 08\/11: 50 minutos antes do retorno previsto/);
   assert.match(tx, /Abono do retorno antecipado: Cliente liberou a equipe mais cedo/);
   // Sem a ficha no aparelho, o diálogo diz o que sabe.

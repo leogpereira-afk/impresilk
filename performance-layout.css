@@ -128,6 +128,17 @@ body:has(#panel-performance.active) .frase-bar{min-height:0;padding:4px 14px;fon
 .perf-atencao p,.perf-faixa-conferir p{margin:0;flex:1 1 260px;min-width:0;font-size:.88rem;line-height:1.45}
 .perf-atencao strong,.perf-faixa-conferir strong{color:#4a2f00}
 .perf-atencao .btn-ghost{background:#fff;border-color:#e5c37a}
+.perf-atencao-acoes{display:flex;flex-wrap:wrap;gap:6px}
+/* A régua de dedo da casa (revisão da onda w3, U7): 44 px nas abas e nos
+   botões que levam a outro lugar. Fora de media query, e com o id do painel
+   para vencer "#panel-performance button{min-height:40px}" (styles.css).
+   Cresce em altura: a largura da barra de abas não muda. */
+#panel-performance .perf-page-tabs button,#panel-performance .perf-atencao button,#panel-performance .perf-faixa-conferir button{min-height:44px}
+.perf-perdas-passo{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 14px;margin:0;padding:10px 14px;border-radius:12px;background:#fff;border:1px solid #f0d9a6;border-left:5px solid #d97706}
+.perf-perdas-passo p{margin:0;flex:1 1 260px;min-width:0;font-size:.86rem;line-height:1.45;color:#4a2f00}
+#panel-performance .perf-perdas-passo button{min-height:44px}
+.perf-perda-antes .perf-perda-selo{background:#eef3f7;color:#2d4456;border-color:#cbd5e1}
+.perf-fechar-motivo .btn-ghost{margin-left:6px}
 .perf-conferencia-titulo{margin:0;font-size:1rem;color:#173c50;flex:1 1 auto;align-self:center}
 .perf-perdas{display:grid;gap:10px}
 .perf-perdas-cabeca h3{margin:0 0 2px;font-size:1.05rem;color:#173c50}
@@ -164,10 +175,11 @@ body:has(#panel-performance.active) .frase-bar{min-height:0;padding:4px 14px;fon
 @media(max-width:900px){.perf-perda-grade{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){
  .perf-perda-grade{grid-template-columns:1fr}
- .perf-atencao .btn-ghost,.perf-faixa-conferir .btn-primary{width:100%;min-height:44px}
+ .perf-atencao-acoes{width:100%}
+ .perf-atencao button,.perf-faixa-conferir .btn-primary,.perf-perdas-passo button{width:100%}
  #panel-performance .perf-page-tabs .perf-aba-selo{margin-left:4px}
 }
-@media print{.perf-atencao .btn-ghost,.perf-faixa-conferir .btn-primary,.perf-perdas-fonte .btn-ghost{display:none!important}}
+@media print{.perf-atencao button,.perf-faixa-conferir .btn-primary,.perf-perdas-fonte .btn-ghost,.perf-perdas-passo button,.perf-perda-grade button[data-perdas-periodo]{display:none!important}}
 
 
 .perf-report-detail{border:1px solid var(--border,#d8e2eb);border-radius:12px;background:var(--surface,#fff);padding:0 14px;margin-top:10px}

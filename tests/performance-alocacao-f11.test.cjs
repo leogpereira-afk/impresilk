@@ -96,7 +96,9 @@ function aparelho({cfg = cfgBase(), papel = 'pcp', src = null, osLocal = [], fil
     periodoOuMes:() => ({...periodo}), classificarEntregas:xs => ({instalacoes:xs, aLancar:[]}),
     diaEntrega:o => String((o && o.entregaLancada && o.entregaLancada.data) || (o && o.finalizadaEm) || '').slice(0, 10),
     valorDaOS:o => o.valorTotal == null ? null : Number(o.valorTotal),
-    pessoasRH:() => FICHAS, avatarRH:() => '', esc, dinheiroCasa:n => 'R$' + Number(n).toFixed(2), filtroPeriodoHTML:() => '', normCasa:s => String(s || '').toLowerCase()};
+    pessoasRH:() => FICHAS, avatarRH:() => '', esc, dinheiroCasa:n => 'R$' + Number(n).toFixed(2), filtroPeriodoHTML:() => '', normCasa:s => String(s || '').toLowerCase(),
+    // A casa nova (com a aba Conferência): os Rankings não repetem a lista (revisão da onda w3, R5).
+    perfCasaTemAbaConferencia:() => true};
   vm.createContext(c);
   vm.runInContext(fs.readFileSync(path.join(RAIZ, 'operacao.js'), 'utf8'), c);
   vm.runInContext(fs.readFileSync(path.join(RAIZ, 'divisao.js'), 'utf8'), c);

@@ -660,7 +660,7 @@ function porOSPrazoTxt(l) {
   const erp = erpDia && erpDia !== st.dataEntrega ? ` · ERP ${POR_OS.ddmm(erpDia)}` : '';
   return `${prazo} · ${entrega}${erp}`;
 }
-// "Previsto 16:30 · conferido 15:40 (50 minutos antes: perda)"
+// "Previsto 16:30 · conferido 15:40 (50 minutos antes: a decidir pela gestão)"
 function porOSRetornoTxt(l) {
   const c = l.card, st = l.st;
   const ch = typeof OPERACAO.chegadaConferida === 'function' ? OPERACAO.chegadaConferida(c) : null;
@@ -673,7 +673,8 @@ function porOSRetornoTxt(l) {
   const chTxt = ch ? `conferido ${ch.hora}${prev && prev.dia !== ch.dia ? ' de ' + POR_OS.ddmm(ch.dia) : ''}` : 'chegada não conferida';
   let como = '';
   if (ra && ch) {
-    if (ra.situacao === 'antecipado') como = `${POR_OS.minTxt(ra.minutos)} antes: perda`;
+    // "a decidir pela gestão", não "perda" (revisão da onda w3, U1): a regra do retorno antecipado está pendente (A3).
+    if (ra.situacao === 'antecipado') como = `${POR_OS.minTxt(ra.minutos)} antes: a decidir pela gestão`;
     else if (ra.situacao === 'abonado') como = `${POR_OS.minTxt(ra.minutos)} antes, abonado`;
     else if (ra.situacao === 'no horário') como = 'no horário';
     else if (ra.situacao === 'na volta') como = 'a volta chegou antes; a perda fica na O.S. do último retorno previsto';
@@ -693,14 +694,18 @@ function porOSComissaoHTML(l) {
     const a=CONFERENCIA_ENTREGA.apurar(card,l.valor);
     if(a.erro) return nota('Itens alterados: confira as entregas novamente.');
     if(a.entregas.some(e=>e.valor==null)) return nota('Confira os valores dos itens antes de calcular a comissão.');
-    let total=0;
+    let total=0;const pendentes=new Set();
     for(const e of a.entregas) {
       const r=REGRAS.regraVigente(_porOSDados.versoes,e.dia);
       if(!r) return nota('Confira cada entrega: há datas sem regra de comissão.');
       const estado=OPERACAO.statusEntrega({...card,finalizadaEm:e.dia+'T12:00:00-03:00',entregaLancada:{data:e.dia}});
-      if(estado.estado!=='cancelado' && !POR_OS.perdasPelaRegra(estado,r).length) total+=REGRAS.comissaoCentavos(e.valor,r);
+      if(estado.estado==='cancelado')continue;
+      // A ocorrência não corta a prevista: fica pendente de decisão (revisão da onda w3, U1).
+      for(const p of POR_OS.perdasPelaRegra(estado,r))pendentes.add(p);
+      total+=REGRAS.comissaoCentavos(e.valor,r);
     }
-    return `<b>${esc(dinheiroCasa(total/100))}</b> ${nota(`prevista sobre os itens de ${a.entregas.length} entrega(s) conferida(s); saldo não incluído`)}`;
+    const rotP={atraso:'atraso',retrabalho:'retrabalho',retornoAntecipado:'retorno antecipado'};
+    return `<b>${esc(dinheiroCasa(total/100))}</b> ${nota(`prevista sobre os itens de ${a.entregas.length} entrega(s) conferida(s); saldo não incluído${pendentes.size?`; pendente de decisão (${[...pendentes].map(p=>rotP[p]||p).join(' e ')})`:''}`)}`;
   }
   const dia = st.dataEntrega || porOSDia(l.erp.data);
   const regra = REGRAS.regraVigente(_porOSDados.versoes, dia);
@@ -708,14 +713,20 @@ function porOSComissaoHTML(l) {
   const pct = String(regra.comissaoBp / 100).replace('.', ',') + '%';
   const provisoria = regra.provisoria ? ', regra provisória' : '';
   if (st.estado === 'cancelado') return `<b>${esc(dinheiroCasa(0))}</b> ${nota('prevista: cancelada, não pontua')}`;
+  /* ATRASO, RETRABALHO E RETORNO ANTECIPADO NÃO CORTAM A PREVISTA (revisão da
+     onda w3, U1; M1 da auditoria). A regra deles está pendente (A3), e a
+     comissão só corta com a falha comprovada registrada no demonstrativo: a
+     prevista é o percentual sem cortar, marcada "pendente de decisão". Antes
+     dizia "R$ 0,00 prevista: não pontua", e a aba Perdas, "a decidir". */
   const perdas = POR_OS.perdasPelaRegra(st, regra);
   const rot = {atraso: 'atraso', retrabalho: 'retrabalho', retornoAntecipado: 'retorno antecipado'};
-  if (perdas.length) return `<b>${esc(dinheiroCasa(0))}</b> ${nota(`prevista: não pontua (${perdas.map(p => rot[p] || p).join(' e ')})`)}`;
   if (!st.entregue) return nota('a entrega ainda não foi registrada no PCP');
   // Baixa do ERP a lançar (ou sem o dia): o prazo só é julgado com a data do lançamento.
   if (!st.dataEntrega) return nota('sai depois do lançamento: sem a data da entrega, o prazo ainda não foi julgado');
-  if (l.valor == null) return nota('sem valor no ERP');
+  const pendente = perdas.length ? `pendente de decisão (${perdas.map(p => rot[p] || p).join(' e ')})` : '';
+  if (l.valor == null) return nota(`sem valor no ERP${pendente ? '; ' + pendente : ''}`);
   const centavos = REGRAS.comissaoCentavos(Math.round(l.valor * 100), regra);
+  if (perdas.length) return `<b>${esc(dinheiroCasa(centavos / 100))}</b> ${nota(`prevista, ${pct} sem cortar${provisoria}: ${pendente}`)}`;
   return `<b>${esc(dinheiroCasa(centavos / 100))}</b> ${nota(`prevista, ${pct} da O.S. que pontua${provisoria}`)}`;
 }
 /* O QUE O SERVIDOR RESPONDEU sobre a O.S. sem ficha. "Nunca passou pelo

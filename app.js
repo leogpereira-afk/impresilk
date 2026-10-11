@@ -1858,10 +1858,12 @@ function etapaParaFinalizar(os) {
    O EFEITO DE CADA ITEM É O QUE O MOTOR DO PROGRAMA FAZ (revisão da F23;
    pontuacao.js da F19, que não lê o checklist). Antes, todo item que
    faltava "ficava pendente para a pontuação", regra que nenhuma régua tem:
-   - prazo: a entrega com atraso tira a O.S. da pontuação (o abono devolve);
-     sem prazo combinado, o atraso não é medido;
-   - retrabalho: tira a O.S. da pontuação para todos e não se abona; a
+   - prazo: a entrega com atraso vira ocorrência a decidir pela gestão (o
+     abono justifica); sem prazo combinado, o atraso não é medido;
+   - retrabalho: vira ocorrência a decidir pela gestão e não se abona; a
      pergunta sem resposta não muda nada;
+   (até a revisão da onda w3, U1, o atraso e o retrabalho diziam "a O.S. não
+   pontua": a regra deles está pendente, A3, veja OCORRENCIA_A_DECIDIR);
    - volta do carro: limpo e arrumado dão o bônus da volta, equipamento
      faltando dá o redutor; a volta não conferida fica neutra;
    - baixa do ERP sem lançamento: entra "sem prova" e não pontua até ser
@@ -1890,11 +1892,17 @@ const regrasNaFicha = () => typeof REGRAS !== 'undefined' && typeof versoesRegra
 const regraDaFicha = os => (regrasNaFicha() ? regraDoDiaTela(diaDaRegraDe(os)) : null);
 // Fora do programa de verdade: a regra está carregada e não vale no dia da O.S.
 const foraDoProgramaFicha = os => regrasNaFicha() && !regraDaFicha(os);
-/* A APURAÇÃO DO PROGRAMA AINDA NÃO ESTÁ NA TELA (revisão da junção v144, D):
-   o checklist diz a regra que vale desde 01/10, e a aba Performance ainda
-   conta como hoje até o motor do programa (F19, pontuacao.js) subir. A linha
-   sai sozinha quando o PONTUACAO estiver carregado. */
-const APURACAO_DEPOIS_FICHA = 'A apuração do programa (pontos e comissão de outubro) entra numa versão seguinte. Até lá, a aba Performance mostra a contagem de hoje.';
+/* A OCORRÊNCIA A DECIDIR (revisão da onda w3, U1; M1 da auditoria). A gestão
+   ainda não decidiu se retrabalho e atraso tiram pontos e comissão sozinhos
+   ou só com falha comprovada (A3). A comissão só corta com a falha comprovada
+   registrada no demonstrativo, e o ranking não desconta nada. A ficha dizia
+   "a O.S. não pontua" e "N perdas valendo" enquanto a aba Perdas por
+   retrabalho, aberta ao lado, dizia "a decidir pela gestão": agora a ficha diz
+   o mesmo que a aba. A linha do checklist sai sozinha quando o motor do
+   programa (F19, pontuacao.js) estiver carregado. */
+const OCORRENCIA_A_DECIDIR = 'ocorrência a decidir pela gestão';
+const ATE_A_DECISAO = 'Até a decisão, não tira pontos nem comissão';
+const APURACAO_DEPOIS_FICHA = 'Retrabalho e atraso são ocorrências a decidir pela gestão: até a decisão, não tiram pontos nem comissão. Cada uma aparece em Performance › Perdas por retrabalho.';
 const apuracaoDepoisFicha = () => typeof PONTUACAO === 'undefined';
 // A baixa do ERP que espera o lançamento à mão: a mesma régua da fila "a lançar" (casa.js, classificarEntregas).
 function aLancarNaFicha(os) {
@@ -1932,10 +1940,10 @@ function checklistFechamento(os) {
       : semPrazo ? 'sem prazo: a O.S. já estava entregue quando ganhou data no PCP'
       : 'sem prazo combinado: ele nasce com a primeira data agendada no PCP',
     efeito: !perde('atraso') ? '' : !pc ? 'Sem prazo, o atraso não é medido.'
-      : atraso && atraso.abonado ? 'Atraso abonado: não tira a O.S. da pontuação.'
-      : atraso && fin ? 'Entregue com atraso: a O.S. não pontua. O abono devolve.'
-      : atraso ? 'Já passou do prazo: entregue com atraso, a O.S. não pontua. O abono devolve.'
-      : fin ? '' : 'Entregar depois dele tira a O.S. da pontuação.',
+      : atraso && atraso.abonado ? 'Atraso abonado: fica justificado e não vira ocorrência a decidir.'
+      : atraso && fin ? `Entregue com atraso: ${OCORRENCIA_A_DECIDIR}. ${ATE_A_DECISAO}; o abono justifica o atraso.`
+      : atraso ? `Já passou do prazo: a entrega com atraso vira ${OCORRENCIA_A_DECIDIR}. O abono justifica o atraso.`
+      : fin ? '' : `Entregar depois dele vira ${OCORRENCIA_A_DECIDIR}.`,
     ir: !pc && !semPrazo && editavel ? 'equipe' : '' });
   const resp = os.retrabalhoPerguntado && typeof os.retrabalhoPerguntado === 'object' ? os.retrabalhoPerguntado.resposta : '';
   const gerou = !!os.retrabalho || resp === 'sim';
@@ -1944,7 +1952,7 @@ function checklistFechamento(os) {
     texto: os.retrabalho ? `gerou retrabalho${os.problema ? ': ' + String(os.problema).slice(0, 80) : ''}`
       : resp === 'nao' ? 'respondido: não gerou' : resp === 'sim' ? 'respondido: gerou'
       : 'responder se gerou retrabalho',
-    efeito: gerou && perde('retrabalho') ? 'Retrabalho tira a O.S. da pontuação para todos e não se abona.' : '',
+    efeito: gerou && perde('retrabalho') ? `Retrabalho: ${OCORRENCIA_A_DECIDIR}. ${ATE_A_DECISAO}. Retrabalho não se abona.` : '',
     como: respondido ? '' : fin ? 'Responda no Fechar o dia, em Entregas.' : 'A pergunta vem ao finalizar.' });
   const rc = os.retornoConf || {};
   const sn = k => { const r = OPERACAO.respostaVolta(rc[k]); return r === 'sim' ? 'sim' : r === 'nao' ? 'não' : 'sem resposta'; };
@@ -5327,7 +5335,7 @@ function statusEntregaFichaHTML(os) {
    são só da gestão (admin e pcp). A tela grava o PEDIDO; autor e hora são do
    servidor. Os botões moram na ficha, no card (Abonar) e no Fechar o dia. */
 const podeAbonar = () => ['admin', 'pcp'].includes(String((STATE.user || {}).papel || '')) && !(typeof crachaEhToque === 'function' && crachaEhToque());
-const RETORNO_SITUACAO_TXT = { antecipado: 'conta como perda', abonado: 'abonado', 'no horário': 'no horário', 'na volta': 'medido na volta',
+const RETORNO_SITUACAO_TXT = { antecipado: 'a decidir pela gestão', abonado: 'abonado', 'no horário': 'no horário', 'na volta': 'medido na volta',
   'sem retorno previsto': 'sem retorno previsto', 'sem dado': 'chegada ainda não conferida', 'não se aplica': 'não se aplica' };
 /* O RETORNO NA FICHA, um por dia da jornada (revisão da F17). "Conta como
    perda" só quando o status conta (st.perdas: sem regra do programa, nada
@@ -5356,7 +5364,7 @@ function ocorrenciaLinhaHTML(oc, gestao, perdas) {
   const ab = oc.abono;
   const ePerda = !!oc.conta && (!Array.isArray(perdas) || perdas.includes(oc.perda));
   const selo = oc.origem === 'manual' ? (oc.anulada ? '<span class="oc-selo anulada">anulada</span>' : '<span class="oc-selo manual">registrada</span>')
-    : oc.abonado ? '<span class="oc-selo abonado">abonada</span>' : ePerda ? '<span class="oc-selo perda">perda</span>' : oc.volta ? '<span class="oc-selo volta">volta do carro</span>' : '';
+    : oc.abonado ? '<span class="oc-selo abonado">abonada</span>' : ePerda ? '<span class="oc-selo perda">a decidir</span>' : oc.volta ? '<span class="oc-selo volta">volta do carro</span>' : '';
   const pend = (oc.pendente || oc.anulacaoPendente || (ab && (ab.pendente || ab.revogacaoPendente))) ? ' <small class="oc-pend">(a enviar)</small>' : '';
   const quem = oc.origem === 'manual' && oc.por ? ` <small>por ${esc(oc.por)}</small>` : '';
   const anulacao = oc.anulada && oc.anuladaPor ? ` <small>anulada por ${esc(oc.anuladaPor)}</small>` : '';
@@ -5373,14 +5381,15 @@ function contaOcorrenciasTxt(lista, perdas) {
   const vivas = lista.filter(o => !o.anulada);
   const n = f => vivas.filter(f).length;
   const valendo = n(o => o.conta && (!Array.isArray(perdas) || perdas.includes(o.perda)));
-  const partes = [`${valendo} ${valendo === 1 ? 'perda valendo' : 'perdas valendo'}`];
+  // "a decidir pela gestão" no lugar de "perda valendo" (revisão da onda w3, U1): a regra do retrabalho e do atraso está pendente. Sem nenhuma, não se fala dela.
+  const partes = valendo ? [`${valendo} a decidir pela gestão`] : [];
   const abonadas = n(o => o.abonado), volta = n(o => o.volta), manuais = n(o => o.origem === 'manual');
   const semContar = n(o => o.origem === 'derivada' && !o.volta && !o.abonado && !(o.conta && (!Array.isArray(perdas) || perdas.includes(o.perda))));
   if (abonadas) partes.push(`${abonadas} ${abonadas === 1 ? 'abonada' : 'abonadas'}`);
   if (semContar) partes.push(`${semContar} sem perda agora`);
   if (volta) partes.push(`${volta} da volta do carro`);
   if (manuais) partes.push(`${manuais} ${manuais === 1 ? 'registrada' : 'registradas'}`);
-  return partes.join(' · ');
+  return partes.join(' · ') || 'nenhuma valendo';
 }
 function ocorrenciasFichaHTML(os, st) {
   if (!temF17() || !st) return '';
@@ -5441,7 +5450,7 @@ function abrirDialogoF17(cfg, aoConfirmar) {
   const primeiro = form.querySelector('select,input,textarea');
   if (primeiro) try { primeiro.focus(); } catch {}
 }
-const TEXTO_ABONO = 'O abono devolve o valor da O.S. na pontuação e fica registrado com o seu nome. Use para a remarcação pedida pelo cliente ou para o retorno antecipado que tem explicação. Retrabalho não se abona.';
+const TEXTO_ABONO = 'O abono justifica a ocorrência e fica registrado com o seu nome: ela deixa de ser ocorrência a decidir pela gestão. Use para a remarcação pedida pelo cliente ou para o retorno antecipado que tem explicação. Retrabalho não se abona.';
 // Abonar e revogar, registrar e anular: no rascunho que a função entrega (a ficha aberta ou a O.S. do STORE).
 function abonarOcorrenciaEm(os, ocorrencias, gravar) {
   const abonaveis = (ocorrencias || []).filter(o => o.abonavel && !o.abonado);
@@ -8156,7 +8165,7 @@ function renderControle() {
         ${(cfg[key] || []).map(v => `
           <span class="cfg-chip">${esc(v)}${key === 'instaladores' ? fichaRHDoChip(v) : ''}${roListas ? '' : `<button data-cfg-del="${key}|${esc(v)}" title="Remover">×</button>`}</span>`).join('') || '<p class="text-muted">Vazio</p>'}
       </div>
-      ${key === 'instaladores' ? '<p class="text-muted" style="font-size:.75rem;margin-top:6px">Ao lado de cada nome, a ficha do RH e o ID a que ele chega. A O.S. grava o ID. Para conferir ou trocar: Performance › Conferir nomes do PCP × fichas do RH.</p>' : ''}
+      ${key === 'instaladores' ? '<p class="text-muted" style="font-size:.75rem;margin-top:6px">Ao lado de cada nome, a ficha do RH e o ID a que ele chega. A O.S. grava o ID. Para conferir ou trocar: Performance › Conferência › Conferir nomes do PCP × fichas do RH.</p>' : ''}
       ${key === 'instaladores' && !roListas ? instaladorDoRHHTML(cfg) : ''}
       ${roListas ? '' : `<div class="flex gap-6 mt-8">
         <input class="w-100" data-cfg-input="${key}" placeholder="${key === 'instaladores' ? 'Terceiro sem ficha no RH (nome)…' : `Adicionar ${esc(label.toLowerCase())}…`}">
@@ -8839,7 +8848,7 @@ function abrirInstrucoes() {
       </ul>
       <p><strong>Atalhos no computador</strong> (a linha "Atalhos" fica embaixo da barra das etapas; no tablet ela some): <em>Alt+1</em> a <em>Alt+5</em> vão direto para a etapa de mesmo número; <em>Ctrl+Enter</em> (<em>Cmd+Enter</em> no Mac) passa para a próxima; <em>Esc</em> fecha a ficha, gravando o que foi digitado. Dentro de um campo de texto as teclas são do campo. Fora de um campo, <em>Ctrl+Z</em> (<em>Cmd+Z</em>) usa o <em>Desfazer</em> do último aviso.</p>
       <p><strong>Desfazer:</strong> liberar, cancelar a liberação, confirmar o cliente, liberar ou cancelar o carro, tirar alguém da equipe e finalizar mostram um aviso com <em>Desfazer</em>, que diz a ação e a O.S. O aviso fica 10 segundos e espera enquanto o mouse está em cima dele. Cancelar a liberação e cancelar o carro perguntam antes.</p>
-      <p>Na barra das etapas, o número em amarelo conta o que <strong>impede finalizar</strong>; "a completar" é o que falta e não impede. O <strong>checklist de fechamento</strong> não trava o Finalizar: cada item diz o efeito que tem na pontuação (atraso e retrabalho tiram a O.S. da pontuação, a volta conferida dá bônus ou redutor, a baixa do ERP só pontua depois de lançada) ou só que falta. O efeito segue o dia da entrega, o mesmo do Status da entrega: o que foi entregue antes de 01/10/2026 fica fora do programa. A apuração do programa (pontos e comissão de outubro) entra numa versão seguinte; até lá, a aba Performance mostra a contagem de hoje.</p>
+      <p>Na barra das etapas, o número em amarelo conta o que <strong>impede finalizar</strong>; "a completar" é o que falta e não impede. O <strong>checklist de fechamento</strong> não trava o Finalizar: cada item diz o efeito que tem na pontuação (atraso e retrabalho viram ocorrência a decidir pela gestão, a volta conferida dá bônus ou redutor, a baixa do ERP só pontua depois de lançada) ou só que falta. O efeito segue o dia da entrega, o mesmo do Status da entrega: o que foi entregue antes de 01/10/2026 fica fora do programa. Até a gestão decidir a regra do retrabalho e do atraso, a ocorrência não tira pontos nem comissão; cada uma aparece em Performance › Perdas por retrabalho.</p>
 
       <h2>Fluxo típico</h2>
       <ol>

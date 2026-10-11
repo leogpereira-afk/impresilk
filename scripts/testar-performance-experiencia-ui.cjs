@@ -32,7 +32,8 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
   assert.equal(await page.locator('[data-quadro="perf-bonus"]').count(),0);
   await semEstouro('Ranking desktop');await page.screenshot({path:path.join(out,'ranking-desktop.png')});
   await pdf(page.locator('#perf-pdf-ranking'),'ranking-curto',/Ranking das equipes/);
-  await pdf(page.locator('#perf-pdf'),'ranking-equipes',/Ranking das equipes/);
+  // O PDF completo dos Rankings leva a conferência por entrega (revisão da onda w3, R6 e U5).
+  await pdf(page.locator('#perf-pdf'),'ranking-equipes',/^(?=[\s\S]*Ranking das equipes)(?=[\s\S]*Conferência por entrega)/);
   await page.locator('[data-perf-modo="pessoas"]').click();await pdf(page.locator('#perf-pdf'),'ranking-pessoas',/Ranking individual/);
   await page.locator('[data-perf-aba="relatorio"]').click();
   assert.equal(await page.locator('[data-quadro="perf-bonus"]').count(),1);

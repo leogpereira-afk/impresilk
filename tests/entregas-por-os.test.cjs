@@ -224,14 +224,17 @@ test('operação, montagem e comercial não veem R$ nem comissão na vista; admi
   }
 });
 
-test('comissão prevista: 1% só na O.S. que pontua, a partir de 01/10; antes disso, não se aplica', () => {
+/* Trocado de propósito na revisão da onda w3 (U1; M1 da auditoria): o atraso
+   e o retrabalho não zeram mais a prevista, que fica 1% sem cortar, marcada
+   "pendente de decisão" (a regra deles está pendente, A3). */
+test('comissão prevista: 1% a partir de 01/10, sem cortar por atraso ou retrabalho (pendente de decisão); antes disso, não se aplica', () => {
   const t = casa(LISTA(), {erp: ERP});
   const html = secao(t.tela('STATE._entVista = "poros"'));
   const fato = n => ((html.split(`aria-label="O.S ${n}"`)[1] || '').match(/<dt>Comissão prevista<\/dt><dd>([\s\S]*?)<\/dd>/) || ['', ''])[1];
   assert.match(fato('5001'), /R\$\s?20,00/);
-  assert.match(fato('5002'), /R\$\s?0,00<\/b> <small>prevista: não pontua \(atraso\)/);
+  assert.match(fato('5002'), /R\$\s?10,00<\/b> <small>prevista, 1% sem cortar, regra provisória: pendente de decisão \(atraso\)/);
   assert.match(fato('5003'), /R\$\s?15,00/, 'o atraso abonado pontua');
-  assert.match(fato('5004'), /não pontua \(retrabalho e atraso\)/);
+  assert.match(fato('5004'), /pendente de decisão \(retrabalho e atraso\)/);
   assert.match(fato('5005'), /cancelada, não pontua/);
   assert.match(fato('5006'), /a entrega ainda não foi registrada no PCP/);
   // Baixa do ERP ainda a lançar: sem a data da entrega, nada de valor previsto.
@@ -246,6 +249,29 @@ test('comissão prevista: 1% só na O.S. que pontua, a partir de 01/10; antes di
   assert.match(secao(set.tela('STATE._entVista = "poros"')), /<dt>Comissão prevista<\/dt><dd><small>não se aplica: entregue em 20\/09\/26, antes de 01\/10\/2026 \(fica na regra atual\)<\/small>/);
 });
 
+/* REVISÃO DA ONDA W3 (11/10/2026), U1. A aba Perdas por retrabalho diz
+   "ocorrência a decidir pela gestão" (a regra do retrabalho e do atraso está
+   pendente, A3), e o Por O.S. dizia "R$ 0,00 prevista: não pontua". A comissão
+   nova só corta com falha comprovada: a prevista é 1% sem cortar, marcada
+   "pendente de decisão" (M1 da auditoria). */
+test('revisão onda-w3-abas: U1, o Por O.S. mostra 1% sem cortar, marcado "pendente de decisão", na O.S. com atraso ou retrabalho', () => {
+  const t = casa(LISTA(), {erp: ERP});
+  const html = secao(t.tela('STATE._entVista = "poros"'));
+  const fato = n => ((html.split(`aria-label="O.S ${n}"`)[1] || '').match(/<dt>Comissão prevista<\/dt><dd>([\s\S]*?)<\/dd>/) || ['', ''])[1];
+  // Caso ruim: "R$ 0,00 prevista: não pontua (atraso)" e "não pontua (retrabalho e atraso)".
+  assert.doesNotMatch(fato('5002') + fato('5004'), /não pontua/);
+  assert.match(fato('5002'), /R\$\s?10,00<\/b> <small>prevista, 1% sem cortar, regra provisória: pendente de decisão \(atraso\)<\/small>/);
+  assert.match(fato('5004'), /R\$\s?8,00<\/b> <small>prevista, 1% sem cortar, regra provisória: pendente de decisão \(retrabalho e atraso\)<\/small>/);
+  // A cancelada continua fora (não é ocorrência a decidir), e a no prazo, como sempre.
+  assert.match(fato('5005'), /cancelada, não pontua/);
+  assert.match(fato('5001'), /R\$\s?20,00<\/b> <small>prevista, 1% da O\.S\. que pontua, regra provisória<\/small>/);
+  // O retorno antecipado no cartão: "a decidir pela gestão", não "perda".
+  const lista = LISTA();
+  Object.assign(lista[0], {retornoPrevisto: [{dia: '2026-10-05', hora: '16:30'}], retornoConferido: {dia: '2026-10-05', hora: '15:40', por: 'Gestão de teste', em: '2026-10-05T18:41:00Z'}});
+  const card = (secao(casa(lista, {erp: ERP}).tela('STATE._entVista = "poros"')).split('aria-label="O.S 5001"')[1] || '').split('</article>')[0];
+  assert.match(card, /50 minutos antes: a decidir pela gestão/);
+});
+
 test('o cartão traz nº, cliente, endereço, prazo × entrega, retorno previsto × conferido e a equipe; Técnico e Tipo saem da vista', () => {
   const lista = LISTA();
   Object.assign(lista[0], {retornoPrevisto: [{dia: '2026-10-05', hora: '16:30'}], retornoConferido: {dia: '2026-10-05', hora: '15:40', por: 'Gestão de teste', em: '2026-10-05T18:41:00Z'}, horaRetorno: '17:00'});
@@ -256,7 +282,7 @@ test('o cartão traz nº, cliente, endereço, prazo × entrega, retorno previsto
   assert.match(card, /Padaria Fictícia/);
   assert.match(card, /📍<\/span> Rua Inventada, 10/);
   assert.match(card, /<dt>Prazo × entrega<\/dt><dd>Prazo 05\/10 · entregue 05\/10, no prazo<\/dd>/);
-  assert.match(card, /<dt>Retorno previsto × conferido<\/dt><dd>Previsto 16:30 · conferido 15:40 \(50 minutos antes: perda\); a equipe anotou 17:00<\/dd>/);
+  assert.match(card, /<dt>Retorno previsto × conferido<\/dt><dd>Previsto 16:30 · conferido 15:40 \(50 minutos antes: a decidir pela gestão\); a equipe anotou 17:00<\/dd>/);
   // O nome de exibição é o da régua de pessoas (o menor começo de nome que só ela tem), nunca o ID.
   assert.match(card, /<span class="poros-pessoa">Ana<\/span><span class="poros-pessoa">Beatriz<\/span>/);
   assert.match(card, /data-os-id="np"/, 'Abrir a ficha');

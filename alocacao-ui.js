@@ -328,7 +328,7 @@ const ALOCUI = (() => {
   // Por que a gestão está no modo só pessoas (a tela mostra no lugar do aviso da operação).
   function dicaModo(papel, os) {
     if (!['admin', 'pcp'].includes(String(papel || '')) || (os && os.tipo === 'interno') || !semIdDe(os).length) return '';
-    return 'Esta O.S. tem nome sem ficha no RH: aqui vão só as pessoas. Para dividir (líder e percentuais), ligue o nome em Performance, Conferir nomes.';
+    return 'Esta O.S. tem nome sem ficha no RH: aqui vão só as pessoas. Para dividir (líder e percentuais), ligue o nome em Performance › Conferência › Conferir nomes.';
   }
   /* A ESTRUTURA montada no modo só pessoas (quais equipes vieram inteiras):
      a divisão da mesma ficha parte dela, e a equipe escolhida não se perde

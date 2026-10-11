@@ -662,7 +662,13 @@ function perfFechamentoBloqueio(f,pendentes){
  if(conflitos.length)return `Confira os valores conflitantes no ERP antes de fechar (O.S. ${[...new Set(conflitos.map(r=>r.numero||'s/n'))].slice(0,6).join(', ')}). Veja as pendências da auditoria.`;
  const pend=regs.filter(r=>!r.confirmado).length,semValor=regs.filter(r=>r.valor==null);
  if(!pend && !semValor.length)return '';
- return 'Para fechar, falta: '+[pend?`${pend} ${pend===1?'entrega sem participação confirmada':'entregas sem participação confirmada'}`:'',semValor.length?`${semValor.length} sem valor (O.S. ${semValor.slice(0,6).map(r=>r.numero || 's/n').join(', ')}${semValor.length>6?' e outras':''})`:''].filter(Boolean).join('; ')+'. Use o filtro Situação da lista para achar cada uma.';
+ return 'Para fechar, falta: '+[pend?`${pend} ${pend===1?'entrega sem participação confirmada':'entregas sem participação confirmada'}`:'',semValor.length?`${semValor.length} sem valor (O.S. ${semValor.slice(0,6).map(r=>r.numero || 's/n').join(', ')}${semValor.length>6?' e outras':''})`:''].filter(Boolean).join('; ')+`. Veja na aba Conferência (filtro ${pend?'A conferir':'Sem valor'}).`;
+}
+/* O filtro da aba Conferência que acha o que trava o Fechar (revisão da onda
+   w3, R7 e U6): a lista e o filtro Situação moram lá, não nos Rankings. */
+function perfFiltroDoBloqueio(f){
+ const regs=f&&!f.fechadoEm&&Array.isArray(f.registros)?f.registros:[];
+ return regs.some(r=>!r.confirmado)?'pendente':regs.some(r=>r.valor==null)?'sem-valor':'';
 }
 function perfFonteHTML(){
  const f=perfFonteAtual(),pendentes=STORE.getQueue?.().length || 0;
@@ -673,7 +679,7 @@ function perfFonteHTML(){
  const pode=perfPodeEditar(),bloqueio=pode?perfFechamentoBloqueio(f,pendentes):'';
  return quadro('🗂 Base e fechamento <small>atualizar, versão e fechar período</small>',`<p class="perf-base-fonte">${esc(perfFonteTexto())}</p>${perfAvisosHTML(false)}
    <div class="perf-base-acoes"><button type="button" class="btn-ghost" id="perf-atualizar-fonte" ${perfRemoto.carregando?'disabled':''}>${perfRemoto.carregando?'Consultando servidor…':'Atualizar apuração'}</button><label>Versão da apuração <select id="perf-versao"><option value="">Dados atuais</option>${perfRemoto.fechamentos.map(r=>`<option value="${esc(r.id)}" ${r.id===perfRemoto.selecionado?'selected':''}>Revisão ${r.revisao} · ${esc(r.fechadoEm.slice(0,10))} · ${esc(r.fechadoPor)}</option>`).join('')}</select></label>${pode?`<button type="button" class="btn-ghost" id="perf-fechar" ${bloqueio?'disabled aria-describedby="perf-fechar-motivo"':''}>${perfRemoto.fechamentos.length?'Criar nova revisão':'Fechar período'}</button>`:''}</div>
-   ${bloqueio?`<p class="perf-fechar-motivo" id="perf-fechar-motivo">${esc(bloqueio)}</p>`:''}${f?.motivo?`<p class="perf-base-fonte">Motivo: ${esc(f.motivo)}</p>`:''}${pode&&typeof perfComissaoBotaoHTML==='function'?perfComissaoBotaoHTML():''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p>`);
+   ${bloqueio?`<p class="perf-fechar-motivo" id="perf-fechar-motivo">${esc(bloqueio)}${/^Para fechar, falta/.test(bloqueio)&&perfFiltroDoBloqueio(f)?` <button type="button" class="btn-ghost btn-sm" data-perf-filtrar="${perfFiltroDoBloqueio(f)}">Abrir na aba Conferência</button>`:''}</p>`:''}${f?.motivo?`<p class="perf-base-fonte">Motivo: ${esc(f.motivo)}</p>`:''}${pode&&typeof perfComissaoBotaoHTML==='function'?perfComissaoBotaoHTML():''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p>`);
 }
 async function perfCarregarFonte(){
  const chave=perfChave(),f=periodoOuMes('_fPerf');
@@ -700,7 +706,7 @@ function perfWireFonte(el){
    if(!fonte.registros.length)return toast('Nenhuma entrega no período para fechar.','error');
    // O servidor recusa fechar um período que ainda não terminou: avisa antes de abrir a confirmação.
    if(String(fonte.periodo?.ate || '')>perfHojeISO())return toast(`O fechamento vai no máximo até hoje (${perfHojeISO().split('-').reverse().join('/')}). Escolha um período que termine hoje ou antes.`,'error');
-   if(pend.length || semValor.length)return toast([pend.length?`${pend.length} ${pend.length===1?'entrega sem participação confirmada':'entregas sem participação confirmada'}`:'',semValor.length?`${semValor.length} sem valor: O.S. ${semValor.slice(0,6).map(r=>r.numero || 's/n').join(', ')}${semValor.length>6?' e outras':''}`:''].filter(Boolean).join('. ')+'. Use o filtro Situação da lista para achar cada uma.','error');
+   if(pend.length || semValor.length)return toast([pend.length?`${pend.length} ${pend.length===1?'entrega sem participação confirmada':'entregas sem participação confirmada'}`:'',semValor.length?`${semValor.length} sem valor: O.S. ${semValor.slice(0,6).map(r=>r.numero || 's/n').join(', ')}${semValor.length>6?' e outras':''}`:''].filter(Boolean).join('. ')+`. Veja na aba Conferência (filtro ${pend.length?'A conferir':'Sem valor'}).`,'error');
    // Quem fecha sela os pesos do SERVIDOR. Se o aparelho mostra outros (alguém
    // mudou em outro tablet), o ranking visto não é o que seria selado.
    if(fonte.criterios && JSON.stringify(PERF.criteriosValidos(fonte.criterios))!==JSON.stringify(perfCriterios())){perfRemoto.dados=null;perfRemoto.tentado=false;renderPerformanceCasa();return toast('Os pesos da nota mudaram. Atualize e confira o ranking antes de fechar.','error');}
@@ -1626,7 +1632,7 @@ function perfRankingPessoasHTML(regs, c) {
   const pesosTxt = ['producao', 'limpeza', 'equipamentos'].map(k => `${rotulos[k]} ${av.pesos[k]}%`).join(' · ');
   const vazio = !av.pessoas.length
     ? '<p class="perf-rank-vazio">Nenhuma entrega com participantes neste período.</p>'
-    : (!linhas.length ? `<p class="perf-rank-vazio">${medida === 'valor' ? 'Ninguém tem valor CONFIRMADO neste período ainda. Confirme as participações na lista abaixo.' : 'Sem dado suficiente para a nota neste período.'}</p>` : '');
+    : (!linhas.length ? `<p class="perf-rank-vazio">${medida === 'valor' ? 'Ninguém tem valor CONFIRMADO neste período ainda. Confirme as participações na aba Conferência.' : 'Sem dado suficiente para a nota neste período.'}</p>` : '');
   const lead = geral ? 'Geral de 0 a 100 · (Nota + Produção + Valor) ÷ 3 · mesma importância para os três'
     : medida === 'nota'
     ? `Nota de 0 a 100 · ${fechada ? 'pesos desta revisão: ' : ''}${esc(pesosTxt)}`
@@ -1948,11 +1954,17 @@ function performanceEquipesHTML() {
     <details class="perf-method"><summary>Jornada e cobertura</summary>${perfJornadaHTML(regs,c)}</details>
     ${typeof operacaoPrioridadesHTML==='function'?operacaoPrioridadesHTML():''}
     <details class="perf-method"><summary>Como interpretar os indicadores</summary><p>Entregas conta as O.S. em que a pessoa participou; não some essa coluna entre pessoas. O.S. equivalentes considera os percentuais e a parcela do valor líquido entregue. As parciais somam no máximo uma O.S.; sem valor dos itens, a parcela fica a conferir. Divisões sugeridas ainda não foram confirmadas. Valores rateados não são faturamento pessoal nem bônus. Qualidade, complexidade e retrabalho precisam de revisão. ${esc(perfFonteTexto())}</p></details>
-    ${perfCoberturaHTML(regs, f)}</section>`;
+    ${perfCoberturaHTML(regs, f)}
+    ${typeof perfCasaTemAbaConferencia==='function'?'':performanceConferenciaHTML({embutida:true})}</section>`;
 }
-function performanceConferenciaHTML() {
+/* A CONFERÊNCIA NA ABA PRÓPRIA, ou EMBUTIDA no fim dos Rankings (revisão da
+   onda w3, R5 e R6). Embutida, sem o período, o título e o PDF próprios (os
+   Rankings já têm), em dois casos: o casa.js antigo no cache, que não tem a
+   aba Conferência (ele não define perfCasaTemAbaConferencia), e o "PDF
+   completo" dos Rankings, que sempre levou a conferência. */
+function performanceConferenciaHTML({embutida=false}={}) {
   const c=perfConfig(), f=periodoOuMes('_fPerf');
-  if(perfConsultaServidor()&&!perfFonteAtual())return `<section class="perf-workspace perf-conferencia">${perfPeriodoCompactoHTML(f)}<p role="status">${perfRemoto.erro?'Não foi possível consultar a apuração. Nenhuma falta de cadastro foi inferida.':'Consultando entregas e equipes…'}</p>${perfAvisosHTML(true)}</section>`;
+  if(perfConsultaServidor()&&!perfFonteAtual())return embutida?'':`<section class="perf-workspace perf-conferencia">${perfPeriodoCompactoHTML(f)}<p role="status">${perfRemoto.erro?'Não foi possível consultar a apuração. Nenhuma falta de cadastro foi inferida.':'Consultando entregas e equipes…'}</p>${perfAvisosHTML(true)}</section>`;
   const regs=perfRegsDoPeriodo(), pesquisa=STATE._perfBusca || '';
   const podeConferir=perfPodeEditar()&&!perfFonteAtual()?.fechadoEm, verValor=perfPodeEditar();
   /* Ordem fixa (entrega mais recente primeiro, depois o número): a lista vinha
@@ -1970,13 +1982,14 @@ function performanceConferenciaHTML() {
     return `<strong>${esc(v.emblema||'🤝')} ${esc(v.equipeNome)}</strong>${v.sugerida?' <span class="perf-sugerida">sugerida</span>':''}<br>`;
   };
   // O que já existia (Conferir, filtros, PDF) é o mesmo: só mudou de aba.
-  return `<section class="perf-workspace perf-conferencia"><div class="perf-controls">${perfPeriodoCompactoHTML(f)}
+  const cabeca=embutida?'':`<div class="perf-controls">${perfPeriodoCompactoHTML(f)}
     <div class="perf-toolbar"><h3 class="perf-conferencia-titulo">Conferência das entregas</h3><details class="perf-pdf-principal"><summary>Exportar</summary><button type="button" class="btn-ghost btn-sm" id="perf-pdf">PDF da conferência</button></details></div></div>
-    ${perfAvisosHTML(true)}
+    ${perfAvisosHTML(true)}`;
+  return `${embutida?'<div class="perf-conferencia-embutida">':'<section class="perf-workspace perf-conferencia">'}${cabeca}
     ${perfAuditoriaHTML(regs)}
     <section class="perf-entregas" aria-labelledby="perf-entregas-titulo"><div class="perf-entregas-cabeca"><h3 id="perf-entregas-titulo">Conferência por entrega</h3><p>Quem fez cada entrega e com qual percentual. É daqui que o ranking tira os nomes.</p></div>
       <div class="perf-filtros"><label>Situação <select id="perf-situacao"><option value="">Todas</option><option value="pendente">A conferir</option><option value="confirmada">Confirmadas</option><option value="sem-equipe">Sem participantes</option><option value="avulsos">Avulsos / vínculo a conferir</option><option value="desatualizada">Divisão desatualizada ou a conferir no RH</option><option value="invalida">Participação inconsistente</option>${verValor?'<option value="sem-valor">Sem valor</option>':''}</select></label><label class="perf-busca">Buscar O.S., cliente ou pessoa <input id="perf-busca-os" type="search" value="${esc(pesquisa)}" placeholder="Digite para localizar"></label><button type="button" class="btn-ghost" id="perf-limpar">Limpar filtros</button><span id="perf-recorte" role="status"></span></div>
-      <div class="casa-tabela-wrap"><table class="casa-tabela perf-conf-tabela"><thead><tr><th scope="col">O.S. / Cliente</th><th scope="col">Data</th><th scope="col">Equipe e percentuais</th><th scope="col">Situação e volta</th><th scope="col"><span class="perf-sr">Ações</span></th></tr></thead><tbody>${linhas.map(r=>{const st=situacao(r);return `<tr data-perf-id="${esc(r.id)}"><td><button type="button" class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button><small class="bloco">${esc(r.os.cliente)}</small>${r.entregaId?`<small class="bloco conf-item-resumo">${esc(r.itensEntrega.map(i=>i.descricao+' × '+i.qtde).join('; '))}${r.saldoItens?` · ${r.saldoItens} item(ns) ainda a conferir`:""}</small>`:""}</td><td>${esc(diaEntrega(r.os).split('-').reverse().join('/'))}</td><td>${equipeTxt(r)}${r.membros.map(p=>`${esc(p.nome)} · ${perfFormato(p.percentual)}%`).join('<br>') || '<span class="perf-nada">Sem equipe</span>'}</td><td><span class="badge perf-st-${st[0]}">${st[1]}</span>${r.estadoEntrega?`<small class="bloco">${esc(r.estadoEntrega.resumo)}</small>`:""}${r.erroConferencia?`<small class="bloco">${esc(r.erroConferencia)}</small>`:''}${r.os.retrabalho?'<small class="bloco">Serviço de retrabalho</small>':''}<small class="bloco perf-volta">${perfVoltaTxt(r.retornoConf)}</small>${verValor?`<small class="bloco">${r.valor==null?'Sem valor':esc(dinheiroCasa(r.valor))}</small>`:''}</td><td>${podeConferir?`<button type="button" class="btn-ghost btn-sm" data-perf-part="${esc(r.id)}">Conferir</button>`:''}</td></tr>`;}).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div></section></section>`;
+      <div class="casa-tabela-wrap"><table class="casa-tabela perf-conf-tabela"><thead><tr><th scope="col">O.S. / Cliente</th><th scope="col">Data</th><th scope="col">Equipe e percentuais</th><th scope="col">Situação e volta</th><th scope="col"><span class="perf-sr">Ações</span></th></tr></thead><tbody>${linhas.map(r=>{const st=situacao(r);return `<tr data-perf-id="${esc(r.id)}"><td><button type="button" class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button><small class="bloco">${esc(r.os.cliente)}</small>${r.entregaId?`<small class="bloco conf-item-resumo">${esc(r.itensEntrega.map(i=>i.descricao+' × '+i.qtde).join('; '))}${r.saldoItens?` · ${r.saldoItens} item(ns) ainda a conferir`:""}</small>`:""}</td><td>${esc(diaEntrega(r.os).split('-').reverse().join('/'))}</td><td>${equipeTxt(r)}${r.membros.map(p=>`${esc(p.nome)} · ${perfFormato(p.percentual)}%`).join('<br>') || '<span class="perf-nada">Sem equipe</span>'}</td><td><span class="badge perf-st-${st[0]}">${st[1]}</span>${r.estadoEntrega?`<small class="bloco">${esc(r.estadoEntrega.resumo)}</small>`:""}${r.erroConferencia?`<small class="bloco">${esc(r.erroConferencia)}</small>`:''}${r.os.retrabalho?'<small class="bloco">Serviço de retrabalho</small>':''}<small class="bloco perf-volta">${perfVoltaTxt(r.retornoConf)}</small>${verValor?`<small class="bloco">${r.valor==null?'Sem valor':esc(dinheiroCasa(r.valor))}</small>`:''}</td><td>${podeConferir?`<button type="button" class="btn-ghost btn-sm" data-perf-part="${esc(r.id)}">Conferir</button>`:''}</td></tr>`;}).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div></section>${embutida?'</div>':'</section>'}`;
 }
 function wirePerformanceEquipes(el) {
   el.querySelectorAll('[data-perf-dash-vista]').forEach(b=>b.onclick=()=>{STATE._perfDashVista=b.dataset.perfDashVista;renderPerformanceCasa();});
@@ -2062,10 +2075,14 @@ function wirePerformanceEquipes(el) {
   };
   const pdf=el.querySelector('#perf-pdf');if(pdf)pdf.onclick=()=>{
     const copy=el.querySelector('.perf-workspace').cloneNode(true);copy.querySelector('.perf-config')?.remove();copy.querySelectorAll('[hidden]').forEach(x=>x.remove());
-    // O recorte da lista só existe na aba Conferência (onde a lista mora agora).
-    const recorte=el.querySelector('#perf-recorte');
+    // O recorte da lista só existe onde a lista está na tela (a aba Conferência, ou os Rankings da casa antiga).
+    const recorte=el.querySelector('#perf-recorte'),naConferencia=!!el.querySelector('.perf-workspace.perf-conferencia');
+    /* O "PDF completo" dos Rankings sempre levou a Conferência por entrega
+       (revisão da onda w3, R6 e U5). Sem a lista na tela (a casa nova a mostra
+       na aba Conferência), ela entra inteira, sem filtro, no fim da cópia. */
+    if(!recorte&&typeof performanceConferenciaHTML==='function')copy.insertAdjacentHTML('beforeend','<p class="metricas-nota">Conferência por entrega: todas as entregas do período, sem filtro.</p>'+performanceConferenciaHTML({embutida:true}));
     if(recorte){const note=document.createElement('p');note.textContent='Detalhamento filtrado por: '+(recorte.textContent || 'todas as entregas')+' Busca: '+(STATE._perfBusca||'sem busca')+'. Os totais acima abrangem o período completo.';copy.prepend(note);}
-    imprimirAnalisePCP(recorte?'Performance · Conferência das entregas':'Performance e participação',copy,periodoOuMes('_fPerf'),perfFonteTexto());
+    imprimirAnalisePCP(naConferencia?'Performance · Conferência das entregas':'Performance e participação',copy,periodoOuMes('_fPerf'),perfFonteTexto());
   };
   el.querySelectorAll('[data-perf-os]').forEach(b=>b.onclick=()=>{
     const r=perfUnirPessoas([perfRegistro(perfOS(b.dataset.perfOs),perfConfig())])[0];

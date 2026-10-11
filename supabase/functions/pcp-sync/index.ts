@@ -645,6 +645,40 @@ function perfPeriodo(body: any) {
   if(!valido(de)||!valido(ate)||de>ate||(Date.parse(ate)-Date.parse(de))/864e5>366) throw new Error("Escolha um período válido de até um ano.");
   return {de,ate};
 }
+/* OS DEMONSTRATIVOS QUE COBREM O RECORTE (revisão da onda w3, R1). A aba
+   Perdas por retrabalho pode estar em qualquer recorte (quinzena, últimos 30
+   dias), e o demonstrativo da comissão é de um período fechado, quase sempre o
+   mês. Pela lista do período exato, a O.S. que o demonstrativo do mês já
+   julgou aparecia "a decidir" em todo outro recorte. Vão junto, resumidas, as
+   revisões dos OUTROS períodos que cobrem algum dia do recorte: a última de
+   cada um e, se ela for uma compensação, também a última que não é (a tela
+   escolhe, perdas.js). Só o que a aba lê: decisões, montagem interna e as
+   linhas sem os pagamentos; a mesma regra de acesso da lista (admin e pcp). */
+function perfComissaoCobrem(todas:any[], periodo:{de:string,ate:string}) {
+  const grupos=new Map<string,any[]>();
+  for(const r of todas||[]){
+    if(!r||typeof r!=="object"||typeof r.de!=="string"||typeof r.ate!=="string")continue;
+    if((r.de===periodo.de&&r.ate===periodo.ate)||r.de>periodo.ate||r.ate<periodo.de)continue;
+    const k=r.de+":"+r.ate;grupos.set(k,[...(grupos.get(k)||[]),r]);
+  }
+  const resumo=(r:any)=>{
+    const ap=r.apuracao||{},ent=r.entrada||{},entregas:any={};
+    for(const [id,e] of Object.entries(ent.entregas||{})){
+      const i=(e as any)?.interna;
+      if(i&&typeof i==="object")entregas[id]={interna:{situacao:i.situacao,partes:Array.isArray(i.partes)?i.partes.map((p:any)=>({pessoaId:p?.pessoaId,cota:p?.cota})):[]}};
+    }
+    return {de:r.de,ate:r.ate,id:r.id,revisao:r.revisao,tipo:r.tipo,em:r.em,fechamentoId:r.fechamentoId,resumo:true,entrada:{decisoes:ent.decisoes||{},entregas},
+      apuracao:{compensacaoDe:ap.compensacaoDe||null,config:{modo:ap.config?.modo},linhas:(Array.isArray(ap.linhas)?ap.linhas:[]).map((l:any)=>({id:l.id,osId:l.osId,numero:l.numero,dia:l.dia,
+        decisao:l.decisao,pendencias:l.pendencias,baseLiquidaCentavos:l.baseLiquidaCentavos,comissaoCentavos:l.comissaoCentavos}))}};
+  };
+  const out:any[]=[];
+  for(const rs of grupos.values()){
+    const ordem=rs.slice().sort((a:any,b:any)=>(Number(b.revisao)||0)-(Number(a.revisao)||0));
+    const topo=ordem[0];out.push(resumo(topo));
+    if(topo.apuracao?.compensacaoDe){const base=ordem.find((r:any)=>!r.apuracao?.compensacaoDe);if(base)out.push(resumo(base));}
+  }
+  return out;
+}
 async function perfHash(v:any) {
   const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(JSON.stringify(v)));
   return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
@@ -1411,7 +1445,7 @@ Deno.serve(async (req: Request) => {
         if(acao==="performanceComissaoListar"){
           const fichas=await fichasRH(), regua=resolverPessoas({pessoas:fichas});
           const pessoas=[...new Map(fichas.filter((p:any)=>p.id&&regua.pessoa(p.id)&&!regua.pessoa(p.id).semFicha).map((p:any)=>[p.id,{id:p.id,nome:p.nome}])).values()];
-          return resp({revisoes,pessoas});
+          return resp({revisoes,pessoas,cobrem:perfComissaoCobrem(todas,periodo)});
         }
         if(acao==="performanceComissaoExportar"){
           if(!ultima || ultima.id!==body.id)return resp({error:"Selecione a última revisão aprovada. Uma nova prévia suspende a exportação anterior."},409);
