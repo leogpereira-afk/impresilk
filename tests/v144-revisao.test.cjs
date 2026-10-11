@@ -198,10 +198,13 @@ test('v144: A, entregue em 30/09 e finalizada em 01/10 não "não pontua": check
   // Entregue em outubro: o efeito volta, e o checklist diz o mesmo que o Status da entrega.
   const t4 = tela({lista: [entregueEm('2026-10-02', {finalizadaEm: '2026-10-03T09:00:00', finalizadoPor: 'Gestor Fictício'})]});
   t4.abrirOS('v1', 'fechamento');
-  assert.ok(t4.run('statusEntregaDe(_modalDraft).perdas').includes('atraso'), 'premissa: em outubro o atraso é perda');
+  /* TROCADO DE PROPÓSITO (onda a3, D-011 de 11/10/2026): em outubro o atraso
+     VALE como ocorrência registrada (sem efeito sozinho), e não é perda; o
+     texto é o da régua das perdas, o mesmo da aba Perdas por retrabalho. */
+  assert.deepEqual(js(t4.run('statusEntregaDe(_modalDraft).ocorrencias.filter(o => o.vale).map(o => [o.tipo, o.efeito])')), [['atraso', 'registrada']], 'premissa: em outubro o atraso vale como ocorrência');
+  assert.deepEqual(js(t4.run('statusEntregaDe(_modalDraft).perdas')), []);
   const ck4 = t4.checklist();
-  // Texto trocado na revisão da onda w3 (U1): a regra do atraso está pendente (A3), e a ficha diz o mesmo que a aba Perdas por retrabalho.
-  assert.match(doChecklist(ck4, 'Prazo').html, /Entregue com atraso: ocorrência a decidir pela gestão\. Até a decisão, não tira pontos nem comissão; o abono justifica o atraso\./);
+  assert.match(doChecklist(ck4, 'Prazo').html, /Entregue com atraso\. Ocorrência registrada: não tira pontos nem comissão sozinha; a gestão pode julgar como falha comprovada\. O abono justifica o atraso\./);
   assert.match(doChecklist(ck4, 'Limpeza e equipamentos da volta').html, /Carro limpo e arrumado: bônus da volta\. Equipamento com &quot;não&quot;: redutor da volta\./);
   assert.doesNotMatch(texto(ck4), /Entregue antes de 01\/10/);
   assert.equal(t4.passoVivo('divisao'), 'Divisão: divisão a confirmar');
@@ -303,11 +306,12 @@ test('v144: C, a marca "não gravou" da Divisão sai quando a sincronização ou
 
 /* ───────────── D · a apuração do programa entra depois ─────────────
    Trocado de propósito na revisão da onda w3 (U1; M1 da auditoria): a linha
-   dizia "a apuração entra numa versão seguinte". Agora diz o que vale até a
-   gestão decidir a regra do retrabalho e do atraso (A3), e onde ver cada
-   ocorrência. O lugar, as condições e a saída com o PONTUACAO são os mesmos. */
-const APURACAO = 'Retrabalho e atraso são ocorrências a decidir pela gestão: até a decisão, não tiram pontos nem comissão. Cada uma aparece em Performance › Perdas por retrabalho.';
-test('v144: D, o checklist e as Instruções avisam que retrabalho e atraso estão a decidir pela gestão', () => {
+   dizia "a apuração entra numa versão seguinte". Trocado de novo na onda a3
+   (D-010 e D-011 de 11/10/2026): a linha diz a régua das perdas, decidida
+   pelo dono, e onde ver cada ocorrência. O lugar, as condições e a saída com
+   o PONTUACAO são os mesmos. */
+const APURACAO = 'Retrabalho de instalação tira os pontos e a comissão da O.S.; o de medição, arte ou produção não tira nada da instalação. Atraso e retorno antecipado ficam registrados como ocorrência e não tiram nada sozinhos. Tudo aparece em Performance › Perdas por retrabalho.';
+test('v144: D, o checklist e as Instruções dizem a régua das perdas (D-010 e D-011)', () => {
   const t = tela({lista: [osPronta({retrabalhoPerguntado: RESPONDIDO_NAO})]});
   t.abrirOS('f1', 'fechamento');
   // Caso ruim: a ficha dizia "não pontua" e a aba Performance contava a O.S., sem nada explicar.
@@ -316,50 +320,57 @@ test('v144: D, o checklist e as Instruções avisam que retrabalho e atraso est�
   const ini = app.indexOf('function abrirInstrucoes()');
   const manual = app.slice(ini, app.indexOf('\n}', ini));
   const linhaManual = manual.split('<p>').find(x => x.includes('checklist de fechamento</strong> não trava')).split('</p>')[0];
-  assert.match(linhaManual, /O efeito segue o dia da entrega, o mesmo do Status da entrega: o que foi entregue antes de 01\/10\/2026 fica fora do programa\. Até a gestão decidir a regra do retrabalho e do atraso, a ocorrência não tira pontos nem comissão; cada uma aparece em Performance › Perdas por retrabalho\./);
+  assert.match(linhaManual, /o retrabalho de instalação tira os pontos e a comissão da O\.S\.; o de medição, arte ou produção não tira nada da instalação; o atraso e o retorno antecipado ficam registrados como ocorrência e não tiram nada sozinhos/);
+  assert.match(linhaManual, /O retrabalho sem a etapa de origem fica a definir: a gestão define no Status da entrega, e até lá a comissão da O\.S\. fica pendente\./);
   for (const s of [APURACAO, linhaManual]) assert.ok(!s.includes('—'), 'sem travessão');
   // Fora do programa (entregue em 30/09) e na cancelada, a linha não aparece.
   const fora = tela({lista: [entregueEm('2026-09-30', {finalizadaEm: '2026-10-01T09:05:00'})]});
   fora.abrirOS('v1', 'fechamento');
-  assert.ok(!texto(fora.checklist()).includes('Retrabalho e atraso são ocorrências'));
+  assert.ok(!texto(fora.checklist()).includes('Retrabalho de instalação tira os pontos'));
   const canc = tela({lista: [osBase({cancelamento: {ativo: true, motivo: 'Cliente desistiu do pedido fictício', por: 'Gestor Fictício', em: HOJE + 'T09:00:00'}})]});
   canc.abrirOS('f1', 'fechamento');
-  assert.ok(!texto(canc.checklist()).includes('Retrabalho e atraso são ocorrências'));
+  assert.ok(!texto(canc.checklist()).includes('Retrabalho de instalação tira os pontos'));
   // Com o motor do programa carregado (F19, PONTUACAO), a linha sai sozinha.
   const f19 = tela({lista: [osPronta()], extra: `var PONTUACAO = {INICIO_PROGRAMA: '2026-10-01'};`});
   f19.abrirOS('f1', 'fechamento');
-  assert.ok(!texto(f19.checklist()).includes('Retrabalho e atraso são ocorrências'));
+  assert.ok(!texto(f19.checklist()).includes('Retrabalho de instalação tira os pontos'));
 });
 
-/* ───────────── revisão da onda w3 (11/10/2026), U1 ─────────────
-   A aba Perdas por retrabalho diz "ocorrência a decidir pela gestão" (a regra
-   do retrabalho e do atraso está pendente, A3), e a ficha que ela abre dizia
-   "a O.S. não pontua", "tira a O.S. da pontuação para todos" e "N perdas
-   valendo". A ficha passa a dizer o mesmo que a aba (M1 da auditoria). */
-test('revisão onda-w3-abas: U1, a ficha diz "ocorrência a decidir pela gestão" no lugar de "não pontua" e de "perda valendo"', () => {
+/* ───────────── revisão da onda w3 (11/10/2026), U1, e onda a3 ─────────────
+   A ficha dizia "a O.S. não pontua", "tira a O.S. da pontuação para todos" e
+   "N perdas valendo" (regra de 29/09); a w3 trocou por "a decidir pela
+   gestão"; a onda a3 (D-010 e D-011) troca de propósito pela régua: o
+   retrabalho sem origem fica a definir, o de instalação tira os pontos e a
+   comissão, e o atraso fica registrado, sem efeito sozinho. */
+test('revisão onda-w3-abas e onda a3: a ficha diz o efeito da régua das perdas, não "não pontua" nem "a decidir pela gestão"', () => {
   const os = entregueEm('2026-10-02', {finalizadaEm: '2026-10-03T09:00:00', finalizadoPor: 'Gestor Fictício', retrabalho: true, problema: 'Placa torta fictícia',
     retrabalhoPerguntado: {resposta: 'sim', em: HOJE + 'T16:00:00', por: 'Gestor Fictício'}});
   const t = tela({lista: [os]});
   t.abrirOS('v1', 'fechamento');
-  const perdas = js(t.run('statusEntregaDe(_modalDraft).perdas'));
-  assert.ok(perdas.includes('atraso') && perdas.includes('retrabalho'), 'premissa: a regra embutida conta o atraso e o retrabalho: ' + perdas);
+  assert.deepEqual(js(t.run('statusEntregaDe(_modalDraft).perdas')), [], 'origem a definir e atraso: nenhuma perda');
   const ck = t.checklist();
   // Caso ruim: "Entregue com atraso: a O.S. não pontua. O abono devolve." e "Retrabalho tira a O.S. da pontuação para todos e não se abona."
-  assert.doesNotMatch(texto(ck), /não pontua|tira a O\.S\. da pontuação|O abono devolve|versão seguinte/);
-  assert.match(doChecklist(ck, 'Prazo').html, /Entregue com atraso: ocorrência a decidir pela gestão\. Até a decisão, não tira pontos nem comissão; o abono justifica o atraso\./);
-  assert.match(doChecklist(ck, 'Retrabalho').html, /Retrabalho: ocorrência a decidir pela gestão\. Até a decisão, não tira pontos nem comissão\. Retrabalho não se abona\./);
-  assert.match(texto(ck), /Retrabalho e atraso são ocorrências a decidir pela gestão: até a decisão, não tiram pontos nem comissão\. Cada uma aparece em Performance › Perdas por retrabalho\./);
-  // O Status da entrega: "a decidir pela gestão" no lugar de "perda valendo" e do selo "perda".
+  assert.doesNotMatch(texto(ck), /não pontua|tira a O\.S\. da pontuação|O abono devolve|versão seguinte|a decidir pela gestão/);
+  assert.match(doChecklist(ck, 'Prazo').html, /Entregue com atraso\. Ocorrência registrada: não tira pontos nem comissão sozinha; a gestão pode julgar como falha comprovada\. O abono justifica o atraso\./);
+  assert.match(doChecklist(ck, 'Retrabalho').html, /Retrabalho com origem a definir: defina a origem; até lá não tira nada e a comissão desta O\.S\. fica pendente\./);
+  assert.ok(texto(ck).includes(APURACAO));
+  // O Status da entrega: "origem a definir" e "marcada", nunca "perda valendo".
   const st = t.run('statusEntregaFichaHTML(_modalDraft)');
-  assert.doesNotMatch(st, /perdas? valendo|conta como perda|>perda</);
-  assert.match(st, /[1-9] a decidir pela gestão/);
-  assert.match(st, /class="oc-selo perda">a decidir</);
-  // Ainda aberta e com o prazo vencido: entregar agora vira ocorrência a decidir.
+  assert.doesNotMatch(st, /perdas? valendo|conta como perda|>perda<|a decidir pela gestão/);
+  assert.match(st, /class="oc-selo definir">origem a definir</);
+  assert.match(st, /class="oc-selo registrada">marcada</);
+  assert.match(st, /1 com origem a definir · 1 marcada, sem efeito sozinha/);
+  // Com a origem Instalação: o selo "tira pontos e comissão" e a perda no status.
+  const inst = tela({lista: [{...js(os), etapaOrigem: 'Instalação'}]});
+  inst.abrirOS('v1', 'fechamento');
+  assert.deepEqual(js(inst.run('statusEntregaDe(_modalDraft).perdas')), ['retrabalho']);
+  assert.match(inst.run('statusEntregaFichaHTML(_modalDraft)'), /class="oc-selo perda">tira pontos e comissão</);
+  // Ainda aberta e com o prazo vencido: entregar agora fica registrado como ocorrência.
   const aberta = tela({lista: [osPronta({prazoCombinado: {data: '2026-10-03', fonte: 'agenda', em: '2026-10-01T08:00:00'}, instalacao: {data: '2026-10-03', periodo: 'Manhã', duracaoDias: 1}})]});
   aberta.abrirOS('f1', 'fechamento');
   const prazo = doChecklist(aberta.checklist(), 'Prazo').html;
-  assert.doesNotMatch(prazo, /não pontua/);
-  assert.match(prazo, /a decidir pela gestão/);
+  assert.doesNotMatch(prazo, /não pontua|a decidir pela gestão/);
+  assert.match(prazo, /Já passou do prazo: a entrega com atraso fica registrada como ocorrência\./);
   // O manual das Instruções diz o mesmo.
   const app = ler('app.js');
   assert.doesNotMatch(app, /entra numa versão seguinte/);

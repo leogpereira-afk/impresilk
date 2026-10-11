@@ -42,7 +42,8 @@ test('upsert sem mudança em campo auditado não gera entrada (e mudar só o tex
 
 test('agenda, carro, valor e retrabalho entram no diário campo a campo',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[base({valorTotal:900})]});
- const os={...copia(e),instalacao:{data:'2026-10-02',periodo:'Tarde',hora:'',duracaoDias:2},veiculo:'Strada',valorTotal:1200,retrabalho:true,causa:'Medida errada'};
+ // TROCADO DE PROPÓSITO (onda a3, D-010): a gestão marca o retrabalho com a etapa de origem (sem ela, a marca não entra).
+ const os={...copia(e),instalacao:{data:'2026-10-02',periodo:'Tarde',hora:'',duracaoDias:2},veiculo:'Strada',valorTotal:1200,retrabalho:true,etapaOrigem:'Produção',causa:'Medida errada'};
  await e.call({action:'upsert',os},gestor);
  const d=diario(e);assert.equal(d.length,1);
  const a=d[0].registro;

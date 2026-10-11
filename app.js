@@ -1858,12 +1858,15 @@ function etapaParaFinalizar(os) {
    O EFEITO DE CADA ITEM É O QUE O MOTOR DO PROGRAMA FAZ (revisão da F23;
    pontuacao.js da F19, que não lê o checklist). Antes, todo item que
    faltava "ficava pendente para a pontuação", regra que nenhuma régua tem:
-   - prazo: a entrega com atraso vira ocorrência a decidir pela gestão (o
-     abono justifica); sem prazo combinado, o atraso não é medido;
-   - retrabalho: vira ocorrência a decidir pela gestão e não se abona; a
+   - prazo: a entrega com atraso fica registrada como ocorrência e não tira
+     nada sozinha (D-011; o abono justifica); sem prazo combinado, o atraso não
+     é medido;
+   - retrabalho: o efeito é o da régua das perdas (D-010): o de instalação
+     tira os pontos e a comissão da O.S. e não se abona; o de medição, arte ou
+     produção não tira nada da instalação; o sem origem fica a definir. A
      pergunta sem resposta não muda nada;
    (até a revisão da onda w3, U1, o atraso e o retrabalho diziam "a O.S. não
-   pontua": a regra deles está pendente, A3, veja OCORRENCIA_A_DECIDIR);
+   pontua"; na w3, "a decidir pela gestão"; desde 11/10/2026, a régua);
    - volta do carro: limpo e arrumado dão o bônus da volta, equipamento
      faltando dá o redutor; a volta não conferida fica neutra;
    - baixa do ERP sem lançamento: entra "sem prova" e não pontua até ser
@@ -1892,17 +1895,19 @@ const regrasNaFicha = () => typeof REGRAS !== 'undefined' && typeof versoesRegra
 const regraDaFicha = os => (regrasNaFicha() ? regraDoDiaTela(diaDaRegraDe(os)) : null);
 // Fora do programa de verdade: a regra está carregada e não vale no dia da O.S.
 const foraDoProgramaFicha = os => regrasNaFicha() && !regraDaFicha(os);
-/* A OCORRÊNCIA A DECIDIR (revisão da onda w3, U1; M1 da auditoria). A gestão
-   ainda não decidiu se retrabalho e atraso tiram pontos e comissão sozinhos
-   ou só com falha comprovada (A3). A comissão só corta com a falha comprovada
-   registrada no demonstrativo, e o ranking não desconta nada. A ficha dizia
-   "a O.S. não pontua" e "N perdas valendo" enquanto a aba Perdas por
-   retrabalho, aberta ao lado, dizia "a decidir pela gestão": agora a ficha diz
-   o mesmo que a aba. A linha do checklist sai sozinha quando o motor do
-   programa (F19, pontuacao.js) estiver carregado. */
-const OCORRENCIA_A_DECIDIR = 'ocorrência a decidir pela gestão';
-const ATE_A_DECISAO = 'Até a decisão, não tira pontos nem comissão';
-const APURACAO_DEPOIS_FICHA = 'Retrabalho e atraso são ocorrências a decidir pela gestão: até a decisão, não tiram pontos nem comissão. Cada uma aparece em Performance › Perdas por retrabalho.';
+/* A RÉGUA DAS PERDAS NA FICHA (D-010 e D-011, 11/10/2026; regras.js). As
+   frases são as de REGRAS.TEXTOS_PERDA, as mesmas da aba Perdas por
+   retrabalho, do Por O.S. e da comissão: o retrabalho de instalação tira os
+   pontos e a comissão da O.S.; o de medição, arte ou produção não tira nada
+   da instalação; o sem origem fica a definir (a comissão da O.S. fica
+   pendente); o atraso e o retorno antecipado ficam registrados como
+   ocorrência e não tiram nada sozinhos. Sem o regras.js novo (cache misto),
+   a ficha não diz o efeito. */
+const textosPerdaFicha = () => (typeof REGRAS !== 'undefined' && REGRAS && REGRAS.TEXTOS_PERDA) || null;
+// O ponto final da frase da régua: "desta O.S." já termina em ponto (a abreviatura não ganha outro).
+const fraseComPonto = t => !t ? '' : /[.!?]$/.test(t) ? t : t + '.';
+const efeitoRetrabalhoFicha = os => (typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.textoDoEfeito === 'function' ? REGRAS.textoDoEfeito('retrabalho', os && os.etapaOrigem) : '');
+const APURACAO_DEPOIS_FICHA = 'Retrabalho de instalação tira os pontos e a comissão da O.S.; o de medição, arte ou produção não tira nada da instalação. Atraso e retorno antecipado ficam registrados como ocorrência e não tiram nada sozinhos. Tudo aparece em Performance › Perdas por retrabalho.';
 const apuracaoDepoisFicha = () => typeof PONTUACAO === 'undefined';
 // A baixa do ERP que espera o lançamento à mão: a mesma régua da fila "a lançar" (casa.js, classificarEntregas).
 function aLancarNaFicha(os) {
@@ -1916,7 +1921,6 @@ function checklistFechamento(os) {
   const fin = !!os.finalizadaEm, erp = OPERACAO.encerradaERP(os);
   const regra = regraDaFicha(os), programa = !!regra;
   const efeito = t => (programa ? t : '');
-  const perde = k => programa && Array.isArray(regra.perdas) && regra.perdas.includes(k);
   const volta = programa && regra.volta && typeof regra.volta === 'object' ? regra.volta : {};
   const bonusVolta = (Number(volta.carroLimpoBp) || 0) > 0, redutorVolta = (Number(volta.equipamentoFaltaBp) || 0) > 0;
   const editavel = !fin && podeEditar();
@@ -1939,11 +1943,11 @@ function checklistFechamento(os) {
     texto: pc ? `combinado para ${fmtDataBR(pc.data)}${atraso ? ', ' + String(atraso.rotulo || '').toLowerCase() : noPrazo ? ', entregue no prazo' : ''}`
       : semPrazo ? 'sem prazo: a O.S. já estava entregue quando ganhou data no PCP'
       : 'sem prazo combinado: ele nasce com a primeira data agendada no PCP',
-    efeito: !perde('atraso') ? '' : !pc ? 'Sem prazo, o atraso não é medido.'
-      : atraso && atraso.abonado ? 'Atraso abonado: fica justificado e não vira ocorrência a decidir.'
-      : atraso && fin ? `Entregue com atraso: ${OCORRENCIA_A_DECIDIR}. ${ATE_A_DECISAO}; o abono justifica o atraso.`
-      : atraso ? `Já passou do prazo: a entrega com atraso vira ${OCORRENCIA_A_DECIDIR}. O abono justifica o atraso.`
-      : fin ? '' : `Entregar depois dele vira ${OCORRENCIA_A_DECIDIR}.`,
+    efeito: !programa || !textosPerdaFicha() ? '' : !pc ? 'Sem prazo combinado: atraso não medido.'
+      : atraso && atraso.abonado ? 'Atraso abonado: fica justificado.'
+      : atraso && fin ? `Entregue com atraso. ${textosPerdaFicha().ocorrencia}. O abono justifica o atraso.`
+      : atraso ? `Já passou do prazo: a entrega com atraso fica registrada como ocorrência. ${textosPerdaFicha().ocorrencia}.`
+      : fin ? '' : 'Entregar depois dele fica registrado como ocorrência, sem tirar pontos nem comissão sozinho.',
     ir: !pc && !semPrazo && editavel ? 'equipe' : '' });
   const resp = os.retrabalhoPerguntado && typeof os.retrabalhoPerguntado === 'object' ? os.retrabalhoPerguntado.resposta : '';
   const gerou = !!os.retrabalho || resp === 'sim';
@@ -1952,8 +1956,12 @@ function checklistFechamento(os) {
     texto: os.retrabalho ? `gerou retrabalho${os.problema ? ': ' + String(os.problema).slice(0, 80) : ''}`
       : resp === 'nao' ? 'respondido: não gerou' : resp === 'sim' ? 'respondido: gerou'
       : 'responder se gerou retrabalho',
-    efeito: gerou && perde('retrabalho') ? `Retrabalho: ${OCORRENCIA_A_DECIDIR}. ${ATE_A_DECISAO}. Retrabalho não se abona.` : '',
-    como: respondido ? '' : fin ? 'Responda no Fechar o dia, em Entregas.' : 'A pergunta vem ao finalizar.' });
+    efeito: !gerou || !programa || !textosPerdaFicha() ? '' : !os.retrabalho ? 'A resposta "gerou retrabalho" chega com a etapa de origem.'
+      : fraseComPonto(efeitoRetrabalhoFicha(os)) + (REGRAS.efeitoDaOcorrencia('retrabalho', os.etapaOrigem) === 'tira' ? ' ' + fraseComPonto(textosPerdaFicha().naoSeAbona) : ''),
+    como: respondido ? (os.retrabalho && !origemDefinidaFicha(os) ? (podeOrigemRetrabalho() ? 'Defina a origem no Status da entrega, no Fechamento.' : 'A gestão do PCP define a origem.') : '')
+      : fin ? 'Responda no Fechar o dia, em Entregas.' : 'A pergunta vem ao finalizar.',
+    // A origem a definir também é "falta" no checklist: sem ela a comissão da O.S. fica pendente.
+    ...(respondido && os.retrabalho && programa && !origemDefinidaFicha(os) ? { estado: 'falta' } : {}) });
   const rc = os.retornoConf || {};
   const sn = k => { const r = OPERACAO.respostaVolta(rc[k]); return r === 'sim' ? 'sim' : r === 'nao' ? 'não' : 'sem resposta'; };
   const ROT_VOLTA = 'Limpeza e equipamentos da volta';
@@ -2412,6 +2420,7 @@ const AUD_ROTULOS = {
   finalizadaEm: 'Finalizada em', finalizadoPor: 'Finalizada por', reabertaEm: 'Reaberta em', reabertaPor: 'Reaberta por',
   finalizadaPorCampo: 'Finalizada pelo celular (declarada)',
   entregaLancada: 'Entrega lançada', retrabalho: 'Retrabalho', causa: 'Causa', causaRaiz: 'Causa raiz', etapaOrigem: 'Etapa de origem',
+  etapaOrigemLog: 'Troca da etapa de origem (com motivo)',
   tipo: 'Tipo', numero: 'Número da O.S.', baixaAutoERP: 'Baixa pelo ERP', justificativaConclusao: 'Justificativa da conclusão',
   prazoCombinado: 'Prazo combinado', retornoPrevisto: 'Retorno previsto', retornoConferido: 'Chegada conferida do carro', chegadasConferidas: 'Chegadas conferidas por dia',
   agendaLog: 'Histórico de remarcações', origemPDF: 'Lida do PDF do ERP',
@@ -3149,7 +3158,8 @@ function manterAbertaComERP(os, gravarManter) {
 /* A resposta do retrabalho que a pergunta grava na O.S. (perguntarRetrabalho).
    Do `checkout` a pergunta só mexe na situação (o "Não" desmarca o
    Retrabalho): o resto dele (a obs de fechamento) é de quem escreveu. */
-const CAMPOS_RESPOSTA_RETRAB = ['retrabalhoPerguntado', 'retrabalho', 'problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho', 'checkout'];
+// O pedido da troca da origem (etapaOrigemMotivo, D-010) vai junto: sem ele, o servidor recusa a troca.
+const CAMPOS_RESPOSTA_RETRAB = ['retrabalhoPerguntado', 'retrabalho', 'problema', 'etapaOrigem', 'etapaOrigemMotivo', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho', 'checkout'];
 /* A FOTO DA RESPOSTA (revisão da E4): tirada antes de perguntar. Se a ficha
    foi trocada no meio (o pull trouxe a versão de outro tablet), o rascunho
    novo recebe SÓ o que a resposta mudou, e do checkout só a situação. Copiar
@@ -3796,7 +3806,7 @@ function blocoExec(os, ro, done) {
           <div class="field"><label>Quem resolveu</label><input data-f="resolvidoPor" value="${esc(OPERACAO.nomePessoa(os.resolvidoPor))}"></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Etapa de origem</label><select data-f="etapaOrigem"><option value=""></option>${ETAPAS_ORIGEM.map(v => `<option ${os.etapaOrigem === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+          <div class="field"><label>Etapa de origem</label>${origemNaJornadaHTML(os)}</div>
           <div class="field"><label>Causa raiz</label><select data-f="causaRaiz"><option value=""></option>${CAUSAS_RAIZ.map(v => `<option ${os.causaRaiz === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
         </div>
         <div class="field-row">
@@ -4664,6 +4674,14 @@ function bindModalEvents(os, ro) {
   $$('[data-f-check],[data-conf-por]', root).forEach(el => {
     el.onchange = () => {
       if (ro) { el.checked = !el.checked; return; } // somente-leitura/finalizada não grava
+      /* MARCAR O RETRABALHO PELA GESTÃO EXIGE A ORIGEM (D-010): a caixa abre a
+         escolha da etapa de origem; Voltar deixa desmarcado. O servidor também
+         recusa a marca da gestão sem origem (guardarOrigemRetrabalho). */
+      if (el.dataset.fCheck === 'retrabalho' && el.checked && !_modalDraft.retrabalho && podeOrigemRetrabalho()) {
+        el.checked = false;
+        abrirOrigemRetrabalho(_modalDraft, gravarNaFichaF17, { marcar: true });
+        return;
+      }
       if (el.dataset.fCheck) setField(el.dataset.fCheck, el.checked);
       if (el.dataset.confPor) setField(el.dataset.confPor, el.checked ? STATE.user.nome : '');
       if (el.dataset.fCheck === 'retrabalho') {
@@ -4671,10 +4689,12 @@ function bindModalEvents(os, ro) {
         if (box) box.style.display = el.checked ? '' : 'none';
         if (!el.checked) {
           // Desmarcou: limpa os campos do retrabalho (senão o PDF/ficha sai
-          // com "Problema/Causa" fantasmas de uma marcação desfeita).
-          ['problema', 'causa', 'resolvidoPor', 'dataResolvido'].forEach(f => setField(f, ''));
+          // com "Problema/Causa" fantasmas de uma marcação desfeita). A origem
+          // sai junto: a marca nova pede a origem de novo (D-010).
+          ['problema', 'causa', 'resolvidoPor', 'dataResolvido', 'etapaOrigem'].forEach(f => setField(f, ''));
+          delete _modalDraft.etapaOrigemMotivo;
           if (box) $$('input,select,textarea', box).forEach(i => { i.value = ''; });
-        }
+        } else toast('Retrabalho marcado. A gestão do PCP define a etapa de origem; até lá ele fica com a origem a definir.', 'success');
         saveDraft();
         pintarPendenciasFicha();
         return;
@@ -4682,6 +4702,9 @@ function bindModalEvents(os, ro) {
       if (el.dataset.confPor) { saveDraft(); reRenderModalKeepOpen(); }
     };
   });
+
+  // A origem do retrabalho (D-010): a gestão define ou troca pelo diálogo (marcar e trocar pedem a origem e o motivo).
+  $$('[data-origem-ficha]', root).forEach(b => { b.onclick = () => abrirOrigemRetrabalho(_modalDraft, gravarNaFichaF17); });
 
   // Itens — edição inline (salva no blur OU debounced para não perder edição
   // se o usuário fechar o modal sem trocar de campo).
@@ -5091,11 +5114,92 @@ function reRenderModalKeepOpen() {
    resposta. Sim → cadastro com taxonomia fixa (etapa de origem, causa raiz),
    porque o objetivo é uma base para achar causa recorrente -- texto livre não
    agrupa. A resposta fica carimbada (quem, quando) mesmo quando é "não". */
-const ETAPAS_ORIGEM = ['Medição', 'Arte', 'Produção', 'Instalação'];
+// As etapas de origem são as da régua das perdas (regras.js, carregado antes); a lista fica de reserva para o cache misto.
+const ETAPAS_ORIGEM = (typeof REGRAS !== 'undefined' && REGRAS && Array.isArray(REGRAS.ETAPAS_ORIGEM) && REGRAS.ETAPAS_ORIGEM) || ['Medição', 'Arte', 'Produção', 'Instalação'];
 const CAUSAS_RAIZ = ['Erro humano', 'Material', 'Comunicação', 'Especificação', 'Outro'];
+// A origem do retrabalho é uma das quatro etapas (regras.js); sem o regras.js novo, não se sabe e não se cobra.
+const origemDefinidaFicha = os => !(typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.origemRetrabalho === 'function') || !!REGRAS.origemRetrabalho(String((os && os.etapaOrigem) || ''));
+// Só a gestão (admin e pcp) define e troca a origem (D-010: ela decide dinheiro), nunca o crachá sem senha.
+const podeOrigemRetrabalho = () => ['admin', 'pcp'].includes(String((STATE.user || {}).papel || '')) && !(typeof crachaEhToque === 'function' && crachaEhToque());
+/* A ETAPA DE ORIGEM DO RETRABALHO (D-010, decisão do dono de 11/10/2026:
+   "retrabalho marcado já tira os pontos e a comissão", "mas é retrabalho de
+   instalação"). A origem decide dinheiro: o retrabalho de Instalação tira os
+   pontos e a comissão da O.S.; o de Medição, Arte ou Produção não tira nada da
+   instalação; sem a origem, fica a definir e a comissão da O.S. fica pendente.
+   Só a gestão (admin e pcp) define e troca. Trocar a origem gravada pede o
+   motivo (15 letras ou mais), que vai no pedido etapaOrigemMotivo: o servidor
+   carimba quem e quando e registra no diário (guardarOrigemRetrabalho), e o
+   pedido nunca fica gravado na O.S. `marcar`: a gestão está marcando o
+   retrabalho agora, e marcar exige a origem. O diálogo vale na ficha aberta
+   (gravarNaFichaF17) e no Status da entrega da O.S. finalizada. */
+const ORIGEM_MOTIVO_MIN_TELA = 15;
+function abrirOrigemRetrabalho(os, gravar, { marcar = false } = {}) {
+  if (!os || !podeOrigemRetrabalho()) { toast('Só a gestão do PCP (admin ou pcp) define a origem do retrabalho.', 'error'); return; }
+  const R = typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.origemRetrabalho === 'function' ? REGRAS : null;
+  if (!R) { toast('As regras do programa não carregaram nesta aba. Atualize a página.', 'error'); return; }
+  const atual = os.retrabalho && !marcar ? R.origemRetrabalho(String(os.etapaOrigem || '')) : '';
+  const velho = document.getElementById('origem-box'); if (velho) velho.remove();
+  const box = document.createElement('div');
+  box.id = 'origem-box';
+  box.className = 'wpp-picker-overlay';
+  const opcoes = R.ETAPAS_ORIGEM.map(e => `<label class="origem-opcao"><input type="radio" name="etapa" value="${esc(e)}" ${e === atual ? 'checked' : ''}> <strong>${esc(e)}</strong> <small>${esc(fraseComPonto(R.textoDoEfeito('retrabalho', e)))}</small></label>`).join('');
+  const titulo = marcar ? 'Marcar retrabalho' : atual ? 'Trocar a origem do retrabalho' : 'Definir a origem do retrabalho';
+  box.innerHTML = `
+    <div class="wpp-picker retrab-box" role="dialog" aria-modal="true" aria-labelledby="origem-tit">
+      <div class="wpp-picker-head"><strong id="origem-tit">${esc(titulo)} · O.S ${esc(os.numero || '')}</strong><button type="button" class="modal-close" data-origem-fechar aria-label="Fechar">×</button></div>
+      <form class="wpp-picker-body ent-form" novalidate>
+        <p class="text-muted ent-texto">${esc(atual ? `Origem gravada: ${atual}. Trocar pede o motivo, que fica registrado com o seu nome.` : 'Escolha a etapa em que o problema nasceu. A origem decide o efeito do retrabalho nos pontos e na comissão.')}</p>
+        <fieldset class="origem-opcoes"><legend>Etapa de origem <span class="req">*</span></legend>${opcoes}</fieldset>
+        ${atual ? '<div class="field"><label>Motivo da troca (15 letras ou mais) <span class="req">*</span><textarea name="motivo" rows="3" maxlength="300"></textarea></label></div>' : ''}
+        <p class="ent-erro" role="alert" hidden></p>
+        <div class="wpp-acoes"><button type="submit" class="btn-primary">${marcar ? 'Marcar retrabalho' : 'Gravar a origem'}</button><button type="button" class="btn-ghost" data-origem-fechar>Voltar</button></div>
+      </form>
+    </div>`;
+  document.body.appendChild(box);
+  const form = box.querySelector('form'), erro = box.querySelector('.ent-erro');
+  const fechar = () => box.remove();
+  box.querySelectorAll('[data-origem-fechar]').forEach(b => { b.onclick = fechar; });
+  form.onsubmit = ev => {
+    ev.preventDefault();
+    const marcada = form.querySelector('input[name="etapa"]:checked');
+    const etapa = R.origemRetrabalho(marcada ? marcada.value : '');
+    const campo = form.querySelector('[name="motivo"]'), motivo = String((campo && campo.value) || '').trim();
+    const mostrar = t => { erro.textContent = t; erro.hidden = false; };
+    if (!etapa) return mostrar('Escolha a etapa de origem.');
+    if (!marcar && etapa === atual) return fechar();
+    const troca = !!atual && etapa !== atual;
+    if (troca && OPERACAO.letrasMotivoSt(motivo) < ORIGEM_MOTIVO_MIN_TELA) return mostrar('Escreva o motivo da troca, com 15 letras ou mais.');
+    const msg = gravar(alvo => {
+      if (marcar) alvo.retrabalho = true;
+      alvo.etapaOrigem = etapa;
+      if (troca) alvo.etapaOrigemMotivo = motivo; else delete alvo.etapaOrigemMotivo;
+      return '';
+    }, marcar ? 'Retrabalho marcado, com a origem.' : troca ? 'Origem do retrabalho trocada. O motivo fica no histórico.' : 'Origem do retrabalho gravada.');
+    if (msg) return mostrar(msg);
+    fechar();
+  };
+  const primeiro = form.querySelector('input[name="etapa"]');
+  if (primeiro) try { primeiro.focus(); } catch {}
+}
+// A origem na Jornada (Embarque e Execução): só leitura, com o efeito, e o botão da gestão.
+function origemNaJornadaHTML(os) {
+  const R = typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.origemRetrabalho === 'function' ? REGRAS : null;
+  const etapa = R ? R.origemRetrabalho(String(os.etapaOrigem || '')) : String(os.etapaOrigem || '');
+  const efeito = R && os.retrabalho ? `<small class="bloco">${esc(fraseComPonto(R.textoDoEfeito('retrabalho', etapa)))}</small>` : '';
+  const botao = !os.retrabalho ? '' : podeOrigemRetrabalho() ? `<button type="button" class="btn-ghost btn-sm" data-origem-ficha>${etapa ? 'Trocar a origem' : 'Definir a origem'}</button>`
+    : '<small class="bloco">A gestão do PCP define a origem.</small>';
+  return `<div class="origem-ficha"><span class="origem-ficha-valor">${esc(etapa || (os.retrabalho ? 'a definir' : ''))}</span>${botao}${efeito}</div>`;
+}
 /* `volta`: quem chama pode trocar o "Voltar" (rótulo e o que fazer). O Lançar
    entrega volta ao próprio formulário, com a data, a equipe e a conferência
    que já estavam marcadas. */
+// A origem já gravada numa O.S. marcada: trocar pede motivo.
+const origemGravadaPergunta = os => (os && os.retrabalho && typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.origemRetrabalho === 'function' ? REGRAS.origemRetrabalho(String(os.etapaOrigem || '')) : '');
+// O campo da origem na pergunta: obrigatório para a gestão, com o efeito da etapa escolhida; para os outros, só o aviso.
+function origemNaPerguntaHTML(os, opt) {
+  if (!podeOrigemRetrabalho()) return '<div class="field"><label>Etapa de origem</label><p class="text-muted" style="font-size:.78rem">A gestão do PCP define a etapa de origem. Até lá o retrabalho fica com a origem a definir.</p></div>';
+  return `<div class="field"><label>Etapa de origem <span class="req">*</span></label><select name="etapaOrigem" required><option value="">Escolher</option>${opt(ETAPAS_ORIGEM, os.etapaOrigem)}</select><small class="bloco" data-retrab-efeito aria-live="polite"></small></div>`;
+}
 function perguntarRetrabalho(os, aoResponder, volta = {}) {
   const old = $('#retrab-pergunta'); if (old) old.remove();
   const box = document.createElement('div');
@@ -5118,13 +5222,14 @@ function perguntarRetrabalho(os, aoResponder, volta = {}) {
         <form id="retrab-form" class="retrab-form" ${jaSim ? '' : 'hidden'}>
           <div class="field"><label>Descrição do problema <span class="req">*</span> <span class="text-muted">(o que precisou ser refeito)</span></label><textarea name="problema" rows="2" required>${esc(os.problema || '')}</textarea></div>
           <div class="field-row">
-            <div class="field"><label>Etapa de origem <span class="req">*</span></label><select name="etapaOrigem" required><option value="">Escolher</option>${opt(ETAPAS_ORIGEM, os.etapaOrigem)}</select></div>
+            ${origemNaPerguntaHTML(os, opt)}
             <div class="field"><label>Causa raiz <span class="req">*</span></label><select name="causaRaiz" required><option value="">Escolher</option>${opt(CAUSAS_RAIZ, os.causaRaiz)}</select></div>
           </div>
           <div class="field-row">
             <div class="field"><label>Responsável da etapa <span class="req">*</span> <span class="text-muted">(nome ou setor)</span></label><input name="responsavelEtapa" list="retrab-resp" required value="${esc(os.responsavelEtapa || '')}"><datalist id="retrab-resp">${setores.map(x => `<option value="${esc(x)}">`).join('')}${elenco.map(p => `<option value="${esc(p.nome)}">`).join('')}</datalist></div>
             <div class="field"><label>Data do retrabalho <span class="req">*</span></label><input name="dataRetrabalho" type="date" required value="${esc(os.dataRetrabalho || hojeISO())}"></div>
           </div>
+          ${origemGravadaPergunta(os) ? '<div class="field" data-retrab-motivo hidden><label>Motivo da troca da origem <span class="req">*</span> <span class="text-muted">(15 letras ou mais)</span><textarea name="etapaOrigemMotivo" rows="2" maxlength="300"></textarea></label></div>' : ''}
           <button class="btn-primary w-100" type="submit">Registrar retrabalho e continuar</button>
         </form>
       </div>
@@ -5158,6 +5263,7 @@ function perguntarRetrabalho(os, aoResponder, volta = {}) {
       os.retrabalho = false;
       if (os.checkout && os.checkout.situacao === 'Retrabalho') os.checkout.situacao = '';
       os.problema = ''; os.etapaOrigem = ''; os.causaRaiz = ''; os.responsavelEtapa = '';
+      delete os.etapaOrigemMotivo;
     }
     os.retrabalhoPerguntado = carimbo('nao');
     rasc.limpar();
@@ -5168,13 +5274,28 @@ function perguntarRetrabalho(os, aoResponder, volta = {}) {
      fecha no meio não perde a descrição. "Não" e o envio limpam. */
   const rasc = typeof ligarRascunhoForm === 'function' ? ligarRascunhoForm(form, 'retrabalho', os.id, { aoRecuperar: () => { form.hidden = false; } }) : { limpar() {} };
   $('#retrab-sim', box).onclick = () => { form.hidden = false; form.querySelector('[name=problema]').focus(); };
+  /* A ORIGEM NA PERGUNTA (D-010): o efeito de cada etapa aparece ao escolher;
+     trocar a origem já gravada pede o motivo. Quem não é da gestão não grava
+     a origem (o servidor também não aceita): o retrabalho fica a definir. */
+  const selOrigem = form.querySelector('[name=etapaOrigem]'), efeitoOrigem = form.querySelector('[data-retrab-efeito]'), caixaMotivo = form.querySelector('[data-retrab-motivo]');
+  const gravadaAntes = origemGravadaPergunta(os);
+  const repintarOrigem = () => {
+    const e = selOrigem ? selOrigem.value : '';
+    if (efeitoOrigem) efeitoOrigem.textContent = e && typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.textoDoEfeito === 'function' ? fraseComPonto(REGRAS.textoDoEfeito('retrabalho', e)) : '';
+    if (caixaMotivo) caixaMotivo.hidden = !(gravadaAntes && e && e !== gravadaAntes);
+  };
+  if (selOrigem) { selOrigem.onchange = repintarOrigem; repintarOrigem(); }
   form.onsubmit = ev => {
     ev.preventDefault();
     const fd = new FormData(form);
     const v = k => String(fd.get(k) || '').trim();
-    if (!v('problema') || !v('etapaOrigem') || !v('causaRaiz') || !v('responsavelEtapa') || !v('dataRetrabalho')) { toast('Preencha os cinco campos do retrabalho.', 'error'); return; }
+    const origemExigida = podeOrigemRetrabalho();
+    if (!v('problema') || (origemExigida && !v('etapaOrigem')) || !v('causaRaiz') || !v('responsavelEtapa') || !v('dataRetrabalho')) { toast(origemExigida ? 'Preencha os cinco campos do retrabalho.' : 'Preencha os campos do retrabalho.', 'error'); return; }
+    const troca = origemExigida && !!gravadaAntes && v('etapaOrigem') !== gravadaAntes;
+    if (troca && OPERACAO.letrasMotivoSt(v('etapaOrigemMotivo')) < ORIGEM_MOTIVO_MIN_TELA) { toast('Escreva o motivo da troca da origem, com 15 letras ou mais.', 'error'); return; }
     os.retrabalho = true;
-    os.problema = v('problema'); os.etapaOrigem = v('etapaOrigem'); os.causaRaiz = v('causaRaiz');
+    os.problema = v('problema'); if (origemExigida) os.etapaOrigem = v('etapaOrigem'); os.causaRaiz = v('causaRaiz');
+    if (troca) os.etapaOrigemMotivo = v('etapaOrigemMotivo'); else delete os.etapaOrigemMotivo;
     os.responsavelEtapa = v('responsavelEtapa'); os.dataRetrabalho = v('dataRetrabalho');
     os.retrabalhoPerguntado = carimbo('sim');
     rasc.limpar();
@@ -5321,7 +5442,7 @@ function statusEntregaFichaHTML(os) {
       <div class="st-ent-linha"><span class="st-ent-rot">Status da entrega</span>${seloStatusEntregaHTML(st)}</div>
       <p class="st-ent-motivo">${esc(motivoExibido.charAt(0).toUpperCase() + motivoExibido.slice(1))}.</p>
       ${outros ? `<ul class="st-ent-outros" aria-label="Também vale">${outros}</ul>` : ''}
-      ${retornoFichaHTML(st.retornoAntecipado, st.motivo, st.perdas)}
+      ${retornoFichaHTML(st.retornoAntecipado, st.motivo, st.perdas, !foraDoProgramaFicha(os))}
       ${erp}${desfeito}
       ${acao ? `<div class="st-ent-acoes">${acao}</div>` : ''}
       ${ocorrenciasFichaHTML(os, st)}
@@ -5335,18 +5456,22 @@ function statusEntregaFichaHTML(os) {
    são só da gestão (admin e pcp). A tela grava o PEDIDO; autor e hora são do
    servidor. Os botões moram na ficha, no card (Abonar) e no Fechar o dia. */
 const podeAbonar = () => ['admin', 'pcp'].includes(String((STATE.user || {}).papel || '')) && !(typeof crachaEhToque === 'function' && crachaEhToque());
-const RETORNO_SITUACAO_TXT = { antecipado: 'a decidir pela gestão', abonado: 'abonado', 'no horário': 'no horário', 'na volta': 'medido na volta',
+const RETORNO_SITUACAO_TXT = { antecipado: 'ocorrência registrada', abonado: 'abonado', 'no horário': 'no horário', 'na volta': 'medido na volta',
   'sem retorno previsto': 'sem retorno previsto', 'sem dado': 'chegada ainda não conferida', 'não se aplica': 'não se aplica' };
-/* O RETORNO NA FICHA, um por dia da jornada (revisão da F17). "Conta como
-   perda" só quando o status conta (st.perdas: sem regra do programa, nada
-   conta); senão "antes do previsto". O motivo que já começa pela situação não
-   a repete ("sem retorno previsto. Sem retorno previsto digitado..."), e o
-   que a ficha já mostrou em cima (`jaDito`) não volta. */
-function retornoFichaHTML(r, jaDito, perdas) {
+/* O RETORNO NA FICHA, um por dia da jornada (revisão da F17). O antecipado
+   fica REGISTRADO como ocorrência (D-011: não tira nada sozinho; a gestão
+   pode julgar como falha comprovada no demonstrativo); só "tira os pontos"
+   se a régua das perdas um dia disser (st.perdas). Sem retorno previsto ou
+   sem a chegada conferida, "não medido", nunca "no horário". O motivo que já
+   começa pela situação não a repete, e o que a ficha já mostrou em cima
+   (`jaDito`) não volta. */
+function retornoFichaHTML(r, jaDito, perdas, noPrograma = true) {
   if (!r) return '';
   const conta = Array.isArray(perdas) && perdas.includes('retornoAntecipado');
   const linha = d => {
-    const sit = d.situacao === 'antecipado' && !conta ? 'antes do previsto, sem perda pela regra do dia' : RETORNO_SITUACAO_TXT[d.situacao] || d.situacao;
+    // Antes do programa (sem regra no dia) a medida fica só como registro, sem efeito.
+    const sit = d.situacao !== 'antecipado' ? RETORNO_SITUACAO_TXT[d.situacao] || d.situacao
+      : conta ? 'tira os pontos e a comissão desta O.S.' : noPrograma ? 'ocorrência registrada' : 'antes do previsto, fora do programa (sem efeito)';
     const m = String(d.motivo || '');
     const repete = m.toLowerCase().startsWith(String(RETORNO_SITUACAO_TXT[d.situacao] || '').toLowerCase());
     const motivo = !m || (jaDito && jaDito.includes(m)) ? '' : ` ${esc(m.charAt(0).toUpperCase() + m.slice(1))}.`;
@@ -5357,36 +5482,56 @@ function retornoFichaHTML(r, jaDito, perdas) {
   return dias.map(linha).join('');
 }
 // Uma ocorrência na lista: o rótulo, o motivo, o abono (ou a anulação) e os botões da gestão.
-/* O selo "perda" sai das perdas do status (revisão da F17): a ocorrência que
-   conta agora (oc.conta, a mesma conta de st.perdas). O atraso da aberta, a
-   abonada e a de antes do programa não são perda. */
+/* O SELO DE CADA OCORRÊNCIA sai do efeito da régua das perdas (oc.efeito,
+   D-010 e D-011), contado só quando ela vale agora (oc.vale: no programa,
+   não abonada; o atraso, só o da entregue):
+     "tira pontos e comissão"  o retrabalho de instalação (oc.conta);
+     "origem a definir"        o retrabalho sem a etapa de origem;
+     "não tira nada"           o retrabalho de medição, arte ou produção;
+     "marcada"                 o atraso e o retorno antecipado: marcados como
+                               ocorrência, sem efeito sozinhos (D-011).
+   O atraso da aberta, a abonada e a de antes do programa ficam sem selo de
+   efeito. O retrabalho tem o botão da origem para a gestão. */
+const SELO_EFEITO_OC = { tira: ['perda', 'tira pontos e comissão'], definir: ['definir', 'origem a definir'], acompanha: ['acompanha', 'não tira nada'], registrada: ['registrada', 'marcada'] };
 function ocorrenciaLinhaHTML(oc, gestao, perdas) {
   const ab = oc.abono;
-  const ePerda = !!oc.conta && (!Array.isArray(perdas) || perdas.includes(oc.perda));
+  const ef = oc.vale && SELO_EFEITO_OC[oc.efeito];
   const selo = oc.origem === 'manual' ? (oc.anulada ? '<span class="oc-selo anulada">anulada</span>' : '<span class="oc-selo manual">registrada</span>')
-    : oc.abonado ? '<span class="oc-selo abonado">abonada</span>' : ePerda ? '<span class="oc-selo perda">a decidir</span>' : oc.volta ? '<span class="oc-selo volta">volta do carro</span>' : '';
+    : oc.abonado ? '<span class="oc-selo abonado">abonada</span>' : ef ? `<span class="oc-selo ${ef[0]}">${ef[1]}</span>` : oc.volta ? '<span class="oc-selo volta">volta do carro</span>' : '';
   const pend = (oc.pendente || oc.anulacaoPendente || (ab && (ab.pendente || ab.revogacaoPendente))) ? ' <small class="oc-pend">(a enviar)</small>' : '';
   const quem = oc.origem === 'manual' && oc.por ? ` <small>por ${esc(oc.por)}</small>` : '';
   const anulacao = oc.anulada && oc.anuladaPor ? ` <small>anulada por ${esc(oc.anuladaPor)}</small>` : '';
   let botoes = '';
-  if (gestao && oc.abonavel && !oc.abonado) botoes = `<button type="button" class="btn-ghost btn-sm" data-f17-acao="abonar" data-oc="${esc(oc.id)}">Abonar</button>`;
+  // A origem do retrabalho (D-010): a gestão define a que está a definir, ou troca a gravada, com motivo.
+  if (oc.tipo === 'retrabalho' && oc.origem === 'derivada' && podeOrigemRetrabalho()) botoes = `<button type="button" class="btn-ghost btn-sm" data-f17-acao="origem" data-oc="${esc(oc.id)}">${origemDefinidaFicha({etapaOrigem:oc.etapaOrigem}) && String(oc.etapaOrigem || '') ? 'Trocar a origem' : 'Definir a origem'}</button>`;
+  else if (gestao && oc.abonavel && !oc.abonado) botoes = `<button type="button" class="btn-ghost btn-sm" data-f17-acao="abonar" data-oc="${esc(oc.id)}">Abonar</button>`;
   else if (gestao && oc.abonado && ab && !ab.pendente) botoes = `<button type="button" class="btn-ghost btn-sm" data-f17-acao="revogar" data-ab="${esc(ab.id)}">Revogar abono</button>`;
   else if (gestao && oc.origem === 'manual' && !oc.anulada) botoes = `<button type="button" class="btn-ghost btn-sm" data-f17-acao="anular" data-oc="${esc(oc.id)}">Anular</button>`;
-  return `<li class="oc-linha${oc.anulada ? ' oc-anulada' : ''}"><div><strong>${esc(oc.rotulo)}</strong> ${selo}${pend}${quem}${anulacao}<br><small>${esc(oc.motivo)}</small></div>${botoes ? `<div class="oc-acoes">${botoes}</div>` : ''}</li>`;
+  // A frase da régua, a mesma da aba Perdas por retrabalho e da comissão (regras.js).
+  const efeito = oc.vale && oc.efeito && typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.textoDoEfeito === 'function'
+    ? `<br><small class="oc-efeito">${esc(fraseComPonto(REGRAS.textoDoEfeito(oc.tipo, oc.etapaOrigem || '')))}</small>` : '';
+  return `<li class="oc-linha${oc.anulada ? ' oc-anulada' : ''}"><div><strong>${esc(oc.rotulo)}</strong> ${selo}${pend}${quem}${anulacao}<br><small>${esc(oc.motivo)}</small>${efeito}</div>${botoes ? `<div class="oc-acoes">${botoes}</div>` : ''}</li>`;
 }
-/* "N valendo" conta só as perdas que valem (revisão da F17); as abonadas, as
-   da volta do carro, as registradas à mão e as que ainda não contam vêm à
+/* A CONTA DAS OCORRÊNCIAS pela régua das perdas (D-010 e D-011): a que tira
+   os pontos e a comissão (o retrabalho de instalação), a de origem a definir,
+   o retrabalho que não tira nada da instalação e a registrada (atraso e
+   retorno antecipado); as abonadas, as da volta do carro, as registradas à mão
+   e as que ainda não valem (o atraso da aberta, antes do programa) vêm à
    parte. */
 function contaOcorrenciasTxt(lista, perdas) {
   const vivas = lista.filter(o => !o.anulada);
   const n = f => vivas.filter(f).length;
-  const valendo = n(o => o.conta && (!Array.isArray(perdas) || perdas.includes(o.perda)));
-  // "a decidir pela gestão" no lugar de "perda valendo" (revisão da onda w3, U1): a regra do retrabalho e do atraso está pendente. Sem nenhuma, não se fala dela.
-  const partes = valendo ? [`${valendo} a decidir pela gestão`] : [];
+  const tira = n(o => o.conta && (!Array.isArray(perdas) || perdas.includes(o.perda)));
+  const definir = n(o => o.vale && o.efeito === 'definir'), acompanha = n(o => o.vale && o.efeito === 'acompanha'), registradas = n(o => o.vale && o.efeito === 'registrada');
+  const partes = [];
+  if (tira) partes.push(`${tira} ${tira === 1 ? 'tira' : 'tiram'} pontos e comissão`);
+  if (definir) partes.push(`${definir} com origem a definir`);
+  if (acompanha) partes.push(`${acompanha} sem efeito na instalação`);
+  if (registradas) partes.push(`${registradas} ${registradas === 1 ? 'marcada' : 'marcadas'}, sem efeito sozinha${registradas === 1 ? '' : 's'}`);
   const abonadas = n(o => o.abonado), volta = n(o => o.volta), manuais = n(o => o.origem === 'manual');
-  const semContar = n(o => o.origem === 'derivada' && !o.volta && !o.abonado && !(o.conta && (!Array.isArray(perdas) || perdas.includes(o.perda))));
+  const semContar = n(o => o.origem === 'derivada' && !o.volta && !o.abonado && !o.vale);
   if (abonadas) partes.push(`${abonadas} ${abonadas === 1 ? 'abonada' : 'abonadas'}`);
-  if (semContar) partes.push(`${semContar} sem perda agora`);
+  if (semContar) partes.push(`${semContar} sem efeito agora`);
   if (volta) partes.push(`${volta} da volta do carro`);
   if (manuais) partes.push(`${manuais} ${manuais === 1 ? 'registrada' : 'registradas'}`);
   return partes.join(' · ') || 'nenhuma valendo';
@@ -5450,7 +5595,7 @@ function abrirDialogoF17(cfg, aoConfirmar) {
   const primeiro = form.querySelector('select,input,textarea');
   if (primeiro) try { primeiro.focus(); } catch {}
 }
-const TEXTO_ABONO = 'O abono justifica a ocorrência e fica registrado com o seu nome: ela deixa de ser ocorrência a decidir pela gestão. Use para a remarcação pedida pelo cliente ou para o retorno antecipado que tem explicação. Retrabalho não se abona.';
+const TEXTO_ABONO = 'O abono justifica a ocorrência e fica registrado com o seu nome. Use para a remarcação pedida pelo cliente ou para o retorno antecipado que tem explicação. Retrabalho não se abona: quem discorda da origem troca a origem, com motivo.';
 // Abonar e revogar, registrar e anular: no rascunho que a função entrega (a ficha aberta ou a O.S. do STORE).
 function abonarOcorrenciaEm(os, ocorrencias, gravar) {
   const abonaveis = (ocorrencias || []).filter(o => o.abonavel && !o.abonado);
@@ -5503,8 +5648,10 @@ function ligarOcorrenciasDaFicha() {
         return abonarOcorrenciaEm(d, (st && st.ocorrencias || []).filter(o => o.id === b.dataset.oc), gravarNaFichaF17);
       }
       if (acao === 'registrar') return registrarOcorrenciaEm(d, gravarNaFichaF17, { fonte: 'ficha' });
+      // A origem do retrabalho (D-010): definir a que está a definir, ou trocar a gravada com motivo.
+      if (acao === 'origem') return abrirOrigemRetrabalho(d, gravarNaFichaF17);
       if (acao === 'revogar') {
-        if (!confirm('Revogar o abono? A ocorrência volta a contar. O abono fica no histórico, marcado como revogado.')) return;
+        if (!confirm('Revogar o abono? A ocorrência volta a valer. O abono fica no histórico, marcado como revogado.')) return;
         const erro = gravarNaFichaF17(alvo => OPERACAO.pedirRevogarAbono(alvo, b.dataset.ab), 'Abono revogado.');
         if (erro) toast(erro, 'error');
         return;
@@ -5529,15 +5676,16 @@ function ligarOcorrenciasDaFicha() {
   });
 }
 /* NO CARD, "Abonar" só em dois casos (revisão da F17; aparecia em 35% dos
-   cards abertos, sem perda nenhuma): (a) a O.S. tem uma perda que conta
-   agora (st.perdas) numa ocorrência abonável; (b) a O.S. aberta está
+   cards abertos, sem perda nenhuma): (a) a O.S. tem uma ocorrência abonável
+   que vale agora (oc.vale: o atraso da entregue e o retorno antecipado,
+   registrados, D-011); (b) a O.S. aberta está
    atrasada e foi remarcada (o agendaLog tem a remarcação: o cliente pediu
    para mudar a data). Nos outros casos, Abonar fica na ficha e no Fechar o
    dia. Só a gestão. */
 function abonarCardHTML(os, st) {
   if (!podeAbonar() || !st || !Array.isArray(st.ocorrencias)) return '';
-  const perdas = Array.isArray(st.perdas) ? st.perdas : [];
-  const perdaAbonavel = st.ocorrencias.some(o => o.abonavel && !o.abonado && o.conta && perdas.includes(o.perda));
+  // A ocorrência registrada que vale agora (D-011: atraso da entregue, retorno antecipado), não abonada: a que o abono justifica.
+  const perdaAbonavel = st.ocorrencias.some(o => o.abonavel && !o.abonado && o.vale);
   const remarcada = !st.entregue && st.ocorrencias.some(o => o.tipo === 'atraso' && o.abonavel && !o.abonado)
     && (Array.isArray(os.agendaLog) ? os.agendaLog : []).some(x => x && typeof x === 'object' && OPERACAO.dia(x.data));
   return perdaAbonavel || remarcada ? `<button class="btn-ghost btn-sm card-abonar" data-abonar-os="${esc(os.id)}" title="Abonar o atraso ou o retorno antecipado, com motivo">Abonar</button>` : '';
@@ -8848,7 +8996,7 @@ function abrirInstrucoes() {
       </ul>
       <p><strong>Atalhos no computador</strong> (a linha "Atalhos" fica embaixo da barra das etapas; no tablet ela some): <em>Alt+1</em> a <em>Alt+5</em> vão direto para a etapa de mesmo número; <em>Ctrl+Enter</em> (<em>Cmd+Enter</em> no Mac) passa para a próxima; <em>Esc</em> fecha a ficha, gravando o que foi digitado. Dentro de um campo de texto as teclas são do campo. Fora de um campo, <em>Ctrl+Z</em> (<em>Cmd+Z</em>) usa o <em>Desfazer</em> do último aviso.</p>
       <p><strong>Desfazer:</strong> liberar, cancelar a liberação, confirmar o cliente, liberar ou cancelar o carro, tirar alguém da equipe e finalizar mostram um aviso com <em>Desfazer</em>, que diz a ação e a O.S. O aviso fica 10 segundos e espera enquanto o mouse está em cima dele. Cancelar a liberação e cancelar o carro perguntam antes.</p>
-      <p>Na barra das etapas, o número em amarelo conta o que <strong>impede finalizar</strong>; "a completar" é o que falta e não impede. O <strong>checklist de fechamento</strong> não trava o Finalizar: cada item diz o efeito que tem na pontuação (atraso e retrabalho viram ocorrência a decidir pela gestão, a volta conferida dá bônus ou redutor, a baixa do ERP só pontua depois de lançada) ou só que falta. O efeito segue o dia da entrega, o mesmo do Status da entrega: o que foi entregue antes de 01/10/2026 fica fora do programa. Até a gestão decidir a regra do retrabalho e do atraso, a ocorrência não tira pontos nem comissão; cada uma aparece em Performance › Perdas por retrabalho.</p>
+      <p>Na barra das etapas, o número em amarelo conta o que <strong>impede finalizar</strong>; "a completar" é o que falta e não impede. O <strong>checklist de fechamento</strong> não trava o Finalizar: cada item diz o efeito que tem na pontuação (o retrabalho de instalação tira os pontos e a comissão da O.S.; o de medição, arte ou produção não tira nada da instalação; o atraso e o retorno antecipado ficam registrados como ocorrência e não tiram nada sozinhos; a volta conferida dá bônus ou redutor; a baixa do ERP só pontua depois de lançada) ou só que falta. O efeito segue o dia da entrega, o mesmo do Status da entrega: o que foi entregue antes de 01/10/2026 fica fora do programa. O retrabalho sem a etapa de origem fica a definir: a gestão define no Status da entrega, e até lá a comissão da O.S. fica pendente. Tudo aparece em Performance › Perdas por retrabalho.</p>
 
       <h2>Fluxo típico</h2>
       <ol>

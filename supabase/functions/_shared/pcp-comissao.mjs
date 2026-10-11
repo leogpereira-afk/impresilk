@@ -1,6 +1,20 @@
 /* Comissão v1: centavos inteiros; nunca altera ranking operacional ou regra legada.
  * Cada revisão referencia fatos selados. Desconhecido é pendência, não punição.
- * Bloco idêntico no navegador e no servidor, verificado nos testes. */
+ * Bloco idêntico no navegador e no servidor, verificado nos testes.
+ * A RÉGUA DAS PERDAS (D-010 e D-011, 11/10/2026) chega pelo selo: o fechamento
+ * apurado com ela guarda o id dela (regraPerdas) e, em cada entrega com
+ * retrabalho, a etapa de origem; a de instalação vem com
+ * perda:'retrabalho_instalacao'. O motor só lê o selo (a régua mora em
+ * regras.js e _shared/pcp-regras.mjs):
+ * - retrabalho de instalação: perda automática da entrega, sem pedir decisão,
+ *   entrega física, rateio nem montagem interna; zero para todos, inclusive a
+ *   parcela interna. A comissão que ela teria gerado (1% da base líquida) vai
+ *   na linha (comissaoPerdidaCentavos), para a aba Perdas;
+ * - retrabalho com origem a definir: pendência; a entrega não paga nem perde
+ *   até a gestão definir a origem e fechar o período de novo;
+ * - retrabalho de outra etapa, atraso e retorno antecipado: nada muda aqui
+ *   sozinho; a gestão decide caso a caso (falha comprovada, D-004).
+ * Selo de antes da régua (sem regraPerdas): como sempre foi. */
 const COMISSAO = (() => {
   const lista = v => Array.isArray(v) ? v : [];
   const texto = v => typeof v === 'string' ? v.trim().slice(0,2000) : '';
@@ -42,8 +56,11 @@ const COMISSAO = (() => {
     }
     return erros;
   }
+  // A comissão de uma base líquida em centavos (1%, a conta do motor), para mostrar o que uma perda tirou.
+  const comissaoDaBase = c => Number.isSafeInteger(c) && c >= 0 ? percentual(c,100) : null;
   function apurar(fonte, entrada={}, contexto={}) {
     const config=entrada.config || {}, decisoes=entrada.decisoes || {}, entregas=entrada.entregas || {};
+    const comRegua=typeof fonte?.regraPerdas==='string'&&fonte.regraPerdas!=='';
     const pendencias=[], add=t=>{if(!pendencias.includes(t))pendencias.push(t);};
     if(!fonte?.fechadoEm || !fonte.id) add('Selecione um fechamento operacional preservado.');
     const dataInicio=new Date(String(config.inicioEfetivo)+'T12:00:00Z');
@@ -75,6 +92,13 @@ const COMISSAO = (() => {
       if(!Number.isFinite(fracao)||fracao<0||fracao>1)falta('Fração da entrega inválida.');
       fracoes.set(osId,(fracoes.get(osId)||0)+(Number.isFinite(fracao)?fracao:0));
       const liquido=centavos(r.valor);
+      const descontoTxt=Number.isSafeInteger(r.descontoCentavos)?'Diferença entre subtotal bruto e líquido (já deduzida)':'Desconto já incluído no líquido; detalhamento indisponível neste fechamento';
+      if(comRegua&&r.perda==='retrabalho_instalacao'){
+        // Perda automática (D-010): nada a decidir nem a ratear; zero para todos.
+        linhas.push({id:r.id,osId,entregaId:r.entregaId||null,numero:r.numero,dia:r.dia,fracaoOS:fracao,origemValor:r.origemValor,baseLiquidaCentavos:liquido,baseElegivelCentavos:lp.length?null:0,baseBrutaCentavos:r.valorBrutoCentavos??null,descontoCentavos:r.descontoCentavos??null,desconto:descontoTxt,comissaoCentavos:lp.length?null:0,internaCentavos:lp.length?null:0,externaCentavos:lp.length?null:0,pontos:lp.length?null:0,pagamentos:[],pendencias:lp,decisao:'retrabalho_instalacao',perda:'retrabalho_instalacao',etapaOrigem:r.etapaOrigem,comissaoPerdidaCentavos:comissaoDaBase(liquido)});
+        continue;
+      }
+      if(comRegua&&r.retrabalho===true&&Object.prototype.hasOwnProperty.call(r,'etapaOrigem')&&!r.etapaOrigem)falta('Retrabalho com origem a definir: defina a origem na ficha da O.S. e feche o período de novo. Até lá a comissão desta O.S. fica pendente.');
       if(liquido===null || !r.confirmado || r.avisoValor || r.erroConferencia)falta('Valor líquido e participação precisam estar conferidos no fechamento.');
       if(e.entregue!==true || !documentada(e))falta('Comprovação da entrega física pendente.');
       const decisaoOk=documentada(d)&&['sem_falha','falha_comprovada','abono'].includes(d.decisao)&&['nenhuma','producao','cliente','incompleto','ma_conducao','atraso','retorno_antecipado','outra'].includes(d.tipo);
@@ -121,7 +145,7 @@ const COMISSAO = (() => {
         creditar(pagamentos.filter(p=>p.tipo==='externa'),'externa',r.id);creditar(pagamentos.filter(p=>p.tipo==='interna'),'interna',r.id);
       }
       // O líquido da fonte já contém descontos proporcionais; não descontar outra vez.
-      linhas.push({id:r.id,osId,entregaId:r.entregaId||null,numero:r.numero,dia:r.dia,fracaoOS:fracao,origemValor:r.origemValor,baseLiquidaCentavos:liquido,baseElegivelCentavos:lp.length?null:baseElegivelCentavos,baseBrutaCentavos:r.valorBrutoCentavos??null,descontoCentavos:r.descontoCentavos??null,desconto:Number.isSafeInteger(r.descontoCentavos)?'Diferença entre subtotal bruto e líquido (já deduzida)':'Desconto já incluído no líquido; detalhamento indisponível neste fechamento',comissaoCentavos:lp.length?null:total,internaCentavos:lp.length?null:internos,externaCentavos:lp.length?null:externo,pontos:lp.length?null:zerada?0:fracao,pagamentos,pendencias:lp,decisao:d.decisao||'pendente'});
+      linhas.push({id:r.id,osId,entregaId:r.entregaId||null,numero:r.numero,dia:r.dia,fracaoOS:fracao,origemValor:r.origemValor,baseLiquidaCentavos:liquido,baseElegivelCentavos:lp.length?null:baseElegivelCentavos,baseBrutaCentavos:r.valorBrutoCentavos??null,descontoCentavos:r.descontoCentavos??null,desconto:descontoTxt,comissaoCentavos:lp.length?null:total,internaCentavos:lp.length?null:internos,externaCentavos:lp.length?null:externo,pontos:lp.length?null:zerada?0:fracao,pagamentos,pendencias:lp,decisao:d.decisao||'pendente'});
     }
     for(const [os,fracao] of fracoes)if(fracao>1.000001)add('O.S. '+os+' · Parciais ultrapassam uma O.S.; não aprovar.');
     const reconhecimento=config.reconhecimento||{};
@@ -162,7 +186,7 @@ const COMISSAO = (() => {
     for(const p of (revisao.apuracao.ajustes||[]))rows.push([revisao.id,revisao.apuracao.fechamentoId,revisao.apuracao.anteriorAprovacao||'',p.pessoaId,p.nome||'',p.tipo,(p.centavos/100).toFixed(2).replace('.',','),(p.diferencaCentavos/100).toFixed(2).replace('.',',')]);
     return '\uFEFF'+rows.map(r=>r.map(cel).join(';')).join('\r\n');
   }
-  return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv};
+  return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase};
 })();
 
 export { COMISSAO };

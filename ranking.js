@@ -46,8 +46,12 @@
     const resumo=dados.resumo || {}, porValor=dados.criterio==='valor-confirmado';
     $('ranking-resumo').replaceChildren(...[[fmt(resumo.equipes),'equipes no ranking'],[fmt(resumo.equivalentes),'O.S. equivalentes'],[fmt(resumo.entregasConfirmadas),'entregas conferidas'],[fmt(resumo.aConferir),'entregas a conferir']].map(([n,t])=>{const d=criar('div');d.append(criar('strong','',n),criar('span','',t));return d;}));
     const semBase=Number(resumo.semBase)||0;
-    $('ranking-sem-base').hidden=semBase<=0;
-    $('ranking-sem-base').textContent=semBase>0?fmt(semBase)+(semBase===1?' entrega já conferida aguarda base para calcular a produção. Ainda não soma O.S. equivalentes.':' entregas já conferidas aguardam base para calcular a produção. Ainda não somam O.S. equivalentes.'):'';
+    // A régua das perdas (D-010): a entrega com retrabalho de instalação conta como entrega, sem pontos.
+    const semPontos=Number(resumo.semPontos)||0;
+    const notaBase=semBase>0?fmt(semBase)+(semBase===1?' entrega já conferida aguarda base para calcular a produção. Ainda não soma O.S. equivalentes.':' entregas já conferidas aguardam base para calcular a produção. Ainda não somam O.S. equivalentes.'):'';
+    const notaPerda=semPontos>0?fmt(semPontos)+(semPontos===1?' entrega com retrabalho de instalação: conta como entrega, sem pontos.':' entregas com retrabalho de instalação: contam como entregas, sem pontos.'):'';
+    $('ranking-sem-base').hidden=!notaBase&&!notaPerda;
+    $('ranking-sem-base').textContent=[notaBase,notaPerda].filter(Boolean).join(' ');
     const busca=$('ranking-busca').value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
     const todas=Array.isArray(dados.equipes)?dados.equipes:[];
     const linhas=todas.filter(e=>String(e.nome).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().includes(busca));
@@ -58,7 +62,7 @@
       const logo=criar('div','ranking-logo');logo.setAttribute('aria-hidden','true');
       const src=typeof e.logo==='string'&&e.logo.length<=40000&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(e.logo)?e.logo:animais.has(e.animal)?'equipe-'+e.animal+'.webp':'';
       if(src){const img=criar('img');img.src=src;img.alt='';img.loading='lazy';logo.append(img);}else logo.textContent=e.emblema || '🤝';
-      const equipe=criar('div','ranking-equipe');equipe.append(criar('h3','',e.nome),criar('small','',(e.tipo==='individual'?'Participação individual':e.tipo==='composicao'?'Composição da entrega':'Equipe')+' · '+fmt(e.entregas)+(e.entregas===1?' entrega com produção calculada':' entregas com produção calculada')));
+      const equipe=criar('div','ranking-equipe');equipe.append(criar('h3','',e.nome),criar('small','',(e.tipo==='individual'?'Participação individual':e.tipo==='composicao'?'Composição da entrega':'Equipe')+' · '+fmt(e.entregas)+(e.entregas===1?' entrega com produção calculada':' entregas com produção calculada')+(Number(e.semPontos)>0?' · '+fmt(e.semPontos)+' sem pontos (retrabalho de instalação)':'')));
       const barra=criar('progress');barra.max=lider;barra.value=e.equivalentes;barra.setAttribute('aria-label','Produção de '+e.nome);if(!porValor)equipe.append(barra);
       const producao=criar('div','ranking-producao');producao.append(criar('strong','',fmt(e.equivalentes)),criar('small','','O.S. equivalentes'),criar('small','ranking-distancia',porValor?(e.posicao===1?'Maior valor confirmado':'Classificação por valor'):e.faltaLideranca>0?fmt(e.faltaLideranca)+' até a liderança':e.posicao===1?'Na liderança':'Produção confirmada'));
       li.append(pos,logo,equipe,producao);return li;

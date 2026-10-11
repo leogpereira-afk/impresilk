@@ -41,7 +41,9 @@ const TABELA = [
   ['a entrega lançada à mão vale antes da baixa do ERP', os({finalizadaEm:'2026-09-15T15:00:00.000Z', finalizadoPor:'Mubisys (baixa automática · ENTREGUE)', baixaAutoERP:{em:'2026-09-15T15:00:00.000Z', status:'ENTREGUE'}, entregaLancada:{data:'2026-09-10', por:'Gestor Teste'}}), HOJE, 'no_prazo', 'No prazo', '(lançada à mão)'],
   ['baixa do ERP sem lançamento: vale a data da baixa, sem prova', os({finalizadaEm:'2026-09-11T15:00:00.000Z', finalizadoPor:'Mubisys (baixa automática · ENTREGUE)', baixaAutoERP:{em:'2026-09-11T15:00:00.000Z', status:'ENTREGUE'}}), HOJE, 'atraso', 'Com atraso', 'baixa do ERP, sem prova'],
   ['entregue sem prazo combinado ("sem prazo" da F15): neutro, sem atraso a medir (revisão da F16)', os({...fin('2026-09-30'), prazoCombinado:{data:'', fonte:'semAgenda'}}), '2026-10-01', 'entregue', 'Entregue, sem prazo combinado', 'sem prazo combinado no PCP'],
-  ['retrabalho marcado e entregue no prazo', os({...fin('2026-09-10'), retrabalho:true, problema:'Adesivo descolou'}), HOJE, 'retrabalho', 'Retrabalho', 'retrabalho marcado: Adesivo descolou'],
+  // TROCADO DE PROPÓSITO (onda a3, D-010 de 11/10/2026): o motivo diz a etapa de origem ("isso tem que ficar claro"); sem ela, "com origem a definir".
+  ['retrabalho marcado e entregue no prazo', os({...fin('2026-09-10'), retrabalho:true, problema:'Adesivo descolou'}), HOJE, 'retrabalho', 'Retrabalho', 'retrabalho marcado, com origem a definir: Adesivo descolou'],
+  ['retrabalho de instalação marcado', os({...fin('2026-09-10'), retrabalho:true, etapaOrigem:'Instalação', problema:'Adesivo descolou'}), HOJE, 'retrabalho', 'Retrabalho', 'retrabalho de instalação marcado: Adesivo descolou'],
   ['retrabalho em O.S. ainda aberta também é retrabalho', os({retrabalho:true, instalacao:{data:'2026-09-25'}, prazoCombinado:{data:'2026-09-25', fonte:'agenda'}}), HOJE, 'retrabalho', 'Retrabalho', 'retrabalho marcado'],
   ['cancelada à mão pela gestão', os({cancelamento:cancel()}), HOJE, 'cancelado', 'Cancelado', 'cancelada por Gestor Teste em 15/09: Cliente desistiu do serviço'],
   ['cancelada no ERP (baixa automática CANCELADO)', os({finalizadaEm:'2026-09-12T15:00:00.000Z', finalizadoPor:'Mubisys (baixa automática · CANCELADO)', baixaAutoERP:{em:'2026-09-12T15:00:00.000Z', status:'CANCELADO'}}), HOJE, 'cancelado', 'Cancelado', 'cancelada no ERP (baixa de 12/09)'],
@@ -96,12 +98,24 @@ test('retorno antecipado: a hora anotada pela equipe é declaração; sem chegad
   assert.ok(!s.perdas.includes('retornoAntecipado'));
 });
 
-test('perdas pela regra: retrabalho e atraso da entregue contam; o atraso da aberta ainda não; sem regra, nenhuma', () => {
+/* TROCADO DE PROPÓSITO (onda a3, 11/10/2026). A regra de 29/09 ("retrabalho,
+   venha de onde vier, e atraso zeram") saiu: pela régua das perdas (regras.js,
+   D-010 e D-011), só o retrabalho de INSTALAÇÃO tira os pontos e a comissão;
+   o de outra etapa e o sem origem não; o atraso e o retorno antecipado ficam
+   registrados como ocorrência, sem efeito sozinhos. */
+test('perdas pela régua: só o retrabalho de instalação conta; o de outra etapa, o sem origem e o atraso não; sem regra, nenhuma', () => {
   const regra = R.REGRA_EMBUTIDA;
-  assert.deepEqual(st(os({...fin('2026-09-13'), retrabalho:true}), HOJE, regra).perdas, ['retrabalho', 'atraso']);
+  assert.deepEqual(st(os({...fin('2026-09-13'), retrabalho:true, etapaOrigem:'Instalação'}), HOJE, regra).perdas, ['retrabalho']);
+  assert.deepEqual(st(os({...fin('2026-09-13'), retrabalho:true}), HOJE, regra).perdas, [], 'origem a definir: não tira nada');
+  assert.deepEqual(st(os({...fin('2026-09-13'), retrabalho:true, etapaOrigem:'Produção'}), HOJE, regra).perdas, [], 'produção: não tira nada da instalação');
+  const atrasada = st(os({...fin('2026-09-13')}), HOJE, regra);
+  assert.deepEqual(atrasada.perdas, [], 'o atraso fica registrado e não tira nada sozinho (D-011)');
+  const oc = atrasada.ocorrencias.find(o => o.tipo === 'atraso');
+  assert.equal(oc.vale, true, 'o atraso da entregue vale como ocorrência');
+  assert.equal(oc.efeito, 'registrada');
+  assert.equal(oc.conta, false);
   assert.deepEqual(st(os(), HOJE, regra).perdas, [], 'aberta atrasada: ainda pode ser abonada ou cancelada');
-  assert.deepEqual(st(os({...fin('2026-09-13'), retrabalho:true}), HOJE, null).perdas, []);
-  assert.deepEqual(st(os({...fin('2026-09-13')}), HOJE, {...regra, perdas:['retrabalho']}).perdas, [], 'regra sem a perda de atraso');
+  assert.deepEqual(st(os({...fin('2026-09-13'), retrabalho:true, etapaOrigem:'Instalação'}), HOJE, null).perdas, [], 'sem regra (antes do programa), nada');
 });
 
 /* ───────────── O.S. de vários dias ───────────── */

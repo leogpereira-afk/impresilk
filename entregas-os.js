@@ -330,18 +330,25 @@ const POR_OS = ((O) => {
   }
   // O texto em que a busca procura, pronto (sem acento, sem caixa).
   function textoBusca(partesTexto) { return norm(lista(partesTexto).filter(x => x != null && x !== '').join(' ')); }
-  /* A PERDA PELA REGRA DO DIA DA ENTREGA, para a comissão prevista: a mesma
-     conta do statusEntrega (o abonado nunca é perda; o atraso só é perda da
-     O.S. entregue), lida dos estados que a O.S. já tem. */
-  const PERDA_DO_ESTADO = {atraso: 'atraso', retrabalho: 'retrabalho', retorno_antecipado: 'retornoAntecipado'};
+  /* A PERDA PELA RÉGUA (D-010 e D-011), para a comissão prevista: as
+     `perdas` do statusEntrega, que já são as da régua das perdas (hoje, só o
+     retrabalho de instalação), contadas no dia da regra (sem regra, nada).
+     `regra` fica para a aba antiga que ainda chama com ela. */
   function perdasPelaRegra(st, regra) {
-    const perdas = obj(regra) && Array.isArray(regra.perdas) ? regra.perdas : [];
-    return lista(st && st.aplicaveis).filter(a => obj(a) && !a.abonado && PERDA_DO_ESTADO[a.estado] && perdas.includes(PERDA_DO_ESTADO[a.estado]) && (a.estado !== 'atraso' || !!st.entregue))
-      .map(a => PERDA_DO_ESTADO[a.estado]);
+    if (regra !== undefined && !obj(regra)) return [];
+    return lista(st && st.perdas).filter(p => typeof p === 'string');
+  }
+  /* AS OCORRÊNCIAS QUE NÃO TIRAM NADA SOZINHAS, para a nota da prevista: o
+     retrabalho de origem a definir (a comissão fica pendente), o de outra
+     etapa e o atraso e o retorno antecipado registrados. */
+  function ocorrenciasSemPerda(st) {
+    const ocs = lista(st && st.ocorrencias).filter(o => obj(o) && o.vale);
+    return {definir:ocs.some(o => o.efeito === 'definir'), acompanha:ocs.filter(o => o.efeito === 'acompanha').map(o => String(o.etapaOrigem || '')),
+      registradas:[...new Set(ocs.filter(o => o.efeito === 'registrada').map(o => o.tipo))]};
   }
 
   return {FUSO, instante, quando, diaDe, ddmm, ddmmaa, cortar, cap, minTxt, norm, linhaDoTempo, ORDEM_STATUS, ROTULO_STATUS, chaveStatus,
-    filtrar, contarStatus, textoBusca, perdasPelaRegra, CAMPO_TIPO};
+    filtrar, contarStatus, textoBusca, perdasPelaRegra, ocorrenciasSemPerda, CAMPO_TIPO};
 })(typeof OPERACAO !== 'undefined' ? OPERACAO : (typeof require === 'function' ? require('./operacao.js') : null));
 if (typeof module !== 'undefined' && module.exports) module.exports = POR_OS;
 
@@ -651,7 +658,8 @@ const porOSDiasTxt = n => n === 1 ? '1 dia' : `${n} dias`;
 function porOSPrazoTxt(l) {
   const st = l.st, erpDia = porOSDia(l.erp.data), interno = (l.card || l.erp).tipo === 'interno';
   if (!st) return `ERP: ${interno ? 'retirada' : 'entregue'} em ${POR_OS.ddmmaa(erpDia) || 'data não informada'}`;
-  const prazo = st.prazo ? 'Prazo ' + (st.prazoInicio && st.prazoInicio !== st.prazo ? `${POR_OS.ddmm(st.prazoInicio)} a ${POR_OS.ddmm(st.prazo)}` : POR_OS.ddmm(st.prazo)) : 'Sem prazo combinado';
+  // Sem prazo combinado o atraso não é medido (nunca "no prazo" nem "zero dias").
+  const prazo = st.prazo ? 'Prazo ' + (st.prazoInicio && st.prazoInicio !== st.prazo ? `${POR_OS.ddmm(st.prazoInicio)} a ${POR_OS.ddmm(st.prazo)}` : POR_OS.ddmm(st.prazo)) : 'Sem prazo combinado (atraso não medido)';
   let entrega;
   if (st.estado === 'cancelado') entrega = 'cancelada';
   else if (st.dataEntrega) entrega = `${interno ? 'retirada' : 'entregue'} ${POR_OS.ddmm(st.dataEntrega)}${st.diasAtraso ? `, ${porOSDiasTxt(st.diasAtraso)} depois` : st.prazo ? ', no prazo' : ''}`;
@@ -660,7 +668,7 @@ function porOSPrazoTxt(l) {
   const erp = erpDia && erpDia !== st.dataEntrega ? ` · ERP ${POR_OS.ddmm(erpDia)}` : '';
   return `${prazo} · ${entrega}${erp}`;
 }
-// "Previsto 16:30 · conferido 15:40 (50 minutos antes: a decidir pela gestão)"
+// "Previsto 16:30 · conferido 15:40 (50 minutos antes: ocorrência registrada)"
 function porOSRetornoTxt(l) {
   const c = l.card, st = l.st;
   const ch = typeof OPERACAO.chegadaConferida === 'function' ? OPERACAO.chegadaConferida(c) : null;
@@ -673,16 +681,36 @@ function porOSRetornoTxt(l) {
   const chTxt = ch ? `conferido ${ch.hora}${prev && prev.dia !== ch.dia ? ' de ' + POR_OS.ddmm(ch.dia) : ''}` : 'chegada não conferida';
   let como = '';
   if (ra && ch) {
-    // "a decidir pela gestão", não "perda" (revisão da onda w3, U1): a regra do retorno antecipado está pendente (A3).
-    if (ra.situacao === 'antecipado') como = `${POR_OS.minTxt(ra.minutos)} antes: a decidir pela gestão`;
+    // D-011: o retorno antecipado fica registrado como ocorrência e não tira nada sozinho.
+    if (ra.situacao === 'antecipado') como = `${POR_OS.minTxt(ra.minutos)} antes: ocorrência registrada, sem efeito sozinha`;
     else if (ra.situacao === 'abonado') como = `${POR_OS.minTxt(ra.minutos)} antes, abonado`;
     else if (ra.situacao === 'no horário') como = 'no horário';
-    else if (ra.situacao === 'na volta') como = 'a volta chegou antes; a perda fica na O.S. do último retorno previsto';
+    else if (ra.situacao === 'na volta') como = 'a volta chegou antes; a ocorrência fica na O.S. do último retorno previsto';
   }
+  // Sem o retorno previsto ou sem a chegada conferida, o retorno antecipado não é medido (D-011: nunca "no horário").
+  if (!como && (!prev || !ch)) como = 'retorno antecipado não medido';
   const decl = String(c.horaRetorno || '').trim() ? `; a equipe anotou ${String(c.horaRetorno).trim()}` : '';
   return `${prevTxt} · ${chTxt}${como ? ` (${como})` : ''}${decl}`;
 }
 // A comissão prevista pela regra vigente no dia da entrega (só admin e pcp veem).
+/* A COMISSÃO PREVISTA PELA RÉGUA DAS PERDAS (D-010 e D-011, 11/10/2026; só
+   admin e pcp veem). O retrabalho de instalação tira a comissão da O.S.:
+   R$ 0,00, com a frase da régua. O de origem a definir deixa a prevista
+   PENDENTE (não paga e não perde) até a gestão definir a origem. O de
+   medição, arte ou produção, o atraso e o retorno antecipado não cortam
+   nada sozinhos: a prevista é o percentual, com a ocorrência dita ao lado (a
+   gestão pode julgar a registrada como falha comprovada no demonstrativo).
+   Antes (w3) a prevista dizia "pendente de decisão" para qualquer ocorrência;
+   na v164, "R$ 0,00 prevista: não pontua". */
+function porOSNotaOcorrencias(st, regraOk) {
+  const T = typeof REGRAS !== 'undefined' && REGRAS && REGRAS.TEXTOS_PERDA ? REGRAS.TEXTOS_PERDA : null;
+  if (!regraOk || !T) return '';
+  const o = POR_OS.ocorrenciasSemPerda(st), partes = [];
+  for (const e of o.acompanha) partes.push(REGRAS.textoDoEfeito('retrabalho', e));
+  const rot = {atraso:'atraso', retorno_antecipado:'retorno antecipado'};
+  if (o.registradas.length) partes.push(`${o.registradas.map(t => rot[t] || t).join(' e ')} registrado${o.registradas.length > 1 ? 's' : ''} como ocorrência, sem efeito sozinho${o.registradas.length > 1 ? 's' : ''}`);
+  return partes.join('; ');
+}
 function porOSComissaoHTML(l) {
   const {card, st} = l;
   const nota = t => `<small>${esc(t)}</small>`;
@@ -690,22 +718,28 @@ function porOSComissaoHTML(l) {
   if (l.interno) return nota('retirada no balcão fica fora da performance');
   if (!card || !st) return nota('sem ficha neste aparelho');
   if (typeof REGRAS === 'undefined' || !REGRAS || typeof REGRAS.regraVigente !== 'function') return nota('a regra do programa não carregou nesta aba');
+  const T = REGRAS.TEXTOS_PERDA || {};
+  const tiraTxt = T.retrabalhoInstalacao || 'Retrabalho de instalação: tira os pontos e a comissão desta O.S.';
+  const definirTxt = 'pendente: retrabalho com origem a definir (defina a origem; até lá a comissão desta O.S. não paga e não perde)';
   if (card.conferenciasEntrega?.length && typeof CONFERENCIA_ENTREGA !== 'undefined') {
     const a=CONFERENCIA_ENTREGA.apurar(card,l.valor);
     if(a.erro) return nota('Itens alterados: confira as entregas novamente.');
     if(a.entregas.some(e=>e.valor==null)) return nota('Confira os valores dos itens antes de calcular a comissão.');
-    let total=0;const pendentes=new Set();
+    let total=0,tira=false,definir=false;const outras=new Set();
     for(const e of a.entregas) {
       const r=REGRAS.regraVigente(_porOSDados.versoes,e.dia);
       if(!r) return nota('Confira cada entrega: há datas sem regra de comissão.');
-      const estado=OPERACAO.statusEntrega({...card,finalizadaEm:e.dia+'T12:00:00-03:00',entregaLancada:{data:e.dia}});
+      // O status da entrega no dia dela, com a regra do dia: as perdas já são as da régua.
+      const estado=OPERACAO.statusEntrega({...card,finalizadaEm:e.dia+'T12:00:00-03:00',entregaLancada:{data:e.dia}},undefined,r);
       if(estado.estado==='cancelado')continue;
-      // A ocorrência não corta a prevista: fica pendente de decisão (revisão da onda w3, U1).
-      for(const p of POR_OS.perdasPelaRegra(estado,r))pendentes.add(p);
+      if(POR_OS.perdasPelaRegra(estado,r).length){tira=true;continue;}
+      if(POR_OS.ocorrenciasSemPerda(estado).definir)definir=true;
+      const n=porOSNotaOcorrencias(estado,true);if(n)outras.add(n);
       total+=REGRAS.comissaoCentavos(e.valor,r);
     }
-    const rotP={atraso:'atraso',retrabalho:'retrabalho',retornoAntecipado:'retorno antecipado'};
-    return `<b>${esc(dinheiroCasa(total/100))}</b> ${nota(`prevista sobre os itens de ${a.entregas.length} entrega(s) conferida(s); saldo não incluído${pendentes.size?`; pendente de decisão (${[...pendentes].map(p=>rotP[p]||p).join(' e ')})`:''}`)}`;
+    if(tira) return `<b>${esc(dinheiroCasa(0))}</b> ${nota(`prevista: ${tiraTxt}`)}`;
+    const extra=[definir?definirTxt:'',...outras].filter(Boolean).join('; ');
+    return `<b>${esc(dinheiroCasa(total/100))}</b> ${nota(`prevista sobre os itens de ${a.entregas.length} entrega(s) conferida(s); saldo não incluído${extra?'; '+extra:''}`)}`;
   }
   const dia = st.dataEntrega || porOSDia(l.erp.data);
   const regra = REGRAS.regraVigente(_porOSDados.versoes, dia);
@@ -713,21 +747,16 @@ function porOSComissaoHTML(l) {
   const pct = String(regra.comissaoBp / 100).replace('.', ',') + '%';
   const provisoria = regra.provisoria ? ', regra provisória' : '';
   if (st.estado === 'cancelado') return `<b>${esc(dinheiroCasa(0))}</b> ${nota('prevista: cancelada, não pontua')}`;
-  /* ATRASO, RETRABALHO E RETORNO ANTECIPADO NÃO CORTAM A PREVISTA (revisão da
-     onda w3, U1; M1 da auditoria). A regra deles está pendente (A3), e a
-     comissão só corta com a falha comprovada registrada no demonstrativo: a
-     prevista é o percentual sem cortar, marcada "pendente de decisão". Antes
-     dizia "R$ 0,00 prevista: não pontua", e a aba Perdas, "a decidir". */
-  const perdas = POR_OS.perdasPelaRegra(st, regra);
-  const rot = {atraso: 'atraso', retrabalho: 'retrabalho', retornoAntecipado: 'retorno antecipado'};
+  // As perdas do status são as da régua (D-010): hoje só o retrabalho de instalação.
+  const perdas = POR_OS.perdasPelaRegra(st, regra), sem = POR_OS.ocorrenciasSemPerda(st), outras = porOSNotaOcorrencias(st, true);
   if (!st.entregue) return nota('a entrega ainda não foi registrada no PCP');
   // Baixa do ERP a lançar (ou sem o dia): o prazo só é julgado com a data do lançamento.
   if (!st.dataEntrega) return nota('sai depois do lançamento: sem a data da entrega, o prazo ainda não foi julgado');
-  const pendente = perdas.length ? `pendente de decisão (${perdas.map(p => rot[p] || p).join(' e ')})` : '';
-  if (l.valor == null) return nota(`sem valor no ERP${pendente ? '; ' + pendente : ''}`);
+  if (perdas.length) return `<b>${esc(dinheiroCasa(0))}</b> ${nota(`prevista: ${tiraTxt}`)}`;
+  if (l.valor == null) return nota(`sem valor no ERP${sem.definir ? '; ' + definirTxt : ''}`);
   const centavos = REGRAS.comissaoCentavos(Math.round(l.valor * 100), regra);
-  if (perdas.length) return `<b>${esc(dinheiroCasa(centavos / 100))}</b> ${nota(`prevista, ${pct} sem cortar${provisoria}: ${pendente}`)}`;
-  return `<b>${esc(dinheiroCasa(centavos / 100))}</b> ${nota(`prevista, ${pct} da O.S. que pontua${provisoria}`)}`;
+  if (sem.definir) return `<b>${esc(dinheiroCasa(centavos / 100))}</b> ${nota(`${definirTxt}${outras ? '; ' + outras : ''}`)}`;
+  return `<b>${esc(dinheiroCasa(centavos / 100))}</b> ${nota(`prevista, ${pct} da O.S. que pontua${provisoria}${outras ? '; ' + outras : ''}`)}`;
 }
 /* O QUE O SERVIDOR RESPONDEU sobre a O.S. sem ficha. "Nunca passou pelo
    PCP" só depois que o servidor disser que não tem (revisão da F18): o

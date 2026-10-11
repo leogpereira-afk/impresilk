@@ -2113,7 +2113,9 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
   /* O RETRABALHO GRAVADO NÃO SE DESMARCA PELO CELULAR (F17). O espelho
      recalcula os.retrabalho pelos itens a cada toque (rollupRetrab) e
      desmarcava o retrabalho que a gestão marcou ou confirmou. Marcar vale na
-     hora, venha de onde vier (retrabalho zera sempre); desmarcar é só da
+     hora (o celular marca pelo item, sem a etapa de origem: o retrabalho
+     entra com a origem a definir, e quem a define é a gestão, D-010,
+     guardarOrigemRetrabalho em _shared/pcp-status.mjs); desmarcar é só da
      gestão (admin e pcp). O que o toque escreveu no problema e na causa
      também não apaga o que estava gravado. */
   if (atual?.retrabalho && !m.retrabalho) {
@@ -2169,7 +2171,7 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
      retrabalho:true só porque os itens dela ainda diziam 'retrab'. Numa cópia
      velha, marcar só vale quando algum item PASSOU a 'retrab' neste envio (em
      relação ao gravado); senão fica o gravado, com aviso. A cópia em dia
-     marca na hora, como sempre (retrabalho zera sempre). */
+     marca na hora, como sempre (o efeito é o da régua das perdas, D-010). */
   if (velha && m.retrabalho && !atual?.retrabalho) {
     const itensAntes = Array.isArray(atual?.itens) ? atual.itens : [];
     const passou = (Array.isArray(m.itens) ? m.itens : []).some((it, i) => objeto(it) && it.statusInst === 'retrab' && !(objeto(itensAntes[i]) && itensAntes[i].statusInst === 'retrab'));
@@ -2205,7 +2207,10 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
    `em` do aparelho só se for data válida e não depois de agora (a resposta
    dada sem rede foi dada naquela hora), com o recebidoEm do servidor. A
    resposta que voltou igual mantém o carimbo. O retrabalho marcado por
-   qualquer um vale na hora (retrabalho zera sempre). Quem tem senha ouve o
+   qualquer um vale na hora; a etapa de origem, que decide o efeito pela
+   régua das perdas (D-010: o de Instalação tira os pontos e a comissão), é
+   da gestão e tem regra própria (guardarOrigemRetrabalho, em
+   _shared/pcp-status.mjs, que roda logo depois). Quem tem senha ouve o
    porquê (`avisar`). Nunca 422. Devolve { os, aviso, mudouPergunta }. */
 export const TAXONOMIA_RETRABALHO = ['problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho'];
 const marcadaRetrabalhoSrv = o => !!(o?.retrabalho || (objeto(o?.checkout) && o.checkout.situacao === 'Retrabalho'));
@@ -2359,6 +2364,14 @@ export function podarCarimbosF15(r) {
     const { porId: _pi, porConta: _pc, revogadoPorId: _ri, revogadoPorConta: _rc, ...y } = x;
     return y;
   });
+  /* A TROCA DA ETAPA DE ORIGEM DO RETRABALHO (D-010) desce com o nome de quem
+     trocou e o motivo, sem o ID e sem o login. A volta sem eles não apaga
+     nada: o histórico só cresce pelo servidor (guardarOrigemRetrabalho). */
+  if (Array.isArray(out.etapaOrigemLog)) out.etapaOrigemLog = out.etapaOrigemLog.map(x => {
+    if (!objeto(x)) return x;
+    const { porId: _pi, porConta: _pc, ...y } = x;
+    return y;
+  });
   // Quem finalizou pelo celular (revisão da E5) desce com o nome, sem o ID; a volta sem ele não apaga.
   if (objeto(out.finalizadaPorCampo)) {
     const { porId: _pi, ...x } = out.finalizadaPorCampo;
@@ -2451,6 +2464,8 @@ export const CAMPOS_AUDITADOS = [
   // Quem finalizou pelo celular (revisão da E5): decide se o implícito é declarado.
   'finalizadaPorCampo',
   'entregaLancada', 'retrabalho', 'causa', 'causaRaiz', 'etapaOrigem',
+  // A troca da etapa de origem do retrabalho, com o motivo e o carimbo (D-010, guardarOrigemRetrabalho).
+  'etapaOrigemLog',
   // O que a apuração da performance e a trava da conclusão leem (perfFonte,
   // validarConclusao): o tipo tira a O.S. da performance e dispensa a prova;
   // o número busca o valor no Painel; a baixa do ERP e a justificativa decidem

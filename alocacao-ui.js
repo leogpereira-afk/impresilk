@@ -88,35 +88,11 @@ const ALOCUI = (() => {
   const regras = () => typeof REGRAS !== 'undefined' ? REGRAS : G('REGRAS');
   const perf = () => typeof PERF !== 'undefined' ? PERF : G('PERF');
   const oper = () => typeof OPERACAO !== 'undefined' ? OPERACAO : G('OPERACAO');
-  /* O QUE O STATUS DA ENTREGA JÁ SABE (F16, crítica 5.4): a O.S. cancelada, e
-     a perda que a regra do programa conta (retrabalho, atraso da entregue),
-     não pontuam. A prévia diz isso e mostra a comissão prevista zerada, em vez
-     de prometer uma comissão que a apuração não vai pagar. Sem o status
-     (versão misturada), fica como estava.
-     `dataEntrega` (revisão da F16): o dia DIGITADO no Lançar entrega. A baixa
-     do ERP ainda não lançada tem a data da sincronização, e a prévia dizia
-     "não pontua" antes de a gestão digitar a data real; com o dia digitado,
-     o status é o da O.S. lançada nesse dia. */
-  function naoPontuaDe(os, programa, dataEntrega) {
-    const O = oper();
-    if (!O || typeof O.statusEntrega !== 'function') return '';
-    const alvo = /^\d{4}-\d{2}-\d{2}$/.test(String(dataEntrega || '')) && objeto(os) ? {...os, entregaLancada: {data: dataEntrega}} : os;
-    /* O retorno antecipado é medido PELA VOLTA (revisão da F17): sem ela, a
-       O.S. que não é a última da volta dizia "não pontua" aqui e "no prazo"
-       na ficha. A volta vem das O.S. do aparelho, a mesma do status da ficha. */
-    let volta = null;
-    try {
-      const S = loja();
-      if (typeof O.voltaNaLista === 'function' && typeof O.chegadaConferida === 'function' && O.chegadaConferida(alvo) && S && typeof S.getAllOS === 'function') volta = O.voltaNaLista(alvo, S.getAllOS());
-    } catch (e) { volta = null; }
-    let s;
-    try { s = O.statusEntrega(alvo, undefined, programa, volta); } catch (e) { return ''; }
-    if (!s || !s.estado) return '';
-    if (s.estado === 'cancelado') return 'O.S. cancelada: não pontua nem paga comissão.';
-    if (!programa || !lista(s.perdas).length) return '';
-    const rot = {retrabalho: 'retrabalho', atraso: 'atraso na entrega', retornoAntecipado: 'retorno antecipado'};
-    return `O.S. com ${s.perdas.map(p => rot[p] || p).join(' e ')}: pela regra do programa, não pontua nem paga comissão.`;
-  }
+  /* A PRÉVIA "NÃO PONTUA" (naoPontuaDe) SAIU (M1 da auditoria da v164,
+     11/10/2026): era calculada e nunca aparecia na tela, e ainda trazia a
+     regra de 29/09 (atraso e retorno antecipado zerando). O efeito das
+     ocorrências agora é o da régua das perdas (regras.js, D-010 e D-011), dito
+     na ficha, no Status da entrega e na aba Perdas por retrabalho. */
   const loja = () => typeof STORE !== 'undefined' ? STORE : G('STORE');
   const fn = nome => { const f = G(nome); return typeof f === 'function' ? f : null; };
   const reais = centavos => { const f = fn('dinheiroCasa'); const v = (Number(centavos) || 0) / 100; return f ? f(v) : v.toLocaleString('pt-BR', {style:'currency', currency:'BRL'}); };
@@ -396,7 +372,6 @@ const ALOCUI = (() => {
       if (o.dica !== undefined) ja.dica = String(o.dica || '');
       if (o.dataEntrega !== undefined) ja.dataEntrega = String(o.dataEntrega || '');
       ja.os = os;
-      ja.naoPontua = naoPontuaDe(os, ja.programa, ja.dataEntrega);
       return ja;
     }
     const equipes = lista(o.equipes).filter(objeto);
@@ -426,7 +401,6 @@ const ALOCUI = (() => {
       trazidas: [],
       ocupados: mapaOcupados(o.ocupados), dica: String(o.dica || ''),
       os, versoes: lista(o.versoes), dataEntrega,
-      naoPontua: naoPontuaDe(os, programa, dataEntrega),
     };
     if (modo === 'pessoas') {
       /* SÓ PESSOAS: todo mundo da O.S. aparece. Quem tem ID vai para os
@@ -452,16 +426,15 @@ const ALOCUI = (() => {
   }
   const estado = chave => estados.get(chave) || null;
   function esquecer(chave) { estados.delete(chave); hosts.delete(chave); }
-  /* A DATA DIGITADA NO LANÇAR ENTREGA (revisão da F16): a regra do dia e o
-     "não pontua" da prévia seguem o campo de data, não a data da baixa do
-     ERP (a da sincronização). Repinta a prévia. */
+  /* A DATA DIGITADA NO LANÇAR ENTREGA (revisão da F16): a regra do dia da
+     prévia segue o campo de data, não a data da baixa do ERP (a da
+     sincronização). Repinta a prévia. */
   function definirDataEntrega(chave, data) {
     const st = estados.get(chave);
     if (!st) return;
     const d = /^\d{4}-\d{2}-\d{2}$/.test(String(data || '')) ? String(data) : '';
     st.dataEntrega = d;
     if (d) { st.dia = d; st.programa = regraDoDia(d, st.versoes).programa; }
-    st.naoPontua = naoPontuaDe(st.os, st.programa, d);
     repintar(chave);
   }
 

@@ -540,7 +540,11 @@ test('aplicarLancamento · padrões: quem e quando vêm do usuário e da hora; i
 test('aplicarLancamento · o retrabalho sai igual ao que o perguntarRetrabalho grava (paridade)', () => {
   const marcada = {retrabalho: true, problema: 'Letra caiu', etapaOrigem: 'Produção', causaRaiz: 'Material', responsavelEtapa: 'Produção',
     dataRetrabalho: '2026-10-01', checkout: {situacao: 'Retrabalho', obs: 'fica'}};
-  const campos = {problema: '  Placa fora de prumo ', etapaOrigem: 'Instalação', causaRaiz: 'Erro humano', responsavelEtapa: ' Montagem', dataRetrabalho: '2026-10-03'};
+  /* O motivo da troca (etapaOrigemMotivo) vai junto (onda a3, D-010): na O.S.
+     marcada com a origem Produção, responder Instalação é TROCAR a origem, e
+     trocar pede o motivo; ele chega igual pelos dois caminhos. */
+  const campos = {problema: '  Placa fora de prumo ', etapaOrigem: 'Instalação', causaRaiz: 'Erro humano', responsavelEtapa: ' Montagem', dataRetrabalho: '2026-10-03',
+    etapaOrigemMotivo: 'Vistoria fictícia mostrou falha de fixação'};
   const casos = [['sem marca, Não', {}, 'nao'], ['sem marca, Sim', {}, 'sim'], ['marcada, Não', marcada, 'nao'], ['marcada, Sim', marcada, 'sim'],
     ['já perguntada antes, Não', {retrabalhoPerguntado: {em: '2026-09-30T10:00:00Z', por: 'Antes', resposta: 'sim'}}, 'nao']];
   const RETRAB = ['retrabalho', 'problema', 'etapaOrigem', 'causaRaiz', 'responsavelEtapa', 'dataRetrabalho', 'checkout', 'retrabalhoPerguntado'];
@@ -585,8 +589,11 @@ test('o modal passa pelo aplicarLancamento: uma chamada, grava o que ela devolve
     assert.equal(chamadas.length, 1, nome);
     const e = chamadas[0].e;
     assert.equal(e.data, '2026-10-02', nome);
-    assert.deepEqual(e.retrabalho, {resposta: 'sim', em: AGORA, por: 'Gestor Teste', problema: SIM.problema, etapaOrigem: SIM.etapaOrigem,
-      causaRaiz: SIM.causaRaiz, responsavelEtapa: SIM.responsavelEtapa, dataRetrabalho: SIM.dataRetrabalho}, nome);
+    /* TROCADO DE PROPÓSITO (onda a3, D-010): a etapa de origem decide dinheiro e
+       só a gestão a grava; a operação responde sem ela (fica a definir). */
+    const {etapaOrigem: _origem, ...semOrigem} = {resposta: 'sim', em: AGORA, por: 'Gestor Teste', problema: SIM.problema, etapaOrigem: SIM.etapaOrigem,
+      causaRaiz: SIM.causaRaiz, responsavelEtapa: SIM.responsavelEtapa, dataRetrabalho: SIM.dataRetrabalho};
+    assert.deepEqual(e.retrabalho, papel === 'pcp' ? {...semOrigem, etapaOrigem: SIM.etapaOrigem} : semOrigem, nome);
     if (papel === 'pcp') {
       assert.equal(e.alocacao.grupos[0].equipeId, 'eq-aguia');
       assert.deepEqual(e.respostasVolta, {...VOLTA_SIM, semAvaria: 'nao'});

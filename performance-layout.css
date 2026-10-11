@@ -155,7 +155,7 @@ body:has(#panel-performance.active) .frase-bar{min-height:0;padding:4px 14px;fon
 .perf-perda-falha{border-left-color:#b91c1c}
 .perf-perda-ok{border-left-color:#15803d}
 .perf-perda header{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
-.perf-perda h4{margin:0;font-size:.95rem;flex:1 1 220px;min-width:0;overflow-wrap:anywhere}
+.perf-perda h4,.perf-perda h5{margin:0;font-size:.95rem;flex:1 1 220px;min-width:0;overflow-wrap:anywhere}
 .perf-perda-cliente{font-weight:500;color:#526378;font-size:.84rem}
 .perf-perda-dia{font-size:.78rem;color:#526378}
 .perf-perda-selo{background:#fff6e0;color:#7a4a00;border:1px solid #f0d9a6}
@@ -172,6 +172,26 @@ body:has(#panel-performance.active) .frase-bar{min-height:0;padding:4px 14px;fon
 .perf-perda-nenhuma{margin:0;color:#526378}
 #perf-dialog .comissao-ocorrencia{margin:0 0 10px;padding:8px 12px;border-radius:10px;background:#fff6e0;border-left:4px solid #d97706;font-size:.84rem;line-height:1.45}
 #perf-dialog .comissao-ocorrencia p{margin:0 0 4px}
+/* A RÉGUA DAS PERDAS (D-010 e D-011): os grupos da aba, a régua à vista, as marcas do ranking e a origem a definir em destaque. */
+.perf-perdas-regra p{margin:0 0 4px}
+.perf-perdas-regra ul{margin:0;padding-left:18px}
+.perf-perdas-regra li{margin:0 0 2px}
+.perf-perdas-grupo{display:grid;gap:8px;min-width:0}
+.perf-perdas-grupo>h4{margin:6px 0 0;font-size:.95rem;color:#173c50;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.perf-perdas-grupo>p{margin:0;font-size:.82rem;color:#526378;line-height:1.45}
+.perf-perdas-grupo-definir{padding:10px 12px;border-radius:12px;background:#fff6e0;border:1px solid #f0d9a6;border-left:5px solid #d97706}
+.perf-perdas-grupo-definir>h4{color:#7a4a00}
+.perf-perdas-grupo-perda>h4{color:#9b1c1c}
+.perf-perda-efeito{font-weight:600;color:#1e293b}
+.perf-perda-naomedido{color:#526378}
+.perf-perdas-acao{margin-top:6px}
+#panel-performance .perf-perdas-acao button,#panel-performance .perf-atencao [data-ficha-etapa]{min-height:44px}
+/* "Definir a origem da O.S. ..." mora na coluna estreita do efeito: o botão quebra a linha em vez de sair do cartão (a 1024 e a 1280 o número longo passava da borda). */
+#panel-performance .perf-perdas-acao button,#panel-performance .perf-atencao-acoes button{white-space:normal;max-width:100%;text-align:left;overflow-wrap:anywhere;height:auto}
+.perf-sem-pontos,.perf-origem-definir{display:inline-block;font-size:.72rem;font-weight:650;border-radius:999px;padding:3px 10px;margin:2px 4px 0 0;white-space:normal}
+.perf-sem-pontos{color:#9b1c1c;background:#fdecea}
+.perf-origem-definir{color:#7a4a00;background:#fff1d6}
+.perf-retrab-regua{color:#7a4a00}
 @media(max-width:900px){.perf-perda-grade{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){
  .perf-perda-grade{grid-template-columns:1fr}

@@ -4,7 +4,7 @@ import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-rankin
 import { podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
-import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno } from "../_shared/pcp-status.mjs";
+import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -705,8 +705,19 @@ function valorConferencia(os:any, erp:any[]) {
 }
 /* `estrito` é a trava de "a base mudou durante a consulta": vale para a
    apuração, que sela um hash. O relatório de entregas só lê; com a equipe
-   sincronizando o dia inteiro, ele falhava sem motivo. */
-async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
+   sincronizando o dia inteiro, ele falhava sem motivo.
+   A RÉGUA DAS PERDAS (D-010 e D-011, _shared/pcp-regras.mjs): a apuração sai
+   com a régua de hoje (REGRAS.REGUA_PERDAS); cada entrega com retrabalho, no
+   programa, leva a etapa de origem (vazia: a definir) e a de instalação leva
+   perda:'retrabalho_instalacao' (REGRAS.perdaNaApuracao, a mesma conta da
+   prévia do aparelho), e então o id da régua entra no conteúdo (regraPerdas)
+   e no hash. Quem decide
+   a régua é o servidor, nunca o corpo do pedido: o recálculo de um selo
+   (perfParametrosDoSelo) usa a do selo, e o selo de antes da régua (sem
+   regraPerdas) é recalculado sem ela, com o hash de sempre. */
+async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDAS.id}:{estrito?:boolean,reguaPerdas?:string}={}) {
+  const regua=reguaPerdas?REGRAS.reguaPorId(reguaPerdas):null;
+  if(reguaPerdas&&!regua)throw new Error("A régua das perdas deste fechamento não existe neste servidor. Atualize antes de conferir.");
   const periodo=perfPeriodo(body), inicio=new Date().toISOString();
   const cfgAntes=await getCfgComVersao();
   const lista:any[]=[]; let after="", terminou=false;
@@ -855,7 +866,7 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     const camposEquipe=confirmado
       ? (divisao&&divisao.grupos?{grupos:divisao.grupos}:{})
       : sugestaoApurada(membros,aloc,aloc?finaisAlocacao(aloc):[],equipesPerf,idMembro);
-    return {id:o.id,...dadosEntrega,...(valorBrutoCentavos!==null&&valor!==null?{valorBrutoCentavos,descontoCentavos:valorBrutoCentavos-Math.round(valor*100)}:{}),numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,...(avisoValor?{avisoValor}:{}),membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf,voltou,volta,...camposEquipe};
+    return {id:o.id,...dadosEntrega,...(valorBrutoCentavos!==null&&valor!==null?{valorBrutoCentavos,descontoCentavos:valorBrutoCentavos-Math.round(valor*100)}:{}),numero:String(o.numero||""),cliente:String(o.cliente||""),dia:o._dia,valor,origemValor:valor===null?"Sem valor":origem,...(avisoValor?{avisoValor}:{}),membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,...(regua?REGRAS.perdaNaApuracao(o,o._dia,regua):{}),retornoConf,voltou,volta,...camposEquipe};
   });
   /* performance-2: cada registro leva a conferência da volta, e a apuração
      leva os PESOS DA NOTA em vigor. Eles entram no hash: quem fecha sela os
@@ -867,7 +878,12 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     : {producao:60,limpeza:20,equipamentos:20};
   // A régua monetária entra no hash e na revisão. Clientes antigos mantêm
   // sua régua explícita; uma revisão antiga nunca é reinterpretada pela tela.
-  const conteudo={periodo,regra:"performance-3",...(body.notaPorValor===true?{regraNota:REGRA_NOTA_VALOR}:{}),criterios,registros};
+  /* O id da régua entra no conteúdo (e no hash) só quando ela julgou alguma
+     entrega (alguma com retrabalho, no programa): o período sem retrabalho
+     fica com o conteúdo e o hash de antes da régua, e o selo antigo confere
+     igual. Sem entrega julgada, a régua não muda nada na comissão. */
+  const julgou=!!regua&&registros.some((r:any)=>Object.prototype.hasOwnProperty.call(r,"etapaOrigem"));
+  const conteudo={periodo,regra:"performance-3",...(body.notaPorValor===true?{regraNota:REGRA_NOTA_VALOR}:{}),...(julgou?{regraPerdas:regua.id}:{}),criterios,registros};
   return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP."};
 }
 /* A RÉGUA DO SELO (A1, auditoria da v164, 11/10/2026). A tela fecha com a
@@ -885,6 +901,9 @@ const REGRA_NOTA_VALOR = "nota-valor-1";
 function perfParametrosDoSelo(selo:any, periodo:any) {
   return {de:periodo.de, ate:periodo.ate, ...(selo?.regraNota===REGRA_NOTA_VALOR?{notaPorValor:true}:{})};
 }
+/* A RÉGUA DAS PERDAS DO SELO (D-010): a que ele guardou em regraPerdas; selo
+   de antes da régua, nenhuma (recalcula como foi selado). */
+const perfReguaDoSelo = (selo:any) => typeof selo?.regraPerdas==="string" ? selo.regraPerdas : "";
 async function perfFechamentos(periodo:any) {
   const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_fechamentos").eq("apagado",false).eq("registro->>de",periodo.de).eq("registro->>ate",periodo.ate).order("id").limit(1000);
   if(error)throw new Error(error.message);if(data?.length===1000)throw new Error("Limite de revisões atingido.");
@@ -1455,7 +1474,7 @@ Deno.serve(async (req: Request) => {
           if(!ultima.apuracao?.compensacaoDe){
           const fechamentos=await perfFechamentos(periodo);
           if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"Há outra revisão operacional. Concilie o demonstrativo antes de exportar."},409);
-          const fonteAtual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo));
+          const fonteAtual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo),{reguaPerdas:perfReguaDoSelo(fechamentos[0])});
           if(fonteAtual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Revise antes de exportar."},409);
           }
           const arquivo="comissao-"+periodo.de+"-r"+ultima.revisao+".csv";
@@ -1502,7 +1521,7 @@ Deno.serve(async (req: Request) => {
           if(!ultima.apuracao.compensacaoDe){
           const fechamentos=await perfFechamentos(periodo);
           if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"O fechamento operacional recebeu outra revisão. Gere e confira uma nova prévia."},409);
-          const atual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo));
+          const atual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo),{reguaPerdas:perfReguaDoSelo(fechamentos[0])});
           if(atual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Crie uma revisão operacional e outra prévia financeira."},409);
           }
           if(!ultima.versoesOS)return resp({error:"Prévia anterior ao controle de versões por O.S. Gere uma nova prévia."},409);
@@ -1981,6 +2000,8 @@ Deno.serve(async (req: Request) => {
         // As ocorrências manuais e os abonos (F17), antes da preservação: só os PEDIDOS entram.
         const veioOcorrencias = Object.prototype.hasOwnProperty.call(os, "ocorrencias") ? os.ocorrencias : undefined;
         const veioAbonos = Object.prototype.hasOwnProperty.call(os, "abonos") ? os.abonos : undefined;
+        // A etapa de origem do retrabalho (D-010), antes da guarda do retrabalho, que a devolve calada a quem não é da gestão.
+        const veioOrigem = Object.prototype.hasOwnProperty.call(os, "etapaOrigem") ? os.etapaOrigem : undefined;
         trocarOS(preservarAusentes(os, existing, { podeLimpar: !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp) }));
         /* O RETRABALHO GRAVADO SÓ A GESTÃO DESMARCA (F17). Regras em _shared
            (guardarRetrabalho): marcar vale na hora, venha de onde vier;
@@ -1995,6 +2016,23 @@ Deno.serve(async (req: Request) => {
           if (gr.mudouPergunta) gr = rodarRetrab(await autorAuditoria());
           trocarOS(gr.os);
           if (gr.aviso) avisosToque.push(gr.aviso);
+        }
+        /* A ETAPA DE ORIGEM DO RETRABALHO (D-010). Regras em _shared
+           (guardarOrigemRetrabalho): decide dinheiro pela régua das perdas
+           (o retrabalho de Instalação tira os pontos e a comissão), então só
+           admin e pcp gravam; marcar pela gestão exige a origem; trocar a
+           gravada exige o motivo (o pedido etapaOrigemMotivo nunca é gravado);
+           o retrabalho que o celular marca entra com a origem a definir.
+           Carimbo do crachá e do servidor em etapaOrigemLog, e o diário leva o
+           antes e o depois. Nada aqui é 422: o que não entra vira aviso. */
+        {
+          const podeOrigem = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
+          const agoraOrigem = new Date().toISOString();
+          const rodarOrigem = (autor: any) => guardarOrigemRetrabalho(os, existing, autor, agoraOrigem, { pode: podeOrigem, avisar: !ehMaquina && !ehToqueNoNome, veio: veioOrigem });
+          let go = rodarOrigem({ nome: String(cracha?.nome || cracha?.sub || ""), login: String(cracha?.sub ?? ""), porId: "" });
+          if (go.mudou) go = rodarOrigem(await autorAuditoria());
+          trocarOS(go.os);
+          avisosToque.push(...go.avisos);
         }
         /* ERP DIZ ENTREGUE, PCP TEM SALDO (E7). Regras em _shared
            (guardarSaldoERP): a marca da baixa (erpComSaldo) é só do servidor,

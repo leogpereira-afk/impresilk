@@ -26,7 +26,12 @@ const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
 const servidor = () => import('../supabase/functions/_shared/pcp-status.mjs');
 const integridade = () => import('../supabase/functions/_shared/pcp-integridade.mjs');
 const plano = v => JSON.parse(JSON.stringify(v));
-const REGRA = {...R.REGRA_EMBUTIDA};   // tolerância 15; perdas: atraso, retrabalho, retorno antecipado
+const REGRA = {...R.REGRA_EMBUTIDA};   // tolerância 15; perdas: as da régua (regras.js, D-010 e D-011)
+/* AS OCORRÊNCIAS MARCADAS (onda a3, D-011 de 11/10/2026): o atraso e o
+   retorno antecipado que valem ficam registrados na O.S., sem tirar nada
+   sozinhos. Os testes que diziam "a perda conta" (st.perdas) passam a dizer
+   "a ocorrência vale" (marcadas), TROCADOS DE PROPÓSITO. */
+const marcadas = st => st.ocorrencias.filter(o => o.vale && o.efeito === 'registrada').map(o => o.tipo);
 const DIA = '2026-10-05';
 const MOTIVO = 'Cliente pediu para remarcar a instalação';
 const banco = regs => ({pcp_registros:regs.map(osRow), registros:plano(FICHAS), equipe_contas:[{sistema:'pcp', usuario:'montagem1'}],
@@ -166,7 +171,7 @@ test('revisão: o abono fica preso à medida que abonou; a chegada corrigida dei
   const ret = O.retornoAntecipado(g(), REGRA);
   assert.equal(ret.situacao, 'antecipado');assert.equal(ret.conta, true);
   assert.match(ret.motivo, /o abono de outra medida \(05\/10 14:00\) não vale para esta/);
-  assert.deepEqual(O.statusEntrega(g(), '2026-10-06', REGRA).perdas, ['retornoAntecipado']);
+  assert.deepEqual(O.statusEntrega(g(), '2026-10-06', REGRA).perdas, []);assert.deepEqual(marcadas(O.statusEntrega(g(), '2026-10-06', REGRA)), ['retorno_antecipado']);
   assert.equal(g().abonos[0].revogadoEm, undefined, 'nada é revogado sozinho');
   // E um abono novo é aceito (antes: "a ocorrência já está abonada").
   r = await e.call({action:'upsert', os:{...g(), abonos:[...g().abonos, pedidoAbono(id, {motivo:'Abono novo para a medida nova das 10h'})]}}, GESTOR);
@@ -179,7 +184,7 @@ test('revisão: o abono fica preso à medida que abonou; a chegada corrigida dei
   assert.deepEqual(noServidor(e2, 'a1').abonos[0].medida, {prazo:'2026-10-03', entrega:DIA});
   const outraEntrega = {...noServidor(e2, 'a1'), entregaLancada:{data:'2026-10-09', por:'Gestor Teste', em:'2026-10-09T12:00:00Z'}};
   const st = O.statusEntrega(outraEntrega, '2026-10-10', REGRA);
-  assert.equal(st.rotulo, 'Com atraso');assert.deepEqual(st.perdas, ['atraso']);
+  assert.equal(st.rotulo, 'Com atraso');assert.deepEqual(st.perdas, []);assert.deepEqual(marcadas(st), ['atraso']);
   assert.match(st.motivo, /o abono de outra medida \(prazo 03\/10, entrega 05\/10\) não vale para esta/);
   // O abono dado antes da entrega (a remarcação pedida pelo cliente) vale para a entrega que vier, com o mesmo prazo.
   // (A porta julga a aberta pelo dia de hoje: o prazo dela fica no passado.)
@@ -225,7 +230,7 @@ test('revisão: o Desfazer do lote que tira a chegada avisa que o abono ficou se
     for (const id of ['A', 'B']) { await b.acao({acao:'retrabalho-nao', os:id}); await b.acao({acao:'confirmar', os:id}); }
     await salvar(b); await b.sincronizar();
     const st = statusNoServidor(b, 'B');
-    assert.equal(st.rotulo, 'Retorno antecipado');assert.deepEqual(st.perdas, ['retornoAntecipado']);
+    assert.equal(st.rotulo, 'Retorno antecipado');assert.deepEqual(st.perdas, []);assert.deepEqual(marcadas(st), ['retorno_antecipado']);
     assert.match(st.motivo, /o abono de outra medida \(29\/09 14:00\) não vale para esta/);
   } finally { b.fechar(); }
 });
@@ -256,14 +261,14 @@ test('revisão: na O.S. de dois dias, a chegada do segundo dia não apaga a perd
     assert.deepEqual([s.retornoConferido.dia, s.retornoConferido.hora], ['2026-09-30', '18:05'], 'o retornoConferido é a última chegada (a v142 lê só ele)');
     const st = statusNoServidor(b, 'm1');
     assert.deepEqual(st.retornoAntecipado.dias.map(d => [d.dia, d.situacao]), [['2026-09-29', 'antecipado'], ['2026-09-30', 'no horário']]);
-    assert.equal(st.retornoAntecipado.situacao, 'antecipado');assert.deepEqual(st.perdas, ['retornoAntecipado']);
+    assert.equal(st.retornoAntecipado.situacao, 'antecipado');assert.deepEqual(st.perdas, []);assert.deepEqual(marcadas(st), ['retorno_antecipado']);
     assert.deepEqual(st.ocorrencias.filter(o => o.tipo === 'retorno_antecipado').map(o => o.id), ['m1:retorno_antecipado:2026-09-29']);
     assert.match(st.motivo, /^29\/09: chegou às 14:00, 4 h antes do retorno previsto \(18:00\)/);
     // A porta acha a ocorrência do dia 29 (lê a volta daquele dia) e grava o abono com a medida dele.
     const r = await b.e.call({action:'upsert', os:{...noServidor(b.e, 'm1'), abonos:[pedidoAbono('m1:retorno_antecipado:2026-09-29')]}}, GESTOR);
     assert.equal(r.status, 200, JSON.stringify(r));
     assert.deepEqual(noServidor(b.e, 'm1').abonos[0].medida, {dia:'2026-09-29', chegada:'2026-09-29T14:00', previsto:'2026-09-29T18:00'});
-    assert.deepEqual(statusNoServidor(b, 'm1').perdas, []);
+    assert.deepEqual(statusNoServidor(b, 'm1').perdas, []);assert.deepEqual(marcadas(statusNoServidor(b, 'm1')), [], 'abonado: não vale mais');
   } finally { b.fechar(); }
 });
 
@@ -420,12 +425,14 @@ test('revisão: a prévia da divisão mede o retorno pela volta: a O.S. que não
     retornoPrevisto:[{dia:D, hora:prev}], retornoConferido:{dia:D, hora:'14:00', fonte:'lote', por:'Gestor Teste', em:D + 'T21:00:00Z'}});
   const b = await montar({os:[mk('A', '15:00'), mk('B', '17:00')]});
   try {
-    const prev = id => b.json(`(() => { const regra = REGRAS.regraVigente([], '${D}'); return ALOCUI.iniciar('ficha:${id}', {os:STORE.getOS('${id}'), equipes:[], papel:'pcp', valor:4000, dia:'${D}', versoes:[]}).naoPontua; })()`);
-    // Caso ruim: a prévia dizia "não pontua" para a A (sozinha, 1 h antes), e a ficha "no prazo" (a perda é da B, a última da volta).
-    assert.equal(await prev('A'), '');
-    assert.match(await prev('B'), /O\.S\. com retorno antecipado: pela regra do programa, não pontua nem paga comissão\./);
-    const ficha = id => b.json(`(() => { const o = STORE.getOS('${id}'); return OPERACAO.statusEntrega(o, '2026-10-06', REGRAS.regraVigente([], '${D}'), OPERACAO.voltaNaLista(o, STORE.getAllOS())).perdas; })()`);
-    assert.deepEqual(await ficha('A'), []);assert.deepEqual(await ficha('B'), ['retornoAntecipado']);
+    /* TROCADO DE PROPÓSITO (onda a3, M1 da auditoria e D-011): a prévia
+       "não pontua" da divisão (naoPontuaDe) era código morto, nunca aparecia,
+       e saiu. O que fica: o retorno é medido pela volta, e a ocorrência fica
+       registrada só na última O.S. da volta (a B), sem tirar nada. */
+    const prev = id => b.json(`(() => { const regra = REGRAS.regraVigente([], '${D}'); return 'naoPontua' in ALOCUI.iniciar('ficha:${id}', {os:STORE.getOS('${id}'), equipes:[], papel:'pcp', valor:4000, dia:'${D}', versoes:[]}); })()`);
+    assert.equal(await prev('A'), false);assert.equal(await prev('B'), false);
+    const ficha = id => b.json(`(() => { const o = STORE.getOS('${id}'); const st = OPERACAO.statusEntrega(o, '2026-10-06', REGRAS.regraVigente([], '${D}'), OPERACAO.voltaNaLista(o, STORE.getAllOS())); return [st.perdas, st.ocorrencias.filter(x => x.vale && x.tipo === 'retorno_antecipado').length]; })()`);
+    assert.deepEqual(await ficha('A'), [[], 0]);assert.deepEqual(await ficha('B'), [[], 1]);
   } finally { b.fechar(); }
 });
 
@@ -442,17 +449,19 @@ test('revisão: o selo "perda" sai das perdas do status: a aberta atrasada e a d
   t.abrir('ab');
   let ficha = t.run('statusEntregaFichaHTML(_modalDraft)');
   assert.deepEqual(t.json('statusEntregaDe(_modalDraft).perdas'), []);
-  // "N perdas valendo" virou "N a decidir pela gestão" na revisão da onda w3 (U1); com zero, a parte some.
-  assert.doesNotMatch(ficha, /oc-selo perda/);assert.match(ficha, /<span class="text-muted">1 sem perda agora<\/span>/);assert.doesNotMatch(ficha, /a decidir pela gestão/);
+  // "N perdas valendo" virou "N a decidir pela gestão" na w3 (U1) e, na onda a3 (D-011), "sem efeito agora" para a que ainda não vale.
+  assert.doesNotMatch(ficha, /oc-selo perda/);assert.match(ficha, /<span class="text-muted">1 sem efeito agora<\/span>/);assert.doesNotMatch(ficha, /a decidir pela gestão/);
   t.abrir('ra');
   ficha = t.run('statusEntregaFichaHTML(_modalDraft)');
   assert.deepEqual(t.json('statusEntregaDe(_modalDraft).perdas'), [], 'antes de 01/10 não há regra do programa');
   assert.doesNotMatch(ficha, /oc-selo perda/);assert.doesNotMatch(ficha, /conta como perda/);
-  assert.match(ficha, /Retorno antecipado:<\/strong> antes do previsto, sem perda pela regra do dia\./);
+  assert.match(ficha, /Retorno antecipado:<\/strong> antes do previsto, fora do programa \(sem efeito\)\./);
   t.abrir('en');
   ficha = t.run('statusEntregaFichaHTML(_modalDraft)');
-  assert.deepEqual(t.json('statusEntregaDe(_modalDraft).perdas'), ['retornoAntecipado']);
-  assert.match(ficha, /oc-selo perda/);assert.match(ficha, /1 a decidir pela gestão/);
+  // TROCADO DE PROPÓSITO (onda a3, D-011): o retorno antecipado da entregue fica MARCADO, sem perda.
+  assert.deepEqual(t.json('statusEntregaDe(_modalDraft).perdas'), []);
+  assert.doesNotMatch(ficha, /oc-selo perda/);assert.match(ficha, /oc-selo registrada">marcada</);assert.match(ficha, /1 marcada, sem efeito sozinha/);
+  assert.match(ficha, /Ocorrência registrada: não tira pontos nem comissão sozinha; a gestão pode julgar como falha comprovada\./);
   // Toda ocorrência que conta tem a perda no status, e vice-versa (a mesma conta).
   for (const id of ['ab', 'ra', 'en']) {
     const st = t.json(`statusEntregaDe(STORE.getOS('${id}'))`);
@@ -478,7 +487,7 @@ test('revisão: a O.S. cancelada (e a retirada) sai da volta antes de escolher a
   for (const M of [O, S]) {
     // Caso ruim: a B (cancelada, previsto 18:00) era a "última" e levava a perda embora; ninguém perdia.
     const st = M.statusEntrega(a, '2026-10-06', REGRA, M.voltaDoRetorno(a, lista));
-    assert.equal(st.retornoAntecipado.situacao, 'antecipado');assert.deepEqual(st.perdas, ['retornoAntecipado']);
+    assert.equal(st.retornoAntecipado.situacao, 'antecipado');assert.deepEqual(st.perdas, []);assert.deepEqual(marcadas(st), ['retorno_antecipado']);
     assert.match(st.retornoAntecipado.motivo, /chegou às 13:00, 3 h antes do retorno previsto \(16:00\)/);
     // Mesmo com a cancelada passada à mão na volta.
     assert.equal(M.retornoAntecipado(a, REGRA, lista).situacao, 'antecipado');
@@ -639,10 +648,12 @@ test('revisão: toque e textos: botões de 40 px nos diálogos, sem a frase repe
   const f1 = t.run('statusEntregaFichaHTML(_modalDraft)');
   // Caso ruim: "Retorno antecipado: sem retorno previsto. Sem retorno previsto digitado: não há perda".
   assert.doesNotMatch(f1, /sem retorno previsto\. Sem retorno previsto/i);
-  assert.match(f1, /<strong>Retorno antecipado:<\/strong> Sem retorno previsto digitado: não há perda por retorno antecipado\./);
+  // TROCADO DE PROPÓSITO (onda a3, D-011): "não medido" no lugar de "não há perda".
+  assert.match(f1, /<strong>Retorno antecipado:<\/strong> Sem retorno previsto digitado: não medido\./);
   // "N valendo": antes contava a da volta do carro e a registrada como se valessem.
   t.abrir('f2');
-  assert.match(t.run('statusEntregaFichaHTML(_modalDraft)'), /1 a decidir pela gestão · 1 da volta do carro · 1 registrada/);
+  // TROCADO DE PROPÓSITO (onda a3, D-011): a derivada que vale fica "marcada", sem efeito sozinha.
+  assert.match(t.run('statusEntregaFichaHTML(_modalDraft)'), /1 marcada, sem efeito sozinha · 1 da volta do carro · 1 registrada/);
   t.abrir('f3');
   assert.match(t.run('statusEntregaFichaHTML(_modalDraft)'), /<span class="text-muted">1 abonada<\/span>/);
   // A instalação sem carro com retorno previsto: o lote pede a chegada NA LINHA, grava e mede.

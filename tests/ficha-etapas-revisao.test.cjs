@@ -178,13 +178,23 @@ test('revisão: D1, o checklist não diz "fica pendente para a pontuação"; cad
   const volta = doChecklist(fech, 'Limpeza e equipamentos da volta');
   assert.equal(volta.estado, 'falta');
   assert.match(volta.html, /Sem a conferência, a volta fica neutra: sem bônus e sem redutor\./);
-  // Atraso e retrabalho viram ocorrência a decidir pela gestão (revisão da onda w3, U1: a regra deles está pendente, A3, e a ficha
-  // dizia "não pontua" ao lado da aba Perdas dizendo "a decidir"); o retrabalho não se abona, o atraso sim.
+  /* TROCADO DE PROPÓSITO (onda a3, D-010 e D-011 de 11/10/2026): o efeito
+     de cada item é o da régua das perdas. O retrabalho sem origem fica "a
+     definir" (falta no checklist: a comissão da O.S. fica pendente); o de
+     instalação tira os pontos e a comissão e não se abona; o atraso fica
+     registrado como ocorrência, sem efeito sozinho (o abono justifica). */
   const t2 = tela({lista: [finalizada({retrabalho: true, problema: 'Placa torta fictícia', retornoConf: VOLTA_OK, instalacao: {data: '2026-10-02', periodo: 'Manhã', duracaoDias: 1}})]});
   t2.abrirOS('f1');
   const f2 = t2.secoes().fechamento;
-  assert.match(doChecklist(f2, 'Retrabalho').html, /Retrabalho: ocorrência a decidir pela gestão\. Até a decisão, não tira pontos nem comissão\. Retrabalho não se abona\./);
-  assert.match(doChecklist(f2, 'Prazo').html, /Entregue com atraso: ocorrência a decidir pela gestão\. Até a decisão, não tira pontos nem comissão; o abono justifica o atraso\./);
+  const r2 = doChecklist(f2, 'Retrabalho');
+  assert.equal(r2.estado, 'falta', 'origem a definir: falta no checklist');
+  assert.match(r2.html, /Retrabalho com origem a definir: defina a origem; até lá não tira nada e a comissão desta O\.S\. fica pendente\./);
+  assert.match(doChecklist(f2, 'Prazo').html, /Entregue com atraso\. Ocorrência registrada: não tira pontos nem comissão sozinha; a gestão pode julgar como falha comprovada\. O abono justifica o atraso\./);
+  const t2b = tela({lista: [finalizada({retrabalho: true, etapaOrigem: 'Instalação', problema: 'Placa torta fictícia', retornoConf: VOLTA_OK, instalacao: {data: '2026-10-02', periodo: 'Manhã', duracaoDias: 1}})]});
+  t2b.abrirOS('f1');
+  const r2b = doChecklist(t2b.secoes().fechamento, 'Retrabalho');
+  assert.equal(r2b.estado, 'ok');
+  assert.match(r2b.html, /Retrabalho de instalação: tira os pontos e a comissão desta O\.S\. Retrabalho de instalação não se abona: quem discorda da origem troca a origem, com motivo\./);
   assert.match(doChecklist(f2, 'Limpeza e equipamentos da volta').html, /Carro limpo e arrumado: bônus da volta\./);
   // O item sem efeito na pontuação é só "falta": a foto que falta na finalizada não promete nada.
   const t3 = tela({lista: [finalizada({fotosRetornoIds: [], retornoConf: VOLTA_OK, retrabalhoPerguntado: RESPONDIDO_NAO})]});
@@ -196,7 +206,7 @@ test('revisão: D1, o checklist não diz "fica pendente para a pontuação"; cad
   const t4 = tela({lista: [finalizada({finalizadaEm: '2026-09-20T16:00:00'})]});
   t4.abrirOS('f1');
   const f4 = t4.secoes().fechamento;
-  assert.doesNotMatch(f4, /fica neutra|bônus|não pontua|a decidir pela gestão/);
+  assert.doesNotMatch(f4, /fica neutra|bônus|não pontua|a decidir pela gestão|Ocorrência registrada/);
   assert.match(f4, /Entregue antes de 01\/10\/2026: os efeitos do programa não valem para ela\./);
 });
 
@@ -289,7 +299,8 @@ test('revisão: D6, a ficha aberta pela aba Retrabalho mostra a etapa de origem 
   const vis = t.visivel()[0];
   // Caso ruim: a finalizada abria no Fechamento, e os campos do retrabalho ficavam escondidos na Jornada.
   assert.equal(vis, 'jornada');
-  assert.match(t.secoes()[vis], /data-f="etapaOrigem"[\s\S]*?data-f="causaRaiz"/);
+  // TROCADO DE PROPÓSITO (onda a3, D-010): a etapa de origem é só leitura na Jornada, com o botão da gestão (trocar pede motivo).
+  assert.match(t.secoes()[vis], /<label>Etapa de origem<\/label><div class="origem-ficha">[\s\S]*?data-origem-ficha[\s\S]*?data-f="causaRaiz"/);
   assert.match(ler('app.js'), /openModal\(os, os\.finalizadaEm \? 'exec' : undefined\)/, 'o botão da O.S. de retrabalho feita também abre na Jornada');
 });
 

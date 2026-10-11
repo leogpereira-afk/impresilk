@@ -26,7 +26,8 @@ const doc = {origem:'Vistoria fictícia', evidencia:'Foto fictícia 001 do servi
 const pessoa = (chave, nome, percentual) => ({chave, nome, percentual});
 const card = (id, extra = {}) => ({id, numero:'T-' + id, cliente:'Cliente fictício ' + id, tipo:'externo', instalacao:{data:'2026-11-05'},
   prazoCombinado:{data:'2026-11-05', fonte:'agenda'}, finalizadaEm:'2026-11-05T15:00:00-03:00', equipe:['900001', '900002'], valorTotal:1200,
-  retrabalho:true, problema:'Adesivo descolou na borda', etapaOrigem:'Instalação', causaRaiz:'Erro humano', responsavelEtapa:'Setor fictício',
+  // TROCADO DE PROPÓSITO (onda a3, D-010): a ficha padrão é de retrabalho de Produção. A de Instalação é perda automática; estes testes são da falha comprovada (D-004), que a gestão decide.
+  retrabalho:true, problema:'Adesivo descolou na borda', etapaOrigem:'Produção', causaRaiz:'Erro humano', responsavelEtapa:'Setor fictício',
   dataRetrabalho:'2026-11-06', retrabalhoPerguntado:{resposta:'sim', por:'Gestora fictícia', em:'2026-11-06T10:15:00-03:00'}, ...extra});
 const semRetrabalho = {retrabalho:false, problema:'', etapaOrigem:'', causaRaiz:'', retrabalhoPerguntado:{resposta:'nao', por:'Gestora fictícia', em:'2026-11-08T10:00:00-03:00'}};
 const registro = (id, extra = {}) => ({id, numero:'T-' + id, cliente:'Cliente fictício ' + id, dia:'2026-11-05', valor:1200, origemValor:'O.S. do PCP',
@@ -70,7 +71,8 @@ const osDoBanco = (id, equipe, extra = {}) => ({colecao:'os', id, apagado:false,
 async function servidorComFalha(requestBase) {
   const ids = ['100001', '100002'];
   const e = await edge('pcp-sync', {
-    pcp_registros:[osDoBanco('osA', ids, {retrabalho:true, etapaOrigem:'Instalação', causaRaiz:'Erro humano'})],
+    // TROCADO DE PROPÓSITO (onda a3, D-010): origem Produção; a de Instalação seria perda automática, sem decisão.
+    pcp_registros:[osDoBanco('osA', ids, {retrabalho:true, etapaOrigem:'Produção', causaRaiz:'Erro humano'})],
     registros:ids.map((id, i) => ({colecao:'colaboradores', id:'p' + i, apagado:false, registro:{id:'p' + i, nome:'Pessoa ' + (i + 1), cpf:id + '12345'}})),
     pcp_config_global:[{id:true, atualizado_em:'2020-01-01', config:{performancePCP:{equipes:[], participacoes:[
       {id:'osA', membros:[pessoa('100001', 'Pessoa 1', 60), pessoa('100002', 'Pessoa 2', 40)], por:'Gestor', em:'2026-11-10'}]}}}],
@@ -109,7 +111,7 @@ test('revisão onda-w3-abas: R1, a decisão do demonstrativo do mês vale num re
   const linha = m.linhas.find(l => l.osId === 'osA');
   assert.equal(linha.decisao.codigo, 'falha_comprovada');
   assert.doesNotMatch(linha.efeito, /a decidir/);
-  assert.equal(m.resumo.retrabalhoSemDecisao, 0, 'o ponto de atenção não acusa o que o mês já decidiu');
+  assert.equal(m.resumo.origemADefinir + m.resumo.decisaoIncompleta, 0, 'o ponto de atenção não acusa o que o mês já decidiu');
   assert.equal(linha.decisao.demonstrativo.de, '2026-11-01');
   assert.equal(linha.perda.valorCentavos, 120000);
   assert.equal(linha.perda.comissaoCentavos, null, 'a comissão perdida se calcula no período do demonstrativo');
@@ -163,7 +165,7 @@ test('revisão onda-w3-abas: R3, com a compensação em preparo no topo, vale a 
   const ds = PERDAS.demonstrativos(lista, NOV);
   const m = PERDAS.montar({registros:f.registros, card:id => cards.get(id) || null, status:c => OPERACAO.statusEntrega(c), demonstrativos:ds, periodo:NOV});
   assert.equal(m.linhas.find(l => l.osId === 'osA').decisao.codigo, 'falha_comprovada');
-  assert.equal(m.resumo.retrabalhoSemDecisao, 0);
+  assert.equal(m.resumo.origemADefinir + m.resumo.decisaoIncompleta, 0);
   // A aba diz que há uma compensação em preparo.
   const regs = f.registros.map(r => ({...r}));
   const t = tela({lista:[...cards.values()], registros:regs, revisoes:lista.revisoes, cobrem:[], fechamentos:[f], aba:'perdas'});
@@ -173,23 +175,29 @@ test('revisão onda-w3-abas: R3, com a compensação em preparo no topo, vale a 
   assert.doesNotMatch(tx, /Ponto de atenção/);
 });
 
-test('revisão onda-w3-abas: R4, o Y do ponto de atenção conta a montagem interna elegível que perde os 20%', () => {
+/* TROCADO DE PROPÓSITO (onda a3, D-010): o ponto de atenção conta a
+   comissão PENDENTE da O.S. de origem a definir (não paga e não perde), e o Y
+   continua contando a montagem interna elegível, que também fica pendente. */
+test('revisão onda-w3-abas: R4, o Y do ponto de atenção conta a montagem interna elegível (comissão pendente da origem a definir)', () => {
   const registros = [registro('R1', {retrabalho:true})];
+  const semOrigem = () => card('R1', {etapaOrigem:''});
   const fonte = fechamento(registros);
   const interna = {...doc, situacao:'elegivel', partes:[{pessoaId:'900009', cota:10000}]};
   const rev = revisaoDe(fonte, {}, 1, interna);
-  // Quem perderia pelo motor: com "sem falha" recebem 900001, 900002 e 900009; com "falha comprovada", ninguém.
+  // Quem receberia pelo motor: 900001, 900002 e 900009 (a montagem interna elegível).
   const sem = COMISSAO.apurar(fonte, {...rev.entrada, decisoes:{R1:{...doc, decisao:'sem_falha', tipo:'incompleto'}}}, {aprovacoes:[]});
-  const perdem = new Set(sem.linhas[0].pagamentos.filter(p => p.centavos > 0).map(p => p.pessoaId));
-  assert.deepEqual([...perdem].sort(), ['900001', '900002', '900009']);
-  // Caso ruim: Y = 2 (só os membros da entrega).
-  const m = PERDAS.montar({registros, card:() => card('R1'), status:c => OPERACAO.statusEntrega(c), revisao:rev});
-  assert.equal(m.resumo.pessoasEmRisco, perdem.size);
+  const recebem = new Set(sem.linhas[0].pagamentos.filter(p => p.centavos > 0).map(p => p.pessoaId));
+  assert.deepEqual([...recebem].sort(), ['900001', '900002', '900009']);
+  const m = PERDAS.montar({registros, card:semOrigem, status:c => OPERACAO.statusEntrega(c), revisao:rev});
+  assert.equal(m.resumo.origemADefinir, 1);
+  assert.equal(m.resumo.pessoasPendentes, recebem.size);
   // A interna que não é elegível não conta, e ninguém conta duas vezes.
-  const naoAplica = PERDAS.montar({registros, card:() => card('R1'), status:c => OPERACAO.statusEntrega(c), revisao:revisaoDe(fonte, {})});
-  assert.equal(naoAplica.resumo.pessoasEmRisco, 2);
+  const naoAplica = PERDAS.montar({registros, card:semOrigem, status:c => OPERACAO.statusEntrega(c), revisao:revisaoDe(fonte, {})});
+  assert.equal(naoAplica.resumo.pessoasPendentes, 2);
   const repetida = revisaoDe(fonte, {}, 1, {...interna, partes:[{pessoaId:'900001', cota:10000}]});
-  assert.equal(PERDAS.montar({registros, card:() => card('R1'), status:c => OPERACAO.statusEntrega(c), revisao:repetida}).resumo.pessoasEmRisco, 2);
+  assert.equal(PERDAS.montar({registros, card:semOrigem, status:c => OPERACAO.statusEntrega(c), revisao:repetida}).resumo.pessoasPendentes, 2);
+  // Com a origem definida, nada fica pendente no ponto.
+  assert.equal(PERDAS.montar({registros, card:() => card('R1'), status:c => OPERACAO.statusEntrega(c), revisao:rev}).resumo.pessoasPendentes, 0);
 });
 
 test('revisão onda-w3-abas: R2 e U2, a falha comprovada diz o que acontece hoje: fora da comissão e dos pontos do demonstrativo, e o ranking ainda conta', () => {
@@ -200,10 +208,10 @@ test('revisão onda-w3-abas: R2 e U2, a falha comprovada diz o que acontece hoje
   const perdas = texto(tela({lista, registros, revisoes:[rev], fechamentos:[fonte], aba:'perdas'}).render());
   // Caso ruim: "a O.S. não pontua no programa" e "Deixa de pontuar: R$ 1.200,00", com o ranking ao lado contando a O.S.
   assert.doesNotMatch(perdas, /não pontua no programa|Deixa de pontuar|deixam de pontuar/);
-  assert.match(perdas, /Falha comprovada da instalação: fica fora da comissão e dos pontos do demonstrativo da comissão\. O ranking da aba Rankings ainda conta esta O\.S\./);
+  // Texto da nota trocado de propósito na onda a3: não há mais "regra pendente"; o ranking só não lê a decisão da comissão.
+  assert.match(perdas, /Falha comprovada da instalação: fica fora da comissão e dos pontos do demonstrativo da comissão\. O ranking da aba Rankings não lê a decisão da comissão: ele ainda conta esta O\.S\./);
   assert.match(perdas, /Base que deixa de gerar comissão: R\$\s?1\.200,00/);
-  assert.match(perdas, /R\$\s?1\.200,00 de base deixam de gerar comissão/, 'o resumo do topo diz o mesmo');
-  assert.match(perdas, /O ranking da aba Rankings ainda conta estas O\.S\./);
+  assert.match(perdas, /R\$\s?1\.200,00 de base não geram comissão/, 'o resumo do topo diz o mesmo');
   // E é verdade: os Rankings contam a O.S. (60% de R$ 2.400, com a R1).
   const rank = texto(tela({lista, registros, revisoes:[rev], fechamentos:[fonte], aba:'equipe'}).render());
   assert.match(rank, /R\$\s?1\.440,00/);
@@ -262,15 +270,18 @@ const retrabalhos = () => ({
   lista:[card('R1'), card('R2', {etapaOrigem:'Instalação', causaRaiz:'Erro humano'}), card('S1', {...semRetrabalho})],
   registros:[registro('R1', {retrabalho:true}), registro('R2', {retrabalho:true, membros:[pessoa('900001', 'Pessoa Um', 50), pessoa('900003', 'Pessoa Três', 50)]}), registro('S1', {confirmado:false, fonte:'sugestao'})]});
 
-test('revisão onda-w3-abas: U3, a aba e o ponto dizem o caminho para decidir, com o botão do próximo passo', () => {
+/* TROCADO DE PROPÓSITO (onda a3, D-011): o caminho (conferir, fechar, abrir
+   a Comissão) é o de JULGAR uma ocorrência no demonstrativo, e mora na seção
+   das outras ocorrências; o ponto de atenção não o pede (atraso e retrabalho
+   de outra origem não ameaçam a comissão sozinhos). */
+test('revisão onda-w3-abas: U3, a aba diz o caminho para julgar no demonstrativo, com o botão do próximo passo', () => {
   const {lista, registros} = retrabalhos();
   // 1) Há entrega a conferir: o próximo passo é a Conferência filtrada.
   const t = tela({lista, registros, aba:'perdas'});
   const html = t.render(), tx = texto(html);
   // Caso ruim: a aba só dizia "(Rankings, Base e fechamento)", sem botão e sem dizer que é preciso conferir e fechar antes.
-  assert.match(tx, /Para decidir: confira a entrega que falta \(aba Conferência\), feche o período em Rankings › Base e fechamento e abra Comissão\./);
-  const ponto = (html.match(/<section class="perf-atencao"[^]*?<\/section>/) || [''])[0];
-  assert.match(texto(ponto), /Para decidir: confira a entrega que falta/, 'o ponto diz a mesma frase');
+  assert.match(tx, /Para julgar no demonstrativo: confira a entrega que falta \(aba Conferência\), feche o período em Rankings › Base e fechamento e abra Comissão\./);
+  assert.doesNotMatch(html, /class="perf-atencao"/, 'sem origem a definir nem decisão incompleta, o ponto não acende');
   assert.match(html, /data-perdas-passo="conferir"[^>]*>Conferir a entrega que falta</);
   const conferir = {dataset:{perdasPasso:'conferir'}};
   t.ctx.renderPerformanceCasa = () => {};
@@ -283,7 +294,7 @@ test('revisão onda-w3-abas: U3, a aba e o ponto dizem o caminho para decidir, c
   const conferidos = registros.map(r => ({...r, confirmado:true, fonte:'participacao'}));
   const t2 = tela({lista, registros:conferidos, aba:'perdas', periodo:{de:'2026-11-01', ate:'2026-11-30'}});
   const h2 = t2.render();
-  assert.match(texto(h2), /Para decidir: feche o período em Rankings › Base e fechamento e abra Comissão\./);
+  assert.match(texto(h2), /Para julgar no demonstrativo: feche o período em Rankings › Base e fechamento e abra Comissão\./);
   assert.match(h2, /data-perdas-passo="fechar"[^>]*>Ir para Base e fechamento</);
   const fechar = {dataset:{perdasPasso:'fechar'}};
   t2.ctx.renderPerformanceCasa = () => {};
@@ -296,7 +307,7 @@ test('revisão onda-w3-abas: U3, a aba e o ponto dizem o caminho para decidir, c
   const fonte = fechamento(conferidos);
   const t3 = tela({lista, registros:conferidos, fechamentos:[fonte], aba:'perdas'});
   const h3 = t3.render();
-  assert.match(texto(h3), /Para decidir: abra Comissão · demonstrativo e aprovação e registre a decisão de cada O\.S\./);
+  assert.match(texto(h3), /Para julgar: abra Comissão · demonstrativo e aprovação e registre a decisão de cada O\.S\./);
   assert.match(h3, /data-perdas-passo="comissao"[^>]*>Abrir o demonstrativo da comissão</);
   const comissao = {dataset:{perdasPasso:'comissao'}};
   let abriu = 0;
@@ -340,11 +351,13 @@ test('revisão onda-w3-abas: U4, a decisão registrada sem documento diz o que f
   const html = tela({lista, registros, revisoes:[rev], fechamentos:[fonte], aba:'perdas'}).render(), tx = texto(html);
   // Caso ruim: "A decidir pela gestão / Lida da revisão 1", sem dizer por quê.
   assert.match(tx, /Decisão registrada \(Sem falha comprovada\), sem documento completo: falta a origem e a evidência/);
+  // TROCADO DE PROPÓSITO (onda a3): o ponto acusa a decisão incompleta (ela trava o demonstrativo), não a falta de decisão.
   const ponto = texto((html.match(/<section class="perf-atencao"[^]*?<\/section>/) || [''])[0]);
-  assert.match(ponto, /1 O\.S\. com retrabalho ainda sem decisão valendo \(1 com decisão registrada sem documento completo\)/);
-  // Sem decisão nenhuma, a frase de sempre.
-  const nada = texto(tela({lista, registros, revisoes:[revisaoDe(fonte, {})], fechamentos:[fonte], aba:'perdas'}).render());
-  assert.match(nada, /1 O\.S\. com retrabalho ainda sem decisão: pode tirar a comissão de 2 pessoas/);
+  assert.match(ponto, /1 decisão da comissão registrada sem documento completo: o demonstrativo só aceita a decisão documentada\./);
+  // Sem decisão nenhuma (retrabalho de produção, sem origem a definir): nada a acusar.
+  const nada = tela({lista, registros, revisoes:[revisaoDe(fonte, {})], fechamentos:[fonte], aba:'perdas'}).render();
+  assert.doesNotMatch(nada, /class="perf-atencao"/);
+  assert.match(texto(nada), /Retrabalho de produção: não tira nada da instalação\./);
 });
 
 test('revisão onda-w3-abas: U7, abas, ponto de atenção e faixa têm 44 px fora de media query', () => {
@@ -364,8 +377,9 @@ test('revisão onda-w3-abas: U8, período antes do programa não acusa perda de 
   const lista = [card('S1', {instalacao:{data:'2026-09-15'}, prazoCombinado:{data:'2026-09-15', fonte:'agenda'}, finalizadaEm:'2026-09-15T15:00:00-03:00'})];
   const registros = [registro('S1', {retrabalho:true, dia:'2026-09-15'})];
   const m = PERDAS.montar({registros, card:() => lista[0], status:c => OPERACAO.statusEntrega(c), revisao:null, periodo:SET});
-  assert.equal(m.resumo.retrabalhoSemDecisao, 0);
-  assert.equal(m.resumo.pessoasEmRisco, 0);
+  // TROCADO DE PROPÓSITO (onda a3): os nomes novos do resumo (origem a definir e comissão pendente).
+  assert.equal(m.resumo.origemADefinir, 0);
+  assert.equal(m.resumo.pessoasPendentes, 0);
   assert.equal(m.resumo.periodoAntes, true);
   const html = tela({lista, registros, revisoes:[], cobrem:[], aba:'perdas', periodo:SET}).render(), tx = texto(html);
   // Caso ruim: "Ponto de atenção: 1 O.S. com retrabalho ainda sem decisão: pode tirar a comissão de 2 pessoas", em setembro.
@@ -375,7 +389,7 @@ test('revisão onda-w3-abas: U8, período antes do programa não acusa perda de 
   assert.doesNotMatch(tx, /A decidir pela gestão/);
   // Recorte que pega setembro e outubro: só a de outubro acusa.
   const mix = PERDAS.montar({registros:[...registros, registro('O1', {retrabalho:true, dia:'2026-10-05'})], card:() => null, revisao:null, periodo:{de:'2026-09-01', ate:'2026-10-31'}});
-  assert.equal(mix.resumo.retrabalhoSemDecisao, 1);
+  assert.equal(mix.resumo.origemADefinir, 1, 'sem a ficha e sem a origem na apuração: a de outubro fica a definir');
   assert.equal(mix.resumo.periodoAntes, false);
 });
 
@@ -388,7 +402,8 @@ test('revisão onda-w3-abas: U9, os textos da aba sem termos internos: comissão
   const tx = texto(tela({lista, registros, revisoes:[rev], fechamentos:[fonte], aba:'perdas'}).render());
   // Caso ruim: "base líquida da linha da comissão", "o mesmo motor do demonstrativo", "Apuração (ranking e comissão)", "A ficha e a apuração concordam".
   assert.doesNotMatch(tx, /base líquida da linha|mesmo motor|Versão da apuração|Apuração \(ranking e comissão\)|concordam/);
-  assert.match(tx, /A comissão perdida é o quanto a O\.S\. renderia no demonstrativo se fosse julgada sem falha; saldo de meses anteriores não entra\./);
+  // Nota trocada de propósito na onda a3: ela também explica a comissão perdida do retrabalho de instalação.
+  assert.match(tx, /a da falha comprovada é o quanto a O\.S\. renderia no demonstrativo se fosse julgada sem falha\. Saldo de meses anteriores não entra\./);
   assert.match(tx, /Dia da entrega usado no ranking \(não desconta atraso\): prazo 05\/11, entrega 05\/11: no prazo/);
   assert.match(tx, /Atraso de 3 dias: prazo 05\/11, entrega 08\/11\. As duas datas dão o mesmo atraso\./);
 });

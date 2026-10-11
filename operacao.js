@@ -948,7 +948,14 @@ const OPERACAO = (() => {
      marcas por item (`semMotor`). */
   let motorDaEntrega = null;
   const usarMotorItem = m => { motorDaEntrega = m && typeof m.resumoOS === 'function' && typeof m.lancamentosDaOS === 'function' ? m : null; };
-  const STATUS_ENTREGA = ((prazoCombinadoDe, motorItem, retornosPrevistos) => {
+  /* A RÉGUA DAS PERDAS (regras.js, D-010 e D-011) também é APRESENTADA ao
+     carregar (usarReguaPerdas), como o motor: o index.html carrega o
+     regras.js depois deste arquivo. O equipe.html não o carrega (o celular
+     não chama o status, e a regra do programa não desce ao crachá): sem ela,
+     nada tira pontos. No Node (testes), o require. */
+  let reguaDasPerdas = null;
+  const usarReguaPerdas = r => { reguaDasPerdas = r && typeof r.efeitoDaOcorrencia === 'function' && typeof r.origemRetrabalho === 'function' ? r : null; };
+  const STATUS_ENTREGA = ((prazoCombinadoDe, motorItem, retornosPrevistos, reguaPerdas) => {
 /* ==== STATUS DA ENTREGA: daqui até FIM DO STATUS, cópia byte a byte de _shared/pcp-status.mjs ==== */
 /* O STATUS DA ENTREGA EM 7 ESTADOS (F16). Função pura: não lê tela e não
    grava nada. Precedência, do que mais pesa para o que menos pesa:
@@ -960,17 +967,21 @@ const OPERACAO = (() => {
    - Cancelado: a baixa do ERP com status CANCELADO, ou a marca
      os.cancelamento da gestão. Cancela o saldo dos itens; o que já foi
      entregue por item fica. Item cancelado sozinho não cancela a O.S.
-   - Retrabalho: a marca de retrabalho da O.S., venha de onde vier (F17: zera
-     na hora; só desmarcar é da gestão). Retrabalho não se abona.
+   - Retrabalho: a marca de retrabalho da O.S. (só desmarcar é da gestão). O
+     efeito é o da RÉGUA DAS PERDAS (regras.js, D-010): o de Instalação tira
+     os pontos e a comissão na hora; o de Medição, Arte ou Produção não tira
+     nada da instalação; sem a origem, fica "origem a definir". Retrabalho não
+     se abona.
    - Retorno antecipado (F17): a chegada conferida pela gestão antes do
      retorno previsto da volta, além da tolerância da regra (retornoAntecipado,
-     abaixo). O abonado aparece como "Retorno antecipado (abonado)", com o
-     motivo, e não é perda.
+     abaixo). Fica registrado como ocorrência e não tira nada sozinho (D-011).
+     O abonado aparece como "Retorno antecipado (abonado)", com o motivo.
    - Com atraso e No prazo: o prazo é o COMBINADO, congelado (F15: a primeira
      data agendada no PCP), até o último dia da duração. A data da entrega é
      a ÚLTIMA entrega por item, quando a O.S. tem marca, e senão a entrega
      lançada, a finalização ou a baixa do ERP (sem prova). A O.S. aberta com
-     o prazo vencido também fica Com atraso, ainda sem entrega.
+     o prazo vencido também fica Com atraso, ainda sem entrega. O atraso fica
+     registrado como ocorrência e não tira nada sozinho (D-011).
    - Em execução: a O.S. aberta com entrega parcial ("entrega parcial N de
      M"), item com problema de entrega, equipe na rua, equipe que voltou sem
      finalizar, ou no dia da agenda com equipe escalada.
@@ -987,8 +998,12 @@ const OPERACAO = (() => {
      antecipado (abonado)". Os dois trazem o motivo do abono, vêm depois das
      perdas que valem e antes do "No prazo", e nunca são perda.
    `hoje` é 'AAAA-MM-DD' no calendário da fábrica; sem ele, o dia de hoje em
-   São Paulo. `regra` é a versão da regra do programa (F05): diz quais estados
-   são perda (`perdas`) e a tolerância do retorno (toleranciaRetornoMin).
+   São Paulo. `regra` é a versão da regra do programa (F05): sem ela (antes
+   do programa) nada é perda; com ela, a tolerância do retorno
+   (toleranciaRetornoMin) é a dela, e o que é perda (`perdas`: o que tira os
+   pontos e a comissão da O.S.) é o que a RÉGUA DAS PERDAS diz (regras.js,
+   D-010 e D-011: hoje só o retrabalho de instalação). Sem a régua carregada
+   (versões misturadas), nada é perda.
    `volta` (F17) é a lista das O.S. da mesma volta (voltaDoRetorno): o
    retorno antecipado é medido pela volta; sem ela, pela O.S. sozinha.
    NÃO muda o status de agenda (OPERACAO.status), que o Painel copia. */
@@ -1010,6 +1025,14 @@ const MOTIVO_CANCELAMENTO_MIN = 15;
 const MOTIVO_CANCELAMENTO_MAX = 300;
 const txtSt = v => v == null ? '' : String(v).trim();
 const objSt = v => !!v && typeof v === 'object' && !Array.isArray(v);
+/* O EFEITO DA OCORRÊNCIA pela RÉGUA DAS PERDAS (regras.js, D-010 e D-011):
+   'tira', 'acompanha', 'definir' (retrabalho sem origem), 'registrada' ou ''.
+   Sem a régua carregada, '' (nada tira pontos). `tipo` é o estado do status
+   ou o tipo da ocorrência (retrabalho, atraso, retorno_antecipado). */
+const efeitoSt = (tipo, os) => {
+  const R = reguaPerdas();
+  return R && typeof R.efeitoDaOcorrencia === 'function' ? R.efeitoDaOcorrencia(tipo, txtSt(objSt(os) ? os.etapaOrigem : '')) : '';
+};
 /* O MOTIVO É TEXTO, e só contam as LETRAS E OS NÚMEROS que se veem, depois
    de normalizar em NFC (revisão da F17): quinze espaços de largura zero, o
    braille em branco, o seletor de variação e a marca combinante não dizem
@@ -1209,9 +1232,16 @@ function motivoAgendadoSt(o, prazo) {
    O.S. de vários dias tem uma volta por dia, e a chegada do segundo dia não
    apaga a perda do primeiro):
      atraso              o prazo combinado vencido (a entregue e a aberta)
-     retrabalho          a marca de retrabalho, venha de onde vier
+     retrabalho          a marca de retrabalho
      retorno_antecipado  a chegada conferida pela gestão antes do retorno
                          previsto da volta, além da tolerância da regra
+   Cada derivada leva o `efeito` da RÉGUA DAS PERDAS (regras.js, D-010 e
+   D-011): o retrabalho de Instalação tira os pontos e a comissão ('tira'),
+   o de outra etapa só acompanha ('acompanha'), o sem origem espera a gestão
+   ('definir'); o atraso e o retorno antecipado ficam MARCADOS como
+   ocorrência ('registrada'), sem efeito sozinhos. `vale`: a ocorrência vale
+   agora (no programa, não abonada; o atraso, só o da entregue). `conta`: ela
+   vale e tira os pontos e a comissão.
      carro, avaria, equipamentos
                          a conferência da volta da gestão (retornoConf):
                          carro sujo ou desarrumado, avaria nova, equipamentos
@@ -1247,8 +1277,8 @@ function motivoAgendadoSt(o, prazo) {
    é uma só, e zerar as três O.S. puniria quem faz três serviços na mesma
    saída) ou em todas ('todas'). A O.S. cancelada e a retirada no balcão não
    são da volta: a cancelada era a "última" e levava a perda embora (revisão
-   da F17). Sem retorno previsto digitado não há perda (decisão do dono); sem
-   chegada conferida, "sem dado". */
+   da F17). Sem retorno previsto digitado o retorno antecipado não é medido
+   (decisão do dono); sem chegada conferida, "sem dado": também não medido. */
 const TIPOS_OCORRENCIA = Object.freeze(['atraso', 'retrabalho', 'retorno_antecipado', 'carro', 'avaria', 'equipamentos', 'equipamento_faltante', 'equipamento_danificado', 'outra']);
 const TIPOS_OCORRENCIA_MANUAL = Object.freeze(['equipamento_faltante', 'equipamento_danificado', 'outra']);
 const ROTULOS_OCORRENCIA = Object.freeze({atraso:'Entrega com atraso', retrabalho:'Retrabalho', retorno_antecipado:'Retorno antecipado',
@@ -1445,12 +1475,14 @@ function voltaNoIndice(o, indice) {
 }
 /* O RETORNO ANTECIPADO da O.S.: {situacao, conta, abonado, motivo, ...,
    dias}. `dias` traz a medida de cada dia da jornada com chegada conferida;
-   o resto é o resumo: o dia que conta como perda, senão o abonado, senão o
-   da volta, senão o no horário. situacao: 'antecipado' (conta como perda),
-   'abonado', 'no horário', 'na volta' (a volta chegou antes, e a perda fica
-   na O.S. do último retorno previsto), 'sem retorno previsto' (sem perda),
-   'sem dado' (a gestão ainda não conferiu a chegada) ou 'não se aplica'
-   (retirada no balcão). */
+   o resto é o resumo: o dia antecipado (a ocorrência registrada), senão o
+   abonado, senão o da volta, senão o no horário. situacao: 'antecipado' (a
+   ocorrência registrada, D-011), 'abonado', 'no horário', 'na volta' (a
+   volta chegou antes, e a ocorrência fica na O.S. do último retorno
+   previsto), 'sem retorno previsto' (não medido), 'sem dado' (a gestão ainda
+   não conferiu a chegada: não medido) ou 'não se aplica' (retirada no
+   balcão). `conta` aqui é a MEDIDA (chegou antes e não foi abonado); o que
+   tira pontos é a régua, no status (`perdas`). */
 const PRIORIDADE_RETORNO_ST = ['antecipado', 'abonado', 'na volta', 'no horário', 'sem retorno previsto'];
 function retornoDoDiaSt(os, c, outras, r, varios, decl) {
   const id = txtSt(os.id), membros = [os];
@@ -1463,7 +1495,7 @@ function retornoDoDiaSt(os, c, outras, r, varios, decl) {
   const n = membros.length, pre = varios ? `${ddmmSt(c.dia)}: ` : '';
   const quando = c.diaChegada !== c.dia ? `${c.hora} de ${ddmmSt(c.diaChegada)}` : c.hora;
   const base = {...r, dia:c.dia, diaChegada:c.diaChegada, chegada:c.hora, osDaVolta:n, medida:n > 1 ? 'volta' : 'os'};
-  if (!ultima) return {...base, situacao:'sem retorno previsto', motivo:`${pre}chegada conferida às ${c.hora} de ${ddmmSt(c.diaChegada)}, sem retorno previsto digitado para o dia: não há perda`};
+  if (!ultima) return {...base, situacao:'sem retorno previsto', motivo:`${pre}chegada conferida às ${c.hora} de ${ddmmSt(c.diaChegada)}, sem retorno previsto digitado para o dia: não medido`};
   const prevTxt = n > 1 ? `retorno previsto da volta (${previsto}, ${n} O.S.)` : `retorno previsto (${previsto})`;
   const antes = instanteSt(c.dia, previsto) - instanteSt(c.diaChegada, c.hora);
   const ocorrenciaId = id + ':retorno_antecipado:' + c.dia;
@@ -1472,7 +1504,7 @@ function retornoDoDiaSt(os, c, outras, r, varios, decl) {
   if (antes <= 0) return {...comPrev, situacao:'no horário', motivo:`${pre}chegou às ${quando}, ${antes < 0 ? `${minTxtSt(-antes)} depois do` : 'no'} ${prevTxt}`};
   if (antes <= r.tolerancia) return {...comPrev, situacao:'no horário', motivo:`${pre}chegou às ${quando}, ${minTxtSt(antes)} antes do ${prevTxt}, dentro da tolerância de ${minTxtSt(r.tolerancia)}`};
   const como = `${pre}chegou às ${quando}, ${minTxtSt(antes)} antes do ${prevTxt}, além da tolerância de ${minTxtSt(r.tolerancia)}`;
-  if (r.modo === 'ultima' && txtSt(ultima.id) !== id) return {...comPrev, situacao:'na volta', motivo:`${pre}a volta ${como.slice(pre.length)}: a perda fica na O.S. ${txtSt(ultima.numero) || txtSt(ultima.id)}, a do último retorno previsto`};
+  if (r.modo === 'ultima' && txtSt(ultima.id) !== id) return {...comPrev, situacao:'na volta', motivo:`${pre}a volta ${como.slice(pre.length)}: a ocorrência fica na O.S. ${txtSt(ultima.numero) || txtSt(ultima.id)}, a do último retorno previsto`};
   const ab = abonoDaOcorrencia(os, ocorrenciaId, medidaAbono);
   if (ab.vigente) return {...comPrev, situacao:'abonado', abonado:true, abono:ab.vigente, ocorrenciaId, medicao:como, motivo:comAbonoSt(como, ab.vigente)};
   return {...comPrev, situacao:'antecipado', conta:true, ocorrenciaId, abonoOutraMedida:ab.outra, medicao:como, motivo:comOutraSt(como + decl, ab.outra)};
@@ -1489,7 +1521,7 @@ function retornoAntecipado(o, regra, volta) {
   if (!cs.length) {
     const semPrev = !retornosPrevistos(os).length;
     return {...r, situacao:semPrev ? 'sem retorno previsto' : 'sem dado',
-      motivo:(semPrev ? 'sem retorno previsto digitado: não há perda por retorno antecipado' : 'a chegada do carro ainda não foi conferida pela gestão') + decl};
+      motivo:(semPrev ? 'sem retorno previsto digitado: não medido' : 'a chegada do carro ainda não foi conferida pela gestão: não medido') + decl};
   }
   // As outras O.S. da volta, uma vez cada, sem a cancelada e sem a retirada; a própria entra como está (o rascunho da ficha).
   const outras = [], vistos = new Set([txtSt(os.id)]);
@@ -1526,28 +1558,41 @@ function apurarSt(os, hoje) {
   }
   return {dHoje, M, temMarca, r, canc, prazo, entrega, atraso};
 }
+/* O motivo do retrabalho diz a etapa de origem gravada (D-010: "isso tem
+   que ficar claro"): "retrabalho de instalação marcado", "retrabalho de
+   produção marcado" ou "retrabalho marcado, com origem a definir". Lê a
+   etapa como está gravada (o servidor só grava uma das quatro), sem a régua:
+   o mesmo texto com ou sem o regras.js. */
 const motivoRetrabalhoSt = os => {
   const prob = Array.from(txtSt(os.problema)).slice(0, 120).join('');
-  return `retrabalho marcado${prob ? ': ' + prob : ''}${diaSt(os.dataResolvido) ? ` (resolvido em ${ddmmSt(diaSt(os.dataResolvido))})` : ''}`;
+  const etapa = txtSt(os.etapaOrigem);
+  const qual = etapa ? `retrabalho de ${etapa.toLowerCase()} marcado` : 'retrabalho marcado, com origem a definir';
+  return `${qual}${prob ? ': ' + prob : ''}${diaSt(os.dataResolvido) ? ` (resolvido em ${ddmmSt(diaSt(os.dataResolvido))})` : ''}`;
 };
 const comAbonoSt = (motivo, ab) => ab ? `${motivo}; abonado${ab.por ? ' por ' + ab.por : ''}: ${ab.motivo}${ab.pendente ? ' (a enviar)' : ''}` : motivo;
-/* As derivadas, com a apuração e o retorno já feitos. `conta` diz se a
-   ocorrência é uma perda que vale agora pela regra (a mesma conta das
-   `perdas` do status): o abonado não conta, o atraso da aberta ainda não, e
-   sem regra (antes do programa) nada conta. */
+/* As derivadas, com a apuração e o retorno já feitos. `efeito` é o da régua
+   das perdas (efeitoSt). `vale` diz se a ocorrência vale agora: dentro do
+   programa (há regra no dia), não abonada, e o atraso só o da entregue (a
+   aberta ainda pode ser abonada ou cancelada). `conta` diz se ela vale E tira
+   os pontos e a comissão da O.S. (a mesma conta das `perdas` do status): hoje,
+   só o retrabalho de instalação (D-010); o atraso e o retorno antecipado
+   valem como ocorrência registrada, sem tirar nada sozinhos (D-011). */
 function derivadasDe(os, ap, ret, regra) {
   const id = txtSt(os.id), out = [];
-  const perdasRegra = objSt(regra) && Array.isArray(regra.perdas) ? regra.perdas : [];
   const poe = (tipo, motivo, extra, medida, idDela) => {
     const ocorrenciaId = idDela || id + ':' + tipo, abonavel = OCORRENCIAS_ABONAVEIS.includes(tipo), perda = PERDA_DA_OCORRENCIA[tipo] || '';
     const ab = abonavel ? abonoDaOcorrencia(os, ocorrenciaId, medida) : {vigente:null, outra:null};
     const x = {id:ocorrenciaId, tipo, rotulo:ROTULOS_OCORRENCIA[tipo], origem:'derivada', perda, volta:false,
       abonavel, abonado:!!ab.vigente, abono:ab.vigente, abonoOutraMedida:ab.outra, medida:medida || null, motivo:comOutraSt(comAbonoSt(motivo, ab.vigente), ab.outra), ...extra};
-    x.conta = !!perda && !x.volta && !x.abonado && perdasRegra.includes(perda) && (tipo !== 'atraso' || x.entregue === true);
+    // Antes do programa (sem regra no dia), nenhuma ocorrência tem efeito.
+    x.efeito = perda && !x.volta && objSt(regra) ? efeitoSt(tipo, os) : '';
+    x.vale = !!perda && !x.volta && !x.abonado && objSt(regra) && (tipo !== 'atraso' || x.entregue === true);
+    x.conta = x.vale && x.efeito === 'tira';
     out.push(x);
   };
   if (ap.atraso) poe('atraso', ap.atraso.motivo, {entregue:ap.atraso.entregue, dias:ap.atraso.dias}, ap.atraso.medida);
-  if (os.retrabalho) poe('retrabalho', motivoRetrabalhoSt(os), {});
+  // O retrabalho leva a etapa de origem gravada: a tela diz o efeito dela (D-010).
+  if (os.retrabalho) poe('retrabalho', motivoRetrabalhoSt(os), {etapaOrigem:txtSt(os.etapaOrigem)});
   if (!ap.canc) for (const d of ret.dias) if (d.situacao === 'antecipado' || d.situacao === 'abonado') poe('retorno_antecipado', d.medicao, {minutos:d.minutos, dia:d.dia}, d.medidaAbono, d.ocorrenciaId);
   const rc = os.tipo !== 'interno' && objSt(os.retornoConf) ? os.retornoConf : null;
   const nao = k => !!rc && (rc[k] === 'nao' || rc[k] === false);
@@ -1604,7 +1649,7 @@ function statusEntrega(o, hoje, regra, volta) {
       poe('atraso', motivoAtraso(), abonoAtraso ? 'Com atraso (abonado)' : '', !!abonoAtraso);
     } else if (prazo) poe('no_prazo', `${como}, dentro do prazo (${prazoTxtSt(prazo)})`);
     // Sem prazo combinado não há o que medir: neutro, nunca o verde do "No prazo".
-    else poe('entregue', `${como}; sem prazo combinado no PCP, não há atraso a medir`, ROTULO_SEM_PRAZO_ST);
+    else poe('entregue', `${como}; sem prazo combinado no PCP: atraso não medido`, ROTULO_SEM_PRAZO_ST);
   } else if (!canc) {
     const exec = motivoExecucaoSt(os, dHoje, parcial, prazo);
     if (ap.atraso) {
@@ -1622,9 +1667,12 @@ function statusEntrega(o, hoje, regra, volta) {
   // Sem data nenhuma, o "Agendado" diz "A agendar" (no selo e na lista).
   if (!prazo) for (const a of aplicaveis) if (a.estado === 'agendado') a.rotulo = 'A agendar';
   const p = aplicaveis[0];
-  const perdasRegra = objSt(regra) && Array.isArray(regra.perdas) ? regra.perdas : [];
-  // Atraso só é perda da O.S. entregue: a aberta ainda pode ser abonada ou cancelada. O abonado nunca é perda.
-  const perdas = aplicaveis.filter(a => !a.abonado && PERDA_DO_ESTADO[a.estado] && perdasRegra.includes(PERDA_DO_ESTADO[a.estado]) && (a.estado !== 'atraso' || !!entrega))
+  /* AS PERDAS: o que tira os pontos e a comissão da O.S., pela régua das
+     perdas (efeitoSt; D-010 e D-011: hoje só o retrabalho de instalação).
+     Sem regra no dia (antes do programa), nada. Atraso só seria perda da
+     O.S. entregue: a aberta ainda pode ser abonada ou cancelada. O abonado
+     nunca é perda. */
+  const perdas = !objSt(regra) ? [] : aplicaveis.filter(a => !a.abonado && PERDA_DO_ESTADO[a.estado] && efeitoSt(a.estado, os) === 'tira' && (a.estado !== 'atraso' || !!entrega))
     .map(a => PERDA_DO_ESTADO[a.estado]);
   return {
     estado:p.estado, rotulo:p.rotulo, motivo:p.motivo, aplicaveis,
@@ -1638,7 +1686,9 @@ function statusEntrega(o, hoje, regra, volta) {
 /* ==== FIM DO STATUS ==== */
     return {ESTADOS_ENTREGA, ROTULOS_ENTREGA, MOTIVO_CANCELAMENTO_MIN, MOTIVO_CANCELAMENTO_MAX, motivoCancelamentoInvalido, cancelamentoDe, cancelada, prazoDaEntrega, statusEntrega, TIPOS_OCORRENCIA, TIPOS_OCORRENCIA_MANUAL, ROTULOS_OCORRENCIA, OCORRENCIAS_ABONAVEIS, MOTIVO_ABONO_MIN, MOTIVO_ABONO_MAX, TOLERANCIA_RETORNO_PADRAO, motivoAbonoInvalido, toleranciaRetorno, chegadaConferida, chegadasConferidas, chegadaDoDia, pareceDiaSeguinte, abonosDe, abonoVigente, abonoDaOcorrencia, ocorrenciasManuais, voltaDoRetorno, indiceDasVoltas, voltaNoIndice, retornoAntecipado, ocorrenciasDerivadas, ocorrenciasDaOS, letrasMotivoSt};
   })(prazoCombinadoDe, () => motorDaEntrega
-    || (typeof module !== 'undefined' && module.exports && typeof require === 'function' ? require('./entrega-item.js') : null), retornosPrevistos);
+    || (typeof module !== 'undefined' && module.exports && typeof require === 'function' ? require('./entrega-item.js') : null), retornosPrevistos,
+  () => reguaDasPerdas
+    || (typeof module !== 'undefined' && module.exports && typeof require === 'function' ? require('./regras.js') : null));
   /* OS PEDIDOS DA F17 NO RASCUNHO DA O.S. (ocorrência manual, anular,
      abonar, revogar). Só o PEDIDO vai: autor e hora são carimbados pelo
      servidor, que confere tudo de novo (_shared/pcp-status.mjs,
@@ -1765,7 +1815,7 @@ function statusEntrega(o, hoje, regra, volta) {
     o.abonos = o.abonos.map((y, j) => j === i ? {...y, revogar:true} : y);
     return '';
   }
-  return {usarVeiculos,veiculoConfirmado,chaveVeiculo,uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,...STATUS_ENTREGA,novoIdF17,voltaNaLista,diaDaJornada,pedirChegada,ocorrenciasDoGrupo,pedirOcorrencia,pedirAnularOcorrencia,pedirAbono,pedirRevogarAbono};
+  return {usarVeiculos,veiculoConfirmado,chaveVeiculo,uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,usarReguaPerdas,...STATUS_ENTREGA,novoIdF17,voltaNaLista,diaDaJornada,pedirChegada,ocorrenciasDoGrupo,pedirOcorrencia,pedirAnularOcorrencia,pedirAbono,pedirRevogarAbono};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
 // Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega

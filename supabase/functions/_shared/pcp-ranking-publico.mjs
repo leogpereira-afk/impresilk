@@ -12,7 +12,7 @@ export function podeVerRankingEquipe(cracha) {
 export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porValor = false) {
   const salvas = new Map((Array.isArray(cadastro) ? cadastro : []).filter(e => e?.id).map(e => [String(e.id), e]));
   const historico = !!fonte?.fechadoEm, grupos = new Map(), vistos = new Set();
-  let entregasConfirmadas = 0, equivalentes = 0, aConferir = 0, semBase = 0;
+  let entregasConfirmadas = 0, equivalentes = 0, aConferir = 0, semBase = 0, semPontos = 0;
   for (const r of Array.isArray(fonte?.registros) ? fonte.registros : []) {
     if (!r?.id || vistos.has(String(r.id))) continue;
     vistos.add(String(r.id));
@@ -46,12 +46,17 @@ export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porVal
           partes.reduce((s, g) => s + g.cota, 0) !== 10000 || new Set(idsPartes).size !== idsPartes.length || idsPartes.length !== membros.length) { aConferir++; continue; }
     } else partes = [{ equipeId:r.equipeId, equipeNome:r.equipeNome, emblema:r.emblema, logo:r.logo, animal:r.animal, cor:r.cor, cota:10000, membros }];
     entregasConfirmadas++;
+    /* RETRABALHO DE INSTALAÇÃO (D-010, a régua das perdas): a entrega conta
+       como entrega, sem pontos: nem produção nem valor. A apuração do servidor
+       já marcou (perda); o selo de antes da régua não tem a marca. */
+    const perde = r.perda === 'retrabalho_instalacao';
+    if (perde) semPontos++;
     // A divisão pode estar conferida mesmo quando ainda falta a base da
     // parcial. Preserva a confirmação sem transformar a entrega em O.S. inteira.
-    if (!fracao) { semBase++; continue; }
-    equivalentes += fracao;
+    if (!fracao && !perde) { semBase++; continue; }
+    if (!perde) equivalentes += fracao;
     const valorValido = !r.avisoValor && Number.isFinite(r.valor) && r.valor >= 0;
-    const totalCentavos = valorValido ? Math.round(r.valor * 100) : null;
+    const totalCentavos = perde ? 0 : valorValido ? Math.round(r.valor * 100) : null;
     const valores = partes.map(g => totalCentavos == null ? null : Math.floor(totalCentavos * g.cota / 10000));
     if (totalCentavos != null) {
       const tamanho = g => Number.isInteger(g.tamanho) && g.tamanho > 0 ? g.tamanho : g.membros.length;
@@ -67,9 +72,11 @@ export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porVal
       const nome = texto(visual.nome || visual.equipeNome || g.membros.map(m => texto(m.nome, 70)).join(' + '));
       const row = grupos.get(chave) || { nome, logo:logoSeguro(salva?.logo || visual.logo), animal,
         emblema:texto(visual.emblema || '🤝', 12), cor:/^#[0-9a-f]{6}$/i.test(visual.cor) ? visual.cor : '',
-        tipo:g.equipeId ? 'equipe' : g.membros.length > 1 ? 'composicao' : 'individual', entregas:0, equivalentes:0, centavos:0, comValor:0 };
-      if (valorValido) { row.centavos += valores[indice]; row.comValor++; }
-      row.entregas++; row.equivalentes += fracao * g.cota / 10000;
+        tipo:g.equipeId ? 'equipe' : g.membros.length > 1 ? 'composicao' : 'individual', entregas:0, equivalentes:0, centavos:0, comValor:0, semPontos:0 };
+      // A entrega que perdeu os pontos tem valor conhecido: zero (não fica fora do ranking de valor como "sem valor").
+      if (perde) { row.semPontos++; row.comValor++; }
+      else if (valorValido) { row.centavos += valores[indice]; row.comValor++; }
+      row.entregas++; if (!perde) row.equivalentes += fracao * g.cota / 10000;
       grupos.set(chave, row);
     }
   }
@@ -83,11 +90,11 @@ export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porVal
     anterior = medida;
     // Allowlist explícita: nem spread da fonte, nem membros, IDs ou dinheiro.
     return { posicao, nome:r.nome, tipo:r.tipo, logo:r.logo, animal:r.animal, emblema:r.emblema, cor:r.cor,
-      entregas:r.entregas, equivalentes:r.equivalentes, faltaLideranca:porValor ? null : numero(lider-r.equivalentes) };
+      entregas:r.entregas, equivalentes:r.equivalentes, ...(r.semPontos ? {semPontos:r.semPontos} : {}), faltaLideranca:porValor ? null : numero(lider-r.equivalentes) };
   });
   return { ...(porValor ? {criterio:'valor-confirmado'} : {}), periodo:{de:texto(fonte?.periodo?.de,10),ate:texto(fonte?.periodo?.ate,10)},
     atualizadoEm:texto(fonte?.consultadoEm,40), fechado:historico,
     fechadoEm:historico ? texto(fonte.fechadoEm,40) : null,
     revisao:historico && Number.isInteger(fonte.revisao) ? fonte.revisao : null,
-    resumo:{equipes:equipes.length,entregasConfirmadas,equivalentes:numero(equivalentes),aConferir,semBase}, equipes };
+    resumo:{equipes:equipes.length,entregasConfirmadas,equivalentes:numero(equivalentes),aConferir,semBase,...(semPontos ? {semPontos} : {})}, equipes };
 }

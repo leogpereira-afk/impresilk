@@ -159,7 +159,8 @@ test('aba antiga sem o campo não encolhe a lista; revogar mantém o registro; d
   assert.equal(rev.length, 1, 'nunca apaga');assert.equal(rev[0].motivo, MOTIVO);assert.equal(rev[0].por, 'Gestor Teste');
   assert.equal(rev[0].revogadoPor, 'Outra Gestora');assert.equal(rev[0].revogadoPorConta, 'outra');assert.ok(rev[0].revogadoEm);assert.ok(!('revogar' in rev[0]));
   st = O.statusEntrega(gravada(e), '2026-10-06', REGRA);
-  assert.equal(st.rotulo, 'Com atraso');assert.deepEqual(st.perdas, ['atraso'], 'revogado, volta a contar');
+  assert.equal(st.rotulo, 'Com atraso');/* TROCADO DE PROPÓSITO (onda a3, D-011): revogado, o atraso volta a VALER como ocorrência registrada; ele não é perda. */
+  assert.deepEqual(st.perdas, [], 'o atraso não é perda');assert.equal(st.ocorrencias.find(o => o.tipo === 'atraso').vale, true, 'revogado, volta a valer');
   // Revogar de novo não troca o carimbo; abonar de novo agora grava um segundo registro.
   const em = rev[0].revogadoEm;
   await e.call({action:'upsert', os:revogar()}, B.GESTOR);
@@ -188,7 +189,8 @@ test('o atraso da O.S. ainda aberta (a remarcação pedida pelo cliente) se abon
   const st = O.statusEntrega(entregue, '2026-10-10', REGRA);
   assert.equal(st.rotulo, 'Com atraso (abonado)');assert.deepEqual(st.perdas, []);assert.equal(st.diasAtraso, 19);
   // Precedência: o abonado vem depois das perdas que valem (o retrabalho manda) e antes do "No prazo".
-  const ra = O.statusEntrega({...entregue, retrabalho:true}, '2026-10-10', REGRA);
+  // TROCADO DE PROPÓSITO (onda a3, D-010): só o retrabalho de instalação é perda; o caso usa essa origem.
+  const ra = O.statusEntrega({...entregue, retrabalho:true, etapaOrigem:'Instalação'}, '2026-10-10', REGRA);
   assert.deepEqual(ra.aplicaveis.map(a => a.estado), ['retrabalho', 'atraso']);assert.equal(ra.aplicaveis[1].abonado, true);assert.deepEqual(ra.perdas, ['retrabalho']);
 });
 

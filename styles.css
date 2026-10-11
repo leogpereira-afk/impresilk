@@ -3910,6 +3910,20 @@ img.perf-logo{object-fit:cover}
 .oc-selo.volta { background: #f1f5f9; color: #334155; }
 .oc-selo.manual { background: #fef3c7; color: #92400e; }
 .oc-selo.anulada { background: #f1f5f9; color: #64748b; }
+/* A régua das perdas (D-010 e D-011): origem a definir, sem efeito na instalação e ocorrência registrada. */
+.oc-selo.definir { background: #fef3c7; color: #92400e; }
+.oc-selo.acompanha { background: #ecfdf5; color: #166534; }
+.oc-selo.registrada { background: #eef2f7; color: #334155; }
+.oc-efeito { display: inline-block; margin-top: 2px; color: #334155; font-weight: 600; }
+.lote-oc-efeito { display: block; color: #334155; }
+.origem-ficha { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.origem-ficha .bloco { flex-basis: 100%; color: #475569; }
+.origem-ficha-valor { font-weight: 650; }
+.origem-opcoes { border: 0; padding: 0; margin: 0 0 10px; display: grid; gap: 6px; }
+.origem-opcoes legend { font-weight: 650; margin-bottom: 4px; }
+.origem-opcao { display: block; padding: 8px 10px; border: 1px solid #dfe7ee; border-radius: 10px; cursor: pointer; line-height: 1.4; min-height: 44px; }
+.origem-opcao small { display: block; color: #475569; }
+.origem-opcao:has(input:checked) { border-color: #2563eb; background: #eff6ff; }
 .oc-pend { color: #92400e !important; }
 .card-principal .card-abonar { min-height: 40px; justify-self: start; }
 .volta-oc-linha { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }

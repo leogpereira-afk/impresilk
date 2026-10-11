@@ -1366,8 +1366,10 @@ const LOTE = (() => {
         ? `<button type="button" class="lote-b" data-lote-acao="abonar" data-os="${escL(o.id)}" data-oc="${escL(oc.id)}" data-lote-k="abonar:${escL(oc.id)}">Abonar</button>`
         : oc.abonado && ab && !ab.pendente ? `<button type="button" class="lote-b" data-lote-acao="revogar-abono" data-os="${escL(o.id)}" data-ab="${escL(ab.id)}" data-lote-k="revogar:${escL(ab.id)}">Revogar abono</button>`
         : oc.origem === 'manual' ? `<button type="button" class="lote-b" data-lote-acao="anular-ocorrencia" data-os="${escL(o.id)}" data-oc="${escL(oc.id)}" data-lote-k="anular:${escL(oc.id)}">Anular</button>` : '';
-      // "perda" só quando ela conta agora (a mesma conta das perdas do status, revisão da F17).
-      return `<li class="lote-oc-item${oc.abonado ? ' abonada' : oc.conta ? ' perda' : ''}"><span><strong>${escL(oc.rotulo)}${oc.abonado ? ' (abonada)' : ''}</strong>${pend}: ${escL(oc.motivo)}</span>${botao}</li>`;
+      // "perda" só quando ela tira os pontos agora (a mesma conta das perdas do status: o retrabalho de instalação, D-010).
+      // O efeito pela régua das perdas (regras.js): a mesma frase da ficha e da aba Perdas (D-010 e D-011).
+      const efeito = oc.vale && oc.efeito && typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.textoDoEfeito === 'function' ? ` <small class="lote-oc-efeito">${escL(String(REGRAS.textoDoEfeito(oc.tipo, oc.etapaOrigem || '')).replace(/([^.!?])$/, '$1.'))}</small>` : '';
+      return `<li class="lote-oc-item${oc.abonado ? ' abonada' : oc.conta ? ' perda' : ''}"><span><strong>${escL(oc.rotulo)}${oc.abonado ? ' (abonada)' : ''}</strong>${pend}: ${escL(oc.motivo)}${efeito}</span>${botao}</li>`;
     };
     return `<ul class="lote-oc" aria-label="Ocorrências da O.S.">${xs.map(item).join('')}</ul>`;
   }
@@ -1717,7 +1719,7 @@ const LOTE = (() => {
     const fim = erro => { if (!erro) { if (typeof toast === 'function') toast(acao === 'abonar' ? 'Abono registrado.' : acao === 'revogar-abono' ? 'Abono revogado.' : acao === 'anular-ocorrencia' ? 'Ocorrência anulada.' : 'Ocorrência registrada nas O.S. da volta.', 'success'); if (telaAtiva()) render(); } return erro; };
     const rodar = extra => fim(executar({acao, os: ds.os, grupo: ds.grupo, oc: ds.oc, ab: ds.ab, ...extra}));
     if (acao === 'revogar-abono') {
-      if (!confirmar('Revogar o abono? A ocorrência volta a contar. O abono fica no histórico, marcado como revogado.')) return;
+      if (!confirmar('Revogar o abono? A ocorrência volta a valer. O abono fica no histórico, marcado como revogado.')) return;
       const erro = rodar({});
       if (erro && typeof toast === 'function') toast(erro, 'error');
       return;

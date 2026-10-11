@@ -224,19 +224,26 @@ test('operação, montagem e comercial não veem R$ nem comissão na vista; admi
   }
 });
 
-/* Trocado de propósito na revisão da onda w3 (U1; M1 da auditoria): o atraso
-   e o retrabalho não zeram mais a prevista, que fica 1% sem cortar, marcada
-   "pendente de decisão" (a regra deles está pendente, A3). */
-test('comissão prevista: 1% a partir de 01/10, sem cortar por atraso ou retrabalho (pendente de decisão); antes disso, não se aplica', () => {
+/* Trocado de propósito na revisão da onda w3 (U1; M1 da auditoria) e de novo
+   na onda a3 (D-010 e D-011 de 11/10/2026): a prevista segue a régua das
+   perdas. O atraso fica registrado e não corta (1% com a ocorrência dita); o
+   retrabalho sem origem deixa a prevista PENDENTE (não paga e não perde); o de
+   instalação zera; o de produção não corta. */
+test('comissão prevista pela régua: atraso registrado não corta; retrabalho sem origem fica pendente; o de instalação zera; antes de 01/10, não se aplica', () => {
   const t = casa(LISTA(), {erp: ERP});
   const html = secao(t.tela('STATE._entVista = "poros"'));
   const fato = n => ((html.split(`aria-label="O.S ${n}"`)[1] || '').match(/<dt>Comissão prevista<\/dt><dd>([\s\S]*?)<\/dd>/) || ['', ''])[1];
   assert.match(fato('5001'), /R\$\s?20,00/);
-  assert.match(fato('5002'), /R\$\s?10,00<\/b> <small>prevista, 1% sem cortar, regra provisória: pendente de decisão \(atraso\)/);
+  assert.match(fato('5002'), /R\$\s?10,00<\/b> <small>prevista, 1% da O\.S\. que pontua, regra provisória; atraso registrado como ocorrência, sem efeito sozinho/);
   assert.match(fato('5003'), /R\$\s?15,00/, 'o atraso abonado pontua');
-  assert.match(fato('5004'), /pendente de decisão \(retrabalho e atraso\)/);
+  assert.match(fato('5004'), /R\$\s?8,00<\/b> <small>pendente: retrabalho com origem a definir/);
   assert.match(fato('5005'), /cancelada, não pontua/);
   assert.match(fato('5006'), /a entrega ainda não foi registrada no PCP/);
+  // O retrabalho de instalação zera a prevista; o de produção não corta.
+  const comOrigem = etapa => { const l = LISTA(); l[3].etapaOrigem = etapa; const h = secao(casa(l, {erp: ERP}).tela('STATE._entVista = "poros"'));
+    return ((h.split('aria-label="O.S 5004"')[1] || '').match(/<dt>Comissão prevista<\/dt><dd>([\s\S]*?)<\/dd>/) || ['', ''])[1]; };
+  assert.match(comOrigem('Instalação'), /R\$\s?0,00<\/b> <small>prevista: Retrabalho de instalação: tira os pontos e a comissão desta O\.S\./);
+  assert.match(comOrigem('Produção'), /R\$\s?8,00<\/b> <small>prevista, 1% da O\.S\. que pontua, regra provisória; Retrabalho de produção: não tira nada da instalação; atraso registrado/);
   // Baixa do ERP ainda a lançar: sem a data da entrega, nada de valor previsto.
   const baixa = casa([os('bx', '7002', {equipe: ['Ana'], prazoCombinado: {data: '2026-10-10', fonte: 'agenda'}, finalizadaEm: '2026-10-12T18:00:00Z', finalizadoPor: 'Mubisys (auto)',
     baixaAutoERP: {em: '2026-10-12T18:00:00Z', status: 'ENTREGUE'}})], {erp: [{numero: '7002', cliente: 'Baixa fictícia', data: '2026-10-12', valor: 3000, tipo: 'externo'}]});
@@ -249,27 +256,24 @@ test('comissão prevista: 1% a partir de 01/10, sem cortar por atraso ou retraba
   assert.match(secao(set.tela('STATE._entVista = "poros"')), /<dt>Comissão prevista<\/dt><dd><small>não se aplica: entregue em 20\/09\/26, antes de 01\/10\/2026 \(fica na regra atual\)<\/small>/);
 });
 
-/* REVISÃO DA ONDA W3 (11/10/2026), U1. A aba Perdas por retrabalho diz
-   "ocorrência a decidir pela gestão" (a regra do retrabalho e do atraso está
-   pendente, A3), e o Por O.S. dizia "R$ 0,00 prevista: não pontua". A comissão
-   nova só corta com falha comprovada: a prevista é 1% sem cortar, marcada
-   "pendente de decisão" (M1 da auditoria). */
-test('revisão onda-w3-abas: U1, o Por O.S. mostra 1% sem cortar, marcado "pendente de decisão", na O.S. com atraso ou retrabalho', () => {
+/* REVISÃO DA ONDA W3 (11/10/2026), U1, trocado de propósito na onda a3
+   (D-011): o Por O.S. nunca diz "não pontua" para a ocorrência, e o retorno
+   antecipado no cartão é "ocorrência registrada, sem efeito sozinha". */
+test('revisão onda-w3-abas e onda a3: o Por O.S. não diz "não pontua" nem "a decidir" para a ocorrência; o retorno antecipado fica registrado', () => {
   const t = casa(LISTA(), {erp: ERP});
   const html = secao(t.tela('STATE._entVista = "poros"'));
   const fato = n => ((html.split(`aria-label="O.S ${n}"`)[1] || '').match(/<dt>Comissão prevista<\/dt><dd>([\s\S]*?)<\/dd>/) || ['', ''])[1];
   // Caso ruim: "R$ 0,00 prevista: não pontua (atraso)" e "não pontua (retrabalho e atraso)".
-  assert.doesNotMatch(fato('5002') + fato('5004'), /não pontua/);
-  assert.match(fato('5002'), /R\$\s?10,00<\/b> <small>prevista, 1% sem cortar, regra provisória: pendente de decisão \(atraso\)<\/small>/);
-  assert.match(fato('5004'), /R\$\s?8,00<\/b> <small>prevista, 1% sem cortar, regra provisória: pendente de decisão \(retrabalho e atraso\)<\/small>/);
-  // A cancelada continua fora (não é ocorrência a decidir), e a no prazo, como sempre.
+  assert.doesNotMatch(fato('5002') + fato('5004'), /não pontua|a decidir|pendente de decisão/);
+  // A cancelada continua fora (não é ocorrência), e a no prazo, como sempre.
   assert.match(fato('5005'), /cancelada, não pontua/);
   assert.match(fato('5001'), /R\$\s?20,00<\/b> <small>prevista, 1% da O\.S\. que pontua, regra provisória<\/small>/);
-  // O retorno antecipado no cartão: "a decidir pela gestão", não "perda".
   const lista = LISTA();
   Object.assign(lista[0], {retornoPrevisto: [{dia: '2026-10-05', hora: '16:30'}], retornoConferido: {dia: '2026-10-05', hora: '15:40', por: 'Gestão de teste', em: '2026-10-05T18:41:00Z'}});
   const card = (secao(casa(lista, {erp: ERP}).tela('STATE._entVista = "poros"')).split('aria-label="O.S 5001"')[1] || '').split('</article>')[0];
-  assert.match(card, /50 minutos antes: a decidir pela gestão/);
+  assert.match(card, /50 minutos antes: ocorrência registrada, sem efeito sozinha/);
+  // Sem retorno previsto: "não medido", nunca "no horário".
+  assert.match(secao(t.tela('STATE._entVista = "poros"')), /Sem retorno previsto · chegada não conferida \(retorno antecipado não medido\)/);
 });
 
 test('o cartão traz nº, cliente, endereço, prazo × entrega, retorno previsto × conferido e a equipe; Técnico e Tipo saem da vista', () => {
@@ -282,7 +286,8 @@ test('o cartão traz nº, cliente, endereço, prazo × entrega, retorno previsto
   assert.match(card, /Padaria Fictícia/);
   assert.match(card, /📍<\/span> Rua Inventada, 10/);
   assert.match(card, /<dt>Prazo × entrega<\/dt><dd>Prazo 05\/10 · entregue 05\/10, no prazo<\/dd>/);
-  assert.match(card, /<dt>Retorno previsto × conferido<\/dt><dd>Previsto 16:30 · conferido 15:40 \(50 minutos antes: a decidir pela gestão\); a equipe anotou 17:00<\/dd>/);
+  // TROCADO DE PROPÓSITO (onda a3, D-011): o retorno antecipado é ocorrência registrada, sem efeito sozinha.
+  assert.match(card, /<dt>Retorno previsto × conferido<\/dt><dd>Previsto 16:30 · conferido 15:40 \(50 minutos antes: ocorrência registrada, sem efeito sozinha\); a equipe anotou 17:00<\/dd>/);
   // O nome de exibição é o da régua de pessoas (o menor começo de nome que só ela tem), nunca o ID.
   assert.match(card, /<span class="poros-pessoa">Ana<\/span><span class="poros-pessoa">Beatriz<\/span>/);
   assert.match(card, /data-os-id="np"/, 'Abrir a ficha');

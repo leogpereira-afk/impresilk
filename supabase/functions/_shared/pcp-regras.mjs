@@ -18,9 +18,12 @@ import { DIVISAO } from './pcp-divisao.mjs';
                            líder, e o líder nunca fica abaixo de um ajudante
      entreEquipes          'proporcional' ao número de pessoas de cada equipe
      comissaoBp            100 = 1% (decisão do dono, 29/09: 1%, não 0,5%)
-     comissaoSobre         'os_que_pontua': só a O.S. no prazo, sem retrabalho
-                           e sem retorno antecipado
-     perdas                o que zera a O.S. (pontos e comissão)
+     comissaoSobre         'os_que_pontua': só a O.S. que pontua (a que a
+                           régua das perdas, abaixo, não tira)
+     perdas                LEGADO (29/09): a lista das ocorrências que o
+                           programa acompanha. Quem decide o que tira pontos
+                           e comissão é a RÉGUA DAS PERDAS (D-010 e D-011,
+                           fim deste bloco), não esta lista
      toleranciaRetornoMin  minutos antes do retorno previsto que não contam
      volta                 bônus e redutor sobre o valor válido da volta:
                            carroLimpoBp (carro limpo e arrumado), equipamento
@@ -155,6 +158,97 @@ function ajusteDaVolta(regra, conf) {
   const v = objR(regra) && objR(regra.volta) ? regra.volta : REGRA_EMBUTIDA.volta, c = objR(conf) ? conf : {};
   return (c.carroCerto === true ? v.carroLimpoBp : 0) - (c.equipamentoOk === false ? v.equipamentoFaltaBp : 0);
 }
+/* A RÉGUA DAS PERDAS (decisões do dono de 11/10/2026, D-010 e D-011 em
+   docs/DECISOES.md). UMA régua, num lugar só, para a ficha (checklist e
+   Status da entrega), o Por O.S., a Conferência, o ranking, a Nota, a
+   comissão e a aba Perdas por retrabalho:
+     retrabalho de Instalação   tira os pontos e a comissão da O.S., sozinho
+                                e na hora, de todas as pessoas e equipes dela
+                                (inclusive a parcela da montagem interna).
+                                Não se abona: quem discorda da origem troca a
+                                origem, com motivo ("retrabalho marcado já
+                                tira os pontos e a comissão", "mas é
+                                retrabalho de instalação");
+     retrabalho de Medição,     não tira nada da instalação: fica para
+     Arte ou Produção           acompanhamento;
+     retrabalho sem a origem    "origem a definir": não tira nada até a
+                                gestão definir; a comissão da O.S. fica
+                                pendente e o ponto de atenção pede a origem;
+     atraso e retorno           ocorrência registrada na O.S. ("como
+     antecipado                 ocorrência, tem que ser marcado"): não tira
+                                pontos nem comissão sozinha; a gestão pode
+                                julgá-la falha comprovada no demonstrativo da
+                                comissão (D-004).
+   A configuração é explícita e tem id. A apuração do servidor (perfFonte)
+   guarda o id da régua com que foi feita (regraPerdas) e o resultado em cada
+   entrega (etapaOrigem e perda): o mês fechado nunca é refeito com outra
+   régua (o selo é o selo). Régua nova = id novo em REGUAS_PERDAS, mantendo
+   as antigas para conferir os selos delas, e REGUA_PERDAS apontando para a
+   nova; os testes de tests/retrabalho-instalacao.test.cjs dizem o que mais
+   precisa mudar (a apuração do servidor hoje só mede o retrabalho). */
+const ETAPAS_ORIGEM = Object.freeze(['Medição', 'Arte', 'Produção', 'Instalação']);
+const ETAPA_INSTALACAO = 'Instalação';
+const REGUAS_PERDAS = congelar({
+  'perdas-1': {id:'perdas-1', validaDesde:'2026-10-01', retrabalhoInstalacao:true, atraso:false, retornoAntecipado:false},
+});
+const REGUA_PERDAS = REGUAS_PERDAS['perdas-1'];
+const reguaPorId = id => (typeof id === 'string' && Object.prototype.hasOwnProperty.call(REGUAS_PERDAS, id) ? REGUAS_PERDAS[id] : null);
+// A etapa de origem do retrabalho, uma das quatro; outra coisa (ou nada) é "origem a definir".
+const origemRetrabalho = v => (ETAPAS_ORIGEM.includes(v) ? v : '');
+/* O EFEITO DE UMA OCORRÊNCIA pela régua:
+     'tira'        tira os pontos e a comissão da O.S.
+     'acompanha'   retrabalho de outra etapa: não tira nada da instalação
+     'definir'     retrabalho sem a origem: pendente até a gestão definir
+     'registrada'  ocorrência marcada na O.S., sem efeito sozinha
+   e '' para o que não é da régua. `tipo`: 'retrabalho', 'atraso' ou
+   'retorno_antecipado' (o 'retornoAntecipado' da regra também vale). */
+function efeitoDaOcorrencia(tipo, etapaOrigem, regua) {
+  const r = objR(regua) ? regua : REGUA_PERDAS;
+  if (tipo === 'retrabalho') {
+    const e = origemRetrabalho(etapaOrigem);
+    if (!e) return 'definir';
+    return e === ETAPA_INSTALACAO && r.retrabalhoInstalacao === true ? 'tira' : 'acompanha';
+  }
+  if (tipo === 'atraso') return r.atraso === true ? 'tira' : 'registrada';
+  if (tipo === 'retorno_antecipado' || tipo === 'retornoAntecipado') return r.retornoAntecipado === true ? 'tira' : 'registrada';
+  return '';
+}
+/* AS FRASES DA RÉGUA, as mesmas em toda tela (ficha, Por O.S., Conferência,
+   ranking, comissão e aba Perdas). */
+const TEXTOS_PERDA = congelar({
+  retrabalhoInstalacao:'Retrabalho de instalação: tira os pontos e a comissão desta O.S.',
+  retrabalhoOutra:'não tira nada da instalação',
+  retrabalhoDefinir:'Retrabalho com origem a definir: defina a origem; até lá não tira nada e a comissão desta O.S. fica pendente',
+  ocorrencia:'Ocorrência registrada: não tira pontos nem comissão sozinha; a gestão pode julgar como falha comprovada',
+  naoSeAbona:'Retrabalho de instalação não se abona: quem discorda da origem troca a origem, com motivo',
+  semPontos:'retrabalho de instalação: sem pontos e sem comissão',
+});
+const ROTULOS_OCORRENCIA_PERDA = Object.freeze({atraso:'Atraso', retorno_antecipado:'Retorno antecipado', retornoAntecipado:'Retorno antecipado'});
+// A frase do efeito, pela régua: "Retrabalho de produção: não tira nada da instalação".
+function textoDoEfeito(tipo, etapaOrigem, regua) {
+  const ef = efeitoDaOcorrencia(tipo, etapaOrigem, regua);
+  if (tipo === 'retrabalho') {
+    if (ef === 'definir') return TEXTOS_PERDA.retrabalhoDefinir;
+    const e = origemRetrabalho(etapaOrigem);
+    if (ef === 'tira') return e === ETAPA_INSTALACAO ? TEXTOS_PERDA.retrabalhoInstalacao : `Retrabalho de ${e.toLowerCase()}: tira os pontos e a comissão desta O.S.`;
+    return `Retrabalho de ${e.toLowerCase()}: ${TEXTOS_PERDA.retrabalhoOutra}`;
+  }
+  if (ef === 'tira') return `${ROTULOS_OCORRENCIA_PERDA[tipo]}: tira os pontos e a comissão desta O.S.`;
+  return ef === 'registrada' ? TEXTOS_PERDA.ocorrencia : '';
+}
+/* A PERDA NA APURAÇÃO (perfFonte no servidor e a prévia do aparelho): a O.S.
+   com retrabalho entregue a partir do início da régua leva a etapa de origem
+   (vazia: origem a definir); a que perde leva perda:'retrabalho_instalacao'.
+   Antes do início, e sem retrabalho, nada: o registro fica igual ao de antes.
+   `dia` é o dia da entrega na apuração (AAAA-MM-DD). */
+function perdaNaApuracao(os, dia, regua) {
+  const r = objR(regua) ? regua : REGUA_PERDAS;
+  if (!objR(os) || !os.retrabalho || !dataValida(dia) || dia < r.validaDesde) return {};
+  const etapaOrigem = origemRetrabalho(os.etapaOrigem);
+  return efeitoDaOcorrencia('retrabalho', etapaOrigem, r) === 'tira' ? {etapaOrigem, perda:'retrabalho_instalacao'} : {etapaOrigem};
+}
 /* ==== FIM DAS REGRAS ==== */
-export { TOTAL_BP, PERDAS, DESEMPATES, ROTULOS, CAMPOS, REGRA_EMBUTIDA, dataValida, dataBR, normalizarRegra, completarRegra, validarRegra, regraVigente, fechamentoBloqueia, comissaoCentavos, exemplo, ajusteDaVolta };
-export const REGRAS = { TOTAL_BP, PERDAS, DESEMPATES, ROTULOS, CAMPOS, REGRA_EMBUTIDA, dataValida, dataBR, normalizarRegra, completarRegra, validarRegra, regraVigente, fechamentoBloqueia, comissaoCentavos, exemplo, ajusteDaVolta };
+export { TOTAL_BP, PERDAS, DESEMPATES, ROTULOS, CAMPOS, REGRA_EMBUTIDA, dataValida, dataBR, normalizarRegra, completarRegra, validarRegra, regraVigente, fechamentoBloqueia, comissaoCentavos, exemplo, ajusteDaVolta,
+  ETAPAS_ORIGEM, ETAPA_INSTALACAO, REGUAS_PERDAS, REGUA_PERDAS, reguaPorId, origemRetrabalho, efeitoDaOcorrencia, TEXTOS_PERDA, textoDoEfeito, perdaNaApuracao };
+export const REGRAS = { TOTAL_BP, PERDAS, DESEMPATES, ROTULOS, CAMPOS, REGRA_EMBUTIDA, dataValida, dataBR, normalizarRegra, completarRegra, validarRegra, regraVigente, fechamentoBloqueia, comissaoCentavos, exemplo, ajusteDaVolta,
+  ETAPAS_ORIGEM, ETAPA_INSTALACAO, REGUAS_PERDAS, REGUA_PERDAS, reguaPorId, origemRetrabalho, efeitoDaOcorrencia, TEXTOS_PERDA, textoDoEfeito, perdaNaApuracao };

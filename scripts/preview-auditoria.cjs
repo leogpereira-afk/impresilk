@@ -82,6 +82,16 @@ lista.push(base('FROTA-A',{numero:'TESTE-FROTA-A',servico:'ADESIVO',equipe:['900
 lista.push(base('FROTA-B',{numero:'TESTE-FROTA-B',servico:'adesivo',equipe:['900004'],veiculo:'UNO - 10 fictício',retornoPrevisto:[{dia:hoje,saida:'09:00',hora:'11:00'}]}));
 lista.push(base('PERDA1',{numero:'TESTE-PERDA',cliente:'Cliente fictício · falha comprovada',instalacao:{data:deslocar(-4),periodo:'Manhã'},prazoCombinado:{data:deslocar(-4),fonte:'agenda'},equipe:['900001','900002'],veiculo:'Carro 1',valorTotal:2500,
  finalizadaEm:deslocar(-2)+'T15:00:00',finalizadoPor:'Gestor de teste',retrabalho:true,problema:'Placa instalada fora do nível',etapaOrigem:'Instalação',causaRaiz:'Erro humano',responsavelEtapa:'Equipe fictícia',dataRetrabalho:deslocar(-1),retrabalhoPerguntado:{resposta:'sim',por:'Gestor de teste',em:deslocar(-1)+'T10:00:00-03:00'}}));
+/* A RÉGUA DAS PERDAS NA PRÉVIA (onda a3, D-010): ao lado da PERDA1 (retrabalho
+   de instalação, perda automática), um retrabalho de produção (só
+   acompanhamento) e um sem origem (origem a definir, comissão pendente). Tudo
+   fictício. #ficha=PERDA2&bloco=jornada abre a ficha; #aba=performance a aba Perdas. */
+lista.push(base('PERDA2',{numero:'TESTE-PRODUCAO',cliente:'Cliente fictício · retrabalho de produção',instalacao:{data:deslocar(-3),periodo:'Tarde'},prazoCombinado:{data:deslocar(-3),fonte:'agenda'},equipe:['900004','900007'],veiculo:'Carro 2',valorTotal:1800,
+ finalizadaEm:deslocar(-2)+'T16:00:00',finalizadoPor:'Gestor de teste',retrabalho:true,problema:'Lona veio com mancha de impressão',etapaOrigem:'Produção',causaRaiz:'Material',responsavelEtapa:'Produção fictícia',dataRetrabalho:deslocar(-1),retrabalhoPerguntado:{resposta:'sim',por:'Gestor de teste',em:deslocar(-1)+'T10:00:00-03:00'}}));
+lista.push(base('PERDA3',{numero:'TESTE-A-DEFINIR',cliente:'Cliente fictício · retrabalho sem origem',instalacao:{data:deslocar(-3),periodo:'Manhã'},prazoCombinado:{data:deslocar(-3),fonte:'agenda'},equipe:['900005','900008'],veiculo:'Carro 3',valorTotal:1400,
+ finalizadaEm:deslocar(-2)+'T11:00:00',finalizadoPor:'Gestor de teste',retrabalho:true,problema:'Letra caiu no dia seguinte',retrabalhoPerguntado:{resposta:'sim',por:'Gestor de teste',em:deslocar(-1)+'T10:00:00-03:00'}}));
+cfg.performancePCP.participacoes.push({id:'PERDA2',equipeId:'eq-leao',equipeNome:'Leão',emblema:'🦁',membros:[pvMembro('900004','Carlos Lima Prado',60),pvMembro('900007','Diego Ramos Teixeira',40)],por:'Gestor de teste',em:hoje,obs:''},
+ {id:'PERDA3',equipeId:'eq-lobo',equipeNome:'Lobo',emblema:'🐺',membros:[pvMembro('900005','Carlos Melo Dias',50),pvMembro('900008','Eduardo Farias Neto',50)],por:'Gestor de teste',em:hoje,obs:''});
 cfg.performancePCP.participacoes.push({id:'PERDA1',equipeId:'eq-aguia',equipeNome:'Águia',emblema:'🦅',membros:[pvMembro('900001','Ana Paula Souza',60),pvMembro('900002','Beatriz Costa Lima',40)],por:'Gestor de teste',em:hoje,obs:''});
 lista.push(base('RETRAB-ORIGINAL',{numero:'TESTE-ORIGINAL',cliente:'Original fictícia para custo',retrabalho:true,dataRetrabalho:hoje,finalizadaEm:hoje+'T12:00:00Z'}));
 lista.push(base('RETRAB-CORRECAO',{numero:'TESTE-CORRECAO',cliente:'Correção fictícia sem medição',osOriginal:'TESTE-ORIGINAL',valorTotal:0}));
@@ -125,9 +135,11 @@ async function previewApi(body){
    const membros=alocOk?finais.filter(f=>f.cota>0).map(f=>({chave:f.pessoaId,nome:nomeRH(f.pessoaId),percentual:f.cota/100})):(!aloc&&p?.membros) || eq.map((n,i)=>({chave:n,nome:nomeRH(n),percentual:(Math.floor(10000/eq.length)+(i<10000%eq.length?1:0))/100}));
    const confirmado=alocOk || (!aloc && !!p),fonte=alocOk?'alocacao':aloc?(aloc.conferirRH?'alocacao-conferir-rh':'alocacao-desatualizada'):p?'participacao':'sugestao';
    const quem=alocOk?{equipeId:um?um.equipeId:'',equipeNome:um?um.equipeNome:'',emblema:um?um.emblema:'🤝',por:aloc.por||'',em:aloc.em||'',obs:''}:{equipeId:p?.equipeId||'',equipeNome:p?.equipeNome||'',emblema:p?.emblema||'🤝',por:p?.por||'',em:p?.em||'',obs:p?.obs||''};
-   return {id:o.id,...(o._parcial||{}),numero:o.numero,cliente:o.cliente,dia:o.finalizadaEm.slice(0,10),valor:typeof o.valorTotal==='number'?o.valorTotal:null,origemValor:'Simulação local',membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf:o.retornoConf||null,voltou:eq.length>0,volta:[o.finalizadaEm.slice(0,10),String(o.veiculo||'').toLowerCase(),[...eq].sort().join('+')].join('|'),
+   return {id:o.id,...(o._parcial||{}),numero:o.numero,cliente:o.cliente,dia:o.finalizadaEm.slice(0,10),valor:typeof o.valorTotal==='number'?o.valorTotal:null,origemValor:'Simulação local',membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,...(typeof REGRAS!=='undefined'&&REGRAS.perdaNaApuracao?REGRAS.perdaNaApuracao(o,o.finalizadaEm.slice(0,10)):{}),retornoConf:o.retornoConf||null,voltou:eq.length>0,volta:[o.finalizadaEm.slice(0,10),String(o.veiculo||'').toLowerCase(),[...eq].sort().join('+')].join('|'),
     ...(confirmado?(d&&d.grupos?{grupos:d.grupos}:{}):PERF.sugestaoApurada(membros,aloc,aloc?DIVISAO.finais(aloc):[],cfg.performancePCP.equipes,m=>m.chave))};
-  });return {completo:true,periodo:{de:body.de,ate:body.ate},hash:'simulacao',registros,consultadoEm:new Date().toISOString(),fonte:'DADOS FICTÍCIOS — simulação local'};
+  });
+  // A régua das perdas (D-010), como o perfFonte do servidor: a apuração diz com qual régua julgou quando julgou algum retrabalho.
+  return {completo:true,periodo:{de:body.de,ate:body.ate},hash:'simulacao',...(registros.some(r=>Object.prototype.hasOwnProperty.call(r,'etapaOrigem'))?{regraPerdas:REGRAS.REGUA_PERDAS.id}:{}),registros,consultadoEm:new Date().toISOString(),fonte:'DADOS FICTÍCIOS — simulação local'};
  }
  /* PERDAS POR RETRABALHO NA PRÉVIA (onda w3, 11/10/2026). Sem #perdas, nenhuma
     revisão da comissão: tudo "a decidir pela gestão". Com #perdas=1, uma prévia

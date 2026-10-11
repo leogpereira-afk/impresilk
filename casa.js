@@ -769,7 +769,13 @@ function aplicarLancamento(os, e = {}) {
   const resposta = r && (r.resposta === 'sim' || r.resposta === 'nao') ? r.resposta : '';
   if (r && !resposta) throw new Error('A resposta do retrabalho é Sim ou Não.');
   const texto = k => String((r && r[k]) ?? '').trim();
-  if (resposta === 'sim' && CAMPOS_RETRABALHO.some(k => !texto(k))) throw new Error('Preencha os cinco campos do retrabalho.');
+  /* A ETAPA DE ORIGEM (D-010) decide dinheiro: só a gestão (admin e pcp) a
+     grava, e para ela é obrigatória e uma das quatro etapas. Quem não é da
+     gestão responde sem ela: o retrabalho fica com a origem a definir. */
+  const gestaoOrigem = typeof podeOrigemRetrabalho === 'function' ? podeOrigemRetrabalho() : ['admin', 'pcp'].includes(String((STATE.user || {}).papel || ''));
+  if (resposta === 'sim' && CAMPOS_RETRABALHO.some(k => (k !== 'etapaOrigem' || gestaoOrigem) && !texto(k))) throw new Error(gestaoOrigem ? 'Preencha os cinco campos do retrabalho.' : 'Preencha os campos do retrabalho.');
+  if (resposta === 'sim' && gestaoOrigem && typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.origemRetrabalho === 'function' && !REGRAS.origemRetrabalho(texto('etapaOrigem')))
+    throw new Error('Escolha a etapa de origem do retrabalho: Medição, Arte, Produção ou Instalação.');
   const por = e.por != null ? String(e.por) : ((STATE.user && STATE.user.nome) || '');
   const em = e.em || nowISO();
   const nova = {...os};
@@ -792,7 +798,9 @@ function aplicarLancamento(os, e = {}) {
   if (resposta) {
     if (resposta === 'sim') {
       nova.retrabalho = true;
-      for (const k of CAMPOS_RETRABALHO) nova[k] = texto(k);
+      for (const k of CAMPOS_RETRABALHO) if (k !== 'etapaOrigem' || gestaoOrigem) nova[k] = texto(k);
+      // O pedido da troca da origem já gravada (o motivo) vai junto; o servidor carimba e não o grava.
+      if (gestaoOrigem && texto('etapaOrigemMotivo')) nova.etapaOrigemMotivo = texto('etapaOrigemMotivo'); else delete nova.etapaOrigemMotivo;
     } else if (nova.retrabalho || (nova.checkout && nova.checkout.situacao === 'Retrabalho')) {
       nova.retrabalho = false;
       if (nova.checkout && nova.checkout.situacao === 'Retrabalho') nova.checkout = {...nova.checkout, situacao: ''};
@@ -813,7 +821,7 @@ function respostaRetrabalhoDe(antes, depois) {
   if (!p || typeof p !== 'object' || p === (antes && antes.retrabalhoPerguntado)) return null;
   if (p.resposta !== 'sim' && p.resposta !== 'nao') return null;
   const r = {resposta: p.resposta, em: p.em, por: p.por};
-  if (p.resposta === 'sim') for (const k of CAMPOS_RETRABALHO) r[k] = depois[k];
+  if (p.resposta === 'sim') { for (const k of CAMPOS_RETRABALHO) r[k] = depois[k]; if (depois.etapaOrigemMotivo) r.etapaOrigemMotivo = depois.etapaOrigemMotivo; }
   return r;
 }
 
@@ -3963,7 +3971,7 @@ function renderPerformanceCasa() {
   const botaoAba = (id, rotulo, selo = '') => `<button class="btn-ghost btn-sm ${abaPerf === id ? 'active' : ''}" aria-pressed="${abaPerf === id}" data-perf-aba="${id}" data-perf-rotulo="${esc(rotulo)}">${rotulo}${selo}</button>`;
   const quadroRH = () => quadroCasa('perf-rh', `🔗 Conferir nomes do PCP × fichas do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), false);
   const subtitulo = abaPerf === 'regras' ? 'Regras, divisão e comissão do programa.' : abaPerf === 'conferencia' ? 'Quem fez cada entrega e com qual percentual. As notas só valem depois da conferência.'
-    : abaPerf === 'perdas' ? 'O.S. com retrabalho, atraso ou retorno antecipado, e o que a comissão decidiu.' : 'Entregas conferidas. Equipes reconhecidas.';
+    : abaPerf === 'perdas' ? 'O.S. com retrabalho, atraso ou retorno antecipado: o que tira pontos e comissão, o que fica pendente e o que só fica registrado.' : 'Entregas conferidas. Equipes reconhecidas.';
   /* Os <details> soltos da apuração ("Como interpretar os indicadores", "Ver
      O.S., percentuais...") fechavam a cada repintura: a apuração chega do
      servidor, uma confirmação muda a nota, e o que a pessoa lia sumia. Guarda
@@ -3986,7 +3994,7 @@ function renderPerformanceCasa() {
         ${temConferencia ? botaoAba('conferencia', 'Conferência', seloAba(pendConf, pendConf === 1 ? 'entrega a conferir' : 'entregas a conferir')) : ''}
         ${typeof perfPodeEditar==='function'&&perfPodeEditar()?botaoAba('gestao', 'Gestão de equipes'):''}
         ${botaoAba('relatorio', 'Relatório')}
-        ${podePerdas ? botaoAba('perdas', 'Perdas por retrabalho', seloAba(nPerdas, 'O.S. com ocorrência', ' perf-selo-perda')) : ''}
+        ${podePerdas ? botaoAba('perdas', 'Perdas por retrabalho', seloAba(nPerdas, 'O.S. com perda ou origem a definir', ' perf-selo-perda')) : ''}
         ${podeRegras ? botaoAba('regras', 'Regras') : ''}
       </nav>
       ${abaPerf === 'gestao' ? perfGestaoEquipesHTML() : abaPerf === 'regras' ? perfRegrasHTML() : abaPerf === 'perdas' ? perdasAbaHTML(perdas) : abaPerf === 'conferencia' ? `

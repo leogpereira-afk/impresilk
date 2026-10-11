@@ -191,7 +191,11 @@ test('revisão: a baixa do ERP ainda não lançada não é julgada pela data da 
     const a = O.statusEntrega(o, hoje, R.REGRA_EMBUTIDA);
     assert.deepEqual(S.statusEntrega(o, hoje, R.REGRA_EMBUTIDA), a, 'paridade com o servidor');
     const temMarca = (o.itens || []).some(it => Array.isArray(it.entregas) && it.entregas.length);
-    if (!temMarca) assert.deepEqual(plano(C.statusEntrega(o, hoje, R.REGRA_EMBUTIDA)), plano(a), 'sem o motor (celular), o mesmo');
+    /* O celular não carrega o regras.js (a regra do programa não desce ao
+       crachá, e ele não chama o status): lá a ocorrência sai sem o `efeito` da
+       régua das perdas (onda a3, D-010 e D-011). O resto é o mesmo. */
+    const semEfeito = x => JSON.parse(JSON.stringify(x, (k, v) => k === 'efeito' ? undefined : v));
+    if (!temMarca) assert.deepEqual(semEfeito(C.statusEntrega(o, hoje, R.REGRA_EMBUTIDA)), semEfeito(a), 'sem o motor (celular), o mesmo');
     return a;
   };
   // Caso ruim: "Com atraso: entregue em 06/10 (baixa do ERP, sem prova), 4 dias depois do prazo", antes de a gestão lançar.
@@ -207,7 +211,9 @@ test('revisão: a baixa do ERP ainda não lançada não é julgada pela data da 
   // Lançada: a data digitada é a que conta.
   assert.equal(st(baixa({entregaLancada:{data:'2026-10-02', por:'Gestor Teste'}})).estado, 'no_prazo');
   const tarde = st(baixa({entregaLancada:{data:'2026-10-05', por:'Gestor Teste'}}));
-  assert.equal(tarde.estado, 'atraso');assert.equal(tarde.diasAtraso, 3);assert.deepEqual(tarde.perdas, ['atraso']);
+  // TROCADO DE PROPÓSITO (onda a3, D-011): o atraso fica registrado como ocorrência e não é perda.
+  assert.equal(tarde.estado, 'atraso');assert.equal(tarde.diasAtraso, 3);assert.deepEqual(tarde.perdas, []);
+  assert.equal(tarde.ocorrencias.find(x => x.tipo === 'atraso').efeito, 'registrada');
   // Antes do corte (decisão do dono): a baixa ENTREGUE conta no dia dela, sem prova, como antes.
   const velha = st(baixa({...erpEntregue('2026-09-11'), instalacao:{data:'2026-09-10'}, prazoCombinado:{data:'2026-09-10', fonte:'agenda'}}), '2026-09-20');
   assert.equal(velha.estado, 'atraso');assert.match(velha.motivo, /baixa do ERP, sem prova/);
@@ -408,7 +414,8 @@ test('revisão: entregue sem prazo combinado é neutro ("Entregue, sem prazo com
   // Caso ruim: "✅ No prazo" sem prazo nenhum para medir.
   const s = O.statusEntrega(o, '2026-10-01', R.REGRA_EMBUTIDA);
   assert.equal(s.estado, 'entregue');assert.equal(s.rotulo, 'Entregue, sem prazo combinado');
-  assert.match(s.motivo, /sem prazo combinado no PCP, não há atraso a medir/);
+  // TROCADO DE PROPÓSITO (onda a3, D-011): sem prazo combinado o atraso é "não medido", nunca zero.
+  assert.match(s.motivo, /sem prazo combinado no PCP: atraso não medido/);
   assert.deepEqual(s.perdas, []);assert.equal(s.entregue, true);assert.equal(s.dataEntrega, '2026-09-30');
   assert.ok(!O.statusEntrega({...o, retrabalho:true}, '2026-10-01', R.REGRA_EMBUTIDA).aplicaveis.some(a => a.estado === 'no_prazo'));
   // Na tela: o selo neutro, sem a classe verde.

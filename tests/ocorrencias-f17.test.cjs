@@ -50,10 +50,15 @@ test('retorno 1 minuto antes, com tolerância de 15, não conta; 15 também não
   // Sem regra (setembro, antes do programa), vale a da regra embutida.
   assert.equal(O.TOLERANCIA_RETORNO_PADRAO, R.REGRA_EMBUTIDA.toleranciaRetornoMin);
   assert.equal(caso('16:59', null).situacao, 'no horário');
-  // O status: a perda só quando conta; o motivo sempre.
+  /* O status: o motivo sempre. TROCADO DE PROPÓSITO (onda a3, D-011 de
+     11/10/2026): o retorno antecipado fica REGISTRADO como ocorrência (vale,
+     efeito 'registrada') e não tira nada sozinho; antes ele era perda. */
   const st = O.statusEntrega(daVolta('a', '17:00', chegada('16:00')), '2026-10-06', REGRA);
-  assert.equal(st.estado, 'retorno_antecipado');assert.deepEqual(st.perdas, ['retornoAntecipado']);
+  assert.equal(st.estado, 'retorno_antecipado');assert.deepEqual(st.perdas, []);
+  const oc = st.ocorrencias.find(o => o.tipo === 'retorno_antecipado');
+  assert.equal(oc.vale, true);assert.equal(oc.efeito, 'registrada');assert.equal(oc.conta, false);
   assert.deepEqual(O.statusEntrega(daVolta('a', '17:00', chegada('16:59')), '2026-10-06', REGRA).perdas, []);
+  assert.equal(O.statusEntrega(daVolta('a', '17:00', chegada('16:59')), '2026-10-06', REGRA).ocorrencias.some(o => o.tipo === 'retorno_antecipado'), false, 'dentro da tolerância não há ocorrência');
 });
 
 test('sem retorno previsto digitado não há perda; sem chegada conferida é "sem dado"; a hora da equipe é só declaração', () => {
@@ -83,7 +88,8 @@ test('volta com 3 O.S.: medida pelo retorno previsto da última O.S. da volta; a
   assert.match(r('d').motivo, /30 minutos antes do retorno previsto da volta \(16:00, 3 O\.S\.\)/);
   for (const id of ['a', 'b']) {
     assert.equal(r(id).situacao, 'na volta', id);assert.equal(r(id).conta, false, id);
-    assert.match(r(id).motivo, /a perda fica na O\.S\. 9d, a do último retorno previsto/, id);
+    // TROCADO DE PROPÓSITO (onda a3, D-011): o retorno antecipado é ocorrência, não perda.
+    assert.match(r(id).motivo, /a ocorrência fica na O\.S\. 9d, a do último retorno previsto/, id);
   }
   // A ocorrência existe só na última: uma perda para a volta, não três.
   const ocs = [a, b, d].map(o => O.ocorrenciasDerivadas(o, REGRA, volta).filter(x => x.tipo === 'retorno_antecipado').map(x => x.id));
@@ -112,7 +118,8 @@ test('hora local sem fuso contra recebidoEm em UTC: o mesmo resultado com o proc
   const saidas = ['America/Sao_Paulo', 'UTC', 'Asia/Tokyo', 'America/Los_Angeles'].map(TZ =>
     execFileSync(process.execPath, ['-e', prog], {env:{...process.env, TZ, NODE_OPTIONS:''}}).toString());
   for (const s of saidas) assert.equal(s, saidas[0]);
-  assert.deepEqual(JSON.parse(saidas[0]), ['antecipado', DIA, '22:30', 30, 'retorno_antecipado', ['retornoAntecipado'], 'no horário']);
+  // TROCADO DE PROPÓSITO (onda a3, D-011): o retorno antecipado medido fica registrado, sem perda (s.perdas vazio).
+  assert.deepEqual(JSON.parse(saidas[0]), ['antecipado', DIA, '22:30', 30, 'retorno_antecipado', [], 'no horário']);
 });
 
 /* ───────────── o id da ocorrência derivada ───────────── */
@@ -127,10 +134,16 @@ test('a ocorrência derivada tem o mesmo id em duas apurações (e no servidor);
   assert.deepEqual(ids(um), ['os-77:atraso', 'os-77:retrabalho', 'os-77:retorno_antecipado:' + DIA, 'os-77:carro', 'os-77:equipamentos', 'os-77:avaria']);
   assert.deepEqual(ids(dois), ids(um), 'outra apuração, outro dia: os mesmos ids');
   assert.deepEqual(ids(S.ocorrenciasDerivadas(o, REGRA, null, '2026-10-08')), ids(um), 'o servidor dá os mesmos ids');
-  // Toda perda do status aponta para uma ocorrência com a mesma perda.
+  /* Toda perda do status aponta para uma ocorrência com a mesma perda.
+     TROCADO DE PROPÓSITO (onda a3, D-010 e D-011): só o retrabalho de
+     instalação é perda; sem origem ele fica a definir, e o atraso e o retorno
+     antecipado ficam registrados (vale, sem conta). */
   const st = O.statusEntrega(o, '2026-10-08', REGRA);
-  assert.deepEqual(st.perdas, ['retrabalho', 'retornoAntecipado', 'atraso']);
-  for (const p of st.perdas) assert.ok(st.ocorrencias.some(x => x.perda === p && x.id.startsWith('os-77:')), p);
+  assert.deepEqual(st.perdas, []);
+  assert.deepEqual(st.ocorrencias.filter(x => x.vale).map(x => [x.tipo, x.efeito]), [['atraso', 'registrada'], ['retrabalho', 'definir'], ['retorno_antecipado', 'registrada']]);
+  const inst = O.statusEntrega({...o, etapaOrigem:'Instalação'}, '2026-10-08', REGRA);
+  assert.deepEqual(inst.perdas, ['retrabalho']);
+  for (const p of inst.perdas) assert.ok(inst.ocorrencias.some(x => x.perda === p && x.conta && x.id.startsWith('os-77:')), p);
   // As da volta são o bônus e o redutor da volta (F19), nunca perda da O.S.; avaria não entra na nota.
   for (const t of ['carro', 'equipamentos', 'avaria']) { const x = um.find(y => y.tipo === t); assert.equal(x.volta, true);assert.equal(x.perda, ''); }
   assert.match(um.find(y => y.tipo === 'carro').motivo, /carro sujo/);assert.doesNotMatch(um.find(y => y.tipo === 'carro').motivo, /desarrumado/);
@@ -312,10 +325,17 @@ test('o toque não desmarca o retrabalho da gestão (nem a montagem com senha); 
   // A gestão desmarca.
   r = await e.call({action:'upsert', os:{...gravada(e, '1'), retrabalho:false, problema:''}}, B.GESTOR);
   assert.equal(r.status, 200);assert.equal(gravada(e, '1').retrabalho, false);
-  // O toque MARCA: vale na hora, venha de onde vier.
+  /* O toque MARCA: vale na hora. TROCADO DE PROPÓSITO (onda a3, D-010 de
+     11/10/2026): o celular não grava a etapa de origem (ela decide dinheiro,
+     é da gestão): o retrabalho entra com a origem A DEFINIR e não tira nada
+     até a gestão definir; com a origem Instalação, aí sim é perda. */
   r = await e.call({action:'upsert', os:{id:'1', rev:gravada(e, '1').rev, retrabalho:true, problema:'Item 1: Erro de medida', causa:'Erro de medida'}}, B.TOQUE);
   assert.equal(r.status, 200);assert.equal(gravada(e, '1').retrabalho, true);
+  assert.equal(gravada(e, '1').etapaOrigem, '', 'marcado pelo celular: origem a definir');
   assert.equal(O.statusEntrega(gravada(e, '1'), '2026-10-06', REGRA).estado, 'retrabalho');
+  assert.deepEqual(O.statusEntrega({...gravada(e, '1'), finalizadaEm:DIA + 'T20:00:00Z'}, '2026-10-06', REGRA).perdas, []);
+  r = await e.call({action:'upsert', os:{...gravada(e, '1'), etapaOrigem:'Instalação'}}, B.GESTOR);
+  assert.equal(r.status, 200);assert.equal(gravada(e, '1').etapaOrigem, 'Instalação', 'a gestão define a origem');
   assert.deepEqual(O.statusEntrega({...gravada(e, '1'), finalizadaEm:DIA + 'T20:00:00Z'}, '2026-10-06', REGRA).perdas, ['retrabalho']);
 });
 
