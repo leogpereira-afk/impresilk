@@ -150,6 +150,55 @@ test('sessão: outra sessão do mesmo agente não pega; a sessão guardada no cl
   } finally { r.limpar(); }
 });
 
+// U3 da revisão final de 11/10: a vez adotada ("sessao: -") guarda a Passagem do
+// anterior, e o passar aceitava o VEZ.md do disco sem nenhuma edição.
+test('passar: a Passagem que ninguém escreveu nesta vez é recusada (U3)', { skip: !temGit }, () => {
+  const r = montar();
+  try {
+    const a = r.clone('claude');
+    const adotar = fs.readFileSync(path.join(a, 'VEZ.md'), 'utf8').replace(/^agente: ninguem$/m, 'agente: claude');
+    fs.writeFileSync(path.join(a, 'VEZ.md'), adotar);
+    g(a, 'commit', '-q', '-am', 'protocolo no ar com a vez do claude', '-m', 'Agente: claude');
+    g(a, 'push', '-q', 'origin', 'HEAD:main');
+    const pa = vez(a, 'sA', 'pegar', 'claude', 'ondas');
+    assert.equal(pa.rc, 0, pa.saida);
+    assert.match(pa.saida, /só atualizo/, 'sessão "-": adota');
+    g(a, 'push', '-q', 'origin', `${pa.sha}:main`);
+    const velha = vez(a, 'sA', 'passar');
+    assert.equal(velha.rc, 1, velha.saida);
+    assert.match(velha.saida, /ninguém a escreveu nesta vez/);
+    g(a, 'pull', '-q', '--ff-only');
+    assert.equal(vez(a, 'sA', 'passar').rc, 1, 'a pasta em dia com a main: a mesma Passagem da origin/main');
+    fs.writeFileSync(path.join(a, 'VEZ.md'), fs.readFileSync(path.join(a, 'VEZ.md'), 'utf8').replace(/^feito: .*$/m, 'feito: a onda de ensaio (fictício)'));
+    const nova = vez(a, 'sA', 'passar');
+    assert.equal(nova.rc, 0, nova.saida);
+  } finally { r.limpar(); }
+});
+
+// U4 da revisão final de 11/10: o dono passa a vez do Claude para o Codex no
+// editor do site, sem zerar a sessão; o Codex tem de conseguir pegar.
+test('pegar: o dono troca o agente pelo site e o novo agente pega (U4)', { skip: !temGit }, () => {
+  const r = montar();
+  try {
+    const a = r.clone('claude');
+    const pa = vez(a, 'sA', 'pegar', 'claude', 'frente A', '--versao', 'v165');
+    g(a, 'push', '-q', 'origin', `${pa.sha}:main`);
+    assert.match(g(r.origem, 'show', 'main:VEZ.md'), /^sessao: claude:sA \(claude\)$/m, 'a sessão leva o agente');
+    const dono = r.clone('leo');
+    fs.writeFileSync(path.join(dono, 'VEZ.md'), fs.readFileSync(path.join(dono, 'VEZ.md'), 'utf8').replace(/^agente: claude$/m, 'agente: codex'));
+    execFileSync('git', ['-C', dono, 'commit', '-q', '-am', 'Update VEZ.md'], { env: { ...process.env, ...ID, GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@github.com' } });
+    g(dono, 'push', '-q', 'origin', 'HEAD:main');
+    const b = r.clone('codex');
+    const pb = vez(b, 'sB', 'pegar', 'codex', 'tarefa dada pelo dono');
+    assert.equal(pb.rc, 0, pb.saida);
+    g(b, 'push', '-q', 'origin', `${pb.sha}:main`);
+    const vezMain = g(r.origem, 'show', 'main:VEZ.md');
+    assert.match(vezMain, /^sessao: codex:sB \(codex\)$/m);
+    assert.match(vezMain, /^versao_reservada: -$/m, 'a reserva do Claude não fica com o Codex');
+    assert.equal(vez(a, 'sA', 'pegar', 'claude', 'volta').rc, 1, 'o Claude não pega de volta sem a devolução');
+  } finally { r.limpar(); }
+});
+
 test('liberar: o dono solta a vez presa sem apagar a Passagem, e o outro agente pega (T3)', { skip: !temGit }, () => {
   const r = montar();
   try {

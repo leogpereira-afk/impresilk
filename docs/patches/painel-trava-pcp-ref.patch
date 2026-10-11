@@ -1,7 +1,7 @@
 From 719ec8867419bfab13fa70a3f8cd6493ca4ac229 Mon Sep 17 00:00:00 2001
 From: Leonardo Pereira <leonardopereira@MacBook-Pro-de-Leonardo-2.local>
 Date: Sun, 11 Oct 2026 05:38:44 -0300
-Subject: [PATCH 1/2] =?UTF-8?q?Functions:=20pcp=5Fref=20e=20rh=5Fref=20s?=
+Subject: [PATCH 1/3] =?UTF-8?q?Functions:=20pcp=5Fref=20e=20rh=5Fref=20s?=
  =?UTF-8?q?=C3=B3=20publicam=20ramo=20que=20cont=C3=A9m=20a=20main=20(M23)?=
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -118,7 +118,7 @@ index 5215c2b..10b0182 100644
 From d63c2e4884cf498822d6d220946d576417e89de2 Mon Sep 17 00:00:00 2001
 From: Leonardo Pereira <leonardopereira@MacBook-Pro-de-Leonardo-2.local>
 Date: Sun, 11 Oct 2026 06:22:31 -0300
-Subject: [PATCH 2/2] =?UTF-8?q?Functions:=20o=20servidor=20do=20PCP=20s?=
+Subject: [PATCH 2/3] =?UTF-8?q?Functions:=20o=20servidor=20do=20PCP=20s?=
  =?UTF-8?q?=C3=B3=20sobe=20do=20=C3=BAltimo=20Deploy=20verde=20de=20l?=
  =?UTF-8?q?=C3=A1,=20e=20o=20token=20fica=20no=20environment=20(M24,=20rev?=
  =?UTF-8?q?is=C3=A3o=20de=2011/10)?=
@@ -540,6 +540,79 @@ index c3f183a..ffd70e8 100644
 +    servidor.close();
 +  }
 +});
+-- 
+2.50.1 (Apple Git-155)
+
+
+From 3c317b935df9e20c769bb09df4029af0f029efcc Mon Sep 17 00:00:00 2001
+From: Leonardo Pereira <leonardopereira@MacBook-Pro-de-Leonardo-2.local>
+Date: Sun, 11 Oct 2026 06:59:42 -0300
+Subject: [PATCH 3/3] =?UTF-8?q?Functions:=20a=20ordem=20do=20passo=20do=20?=
+ =?UTF-8?q?dono=20para=20o=20token=20e=20o=20que=20o=20verde=20do=20PCP=20?=
+ =?UTF-8?q?exige=20(revis=C3=A3o=20final=20de=2011/10)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- PUB-02: o comentário do functions.yml diz a ordem do passo do dono no
+  GitHub: (1) este arquivo na main com um run verde; (2) o environment
+  publicar-functions com a política "só a main" e o segredo nele; (3) um run
+  verde lendo o segredo do environment; (4) só então apagar o segredo do
+  repositório. Na main de hoje (0ac3b46) o functions.yml e o
+  functions-sistemas.yml não declaram environment: apagar o segredo antes do
+  passo 1 deixa os dois sem token (push que mexe em supabase/functions não
+  publica, cron vermelho de hora em hora).
+- PUB-01/U1: o passo "A main do PCP e o ultimo Deploy verde?" depende de o
+  deploy.yml do PCP rodar em todo push da main, inclusive o só da vez. O
+  conserto é do lado do PCP (o paths-ignore saiu do deploy.yml no ramo
+  protocolo); aqui fica o comentário, para ninguém religar aquele filtro sem
+  saber que trava este passo.
+
+Só comentários; nenhuma lógica muda. YAML conferido com o parser do Ruby;
+tests/publicar-sistemas.test.mjs 7 de 7. Nada publicado.
+
+Agente: claude
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .github/workflows/functions.yml | 18 +++++++++++++++---
+ 1 file changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/.github/workflows/functions.yml b/.github/workflows/functions.yml
+index 5b89483..94380fc 100644
+--- a/.github/workflows/functions.yml
++++ b/.github/workflows/functions.yml
+@@ -23,9 +23,16 @@
+ # com o token como segredo do repositório, um ramo velho do Painel (sem a trava
+ # abaixo) recebia o token e publicava o que quisesse. Com o segredo só no
+ # environment e a política "só a main", run de outro ramo não recebe o token.
+-# Passo do dono (Settings > Environments): criar "publicar-functions",
+-# Deployment branches = Selected branches = main, e mover o
+-# SUPABASE_ACCESS_TOKEN para lá (apagando o do repositório).
++# Passo do dono (Settings > Environments), NESTA ORDEM (revisão final de
++# 11/10/2026, PUB-02):
++#   1. este arquivo na main, com um run verde;
++#   2. criar "publicar-functions", Deployment branches = Selected branches =
++#      main, e pôr o SUPABASE_ACCESS_TOKEN nele;
++#   3. um run verde lendo o segredo do environment;
++#   4. só então apagar o SUPABASE_ACCESS_TOKEN do repositório.
++# Apagar antes do 1 deixa sem token o functions.yml e o functions-sistemas.yml
++# que não declaram environment: o push que mexe em supabase/functions deixa de
++# publicar e o cron fica vermelho de hora em hora.
+ name: Edge Functions no Supabase
+ 
+ on:
+@@ -172,6 +179,11 @@ jobs:
+           fi
+           echo "ok: '$REF' contem a main ($(git rev-parse --short origin/main)); $(git rev-list --count origin/main..HEAD) commit(s) a frente dela."
+ 
++      # Depende de o deploy.yml do PCP rodar em TODO push da main, inclusive o
++      # so da vez (VEZ.md e docs/passagens/; sem paths-ignore desde a revisao
++      # final de 11/10/2026). Se aquele Deploy voltar a pular esses arquivos,
++      # depois de cada pegar ou passar a main fica a frente do verde e este
++      # passo recusa o disparo ate o proximo push de codigo de la.
+       - name: A main do PCP e o ultimo Deploy verde?
+         env:
+           GH_TOKEN: ${{ github.token }}
 -- 
 2.50.1 (Apple Git-155)
 

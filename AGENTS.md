@@ -36,9 +36,12 @@ aqui.
    `node scripts/vez.cjs` de novo; nunca junte o VEZ.md à mão. A sessão fica
    guardada no git-dir da pasta onde você rodou o pegar: rode o passar na
    mesma pasta (ou com `VEZ_SESSAO=<id>`, o id do campo sessao do VEZ.md).
-   Esse push (só VEZ.md e docs/passagens/) não republica o site e é a única
-   exceção ao "publicar só com o pode publicar do dono". O Claude pede no chat
-   o OK para ele: o modo automático do Claude barra push na main sem o OK.
+   Esse push (só VEZ.md e docs/passagens/) roda o Deploy, que republica o
+   mesmo site e confere a vez: espere ele ficar verde antes de disparar o
+   functions.yml do painel (o painel só publica o servidor da main que é o
+   último Deploy verde). É a única exceção ao "publicar só com o pode
+   publicar do dono". O Claude pede no chat o OK para ele: o modo automático
+   do Claude barra push na main sem o OK.
 6. Trabalhe num ramo a partir da origin/main (`git fetch origin && git
    switch -c <ramo> origin/main`). No ramo de trabalho o VEZ.md não muda: ele
    só muda pelo vez.cjs, sempre em cima da origin/main.
@@ -80,6 +83,12 @@ aqui.
   ~/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node, v24;
   o ~/apps/node20 não serve para a suíte, e o verificar.cjs avisa). Vermelho
   não sobe.
+- Antes do push na main, também `node scripts/vez.cjs conferir
+  origin/main..HEAD` (o mesmo passo da CI). Vermelho não sobe: um commit fora
+  da vez que chega na main trava o site até o dono aceitar. Ramo atrás da main
+  (ou nascido antes do protocolo): `git rebase origin/main` e depois
+  `subir-versao --proxima`; nunca `git merge` com a mensagem padrão do git,
+  que sai sem a linha `Agente:` (o mesmo vale para revert e cherry-pick).
 - Push na main É publicação: o Pages publica a tela na hora. Ordem: migration,
   depois o servidor, por último a tela.
 - O servidor do PCP sobe pelo repositório painel-impresilk: disparo manual do
@@ -137,15 +146,17 @@ aqui.
   conferidor no próprio push não o desliga). Recusa commit sem a linha, de
   quem não tem a vez, que apaga o VEZ.md, ou que troca a vez de um agente para
   outro sem a devolução (`agente: ninguem`), inclusive num merge que resolve o
-  conflito do VEZ.md ficando com a própria versão. Push só de VEZ.md e
-  docs/passagens/ não roda o Deploy, mas entra na conferência do seguinte.
+  conflito do VEZ.md ficando com a própria versão. Todo push na main roda o
+  Deploy, inclusive o só de VEZ.md e docs/passagens/.
 - Um commit recusado que já está na main continua vermelho em todo Deploy
   seguinte, e o site fica parado no último verde, até ser tratado. Sem push
   --force: o dono aceita (`node scripts/vez.cjs aceitar <sha> "<frase dele>"`
   e o push impresso, ou um commit dele no site do GitHub com a linha
-  `Aceito: <sha>`). O próximo Deploy (ou "Run workflow") passa.
+  `Aceito: <sha>`). O Deploy desse push já passa.
 - O dono: commit feito por ele no site do GitHub (editor ou botão de merge)
-  vem assinado pelo GitHub e vale como `Agente: leo` sem a linha. Um agente só
+  vem assinado pelo GitHub e vale como `Agente: leo` sem a linha. Se ele
+  passar a vez pelo editor do site trocando a linha `agente:`, a sessão do
+  agente anterior deixa de valer e o novo pega normalmente. Um agente só
   escreve `Agente: leo` nos commits de vez (liberar, aceitar, pegar pelo dono),
   quando o dono pediu no chat, com a frase dele no commit (o vez.cjs põe). Código
   com `Agente: leo` fora do site do GitHub é recusado.
@@ -155,8 +166,9 @@ aqui.
 - Commit feito antes de o VEZ.md existir (sem VEZ.md nele nem no pai) passa
   só com a linha `Agente:`.
 - Limite: a CI roda o deploy.yml do próprio push; tirar o passo dali desliga a
-  conferência. Só uma regra na main do GitHub exigindo o Deploy fecha isso
-  (pergunta ao dono, P-021 em docs/DECISOES.md).
+  conferência. Uma regra na main do GitHub exigindo o check Deploy NÃO resolve
+  do jeito que está: o Deploy só roda com o commit já na main, e a regra
+  recusaria todo push, até o da vez (P-021 em docs/DECISOES.md).
 - Quem tem a vez no painel-impresilk não mexe no PCP: o painel publica as
   functions do PCP de carona.
 - Ao terminar, ou ao parar no meio (cota acabou, sessão caiu): preencha a
@@ -169,7 +181,9 @@ aqui.
 Todos os campos, uma linha cada (detalhe em docs/, o campo aponta para lá).
 `vez.cjs passar` recusa se faltar algum, e com a vez livre (`agente: ninguem`)
 o `tests/agentes.test.cjs` também. Enquanto a vez é sua, os campos podem
-ficar em "-"; preencha-os ao parar, mesmo no meio.
+ficar em "-"; preencha-os ao parar, mesmo no meio. O passar também recusa a
+Passagem que ninguém escreveu nesta vez (igual à da origin/main ou à do
+último commit da pasta).
 
 - `no_ar`: sha da main, versão (APP_VERSAO) e versões de pcp-sync e
   pcp-mubisys, e como conferiu.

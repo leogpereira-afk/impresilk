@@ -46,6 +46,30 @@ test('pegar: a vez do mesmo agente em OUTRA sessão não passa; a mesma sessão 
   assert.equal(vez.idSessao('-'), '');
 });
 
+// U4 da revisão final de 11/10: o dono passou a vez ao Codex trocando a linha
+// "agente:" no editor do site; a sessão que ficou era a do Claude, e o pegar do
+// Codex era recusado como "OUTRA sessão". A sessão leva o agente na frente.
+test('pegar: sessão gravada por OUTRO agente não prende quem tem a vez agora', () => {
+  assert.equal(vez.idSessao('claude:a1b2c3d4 (impresilk-protocolo)'), 'a1b2c3d4');
+  assert.equal(vez.agenteDaSessao('claude:a1b2c3d4 (x)'), 'claude');
+  assert.equal(vez.agenteDaSessao('a1b2c3d4 (x)'), '', 'formato antigo, sem o agente');
+  const trocada = vez.podePegar({ agente: 'codex', sessao: 'claude:a1b2c3d4 (x)' }, 'codex', 'ffff0000');
+  assert.equal(trocada.ok, true);
+  assert.ok(!trocada.mesma, 'é vez nova: zera a Passagem e as reservas do anterior');
+  assert.equal(vez.podePegar({ agente: 'codex', sessao: 'codex:a1b2c3d4 (x)' }, 'codex', 'a1b2c3d4').mesma, true);
+  assert.equal(vez.podePegar({ agente: 'codex', sessao: 'codex:a1b2c3d4 (x)' }, 'codex', 'ffff0000').ok, false, 'outra sessão do mesmo agente continua barrada');
+});
+
+// PUB-01/U1 e PUB-04 da revisão final de 11/10. O painel só publica o servidor
+// do PCP da main que é o último Deploy verde: um Deploy que pula o push da vez
+// trava o pcp_ref depois de cada pegar ou passar. E o verde que não está na
+// história da main (história reescrita) não serve de base.
+test('deploy.yml: roda em todo push da main e só usa o verde da história como base', () => {
+  const deploy = fs.readFileSync(path.join(raiz, '.github/workflows/deploy.yml'), 'utf8');
+  assert.doesNotMatch(deploy, /^\s*paths-ignore:/m, 'o push só da vez também tem de rodar o Deploy');
+  assert.match(deploy, /merge-base --is-ancestor "\$1" HEAD/);
+});
+
 test('passar: Passagem incompleta é recusada e diz o que falta', () => {
   const r = vez.passagemCompleta({ no_ar: 'main abc v165', ramos: '-', feito: 'x' });
   assert.equal(r.ok, false);

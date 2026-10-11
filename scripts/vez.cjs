@@ -47,16 +47,24 @@ function ler(texto) {
   return campos;
 }
 const vazio = v => !v || v === '-' || /^\(.*\)$/.test(v);
-const idSessao = v => (vazio(v) ? '' : String(v).split(/\s+/)[0]);
+/* Campo sessao: "<agente>:<id> (<pasta>)". O agente vai junto porque o dono pode
+   trocar o agente no editor do site sem zerar a sessão (U4 da revisão final de
+   11/10): a sessão que ficou é do agente anterior, não de quem tem a vez agora. */
+const idSessao = v => (vazio(v) ? '' : String(v).split(/\s+/)[0].replace(/^[a-z]+:/, ''));
+const agenteDaSessao = v => { const m = /^([a-z]+):/.exec(vazio(v) ? '' : String(v)); return m ? m[1] : ''; };
 
 /* Pegar: vez livre passa; vez de outro agente não passa (o dono, sim). Vez do
    MESMO agente só passa na mesma sessão: o conflito real da auditoria de 11/10
-   foi entre duas sessões do Claude. Sessão "-" (ninguém registrou) é adotada. */
+   foi entre duas sessões do Claude. Sessão "-" (ninguém registrou) é adotada.
+   Sessão gravada por OUTRO agente (o dono passou a vez trocando o agente no site)
+   não é de ninguém nesta vez: quem tem a vez pega como vez nova. */
 function podePegar(atual, eu, sessao = '') {
   if (!AGENTES.includes(eu)) return { ok: false, motivo: `agente desconhecido: ${eu} (use ${AGENTES.join(', ')})` };
   const dono = atual.agente || 'ninguem';
   if (dono === 'ninguem') return { ok: true };
   if (dono === eu) {
+    const de = agenteDaSessao(atual.sessao);
+    if (de && de !== eu) return { ok: true };
     const dela = idSessao(atual.sessao);
     if (!dela || !sessao || dela === sessao) return { ok: true, mesma: true };
     return { ok: false, motivo: `a vez já é de ${eu}, mas de OUTRA sessão (${atual.sessao}, ramo ${atual.ramo || '?'}, desde ${atual.desde || '?'}). Uma sessão por vez, mesmo do mesmo agente. Se aquela sessão acabou, peça ao dono para liberar (node scripts/vez.cjs liberar "frase do dono").` };
@@ -169,7 +177,7 @@ function textoDaMain() {
 
 /* A sessão: VEZ_SESSAO, ou um número guardado no git-dir deste clone/worktree. */
 function minhaSessao(criar) {
-  if (process.env.VEZ_SESSAO) return process.env.VEZ_SESSAO;
+  if (process.env.VEZ_SESSAO) return idSessao(process.env.VEZ_SESSAO);
   let arq;
   try { arq = path.join(git('rev-parse', '--absolute-git-dir'), 'vez-sessao'); } catch { return ''; }
   try { const id = fs.readFileSync(arq, 'utf8').trim(); if (id) return id; } catch {}
@@ -244,7 +252,7 @@ function cli(argv) {
       // A Passagem do anterior vai para docs/passagens/ (no MESMO commit) e os
       // campos zeram: quem pega escreve a SUA Passagem, não herda a do outro.
       if (!vazio(ant.no_ar)) {
-        const autor = ant.agente && ant.agente !== 'ninguem' ? ant.agente : (ant.passou_por || 'sem-autor');
+        const autor = ant.agente && ant.agente !== 'ninguem' ? (agenteDaSessao(ant.sessao) || ant.agente) : (ant.passou_por || 'sem-autor');
         const base = `docs/passagens/${agora().slice(0, 10)}-${autor}`;
         let nome = `${base}.md`;
         for (let i = 2; existe(`origin/main:${nome}`); i++) nome = `${base}-${i}.md`;
@@ -258,7 +266,7 @@ function cli(argv) {
     }
     t = por(t, 'ramo', ramo);
     if (a2 || !r.mesma) t = por(t, 'tarefa', a2 || '-');
-    t = por(t, 'sessao', sessao ? `${sessao} (${path.basename(RAIZ)})` : '-');
+    t = por(t, 'sessao', sessao ? `${eu}:${sessao} (${path.basename(RAIZ)})` : '-');
     if ('versao' in flags || !r.mesma) t = por(t, 'versao_reservada', flags.versao || '-');
     if ('arquivos' in flags || !r.mesma) t = por(t, 'arquivos_em_uso', flags.arquivos || '-');
     arquivos['VEZ.md'] = t;
@@ -274,13 +282,20 @@ function cli(argv) {
     const main = ler(daMain);
     const quem = main.agente || 'ninguem';
     if (quem === 'ninguem') { console.error('ERRO: a vez já está livre na origin/main; não há o que passar.'); return 1; }
-    const dela = idSessao(main.sessao);
+    const de = agenteDaSessao(main.sessao);
+    const dela = de && de !== quem ? '' : idSessao(main.sessao);
     const sessao = minhaSessao(false);
     if (dela && sessao !== dela) { console.error(`ERRO: a vez é de ${quem} na sessão ${main.sessao}, e esta pasta é ${sessao || 'de nenhuma sessão'}. Rode o passar na pasta em que rodou o pegar (ou com VEZ_SESSAO=${dela} se for a mesma sessão em outra pasta). Se aquela sessão acabou, o dono libera (node scripts/vez.cjs liberar "frase do dono").`); return 1; }
     let disco;
     try { disco = ler(fs.readFileSync(ARQ, 'utf8')); } catch { console.error('ERRO: não achei o VEZ.md no disco para ler a Passagem.'); return 1; }
     const p = passagemCompleta(disco);
     if (!p.ok) { console.error(`ERRO: a Passagem do VEZ.md (disco) está incompleta. Preencha: ${p.faltam.join(', ')}.`); return 1; }
+    // U3 da revisão final de 11/10: o VEZ.md do disco sem nenhuma edição (a pasta
+    // ainda na Passagem de antes, ou a vez adotada com a Passagem do anterior)
+    // passava calado, e o próximo agente recebia o no_ar e os testes velhos.
+    const igual = [['a da origin/main', main], ['a do último commit desta pasta (HEAD)', lerVezDe('HEAD')]]
+      .find(([, v]) => v && CAMPOS_PASSAGEM.every(c => (v[c] || '') === (disco[c] || '')));
+    if (igual) { console.error(`ERRO: a Passagem do VEZ.md do disco é ${igual[0]}: ninguém a escreveu nesta vez. Escreva no VEZ.md do disco o que esta vez deixou (no_ar, ramos, feito...) e rode passar de novo.`); return 1; }
     let t = daMain;
     for (const c of CAMPOS_PASSAGEM) t = por(t, c, disco[c]);
     t = por(t, 'agente', 'ninguem');
@@ -327,7 +342,7 @@ function cli(argv) {
     try { texto = git('show', `origin/main:${rel}`) + '\n'; } catch {}
     for (const s of shas) texto += `- ${agora().slice(0, 10)} · ${s.slice(0, 12)} · "${frase}"\n`;
     imprimirPush(commitNaMain({ [rel]: texto }, [`vez: o dono aceita ${shas.length} commit(s)`, ...shas.map(s => `Aceito: ${s}`), `Dono-disse: ${frase}`, 'Agente: leo']),
-      'Esse push não roda o Deploy; o próximo Deploy (ou o "Run workflow" do Deploy) confere de novo, já com o aceite.');
+      'Esse push roda o Deploy, que confere de novo, já com o aceite.');
     return 0;
   }
   if (cmd === 'conferir') {
@@ -338,6 +353,7 @@ function cli(argv) {
     try { shas = git('rev-list', '--reverse', faixa).split('\n').filter(Boolean); }
     catch { console.error(`::error::faixa inválida: ${faixa}`); return 1; }
     const protocoloNoAr = existe(`${partes[1]}:scripts/vez.cjs`);
+    const desde = /^[0-9a-f]{40}$/i.test(partes[1]) ? partes[1].slice(0, 8) : partes[1];
     const info = shas.map(sha => {
       const msg = git('log', '-1', '--format=%B', sha);
       const pais = git('rev-list', '--parents', '-n', '1', sha).split(' ').slice(1);
@@ -370,8 +386,8 @@ function cli(argv) {
       else if (r.ok && r.semAssinatura) console.log(`::warning::${c.sha.slice(0, 8)} "Agente: leo" fora do site do GitHub (só a vez): confira com o dono`);
       if (!r.ok) { falhas++; console.error(`::error::${c.sha.slice(0, 8)} ${r.motivo}`); }
     }
-    if (falhas) { console.error(`${falhas} de ${shas.length} commit(s) fora da vez desde ${partes[1].slice(0, 8)}. Ficam vermelhos até serem tratados: AGENTS.md, seção 5.`); return 1; }
-    console.log(`ok: ${shas.length} commit(s) dentro da vez desde ${partes[1].slice(0, 8)}` + (antigos ? ` (${antigos} de antes do VEZ.md, só com a linha Agente)` : '') + '.');
+    if (falhas) { console.error(`${falhas} de ${shas.length} commit(s) fora da vez desde ${desde}. Ficam vermelhos até serem tratados: AGENTS.md, seção 5.`); return 1; }
+    console.log(`ok: ${shas.length} commit(s) dentro da vez desde ${desde}` + (antigos ? ` (${antigos} de antes do VEZ.md, só com a linha Agente)` : '') + '.');
     return 0;
   }
   console.error('uso: node scripts/vez.cjs [pegar <agente> "tarefa" [--versao vNNN] [--arquivos "..."] | passar | liberar "frase" | aceitar <sha>... "frase" | conferir <base>..<ate>]');
@@ -379,4 +395,4 @@ function cli(argv) {
 }
 
 if (require.main === module) process.exit(cli(process.argv.slice(2)));
-module.exports = { ler, podePegar, passagemCompleta, conferirCommit, idSessao, PROTEGIDOS, CAMPOS_PASSAGEM };
+module.exports = { ler, podePegar, passagemCompleta, conferirCommit, idSessao, agenteDaSessao, PROTEGIDOS, CAMPOS_PASSAGEM };

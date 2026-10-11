@@ -10,12 +10,15 @@ name: Deploy (GitHub Pages)
 # Nao precisa de 404.html: o app e multipagina (index.html + equipe.html), os
 # arquivos existem de verdade -- diferente de uma SPA.
 on:
+  # TODO push na main roda, inclusive o so da vez (pegar, passar, liberar e
+  # aceitar mexem so no VEZ.md e em docs/passagens/): republica o mesmo site e
+  # confere a vez. Ate a revisao final de 11/10/2026 havia aqui um paths-ignore
+  # desses dois: depois de cada pegar ou passar a main ficava a frente do ultimo
+  # Deploy verde, e o painel-impresilk (que so publica o servidor do PCP da main
+  # que e o ultimo Deploy verde) recusava o pcp_ref a sessao inteira e deixava o
+  # cron PENDENTE, calado. Nao volte a pular esses arquivos.
   push:
     branches: [main]
-    # Pegar ou passar a vez (so o VEZ.md e o arquivo da passagem) nao republica o site.
-    paths-ignore:
-      - 'VEZ.md'
-      - 'docs/passagens/**'
   workflow_dispatch: {}
 
 permissions:
@@ -50,10 +53,14 @@ jobs:
       # Em 02-08/10/2026 entraram 39 commits na main sem dizer de quem eram.
       #
       # BASE = o ULTIMO DEPLOY VERDE da main, nao o "before" do push. Com o
-      # before, o push que o paths-ignore pula (so VEZ.md) nunca era conferido,
-      # nem o merge que tomava a vez; e o commit recusado saia da faixa no push
-      # seguinte e ia ao ar junto com ele. Agora tudo desde o ultimo verde e
-      # conferido de novo, e o recusado continua vermelho ate o dono aceita-lo.
+      # before, o push que nao chegou a rodar nunca era conferido, nem o merge
+      # que tomava a vez; e o commit recusado saia da faixa no push seguinte e
+      # ia ao ar junto com ele. Agora tudo desde o ultimo verde e conferido de
+      # novo, e o recusado continua vermelho ate o dono aceita-lo.
+      # O verde so vale como base se estiver na historia desta main: com a
+      # historia reescrita (P-023) e o verde velho vivo em outro ramo, a faixa
+      # seria a historia inteira, vermelha para sempre. Ai vale o before, e sem
+      # ele o ultimo commit, com aviso.
       # O CONFERIDOR vem da base: mexer no vez.cjs no proprio push nao o desliga.
       # A CHAVE do GitHub: commit do dono pelo site (editor ou botao de merge) vem
       # assinado por ela e vale como "Agente: leo" sem a linha.
@@ -67,12 +74,13 @@ jobs:
             echo "::error::Nao consegui ler o ultimo Deploy verde pela API do GitHub. Sem ele nao sei o que conferir: rode de novo."
             exit 1
           fi
-          if [ -n "$verde" ] && git cat-file -e "${verde}^{commit}" 2>/dev/null; then
+          na_historia() { [ -n "$1" ] && git cat-file -e "${1}^{commit}" 2>/dev/null && git merge-base --is-ancestor "$1" HEAD; }
+          if na_historia "$verde"; then
             base="$verde"
-          elif [ -n "$ANTES" ] && git cat-file -e "${ANTES}^{commit}" 2>/dev/null; then
-            base="$ANTES"; echo "::warning::Nenhum Deploy verde na historia desta main: confiro so este push."
+          elif na_historia "$ANTES"; then
+            base="$ANTES"; echo "::warning::O ultimo Deploy verde (${verde:-nenhum}) nao esta na historia desta main (reescrita?): confiro so este push."
           else
-            base=$(git rev-parse HEAD~1); echo "::warning::Nenhum Deploy verde nem before: confiro so o ultimo commit."
+            base=$(git rev-parse HEAD~1); echo "::warning::Nem o ultimo Deploy verde nem o before estao na historia desta main: confiro so o ultimo commit."
           fi
           echo "base da conferencia: $base (ultimo Deploy verde: ${verde:-nenhum})"
           export GNUPGHOME="$RUNNER_TEMP/gnupg"
