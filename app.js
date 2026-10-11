@@ -4512,6 +4512,26 @@ function registrarRemarcacao(os, novaData) {
   }
 }
 
+/* APAGAR FOTO DE O.S. FINALIZADA (A2, 11/10/2026). A foto da O.S. finalizada
+   é a prova da entrega física, e o servidor só a apaga pela gestão do PCP
+   (admin ou pcp) com motivo, registrado no diário. A tela pergunta o motivo
+   antes de tirar a foto da ficha e recusa na hora os outros papéis: tirar da
+   ficha e depois ouvir a recusa deixaria a ficha sem a foto que continua
+   guardada. O.S. aberta segue como sempre (só confirma). */
+function motivoParaApagarFoto(os, papel, { confirmar, perguntar, avisar }) {
+  if (!(os && os.finalizadaEm)) return confirmar('Apagar esta foto? Ela sai do servidor e não volta.') ? { apagar: true, motivo: '' } : { apagar: false };
+  if (!['admin', 'pcp'].includes(String(papel || ''))) {
+    avisar('Esta O.S. está finalizada e a foto é a prova da entrega. Só a gestão do PCP apaga, com motivo.');
+    return { apagar: false };
+  }
+  const motivo = String(perguntar('A O.S. está finalizada e esta foto é a prova da entrega. Para apagar, escreva o motivo (fica no histórico da O.S.):') || '').trim();
+  if (motivo.length < 5 || motivo.length > 500) {
+    if (motivo) avisar('O motivo precisa ter de 5 a 500 caracteres. A foto não foi apagada.');
+    return { apagar: false };
+  }
+  return { apagar: true, motivo };
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    EVENTOS DO MODAL
    ══════════════════════════════════════════════════════════════════════════ */
@@ -4900,7 +4920,8 @@ function bindModalEvents(os, ro) {
       toast('Enviando foto…');
       const fileId = await STORE.pushPhoto(file, draft.id);
       if (!fileId) return;
-      if (draft[field]) STORE.delFotoSync(draft[field]);
+      // A foto trocada de O.S. finalizada fica guardada: é da O.S. que já saiu (A2).
+      if (draft[field] && !draft.finalizadaEm) STORE.delFotoSync(draft[field]);
       draft[field] = fileId;
       persistirAposFoto(draft, [field]);
     };
@@ -4925,8 +4946,10 @@ function bindModalEvents(os, ro) {
       const fid = btn.dataset.fotoRm;
       // O × fica no canto da miniatura, que agora abre a foto grande: um toque
       // torto apagava a foto da rua do servidor, sem volta. Pergunta antes.
-      if (!confirm('Apagar esta foto? Ela sai do servidor e não volta.')) return;
-      STORE.delFotoSync(fid);
+      // O.S. finalizada: só a gestão, com motivo (motivoParaApagarFoto).
+      const pedido = motivoParaApagarFoto(_modalDraft, STATE.user && STATE.user.papel, { confirmar: t => confirm(t), perguntar: t => prompt(t), avisar: t => toast(t, 'error') });
+      if (!pedido.apagar) return;
+      STORE.delFotoSync(fid, pedido.motivo);
       _modalDraft.fotosCheckinIds = (_modalDraft.fotosCheckinIds || []).filter(x => x !== fid);
       // Anotada: o envio velho do celular da equipe soma as listas e traria a foto de volta.
       _modalDraft.fotosTiradas = [...new Set([...(_modalDraft.fotosTiradas || []), fid])].slice(-100);
@@ -4951,8 +4974,9 @@ function bindModalEvents(os, ro) {
   $$('[data-foto-rm-retorno]', root).forEach(btn => {
     btn.onclick = () => {
       const fid = btn.dataset.fotoRmRetorno;
-      if (!confirm('Apagar esta foto? Ela sai do servidor e não volta.')) return;
-      STORE.delFotoSync(fid);
+      const pedido = motivoParaApagarFoto(_modalDraft, STATE.user && STATE.user.papel, { confirmar: t => confirm(t), perguntar: t => prompt(t), avisar: t => toast(t, 'error') });
+      if (!pedido.apagar) return;
+      STORE.delFotoSync(fid, pedido.motivo);
       _modalDraft.fotosRetornoIds = (_modalDraft.fotosRetornoIds || []).filter(x => x !== fid);
       _modalDraft.fotosTiradas = [...new Set([...(_modalDraft.fotosTiradas || []), fid])].slice(-100);
       saveDraft(); reRenderModalKeepOpen();

@@ -39,6 +39,7 @@ const JWT_SECRET = Deno.env.get("EQUIPE_JWT_SECRET") ?? "";
 //
 //   GENTE   -> Authorization: Bearer <cracha da equipe-auth>, com sis = "pcp"
 //   MAQUINA -> x-token, so para o backup do Hub, que nao faz login
+//              (a copia completa sai pela acao exportarBackup, so dela)
 async function lerCracha(token: string): Promise<any | null> {
   if (!JWT_SECRET || !token) return null;
   const partes = token.split(".");
@@ -218,6 +219,168 @@ async function contarRegs(colecao: string): Promise<number> {
     .from("pcp_registros").select("id", { count: "exact", head: true })
     .eq("colecao", colecao).eq("apagado", false);
   return count ?? 0;
+}
+
+// ---------------------------------------------------------------- exportacao
+/* A PORTA DE EXPORTACAO DO BACKUP (M20, M21, M29 e a linha Baixa "O.S.
+   excluida pode voltar numa restauracao feita so pelo Hub", auditoria de
+   11/10/2026). O painel-backup lia o PCP pelo `list`, que entrega so O.S.
+   vivas: ficavam fora 1.158 de 2.228 linhas (74 lapides, 1.034 do diario, 50
+   horarios de foto), as Demandas e, assim que existirem, o selo do mes, as
+   regras e a comissao aprovada. Sem a lapide, uma restauracao feita so pelo
+   arquivo do Hub deixava o importador recriar a O.S. excluida; sem o selo, o
+   mes fechado reabria.
+
+   Esta porta e SO DE LEITURA e SO DA MAQUINA (o x-token do backup): nenhum
+   cracha de pessoa passa, nem o da gestao. Entrega TODAS as linhas de
+   pcp_registros (qualquer colecao, apagada ou nao, com o `apagado` e o
+   `atualizado_em` de cada uma), a tabela pcp_demandas e a configuracao.
+
+   AS COLECOES SAEM DO BANCO, NAO DE UMA LISTA: a varredura pula de colecao em
+   colecao pelo indice (a proxima maior que a atual), entao uma colecao nova
+   entra sozinha. A lista abaixo so garante que as conhecidas aparecam na
+   contagem mesmo vazias: o Hub confere que nenhuma sumiu da porta.
+
+   CURSOR ESTAVEL: [fase, colecao, id] da ULTIMA linha entregue (fase "r" =
+   pcp_registros, "d" = pcp_demandas), nunca da colecao em que o laco parou.
+   Pagina que enche na fronteira entre colecoes retoma pela proxima sem pular
+   nem repetir (a licao do Diamond, 25/08/2026).
+
+   CONTAGEM: a primeira pagina traz a contagem por colecao de ANTES de ler, e
+   a ultima a de DEPOIS. Nada e apagado de pcp_registros (lapide, nao sumico),
+   entao o que foi exportado fica entre as duas; fora disso, ou colecao
+   faltando, o Hub marca a copia como falha. */
+const COLECOES_EXPORTACAO = ["os", "auditoria", "foto_evento", "performance_fechamentos",
+  "performance_regras", "performance_comissao", "performance_comissao_os_versoes"];
+const EXPORTACAO_PAGINA = 500; // abaixo do max_rows de 1000 do PostgREST
+const EXPORTACAO_TETO_BYTES = 4_000_000;
+
+async function proximaColecao(depois: string): Promise<string | null> {
+  let q = sb.from("pcp_registros").select("colecao").order("colecao").limit(1);
+  if (depois) q = q.gt("colecao", depois);
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  return data?.length ? String((data[0] as any).colecao) : null;
+}
+
+async function contagemExportacao() {
+  const colecoes = new Set(COLECOES_EXPORTACAO);
+  let n = 0;
+  for (let c = await proximaColecao(""); c !== null; c = await proximaColecao(c)) {
+    if (++n > 500) throw new Error("Coleções demais para exportar.");
+    colecoes.add(c);
+  }
+  const contar = async (c: string, soApagados: boolean) => {
+    let q = sb.from("pcp_registros").select("id", { count: "exact", head: true }).eq("colecao", c);
+    if (soApagados) q = q.eq("apagado", true);
+    const { count, error } = await q;
+    if (error) throw new Error(error.message);
+    if (typeof count !== "number") throw new Error("Contagem indisponível: " + c);
+    return count;
+  };
+  const pcp_registros: Record<string, { total: number; apagados: number }> = {};
+  for (const c of [...colecoes].sort()) {
+    const [total, apagados] = await Promise.all([contar(c, false), contar(c, true)]);
+    pcp_registros[c] = { total, apagados };
+  }
+  const { count, error } = await sb.from("pcp_demandas").select("id", { count: "exact", head: true });
+  if (error) throw new Error(error.message);
+  if (typeof count !== "number") throw new Error("Contagem indisponível: pcp_demandas");
+  return { pcp_registros, pcp_demandas: count };
+}
+
+// null = começo; undefined = cursor que não foi esta porta que deu.
+function lerCursorExportacao(v: unknown): { fase: string; colecao: string; id: string } | null | undefined {
+  if (v == null || v === "") return null;
+  let a: any;
+  try { a = JSON.parse(String(v)); } catch { return undefined; }
+  if (!Array.isArray(a) || a.length !== 3 || a.some((x) => typeof x !== "string")) return undefined;
+  const [fase, colecao, id] = a;
+  if (!id || id.length > 300) return undefined;
+  if (fase === "r" && colecao && colecao.length <= 100) return { fase, colecao, id };
+  if (fase === "d" && colecao === "") return { fase, colecao, id };
+  return undefined;
+}
+
+async function paginaExportacao(cursor: { fase: string; colecao: string; id: string } | null, limite: number) {
+  const registros: any[] = [], demandas: any[] = [];
+  let ultimo = cursor, bytes = 0, cheio = false, terminou = false;
+  // A primeira linha de uma página sempre entra: página nunca volta vazia no meio.
+  const cabe = (linha: unknown) => {
+    const t = JSON.stringify(linha).length;
+    if (registros.length + demandas.length > 0 && bytes + t > EXPORTACAO_TETO_BYTES) return false;
+    bytes += t;
+    return true;
+  };
+  let fase = cursor?.fase ?? "r";
+  let colecao: string | null = cursor?.fase === "r" ? cursor.colecao : null;
+  let depois = cursor?.id ?? "";
+  if (fase === "r" && colecao === null) {
+    colecao = await proximaColecao("");
+    if (colecao === null) fase = "d";
+  }
+  while (fase === "r" && !cheio) {
+    const falta = limite - registros.length;
+    let q = sb.from("pcp_registros").select("colecao, id, registro, apagado, atualizado_em")
+      .eq("colecao", colecao).order("id").limit(falta);
+    if (depois) q = q.gt("id", depois);
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    const lote = (data ?? []) as any[];
+    for (const l of lote) {
+      if (!cabe(l)) { cheio = true; break; }
+      registros.push(l);
+      ultimo = { fase: "r", colecao: String(colecao), id: String(l.id) };
+    }
+    if (cheio || registros.length >= limite) { cheio = true; break; }
+    // A coleção acabou: segue para a próxima, do começo dela.
+    const prox = await proximaColecao(String(colecao));
+    depois = "";
+    if (prox === null) fase = "d"; else colecao = prox;
+  }
+  if (fase === "d" && !cheio) {
+    const falta = limite - registros.length - demandas.length;
+    if (falta <= 0) cheio = true;
+    else {
+      let q = sb.from("pcp_demandas").select("id, registro, revision, mutation_id, atualizado_em").order("id").limit(falta);
+      if (depois) q = q.gt("id", depois);
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      const lote = (data ?? []) as any[];
+      for (const l of lote) {
+        if (!cabe(l)) { cheio = true; break; }
+        demandas.push(l);
+        ultimo = { fase: "d", colecao: "", id: String(l.id) };
+      }
+      if (!cheio && lote.length < falta) terminou = true;
+    }
+  }
+  return { registros, demandas, terminou,
+    nextCursor: terminou ? null : JSON.stringify([ultimo!.fase, ultimo!.colecao, ultimo!.id]) };
+}
+
+/* AS O.S. FINALIZADAS QUE CITAM A FOTO (A2). Procura o id em QUALQUER campo
+   do registro (check-in, retorno, item, volta do carro, conferência, layout,
+   embarque e fotosTiradas): a tela tira a foto da lista e anota em
+   fotosTiradas ANTES de o pedido de apagar chegar, e a fila pode mandar a O.S.
+   gravada antes dele. null = a varredura não terminou (foto preservada). */
+async function osFinalizadasComFoto(fileId: string): Promise<{ id: string; numero: string }[] | null> {
+  const alvo = JSON.stringify(fileId), achadas: { id: string; numero: string }[] = [];
+  let cursor = "";
+  for (let pagina = 0; pagina < 100; pagina++) {
+    let q = sb.from("pcp_registros").select("id, registro").eq("colecao", "os").eq("apagado", false)
+      .neq("registro->>finalizadaEm", "").order("id").limit(200);
+    if (cursor) q = q.gt("id", cursor);
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    for (const row of (data ?? []) as any[]) {
+      const o = row.registro;
+      if (o?.finalizadaEm && JSON.stringify(o).includes(alvo)) achadas.push({ id: String(row.id), numero: String(o.numero ?? "") });
+    }
+    if (!data?.length || data.length < 200) return achadas;
+    cursor = String((data[data.length - 1] as any).id);
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------- diario
@@ -1310,6 +1473,25 @@ Deno.serve(async (req: Request) => {
         }
         const { data, error } = await sb.storage.from(BUCKET).list("", { limit: 1 });
         out.bucket = error ? "ERR: " + error.message : "ok (" + BUCKET + ")";
+        return resp(out);
+      }
+
+      // A cópia do Hub (M20): só a máquina, só leitura. Ver paginaExportacao.
+      case "exportarBackup": {
+        if (!ehMaquina || cracha) return resp({ error: "A exportação completa é só da cópia de segurança do Hub." }, 403);
+        const cursor = lerCursorExportacao(body.cursor);
+        if (cursor === undefined) return resp({ error: "Cursor de exportação inválido. Recomece do início." }, 400);
+        const limite = Number.isInteger(body.limite) && body.limite >= 1 && body.limite <= EXPORTACAO_PAGINA ? body.limite : EXPORTACAO_PAGINA;
+        const out: Record<string, unknown> = { ok: true, formato: "pcp-exportacao-1", geradoEm: new Date().toISOString() };
+        if (!cursor) {
+          // A contagem de ANTES vem antes da primeira leitura.
+          out.contagemInicio = await contagemExportacao();
+          const { config, versao } = await getCfgComVersao();
+          out.cfg = config; out.cfgVersao = versao;
+        }
+        const pag = await paginaExportacao(cursor, limite);
+        out.registros = pag.registros; out.demandas = pag.demandas; out.nextCursor = pag.nextCursor;
+        if (pag.terminou) out.contagemFim = await contagemExportacao();
         return resp(out);
       }
 
@@ -2677,6 +2859,32 @@ Deno.serve(async (req: Request) => {
           cursor=data[data.length-1].id;
         }
         if(!concluiu)return resp({error:"Não foi possível conferir todas as referências da foto. Arquivo preservado."},409);
+        /* A PROVA DA ENTREGA (A2, auditoria de 11/10/2026). A foto citada por
+           O.S. finalizada (check-in, retorno, item, volta do carro) é o que
+           mostra a entrega física; até aqui qualquer crachá com senha a
+           apagava do bucket, sem cópia nenhuma. Agora só a gestão do PCP
+           (admin ou pcp) apaga, com motivo, e o pedido entra no diário da O.S.
+           ANTES de o arquivo sair: sem diário, a foto fica (503, a fila tenta
+           de novo). Os outros papéis, a máquina e o crachá de toque recebem
+           403 com o motivo: a fila do aparelho tira o item e diz a recusa
+           (403 não prende a fila; 422 prenderia). */
+        const finalizadas = await osFinalizadasComFoto(String(body.fileId));
+        if (finalizadas === null) return resp({error:"Não foi possível conferir todas as referências da foto. Arquivo preservado."},409);
+        if (finalizadas.length) {
+          if (!cracha || ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha.papel ?? "")))
+            return resp({error:"Foto de O.S. finalizada é a prova da entrega: só a gestão do PCP (admin ou pcp) apaga, com motivo. A foto continua guardada."},403);
+          const motivo = String(body.motivo ?? "").trim();
+          if (motivo.length < 5 || motivo.length > 500)
+            return resp({error:"Foto de O.S. finalizada: para apagar, informe o motivo (5 a 500 caracteres). A foto continua guardada."},403);
+          const autor = await autorAuditoria(), em = new Date().toISOString();
+          for (const o of finalizadas) {
+            const entrada = entradaAuditoria({ id: crypto.randomUUID(), osId: o.id, numero: o.numero, acao: "foto-apagada",
+              diff: { campos: ["foto"], antes: { fileId: String(body.fileId) }, depois: { fileId: null, motivo } },
+              autor, origem: origemAuditoria, em });
+            if (!(await gravarAuditoria(entrada)))
+              return resp({error:"Não foi possível registrar o pedido no diário da O.S. A foto continua guardada; o pedido vai de novo."},503);
+          }
+        }
         const {error} = await sb.storage.from(BUCKET).remove([body.fileId]);
         if (error) throw new Error(error.message);
         return resp({ ok: true });
@@ -2721,7 +2929,9 @@ Deno.serve(async (req: Request) => {
          e pcp) e a máquina (backup do Hub): o diário guarda valor em R$ e o
          antes e o depois de tudo. Montagem, operação e o crachá de toque
          levam 403, e nada disso passa pelo list. `osId: 'cfg'` é o diário da
-         configuração. Lido sob demanda, quando a ficha abre a seção. */
+         configuração. Lido sob demanda, quando a ficha abre a seção. O
+         backup do Hub não passa por aqui: copia o diário inteiro pela
+         exportarBackup (até 11/10/2026 não copiava nada dele). */
       case "auditoriaOS": {
         if (!ehMaquina && !["admin", "pcp"].includes(String(cracha?.papel ?? ""))) {
           return resp({ error: "Histórico de alterações restrito à gestão do PCP." }, 403);

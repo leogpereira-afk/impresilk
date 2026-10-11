@@ -2164,10 +2164,13 @@ const STORE = (() => {
   // Remove a foto local E do servidor (enfileira deletePhoto na fila de sync).
   // delFoto sozinho só apagava do IndexedDB — o blob ficava para sempre no
   // servidor e nos outros aparelhos.
-  function delFotoSync(fileId) {
+  /* `motivo` (A2, 11/10/2026): foto de O.S. finalizada é a prova da entrega e
+     o servidor só a apaga pela gestão do PCP com o motivo, que vai no pedido. */
+  function delFotoSync(fileId, motivo) {
     if (!fileId) return;
     delFoto(fileId);
-    _enqueue({ action: 'deletePhoto', fileId });
+    const m = String(motivo || '').trim();
+    _enqueue(m ? { action: 'deletePhoto', fileId, motivo: m } : { action: 'deletePhoto', fileId });
     trySync();
   }
 
