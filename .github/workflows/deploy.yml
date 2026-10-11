@@ -12,6 +12,10 @@ name: Deploy (GitHub Pages)
 on:
   push:
     branches: [main]
+    # Pegar ou passar a vez (so o VEZ.md e o arquivo da passagem) nao republica o site.
+    paths-ignore:
+      - 'VEZ.md'
+      - 'docs/passagens/**'
   workflow_dispatch: {}
 
 permissions:
@@ -28,6 +32,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Historia inteira: a conferencia da vez olha CADA commit do push.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -35,6 +42,19 @@ jobs:
 
       - name: Verificar regras, telas e sincronização
         run: npm run verificar
+
+      # Um agente por repositorio de cada vez (AGENTS.md, secao 5). Cada commit
+      # do push leva "Agente: X" e X e quem tem a vez no VEZ.md daquele commit.
+      # Em 02-08/10/2026 entraram 39 commits na main sem dizer de quem eram.
+      - name: Commits dentro da vez?
+        env:
+          ANTES: ${{ github.event.before }}
+        run: |
+          if [ -n "$ANTES" ] && git cat-file -e "${ANTES}^{commit}" 2>/dev/null; then faixa="${ANTES}..HEAD"; else faixa="HEAD~1..HEAD"; fi
+          node scripts/vez.cjs conferir "$faixa"
+
+      - name: Versao igual nos 83 lugares?
+        run: node scripts/subir-versao.cjs
 
       # POR GLOB, NAO POR LISTA. A lista nominal deixou o casa.js de fora quando
       # ele nasceu (13/09/2026): o site subiu com index.html pedindo um arquivo
