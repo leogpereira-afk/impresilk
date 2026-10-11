@@ -552,8 +552,23 @@ async function perfFonte(body:any, {estrito=true}:{estrito?:boolean}={}) {
     : {producao:60,limpeza:20,equipamentos:20};
   // A régua monetária entra no hash e na revisão. Clientes antigos mantêm
   // sua régua explícita; uma revisão antiga nunca é reinterpretada pela tela.
-  const conteudo={periodo,regra:"performance-3",...(body.notaPorValor===true?{regraNota:"nota-valor-1"}:{}),criterios,registros};
+  const conteudo={periodo,regra:"performance-3",...(body.notaPorValor===true?{regraNota:REGRA_NOTA_VALOR}:{}),criterios,registros};
   return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP."};
+}
+/* A RÉGUA DO SELO (A1, auditoria da v164, 11/10/2026). A tela fecha com a
+   nota por valor (performance.js manda notaPorValor:true na apuração e no
+   fechamento) e a marca entra no hash como regraNota. Quem recalcula para
+   conferir o selo (Aprovar e Exportar a comissão) chamava perfFonte(body), e o
+   corpo desses pedidos não traz a marca: o hash nunca batia e a resposta era
+   sempre 409 "A fonte mudou depois do fechamento". Os parâmetros do recálculo
+   saem do PRÓPRIO selo, nunca do corpo do pedido: selo com 'nota-valor-1'
+   recalcula com a nota por valor; selo sem regraNota (performance-3 antigo)
+   recalcula como sempre; régua que este servidor não conhece fica sem a marca,
+   o hash não bate e continua 409 (nunca vira aceite). Mudança real na fonte
+   segue mudando o hash. */
+const REGRA_NOTA_VALOR = "nota-valor-1";
+function perfParametrosDoSelo(selo:any, periodo:any) {
+  return {de:periodo.de, ate:periodo.ate, ...(selo?.regraNota===REGRA_NOTA_VALOR?{notaPorValor:true}:{})};
 }
 async function perfFechamentos(periodo:any) {
   const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_fechamentos").eq("apagado",false).eq("registro->>de",periodo.de).eq("registro->>ate",periodo.ate).order("id").limit(1000);
@@ -1125,7 +1140,7 @@ Deno.serve(async (req: Request) => {
           if(!ultima.apuracao?.compensacaoDe){
           const fechamentos=await perfFechamentos(periodo);
           if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"Há outra revisão operacional. Concilie o demonstrativo antes de exportar."},409);
-          const fonteAtual=await perfFonte(body);
+          const fonteAtual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo));
           if(fonteAtual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Revise antes de exportar."},409);
           }
           try{return resp({ok:true,csv:COMISSAO.csv(ultima),arquivo:"comissao-"+periodo.de+"-r"+ultima.revisao+".csv",aviso:"Exportação para conferência; não realiza pagamento. Não importar novamente sem conciliação."});}catch(e){return resp({error:(e as Error).message},422);}
@@ -1161,7 +1176,7 @@ Deno.serve(async (req: Request) => {
           if(!ultima.apuracao.compensacaoDe){
           const fechamentos=await perfFechamentos(periodo);
           if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"O fechamento operacional recebeu outra revisão. Gere e confira uma nova prévia."},409);
-          const atual=await perfFonte(body);
+          const atual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo));
           if(atual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Crie uma revisão operacional e outra prévia financeira."},409);
           }
           if(!ultima.versoesOS)return resp({error:"Prévia anterior ao controle de versões por O.S. Gere uma nova prévia."},409);
