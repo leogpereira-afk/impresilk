@@ -399,3 +399,18 @@ test('ponto de atenção: espera a primeira leitura das decisões e não pisca a
   t.run(`perdasRemoto={chave:perfChave(),revisoes:null,carregando:false,erro:'Sem conexão com o servidor. Tente de novo.',tentado:true};`);
   assert.match(texto(t.render()), /As decisões da comissão não foram consultadas agora/);
 });
+
+/* O "conferir no RH" do Conferir abria o quadro PCP × RH procurando-o na
+   página; o quadro mudou para a aba Conferência, e do Relatório (painéis) o
+   clique não fazia nada. Agora a aba troca antes de abrir o quadro. */
+test('o atalho para o quadro PCP × RH abre a aba Conferência quando o quadro não está na tela', () => {
+  const t = tela({registros:[registro('C1')]});
+  const quadro = {open:false, rolou:false, scrollIntoView() { this.rolou = true; }};
+  let pintou = false;
+  t.ctx.renderPerformanceCasa = () => { pintou = true; };
+  t.ctx.document.querySelector = sel => sel === '[data-quadro="perf-rh"]' && pintou ? quadro : null;
+  t.run('STATE._perfAba="relatorio"; perfIrParaQuadroRH()');
+  assert.equal(t.run('STATE._perfAba'), 'conferencia');
+  assert.equal(quadro.open, true);
+  assert.equal(quadro.rolou, true);
+});

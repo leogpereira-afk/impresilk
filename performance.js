@@ -1187,8 +1187,7 @@ async function perfEditarParticipacao(id) {
   const aoIr = destino => {
     d.close();
     if (destino === 'ficha') { const o = STORE.getOS(id); if (o && typeof openModal === 'function') openModal(o, 'agenda'); return; }
-    const q = document.querySelector('[data-quadro="perf-rh"]');
-    if (q) { q.open = true; q.scrollIntoView({behavior:'smooth', block:'start'}); }
+    perfIrParaQuadroRH();
   };
   ALOCUI.montar(box, chave, {aoMudar:conferirBotao, aoIr});
   d.addEventListener('close', () => { if (!enviando) ALOCUI.esquecer(chave); }, {once:true});
@@ -1928,6 +1927,14 @@ function perfIrParaConferencia({situacao='',pessoa='',grupo='',composicao='',ape
   STATE._perfPessoa=pessoa;STATE._perfGrupo=grupo;STATE._perfComposicao=composicao;STATE._perfApenasComValor=!!apenasComValor;
   STATE._perfSituacao=situacao;STATE._perfBusca='';STATE._perfRolarConferencia=true;
   renderPerformanceCasa();
+}
+/* O "conferir no RH" do Conferir abre o quadro PCP × RH, que agora mora na
+   aba Conferência: aberto de outra aba (o Relatório, pelos painéis), a aba
+   troca antes, em vez de o clique não fazer nada. */
+function perfIrParaQuadroRH() {
+  let q=document.querySelector('[data-quadro="perf-rh"]');
+  if(!q&&typeof renderPerformanceCasa==='function'){STATE._perfAba='conferencia';renderPerformanceCasa();q=document.querySelector('[data-quadro="perf-rh"]');}
+  if(q){q.open=true;if(typeof q.scrollIntoView==='function')q.scrollIntoView({behavior:'smooth',block:'start'});}
 }
 function performanceEquipesHTML() {
   const c=perfConfig(), f=periodoOuMes('_fPerf');
