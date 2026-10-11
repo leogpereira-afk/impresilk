@@ -3,7 +3,7 @@
 Quem pega a vez lê isto antes de juntar qualquer ramo. Se a memória de um
 agente disser "retomar a junção F19 a F22" (ou outra coisa), vale o que está
 aqui. Apagar ramo, tag ou worktree só com o aval do dono (P-022 em
-docs/DECISOES.md). Contagens contra a main 8aecc12 (v164), medidas em
+docs/DECISOES.md). Contagens contra a main 8aecc12 (v164; em 11/10 a main passou a 8e959a0, um commit a mais, o A1), medidas em
 11/10/2026 com `git rev-list --left-right --count 8aecc12...<ramo>`.
 
 ## Superados: NÃO JUNTAR
@@ -52,5 +52,5 @@ do f22t, o semEquipe.valorBruto e o range() do f22s.
 
 | ramo | commit | à frente / atrás | o que é |
 |---|---|---|---|
-| a1-comissao | 8e959a0 | 1 / 0 | A1: aprovar e exportar a comissão com a régua do selo (só servidor) |
-| protocolo | sobre a1-comissao | A1 + protocolo | AGENTS.md, VEZ.md, DECISOES.md, RAMOS.md, vez.cjs, subir-versao.cjs, testes e passos de CI |
+| a1-comissao | 8e959a0 | 1 / 0 | A1: aprovar e exportar a comissão com a régua do selo (só servidor). JÁ NA MAIN desde 11/10/2026 (pcp-sync v131) |
+| protocolo | sobre a1-comissao | à frente da main 8e959a0, 0 atrás | AGENTS.md, VEZ.md, DECISOES.md, RAMOS.md, vez.cjs, subir-versao.cjs, testes e passos de CI |
