@@ -1901,12 +1901,52 @@ function perfCompartilharRanking() {
     catch{d.querySelector('#perf-ranking-link').select();d.querySelector('#perf-share-status').textContent='Selecione e copie o link acima.';}
   };
 }
+/* AS ENTREGAS DO PERÍODO, uma régua só para o ranking, a Conferência, o selo
+   da aba e a aba de Perdas (perdas.js): as mesmas que o fechamento sela. */
+function perfRegsDoPeriodo() {
+  const c=perfConfig(), f=periodoOuMes('_fPerf');
+  return perfUnirPessoas(perfLista().filter(o=>OPERACAO.emIntervalo(diaEntrega(o),f.de,f.ate)).map(o=>perfRegistro(o,c)));
+}
+/* A CONFERÊNCIA EM DESTAQUE (pedido do dono, 11/10/2026: "a parte de
+   conferência de notas, ela tem que ser bem destacada"). Ela morava no fim da
+   aba Rankings; agora tem aba própria, com o número no selo, e os Rankings
+   abrem com uma faixa quando há o que conferir. O número é o mesmo do filtro
+   "A conferir" e o mesmo que trava o fechamento (perfFechamentoBloqueio). */
+function perfConferenciaPendentes() {
+  if(perfConsultaServidor()&&!perfFonteAtual())return 0;
+  return perfRegsDoPeriodo().filter(r=>!r.confirmado).length;
+}
+function perfFaixaConferenciaHTML(n) {
+  if(!n)return '';
+  return `<section class="perf-faixa-conferir" role="status" aria-label="Entregas a conferir"><p><span aria-hidden="true">⚠</span> <strong>${n} ${n===1?'entrega a conferir':'entregas a conferir'}:</strong> as notas só valem depois da conferência.</p><button type="button" class="btn-primary btn-sm" data-perf-filtrar="pendente">${perfPodeEditar()?'Conferir agora':'Ver na Conferência'}</button></section>`;
+}
+/* Os atalhos dos Rankings ("Conferir as N", "Informar participantes", "Ver
+   entregas", "Conferir esses vínculos") abriam a lista no fim da mesma aba.
+   Agora abrem a aba Conferência já filtrada, e a lista vem à vista. */
+function perfIrParaConferencia({situacao='',pessoa='',grupo='',composicao='',apenasComValor=false}={}) {
+  STATE._perfAba='conferencia';
+  STATE._perfPessoa=pessoa;STATE._perfGrupo=grupo;STATE._perfComposicao=composicao;STATE._perfApenasComValor=!!apenasComValor;
+  STATE._perfSituacao=situacao;STATE._perfBusca='';STATE._perfRolarConferencia=true;
+  renderPerformanceCasa();
+}
 function performanceEquipesHTML() {
   const c=perfConfig(), f=periodoOuMes('_fPerf');
   if(perfConsultaServidor()&&!perfFonteAtual())return `<section class="perf-workspace">${perfPeriodoCompactoHTML(f)}<p role="status">${perfRemoto.erro?'Não foi possível consultar a apuração. Nenhuma falta de cadastro foi inferida.':'Consultando entregas e equipes…'}</p>${perfAvisosHTML(true)}</section>`;
-  const lista=perfLista().filter(o=>OPERACAO.emIntervalo(diaEntrega(o),f.de,f.ate));
-  const regs=perfUnirPessoas(lista.map(o=>perfRegistro(o,c)));
-  const modo=['pessoas','composicoes'].includes(STATE._perfModo)?STATE._perfModo:'equipes', pesquisa=STATE._perfBusca || '';
+  const regs=perfRegsDoPeriodo();
+  const modo=['pessoas','composicoes'].includes(STATE._perfModo)?STATE._perfModo:'equipes';
+  const vista=v=>`<button type="button" class="btn-ghost ${modo===v?'active':''}" aria-pressed="${modo===v}" data-perf-modo="${v}">${v==='pessoas'?'👤 Pessoas':v==='composicoes'?'🧩 Composições':'🤝 Equipes'}</button>`;
+  return `<section class="perf-workspace"><div class="perf-controls">${perfPeriodoCompactoHTML(f)}
+    <div class="perf-toolbar"><span class="perf-toolbar-rot" id="perf-vista-rot">Ranking de</span><div class="casa-vista" role="group" aria-labelledby="perf-vista-rot">${vista('equipes')}${vista('composicoes')}${vista('pessoas')}</div><details class="perf-pdf-principal"><summary>Exportar</summary><button type="button" class="btn-ghost btn-sm" id="perf-pdf-ranking">📄 PDF do ranking</button><button type="button" class="btn-ghost btn-sm" id="perf-pdf">PDF completo</button></details></div></div>
+    ${modo==='pessoas' ? perfRankingPessoasHTML(regs, c) : perfRankingEquipesHTML(regs, c, modo)}
+    <details class="perf-method"><summary>Jornada e cobertura</summary>${perfJornadaHTML(regs,c)}</details>
+    ${typeof operacaoPrioridadesHTML==='function'?operacaoPrioridadesHTML():''}
+    <details class="perf-method"><summary>Como interpretar os indicadores</summary><p>Entregas conta as O.S. em que a pessoa participou; não some essa coluna entre pessoas. O.S. equivalentes considera os percentuais e a parcela do valor líquido entregue. As parciais somam no máximo uma O.S.; sem valor dos itens, a parcela fica a conferir. Divisões sugeridas ainda não foram confirmadas. Valores rateados não são faturamento pessoal nem bônus. Qualidade, complexidade e retrabalho precisam de revisão. ${esc(perfFonteTexto())}</p></details>
+    ${perfCoberturaHTML(regs, f)}</section>`;
+}
+function performanceConferenciaHTML() {
+  const c=perfConfig(), f=periodoOuMes('_fPerf');
+  if(perfConsultaServidor()&&!perfFonteAtual())return `<section class="perf-workspace perf-conferencia">${perfPeriodoCompactoHTML(f)}<p role="status">${perfRemoto.erro?'Não foi possível consultar a apuração. Nenhuma falta de cadastro foi inferida.':'Consultando entregas e equipes…'}</p>${perfAvisosHTML(true)}</section>`;
+  const regs=perfRegsDoPeriodo(), pesquisa=STATE._perfBusca || '';
   const podeConferir=perfPodeEditar()&&!perfFonteAtual()?.fechadoEm, verValor=perfPodeEditar();
   /* Ordem fixa (entrega mais recente primeiro, depois o número): a lista vinha
      na ordem do banco (id sorteado) ou do cache, e cada confirmação a
@@ -1922,14 +1962,10 @@ function performanceEquipesHTML() {
     if(!v.equipeNome)return '';
     return `<strong>${esc(v.emblema||'🤝')} ${esc(v.equipeNome)}</strong>${v.sugerida?' <span class="perf-sugerida">sugerida</span>':''}<br>`;
   };
-  const vista=v=>`<button type="button" class="btn-ghost ${modo===v?'active':''}" aria-pressed="${modo===v}" data-perf-modo="${v}">${v==='pessoas'?'👤 Pessoas':v==='composicoes'?'🧩 Composições':'🤝 Equipes'}</button>`;
-  return `<section class="perf-workspace"><div class="perf-controls">${perfPeriodoCompactoHTML(f)}
-    <div class="perf-toolbar"><span class="perf-toolbar-rot" id="perf-vista-rot">Ranking de</span><div class="casa-vista" role="group" aria-labelledby="perf-vista-rot">${vista('equipes')}${vista('composicoes')}${vista('pessoas')}</div><details class="perf-pdf-principal"><summary>Exportar</summary><button type="button" class="btn-ghost btn-sm" id="perf-pdf-ranking">📄 PDF do ranking</button><button type="button" class="btn-ghost btn-sm" id="perf-pdf">PDF completo</button></details></div></div>
-    ${modo==='pessoas' ? perfRankingPessoasHTML(regs, c) : perfRankingEquipesHTML(regs, c, modo)}
-    <details class="perf-method"><summary>Jornada e cobertura</summary>${perfJornadaHTML(regs,c)}</details>
-    ${typeof operacaoPrioridadesHTML==='function'?operacaoPrioridadesHTML():''}
-    <details class="perf-method"><summary>Como interpretar os indicadores</summary><p>Entregas conta as O.S. em que a pessoa participou; não some essa coluna entre pessoas. O.S. equivalentes considera os percentuais e a parcela do valor líquido entregue. As parciais somam no máximo uma O.S.; sem valor dos itens, a parcela fica a conferir. Divisões sugeridas ainda não foram confirmadas. Valores rateados não são faturamento pessoal nem bônus. Qualidade, complexidade e retrabalho precisam de revisão. ${esc(perfFonteTexto())}</p></details>
-    ${perfCoberturaHTML(regs, f)}
+  // O que já existia (Conferir, filtros, PDF) é o mesmo: só mudou de aba.
+  return `<section class="perf-workspace perf-conferencia"><div class="perf-controls">${perfPeriodoCompactoHTML(f)}
+    <div class="perf-toolbar"><h3 class="perf-conferencia-titulo">Conferência das entregas</h3><details class="perf-pdf-principal"><summary>Exportar</summary><button type="button" class="btn-ghost btn-sm" id="perf-pdf">PDF da conferência</button></details></div></div>
+    ${perfAvisosHTML(true)}
     ${perfAuditoriaHTML(regs)}
     <section class="perf-entregas" aria-labelledby="perf-entregas-titulo"><div class="perf-entregas-cabeca"><h3 id="perf-entregas-titulo">Conferência por entrega</h3><p>Quem fez cada entrega e com qual percentual. É daqui que o ranking tira os nomes.</p></div>
       <div class="perf-filtros"><label>Situação <select id="perf-situacao"><option value="">Todas</option><option value="pendente">A conferir</option><option value="confirmada">Confirmadas</option><option value="sem-equipe">Sem participantes</option><option value="avulsos">Avulsos / vínculo a conferir</option><option value="desatualizada">Divisão desatualizada ou a conferir no RH</option><option value="invalida">Participação inconsistente</option>${verValor?'<option value="sem-valor">Sem valor</option>':''}</select></label><label class="perf-busca">Buscar O.S., cliente ou pessoa <input id="perf-busca-os" type="search" value="${esc(pesquisa)}" placeholder="Digite para localizar"></label><button type="button" class="btn-ghost" id="perf-limpar">Limpar filtros</button><span id="perf-recorte" role="status"></span></div>
@@ -1980,17 +2016,29 @@ function wirePerformanceEquipes(el) {
     });
     el.querySelector('#perf-recorte').textContent=n+(n===1?' entrega na lista':' entregas na lista')+(STATE._perfPessoa || STATE._perfGrupo || STATE._perfComposicao?' · participante/equipe/composição selecionado':'')+'. Os números do ranking valem para o período inteiro.';
   };
-  el.querySelectorAll('[data-perf-pessoa],[data-perf-grupo],[data-perf-composicao]').forEach(b=>b.onclick=()=>{STATE._perfPessoa=b.dataset.perfPessoa||'';STATE._perfGrupo=b.dataset.perfGrupo||'';STATE._perfComposicao=b.dataset.perfComposicao||'';STATE._perfApenasComValor=b.dataset.perfFonteMedida==='valor';busca.value='';situacao.value=b.dataset.perfFonteMedida&&b.dataset.perfFonteMedida!=='entregas'?'confirmada':'';filtrar();el.querySelector('.perf-entregas').scrollIntoView({behavior:'smooth',block:'start'});});
+  // A lista mora na aba Conferência: daqui dos Rankings, o atalho abre a aba já filtrada.
+  el.querySelectorAll('[data-perf-pessoa],[data-perf-grupo],[data-perf-composicao]').forEach(b=>b.onclick=()=>{
+    const medida=b.dataset.perfFonteMedida, sit=medida&&medida!=='entregas'?'confirmada':'';
+    if(!busca)return perfIrParaConferencia({situacao:sit,pessoa:b.dataset.perfPessoa||'',grupo:b.dataset.perfGrupo||'',composicao:b.dataset.perfComposicao||'',apenasComValor:medida==='valor'});
+    STATE._perfPessoa=b.dataset.perfPessoa||'';STATE._perfGrupo=b.dataset.perfGrupo||'';STATE._perfComposicao=b.dataset.perfComposicao||'';STATE._perfApenasComValor=medida==='valor';busca.value='';situacao.value=sit;filtrar();el.querySelector('.perf-entregas').scrollIntoView({behavior:'smooth',block:'start'});
+  });
   if(busca){situacao.value=STATE._perfSituacao||'';busca.oninput=filtrar;situacao.onchange=()=>{STATE._perfApenasComValor=false;filtrar();};el.querySelector('#perf-limpar').onclick=()=>{STATE._perfPessoa='';STATE._perfGrupo='';STATE._perfComposicao='';STATE._perfApenasComValor=false;busca.value='';situacao.value='';filtrar();};filtrar();}
   /* A FAIXA DE COBERTURA manda para a lista já filtrada ("Completar equipes"
      mostra as sem equipe, com o Conferir de cada uma) e o foco vai para o
-     filtro, para quem usa teclado continuar dali. */
+     filtro, para quem usa teclado continuar dali. A lista agora mora na aba
+     Conferência: dos Rankings, o atalho troca de aba e chega no mesmo lugar. */
   el.querySelectorAll('[data-perf-filtrar]').forEach(b=>b.onclick=()=>{
-    if(!busca)return;
+    if(!busca)return perfIrParaConferencia({situacao:b.dataset.perfFiltrar});
     STATE._perfPessoa='';STATE._perfGrupo='';STATE._perfComposicao='';STATE._perfApenasComValor=false;busca.value='';situacao.value=b.dataset.perfFiltrar;filtrar();
     el.querySelector('.perf-entregas').scrollIntoView({behavior:'smooth',block:'start'});
     try{situacao.focus({preventScroll:true});}catch(e){situacao.focus();}
   });
+  // Chegou pelo atalho: a lista filtrada vem à vista, com o foco no filtro.
+  if(STATE._perfRolarConferencia&&busca){
+    STATE._perfRolarConferencia=false;
+    const alvo=el.querySelector('.perf-entregas');if(alvo&&alvo.scrollIntoView)alvo.scrollIntoView({behavior:'smooth',block:'start'});
+    try{situacao.focus({preventScroll:true});}catch(e){situacao.focus();}
+  }
   el.querySelectorAll('[data-perf-atualizar]').forEach(b=>b.onclick=perfCarregarFonte);
   el.querySelectorAll('[data-perf-lancar]').forEach(b=>b.onclick=perfAbrirLancamento);
   el.querySelectorAll('[data-perf-erp-saldo]').forEach(b=>b.onclick=()=>{ if (typeof abrirListaErpSaldo === 'function') abrirListaErpSaldo(); });
@@ -2007,8 +2055,10 @@ function wirePerformanceEquipes(el) {
   };
   const pdf=el.querySelector('#perf-pdf');if(pdf)pdf.onclick=()=>{
     const copy=el.querySelector('.perf-workspace').cloneNode(true);copy.querySelector('.perf-config')?.remove();copy.querySelectorAll('[hidden]').forEach(x=>x.remove());
-    const note=document.createElement('p');note.textContent='Detalhamento filtrado por: '+(el.querySelector('#perf-recorte')?.textContent || 'todas as entregas')+' Busca: '+(STATE._perfBusca||'sem busca')+'. Os totais acima abrangem o período completo.';copy.prepend(note);
-    imprimirAnalisePCP('Performance e participação',copy,periodoOuMes('_fPerf'),perfFonteTexto());
+    // O recorte da lista só existe na aba Conferência (onde a lista mora agora).
+    const recorte=el.querySelector('#perf-recorte');
+    if(recorte){const note=document.createElement('p');note.textContent='Detalhamento filtrado por: '+(recorte.textContent || 'todas as entregas')+' Busca: '+(STATE._perfBusca||'sem busca')+'. Os totais acima abrangem o período completo.';copy.prepend(note);}
+    imprimirAnalisePCP(recorte?'Performance · Conferência das entregas':'Performance e participação',copy,periodoOuMes('_fPerf'),perfFonteTexto());
   };
   el.querySelectorAll('[data-perf-os]').forEach(b=>b.onclick=()=>{
     const r=perfUnirPessoas([perfRegistro(perfOS(b.dataset.perfOs),perfConfig())])[0];

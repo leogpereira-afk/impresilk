@@ -132,7 +132,9 @@ test('revisão: a divisão desatualizada que ficou SEM gente conta só em "sem e
   ];
   const srv = await apurar(await edge('pcp-sync', bancoCom(regs)));
   const c = comBase(aparelho(), srv);
-  const html = c.performanceEquipesHTML();
+  // A conferência por entrega mudou de aba (onda w3, 11/10/2026, pedido do dono): a lista mora em performanceConferenciaHTML; a faixa de cobertura continua nos Rankings.
+  const lista = c.performanceConferenciaHTML();
+  const html = c.performanceEquipesHTML() + lista;
   const faixa = cortar(html.match(/<section class="perf-cobertura[\s\S]*?<\/section>/)[0]);
   assert.match(faixa, /1 sem participantes/);
   assert.match(faixa, /2 sugeridas, a conferir \(1 com a divisão desatualizada\)/, 'só a X3 (com gente) leva a marca');
@@ -180,7 +182,8 @@ test('revisão: a divisão que espera o RH ou está desatualizada sugere a equip
   assert.deepEqual(Object.fromEntries(P.resumir(vis).equipes.map(x => [x.nome, x.os])), {'Águia':2, 'Leão':2});
   assert.deepEqual(P.resumir(vis.filter(r => r.confirmado)).equipes, []);
   // Na lista, cada equipe da divisão aparece marcada "sugerida".
-  const html = c.performanceEquipesHTML();
+  // A conferência por entrega mudou de aba (onda w3, 11/10/2026, pedido do dono): a lista mora em performanceConferenciaHTML; a faixa de cobertura continua nos Rankings.
+  const html = c.performanceConferenciaHTML();
   assert.match(html.match(/<tr data-perf-id="R1">[\s\S]*?<\/tr>/)[0], /Leão<\/strong> <span class="perf-sugerida">sugerida<\/span>/);
   const linhaR2 = html.match(/<tr data-perf-id="R2">[\s\S]*?<\/tr>/)[0];
   assert.match(linhaR2, /Águia<\/strong> <small>[^<]+% da O\.S\.<\/small> <span class="perf-sugerida">sugerida<\/span>/);

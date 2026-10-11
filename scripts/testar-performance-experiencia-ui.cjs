@@ -47,7 +47,12 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
   await page.locator('[data-perf-aba="equipe"]').click();await page.locator('#perf-tv').click();
   await page.locator('.tv-painel').waitFor();assert.match(await page.locator('.tv-painel').innerText(),/Produção confirmada/);
   await pdf(page.locator('.tv-pdf'),'modo-tv',/Produção confirmada/);await page.locator('.tv-x').click();
-  // A conferência de volta abre o dia correspondente, sem gravar o lote.
+  // As abas novas (onda w3): Conferência e Perdas por retrabalho, sem corte horizontal e com PDF.
+  await page.locator('[data-perf-aba="perdas"]').click();await semEstouro('Perdas desktop');
+  await pdf(page.locator('[data-pdf-tela]'),'perdas',/Perdas por retrabalho/);
+  await page.locator('[data-perf-aba="conferencia"]').click();await semEstouro('Conferência desktop');
+  await pdf(page.locator('#perf-pdf'),'conferencia',/Conferência por entrega/);
+  // A conferência de volta abre o dia correspondente, sem gravar o lote (na aba Conferência).
   await page.locator('[data-perf-audit-volta]').first().click();await page.locator('[data-lote-campo="dia"]').waitFor();
   assert.match(await page.locator('#panel-entregas .casa-pagina-head h2').innerText(),/Fechar o dia/);checks.push('Pendência de volta abre o lote correto');
   for(const vista of ['tabela','cards','poros']){

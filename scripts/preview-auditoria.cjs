@@ -3,7 +3,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['demandas.js','demandas.css','performance-layout.css','performance-dashboards.js','performance-dashboards.css','ranking.html','ranking.js','ranking.css','privacidade-valores.js','diagnostico-itens.js','relatorios-pcp.js','alertas-sync.js','index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','operacao-revisao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
+const permitidos=new Set(['demandas.js','demandas.css','performance-layout.css','performance-dashboards.js','performance-dashboards.css','ranking.html','ranking.js','ranking.css','privacidade-valores.js','diagnostico-itens.js','relatorios-pcp.js','alertas-sync.js','index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','perdas.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','operacao-revisao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
@@ -80,11 +80,15 @@ a23OS.conferenciasEntrega=[1,2].map(n=>({id:'a23-parcial-'+n,dia:hoje,itens:[ite
 lista.push(a23OS);
 lista.push(base('FROTA-A',{numero:'TESTE-FROTA-A',servico:'ADESIVO',equipe:['900001'],veiculo:'Uno fictício',retornoPrevisto:[{dia:hoje,saida:'08:00',hora:'10:00'}]}));
 lista.push(base('FROTA-B',{numero:'TESTE-FROTA-B',servico:'adesivo',equipe:['900004'],veiculo:'UNO - 10 fictício',retornoPrevisto:[{dia:hoje,saida:'09:00',hora:'11:00'}]}));
+lista.push(base('PERDA1',{numero:'TESTE-PERDA',cliente:'Cliente fictício · falha comprovada',instalacao:{data:deslocar(-4),periodo:'Manhã'},prazoCombinado:{data:deslocar(-4),fonte:'agenda'},equipe:['900001','900002'],veiculo:'Carro 1',valorTotal:2500,
+ finalizadaEm:deslocar(-2)+'T15:00:00',finalizadoPor:'Gestor de teste',retrabalho:true,problema:'Placa instalada fora do nível',etapaOrigem:'Instalação',causaRaiz:'Erro humano',responsavelEtapa:'Equipe fictícia',dataRetrabalho:deslocar(-1),retrabalhoPerguntado:{resposta:'sim',por:'Gestor de teste',em:deslocar(-1)+'T10:00:00-03:00'}}));
+cfg.performancePCP.participacoes.push({id:'PERDA1',equipeId:'eq-aguia',equipeNome:'Águia',emblema:'🦅',membros:[pvMembro('900001','Ana Paula Souza',60),pvMembro('900002','Beatriz Costa Lima',40)],por:'Gestor de teste',em:hoje,obs:''});
 lista.push(base('RETRAB-ORIGINAL',{numero:'TESTE-ORIGINAL',cliente:'Original fictícia para custo',retrabalho:true,dataRetrabalho:hoje,finalizadaEm:hoje+'T12:00:00Z'}));
 lista.push(base('RETRAB-CORRECAO',{numero:'TESTE-CORRECAO',cliente:'Correção fictícia sem medição',osOriginal:'TESTE-ORIGINAL',valorTotal:0}));
 let pvCfgBase=structuredClone(cfg),pvCfgPendente=null;
 const revisoesPreview=[];
 async function previewApi(body){
+ if(new URLSearchParams(location.hash.slice(1)).has('perdas')&&['performanceComissaoListar','performanceFechamentos'].includes(body.action))return previewPerdas(body);
  if(body.action==='demandas')return fetch('/demandas-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
  if(['previewEstado','getCfg','setCfg','performanceVincularEquipe','controleEntrega','delete','restaurarOS','excluidasOS','fotosEvento','conferenciaEntrega'].includes(body.action)||(!new URLSearchParams(location.hash.slice(1)).has('comissao')&&['performancePeriodo','performanceFechamentos','performanceFechar'].includes(body.action))){
   const r=await fetch('/controle-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,seed:lista,pessoas:ELENCO_PREVIA.pessoas,cfg})});const out=await r.json();
@@ -124,6 +128,21 @@ async function previewApi(body){
    return {id:o.id,...(o._parcial||{}),numero:o.numero,cliente:o.cliente,dia:o.finalizadaEm.slice(0,10),valor:typeof o.valorTotal==='number'?o.valorTotal:null,origemValor:'Simulação local',membros,confirmado,fonte,...quem,retrabalho:!!o.retrabalho,retornoConf:o.retornoConf||null,voltou:eq.length>0,volta:[o.finalizadaEm.slice(0,10),String(o.veiculo||'').toLowerCase(),[...eq].sort().join('+')].join('|'),
     ...(confirmado?(d&&d.grupos?{grupos:d.grupos}:{}):PERF.sugestaoApurada(membros,aloc,aloc?DIVISAO.finais(aloc):[],cfg.performancePCP.equipes,m=>m.chave))};
   });return {completo:true,periodo:{de:body.de,ate:body.ate},hash:'simulacao',registros,consultadoEm:new Date().toISOString(),fonte:'DADOS FICTÍCIOS — simulação local'};
+ }
+ /* PERDAS POR RETRABALHO NA PRÉVIA (onda w3, 11/10/2026). Sem #perdas, nenhuma
+    revisão da comissão: tudo "a decidir pela gestão". Com #perdas=1, uma prévia
+    FICTÍCIA da comissão calculada pelo motor de verdade (comissao.js), com falha
+    comprovada na PERDA1 e abono na AB1, e o fechamento dela. Tudo fictício. */
+ if(body.action==='performanceComissaoListar')return {revisoes:[],pessoas:[]};
+ // Chamada no começo do previewApi (antes do roteamento do controle, que também atende performanceFechamentos).
+ async function previewPerdas(body){
+  const base=await previewApi({action:'performancePeriodo',de:body.de,ate:body.ate});
+  const fech={...base,id:'fechamento-previa-perdas',revisao:1,fechadoEm:new Date().toISOString(),fechadoPor:'Gestor fictício',motivo:'Fechamento fictício para a prévia das perdas',periodo:{de:body.de,ate:body.ate}};
+  if(body.action==='performanceFechamentos')return {fechamentos:[fech]};
+  const doc={origem:'Vistoria fictícia',evidencia:'Foto fictícia da prévia',justificativa:'Decisão fictícia para a prévia'};
+  const entrada={config:{modo:'teste',criteriosExtras:'somente_falha_comprovada'},decisoes:{PERDA1:{...doc,decisao:'falha_comprovada',tipo:'incompleto'},AB1:{...doc,decisao:'abono',tipo:'atraso'}},
+   entregas:Object.fromEntries(fech.registros.map(r=>[r.id,{...doc,entregue:true,grupos:[{montadorId:(r.membros[0]||{}).chave}],interna:{...doc,situacao:'nao_aplicavel'}}]))};
+  return {revisoes:[{id:body.de+':'+body.ate+':000001',revisao:1,tipo:'previa',em:new Date().toISOString(),fechamentoId:fech.id,entrada,apuracao:COMISSAO.apurar(fech,entrada,{aprovacoes:[]})}],pessoas:[]};
  }
  if(body.action==='performanceFechamentos')return {fechamentos:revisoesPreview};
  if(body.action==='performanceFechar'){

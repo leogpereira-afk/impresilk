@@ -10,6 +10,8 @@ const fs=require('node:fs');
  try {
   const page=await browser.newPage({viewport:{width:1366,height:900}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto((process.env.PCP_PREVIEW_URL || 'http://127.0.0.1:4201/')+'#aba=performance');
+  // A conferência por entrega tem aba própria desde a onda w3 (11/10/2026).
+  await page.locator('[data-perf-aba="conferencia"]').click();
   const rows=page.getByRole('row').filter({has:page.getByRole('button',{name:'TESTE-PARCIAL',exact:true})});
   await rows.getByRole('button',{name:'Conferir',exact:true}).click();
   const d=page.getByRole('dialog');await d.waitFor();

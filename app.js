@@ -1121,6 +1121,8 @@ function initTabs() {
       /* Voltar à Performance consulta o servidor de novo: a apuração lida uma
          vez na sessão ficava parada (voltas conferidas depois não entravam). */
       if (tab === 'performance' && typeof perfRemoto === 'object' && perfRemoto && !perfRemoto.carregando) perfRemoto.tentado = false;
+      // As decisões da comissão (aba Perdas e ponto de atenção) também: outra revisão pode ter sido gravada.
+      if (tab === 'performance' && typeof perdasInvalidar === 'function') perdasInvalidar();
       STORE.pull(refreshAposPull);
       renderActiveTab();
       window.scrollTo({ top: 0, behavior: 'instant' });
@@ -8555,7 +8557,7 @@ function wirePDFsEntregaPerformance(el) {
   const head=el.querySelector('.casa-pagina-head');
   if(head&&!el.querySelector('#perf-pdf,#perf-rel-pdf,#rel-ent-pdf')&&!head.querySelector('[data-pdf-tela]')){
     const b=document.createElement('button');b.type='button';b.className='btn-ghost btn-sm';b.dataset.pdfTela='';b.textContent='📄 PDF desta tela';
-    b.onclick=()=>exportar(el.querySelector('.casa-pagina')||el,(head.querySelector('h2')?.textContent||'Entregas')+(el.querySelector('[data-perf-aba].active')?' · '+el.querySelector('[data-perf-aba].active').textContent:''));head.appendChild(b);
+    b.onclick=()=>exportar(el.querySelector('.casa-pagina')||el,(head.querySelector('h2')?.textContent||'Entregas')+(el.querySelector('[data-perf-aba].active')?' · '+(el.querySelector('[data-perf-aba].active').dataset.perfRotulo||el.querySelector('[data-perf-aba].active').textContent):''));head.appendChild(b);
   }
   el.querySelectorAll('details.casa-quadro').forEach(d=>{
     const corpo=d.querySelector('.casa-quadro-corpo');if(!corpo||corpo.querySelector(':scope > .pdf-secao-acao'))return;

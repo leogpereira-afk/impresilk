@@ -3934,8 +3934,29 @@ function renderPerformanceCasa() {
      guardado cai na Equipe. Sem o regras.js carregado (cache quebrado), a
      aba some em vez de derrubar a tela. */
   const podeRegras = ['admin', 'pcp'].includes(String(STATE.user?.papel || '')) && typeof perfRegrasHTML === 'function' && typeof REGRAS !== 'undefined';
-  const abaPerf = STATE._perfAba === 'gestao' && typeof perfPodeEditar==='function' && perfPodeEditar() ? 'gestao' : STATE._perfAba === 'relatorio' ? 'relatorio' : STATE._perfAba === 'regras' && podeRegras ? 'regras' : 'equipe';
+  /* AS DUAS ABAS DO DONO (11/10/2026: "a parte de conferência de notas, ela
+     tem que ser bem destacada, e a que perdeu por retrabalho, essa parte
+     precisa de uma aba e um ponto de atenção importante").
+     CONFERÊNCIA, logo depois de Rankings, para todo papel que vê a
+     Performance, com o número a conferir no selo; o R$ segue a regra de
+     sempre (só admin e pcp). PERDAS POR RETRABALHO (perdas.js), só admin e
+     pcp e nunca o crachá sem senha, com o selo vermelho; e o PONTO DE
+     ATENÇÃO no alto de todas as abas. Sem performance.js ou perdas.js (cache
+     quebrado), as abas somem e o conteúdo antigo fica nos Rankings. */
+  const temConferencia = typeof performanceConferenciaHTML === 'function';
+  const podePerdas = typeof perdasPode === 'function' && typeof perdasAbaHTML === 'function' && perdasPode();
+  const abaPerf = STATE._perfAba === 'gestao' && typeof perfPodeEditar==='function' && perfPodeEditar() ? 'gestao' : STATE._perfAba === 'relatorio' ? 'relatorio' : STATE._perfAba === 'regras' && podeRegras ? 'regras'
+    : STATE._perfAba === 'conferencia' && temConferencia ? 'conferencia' : STATE._perfAba === 'perdas' && podePerdas ? 'perdas' : 'equipe';
   const pendRH = pendentesConferenciaRH();
+  const pendConf = temConferencia && typeof perfConferenciaPendentes === 'function' ? perfConferenciaPendentes() : 0;
+  const perdas = podePerdas && typeof perdasDados === 'function' ? perdasDados() : null;
+  const nPerdas = perdas && typeof perdasContagem === 'function' ? perdasContagem(perdas) : 0;
+  // O número do selo fica escondido do leitor de tela: ele ouve a frase inteira, ao lado.
+  const seloAba = (n, frase, classe = '') => n ? ` <span class="badge perf-aba-selo${classe}" aria-hidden="true">${n}</span><span class="perf-sr"> (${n} ${frase})</span>` : '';
+  const botaoAba = (id, rotulo, selo = '') => `<button class="btn-ghost btn-sm ${abaPerf === id ? 'active' : ''}" aria-pressed="${abaPerf === id}" data-perf-aba="${id}" data-perf-rotulo="${esc(rotulo)}">${rotulo}${selo}</button>`;
+  const quadroRH = () => quadroCasa('perf-rh', `🔗 Conferir nomes do PCP × fichas do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), false);
+  const subtitulo = abaPerf === 'regras' ? 'Regras, divisão e comissão do programa.' : abaPerf === 'conferencia' ? 'Quem fez cada entrega e com qual percentual. As notas só valem depois da conferência.'
+    : abaPerf === 'perdas' ? 'O.S. com retrabalho, atraso ou retorno antecipado, e o que a comissão decidiu.' : 'Entregas conferidas. Equipes reconhecidas.';
   /* Os <details> soltos da apuração ("Como interpretar os indicadores", "Ver
      O.S., percentuais...") fechavam a cada repintura: a apuração chega do
      servidor, uma confirmação muda a nota, e o que a pessoa lia sumia. Guarda
@@ -3946,23 +3967,30 @@ function renderPerformanceCasa() {
   el.innerHTML = `
     <div class="casa-pagina casa-perf">
       <header class="casa-pagina-head perf-page-head">
-        <div><h2>Performance</h2><p>${abaPerf === 'regras' ? 'Regras, divisão e comissão do programa.' : 'Entregas conferidas. Equipes reconhecidas.'}</p></div>
+        <div><h2>Performance</h2><p>${subtitulo}</p></div>
         <div class="perf-page-actions">
           <button class="btn-ghost btn-sm" id="perf-compartilhar">🔗 Link para funcionários</button>
           <button class="btn-ghost btn-sm" id="perf-tv" title="Ranking em tela cheia para a TV da fábrica">📺 Modo TV</button>
         </div>
       </header>
+      ${perdas && typeof perdasPontoHTML === 'function' ? perdasPontoHTML(perdas) : ''}
       <nav class="perf-page-tabs" aria-label="Áreas de Performance">
-        <button class="btn-ghost btn-sm ${abaPerf === 'equipe' ? 'active' : ''}" aria-pressed="${abaPerf === 'equipe'}" data-perf-aba="equipe">Rankings</button>
-        ${typeof perfPodeEditar==='function'&&perfPodeEditar()?`<button class="btn-ghost btn-sm ${abaPerf === 'gestao'?'active':''}" aria-pressed="${abaPerf === 'gestao'}" data-perf-aba="gestao">Gestão de equipes</button>`:''}
-        <button class="btn-ghost btn-sm ${abaPerf === 'relatorio' ? 'active' : ''}" aria-pressed="${abaPerf === 'relatorio'}" data-perf-aba="relatorio">Relatório</button>
-        ${podeRegras ? `<button class="btn-ghost btn-sm ${abaPerf === 'regras' ? 'active' : ''}" aria-pressed="${abaPerf === 'regras'}" data-perf-aba="regras">Regras</button>` : ''}
+        ${botaoAba('equipe', 'Rankings')}
+        ${temConferencia ? botaoAba('conferencia', 'Conferência', seloAba(pendConf, pendConf === 1 ? 'entrega a conferir' : 'entregas a conferir')) : ''}
+        ${typeof perfPodeEditar==='function'&&perfPodeEditar()?botaoAba('gestao', 'Gestão de equipes'):''}
+        ${botaoAba('relatorio', 'Relatório')}
+        ${podePerdas ? botaoAba('perdas', 'Perdas por retrabalho', seloAba(nPerdas, 'O.S. com ocorrência', ' perf-selo-perda')) : ''}
+        ${podeRegras ? botaoAba('regras', 'Regras') : ''}
       </nav>
-      ${abaPerf === 'gestao' ? perfGestaoEquipesHTML() : abaPerf === 'regras' ? perfRegrasHTML() : `
+      ${abaPerf === 'gestao' ? perfGestaoEquipesHTML() : abaPerf === 'regras' ? perfRegrasHTML() : abaPerf === 'perdas' ? perdasAbaHTML(perdas) : abaPerf === 'conferencia' ? `
+        ${performanceConferenciaHTML()}
+        ${quadroRH()}
+      ` : `
       ${abaPerf === 'equipe' ? `
+        ${typeof perfFaixaConferenciaHTML === 'function' ? perfFaixaConferenciaHTML(pendConf) : ''}
         ${typeof performanceEquipesHTML === 'function' ? performanceEquipesHTML() : produtividadeHTML()}
         ${typeof perfFonteHTML === 'function' ? perfFonteHTML() : ''}
-        ${quadroCasa('perf-rh', `🔗 Conferir nomes do PCP × fichas do RH${pendRH ? ` <span class="badge sem-valor">${pendRH} pendente${pendRH === 1 ? '' : 's'}</span>` : ''}`, ligacaoRHHTML(), false)}
+        ${temConferencia ? '' : quadroRH()}
         ${quadroCasa('perf-plantoes', '🗓 Plantões vinculados às O.S.', plantaoPerformanceHTML(), false)}
 
       ` : `
@@ -3977,6 +4005,13 @@ function renderPerformanceCasa() {
       `}`}
     </div>`;
   if (detAbertos.size) { const detDepois = [...el.querySelectorAll('details')]; chaveDet(detDepois).forEach((k, i) => { if (detAbertos.has(k)) detDepois[i].open = true; }); }
+  /* Seis abas não cabem a 375 px: a barra rola de lado, e a aba aberta
+     (Perdas, Regras) ficava fora da vista. Só a barra rola; a página não. */
+  const barraAbas = el.querySelector('.perf-page-tabs'), abaAberta = barraAbas && typeof barraAbas.querySelector === 'function' ? barraAbas.querySelector('.active') : null;
+  if (barraAbas && abaAberta && typeof abaAberta.getBoundingClientRect === 'function' && barraAbas.scrollWidth > barraAbas.clientWidth) {
+    const a = abaAberta.getBoundingClientRect(), b = barraAbas.getBoundingClientRect();
+    if (a.left < b.left || a.right > b.right) barraAbas.scrollLeft += a.left - b.left - 16;
+  }
   wireFiltroPeriodo(el, '_fPerf', renderPerformanceCasa);
   wireQuadrosCasa(el);
   if(typeof wirePDFsEntregaPerformance==='function')wirePDFsEntregaPerformance(el);
@@ -3984,10 +4019,20 @@ function renderPerformanceCasa() {
     STATE._perfAba = b.dataset.perfAba;
     // Entrar na aba Regras consulta o servidor de novo (outra versão pode ter sido criada).
     if (b.dataset.perfAba === 'regras' && typeof perfRegrasEstado === 'object') perfRegrasEstado.tentado = false;
+    // Entrar em Perdas lê de novo as decisões da comissão (outra revisão pode ter sido gravada).
+    if (b.dataset.perfAba === 'perdas' && typeof perdasInvalidar === 'function') perdasInvalidar();
     renderPerformanceCasa();
+  });
+  // O ponto de atenção leva à aba de Perdas; o foco vai para a aba aberta, para quem usa teclado.
+  el.querySelectorAll('[data-perf-ir]').forEach(b => b.onclick = () => {
+    STATE._perfAba = b.dataset.perfIr;
+    renderPerformanceCasa();
+    const aba = el.querySelector(`[data-perf-aba="${CSS.escape(b.dataset.perfIr)}"]`);
+    if (aba && typeof aba.focus === 'function') aba.focus();
   });
   if (abaPerf === 'regras') { if (typeof wirePerfRegras === 'function') wirePerfRegras(el); }
   else if (typeof wirePerformanceEquipes === 'function') wirePerformanceEquipes(el);
+  if (typeof wirePerdas === 'function') wirePerdas(el);
   const tv = document.getElementById('perf-tv'); if (tv) tv.onclick = abrirTVCasa;
   const compartilhar=el.querySelector('#perf-compartilhar'); if(compartilhar)compartilhar.onclick=perfCompartilharRanking;
   const mesEl = document.getElementById('perf-mes');

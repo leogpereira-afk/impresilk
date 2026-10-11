@@ -202,7 +202,8 @@ test('divisão desatualizada: aparece com a marca na lista, na faixa e no detalh
   const e = await edge('pcp-sync', bancoCom(osFixas()));
   const srv = await apurar(e);
   const c = comBase(aparelho(), srv);
-  const html = c.performanceEquipesHTML();
+  // A conferência por entrega mudou de aba (onda w3, 11/10/2026, pedido do dono): a lista mora em performanceConferenciaHTML; a faixa de cobertura continua nos Rankings.
+  const html = c.performanceConferenciaHTML();
   const linha = html.match(/<tr data-perf-id="A3">[\s\S]*?<\/tr>/)[0];
   assert.match(linha, /badge perf-st-desat">Divisão desatualizada</);
   assert.doesNotMatch(linha, /Confirmada/);
@@ -225,7 +226,8 @@ test('O.S. sem divisão usa o legado: participação antiga confirma como antes;
   assert.deepEqual(plano(l2.membros.map(m => m.percentual)), [50, 50], 'sugestão continua dividindo igual (a nota não muda)');
   // Na tela: a equipe sugerida aparece com o nome e a marca "sugerida"; a confirmada, sem a marca.
   const c = comBase(aparelho(), srv);
-  const html = c.performanceEquipesHTML();
+  // A conferência por entrega mudou de aba (onda w3, 11/10/2026, pedido do dono): a lista mora em performanceConferenciaHTML; a faixa de cobertura continua nos Rankings.
+  const html = c.performanceConferenciaHTML();
   assert.match(html.match(/<tr data-perf-id="L2">[\s\S]*?<\/tr>/)[0], /Águia<\/strong> <span class="perf-sugerida">sugerida<\/span>/);
   assert.doesNotMatch(html.match(/<tr data-perf-id="L1">[\s\S]*?<\/tr>/)[0], /perf-sugerida/);
   assert.doesNotMatch(html.match(/<tr data-perf-id="L3">[\s\S]*?<\/tr>/)[0], /Tigre|Touro/, 'duas com a mesma gente: nenhum nome');
@@ -254,8 +256,10 @@ test('cobertura: a faixa "Equipe nas entregas" diz confirmadas, sugeridas, sem e
   const srv = await apurar(e);
   const c = comBase(aparelho(), srv);
   const html = c.performanceEquipesHTML();
+  // A conferência por entrega mudou de aba (onda w3, 11/10/2026, pedido do dono): a lista mora em performanceConferenciaHTML; a faixa de cobertura continua nos Rankings.
+  const lista = c.performanceConferenciaHTML();
   // A contagem da lista (os selos de situação de cada linha).
-  const selos = [...html.matchAll(/badge perf-st-(\w+)"/g)].map(m => m[1]);
+  const selos = [...lista.matchAll(/badge perf-st-(\w+)"/g)].map(m => m[1]);
   const conta = t => selos.filter(x => t.includes(x)).length;
   assert.equal(selos.length, 10);
   const conf = conta(['ok']), sug = conta(['sug', 'desat', 'erro']), sem = conta(['sem']);
