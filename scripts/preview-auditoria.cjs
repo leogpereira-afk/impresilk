@@ -144,7 +144,10 @@ async function previewApi(body){
  /* PERDAS POR RETRABALHO NA PRÉVIA (onda w3, 11/10/2026). Sem #perdas, nenhuma
     revisão da comissão: tudo "a decidir pela gestão". Com #perdas=1, uma prévia
     FICTÍCIA da comissão calculada pelo motor de verdade (comissao.js), com falha
-    comprovada na PERDA1 e abono na AB1, e o fechamento dela. Tudo fictício. */
+    comprovada na PERDA2 (retrabalho de produção julgado falha da instalação:
+    D-004 nos pontos, revisão da onda a3) e abono na AB1, e o fechamento dela.
+    A PERDA1 (retrabalho de instalação) é perda automática: não pede decisão.
+    Tudo fictício. */
  if(body.action==='performanceComissaoListar')return {revisoes:[],pessoas:[],cobrem:[]};
  // Chamada no começo do previewApi (antes do roteamento do controle, que também atende performanceFechamentos).
  async function previewPerdas(body){
@@ -152,7 +155,7 @@ async function previewApi(body){
   const fech={...base,id:'fechamento-previa-perdas',revisao:1,fechadoEm:new Date().toISOString(),fechadoPor:'Gestor fictício',motivo:'Fechamento fictício para a prévia das perdas',periodo:{de:body.de,ate:body.ate}};
   if(body.action==='performanceFechamentos')return {fechamentos:[fech]};
   const doc={origem:'Vistoria fictícia',evidencia:'Foto fictícia da prévia',justificativa:'Decisão fictícia para a prévia'};
-  const entrada={config:{modo:'teste',criteriosExtras:'somente_falha_comprovada'},decisoes:{PERDA1:{...doc,decisao:'falha_comprovada',tipo:'incompleto'},AB1:{...doc,decisao:'abono',tipo:'atraso'}},
+  const entrada={config:{modo:'teste',criteriosExtras:'somente_falha_comprovada'},decisoes:{PERDA2:{...doc,decisao:'falha_comprovada',tipo:'incompleto'},AB1:{...doc,decisao:'abono',tipo:'atraso'}},
    entregas:Object.fromEntries(fech.registros.map(r=>[r.id,{...doc,entregue:true,grupos:[{montadorId:(r.membros[0]||{}).chave}],interna:{...doc,situacao:'nao_aplicavel'}}]))};
   // cobrem: os demonstrativos de outros períodos que cobrem o recorte (revisão da onda w3, R1); a prévia só tem o do recorte.
   return {revisoes:[{de:body.de,ate:body.ate,id:body.de+':'+body.ate+':000001',revisao:1,tipo:'previa',em:new Date().toISOString(),fechamentoId:fech.id,entrada,apuracao:COMISSAO.apurar(fech,entrada,{aprovacoes:[]})}],pessoas:[],cobrem:[]};

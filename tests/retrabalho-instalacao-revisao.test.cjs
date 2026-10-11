@@ -193,6 +193,20 @@ test('revisão a3: a falha comprovada julgada no demonstrativo tira os pontos da
   assert.match(texto(telaPerf({lista, registros, revisoes:[], fechamentos:[fonte], modo:'pessoas'}).render()), /R\$\s?1\.440,00/);
 });
 
+test('revisão a3: sem as decisões da comissão (consulta que falhou), os Rankings e o Relatório dizem que a falha comprovada pode não aparecer', () => {
+  const t = telaPerf({lista:[card('R1')], registros:[registro('R1', {retrabalho:true})]});
+  t.run(`perdasRemoto={chave:perfChave(),revisoes:null,cobrem:null,carregando:false,erro:'Sem conexão com o servidor. Tente de novo.',tentado:true};`);
+  // Caso ruim: o ranking contava a O.S. calado, como se nenhuma falha tivesse sido julgada.
+  const rank = t.render();
+  assert.match(texto(rank), /Não foi possível ler as decisões da comissão \(Sem conexão com o servidor\. Tente de novo\.\)\. Até ler, a falha comprovada julgada no demonstrativo pode não aparecer nestes números\./);
+  assert.match(rank, /data-perdas-atualizar>Tentar de novo</);
+  t.run(`STATE._perfAba='relatorio'`);
+  assert.match(texto(t.render()), /Não foi possível ler as decisões da comissão/);
+  // Lidas (mesmo sem nenhuma revisão), nada a avisar.
+  t.run(`STATE._perfAba='equipe'; perdasRemoto={chave:perfChave(),revisoes:[],cobrem:[],carregando:false,erro:'',tentado:true};`);
+  assert.doesNotMatch(t.render(), /Não foi possível ler as decisões/);
+});
+
 test('revisão a3: a decisão vale no período do demonstrativo que a julgou; compensação no topo vale a anterior; a recusada não tira nada', () => {
   // Outubro julgou a O.S. como falha; novembro (outra entrega da mesma O.S.) julgou sem falha (P-010 aberta: outro mês segue o demonstrativo dele).
   const out = {de:'2026-10-01', ate:'2026-10-31', id:'out:1', revisao:1, tipo:'aprovacao', em:'2026-11-02T10:00:00Z', entrada:{decisoes:{X:falha}},

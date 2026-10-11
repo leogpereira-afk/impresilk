@@ -423,7 +423,8 @@ const OPERACAO = (() => {
      confere as duas. O prazo é a PRIMEIRA data agendada no PCP, congelada; o
      ERP não define prazo (a importação põe a previsão do ERP em
      instalacao.data, e isso não é agenda de ninguém). O retorno previsto é a
-     hora digitada pela gestão, por dia da agenda; sem hora, não há perda. */
+     hora digitada pela gestão, por dia da agenda; sem hora, o retorno
+     antecipado não é medido (D-011: medido ou não, ele não tira nada sozinho). */
   const HORA_F15 = /^([01]\d|2[0-3]):[0-5]\d$/;
   const objF15 = v => !!v && typeof v === 'object' && !Array.isArray(v);
   // A resposta de cada texto fica guardada (revisão da F17: o status de centenas de cards lê os mesmos dias o tempo todo).
