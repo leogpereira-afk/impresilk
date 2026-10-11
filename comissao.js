@@ -1,5 +1,6 @@
 'use strict';
-/* Comissão v1: centavos inteiros; nunca altera ranking operacional ou regra legada.
+/* Comissão v1: centavos inteiros; não grava no ranking operacional nem na regra legada
+ * (o ranking só LÊ a falha comprovada aceita aqui: D-004, revisão da onda a3).
  * Cada revisão referencia fatos selados. Desconhecido é pendência, não punição.
  * Bloco idêntico no navegador e no servidor, verificado nos testes.
  * A RÉGUA DAS PERDAS (D-010 e D-011, 11/10/2026) chega pelo selo: o fechamento
@@ -9,13 +10,21 @@
  * regras.js e _shared/pcp-regras.mjs):
  * - retrabalho de instalação: perda automática da entrega, sem pedir decisão,
  *   entrega física, rateio nem montagem interna; zero para todos, inclusive a
- *   parcela interna. A comissão que ela teria gerado (1% da base líquida) vai
- *   na linha (comissaoPerdidaCentavos), para a aba Perdas;
- * - retrabalho com origem a definir: pendência; a entrega não paga nem perde
- *   até a gestão definir a origem e fechar o período de novo;
+ *   parcela interna. A comissão que ela teria gerado vai na linha
+ *   (comissaoPerdidaCentavos), para a aba Perdas, pela MESMA conta acumulada
+ *   da O.S. que a linha paga usaria (o saldo paralelo; revisão da onda a3:
+ *   1% de cada parte, arredondado sozinho, passava 1 centavo do que seria pago);
+ * - retrabalho com origem a definir: só a O.S. fica pendente (não paga e não
+ *   perde) e o demonstrativo continua aprovável (revisão da onda a3: a origem a
+ *   definir travava o mês inteiro). Definida a origem, ela entra numa revisão
+ *   seguinte (fechar de novo e nova prévia);
  * - retrabalho de outra etapa, atraso e retorno antecipado: nada muda aqui
  *   sozinho; a gestão decide caso a caso (falha comprovada, D-004).
- * Selo de antes da régua (sem regraPerdas): como sempre foi. */
+ * Selo de antes da régua (sem regraPerdas): como sempre foi.
+ * A falha comprovada aceita aqui também tira os pontos da O.S. no ranking, na
+ * Nota, na Conferência, no Por O.S., no ranking dos funcionários e no
+ * Relatório (D-004, "zera só os pontos e a comissão da O.S. afetada"): eles
+ * leem a decisão da revisão que vale (demonstrativosVigentes), nunca o hash. */
 const COMISSAO = (() => {
   const lista = v => Array.isArray(v) ? v : [];
   const texto = v => typeof v === 'string' ? v.trim().slice(0,2000) : '';
@@ -59,6 +68,16 @@ const COMISSAO = (() => {
   }
   // A comissão de uma base líquida em centavos (1%, a conta do motor), para mostrar o que uma perda tirou.
   const comissaoDaBase = c => Number.isSafeInteger(c) && c >= 0 ? percentual(c,100) : null;
+  /* A COMISSÃO DE CADA BASE PELA CONTA ACUMULADA DO MOTOR: 1% do acumulado da
+     O.S. menos o que já saiu, a partir de um saldo. É a conta da linha paga, e
+     a da comissão perdida (o saldo paralelo); a aba Perdas usa esta mesma
+     função quando o demonstrativo ainda não tem a O.S. */
+  function comissoesAcumuladas(bases, saldo={base:0,comissao:0}) {
+    let b=Number.isSafeInteger(saldo?.base)?saldo.base:0, c=Number.isSafeInteger(saldo?.comissao)?saldo.comissao:0;
+    return lista(bases).map(x=>{if(!Number.isSafeInteger(x)||x<0)return null;const v=Math.max(0,percentual(b+x,100)-c);b+=x;c+=v;return v;});
+  }
+  // A frase da O.S. com a origem do retrabalho a definir: a mesma na linha, no diálogo e na aba Perdas.
+  const TEXTO_ORIGEM_A_DEFINIR='Retrabalho com origem a definir: esta O.S. fica pendente (não paga e não perde) e não trava o demonstrativo. Defina a origem na ficha: ela entra numa revisão seguinte (feche o período de novo e gere nova prévia).';
   function apurar(fonte, entrada={}, contexto={}) {
     const config=entrada.config || {}, decisoes=entrada.decisoes || {}, entregas=entrada.entregas || {};
     const comRegua=typeof fonte?.regraPerdas==='string'&&fonte.regraPerdas!=='';
@@ -85,6 +104,9 @@ const COMISSAO = (() => {
     const rs=lista(fonte?.registros).slice().sort((a,b)=>String(a.dia).localeCompare(String(b.dia))||String(a.id).localeCompare(String(b.id))), ids=new Set(), fracoes=new Map(), linhas=[], pessoas=new Map();
     if(!rs.length)add('Sem entregas no fechamento.');
     const creditar=(partes,tipo,id)=>{for(const p of partes){const k=tipo+':'+p.pessoaId;const anterior=pessoas.get(k)||{pessoaId:p.pessoaId,tipo,centavos:0,entregas:[]};anterior.centavos+=p.centavos;anterior.entregas.push(id);pessoas.set(k,anterior);}};
+    // O saldo paralelo da O.S.: o que ela teria pago sem a perda (o acumulado de verdade mais o que a perda tirou), pela mesma conta acumulada.
+    const paralelos=new Map();
+    const paralelo=osId=>{if(!paralelos.has(osId)){const x=acumulados.get(osId)||{base:0,comissao:0};paralelos.set(osId,{base:x.base,comissao:x.comissao});}return paralelos.get(osId);};
     for(const r of rs) {
       const osId=String(r.osId||r.id), d=decisoes[osId]||{}, e=entregas[r.id]||{}, lp=[];
       const falta=t=>{lp.push(t);add('O.S. '+(r.numero||osId)+' · '+t);};
@@ -95,11 +117,17 @@ const COMISSAO = (() => {
       const liquido=centavos(r.valor);
       const descontoTxt=Number.isSafeInteger(r.descontoCentavos)?'Diferença entre subtotal bruto e líquido (já deduzida)':'Desconto já incluído no líquido; detalhamento indisponível neste fechamento';
       if(comRegua&&r.perda==='retrabalho_instalacao'){
-        // Perda automática (D-010): nada a decidir nem a ratear; zero para todos.
-        linhas.push({id:r.id,osId,entregaId:r.entregaId||null,numero:r.numero,dia:r.dia,fracaoOS:fracao,origemValor:r.origemValor,baseLiquidaCentavos:liquido,baseElegivelCentavos:lp.length?null:0,baseBrutaCentavos:r.valorBrutoCentavos??null,descontoCentavos:r.descontoCentavos??null,desconto:descontoTxt,comissaoCentavos:lp.length?null:0,internaCentavos:lp.length?null:0,externaCentavos:lp.length?null:0,pontos:lp.length?null:0,pagamentos:[],pendencias:lp,decisao:'retrabalho_instalacao',perda:'retrabalho_instalacao',etapaOrigem:r.etapaOrigem,comissaoPerdidaCentavos:comissaoDaBase(liquido)});
+        // Perda automática (D-010): nada a decidir nem a ratear; zero para todos. A comissão perdida é a que a O.S. pagaria (saldo paralelo).
+        let perdida=null;
+        if(liquido!==null){const p=paralelo(osId);perdida=comissoesAcumuladas([liquido],p)[0];p.base+=liquido;p.comissao+=perdida;}
+        linhas.push({id:r.id,osId,entregaId:r.entregaId||null,numero:r.numero,dia:r.dia,fracaoOS:fracao,origemValor:r.origemValor,baseLiquidaCentavos:liquido,baseElegivelCentavos:lp.length?null:0,baseBrutaCentavos:r.valorBrutoCentavos??null,descontoCentavos:r.descontoCentavos??null,desconto:descontoTxt,comissaoCentavos:lp.length?null:0,internaCentavos:lp.length?null:0,externaCentavos:lp.length?null:0,pontos:lp.length?null:0,pagamentos:[],pendencias:lp,decisao:'retrabalho_instalacao',perda:'retrabalho_instalacao',etapaOrigem:r.etapaOrigem,comissaoPerdidaCentavos:perdida});
         continue;
       }
-      if(comRegua&&r.retrabalho===true&&Object.prototype.hasOwnProperty.call(r,'etapaOrigem')&&!r.etapaOrigem)falta('Retrabalho com origem a definir: defina a origem na ficha da O.S. e feche o período de novo. Até lá a comissão desta O.S. fica pendente.');
+      if(comRegua&&r.retrabalho===true&&Object.prototype.hasOwnProperty.call(r,'etapaOrigem')&&!r.etapaOrigem){
+        // Origem a definir: só esta O.S. fica pendente (não paga e não perde), sem travar o demonstrativo; nada a decidir nem a conferir agora.
+        linhas.push({id:r.id,osId,entregaId:r.entregaId||null,numero:r.numero,dia:r.dia,fracaoOS:fracao,origemValor:r.origemValor,baseLiquidaCentavos:liquido,baseElegivelCentavos:lp.length?null:0,baseBrutaCentavos:r.valorBrutoCentavos??null,descontoCentavos:r.descontoCentavos??null,desconto:descontoTxt,comissaoCentavos:lp.length?null:0,internaCentavos:lp.length?null:0,externaCentavos:lp.length?null:0,pontos:null,pagamentos:[],pendencias:[...lp,TEXTO_ORIGEM_A_DEFINIR],decisao:'origem_a_definir',origemADefinir:true,etapaOrigem:''});
+        continue;
+      }
       if(liquido===null || !r.confirmado || r.avisoValor || r.erroConferencia)falta('Valor líquido e participação precisam estar conferidos no fechamento.');
       if(e.entregue!==true || !documentada(e))falta('Comprovação da entrega física pendente.');
       const decisaoOk=documentada(d)&&['sem_falha','falha_comprovada','abono'].includes(d.decisao)&&['nenhuma','producao','cliente','incompleto','ma_conducao','atraso','retorno_antecipado','outra'].includes(d.tipo);
@@ -137,6 +165,7 @@ const COMISSAO = (() => {
       if(calculado<0)falta('Comissão anterior excede a base elegível. Prepare compensação da aprovação anterior.');
       const total=Math.max(0,calculado);
       if(!lp.length)acumulados.set(osId,{base:saldo.base+baseElegivelCentavos,comissao:saldo.comissao+total});
+      if(!lp.length&&paralelos.has(osId)){const p=paralelos.get(osId);p.base+=baseElegivelCentavos;p.comissao+=total;}
       const internos=interna.situacao==='elegivel'?percentual(total,2000):0, externo=total-internos;
       let pagamentos=[];
       if(!lp.length){
@@ -187,7 +216,59 @@ const COMISSAO = (() => {
     for(const p of (revisao.apuracao.ajustes||[]))rows.push([revisao.id,revisao.apuracao.fechamentoId,revisao.apuracao.anteriorAprovacao||'',p.pessoaId,p.nome||'',p.tipo,(p.centavos/100).toFixed(2).replace('.',','),(p.diferencaCentavos/100).toFixed(2).replace('.',',')]);
     return '\uFEFF'+rows.map(r=>r.map(cel).join(';')).join('\r\n');
   }
-  return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase};
+  /* A FALHA COMPROVADA NOS PONTOS (D-004: "zera só os pontos e a comissão da
+     O.S. afetada"; revisão da onda a3, 11/10/2026). O ranking, a Nota, a
+     Conferência, o Por O.S., o ranking dos funcionários e o Relatório leem a
+     decisão de falha comprovada da revisão que vale no demonstrativo que cobre
+     a entrega, a mesma escolha da aba Perdas: em cada período, a última
+     revisão; se ela for uma compensação, a última que não é. A decisão só vale
+     aceita pelo motor (documentada, falha da instalação e a mesma em todas as
+     entregas da O.S. no demonstrativo). Vale para as entregas da O.S. dentro do
+     período do demonstrativo que a julgou; outro mês da mesma O.S. segue o
+     demonstrativo dele (P-010 aberta). Sem revisão, nada muda. É leitura: não
+     entra no fechamento nem no hash dele. */
+  const SEM_DECISAO='Ocorrência e responsabilidade aguardam decisão documentada.', FALHA_FORA='Produção, cliente ou ausência de ocorrência não comprovam falha da instalação.';
+  function falhaAceita(osId, revisao) {
+    const ls=lista(revisao?.apuracao?.linhas).filter(l=>l&&String(l.osId)===osId);
+    if(!ls.length||ls.some(l=>l.perda==='retrabalho_instalacao'||l.decisao==='origem_a_definir'))return false;
+    const pend=ls.flatMap(l=>lista(l.pendencias));
+    if(pend.includes(SEM_DECISAO)||pend.includes(FALHA_FORA))return false;
+    return ls.every(l=>l.decisao==='falha_comprovada');
+  }
+  function demonstrativosVigentes(revisoes, periodo={}) {
+    const grupos=new Map();
+    for(const r of lista(revisoes)){if(!r||typeof r!=='object'||typeof r.de!=='string'||typeof r.ate!=='string')continue;const k=r.de+':'+r.ate;grupos.set(k,[...(grupos.get(k)||[]),r]);}
+    const out=[];
+    for(const rs of grupos.values()){
+      const ordem=[...new Map(rs.map(r=>[String(r.id??r.revisao),r])).values()].sort((a,b)=>(Number(b.revisao)||0)-(Number(a.revisao)||0));
+      const r=ordem.find(x=>!x?.apuracao?.compensacaoDe);
+      if(!r)continue;
+      const decisoes=r.entrada&&typeof r.entrada==='object'&&r.entrada.decisoes&&typeof r.entrada.decisoes==='object'?r.entrada.decisoes:{};
+      const ids=[...new Set(lista(r.apuracao?.linhas).map(l=>String(l?.osId??'')).filter(Boolean))];
+      out.push({de:r.de,ate:r.ate,exato:r.de===periodo?.de&&r.ate===periodo?.ate,revisao:r.revisao??null,tipo:r.tipo==='aprovacao'?'aprovacao':'previa',em:typeof r.em==='string'?r.em:'',
+        os:Object.fromEntries(ids.map(id=>[id,falhaAceita(id,r)?{falha:true,tipo:texto(decisoes[id]?.tipo)}:{falha:false}]))});
+    }
+    return out;
+  }
+  // A decisão para a entrega da O.S. no dia: o demonstrativo que cobre o dia e tem a O.S. (o do recorte exato primeiro, depois o de período mais recente).
+  function falhaComprovadaNoDia(demos, osId, dia) {
+    const id=String(osId??''),d=String(dia||'');
+    if(!id||!/^\d{4}-\d{2}-\d{2}$/.test(d))return null;
+    const x=lista(demos).filter(z=>z&&z.os&&Object.prototype.hasOwnProperty.call(z.os,id)&&d>=z.de&&d<=z.ate)
+      .sort((a,b)=>Number(!!b.exato)-Number(!!a.exato)||String(b.ate).localeCompare(String(a.ate))||String(b.em).localeCompare(String(a.em)))[0];
+    return x&&x.os[id].falha?{de:x.de,ate:x.ate,revisao:x.revisao,tipo:x.tipo,em:x.em,tipoFalha:x.os[id].tipo||''}:null;
+  }
+  // As entregas com a falha comprovada que vale ficam sem pontos (perda:'falha_comprovada'), como o retrabalho de instalação. Devolve cópias; o registro de origem não muda.
+  function comFalhasComprovadas(registros, demos, diaDe) {
+    const ds=lista(demos);
+    if(!ds.length)return lista(registros);
+    return lista(registros).map(r=>{
+      if(!r||typeof r!=='object'||r.perda)return r;
+      const f=falhaComprovadaNoDia(ds,r.osId||r.id,typeof diaDe==='function'?diaDe(r):r.dia);
+      return f?{...r,perda:'falha_comprovada',falhaComprovada:f}:r;
+    });
+  }
+  return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase,comissoesAcumuladas,TEXTO_ORIGEM_A_DEFINIR,demonstrativosVigentes,falhaComprovadaNoDia,comFalhasComprovadas};
 })();
 
 if (typeof module !== 'undefined') module.exports = COMISSAO;

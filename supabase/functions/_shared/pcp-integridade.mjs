@@ -2364,14 +2364,16 @@ export function podarCarimbosF15(r) {
     const { porId: _pi, porConta: _pc, revogadoPorId: _ri, revogadoPorConta: _rc, ...y } = x;
     return y;
   });
-  /* A TROCA DA ETAPA DE ORIGEM DO RETRABALHO (D-010) desce com o nome de quem
-     trocou e o motivo, sem o ID e sem o login. A volta sem eles não apaga
-     nada: o histórico só cresce pelo servidor (guardarOrigemRetrabalho). */
-  if (Array.isArray(out.etapaOrigemLog)) out.etapaOrigemLog = out.etapaOrigemLog.map(x => {
-    if (!objeto(x)) return x;
-    const { porId: _pi, porConta: _pc, ...y } = x;
-    return y;
-  });
+  /* A TROCA DA ETAPA DE ORIGEM DO RETRABALHO (D-010; revisão da onda a3, 7):
+     quem não é da gestão (montagem com senha, operação, comercial e o crachá
+     sem senha) recebe só a origem atual e a data: nem o nome, nem o login,
+     nem o ID, nem o motivo, nem o caminho das trocas. A volta sem eles não
+     apaga nada: o histórico só cresce pelo servidor (guardarOrigemRetrabalho
+     parte do gravado). A gestão (admin e pcp) não passa por aqui. */
+  if (Array.isArray(out.etapaOrigemLog)) {
+    const ultimo = [...out.etapaOrigemLog].reverse().find(objeto);
+    out.etapaOrigemLog = ultimo ? [{ para: String(ultimo.para ?? ''), em: String(ultimo.em ?? '') }] : [];
+  }
   // Quem finalizou pelo celular (revisão da E5) desce com o nome, sem o ID; a volta sem ele não apaga.
   if (objeto(out.finalizadaPorCampo)) {
     const { porId: _pi, ...x } = out.finalizadaPorCampo;

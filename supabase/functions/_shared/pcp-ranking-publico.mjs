@@ -12,7 +12,7 @@ export function podeVerRankingEquipe(cracha) {
 export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porValor = false) {
   const salvas = new Map((Array.isArray(cadastro) ? cadastro : []).filter(e => e?.id).map(e => [String(e.id), e]));
   const historico = !!fonte?.fechadoEm, grupos = new Map(), vistos = new Set();
-  let entregasConfirmadas = 0, equivalentes = 0, aConferir = 0, semBase = 0, semPontos = 0;
+  let entregasConfirmadas = 0, equivalentes = 0, aConferir = 0, semBase = 0, semPontos = 0, falhaComprovada = 0;
   for (const r of Array.isArray(fonte?.registros) ? fonte.registros : []) {
     if (!r?.id || vistos.has(String(r.id))) continue;
     vistos.add(String(r.id));
@@ -48,9 +48,11 @@ export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porVal
     entregasConfirmadas++;
     /* RETRABALHO DE INSTALAÇÃO (D-010, a régua das perdas): a entrega conta
        como entrega, sem pontos: nem produção nem valor. A apuração do servidor
-       já marcou (perda); o selo de antes da régua não tem a marca. */
-    const perde = r.perda === 'retrabalho_instalacao';
-    if (perde) semPontos++;
+       já marcou (perda); o selo de antes da régua não tem a marca. A FALHA
+       COMPROVADA que vale no demonstrativo da comissão (D-004 nos pontos,
+       revisão da onda a3) também: quem chama marca (COMISSAO.comFalhasComprovadas). */
+    const porFalha = r.perda === 'falha_comprovada', perde = r.perda === 'retrabalho_instalacao' || porFalha;
+    if (porFalha) falhaComprovada++; else if (perde) semPontos++;
     // A divisão pode estar conferida mesmo quando ainda falta a base da
     // parcial. Preserva a confirmação sem transformar a entrega em O.S. inteira.
     if (!fracao && !perde) { semBase++; continue; }
@@ -72,9 +74,9 @@ export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porVal
       const nome = texto(visual.nome || visual.equipeNome || g.membros.map(m => texto(m.nome, 70)).join(' + '));
       const row = grupos.get(chave) || { nome, logo:logoSeguro(salva?.logo || visual.logo), animal,
         emblema:texto(visual.emblema || '🤝', 12), cor:/^#[0-9a-f]{6}$/i.test(visual.cor) ? visual.cor : '',
-        tipo:g.equipeId ? 'equipe' : g.membros.length > 1 ? 'composicao' : 'individual', entregas:0, equivalentes:0, centavos:0, comValor:0, semPontos:0 };
+        tipo:g.equipeId ? 'equipe' : g.membros.length > 1 ? 'composicao' : 'individual', entregas:0, equivalentes:0, centavos:0, comValor:0, semPontos:0, falhaComprovada:0 };
       // A entrega que perdeu os pontos tem valor conhecido: zero (não fica fora do ranking de valor como "sem valor").
-      if (perde) { row.semPontos++; row.comValor++; }
+      if (perde) { if (porFalha) row.falhaComprovada++; else row.semPontos++; row.comValor++; }
       else if (valorValido) { row.centavos += valores[indice]; row.comValor++; }
       row.entregas++; if (!perde) row.equivalentes += fracao * g.cota / 10000;
       grupos.set(chave, row);
@@ -90,11 +92,11 @@ export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porVal
     anterior = medida;
     // Allowlist explícita: nem spread da fonte, nem membros, IDs ou dinheiro.
     return { posicao, nome:r.nome, tipo:r.tipo, logo:r.logo, animal:r.animal, emblema:r.emblema, cor:r.cor,
-      entregas:r.entregas, equivalentes:r.equivalentes, ...(r.semPontos ? {semPontos:r.semPontos} : {}), faltaLideranca:porValor ? null : numero(lider-r.equivalentes) };
+      entregas:r.entregas, equivalentes:r.equivalentes, ...(r.semPontos ? {semPontos:r.semPontos} : {}), ...(r.falhaComprovada ? {falhaComprovada:r.falhaComprovada} : {}), faltaLideranca:porValor ? null : numero(lider-r.equivalentes) };
   });
   return { ...(porValor ? {criterio:'valor-confirmado'} : {}), periodo:{de:texto(fonte?.periodo?.de,10),ate:texto(fonte?.periodo?.ate,10)},
     atualizadoEm:texto(fonte?.consultadoEm,40), fechado:historico,
     fechadoEm:historico ? texto(fonte.fechadoEm,40) : null,
     revisao:historico && Number.isInteger(fonte.revisao) ? fonte.revisao : null,
-    resumo:{equipes:equipes.length,entregasConfirmadas,equivalentes:numero(equivalentes),aConferir,semBase,...(semPontos ? {semPontos} : {})}, equipes };
+    resumo:{equipes:equipes.length,entregasConfirmadas,equivalentes:numero(equivalentes),aConferir,semBase,...(semPontos ? {semPontos} : {}),...(falhaComprovada ? {falhaComprovada} : {})}, equipes };
 }

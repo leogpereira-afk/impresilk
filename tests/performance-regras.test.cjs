@@ -363,7 +363,9 @@ const FORM = {validaDesde:'2026-11-01', lider2:'60', lider3:'40', ajudante3:'30'
 test('tela: sem cópia mostra a regra embutida como provisória e o exemplo ao vivo (dupla R$ 10.000: R$ 100, R$ 60, R$ 40)', () => {
   const html = tela('pcp').perfRegrasHTML();
   assert.match(html, /Provisória/);
-  assert.match(html, /Dupla<\/strong>, O\.S\. de R\$\s10\.000,00 no prazo: comissão total R\$\s100,00, líder R\$\s60,00, ajudante R\$\s40,00/);
+  // TROCADO DE PROPÓSITO (revisão da onda a3, B6): "no prazo" dava a entender que o atraso tira a comissão; o atraso não tira nada sozinho (D-011).
+  assert.match(html, /Dupla<\/strong>, O\.S\. de R\$\s10\.000,00 sem retrabalho de instalação: comissão total R\$\s100,00, líder R\$\s60,00, ajudante R\$\s40,00/);
+  assert.doesNotMatch(html, /no prazo: comissão total/);
   assert.match(html, /Trio<\/strong>.*comissão total R\$\s100,00, líder R\$\s40,00, cada ajudante R\$\s30,00/);
   assert.match(html, /\+5%/); assert.match(html, /-10%/);
   assert.match(html, /id="perf-regra-nova" disabled/, 'sem consultar o servidor não cria versão');

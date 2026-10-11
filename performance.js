@@ -90,8 +90,14 @@ const PERF = (() => {
      produção zero e valor zero (conhecido, não "sem valor"), para todas as
      pessoas e equipes dela. O retrabalho de outra etapa conta como sempre; o
      de origem a definir também, com a marca. Selo de antes da régua não tem
-     a marca e fica como foi. */
+     a marca e fica como foi.
+     A FALHA COMPROVADA (D-004 nos pontos, revisão da onda a3) entra do mesmo
+     jeito, com perda:'falha_comprovada': quem lê a decisão da comissão marca
+     a entrega (COMISSAO.comFalhasComprovadas) antes de chegar aqui. As contas
+     daqui (resumir, a Nota, o dossiê e os painéis) usam fracaoQuePontua e
+     comPerda: o total é sempre a soma das equipes. */
   const semPontos = r => !!(r && r.perda);
+  const porFalha = r => !!r && r.perda === 'falha_comprovada';
   const origemADefinir = r => !!r && r.retrabalho === true && !r.perda && Object.prototype.hasOwnProperty.call(r, 'etapaOrigem') && !r.etapaOrigem;
   const fracaoQuePontua = r => semPontos(r) ? 0 : fracaoRegistro(r);
   const comPerda = r => semPontos(r) ? {...r, valor:0} : r;
@@ -99,12 +105,12 @@ const PERF = (() => {
     const pessoas = new Map(), equipes = new Map();
     for (const bruto of registros) {
       if (validar(bruto.membros)) continue;
-      const r = comPerda(bruto), perde = semPontos(r), aDefinir = origemADefinir(r);
+      const r = comPerda(bruto), perde = semPontos(r), falha = porFalha(r), aDefinir = origemADefinir(r);
       const centavos = ratearCentavos(r.valor, r.membros);
       for (const [indice,p] of r.membros.entries()) {
-        const x = pessoas.get(p.chave) || {chave:p.chave,nome:p.nome,os:0,equivalentes:0,valor:0,semValor:0,confirmadas:0,semPontos:0,origemADefinir:0};
+        const x = pessoas.get(p.chave) || {chave:p.chave,nome:p.nome,os:0,equivalentes:0,valor:0,semValor:0,confirmadas:0,semPontos:0,falhaComprovada:0,origemADefinir:0};
         x.os++; if(r.confirmado) x.confirmadas++; x.equivalentes += p.percentual/100 * fracaoQuePontua(r);
-        if (perde) x.semPontos++;
+        if (falha) x.falhaComprovada++; else if (perde) x.semPontos++;
         if (aDefinir) x.origemADefinir++;
         if (r.valor == null) x.semValor++; else x.valor = (Math.round(x.valor*100) + centavos[indice])/100;
         pessoas.set(p.chave,x);
@@ -114,16 +120,24 @@ const PERF = (() => {
          dela no valor (a soma das cotas): a O.S. não conta inteira nas duas. */
       for (const g of gruposDoRegistro(r)) {
         const k = g.chave;
-        const x = equipes.get(k) || {chave:k,nome:g.equipeNome || g.membros.map(p=>p.nome).join(' + '),emblema:g.emblema || '🤝',logo:g.logo || '',animal:g.animal || '',cor:g.cor || '',salva:!!g.equipeId,membros:g.membros.map(p=>({chave:p.chave,nome:p.nome})),os:0,valor:0,semValor:0,confirmadas:0,semPontos:0,origemADefinir:0};
+        const x = equipes.get(k) || {chave:k,nome:g.equipeNome || g.membros.map(p=>p.nome).join(' + '),emblema:g.emblema || '🤝',logo:g.logo || '',animal:g.animal || '',cor:g.cor || '',salva:!!g.equipeId,membros:g.membros.map(p=>({chave:p.chave,nome:p.nome})),os:0,valor:0,semValor:0,confirmadas:0,semPontos:0,falhaComprovada:0,origemADefinir:0};
         x.os++; if(r.confirmado) x.confirmadas++;
         x.equivalentes = (x.equivalentes || 0) + fracaoQuePontua(r) * g.cota / 10000;
-        if (perde) x.semPontos++;
+        if (falha) x.falhaComprovada++; else if (perde) x.semPontos++;
         if (aDefinir) x.origemADefinir++;
         if (g.valor == null) x.semValor++; else x.valor = (Math.round(x.valor*100) + (g.inteira ? Math.round(g.valor*100) : g.centavos))/100;
         equipes.set(k,x);
       }
     }
     return {pessoas:[...pessoas.values()].sort((a,b)=>b.equivalentes-a.equivalentes || a.nome.localeCompare(b.nome)),equipes:[...equipes.values()].sort((a,b)=>b.os-a.os || a.nome.localeCompare(b.nome))};
+  };
+  /* O VALOR DAS ENTREGAS CONFIRMADAS (o cabeçalho do Relatório; revisão da
+     onda a3, M1): a mesma conta das equipes, com a entrega sem pontos em zero
+     (comPerda) e em centavos. Somava o valor cru e passava a soma das equipes. */
+  const valorDasConfirmadas = registros => {
+    const rs = (registros || []).filter(r => r && r.confirmado && !validar(r.membros)).map(comPerda);
+    const conhecidos = rs.filter(r => r.valor != null && Number.isFinite(r.valor));
+    return {valor:conhecidos.reduce((n, r) => n + Math.round(r.valor * 100), 0) / 100, semValor:rs.length - conhecidos.length, confirmadas:rs.length};
   };
   // Diagnóstico sem escrita: cada pendência mantém a chave da entrega para abrir a conferência certa.
   function auditar(registros) {
@@ -167,9 +181,9 @@ const PERF = (() => {
       // Com duas equipes na divisão (F11), a O.S. entra no dossiê de cada uma, com a parte dela.
       for(const eq of gruposDoRegistro(comPerda(r))){
         const chave=eq.chave;
-        const g=grupos.get(chave)||{chave,nome:eq.equipeNome || 'Composição avulsa',emblema:eq.emblema||'🤝',logo:eq.logo||'',animal:eq.animal||'',cor:eq.cor||'',registros:[],membros:new Map(),confirmadas:0,valor:0,semValor:0,retrabalhos:0,semPontos:0,origemADefinir:0};
+        const g=grupos.get(chave)||{chave,nome:eq.equipeNome || 'Composição avulsa',emblema:eq.emblema||'🤝',logo:eq.logo||'',animal:eq.animal||'',cor:eq.cor||'',registros:[],membros:new Map(),confirmadas:0,valor:0,semValor:0,retrabalhos:0,semPontos:0,falhaComprovada:0,origemADefinir:0};
         g.registros.push(r);if(r.os?.retrabalho || r.retrabalho)g.retrabalhos++;
-        if(semPontos(r))g.semPontos++;
+        if(porFalha(r))g.falhaComprovada++;else if(semPontos(r))g.semPontos++;
         if(origemADefinir(r))g.origemADefinir++;
         if(r.confirmado){g.confirmadas++;if(eq.valor==null)g.semValor++;else g.valor=(Math.round(g.valor*100)+(eq.inteira?Math.round(eq.valor*100):eq.centavos))/100;}
         for(const m of eq.membros){const pessoa=g.membros.get(m.chave)||{chave:m.chave,nome:m.nome,entregas:0,confirmadas:0,equivalentes:0};pessoa.entregas++;if(r.confirmado){pessoa.confirmadas++;pessoa.equivalentes+=m.percentual/100 * fracaoQuePontua(r);}g.membros.set(m.chave,pessoa);}
@@ -600,7 +614,7 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
     }
     return [...por.values()];
   };
-  return {auditar,chaveComposicao,registrosPorComposicao,coberturaEquipes,fracaoRegistro,semPontos,origemADefinir,unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,avaliarGeral,valoresConfirmados,REGRA_NOTA_VALOR,criteriosValidos,carroDaVolta,CRITERIOS_PADRAO,COBERTURA_MINIMA,
+  return {auditar,chaveComposicao,registrosPorComposicao,coberturaEquipes,fracaoRegistro,fracaoQuePontua,comPerda,semPontos,porFalha,origemADefinir,valorDasConfirmadas,unirMembros,unicos,iguais,ratearCentavos,validar,composicao,resumir,incluiPessoa,dossie,equipeDoRegistro,comEquipes,composicaoCom,ranquear,avaliar,avaliarGeral,valoresConfirmados,REGRA_NOTA_VALOR,criteriosValidos,carroDaVolta,CRITERIOS_PADRAO,COBERTURA_MINIMA,
     ratearGrupos,gruposDoRegistro,chavesDeEquipe,composicaoApurada,equipeDaComposicao,equipeSugeridaDe,gruposApurados,equipesDaDivisao,sugestaoApurada,
     ANIMAIS,CORES,EMBLEMAS,LOGO_ANIMAL,COR_ANIMAL,animalDe,corValida,iconeEquipe,nomeEquipeNorm,conferirEquipes};
 })();
@@ -1725,11 +1739,15 @@ function perfEditarCriterios() {
 const PERF_MEDALHAS = {1: '🥇', 2: '🥈', 3: '🥉'};
 /* AS MARCAS DA RÉGUA DAS PERDAS NO RANKING (D-010): a entrega com
    retrabalho de instalação conta como entrega, sem pontos; a de origem a
-   definir conta como sempre, com a marca, até a gestão definir a origem. */
+   definir conta como sempre, com a marca, até a gestão definir a origem. A
+   falha comprovada julgada no demonstrativo também tira os pontos (D-004;
+   revisão da onda a3). */
 function perfMarcasReguaHTML(x) {
   if (!x) return '';
-  const sem = Number(x.semPontos) || 0, def = Number(x.origemADefinir) || 0;
-  return `${sem ? `<span class="perf-sem-pontos">${sem} sem pontos: retrabalho de instalação</span>` : ''}${def ? `<span class="perf-origem-definir">${def} com retrabalho de origem a definir</span>` : ''}`;
+  const sem = Number(x.semPontos) || 0, falha = Number(x.falhaComprovada) || 0, def = Number(x.origemADefinir) || 0;
+  // Numa linha própria (revisão da onda a3, M4): a 768 e a 1024 px o selo dividia o espaço com a distância e quebrava palavra no meio.
+  const marcas = `${sem ? `<span class="perf-sem-pontos">${sem} sem pontos: retrabalho de instalação</span>` : ''}${falha ? `<span class="perf-sem-pontos">${falha} sem pontos: falha comprovada</span>` : ''}${def ? `<span class="perf-origem-definir">${def} com retrabalho de origem a definir</span>` : ''}`;
+  return marcas ? `<span class="perf-marcas-regua">${marcas}</span>` : '';
 }
 /* O PÓDIO É CORTADO PELA POSIÇÃO, não pela ordem da lista. Com cinco empatados
    em 1º, os três primeiros em ordem alfabética ganhavam medalha e card grande e
@@ -1890,9 +1908,14 @@ function perfJornadaHTML(regs,c) {
     <details class="perf-programa"><summary>Progresso da conferência e programa de reconhecimento</summary><div class="perf-jornada-etapas">${etapa('Participação confirmada',a.confirmadas,a.total,'Quem entregou e quanto fez')}${etapa('Valores identificados',a.total-a.semValor,a.total,'Base líquida para a conferência')}${etapa('Voltas conferidas',a.voltasConferidas,a.voltas,a.voltas?'Carro, organização, equipamentos e avarias':'Nenhuma volta aplicável no período')}</div><p>Outubro de 2026 é teste. Início efetivo em novembro, prêmios, rateio interno, trios e desempates dependem de configuração explícita e validação da gestão. Participações confirmadas não significam todos os itens entregues nem qualidade comprovada.</p><p>Comissão prevista: 1% do serviço efetivamente entregue. O retrabalho de instalação zera sozinho os pontos e a comissão da O.S. afetada; o de medição, arte ou produção não tira nada da instalação. Atraso, retorno antecipado, serviço incompleto e má condução ficam registrados e só zeram a O.S. com falha comprovada, decidida no demonstrativo da comissão. O regulamento e as ocorrências precisam estar conferidos antes da apuração final.</p><p>O repasse de 20% para a montagem interna sem retrabalho e a divisão de 60%/40% do restante precisam constar da apuração financeira. Esta classificação operacional não libera pagamentos nem determina os premiados.</p></details>
   </section>`;
 }
+/* OS APONTAMENTOS DOS LANÇAMENTOS (revisão da onda a3, B5): a aba Conferência
+   abria com a lista inteira destes apontamentos aberta, e o primeiro Conferir
+   ficava a mais de mil pixels do topo. Agora o quadro vem fechado, depois da
+   Conferência por entrega, e os itens se chamam apontamentos (o "Ponto de
+   atenção" é o das perdas, no alto da Performance). */
 function perfAuditoriaHTML(regs) {
-  const a=PERF.auditar(regs), pode=perfPodeEditar()&&!perfFonteAtual()?.fechadoEm;
-  return `<details class="perf-auditoria" ${a.pendencias.length?'open':''}><summary>Conferência dos lançamentos · ${a.pendencias.length?`${a.pendencias.length} pontos de atenção`:'sem pendência nas verificações automáticas'}</summary><p>Confere participantes, valores, repetição de registros, parciais e volta do carro. Não substitui a verificação do serviço entregue.</p>${a.pendencias.length?`<ul>${a.pendencias.map(p=>`<li><span><strong>O.S. ${esc(p.numero||'a conferir')}</strong> · ${esc(p.motivo)}</span>${pode&&regs.some(r=>r.id===p.id)?`<button type="button" class="inline-link" ${p.tipo==='volta'?'data-perf-audit-volta':['sem-valor','valor-erp'].includes(p.tipo)?'data-perf-os':'data-perf-audit-id'}="${esc(p.id)}">${p.tipo==='volta'?'Conferir volta':['sem-valor','valor-erp'].includes(p.tipo)?'Ver origem':'Conferir entrega'}</button>`:''}</li>`).join('')}</ul>`:'<p>As informações disponíveis estão consistentes nesses critérios. O fechamento continua sujeito à revisão da gestão.</p>'}</details>`;
+  const a=PERF.auditar(regs), pode=perfPodeEditar()&&!perfFonteAtual()?.fechadoEm, n=a.pendencias.length;
+  return `<details class="perf-auditoria"><summary>Apontamentos dos lançamentos · ${n?`${n} ${n===1?'apontamento':'apontamentos'} a revisar`:'nenhum nas verificações automáticas'}</summary><p>Confere participantes, valores, repetição de registros, parciais e volta do carro. Não substitui a verificação do serviço entregue.</p>${a.pendencias.length?`<ul>${a.pendencias.map(p=>`<li><span><strong>O.S. ${esc(p.numero||'a conferir')}</strong> · ${esc(p.motivo)}</span>${pode&&regs.some(r=>r.id===p.id)?`<button type="button" class="inline-link" ${p.tipo==='volta'?'data-perf-audit-volta':['sem-valor','valor-erp'].includes(p.tipo)?'data-perf-os':'data-perf-audit-id'}="${esc(p.id)}">${p.tipo==='volta'?'Conferir volta':['sem-valor','valor-erp'].includes(p.tipo)?'Ver origem':'Conferir entrega'}</button>`:''}</li>`).join('')}</ul>`:'<p>As informações disponíveis estão consistentes nesses critérios. O fechamento continua sujeito à revisão da gestão.</p>'}</details>`;
 }
 // Gestão atual e associação histórica são atos distintos.
 function perfGestaoEquipesHTML(){
@@ -1936,10 +1959,24 @@ function perfCompartilharRanking() {
   };
 }
 /* AS ENTREGAS DO PERÍODO, uma régua só para o ranking, a Conferência, o selo
-   da aba e a aba de Perdas (perdas.js): as mesmas que o fechamento sela. */
+   da aba e a aba de Perdas (perdas.js): as mesmas que o fechamento sela, com
+   a falha comprovada que vale no demonstrativo da comissão (perfComFalhas). */
 function perfRegsDoPeriodo() {
   const c=perfConfig(), f=periodoOuMes('_fPerf');
-  return perfUnirPessoas(perfLista().filter(o=>OPERACAO.emIntervalo(diaEntrega(o),f.de,f.ate)).map(o=>perfRegistro(o,c)));
+  return perfComFalhas(perfUnirPessoas(perfLista().filter(o=>OPERACAO.emIntervalo(diaEntrega(o),f.de,f.ate)).map(o=>perfRegistro(o,c))));
+}
+/* A FALHA COMPROVADA NOS PONTOS (D-004: "zera só os pontos e a comissão da
+   O.S. afetada"; revisão da onda a3). A decisão de falha comprovada da
+   revisão que vale no demonstrativo da comissão que cobre a entrega (a mesma
+   consulta e a mesma escolha da aba Perdas, perdasFalhasDemos) tira os pontos
+   da O.S. no ranking, na Nota, na Conferência, no Relatório e na TV, pela
+   régua do motor (COMISSAO.comFalhasComprovadas, a mesma do ranking dos
+   funcionários no servidor). Sem as decisões (montagem, operação, consulta
+   que não chegou), fica como está. O fechamento e o hash não mudam. */
+function perfComFalhas(regs){
+  const demos=typeof perdasFalhasDemos==='function'?perdasFalhasDemos():null;
+  if(!Array.isArray(demos)||!demos.length||typeof COMISSAO==='undefined'||!COMISSAO||typeof COMISSAO.comFalhasComprovadas!=='function')return regs;
+  return COMISSAO.comFalhasComprovadas(regs,demos,r=>r.dia||(r.os&&typeof diaEntrega==='function'?diaEntrega(r.os):''));
 }
 /* A CONFERÊNCIA EM DESTAQUE (pedido do dono, 11/10/2026: "a parte de
    conferência de notas, ela tem que ser bem destacada"). Ela morava no fim da
@@ -1982,7 +2019,7 @@ function performanceEquipesHTML() {
     ${modo==='pessoas' ? perfRankingPessoasHTML(regs, c) : perfRankingEquipesHTML(regs, c, modo)}
     <details class="perf-method"><summary>Jornada e cobertura</summary>${perfJornadaHTML(regs,c)}</details>
     ${typeof operacaoPrioridadesHTML==='function'?operacaoPrioridadesHTML():''}
-    <details class="perf-method"><summary>Como interpretar os indicadores</summary><p>Entregas conta as O.S. em que a pessoa participou; não some essa coluna entre pessoas. O.S. equivalentes considera os percentuais e a parcela do valor líquido entregue. As parciais somam no máximo uma O.S.; sem valor dos itens, a parcela fica a conferir. Divisões sugeridas ainda não foram confirmadas. Valores rateados não são faturamento pessoal nem bônus. A entrega com retrabalho de instalação conta como entrega, sem pontos: nem produção nem valor. Qualidade e complexidade precisam de revisão. ${esc(perfFonteTexto())}</p></details>
+    <details class="perf-method"><summary>Como interpretar os indicadores</summary><p>Entregas conta as O.S. em que a pessoa participou; não some essa coluna entre pessoas. O.S. equivalentes considera os percentuais e a parcela do valor líquido entregue. As parciais somam no máximo uma O.S.; sem valor dos itens, a parcela fica a conferir. Divisões sugeridas ainda não foram confirmadas. Valores rateados não são faturamento pessoal nem bônus. A entrega com retrabalho de instalação, ou com falha comprovada julgada no demonstrativo da comissão, conta como entrega, sem pontos: nem produção nem valor. Qualidade e complexidade precisam de revisão. ${esc(perfFonteTexto())}</p></details>
     ${perfCoberturaHTML(regs, f)}
     ${typeof perfCasaTemAbaConferencia==='function'?'':performanceConferenciaHTML({embutida:true})}</section>`;
 }
@@ -2015,10 +2052,10 @@ function performanceConferenciaHTML({embutida=false}={}) {
     <div class="perf-toolbar"><h3 class="perf-conferencia-titulo">Conferência das entregas</h3><details class="perf-pdf-principal"><summary>Exportar</summary><button type="button" class="btn-ghost btn-sm" id="perf-pdf">PDF da conferência</button></details></div></div>
     ${perfAvisosHTML(true)}`;
   return `${embutida?'<div class="perf-conferencia-embutida">':'<section class="perf-workspace perf-conferencia">'}${cabeca}
-    ${perfAuditoriaHTML(regs)}
     <section class="perf-entregas" aria-labelledby="perf-entregas-titulo"><div class="perf-entregas-cabeca"><h3 id="perf-entregas-titulo">Conferência por entrega</h3><p>Quem fez cada entrega e com qual percentual. É daqui que o ranking tira os nomes.</p></div>
       <div class="perf-filtros"><label>Situação <select id="perf-situacao"><option value="">Todas</option><option value="pendente">A conferir</option><option value="confirmada">Confirmadas</option><option value="sem-equipe">Sem participantes</option><option value="avulsos">Avulsos / vínculo a conferir</option><option value="desatualizada">Divisão desatualizada ou a conferir no RH</option><option value="invalida">Participação inconsistente</option>${verValor?'<option value="sem-valor">Sem valor</option>':''}</select></label><label class="perf-busca">Buscar O.S., cliente ou pessoa <input id="perf-busca-os" type="search" value="${esc(pesquisa)}" placeholder="Digite para localizar"></label><button type="button" class="btn-ghost" id="perf-limpar">Limpar filtros</button><span id="perf-recorte" role="status"></span></div>
-      <div class="casa-tabela-wrap"><table class="casa-tabela perf-conf-tabela"><thead><tr><th scope="col">O.S. / Cliente</th><th scope="col">Data</th><th scope="col">Equipe e percentuais</th><th scope="col">Situação e volta</th><th scope="col"><span class="perf-sr">Ações</span></th></tr></thead><tbody>${linhas.map(r=>{const st=situacao(r);return `<tr data-perf-id="${esc(r.id)}"><td><button type="button" class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button><small class="bloco">${esc(r.os.cliente)}</small>${r.entregaId?`<small class="bloco conf-item-resumo">${esc(r.itensEntrega.map(i=>i.descricao+' × '+i.qtde).join('; '))}${r.saldoItens?` · ${r.saldoItens} item(ns) ainda a conferir`:""}</small>`:""}</td><td>${esc(diaEntrega(r.os).split('-').reverse().join('/'))}</td><td>${equipeTxt(r)}${r.membros.map(p=>`${esc(p.nome)} · ${perfFormato(p.percentual)}%`).join('<br>') || '<span class="perf-nada">Sem equipe</span>'}</td><td><span class="badge perf-st-${st[0]}">${st[1]}</span>${r.estadoEntrega?`<small class="bloco">${esc(r.estadoEntrega.resumo)}</small>`:""}${r.erroConferencia?`<small class="bloco">${esc(r.erroConferencia)}</small>`:''}${perfRetrabalhoTxt(r)?`<small class="bloco perf-retrab-regua">${esc(perfRetrabalhoTxt(r))}</small>`:''}<small class="bloco perf-volta">${perfVoltaTxt(r.retornoConf)}</small>${verValor?`<small class="bloco">${r.valor==null?'Sem valor':esc(dinheiroCasa(r.valor))}</small>`:''}</td><td>${podeConferir?`<button type="button" class="btn-ghost btn-sm" data-perf-part="${esc(r.id)}">Conferir</button>`:''}</td></tr>`;}).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div></section>${embutida?'</div>':'</section>'}`;
+      <div class="casa-tabela-wrap"><table class="casa-tabela perf-conf-tabela"><thead><tr><th scope="col">O.S. / Cliente</th><th scope="col">Data</th><th scope="col">Equipe e percentuais</th><th scope="col">Situação e volta</th><th scope="col"><span class="perf-sr">Ações</span></th></tr></thead><tbody>${linhas.map(r=>{const st=situacao(r);return `<tr data-perf-id="${esc(r.id)}"><td><button type="button" class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button><small class="bloco">${esc(r.os.cliente)}</small>${r.entregaId?`<small class="bloco conf-item-resumo">${esc(r.itensEntrega.map(i=>i.descricao+' × '+i.qtde).join('; '))}${r.saldoItens?` · ${r.saldoItens} item(ns) ainda a conferir`:""}</small>`:""}</td><td>${esc(diaEntrega(r.os).split('-').reverse().join('/'))}</td><td>${equipeTxt(r)}${r.membros.map(p=>`${esc(p.nome)} · ${perfFormato(p.percentual)}%`).join('<br>') || '<span class="perf-nada">Sem equipe</span>'}</td><td><span class="badge perf-st-${st[0]}">${st[1]}</span>${r.estadoEntrega?`<small class="bloco">${esc(r.estadoEntrega.resumo)}</small>`:""}${r.erroConferencia?`<small class="bloco">${esc(r.erroConferencia)}</small>`:''}${perfRetrabalhoTxt(r)?`<small class="bloco perf-retrab-regua">${esc(perfRetrabalhoTxt(r))}</small>`:''}${perfFalhaTxt(r)?`<small class="bloco perf-retrab-regua">${esc(perfFalhaTxt(r))}</small>`:''}<small class="bloco perf-volta">${perfVoltaTxt(r.retornoConf)}</small>${verValor?`<small class="bloco">${r.valor==null?'Sem valor':esc(dinheiroCasa(r.valor))}</small>`:''}</td><td>${podeConferir?`<button type="button" class="btn-ghost btn-sm" data-perf-part="${esc(r.id)}">Conferir</button>`:''}</td></tr>`;}).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div></section>
+    ${perfAuditoriaHTML(regs)}${embutida?'</div>':'</section>'}`;
 }
 function wirePerformanceEquipes(el) {
   el.querySelectorAll('[data-perf-dash-vista]').forEach(b=>b.onclick=()=>{STATE._perfDashVista=b.dataset.perfDashVista;renderPerformanceCasa();});
@@ -2141,17 +2178,19 @@ function performanceRelatorioHTML() {
   // relatório: um quadro com o nome e outro com a composição crua seria a
   // mesma equipe parecendo duas.
   // (a mesma pessoa numa linha só, como no ranking)
-  const regs=PERF.comEquipes(perfUnirPessoas(perfLista().filter(o=>OPERACAO.emIntervalo(diaEntrega(o),f.de,f.ate)).map(o=>perfRegistro(o,c))),c.equipes,perfOpcoesEquipe());
+  // As mesmas entregas do ranking (perfRegsDoPeriodo), com a falha comprovada que vale.
+  const regs=PERF.comEquipes(perfRegsDoPeriodo(),c.equipes,perfOpcoesEquipe());
   const validos=regs.filter(r=>!PERF.validar(r.membros)), confirmados=validos.filter(r=>r.confirmado);
   const resumo=PERF.resumir(validos), confirmado=PERF.resumir(confirmados), grupos=PERF.dossie(regs);
   const semEquipe=regs.filter(r=>!r.membros.length).length, inconsistentes=regs.length-validos.length-semEquipe;
   const cobertura=regs.length?Math.round(confirmados.length/regs.length*100):0;
-  const semValor=confirmados.filter(r=>r.valor==null).length,valor=confirmados.reduce((n,r)=>n+(r.valor??0),0);
+  // A conta das equipes (revisão da onda a3, M1): a entrega sem pontos entra com valor zero.
+  const {semValor,valor}=PERF.valorDasConfirmadas(confirmados);
   const fmtDia=v=>String(v||'').slice(0,10).split('-').reverse().join('/');
   const valorTexto=(n,conhecidas,total)=>!total?'A conferir':!conhecidas?'Sem valor':dinheiroCasa(n)+(conhecidas<total?' · parcial':'');
   const tabela=(titulo,linhas,equipe=false)=>`<section class="perf-report-section"><h3>${titulo}</h3><p class="metricas-nota">${equipe?'Cada entrega conta uma vez na equipe.':'O.S. equivalentes somam os percentuais confirmados: duas participações de 50% equivalem a uma O.S.'}</p><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>${equipe?'Equipe':'Pessoa'}</th><th>Entregas</th><th>Confirmadas</th><th>A conferir</th>${equipe?'':'<th>O.S. equivalentes confirmadas</th>'}<th>Valor confirmado${equipe?'':' rateado'}</th></tr></thead><tbody>${linhas.map(p=>{const cf=(equipe?confirmado.equipes:confirmado.pessoas).find(x=>x.chave===p.chave);return `<tr><td><strong>${esc(p.nome)}</strong></td><td>${p.os}</td><td>${p.confirmadas}</td><td>${p.os-p.confirmadas}</td>${equipe?'':`<td>${perfFormato(cf?.equivalentes || 0)}</td>`}<td>${!cf?'—':cf.semValor===cf.os?'Sem valor':dinheiroCasa(cf.valor)+(cf.semValor?' (parcial)':'')}</td></tr>`;}).join('') || `<tr><td colspan="${equipe?5:6}">Sem participantes registrados neste período.</td></tr>`}</tbody></table></div></section>`;
-  const equipes=grupos.map(g=>`<article class="perf-team-report${perfCorClasse(g)}"><header>${perfLogoHTML(g,'perf-emblema')}<div><h4>${esc(g.nome)}</h4><p>${g.membros.length} participantes no período · ${g.registros.length} entrega${g.registros.length===1?'':'s'}</p></div><strong>${valorTexto(g.valor,g.confirmadas-g.semValor,g.confirmadas)}<small>valor confirmado da equipe</small></strong></header><div class="perf-team-numbers"><span><b>${g.confirmadas}</b> ${g.confirmadas===1?'confirmada':'confirmadas'}</span><span><b>${g.registros.length-g.confirmadas}</b> a conferir</span><span><b>${g.retrabalhos}</b> com marca de retrabalho</span>${g.semPontos?`<span><b>${g.semPontos}</b> sem pontos (retrabalho de instalação)</span>`:''}${g.origemADefinir?`<span><b>${g.origemADefinir}</b> com origem a definir</span>`:''}</div><div class="perf-member-list">${g.membros.map(m=>`<span><strong>${esc(m.nome)}</strong><small>${m.entregas} entrega${m.entregas===1?'':'s'} · ${m.confirmadas} ${m.confirmadas===1?'confirmada':'confirmadas'} · ${perfFormato(m.equivalentes)} O.S. equivalentes</small></span>`).join('')}</div><details><summary>Ver O.S., percentuais e dados de conferência</summary><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / cliente</th><th>Entrega</th><th>Participação na entrega</th><th>Valor da entrega</th><th>Conferência</th></tr></thead><tbody>${g.registros.map(r=>`<tr><td><button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os?.numero || r.id)}</button><small class="bloco">${esc(r.os?.cliente || '')}</small>${r.entregaId?`<small class="bloco">${esc(r.itensEntrega.map(i=>i.descricao+' × '+i.qtde).join('; '))}</small>`:''}${perfRetrabalhoTxt(r)?`<small class="bloco">${esc(perfRetrabalhoTxt(r))}</small>`:''}</td><td>${fmtDia(diaEntrega(r.os))}</td><td>${r.membros.map(m=>`${esc(m.nome)} · <strong>${perfFormato(m.percentual)}%</strong>`).join('<br>')}</td><td>${r.valor==null?'Sem valor':dinheiroCasa(r.valor)}<small class="bloco">${esc(r.origemValor || 'Base da apuração')}</small></td><td>${r.confirmado?'Confirmada':r.fonte==='alocacao-desatualizada'?'Divisão desatualizada':r.fonte==='alocacao-conferir-rh'?'Divisão a conferir no RH':'Divisão sugerida'}${r.por?`<small class="bloco">${esc(r.por)} · ${fmtDia(r.em)}</small>`:''}${r.estadoEntrega?`<small class="bloco">${esc(r.estadoEntrega.resumo)}</small>`:''}${r.obs?`<small class="bloco">${esc(r.obs)}</small>`:''}</td></tr>`).join('')}</tbody></table></div></details></article>`).join('');
-  const painel=typeof PERF_DASH==='undefined'?'':PERF_DASH.html(PERF_DASH.montar(regs,{perf:PERF,periodo:f,diaDe:r=>r.dia||diaEntrega(r.os),verValores:podeVerValores()}),{vista:STATE._perfDashVista,granularidade:STATE._perfDashGranularidade,podeConferir:perfPodeEditar()&&!perfFonteAtual()?.fechadoEm,fonte:perfFonteTexto()});
+  const equipes=grupos.map(g=>`<article class="perf-team-report${perfCorClasse(g)}"><header>${perfLogoHTML(g,'perf-emblema')}<div><h4>${esc(g.nome)}</h4><p>${g.membros.length} participantes no período · ${g.registros.length} entrega${g.registros.length===1?'':'s'}</p></div><strong>${valorTexto(g.valor,g.confirmadas-g.semValor,g.confirmadas)}<small>valor confirmado da equipe</small></strong></header><div class="perf-team-numbers"><span><b>${g.confirmadas}</b> ${g.confirmadas===1?'confirmada':'confirmadas'}</span><span><b>${g.registros.length-g.confirmadas}</b> a conferir</span><span><b>${g.retrabalhos}</b> com marca de retrabalho</span>${g.semPontos?`<span><b>${g.semPontos}</b> sem pontos (retrabalho de instalação)</span>`:''}${g.falhaComprovada?`<span><b>${g.falhaComprovada}</b> sem pontos (falha comprovada)</span>`:''}${g.origemADefinir?`<span><b>${g.origemADefinir}</b> com origem a definir</span>`:''}</div><div class="perf-member-list">${g.membros.map(m=>`<span><strong>${esc(m.nome)}</strong><small>${m.entregas} entrega${m.entregas===1?'':'s'} · ${m.confirmadas} ${m.confirmadas===1?'confirmada':'confirmadas'} · ${perfFormato(m.equivalentes)} O.S. equivalentes</small></span>`).join('')}</div><details><summary>Ver O.S., percentuais e dados de conferência</summary><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / cliente</th><th>Entrega</th><th>Participação na entrega</th><th>Valor da entrega</th><th>Conferência</th></tr></thead><tbody>${g.registros.map(r=>`<tr><td><button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os?.numero || r.id)}</button><small class="bloco">${esc(r.os?.cliente || '')}</small>${r.entregaId?`<small class="bloco">${esc(r.itensEntrega.map(i=>i.descricao+' × '+i.qtde).join('; '))}</small>`:''}${perfRetrabalhoTxt(r)?`<small class="bloco">${esc(perfRetrabalhoTxt(r))}</small>`:''}${perfFalhaTxt(r)?`<small class="bloco">${esc(perfFalhaTxt(r))}</small>`:''}</td><td>${fmtDia(diaEntrega(r.os))}</td><td>${r.membros.map(m=>`${esc(m.nome)} · <strong>${perfFormato(m.percentual)}%</strong>`).join('<br>')}</td><td>${r.valor==null?'Sem valor':dinheiroCasa(r.valor)}<small class="bloco">${esc(r.origemValor || 'Base da apuração')}</small></td><td>${r.confirmado?'Confirmada':r.fonte==='alocacao-desatualizada'?'Divisão desatualizada':r.fonte==='alocacao-conferir-rh'?'Divisão a conferir no RH':'Divisão sugerida'}${r.por?`<small class="bloco">${esc(r.por)} · ${fmtDia(r.em)}</small>`:''}${r.estadoEntrega?`<small class="bloco">${esc(r.estadoEntrega.resumo)}</small>`:''}${r.obs?`<small class="bloco">${esc(r.obs)}</small>`:''}</td></tr>`).join('')}</tbody></table></div></details></article>`).join('');
+  const painel=typeof PERF_DASH==='undefined'?'':PERF_DASH.html(PERF_DASH.montar(regs,{perf:PERF,periodo:f,diaDe:r=>r.dia||diaEntrega(r.os),verValores:podeVerValores(),podePerdas:typeof perdasPode==='function'&&perdasPode()}),{vista:STATE._perfDashVista,granularidade:STATE._perfDashGranularidade,podeConferir:perfPodeEditar()&&!perfFonteAtual()?.fechadoEm,fonte:perfFonteTexto()});
   return `${painel}<details class="perf-report-detail"><summary>Detalhamento por equipe, pessoa e entrega</summary><section class="perf-report"><header class="perf-report-heading"><div><span class="perf-report-eyebrow">PRODUÇÃO · PESSOAS · EQUIPES</span><h3>Relatório de performance</h3><p>${fmtDia(f.de)} a ${fmtDia(f.ate)} · ${resumo.pessoas.length} participantes · ${grupos.length} ${grupos.length===1?'equipe / composição utilizada':'equipes / composições utilizadas'}</p></div><span class="perf-report-state">${perfFonteAtual()?.fechadoEm?'Fechamento preservado':'Apuração em acompanhamento'}</span></header><div class="perf-summary"><div><b>${regs.length}</b><span>entregas no período</span></div><div><b>${cobertura}%</b><span>com participação confirmada (${confirmados.length})</span></div><div><b>${semEquipe}</b><span>sem equipe informada</span></div></div><div class="perf-report-value"><span>Valor das entregas com participação confirmada</span><strong>${valorTexto(valor,confirmados.length-semValor,confirmados.length)}</strong><small>${semValor} entrega(s) confirmada(s) sem valor. Valores por pessoa são rateados; não representam pagamento ou bônus.</small></div><p class="perf-coverage">${!regs.length?'Nenhuma instalação registrada neste período.':confirmados.length<regs.length?`Apuração parcial: ${regs.length-confirmados.length} ${regs.length-confirmados.length===1?'participação':'participações'} a conferir, incluindo ${semEquipe} sem equipe e ${inconsistentes} inconsistentes.`:'Participações conferidas. Quantidade de entregas não mede sozinha qualidade, esforço ou complexidade.'}</p><section class="perf-report-section"><h3>Equipes e composição real do período</h3><p class="metricas-nota">Participantes das entregas, incluindo avulsos. Os percentuais variam por O.S.; o cadastro atual da equipe não reescreve o histórico.</p>${equipes || '<p>Nenhuma equipe com participação válida registrada no período.</p>'}</section>${tabela('Participação por pessoa',resumo.pessoas)}${tabela('Resumo das equipes',resumo.equipes,true)}<details class="perf-report-section perf-report-pendencias"><summary>Entregas que ainda não permitem apuração por pessoa</summary><p>${semEquipe} sem equipe · ${inconsistentes} com percentuais inconsistentes.</p><ul>${regs.filter(r=>PERF.validar(r.membros)).map(r=>`<li>O.S. <button class="inline-link" data-perf-os="${esc(r.id)}">${esc(r.os.numero)}</button> · ${esc(r.os.cliente)} · ${r.membros.length?'rever percentuais':'informar participantes'}</li>`).join('') || '<li>Nenhuma pendência de composição.</li>'}</ul></details><p class="metricas-nota">Entregas inclui participações sugeridas e confirmadas. A mesma O.S. pode aparecer para mais de uma pessoa; não some a coluna entre colaboradores. Valores incluem somente participações confirmadas, sem duplicar o valor entre pessoas. Não representam lucro, recebimento ou bônus. Retrabalho indica a marca registrada, não uma avaliação automática do colaborador. ${esc(perfFonteTexto())}</p></section></details>`;
 }
 
@@ -2173,8 +2212,9 @@ function perfPct(bp) { return String(Number(bp) / 100).replace('.', ',') + '%'; 
 // "60", "60,5" ou "60.5" em 0,01%. Vazio ou texto vira NaN, que o validador recusa com a frase certa.
 function perfPctBp(v) { const t = String(v ?? '').trim().replace(',', '.'); if (!t || !/^-?\d+(\.\d+)?$/.test(t)) return NaN; return Math.round(Number(t) * 100); }
 function perfCentavos(c) { return dinheiroCasa((Number(c) || 0) / 100); }
-/* O EXEMPLO AO VIVO: dupla, O.S. de R$ 10.000 no prazo. Sai do motor de
-   divisão e da comissão da regra; a O.S. que não pontua não paga ninguém. */
+/* O EXEMPLO AO VIVO: dupla, O.S. de R$ 10.000 sem retrabalho de instalação.
+   Sai do motor de divisão e da comissão da regra; a O.S. que não pontua não
+   paga ninguém. Dizia "no prazo", e o atraso não tira nada sozinho (D-011). */
 function perfRegraExemploHTML(regra) {
   if (!regra || REGRAS.validarRegra(regra)) return '<p class="perf-coverage">Corrija a regra para ver o exemplo.</p>';
   const valor = 1000000;
@@ -2183,7 +2223,7 @@ function perfRegraExemploHTML(regra) {
     const ajTxt = !aj.length ? '' : new Set(aj.map(p => p.centavos)).size === 1
       ? `, ${aj.length === 1 ? 'ajudante' : 'cada ajudante'} ${perfCentavos(aj[0].centavos)}`
       : ', ' + aj.map((p, i) => `ajudante ${i+1} ${perfCentavos(p.centavos)}`).join(', ');
-    return `<li><strong>${rotulo}</strong>, O.S. de ${perfCentavos(valor)} no prazo: comissão total ${perfCentavos(ex.comissaoCentavos)}, ${n === 1 ? 'quem foi sozinho' : 'líder'} ${perfCentavos(lider.centavos)}${ajTxt}.</li>`;
+    return `<li><strong>${rotulo}</strong>, O.S. de ${perfCentavos(valor)} sem retrabalho de instalação: comissão total ${perfCentavos(ex.comissaoCentavos)}, ${n === 1 ? 'quem foi sozinho' : 'líder'} ${perfCentavos(lider.centavos)}${ajTxt}.</li>`;
   };
   const v = regra.volta, base = valor;
   return `<div class="perf-regra-exemplo" aria-live="polite"><h4>Exemplo legado — não configura a nova comissão</h4><ul>${linha(2,'Dupla')}${linha(3,'Trio')}${linha(4,'Equipe de 4')}${linha(1,'Sozinho')}</ul>
@@ -2197,6 +2237,14 @@ function perfReguaPerdasTxt() {
   if (!T) return 'A régua das perdas não carregou nesta aba.';
   const ponto = t => /[.!?]$/.test(t) ? t : t + '.';
   return `${ponto(T.retrabalhoInstalacao)} Retrabalho de medição, arte ou produção: ${ponto(T.retrabalhoOutra)} ${ponto(T.retrabalhoDefinir)} Atraso e retorno antecipado: ${ponto(T.ocorrencia.charAt(0).toLowerCase() + T.ocorrencia.slice(1))}`;
+}
+// A falha comprovada que tirou os pontos da entrega (D-004; revisão da onda a3): a frase da régua e o demonstrativo que a julgou.
+function perfFalhaTxt(r) {
+  if (!r || r.perda !== 'falha_comprovada') return '';
+  const T = typeof REGRAS !== 'undefined' && REGRAS && REGRAS.TEXTOS_PERDA ? REGRAS.TEXTOS_PERDA : {};
+  const f = r.falhaComprovada || {}, dia = d => String(d || '').split('-').reverse().join('/');
+  const onde = f.de ? ` (demonstrativo de ${dia(f.de)} a ${dia(f.ate)}, revisão ${f.revisao}, ${f.tipo === 'aprovacao' ? 'aprovada' : 'prévia'})` : '';
+  return `${T.falhaComprovada || 'Falha comprovada da instalação, julgada no demonstrativo da comissão: tira os pontos e a comissão desta O.S.'}${onde}.`.replace('O.S..', 'O.S.');
 }
 // O retrabalho de um registro da apuração, pela régua (D-010): a frase da etapa de origem.
 function perfRetrabalhoTxt(r) {
@@ -2267,6 +2315,8 @@ function perfRegraErroForm(regra, fechadoAte) {
   const e = REGRAS.validarRegra(regra);
   if (e) return e;
   if (REGRAS.fechamentoBloqueia(regra.validaDesde, fechadoAte)) return `A data ${REGRAS.dataBR(regra.validaDesde)} cai em período já fechado (até ${REGRAS.dataBR(fechadoAte)}). Escolha uma data depois de ${REGRAS.dataBR(fechadoAte)}.`;
+  // A porta recusa a versão que começa antes do programa (revisão da onda a3): o formulário diz antes, com a mesma frase e na mesma ordem.
+  if (typeof REGRAS.antesDoPrograma === 'function' && REGRAS.antesDoPrograma(regra.validaDesde)) return REGRAS.TEXTO_ANTES_DO_PROGRAMA;
   return '';
 }
 /* O PRIMEIRO DIA DO PROGRAMA: o início da embutida ou da versão gravada mais
@@ -2301,7 +2351,8 @@ function perfNovaRegra() {
   let requestId = STORE.uuid(), tentou = false;
   const t = base.divisao.tabela, dupla = t[2] || t['2'], trio = t[3] || t['3'];
   const pct = bp => String(bp / 100).replace('.', ',');
-  const minimo = f.fechadoAte ? perfDiaSeguinte(f.fechadoAte) : '';
+  // O menor dia aceito: o seguinte ao último fechado e nunca antes do programa (01/10/2026).
+  const minimo = [f.fechadoAte ? perfDiaSeguinte(f.fechadoAte) : '', REGRAS.REGRA_EMBUTIDA.validaDesde].filter(Boolean).sort().pop();
   const sugerida = perfRegraDataSugerida(f.fechadoAte, perfHojeISO());
   const campo = (nome, rotulo, valor, sufixo, dica) => `<label>${rotulo} <span class="perf-regra-campo"><input name="${nome}" inputmode="decimal" value="${esc(valor)}" required> ${sufixo}</span>${dica ? `<small>${dica}</small>` : ''}</label>`;
   const d = perfDialog('Nova versão da regra operacional legada', `<form id="perf-regra-form" novalidate>

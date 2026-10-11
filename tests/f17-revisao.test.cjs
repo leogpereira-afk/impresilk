@@ -230,7 +230,11 @@ test('revisão: o Desfazer do lote que tira a chegada avisa que o abono ficou se
     for (const id of ['A', 'B']) { await b.acao({acao:'retrabalho-nao', os:id}); await b.acao({acao:'confirmar', os:id}); }
     await salvar(b); await b.sincronizar();
     const st = statusNoServidor(b, 'B');
-    assert.equal(st.rotulo, 'Retorno antecipado');assert.deepEqual(st.perdas, []);assert.deepEqual(marcadas(st), ['retorno_antecipado']);
+    assert.equal(st.rotulo, 'Retorno antecipado');assert.deepEqual(st.perdas, []);
+    /* TROCADO DE PROPÓSITO (revisão da onda a3, a régua de cada dia): 29/09 é
+       antes da régua das perdas (01/10/2026). A ocorrência fica no status e
+       vale, sem efeito da régua (antes ela era "registrada" pela régua de hoje). */
+    assert.deepEqual(st.ocorrencias.filter(o => o.vale && o.tipo === 'retorno_antecipado').map(o => o.efeito), ['']);
     assert.match(st.motivo, /o abono de outra medida \(29\/09 14:00\) não vale para esta/);
   } finally { b.fechar(); }
 });
@@ -261,7 +265,9 @@ test('revisão: na O.S. de dois dias, a chegada do segundo dia não apaga a perd
     assert.deepEqual([s.retornoConferido.dia, s.retornoConferido.hora], ['2026-09-30', '18:05'], 'o retornoConferido é a última chegada (a v142 lê só ele)');
     const st = statusNoServidor(b, 'm1');
     assert.deepEqual(st.retornoAntecipado.dias.map(d => [d.dia, d.situacao]), [['2026-09-29', 'antecipado'], ['2026-09-30', 'no horário']]);
-    assert.equal(st.retornoAntecipado.situacao, 'antecipado');assert.deepEqual(st.perdas, []);assert.deepEqual(marcadas(st), ['retorno_antecipado']);
+    assert.equal(st.retornoAntecipado.situacao, 'antecipado');assert.deepEqual(st.perdas, []);
+    // TROCADO DE PROPÓSITO (revisão da onda a3, a régua de cada dia): setembro é antes da régua das perdas; a ocorrência do dia 29 fica, sem efeito da régua.
+    assert.deepEqual(st.ocorrencias.filter(o => o.vale && o.tipo === 'retorno_antecipado').map(o => o.efeito), ['']);
     assert.deepEqual(st.ocorrencias.filter(o => o.tipo === 'retorno_antecipado').map(o => o.id), ['m1:retorno_antecipado:2026-09-29']);
     assert.match(st.motivo, /^29\/09: chegou às 14:00, 4 h antes do retorno previsto \(18:00\)/);
     // A porta acha a ocorrência do dia 29 (lê a volta daquele dia) e grava o abono com a medida dele.

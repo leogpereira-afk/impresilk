@@ -254,12 +254,17 @@ test('retrabalho sem origem não zera: fica a definir, pendente na comissão, ma
   const eq = equipeDe(fonte.registros);
   assert.deepEqual([eq.equivalentes, eq.valor, eq.semPontos, eq.origemADefinir], [2, 2000, 0, 1]);
   assert.match(require('vm').runInNewContext('perfMarcasReguaHTML(x)', {x:eq, perfMarcasReguaHTML:new Function('x', ler('performance.js').match(/function perfMarcasReguaHTML\(x\) \{([\s\S]*?)\n\}/)[1])}), /1 com retrabalho de origem a definir/);
-  // A comissão: pendente (não paga e não perde), e a apuração não aprova até a origem.
+  /* A comissão: só esta O.S. fica pendente (não paga e não perde).
+     TROCADO DE PROPÓSITO (revisão da onda a3, decisão "origem a definir não
+     trava o mês"): a apuração era não aprovável até a origem; agora o
+     demonstrativo continua aprovável, a linha fica pendente com R$ 0,00 pago e
+     nada perdido, e a O.S. entra numa revisão seguinte. */
   const rev = await previa(e, f, {osR:semFalha, osN:semFalha});
   const lR = linhaDe(rev, 'osR');
-  assert.equal(lR.comissaoCentavos, null);assert.equal(lR.pontos, null);
-  assert.ok(lR.pendencias.includes('Retrabalho com origem a definir: defina a origem na ficha da O.S. e feche o período de novo. Até lá a comissão desta O.S. fica pendente.'), JSON.stringify(lR.pendencias));
-  assert.equal(rev.apuracao.aprovavel, false);
+  assert.deepEqual([lR.decisao, lR.comissaoCentavos, lR.pontos, lR.origemADefinir, 'comissaoPerdidaCentavos' in lR], ['origem_a_definir', 0, null, true, false]);
+  assert.ok(lR.pendencias.includes(C.TEXTO_ORIGEM_A_DEFINIR), JSON.stringify(lR.pendencias));
+  assert.equal(rev.apuracao.aprovavel, true, JSON.stringify(rev.apuracao.pendencias));
+  assert.ok(!rev.apuracao.pendencias.some(t => /origem a definir/.test(t)), 'a pendência é da linha, não do mês');
   assert.equal(linhaDe(rev, 'osN').comissaoCentavos, 800, 'a outra O.S. segue');
   // A aba Perdas e o ponto de atenção.
   const m = PERDAS.montar({registros:f.registros, card:id => noServidor(e, id), status:statusDe, revisao:rev});
@@ -270,16 +275,30 @@ test('retrabalho sem origem não zera: fica a definir, pendente na comissão, ma
   t.ctx.__d = {...m, carregando:false, decisoes:{consultando:false, consultada:true}};
   const ponto = t.run('perdasPontoHTML(__d)');
   assert.match(ponto, /class="perf-atencao" role="status"/);
-  assert.match(ponto, /1 O\.S\. com retrabalho de origem a definir: defina a origem na ficha\. Até lá ela não tira nada e a comissão de 2 pessoas fica pendente\./);
-  assert.match(ponto, /data-etapa="jornada">Definir a origem da O\.S\. T-osR<\/button>/, 'o botão leva à ficha (Jornada), buscando-a no servidor quando não está no aparelho');
-  // Definida a origem (Instalação), a gestão fecha de novo e a perda passa a valer; o ponto apaga.
+  // TROCADO DE PROPÓSITO (revisão da onda a3): o ponto diz que o mês não trava, e a instrução é uma só (Status da entrega, no Fechamento).
+  assert.match(ponto, /1 O\.S\. com retrabalho de origem a definir: defina a origem no Status da entrega, no Fechamento da ficha\. Até lá ela não tira nada e a comissão de 2 pessoas fica pendente \(não paga e não perde\); o demonstrativo do mês pode ser aprovado sem ela, e ela entra numa revisão seguinte quando a origem for definida\./);
+  assert.match(ponto, /data-perdas-origem="osR"[^>]*>Definir a origem da O\.S\. T-osR<\/button>/, 'o botão abre a escolha da origem (M2)');
+  // Definida a origem (Instalação) depois do fechamento: o demonstrativo continua com a O.S. pendente; o ponto pede a revisão nova.
   const r = await e.call({action:'upsert', os:{...noServidor(e, 'osR'), etapaOrigem:'Instalação'}}, gestor);
   assert.equal(r.status, 200, JSON.stringify(r));
   const m2 = PERDAS.montar({registros:f.registros, card:id => noServidor(e, id), status:statusDe, revisao:rev});
-  assert.equal(m2.linhas.find(l => l.osId === 'osR').grupo, 'perda');
-  assert.equal(m2.linhas.find(l => l.osId === 'osR').ocorrencias.retrabalho.apuracaoDiverge, true, 'a aba avisa que a apuração ainda tem a origem de antes');
+  const l2 = m2.linhas.find(l => l.osId === 'osR');
+  assert.equal(l2.grupo, 'definir', 'o mês fechado manda: no demonstrativo ela está pendente');
+  assert.match(l2.avisoFicha, /Na ficha, a origem do retrabalho hoje é Instalação \(tira os pontos e a comissão desta O\.S\.\)\. No demonstrativo esta O\.S\. ficou pendente: ela só entra com nova revisão/);
+  assert.deepEqual([m2.resumo.origemADefinir, m2.resumo.origemDefinidaDepois, m2.resumo.pessoasPendentes], [0, 1, 0]);
   t.ctx.__d = {...m2, carregando:false, decisoes:{consultando:false}};
-  assert.equal(t.run('perdasPontoHTML(__d)'), '');
+  assert.match(t.run('perdasPontoHTML(__d)'), /1 O\.S\. com a origem definida depois do fechamento: ela só entra no demonstrativo com nova revisão/);
+  // A gestão fecha de novo e gera a prévia nova: a perda passa a valer, e o ponto diz a perda (sempre que houver).
+  const fonte2 = await e.call({action:'performancePeriodo', ...NOV, notaPorValor:true}, gestor);
+  const fech2 = await e.call({action:'performanceFechar', ...NOV, hash:fonte2.hash, anterior:f.id, requestId:pedido('fechar-ri'), motivo:'Nova revisão fictícia', leGrupos:true, leEntregasItens:true, notaPorValor:true}, gestor);
+  assert.equal(fech2.ok, true, JSON.stringify(fech2));
+  const rev2 = await previa(e, fech2.fechamento, {osN:semFalha}, {anterior:rev.id});
+  assert.equal(linhaDe(rev2, 'osR').decisao, 'retrabalho_instalacao');
+  const m3 = PERDAS.montar({registros:fech2.fechamento.registros, card:id => noServidor(e, id), status:statusDe, revisao:rev2});
+  assert.equal(m3.linhas.find(l => l.osId === 'osR').grupo, 'perda');
+  assert.equal(m3.linhas.find(l => l.osId === 'osR').avisoFicha, '');
+  t.ctx.__d = {...m3, carregando:false, decisoes:{consultando:false}};
+  assert.match(t.run('perdasPontoHTML(__d)'), /1 O\.S\. perdeu pontos e comissão por retrabalho de instalação \(R\$\s?12,00 de comissão\)\./);
 });
 
 /* ═══════════════ marcar sem origem é recusado, sem 422 ═══════════════ */
@@ -361,11 +380,12 @@ test('trocar a origem: quem não é admin nem pcp é recusado; sem motivo fica a
   // O histórico só cresce: o aparelho não o reescreve.
   r = await e.call({action:'upsert', os:{...noServidor(e, 'osR'), etapaOrigemLog:[]}}, gestor);
   assert.equal(noServidor(e, 'osR').etapaOrigemLog.length, g.etapaOrigemLog.length);
-  // O crachá sem senha recebe o histórico com o nome, sem o ID e sem o login de quem trocou.
+  /* TROCADO DE PROPÓSITO (revisão da onda a3, privacidade): o crachá sem senha
+     recebia o histórico com o nome e o motivo de quem trocou; agora recebe só a
+     origem atual e a data. */
   r = await e.call({action:'upsert', os:{id:'osR', rev:noServidor(e, 'osR').rev, horaRetorno:'17:00'}}, toque);
   assert.equal(r.status, 200);
-  assert.ok(r.os.etapaOrigemLog.every(x => !('porId' in x) && !('porConta' in x)), JSON.stringify(r.os.etapaOrigemLog));
-  assert.equal(r.os.etapaOrigemLog[r.os.etapaOrigemLog.length - 1].por, 'Gestor Teste');
+  assert.deepEqual(r.os.etapaOrigemLog, [{para:'Produção', em:ult.em}]);
 });
 
 /* ═══════════════ desmarcar devolve ═══════════════ */
@@ -425,11 +445,14 @@ test('atraso e retorno antecipado não zeram em lugar nenhum: ficam marcados com
   t.ctx.__d = {...m, carregando:false, decisoes:{consultando:false, consultada:true}};
   assert.doesNotMatch(t.run('perdasPontoHTML(__d)'), /atraso|retorno/i, 'o ponto mostra só o que pede ação');
   const html = t.run('perdasOcorrenciaListaHTML(__d.linhas[0].ocorrencias)').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-  assert.match(html, /Atraso de 5 dias: prazo 05\/11, entrega 10\/11\. As duas datas dão o mesmo atraso\. Ocorrência registrada: não tira pontos nem comissão sozinha; a gestão pode julgar como falha comprovada\./);
+  // TROCADO DE PROPÓSITO (revisão da onda a3, B6): "As duas datas dão o mesmo atraso" saía em todo cartão; só a divergência é dita.
+  assert.match(html, /Atraso de 5 dias: prazo 05\/11, entrega 10\/11\. Ocorrência registrada: não tira pontos nem comissão sozinha; a gestão pode julgar como falha comprovada\./);
+  assert.doesNotMatch(html, /As duas datas dão o mesmo atraso/);
   assert.match(html, /Retorno antecipado em 10\/11: 180 minutos antes do retorno previsto Ocorrência registrada: não tira pontos nem comissão sozinha; a gestão pode julgar como falha comprovada\./);
   assert.equal(aba(rev).linhas.find(l => l.osId === 'osR').efeito, 'Sem falha comprovada: a ocorrência não tira pontos nem comissão', 'julgada sem falha');
   const julgada = aba(falha, PERDAS.semFalhas(C, f, falha)).linhas.find(l => l.osId === 'osR');
-  assert.match(julgada.efeito, /^Falha comprovada da instalação: fica fora da comissão e dos pontos do demonstrativo da comissão\./, 'julgada falha comprovada (D-004)');
+  // TROCADO DE PROPÓSITO (revisão da onda a3, D-004 nos pontos): a falha comprovada tira os pontos e a comissão da O.S. (o ranking também lê a decisão).
+  assert.match(julgada.efeito, /^Falha comprovada da instalação, julgada no demonstrativo da comissão: tira os pontos e a comissão desta O\.S\./, 'julgada falha comprovada (D-004)');
   assert.equal(julgada.perda.comissaoCentavos, 1200);
   // Não medido nunca é zero: sem prazo combinado e sem retorno previsto.
   const semMedida = statusDe({...noServidor(e, 'osN'), prazoCombinado:undefined});
@@ -471,17 +494,20 @@ test('o diálogo da comissão: a O.S. com retrabalho de instalação é perda au
   assert.match(texto, /esta entrega não paga comissão a ninguém, nem a parcela da montagem interna/);
   const blocoD = corpo.slice(corpo.indexOf('O.S. T-osD'), corpo.indexOf('</details>', corpo.indexOf('O.S. T-osD')));
   assert.match(blocoD, /origem a definir/);
-  assert.match(blocoD, /Retrabalho com origem a definir: defina a origem na ficha da O\.S\. e feche o período de novo\. Até lá a comissão desta O\.S\. fica pendente \(não paga e não perde\)\./);
+  // TROCADO DE PROPÓSITO (revisão da onda a3): a origem a definir não trava o demonstrativo; a frase é a do motor.
+  assert.match(blocoD, /Retrabalho com origem a definir: esta O\.S\. fica pendente \(não paga e não perde\) e não trava o demonstrativo\. Defina a origem na ficha: ela entra numa revisão seguinte \(feche o período de novo e gere nova prévia\)\./);
   assert.match(blocoD, /name="os\d+decisao"/, 'a decisão geral da O.S. continua');
   // O atraso fica marcado, com a frase da régua, e a gestão pode julgá-lo falha comprovada aqui (D-011 e D-004).
   const blocoA = corpo.slice(corpo.indexOf('O.S. T-osA'), corpo.indexOf('</details>', corpo.indexOf('O.S. T-osA'))).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
   assert.match(blocoA, /^O\.S\. T-osA · Atraso · Pendente Decisão sobre responsabilidade/);
-  assert.match(blocoA, /Ocorrência em julgamento Atraso de 5 dias[^.]*\.[^.]*\. Ocorrência registrada: não tira pontos nem comissão sozinha; a gestão pode julgar como falha comprovada\./);
+  // TROCADO DE PROPÓSITO (revisão da onda a3, B6): sem a frase repetida das duas datas iguais.
+  assert.match(blocoA, /Ocorrência em julgamento Atraso de 5 dias[^.]*\. Ocorrência registrada: não tira pontos nem comissão sozinha; a gestão pode julgar como falha comprovada\./);
   assert.match(corpo.slice(corpo.indexOf('O.S. T-osA')), /value="falha_comprovada"[^>]*>Falha comprovada da instalação/);
   assert.match(texto, /Confirmo a régua: atraso e retorno antecipado são ocorrências registradas e só zeram pontos e comissão da O\.S\. com falha comprovada da instalação, decidida aqui; o retrabalho de instalação zera sozinho\./);
   // O motor confirma: a perda automática não tem pendência; a de origem a definir tem.
   const ap = C.apurar(fonte, {config:{modo:'teste', criteriosExtras:'somente_falha_comprovada'}, decisoes:{osD:semFalha, osN:semFalha}, entregas:entregasDoc(rs)});
-  assert.deepEqual(ap.linhas.map(l => [l.osId, l.comissaoCentavos, l.pendencias.length]).sort(), [['osA', null, 1], ['osD', null, 1], ['osI', 0, 0], ['osN', 1200, 0]], 'osA: sem decisão, pendente como sempre');
+  // osD: TROCADO DE PROPÓSITO (revisão da onda a3): a linha da origem a definir fica pendente com R$ 0,00 e não trava o mês.
+  assert.deepEqual(ap.linhas.map(l => [l.osId, l.comissaoCentavos, l.pendencias.length]).sort(), [['osA', null, 1], ['osD', 0, 1], ['osI', 0, 0], ['osN', 1200, 0]], 'osA: sem decisão, pendente como sempre');
 });
 
 /* A FICHA, com o store e o servidor de verdade (o mesmo harness de tests/f17-revisao.test.cjs). */

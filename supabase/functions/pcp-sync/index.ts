@@ -669,7 +669,8 @@ function perfComissaoCobrem(todas:any[], periodo:{de:string,ate:string}) {
     }
     return {de:r.de,ate:r.ate,id:r.id,revisao:r.revisao,tipo:r.tipo,em:r.em,fechamentoId:r.fechamentoId,resumo:true,entrada:{decisoes:ent.decisoes||{},entregas},
       apuracao:{compensacaoDe:ap.compensacaoDe||null,config:{modo:ap.config?.modo},linhas:(Array.isArray(ap.linhas)?ap.linhas:[]).map((l:any)=>({id:l.id,osId:l.osId,numero:l.numero,dia:l.dia,
-        decisao:l.decisao,pendencias:l.pendencias,baseLiquidaCentavos:l.baseLiquidaCentavos,comissaoCentavos:l.comissaoCentavos}))}};
+        decisao:l.decisao,pendencias:l.pendencias,baseLiquidaCentavos:l.baseLiquidaCentavos,comissaoCentavos:l.comissaoCentavos,
+        perda:l.perda,etapaOrigem:l.etapaOrigem,comissaoPerdidaCentavos:l.comissaoPerdidaCentavos,origemADefinir:l.origemADefinir}))}};
   };
   const out:any[]=[];
   for(const rs of grupos.values()){
@@ -910,6 +911,27 @@ async function perfFechamentos(periodo:any) {
   return (data||[]).map((r:any)=>r.registro).sort((a:any,b:any)=>b.revisao-a.revisao);
 }
 
+/* AS REVISÕES DA COMISSÃO QUE COBREM UM PERÍODO (revisão da onda a3, D-004
+   nos pontos), para o ranking dos funcionários ler a falha comprovada que
+   vale (COMISSAO.demonstrativosVigentes). Paginada pela chave; só uma página
+   vazia confirma o fim. Nada daqui sai na resposta além do ranking. */
+async function perfComissaoQueCobrem(periodo:{de:string,ate:string}) {
+  const out:any[]=[];let cursor="";
+  for(let pagina=0;pagina<400;pagina++){
+    let q=sb.from("pcp_registros").select("id,registro").eq("colecao","performance_comissao").eq("apagado",false).order("id").limit(500);
+    if(cursor)q=q.gt("id",cursor);
+    const {data,error}=await q;if(error)throw new Error(error.message);
+    const rows=data||[];
+    if(!rows.length)return out;
+    for(const row of rows){
+      if(typeof row?.id!=="string"||row.id<=cursor)throw new Error("Leitura da comissão inconsistente. Atualize o ranking.");
+      cursor=row.id;
+      const r=row.registro;
+      if(r&&typeof r==="object"&&typeof r.de==="string"&&typeof r.ate==="string"&&!(r.de>periodo.ate||r.ate<periodo.de))out.push(r);
+    }
+  }
+  throw new Error("Revisões da comissão excederam o limite da leitura.");
+}
 // Compartilhar o endereço não compartilha o crachá. Cache só da projeção
 // permitida, após autenticação e revogação, para não reler toda a base por celular.
 const CACHE_RANKING_EQUIPE = new Map<string, {ate:number, dados:any}>();
@@ -920,7 +942,13 @@ async function rankingEquipeDoPeriodo(periodo:any, porValor=false) {
   if (RANKING_EQUIPE_EM_CURSO.has(chave)) return RANKING_EQUIPE_EM_CURSO.get(chave);
   const consulta = (async () => {
     const fechamentos = await perfFechamentos(periodo);
-    const fonte = fechamentos[0] || await perfFonte(periodo, {estrito:false});
+    const fonteBase = fechamentos[0] || await perfFonte(periodo, {estrito:false});
+    /* D-004 NOS PONTOS (revisão da onda a3): a falha comprovada que vale no
+       demonstrativo da comissão que cobre a entrega tira os pontos dela aqui
+       também, como na tela da gestão (COMISSAO.comFalhasComprovadas, a mesma
+       régua). Só leitura: o fechamento e o hash dele não mudam. */
+    const demos = COMISSAO.demonstrativosVigentes(await perfComissaoQueCobrem(periodo), periodo);
+    const fonte = demos.length ? {...fonteBase, registros:COMISSAO.comFalhasComprovadas(fonteBase.registros, demos)} : fonteBase;
     const cfg = await getCfg();
     // Como a gestão, unifica a mesma ficha em formatos antigos só na visão.
     // Fonte, nome histórico da equipe e hash do fechamento ficam intactos.
@@ -1637,6 +1665,11 @@ Deno.serve(async (req: Request) => {
         if (erroRegra) return resp({ error: erroRegra }, 422);
         if (REGRAS.fechamentoBloqueia(regra.validaDesde, fechadoAte))
           return resp({ error: `A data ${REGRAS.dataBR(regra.validaDesde)} cai em período já fechado (até ${REGRAS.dataBR(fechadoAte)}). Escolha uma data depois de ${REGRAS.dataBR(fechadoAte)}.` }, 409);
+        /* ANTES DO PROGRAMA (revisão da onda a3): uma versão que começa antes de
+           01/10/2026 punha setembro no programa e a ficha dizia uma perda que a
+           apuração não aplica. Recusa com a frase da régua (o formulário diz a
+           mesma); esta ação é chamada na hora, fora da fila, e nada se grava. */
+        if (REGRAS.antesDoPrograma(regra.validaDesde)) return resp({ error: REGRAS.TEXTO_ANTES_DO_PROGRAMA }, 409);
         const autor = await autorAuditoria();
         const versao = (Number(ultima?.versao) || 0) + 1, criadaEm = new Date().toISOString();
         const registro = { ...regra, id: crypto.randomUUID(), versao, requestId, motivo, criadaEm,

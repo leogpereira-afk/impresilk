@@ -514,7 +514,7 @@ function porOSEsquecer() { _porOSMemo = {glob: '', st: new Map()}; }
    O status, as pessoas e as equipes de cada O.S. ficam na memória enquanto a
    chave dela e a impressão digital do resto não mudam: trocar o período, ou
    uma O.S. mudar, não recalcula as outras. */
-function porOSMontar(erpLista, todas, hoje) {
+function porOSMontar(erpLista, todas, hoje, periodo) {
   const hist = typeof STORE.historico === 'function' ? (STORE.historico() || []) : [];
   const porNumero = new Map(), doServidor = new Set();
   for (const o of todas) porNumero.set(String(o.numero || '').trim(), o);
@@ -559,7 +559,7 @@ function porOSMontar(erpLista, todas, hoje) {
   }
   // Só as O.S. das últimas listas ficam: trocar muito de período não faz a memória crescer sem fim.
   if (_porOSMemo.st.size > usadas.size + 3000) for (const id of [..._porOSMemo.st.keys()]) if (!usadas.has(id)) _porOSMemo.st.delete(id);
-  _porOSDados = {linhas, equipes, versoes, hoje, total: linhas.length, verValor: porOSVerValor()};
+  _porOSDados = {linhas, equipes, versoes, hoje, total: linhas.length, verValor: porOSVerValor(), periodo: periodo && periodo.de && periodo.ate ? {de: periodo.de, ate: periodo.ate} : null};
   return _porOSDados;
 }
 
@@ -711,6 +711,22 @@ function porOSNotaOcorrencias(st, regraOk) {
   if (o.registradas.length) partes.push(`${o.registradas.map(t => rot[t] || t).join(' e ')} registrado${o.registradas.length > 1 ? 's' : ''} como ocorrência, sem efeito sozinho${o.registradas.length > 1 ? 's' : ''}`);
   return partes.join('; ');
 }
+/* A FALHA COMPROVADA NA PREVISTA (D-004 nos pontos; revisão da onda a3): a
+   decisão de falha comprovada da revisão que vale no demonstrativo da
+   comissão que cobre a entrega zera a prevista, como o ranking e a comissão.
+   As decisões do período vêm de perdas.js (a mesma consulta da aba Perdas);
+   enquanto não chegam, a prevista fica como está, e a vista repinta quando
+   chegam. Só admin e pcp veem a prevista. */
+function porOSFalhaDe(card, dia) {
+  const d = _porOSDados;
+  if (!card || !dia || !d || !d.periodo || typeof perdasFalhaDaOS !== 'function') return null;
+  try { return perdasFalhaDaOS(card.id, dia, d.periodo, () => { if (typeof renderEntregas === 'function') renderEntregas(); }); } catch (e) { return null; }
+}
+function porOSFalhaTxt(f) {
+  const T = typeof REGRAS !== 'undefined' && REGRAS && REGRAS.TEXTOS_PERDA ? REGRAS.TEXTOS_PERDA : {};
+  const dia = x => POR_OS.ddmmaa(x) || String(x || '');
+  return `prevista: ${T.falhaComprovada || 'Falha comprovada da instalação, julgada no demonstrativo da comissão: tira os pontos e a comissão desta O.S.'} (demonstrativo de ${dia(f.de)} a ${dia(f.ate)}, revisão ${f.revisao})`;
+}
 function porOSComissaoHTML(l) {
   const {card, st} = l;
   const nota = t => `<small>${esc(t)}</small>`;
@@ -725,7 +741,7 @@ function porOSComissaoHTML(l) {
     const a=CONFERENCIA_ENTREGA.apurar(card,l.valor);
     if(a.erro) return nota('Itens alterados: confira as entregas novamente.');
     if(a.entregas.some(e=>e.valor==null)) return nota('Confira os valores dos itens antes de calcular a comissão.');
-    let total=0,tira=false,definir=false;const outras=new Set();
+    let total=0,tira=false,definir=false,falha=null;const outras=new Set();
     for(const e of a.entregas) {
       const r=REGRAS.regraVigente(_porOSDados.versoes,e.dia);
       if(!r) return nota('Confira cada entrega: há datas sem regra de comissão.');
@@ -733,12 +749,14 @@ function porOSComissaoHTML(l) {
       const estado=OPERACAO.statusEntrega({...card,finalizadaEm:e.dia+'T12:00:00-03:00',entregaLancada:{data:e.dia}},undefined,r);
       if(estado.estado==='cancelado')continue;
       if(POR_OS.perdasPelaRegra(estado,r).length){tira=true;continue;}
+      const f=porOSFalhaDe(card,e.dia);if(f){falha=falha||f;continue;}
       if(POR_OS.ocorrenciasSemPerda(estado).definir)definir=true;
       const n=porOSNotaOcorrencias(estado,true);if(n)outras.add(n);
       total+=REGRAS.comissaoCentavos(e.valor,r);
     }
     if(tira) return `<b>${esc(dinheiroCasa(0))}</b> ${nota(`prevista: ${tiraTxt}`)}`;
-    const extra=[definir?definirTxt:'',...outras].filter(Boolean).join('; ');
+    if(falha&&!total) return `<b>${esc(dinheiroCasa(0))}</b> ${nota(porOSFalhaTxt(falha))}`;
+    const extra=[definir?definirTxt:'',falha?porOSFalhaTxt(falha):'',...outras].filter(Boolean).join('; ');
     return `<b>${esc(dinheiroCasa(total/100))}</b> ${nota(`prevista sobre os itens de ${a.entregas.length} entrega(s) conferida(s); saldo não incluído${extra?'; '+extra:''}`)}`;
   }
   const dia = st.dataEntrega || porOSDia(l.erp.data);
@@ -753,6 +771,8 @@ function porOSComissaoHTML(l) {
   // Baixa do ERP a lançar (ou sem o dia): o prazo só é julgado com a data do lançamento.
   if (!st.dataEntrega) return nota('sai depois do lançamento: sem a data da entrega, o prazo ainda não foi julgado');
   if (perdas.length) return `<b>${esc(dinheiroCasa(0))}</b> ${nota(`prevista: ${tiraTxt}`)}`;
+  const falha = porOSFalhaDe(card, dia);
+  if (falha) return `<b>${esc(dinheiroCasa(0))}</b> ${nota(porOSFalhaTxt(falha))}`;
   if (l.valor == null) return nota(`sem valor no ERP${sem.definir ? '; ' + definirTxt : ''}`);
   const centavos = REGRAS.comissaoCentavos(Math.round(l.valor * 100), regra);
   if (sem.definir) return `<b>${esc(dinheiroCasa(centavos / 100))}</b> ${nota(`${definirTxt}${outras ? '; ' + outras : ''}`)}`;

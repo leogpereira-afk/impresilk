@@ -185,13 +185,22 @@ body:has(#panel-performance.active) .frase-bar{min-height:0;padding:4px 14px;fon
 .perf-perda-efeito{font-weight:600;color:#1e293b}
 .perf-perda-naomedido{color:#526378}
 .perf-perdas-acao{margin-top:6px}
-#panel-performance .perf-perdas-acao button,#panel-performance .perf-atencao [data-ficha-etapa]{min-height:44px}
+#panel-performance .perf-perdas-acao button,#panel-performance .perf-atencao [data-ficha-etapa],#panel-performance .perf-atencao [data-perdas-origem]{min-height:44px}
 /* "Definir a origem da O.S. ..." mora na coluna estreita do efeito: o botão quebra a linha em vez de sair do cartão (a 1024 e a 1280 o número longo passava da borda). */
 #panel-performance .perf-perdas-acao button,#panel-performance .perf-atencao-acoes button{white-space:normal;max-width:100%;text-align:left;overflow-wrap:anywhere;height:auto}
 .perf-sem-pontos,.perf-origem-definir{display:inline-block;font-size:.72rem;font-weight:650;border-radius:999px;padding:3px 10px;margin:2px 4px 0 0;white-space:normal}
 .perf-sem-pontos{color:#9b1c1c;background:#fdecea}
 .perf-origem-definir{color:#7a4a00;background:#fff1d6}
 .perf-retrab-regua{color:#7a4a00}
+/* AS MARCAS DA RÉGUA E A DISTÂNCIA ATÉ A LIDERANÇA, cada uma na sua linha e sem quebrar palavra no meio (revisão da onda a3, M4: a 768 e a 1024 px o pódio herdava o overflow-wrap:anywhere e "Liderança" virava "Lider ança"). */
+#panel-performance .perf-podio-aviso,#panel-performance .perf-cartao-linha{flex-wrap:wrap}
+#panel-performance .perf-marcas-regua{display:flex;flex-wrap:wrap;gap:4px;flex:1 1 100%;min-width:0}
+#panel-performance .perf-podio-aviso>.perf-conquistas{flex:1 1 100%;min-width:0}
+#panel-performance :is(.perf-podio-aviso,.perf-cartao-linha,.perf-conquistas,.perf-marcas-regua),#panel-performance :is(.perf-podio-aviso,.perf-cartao-linha,.perf-conquistas,.perf-marcas-regua) *{overflow-wrap:normal;word-break:normal}
+/* O texto da ocorrência no diálogo da comissão: cada frase na sua linha (revisão da onda a3, B2: "...O.S.Ocorrência registrada" grudava). */
+#perf-dialog .comissao-ocorrencia .bloco{display:block;margin-top:2px}
+.perf-perda-aviso-ficha{color:#9b1c1c}
+.perf-perda-diverge .btn-sm{margin-left:4px}
 @media(max-width:900px){.perf-perda-grade{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){
  .perf-perda-grade{grid-template-columns:1fr}

@@ -159,8 +159,10 @@ test('contagens batem com a apuração do servidor: a base e a comissão perdida
   assert.equal(p1.ok, true, JSON.stringify(p1));
   const linhaA = p1.revisao.apuracao.linhas.find(l => l.osId === 'osA'), linhaB = p1.revisao.apuracao.linhas.find(l => l.osId === 'osB');
   assert.deepEqual([linhaA.comissaoCentavos, linhaA.pontos, linhaA.decisao, linhaA.comissaoPerdidaCentavos], [0, 0, 'retrabalho_instalacao', 1200]);
-  assert.equal(linhaB.comissaoCentavos, null, 'origem a definir: pendente');
+  // TROCADO DE PROPÓSITO (revisão da onda a3): a origem a definir fica pendente na linha (R$ 0,00 pago, nada perdido) e não trava o mês.
+  assert.deepEqual([linhaB.comissaoCentavos, linhaB.pontos, linhaB.decisao], [0, null, 'origem_a_definir'], 'origem a definir: pendente');
   assert.ok(linhaB.pendencias.some(t => /origem a definir/.test(t)), JSON.stringify(linhaB.pendencias));
+  assert.equal(p1.revisao.apuracao.aprovavel, true, 'a origem a definir não trava o demonstrativo');
   const cards = new Map(e.db.pcp_registros.filter(r => r.colecao === 'os').map(r => [r.id, r.registro]));
   const m = P.montar({registros:f.registros, card:id => cards.get(id) || null, status:c => OPERACAO.statusEntrega(c), noDia:(c, dia) => noDia(c)(dia),
     revisao:p1.revisao, contrafactual:P.semFalhas(COMISSAO, f, p1.revisao)});
@@ -230,7 +232,10 @@ test('Conferência: lançamentos, conferência por entrega e nomes do RH saem do
   const ranking = tela({registros:regs, aba:'equipe'}).render();
   assert.doesNotMatch(ranking, /Conferência por entrega|Conferência dos lançamentos|Conferir nomes do PCP/);
   const conf = tela({registros:regs, aba:'conferencia'}).render();
-  assert.match(conf, /Conferência dos lançamentos/);
+  // TROCADO DE PROPÓSITO (revisão da onda a3, B5): o quadro virou "Apontamentos dos lançamentos", fechado e depois da lista.
+  assert.match(conf, /Apontamentos dos lançamentos/);
+  assert.ok(conf.indexOf('Apontamentos dos lançamentos') > conf.indexOf('Conferência por entrega'), 'depois da lista: o primeiro Conferir fica no alto');
+  assert.doesNotMatch(conf, /<details class="perf-auditoria" open/, 'fechado');
   assert.match(conf, /Conferência por entrega/);
   assert.match(conf, /Conferir nomes do PCP/);
   assert.match(conf, /data-perf-part="C2"/, 'o Conferir continua');
@@ -284,22 +289,32 @@ const retrabalhos = () => ({
   registros:[registro('R1', {retrabalho:true}), registro('R2', {retrabalho:true, membros:[pessoa('900001', 'Pessoa Um', 50), pessoa('900003', 'Pessoa Três', 50)]}),
     registro('R3', {retrabalho:true}), registro('S1')]});
 
-/* TROCADO DE PROPÓSITO (onda a3, D-010 e D-011): o ponto de atenção mostra só
-   o que pede ação. O retrabalho de origem a definir pede (a gestão define na
-   ficha); o de instalação (perda automática), o de produção e o atraso não. */
-test('ponto de atenção: em todas as abas para admin e pcp, só com retrabalho de origem a definir; some quando a origem é definida', () => {
+/* TROCADO DE PROPÓSITO (onda a3, D-010 e D-011): o ponto de atenção mostra o
+   que pede ação: o retrabalho de origem a definir (a gestão define); o de
+   produção e o atraso não. E de novo na revisão da onda a3 (M3, pedido do
+   dono: "a que perdeu por retrabalho precisa de uma aba e um ponto de atenção
+   importante"): ele mostra SEMPRE a perda por retrabalho de instalação, com a
+   comissão perdida; a origem a definir diz que o mês não trava, e o botão abre
+   a escolha da origem (M2). */
+test('ponto de atenção: em todas as abas para admin e pcp, com a perda por retrabalho de instalação e a origem a definir', () => {
   const {lista, registros} = retrabalhos();
   for (const aba of ['equipe', 'conferencia', 'gestao', 'relatorio', 'perdas']) {
     const html = tela({lista, registros, aba}).render();
-    assert.match(texto(html), /1 O\.S\. com retrabalho de origem a definir: defina a origem na ficha\. Até lá ela não tira nada e a comissão de 2 pessoas fica pendente\./, aba);
+    assert.match(texto(html), /1 O\.S\. perdeu pontos e comissão por retrabalho de instalação \(R\$\s?12,00 de comissão\)\./, aba);
+    assert.match(texto(html), /1 O\.S\. com retrabalho de origem a definir: defina a origem no Status da entrega, no Fechamento da ficha\. Até lá ela não tira nada e a comissão de 2 pessoas fica pendente \(não paga e não perde\); o demonstrativo do mês pode ser aprovado sem ela/, aba);
     assert.doesNotMatch(texto(html), /sem decisão|podem tirar a comissão|pode tirar a comissão/, aba + ': atraso e retrabalho de outra origem não ameaçam a comissão');
     assert.match(html, /class="perf-atencao" role="status"/, aba + ': papel de status, não só cor');
     assert.match(html, /data-perf-ir="perdas"/, aba + ': o botão leva à aba de Perdas');
-    assert.match(html, /data-os-id="R3" data-ficha-etapa="jornada">Definir a origem da O\.S\. T-R3</, aba + ': e o botão abre a ficha onde se define a origem');
+    assert.match(html, /data-perdas-origem="R3" data-numero="T-R3">Definir a origem da O\.S\. T-R3</, aba + ': e o botão abre a escolha da origem');
   }
-  // Com a origem definida (qualquer etapa), o ponto some.
+  // Com a origem definida (qualquer etapa), sai a parte da origem; a perda continua no ponto.
   const definida = lista.map(c => c.id === 'R3' ? {...c, etapaOrigem:'Arte'} : c);
-  assert.doesNotMatch(tela({lista:definida, registros}).render(), /perf-atencao/);
+  const d = texto(tela({lista:definida, registros}).render());
+  assert.doesNotMatch(d, /origem a definir: defina/);
+  assert.match(d, /1 O\.S\. perdeu pontos e comissão por retrabalho de instalação/);
+  // Sem a perda nem a origem a definir, o ponto some.
+  const nada = definida.map(c => c.id === 'R2' ? {...c, etapaOrigem:'Medição'} : c);
+  assert.doesNotMatch(tela({lista:nada, registros}).render(), /perf-atencao/);
   // Sem retrabalho no período, não há ponto.
   assert.doesNotMatch(tela({lista, registros:registros.filter(r => r.id === 'S1')}).render(), /perf-atencao/);
   // Montagem e operação nunca veem.
@@ -325,7 +340,8 @@ test('Perdas: grupos pela régua, a régua no topo, e cada O.S. com a ocorrênci
   assert.ok(ordem.every(i => i > 0) && ordem.every((x, i) => !i || x > ordem[i - 1]), JSON.stringify(ordem));
   const grupo = id => texto(html.slice(html.indexOf(`id="perf-perdas-g-${id}"`), html.indexOf('</section>', html.indexOf(`id="perf-perdas-g-${id}"`))));
   assert.match(grupo('definir'), /T-R3[\s\S]*Origem a definir[\s\S]*Pendente: a origem do retrabalho/);
-  assert.match(grupo('perda'), /T-R2[\s\S]*Perda: retrabalho de instalação[\s\S]*Perda automática[\s\S]*Base que deixa de pontuar: R\$\s?1\.200,00[\s\S]*Comissão perdida: R\$\s?12,00 \(1% da base, pelo motor da comissão\)/);
+  // TROCADO DE PROPÓSITO (revisão da onda a3, B6): sem o termo interno "pelo motor da comissão".
+  assert.match(grupo('perda'), /T-R2[\s\S]*Perda: retrabalho de instalação[\s\S]*Perda automática[\s\S]*Base que deixa de pontuar: R\$\s?1\.200,00[\s\S]*Comissão perdida: R\$\s?12,00 \(1% da base, como o demonstrativo calcularia\)/);
   assert.match(grupo('outra'), /T-R1[\s\S]*origem: Produção[\s\S]*Retrabalho de produção: não tira nada da instalação\./);
   assert.match(grupo('ocorrencia'), /T-A1[\s\S]*Ficha: prazo 05\/11, entrega 08\/11: 3 dias de atraso/);
   // Rótulo trocado na revisão da onda w3 (U9): o ranking não desconta atraso.
@@ -338,18 +354,24 @@ test('Perdas: grupos pela régua, a régua no topo, e cada O.S. com a ocorrênci
   assert.match(botaoAba(html, 'perdas'), /class="badge perf-aba-selo perf-selo-perda"[^>]*>2</, 'o selo vermelho conta a perda e a origem a definir');
 });
 
+/* Revisão da onda a3 (o mês fechado manda): o fechamento é o do servidor, com a
+   régua das perdas e a marca de cada entrega (perdaNaApuracao); sem ela, o
+   selo diria que nenhum retrabalho foi julgado pela régua. */
 test('Perdas: com falha comprovada, o valor que deixa de pontuar e a comissão perdida vêm da apuração da comissão', () => {
-  const {lista, registros} = retrabalhos();
-  const fonte = fechamento(registros);
+  const {lista, registros:crus} = retrabalhos();
+  const R = require('../regras.js');
+  const registros = crus.map(r => r.retrabalho ? {...r, ...R.perdaNaApuracao({retrabalho:true, etapaOrigem:(lista.find(c => c.id === r.id) || {}).etapaOrigem}, r.dia)} : r);
+  const fonte = {...fechamento(registros), regraPerdas:'perdas-1'};
   const rev = revisaoDe(fonte, {R1:{...doc, decisao:'falha_comprovada', tipo:'incompleto'}});
   const html = tela({lista, registros, revisoes:[rev], fechamentos:[fonte], aba:'perdas'}).render(), t = texto(html);
-  // Texto trocado na revisão da onda w3 (R2 e U2): "não pontua no programa" e "Deixa de pontuar" eram desmentidos pelo ranking, que conta a O.S.
-  assert.match(t, /Falha comprovada da instalação: fica fora da comissão e dos pontos do demonstrativo da comissão/);
+  // Texto trocado na revisão da onda w3 (R2 e U2) e de novo na revisão da onda a3 (D-004 nos pontos): a falha comprovada tira os pontos também no ranking.
+  assert.match(t, /Falha comprovada da instalação, julgada no demonstrativo da comissão: tira os pontos e a comissão desta O\.S\./);
   assert.match(t, /Base que deixa de gerar comissão: R\$\s?1\.200,00/);
   assert.match(t, /Comissão perdida: R\$\s?12,00/);
   assert.match(t, /revisão 1/);
-  // TROCADO DE PROPÓSITO (onda a3): o ponto de atenção conta só a origem a definir (R3), não a falha nem a perda automática.
+  // TROCADO DE PROPÓSITO (onda a3 e revisão da onda a3, M3): o ponto conta a origem a definir (R3) e a perda por retrabalho de instalação (R2), não a falha comprovada.
   assert.match(t, /1 O\.S\. com retrabalho de origem a definir/);
+  assert.match(t, /1 O\.S\. perdeu pontos e comissão por retrabalho de instalação/);
 });
 
 test('ninguém sem papel vê R$: montagem e operação na Conferência, sem aba de Perdas e sem ponto', () => {
@@ -428,8 +450,9 @@ test('ponto de atenção: a origem a definir não espera as decisões da comiss�
   assert.match(t.render(), /perf-atencao/, 'reler não esconde o que já foi lido');
   t.run(`perdasRemoto={chave:perfChave(),revisoes:[],carregando:true,erro:'',tentado:true};`);
   assert.match(t.render(), /perf-atencao/, 'durante a consulta nova, o ponto fica');
-  // Sem a origem a definir, e sem decisões lidas: nada a acusar.
-  const definida = tela({lista:lista.map(c => c.id === 'R3' ? {...c, etapaOrigem:'Arte'} : c), registros});
+  // Sem a origem a definir e sem a perda, e sem decisões lidas: nada a acusar.
+  // (Revisão da onda a3, M3: a perda por retrabalho de instalação sempre aparece; aqui a R2 é de medição.)
+  const definida = tela({lista:lista.map(c => c.id === 'R3' ? {...c, etapaOrigem:'Arte'} : c.id === 'R2' ? {...c, etapaOrigem:'Medição'} : c), registros});
   definida.run(`perdasRemoto={chave:'',revisoes:null,carregando:false,erro:'',tentado:false};`);
   assert.doesNotMatch(definida.render(), /perf-atencao/);
 });

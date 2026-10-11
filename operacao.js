@@ -1028,11 +1028,19 @@ const objSt = v => !!v && typeof v === 'object' && !Array.isArray(v);
 /* O EFEITO DA OCORRÊNCIA pela RÉGUA DAS PERDAS (regras.js, D-010 e D-011):
    'tira', 'acompanha', 'definir' (retrabalho sem origem), 'registrada' ou ''.
    Sem a régua carregada, '' (nada tira pontos). `tipo` é o estado do status
-   ou o tipo da ocorrência (retrabalho, atraso, retorno_antecipado). */
-const efeitoSt = (tipo, os) => {
+   ou o tipo da ocorrência (retrabalho, atraso, retorno_antecipado). `dia` é
+   o dia da entrega (revisão da onda a3): vale a régua desse dia, a mesma da
+   apuração (reguaNoDia), e antes da primeira régua nada tem efeito; a versão
+   da regra do programa sozinha não põe setembro na régua. */
+const efeitoSt = (tipo, os, dia) => {
   const R = reguaPerdas();
-  return R && typeof R.efeitoDaOcorrencia === 'function' ? R.efeitoDaOcorrencia(tipo, txtSt(objSt(os) ? os.etapaOrigem : '')) : '';
+  if (!R || typeof R.efeitoDaOcorrencia !== 'function') return '';
+  const doDia = typeof R.reguaNoDia === 'function' ? R.reguaNoDia(dia) : undefined;
+  if (doDia === null) return '';
+  return R.efeitoDaOcorrencia(tipo, txtSt(objSt(os) ? os.etapaOrigem : ''), doDia);
 };
+// O dia da entrega para a régua: o da entrega da ficha; sem ele (a aberta ou a baixa a lançar), a finalização, senão hoje.
+const diaDaReguaSt = (os, ap) => (ap.entrega && ap.entrega.dia) || diaSt(os.finalizadaEm) || ap.dHoje;
 /* O MOTIVO É TEXTO, e só contam as LETRAS E OS NÚMEROS que se veem, depois
    de normalizar em NFC (revisão da F17): quinze espaços de largura zero, o
    braille em branco, o seletor de variação e a marca combinante não dizem
@@ -1578,14 +1586,14 @@ const comAbonoSt = (motivo, ab) => ab ? `${motivo}; abonado${ab.por ? ' por ' + 
    só o retrabalho de instalação (D-010); o atraso e o retorno antecipado
    valem como ocorrência registrada, sem tirar nada sozinhos (D-011). */
 function derivadasDe(os, ap, ret, regra) {
-  const id = txtSt(os.id), out = [];
+  const id = txtSt(os.id), out = [], diaRegua = diaDaReguaSt(os, ap);
   const poe = (tipo, motivo, extra, medida, idDela) => {
     const ocorrenciaId = idDela || id + ':' + tipo, abonavel = OCORRENCIAS_ABONAVEIS.includes(tipo), perda = PERDA_DA_OCORRENCIA[tipo] || '';
     const ab = abonavel ? abonoDaOcorrencia(os, ocorrenciaId, medida) : {vigente:null, outra:null};
     const x = {id:ocorrenciaId, tipo, rotulo:ROTULOS_OCORRENCIA[tipo], origem:'derivada', perda, volta:false,
       abonavel, abonado:!!ab.vigente, abono:ab.vigente, abonoOutraMedida:ab.outra, medida:medida || null, motivo:comOutraSt(comAbonoSt(motivo, ab.vigente), ab.outra), ...extra};
     // Antes do programa (sem regra no dia), nenhuma ocorrência tem efeito.
-    x.efeito = perda && !x.volta && objSt(regra) ? efeitoSt(tipo, os) : '';
+    x.efeito = perda && !x.volta && objSt(regra) ? efeitoSt(tipo, os, diaRegua) : '';
     x.vale = !!perda && !x.volta && !x.abonado && objSt(regra) && (tipo !== 'atraso' || x.entregue === true);
     x.conta = x.vale && x.efeito === 'tira';
     out.push(x);
@@ -1672,7 +1680,8 @@ function statusEntrega(o, hoje, regra, volta) {
      Sem regra no dia (antes do programa), nada. Atraso só seria perda da
      O.S. entregue: a aberta ainda pode ser abonada ou cancelada. O abonado
      nunca é perda. */
-  const perdas = !objSt(regra) ? [] : aplicaveis.filter(a => !a.abonado && PERDA_DO_ESTADO[a.estado] && efeitoSt(a.estado, os) === 'tira' && (a.estado !== 'atraso' || !!entrega))
+  const diaRegua = diaDaReguaSt(os, ap);
+  const perdas = !objSt(regra) ? [] : aplicaveis.filter(a => !a.abonado && PERDA_DO_ESTADO[a.estado] && efeitoSt(a.estado, os, diaRegua) === 'tira' && (a.estado !== 'atraso' || !!entrega))
     .map(a => PERDA_DO_ESTADO[a.estado]);
   return {
     estado:p.estado, rotulo:p.rotulo, motivo:p.motivo, aplicaveis,

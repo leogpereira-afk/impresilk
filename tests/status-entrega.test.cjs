@@ -103,19 +103,29 @@ test('retorno antecipado: a hora anotada pela equipe é declaração; sem chegad
    D-010 e D-011), só o retrabalho de INSTALAÇÃO tira os pontos e a comissão;
    o de outra etapa e o sem origem não; o atraso e o retorno antecipado ficam
    registrados como ocorrência, sem efeito sozinhos. */
+/* TROCADO DE PROPÓSITO (revisão da onda a3, a régua de cada dia): as entregas
+   deste teste eram de setembro, com a regra embutida passada à mão. A régua das
+   perdas começa em 01/10/2026 e vale no dia da entrega (a mesma da apuração):
+   setembro não tem régua, mesmo com uma versão da regra que comece antes.
+   Agora o mesmo caso em outubro, e setembro diz o que mudou. */
 test('perdas pela régua: só o retrabalho de instalação conta; o de outra etapa, o sem origem e o atraso não; sem regra, nenhuma', () => {
-  const regra = R.REGRA_EMBUTIDA;
-  assert.deepEqual(st(os({...fin('2026-09-13'), retrabalho:true, etapaOrigem:'Instalação'}), HOJE, regra).perdas, ['retrabalho']);
-  assert.deepEqual(st(os({...fin('2026-09-13'), retrabalho:true}), HOJE, regra).perdas, [], 'origem a definir: não tira nada');
-  assert.deepEqual(st(os({...fin('2026-09-13'), retrabalho:true, etapaOrigem:'Produção'}), HOJE, regra).perdas, [], 'produção: não tira nada da instalação');
-  const atrasada = st(os({...fin('2026-09-13')}), HOJE, regra);
+  const regra = R.REGRA_EMBUTIDA, hoje = '2026-10-20';
+  const out = (extra = {}) => os({instalacao:{data:'2026-10-10', periodo:'Manhã', duracaoDias:1}, prazoCombinado:{data:'2026-10-10', fonte:'agenda'}, ...extra});
+  assert.deepEqual(st(out({...fin('2026-10-13'), retrabalho:true, etapaOrigem:'Instalação'}), hoje, regra).perdas, ['retrabalho']);
+  assert.deepEqual(st(out({...fin('2026-10-13'), retrabalho:true}), hoje, regra).perdas, [], 'origem a definir: não tira nada');
+  assert.deepEqual(st(out({...fin('2026-10-13'), retrabalho:true, etapaOrigem:'Produção'}), hoje, regra).perdas, [], 'produção: não tira nada da instalação');
+  const atrasada = st(out({...fin('2026-10-13')}), hoje, regra);
   assert.deepEqual(atrasada.perdas, [], 'o atraso fica registrado e não tira nada sozinho (D-011)');
   const oc = atrasada.ocorrencias.find(o => o.tipo === 'atraso');
   assert.equal(oc.vale, true, 'o atraso da entregue vale como ocorrência');
   assert.equal(oc.efeito, 'registrada');
   assert.equal(oc.conta, false);
-  assert.deepEqual(st(os(), HOJE, regra).perdas, [], 'aberta atrasada: ainda pode ser abonada ou cancelada');
-  assert.deepEqual(st(os({...fin('2026-09-13'), retrabalho:true, etapaOrigem:'Instalação'}), HOJE, null).perdas, [], 'sem regra (antes do programa), nada');
+  assert.deepEqual(st(out(), hoje, regra).perdas, [], 'aberta atrasada: ainda pode ser abonada ou cancelada');
+  assert.deepEqual(st(out({...fin('2026-10-13'), retrabalho:true, etapaOrigem:'Instalação'}), hoje, null).perdas, [], 'sem regra (antes do programa), nada');
+  // Setembro, mesmo com a regra passada: antes da régua das perdas, nada tira e a ocorrência fica sem efeito.
+  const set = st(os({...fin('2026-09-13'), retrabalho:true, etapaOrigem:'Instalação'}), HOJE, regra);
+  assert.deepEqual(set.perdas, [], 'a régua das perdas começa em 01/10/2026');
+  assert.equal(set.ocorrencias.find(o => o.tipo === 'retrabalho').efeito, '');
 });
 
 /* ───────────── O.S. de vários dias ───────────── */

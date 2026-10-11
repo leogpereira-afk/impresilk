@@ -177,15 +177,20 @@ test('revisão onda-w3-abas: R3, com a compensação em preparo no topo, vale a 
 
 /* TROCADO DE PROPÓSITO (onda a3, D-010): o ponto de atenção conta a
    comissão PENDENTE da O.S. de origem a definir (não paga e não perde), e o Y
-   continua contando a montagem interna elegível, que também fica pendente. */
+   continua contando a montagem interna elegível, que também fica pendente.
+   E de novo na revisão da onda a3 (o mês fechado manda): o fechamento é o da
+   régua, com a linha pendente da origem a definir; um selo sem a régua não
+   tem essa linha, e a O.S. não fica "a definir" nele. */
 test('revisão onda-w3-abas: R4, o Y do ponto de atenção conta a montagem interna elegível (comissão pendente da origem a definir)', () => {
-  const registros = [registro('R1', {retrabalho:true})];
+  const registros = [registro('R1', {retrabalho:true, etapaOrigem:''})];
   const semOrigem = () => card('R1', {etapaOrigem:''});
-  const fonte = fechamento(registros);
+  const fonte = {...fechamento(registros), regraPerdas:'perdas-1'};
   const interna = {...doc, situacao:'elegivel', partes:[{pessoaId:'900009', cota:10000}]};
   const rev = revisaoDe(fonte, {}, 1, interna);
-  // Quem receberia pelo motor: 900001, 900002 e 900009 (a montagem interna elegível).
-  const sem = COMISSAO.apurar(fonte, {...rev.entrada, decisoes:{R1:{...doc, decisao:'sem_falha', tipo:'incompleto'}}}, {aprovacoes:[]});
+  assert.equal(rev.apuracao.linhas[0].decisao, 'origem_a_definir', 'premissa: a linha pendente da origem a definir');
+  // Quem receberia pelo motor com a origem definida: 900001, 900002 e 900009 (a montagem interna elegível).
+  const definida = {...fechamento([registro('R1', {retrabalho:true, etapaOrigem:'Produção'})]), regraPerdas:'perdas-1'};
+  const sem = COMISSAO.apurar(definida, {...rev.entrada, decisoes:{R1:{...doc, decisao:'sem_falha', tipo:'incompleto'}}}, {aprovacoes:[]});
   const recebem = new Set(sem.linhas[0].pagamentos.filter(p => p.centavos > 0).map(p => p.pessoaId));
   assert.deepEqual([...recebem].sort(), ['900001', '900002', '900009']);
   const m = PERDAS.montar({registros, card:semOrigem, status:c => OPERACAO.statusEntrega(c), revisao:rev});
@@ -196,25 +201,32 @@ test('revisão onda-w3-abas: R4, o Y do ponto de atenção conta a montagem inte
   assert.equal(naoAplica.resumo.pessoasPendentes, 2);
   const repetida = revisaoDe(fonte, {}, 1, {...interna, partes:[{pessoaId:'900001', cota:10000}]});
   assert.equal(PERDAS.montar({registros, card:semOrigem, status:c => OPERACAO.statusEntrega(c), revisao:repetida}).resumo.pessoasPendentes, 2);
-  // Com a origem definida, nada fica pendente no ponto.
-  assert.equal(PERDAS.montar({registros, card:() => card('R1'), status:c => OPERACAO.statusEntrega(c), revisao:rev}).resumo.pessoasPendentes, 0);
+  // Com a origem definida (depois do fechamento), nada fica pendente no ponto: a O.S. pede a revisão nova.
+  const depois = PERDAS.montar({registros, card:() => card('R1'), status:c => OPERACAO.statusEntrega(c), revisao:rev});
+  assert.deepEqual([depois.resumo.pessoasPendentes, depois.resumo.origemADefinir, depois.resumo.origemDefinidaDepois], [0, 0, 1]);
 });
 
-test('revisão onda-w3-abas: R2 e U2, a falha comprovada diz o que acontece hoje: fora da comissão e dos pontos do demonstrativo, e o ranking ainda conta', () => {
+/* TROCADO DE PROPÓSITO (revisão da onda a3, D-004 nos pontos: "zera só os
+   pontos e a comissão da O.S. afetada"): a falha comprovada julgada no
+   demonstrativo também tira os pontos da O.S. nos Rankings. Antes a aba dizia
+   que o ranking ainda contava a O.S., e contava. */
+test('revisão onda-w3-abas: R2 e U2, a falha comprovada tira os pontos e a comissão da O.S.: na aba, no demonstrativo e nos Rankings', () => {
   const lista = [card('R1'), card('S1', {...semRetrabalho})];
   const registros = [registro('R1', {retrabalho:true}), registro('S1')];
   const fonte = fechamento(registros);
   const rev = revisaoDe(fonte, {R1:{...doc, decisao:'falha_comprovada', tipo:'incompleto'}, S1:{...doc, decisao:'sem_falha', tipo:'nenhuma'}});
   const perdas = texto(tela({lista, registros, revisoes:[rev], fechamentos:[fonte], aba:'perdas'}).render());
-  // Caso ruim: "a O.S. não pontua no programa" e "Deixa de pontuar: R$ 1.200,00", com o ranking ao lado contando a O.S.
-  assert.doesNotMatch(perdas, /não pontua no programa|Deixa de pontuar|deixam de pontuar/);
-  // Texto da nota trocado de propósito na onda a3: não há mais "regra pendente"; o ranking só não lê a decisão da comissão.
-  assert.match(perdas, /Falha comprovada da instalação: fica fora da comissão e dos pontos do demonstrativo da comissão\. O ranking da aba Rankings não lê a decisão da comissão: ele ainda conta esta O\.S\./);
+  assert.doesNotMatch(perdas, /não pontua no programa|Deixa de pontuar|deixam de pontuar|ainda conta esta O\.S\./);
+  assert.match(perdas, /Falha comprovada da instalação, julgada no demonstrativo da comissão: tira os pontos e a comissão desta O\.S\./);
   assert.match(perdas, /Base que deixa de gerar comissão: R\$\s?1\.200,00/);
   assert.match(perdas, /R\$\s?1\.200,00 de base não geram comissão/, 'o resumo do topo diz o mesmo');
-  // E é verdade: os Rankings contam a O.S. (60% de R$ 2.400, com a R1).
+  // Os Rankings (Pessoas): 60% só da S1 (R$ 720,00); antes, 60% de R$ 2.400 (R$ 1.440,00), com a R1.
   const rank = texto(tela({lista, registros, revisoes:[rev], fechamentos:[fonte], aba:'equipe'}).render());
-  assert.match(rank, /R\$\s?1\.440,00/);
+  assert.match(rank, /R\$\s?720,00/);
+  assert.doesNotMatch(rank, /R\$\s?1\.440,00/);
+  // Sem a revisão da comissão, nada muda: a R1 conta (60% de R$ 2.400).
+  const semRev = texto(tela({lista, registros, revisoes:[], fechamentos:[fonte], aba:'equipe'}).render());
+  assert.match(semRev, /R\$\s?1\.440,00/);
 });
 
 test('revisão onda-w3-abas: R5, casa.js antigo com performance.js novo: a conferência continua nos Rankings', () => {
@@ -243,7 +255,8 @@ test('revisão onda-w3-abas: R6 e U5, o PDF completo dos Rankings leva a confer�
   // Caso ruim: o "PDF completo" saía só com o ranking.
   assert.ok(impresso, 'o PDF foi montado');
   assert.match(impresso.html, /Conferência por entrega/);
-  assert.match(impresso.html, /Conferência dos lançamentos/);
+  // TROCADO DE PROPÓSITO (revisão da onda a3, B5): o quadro passou a se chamar Apontamentos dos lançamentos.
+  assert.match(impresso.html, /Apontamentos dos lançamentos/);
   assert.match(impresso.html, /T-C2/);
   assert.doesNotMatch(impresso.html, /id="perf-pdf"/, 'sem botão repetido no PDF');
   assert.match(ler('scripts/testar-performance-experiencia-ui.cjs'), /'ranking-equipes',[^\n]*Conferência por entrega/, 'a prova no navegador confere o PDF completo');
@@ -274,14 +287,23 @@ const retrabalhos = () => ({
    a Comissão) é o de JULGAR uma ocorrência no demonstrativo, e mora na seção
    das outras ocorrências; o ponto de atenção não o pede (atraso e retrabalho
    de outra origem não ameaçam a comissão sozinhos). */
+/* TROCADO DE PROPÓSITO (revisão da onda a3, B4): o caminho para julgar mora só
+   nas "Outras ocorrências"; o retrabalho de outra origem só se acompanha. A
+   O.S. com atraso (A1) entra no período para a seção existir. */
 test('revisão onda-w3-abas: U3, a aba diz o caminho para julgar no demonstrativo, com o botão do próximo passo', () => {
   const {lista, registros} = retrabalhos();
+  lista.push(card('A1', {...semRetrabalho, finalizadaEm:'2026-11-08T15:00:00-03:00'}));
+  registros.push(registro('A1', {dia:'2026-11-08'}));
   // 1) Há entrega a conferir: o próximo passo é a Conferência filtrada.
   const t = tela({lista, registros, aba:'perdas'});
   const html = t.render(), tx = texto(html);
   // Caso ruim: a aba só dizia "(Rankings, Base e fechamento)", sem botão e sem dizer que é preciso conferir e fechar antes.
   assert.match(tx, /Para julgar no demonstrativo: confira a entrega que falta \(aba Conferência\), feche o período em Rankings › Base e fechamento e abra Comissão\./);
-  assert.doesNotMatch(html, /class="perf-atencao"/, 'sem origem a definir nem decisão incompleta, o ponto não acende');
+  const secaoOutra = html.slice(html.indexOf('perf-perdas-grupo-outra'), html.indexOf('perf-perdas-grupo-ocorrencia'));
+  assert.ok(secaoOutra.length > 0 && !/Para julgar/.test(secaoOutra), 'B4: o caminho não aparece no retrabalho de outra origem');
+  assert.match(html.slice(html.indexOf('perf-perdas-grupo-ocorrencia')), /Para julgar no demonstrativo/, 'ele mora nas outras ocorrências');
+  // O ponto acende pela perda do retrabalho de instalação (R2), sem pedir o caminho do julgamento.
+  assert.doesNotMatch(texto(html.slice(html.indexOf('class="perf-atencao"'), html.indexOf('</section>', html.indexOf('class="perf-atencao"')))), /Para julgar/);
   assert.match(html, /data-perdas-passo="conferir"[^>]*>Conferir a entrega que falta</);
   const conferir = {dataset:{perdasPasso:'conferir'}};
   t.ctx.renderPerformanceCasa = () => {};
@@ -403,7 +425,11 @@ test('revisão onda-w3-abas: U9, os textos da aba sem termos internos: comissão
   // Caso ruim: "base líquida da linha da comissão", "o mesmo motor do demonstrativo", "Apuração (ranking e comissão)", "A ficha e a apuração concordam".
   assert.doesNotMatch(tx, /base líquida da linha|mesmo motor|Versão da apuração|Apuração \(ranking e comissão\)|concordam/);
   // Nota trocada de propósito na onda a3: ela também explica a comissão perdida do retrabalho de instalação.
-  assert.match(tx, /a da falha comprovada é o quanto a O\.S\. renderia no demonstrativo se fosse julgada sem falha\. Saldo de meses anteriores não entra\./);
+  // E de novo na revisão da onda a3 (B6): sem "pelo motor" nem "a mesma conta do motor".
+  assert.match(tx, /A da falha comprovada é o quanto a O\.S\. renderia no demonstrativo se fosse julgada sem falha\. Saldo de meses anteriores não entra\./);
+  assert.doesNotMatch(tx, /pelo motor|conta do motor/);
   assert.match(tx, /Dia da entrega usado no ranking \(não desconta atraso\): prazo 05\/11, entrega 05\/11: no prazo/);
-  assert.match(tx, /Atraso de 3 dias: prazo 05\/11, entrega 08\/11\. As duas datas dão o mesmo atraso\./);
+  // TROCADO DE PROPÓSITO (revisão da onda a3, B6): a frase das duas datas iguais saía em todo cartão; só a divergência é dita.
+  assert.match(tx, /Atraso de 3 dias: prazo 05\/11, entrega 08\/11\./);
+  assert.doesNotMatch(tx, /As duas datas dão o mesmo atraso/);
 });

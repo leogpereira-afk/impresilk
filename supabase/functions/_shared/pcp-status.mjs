@@ -85,11 +85,19 @@ const objSt = v => !!v && typeof v === 'object' && !Array.isArray(v);
 /* O EFEITO DA OCORRÊNCIA pela RÉGUA DAS PERDAS (regras.js, D-010 e D-011):
    'tira', 'acompanha', 'definir' (retrabalho sem origem), 'registrada' ou ''.
    Sem a régua carregada, '' (nada tira pontos). `tipo` é o estado do status
-   ou o tipo da ocorrência (retrabalho, atraso, retorno_antecipado). */
-const efeitoSt = (tipo, os) => {
+   ou o tipo da ocorrência (retrabalho, atraso, retorno_antecipado). `dia` é
+   o dia da entrega (revisão da onda a3): vale a régua desse dia, a mesma da
+   apuração (reguaNoDia), e antes da primeira régua nada tem efeito; a versão
+   da regra do programa sozinha não põe setembro na régua. */
+const efeitoSt = (tipo, os, dia) => {
   const R = reguaPerdas();
-  return R && typeof R.efeitoDaOcorrencia === 'function' ? R.efeitoDaOcorrencia(tipo, txtSt(objSt(os) ? os.etapaOrigem : '')) : '';
+  if (!R || typeof R.efeitoDaOcorrencia !== 'function') return '';
+  const doDia = typeof R.reguaNoDia === 'function' ? R.reguaNoDia(dia) : undefined;
+  if (doDia === null) return '';
+  return R.efeitoDaOcorrencia(tipo, txtSt(objSt(os) ? os.etapaOrigem : ''), doDia);
 };
+// O dia da entrega para a régua: o da entrega da ficha; sem ele (a aberta ou a baixa a lançar), a finalização, senão hoje.
+const diaDaReguaSt = (os, ap) => (ap.entrega && ap.entrega.dia) || diaSt(os.finalizadaEm) || ap.dHoje;
 /* O MOTIVO É TEXTO, e só contam as LETRAS E OS NÚMEROS que se veem, depois
    de normalizar em NFC (revisão da F17): quinze espaços de largura zero, o
    braille em branco, o seletor de variação e a marca combinante não dizem
@@ -635,14 +643,14 @@ const comAbonoSt = (motivo, ab) => ab ? `${motivo}; abonado${ab.por ? ' por ' + 
    só o retrabalho de instalação (D-010); o atraso e o retorno antecipado
    valem como ocorrência registrada, sem tirar nada sozinhos (D-011). */
 function derivadasDe(os, ap, ret, regra) {
-  const id = txtSt(os.id), out = [];
+  const id = txtSt(os.id), out = [], diaRegua = diaDaReguaSt(os, ap);
   const poe = (tipo, motivo, extra, medida, idDela) => {
     const ocorrenciaId = idDela || id + ':' + tipo, abonavel = OCORRENCIAS_ABONAVEIS.includes(tipo), perda = PERDA_DA_OCORRENCIA[tipo] || '';
     const ab = abonavel ? abonoDaOcorrencia(os, ocorrenciaId, medida) : {vigente:null, outra:null};
     const x = {id:ocorrenciaId, tipo, rotulo:ROTULOS_OCORRENCIA[tipo], origem:'derivada', perda, volta:false,
       abonavel, abonado:!!ab.vigente, abono:ab.vigente, abonoOutraMedida:ab.outra, medida:medida || null, motivo:comOutraSt(comAbonoSt(motivo, ab.vigente), ab.outra), ...extra};
     // Antes do programa (sem regra no dia), nenhuma ocorrência tem efeito.
-    x.efeito = perda && !x.volta && objSt(regra) ? efeitoSt(tipo, os) : '';
+    x.efeito = perda && !x.volta && objSt(regra) ? efeitoSt(tipo, os, diaRegua) : '';
     x.vale = !!perda && !x.volta && !x.abonado && objSt(regra) && (tipo !== 'atraso' || x.entregue === true);
     x.conta = x.vale && x.efeito === 'tira';
     out.push(x);
@@ -729,7 +737,8 @@ function statusEntrega(o, hoje, regra, volta) {
      Sem regra no dia (antes do programa), nada. Atraso só seria perda da
      O.S. entregue: a aberta ainda pode ser abonada ou cancelada. O abonado
      nunca é perda. */
-  const perdas = !objSt(regra) ? [] : aplicaveis.filter(a => !a.abonado && PERDA_DO_ESTADO[a.estado] && efeitoSt(a.estado, os) === 'tira' && (a.estado !== 'atraso' || !!entrega))
+  const diaRegua = diaDaReguaSt(os, ap);
+  const perdas = !objSt(regra) ? [] : aplicaveis.filter(a => !a.abonado && PERDA_DO_ESTADO[a.estado] && efeitoSt(a.estado, os, diaRegua) === 'tira' && (a.estado !== 'atraso' || !!entrega))
     .map(a => PERDA_DO_ESTADO[a.estado]);
   return {
     estado:p.estado, rotulo:p.rotulo, motivo:p.motivo, aplicaveis,
@@ -947,6 +956,10 @@ export function guardarAbonos(veio, os, antes, autor, agora, { pode = false, avi
      origem no envio: sem ela, a marca (e a resposta "sim" da pergunta) não
      entra, com aviso. Nunca 422: um 422 prende a fila do aparelho.
    - Definir a origem que estava a definir: entra, carimbada.
+   - A ÚLTIMA ORIGEM DO HISTÓRICO vale como a gravada (revisão da onda a3):
+     marcar de novo depois de desmarcar, ou definir a que ficou a definir,
+     com origem diferente da última do etapaOrigemLog é troca e pede o
+     motivo; sem ele, nada entra, com aviso.
    - TROCAR a origem gravada: só com o motivo (15 letras ou mais) no pedido
      `etapaOrigemMotivo`, que nunca é gravado na O.S.; sem motivo fica a
      gravada, com aviso. A origem não volta a "a definir" com o retrabalho
@@ -995,13 +1008,29 @@ export function guardarOrigemRetrabalho(os, antes, autor, agora, { pode = false,
     return { os: r, avisos, mudou: false };
   }
   if (invalida) avisos.push(`A etapa de origem "${semInvisiveis(veioTxt, 40)}" não existe e não foi gravada: escolha Medição, Arte, Produção ou Instalação.`);
+  /* A ÚLTIMA ORIGEM DO HISTÓRICO (revisão da onda a3): marcar de novo depois
+     de desmarcar, ou definir a origem que ficou a definir (o celular remarcou),
+     com uma origem diferente da última gravada é uma troca, e a troca pede
+     motivo. Sem isso, desmarcar e marcar de novo trocava Instalação por
+     Produção sem motivo nenhum. */
+  const ultima = REGRAS.ultimaOrigemDoLog(log);
+  const trocaSemMotivo = para => !!ultima && para !== ultima && letrasMotivoSt(motivoVeio) < ORIGEM_MOTIVO_MIN;
+  const avisoTroca = para => `A etapa de origem ${para} não foi gravada: a última origem desta O.S. foi ${ultima}, e trocar pede o motivo, com 15 letras ou mais. Retrabalho de instalação não se abona: quem discorda troca a origem, com motivo.`;
   // MARCAR: a gestão escolhe a origem no mesmo envio.
   if (marcado && !marcadoAntes) {
-    if (!temVeio || !valida) {
+    const voltaComoEstava = () => {
       if (antes && Object.prototype.hasOwnProperty.call(antes, 'retrabalho')) r.retrabalho = antes.retrabalho; else delete r.retrabalho;
       for (const c of TAXONOMIA_ORIGEM_ST) { if (antes && Object.prototype.hasOwnProperty.call(antes, c)) r[c] = antes[c]; else delete r[c]; }
       if (antes && Object.prototype.hasOwnProperty.call(antes, 'retrabalhoPerguntado')) r.retrabalhoPerguntado = antes.retrabalhoPerguntado; else delete r.retrabalhoPerguntado;
+    };
+    if (!temVeio || !valida) {
+      voltaComoEstava();
       avisos.push('O retrabalho não foi marcado: escolha a etapa de origem (Medição, Arte, Produção ou Instalação). Retrabalho de instalação tira os pontos e a comissão da O.S.; o das outras etapas não tira nada da instalação.');
+      return { os: r, avisos, mudou: false };
+    }
+    if (trocaSemMotivo(valida)) {
+      voltaComoEstava();
+      avisos.push('O retrabalho não foi marcado. ' + avisoTroca(valida));
       return { os: r, avisos, mudou: false };
     }
     r.etapaOrigem = valida;
@@ -1026,6 +1055,11 @@ export function guardarOrigemRetrabalho(os, antes, autor, agora, { pode = false,
   }
   if (!origemAntes) {
     if (!valida) { ficaGravada(); return { os: r, avisos, mudou: false }; }
+    if (trocaSemMotivo(valida)) {
+      ficaGravada();
+      avisos.push(avisoTroca(valida));
+      return { os: r, avisos, mudou: false };
+    }
     r.etapaOrigem = valida;
     carimbo('', valida);
     return { os: r, avisos, mudou: true };

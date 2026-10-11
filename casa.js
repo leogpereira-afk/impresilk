@@ -2267,7 +2267,7 @@ function renderEntregas() {
      o De e o Até, e a grade ano × mês voltava para janeiro. */
   const grade0 = el.querySelector('.casa-grade-meses');
   const rolGrade = grade0 && grade0.parentElement ? grade0.parentElement.scrollLeft : 0;
-  if (porOS) porOSMontar(lista.map(x => x.erp), todas, hoje);
+  if (porOS) porOSMontar(lista.map(x => x.erp), todas, hoje, f);
   const voltarFocoPorOS = porOS ? porOSGuardarFoco() : null;
   el.innerHTML = `
     <div class="casa-pagina">
@@ -3715,7 +3715,9 @@ function painelTVCasa(i, f) {
   const base = typeof perfLista === 'function' ? perfLista() : classificarEntregas(STORE.getAllOS()).instalacoes;
   const entregas = base.filter(o=>OPERACAO.emIntervalo(diaEntrega(o),f.de,f.ate));
   const brutos = temPerf ? entregas.map(o=>perfRegistro(o,c)) : [];
-  const regs = typeof perfUnirPessoas === 'function' ? perfUnirPessoas(brutos) : brutos;
+  // A falha comprovada que vale no demonstrativo também tira os pontos na TV (D-004; revisão da onda a3), como na tela.
+  const unidos = typeof perfUnirPessoas === 'function' ? perfUnirPessoas(brutos) : brutos;
+  const regs = typeof perfComFalhas === 'function' ? perfComFalhas(unidos) : unidos;
   const opcoes = typeof perfOpcoesEquipe === 'function' ? perfOpcoesEquipe() : {};
   const resumo = temPerf
     ? { pessoas: PERF.resumir(regs).pessoas, equipes: PERF.resumir(PERF.comEquipes(regs, c.equipes || [], opcoes)).equipes }

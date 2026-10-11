@@ -135,6 +135,13 @@ function regraVigente(versoes, dia) {
 function fechamentoBloqueia(validaDesde, fechadoAte) {
   return dataValida(fechadoAte) && String(validaDesde) <= fechadoAte;
 }
+/* ANTES DO PROGRAMA (revisão da onda a3, 11/10/2026). O programa começa em
+   01/10/2026 (a embutida). Uma versão gravada com início antes disso punha
+   dias de setembro no programa: a ficha tirava os pontos de uma O.S. que a
+   apuração contava inteira. A porta (performanceRegraNova) e o formulário
+   recusam, com a mesma frase. */
+const antesDoPrograma = validaDesde => dataValida(validaDesde) && validaDesde < REGRA_EMBUTIDA.validaDesde;
+const TEXTO_ANTES_DO_PROGRAMA = `O programa começa em ${dataBR(REGRA_EMBUTIDA.validaDesde)}: a versão da regra não pode começar antes. Escolha uma data a partir de ${dataBR(REGRA_EMBUTIDA.validaDesde)}.`;
 /* COMISSÃO DA O.S. QUE PONTUA, em centavos, e a parte de cada um pelo motor
    (dois níveis, sobra no líder). O.S. que não pontua: zero para todos. */
 function comissaoCentavos(valorCentavos, regra) {
@@ -185,7 +192,11 @@ function ajusteDaVolta(regra, conf) {
    régua (o selo é o selo). Régua nova = id novo em REGUAS_PERDAS, mantendo
    as antigas para conferir os selos delas, e REGUA_PERDAS apontando para a
    nova; os testes de tests/retrabalho-instalacao.test.cjs dizem o que mais
-   precisa mudar (a apuração do servidor hoje só mede o retrabalho). */
+   precisa mudar (a apuração do servidor hoje só mede o retrabalho).
+   A RÉGUA DE CADA DIA (revisão da onda a3): vale a de validaDesde mais
+   recente até o dia da entrega (reguaNoDia), na ficha, no Por O.S. e na
+   apuração. A régua nova não apaga o efeito dos dias antes dela, e antes da
+   primeira (01/10/2026) não há régua: nada tira pontos. */
 const ETAPAS_ORIGEM = Object.freeze(['Medição', 'Arte', 'Produção', 'Instalação']);
 const ETAPA_INSTALACAO = 'Instalação';
 const REGUAS_PERDAS = congelar({
@@ -193,6 +204,19 @@ const REGUAS_PERDAS = congelar({
 });
 const REGUA_PERDAS = REGUAS_PERDAS['perdas-1'];
 const reguaPorId = id => (typeof id === 'string' && Object.prototype.hasOwnProperty.call(REGUAS_PERDAS, id) ? REGUAS_PERDAS[id] : null);
+/* A RÉGUA QUE VALE NUM DIA: entre a `regua` pedida (a de hoje, ou a do selo
+   que se confere) e as registradas que começaram antes dela, a de
+   validaDesde mais recente até o dia. Antes de todas, null (fora do
+   programa). O selo feito com a perdas-1 continua conferindo com ela, mesmo
+   depois de uma perdas-2: a régua mais nova que ele pode usar é a dele. */
+function reguaNoDia(dia, regua) {
+  if (!dataValida(dia)) return null;
+  const r = objR(regua) ? regua : REGUA_PERDAS;
+  const cand = [r, ...Object.values(REGUAS_PERDAS).filter(x => x !== r && dataValida(x.validaDesde) && dataValida(r.validaDesde) && x.validaDesde < r.validaDesde)]
+    .filter(x => dataValida(x.validaDesde) && x.validaDesde <= dia)
+    .sort((a, b) => a.validaDesde < b.validaDesde ? 1 : a.validaDesde > b.validaDesde ? -1 : 0);
+  return cand[0] || null;
+}
 // A etapa de origem do retrabalho, uma das quatro; outra coisa (ou nada) é "origem a definir".
 const origemRetrabalho = v => (ETAPAS_ORIGEM.includes(v) ? v : '');
 /* O EFEITO DE UMA OCORRÊNCIA pela régua:
@@ -222,6 +246,9 @@ const TEXTOS_PERDA = congelar({
   ocorrencia:'Ocorrência registrada: não tira pontos nem comissão sozinha; a gestão pode julgar como falha comprovada',
   naoSeAbona:'Retrabalho de instalação não se abona: quem discorda da origem troca a origem, com motivo',
   semPontos:'retrabalho de instalação: sem pontos e sem comissão',
+  // D-004 nos pontos (revisão da onda a3): a falha comprovada julgada no demonstrativo também tira os pontos da O.S.
+  falhaComprovada:'Falha comprovada da instalação, julgada no demonstrativo da comissão: tira os pontos e a comissão desta O.S.',
+  semPontosFalha:'falha comprovada: sem pontos e sem comissão',
 });
 const ROTULOS_OCORRENCIA_PERDA = Object.freeze({atraso:'Atraso', retorno_antecipado:'Retorno antecipado', retornoAntecipado:'Retorno antecipado'});
 // A frase do efeito, pela régua: "Retrabalho de produção: não tira nada da instalação".
@@ -240,15 +267,31 @@ function textoDoEfeito(tipo, etapaOrigem, regua) {
    com retrabalho entregue a partir do início da régua leva a etapa de origem
    (vazia: origem a definir); a que perde leva perda:'retrabalho_instalacao'.
    Antes do início, e sem retrabalho, nada: o registro fica igual ao de antes.
-   `dia` é o dia da entrega na apuração (AAAA-MM-DD). */
+   `dia` é o dia da entrega na apuração (AAAA-MM-DD); a régua é a desse dia
+   (reguaNoDia), e uma régua mais nova não apaga o que a anterior julgava. */
 function perdaNaApuracao(os, dia, regua) {
-  const r = objR(regua) ? regua : REGUA_PERDAS;
-  if (!objR(os) || !os.retrabalho || !dataValida(dia) || dia < r.validaDesde) return {};
+  const r = reguaNoDia(dia, regua);
+  if (!objR(os) || !os.retrabalho || !r) return {};
   const etapaOrigem = origemRetrabalho(os.etapaOrigem);
   return efeitoDaOcorrencia('retrabalho', etapaOrigem, r) === 'tira' ? {etapaOrigem, perda:'retrabalho_instalacao'} : {etapaOrigem};
 }
+/* A ÚLTIMA ORIGEM GRAVADA no histórico (etapaOrigemLog), mesmo depois de um
+   desmarcar. Marcar de novo, ou definir a origem que ficou a definir, com uma
+   origem diferente dela é uma troca, e a troca pede motivo (revisão da onda
+   a3: desmarcar e marcar de novo trocava a origem sem motivo nenhum). */
+function ultimaOrigemDoLog(log) {
+  const xs = Array.isArray(log) ? log : [];
+  for (let i = xs.length - 1; i >= 0; i--) {
+    const x = xs[i];
+    if (!objR(x)) continue;
+    const para = origemRetrabalho(x.para), de = origemRetrabalho(x.de);
+    if (para) return para;
+    if (de) return de;
+  }
+  return '';
+}
 /* ==== FIM DAS REGRAS ==== */
-export { TOTAL_BP, PERDAS, DESEMPATES, ROTULOS, CAMPOS, REGRA_EMBUTIDA, dataValida, dataBR, normalizarRegra, completarRegra, validarRegra, regraVigente, fechamentoBloqueia, comissaoCentavos, exemplo, ajusteDaVolta,
-  ETAPAS_ORIGEM, ETAPA_INSTALACAO, REGUAS_PERDAS, REGUA_PERDAS, reguaPorId, origemRetrabalho, efeitoDaOcorrencia, TEXTOS_PERDA, textoDoEfeito, perdaNaApuracao };
-export const REGRAS = { TOTAL_BP, PERDAS, DESEMPATES, ROTULOS, CAMPOS, REGRA_EMBUTIDA, dataValida, dataBR, normalizarRegra, completarRegra, validarRegra, regraVigente, fechamentoBloqueia, comissaoCentavos, exemplo, ajusteDaVolta,
-  ETAPAS_ORIGEM, ETAPA_INSTALACAO, REGUAS_PERDAS, REGUA_PERDAS, reguaPorId, origemRetrabalho, efeitoDaOcorrencia, TEXTOS_PERDA, textoDoEfeito, perdaNaApuracao };
+export { TOTAL_BP, PERDAS, DESEMPATES, ROTULOS, CAMPOS, REGRA_EMBUTIDA, dataValida, dataBR, normalizarRegra, completarRegra, validarRegra, regraVigente, fechamentoBloqueia, antesDoPrograma, TEXTO_ANTES_DO_PROGRAMA, comissaoCentavos, exemplo, ajusteDaVolta,
+  ETAPAS_ORIGEM, ETAPA_INSTALACAO, REGUAS_PERDAS, REGUA_PERDAS, reguaPorId, reguaNoDia, origemRetrabalho, efeitoDaOcorrencia, TEXTOS_PERDA, textoDoEfeito, perdaNaApuracao, ultimaOrigemDoLog };
+export const REGRAS = { TOTAL_BP, PERDAS, DESEMPATES, ROTULOS, CAMPOS, REGRA_EMBUTIDA, dataValida, dataBR, normalizarRegra, completarRegra, validarRegra, regraVigente, fechamentoBloqueia, antesDoPrograma, TEXTO_ANTES_DO_PROGRAMA, comissaoCentavos, exemplo, ajusteDaVolta,
+  ETAPAS_ORIGEM, ETAPA_INSTALACAO, REGUAS_PERDAS, REGUA_PERDAS, reguaPorId, reguaNoDia, origemRetrabalho, efeitoDaOcorrencia, TEXTOS_PERDA, textoDoEfeito, perdaNaApuracao, ultimaOrigemDoLog };

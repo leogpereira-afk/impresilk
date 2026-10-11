@@ -29,14 +29,26 @@
   }
   const celula = dia => ({dia,entregas:0,confirmadas:0,aConferir:0,equivalentes:0,semBase:0,valorCentavos:0,comValor:0,semValor:0});
   const fracaoConhecida = r => !r.entregaId || (Number.isFinite(r.fracaoOS) && r.fracaoOS > 0 && r.fracaoOS <= 1);
+  /* A MESMA CONTA DAS EQUIPES (revisão da onda a3, M1): a entrega com
+     retrabalho de instalação ou com falha comprovada conta como entrega, sem
+     pontos (PERF.fracaoQuePontua e PERF.comPerda, as do ranking). O total, a
+     evolução e o cabeçalho eram somados pela fração e pelo valor crus: a
+     "Produção confirmada" e o "Valor confirmado" passavam a soma das equipes.
+     Sem as funções novas (cache misto), a conta de antes. */
+  const contaDe = perf => ({
+    fracao:typeof perf.fracaoQuePontua === 'function' ? perf.fracaoQuePontua : perf.fracaoRegistro,
+    comPerda:typeof perf.comPerda === 'function' ? perf.comPerda : (r => r),
+    semPontos:typeof perf.semPontos === 'function' ? perf.semPontos : (() => false),
+  });
   function contabilizar(dia, r, perf, verValores) {
+    const k = contaDe(perf);
     dia.entregas++;
     if (!r.confirmado) {dia.aConferir++;return;}
     dia.confirmadas++;
-    dia.equivalentes += perf.fracaoRegistro(r);
-    if (!fracaoConhecida(r)) dia.semBase++;
+    dia.equivalentes += k.fracao(r);
+    if (!k.semPontos(r) && !fracaoConhecida(r)) dia.semBase++;
     if (verValores) {
-      const n = centavos(r.valor);
+      const n = centavos(k.comPerda(r).valor);
       if (n === null) dia.semValor++;
       else {dia.comValor++;dia.valorCentavos += n;}
     }
@@ -59,10 +71,25 @@
     }
     return seriePublica([...mapa.values()],verValores);
   }
+  /* A FRASE DO RETRABALHO POR ORIGEM, a mesma no "Onde agir agora" e na
+     Qualidade (revisão da onda a3, M1): dizia "a marca precisa de análise e
+     responsabilidade", de antes da régua das perdas. */
+  function partesRetrabalho(o) {
+    const x = o || {}, n = (q, um, varios) => `${q} ${q === 1 ? um : varios}`;
+    return [x.instalacao ? n(x.instalacao, 'de instalação (sem pontos e sem comissão)', 'de instalação (sem pontos e sem comissão)') : '',
+      x.outra ? n(x.outra, 'de medição, arte ou produção (não tira nada da instalação)', 'de medição, arte ou produção (não tiram nada da instalação)') : '',
+      x.definir ? n(x.definir, 'com a origem a definir (pendente até a gestão definir)', 'com a origem a definir (pendentes até a gestão definir)') : '',
+      x.semRegua ? n(x.semRegua, 'sem a régua das perdas (antes do programa ou revisão antiga)', 'sem a régua das perdas (antes do programa ou revisão antiga)') : ''].filter(Boolean);
+  }
+  function textoRetrabalho(total, o, comAba) {
+    const partes = partesRetrabalho(o);
+    const falha = o && o.falha ? ` ${o.falha} O.S. com falha comprovada no demonstrativo da comissão: sem pontos e sem comissão.` : '';
+    return `${total} O.S. com retrabalho${partes.length ? ': ' + partes.join('; ') : ''}.${falha}${comAba ? ' O detalhe de cada uma está na aba Perdas por retrabalho.' : ''}`;
+  }
   function montar(registros, options = {}) {
     const perf = options.perf;
     if (!perf || !['validar','resumir','fracaoRegistro','ranquear','auditar','gruposDoRegistro'].every(k=>typeof perf[k] === 'function')) throw new TypeError('Informe o motor PERF da apuração.');
-    const verValores = options.verValores === true;
+    const verValores = options.verValores === true, podePerdas = options.podePerdas === true;
     const periodo = {de:diaValido(options.periodo?.de),ate:diaValido(options.periodo?.ate)};
     const fonte = Array.isArray(registros) ? registros.filter(r=>r && typeof r==='object') : [];
     const ids = new Set(), repetidos = [], rs = [];
@@ -78,21 +105,38 @@
       rs.push({...original,id,dia,membros,valor:centavos(original.valor)===null?null:Math.round(original.valor*100)/100,confirmado:original.confirmado===true&&!erro,_erro:erro});
     }
     const validos = rs.filter(r=>!r._erro), confirmados = validos.filter(r=>r.confirmado);
+    const k = contaDe(perf);
     const resumo = perf.resumir(validos), resumoConf = perf.resumir(confirmados);
     const auditoria = perf.auditar(rs), os = new Set(rs.map(r=>r.osId || r.id).filter(Boolean));
     const semEquipe = rs.filter(r=>!r.membros.length).length;
     const inconsistentes = rs.filter(r=>r.membros.length&&r._erro).length;
-    const semBase = confirmados.filter(r=>!fracaoConhecida(r)).length;
+    const semBase = confirmados.filter(r=>!k.semPontos(r) && !fracaoConhecida(r)).length;
     const semData = rs.filter(r=>!r.dia).length;
     const baseRetrabalho = new Set(rs.filter(r=>r.retrabalho || r.os?.retrabalho).map(r=>r.osId || r.id));
+    /* O RETRABALHO POR ORIGEM, pela régua das perdas (D-010; revisão da onda
+       a3, M1): de instalação (sem pontos e sem comissão), de outra origem (não
+       tira nada da instalação), com a origem a definir (pendente) e sem régua
+       (antes do programa ou selo antigo). E a falha comprovada (D-004). Por
+       O.S., como a contagem do retrabalho. */
+    const porOrigem = {instalacao:new Set(), outra:new Set(), definir:new Set(), semRegua:new Set(), falha:new Set()};
+    for (const r of rs) {
+      const id = r.osId || r.id;
+      if (r.perda === 'falha_comprovada') porOrigem.falha.add(id);
+      if (!(r.retrabalho || r.os?.retrabalho)) continue;
+      if (r.perda === 'retrabalho_instalacao') porOrigem.instalacao.add(id);
+      else if (!Object.prototype.hasOwnProperty.call(r, 'etapaOrigem')) porOrigem.semRegua.add(id);
+      else if (!r.etapaOrigem) porOrigem.definir.add(id);
+      else porOrigem.outra.add(id);
+    }
+    const retrabalhoPorOrigem = Object.fromEntries(Object.entries(porOrigem).map(([c, v]) => [c, v.size]));
     const semVinculo = new Set();
     for (const r of confirmados) for (const g of perf.gruposDoRegistro(r)) if (!g.equipeId) semVinculo.add(g.chave);
     const total = {entregas:rs.length,os:os.size,confirmadas:confirmados.length,aConferir:rs.length-confirmados.length,
       cobertura:percentual(confirmados.length,rs.length),parciais:rs.filter(r=>r.entregaId).length,
-      equivalentes:confirmados.reduce((n,r)=>n+perf.fracaoRegistro(r),0),semBase,semEquipe,inconsistentes,semData,
+      equivalentes:confirmados.reduce((n,r)=>n+k.fracao(r),0),semBase,semEquipe,inconsistentes,semData,
       participantes:resumo.pessoas.length,equipes:resumo.equipes.length,composicoesSemVinculo:semVinculo.size};
     if (verValores) {
-      const conhecidos = confirmados.filter(r=>r.valor!==null);
+      const conhecidos = confirmados.map(k.comPerda).filter(r=>r.valor!==null);
       total.valor = conhecidos.length ? conhecidos.reduce((n,r)=>n+centavos(r.valor),0)/100 : null;
       total.comValor = conhecidos.length;
       total.semValor = confirmados.length-conhecidos.length;
@@ -102,7 +146,7 @@
       const c = cf.get(e.chave), eqRegs=validos.filter(r=>perf.gruposDoRegistro(r).some(g=>g.chave===e.chave));
       return {chave:e.chave,nome:e.nome,salva:e.salva,entregas:e.os,confirmadas:c?.os||0,aConferir:e.os-(c?.os||0),
         cobertura:percentual(c?.os||0,e.os),equivalentes:c?.equivalentes||0,
-        semBase:eqRegs.filter(r=>r.confirmado&&!fracaoConhecida(r)).length,
+        semBase:eqRegs.filter(r=>r.confirmado&&!k.semPontos(r)&&!fracaoConhecida(r)).length,
         ...(verValores?{valor:c&&c.os>c.semValor?c.valor:null,semValor:c?.semValor||0,comValor:c?c.os-c.semValor:0}:{})};
     });
     const ranking = perf.ranquear(equipes.filter(e=>e.equivalentes>0), e=>Math.round(e.equivalentes*1e8)/1e8);
@@ -133,14 +177,14 @@
     add('parcial',semBase,'Revisar as parciais sem base',`${semBase} parcial(is) confirmada(s) ainda não têm uma fração calculável da O.S. Não foram consideradas como O.S. inteiras.`);
     add('volta',auditoria.voltas-auditoria.voltasConferidas,'Concluir a volta do carro',`${auditoria.voltas-auditoria.voltasConferidas} volta(s) sem checklist completo. Não é possível concluir qualidade apenas pela entrega.`);
     add('vinculo',semVinculo.size,'Dar identidade às composições',`${semVinculo.size} composição(ões) com entrega confirmada ainda sem vínculo com equipe cadastrada. Confira na Gestão de equipes, sem reatribuir o histórico automaticamente.`);
-    add('retrabalho',baseRetrabalho.size,'Revisar as ocorrências',`${baseRetrabalho.size} O.S. com marca de retrabalho. A marca precisa de análise e responsabilidade; este painel não aplica punição nem calcula comissão.`);
+    add('retrabalho',baseRetrabalho.size,'Revisar as ocorrências',textoRetrabalho(baseRetrabalho.size,retrabalhoPorOrigem,podePerdas));
     const alertas=[];
     if(repetidos.length)alertas.push(`${repetidos.length} registro(s) repetido(s) foram contados uma única vez. Atualize a apuração para conferir a origem.`);
     if(semData)alertas.push(`${semData} entrega(s) sem data válida ficam fora do gráfico de evolução e permanecem no resumo para conferência.`);
     if(numeroDias>3660)alertas.push('Período extenso: o gráfico mostra somente as datas com registros. Reduza o período para visualizar os dias sem registro.');
     if(periodo.de&&periodo.ate&&periodo.de>periodo.ate)alertas.push('Confira o período: a data inicial está depois da final.');
-    return {periodo:{de,ate},verValores,total,equipes,dias:seriePublica(dias,verValores),semanas:porSemana(dias,verValores),serieCompleta,
-      qualidade:{os:os.size,retrabalho:baseRetrabalho.size,voltas:auditoria.voltas,voltasConferidas:auditoria.voltasConferidas,
+    return {periodo:{de,ate},verValores,podePerdas,total,equipes,dias:seriePublica(dias,verValores),semanas:porSemana(dias,verValores),serieCompleta,
+      qualidade:{os:os.size,retrabalho:baseRetrabalho.size,retrabalhoPorOrigem,voltas:auditoria.voltas,voltasConferidas:auditoria.voltasConferidas,
         voltasSemOcorrencia:auditoria.voltasSemOcorrencia,voltasComOcorrencia:auditoria.voltasConferidas-auditoria.voltasSemOcorrencia,
         voltasPendentes:auditoria.voltas-auditoria.voltasConferidas},pendencias,proximas,alertas,foraPeriodo,repetidos:repetidos.length};
   }
@@ -155,8 +199,10 @@
     const linhas=limite?m.equipes.slice(0,limite):m.equipes,max=Math.max(...m.equipes.map(e=>e.equivalentes),0);
     return `<div class="pd-comparativo">${linhas.map(e=>`<div class="pd-bar-row"><div><strong>${esc(e.nome)}</strong><small>${e.confirmadas} confirmada(s) · ${e.aConferir} a conferir</small></div><div>${barra(e.equivalentes,max)}<span>${numero(e.equivalentes)} O.S. eq.</span></div></div>`).join('')}</div>${limite&&m.equipes.length>limite?'<p class="pd-muted">Primeiras '+limite+' de '+m.equipes.length+' composições. Veja todas em Comparar equipes.</p>':''}`;
   }
+  // O botão para a aba Perdas por retrabalho, só para quem a vê (admin e pcp); o casa.js liga o data-perf-ir.
+  const botaoPerdas = m => m.podePerdas ? '<button type="button" class="btn-ghost btn-sm" data-perf-ir="perdas">Ver a aba Perdas por retrabalho</button>' : '';
   function acoesHTML(m) {
-    const lista=itens=>`<ol class="pd-actions">${itens.map(p=>`<li><span class="pd-count">${p.quantidade}</span><div><strong>${esc(p.titulo)}</strong><p>${esc(p.texto)}</p></div></li>`).join('')}</ol>`;
+    const lista=itens=>`<ol class="pd-actions">${itens.map(p=>`<li><span class="pd-count">${p.quantidade}</span><div><strong>${esc(p.titulo)}</strong><p>${esc(p.texto)}</p>${p.tipo==='retrabalho'?botaoPerdas(m):''}</div></li>`).join('')}</ol>`;
     return `<section class="pd-panel"><header><h4>Onde agir agora</h4><span>Com base nesta apuração</span></header>${m.proximas.length?`${lista(m.proximas.slice(0,3))}${m.proximas.length>3?`<details class="pd-detail"><summary>Mais ${m.proximas.length-3} oportunidade(s) de melhoria</summary>${lista(m.proximas.slice(3))}</details>`:''}`:`<p class="pd-empty">${m.total.entregas?'Nenhuma pendência nos critérios automáticos disponíveis. Confira o serviço e as ocorrências antes do fechamento.':'A primeira entrega registrada inicia os indicadores. Escolha outro período para consultar o histórico.'}</p>`}</section>`;
   }
   function geralHTML(m) {
@@ -172,7 +218,8 @@
   function qualidadeHTML(m,options) {
     const q=m.qualidade,t=m.total;
     const etapas=[['Participação confirmada',t.confirmadas,t.entregas],['Voltas conferidas',q.voltasConferidas,q.voltas],['Voltas conferidas sem ocorrência',q.voltasSemOcorrencia,q.voltasConferidas]];
-    return `<div class="pd-kpis">${card('O.S. com retrabalho marcado',numero(q.retrabalho),`${q.os} O.S. na base · responsabilidade a conferir`,q.retrabalho?'pd-attention':'')}${card('Voltas sem conferência',numero(q.voltasPendentes),`${q.voltas} volta(s) identificada(s)`,q.voltasPendentes?'pd-attention':'')}${card('Voltas com ocorrência',numero(q.voltasComOcorrencia),`${q.voltasConferidas} volta(s) com checklist completo`)}${card('Composição a resolver',numero(t.semEquipe+t.inconsistentes),`${t.semEquipe} sem equipe · ${t.inconsistentes} inconsistentes`)}</div><div class="pd-two"><section class="pd-panel"><header><h4>Cobertura da conferência</h4><span>O denominador de cada indicador está visível</span></header>${etapas.map(([label,n,total])=>`<div class="pd-quality-row"><div><strong>${esc(label)}</strong><span>${n} / ${total}${total?' · '+percentual(n,total)+'%':' · não se aplica'}</span></div>${barra(n,total)}</div>`).join('')}<p class="pd-note">Voltas sem resposta não são classificadas como boas ou ruins. Retrabalho marcado não identifica automaticamente o responsável.</p></section>${acoesHTML(m)}</div><section class="pd-panel"><header><h4>O que precisa de conferência</h4><span>${m.pendencias.length} apontamento(s); uma entrega pode ter mais de um</span></header>${m.pendencias.length?`<ul class="pd-pendencias">${m.pendencias.map(p=>`<li><div><strong>O.S. ${esc(p.numero||'a identificar')}</strong><p>${esc(p.motivo)}</p></div>${options.podeConferir&&p.id?`<button type="button" class="btn-ghost btn-sm" ${p.tipo==='volta'?'data-perf-audit-volta':['sem-valor','valor-erp'].includes(p.tipo)?'data-perf-os':'data-perf-audit-id'}="${esc(p.id)}">${p.tipo==='volta'?'Conferir volta':['sem-valor','valor-erp'].includes(p.tipo)?'Ver origem':'Conferir entrega'}</button>`:''}</li>`).join('')}</ul>`:'<p class="pd-empty">Nenhum apontamento nos critérios automáticos disponíveis.</p>'}</section>`;
+    const origem=partesRetrabalho(q.retrabalhoPorOrigem);
+    return `<div class="pd-kpis">${card('O.S. com retrabalho marcado',numero(q.retrabalho),q.retrabalho?(origem.length?origem.join(' · '):`${q.os} O.S. na base`):`${q.os} O.S. na base`,q.retrabalho?'pd-attention':'')}${card('Voltas sem conferência',numero(q.voltasPendentes),`${q.voltas} volta(s) identificada(s)`,q.voltasPendentes?'pd-attention':'')}${card('Voltas com ocorrência',numero(q.voltasComOcorrencia),`${q.voltasConferidas} volta(s) com checklist completo`)}${card('Composição a resolver',numero(t.semEquipe+t.inconsistentes),`${t.semEquipe} sem equipe · ${t.inconsistentes} inconsistentes`)}</div><div class="pd-two"><section class="pd-panel"><header><h4>Cobertura da conferência</h4><span>O denominador de cada indicador está visível</span></header>${etapas.map(([label,n,total])=>`<div class="pd-quality-row"><div><strong>${esc(label)}</strong><span>${n} / ${total}${total?' · '+percentual(n,total)+'%':' · não se aplica'}</span></div>${barra(n,total)}</div>`).join('')}<p class="pd-note">Voltas sem resposta não são classificadas como boas ou ruins. O retrabalho de instalação tira os pontos e a comissão da O.S.; o de outra origem não tira nada da instalação; o de origem a definir fica pendente até a gestão definir.${q.retrabalhoPorOrigem&&q.retrabalhoPorOrigem.falha?` ${q.retrabalhoPorOrigem.falha} O.S. com falha comprovada no demonstrativo da comissão: sem pontos e sem comissão.`:''} ${q.retrabalho||(q.retrabalhoPorOrigem&&q.retrabalhoPorOrigem.falha)?botaoPerdas(m):''}</p></section>${acoesHTML(m)}</div><section class="pd-panel"><header><h4>O que precisa de conferência</h4><span>${m.pendencias.length} apontamento(s); uma entrega pode ter mais de um</span></header>${m.pendencias.length?`<ul class="pd-pendencias">${m.pendencias.map(p=>`<li><div><strong>O.S. ${esc(p.numero||'a identificar')}</strong><p>${esc(p.motivo)}</p></div>${options.podeConferir&&p.id?`<button type="button" class="btn-ghost btn-sm" ${p.tipo==='volta'?'data-perf-audit-volta':['sem-valor','valor-erp'].includes(p.tipo)?'data-perf-os':'data-perf-audit-id'}="${esc(p.id)}">${p.tipo==='volta'?'Conferir volta':['sem-valor','valor-erp'].includes(p.tipo)?'Ver origem':'Conferir entrega'}</button>`:''}</li>`).join('')}</ul>`:'<p class="pd-empty">Nenhum apontamento nos critérios automáticos disponíveis.</p>'}</section>`;
   }
   function html(m,options = {}) {
     const vista=VISTAS.some(v=>v.id===options.vista)?options.vista:'geral';

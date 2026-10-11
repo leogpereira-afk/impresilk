@@ -1906,7 +1906,17 @@ const foraDoProgramaFicha = os => regrasNaFicha() && !regraDaFicha(os);
 const textosPerdaFicha = () => (typeof REGRAS !== 'undefined' && REGRAS && REGRAS.TEXTOS_PERDA) || null;
 // O ponto final da frase da régua: "desta O.S." já termina em ponto (a abreviatura não ganha outro).
 const fraseComPonto = t => !t ? '' : /[.!?]$/.test(t) ? t : t + '.';
-const efeitoRetrabalhoFicha = os => (typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.textoDoEfeito === 'function' ? REGRAS.textoDoEfeito('retrabalho', os && os.etapaOrigem) : '');
+/* A FRASE DO EFEITO NA FICHA: a da régua (regras.js). Para quem não é da
+   gestão, a origem a definir não diz "defina a origem" (só a gestão define):
+   diz quem define (revisão da onda a3, B3). */
+const TEXTO_DEFINIR_SEM_GESTAO = 'Retrabalho com origem a definir: a gestão do PCP define a origem; até lá não tira nada e a comissão desta O.S. fica pendente';
+function textoDoEfeitoFicha(tipo, etapa) {
+  if (typeof REGRAS === 'undefined' || !REGRAS || typeof REGRAS.textoDoEfeito !== 'function') return '';
+  if (tipo === 'retrabalho' && typeof REGRAS.efeitoDaOcorrencia === 'function' && REGRAS.efeitoDaOcorrencia('retrabalho', etapa) === 'definir'
+    && typeof podeOrigemRetrabalho === 'function' && !podeOrigemRetrabalho()) return TEXTO_DEFINIR_SEM_GESTAO;
+  return REGRAS.textoDoEfeito(tipo, etapa);
+}
+const efeitoRetrabalhoFicha = os => textoDoEfeitoFicha('retrabalho', os && os.etapaOrigem);
 const APURACAO_DEPOIS_FICHA = 'Retrabalho de instalação tira os pontos e a comissão da O.S.; o de medição, arte ou produção não tira nada da instalação. Atraso e retorno antecipado ficam registrados como ocorrência e não tiram nada sozinhos. Tudo aparece em Performance › Perdas por retrabalho.';
 const apuracaoDepoisFicha = () => typeof PONTUACAO === 'undefined';
 // A baixa do ERP que espera o lançamento à mão: a mesma régua da fila "a lançar" (casa.js, classificarEntregas).
@@ -3376,7 +3386,8 @@ function alertasAgendaHTML(os) {
    Decisões do dono: o prazo é a PRIMEIRA data agendada no PCP, congelada (o
    servidor grava quando a O.S. ganha a primeira data; a O.S. antiga tem o
    prazo lido do histórico de remarcações). O retorno previsto é a hora
-   DIGITADA pela gestão, por dia da agenda; sem hora digitada, não há perda.
+   DIGITADA pela gestão, por dia da agenda; sem hora digitada, o retorno
+   antecipado não é medido (D-011: medido ou não, ele não tira nada sozinho).
    Os dois ficam fora de `instalacao` e não passam pelo setField: mexer neles
    não zera a confirmação do cliente nem o carro liberado. Só admin e pcp
    digitam; o servidor carimba quem e quando e guarda no diário. */
@@ -3467,7 +3478,7 @@ function prazoRetornoHTML(os, ro) {
     ? dias.map(dia).join('')
     : '<p class="text-muted">Defina a data da instalação para digitar o retorno previsto.</p>';
   return `${prazo}${corrigir}
-    <div class="retorno-previsto"><p class="retorno-titulo">Retorno previsto <span class="text-muted">· digitado pela gestão; sem hora digitada, não há perda por retorno antecipado</span></p>${retornos}</div>`;
+    <div class="retorno-previsto"><p class="retorno-titulo">Retorno previsto <span class="text-muted">· digitado pela gestão; sem hora digitada, o retorno antecipado não é medido (com ou sem hora, ele fica só registrado, sem tirar nada sozinho)</span></p>${retornos}</div>`;
 }
 
 function blocoAgenda(os, ro, done) {
@@ -4696,7 +4707,10 @@ function bindModalEvents(os, ro) {
           if (box) $$('input,select,textarea', box).forEach(i => { i.value = ''; });
         } else toast('Retrabalho marcado. A gestão do PCP define a etapa de origem; até lá ele fica com a origem a definir.', 'success');
         saveDraft();
-        pintarPendenciasFicha();
+        /* Marcou: a ficha repinta, e a origem "a definir" e o efeito aparecem
+           na hora (revisão da onda a3, B3: o campo ficava vazio até a próxima
+           pintura). Desmarcou: a caixa some e basta o checklist. */
+        if (el.checked) reRenderModalKeepOpen(); else pintarPendenciasFicha();
         return;
       }
       if (el.dataset.confPor) { saveDraft(); reRenderModalKeepOpen(); }
@@ -5138,6 +5152,11 @@ function abrirOrigemRetrabalho(os, gravar, { marcar = false } = {}) {
   const R = typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.origemRetrabalho === 'function' ? REGRAS : null;
   if (!R) { toast('As regras do programa não carregaram nesta aba. Atualize a página.', 'error'); return; }
   const atual = os.retrabalho && !marcar ? R.origemRetrabalho(String(os.etapaOrigem || '')) : '';
+  /* A ÚLTIMA ORIGEM DO HISTÓRICO (revisão da onda a3): marcar de novo depois de
+     desmarcar, ou definir a que ficou a definir, com outra origem é troca e pede
+     o motivo, como no servidor (guardarOrigemRetrabalho). */
+  const ultima = !atual && typeof R.ultimaOrigemDoLog === 'function' ? R.ultimaOrigemDoLog(os.etapaOrigemLog) : '';
+  const ref = atual || ultima;
   const velho = document.getElementById('origem-box'); if (velho) velho.remove();
   const box = document.createElement('div');
   box.id = 'origem-box';
@@ -5148,9 +5167,10 @@ function abrirOrigemRetrabalho(os, gravar, { marcar = false } = {}) {
     <div class="wpp-picker retrab-box" role="dialog" aria-modal="true" aria-labelledby="origem-tit">
       <div class="wpp-picker-head"><strong id="origem-tit">${esc(titulo)} · O.S ${esc(os.numero || '')}</strong><button type="button" class="modal-close" data-origem-fechar aria-label="Fechar">×</button></div>
       <form class="wpp-picker-body ent-form" novalidate>
-        <p class="text-muted ent-texto">${esc(atual ? `Origem gravada: ${atual}. Trocar pede o motivo, que fica registrado com o seu nome.` : 'Escolha a etapa em que o problema nasceu. A origem decide o efeito do retrabalho nos pontos e na comissão.')}</p>
+        <p class="text-muted ent-texto">${esc(atual ? `Origem gravada: ${atual}. Trocar pede o motivo, que fica registrado com o seu nome.` : ultima ? `A última origem desta O.S. foi ${ultima}. Escolher outra é uma troca: pede o motivo, que fica registrado com o seu nome.` : 'Escolha a etapa em que o problema nasceu. A origem decide o efeito do retrabalho nos pontos e na comissão.')}</p>
         <fieldset class="origem-opcoes"><legend>Etapa de origem <span class="req">*</span></legend>${opcoes}</fieldset>
-        ${atual ? '<div class="field"><label>Motivo da troca (15 letras ou mais) <span class="req">*</span><textarea name="motivo" rows="3" maxlength="300"></textarea></label></div>' : ''}
+        ${atual ? '<div class="field"><label>Motivo da troca (15 letras ou mais) <span class="req">*</span><textarea name="motivo" rows="3" maxlength="300"></textarea></label></div>'
+          : ultima ? `<div class="field"><label>Motivo da troca, se a origem não for ${esc(ultima)} (15 letras ou mais)<textarea name="motivo" rows="3" maxlength="300"></textarea></label></div>` : ''}
         <p class="ent-erro" role="alert" hidden></p>
         <div class="wpp-acoes"><button type="submit" class="btn-primary">${marcar ? 'Marcar retrabalho' : 'Gravar a origem'}</button><button type="button" class="btn-ghost" data-origem-fechar>Voltar</button></div>
       </form>
@@ -5167,7 +5187,7 @@ function abrirOrigemRetrabalho(os, gravar, { marcar = false } = {}) {
     const mostrar = t => { erro.textContent = t; erro.hidden = false; };
     if (!etapa) return mostrar('Escolha a etapa de origem.');
     if (!marcar && etapa === atual) return fechar();
-    const troca = !!atual && etapa !== atual;
+    const troca = !!ref && etapa !== ref;
     if (troca && OPERACAO.letrasMotivoSt(motivo) < ORIGEM_MOTIVO_MIN_TELA) return mostrar('Escreva o motivo da troca, com 15 letras ou mais.');
     const msg = gravar(alvo => {
       if (marcar) alvo.retrabalho = true;
@@ -5185,7 +5205,7 @@ function abrirOrigemRetrabalho(os, gravar, { marcar = false } = {}) {
 function origemNaJornadaHTML(os) {
   const R = typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.origemRetrabalho === 'function' ? REGRAS : null;
   const etapa = R ? R.origemRetrabalho(String(os.etapaOrigem || '')) : String(os.etapaOrigem || '');
-  const efeito = R && os.retrabalho ? `<small class="bloco">${esc(fraseComPonto(R.textoDoEfeito('retrabalho', etapa)))}</small>` : '';
+  const efeito = R && os.retrabalho ? `<small class="bloco">${esc(fraseComPonto(textoDoEfeitoFicha('retrabalho', etapa)))}</small>` : '';
   const botao = !os.retrabalho ? '' : podeOrigemRetrabalho() ? `<button type="button" class="btn-ghost btn-sm" data-origem-ficha>${etapa ? 'Trocar a origem' : 'Definir a origem'}</button>`
     : '<small class="bloco">A gestão do PCP define a origem.</small>';
   return `<div class="origem-ficha"><span class="origem-ficha-valor">${esc(etapa || (os.retrabalho ? 'a definir' : ''))}</span>${botao}${efeito}</div>`;
@@ -5195,6 +5215,8 @@ function origemNaJornadaHTML(os) {
    que já estavam marcadas. */
 // A origem já gravada numa O.S. marcada: trocar pede motivo.
 const origemGravadaPergunta = os => (os && os.retrabalho && typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.origemRetrabalho === 'function' ? REGRAS.origemRetrabalho(String(os.etapaOrigem || '')) : '');
+// A de referência: a gravada; sem ela (desmarcada, ou a definir), a última do histórico (etapaOrigemLog). Escolher outra é troca e pede motivo.
+const origemReferenciaPergunta = os => origemGravadaPergunta(os) || (os && typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.ultimaOrigemDoLog === 'function' ? REGRAS.ultimaOrigemDoLog(os.etapaOrigemLog) : '');
 // O campo da origem na pergunta: obrigatório para a gestão, com o efeito da etapa escolhida; para os outros, só o aviso.
 function origemNaPerguntaHTML(os, opt) {
   if (!podeOrigemRetrabalho()) return '<div class="field"><label>Etapa de origem</label><p class="text-muted" style="font-size:.78rem">A gestão do PCP define a etapa de origem. Até lá o retrabalho fica com a origem a definir.</p></div>';
@@ -5229,7 +5251,7 @@ function perguntarRetrabalho(os, aoResponder, volta = {}) {
             <div class="field"><label>Responsável da etapa <span class="req">*</span> <span class="text-muted">(nome ou setor)</span></label><input name="responsavelEtapa" list="retrab-resp" required value="${esc(os.responsavelEtapa || '')}"><datalist id="retrab-resp">${setores.map(x => `<option value="${esc(x)}">`).join('')}${elenco.map(p => `<option value="${esc(p.nome)}">`).join('')}</datalist></div>
             <div class="field"><label>Data do retrabalho <span class="req">*</span></label><input name="dataRetrabalho" type="date" required value="${esc(os.dataRetrabalho || hojeISO())}"></div>
           </div>
-          ${origemGravadaPergunta(os) ? '<div class="field" data-retrab-motivo hidden><label>Motivo da troca da origem <span class="req">*</span> <span class="text-muted">(15 letras ou mais)</span><textarea name="etapaOrigemMotivo" rows="2" maxlength="300"></textarea></label></div>' : ''}
+          ${origemReferenciaPergunta(os) ? `<div class="field" data-retrab-motivo hidden><label>Motivo da troca da origem <span class="req">*</span> <span class="text-muted">(a origem ${esc(origemGravadaPergunta(os) ? 'gravada' : 'anterior')} é ${esc(origemReferenciaPergunta(os))}; 15 letras ou mais)</span><textarea name="etapaOrigemMotivo" rows="2" maxlength="300"></textarea></label></div>` : ''}
           <button class="btn-primary w-100" type="submit">Registrar retrabalho e continuar</button>
         </form>
       </div>
@@ -5278,7 +5300,8 @@ function perguntarRetrabalho(os, aoResponder, volta = {}) {
      trocar a origem já gravada pede o motivo. Quem não é da gestão não grava
      a origem (o servidor também não aceita): o retrabalho fica a definir. */
   const selOrigem = form.querySelector('[name=etapaOrigem]'), efeitoOrigem = form.querySelector('[data-retrab-efeito]'), caixaMotivo = form.querySelector('[data-retrab-motivo]');
-  const gravadaAntes = origemGravadaPergunta(os);
+  // A origem de referência: a gravada, ou a última do histórico depois de um desmarcar (revisão da onda a3).
+  const gravadaAntes = origemReferenciaPergunta(os);
   const repintarOrigem = () => {
     const e = selOrigem ? selOrigem.value : '';
     if (efeitoOrigem) efeitoOrigem.textContent = e && typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.textoDoEfeito === 'function' ? fraseComPonto(REGRAS.textoDoEfeito('retrabalho', e)) : '';
@@ -5509,7 +5532,7 @@ function ocorrenciaLinhaHTML(oc, gestao, perdas) {
   else if (gestao && oc.origem === 'manual' && !oc.anulada) botoes = `<button type="button" class="btn-ghost btn-sm" data-f17-acao="anular" data-oc="${esc(oc.id)}">Anular</button>`;
   // A frase da régua, a mesma da aba Perdas por retrabalho e da comissão (regras.js).
   const efeito = oc.vale && oc.efeito && typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.textoDoEfeito === 'function'
-    ? `<br><small class="oc-efeito">${esc(fraseComPonto(REGRAS.textoDoEfeito(oc.tipo, oc.etapaOrigem || '')))}</small>` : '';
+    ? `<br><small class="oc-efeito">${esc(fraseComPonto(textoDoEfeitoFicha(oc.tipo, oc.etapaOrigem || '')))}</small>` : '';
   return `<li class="oc-linha${oc.anulada ? ' oc-anulada' : ''}"><div><strong>${esc(oc.rotulo)}</strong> ${selo}${pend}${quem}${anulacao}<br><small>${esc(oc.motivo)}</small>${efeito}</div>${botoes ? `<div class="oc-acoes">${botoes}</div>` : ''}</li>`;
 }
 /* A CONTA DAS OCORRÊNCIAS pela régua das perdas (D-010 e D-011): a que tira
