@@ -1,0 +1,545 @@
+From 719ec8867419bfab13fa70a3f8cd6493ca4ac229 Mon Sep 17 00:00:00 2001
+From: Leonardo Pereira <leonardopereira@MacBook-Pro-de-Leonardo-2.local>
+Date: Sun, 11 Oct 2026 05:38:44 -0300
+Subject: [PATCH 1/2] =?UTF-8?q?Functions:=20pcp=5Fref=20e=20rh=5Fref=20s?=
+ =?UTF-8?q?=C3=B3=20publicam=20ramo=20que=20cont=C3=A9m=20a=20main=20(M23)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+O disparo manual do functions.yml fazia checkout de qualquer ramo informado
+em pcp_ref e publicava o servidor do PCP sem conferir nada. Na origem do PCP
+há 3 ramos velhos (codex/entregas-parciais-equipes 36 commits atrás da
+main, claude/admiring-noether-ly12p1 100, producao-lateral 188): qualquer
+um deles poria no ar um pcp-sync mais velho que a tela v164, com o check
+verde. O mesmo valia para o rh_ref.
+
+- checkout do PCP e do RH com fetch-depth 0: com o padrão (1 commit) o
+  merge-base não enxerga a main e barra até o ramo que a contém;
+- passo "O ramo do PCP contem a main?" antes de publicar: recusa com o
+  número de commits da main que faltam; ramo À FRENTE da main passa
+  (servidor antes da tela continua valendo);
+- o mesmo passo para o rh_ref ("O ramo do RH contem a main?");
+- a descrição dos dois inputs diz a regra.
+
+Provas (origens falsas, nada publicado), com o corpo do passo tirado do
+próprio .yml: main, protocolo (+2) e a1-comissao (+1) passam;
+codex/entregas-parciais-equipes, producao-lateral,
+claude/admiring-noether-ly12p1, f21 e poda-valores-operacao são barrados
+com 36, 188, 100, 39 e 89 commits faltando; num checkout raso o ramo à
+frente seria barrado (por isso fetch-depth 0). RH sintético: main e ramo à
+frente passam, ramo atrás é barrado. YAML lido pelo Psych (Ruby).
+
+Falta da M24 (não feito aqui): publicar o PCP só por disparo ou quando o
+commit da main do PCP mudou, exigir o Deploy verde daquele commit e o cron
+comparar commit em vez de data.
+
+Agente: claude
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .github/workflows/functions.yml | 43 +++++++++++++++++++++++++++++++--
+ 1 file changed, 41 insertions(+), 2 deletions(-)
+
+diff --git a/.github/workflows/functions.yml b/.github/workflows/functions.yml
+index 5215c2b..10b0182 100644
+--- a/.github/workflows/functions.yml
++++ b/.github/workflows/functions.yml
+@@ -32,11 +32,11 @@ on:
+   workflow_dispatch:
+     inputs:
+       pcp_ref:
+-        description: 'Ramo do PCP cujas functions publicar'
++        description: 'Ramo do PCP cujas functions publicar (tem de conter a main do PCP)'
+         required: false
+         default: 'main'
+       rh_ref:
+-        description: 'Ramo do RH (so com rh_funcoes)'
++        description: 'Ramo do RH (so com rh_funcoes; tem de conter a main do RH)'
+         required: false
+         default: 'main'
+       rh_funcoes:
+@@ -104,6 +104,27 @@ jobs:
+         with:
+           repository: leogpereira-afk/impresilk
+           ref: ${{ github.event.inputs.pcp_ref || 'main' }}
++          # Historia inteira: com o padrao (1 commit) o merge-base abaixo nao
++          # enxerga a main e barra ate o ramo que a contem (medido em 10/10/2026).
++          fetch-depth: 0
++
++      # TRAVA (10/10/2026): o ramo pedido tem de CONTER a main do PCP. Na origem
++      # ha 3 ramos velhos (codex/entregas-parciais-equipes 36 commits atras,
++      # claude/admiring-noether 100, producao-lateral 188); qualquer um deles em
++      # pcp_ref poria no ar um pcp-sync mais velho que a tela v164, calado.
++      # "Servidor antes da tela" continua valendo: um ramo A FRENTE da main passa.
++      - name: O ramo do PCP contem a main?
++        env:
++          REF: ${{ github.event.inputs.pcp_ref || 'main' }}
++        run: |
++          set -euo pipefail
++          git fetch --no-tags --quiet origin +refs/heads/main:refs/remotes/origin/main
++          if ! git merge-base --is-ancestor origin/main HEAD; then
++            falta=$(git rev-list --count HEAD..origin/main)
++            echo "::error::O ramo '$REF' NAO contem a main do PCP: faltam $falta commit(s) da main nele. Publicar daqui poria no ar um servidor mais velho que a tela. Junte a main no ramo e dispare de novo."
++            exit 1
++          fi
++          echo "ok: '$REF' contem a main ($(git rev-parse --short origin/main)); $(git rev-list --count origin/main..HEAD) commit(s) a frente dela."
+ 
+       - name: O secret existe?
+         env:
+@@ -133,6 +154,24 @@ jobs:
+         with:
+           repository: leogpereira-afk/impresilkrh
+           ref: ${{ github.event.inputs.rh_ref || 'main' }}
++          # Historia inteira, pelo mesmo motivo do PCP acima.
++          fetch-depth: 0
++
++      # A MESMA TRAVA para o rh_ref (11/10/2026): publicar function do RH a
++      # partir de um ramo que nao contem a main do RH poria no ar um servidor
++      # mais velho que a tela do RH, calado. Ramo A FRENTE da main passa.
++      - name: O ramo do RH contem a main?
++        env:
++          REF: ${{ github.event.inputs.rh_ref || 'main' }}
++        run: |
++          set -euo pipefail
++          git fetch --no-tags --quiet origin +refs/heads/main:refs/remotes/origin/main
++          if ! git merge-base --is-ancestor origin/main HEAD; then
++            falta=$(git rev-list --count HEAD..origin/main)
++            echo "::error::O ramo '$REF' NAO contem a main do RH: faltam $falta commit(s) da main nele. Publicar daqui poria no ar um servidor mais velho que a tela. Junte a main no ramo e dispare de novo."
++            exit 1
++          fi
++          echo "ok: '$REF' contem a main do RH ($(git rev-parse --short origin/main)); $(git rev-list --count origin/main..HEAD) commit(s) a frente dela."
+ 
+       - name: Publicar as functions pedidas do RH
+         env:
+-- 
+2.50.1 (Apple Git-155)
+
+
+From d63c2e4884cf498822d6d220946d576417e89de2 Mon Sep 17 00:00:00 2001
+From: Leonardo Pereira <leonardopereira@MacBook-Pro-de-Leonardo-2.local>
+Date: Sun, 11 Oct 2026 06:22:31 -0300
+Subject: [PATCH 2/2] =?UTF-8?q?Functions:=20o=20servidor=20do=20PCP=20s?=
+ =?UTF-8?q?=C3=B3=20sobe=20do=20=C3=BAltimo=20Deploy=20verde=20de=20l?=
+ =?UTF-8?q?=C3=A1,=20e=20o=20token=20fica=20no=20environment=20(M24,=20rev?=
+ =?UTF-8?q?is=C3=A3o=20de=2011/10)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Correções dos achados CI-03, CI-04 e CI-05 da revisão do patch da trava (719ec88).
+
+- CI-03: o cron (functions-sistemas.yml) e a carona do push (functions.yml)
+  publicavam o servidor do PCP pela data do commit da main, sem olhar o Deploy
+  do PCP: o commit que a CI de lá recusou ia ao ar em até 1 hora. Agora o
+  registro marca o PCP com "deployVerde": "deploy.yml" e o publicador
+  (scripts/publicar-sistemas.mjs) só publica se a main for o commit do último
+  Deploy verde; à frente dele fica PENDENTE, e sem conseguir ler a API dá erro.
+  A carona do push passa a usar esse mesmo publicador (data e verde) em vez de
+  republicar a main às cegas, o que também desfazia o servidor publicado de um
+  ramo antes da tela.
+- CI-05: o disparo manual (agora o job publicar-pcp-ramo) roda, depois da trava
+  "contém a main": a main tem de ser o último Deploy verde, os commits do ramo
+  passam pelo conferidor da vez da main, e a suíte do PCP (npm run verificar)
+  roda no ramo antes de publicar; imprime o commit publicado. O publicar-rh
+  roda lint, typecheck e testes do RH no ramo pedido.
+- CI-04: todos os jobs que usam o SUPABASE_ACCESS_TOKEN declaram
+  environment: publicar-functions. Falta o passo do dono no GitHub: criar o
+  environment com a política "só a main" e mover o segredo do repositório
+  para ele; até lá nada muda, e os ramos codex/comercial-20261007 e
+  codex/compromissos-20261008 (sem a trava) continuam recebendo o token.
+
+Testes: tests/publicar-sistemas.test.mjs 7 de 7 (2 novos: conferirVerde e de
+ponta a ponta com a API falsa: main à frente espera, main verde publica, API
+fora do ar falha). Ensaio com o script de 719ec88: "pcp-sync: PUBLICARIA" sem
+consultar o GitHub; com este commit: "PENDENTE: a main está à frente do último
+Deploy verde". YAML conferido com o parser do Ruby. Nada publicado.
+
+Agente: claude
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .github/workflows/functions-sistemas.yml |  6 ++
+ .github/workflows/functions.yml          | 97 +++++++++++++++++++++++-
+ scripts/lib/publicar-sistemas.mjs        | 14 ++++
+ scripts/publicar-sistemas.mjs            | 24 +++++-
+ scripts/sistemas-functions.json          |  2 +-
+ tests/publicar-sistemas.test.mjs         | 81 +++++++++++++++++++-
+ 6 files changed, 220 insertions(+), 4 deletions(-)
+
+diff --git a/.github/workflows/functions-sistemas.yml b/.github/workflows/functions-sistemas.yml
+index dd5a660..9668485 100644
+--- a/.github/workflows/functions-sistemas.yml
++++ b/.github/workflows/functions-sistemas.yml
+@@ -13,6 +13,8 @@
+ # em hora (o GitHub pode atrasar em horário cheio) e sob demanda. Ele NÃO
+ # republica às cegas: só sobe a function cuja main tem commit depois da versão
+ # que está no ar. Os detalhes estão em scripts/publicar-sistemas.mjs.
++# O PCP só sobe a main que é o último Deploy verde de lá (revisão de 11/10/2026,
++# CI-03): commit que a CI do PCP recusou não vai ao ar pelo cron.
+ #
+ # Usa o mesmo secret SUPABASE_ACCESS_TOKEN do functions.yml: um token só, com
+ # Edge Functions read-write nos dois projetos (impresilk e Projetos Léo).
+@@ -49,6 +51,8 @@ concurrency:
+ jobs:
+   publicar:
+     runs-on: ubuntu-latest
++    # O token mora no environment (functions.yml explica, revisão de 11/10/2026, CI-04).
++    environment: publicar-functions
+     steps:
+       - uses: actions/checkout@v4
+ 
+@@ -68,6 +72,8 @@ jobs:
+       - name: Publicar o que ficou para trás
+         env:
+           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
++          # Ler o ultimo Deploy verde do PCP (deployVerde no registro).
++          GITHUB_TOKEN: ${{ github.token }}
+           SISTEMA: ${{ inputs.sistema }}
+           FUNCAO: ${{ inputs.funcao }}
+           FORCAR: ${{ inputs.forcar }}
+diff --git a/.github/workflows/functions.yml b/.github/workflows/functions.yml
+index 10b0182..5b89483 100644
+--- a/.github/workflows/functions.yml
++++ b/.github/workflows/functions.yml
+@@ -16,6 +16,16 @@
+ # Supabase, começa com sbp_ -- https://supabase.com/dashboard/account/tokens).
+ # Sem ele o job FALHA em vez de passar pulando: "publicou 0" com check verde é a
+ # mesma mentira que este arquivo existe para acabar.
++#
++# O TOKEN MORA NO ENVIRONMENT `publicar-functions` (revisão de 11/10/2026,
++# CI-04): todo job daqui que o usa declara `environment: publicar-functions`.
++# O workflow_dispatch roda o arquivo do RAMO escolhido em "Use workflow from";
++# com o token como segredo do repositório, um ramo velho do Painel (sem a trava
++# abaixo) recebia o token e publicava o que quisesse. Com o segredo só no
++# environment e a política "só a main", run de outro ramo não recebe o token.
++# Passo do dono (Settings > Environments): criar "publicar-functions",
++# Deployment branches = Selected branches = main, e mover o
++# SUPABASE_ACCESS_TOKEN para lá (apagando o do repositório).
+ name: Edge Functions no Supabase
+ 
+ on:
+@@ -53,6 +63,7 @@ concurrency:
+ jobs:
+   publicar:
+     runs-on: ubuntu-latest
++    environment: publicar-functions
+     steps:
+       - uses: actions/checkout@v4
+ 
+@@ -95,10 +106,45 @@ jobs:
+   # entraram no git do PCP no mesmo dia -- e nenhum dos dois chegou no ar,
+   # porque publicar Edge Function de la dependia de alguem lembrar de rodar o
+   # script a mao. O dono abriu a tela no dia seguinte e viu tudo igual.
++  # DUAS PORTAS, AS DUAS CONFERIDAS (revisão de 11/10/2026, CI-03 e CI-05):
++  # - push aqui (carona): o MESMO publicador do cron (scripts/publicar-sistemas.mjs).
++  #   Ele só publica se a main do PCP for o commit do ÚLTIMO DEPLOY VERDE de lá
++  #   (a suíte e a vez passaram) e se ela tiver commit mais novo que a versão no
++  #   ar. Antes, todo push do Painel republicava a main do PCP às cegas: ia ao ar
++  #   o código que a CI do PCP recusou, e o servidor publicado de um ramo (para
++  #   subir antes da tela) era desfeito pela main mais velha.
++  # - disparo manual (pcp_ref): o ramo tem de conter a main, a main tem de ser o
++  #   último Deploy verde, os commits do ramo têm de estar dentro da vez, e a
++  #   suíte do PCP roda NO RAMO antes de publicar: a trava só olha ancestralidade,
++  #   e um merge resolvido "com a minha versão" contém a main e tira regra dela.
+   publicar-pcp:
+     runs-on: ubuntu-latest
+     needs: publicar
+-    if: always()
++    if: always() && github.event_name == 'push'
++    environment: publicar-functions
++    steps:
++      - uses: actions/checkout@v4
++
++      - uses: actions/setup-node@v4
++        with:
++          node-version: 22
++
++      - name: Publicar o servidor do PCP (só a main do último Deploy verde, se estiver atrasado)
++        env:
++          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
++          GITHUB_TOKEN: ${{ github.token }}
++        run: |
++          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
++            echo "::error::Falta o secret SUPABASE_ACCESS_TOKEN. As functions do PCP NAO foram publicadas."
++            exit 1
++          fi
++          node scripts/publicar-sistemas.mjs --sistema impresilk
++
++  publicar-pcp-ramo:
++    runs-on: ubuntu-latest
++    needs: publicar
++    if: always() && github.event_name == 'workflow_dispatch'
++    environment: publicar-functions
+     steps:
+       - uses: actions/checkout@v4
+         with:
+@@ -126,6 +172,38 @@ jobs:
+           fi
+           echo "ok: '$REF' contem a main ($(git rev-parse --short origin/main)); $(git rev-list --count origin/main..HEAD) commit(s) a frente dela."
+ 
++      - name: A main do PCP e o ultimo Deploy verde?
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          set -euo pipefail
++          verde=$(gh api "repos/leogpereira-afk/impresilk/actions/workflows/deploy.yml/runs?branch=main&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""')
++          main=$(git rev-parse origin/main)
++          if [ "$main" != "$verde" ]; then
++            echo "::error::A main do PCP (${main:0:7}) nao e o ultimo Deploy verde (${verde:0:7}): o Deploy de la esta vermelho ou rodando. Resolva o vermelho ou espere o verde, e dispare de novo."
++            exit 1
++          fi
++          echo "ok: a main do PCP (${main:0:7}) e o ultimo Deploy verde."
++
++      - uses: actions/setup-node@v4
++        with:
++          node-version: '22'
++
++      # Os commits do ramo, a frente da main, com o conferidor da MAIN (o que ja
++      # passou num Deploy verde), nao com o do ramo.
++      - name: Os commits do ramo estao dentro da vez?
++        run: |
++          set -euo pipefail
++          if git cat-file -e origin/main:scripts/vez.cjs 2>/dev/null; then
++            git show origin/main:scripts/vez.cjs > "$RUNNER_TEMP/vez.cjs"
++            PCP_RAIZ="$GITHUB_WORKSPACE" node "$RUNNER_TEMP/vez.cjs" conferir "origin/main..HEAD"
++          else
++            echo "A main do PCP ainda nao tem scripts/vez.cjs (protocolo da vez): pulo esta conferencia."
++          fi
++
++      - name: Suite do PCP no ramo pedido
++        run: npm run verificar
++
+       - name: O secret existe?
+         env:
+           TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+@@ -138,7 +216,9 @@ jobs:
+       - name: Publicar as functions do PCP
+         env:
+           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
++          REF: ${{ github.event.inputs.pcp_ref || 'main' }}
+         run: |
++          echo "Publicando o servidor do PCP do commit $(git rev-parse HEAD) (ramo '$REF')."
+           chmod +x scripts/publicar-functions.sh
+           ./scripts/publicar-functions.sh
+ 
+@@ -149,6 +229,7 @@ jobs:
+     runs-on: ubuntu-latest
+     needs: publicar
+     if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.rh_funcoes != ''
++    environment: publicar-functions
+     steps:
+       - uses: actions/checkout@v4
+         with:
+@@ -173,6 +254,20 @@ jobs:
+           fi
+           echo "ok: '$REF' contem a main do RH ($(git rev-parse --short origin/main)); $(git rev-list --count origin/main..HEAD) commit(s) a frente dela."
+ 
++      # A suite do RH no ramo pedido, como o verificar.yml de la (CI-05): a
++      # trava acima so olha ancestralidade.
++      - uses: actions/setup-node@v4
++        with:
++          node-version: '20'
++          cache: npm
++
++      - name: Suite do RH no ramo pedido
++        run: |
++          npm ci
++          npm run lint
++          npm run typecheck
++          npm test
++
+       - name: Publicar as functions pedidas do RH
+         env:
+           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+diff --git a/scripts/lib/publicar-sistemas.mjs b/scripts/lib/publicar-sistemas.mjs
+index 932c4c0..892592d 100644
+--- a/scripts/lib/publicar-sistemas.mjs
++++ b/scripts/lib/publicar-sistemas.mjs
+@@ -95,6 +95,20 @@ export function decidir({ noAr, ultimoCommitMs, forcar = false, desde = AUTOMATI
+   return { acao: "publicar", motivo: "a main tem commit mais novo que a versão no ar" };
+ }
+ 
++// SÓ O QUE PASSOU NA CI DE LÁ (revisão de 11/10/2026, CI-03). O PCP confere
++// a suíte e a vez de cada commit no Deploy dele. Publicar o servidor pela data
++// do commit, sem olhar esse Deploy, punha no ar em até 1 hora (cron) ou no
++// próximo push do Painel (carona) o código que a CI do PCP tinha recusado.
++// Sistema com `deployVerde` no registro só publica se a main for exatamente o
++// commit do último Deploy verde; à frente dele (vermelho ou rodando), espera.
++export function conferirVerde({ head, verde }) {
++  if (!verde) return { ok: false, motivo: "PENDENTE: nenhum Deploy verde na main; não publico o servidor" };
++  if (head !== verde) {
++    return { ok: false, motivo: `PENDENTE: a main (${head.slice(0, 7)}) está à frente do último Deploy verde (${verde.slice(0, 7)}): o Deploy de lá está vermelho ou rodando; não publico o servidor` };
++  }
++  return { ok: true };
++}
++
+ // A CONFIGURAÇÃO FICA COMO ESTÁ NO AR. verify_jwt vem da versão atual: nenhum
+ // sistema daqui confere crachá pelo gateway, mas se algum dia um conferir,
+ // publicar por cima não pode desligar essa trava calado. O import map também
+diff --git a/scripts/publicar-sistemas.mjs b/scripts/publicar-sistemas.mjs
+index 94fd8bd..0fad805 100644
+--- a/scripts/publicar-sistemas.mjs
++++ b/scripts/publicar-sistemas.mjs
+@@ -22,6 +22,9 @@
+ //      senão, está em dia. Commit anterior a AUTOMATICO_DESDE aparece como
+ //      PENDENTE e só sobe à mão. Function que não existe no ar não é criada, e
+ //      nada é apagado. verify_jwt e import map ficam como estão no ar.
++//   4. sistema com "deployVerde" no registro (o PCP): só publica se a main for
++//      o commit do último Deploy verde de lá (scripts/lib, conferirVerde). O
++//      functions.yml usa este mesmo publicador na carona do push do Painel.
+ //
+ // USO (o token é o "personal access token" do Supabase, começa com sbp_):
+ //   export SUPABASE_ACCESS_TOKEN=sbp_...
+@@ -38,9 +41,10 @@ import { execFileSync } from "node:child_process";
+ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+ import { join } from "node:path";
+ import { tmpdir } from "node:os";
+-import { decidir, juntarArquivos, listarFunctions, metadados, tipoDoArquivo } from "./lib/publicar-sistemas.mjs";
++import { conferirVerde, decidir, juntarArquivos, listarFunctions, metadados, tipoDoArquivo } from "./lib/publicar-sistemas.mjs";
+ 
+ const API = process.env.SUPABASE_API_URL || "https://api.supabase.com/v1";
++const GITHUB_API = process.env.GITHUB_API_URL || "https://api.github.com";
+ const TOKEN = process.env.SUPABASE_ACCESS_TOKEN || "";
+ const DONO = "leogpereira-afk";
+ 
+@@ -105,6 +109,18 @@ function clonar(repo) {
+   return { raiz: pasta, limpar: () => rmSync(pasta, { recursive: true, force: true }) };
+ }
+ 
++// O último Deploy verde da main do sistema, pela API do GitHub (repositórios
++// públicos; GITHUB_TOKEN, se houver, só evita o limite de consultas). Falhar
++// em ler é erro, não "publica assim mesmo".
++async function ultimoDeployVerde(repo, workflow) {
++  const headers = { Accept: "application/vnd.github+json", "User-Agent": "publicar-sistemas" };
++  if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
++  const r = await fetch(`${GITHUB_API}/repos/${DONO}/${repo}/actions/workflows/${workflow}/runs?branch=main&status=success&per_page=1`, { headers });
++  if (!r.ok) throw new Error(`não consegui ler o último ${workflow} verde de ${repo} (HTTP ${r.status})`);
++  const corpo = await r.json().catch(() => ({}));
++  return corpo.workflow_runs?.[0]?.head_sha || "";
++}
++
+ function ultimoCommitMs(raiz, arquivos) {
+   const saida = execFileSync("git", ["-C", raiz, "log", "-1", "--format=%ct", "--", ...arquivos], { encoding: "utf8" }).trim();
+   return saida ? Number(saida) * 1000 : NaN;
+@@ -128,6 +144,12 @@ for (const sistema of SISTEMAS) {
+   try {
+     const noAr = await funcoesNoAr(sistema.projeto);
+     clone = clonar(sistema.repo);
++    if (sistema.deployVerde) {
++      const head = execFileSync("git", ["-C", clone.raiz, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
++      const verde = conferirVerde({ head, verde: await ultimoDeployVerde(sistema.repo, sistema.deployVerde) });
++      if (!verde.ok) { conta.pendentes++; console.log(`  ${verde.motivo}`); continue; }
++      console.log(`  main ${head.slice(0, 7)} = último ${sistema.deployVerde} verde: confiro as functions dela`);
++    }
+     const nomes = listarFunctions(clone.raiz).filter((n) => !FUNCAO || n === FUNCAO);
+     if (!nomes.length) console.log(FUNCAO ? `  (sem a function ${FUNCAO})` : "  (sem functions em supabase/functions)");
+     for (const nome of nomes) {
+diff --git a/scripts/sistemas-functions.json b/scripts/sistemas-functions.json
+index 4c3c16e..c0f0250 100644
+--- a/scripts/sistemas-functions.json
++++ b/scripts/sistemas-functions.json
+@@ -1,5 +1,5 @@
+ [
+-  { "repo": "impresilk", "nome": "PCP / Instalação", "projeto": "heveemylixartyijxewh" },
++  { "repo": "impresilk", "nome": "PCP / Instalação", "projeto": "heveemylixartyijxewh", "deployVerde": "deploy.yml" },
+   { "repo": "brief-medicao", "nome": "Brief de Medição", "projeto": "heveemylixartyijxewh" },
+   { "repo": "impresilk-dre", "nome": "DRE Caixa", "projeto": "heveemylixartyijxewh" },
+   { "repo": "impresilk-compras", "nome": "Compras", "projeto": "heveemylixartyijxewh" },
+diff --git a/tests/publicar-sistemas.test.mjs b/tests/publicar-sistemas.test.mjs
+index c3f183a..ffd70e8 100644
+--- a/tests/publicar-sistemas.test.mjs
++++ b/tests/publicar-sistemas.test.mjs
+@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
+ import { dirname, join } from "node:path";
+ import { fileURLToPath } from "node:url";
+ import {
+-  AUTOMATICO_DESDE, decidir, importsRelativos, juntarArquivos, listarFunctions, metadados, tipoDoArquivo,
++  AUTOMATICO_DESDE, conferirVerde, decidir, importsRelativos, juntarArquivos, listarFunctions, metadados, tipoDoArquivo,
+ } from "../scripts/lib/publicar-sistemas.mjs";
+ 
+ const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "../scripts/publicar-sistemas.mjs");
+@@ -178,3 +178,82 @@ test("de ponta a ponta: publica só a atrasada, com os arquivos certos, e não c
+     servidor.close();
+   }
+ });
++
++// CI-03 da revisão de 11/10/2026: o cron e a carona publicavam o servidor do PCP
++// pela data do commit, sem olhar o Deploy de lá. Um commit que a CI do PCP
++// recusou ia ao ar em até 1 hora. Dados fictícios.
++test("Deploy verde: só publica a main que é o último Deploy verde do sistema", () => {
++  assert.equal(conferirVerde({ head: "a".repeat(40), verde: "a".repeat(40) }).ok, true);
++  const afrente = conferirVerde({ head: "b".repeat(40), verde: "a".repeat(40) });
++  assert.equal(afrente.ok, false);
++  assert.match(afrente.motivo, /à frente do último Deploy verde/);
++  assert.match(conferirVerde({ head: "b".repeat(40), verde: "" }).motivo, /nenhum Deploy verde/);
++});
++
++test("Deploy verde de ponta a ponta: main à frente espera, main verde publica, API fora do ar falha", async () => {
++  const origem = mkdtempSync(join(tmpdir(), "origem-verde-"));
++  repositorio(join(origem, "pcp"), [
++    { quando: "2026-10-10T20:00:00Z", arquivos: { "supabase/functions/pcp-sync/index.ts": "export const v = 1;\n" } },
++  ]);
++  const raiz = join(origem, "pcp");
++  const sha = () => execFileSync("git", ["-C", raiz, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
++  const verdeAntigo = sha();
++  escrever(raiz, { "supabase/functions/pcp-sync/index.ts": "export const v = 2; // a CI de lá recusou\n" });
++  execFileSync("git", ["-C", raiz, "add", "-A"]);
++  execFileSync("git", ["-C", raiz, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c"], {
++    env: { ...process.env, GIT_AUTHOR_DATE: "2026-10-11T10:00:00Z", GIT_COMMITTER_DATE: "2026-10-11T10:00:00Z" },
++  });
++  const registro = join(origem, "sistemas.json");
++  writeFileSync(registro, JSON.stringify([{ repo: "pcp", nome: "PCP", projeto: "pcpteste", deployVerde: "deploy.yml" }]));
++
++  let verde = verdeAntigo;
++  let githubFora = false;
++  const recebidos = [];
++  const servidor = createServer((req, res) => {
++    if (req.url.startsWith("/gh/")) {
++      assert.equal(req.url, "/gh/repos/leogpereira-afk/pcp/actions/workflows/deploy.yml/runs?branch=main&status=success&per_page=1");
++      if (githubFora) { res.writeHead(503); return res.end("{}"); }
++      res.writeHead(200, { "content-type": "application/json" });
++      return res.end(JSON.stringify({ workflow_runs: [{ head_sha: verde }] }));
++    }
++    const partes = [];
++    req.on("data", (p) => partes.push(p));
++    req.on("end", () => {
++      res.writeHead(req.method === "GET" ? 200 : 201, { "content-type": "application/json" });
++      if (req.method === "GET") return res.end(JSON.stringify([{ slug: "pcp-sync", version: 130, updated_at: Date.parse("2026-10-11T09:00:00Z"), verify_jwt: false, import_map: false }]));
++      recebidos.push(req.url);
++      res.end(JSON.stringify({ version: 131 }));
++    });
++  });
++  await new Promise((ok) => servidor.listen(0, "127.0.0.1", ok));
++  const porta = servidor.address().port;
++  const rodar = () => new Promise((ok) => {
++    const filho = spawn(process.execPath, [SCRIPT, "--origem", origem, "--registro", registro], {
++      env: { ...process.env, SUPABASE_ACCESS_TOKEN: "sbp_teste", SUPABASE_API_URL: `http://127.0.0.1:${porta}/v1`, GITHUB_API_URL: `http://127.0.0.1:${porta}/gh` },
++    });
++    let saida = "";
++    filho.stdout.on("data", (d) => { saida += d; });
++    filho.stderr.on("data", (d) => { saida += d; });
++    filho.on("close", (codigo) => ok({ codigo, saida }));
++  });
++  try {
++    const espera = await rodar();
++    assert.equal(espera.codigo, 0, espera.saida);
++    assert.match(espera.saida, /PENDENTE: a main \([0-9a-f]{7}\) está à frente do último Deploy verde/);
++    assert.equal(recebidos.length, 0, "não publica o commit que a CI recusou");
++
++    verde = sha();
++    const publica = await rodar();
++    assert.equal(publica.codigo, 0, publica.saida);
++    assert.match(publica.saida, /pcp-sync: publicada v131/);
++    assert.equal(recebidos.length, 1);
++
++    githubFora = true;
++    const falha = await rodar();
++    assert.equal(falha.codigo, 1, "sem saber o verde, não publica e não termina verde");
++    assert.match(falha.saida, /não consegui ler o último deploy\.yml verde de pcp \(HTTP 503\)/);
++    assert.equal(recebidos.length, 1);
++  } finally {
++    servidor.close();
++  }
++});
+-- 
+2.50.1 (Apple Git-155)
+

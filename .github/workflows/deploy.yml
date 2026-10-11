@@ -22,6 +22,8 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  # Ler o ultimo Deploy verde: e dele que parte a conferencia da vez.
+  actions: read
 
 concurrency:
   group: pages
@@ -44,14 +46,44 @@ jobs:
         run: npm run verificar
 
       # Um agente por repositorio de cada vez (AGENTS.md, secao 5). Cada commit
-      # do push leva "Agente: X" e X e quem tem a vez no VEZ.md daquele commit.
+      # leva "Agente: X" e X e quem tem a vez no VEZ.md daquele commit.
       # Em 02-08/10/2026 entraram 39 commits na main sem dizer de quem eram.
+      #
+      # BASE = o ULTIMO DEPLOY VERDE da main, nao o "before" do push. Com o
+      # before, o push que o paths-ignore pula (so VEZ.md) nunca era conferido,
+      # nem o merge que tomava a vez; e o commit recusado saia da faixa no push
+      # seguinte e ia ao ar junto com ele. Agora tudo desde o ultimo verde e
+      # conferido de novo, e o recusado continua vermelho ate o dono aceita-lo.
+      # O CONFERIDOR vem da base: mexer no vez.cjs no proprio push nao o desliga.
+      # A CHAVE do GitHub: commit do dono pelo site (editor ou botao de merge) vem
+      # assinado por ela e vale como "Agente: leo" sem a linha.
       - name: Commits dentro da vez?
         env:
           ANTES: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -n "$ANTES" ] && git cat-file -e "${ANTES}^{commit}" 2>/dev/null; then faixa="${ANTES}..HEAD"; else faixa="HEAD~1..HEAD"; fi
-          node scripts/vez.cjs conferir "$faixa"
+          set -uo pipefail
+          if ! verde=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy.yml/runs?branch=main&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""'); then
+            echo "::error::Nao consegui ler o ultimo Deploy verde pela API do GitHub. Sem ele nao sei o que conferir: rode de novo."
+            exit 1
+          fi
+          if [ -n "$verde" ] && git cat-file -e "${verde}^{commit}" 2>/dev/null; then
+            base="$verde"
+          elif [ -n "$ANTES" ] && git cat-file -e "${ANTES}^{commit}" 2>/dev/null; then
+            base="$ANTES"; echo "::warning::Nenhum Deploy verde na historia desta main: confiro so este push."
+          else
+            base=$(git rev-parse HEAD~1); echo "::warning::Nenhum Deploy verde nem before: confiro so o ultimo commit."
+          fi
+          echo "base da conferencia: $base (ultimo Deploy verde: ${verde:-nenhum})"
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -p -m 700 "$GNUPGHOME"
+          curl -fsSL https://github.com/web-flow.gpg | gpg --batch --quiet --import || echo "::warning::Nao importei a chave do GitHub: commit do dono feito pelo site, sem a linha Agente, vai ficar vermelho."
+          if git cat-file -e "$base:scripts/vez.cjs" 2>/dev/null; then
+            git show "$base:scripts/vez.cjs" > "$RUNNER_TEMP/vez.cjs"
+          else
+            cp scripts/vez.cjs "$RUNNER_TEMP/vez.cjs"
+          fi
+          PCP_RAIZ="$GITHUB_WORKSPACE" node "$RUNNER_TEMP/vez.cjs" conferir "$base..HEAD"
 
       - name: Versao igual nos 83 lugares?
         run: node scripts/subir-versao.cjs
