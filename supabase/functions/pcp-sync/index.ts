@@ -1773,7 +1773,9 @@ Deno.serve(async (req: Request) => {
   };
   const saidaBase = (r: any) => ehToqueNoNome ? podarToque(r) : gestaoVeTudo ? r : podarCarimbosF15(podarAlocacao(r));
 
-  const saida = (r:any) => gestaoVeTudo ? podarControle(saidaBase(r)) : podarValoresPCP(podarControle(saidaBase(r)));
+  // A marca gravada por engano antes da revisão (item 3) não desce para a gestão.
+  const semMarcaPodada = (r:any) => { if (!r || typeof r !== "object" || !("conferenciaSoGestao" in r)) return r; const { conferenciaSoGestao: _m, ...x } = r; return x; };
+  const saida = (r:any) => gestaoVeTudo ? podarControle(semMarcaPodada(saidaBase(r))) : podarValoresPCP(podarControle(saidaBase(r)));
 
   /* QUEM ASSINA A ENTRADA DO DIARIO: o cracha, nunca o corpo do pedido. Um
      `porId` que viesse do aparelho seria o aparelho dizendo quem ele e --
@@ -3418,6 +3420,11 @@ Deno.serve(async (req: Request) => {
            nesse campo é ignorado; só cresce, até 20 linhas; quem e quando
            carimbados aqui), a resposta traz o aviso (o celular mostra) e a
            gestão vê a marca na ficha. */
+        /* A MARCA conferenciaSoGestao É SÓ DE SAÍDA (revisão da onda auditoria,
+           item 3): a montagem e a operação a recebem na O.S. podada e a
+           devolviam pela fila; ficava gravada, e a gestão via "Conferência só
+           para a gestão" para sempre. Nunca se grava. */
+        delete os.conferenciaSoGestao;
         {
           if (existing && Array.isArray(existing.trabalhoCancelada)) os.trabalhoCancelada = existing.trabalhoCancelada; else delete os.trabalhoCancelada;
           if (existing && !ehMaquina && cancelada(existing) && cancelada(os)) {

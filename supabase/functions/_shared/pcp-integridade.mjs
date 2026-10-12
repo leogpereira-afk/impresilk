@@ -3553,6 +3553,8 @@ export function podarAlocacao(r) {
      conferências, a tela de quem não é da gestão media o prazo pelo
      lançamento e escrevia "No prazo" onde a gestão via "Conferência parcial".
      Com a marca, a tela diz "Conferência só para a gestão". */
+  // A marca vem da conferência gravada agora, nunca de uma marca antiga no registro (item 3 da revisão).
+  delete x.conferenciaSoGestao;
   if (Array.isArray(_ce) && _ce.length) x.conferenciaSoGestao = true;
   return x;
 }

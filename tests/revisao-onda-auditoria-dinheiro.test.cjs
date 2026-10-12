@@ -106,6 +106,16 @@ test('P1/pessoas: vínculo salvo (vinculosRH) com o ID anterior não leva ao ID 
   assert.equal(r.idDe('Ninha'),'100011','o nome com vínculo salvo no ID anterior ficou no ID anterior');
 });
 
+test('operação grava a marca conferenciaSoGestao no registro (campo que só o servidor deveria pôr na saída)', async()=>{
+  const A=base('A','91001',10000,['100002']);
+  const e=await edge('pcp-sync',{pcp_registros:[{colecao:'os',id:'A',apagado:false,atualizado_em:'2026-11-01T10:00:00.000Z',registro:A}],
+    registros:[...FIXAS],pcp_config_global:[{id:true,atualizado_em:'2020-01-01',config:{}}],painel_ordens:[],
+    equipe_contas:[{sistema:'pcp',usuario:'op',papel:'operacao',ativo:true}]});
+  const r=await e.call({action:'upsert',os:{...structuredClone(A),conferenciaSoGestao:true,observacao:'x'}},{papel:'operacao',sub:'op',nome:'Operacao',exp:EXP});
+  assert.equal(r.status,200,JSON.stringify(r).slice(0,300));
+  assert.equal(e.db.pcp_registros.find(x=>x.id==='A').registro.conferenciaSoGestao,undefined,'a marca ficou gravada');
+});
+
 test('P1/pessoas: o crachá de toque cujo nome tem o vínculo salvo no ID anterior abre as próprias O.S. (servidor)', async()=>{
   const I=await import('../supabase/functions/_shared/pcp-integridade.mjs');
   const dados={pessoas:[{id:'100011',nome:'Instaladora Ficticia',apelido:'inst',anteriores:['100001']}],vinculos:[{apelido:'Ninha',id:'100001'}]};

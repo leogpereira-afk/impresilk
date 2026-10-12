@@ -5750,7 +5750,8 @@ function statusEntregaDe(os) {
        gestão recebe a O.S. sem as conferências, só com a marca de que elas
        existem. O prazo medido sem elas não é o da gestão: o selo diz
        "Conferência só para a gestão", não "No prazo". */
-    if(os.conferenciaSoGestao===true && !os.conferenciasEntrega?.length && st.estado!=='cancelado')return {...st,conferenciaSoGestao:true};
+    // Só para quem não vê os valores (a gestão recebe a conferência inteira e ignora a marca: item 3 da revisão).
+    if(os.conferenciaSoGestao===true && !(typeof podeVerValores==='function'&&podeVerValores()) && !os.conferenciasEntrega?.length && st.estado!=='cancelado')return {...st,conferenciaSoGestao:true};
     const conf=os.conferenciasEntrega?.length && typeof CONFERENCIA_ENTREGA!=='undefined'?CONFERENCIA_ENTREGA.estado(os):null;
     return conf && ['parcial','inconsistente'].includes(conf.situacao) && st.estado!=='cancelado'?{...st,conferenciaParcial:conf.resumo}:st;
   } catch { return null; }
