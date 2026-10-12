@@ -50,3 +50,18 @@ test('item 1 na tela: o aviso do mês fechado diz se a mudança trava a comissã
   assert.match(html,/Na comissão: 1 mudança muda o dinheiro \(O\.S\. 90001: valor líquido\)\. Aprovar e Exportar a comissão deste mês ficam travados/);
   assert.match(html,/A O\.S\. 90002 tinha a origem do retrabalho a definir no fechamento e mudou depois: no demonstrativo ela fica pendente \(não paga e não perde\)/);
 });
+
+/* ------------------------------------------------------------------ item 4 */
+const revisaoTela=(extra={})=>({id:'2026-11-01:2026-11-30:000001',revisao:1,tipo:'previa',em:'2026-12-03T12:00:00Z',motivo:'Prévia fictícia',autor:{login:'gestor',nome:'Gestor fictício'},
+  apuracao:{config:{modo:'efetivo'},totalCentavos:1000,pendencias:[],linhas:[],ajustes:[],reconhecimento:{situacao:'pendente',aviso:'Aviso fictício',criterios:{},equipes:[]}},...extra});
+test('item 4 na tela: o demonstrativo diz quem fez a prévia e quem aprovou pelo ID; o registro antigo sem o ID mostra só o nome',()=>{
+  const c=tela();
+  c.__r=revisaoTela();
+  assert.match(c.run('comissaoResumoHTML(__r,[__r])'),/<p>Prévia de Gestor fictício · /);
+  c.__r=revisaoTela({tipo:'aprovacao',autor:{login:'gestor',nome:'Gestor fictício',porId:'044455'}});
+  assert.match(c.run('comissaoResumoHTML(__r,[__r])'),/<p>Aprovada por Gestor fictício \(cadastro 044455\) · /);
+  // O selo do mês com o ID de quem fechou.
+  const s=selo(1,[reg('a1',100)],{fechadoPorId:'044455'});
+  comBase(c,fonte([reg('a1',100)]),[s],s.id);
+  assert.match(c.run('perfFonteTexto()'),/Fechamento preservado · revisão 1 · Gestor fictício \(cadastro 044455\) · /);
+});

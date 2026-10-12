@@ -1798,7 +1798,12 @@ Deno.serve(async (req: Request) => {
         const fraseCobertura=String(body.confirmaCobertura || "").trim().toLowerCase().replace(/\s+/g," ");
         if(cob?.baixa && fraseCobertura!==PERF_FRASE_COBERTURA)return resp({error:`Só ${cob.pctValor}% do valor do mês está na base: ${cob.aLancar} ${cob.aLancar===1?"baixa do ERP a lançar fica":"baixas do ERP a lançar ficam"} de fora. Para fechar assim, escreva "${PERF_FRASE_COBERTURA}" na confirmação (recarregue a página se o campo não aparecer).`,coberturaBaixa:true,cobertura:cob},422);
         const revisao=(anterior?.revisao || 0)+1,id=periodo.de+":"+periodo.ate+":"+String(revisao).padStart(6,"0");
-        const registro={...fonte,...periodo,id,revisao,anterior:anterior?.id||null,requestId,motivo,fechadoEm:new Date().toISOString(),fechadoPor:cracha?.nome || "Integração autorizada",...(cob?.baixa?{coberturaBaixaConfirmada:PERF_FRASE_COBERTURA}:{})};
+        /* QUEM FECHOU PELO ID (item 7 da fila de 11/10/2026 e linha Baixa
+           "fechadoPorId"): o selo guardava só o nome. O ID de 6 dígitos vem da
+           mesma régua do diário (autorAuditoria); sem ID resolvido fica vazio,
+           e o selo antigo sem o campo continua legível pelo nome. Fora do hash. */
+        const autorFech=await autorAuditoria();
+        const registro={...fonte,...periodo,id,revisao,anterior:anterior?.id||null,requestId,motivo,fechadoEm:new Date().toISOString(),fechadoPor:cracha?.nome || "Integração autorizada",fechadoPorId:autorFech.porId||"",...(cob?.baixa?{coberturaBaixaConfirmada:PERF_FRASE_COBERTURA}:{})};
         const {error}=await sb.from("pcp_registros").insert({colecao:"performance_fechamentos",id,registro,apagado:false,atualizado_em:registro.fechadoEm});
         if(error){if(error.code==="23505")return resp({error:"O período recebeu outra revisão. Atualize antes de fechar."},409);throw new Error(error.message);}
         return resp({ok:true,fechamento:registro});
@@ -1916,7 +1921,7 @@ Deno.serve(async (req: Request) => {
         const referenciaVersoes=Object.fromEntries(afetadas.map(osId=>[osId,versoesOS.get(osId)||0]));
         const revisao=(ultima?.revisao||0)+1,id=chave+":"+String(revisao).padStart(6,"0"),em=new Date().toISOString();
         const hash=await perfHash({apuracao,entrada,fechamentoId});
-        const registro:any={...periodo,id,revisao,tipo,anterior:ultima?.id||null,requestId,assinatura,motivo,fechamentoId,entrada,apuracao,hash,versoesOS:referenciaVersoes,em,autor:{login:String(cracha.sub||""),nome:String(cracha.nome||"")}};
+        const registro:any={...periodo,id,revisao,tipo,anterior:ultima?.id||null,requestId,assinatura,motivo,fechamentoId,entrada,apuracao,hash,versoesOS:referenciaVersoes,em,autor:{login:String(cracha.sub||""),nome:String(cracha.nome||""),porId:(await autorAuditoria()).porId||""}};
         /* O que a conferência do selo achou na aprovação (onda comissão): mudança fora do dinheiro e as O.S. com a
            origem a definir no selo que mudaram depois (pendência para a próxima revisão ou compensação). Fora do hash. */
         if(tipo==="aprovacao"&&conferida)registro.fonteConferida={em,...resumoConferida()};
