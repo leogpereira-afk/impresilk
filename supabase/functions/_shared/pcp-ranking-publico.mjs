@@ -31,7 +31,8 @@ export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porVal
       const k = String(m?.chave || ''), ficha = (pessoas?.fichas || []).find(p => String(p.chave) === k && /^\d{6}$/.test(String(p.id)));
       // Slug só muda pela própria ficha. Nome/apelido só muda quando ele É
       // a chave; nunca procurar um slug órfão pelo nome de outra pessoa.
-      const id = pessoas ? (/^\d{6}$/.test(k) ? k : ficha?.id || (k === String(m?.apelido || m?.nome || '') ? pessoas.idDe(k) : '')) : '';
+      // O ID anterior da pessoa (P1 da auditoria de 12/10/2026) soma com o de hoje.
+      const id = pessoas ? (/^\d{6}$/.test(k) ? (pessoas.idDe(k) || k) : ficha?.id || (k === String(m?.apelido || m?.nome || '') ? pessoas.idDe(k) : '')) : '';
       const usar = id && !pessoas?.repetido?.(id) ? String(id) : k;
       const nome = usar !== k ? (pessoas?.pessoa?.(usar)?.nome || m.nome) : m?.nome;
       const proximo = {...m,chave:usar,nome};

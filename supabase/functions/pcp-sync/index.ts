@@ -1,7 +1,7 @@
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
-import { idDoCadastroRH, prazoParaConferir, protegerItensConferidos, mudancaValorConferido, dinheiroDaOSMudou, avisoDinheiroMesFechado, valorDaComissao, guardarOsOriginalId, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, guardarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, acertarMomentosGestao, momentosComoGravados, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffEdicaoRecusada, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { idDoCadastroRH, idsAnterioresDoCadastro, avisosIdsAnteriores, prazoParaConferir, protegerItensConferidos, mudancaValorConferido, dinheiroDaOSMudou, avisoDinheiroMesFechado, valorDaComissao, guardarOsOriginalId, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, guardarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, acertarMomentosGestao, momentosComoGravados, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffEdicaoRecusada, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, atrasoDaOS, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
@@ -575,7 +575,7 @@ let _fichasRH: { ate: number; fichas: any[] } | null = null;
    a régua usa; o CPF inteiro fica neste servidor (juntarFreelancers). */
 async function contratosFreelancerRH(comFoto = false): Promise<any[]> {
   const { data, error } = await sb.from("registros")
-    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->>funcao, registro->>situacao, registro->>contratoFim" + (comFoto ? ", registro->>exColaboradorId, registro->>fotoDataUrl" : ""))
+    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->idPessoaAnteriores, registro->>funcao, registro->>situacao, registro->>contratoFim" + (comFoto ? ", registro->>exColaboradorId, registro->>fotoDataUrl" : ""))
     .eq("colecao", "freelancers").eq("apagado", false);
   if (error) throw new Error(error.message);
   return (data ?? []) as any[];
@@ -583,7 +583,7 @@ async function contratosFreelancerRH(comFoto = false): Promise<any[]> {
 async function fichasRH(): Promise<any[]> {
   if (_fichasRH && _fichasRH.ate > Date.now()) return _fichasRH.fichas;
   const { data, error } = await sb.from("registros")
-    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->>dataDesligamento, registro->>statusId")
+    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->idPessoaAnteriores, registro->>dataDesligamento, registro->>statusId")
     .eq("colecao", "colaboradores").eq("apagado", false);
   if (error) throw new Error(error.message);
   // `ativo` com a mesma regra do elenco: ficha inativa com contrato ativo do
@@ -593,7 +593,9 @@ async function fichasRH(): Promise<any[]> {
     const d = String(g.cpf || "").replace(/\D/g, "");
     // O ID gravado na ficha manda; o do CPF só quando o campo falta (D-015).
     const idf = idDoCadastroRH(g);
-    return { chave: String(g.id || ""), id: idf.id, nome: String(g.nome || "").trim(),
+    // Os IDs que a pessoa já teve (P1 da auditoria de 12/10/2026): a régua leva cada um ao ID de hoje.
+    const ant = idsAnterioresDoCadastro(g, idf.id);
+    return { chave: String(g.id || ""), id: idf.id, nome: String(g.nome || "").trim(), ...(ant.length ? { anteriores: ant } : {}),
              ...(idf.divergente ? { idDivergente: true } : {}), ...(idf.gravadoInvalido ? { idGravadoInvalido: true } : {}),
              apelido: String(g.apelido || "").trim(), desligado: !!String(g.dataDesligamento || "").trim(),
              // A data da saída confere a divisão de O.S. antiga de quem saiu depois (F08). Não desce para aparelho nenhum.
@@ -609,7 +611,7 @@ async function fichasRH(): Promise<any[]> {
        do freelancer cujo contrato venceu depois (F08). Ficam no servidor: a
        régua não desce para aparelho nenhum. */
     ...junta.contratos.map((c: any) => ({ chave: c.chave, id: c.id, nome: c.nome, apelido: c.apelido, desligado: c.desligado, freelancer: true,
-      contratoFim: c.contratoFim, situacaoContrato: c.situacaoContrato, ...(c.idRepetido ? { idRepetido: true } : {}) })),
+      contratoFim: c.contratoFim, situacaoContrato: c.situacaoContrato, ...(c.idRepetido ? { idRepetido: true } : {}), ...(c.anteriores ? { anteriores: c.anteriores } : {}) })),
   ];
   _fichasRH = { ate: Date.now() + 60_000, fichas };
   return fichas;
@@ -646,7 +648,15 @@ async function comissaoAprovadorEventos(limite = 1): Promise<any[]> {
 }
 async function comissaoAprovadorAtual(): Promise<any | null> {
   const [ultimo] = await comissaoAprovadorEventos(1);
-  return ultimo && /^\d{6}$/.test(String(ultimo.titularId || "")) ? { titularId: ultimo.titularId, substituto: ultimo.substituto || null, em: ultimo.em } : null;
+  if (!(ultimo && /^\d{6}$/.test(String(ultimo.titularId || "")))) return null;
+  /* O titular ou o substituto designado por um ID que depois virou ID
+     anterior no RH (P1 da auditoria de 12/10/2026) é a mesma pessoa: a porta
+     compara com o ID de hoje dela. Sem o RH agora, fica o ID gravado. */
+  let regua: any = null;
+  try { regua = await pessoasDoPCP(); } catch { regua = null; }
+  const hoje = (id: any) => regua && /^\d{6}$/.test(String(id || "")) ? (regua.idDe(String(id)) || String(id)) : id;
+  const sub = ultimo.substituto ? { ...ultimo.substituto, id: hoje(ultimo.substituto.id) } : null;
+  return { titularId: hoje(ultimo.titularId), substituto: sub, em: ultimo.em };
 }
 /* AS CONTAS DA CENTRAL DE ACESSOS (acesso_conta): só o login, o ID da pessoa
    ligada, se está ativa, o tipo e até quando vale (valido_ate, onda acabamento). Uma leitura por minuto. Quem é a conta em
@@ -3887,9 +3897,11 @@ Deno.serve(async (req: Request) => {
             const idf = idDoCadastroRH(g); // o ID gravado na ficha manda (D-015)
             const st = String(g.statusId || "").trim();
             const foto = String(g.fotoDataUrl || "");
+            const ant = idsAnterioresDoCadastro(g, idf.id); // os IDs que a pessoa já teve (P1): a régua do aparelho leva ao de hoje
             return {
               chave: String(g.id || ""),                       // id do RH (slug) -- casa ferias/ausencias
               id: idf.id,                                      // id de pessoa da casa (gravado na ficha; senão, 6 primeiros do CPF)
+              ...(ant.length ? { anteriores: ant } : {}),
               nome: String(g.nome).trim(),
               apelido: String(g.apelido || "").trim(),
               setor: String(g.setor || "").trim(),
@@ -3912,7 +3924,8 @@ Deno.serve(async (req: Request) => {
           .map((r: any) => r.registro || {})
           .filter((g: any) => String(g.nome || "").trim() && String(g.dataDesligamento || "").trim())
           .map((g: any) => {
-            return { chave: String(g.id || ""), id: idDoCadastroRH(g).id, nome: String(g.nome).trim(),
+            const id = idDoCadastroRH(g).id, ant = idsAnterioresDoCadastro(g, id);
+            return { chave: String(g.id || ""), id, nome: String(g.nome).trim(), ...(ant.length ? { anteriores: ant } : {}),
                      apelido: String(g.apelido || "").trim(), ativo: false, desligado: true };
           })
           .filter((g: any) => g.id);
@@ -3954,7 +3967,7 @@ Deno.serve(async (req: Request) => {
         const contratosPorChave = new Map(contratosRH.map((c: any) => [`freelancer:${String(c.id).trim()}`, c]));
         const fichasParaFoto = (col ?? []).map((r: any) => r.registro || {});
         const contratoParaTela = (c: any) => ({
-          chave: c.chave, id: c.id, nome: c.nome, apelido: c.apelido, setor: "", area: "", cargo: veContrato ? c.funcao : "",
+          chave: c.chave, id: c.id, nome: c.nome, apelido: c.apelido, setor: "", area: "", cargo: veContrato ? c.funcao : "", ...(c.anteriores ? { anteriores: c.anteriores } : {}),
           statusId: "", status: "", ativo: true,
           foto: fotoFreelancerRH(contratosPorChave.get(c.chave), fichasParaFoto, { leve: !!body.leve }),
           ...(veContrato ? { freelancer: true } : {}),
@@ -3969,7 +3982,7 @@ Deno.serve(async (req: Request) => {
         const antigosComContrato = [
           ...antigos.filter((p: any) => !junta.fichasFora.has(p.chave)).map(marcar),
           ...junta.contratos.filter((c: any) => !c.ativo && c.id).map((c: any) => ({ chave: c.chave, id: c.id, nome: c.nome,
-            apelido: c.apelido, ativo: false, desligado: true, freelancer: true, ...(c.idRepetido ? { idRepetido: true } : {}) })),
+            apelido: c.apelido, ativo: false, desligado: true, freelancer: true, ...(c.idRepetido ? { idRepetido: true } : {}), ...(c.anteriores ? { anteriores: c.anteriores } : {}) })),
           /* O CONTRATO ENCERRADO SEM CPF CONTA NA AMBIGUIDADE (revisão da F12).
              A régua do servidor (fichasRH) conta todo contrato sem ID: "Lisandro"
              com a ficha do Lisandro Ferreira e o contrato encerrado do Lisandro Prado
@@ -4027,7 +4040,9 @@ Deno.serve(async (req: Request) => {
         // `avisos`: ID repetido entre ficha e contrato, ou pessoa com ficha e
         // contrato ativos ao mesmo tempo. Conferência do RH: só admin/pcp.
         return resp({ pessoas: pessoasComContrato, antigos: verFichaRH ? antigosComContrato : [], veiculos, hoje: hojeUTC, em: new Date().toISOString(), fichaRH: verFichaRH,
-                      ferias: verFichaRH ? ferias : [], ausencias: verFichaRH ? ausencias : [], avisos: verFichaRH ? junta.avisos : [] });
+                      ferias: verFichaRH ? ferias : [], ausencias: verFichaRH ? ausencias : [],
+                      // O ID anterior em conflito (P1): a gestão é avisada, como o ID repetido.
+                      avisos: verFichaRH ? [...junta.avisos, ...avisosIdsAnteriores(resolverPessoas({ pessoas: [...pessoasComContrato, ...antigosComContrato] }))] : [] });
       }
 
       case "getCfg": {

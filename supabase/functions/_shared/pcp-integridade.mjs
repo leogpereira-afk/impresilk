@@ -1354,6 +1354,28 @@ export function resolverPessoas(dados = {}) {
     if (tipoDoId.has(p.id) && tipoDoId.get(p.id) !== t) repetidos.add(p.id);
     else if (!tipoDoId.has(p.id)) tipoDoId.set(p.id, t);
   }
+  /* OS IDs ANTERIORES DA PESSOA (P1 da auditoria de 12/10/2026). O RH guarda
+     em `idPessoaAnteriores` os IDs de 6 dígitos que a pessoa já teve (o ID
+     trocado à mão quando o CPF foi corrigido) e manda em `anteriores`. Cada um
+     é a MESMA pessoa: o histórico, as O.S., as equipes, as divisões antigas e
+     a conta da Central com o ID anterior levam ao ID de hoje. O ID anterior
+     que é hoje o ID de outro cadastro, ou que dois cadastros dizem ter tido, é
+     conflito: não junta nada (fica de quem é hoje), e a gestão é avisada
+     (`conflitosAnteriores`). */
+  const donosAnterior = new Map();
+  for (const p of fichas) for (const a of Array.isArray(p.anteriores) ? p.anteriores : []) {
+    const id = String(a ?? '').trim();
+    if (!ehIdPessoa(id) || id === p.id) continue;
+    const s = donosAnterior.get(id) || new Set();
+    s.add(p.id); donosAnterior.set(id, s);
+  }
+  const anteriorDe = new Map(), conflitosAnteriores = [];
+  for (const [a, s] of donosAnterior) {
+    const donos = [...s];
+    if (porId.has(a)) conflitosAnteriores.push({ id: a, donos, motivo: 'atual' });
+    else if (donos.length > 1) conflitosAnteriores.push({ id: a, donos, motivo: 'dois' });
+    else if (!repetidos.has(donos[0])) anteriorDe.set(a, donos[0]);
+  }
   // Casamento automático com a régua de sempre do PCP -- apelido do RH, nome
   // completo, ou começo de nome que só uma ficha tem --, contado entre TODAS
   // as fichas, inclusive quem já saiu. Quem saiu nunca é o resultado: "Elias"
@@ -1399,7 +1421,7 @@ export function resolverPessoas(dados = {}) {
   const idDe = entrada => {
     const s = String(entrada ?? '').trim();
     if (!s) return '';
-    if (ehIdPessoa(s)) return s;
+    if (ehIdPessoa(s)) return anteriorDe.get(s) || s;
     const ap = normPessoa(s);
     // Vínculo salvo que aponta para ID repetido (ficha e contrato, F07) não
     // resolve: o ID não separa as duas pessoas, e o ponto iria para a errada.
@@ -1433,7 +1455,7 @@ export function resolverPessoas(dados = {}) {
   // O ID repetido não é de nenhum dos dois cadastros: a pessoa fica sem ficha até o RH corrigir.
   const pessoa = entrada => { const id = idDe(entrada); if (!id) return null; if (repetidos.has(id)) return { id, chave: '', nome: '', semFicha: true, repetido: true }; return porId.get(id) || { id, chave: '', nome: '', semFicha: true }; };
   const repetido = id => repetidos.has(String(id ?? '').trim());
-  return { idDe, chave, nome, pessoa, fixado, fichas, repetido };
+  return { idDe, chave, nome, pessoa, fixado, fichas, repetido, conflitosAnteriores };
 }
 
 /* FREELANCER PELO CONTRATO DO RH (F07, caminho B, decisão do dono de
@@ -1487,6 +1509,29 @@ export function idDoCadastroRH(reg, { exigirCpfValido = false } = {}) {
   if (/^\d{6}$/.test(gravado)) return { id: gravado, fonte: 'gravado', divergente: !!doCpf && doCpf !== gravado, gravadoInvalido: false };
   return { id: doCpf, fonte: doCpf ? 'cpf' : '', divergente: false, gravadoInvalido: !!gravado };
 }
+/* OS IDs QUE A PESSOA JÁ TEVE (P1 da auditoria de 12/10/2026): o RH grava em
+   `idPessoaAnteriores` a lista dos IDs de 6 dígitos anteriores (o ID trocado
+   à mão). Aceita a lista ou o texto com os IDs separados; só 6 dígitos, sem
+   repetir, sem o ID de hoje, até 20. */
+export const CAMPO_IDS_ANTERIORES = 'idPessoaAnteriores';
+export function idsAnterioresDoCadastro(reg, idAtual = '') {
+  let v = reg?.[CAMPO_IDS_ANTERIORES];
+  if (typeof v === 'string') { const t = v.trim(); try { v = t.startsWith('[') ? JSON.parse(t) : t.split(/[\s,;]+/); } catch { v = t.split(/[\s,;]+/); } }
+  const out = [];
+  for (const x of Array.isArray(v) ? v : []) {
+    const id = String(x ?? '').trim();
+    if (/^\d{6}$/.test(id) && id !== String(idAtual ?? '').trim() && !out.includes(id)) out.push(id);
+  }
+  return out.slice(0, 20);
+}
+/* A frase da gestão para o ID anterior em conflito (P1): ele é hoje o ID de
+   outro cadastro, ou dois cadastros dizem tê-lo tido. Sem CPF no texto. */
+export function avisosIdsAnteriores(regua) {
+  const nomeDo = id => { const p = regua?.pessoa?.(id); return p && !p.semFicha && p.nome ? p.nome : 'ID ' + id; };
+  return (Array.isArray(regua?.conflitosAnteriores) ? regua.conflitosAnteriores : []).map(c => c.motivo === 'atual'
+    ? `O ID ${c.id} aparece no RH como ID anterior de ${c.donos.map(nomeDo).join(' e ')}, mas hoje é o ID de ${nomeDo(c.id)}. O PCP não junta os dois: o histórico com esse ID fica de ${nomeDo(c.id)}. Se o ID foi dado a outra pessoa por engano, só o RH corrige, pela tela.`
+    : `O ID ${c.id} aparece no RH como ID anterior de mais de uma pessoa (${c.donos.map(nomeDo).join(' e ')}). O PCP não liga esse ID a ninguém até o RH deixar um só.`);
+}
 /* O aviso à gestão (admin e pcp) do cadastro cujo ID gravado e CPF discordam,
    ou cujo campo gravado está fora do formato. Sem CPF no texto. */
 export function avisoIdDoCadastro(c) {
@@ -1538,6 +1583,7 @@ export function juntarFreelancers(fichas, contratos, { hoje = '' } = {}) {
         ativo, desligado: !ativo, contratoFim: String(c.contratoFim || '').slice(0, 10),
         situacaoContrato: String(c.situacao || '') === 'encerrado' ? 'encerrado' : ativo ? 'ativo' : 'vencido',
         ...(idc.divergente ? { idDivergente: true } : {}), ...(idc.gravadoInvalido ? { idGravadoInvalido: true } : {}),
+        ...(idsAnterioresDoCadastro(c, idc.id).length ? { anteriores: idsAnterioresDoCadastro(c, idc.id) } : {}),
         ...(idc.id ? {} : { semCpf: true, ...(cpf ? { cpfInvalido: true } : {}) }) } };
     });
   // Renovação em cadastro novo: um contrato por CPF.
@@ -1623,7 +1669,9 @@ export function idDoCracha(quem, pessoas) {
   const fixo = !!(r && nome && typeof r.fixado === 'function' && r.fixado(nome));
   // O `id` assinado no crachá também não vale se hoje está repetido no RH.
   const repetido = id => !!(r && typeof r.repetido === 'function' && r.repetido(id));
-  return (r && nome ? r.idDe(nome) : '') || (!fixo && ehIdPessoa(q.id) && !repetido(String(q.id).trim()) ? String(q.id).trim() : '');
+  // O `id` assinado que é um ID anterior da pessoa (P1) vale como o ID de hoje dela.
+  const doCracha = ehIdPessoa(q.id) ? (r ? r.idDe(String(q.id).trim()) : String(q.id).trim()) : '';
+  return (r && nome ? r.idDe(nome) : '') || (!fixo && doCracha && !repetido(doCracha) ? doCracha : '');
 }
 /* QUEM É A CONTA DA GESTÃO, em ID. O crachá da gestão não traz ID; a única
    ligação aceita é a da identidade única (apelido do RH = login): UMA ficha,
@@ -1664,7 +1712,14 @@ export function idDaConta(login, contas, pessoas, agora = Date.now()) {
   if (!ligadas.length) return idDaGestao(login, pessoas);
   const ids = [...new Set(ligadas.map(c => String(c.id_pessoa).trim()))];
   if (ids.length !== 1) return '';
-  const id = ids[0], fichas = pessoas && Array.isArray(pessoas.fichas) ? pessoas.fichas : [];
+  /* A conta da Central ligada a um ID anterior da pessoa (P1 da auditoria de
+     12/10/2026: o ID trocado à mão no RH e a conta que ficou com o antigo)
+     leva ao ID de hoje dela. */
+  /* O ID da Central em conflito (é ID anterior de uma pessoa e o ID de hoje de
+     outra, ou anterior de duas) não é de ninguém: a conta fica sem ID até o RH
+     ou a Central acertar. */
+  if ((Array.isArray(pessoas?.conflitosAnteriores) ? pessoas.conflitosAnteriores : []).some(c => c && c.id === ids[0])) return '';
+  const id = typeof pessoas?.idDe === 'function' ? (pessoas.idDe(ids[0]) || ids[0]) : ids[0], fichas = pessoas && Array.isArray(pessoas.fichas) ? pessoas.fichas : [];
   const repetido = (typeof pessoas?.repetido === 'function' && pessoas.repetido(id)) || fichas.some(p => String(p.id) === id && p.idRepetido === true);
   return !repetido && fichas.some(p => String(p.id) === id && !p.desligado) ? id : '';
 }
@@ -1678,7 +1733,8 @@ export function pertenceEquipe(os, quem, pessoas) {
   return (Array.isArray(os?.equipe) ? os.equipe : []).some(n => {
     const s = String(n ?? '').trim();
     if (!s) return false;
-    const id = ehIdPessoa(s) ? s : (r ? r.idDe(s) : '');
+    // O ID anterior da pessoa (P1) é ela: a régua leva ao ID de hoje.
+    const id = ehIdPessoa(s) ? (r ? r.idDe(s) || s : s) : (r ? r.idDe(s) : '');
     if (alvo && id) return id === alvo;
     return !!texto && !ehIdPessoa(s) && normPessoa(s) === texto;
   });

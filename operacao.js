@@ -62,6 +62,28 @@ const OPERACAO = (() => {
       if (tipoDoId.has(p.id) && tipoDoId.get(p.id) !== t) repetidos.add(p.id);
       else if (!tipoDoId.has(p.id)) tipoDoId.set(p.id, t);
     }
+    /* OS IDs ANTERIORES DA PESSOA (P1 da auditoria de 12/10/2026). O RH guarda
+       em `idPessoaAnteriores` os IDs de 6 dígitos que a pessoa já teve (o ID
+       trocado à mão quando o CPF foi corrigido) e manda em `anteriores`. Cada um
+       é a MESMA pessoa: o histórico, as O.S., as equipes, as divisões antigas e
+       a conta da Central com o ID anterior levam ao ID de hoje. O ID anterior
+       que é hoje o ID de outro cadastro, ou que dois cadastros dizem ter tido, é
+       conflito: não junta nada (fica de quem é hoje), e a gestão é avisada
+       (`conflitosAnteriores`). */
+    const donosAnterior = new Map();
+    for (const p of fichas) for (const a of Array.isArray(p.anteriores) ? p.anteriores : []) {
+      const id = String(a ?? '').trim();
+      if (!ehIdPessoa(id) || id === p.id) continue;
+      const s = donosAnterior.get(id) || new Set();
+      s.add(p.id); donosAnterior.set(id, s);
+    }
+    const anteriorDe = new Map(), conflitosAnteriores = [];
+    for (const [a, s] of donosAnterior) {
+      const donos = [...s];
+      if (porId.has(a)) conflitosAnteriores.push({ id: a, donos, motivo: 'atual' });
+      else if (donos.length > 1) conflitosAnteriores.push({ id: a, donos, motivo: 'dois' });
+      else if (!repetidos.has(donos[0])) anteriorDe.set(a, donos[0]);
+    }
     // Casamento automático com a régua de sempre do PCP -- apelido do RH, nome
     // completo, ou começo de nome que só uma ficha tem --, contado entre TODAS
     // as fichas, inclusive quem já saiu. Quem saiu nunca é o resultado: "Elias"
@@ -107,7 +129,7 @@ const OPERACAO = (() => {
     const idDe = entrada => {
       const s = String(entrada ?? '').trim();
       if (!s) return '';
-      if (ehIdPessoa(s)) return s;
+      if (ehIdPessoa(s)) return anteriorDe.get(s) || s;
       const ap = normPessoa(s);
       // Vínculo salvo que aponta para ID repetido (ficha e contrato, F07) não
       // resolve: o ID não separa as duas pessoas, e o ponto iria para a errada.
@@ -141,7 +163,7 @@ const OPERACAO = (() => {
     // O ID repetido não é de nenhum dos dois cadastros: a pessoa fica sem ficha até o RH corrigir.
     const pessoa = entrada => { const id = idDe(entrada); if (!id) return null; if (repetidos.has(id)) return { id, chave: '', nome: '', semFicha: true, repetido: true }; return porId.get(id) || { id, chave: '', nome: '', semFicha: true }; };
     const repetido = id => repetidos.has(String(id ?? '').trim());
-    return { idDe, chave, nome, pessoa, fixado, fichas, repetido };
+    return { idDe, chave, nome, pessoa, fixado, fichas, repetido, conflitosAnteriores };
   }
   // A tela diz de onde vêm as fichas (elenco do RH + CFG); o resolvedor vale
   // até o fim da volta síncrona, como o cache de vínculos do casa.js. Sem

@@ -1218,7 +1218,9 @@ function perfPessoa(n) { const p = nomeExibicaoCasa(n); const id = /^\d{6}$/.tes
    num lado e não no outro. */
 function perfIdMembro(m) {
   const k = String(m && m.chave != null ? m.chave : '').trim();
-  if (!k || /^\d{6}$/.test(k)) return k;
+  if (!k) return k;
+  // O ID anterior da pessoa (P1 da auditoria de 12/10/2026) é ela: a régua leva ao ID de hoje.
+  if (/^\d{6}$/.test(k)) return (typeof OPERACAO !== 'undefined' && typeof OPERACAO.idPessoa === 'function' ? OPERACAO.idPessoa(k) : '') || k;
   const rh = typeof pessoasRH === 'function' ? pessoasRH() : [];
   const doSlug = p => p && String(p.chave) === k && /^\d{6}$/.test(String(p.id || ''));
   let ficha = rh.find(doSlug);
@@ -1245,6 +1247,8 @@ function perfChaveDeHoje(m) {
   // Slug da ficha (participação gravada até a v133) vira o ID da mesma ficha.
   const ficha = rh.find(p => String(p.chave) === k && /^\d{6}$/.test(String(p.id || '')) && String(p.id) !== k);
   if (ficha) { const p = perfPessoa(String(ficha.id)); return {...p, chave:String(ficha.id)}; }
+  // O ID anterior da pessoa (P1 da auditoria de 12/10/2026) vira o ID de hoje dela.
+  if (/^\d{6}$/.test(k)) { const hoje = (typeof OPERACAO !== 'undefined' && typeof OPERACAO.idPessoa === 'function' ? OPERACAO.idPessoa(k) : '') || k; return hoje !== k ? {...perfPessoa(hoje), chave:hoje} : null; }
   if (k !== String((m && (m.apelido || m.nome)) || '')) return null;
   if (rh.some(p => String(p.chave) === k || String(p.id) === k)) return null;
   const p = perfPessoa(m.apelido || m.nome || k);
