@@ -108,6 +108,82 @@ async function perfComissaoAbrir() {
     conteudo.querySelector('#comissao-exportar').onclick=async()=>{try{const r=escolhida();const out=await STORE.api({action:'performanceComissaoExportar',...periodo,id:r?.id});if(!out.ok)throw new Error(out.error);const url=URL.createObjectURL(new Blob([out.csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=out.arquivo;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);erro.textContent=out.aviso+comissaoConferenciaTxt(out.conferencia);if(out.exportacao){if(typeof perfMesesInvalidar==='function')perfMesesInvalidar();exportacoes.push(out.exportacao);conteudo.querySelector('#comissao-resumo').innerHTML=comissaoResumoHTML(escolhida(),revisoes,exportacoes)+comissaoDiferencasHTML(out.exportacao);}}catch(e){erro.textContent=e.message;}};
   }catch(e){d.appendChild(Object.assign(document.createElement('p'),{textContent:e.message}));}
 }
+/* O RASCUNHO AUTOMÁTICO DA APURAÇÃO DA COMISSÃO (item 9 da fila de
+   11/10/2026; entrou nesta onda com a resposta "THIAGO APROVA", D-013). É o
+   formulário mais longo do PCP (cerca de 14 campos por entrega), e salvar a
+   prévia cria revisão que não se apaga: não serve de rascunho. O que se digita
+   fica guardado neste aparelho, na mesma base dos rascunhos dos diálogos
+   (IndexedDB, pela conta, apagada ao sair, 7 dias), com a chave do período e
+   do fechamento: outro fechamento não recebe o rascunho. Guarda os campos com
+   o nome, as caixas marcadas e quantas pessoas há em cada rateio; nada de
+   R$ (a prévia não tem campo de valor). Volta ao reabrir, com o aviso e o
+   Descartar; some quando a prévia é salva. */
+function comissaoRascunhoLigar(form, chaveId, opt = {}) {
+  const nada = { limpar() {}, sujo: () => false, mudou() {}, descartar() {} };
+  if (!form || !chaveId || typeof form.querySelectorAll !== 'function' || typeof lerRascunhoF24 !== 'function' || typeof gravarRascunhoF24 !== 'function' || typeof chaveRascunhoF24 !== 'function') return nada;
+  const chave = chaveRascunhoF24('comissao-previa', chaveId);
+  const campos = () => Array.from(form.querySelectorAll('input[name], textarea[name], select[name]')).filter(el => !['hidden', 'file', 'password', 'submit', 'button'].includes(String(el.type || '').toLowerCase()));
+  const ler = () => {
+    const valores = {}, linhas = {};
+    for (const el of campos()) (valores[el.name] = valores[el.name] || []).push(String(el.type || '').toLowerCase() === 'checkbox' ? (el.checked ? '1' : '') : String(el.value ?? ''));
+    for (const fs of Array.from(form.querySelectorAll('[data-rateio]'))) linhas[fs.dataset.rateio] = fs.querySelectorAll('[data-rateio-linha]').length;
+    return { valores, linhas };
+  };
+  const aplicar = r => {
+    for (const fs of Array.from(form.querySelectorAll('[data-rateio]'))) {
+      const n = Number(r.linhas && r.linhas[fs.dataset.rateio]);
+      if (!Number.isInteger(n) || n < 0 || n > 50) continue;
+      let atuais = Array.from(fs.querySelectorAll('[data-rateio-linha]'));
+      while (atuais.length < n && typeof opt.adicionarLinha === 'function') { opt.adicionarLinha(fs.dataset.rateio); const depois = Array.from(fs.querySelectorAll('[data-rateio-linha]')); if (depois.length === atuais.length) break; atuais = depois; }
+      for (const l of atuais.slice(n)) if (typeof l.remove === 'function') l.remove();
+    }
+    const vistos = {};
+    for (const el of campos()) {
+      const xs = r.valores && r.valores[el.name];
+      const i = vistos[el.name] = (vistos[el.name] ?? -1) + 1;
+      if (!Array.isArray(xs) || i >= xs.length) continue;
+      const v = String(xs[i] ?? '');
+      if (String(el.type || '').toLowerCase() === 'checkbox') { el.checked = v === '1'; continue; }
+      if (String(el.tagName).toUpperCase() === 'SELECT' && !Array.from(el.options || []).some(o => o.value === v)) continue;
+      el.value = v;
+    }
+  };
+  const inicial = ler(), txtInicial = JSON.stringify(inicial);
+  let timer = null, vivo = true, aviso = null, tocou = false;
+  const guardar = () => {
+    timer = null; if (!vivo) return;
+    const atual = ler();
+    gravarRascunhoF24(chave, JSON.stringify(atual) === txtInicial ? null : { em: new Date().toISOString(), ...atual });
+  };
+  const mudou = () => { tocou = true; if (timer) clearTimeout(timer); timer = setTimeout(guardar, 400); };
+  const descartar = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    aplicar(inicial); gravarRascunhoF24(chave, null);
+    if (aviso && typeof aviso.remove === 'function') aviso.remove();
+    aviso = null;
+  };
+  if (typeof form.addEventListener === 'function') { form.addEventListener('input', mudou); form.addEventListener('change', mudou); }
+  lerRascunhoF24(chave).then(r => {
+    if (!vivo || tocou || !r || typeof r !== 'object' || !r.valores || typeof r.valores !== 'object') return;
+    const t = Date.parse(String(r.em || '')), validade = typeof RASC_VALIDADE_MS === 'number' ? RASC_VALIDADE_MS : 7 * 24 * 3600 * 1000;
+    if (!Number.isFinite(t) || Date.now() - t > validade) { gravarRascunhoF24(chave, null); return; }
+    if (JSON.stringify({ valores: r.valores, linhas: r.linhas || {} }) === txtInicial) return;
+    aplicar(r);
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function' && typeof form.insertBefore === 'function') {
+      aviso = document.createElement('p');
+      aviso.className = 'rasc-aviso'; aviso.setAttribute('role', 'status');
+      const txt = document.createElement('span');
+      txt.textContent = 'Voltou o que você tinha digitado nesta apuração (de ' + new Date(t).toLocaleString('pt-BR') + ') e não chegou a salvar como prévia.';
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn-ghost btn-sm rasc-descartar'; b.textContent = 'Descartar';
+      b.onclick = descartar;
+      if (typeof aviso.append === 'function') aviso.append(txt, ' ', b); else aviso.textContent = txt.textContent;
+      form.insertBefore(aviso, form.firstChild);
+    }
+    if (typeof opt.aoRecuperar === 'function') opt.aoRecuperar();
+  });
+  return { limpar() { vivo = false; if (timer) { clearTimeout(timer); timer = null; } gravarRascunhoF24(chave, null); }, sujo: () => JSON.stringify(ler()) !== txtInicial, mudou, descartar };
+}
 /* A PRÉVIA DEPOIS DE UMA COMPENSAÇÃO ABRE PREENCHIDA (linha Baixa da
    auditoria de 11/10/2026): a última revisão era a compensação, cuja entrada
    é só {compensarId}, e a prévia nova abria em branco e em Teste (o servidor
@@ -164,8 +240,11 @@ function comissaoEditar(fonte,ultima,periodo,pai,pessoas=[],revisoes=[]) {
   ${selecao('e'+i+'interna','Montagem interna',interna.situacao,[['pendente','Pendente de análise'],['elegivel','Elegível — reservar 20%'],['impeditivo','Retrabalho impeditivo — parcela fica externa'],['nao_aplicavel','Não aplicável — parcela fica externa']])}${doc('e'+i+'int',interna)}${rateio('e'+i+'internas','Participação da montagem interna',interna.partes)}</fieldset></details>`;}).join('')}
   ${area('motivo','Motivo desta revisão')}<button class="btn-primary" type="submit">Salvar prévia calculada no servidor</button><p role="alert"></p></form>`);
   d.classList.add('comissao-dialog');
-  d.querySelectorAll('[data-rateio-adicionar]').forEach(b=>b.onclick=()=>{const linhas=b.parentElement.querySelector('[data-rateio-linhas]');linhas.insertAdjacentHTML('beforeend',linhaRateio(b.dataset.rateioAdicionar));});
-  d.onclick=ev=>{if(ev.target.matches('[data-rateio-remover]'))ev.target.closest('[data-rateio-linha]')?.remove();};
+  const adicionarLinha=prefixo=>{const fs=d.querySelector(`[data-rateio="${prefixo}"]`),linhas=fs&&fs.querySelector('[data-rateio-linhas]');if(linhas)linhas.insertAdjacentHTML('beforeend',linhaRateio(prefixo));};
+  // O rascunho desta apuração: período e fechamento (item 9 da fila de 11/10/2026).
+  const rasc=comissaoRascunhoLigar(d.querySelector('form'),periodo.de+':'+periodo.ate+':'+fonte.id,{adicionarLinha});
+  d.querySelectorAll('[data-rateio-adicionar]').forEach(b=>b.onclick=()=>{adicionarLinha(b.dataset.rateioAdicionar);rasc.mudou();});
+  d.onclick=ev=>{if(ev.target.matches('[data-rateio-remover]')){ev.target.closest('[data-rateio-linha]')?.remove();rasc.mudou();}};
   let pagina=0;
   const filtrar=()=>{const busca=d.querySelector('[data-comissao-busca]').value.toLocaleLowerCase('pt-BR'),itens=[...d.querySelectorAll('[data-comissao-item]')],visiveis=itens.filter(e=>e.dataset.busca.toLocaleLowerCase('pt-BR').includes(busca));pagina=Math.min(pagina,Math.max(0,Math.ceil(visiveis.length/10)-1));itens.forEach(e=>e.hidden=true);visiveis.slice(pagina*10,pagina*10+10).forEach(e=>e.hidden=false);d.querySelector('[data-comissao-contagem]').textContent=`${visiveis.length} conferências · página ${pagina+1} de ${Math.max(1,Math.ceil(visiveis.length/10))}`;d.querySelector('[data-comissao-anterior]').disabled=pagina===0;d.querySelector('[data-comissao-proxima]').disabled=(pagina+1)*10>=visiveis.length;};
   d.querySelector('[data-comissao-busca]').oninput=()=>{pagina=0;filtrar();};d.querySelector('[data-comissao-anterior]').onclick=()=>{pagina--;filtrar();};d.querySelector('[data-comissao-proxima]').onclick=()=>{pagina++;filtrar();};filtrar();
@@ -179,6 +258,6 @@ function comissaoEditar(fonte,ultima,periodo,pai,pessoas=[],revisoes=[]) {
     // A perda automática (D-010) não leva decisão nem conferência da entrega: o motor não as pede.
     os.forEach((r,i)=>{if(!perdeOS(r.osId||r.id))entrada.decisoes[r.osId||r.id]={...documento('os'+i),decisao:v('os'+i+'decisao'),tipo:v('os'+i+'tipo')};});
     rs.forEach((r,i)=>{if(comRegua&&r.perda==='retrabalho_instalacao')return;const gs=r.grupos?.length?r.grupos:[{membros:r.membros.map(m=>m.chave)}];entrada.entregas[r.id]={...documento('e'+i),entregue:ck('e'+i+'entregue'),identidades:Object.fromEntries(r.membros.filter(m=>!/^\d{6}$/.test(m.chave)).map((m,j)=>[m.chave,v('e'+i+'id'+j)])),grupos:gs.map((g,j)=>({montadorId:v('e'+i+'g'+j+'montador'),partes:partes('e'+i+'g'+j+'partes'),justificativa:v('e'+i+'g'+j+'justificativa')})),interna:{...documento('e'+i+'int'),situacao:v('e'+i+'interna'),partes:partes('e'+i+'internas')}};});
-    try{const out=await STORE.api({action:'performanceComissaoNova',...periodo,fechamentoId:fonte.id,anterior:ultima?.id||'',entrada,motivo:v('motivo'),requestId:crypto.randomUUID()});if(!out.ok)throw new Error(out.error);if(typeof perdasInvalidar==='function')perdasInvalidar();if(typeof perfMesesInvalidar==='function')perfMesesInvalidar();d.close();await perfComissaoAbrir();}catch(e){form.querySelector('[role="alert"]').textContent=e.message;}finally{btn.disabled=false;}
+    try{const out=await STORE.api({action:'performanceComissaoNova',...periodo,fechamentoId:fonte.id,anterior:ultima?.id||'',entrada,motivo:v('motivo'),requestId:crypto.randomUUID()});if(!out.ok)throw new Error(out.error);rasc.limpar();if(typeof perdasInvalidar==='function')perdasInvalidar();if(typeof perfMesesInvalidar==='function')perfMesesInvalidar();d.close();await perfComissaoAbrir();}catch(e){form.querySelector('[role="alert"]').textContent=e.message;}finally{btn.disabled=false;}
   };
 }

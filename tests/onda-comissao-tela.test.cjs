@@ -191,3 +191,60 @@ test('item 10: a prévia depois de uma compensação abre preenchida com a últi
   assert.deepEqual(plano(c.run('comissaoEntradaBase([],null)')),{revisao:null,entrada:{}});
   assert.match(fs.readFileSync(path.join(RAIZ,'comissao-ui.js'),'utf8'),/comissaoEditar\(fonte,ultima,periodo,d,resposta\.pessoas\|\|\[\],revisoes\)/,'o botão passa as revisões');
 });
+
+/* --------------------------------------------------- item 11 (item 9 da fila) */
+// Um formulário falso com o que o rascunho usa: os campos com nome, as caixas e os rateios com as linhas.
+function formComissao(){
+  const ouv={},campo=(name,extra={})=>({name,value:'',type:'text',tagName:'INPUT',...extra});
+  const linha=prefixo=>{const l={pessoa:campo(prefixo+'pessoa',{tagName:'SELECT',type:'select-one',options:[{value:''},{value:'100001'},{value:'100002'}]}),pct:campo(prefixo+'percentual',{type:'number'}),remove(){fs.linhas.splice(fs.linhas.indexOf(l),1);}};return l;};
+  const fs={dataset:{rateio:'e0internas'},linhas:[],querySelectorAll:()=>fs.linhas};
+  const fixos=[campo('modo',{tagName:'SELECT',type:'select-one',value:'teste',options:[{value:'teste'},{value:'efetivo'}]}),campo('extras',{type:'checkbox',checked:false}),campo('os0evidencia',{tagName:'TEXTAREA',type:'textarea'}),campo('e0entregue',{type:'checkbox',checked:false})];
+  const f={aviso:null,firstChild:null,fs,linha,addEventListener:(tp,fn)=>(ouv[tp]=ouv[tp]||[]).push(fn),insertBefore(n){this.aviso=n;},
+    querySelectorAll(sel){return sel==='[data-rateio]'?[fs]:[...fixos,...fs.linhas.flatMap(l=>[l.pessoa,l.pct])];},
+    el:name=>f.querySelectorAll('x').filter(e=>e.name===name),
+    mudar(){(ouv.input||[]).forEach(fn=>fn({}));}};
+  return f;
+}
+function telaRascunho(){
+  const c=tela();
+  c.run(`var __rasc=new Map();function chaveRascunhoF24(t,id){return 'gestor|'+t+'|'+id;}function lerRascunhoF24(k){return Promise.resolve(__rasc.has(k)?__rasc.get(k):null);}function gravarRascunhoF24(k,v){if(v==null)__rasc.delete(k);else __rasc.set(k,JSON.parse(JSON.stringify(v)));return Promise.resolve(true);}`);
+  const timers=[];c.setTimeout=fn=>{timers.push(fn);return timers.length;};c.clearTimeout=()=>{};
+  c.correr=()=>{while(timers.length)timers.shift()();};
+  c.document={createElement:()=>({setAttribute(){},append(...xs){this.textContent=xs.map(x=>typeof x==='string'?x:x.textContent||'').join('');},remove(){}})};
+  return c;
+}
+const tique=()=>new Promise(r=>setImmediate(r));
+test('item 11 (item 9 da fila): o rascunho da apuração da comissão guarda o que foi digitado, volta ao reabrir e some ao salvar',async()=>{
+  const c=telaRascunho();
+  const ligar=(f,id)=>{c.__f=f;c.__id=id;return c.run('comissaoRascunhoLigar(__f,__id,{adicionarLinha:p=>__f.fs.linhas.push(__f.linha(p))})');};
+  const f1=formComissao();ligar(f1,'2026-11-01:2026-11-30:F1');await tique();
+  f1.el('modo')[0].value='efetivo';f1.el('extras')[0].checked=true;f1.el('os0evidencia')[0].value='Foto fictícia 001 do serviço';
+  f1.fs.linhas.push(f1.linha('e0internas'),f1.linha('e0internas'));
+  f1.el('e0internaspessoa')[1].value='100002';f1.el('e0internaspercentual')[1].value='40';
+  f1.mudar();c.correr();await tique();
+  // O caso ruim: a tela fechou antes de salvar a prévia e tudo se perdia.
+  const f2=formComissao();const r2=ligar(f2,'2026-11-01:2026-11-30:F1');await tique();
+  assert.equal(f2.el('modo')[0].value,'efetivo');assert.equal(f2.el('extras')[0].checked,true);
+  assert.equal(f2.el('os0evidencia')[0].value,'Foto fictícia 001 do serviço');
+  assert.equal(f2.fs.linhas.length,2,'as duas pessoas do rateio voltam');
+  assert.equal(f2.el('e0internaspessoa')[1].value,'100002');assert.equal(f2.el('e0internaspercentual')[1].value,'40');
+  assert.match(f2.aviso.textContent,/não chegou a salvar como prévia/);
+  // Outro fechamento não recebe o rascunho.
+  const f3=formComissao();ligar(f3,'2026-11-01:2026-11-30:F2');await tique();
+  assert.equal(f3.el('modo')[0].value,'teste');assert.equal(f3.aviso,null);
+  // Descartar volta ao que abriu e apaga.
+  r2.descartar();await tique();
+  assert.equal(f2.el('modo')[0].value,'teste');assert.equal(f2.fs.linhas.length,0);
+  const f4=formComissao();ligar(f4,'2026-11-01:2026-11-30:F1');await tique();
+  assert.equal(f4.el('os0evidencia')[0].value,'');
+  // Salvou a prévia: some.
+  const f5=formComissao();const r5=ligar(f5,'2026-11-01:2026-11-30:F1');await tique();
+  f5.el('os0evidencia')[0].value='Outro texto fictício';f5.mudar();c.correr();await tique();
+  r5.limpar();await tique();
+  const f6=formComissao();ligar(f6,'2026-11-01:2026-11-30:F1');await tique();
+  assert.equal(f6.el('os0evidencia')[0].value,'');
+  // O formulário da comissão liga o rascunho e o apaga ao salvar.
+  const ui=fs.readFileSync(path.join(RAIZ,'comissao-ui.js'),'utf8');
+  assert.match(ui,/comissaoRascunhoLigar\(d\.querySelector\('form'\),periodo\.de\+':'\+periodo\.ate\+':'\+fonte\.id/);
+  assert.match(ui,/if\(!out\.ok\)throw new Error\(out\.error\);rasc\.limpar\(\);/);
+});
