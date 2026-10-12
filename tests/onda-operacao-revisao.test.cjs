@@ -217,3 +217,62 @@ test('revisão operação: U1, no Fechar o dia a linha da O.S. com conferência 
   assert.equal(srv.retrabalhoPerguntado.resposta, 'nao');
   b.fechar();
 });
+
+/* ── U2, U7 e U8: Entregas, "Prazos para conferir" e "ERP diz entregue" ─── */
+const vm = require('node:vm');
+function telaCasa(lista, papel = 'pcp') {
+  const STORE = {getAllOS:() => lista, getOS:id => lista.find(o => o.id === id) || null, getCFG:() => ({instaladores:[]}), saveOS() {},
+    entreguesMes:() => null, elenco:() => ({pessoas:[], veiculos:[], ferias:[], ausencias:[]}), valores:() => ({})};
+  const HOJE = '2026-10-12', abertas = [];
+  const c = {STORE, STATE:{user:{papel, nome:'Gestor Teste'}}, console, abertas,
+    Date:class extends Date { constructor(...a) { super(...(a.length ? a : [HOJE + 'T12:00:00'])); } static now() { return +new Date(HOJE + 'T12:00:00'); } },
+    esc:s => String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;'}[ch])),
+    toast() {}, nowISO:() => HOJE + 'T15:00:00.000Z', emptyState:() => '', bindCardClicks() {}, setTimeout:() => 0,
+    openModal:(os, alvo) => abertas.push([os.id, alvo]),
+    localStorage:{getItem:() => null, setItem() {}, removeItem() {}},
+    document:{getElementById:() => null, querySelectorAll:() => [], body:{classList:{add() {}, remove() {}, contains:() => false}}}};
+  vm.createContext(c);
+  for (const f of ['operacao.js', 'entrega-item.js', 'conferencia-entrega.js', 'casa.js']) vm.runInContext(ler(f), c, {filename:f});
+  return {run:code => vm.runInContext(code, c), abertas};
+}
+const prazoDuvida = () => ({id:'pz', numero:'9pz', tipo:'externo', cliente:'Cliente Fictício pz', liberadoPCP:true, equipe:['100001'],
+  instalacao:{data:'2026-10-02', periodo:'Manhã', duracaoDias:1}, previsaoEntrega:'2026-10-02',
+  prazoCombinado:{data:'2026-10-18', fonte:'agenda', em:'2026-09-20T10:00:00.000Z'}, agendaLog:[{de:'', data:'2026-10-02', em:'2026-09-20T10:00:08.000Z'}]});
+
+test('revisão operação: U2, "Abrir a ficha" dos Prazos para conferir cai no Agendamento, e o "Prazo correto" vem com a data da agenda', async () => {
+  const t = telaCasa([prazoDuvida()]);
+  const html = t.run('prazosParaConferirHTML(STORE.getAllOS())');
+  // Caso ruim (f33877d): o botão era o genérico data-os-id, que abre a ficha na etapa da situação (sem o aviso do prazo).
+  assert.doesNotMatch(html, /data-os-id=/);
+  assert.match(html, /data-prazo-ficha="pz">Abrir a ficha no prazo</);
+  t.run(`abrirFichaNoPrazo('pz')`);
+  assert.deepEqual(JSON.parse(JSON.stringify(t.abertas)), [['pz', 'agenda']]);
+  // O bloco 'agenda' é o da etapa Equipe, onde está o prazo (prazoRetornoHTML).
+  const f = await telaFicha([prazoDuvida()]);
+  assert.equal(f.run(`etapaDoAlvoFicha('agenda')`), 'equipe');
+  assert.match(ler('app.js'), /function blocoAgenda[\s\S]{0,4000}id="prazo-retorno">\$\{prazoRetornoHTML\(os, ro\)\}/);
+  f.abrir('pz');
+  const ficha = f.run('prazoRetornoHTML(_modalDraft, false)');
+  assert.match(ficha, /data-prazo-conferir="minuto"/);
+  // Caso ruim (f33877d): o "Prazo correto" vinha com 18/10, a data congelada que está em dúvida.
+  assert.match(ficha, /id="prazo-corr-data" value="2026-10-02"/);
+});
+
+test('revisão operação: U7, a contagem da parcial não se contradiz (inteiros e com parte, de quantos)', () => {
+  const t = telaCasa([]);
+  // Caso ruim (f33877d): "2 de 2 itens conferidos; faltam 5 unidades".
+  assert.equal(t.run(`contagemItensParcial({itensTotal:2, entregues:0, parciais:2, saldoItens:5}, true)`), '0 de 2 itens conferidos por inteiro, 2 com parte conferida; faltam 5 unidades a conferir');
+  assert.equal(t.run(`contagemItensParcial({itensTotal:1, entregues:0, parciais:1, saldoItens:1}, true)`), '0 de 1 item conferido por inteiro, 1 com parte conferida; falta 1 unidade a conferir');
+  assert.equal(t.run(`contagemItensParcial({itensTotal:5, entregues:2, parciais:0, saldoItens:3}, false)`), '2 de 5 itens entregues por inteiro; faltam 3 unidades');
+});
+
+test('revisão operação: U8, "Prazos para conferir" é recolhível, fechado por padrão, com a contagem no título', () => {
+  const t = telaCasa([prazoDuvida(), {...prazoDuvida(), id:'pz2', numero:'9pz2'}]);
+  const html = t.run('prazosParaConferirHTML(STORE.getAllOS())');
+  // Caso ruim (f33877d): uma <section> sempre aberta no meio de Entregas.
+  assert.match(html, /^<details class="erp-saldo prazo-conferir-lista" data-prazos-conferir="2">/);
+  assert.match(html, /<summary class="erp-saldo-cab">[\s\S]*Prazos para conferir <span class="erp-saldo-n">2<\/span>[\s\S]*<\/summary>/);
+  t.run('STATE._entPrazosAberto = true');
+  assert.match(t.run('prazosParaConferirHTML(STORE.getAllOS())'), /data-prazos-conferir="2" open>/, 'aberto pela pessoa, fica aberto ao repintar');
+  assert.match(ler('styles.css'), /\.prazo-conferir-lista>summary\{cursor:pointer;list-style:none;min-height:44px\}/);
+});

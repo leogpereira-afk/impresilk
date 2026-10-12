@@ -58,7 +58,7 @@ test('E7: o ERP ENTREGUE numa O.S. com parte conferida e saldo a conferir não a
   const res = await e.baixar();
   assert.equal(res.baixadas, 0, JSON.stringify(res));
   assert.equal(res.marcadasComSaldo, 1);
-  assert.match(res.comSaldo[0].causa, /entrega parcial conferida no PCP: 2 de 3 itens conferidos, 3 unidades de saldo a conferir; o ERP diz ENTREGUE/);
+  assert.match(res.comSaldo[0].causa, /entrega parcial conferida no PCP: 1 de 3 itens conferidos por inteiro, 1 com parte conferida, 3 unidades de saldo a conferir; o ERP diz ENTREGUE/);
   const g = gravada(e, 'mub-30');
   assert.ok(!g.finalizadaEm, 'o PCP segura: nada de finalizadaEm');
   assert.equal(g.erpComSaldo.status, 'ENTREGUE');
@@ -70,7 +70,8 @@ test('E7: o ERP ENTREGUE numa O.S. com parte conferida e saldo a conferir não a
   assert.equal(l[0].resumo.conferencia, true);
   const html = t.run('erpComSaldoHTML(listaErpComSaldo(STORE.getAllOS()))');
   assert.match(html, /data-conferir-saldo="mub-30"/);
-  assert.match(html, /2 de 3 itens conferidos; faltam 3 unidades a conferir/);
+  // U7 da revisão da onda operação: os inteiros e os com parte, sem contradição.
+  assert.match(html, /1 de 3 itens conferidos por inteiro, 1 com parte conferida; faltam 3 unidades a conferir/);
   assert.doesNotMatch(html, /Entregar o saldo/);
   assert.match(html, /Manter aberta/);
   // O card e a ficha dizem o mesmo aviso do ERP (erpSaldoNaOS lê a conferência).

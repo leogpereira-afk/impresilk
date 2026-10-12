@@ -3522,6 +3522,14 @@ img.perf-logo{object-fit:cover}
 #panel-entregas .erp-saldo{margin:0;border:1px solid #f0d9a6;border-radius:12px;background:linear-gradient(180deg,#fffaf0,var(--surface,#fff) 80%);padding:10px 14px 12px}
 .erp-saldo-cab{display:flex;align-items:flex-start;gap:10px 14px}
 .erp-saldo-cab h3{margin:0 0 2px;font-size:.95rem;color:#7a4a00}
+/* Prazos para conferir recolhível e fechado (U8 da revisão da onda operação). */
+.prazo-conferir-lista>summary{cursor:pointer;list-style:none;min-height:44px}
+.prazo-conferir-lista>summary::-webkit-details-marker{display:none}
+.prazo-conferir-lista>summary::after{content:'▸';margin-left:auto;align-self:center;color:#7a4a00;font-size:.9rem}
+.prazo-conferir-lista[open]>summary::after{content:'▾'}
+.prazo-conferir-tit{display:block;margin:0 0 2px;font-size:.95rem;font-weight:700;color:#7a4a00}
+.prazo-conferir-lista>summary .ent-fila-frase{display:block}
+.prazo-conferir-lista[open]>.erp-saldo-lista{margin-top:8px}
 .erp-saldo-n{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;margin-left:4px;padding:0 6px;border-radius:11px;background:#c77d0a;color:#fff;font-size:.75rem;vertical-align:1px}
 .erp-saldo-lista{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:8px}
 .erp-saldo-item{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"os acoes" "fatos acoes";gap:4px 14px;align-items:center;padding:10px 12px;border:1px solid #e3e9f0;border-radius:12px;background:var(--surface,#fff)}

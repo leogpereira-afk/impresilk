@@ -2102,31 +2102,47 @@ function prazosParaConferirHTML(todas) {
   const linhas = listaPrazosParaConferir(todas);
   if (!linhas.length) return '';
   const n = linhas.length;
-  return `<section class="erp-saldo prazo-conferir-lista" aria-labelledby="prazo-conferir-tit" data-prazos-conferir="${n}">
-      <div class="erp-saldo-cab"><span class="ent-fila-icone" aria-hidden="true">!</span>
-        <div><h3 id="prazo-conferir-tit">Prazos para conferir <span class="erp-saldo-n">${n}</span></h3>
-        <p class="ent-fila-frase">O prazo combinado mede o atraso da ficha e do relatório. ${n === 1 ? 'Este parece digitado errado' : 'Estes parecem digitados errados'}: confira na ficha e, se for o caso, use "Corrigir o prazo", com o motivo.</p></div>
-      </div>
+  /* RECOLHÍVEL E FECHADA (U8 da revisão da onda operação): a lista é
+     consulta, não fila do dia; o título diz quantas. O "Abrir a ficha" (U2)
+     abre no Agendamento, onde está o aviso e o "Corrigir o prazo". */
+  return `<details class="erp-saldo prazo-conferir-lista" data-prazos-conferir="${n}"${STATE._entPrazosAberto ? ' open' : ''}>
+      <summary class="erp-saldo-cab"><span class="ent-fila-icone" aria-hidden="true">!</span>
+        <span><span class="prazo-conferir-tit" id="prazo-conferir-tit">Prazos para conferir <span class="erp-saldo-n">${n}</span></span>
+        <span class="ent-fila-frase">O prazo combinado mede o atraso da ficha e do relatório. ${n === 1 ? 'Este parece digitado errado' : 'Estes parecem digitados errados'}: abra a ficha e, se for o caso, use "Corrigir o prazo", com o motivo.</span></span>
+      </summary>
       <ul class="erp-saldo-lista">${linhas.map(({os, alerta}) => `<li class="erp-saldo-item">
         <div class="erp-saldo-os"><strong>${esc(os.numero || '')}</strong> ${esc(os.cliente || '')}</div>
         <p class="erp-saldo-fatos"><span>${esc(alerta.motivo[0].toUpperCase() + alerta.motivo.slice(1))}.</span></p>
-        <div class="erp-saldo-acoes"><button type="button" class="btn-ghost btn-sm" data-os-id="${esc(os.id)}">Abrir a ficha</button></div>
+        <div class="erp-saldo-acoes"><button type="button" class="btn-ghost btn-sm" data-prazo-ficha="${esc(os.id)}">Abrir a ficha no prazo</button></div>
       </li>`).join('')}</ul>
-    </section>`;
+    </details>`;
+}
+/* A FICHA NO PRAZO (U2): o bloco Agendamento (etapa Equipe), aberto, com o
+   aviso e o "Corrigir o prazo" à vista. */
+function abrirFichaNoPrazo(osId) {
+  const os = STORE.getOS(osId);
+  if (!os) { toast('O.S não encontrada.', 'error'); return; }
+  openModal(os, 'agenda');
+  setTimeout(() => { const el = document.getElementById('prazo-retorno'); if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({block: 'center'}); const d = document.getElementById('prazo-corr-data'); if (d && typeof d.focus === 'function') d.focus({preventScroll: true}); }, 60);
+}
+/* Os itens da parcial, sem contradição (U7): os conferidos por inteiro e os
+   com parte, de quantos, e as unidades que faltam. */
+function contagemItensParcial(r, conferida) {
+  const t = Number(r.itensTotal) || 0, inteiros = Number(r.entregues) || 0, parte = Number(r.parciais) || 0, falta = Number(r.saldoItens) || 0;
+  const [um, varios, daParte] = conferida ? ['conferido', 'conferidos', 'conferida'] : ['entregue', 'entregues', 'entregue'];
+  return `${inteiros} de ${t} ite${t === 1 ? 'm' : 'ns'} ${t === 1 ? um : varios} por inteiro${parte ? `, ${parte} com parte ${daParte}` : ''}; falta${falta === 1 ? '' : 'm'} ${falta} unidade${falta === 1 ? '' : 's'}${conferida ? ' a conferir' : ''}`;
 }
 function erpComSaldoHTML(linhas) {
   if (!podeDecidirSaldoERP() || !Array.isArray(linhas) || !linhas.length) return '';
   const n = linhas.length;
   const linha = ({os, aviso, resumo, saldo}) => {
     const erp = `${NOME_SITUACAO_ERP[aviso.status] || String(aviso.status).toLowerCase()}${aviso.data ? ` em ${ddmmCasa(aviso.data)}` : ', sem data de entrega'}`;
-    const com = resumo.entregues + resumo.parciais;
     const pcp = resumo.conferencia && resumo.inconsistente ? `conferência gravada que não se lê mais: ${resumo.erro || 'um item mudou'}`
-      : resumo.conferencia ? `${com} de ${resumo.itensTotal} ite${resumo.itensTotal === 1 ? 'm' : 'ns'} conferido${com === 1 ? '' : 's'}; faltam ${resumo.saldoItens} unidade${resumo.saldoItens === 1 ? '' : 's'} a conferir`
-      : `${com} de ${resumo.itensTotal} ite${resumo.itensTotal === 1 ? 'm' : 'ns'} com entrega; faltam ${resumo.saldoItens} unidade${resumo.saldoItens === 1 ? '' : 's'}`;
+      : contagemItensParcial(resumo, !!resumo.conferencia);
     const decl = resumo.unidadesDeclaradas > 0 ? `<span class="tag-entrega tag-entrega-decl">${resumo.unidadesDeclaradas} declarada${resumo.unidadesDeclaradas === 1 ? '' : 's'} pelo celular</span>` : '';
     const prob = saldo.comProblema.length ? `<span class="tag-entrega tag-entrega-prob">${saldo.comProblema.length} ite${saldo.comProblema.length === 1 ? 'm' : 'ns'} com problema fica${saldo.comProblema.length === 1 ? '' : 'm'}</span>` : '';
     // A parcial conferida (D-016) se resolve na conferência, não pelas marcas antigas.
-    const entregar = resumo.conferencia ? `<button type="button" class="btn-primary btn-sm edit-only" data-conferir-saldo="${esc(os.id)}">Conferir o saldo</button>`
+    const entregar = resumo.conferencia ? `<button type="button" class="btn-primary btn-sm edit-only" data-conferir-saldo="${esc(os.id)}">Conferir itens e equipe</button>`
       : aviso.data && saldo.pendentes.length
       ? `<button type="button" class="btn-primary btn-sm edit-only" data-erp-entregar="${esc(os.id)}" data-erp-selo="${esc(aviso.selo)}">Entregar o saldo em ${esc(ddmmCasa(aviso.data))}</button>`
       : `<button type="button" class="btn-ghost btn-sm" data-os-id="${esc(os.id)}">${aviso.data ? 'Resolver na ficha' : 'Marcar na ficha'}</button>`;
@@ -2146,6 +2162,9 @@ function erpComSaldoHTML(linhas) {
     </section>`;
 }
 function wireErpComSaldo(el) {
+  el.querySelectorAll('[data-prazo-ficha]').forEach(b => b.onclick = () => abrirFichaNoPrazo(b.dataset.prazoFicha));
+  const prazos = el.querySelector('details.prazo-conferir-lista');
+  if (prazos) prazos.ontoggle = () => { STATE._entPrazosAberto = prazos.open; };
   el.querySelectorAll('[data-conferir-saldo]').forEach(b => b.onclick = () => {
     if (typeof conferirItensEntrega === 'function') conferirItensEntrega(b.dataset.conferirSaldo);
   });

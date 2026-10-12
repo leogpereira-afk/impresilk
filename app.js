@@ -3479,9 +3479,11 @@ function prazoRetornoHTML(os, ro) {
      correção é a de sempre, com motivo. */
   const alertaPrazo = podeDigitarPrevisto() && !pedido && typeof OPERACAO.prazoParaConferir === 'function' ? OPERACAO.prazoParaConferir(os) : null;
   const avisoPrazo = alertaPrazo ? `<p class="retorno-aviso prazo-conferir" role="note" data-prazo-conferir="${esc(alertaPrazo.tipo)}">Prazo para conferir: ${esc(alertaPrazo.motivo)}. Se estiver errado, use "Corrigir o prazo", com o motivo.</p>` : '';
+  /* O prazo para conferir (U2 da revisão da onda operação): o "Prazo correto"
+     já vem com a data da agenda, não com a congelada que está em dúvida. */
   const corrigir = gestao && (pc || semPrazo) ? `<details class="prazo-corrigir"${alertaPrazo ? ' open' : ''}><summary>Corrigir o prazo</summary>
       <p class="text-muted">Só para prazo gravado errado. Remarcação pedida pelo cliente não se corrige aqui: vira abono.</p>
-      <div class="field-row"><div class="field"><label for="prazo-corr-data">Prazo correto</label><input type="date" id="prazo-corr-data" value="${esc(pc ? pc.data : agendaAtual)}"></div>
+      <div class="field-row"><div class="field"><label for="prazo-corr-data">Prazo correto</label><input type="date" id="prazo-corr-data" value="${esc(alertaPrazo && agendaAtual ? agendaAtual : pc ? pc.data : agendaAtual)}"></div>
       <div class="field"><label for="prazo-corr-motivo">Motivo (15 letras ou mais)</label><input id="prazo-corr-motivo" maxlength="300"></div></div>
       <button type="button" class="btn-ghost btn-sm" id="btn-prazo-corrigir">Gravar correção</button></details>` : '';
   const dias = OPERACAO.diasAgenda(os);

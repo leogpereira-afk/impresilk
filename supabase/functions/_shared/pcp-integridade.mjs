@@ -126,7 +126,8 @@ export function parcialConferida(o) {
 }
 function textoParcial(r) {
   if (r.conferencia && r.inconsistente) return `conferência por entrega gravada que não se lê mais (${r.erro || 'um item mudou'})`;
-  if (r.conferencia) return `entrega parcial conferida no PCP: ${r.entregues + r.parciais} de ${r.itensTotal} ite${r.itensTotal === 1 ? 'm' : 'ns'} conferidos, ${r.saldoItens} unidade${r.saldoItens === 1 ? '' : 's'} de saldo a conferir`;
+  // U7 da revisão da onda operação: os inteiros e os com parte, sem contradição.
+  if (r.conferencia) return `entrega parcial conferida no PCP: ${r.entregues} de ${r.itensTotal} ite${r.itensTotal === 1 ? 'm' : 'ns'} conferido${r.itensTotal === 1 ? '' : 's'} por inteiro${r.parciais ? `, ${r.parciais} com parte conferida` : ''}, ${r.saldoItens} unidade${r.saldoItens === 1 ? '' : 's'} de saldo a conferir`;
   const itens = r.entregues + r.parciais;
   const decl = r.unidadesDeclaradas > 0 ? `, ${r.unidadesDeclaradas} unidade${r.unidadesDeclaradas === 1 ? '' : 's'} declarada${r.unidadesDeclaradas === 1 ? '' : 's'} pelo celular` : '';
   return `entrega parcial marcada no PCP: ${itens} de ${r.itensTotal} ite${r.itensTotal === 1 ? 'm' : 'ns'} com entrega, ${r.saldoItens} unidade${r.saldoItens === 1 ? '' : 's'} de saldo${decl}`;

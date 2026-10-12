@@ -111,7 +111,8 @@ test('ERP ENTREGUE numa O.S. com 2 de 5 itens: poupada, listada, sem finalizadaE
   assert.equal(l.length, 1);assert.equal(l[0].aviso.data, DIA_ERP);assert.equal(l[0].saldo.unidades, 3);
   const html = t.run('erpComSaldoHTML(listaErpComSaldo(STORE.getAllOS()))');
   assert.match(html, /ERP diz entregue, PCP tem saldo/);assert.match(html, /Entregar o saldo em 25\/09/);assert.match(html, /Manter aberta/);
-  assert.match(html, /2 de 5 itens com entrega; faltam 3 unidades/);
+  // U7 da revisão da onda operação: os inteiros e os com parte, sem contradição.
+  assert.match(html, /2 de 5 itens entregues por inteiro; faltam 3 unidades/);
   assert.ok(!html.includes('— ') && !/\s—\s/.test(html), 'sem travessão no texto');
 });
 
