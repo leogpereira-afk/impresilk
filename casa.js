@@ -281,12 +281,23 @@ function erpAntesDoCorte(o) {
 /* A O.S. CANCELADA (F16), no ERP ou à mão pela gestão, não é entrega nem
    retirada: não conta valor, sai da fila "a lançar" e da base da apuração (o
    servidor faz o mesmo no perfFonte). Fica em `canceladas`, para quem quiser
-   contar. A aberta cancelada também entra: ela não vai mais ser entregue. */
+   contar. A aberta cancelada também entra: ela não vai mais ser entregue.
+   A CANCELADA COM PARTE CONFERIDA (revisão da onda fechamento, D4; D-009 e
+   item 4 da fila de 11/10/2026): o cancelamento cancela o SALDO, e a parte
+   que a gestão conferiu antes conta como entrega, como no ranking e na
+   comissão (perfFonte do servidor). Ela entra em `instalacoes` pela parte
+   conferida (parcelasEntreguesCasa vale cada conferência; o cancelado não é
+   saldo) e continua em `canceladas`, porque o resto foi cancelado; nunca vai
+   para "a lançar". Quem soma as duas listas conta a O.S. duas vezes. */
 function classificarEntregas(lista) {
   const r = { retiradas: [], instalacoes: [], aLancar: [], canceladas: [] };
   for (const o of lista || STORE.getAllOS()) {
     // Cache misto (operacao.js de antes da F16 com este casa.js): sem a função, ninguém é cancelada.
-    if (typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(o)) { r.canceladas.push(o); continue; }
+    if (typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(o)) {
+      r.canceladas.push(o);
+      if (o.conferenciasEntrega?.length && o.conferenciaERP?.classificacao !== 'baixa_administrativa' && o.conferenciaERP?.classificacao !== 'retirada' && !OPERACAO.interno(o)) r.instalacoes.push(o);
+      continue;
+    }
     if (o.conferenciaERP?.classificacao === 'baixa_administrativa') { continue; }
     if (o.conferenciaERP?.classificacao === 'retirada') { r.retiradas.push(o); continue; }
     if (o.conferenciasEntrega?.length) { r.instalacoes.push(o); if (o.baixaAutoERP && CONFERENCIA_ENTREGA.estado(o).situacao !== 'saldo_concluido') r.aLancar.push(o); continue; }
@@ -3762,11 +3773,13 @@ function painelTVCasa(i, f) {
   const p = paineis[n];
   /* O SELO DO MÊS ABERTO NA TV (item 1 da fila de 11/10/2026): a TV da fábrica
      mostra o pódio do mês em andamento, e ele não pode parecer o resultado do
-     mês. A mesma régua da tela (perfSeloAberto); sem o performance.js, o mesmo
-     texto, salvo na revisão fechada. */
-  const seloTV = typeof perfSeloAberto === 'function' ? perfSeloAberto() : (fechada ? null : {texto:'Mês aberto, resultado provisório'});
+     mês. A mesma régua da tela (perfSeloAberto), que lê a base do servidor
+     (U1 da revisão: o mês fechado diz "Mês fechado · revisão N" também para a
+     montagem e a operação). Sem o performance.js (cache misto) não há base, e
+     a TV não afirma nada. */
+  const seloTV = typeof perfSeloAberto === 'function' ? perfSeloAberto() : null;
   return { total: paineis.length, html: `<div class="tv-head">
-      <h2>${p.titulo}</h2>${seloTV ? `<span class="tv-selo">${esc(seloTV.texto)}</span>` : ''}
+      <h2>${p.titulo}</h2>${seloTV ? `<span class="tv-selo ${esc(seloTV.tipo || 'provisorio')}">${esc(seloTV.texto)}</span>` : ''}
       <span class="tv-relogio">${new Date().toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
     </div>
     <div class="tv-corpo">${p.corpo}</div>

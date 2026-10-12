@@ -69,6 +69,8 @@ test('item 1: o mês sem fechamento leva o selo "Mês aberto, resultado provisó
   assert.match(c.performanceRelatorioHTML(), /<span class="perf-report-state">Mês aberto, resultado provisório<\/span>/);
   // O mês corrente até hoje (o período padrão) também é o mês aberto.
   const h = tela({hoje:'2026-11-19', periodo:{de:'2026-11-01', ate:'2026-11-19'}});
+  // U1 da revisão (12/10/2026): o selo só afirma o mês aberto com a base do servidor (os períodos fechados).
+  vm.runInContext('perfFechados.lista=[]', h);
   assert.match(h.perfSituacaoHTML(null), /Mês aberto, resultado provisório/);
   // Recorte que não é o mês inteiro nem o mês até hoje: período aberto.
   c.STATE._fPerf = {de:'2026-11-01', ate:'2026-11-19'};
@@ -83,8 +85,10 @@ test('item 1: o mês sem fechamento leva o selo "Mês aberto, resultado provisó
   // Os dados atuais de um mês fechado também são provisórios.
   base(c, fonte([reg('a1', 300)]), {fechamentos:[s1], selecionado:''});
   assert.match(c.perfSituacaoHTML(null), /Dados atuais, fora do fechamento: resultado provisório/);
-  // Montagem e operação veem a prévia do aparelho, com o selo também.
+  // Montagem e operação veem a prévia do aparelho, com o selo também; sem a base, o selo diz só "Prévia do aparelho" (U1 da revisão).
   const m = tela({papel:'montagem'});
+  assert.match(m.perfSituacaoHTML(null), /Prévia do aparelho/);
+  vm.runInContext('perfFechados.lista=[]', m);
   assert.match(m.perfSituacaoHTML(null), /Mês aberto, resultado provisório/);
 });
 test('item 1: o Modo TV mostra o selo do mês aberto no topo; a revisão fechada não', () => {
@@ -94,10 +98,10 @@ test('item 1: o Modo TV mostra o selo do mês aberto no topo; a revisão fechada
     vm.createContext(ctx); vm.runInContext(s.slice(s.indexOf('function painelTVCasa('), s.indexOf('function rotuloPeriodoCasa(')), ctx);
     return ctx.painelTVCasa(0, {}).html;
   };
-  assert.match(tv({perfFonteAtual:() => ({consultadoEm:'x'}), perfSeloAberto:() => ({tipo:'provisorio', texto:'Mês aberto, resultado provisório'})}), /<span class="tv-selo">Mês aberto, resultado provisório<\/span>/);
+  assert.match(tv({perfFonteAtual:() => ({consultadoEm:'x'}), perfSeloAberto:() => ({tipo:'provisorio', texto:'Mês aberto, resultado provisório'})}), /<span class="tv-selo provisorio">Mês aberto, resultado provisório<\/span>/);
   assert.doesNotMatch(tv({perfFonteAtual:() => ({fechadoEm:'2026-12-02'}), perfSeloAberto:() => null}), /tv-selo/);
-  // Sem o performance.js novo (cache misto), o mesmo texto, salvo na revisão fechada.
-  assert.match(tv({perfFonteAtual:() => null}), /Mês aberto, resultado provisório/);
+  // Sem o performance.js novo (cache misto) não há base: a TV não afirma o mês aberto (U1 da revisão).
+  assert.doesNotMatch(tv({perfFonteAtual:() => null}), /tv-selo|Mês aberto/);
   assert.doesNotMatch(tv({perfFonteAtual:() => ({fechadoEm:'2026-12-02'})}), /tv-selo/);
 });
 test('item 1 e verificação da v166: o ranking.html diz "Prévia · Mês aberto" no mês sem fechamento e mostra o aviso sem as decisões', async () => {
@@ -109,12 +113,14 @@ test('item 1 e verificação da v166: o ranking.html diz "Prévia · Mês aberto
     AUTH:{temCracha:() => entrou, dono:() => entrou ? {nome:'Ana', papel:'montagem'} : null, cracha:() => '', login:async () => { entrou = true; return {}; }}, fetch:async () => ({ok:true, status:200, json:async () => resposta})};
   vm.runInNewContext(ler('ranking.js'), ctx);
   await el('ranking-login-form').onsubmit({preventDefault() {}});
-  assert.match(el('ranking-recorte').textContent, /01\/11\/2026 a 30\/11\/2026 · Prévia · Mês aberto, resultado provisório/);
+  // U8 da revisão (12/10/2026): o selo saiu da legenda cinza para um selo destacado (ranking-selo).
+  assert.match(el('ranking-recorte').textContent, /^01\/11\/2026 a 30\/11\/2026$/);
+  assert.equal(el('ranking-selo').textContent, 'Prévia · Mês aberto, resultado provisório');assert.equal(el('ranking-selo').className, 'ranking-selo-mes aberto');assert.equal(el('ranking-selo').hidden, false);
   assert.equal(el('ranking-sem-base').hidden, false);assert.match(el('ranking-sem-base').textContent, /Não foi possível ler as decisões/);
   resposta = {...resposta, fechado:true, revisao:2, avisoDecisoes:undefined};
   el('ranking-periodo').onsubmit({preventDefault() {}});
   for (let i = 0; i < 5; i++) await new Promise(r => setTimeout(r, 0));
-  assert.match(el('ranking-recorte').textContent, /Período fechado · revisão 2/);assert.doesNotMatch(el('ranking-recorte').textContent, /Prévia/);
+  assert.equal(el('ranking-selo').textContent, 'Período fechado · revisão 2');assert.equal(el('ranking-selo').className, 'ranking-selo-mes fechado');assert.doesNotMatch(el('ranking-recorte').textContent, /Prévia/);
 });
 
 /* -------------------------------------------------------------- item 3 */
@@ -169,16 +175,17 @@ test('item 2: a confirmação do Fechar mostra X de Y entregas, a %, o R$ que fi
 });
 
 /* ------------------------------------------------------------- item 29 */
-test('item 29: a faixa de cobertura vem acima do pódio; abaixo de 50% do valor o pódio fica, com o aviso forte', () => {
+test('item 29: a cobertura do mês vem acima do pódio; abaixo de 50% do valor o pódio fica, com o aviso forte', () => {
   const regs = [reg('a1', 300, [pessoa('900001')]), reg('a2', 200, [pessoa('900002')]), reg('a3', 100, [pessoa('900003')])];
   const cob = {entregas:3, entregasCentavos:60000, entregasSemValor:0, aLancar:2, aLancarCentavos:90000, aLancarSemValor:0, aLancarNumeros:['90004', '90005'], pctValor:40, baixa:true};
   const c = base(tela(), fonte(regs, {cobertura:cob}));
   c.STATE._perfModo = 'pessoas';
   const html = c.performanceEquipesHTML();
-  const iCob = html.indexOf('class="perf-cobertura'), iRank = html.indexOf('class="perf-ranking'), iPodio = html.indexOf('class="perf-podio');
-  assert.ok(iCob > 0 && iRank > 0 && iCob < iRank, 'a faixa vem antes do ranking (a v166 a pôs embaixo)');
+  // U3 da revisão (12/10/2026): só a linha da cobertura do mês sobe; o quadro "Participantes nas entregas" voltou para baixo, como na v166.
+  const iCob = html.indexOf('class="perf-cob-extra perf-cob-mes'), iRank = html.indexOf('class="perf-ranking'), iPodio = html.indexOf('class="perf-podio');
+  assert.ok(iCob > 0 && iRank > 0 && iCob < iRank, 'a linha da cobertura do mês vem antes do ranking');
   assert.ok(iPodio > iRank, 'o pódio continua à vista');
-  assert.match(html, /Cobertura do mês: <strong>3 de 5 entregas<\/strong> no ranking, <strong>40% do valor<\/strong> · 2 baixas do ERP a lançar ficam de fora \(R\$ 900\.00\)/);
+  assert.match(html, /Cobertura do mês: <strong>40% do valor<\/strong> no ranking · <strong>3 de 5 entregas<\/strong> do mês contam \(as confirmadas e com valor; 3 lançadas no PCP e 2 a lançar\)\. Ficam de fora 2 baixas do ERP a lançar \(R\$ 900\.00\)/);
   assert.match(html, /<p class="perf-aviso perf-aviso-forte" role="note"><strong>Este pódio não representa o mês:<\/strong> só 40% do valor/);
   assert.ok(html.indexOf('perf-aviso-forte') < iPodio, 'o aviso vem antes do pódio');
   // Com metade ou mais do valor, sem o aviso forte.
@@ -202,7 +209,7 @@ test('M8: o mês fechado abre na última revisão; as revisões são lidas à pa
   assert.equal(vm.runInContext('perfRemoto.selecionado', c), s2.id, 'abre na revisão 2 (a v166 abria nos dados atuais)');
   assert.equal(c.perfFonteAtual().revisao, 2);
   const aviso = c.perfAvisosHTML(true);
-  assert.match(aviso, /Mês fechado: você está vendo a revisão 2, de [^.]+\. Há 2 mudanças nas entregas depois do fechamento \(1 entrega nova, 1 entrega mudou\)\. Elas não entram no selo/);
+  assert.match(aviso, /Mês fechado: você está vendo a revisão 2, de [^.]+\. Há 2 mudanças nas entregas depois do fechamento \(1 entrega nova, 1 entrega mudou\)\. Elas não entram no fechamento/);
   assert.match(aviso, /data-perf-ver-atuais>Ver os dados atuais</);
   // A pessoa escolhe os dados atuais; Atualizar não a devolve à revisão.
   vm.runInContext("perfRemoto.selecionado='';perfRemoto.escolhido=true;", c);
@@ -239,19 +246,20 @@ test('M8: o Conferir de uma entrega num mês fechado avisa que a mudança não e
   c.perfDialog = (t, h) => { html = h; const els = {}; return {open:true, querySelector:sel => els[sel] || (els[sel] = elemento()), addEventListener() {}, close() {}}; };
   c.ALOCUI = {iniciar:() => ({antigo:false}), montar() {}, bloqueio:() => '', estado:() => ({}), esquecer() {}, repintar() {}};
   await c.perfEditarParticipacao('os1');
-  assert.match(html, /A entrega de 10\/11\/2026 está num mês já fechado \(01\/11\/2026 a 30\/11\/2026, revisão 1\)\. O que você gravar aqui não entra no selo/);
+  assert.match(html, /A entrega de 10\/11\/2026 está num mês já fechado \(01\/11\/2026 a 30\/11\/2026, revisão 1\)\. O que você gravar aqui não entra no fechamento/);
   // Fora do mês fechado, sem o aviso.
   os[0].entregaLancada = {data:'2026-12-01'};html = '';
   await c.perfEditarParticipacao('os1');
-  assert.doesNotMatch(html, /não entra no selo/);
+  assert.doesNotMatch(html, /não entra no fechamento/);
 });
 
 /* ------------------------------------------------------------------ M7 */
 test('M7: o diálogo da conferência por entrega diz o mês fechado (dia novo ou antigo) antes de salvar', () => {
   const c = {console};vm.createContext(c);vm.runInContext(ler('conferencia-entrega-ui.js'), c);
   const fechados = [{de:'2026-11-01', ate:'2026-11-30', revisoes:1, ultimaRevisao:1}];
-  assert.equal(c.confTravaMesFechado(fechados, '', '2026-11-20'), 'O dia 20/11/2026 está num mês já fechado (01/11/2026 a 30/11/2026, revisão 1). Mês fechado não se recalcula: escolha o dia certo, num mês aberto.');
-  assert.match(c.confTravaMesFechado(fechados, '2026-11-20', '2026-12-01'), /^Esta entrega foi conferida em 20\/11\/2026, num mês já fechado .* ela não pode mudar nem ir para outro mês\.$/);
+  // U2 da revisão (12/10/2026): sem empurrar para um mês aberto (tests/onda-fechamento-revisao.test.cjs).
+  assert.equal(c.confTravaMesFechado(fechados, '', '2026-11-20'), 'O dia 20/11/2026 está num mês já fechado (01/11/2026 a 30/11/2026, revisão 1). Se a data está errada, corrija. Se a entrega foi mesmo em novembro de 2026, ela não pode ser conferida agora: o ajuste de mês fechado ainda não existe; fale com a gestão.');
+  assert.match(c.confTravaMesFechado(fechados, '2026-11-20', '2026-12-01'), /^Esta entrega foi conferida em 20\/11\/2026, num mês já fechado .* ela não pode mudar nem ir para outro mês\. Se algo está errado nela, o ajuste de mês fechado ainda não existe; fale com a gestão\.$/);
   assert.equal(c.confTravaMesFechado(fechados, '', '2026-12-01'), '');
   assert.equal(c.confTravaMesFechado(null, '', '2026-11-20'), '', 'sem a lista (servidor antigo), nada se afirma: a porta confere');
   // O motivo trava o Salvar, antes dos outros.
@@ -280,8 +288,9 @@ test('item 12: a revisão antiga diz "Revisão N, substituída pela N+1" na tela
   const s1 = selo(1, [reg('a1', 300)]), s2 = selo(2, [reg('a1', 350)]);
   const c = base(tela(), fonte([reg('a1', 350)]), {fechamentos:[s2, s1], selecionado:s1.id});
   assert.match(c.perfSituacaoHTML(c.perfSituacao(regsTela(c))), /Revisão 1, substituída pela 2/);
-  assert.match(c.perfFonteTexto(), /^Fechamento preservado · revisão 1 \(Revisão 1, substituída pela 2\)/);
-  assert.match(c.perfFonteHTML(), /Revisão 1 · 2026-12-01 · Gestor fictício · substituída pela 2<\/option>/);
+  // U10 da revisão (12/10/2026): sem a repetição "revisão 1 (Revisão 1, ...)"; no seletor, o "substituída" logo depois do número (a 375 px o fim é cortado).
+  assert.match(c.perfFonteTexto(), /^Fechamento preservado · revisão 1, substituída pela 2 · Gestor fictício/);
+  assert.match(c.perfFonteHTML(), /Revisão 1, substituída pela 2 · 01\/12\/2026 · Gestor fictício<\/option>/);
   assert.match(c.perfAvisosHTML(true), /Você está vendo a revisão 1, substituída pela 2/);
   vm.runInContext('perfRemoto.selecionado=perfRemoto.fechamentos[0].id', c);
   assert.doesNotMatch(c.perfFonteTexto(), /substituída/);

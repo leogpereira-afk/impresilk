@@ -521,7 +521,8 @@ test('servidor: fechamento com "até" depois de hoje é recusado com a causa e n
   const ultimo = new Date(Date.UTC(Number(hoje.slice(0, 4)), Number(hoje.slice(5, 7)), 0)).toISOString().slice(0, 10);
   const mes = await e.call({action:'performanceFechar', de:hoje.slice(0, 8) + '01', ate:ultimo, requestId:'fechar-futuro-000002', motivo:'Fechamento por engano', hash:'x', anterior:''}, PCP);
   assert.equal(mes.status, 422);
-  assert.match(mes.error, /O mês ainda não terminou/);
+  // Em outubro de 2026 (teste, D-005) a recusa não marca data para fechar (U11 da revisão da onda fechamento).
+  assert.match(mes.error, /O mês ainda não terminou|Outubro de 2026 é mês de teste e não tem data para ser fechado/);
   assert.equal(e.db.pcp_registros.filter(x => x.colecao === 'performance_fechamentos').length, 0);
   // Consultar um período que termina no futuro continua liberado (só lê).
   assert.equal((await e.call({action:'performanceFechamentos', de:hoje, ate:amanha}, PCP)).status ?? 200, 200);

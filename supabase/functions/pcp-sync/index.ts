@@ -685,6 +685,37 @@ async function perfPeriodosFechados() {
   return [...porPeriodo.values()].sort((a,b)=>a.de.localeCompare(b.de)||a.ate.localeCompare(b.ate));
 }
 const perfPeriodoDoDia = (fechados:any[], dia:string) => (fechados||[]).find((f:any)=>dia>=f.de&&dia<=f.ate)||null;
+/* O DIA EM QUE A O.S. CONTA INTEIRA NA APURAÇÃO (revisão da onda fechamento,
+   D1): a O.S. sem conferência por item entra inteira no dia do lançamento ou
+   da finalização, pela mesma régua do perfFonte (fora: a classificada como
+   baixa administrativa ou retirada, a interna, a cancelada e a baixa do ERP a
+   lançar, que não entram na base). Vazio: ela não conta inteira em dia nenhum. */
+function perfDiaInteira(o:any):string {
+  if(!o||typeof o!=="object"||o.conferenciasEntrega?.length||o.tipo==="interno")return "";
+  if(["baixa_administrativa","retirada"].includes(o.conferenciaERP?.classificacao))return "";
+  const fim=perfDia(o.finalizadaEm);
+  if(!fim||cancelada(o))return "";
+  const erp=o.baixaAutoERP?.em===o.finalizadaEm || /^Mubisys\b/i.test(o.finalizadoPor || "");
+  if(erp && !o.entregaLancada && fim>=CORTE_LANCAMENTO_MANUAL)return "";
+  return (o.entregaLancada && perfDia(o.entregaLancada.data)) || fim;
+}
+/* O PERÍODO FECHADO EM QUE A O.S. JÁ ENTROU INTEIRA (D1), com o dia. Só
+   quando ela está mesmo na revisão que vale desse período (a finalizada com
+   data antiga depois do fechamento não entrou no selo, e conferir não a conta
+   duas vezes). A leitura do selo só acontece quando o dia cai num período
+   fechado, o que é raro. */
+async function perfInteiraFechada(o:any, fechados:any[], osId:string) {
+  const dia=perfDiaInteira(o), f=dia?perfPeriodoDoDia(fechados,dia):null;
+  if(!f)return null;
+  const vale=(await perfFechamentos({de:f.de,ate:f.ate}))[0];
+  if(!vale||!Array.isArray(vale.registros)||!vale.registros.some((r:any)=>String(r?.id??"")===osId))return null;
+  return {dia,de:f.de,ate:f.ate,ultimaRevisao:f.ultimaRevisao};
+}
+/* A FRASE DO MÊS FECHADO NA CONFERÊNCIA (revisão da onda fechamento, U2): não
+   empurra a pessoa a trocar a data para um mês aberto (a entrega de setembro
+   contaria em outubro). O ajuste de mês fechado depende da pergunta 3 da fila
+   do dono (P-006 a P-010) e ainda não existe. */
+const PERF_AJUSTE_FECHADO = "o ajuste de mês fechado ainda não existe; fale com a gestão.";
 // A confirmação escrita do Fechar com a cobertura do valor abaixo de 50% (item 2): a mesma frase da tela.
 const PERF_FRASE_COBERTURA = "fechar com cobertura baixa";
 /* A BASE QUE MUDA DURANTE A CONSULTA É 409, NÃO 500 (item 14). A tela trata o
@@ -832,11 +863,18 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
     const bruto=subtotais.length&&subtotais.every((v:number)=>Number.isFinite(v)&&v>=0)?subtotais.reduce((a:number,b:number)=>a+b,0):null;
     let valorBrutoCentavos=bruto===null?null:Math.round(bruto*100);
     if(o._conferencia) {
-      const a=CONFERENCIA_ENTREGA.apurar(o,valorConferencia(o,valoresItens[String(o.numero)] || [])), e=a.entregas.find((x:any)=>x.id===o._conferencia.id);
-      if(bruto!==null){const bruta=CONFERENCIA_ENTREGA.apurar(o,bruto).entregas.find((x:any)=>x.id===o._conferencia.id);valorBrutoCentavos=bruta?.valor??null;}
+      /* A O.S. COMO ESTAVA NO FIM DO PERÍODO (revisão da onda fechamento, D2):
+         o estado e o saldo das entregas do período saem só do que aconteceu
+         até o último dia dele (CONFERENCIA_ENTREGA.noFimDoDia, a mesma régua
+         nas duas cópias do motor). A parcial de novembro fechado continua
+         parcial quando o resto chega em dezembro, e o recálculo do selo
+         (Aprovar e Exportar) confere. O valor de cada entrega não muda. */
+      const oFim=CONFERENCIA_ENTREGA.noFimDoDia(o,periodo.ate);
+      const a=CONFERENCIA_ENTREGA.apurar(oFim,valorConferencia(o,valoresItens[String(o.numero)] || [])), e=a.entregas.find((x:any)=>x.id===o._conferencia.id);
+      if(bruto!==null){const bruta=CONFERENCIA_ENTREGA.apurar(oFim,bruto).entregas.find((x:any)=>x.id===o._conferencia.id);valorBrutoCentavos=bruta?.valor??null;}
       const indiceEntrega=a.entregas.findIndex((x:any)=>x.id===o._conferencia.id);
       const baseAnteriorCentavos=indiceEntrega>=0&&a.entregas.slice(0,indiceEntrega).every((x:any)=>x.valor!==null)?a.entregas.slice(0,indiceEntrega).reduce((s:number,x:any)=>s+x.valor,0):null;
-      dadosEntrega={estadoEntrega:CONFERENCIA_ENTREGA.estado(o,valorConferencia(o,valoresItens[String(o.numero)] || [])),baseAnteriorCentavos,osId:o._osId,entregaId:o._conferencia.id,itensEntrega:e?.itens || [],saldoItens:a.saldoItens?.length || 0,erroConferencia:a.erro || "",fracaoOS:a.total>0 && e?.valor!=null?e.valor/a.total:0};
+      dadosEntrega={estadoEntrega:CONFERENCIA_ENTREGA.estado(oFim,valorConferencia(o,valoresItens[String(o.numero)] || [])),baseAnteriorCentavos,osId:o._osId,entregaId:o._conferencia.id,itensEntrega:e?.itens || [],saldoItens:a.saldoItens?.length || 0,erroConferencia:a.erro || "",fracaoOS:a.total>0 && e?.valor!=null?e.valor/a.total:0};
       const idsEntrega=finaisAlocacao(o._conferencia.alocacao).map((m:any)=>m.pessoaId).sort();
       const idsOperacionais=(o.equipe || []).map((n:any)=>pessoasPerf.chave(String(n))).sort();
       const diaRetorno=perfDia(o.retornoEm) || perfDia(o.entregaLancada?.data) || perfDia(o.finalizadaEm);
@@ -1476,7 +1514,10 @@ Deno.serve(async (req: Request) => {
              que o dia cai em mês fechado. Sem eles, o diálogo abre igual e a
              gravação confere aqui. */
           let fechados:any[]|null=null;try{fechados=await perfPeriodosFechados();}catch{fechados=null;}
-          return resp({os:saida(os),valor:valorConferencia(os,erp || []),fechados});
+          /* A O.S. que já entrou inteira num período fechado (D1): o diálogo diz
+             antes de salvar e fica só leitura (a gravação recusa aqui). */
+          let inteira:any=null;if(fechados){try{inteira=await perfInteiraFechada(os,fechados,osId);}catch{inteira=null;}}
+          return resp({os:saida(os),valor:valorConferencia(os,erp || []),fechados,inteira});
         }
         if(body.rev!==os.rev) return resp({error:"A O.S. mudou. Reabra a conferência antes de salvar.",conflito:true},409);
         if(["baixa_administrativa","retirada"].includes(os.conferenciaERP?.classificacao)) return resp({error:"Revise a classificação ERP para divergência antes de conferir uma instalação. A classificação anterior será preservada no histórico."},422);
@@ -1495,8 +1536,18 @@ Deno.serve(async (req: Request) => {
            fila do aparelho: a recusa não prende nada. */
         const fechadosConf=await perfPeriodosFechados();
         const fNovo=perfPeriodoDoDia(fechadosConf,String(entrega.dia||"")), fVelho=velho?perfPeriodoDoDia(fechadosConf,String(velho.dia||"")):null;
-        if(fVelho)return resp({error:`Esta entrega foi conferida em ${perfDiaBR(velho.dia)}, num período já fechado (${perfDiaBR(fVelho.de)} a ${perfDiaBR(fVelho.ate)}, revisão ${fVelho.ultimaRevisao}). Mês fechado não se recalcula: ela não pode mudar nem ir para outro mês. Nada foi gravado.`,periodoFechado:{de:fVelho.de,ate:fVelho.ate}},409);
-        if(fNovo)return resp({error:`O dia ${perfDiaBR(entrega.dia)} cai num período já fechado (${perfDiaBR(fNovo.de)} a ${perfDiaBR(fNovo.ate)}, revisão ${fNovo.ultimaRevisao}). Mês fechado não se recalcula: nada foi gravado. Se a data está errada, escolha o dia certo, num mês aberto.`,periodoFechado:{de:fNovo.de,ate:fNovo.ate}},409);
+        if(fVelho)return resp({error:`Esta entrega foi conferida em ${perfDiaBR(velho.dia)}, num período já fechado (${perfDiaBR(fVelho.de)} a ${perfDiaBR(fVelho.ate)}, revisão ${fVelho.ultimaRevisao}). Mês fechado não se recalcula: ela não pode mudar nem ir para outro mês. Se algo está errado nela, ${PERF_AJUSTE_FECHADO} Nada foi gravado.`,periodoFechado:{de:fVelho.de,ate:fVelho.ate}},409);
+        /* U2 (revisão da onda fechamento): a frase não empurra a trocar o dia
+           para um mês aberto; a entrega de setembro contaria em outubro. */
+        if(fNovo)return resp({error:`O dia ${perfDiaBR(entrega.dia)} cai num período já fechado (${perfDiaBR(fNovo.de)} a ${perfDiaBR(fNovo.ate)}, revisão ${fNovo.ultimaRevisao}). Mês fechado não se recalcula: nada foi gravado. Se a data está errada, corrija. Se a entrega foi mesmo em ${perfMesTxt(String(entrega.dia).slice(0,7))}, ela não pode ser conferida agora: ${PERF_AJUSTE_FECHADO}`,periodoFechado:{de:fNovo.de,ate:fNovo.ate}},409);
+        /* A O.S. QUE JÁ ENTROU INTEIRA NUM PERÍODO FECHADO (D1 da revisão da
+           onda fechamento; a M7 ficou incompleta sem isto): sem conferência por
+           item, ela contou inteira no selo pelo dia do lançamento ou da
+           finalização; a primeira conferência por item com o dia num mês aberto
+           contaria a mesma unidade de novo. Recusa, como a M7. O ajuste de mês
+           fechado depende da pergunta 3 da fila do dono (P-006 a P-010). */
+        const fInteira=!velho&&!demais.length?await perfInteiraFechada(os,fechadosConf,osId):null;
+        if(fInteira)return resp({error:`Esta O.S. já entrou inteira no fechamento de ${perfDiaBR(fInteira.de)} a ${perfDiaBR(fInteira.ate)} (revisão ${fInteira.ultimaRevisao}), com a entrega de ${perfDiaBR(fInteira.dia)}. Conferir os itens agora contaria a mesma entrega de novo em outro mês: ${PERF_AJUSTE_FECHADO} Nada foi gravado.`,periodoFechado:{de:fInteira.de,ate:fInteira.ate},inteiraNoFechamento:true},409);
         const cfg=(await getCfg()) || {}, pessoas=await pessoasReq(), autor=await autorAuditoria(), agora=new Date().toISOString();
         const anterior={...os,equipe:velho?.alocacao?finaisAlocacao(velho.alocacao).map((m:any)=>m.pessoaId):[],alocacao:velho?.alocacao};
         const virtual={...os,entregaLancada:{data:entrega.dia},equipe:pedido.alocacao?.grupos?.flatMap((g:any)=>g.membros?.map((m:any)=>m.pessoaId) || []) || []};
@@ -1513,12 +1564,21 @@ Deno.serve(async (req: Request) => {
       }
 
       /* OS PERÍODOS JÁ FECHADOS, de todos os meses (M8 e itens 3 e 11 da fila
-         de 11/10/2026): só leitura, só a gestão do PCP, como a apuração. A tela
-         avisa o mês que terminou sem fechamento, trava o Fechar que cruzaria
-         outro período e diz no Conferir que o dia está num mês fechado. */
+         de 11/10/2026): só leitura. A tela avisa o mês que terminou sem
+         fechamento, trava o Fechar que cruzaria outro período e diz no
+         Conferir que o dia está num mês fechado.
+         U1 (revisão da onda fechamento): o selo do mês na Performance e na TV
+         de quem não lê a apuração (montagem, operação, comercial e o crachá de
+         toque, que é montagem) dizia "Mês aberto" num mês fechado, enquanto o
+         ranking.html dizia "Período fechado · revisão N". Agora a ação responde
+         a todos os papéis que veem o ranking (podeVerRankingEquipe), só com os
+         períodos e os números de revisão: nada de R$, de quem fechou nem de
+         quando. A gestão continua recebendo a lista inteira. */
       case "performanceFechados": {
-        if(!ehMaquina && !["admin","pcp"].includes(String(cracha?.papel || "")))return resp({error:"Apuração restrita à gestão do PCP."},403);
-        return resp({fechados:await perfPeriodosFechados(),hoje:perfDia(new Date().toISOString())});
+        const gestaoFech=ehMaquina || ["admin","pcp"].includes(String(cracha?.papel || ""));
+        if(!gestaoFech && !podeVerRankingEquipe(cracha))return resp({error:"Entre com seu acesso de funcionário do PCP.",semSessao:!cracha},cracha?403:401);
+        const lista=await perfPeriodosFechados();
+        return resp({fechados:gestaoFech?lista:lista.map((f:any)=>({de:f.de,ate:f.ate,revisoes:f.revisoes,ultimaRevisao:f.ultimaRevisao})),hoje:perfDia(new Date().toISOString())});
       }
 
       case "performancePeriodo":
@@ -1537,7 +1597,9 @@ Deno.serve(async (req: Request) => {
            hora, fora da fila, então o 422 aqui não prende nada e mostra a causa. */
         if(!perfEhMesCalendario(periodo))return resp({error:`O fechamento é só de mês inteiro, do dia 01 ao último dia (por exemplo, ${perfDiaBR(periodo.de.slice(0,8)+"01")} a ${perfDiaBR(perfUltimoDiaDoMes(periodo.de.slice(0,7)))}). Escolha o mês no período e feche de novo.`,mesInteiro:true},422);
         const hojeFechar=perfDia(new Date().toISOString());
-        if(periodo.ate>=hojeFechar)return resp({error:`O mês ainda não terminou: ${perfMesTxt(periodo.de.slice(0,7))} pode ser fechado a partir de ${perfDiaBR(perfDiaSeguinte(periodo.ate))}.`},422);
+        /* Outubro de 2026 é teste (D-005; P-005 e P-008 abertas): a recusa não
+           marca data para fechá-lo (U11 da revisão da onda fechamento). */
+        if(periodo.ate>=hojeFechar)return resp({error:periodo.de==="2026-10-01"?"Outubro de 2026 é mês de teste e não tem data para ser fechado: a gestão ainda decide se ele será fechado.":`O mês ainda não terminou: ${perfMesTxt(periodo.de.slice(0,7))} pode ser fechado a partir de ${perfDiaBR(perfDiaSeguinte(periodo.ate))}.`},422);
         const requestId=String(body.requestId || "");
         if(!/^[a-zA-Z0-9-]{10,80}$/.test(requestId))return resp({error:"Identificação do fechamento inválida."},422);
         const repetido=fechamentos.find((r:any)=>r.requestId===requestId);if(repetido)return resp({ok:true,fechamento:repetido});

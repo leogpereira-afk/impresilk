@@ -92,5 +92,28 @@ export const CONFERENCIA_ENTREGA = (() => {
     const resumo = rotulo + (registros.length && !ap.erro ? ' · ' + conferidas + ' unidades conferidas · ' + (restoCancelado ? ap.canceladoUnidades + ' canceladas' : saldoUnidades + ' a conferir') : '') + (divergencia ? ' · finalização anterior com saldo: revisar' : '') + (ap.erro ? ' · '+ap.erro : '');
     return {...ap,itens,situacao,rotulo,resumo,saldoUnidades,divergencia,conferidoValor:ap.saldo===null?null:ap.total-ap.saldo-(ap.cancelado || 0),ultimoDia:registros.map(e=>e.dia).sort().pop() || ''};
   }
-  return {catalogo, validar, apurar, estado};
+  /* COMO ESTAVA NO FIM DO DIA (revisão da onda fechamento, D2 da lente
+     dinheiro, 12/10/2026): a O.S. vista só com o que tinha acontecido até o
+     fim de `dia`, no relógio de São Paulo: as conferências com o dia até ele,
+     as marcas dos itens com o dia até ele (o desfazer também é marca), e a
+     finalização, o lançamento e o cancelamento só se vieram até ele. A
+     apuração de um período usa esta O.S. para o estado das entregas dele: a
+     parcial conferida em novembro continua "parcial" no recálculo de novembro
+     fechado quando o resto chega em dezembro. Antes o estado mudava (parcial
+     para saldo concluído), o hash do selo deixava de bater e Aprovar e
+     Exportar novembro davam 409 "A fonte mudou". Não muda o valor de nenhuma
+     entrega (a parte k vale pela soma acumulada até ela). Sem dia válido,
+     devolve a própria O.S. */
+  function noFimDoDia(os, dia) {
+    if (!os || typeof os !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(String(dia || ''))) return os;
+    const ate = String(dia), depois = v => { const d = motor().diaSP(v); return !!d && d > ate; };
+    const out = {...os, conferenciasEntrega:lista(os.conferenciasEntrega).filter(e => !(e && String(e.dia || '') > ate))};
+    if (Array.isArray(os.itens)) out.itens = os.itens.map(it => it && typeof it === 'object' && Array.isArray(it.entregas) ? {...it, entregas:it.entregas.filter(m => !(m && depois(m.dia)))} : it);
+    if (depois(os.finalizadaEm)) for (const k of ['finalizadaEm', 'finalizadoPor', 'baixaAutoERP', 'finalizadaPorCampo']) delete out[k];
+    const l = os.entregaLancada;
+    if (depois(l && typeof l === 'object' ? l.data : l)) delete out.entregaLancada;
+    if (os.cancelamento && typeof os.cancelamento === 'object' && depois(os.cancelamento.em)) delete out.cancelamento;
+    return out;
+  }
+  return {catalogo, validar, apurar, estado, noFimDoDia};
 })();

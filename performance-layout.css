@@ -227,14 +227,28 @@ body:has(#panel-performance.active) .frase-bar{min-height:0;padding:4px 14px;fon
 .perf-situacao.provisorio{background:#fdecd2;color:#7a4300}
 .perf-aviso.perf-aviso-forte{background:#fdecea;color:#7f1d1d;border-left:5px solid #b42318;font-size:.9rem;padding:10px 14px}
 .perf-cob-mes.baixa{color:#8a2c0d;font-weight:600}
+/* U3 da revisão da onda fechamento: acima do pódio, só a linha da cobertura do mês e o aviso do mês fechado, compactos; o quadro "Participantes nas entregas" voltou para baixo. */
+.perf-topo-mes{display:grid;gap:6px;margin:2px 0 10px}
+.perf-topo-mes .perf-cob-mes{margin:0;padding:8px 12px;border-radius:10px;background:#eef3f7;color:#24394a;font-size:.84rem;line-height:1.45}
+.perf-topo-mes .perf-cob-mes.baixa{background:#fff1ec;color:#8a2c0d}
+.perf-topo-mes .perf-cob-mes .inline-link{min-height:0;padding:0 4px}
+.perf-topo-mes .perf-aviso{margin:0}
+.perf-cob-base{display:block;font-size:.74rem;font-weight:500;color:#5d7283;margin-top:2px}
 .perf-fech-cob{margin:8px 0;padding:10px 12px;border-radius:10px;background:#eef3f7;color:#24394a;font-size:.88rem;line-height:1.5}
 .perf-fech-cob.baixa{background:#fff6e0;color:#5c3d00}
 .perf-fech-baixa{margin-top:8px;padding:10px 12px;border-radius:10px;background:#fdecea;color:#7f1d1d;border-left:5px solid #b42318}
 .perf-fech-baixa label{display:flex;flex-direction:column;gap:6px;margin-top:6px;font-weight:600}
 .perf-fech-baixa input{min-height:40px;border:1px solid #d99a91;border-radius:8px;padding:8px 10px;font:inherit}
 .perf-mudancas{margin:8px 0;padding:10px 14px;border-radius:12px;background:#f4f7fa;border:1px solid #d9e2ea}
-.perf-mudancas summary{font-weight:700;cursor:pointer;min-height:40px;display:flex;align-items:center}
+.perf-mudancas summary{font-weight:700;cursor:pointer;min-height:40px;display:flex;align-items:center;gap:6px;list-style:none}
+/* U7 da revisão da onda fechamento: o display:flex tirou a seta nativa; volta o ▸/▾ desenhado, como o .perf-method summary. */
+.perf-mudancas summary::-webkit-details-marker{display:none}
+.perf-mudancas summary:before{content:'▸';flex:none}
+.perf-mudancas[open] summary:before{content:'▾'}
 .perf-mudancas ul{margin:6px 0 0;padding-left:20px;font-size:.88rem;line-height:1.55}
 .comissao-substituida{border-left:5px solid #d97706}
-.tv-selo{display:inline-block;margin-left:12px;padding:4px 12px;border-radius:999px;background:#fdecd2;color:#7a4300;font-size:clamp(.75rem,1.2vw,1rem);font-weight:700;vertical-align:middle}
-@media print{.perf-situacao.provisorio,.perf-aviso-forte,.tv-selo{-webkit-print-color-adjust:exact;print-color-adjust:exact}.perf-mudancas[open] summary{list-style:none}}
+/* U8 da revisão da onda fechamento: o selo da TV tinha 16 px a 1920 (o título, 41,6 px). Agora acompanha o título (cerca de 70% dele) e o cabeçalho quebra a linha em vez de espremer. */
+.tv-head{flex-wrap:wrap;row-gap:.6vh}
+.tv-selo{display:inline-flex;align-items:center;align-self:center;padding:.3em .9em;border-radius:999px;background:#fdecd2;color:#7a4300;border:2px solid #f3b45f;font-size:clamp(1rem,1.55vw,1.85rem);font-weight:800;line-height:1.2;letter-spacing:.01em}
+.tv-selo.ok{background:#d9f2ea;color:#14544a;border-color:#6cc3ad}
+@media print{.perf-situacao.provisorio,.perf-aviso-forte,.tv-selo{-webkit-print-color-adjust:exact;print-color-adjust:exact}.perf-mudancas[open] summary:before{content:''}}

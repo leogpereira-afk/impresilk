@@ -9,29 +9,35 @@ async function conferirItensEntrega(osId, entregaId = '') {
   const os = resposta.os, registros = os.conferenciasEntrega || [], anterior = registros.find(e => e.id === entregaId);
   if (entregaId && !anterior) throw new Error('Esta entrega mudou. Atualize a apuração.');
   const outros = registros.filter(e => e.id !== entregaId), catalogo = CONFERENCIA_ENTREGA.catalogo(os);
-  // O dia (novo ou antigo) em mês fechado: o diálogo diz antes de salvar (M7 e M8).
-  const travaMes = d => confTravaMesFechado(resposta.fechados, anterior && anterior.dia, d);
+  // Na primeira conferência, conservar quem já estava indicado na O.S.,
+  // mas exigir a escolha dos itens. Uma nova entrega não herda a equipe.
+  const primeira = !anterior && !registros.length;
+  /* O dia (novo ou antigo) em mês fechado, e a O.S. que já entrou inteira num
+     período fechado (D1 da revisão da onda fechamento): o diálogo diz antes de
+     salvar (M7 e M8). A entrega já conferida num mês fechado, e a O.S. que já
+     entrou inteira, ficam só leitura: os campos, não só o botão (U2). */
+  const inteira = primeira && resposta.inteira && resposta.inteira.de ? resposta.inteira : null;
+  const travaMes = d => confTravaMesFechado(resposta.fechados, anterior && anterior.dia, d, inteira);
+  const soLeitura = !!inteira || !!(anterior && confTravaMesFechado(resposta.fechados, anterior.dia, anterior.dia));
   const id = anterior?.id || 'ent-' + crypto.randomUUID(), chave = 'itens:' + id;
   let dia = anterior?.dia || diaEntrega(os) || ENTREGA_ITEM.diaSP(new Date().toISOString()), enviando = false;
   const escolhidos = new Map((anterior?.itens || []).map(i => [i.chave,i.qtde]));
   const usados = new Map(); outros.forEach(e => e.itens.forEach(i => usados.set(i.chave,(usados.get(i.chave)||0)+i.qtde)));
-  // Na primeira conferência, conservar quem já estava indicado na O.S.,
-  // mas exigir a escolha dos itens. Uma nova entrega não herda a equipe.
-  const primeira = !anterior && !registros.length;
   const virtual = {...os, alocacao:anterior?.alocacao || (primeira ? os.alocacao : null), equipe:anterior ? DIVISAO.derivarEquipe(anterior.alocacao) : primeira ? os.equipe || [] : []};
   ALOCUI.iniciar(chave, {os:virtual,equipes:perfConfig().equipes,papel:STATE.user.papel,valor:null,rotuloValor:'Valor dos itens desta entrega',dataEntrega:dia,versoes:perfRegrasFonte().versoes,semAntigo:true,reiniciar:true});
   const d = perfDialog('Itens e equipe · O.S. ' + (os.numero || ''), `<p class="aloc-os">${esc(os.cliente || '')}</p>
     <p class="metricas-nota">Selecione somente o que esta equipe entregou nesta data. Os itens restantes poderão ser conferidos em outra entrega, com outra equipe.</p>
     ${registros.length?`<nav class="conf-entregas" aria-label="Entregas desta O.S.">${registros.map((e,n)=>`<button type="button" class="btn-ghost btn-sm" data-conf-abrir="${esc(e.id)}" ${e.id===entregaId?'disabled':''}>Entrega ${n+1} · ${esc(e.dia.split('-').reverse().join('/'))}</button>`).join('')}<button type="button" class="btn-ghost btn-sm" data-conf-abrir="" ${!entregaId?'disabled':''}>+ Nova entrega</button></nav>`:''}
     ${!registros.length && os.alocacao?'<p class="aloc-aviso">Esta primeira conferência por item substituirá a divisão da O.S. inteira na apuração aberta. Confira depois os itens restantes. Os fechamentos já salvos permanecem preservados.</p>':''}
-    <p class="aloc-aviso conf-mes-fechado" id="conf-mes-fechado" ${travaMes(dia)?'':'hidden'}>${esc(travaMes(dia))}</p>
+    <p class="aloc-aviso conf-mes-fechado" id="conf-mes-fechado" role="note" ${travaMes(dia)?'':'hidden'}>${esc(travaMes(dia))}</p>
+    <fieldset class="conf-campos${soLeitura?' so-leitura':''}" ${soLeitura?'disabled aria-describedby="conf-mes-fechado"':''}><legend class="perf-sr">${soLeitura?'Entrega em mês fechado: só leitura':'Dados desta entrega'}</legend>
     <label class="conf-data">Data desta entrega <input id="conf-data" type="date" value="${esc(dia)}" max="${ENTREGA_ITEM.diaSP(new Date().toISOString())}"></label>
     <section class="conf-itens" aria-label="Itens desta entrega"><div class="conf-itens-topo"><h4>O que foi entregue?</h4><button type="button" class="btn-ghost btn-sm" id="conf-todos">Selecionar saldo disponível</button></div>
       ${catalogo.map((it,n)=>{const saldo=it.qtde-(usados.get(it.chave)||0), trava=saldo<=0||it.ambiguo||it.cancelado;return `<div class="conf-item"><label><input type="checkbox" data-conf-item="${n}" ${escolhidos.has(it.chave)?'checked':''} ${trava?'disabled':''}><span><strong>${esc(it.descricao)}</strong><small>${it.ambiguo?'Itens iguais sem identificação: confira a ficha.':it.cancelado?'Item cancelado':`${saldo} de ${it.qtde} disponível(is) · ${it.qtde>1?'unidades':'item completo'}`}</small></span></label><label class="conf-qtde">Quantidade <input type="number" inputmode="numeric" min="1" max="${saldo}" step="1" data-conf-qtde="${n}" value="${escolhidos.get(it.chave)||saldo||1}" ${trava||!escolhidos.has(it.chave)?'disabled':''}></label></div>`;}).join('') || '<p>Nenhum item cadastrado. Complete a ficha da O.S. para conferir a entrega.</p>'}
       <p id="conf-resumo" class="conf-resumo" aria-live="polite"></p></section>
     <h4>Quem entregou estes itens?</h4>
     <section class="conf-parte" aria-label="Parte entregue por esta equipe"><div class="conf-parte-topo"><strong id="conf-parte-titulo">Selecione os itens entregues</strong><button type="button" class="btn-ghost btn-sm" id="conf-editar-itens">Editar itens e quantidades</button></div><p id="conf-parte-itens"></p><p id="conf-parte-valor" aria-live="polite"></p><small>100% aqui significa a participação nos itens selecionados, não na O.S. inteira.</small></section>
-    <div id="conf-aloc"></div>
+    <div id="conf-aloc"></div></fieldset>
     <p class="aloc-status" id="conf-status" role="status" aria-live="polite"></p><div class="aloc-acoes"><button type="button" class="btn-primary" id="conf-salvar">${anterior?'Salvar alterações da entrega':'Confirmar esta entrega'}</button><button type="button" class="btn-ghost" id="conf-cancelar">Cancelar</button></div>`);
   const box=d.querySelector('#conf-aloc'), status=d.querySelector('#conf-status'), salvar=d.querySelector('#conf-salvar');
   const minhaTela=()=>d.open && d.querySelector('#conf-aloc')===box;
@@ -92,13 +98,23 @@ async function conferirItensEntrega(osId, entregaId = '') {
    contou; mover a parcial dele contaria a mesma unidade duas vezes). O diálogo
    diz antes de salvar, com os períodos que vieram na abertura (conferenciaEntrega
    sem entrega). Sem eles (servidor antigo), nada é afirmado: a porta confere. */
-function confTravaMesFechado(fechados, diaAnterior, dia) {
+/* U2 da revisão da onda fechamento (12/10/2026): a frase dizia "escolha o dia
+   certo, num mês aberto", e a pessoa trocava 30/09 por 01/10: a entrega de
+   setembro contava em outubro. Agora diz para corrigir só a data errada, e
+   que a entrega de mês fechado não se confere agora. O ajuste de mês fechado
+   depende da pergunta 3 da fila do dono (P-006 a P-010). `inteira`: o período
+   fechado em que a O.S. já entrou inteira (D1), que o servidor manda ao abrir. */
+const CONF_MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+const CONF_AJUSTE_FECHADO = 'o ajuste de mês fechado ainda não existe; fale com a gestão.';
+function confTravaMesFechado(fechados, diaAnterior, dia, inteira) {
   const lista = Array.isArray(fechados) ? fechados : [];
   const de = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? lista.find(x => x && d >= x.de && d <= x.ate) || null : null;
   const br = d => String(d || '').split('-').reverse().join('/');
+  const mes = d => CONF_MESES[Number(String(d).slice(5, 7)) - 1] + ' de ' + String(d).slice(0, 4);
   const v = de(diaAnterior), n = de(dia);
-  if (v) return `Esta entrega foi conferida em ${br(diaAnterior)}, num mês já fechado (${br(v.de)} a ${br(v.ate)}, revisão ${v.ultimaRevisao}). Mês fechado não se recalcula: ela não pode mudar nem ir para outro mês.`;
-  if (n) return `O dia ${br(dia)} está num mês já fechado (${br(n.de)} a ${br(n.ate)}, revisão ${n.ultimaRevisao}). Mês fechado não se recalcula: escolha o dia certo, num mês aberto.`;
+  if (v) return `Esta entrega foi conferida em ${br(diaAnterior)}, num mês já fechado (${br(v.de)} a ${br(v.ate)}, revisão ${v.ultimaRevisao}). Mês fechado não se recalcula: ela não pode mudar nem ir para outro mês. Se algo está errado nela, ${CONF_AJUSTE_FECHADO}`;
+  if (inteira && inteira.de) return `Esta O.S. já entrou inteira no fechamento de ${br(inteira.de)} a ${br(inteira.ate)} (revisão ${inteira.ultimaRevisao}), com a entrega de ${br(inteira.dia)}. Conferir os itens agora contaria a mesma entrega de novo em outro mês: ${CONF_AJUSTE_FECHADO}`;
+  if (n) return `O dia ${br(dia)} está num mês já fechado (${br(n.de)} a ${br(n.ate)}, revisão ${n.ultimaRevisao}). Se a data está errada, corrija. Se a entrega foi mesmo em ${mes(dia)}, ela não pode ser conferida agora: ${CONF_AJUSTE_FECHADO}`;
   return '';
 }
 

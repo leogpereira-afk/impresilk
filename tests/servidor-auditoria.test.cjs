@@ -274,14 +274,15 @@ test('relatório: as áreas da produção escolhidas voltam depois de recarregar
 });
 function apuracao(papel){
  const src=fs.readFileSync('performance.js','utf8');
- const c={STORE:{getCFG:()=>({performancePCP:{equipes:[],participacoes:[]}}),getAllOS:()=>[],getQueue:()=>[],api:()=>{c.chamou=true;return new Promise(()=>{});}},STATE:{user:{papel}},periodoOuMes:()=>({de:'2026-09-01',ate:'2026-09-19'}),esc:s=>String(s??''),renderPerformanceCasa:()=>{},toast:()=>{}};
+ const c={STORE:{getCFG:()=>({performancePCP:{equipes:[],participacoes:[]}}),getAllOS:()=>[],getQueue:()=>[],api:corpo=>{(c.acoes||(c.acoes=[])).push(corpo&&corpo.action);if(corpo&&corpo.action!=='performanceFechados')c.chamou=true;return new Promise(()=>{});}},STATE:{user:{papel}},periodoOuMes:()=>({de:'2026-09-01',ate:'2026-09-19'}),esc:s=>String(s??''),renderPerformanceCasa:()=>{},toast:()=>{}};
  vm.createContext(c);vm.runInContext(src,c);return c;
 }
 test('apuração: montagem e operação veem a prévia dita como prévia, sem consultar o servidor que as recusa',()=>{
  for(const papel of ['montagem','operacao']){
   const c=apuracao(papel);const html=c.perfFonteHTML();
   assert.match(html,/Prévia do aparelho/);assert.doesNotMatch(html,/perf-atualizar-fonte|role="alert"/);
-  c.perfWireFonte({querySelector:()=>null});assert.equal(c.chamou,undefined,papel+' não chama performancePeriodo');
+  // Os períodos fechados (sem R$) valem para todos os papéis do ranking (U1 da revisão da onda fechamento, 12/10/2026); a apuração, não.
+  c.perfWireFonte({querySelector:()=>null});assert.equal(c.chamou,undefined,papel+' não chama performancePeriodo');assert.deepEqual([...c.acoes],['performanceFechados']);
  }
  const g=apuracao('pcp');g.perfWireFonte({querySelector:()=>null});assert.equal(g.chamou,true);
  assert.equal(g.perfErroTxt(new TypeError('Failed to fetch')),'Sem conexão com o servidor. Tente de novo.');

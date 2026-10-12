@@ -16,7 +16,7 @@
     const ultimo=new Date(Date.UTC(ano,m,0)).toISOString().slice(0,10);
     return {de:mes+'-01',ate:ultimo>hoje()?hoje():ultimo};
   }
-  function limparDados() { dados=null;$('ranking-lista').replaceChildren();$('ranking-resumo').replaceChildren();$('ranking-recorte').textContent='';$('ranking-atualizacao').textContent='';$('ranking-sem-base').hidden=true;$('ranking-sem-base').textContent='';$('ranking-vazio').hidden=true;$('ranking-pdf').disabled=true; }
+  function limparDados() { dados=null;$('ranking-lista').replaceChildren();$('ranking-resumo').replaceChildren();$('ranking-recorte').textContent='';if($('ranking-selo')){$('ranking-selo').hidden=true;$('ranking-selo').textContent='';}$('ranking-atualizacao').textContent='';$('ranking-sem-base').hidden=true;$('ranking-sem-base').textContent='';$('ranking-vazio').hidden=true;$('ranking-pdf').disabled=true; }
   function mostrarLogin(mensagem='') {
     pedido++;ocupado=false;limparDados();$('ranking-login').hidden=false;$('ranking-conteudo').hidden=true;
     $('ranking-sair').hidden=true;$('ranking-nome').textContent='';$('ranking-login-erro').textContent=mensagem;
@@ -75,8 +75,12 @@
     $('ranking-vazio').hidden=linhas.length>0;
     $('ranking-vazio').textContent=busca?'Nenhuma equipe encontrada. Tente outro nome.':semBase>0?'As entregas conferidas aguardam base para entrar no ranking.':'O ranking está esperando as primeiras entregas confirmadas deste período.';
     /* O mês sem fechamento leva o selo e, no PDF (a impressão desta página), a
-       palavra "Prévia" (item 1 da fila de 11/10/2026). */
-    $('ranking-recorte').textContent=diaBR(dados.periodo?.de)+' a '+diaBR(dados.periodo?.ate)+' · '+(dados.fechado?'Período fechado · revisão '+dados.revisao:'Prévia · Mês aberto, resultado provisório')+(busca?' · exibindo '+linhas.length+' de '+todas.length+' equipes':'');
+       palavra "Prévia" (item 1 da fila de 11/10/2026). U8 da revisão: o selo
+       era o fim da legenda cinza de 12 px; agora é um selo destacado acima dos
+       números (ranking-selo). Página antiga sem o elemento: volta à legenda. */
+    const seloTxt=dados.fechado?'Período fechado · revisão '+dados.revisao:'Prévia · Mês aberto, resultado provisório', seloEl=$('ranking-selo');
+    if(seloEl){seloEl.hidden=false;seloEl.className='ranking-selo-mes '+(dados.fechado?'fechado':'aberto');seloEl.textContent=seloTxt;}
+    $('ranking-recorte').textContent=diaBR(dados.periodo?.de)+' a '+diaBR(dados.periodo?.ate)+(seloEl?'':' · '+seloTxt)+(busca?' · exibindo '+linhas.length+' de '+todas.length+' equipes':'');
     const data=new Date(dados.atualizadoEm);
     $('ranking-atualizacao').textContent=Number.isFinite(+data)?'Consultado em '+data.toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'Consulta concluída';
     $('ranking-pdf').disabled=!todas.length&&!resumo.entregasConfirmadas&&!resumo.aConferir;

@@ -91,7 +91,8 @@ test('item 3: não sobrepõe período já fechado; o selo antigo de período liv
   const lista=await e.call({action:'performanceFechados'},gestor);
   assert.deepEqual(lista.fechados.map(f=>[f.de,f.ate,f.revisoes,f.ultimaRevisao]),[['2026-10-20','2026-11-10',1,1]]);
   assert.equal(lista.hoje,'2026-12-02');
-  for(const who of [montagem,{...montagem,papel:'operacao'},{...montagem,papel:'comercial'}])assert.equal((await e.call({action:'performanceFechados'},who)).status,403);
+  // U1 da revisão (12/10/2026): os outros papéis do ranking recebem só os períodos e as revisões (tests/onda-fechamento-revisao.test.cjs).
+  for(const who of [montagem,{...montagem,papel:'operacao'},{...montagem,papel:'comercial'}])assert.deepEqual(JSON.parse(JSON.stringify((await e.call({action:'performanceFechados'},who)).fechados)),[{de:'2026-10-20',ate:'2026-11-10',revisoes:1,ultimaRevisao:1}]);
 });
 
 /* ------------------------------------------------------------ item 2 */

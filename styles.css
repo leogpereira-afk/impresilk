@@ -3368,7 +3368,9 @@ img.perf-logo{object-fit:cover}
 .perf-base{margin-top:16px}
 .perf-base-fonte{margin:10px 0 6px;font-size:.84rem;line-height:1.5;color:#3d5566;overflow-wrap:anywhere}
 .perf-base-acoes{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 14px;margin:12px 0 8px}
-.perf-base-acoes label{display:grid;gap:6px;font-size:.8rem;color:#3d5566}
+.perf-base-acoes label{display:grid;gap:6px;font-size:.8rem;color:#3d5566;min-width:0;max-width:100%}
+/* U10 da revisão da onda fechamento: a 375 px o seletor de versão tinha 450 px e saía da tela. */
+.perf-base-acoes select{max-width:100%;min-width:0;text-overflow:ellipsis}
 #panel-performance .perf-base-acoes button{min-height:44px}
 #panel-performance #perf-fechar[disabled]{opacity:.55;cursor:not-allowed}
 .perf-fechar-motivo{margin:4px 0 10px;padding:8px 12px;border-left:3px solid #c89a42;border-radius:0 8px 8px 0;background:#fff8e8;color:#6d4a00;font-size:.82rem;line-height:1.5}
@@ -4106,6 +4108,8 @@ img.perf-logo{object-fit:cover}
 .conf-entregas,.conf-itens-topo{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.75rem}
 .conf-itens-topo{justify-content:space-between}.conf-itens-topo h4{margin:0}
 .conf-data{display:flex;align-items:center;gap:.6rem;margin:1rem 0;font-weight:600}
+/* Os campos da entrega num fieldset (U2 da revisão da onda fechamento): a entrega já conferida num mês fechado fica só leitura, os campos e não só o botão. */
+.conf-campos{border:0;padding:0;margin:0;min-width:0}.conf-campos.so-leitura{opacity:.78}.conf-campos.so-leitura input,.conf-campos.so-leitura button{cursor:not-allowed}
 .conf-data input{max-width:12rem;padding:.5rem;border:1px solid var(--border,#d8dfe5);border-radius:.5rem;background:var(--surface,#fff);color:inherit}
 .conf-itens{border:1px solid var(--border,#d8dfe5);border-radius:12px;padding:1rem;margin-bottom:1rem;min-width:0}
 .conf-item{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.7rem 0;border-top:1px solid var(--border,#d8dfe5)}
