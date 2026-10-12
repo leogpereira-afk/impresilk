@@ -99,3 +99,19 @@ test('P1/mês fechado: o RH grava o ID anterior depois do fechamento; o selo rec
   const c=await e.run(`perfConferirSeloDaComissao(${s},${JSON.stringify(NOV)})`);
   assert.equal(rc.hash,selo.hash,'o mês fechado recalcula diferente depois do ID anterior');
 });
+
+test('P1/pessoas: vínculo salvo (vinculosRH) com o ID anterior não leva ao ID de hoje', ()=>{
+  const r=O.resolverPessoas({pessoas:[{id:'100011',nome:'Instaladora Ficticia',apelido:'inst',anteriores:['100001']}],vinculos:[{apelido:'Ninha',id:'100001'}]});
+  assert.equal(r.idDe('100001'),'100011');
+  assert.equal(r.idDe('Ninha'),'100011','o nome com vínculo salvo no ID anterior ficou no ID anterior');
+});
+
+test('P1/pessoas: o crachá de toque cujo nome tem o vínculo salvo no ID anterior abre as próprias O.S. (servidor)', async()=>{
+  const I=await import('../supabase/functions/_shared/pcp-integridade.mjs');
+  const dados={pessoas:[{id:'100011',nome:'Instaladora Ficticia',apelido:'inst',anteriores:['100001']}],vinculos:[{apelido:'Ninha',id:'100001'}]};
+  const r=I.resolverPessoas(dados);
+  assert.equal(r.idDe('Ninha'),'100011');
+  assert.equal(I.idDoCracha({nome:'Ninha'},r),'100011');
+  assert.equal(I.pertenceEquipe({equipe:['100011']},{nome:'Ninha'},r),true);
+  assert.equal(I.pertenceEquipe({equipe:['100001']},{nome:'Ninha'},r),true);
+});

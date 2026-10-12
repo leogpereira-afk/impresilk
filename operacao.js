@@ -118,8 +118,10 @@ const OPERACAO = (() => {
     const salvos = new Map();
     for (const v of vinculos) {
       const ap = normPessoa(v.apelido || v.nomePCP);
-      const p = porId.get(id6(v.id || v.idPessoa)) || porChaveRH.get(String(v.chave || '').trim());
-      const id = v.semFicha === true ? '' : (p ? p.id : id6(v.id || v.idPessoa));
+      // O vínculo salvo no ID anterior da pessoa (P1) leva ao ID de hoje dela.
+      const bruto = id6(v.id || v.idPessoa), hoje = anteriorDe.get(bruto) || bruto;
+      const p = porId.get(hoje) || porChaveRH.get(String(v.chave || '').trim());
+      const id = v.semFicha === true ? '' : (p ? p.id : hoje);
       if (!ap || (!id && v.semFicha !== true)) continue;
       salvos.set(ap, salvos.has(ap) && salvos.get(ap) !== id ? '' : id);
     }
