@@ -4389,6 +4389,15 @@ img.perf-logo{object-fit:cover}
 .rel-ent-prazo-cards .prazo-ok strong{color:#146d60}.rel-ent-prazo-cards .prazo-atraso strong{color:#b0392c}
 .rel-ent-prazo-barra{display:flex;width:100%;height:10px;overflow:hidden;border-radius:10px;background:#edf2f5;margin-top:16px}
 .rel-ent-prazo-barra span:first-child{background:#167a70}.rel-ent-prazo-barra span:last-child{background:#c54738}
+/* As duas réguas da pontualidade, separadas e com rótulo (U4 da revisão da onda operação). */
+.rel-ent-regua{margin:12px 0 0;padding:12px 14px;border:1px solid #dfe7ee;border-radius:12px;background:var(--surface,#fff)}
+.rel-ent-regua-tit{margin:0 0 4px;font-size:15px;font-weight:750;color:#163654}
+.rel-ent-regua-tit small{font-size:12px;font-weight:500;color:#5b7083}
+.rel-ent-regua-base{margin:0 0 8px;font-size:12px;line-height:1.45;color:#456174}
+.rel-ent-regua-erp{border-left:4px solid #8aa2b6}
+.rel-ent-regua-pcp{border-left:4px solid #167a70;background:#f7fbfa}
+.rel-ent-regua-pcp .rel-ent-prazo-cards{margin-top:4px}
+@media print{.rel-ent-regua{break-inside:avoid;padding:8px 10px}}
 .rel-ent-prazo-detalhes{border-top:1px solid #e4ebf0;margin-top:16px;padding-top:14px}
 .rel-ent-prazo-detalhes summary{font-weight:700;color:#29495e;cursor:pointer;padding:7px 0}
 .rel-ent-prazo-filtro{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0}

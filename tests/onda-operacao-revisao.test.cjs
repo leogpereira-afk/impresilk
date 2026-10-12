@@ -307,3 +307,30 @@ test('revisão operação: U3, as telas chamam a conferência pelo nome do botã
   assert.match(o2.run('globalThis.__t[0][0]'), /"Conferir itens e equipe" \(na ficha da O\.S\., em Conferência e acompanhamento\)/);
   assert.equal(o2.run('globalThis.__t[0][1]'), '');
 });
+
+/* ── U4: as duas réguas do relatório de pontualidade, separadas ─────────── */
+test('revisão operação: U4, o relatório separa a Régua do ERP (cartões, barra e base) da Régua do PCP (rótulo e base)', () => {
+  const ctx = vm.createContext({console, Date, Set, Number, Object, Map, Intl, MES_CURTO:['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'], esc:s => String(s).replaceAll('<', '&lt;').replaceAll('>', '&gt;')});
+  vm.runInContext(ler('relatorios-entregas.js'), ctx);
+  ctx.fixture = [{mes:'2026-10', entregasCarregadas:true, entregas:[
+    {numero:'1', cliente:'A', data:'2026-10-08', previsao:'2026-10-09', valor:1, pcp:{situacao:'atraso', dias:3, prazo:'2026-10-05', entrega:'2026-10-08'}},
+    {numero:'2', cliente:'B', data:'2026-10-10', previsao:'2026-10-09', valor:1, pcp:{situacao:'no_prazo', dias:0, prazo:'2026-10-11', entrega:'2026-10-10'}},
+    {numero:'3', cliente:'C', data:'2026-10-08', previsao:'2026-10-09', valor:1, pcp:null}]}];
+  vm.runInContext("REL_ENT.dados={ate:'2026-10-31',meses:fixture};REL_ENT.ano=2026;REL_ENT.foco='10'", ctx);
+  const h = vm.runInContext('relEntPontualidadeHTML()', ctx);
+  const iErp = h.indexOf('data-rel-regua-erp'), iPcp = h.indexOf('data-rel-regua-pcp'), iBarra = h.indexOf('rel-ent-prazo-barra');
+  // Caso ruim (f33877d): a barra 60/40 do ERP ficava logo abaixo dos cartões do PCP, sem rótulo, e os cartões do ERP sem o nome da régua.
+  assert.ok(iErp >= 0 && iPcp > iErp, 'a régua do ERP vem antes, num bloco próprio');
+  assert.ok(iBarra > iErp && iBarra < iPcp, 'a barra é do bloco do ERP');
+  const erp = h.slice(iErp, iPcp), pcp = h.slice(iPcp);
+  assert.match(erp, /<h4 class="rel-ent-regua-tit" id="rel-ent-regua-erp-tit">Régua do ERP/);
+  assert.match(erp, /Base: 3 O\.S\. comparáveis de 3 entregues/);
+  assert.match(erp, /Indicadores do período pela régua do ERP/);
+  assert.match(erp, /aria-label="Régua do ERP: /);
+  assert.match(pcp, /<h4 class="rel-ent-regua-tit" id="rel-ent-regua-pcp-tit">Régua do PCP/);
+  assert.match(pcp, /Base: 2 O\.S\. medidas de 3 entregues; 1 não medida fica à parte, nunca como zero\./);
+  assert.doesNotMatch(pcp, /rel-ent-prazo-barra/);
+  const css = ler('styles.css');
+  assert.match(css, /\.rel-ent-regua-pcp\{[^}]+\}/);
+  assert.match(css, /\.rel-ent-regua-tit\{[^}]+\}/);
+});
