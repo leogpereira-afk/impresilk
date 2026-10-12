@@ -832,6 +832,34 @@ function perfDinheiroDoSeloTxt(selo, atual) {
  if(d.dinheiro.length)return ` <strong>Na comissão: ${d.dinheiro.length} ${d.dinheiro.length===1?'mudança muda':'mudanças mudam'} o dinheiro (${esc(COMISSAO.textoMudancasDeDinheiro(d.dinheiro))}). Aprovar e Exportar a comissão deste mês ficam travados até uma nova revisão e outra prévia.</strong>${pend}`;
  return ` Nenhuma delas muda a comissão: Aprovar e Exportar continuam valendo.${pend}`;
 }
+/* O QUE FOI GRAVADO DEPOIS DO FECHAMENTO (onda cancelamento, 12/10/2026;
+   baixa da verificação da onda operação). A marca de item (o cancelamento,
+   por exemplo) gravada depois do fechamento com o dia dentro do mês não entra
+   no recálculo do selo (a porta corta pelo carimbo do servidor). A apuração
+   atual traz essas entregas em depoisDoFechamento, com a versão delas que o
+   recálculo do selo vê. O aviso compara o selo com os dados de agora com
+   essas entregas trocadas pela versão do recálculo (a mesma régua da porta:
+   não diz que trava o que não trava) e mostra as marcas à parte, como mudança
+   depois do fechamento que não entra no fechamento. */
+function perfDepoisDoFechamento(f, dados) {
+ const d=dados&&dados.depoisDoFechamento;
+ if(!f||!d||String(d.fechamentoId)!==String(f.id)||!Array.isArray(d.entregas)||!d.entregas.length)return null;
+ return d;
+}
+function perfComoNoFechamento(f, dados) {
+ const d=perfDepoisDoFechamento(f,dados);
+ if(!d||!Array.isArray(dados.registros))return dados;
+ const rc=new Map((Array.isArray(d.registros)?d.registros:[]).map(r=>[String(r.id),r]));
+ return {...dados,registros:dados.registros.map(r=>rc.get(String(r.id))||r)};
+}
+const PERF_MARCA_DEPOIS={cancelado:['cancelamento de item','gravado'],desfeito:['desfazer de marca de item','gravado'],entregue:['entrega de item','gravada'],retirado:['retirada de item','gravada'],problema:['problema em item','gravado'],conferido:['conferência de item','gravada']};
+function perfDepoisDoFechamentoTxt(d) {
+ const n=d.entregas.length;
+ const diaEm=v=>{const t=Date.parse(String(v||''));return Number.isFinite(t)?new Date(t).toLocaleDateString('pt-BR',{timeZone:'America/Sao_Paulo'}):'';};
+ const marcas=d.entregas.flatMap(e=>(Array.isArray(e.marcas)?e.marcas:[]).map(m=>({...m,numero:e.numero||e.osId})));
+ const linha=m=>{const [o,g]=PERF_MARCA_DEPOIS[m.tipo]||['marca de item','gravada'];return `O.S. ${m.numero}: ${o}${m.dia?` com o dia ${perfDiaBR(m.dia)}`:''}${diaEm(m.em)?`, ${g} em ${diaEm(m.em)}`:''}`;};
+ return ` ${n===1?'1 entrega mudou':`${n} entregas mudaram`} depois do fechamento por marca de item gravada depois dele (${esc(marcas.slice(0,3).map(linha).join('; '))}${marcas.length>3?' e outras':''}): ${n===1?'ela não entra':'elas não entram'} no fechamento e não ${n===1?'trava':'travam'} Aprovar e Exportar a comissão. Para que ${n===1?'entre':'entrem'}, crie uma nova revisão em Base e fechamento.`;
+}
 function perfMudancasTxt(m) {
  const n=(x,um,varios)=>x?`${x} ${x===1?um:varios}`:'';
  return [n(m.entraram,'entrega nova','entregas novas'),n(m.sairam,'entrega saiu','entregas saíram'),n(m.mudaram,'entrega mudou','entregas mudaram'),m.pesos?'os pesos da nota mudaram':''].filter(Boolean).join(', ');
@@ -843,8 +871,13 @@ function perfAvisoFechadoHTML(f,comAcao) {
  if(f&&f.fechadoEm){
    const subst=perfSubstituta(f);
    if(subst)return `<p class="perf-aviso">Você está vendo a revisão ${esc(f.revisao)}, substituída pela ${esc(subst.revisao)} (${esc(quando(subst))}). O que vale é a revisão ${esc(vigente.revisao)}.${botao('data-perf-ver-selo',`Ver a revisão ${esc(vigente.revisao)}`)}</p>`;
-   const m=perfMudancasDoSelo(f,perfRemoto.dados);
-   if(m&&(m.total||m.pesos))return `<p class="perf-aviso">Mês fechado: você está vendo a revisão ${esc(f.revisao)}, de ${esc(quando(f))}. Há ${m.total?`${m.total} ${m.total===1?'mudança':'mudanças'} nas entregas`:'mudança'} depois do fechamento (${esc(perfMudancasTxt(m))}). Elas não entram no fechamento: para valer, crie uma nova revisão em Base e fechamento.${perfDinheiroDoSeloTxt(f,perfRemoto.dados)}${botao('data-perf-ver-atuais','Ver os dados atuais')}</p>`;
+   // A mesma régua da porta: as entregas com marca gravada depois do fechamento entram como o recálculo do selo as vê.
+   const dados=perfComoNoFechamento(f,perfRemoto.dados), dep=perfDepoisDoFechamento(f,perfRemoto.dados);
+   const erroDep=f.id===vigente.id&&perfRemoto.dados&&perfRemoto.dados.depoisDoFechamentoErro?` ${esc(perfRemoto.dados.depoisDoFechamentoErro)} Toque em Atualizar apuração.`:'';
+   const depTxt=(dep?perfDepoisDoFechamentoTxt(dep):'')+erroDep;
+   const m=perfMudancasDoSelo(f,dados);
+   if(m&&(m.total||m.pesos))return `<p class="perf-aviso">Mês fechado: você está vendo a revisão ${esc(f.revisao)}, de ${esc(quando(f))}. Há ${m.total?`${m.total} ${m.total===1?'mudança':'mudanças'} nas entregas`:'mudança'} depois do fechamento (${esc(perfMudancasTxt(m))}). Elas não entram no fechamento: para valer, crie uma nova revisão em Base e fechamento.${perfDinheiroDoSeloTxt(f,dados)}${depTxt}${botao('data-perf-ver-atuais','Ver os dados atuais')}</p>`;
+   if(depTxt)return `<p class="perf-aviso">Mês fechado: você está vendo a revisão ${esc(f.revisao)}, de ${esc(quando(f))}.${depTxt}${botao('data-perf-ver-atuais','Ver os dados atuais')}</p>`;
    if(m)return `<p class="perf-aviso neutro">Mês fechado: você está vendo a revisão ${esc(f.revisao)}, de ${esc(quando(f))}. Nada mudou nas entregas depois do fechamento.</p>`;
    return `<p class="perf-aviso neutro">Mês fechado: você está vendo a revisão ${esc(f.revisao)}, de ${esc(quando(f))}.</p>`;
  }

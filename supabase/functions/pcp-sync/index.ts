@@ -908,8 +908,14 @@ function valorConferencia(os:any, erp:any[]) {
    e no hash. Quem decide
    a régua é o servidor, nunca o corpo do pedido: o recálculo de um selo
    (perfParametrosDoSelo) usa a do selo, e o selo de antes da régua (sem
-   regraPerdas) é recalculado sem ela, com o hash de sempre. */
-async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDAS.id, regraVolta=REGRA_VOLTA, marcaVolta=false}:{estrito?:boolean,reguaPerdas?:string,regraVolta?:string,marcaVolta?:boolean}={}) {
+   regraPerdas) é recalculado sem ela, com o hash de sempre.
+   O QUE FOI GRAVADO DEPOIS DO FECHAMENTO (onda cancelamento, 12/10/2026):
+   `gravadoAte` é o instante do fechamento, que o recálculo do selo passa
+   (perfOpcoesDoSelo): a marca de item gravada depois dele não entra, mesmo
+   com o dia dentro do mês (CONFERENCIA_ENTREGA.noFimDoDia). `depoisDe` só
+   conta essas marcas, sem tirá-las: a apuração atual as devolve em
+   `marcasDepois`, fora do conteúdo e do hash, para a tela do mês fechado. */
+async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDAS.id, regraVolta=REGRA_VOLTA, marcaVolta=false, gravadoAte="", depoisDe=""}:{estrito?:boolean,reguaPerdas?:string,regraVolta?:string,marcaVolta?:boolean,gravadoAte?:string,depoisDe?:string}={}) {
   const regua=reguaPerdas?REGRAS.reguaPorId(reguaPerdas):null;
   if(reguaPerdas&&!regua)throw new Error("A régua das perdas deste fechamento não existe neste servidor. Atualize antes de conferir.");
   const periodo=perfPeriodo(body), inicio=new Date().toISOString();
@@ -995,6 +1001,7 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
      na leitura; a mesma viagem com e sem o id era contada duas vezes. Só a
      régua nova (volta-1) lê; a da v167 fica como era. */
   const ativosPerf=regraVolta?await ativosDoPainel():[];
+  const marcasDepois:any[]=[];
   const registros=lista.map(o=>{
     const p=participacoes.find((x:any)=>x.id===o.id);
     let valor=num(o.valorTotal), origem="O.S. do PCP";
@@ -1022,7 +1029,8 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
          nas duas cópias do motor). A parcial de novembro fechado continua
          parcial quando o resto chega em dezembro, e o recálculo do selo
          (Aprovar e Exportar) confere. O valor de cada entrega não muda. */
-      const oFim=CONFERENCIA_ENTREGA.noFimDoDia(o,periodo.ate);
+      const oFim=CONFERENCIA_ENTREGA.noFimDoDia(o,periodo.ate,{gravadoAte});
+      if(depoisDe){const gd=CONFERENCIA_ENTREGA.gravadasDepois(o,periodo.ate,depoisDe);if(gd.length)marcasDepois.push({id:String(o.id),osId:String(o._osId),numero:String(o.numero||""),dia:String(o._dia||""),marcas:gd.slice(0,20).map((m:any)=>({tipo:m.tipo,item:m.item,dia:m.dia,em:m.em}))});}
       const a=CONFERENCIA_ENTREGA.apurar(oFim,valorConferencia(o,valoresItens[String(o.numero)] || [])), e=a.entregas.find((x:any)=>x.id===o._conferencia.id);
       if(bruto!==null){const bruta=CONFERENCIA_ENTREGA.apurar(oFim,bruto).entregas.find((x:any)=>x.id===o._conferencia.id);valorBrutoCentavos=bruta?.valor??null;}
       const indiceEntrega=a.entregas.findIndex((x:any)=>x.id===o._conferencia.id);
@@ -1192,7 +1200,7 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
     pctValor,baixa:registros.length+aLancar.length>0&&pctValor<50};
   // As O.S. inteiras deste período (D4): o fechamento as guarda fora do hash, para a leitura dos outros períodos.
   const inteiras=registros.filter((r:any)=>!String(r.id).includes("::entrega:")).map((r:any)=>({id:String(r.id),dia:String(r.dia||"")}));
-  return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP.",cobertura,inteiras,jaFechadas};
+  return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP.",cobertura,inteiras,jaFechadas,...(marcasDepois.length?{marcasDepois}:{})};
 }
 /* A RÉGUA DO SELO (A1, auditoria da v164, 11/10/2026). A tela fecha com a
    nota por valor (performance.js manda notaPorValor:true na apuração e no
@@ -1219,8 +1227,14 @@ const perfReguaDoSelo = (selo:any) => typeof selo?.regraPerdas==="string" ? selo
    fotografia voltaLegado). Régua que este servidor não conhece fica com a de
    antes: o hash não bate e continua 409 (nunca vira aceite). */
 const perfRegraVoltaDoSelo = (selo:any) => selo?.regraVolta===REGRA_VOLTA ? REGRA_VOLTA : "";
-// As opções do recálculo de um selo: a régua da volta dele e a marca, como ele foi selado.
-const perfOpcoesDoSelo = (selo:any) => ({reguaPerdas:perfReguaDoSelo(selo),regraVolta:perfRegraVoltaDoSelo(selo),marcaVolta:perfRegraVoltaDoSelo(selo)===REGRA_VOLTA});
+/* O INSTANTE DO FECHAMENTO (onda cancelamento): o fim da consulta que ele
+   selou (consultadoEm, que o selo guarda desde sempre); sem ele, a hora do
+   fechamento. A marca de item gravada depois dele não entra no recálculo. O
+   selo sem nenhum dos dois recalcula como antes, só pelo dia. */
+const perfInstanteOk = (v:any) => typeof v==="string" && /^\d{4}-\d{2}-\d{2}T/.test(v) && Number.isFinite(Date.parse(v));
+const perfCorteDoSelo = (selo:any) => perfInstanteOk(selo?.consultadoEm) ? selo.consultadoEm : perfInstanteOk(selo?.fechadoEm) ? selo.fechadoEm : "";
+// As opções do recálculo de um selo: a régua da volta dele e a marca, como ele foi selado, e o instante do fechamento.
+const perfOpcoesDoSelo = (selo:any) => ({reguaPerdas:perfReguaDoSelo(selo),regraVolta:perfRegraVoltaDoSelo(selo),marcaVolta:perfRegraVoltaDoSelo(selo)===REGRA_VOLTA,gravadoAte:perfCorteDoSelo(selo)});
 /* A APROVAÇÃO E A EXPORTAÇÃO CONFEREM SÓ O DINHEIRO (onda comissão,
    12/10/2026; linha Baixa da auditoria de 11/10/2026). O recálculo do selo
    com a régua dele continua; o hash igual segue valendo como antes. Hash
@@ -1249,6 +1263,39 @@ async function perfConferirSeloDaComissao(selo:any, periodo:any) {
 function perfRespostaFonteMudou(c:any, oQueFazer:string) {
   if(c.regua)return {error:"A régua deste fechamento não existe neste servidor. Atualize o servidor antes de aprovar ou exportar; nada foi gravado.",reguaDesconhecida:true};
   return {error:"A fonte mudou depois do fechamento no que decide a comissão ("+COMISSAO.textoMudancasDeDinheiro(c.mudancas)+"). "+oQueFazer,mudancasDinheiro:c.mudancas.slice(0,200),pendentes:c.pendentes.slice(0,200)};
+}
+/* A APURAÇÃO ATUAL DE UM MÊS FECHADO (onda cancelamento, M8): os dados de
+   agora, como sempre, e, quando há marca de item do mês gravada depois do
+   último fechamento, `depoisDoFechamento`: quais entregas, quais marcas, e
+   essas entregas como o recálculo do selo as vê (sem as marcas). A tela
+   compara o selo com os dados de agora trocando essas entregas pelas do
+   recálculo (a mesma régua da porta) e mostra as marcas como "mudou depois
+   do fechamento" e "não entra no fechamento". Fora do conteúdo e do hash. A
+   leitura das revisões que falha não esconde os dados atuais: vai a causa. */
+async function perfApuracaoAtual(body:any, periodo:any) {
+  let ultimo:any=null, erroUltimo="";
+  try{
+    const {data,error}=await sb.from("pcp_registros").select("id, revisao:registro->revisao, consultadoEm:registro->>consultadoEm, fechadoEm:registro->>fechadoEm")
+      .eq("colecao","performance_fechamentos").eq("apagado",false).eq("registro->>de",periodo.de).eq("registro->>ate",periodo.ate).limit(1000);
+    if(error)throw new Error(error.message);
+    for(const f of (data||[]) as any[])if(!ultimo||(Number(f.revisao)||0)>(Number(ultimo.revisao)||0))ultimo=f;
+  }catch(e){erroUltimo=String((e as Error)?.message||e).slice(0,200);}
+  const corte=ultimo?perfCorteDoSelo(ultimo):"";
+  const fonte:any=await perfFonte(body,corte?{depoisDe:corte}:{});
+  const marcas=Array.isArray(fonte.marcasDepois)?fonte.marcasDepois:[];
+  delete fonte.marcasDepois;
+  if(erroUltimo)return {...fonte,depoisDoFechamentoErro:"Não foi possível ler o último fechamento deste período ("+erroUltimo+")."};
+  if(!marcas.length)return fonte;
+  try{
+    const selo=(await perfFechamentos(periodo))[0];
+    if(!selo||String(selo.id)!==String(ultimo.id))throw new Error("O período recebeu outra revisão durante a consulta. Atualize a apuração.");
+    const rc=await perfFonte(perfParametrosDoSelo(selo,periodo),{...perfOpcoesDoSelo(selo),estrito:false});
+    const ids=new Set(marcas.map((m:any)=>m.id));
+    return {...fonte,depoisDoFechamento:{fechamentoId:String(selo.id),revisao:selo.revisao,fechadoEm:String(selo.fechadoEm||""),corte,entregas:marcas.slice(0,200),
+      registros:(rc.registros||[]).filter((r:any)=>ids.has(String(r.id))),hashIgual:rc.hash===selo.hash}};
+  }catch(e){
+    return {...fonte,depoisDoFechamentoErro:"Há marca de item gravada depois do fechamento, mas o recálculo do fechamento falhou ("+String((e as Error)?.message||e).slice(0,200)+")."};
+  }
 }
 async function perfFechamentos(periodo:any) {
   const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_fechamentos").eq("apagado",false).eq("registro->>de",periodo.de).eq("registro->>ate",periodo.ate).order("id").limit(1000);
@@ -1954,7 +2001,7 @@ Deno.serve(async (req: Request) => {
       case "performanceFechar": {
         if(!ehMaquina && !["admin","pcp"].includes(String(cracha?.papel || "")))return resp({error:"Apuração restrita à gestão do PCP."},403);
         let periodo;try{periodo=perfPeriodo(body);}catch(e){return resp({error:(e as Error).message},422);}
-        if(acao==="performancePeriodo")return resp(await perfFonte(body));
+        if(acao==="performancePeriodo")return resp(await perfApuracaoAtual(body,periodo));
         const fechamentos=await perfFechamentos(periodo);
         // As logos dos retratos (item 13) vão junto; sem elas a tela usa a de hoje, como antes.
         if(acao==="performanceFechamentos"){let logos:Record<string,string>={};try{logos=await perfLogosDosRetratos(fechamentos);}catch{logos={};}return resp({fechamentos,logos});}

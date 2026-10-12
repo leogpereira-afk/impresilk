@@ -124,16 +124,44 @@ const CONFERENCIA_ENTREGA = (() => {
      para saldo concluído), o hash do selo deixava de bater e Aprovar e
      Exportar novembro davam 409 "A fonte mudou". Não muda o valor de nenhuma
      entrega (a parte k vale pela soma acumulada até ela). Sem dia válido,
-     devolve a própria O.S. */
-  function noFimDoDia(os, dia) {
+     devolve a própria O.S.
+     GRAVADO ATÉ O FECHAMENTO (onda cancelamento, 12/10/2026; baixa da
+     verificação da onda operação): a marca de item tem o dia declarado e o
+     carimbo `em` do servidor (quando foi gravada). O cancelamento gravado em
+     dezembro com o dia 20/11 passava pelo dia e mudava o recálculo de
+     novembro fechado (o hash do selo deixava de bater). Com `gravadoAte` (o
+     instante do fechamento, que o recálculo do selo passa), a marca gravada
+     depois dele também sai: o que foi gravado depois do fechamento só entra
+     numa revisão nova. A marca sem carimbo (antiga) e o corte inválido ficam
+     como antes; sem `gravadoAte`, só o dia, como antes. */
+  const instante = v => /^\d{4}-\d{2}-\d{2}T/.test(String(v || '')) ? Date.parse(String(v)) : NaN;
+  const gravadaDepois = (m, corte) => Number.isFinite(corte) && !!m && typeof m === 'object' && instante(m.em) > corte;
+  function noFimDoDia(os, dia, {gravadoAte = ''} = {}) {
     if (!os || typeof os !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(String(dia || ''))) return os;
-    const ate = String(dia), depois = v => { const d = motor().diaSP(v); return !!d && d > ate; };
+    const ate = String(dia), depois = v => { const d = motor().diaSP(v); return !!d && d > ate; }, corte = instante(gravadoAte);
     const out = {...os, conferenciasEntrega:lista(os.conferenciasEntrega).filter(e => !(e && String(e.dia || '') > ate))};
-    if (Array.isArray(os.itens)) out.itens = os.itens.map(it => it && typeof it === 'object' && Array.isArray(it.entregas) ? {...it, entregas:it.entregas.filter(m => !(m && depois(m.dia)))} : it);
+    if (Array.isArray(os.itens)) out.itens = os.itens.map(it => it && typeof it === 'object' && Array.isArray(it.entregas) ? {...it, entregas:it.entregas.filter(m => !(m && (depois(m.dia) || gravadaDepois(m, corte))))} : it);
     if (depois(os.finalizadaEm)) for (const k of ['finalizadaEm', 'finalizadoPor', 'baixaAutoERP', 'finalizadaPorCampo']) delete out[k];
     const l = os.entregaLancada;
     if (depois(l && typeof l === 'object' ? l.data : l)) delete out.entregaLancada;
     if (os.cancelamento && typeof os.cancelamento === 'object' && depois(os.cancelamento.em)) delete out.cancelamento;
+    return out;
+  }
+  /* As marcas que o corte tira e o dia não tiraria: as do mês fechado (ou sem
+     dia válido) gravadas depois do fechamento. A tela do mês fechado as mostra
+     como "mudou depois do fechamento" e "não entra no fechamento" (M8). */
+  function gravadasDepois(os, dia, gravadoAte) {
+    const corte = instante(gravadoAte);
+    if (!os || typeof os !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(String(dia || '')) || !Number.isFinite(corte)) return [];
+    const ate = String(dia), out = [];
+    for (const it of lista(os.itens)) {
+      if (!it || typeof it !== 'object') continue;
+      for (const m of lista(it.entregas)) {
+        const d = m && typeof m === 'object' ? motor().diaSP(m.dia) : '';
+        if ((d && d > ate) || !gravadaDepois(m, corte)) continue;
+        out.push({id:String(m.id ?? ''), uid:String(it.uid ?? ''), item:String(it.item ?? ''), tipo:String(m.tipo ?? ''), dia:d || '', em:String(m.em)});
+      }
+    }
     return out;
   }
   /* A VOLTA DO CARRO DE CADA VIAGEM (onda volta, 12/10/2026; D2 da revisão
@@ -325,6 +353,6 @@ const CONFERENCIA_ENTREGA = (() => {
     const voltouDepois = !Number.isFinite(tSai) && !!rNew && rNew !== rOld && Number.isFinite(tOld) && Number.isFinite(tNew) && tNew > tOld;
     return {de, para, nova:para > de && (saiuDepois || voltouDepois)};
   }
-  return {catalogo, validar, validarRevisao, lidasParaSaldo, apurar, estado, noFimDoDia, PERGUNTAS_VOLTA, diaDaVolta, idDoAtivo, chaveVeiculo, semCarroV, confDaVolta, confGuardada, declaracaoGuardada, confDaViagemDoDia, declaracaoDaViagemDoDia, registroDaVolta, voltasDaOS, viagemDoDia, voltaDaEntrega, voltaDaOS, chaveDaViagem, ultimaViagem, movimentoDaViagem};
+  return {catalogo, validar, validarRevisao, lidasParaSaldo, apurar, estado, noFimDoDia, gravadasDepois, PERGUNTAS_VOLTA, diaDaVolta, idDoAtivo, chaveVeiculo, semCarroV, confDaVolta, confGuardada, declaracaoGuardada, confDaViagemDoDia, declaracaoDaViagemDoDia, registroDaVolta, voltasDaOS, viagemDoDia, voltaDaEntrega, voltaDaOS, chaveDaViagem, ultimaViagem, movimentoDaViagem};
 })();
 if (typeof module !== 'undefined') module.exports = CONFERENCIA_ENTREGA;

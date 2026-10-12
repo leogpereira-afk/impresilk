@@ -201,7 +201,7 @@ test('revisão fechamento: D2, a régua "como estava no fim do dia" é a mesma n
     assert.equal(o.conferenciasEntrega.length, 2);assert.equal(o.itens[1].entregas.length, 1);
     assert.equal(M.noFimDoDia(o, ''), o, 'sem dia válido, a O.S. como está');
   }
-  assert.equal(ler('supabase/functions/_shared/pcp-conferencia-entrega.mjs').includes('function noFimDoDia(os, dia)'), true);
+  assert.equal(ler('supabase/functions/_shared/pcp-conferencia-entrega.mjs').includes('function noFimDoDia(os, dia, {gravadoAte'), true);
 });
 
 /* A tela do mês fechado (performance.js em vm), com o selo e os dados atuais do servidor. */
