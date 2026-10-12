@@ -4607,3 +4607,13 @@ img.perf-logo{object-fit:cover}
 .perf-podio-nome .tag-freelancer { align-self: center; margin-left: 6px; }
 .tv-nome .tag-freelancer { margin: .25em 0 0; }
 .tv-corpo .tag-freelancer { font-size: clamp(.8rem, 1.15vw, 1.15rem); padding: .15em .65em; letter-spacing: .03em; }
+/* ALVOS DE TOQUE DE 40 PX (U5 da auditoria de 12/10/2026): o arquivar dos
+   Finalizados (38 de largura), os meses dos Relatórios de Entregas (34 de
+   altura), as O.S. das Prioridades do dia na Programação (31), as setas do dia
+   no Painel (28 e 30 de largura) e o "Liberar para instalação" (34). */
+[data-arquivar-os] { min-width: 40px; min-height: 40px; }
+#panel-entregas .rel-ent-meses button, .rel-ent-meses button { min-height: 40px; min-width: 40px; }
+.erp-aviso { min-height: 40px; }
+.op-prioridades .inline-link[data-os-id] { display: inline-flex; align-items: center; min-height: 40px; }
+#lt-menos, #lt-mais { min-width: 40px; min-height: 40px; }
+.btn-liberar { min-height: 40px; }

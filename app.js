@@ -2360,7 +2360,7 @@ function renderModal() {
     <div class="modal-header">
       <div style="flex:1">
         <div class="modal-title" id="modal-os-titulo">O.S ${esc(os.numero || '(nova)')} <span class="tipo-badge tipo-${interno ? 'interno' : 'externo'}">${interno ? '🏬 Cliente retira' : '🚚 Externo'}</span></div>
-        <div class="modal-meta">Atualizado por ${esc(os.atualizadoPor || '—')}${os.atualizadoEm ? ' · ' + new Date(os.atualizadoEm).toLocaleString('pt-BR') : ''}</div>
+        <div class="modal-meta">Atualizado por ${esc(os.atualizadoPor || 'não informado')}${os.atualizadoEm ? ' · ' + new Date(os.atualizadoEm).toLocaleString('pt-BR') : ''}</div>
       </div>
       <span class="modal-status badge st-${st}">${os.conferenciasEntrega?.length && !canceladaNaTela(os)?esc(CONFERENCIA_ENTREGA.estado(os).rotulo):statusLabelDe(os, st)}</span>
       <button class="modal-close" id="modal-close-btn" aria-label="Fechar ficha da O.S.">×</button>
@@ -2368,7 +2368,7 @@ function renderModal() {
 
     ${finalizada ? `
     <div class="finalizada-lock lock-allow">
-      <span>🔒 O.S finalizada por <strong>${esc(os.finalizadoPor || '—')}</strong>${os.finalizadaEm ? ' · ' + new Date(os.finalizadaEm).toLocaleString('pt-BR') : ''}. Somente leitura.</span>
+      <span>🔒 O.S finalizada por <strong>${esc(os.finalizadoPor || 'não informado')}</strong>${os.finalizadaEm ? ' · ' + new Date(os.finalizadaEm).toLocaleString('pt-BR') : ''}. Somente leitura.</span>
       <button class="btn-ghost btn-sm" id="btn-reabrir-os">↩ Reabrir / voltar status</button>
     </div>` : ''}
     ${canceladaAvisoFichaHTML(os)}
@@ -2399,9 +2399,8 @@ function renderModal() {
       <button class="btn-ghost btn-sm" id="modal-wpp">💬 Enviar via WhatsApp</button>
       <button class="btn-primary btn-sm" id="modal-save" style="margin-left:auto">💾 Salvar O.S.</button>
       <!-- Excluir numa linha própria: colado no WhatsApp, um toque torto no tablet apagava a O.S. -->
-      <div class="edit-only" style="flex-basis:100%;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-        ${['admin','pcp'].includes(STATE.user.papel) ? '<button class="btn-danger btn-sm" id="modal-delete">🗑 Excluir O.S</button>' : `<button class="btn-ghost btn-sm" data-controle="solicitarRevisao" data-controle-os="${esc(os.id)}">Solicitar revisão à gestão</button>`}
-      </div>
+      ${/* O pedido de revisão à gestão mora uma vez só, em Conferência e acompanhamento (U5 da auditoria de 12/10/2026). */''}
+      ${['admin','pcp'].includes(STATE.user.papel) ? '<div class="edit-only" style="flex-basis:100%;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><button class="btn-danger btn-sm" id="modal-delete">🗑 Excluir O.S</button></div>' : ''}
     </div>
   `;
 
@@ -2726,7 +2725,7 @@ function blocoPCP(os, ro, done) {
       </div>
       <div class="edit-only">
         ${lib
-          ? `<div class="liberar-status">✓ Liberado para instalação por ${esc(os.aptoPor || '—')}${os.aptoEm ? ' · ' + new Date(os.aptoEm).toLocaleDateString('pt-BR') : ''}
+          ? `<div class="liberar-status">✓ Liberado para instalação por ${esc(os.aptoPor || 'não informado')}${os.aptoEm ? ' · ' + new Date(os.aptoEm).toLocaleDateString('pt-BR') : ''}
                <button class="btn-xs btn-ghost" id="btn-cancelar-liberar" style="margin-left:auto">Cancelar</button></div>`
           : `<button class="btn-liberar" id="btn-liberar"${fmsgAttr('liberar')}>✓ Liberar para instalação</button>`}
       </div>
@@ -3970,7 +3969,7 @@ function blocoExec(os, ro, done) {
       ${!confirmado ? `<div class="trava-msg">🔒 Confirme o horário com o cliente (POP EXI‑002) antes de liberar o carro / sair.</div>` : ''}
       <div class="edit-only">
         ${os.carroLiberado
-          ? `<div class="liberar-status">${OPERACAO.semCarro(os) ? '🏠 Saída liberada (sem carro)' : '🚗 Carro liberado'} por ${esc(os.carroLiberadoPor||'—')}${os.carroLiberadoEm?' · '+new Date(os.carroLiberadoEm).toLocaleString('pt-BR'):''}
+          ? `<div class="liberar-status">${OPERACAO.semCarro(os) ? '🏠 Saída liberada (sem carro)' : '🚗 Carro liberado'} por ${esc(os.carroLiberadoPor||'não informado')}${os.carroLiberadoEm?' · '+new Date(os.carroLiberadoEm).toLocaleString('pt-BR'):''}
                <button class="btn-xs btn-ghost" id="btn-cancelar-carro" style="margin-left:auto">Cancelar</button></div>`
           : `<button class="btn-primary btn-sm" id="btn-liberar-carro" ${!confirmado?'disabled style="opacity:.5"':''}${fmsgAttr('carro')}>${OPERACAO.semCarro(os) ? '🏠 Liberar saída (sem carro)' : '🚗 Liberar carro / Saída'}</button>`}
       </div>
@@ -4045,7 +4044,7 @@ function blocoExec(os, ro, done) {
 
       <div class="edit-only mt-12">
         ${os.finalizadaEm
-          ? `<div class="liberar-status" style="background:#dcfce7;color:var(--green)">✓ Finalizada por ${esc(os.finalizadoPor||'—')} · ${new Date(os.finalizadaEm).toLocaleString('pt-BR')}</div>`
+          ? `<div class="liberar-status" style="background:#dcfce7;color:var(--green)">✓ Finalizada por ${esc(os.finalizadoPor||'não informado')} · ${new Date(os.finalizadaEm).toLocaleString('pt-BR')}</div>`
           : canceladaNaTela(os) ? FINALIZAR_CANCELADA_HTML
           : `<button class="btn-primary w-100" id="btn-finalizar">🏁 Finalizar instalação</button>
              <div class="fe-fin-resumo" id="fe-fin-jornada" aria-live="polite">${resumoFin}</div>`}
@@ -6112,7 +6111,8 @@ function osCardHTML(os) {
   const itens = os.itens || [];
   const prontos = itens.filter(i => i.pronto).length;
   const pct = fichaPercent(os);
-  const resp = os.atualizadoPor || os.responsavelPCP || os.criadoPor || '—';
+  // Sem nome: "não informado", não um travessão solto (U5 da auditoria de 12/10/2026).
+  const resp = os.atualizadoPor || os.responsavelPCP || os.criadoPor || 'responsável não informado';
   const interno = isInterno(os);
   const pp = proximoPasso(os); // próximo passo do funil (null se finalizada)
   // Botões de etapa: abrem o modal direto no bloco escolhido. Interno só tem
@@ -7793,7 +7793,7 @@ function osMiniList(list) {
     <div class="os-list-item st-${calcStatus(os)} ${alertaOS(os)}" data-os-id="${esc(os.id)}">
       <div class="list-info">
         <div class="list-numero">O.S ${esc(os.numero||'—')} <span class="badge st-${calcStatus(os)}">${statusLabelDe(os, calcStatus(os))}</span></div>
-        <div class="list-cliente">${esc(os.cliente||'Sem cliente')}${os.servico?' — '+esc(os.servico):''}</div>
+        <div class="list-cliente">${esc(os.cliente||'Sem cliente')}${os.servico?' · '+esc(os.servico):''}</div>
         <div class="list-date">📅 ${esc(fmtInstalacao(os.instalacao))}${(os.equipe||[]).length?' · 👷 '+esc(OPERACAO.equipeTexto(os, ', ')):''}</div>
       </div>
     </div>`).join('')}</div>`;
@@ -8377,7 +8377,7 @@ function finRenderCards() {
     return `<div class="os-list-item st-finalizada" data-os-id="${esc(os.id)}">
       <div class="list-info">
         <div class="list-numero">O.S ${esc(os.numero || '—')} <span class="badge st-finalizada">${os.conferenciasEntrega?.length ? esc(resumoEntregaFichaTexto(os)) : statusLabelDe(os,'finalizada')}</span>${teveRetrabalho ? ' <span class="badge st-retrabalho" title="Houve retrabalho neste serviço">↻ Retrabalho</span>' : ''}${estaArquivada(os) ? ' <span class="badge" title="Está na vista Arquivados do PCP">🗄 Arquivada</span>' : ''}</div>
-        <div class="list-cliente">${esc(os.cliente || 'Sem cliente')}${os.servico ? ' — ' + esc(os.servico) : ''}</div>
+        <div class="list-cliente">${esc(os.cliente || 'Sem cliente')}${os.servico ? ' · ' + esc(os.servico) : ''}</div>
         <div class="list-date">${OPERACAO.encerradaERP(os) ? '↻ Recebida do ERP em' : os.finalizadaEm ? '🏁 Conclusão registrada em' : 'Última conferência em'} ${esc(dataF)}${(os.equipe||[]).length ? ' · 👷 ' + esc(OPERACAO.equipeTexto(os, ', ')) : ''}${OPERACAO.encerradaERP(os) ? ' · '+esc(os.baixaAutoERP?.status || 'encerramento')+' · não comprova entrega nesta data' : ''}</div>
       </div>
       ${podeArquivar ? `<button class="btn-ghost btn-sm edit-only" data-arquivar-os="${esc(os.id)}" title="Mandar agora para a vista Arquivados">🗄</button>` : ''}
@@ -9818,7 +9818,7 @@ function montarTextoWhatsApp(os) {
     // Sem o endereço do cadastro do cliente (o do CNPJ): não é o local da instalação.
     `👷 ${OPERACAO.equipeTexto(os, ', ') || '—'}\n` +
     (os.confirmacao ? `✅ ${os.confirmacao}\n` : '') +
-    (os.finalizadaEm ? `🏁 Finalizada${co.situacao ? ' — ' + co.situacao : ''}\n` : '') +
+    (os.finalizadaEm ? `🏁 Finalizada${co.situacao ? ': ' + co.situacao : ''}\n` : '') +
     `\n_Obs: gere o PDF (🖨) e anexe na conversa, se precisar do documento completo._`;
 }
 
@@ -10822,7 +10822,7 @@ function valorItemHTML(it, i, os, ro, u, cols, conferido = false) {
   const aviso = !ro && it.manual ? `<p class="fe-msg valor-item-aviso" id="${idAvisoValorF24(i)}" data-valor-aviso="${i}" aria-live="polite">${semValor ? esc(TEXTO_ITEM_SEM_VALOR) : ''}</p>` : '';
   const campo = !ro && it.manual
     ? `<label class="valor-item-rot">Valor unitário <span class="valor-item-campo"><span aria-hidden="true">R$</span><input type="text" inputmode="decimal" autocomplete="off" data-valor-item="${i}" ${u} value="${esc(unit > 0 ? fmtValorBR(unit) : '')}" placeholder="0,00" aria-label="Valor unitário do item ${esc(codigo)}, em reais" aria-describedby="${idAvisoValorF24(i)}"${semValor ? ' aria-invalid="true"' : ''}></span></label>`
-    : `<span class="valor-item-rot">Valor unitário R$ ${esc(Number.isFinite(unit) ? fmtValorBR(unit) : '—')}</span>`;
+    : `<span class="valor-item-rot">Valor unitário ${Number.isFinite(unit) ? 'R$ ' + esc(fmtValorBR(unit)) : 'não informado'}</span>`;
   return `<tr class="valor-row"><td colspan="${cols}" data-label="Valor"><div class="valor-item"><span class="valor-item-de">${esc(deQual)}</span>${campo}<span class="valor-item-sub">Subtotal <strong data-valor-sub="${i}" ${u}>${esc(subTxt)}</strong></span></div>${aviso}</td></tr>`;
 }
 function ligarValoresDaFicha(root, ro) {

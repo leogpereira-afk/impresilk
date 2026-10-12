@@ -4533,7 +4533,7 @@ function avisoAusenciaCasa(nomes, dia) {
 const TIPOS_PLANTAO = { diarista: 'Diarista', sobreaviso: 'Sobreaviso', folga: 'Folga' };
 function pillPlantao(p) {
   const t = TIPOS_PLANTAO[p.tipo] ? p.tipo : '';
-  return `<span class="casa-pill ${t || 'navy'}" title="${esc(OPERACAO.nomePessoa(p.quem || ''))}${p.obs ? ' — ' + esc(p.obs) : ''}">${t ? esc(TIPOS_PLANTAO[t]) : 'plantão'}</span>`;
+  return `<span class="casa-pill ${t || 'navy'}" title="${esc(OPERACAO.nomePessoa(p.quem || ''))}${p.obs ? ': ' + esc(p.obs) : ''}">${t ? esc(TIPOS_PLANTAO[t]) : 'plantão'}</span>`;
 }
 
 /* OS CHIPS DO CALENDÁRIO — o mesmo controle que Entregas já usa.
@@ -5492,6 +5492,6 @@ function abrirEquipeCasa() {
 function pdfAgendaRecorte(titulo,lista,periodo,historico) {
  const el=document.createElement('section');
  el.dataset.pdfCobertura=lista.length+' registros de agenda; uma O.S. pode ocupar vários dias';
- el.innerHTML='<table><thead><tr><th>Data</th><th>O.S.</th><th>Cliente / serviço</th><th>Equipe</th><th>Veículo</th><th>Situação</th></tr></thead><tbody>'+lista.map(o=>'<tr>'+[o._pdfDia||periodo.de,o.numero,(o.cliente||'')+' — '+(o.servico||''),OPERACAO.equipeTexto(o,', '),o.veiculo,OPERACAO.status(o)].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+ el.innerHTML='<table><thead><tr><th>Data</th><th>O.S.</th><th>Cliente / serviço</th><th>Equipe</th><th>Veículo</th><th>Situação</th></tr></thead><tbody>'+lista.map(o=>'<tr>'+[o._pdfDia||periodo.de,o.numero,(o.cliente||'')+(o.servico?' · '+o.servico:''),OPERACAO.equipeTexto(o,', '),o.veiculo,OPERACAO.status(o)].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
  imprimirAnalisePCP(titulo,el,periodo,'PCP local; '+(historico?'inclui histórico concluído':'somente abertas')+'; recorte de O.S. da agenda; plantões e eventos têm relatórios próprios.');
 }

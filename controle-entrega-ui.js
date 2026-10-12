@@ -64,13 +64,17 @@ function controleEntregaHTML(os) {
   const botao=(tipo,texto)=>`<button type="button" class="btn-ghost btn-sm" data-controle="${tipo}" data-controle-os="${esc(os.id)}">${texto}</button>`;
   const gestao=controleGestao(), erp=os.conferenciaERP, saida=os.regularizacaoSaida;
   const pendValor=gestao?pendenciaValorItemHTML(os):'';
+  /* UM BOTÃO SÓ POR FICHA (U5 da auditoria de 12/10/2026): com a O.S. aberta e
+     saldo a conferir, a ficha já mostra "Conferir itens e equipe" acima dos
+     itens (conferirEntregaFichaHTML); aqui fica só a indicação. */
+  const conferirNaFichaAcima=gestao&&typeof conferirEntregaFichaHTML==='function'&&!!conferirEntregaFichaHTML(os,true);
   return `<details class="cfg-grupo lock-allow"${pendValor?' open data-pendencia-valor':''}><summary>Conferência e acompanhamento${pendValor?' · <strong class="conf-pend-titulo">pendência de valor</strong>':''}</summary><p>${esc(resumoEntregaFichaTexto(os) || 'Sem conferência de itens registrada. A ausência de conferência não prova falta de entrega física.')}</p>
     ${erp?`<p>${esc(CONTROLE_CLASSIFICACOES[erp.classificacao] || erp.classificacao)} · ${esc(erp.responsavelNome)} · revisar até ${esc(erp.prazo)}<br>${esc(erp.evidencia)}<br>Motivo: ${esc(erp.motivo)} · ${esc(erp.por)} · ${esc(erp.em)}</p>`:''}
     ${saida?`<p>Saída ${saida.situacao==='regularizada'?'regularizada':'em conferência'} · ${esc(saida.responsavelNome)} · prazo ${esc(saida.prazo)}<br>${esc(saida.evidencia)}<br>Motivo: ${esc(saida.motivo)} · ${esc(saida.por)} · ${esc(saida.em)}</p>`:''}
     ${(os.revisaoSolicitada || []).map(r=>`<p>Revisão solicitada: ${esc(r.motivo)} · ${esc(r.por)} · ${esc(r.em)}</p>`).join('')}
     ${pendValor}
     ${gestao&&typeof confRevisoesHTML==='function'?confRevisoesHTML(os):''}
-    ${gestao?`<button type="button" class="btn-ghost btn-sm" data-controle="itens" data-controle-secao="acompanhamento" data-controle-os="${esc(os.id)}">Conferir itens e equipe</button>${os.baixaAutoERP || os.erpComSaldo || os.erpSaiuDaCarteiraEm || os.conferenciaERP?botao('erp','Classificar baixa ERP'):''}${os.saidaEm || os.horaSaida?botao('saida','Regularizar saída antiga'):''}`:botao('solicitarRevisao','Solicitar revisão à gestão')}
+    ${gestao?`${conferirNaFichaAcima?'<p class="text-muted">O botão "Conferir itens e equipe" fica acima, junto dos itens.</p>':`<button type="button" class="btn-ghost btn-sm" data-controle="itens" data-controle-secao="acompanhamento" data-controle-os="${esc(os.id)}">Conferir itens e equipe</button>`}${os.baixaAutoERP || os.erpComSaldo || os.erpSaiuDaCarteiraEm || os.conferenciaERP?botao('erp','Classificar baixa ERP'):''}${os.saidaEm || os.horaSaida?botao('saida','Regularizar saída antiga'):''}`:botao('solicitarRevisao','Solicitar revisão à gestão')}
     ${botao('fotos','Horários das fotos')}
     <p>Hora da foto, anexo e recebimento são registros separados. Nenhum deles preenche automaticamente saída ou retorno.</p></details>`;
 }
@@ -83,7 +87,7 @@ function controleConferidasHTML(todas,f) {
   const nomes={todas:'📋 Todas',parcial:'🟠 Parciais',saldo_concluido:'✅ Saldo conferido',inconsistente:'🔎 Revisar itens'};
   return `<section class="ent-conferidas" aria-label="Conferência por itens"><h3>Entregas conferidas por item</h3><p>O.S. com conferência no período · saldo atual de cada ficha. Saldo a conferir não prova falta de entrega física. As baixas financeiras do ERP têm sua própria data.</p>
     <nav class="ent-chips" aria-label="Situação da conferência">${Object.entries(nomes).map(([k,n])=>`<button type="button" class="ent-chip" data-ent-conferencia="${k}" aria-pressed="${foco===k}">${n}<b>${grupos[k].length}</b></button>`).join('')}</nav>
-    <div class="ent-conferidas-grid">${grupos[foco].map(o=>`<article><strong>O.S. ${esc(o.numero)} · ${esc(o.cliente)}</strong><p>${esc(resumoEntregaFichaTexto(o))}</p><button type="button" class="btn-ghost btn-sm" data-controle="itens" data-controle-os="${esc(o.id)}">Itens, equipes e saldo →</button></article>`).join('') || '<p>Nenhuma conferência nesta situação e período.</p>'}</div></section>`;
+    <div class="ent-conferidas-grid">${grupos[foco].map(o=>`<article><strong>O.S. ${esc(o.numero)} · ${esc(o.cliente)}</strong><p>${esc(resumoEntregaFichaTexto(o))}</p><button type="button" class="btn-ghost btn-sm" data-controle="itens" data-controle-os="${esc(o.id)}">Conferir itens e equipe</button></article>`).join('') || '<p>Nenhuma conferência nesta situação e período.</p>'}</div></section>`;
 }
 async function controleSalvar(body,d) {
   const status=d.querySelector('[role="status"]'),botao=d.querySelector('[type="submit"]');
