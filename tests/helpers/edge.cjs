@@ -40,9 +40,28 @@ function banco(initial={}) {
  }};return {db,cliente};
 }
 // `opcoes.shared`: outra pasta _shared (a de uma versão antiga tirada do git), para o servidor antigo rodar com as regras dele.
+/* AS MARCAS ANTIGAS POR ITEM (D-016): a porta as descarta desde a onda
+   acabamento. Os testes do LEGADO (a marca gravada continua sendo lida: saldo,
+   ERP, status, apuração) precisam criá-las como a v171 criava: chamam
+   ligarMarcasAntigas() no topo do arquivo, e o servidor da bancada (e o
+   motor do servidor importado no mesmo processo) volta a gravá-las. Nunca
+   em produção: ninguém lá muda ENTREGA_ITEM.MARCAS_NOVAS.
+   Na TELA (ficha, celular, lote, "Entregar o saldo"), a mesma chave do motor
+   do aparelho: o entrega-item.js lido por este processo (vm) sai com
+   MARCAS_NOVAS = true, e o require dele também, para as telas da v171
+   oferecerem a marca como ofereciam. */
+let MARCAS_ANTIGAS=false;
+function ligarMarcasAntigas(){
+ if(MARCAS_ANTIGAS)return;MARCAS_ANTIGAS=true;
+ const DESL='const MARCAS_NOVAS = false;',LIG='const MARCAS_NOVAS = true;';
+ const ler=fs.readFileSync;
+ fs.readFileSync=function(p,...r){const t=ler.call(this,p,...r);return typeof t==='string'&&/(^|[\\/])(pcp-)?entrega-item\.m?js$/.test(String(p))?t.replace(DESL,LIG):t;};
+ require(path.join(__dirname,'../../entrega-item.js')).MARCAS_NOVAS=true;
+}
 async function edge(tipo,initial={},opcoes={}) {
  const {db,cliente}=banco(initial);let handler;
  const sh=nome=>opcoes.shared?require('node:url').pathToFileURL(path.join(opcoes.shared,nome)).href:'../../supabase/functions/_shared/'+nome;
+ if(MARCAS_ANTIGAS&&!opcoes.shared)(await import(sh('pcp-entrega-item.mjs'))).ENTREGA_ITEM.MARCAS_NOVAS=true;
  const regras=await import(sh('pcp-integridade.mjs'));
  const {COMISSAO}=await import(sh('pcp-comissao.mjs'));
  const {REGRAS}=await import(sh('pcp-regras.mjs'));
@@ -62,4 +81,4 @@ async function edge(tipo,initial={},opcoes={}) {
   const r=await handler(new Request('https://example.invalid',{method:'POST',headers,body:JSON.stringify(body)}));return {status:r.status,...await r.json()};
  }};
 }
-module.exports={edge};
+module.exports={edge,ligarMarcasAntigas};

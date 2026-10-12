@@ -13,6 +13,8 @@
    pcp-mubisys de teste (o vm de cada um), sem mudar o _shared. O desligado
    está provado em tests/itens-erp-revisao.test.cjs. */
 const {test} = require('node:test');
+// Legado (D-016): as marcas antigas por item ficaram só leitura na onda acabamento; este arquivo as cria como a v171 criava (helpers/edge.cjs).
+require('./helpers/edge.cjs').ligarMarcasAntigas();
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');

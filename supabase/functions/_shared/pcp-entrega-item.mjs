@@ -51,6 +51,15 @@ const FIM_ALVO = 'fim:';
 /* A declaração do celular aceita o dia de até 30 dias atrás: é a validade do
    crachá (pcp-sync, assinarCrachaMontagem). Fora disso, vale o dia de hoje. */
 const DIAS_DECLARACAO = 30;
+/* AS MARCAS NOVAS ESTÃO DESLIGADAS (D-016, "vale a conferencia"; M13 da
+   auditoria de 11/10/2026, onda acabamento). A entrega por item se confere
+   na conferência da gestão (por unidade e dia). As marcas antigas ficam SÓ
+   LEITURA: o motor continua lendo a marca gravada (situação, saldo, valor),
+   mas nenhuma tela oferece marcar (a ficha, o celular, o Fechar o dia e o
+   "Entregar o saldo" leem MARCAS_NOVAS) e a porta do servidor descarta a
+   marca nova com aviso, nunca 422 (guardarEntregasItens). Desligado aqui,
+   nas duas cópias. */
+const MARCAS_NOVAS = false;
 const PROBLEMA_NA_DECLARACAO = 'Este item está com problema marcado pela gestão; fale com o PCP.';
 /* A marca em LOTE ('lote': o "Entregar o saldo" da lista do ERP, E7) não
    passa por cima do problema aberto (revisão da E7): a cópia velha de um PC,
@@ -696,5 +705,5 @@ function declaracoesAConferir(os) {
   return out;
 }
 /* ==== FIM DO MOTOR ==== */
-export { TIPOS, VIAS, TETO_EVENTOS, PERMISSOES, FIM_ALVO, diaSP, qtdeNum, aceitaParte, ehServico, podeMarcar, declarada, eventosAtivos, validarEvento, situacaoItem, resumoOS, entregaImplicita, canceladaNoERP, canceladaAMao, canceladaOS, valorItemRateado, valorDoEvento, lancamentosDaOS, declaracoesAConferir };
-export const ENTREGA_ITEM = { TIPOS, VIAS, TETO_EVENTOS, PERMISSOES, FIM_ALVO, diaSP, qtdeNum, aceitaParte, ehServico, podeMarcar, declarada, eventosAtivos, validarEvento, situacaoItem, resumoOS, entregaImplicita, canceladaNoERP, canceladaAMao, canceladaOS, valorItemRateado, valorDoEvento, lancamentosDaOS, declaracoesAConferir };
+export { MARCAS_NOVAS, TIPOS, VIAS, TETO_EVENTOS, PERMISSOES, FIM_ALVO, diaSP, qtdeNum, aceitaParte, ehServico, podeMarcar, declarada, eventosAtivos, validarEvento, situacaoItem, resumoOS, entregaImplicita, canceladaNoERP, canceladaAMao, canceladaOS, valorItemRateado, valorDoEvento, lancamentosDaOS, declaracoesAConferir };
+export const ENTREGA_ITEM = { MARCAS_NOVAS, TIPOS, VIAS, TETO_EVENTOS, PERMISSOES, FIM_ALVO, diaSP, qtdeNum, aceitaParte, ehServico, podeMarcar, declarada, eventosAtivos, validarEvento, situacaoItem, resumoOS, entregaImplicita, canceladaNoERP, canceladaAMao, canceladaOS, valorItemRateado, valorDoEvento, lancamentosDaOS, declaracoesAConferir };

@@ -2720,8 +2720,14 @@ function papelEntrega() {
   if (typeof crachaEhToque === 'function' && crachaEhToque()) return 'toque';
   return String((STATE.user || {}).papel || '');
 }
+/* AS MARCAS ANTIGAS POR ITEM SÃO SÓ LEITURA (D-016, "vale a conferencia";
+   M13, onda acabamento): a ficha não oferece mais Entregar tudo, parte,
+   Retirado, Problema, Cancelar item nem Desfazer, e o Finalizar não marca o
+   saldo. A marca gravada continua lida (o selo, o saldo, o resumo). A
+   entrega se confere em "Conferir itens e equipe". A chave é a do motor,
+   desligada nas duas cópias (ENTREGA_ITEM.MARCAS_NOVAS). */
 function podeMarcarEntrega(tipo) {
-  return temMotorEntrega() && podeEditar() && ENTREGA_ITEM.podeMarcar(papelEntrega(), tipo);
+  return temMotorEntrega() && ENTREGA_ITEM.MARCAS_NOVAS === true && podeEditar() && ENTREGA_ITEM.podeMarcar(papelEntrega(), tipo);
 }
 /* Quem DECLARA em vez de marcar (E5): o crachá sem senha e a montagem com
    senha, o celular no motor (via 'toque'). A tela diz "declarar", não
@@ -2855,6 +2861,7 @@ function executarEntregaItem(acao, uid, idx, dados = {}) {
   const conf = ACOES_ENTREGA[acao];
   const d = _modalDraft;
   if (!conf || !temMotorEntrega()) return 'Ação de entrega desconhecida.';
+  if (ENTREGA_ITEM.MARCAS_NOVAS !== true) return 'A entrega por item se confere em "Conferir itens e equipe": as marcas por item são só leitura.';
   if (!d) return 'A ficha da O.S. não está aberta.';
   if (!podeEditar() || d.finalizadaEm) return 'O.S. finalizada ou sem permissão de edição: reabra para marcar.';
   juntarMarcasDoStore(d);

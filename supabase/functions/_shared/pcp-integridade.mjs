@@ -2160,6 +2160,21 @@ export function preservarItens(os, antes, { sortear = sortearUid } = {}) {
    entrava calada, com a hora de agora e o dia antigo (revisão da E3). Nunca
    lança. */
 const TETO_AVISOS_ENTREGA = 5;
+/* AS MARCAS ANTIGAS POR ITEM FICAM SÓ LEITURA (D-016, "vale a conferencia";
+   M13 da auditoria de 11/10/2026, onda acabamento). A entrega por item se
+   confere na conferência da gestão (conferenciasEntrega, por unidade e dia).
+   A marca NOVA (item.entregas: entregue, retirado, problema, cancelar item,
+   desfazer, conferir o declarado), de qualquer papel e de qualquer via, é
+   descartada com UM aviso por gravação e volta em `recusadas`, para o
+   aparelho tirá-la da cópia e da fila: nunca 422 (o celular da v171 sem
+   sinal que marcou recebe 200 e fica com o gravado). O resto da gravação
+   segue (o Instalado, as fotos, a volta, a finalização). A marca já gravada
+   continua sendo lida pelo motor (saldo, situação, valor); em 12/10/2026
+   (SELECT, só contagem) havia 0 O.S. com marca. A chave é a do motor
+   (ENTREGA_ITEM.MARCAS_NOVAS, lida na hora): a bancada dos testes do legado
+   a liga para gravar marcas como a v171 gravava. */
+export const AVISO_MARCA_SO_LEITURA = 'A entrega por item agora é conferida pela gestão do PCP em "Conferir itens e equipe": a marca de entrega deste aparelho não foi gravada. O Instalado, as fotos e a volta continuam valendo.';
+const MOTIVO_MARCA_SO_LEITURA = 'As marcas de entrega por item são só leitura: a entrega se confere em "Conferir itens e equipe".';
 function rotuloItem(it) {
   // Só o produto: o texto livre depois de ' - ' (dia, local, evento) fica de fora.
   const d = String(it?.descricao ?? '').split(' - ')[0].trim().slice(0, 40);
@@ -2180,6 +2195,7 @@ function linhaEntrega(it, e) {
 const marcasDe = it => objeto(it) && Array.isArray(it.entregas) ? it.entregas : [];
 export function guardarEntregasItens(os, antes, { papel = '', avisar = false, autor = {}, agora = '', cancelamento = antes ? antes.cancelamento : undefined } = {}) {
   const avisos = [], eventos = [], recusas = [], recusadas = [];
+  let somenteLeitura = 0;
   if (!objeto(os)) return { os, avisos, eventos, recusadas };
   const gravados = Array.isArray(antes?.itens) ? antes.itens : [];
   const porUid = new Map();
@@ -2208,6 +2224,11 @@ export function guardarEntregasItens(os, antes, { papel = '', avisar = false, au
       if (!objeto(e)) continue;
       const id = String(e.id ?? '').trim();
       if (doItem.has(id) || idsOS.has(id)) continue;
+      if (ENTREGA_ITEM.MARCAS_NOVAS !== true) {
+        somenteLeitura++;
+        recusadas.push({ id: id.slice(0, 64), uid: String(it.uid ?? '').slice(0, 80), motivo: MOTIVO_MARCA_SO_LEITURA });
+        continue;
+      }
       const v = ENTREGA_ITEM.validarEvento(e, item, { papel, os: osCtx, hoje });
       if (v.repetido) continue;
       if (!v.ok) {
@@ -2231,6 +2252,7 @@ export function guardarEntregasItens(os, antes, { papel = '', avisar = false, au
     presentes.add(g.uid); voltaram++;
     avisos.push(`O ${rotuloItem(g)} já tem marca de entrega e continua na O.S.: item com entrega não sai da lista. Para tirar o saldo que falta, a gestão usa Cancelar item.`);
   });
+  if (somenteLeitura) avisos.push(AVISO_MARCA_SO_LEITURA);
   avisos.push(...recusas.slice(0, TETO_AVISOS_ENTREGA));
   if (recusas.length > TETO_AVISOS_ENTREGA) avisos.push(`Mais ${recusas.length - TETO_AVISOS_ENTREGA} marcas de entrega não foram gravadas.`);
   const r = Array.isArray(os.itens) || voltaram ? { ...os, itens } : { ...os };

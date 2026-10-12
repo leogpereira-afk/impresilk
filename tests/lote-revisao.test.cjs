@@ -13,6 +13,8 @@
    pedido {desfazer:true} lido como lançamento na cópia local.
    Tudo fictício: o repositório é público. */
 const {test} = require('node:test');
+// Legado (D-016): as marcas antigas por item ficaram só leitura na onda acabamento; este arquivo as cria como a v171 criava (helpers/edge.cjs).
+require('./helpers/edge.cjs').ligarMarcasAntigas();
 const B = require('./helpers/lote-bancada.cjs');
 const {assert, O, E, ler, js, esperar, HOJE, CFG, EQUIPES, OUTRA, erp, pcpFim, noServidor, montar, salvar, estadoDe, itemDe, declarada, celular,
   PEND, G_ERP, G_P1, abrirPendencias, naoEConfirma, equipeAguia, projecao, osRow, FICHAS, edge} = B;

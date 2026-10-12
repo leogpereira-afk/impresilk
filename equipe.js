@@ -106,6 +106,14 @@ function itemDoRascunho(idx, uid) {
    marcar a entrega. */
 const temMotorEntrega = () => typeof ENTREGA_ITEM !== 'undefined' && !!ENTREGA_ITEM && typeof ENTREGA_ITEM.validarEvento === 'function'
   && typeof ENTREGA_ITEM.podeMarcar === 'function' && ENTREGA_ITEM.podeMarcar('toque', 'entregue') === true;
+/* AS MARCAS ANTIGAS POR ITEM SÃO SÓ LEITURA (D-016, "vale a conferencia";
+   M13, onda acabamento). O celular não declara mais a entrega: o Instalado
+   marca o item como sempre (status e Verificado), sem marca de entrega; não
+   há "Entregar parte" e o Finalizar não declara o saldo. O que já foi
+   marcado continua lido (o selo do item). Ficam o Instalado, o Retrabalho,
+   as fotos e a volta. A chave é a do motor (ENTREGA_ITEM.MARCAS_NOVAS),
+   desligada nas duas cópias; o motor velho (cache misto) também não marca. */
+const marcasNovasCel = () => temMotorEntrega() && ENTREGA_ITEM.MARCAS_NOVAS === true;
 const idMarca = e => e && typeof e === 'object' ? String(e.id == null ? '' : e.id).trim() : '';
 function novoIdMarca() {
   const c = typeof crypto !== 'undefined' ? crypto : null, b = new Uint8Array(12);
@@ -151,6 +159,7 @@ function juntarMarcasDoStore(d) {
    tudo ou nada). Devolve o resultado do validarEvento. */
 function declararEntrega(it, qtde, { simular = false } = {}) {
   if (!temMotorEntrega()) return { ok: false, erro: 'Atualize o app para marcar a entrega.', evento: null };
+  if (!marcasNovasCel()) return { ok: false, erro: 'A entrega por item é conferida pelo PCP: este celular não marca a entrega.', evento: null };
   const hoje = ENTREGA_ITEM.diaSP(Date.now());
   const ev = { id: novoIdMarca(), tipo: isInterno(_draft) ? 'retirado' : 'entregue', dia: hoje, qtde, por: EQ.instalador || '', em: nowISO() };
   const v = ENTREGA_ITEM.validarEvento(ev, it, { papel: 'toque', os: _draft, hoje });
@@ -162,7 +171,7 @@ function declararEntrega(it, qtde, { simular = false } = {}) {
    no Finalizar (revisão da E5): a declaração não fecha o problema, e o
    servidor a recusaria com a mesma frase. */
 function declararSaldoDoItem(it) {
-  if (!temMotorEntrega() || ENTREGA_ITEM.ehServico(it)) return null;
+  if (!marcasNovasCel() || ENTREGA_ITEM.ehServico(it)) return null;
   juntarMarcasDoStore(_draft);
   const s = situacaoEntrega(it, _draft);
   if (!s) return null;
@@ -187,7 +196,7 @@ function textoDeclarado(it, v) {
    Sem marca nenhuma na O.S., finaliza como sempre. O item com problema de
    entrega (marcado pelo PCP) fica como está. */
 function saldoAoFinalizar(d) {
-  if (!temMotorEntrega() || !d || d.finalizadaEm) return null;
+  if (!marcasNovasCel() || !d || d.finalizadaEm) return null;
   let r;
   try { r = ENTREGA_ITEM.resumoOS(d); } catch { return null; }
   if (r.situacao !== 'parcial' && r.situacao !== 'com marca') return null;
@@ -1208,7 +1217,7 @@ function entregaDoItemHTML(it, i, os, ro, u) {
   const interno = isInterno(os);
   const uid = uidItemOk(it.uid) ? it.uid : '';
   // Item com problema aberto não oferece parte: a declaração não o fecha (revisão da E5).
-  const podeParte = !ro && !os.finalizadaEm && s.situacao !== 'cancelado' && s.situacao !== 'problema' && s.saldo > 1 && ENTREGA_ITEM.aceitaParte(it);
+  const podeParte = marcasNovasCel() && !ro && !os.finalizadaEm && s.situacao !== 'cancelado' && s.situacao !== 'problema' && s.saldo > 1 && ENTREGA_ITEM.aceitaParte(it);
   let selo = '';
   if (s.situacao === 'cancelado') selo = `<span class="ent-selo st-cancelado">Cancelado pelo PCP${s.cancelado && s.cancelado.motivo ? ': ' + esc(s.cancelado.motivo) : ''}</span>`;
   else if (s.situacao === 'problema') selo = `<span class="ent-selo st-problema">Com problema de entrega${s.problema && s.problema.motivo ? ': ' + esc(s.problema.motivo) : ''}. Fale com o PCP.</span>`;
@@ -1359,7 +1368,7 @@ function renderModal() {
     <details class="card-fs" data-bloco="itens" open>
       <summary>${n.itens}. Itens <span class="item-progress" style="margin-left:auto">✅ ${instalados}/${itens.length}${retrabN?` · 🔴 ${retrabN}`:''}</span></summary>
       <div class="fs-body">
-        <p class="text-muted" style="margin-bottom:8px">Marque cada item: <strong>${interno ? 'Retirado' : 'Instalado'}</strong> ou <strong>Retrabalho</strong>. ${temMotorEntrega() ? `O ${interno ? 'Retirado' : 'Instalado'} declara a entrega do item, e o PCP confere. ` : ''}No retrabalho, escolha o motivo e tire uma foto do problema.</p>
+        <p class="text-muted" style="margin-bottom:8px">Marque cada item: <strong>${interno ? 'Retirado' : 'Instalado'}</strong> ou <strong>Retrabalho</strong>. ${marcasNovasCel() ? `O ${interno ? 'Retirado' : 'Instalado'} declara a entrega do item, e o PCP confere. ` : ''}No retrabalho, escolha o motivo e tire uma foto do problema.</p>
         <div class="item-cards">${itensCards || '<p class="text-muted" style="text-align:center">Sem itens</p>'}</div>
       </div>
     </details>`;

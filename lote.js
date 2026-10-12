@@ -66,6 +66,12 @@ const LOTE = (() => {
   const usuario = () => { const u = (typeof STATE !== 'undefined' && STATE.user) || {}; return String(u.usuario || u.nome || ''); };
   const nomeUsuario = () => String((typeof STATE !== 'undefined' && STATE.user && STATE.user.nome) || '');
   const temMotor = () => typeof ENTREGA_ITEM !== 'undefined' && ENTREGA_ITEM && typeof ENTREGA_ITEM.validarEvento === 'function';
+  /* AS MARCAS ANTIGAS POR ITEM SÃO SÓ LEITURA (D-016, M13, onda acabamento):
+     o lote não marca "Todos os itens entregues", a parte nem o "Conferir o
+     declarado". A entrega da O.S. aberta se confere em "Conferir itens e
+     equipe"; o que já foi marcado continua lido (itensDe, saldo). */
+  const marcasNovas = () => temMotor() && ENTREGA_ITEM.MARCAS_NOVAS === true;
+  const SO_CONFERENCIA = 'A entrega dos itens se confere em "Conferir itens e equipe": o Fechar o dia não marca itens.';
   const temALOCUI = () => typeof ALOCUI !== 'undefined' && ALOCUI && typeof ALOCUI.iniciar === 'function';
   const dataBR = d => diaOk(d) ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : '';
   const MES_NOME = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
@@ -371,7 +377,7 @@ const LOTE = (() => {
       return s ? {indice, it, s, uid: texto(it.uid), servico: ENTREGA_ITEM.ehServico(it), parte: ENTREGA_ITEM.aceitaParte(it)} : null;
     }).filter(Boolean);
   }
-  const declaracoesDe = o => { if (!temMotor()) return []; try { return ENTREGA_ITEM.declaracoesAConferir(o); } catch (e) { return []; } };
+  const declaracoesDe = o => { if (!marcasNovas()) return []; try { return ENTREGA_ITEM.declaracoesAConferir(o); } catch (e) { return []; } };
   const respostaFeita = o => { const p = objeto(o && o.retrabalhoPerguntado) ? o.retrabalhoPerguntado : null; return p && (p.resposta === 'sim' || p.resposta === 'nao') ? p.resposta : ''; };
   const marcadaRetrabalho = o => !!(o && (o.retrabalho || (o.checkout && o.checkout.situacao === 'Retrabalho')));
   const semProva = o => baixaERP(o) && !lista(o.fotosRetornoIds).length;
@@ -548,6 +554,7 @@ const LOTE = (() => {
     else if (l.data > hoje()) trava.push('data da entrega depois de hoje');
     if (!respostaDaLinha(o, l)) trava.push('resposta do retrabalho');
     if (aberta(o) && erpPendente(o)) trava.push(ERP_DECIDIR);
+    else if (aberta(o) && !conf0 && !marcasNovas()) nota.push('entrega dos itens (Conferir itens e equipe)');
     else if (aberta(o) && !conf0) {
       if (!l.entrega) trava.push('entrega dos itens (todos ou a parte)');
       else if (l.entrega === 'parte' && !Object.values(l.parte || {}).some(q => Number(q) > 0)) trava.push('quantidade entregue da parte');
@@ -674,7 +681,7 @@ const LOTE = (() => {
         return '';
       };
       const rotuloItem = it => texto(it && (it.descricao || it.item)) || 'item';
-      if (aberta(atual) && !conferida && (l.entrega === 'todos' || l.entrega === 'parte')) {
+      if (marcasNovas() && aberta(atual) && !conferida && (l.entrega === 'todos' || l.entrega === 'parte')) {
         const interna = OPERACAO.interno(atual);
         for (const x of itensDe(atual)) {
           if (x.servico) continue;
@@ -1179,17 +1186,19 @@ const LOTE = (() => {
         break;
       case 'retrabalho-resposta': if (precisa()) { const r = ds.resposta; if (objeto(r) && (r.resposta === 'sim' || r.resposta === 'nao')) x.l.retrabalho = copia(r); else erro = 'Resposta do retrabalho inválida.'; } break;
       case 'entrega-todos':
-        if (precisa() && aberta(x.o) && erpPendente(x.o)) { erro = ERRO_ERP_DECIDIR; x.l.entrega = ''; x.l.confirmada = false; break; }
+        if (precisa() && aberta(x.o) && !marcasNovas()) { erro = SO_CONFERENCIA; x.l.entrega = ''; break; }
+        if (x && aberta(x.o) && erpPendente(x.o)) { erro = ERRO_ERP_DECIDIR; x.l.entrega = ''; x.l.confirmada = false; break; }
         if (x) { x.l.entrega = x.l.entrega === 'todos' && aberta(x.o) ? '' : 'todos'; if (!x.l.entrega) x.l.confirmada = false; } break;
       case 'itens': if (precisa()) est.itensAberto = est.itensAberto === x.o.id ? '' : x.o.id; break;
       case 'parte':
         if (!precisa()) break;
         if (!aberta(x.o)) { erro = 'O.S. finalizada: a entrega de cada item já conta pela finalização. Para marcar só uma parte, reabra a O.S. pela ficha.'; break; }
         if (erpPendente(x.o)) { erro = ERRO_ERP_DECIDIR; break; }
+        if (!marcasNovas()) { erro = SO_CONFERENCIA; break; }
         x.l.parte = {...(x.l.parte || {}), [String(ds.uid)]: Math.max(0, Math.floor(Number(ds.valor) || 0))};
         x.l.entrega = 'parte';
         break;
-      case 'conferir': if (precisa()) x.l.conferir = !x.l.conferir; break;
+      case 'conferir': if (precisa()) { if (!marcasNovas()) erro = SO_CONFERENCIA; else x.l.conferir = !x.l.conferir; } break;
       case 'confirmar': if (precisa()) erro = confirmarLinha(x); break;
       case 'desconfirmar': if (precisa()) x.l.confirmada = false; break;
       case 'foco': if (precisa()) est.foco = x.o.id; break;
@@ -1383,6 +1392,7 @@ const LOTE = (() => {
   function itensHTML(o, l) {
     const xs = itensDe(o);
     if (aberta(o) && erpPendente(o)) return `<div class="lote-itens"><p class="lote-itens-dica">O ERP diz entregue e o PCP tem saldo: a gestão decide em Entregas (entregar o saldo na data do ERP, ou manter aberta). O lote não marca a entrega desta O.S.</p>${saldoItensHTML(o, false)}</div>`;
+    if (!marcasNovas()) return `<div class="lote-itens"><p class="lote-itens-dica">${escL(aberta(o) ? SO_CONFERENCIA : 'O.S. finalizada: cada item já conta pela finalização' + (baixaERP(o) ? ' (baixa do ERP, sem prova).' : '.'))}</p>${saldoItensHTML(o, false)}</div>`;
     if (!aberta(o)) return `<div class="lote-itens"><p class="lote-itens-dica">O.S. finalizada: cada item já conta pela finalização${baixaERP(o) ? ' (baixa do ERP, sem prova)' : ''}. Para marcar só uma parte, reabra a O.S. pela ficha.</p>${saldoItensHTML(o, false)}</div>`;
     const fis = xs.filter(x => !x.servico);
     if (!fis.length) return '<div class="lote-itens"><p class="lote-itens-vazio">Esta O.S. não tem itens para marcar.</p></div>';
@@ -1461,6 +1471,7 @@ const LOTE = (() => {
       : confOS && !e7 ? `<span class="lote-conf-estado">Conferência por entrega gravada.</span>${abrirConf}`
       : e7
       ? `<span class="lote-b estatico lote-erp-decidir">${escL(typeof textoERPDiz === 'function' ? textoERPDiz(e7.aviso) : 'O ERP diz entregue')}: decida em Entregas</span><button type="button" class="lote-b" data-lote-acao="erp-lista" data-os="${escL(o.id)}" data-lote-k="erp:${escL(o.id)}">Abrir a lista</button>`
+      : aberta(o) && !marcasNovas() ? `<span class="lote-conf-estado">A entrega dos itens se confere por item e dia.</span>${abrirConf}`
       : aberta(o)
       ? `<button type="button" class="lote-b ${l.entrega === 'todos' ? 'on' : ''}" aria-pressed="${l.entrega === 'todos'}" data-lote-acao="entrega-todos" data-os="${escL(o.id)}" data-lote-k="todos:${escL(o.id)}">✓ Todos os itens entregues</button>`
       : `<span class="lote-b on estatico" title="A O.S. já está encerrada: cada item conta pela finalização">✓ Todos os itens entregues</span>`;
@@ -1476,7 +1487,7 @@ const LOTE = (() => {
       ${confOS ? '<p class="lote-l-data lote-l-data-conf">Entrega <small>pela conferência por entrega, com o dia de cada uma</small></p>'
         : `<label class="lote-l-data">Entrega <input type="date" value="${escL(l.data)}" max="${escL(hoje())}" data-lote-campo="data" data-os="${escL(o.id)}" data-lote-k="data:${escL(o.id)}">${origem ? `<small class="lote-l-origem">${escL(origem)}</small>` : ''}</label>`}
       ${retrab}
-      <div class="lote-l-entrega">${entregaBtn}${confOS && !e7 ? '' : `<button type="button" class="lote-b" aria-expanded="${est.itensAberto === o.id}" data-lote-acao="itens" data-os="${escL(o.id)}" data-lote-k="itens:${escL(o.id)}">${aberta(o) && !e7 ? 'Marcar a parte' : 'Ver os itens'}</button>`}</div>
+      <div class="lote-l-entrega">${entregaBtn}${confOS && !e7 ? '' : `<button type="button" class="lote-b" aria-expanded="${est.itensAberto === o.id}" data-lote-acao="itens" data-os="${escL(o.id)}" data-lote-k="itens:${escL(o.id)}">${aberta(o) && !e7 && marcasNovas() ? 'Marcar a parte' : 'Ver os itens'}</button>`}</div>
       ${declHTML}
       ${chegadaLinhaHTML(o, g, l)}
       ${ocorrenciasLinhaHTML(o)}

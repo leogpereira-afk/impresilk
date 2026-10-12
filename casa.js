@@ -1897,6 +1897,8 @@ function filaLancarHTML(aLancar, f, hoje) {
 const PAPEIS_SALDO_ERP = ['admin', 'pcp'];
 const podeDecidirSaldoERP = () => PAPEIS_SALDO_ERP.includes(String((STATE.user || {}).papel || ''));
 const temMotorSaldoERP = () => typeof ENTREGA_ITEM !== 'undefined' && !!ENTREGA_ITEM && typeof ENTREGA_ITEM.resumoOS === 'function';
+// As marcas antigas por item são só leitura (D-016, M13): o motor diz se ainda se marca (desligado nas duas cópias).
+const marcasNovasCasa = () => temMotorSaldoERP() && ENTREGA_ITEM.MARCAS_NOVAS === true;
 const diaISOCasa = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '';
 // A O.S. no pacote de entregues do ERP (status ENTREGUE, data de entrega), só nos meses já carregados.
 function entregueNoPacoteERP(numero, desde) {
@@ -2007,6 +2009,7 @@ const canceladaSaldoERP = os => temMotorSaldoERP() && typeof ENTREGA_ITEM.cancel
 function entregarSaldoERP(osId, selo) {
   if (!podeDecidirSaldoERP()) return {erro: 'Só admin e PCP decidem o saldo que o ERP deu como entregue.'};
   if (!temMotorSaldoERP()) return {erro: 'Atualize a página: falta o motor da entrega por item.'};
+  if (!marcasNovasCasa()) return {erro: 'O saldo se confere em "Conferir itens e equipe": as marcas de entrega por item são só leitura.'};
   const fonte = STORE.getOS(osId);
   if (!fonte) return {erro: 'Esta O.S. não está mais neste aparelho.'};
   if (canceladaSaldoERP(fonte)) return {erro: ERRO_SALDO_ERP_CANCELADA};
@@ -2148,7 +2151,9 @@ function erpComSaldoHTML(linhas) {
     const decl = resumo.unidadesDeclaradas > 0 ? `<span class="tag-entrega tag-entrega-decl">${resumo.unidadesDeclaradas} declarada${resumo.unidadesDeclaradas === 1 ? '' : 's'} pelo celular</span>` : '';
     const prob = saldo.comProblema.length ? `<span class="tag-entrega tag-entrega-prob">${saldo.comProblema.length} ite${saldo.comProblema.length === 1 ? 'm' : 'ns'} com problema fica${saldo.comProblema.length === 1 ? '' : 'm'}</span>` : '';
     // A parcial conferida (D-016) se resolve na conferência, não pelas marcas antigas.
-    const entregar = resumo.conferencia ? `<button type="button" class="btn-primary btn-sm edit-only" data-conferir-saldo="${esc(os.id)}">Conferir itens e equipe</button>`
+    /* As marcas antigas são só leitura (D-016, M13, onda acabamento): sem o
+       "Entregar o saldo", o saldo se confere na conferência da gestão. */
+    const entregar = resumo.conferencia || !marcasNovasCasa() ? `<button type="button" class="btn-primary btn-sm edit-only" data-conferir-saldo="${esc(os.id)}">Conferir itens e equipe</button>`
       : aviso.data && saldo.pendentes.length
       ? `<button type="button" class="btn-primary btn-sm edit-only" data-erp-entregar="${esc(os.id)}" data-erp-selo="${esc(aviso.selo)}">Entregar o saldo em ${esc(ddmmCasa(aviso.data))}</button>`
       : `<button type="button" class="btn-ghost btn-sm" data-os-id="${esc(os.id)}">${aviso.data ? 'Resolver na ficha' : 'Marcar na ficha'}</button>`;

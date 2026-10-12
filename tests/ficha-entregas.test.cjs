@@ -6,6 +6,8 @@
    falando com o pcp-sync de verdade (helpers/edge.cjs), num DOM de mentira.
    Cada teste começa pelo caso ruim. Tudo fictício: o repositório é público. */
 const {test} = require('node:test');
+// Legado (D-016): as marcas antigas por item ficaram só leitura na onda acabamento; este arquivo as cria como a v171 criava (helpers/edge.cjs).
+require('./helpers/edge.cjs').ligarMarcasAntigas();
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
