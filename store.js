@@ -1042,6 +1042,21 @@ const STORE = (() => {
      + finalizadas de JANELA_LOCAL_DIAS; o resto sai (o historico vem por
      busca). Edicao pendente na fila nunca sai nem e sobrescrita. */
   let _pulling = false;
+  /* A MARGEM NO CURSOR (item 23 da fila de 11/10/2026, onda operação; o
+     EI-AL10 do plano de entrega por item). O cursor é o relógio do servidor
+     no COMEÇO da consulta ("agora"); a gravação que outro aparelho fazia no
+     mesmo instante, carimbada um pouco antes desse "agora" mas ainda não
+     visível na consulta (outra instância da função, outro relógio, a
+     transação em curso), ficava atrás do cursor e nunca chegava a este
+     aparelho pelo incremental (só na conferência completa, até 15 min
+     depois). Agora o incremental pede desde o cursor MENOS a margem: as
+     linhas da margem vêm de novo e a mescla, que compara rev e atualizadoEm,
+     não muda nada nelas. O cursor guardado continua sendo o do servidor. */
+  const MARGEM_CURSOR_MS = 2 * 60000;
+  function desdeComMargem(em) {
+    const t = Date.parse(String(em || ''));
+    return Number.isFinite(t) ? new Date(t - MARGEM_CURSOR_MS).toISOString() : em;
+  }
   async function pull(onRefresh, opts = {}) {
     if (!navigator.onLine) return { updated: false, offline: true };
     if (_pulling) return { updated: false, ocupado: true };   // rede lenta nao empilha pulls
@@ -1054,7 +1069,7 @@ const STORE = (() => {
       const conferir = !ultimaCompleta || Date.now() - ultimaCompleta >= 15 * 60000;
       const completo = !!opts.completo || conferir || !cursor || !cursor.em || idade > 6 * 3600000;
       if (!completo) {
-        const r = await _pullIncremental(cursor.em, onRefresh);
+        const r = await _pullIncremental(desdeComMargem(cursor.em), onRefresh);
         if (!r.cheio) return r;
         // 500 mudancas desde o cursor: refaz completo em vez de fingir.
       }
