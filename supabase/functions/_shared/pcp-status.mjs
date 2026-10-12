@@ -861,6 +861,11 @@ export { ESTADOS_ENTREGA, ROTULOS_ENTREGA, MOTIVO_CANCELAMENTO_MIN, MOTIVO_CANCE
      mesmo pedido de novo). Desfazer guarda a marca, com o carimbo de quem
      desfez (desfeitoPor, desfeitoPorConta, desfeitoPorId, desfeitoEm): o
      histórico não some. Desfazer o que não está cancelado não muda nada.
+   - cancelar de novo depois de desfazer guarda o cancelamento desfeito em
+     `anteriores` ({motivo, em, desfeitoEm}, sem quem, os 50 mais novos; onda
+     cancelamento, 12/10/2026): antes ele era sobrescrito e o carimbo antigo
+     sumia. O recálculo do mês fechado lê o estado do instante do fechamento
+     por esses carimbos (CONFERENCIA_ENTREGA.cancelamentoNoInstante).
    Devolve { os, avisos }. */
 const pedidoCancelar = v => objSt(v) && v.cancelar === true;
 const pedidoDesfazer = v => objSt(v) && v.desfazer === true;
@@ -880,7 +885,10 @@ export function carimbarCancelamento(veio, os, antes, autor, agora, { pode = fal
     if (ativo) return { os: r, avisos };
     const erro = motivoCancelamentoInvalido(veio.motivo);
     if (erro) { avisos.push('A O.S. não foi cancelada: ' + erro.charAt(0).toLowerCase() + erro.slice(1)); return { os: r, avisos }; }
-    r.cancelamento = { ativo: true, motivo: txtSt(veio.motivo), ...quem, em: String(agora ?? '') };
+    const desfeito = gravado && gravado.ativo === false && txtSt(gravado.em) && txtSt(gravado.desfeitoEm)
+      ? { motivo: txtSt(gravado.motivo), em: String(gravado.em), desfeitoEm: String(gravado.desfeitoEm) } : null;
+    const anteriores = [...(gravado && Array.isArray(gravado.anteriores) ? gravado.anteriores.filter(objSt) : []), ...(desfeito ? [desfeito] : [])].slice(-50);
+    r.cancelamento = { ativo: true, motivo: txtSt(veio.motivo), ...quem, em: String(agora ?? ''), ...(anteriores.length ? { anteriores } : {}) };
     return { os: r, avisos };
   }
   if (!ativo) return { os: r, avisos };

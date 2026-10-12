@@ -912,15 +912,20 @@ function valorConferencia(os:any, erp:any[]) {
    O QUE FOI GRAVADO DEPOIS DO FECHAMENTO (onda cancelamento, 12/10/2026):
    `gravadoAte` é o instante do fechamento, que o recálculo do selo passa
    (perfOpcoesDoSelo): a marca de item gravada depois dele não entra, mesmo
-   com o dia dentro do mês (CONFERENCIA_ENTREGA.noFimDoDia). `depoisDe` só
-   conta essas marcas, sem tirá-las: a apuração atual as devolve em
-   `marcasDepois`, fora do conteúdo e do hash, para a tela do mês fechado. */
+   com o dia dentro do mês (CONFERENCIA_ENTREGA.noFimDoDia), e o cancelamento
+   da O.S. é o do instante do fechamento (cancelar, desfazer e cancelar de
+   novo depois dele não entram: CONFERENCIA_ENTREGA.cancelamentoNoInstante).
+   `depoisDe` só aponta essas mudanças, sem tirá-las: a apuração atual as
+   devolve por O.S. em `mudancasDepois`, fora do conteúdo e do hash, para a
+   tela do mês fechado. */
 async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDAS.id, regraVolta=REGRA_VOLTA, marcaVolta=false, gravadoAte="", depoisDe=""}:{estrito?:boolean,reguaPerdas?:string,regraVolta?:string,marcaVolta?:boolean,gravadoAte?:string,depoisDe?:string}={}) {
   const regua=reguaPerdas?REGRAS.reguaPorId(reguaPerdas):null;
   if(reguaPerdas&&!regua)throw new Error("A régua das perdas deste fechamento não existe neste servidor. Atualize antes de conferir.");
   const periodo=perfPeriodo(body), inicio=new Date().toISOString();
   const cfgAntes=await getCfgComVersao();
   const lista:any[]=[], aLancar:any[]=[]; let after="", terminou=false;
+  const depoisPorOS=new Map<string,any>();
+  const depoisDaOS=(id:string,numero:any)=>{let x=depoisPorOS.get(id);if(!x){x={osId:id,numero:String(numero||""),marcas:[]};depoisPorOS.set(id,x);}return x;};
   for(let pagina=0;pagina<100;pagina++) {
     let q=sb.from("pcp_registros").select("id,registro,atualizado_em").eq("colecao","os").eq("apagado",false).order("id").limit(500);
     if(after) q=q.gt("id",after);
@@ -938,7 +943,11 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
          conferiu (conferenciasEntrega) continua contando pela parte entregue,
          no ranking e na comissão. Conferir de novo depois do cancelamento
          continua recusado (D-009). A cancelada sem conferência sai, como antes. */
-      if(cancelada(o) && !o?.conferenciasEntrega?.length) continue;
+      if(depoisDe){
+        const antes=cancelada({...o,cancelamento:CONFERENCIA_ENTREGA.cancelamentoNoInstante(o.cancelamento,depoisDe)}), agora=cancelada(o);
+        if(antes!==agora)depoisDaOS(String(row.id),o.numero).cancelamento={agora:agora?"cancelada":"ativa",em:String((agora?o.cancelamento?.em:o.cancelamento?.desfeitoEm)||"")};
+      }
+      if(cancelada(gravadoAte?{...o,cancelamento:CONFERENCIA_ENTREGA.cancelamentoNoInstante(o.cancelamento,gravadoAte)}:o) && !o?.conferenciasEntrega?.length) continue;
       const erp=o.baixaAutoERP?.em===o.finalizadaEm || /^Mubisys\b/i.test(o.finalizadoPor || "");
       /* A BAIXA DO ERP A LANÇAR fica fora da base (baixa não prova entrega
          física, D-007), mas entra na COBERTURA do período (item 2): quem
@@ -1001,7 +1010,6 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
      na leitura; a mesma viagem com e sem o id era contada duas vezes. Só a
      régua nova (volta-1) lê; a da v167 fica como era. */
   const ativosPerf=regraVolta?await ativosDoPainel():[];
-  const marcasDepois:any[]=[];
   const registros=lista.map(o=>{
     const p=participacoes.find((x:any)=>x.id===o.id);
     let valor=num(o.valorTotal), origem="O.S. do PCP";
@@ -1030,7 +1038,7 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
          parcial quando o resto chega em dezembro, e o recálculo do selo
          (Aprovar e Exportar) confere. O valor de cada entrega não muda. */
       const oFim=CONFERENCIA_ENTREGA.noFimDoDia(o,periodo.ate,{gravadoAte});
-      if(depoisDe){const gd=CONFERENCIA_ENTREGA.gravadasDepois(o,periodo.ate,depoisDe);if(gd.length)marcasDepois.push({id:String(o.id),osId:String(o._osId),numero:String(o.numero||""),dia:String(o._dia||""),marcas:gd.slice(0,20).map((m:any)=>({tipo:m.tipo,item:m.item,dia:m.dia,em:m.em}))});}
+      if(depoisDe){const gd=CONFERENCIA_ENTREGA.gravadasDepois(o,periodo.ate,depoisDe);if(gd.length){const x=depoisDaOS(String(o._osId),o.numero);for(const m of gd)if(x.marcas.length<20&&!x.marcas.some((y:any)=>y.id===m.id))x.marcas.push({id:m.id,tipo:m.tipo,item:m.item,dia:m.dia,em:m.em});}}
       const a=CONFERENCIA_ENTREGA.apurar(oFim,valorConferencia(o,valoresItens[String(o.numero)] || [])), e=a.entregas.find((x:any)=>x.id===o._conferencia.id);
       if(bruto!==null){const bruta=CONFERENCIA_ENTREGA.apurar(oFim,bruto).entregas.find((x:any)=>x.id===o._conferencia.id);valorBrutoCentavos=bruta?.valor??null;}
       const indiceEntrega=a.entregas.findIndex((x:any)=>x.id===o._conferencia.id);
@@ -1200,7 +1208,7 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
     pctValor,baixa:registros.length+aLancar.length>0&&pctValor<50};
   // As O.S. inteiras deste período (D4): o fechamento as guarda fora do hash, para a leitura dos outros períodos.
   const inteiras=registros.filter((r:any)=>!String(r.id).includes("::entrega:")).map((r:any)=>({id:String(r.id),dia:String(r.dia||"")}));
-  return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP.",cobertura,inteiras,jaFechadas,...(marcasDepois.length?{marcasDepois}:{})};
+  return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP.",cobertura,inteiras,jaFechadas,...(depoisPorOS.size?{mudancasDepois:[...depoisPorOS.values()]}:{})};
 }
 /* A RÉGUA DO SELO (A1, auditoria da v164, 11/10/2026). A tela fecha com a
    nota por valor (performance.js manda notaPorValor:true na apuração e no
@@ -1265,12 +1273,13 @@ function perfRespostaFonteMudou(c:any, oQueFazer:string) {
   return {error:"A fonte mudou depois do fechamento no que decide a comissão ("+COMISSAO.textoMudancasDeDinheiro(c.mudancas)+"). "+oQueFazer,mudancasDinheiro:c.mudancas.slice(0,200),pendentes:c.pendentes.slice(0,200)};
 }
 /* A APURAÇÃO ATUAL DE UM MÊS FECHADO (onda cancelamento, M8): os dados de
-   agora, como sempre, e, quando há marca de item do mês gravada depois do
-   último fechamento, `depoisDoFechamento`: quais entregas, quais marcas, e
-   essas entregas como o recálculo do selo as vê (sem as marcas). A tela
-   compara o selo com os dados de agora trocando essas entregas pelas do
-   recálculo (a mesma régua da porta) e mostra as marcas como "mudou depois
-   do fechamento" e "não entra no fechamento". Fora do conteúdo e do hash. A
+   agora, como sempre, e, quando há mudança gravada depois do último
+   fechamento (marca de item do mês; cancelar, desfazer ou cancelar de novo
+   a O.S.) que muda alguma entrega do mês, `depoisDoFechamento`: quais O.S.,
+   o que mudou, e as entregas delas como o recálculo do selo as vê. A tela
+   compara o selo com os dados de agora trocando as entregas dessas O.S.
+   pelas do recálculo (a mesma régua da porta) e mostra as mudanças como
+   "mudou depois do fechamento" e "não entra no fechamento". Fora do conteúdo e do hash. A
    leitura das revisões que falha não esconde os dados atuais: vai a causa. */
 async function perfApuracaoAtual(body:any, periodo:any) {
   let ultimo:any=null, erroUltimo="";
@@ -1282,19 +1291,24 @@ async function perfApuracaoAtual(body:any, periodo:any) {
   }catch(e){erroUltimo=String((e as Error)?.message||e).slice(0,200);}
   const corte=ultimo?perfCorteDoSelo(ultimo):"";
   const fonte:any=await perfFonte(body,corte?{depoisDe:corte}:{});
-  const marcas=Array.isArray(fonte.marcasDepois)?fonte.marcasDepois:[];
-  delete fonte.marcasDepois;
+  const mud=Array.isArray(fonte.mudancasDepois)?fonte.mudancasDepois:[];
+  delete fonte.mudancasDepois;
   if(erroUltimo)return {...fonte,depoisDoFechamentoErro:"Não foi possível ler o último fechamento deste período ("+erroUltimo+")."};
-  if(!marcas.length)return fonte;
+  if(!mud.length)return fonte;
   try{
     const selo=(await perfFechamentos(periodo))[0];
     if(!selo||String(selo.id)!==String(ultimo.id))throw new Error("O período recebeu outra revisão durante a consulta. Atualize a apuração.");
     const rc=await perfFonte(perfParametrosDoSelo(selo,periodo),{...perfOpcoesDoSelo(selo),estrito:false});
-    const ids=new Set(marcas.map((m:any)=>m.id));
-    return {...fonte,depoisDoFechamento:{fechamentoId:String(selo.id),revisao:selo.revisao,fechadoEm:String(selo.fechadoEm||""),corte,entregas:marcas.slice(0,200),
-      registros:(rc.registros||[]).filter((r:any)=>ids.has(String(r.id))),hashIgual:rc.hash===selo.hash}};
+    /* Só a O.S. em que a mudança gravada depois muda alguma entrega do mês
+       (o cancelamento de dezembro com o dia em dezembro não muda novembro). */
+    const daOS=(regs:any[],id:string)=>(regs||[]).filter((r:any)=>String(r?.osId||r?.id)===id).sort((a:any,b:any)=>String(a.id).localeCompare(String(b.id)));
+    const os=mud.filter((x:any)=>canon(daOS(rc.registros,x.osId))!==canon(daOS(fonte.registros,x.osId)));
+    if(!os.length)return fonte;
+    const ids=new Set(os.map((x:any)=>x.osId));
+    return {...fonte,depoisDoFechamento:{fechamentoId:String(selo.id),revisao:selo.revisao,fechadoEm:String(selo.fechadoEm||""),corte,os:os.slice(0,200),
+      registros:(rc.registros||[]).filter((r:any)=>ids.has(String(r?.osId||r?.id))),hashIgual:rc.hash===selo.hash}};
   }catch(e){
-    return {...fonte,depoisDoFechamentoErro:"Há marca de item gravada depois do fechamento, mas o recálculo do fechamento falhou ("+String((e as Error)?.message||e).slice(0,200)+")."};
+    return {...fonte,depoisDoFechamentoErro:"Há mudança gravada depois do fechamento, mas o recálculo do fechamento falhou ("+String((e as Error)?.message||e).slice(0,200)+")."};
   }
 }
 async function perfFechamentos(periodo:any) {

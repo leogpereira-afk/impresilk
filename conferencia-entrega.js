@@ -144,8 +144,32 @@ const CONFERENCIA_ENTREGA = (() => {
     if (depois(os.finalizadaEm)) for (const k of ['finalizadaEm', 'finalizadoPor', 'baixaAutoERP', 'finalizadaPorCampo']) delete out[k];
     const l = os.entregaLancada;
     if (depois(l && typeof l === 'object' ? l.data : l)) delete out.entregaLancada;
-    if (os.cancelamento && typeof os.cancelamento === 'object' && depois(os.cancelamento.em)) delete out.cancelamento;
+    if (Number.isFinite(corte) && os.cancelamento !== undefined) { const c = cancelamentoNoInstante(os.cancelamento, gravadoAte); if (c === undefined) delete out.cancelamento; else out.cancelamento = c; }
+    if (out.cancelamento && typeof out.cancelamento === 'object' && depois(out.cancelamento.em)) delete out.cancelamento;
     return out;
+  }
+  /* O CANCELAMENTO DA O.S. COMO ESTAVA NO INSTANTE DO FECHAMENTO (onda
+     cancelamento, 12/10/2026). O servidor guarda o cancelamento que vale
+     ({ativo, motivo, em, desfeitoEm...}) e, desde esta onda, em `anteriores`
+     cada cancelamento já desfeito que um cancelar novo substituiu ({motivo,
+     em, desfeitoEm}, sem quem). Desfazer depois do fechamento (ou cancelar de
+     novo depois de desfazer) mudava o recálculo do mês fechado: o recálculo
+     do selo lê agora o estado do instante do fechamento, pelos carimbos do
+     servidor. O cancelamento sem carimbo `em` (o legado, o pedido ainda na
+     fila) e o corte inválido ficam como estão (só o dia, em noFimDoDia).
+     Antes do primeiro cancelar: undefined (não havia cancelamento). */
+  function cancelamentoNoInstante(c, gravadoAte) {
+    const corte = instante(gravadoAte);
+    if (!Number.isFinite(corte) || !c || typeof c !== 'object' || Array.isArray(c) || !Number.isFinite(instante(c.em))) return c;
+    const desfeitoAte = r => Number.isFinite(instante(r.desfeitoEm)) && instante(r.desfeitoEm) <= corte;
+    if (instante(c.em) <= corte) {
+      if (c.ativo !== false || desfeitoAte(c) || !Number.isFinite(instante(c.desfeitoEm))) return c;
+      const {desfeitoPor: _a, desfeitoPorConta: _b, desfeitoPorId: _c, desfeitoEm: _d, ...ativo} = c;
+      return {...ativo, ativo:true};
+    }
+    const antes = lista(c.anteriores).filter(r => r && typeof r === 'object' && instante(r.em) <= corte).pop();
+    if (!antes) return undefined;
+    return desfeitoAte(antes) ? {ativo:false, motivo:String(antes.motivo ?? ''), em:String(antes.em), desfeitoEm:String(antes.desfeitoEm)} : {ativo:true, motivo:String(antes.motivo ?? ''), em:String(antes.em)};
   }
   /* As marcas que o corte tira e o dia não tiraria: as do mês fechado (ou sem
      dia válido) gravadas depois do fechamento. A tela do mês fechado as mostra
@@ -353,6 +377,6 @@ const CONFERENCIA_ENTREGA = (() => {
     const voltouDepois = !Number.isFinite(tSai) && !!rNew && rNew !== rOld && Number.isFinite(tOld) && Number.isFinite(tNew) && tNew > tOld;
     return {de, para, nova:para > de && (saiuDepois || voltouDepois)};
   }
-  return {catalogo, validar, validarRevisao, lidasParaSaldo, apurar, estado, noFimDoDia, gravadasDepois, PERGUNTAS_VOLTA, diaDaVolta, idDoAtivo, chaveVeiculo, semCarroV, confDaVolta, confGuardada, declaracaoGuardada, confDaViagemDoDia, declaracaoDaViagemDoDia, registroDaVolta, voltasDaOS, viagemDoDia, voltaDaEntrega, voltaDaOS, chaveDaViagem, ultimaViagem, movimentoDaViagem};
+  return {catalogo, validar, validarRevisao, lidasParaSaldo, apurar, estado, noFimDoDia, gravadasDepois, cancelamentoNoInstante, PERGUNTAS_VOLTA, diaDaVolta, idDoAtivo, chaveVeiculo, semCarroV, confDaVolta, confGuardada, declaracaoGuardada, confDaViagemDoDia, declaracaoDaViagemDoDia, registroDaVolta, voltasDaOS, viagemDoDia, voltaDaEntrega, voltaDaOS, chaveDaViagem, ultimaViagem, movimentoDaViagem};
 })();
 if (typeof module !== 'undefined') module.exports = CONFERENCIA_ENTREGA;

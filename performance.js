@@ -833,32 +833,37 @@ function perfDinheiroDoSeloTxt(selo, atual) {
  return ` Nenhuma delas muda a comissão: Aprovar e Exportar continuam valendo.${pend}`;
 }
 /* O QUE FOI GRAVADO DEPOIS DO FECHAMENTO (onda cancelamento, 12/10/2026;
-   baixa da verificação da onda operação). A marca de item (o cancelamento,
-   por exemplo) gravada depois do fechamento com o dia dentro do mês não entra
-   no recálculo do selo (a porta corta pelo carimbo do servidor). A apuração
-   atual traz essas entregas em depoisDoFechamento, com a versão delas que o
-   recálculo do selo vê. O aviso compara o selo com os dados de agora com
-   essas entregas trocadas pela versão do recálculo (a mesma régua da porta:
-   não diz que trava o que não trava) e mostra as marcas à parte, como mudança
-   depois do fechamento que não entra no fechamento. */
+   baixa da verificação da onda operação). A marca de item (o cancelamento
+   de item, por exemplo) gravada depois do fechamento com o dia dentro do mês,
+   e o cancelar, o desfazer e o cancelar de novo da O.S. gravados depois dele
+   não entram no recálculo do selo (a porta lê pelos carimbos do servidor). A
+   apuração atual traz essas O.S. em depoisDoFechamento, com as entregas delas
+   como o recálculo do selo as vê. O aviso compara o selo com os dados de
+   agora com essas entregas trocadas pelas do recálculo (a mesma régua da
+   porta: não diz que trava o que não trava) e mostra as mudanças à parte,
+   como mudança depois do fechamento que não entra no fechamento. */
 function perfDepoisDoFechamento(f, dados) {
  const d=dados&&dados.depoisDoFechamento;
- if(!f||!d||String(d.fechamentoId)!==String(f.id)||!Array.isArray(d.entregas)||!d.entregas.length)return null;
+ if(!f||!d||String(d.fechamentoId)!==String(f.id)||!Array.isArray(d.os)||!d.os.length)return null;
  return d;
 }
 function perfComoNoFechamento(f, dados) {
  const d=perfDepoisDoFechamento(f,dados);
  if(!d||!Array.isArray(dados.registros))return dados;
- const rc=new Map((Array.isArray(d.registros)?d.registros:[]).map(r=>[String(r.id),r]));
- return {...dados,registros:dados.registros.map(r=>rc.get(String(r.id))||r)};
+ const chave=r=>String(r&&(r.osId||r.id)), ids=new Set(d.os.map(x=>String(x.osId)));
+ return {...dados,registros:[...dados.registros.filter(r=>!ids.has(chave(r))),...(Array.isArray(d.registros)?d.registros:[])]};
 }
 const PERF_MARCA_DEPOIS={cancelado:['cancelamento de item','gravado'],desfeito:['desfazer de marca de item','gravado'],entregue:['entrega de item','gravada'],retirado:['retirada de item','gravada'],problema:['problema em item','gravado'],conferido:['conferência de item','gravada']};
 function perfDepoisDoFechamentoTxt(d) {
- const n=d.entregas.length;
+ const n=d.os.length;
  const diaEm=v=>{const t=Date.parse(String(v||''));return Number.isFinite(t)?new Date(t).toLocaleDateString('pt-BR',{timeZone:'America/Sao_Paulo'}):'';};
- const marcas=d.entregas.flatMap(e=>(Array.isArray(e.marcas)?e.marcas:[]).map(m=>({...m,numero:e.numero||e.osId})));
- const linha=m=>{const [o,g]=PERF_MARCA_DEPOIS[m.tipo]||['marca de item','gravada'];return `O.S. ${m.numero}: ${o}${m.dia?` com o dia ${perfDiaBR(m.dia)}`:''}${diaEm(m.em)?`, ${g} em ${diaEm(m.em)}`:''}`;};
- return ` ${n===1?'1 entrega mudou':`${n} entregas mudaram`} depois do fechamento por marca de item gravada depois dele (${esc(marcas.slice(0,3).map(linha).join('; '))}${marcas.length>3?' e outras':''}): ${n===1?'ela não entra':'elas não entram'} no fechamento e não ${n===1?'trava':'travam'} Aprovar e Exportar a comissão. Para que ${n===1?'entre':'entrem'}, crie uma nova revisão em Base e fechamento.`;
+ const linhas=[];
+ for(const x of d.os){
+  const num=x.numero||x.osId, c=x.cancelamento;
+  if(c)linhas.push(`O.S. ${num}: ${c.agora==='cancelada'?'O.S. cancelada':'cancelamento da O.S. desfeito'}${diaEm(c.em)?` em ${diaEm(c.em)}`:''}`);
+  for(const m of Array.isArray(x.marcas)?x.marcas:[]){const [o,g]=PERF_MARCA_DEPOIS[m.tipo]||['marca de item','gravada'];linhas.push(`O.S. ${num}: ${o}${m.dia?` com o dia ${perfDiaBR(m.dia)}`:''}${diaEm(m.em)?`, ${g} em ${diaEm(m.em)}`:''}`);}
+ }
+ return ` ${n===1?'1 O.S. mudou':`${n} O.S. mudaram`} depois do fechamento por mudança gravada depois dele (${esc(linhas.slice(0,3).join('; '))}${linhas.length>3?' e outras':''}): isso não entra no fechamento e não trava Aprovar e Exportar a comissão. Para que entre, crie uma nova revisão em Base e fechamento.`;
 }
 function perfMudancasTxt(m) {
  const n=(x,um,varios)=>x?`${x} ${x===1?um:varios}`:'';
