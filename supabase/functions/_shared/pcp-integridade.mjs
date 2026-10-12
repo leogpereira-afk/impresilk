@@ -2468,12 +2468,15 @@ export function mudancaValorConferido(antes, depois, erp = []) {
    valor das entregas conferidas ou o valor de um item (valorUnit, subtotal).
    Serve ao aviso do mês fechado, com ou sem conferência por entrega (a O.S.
    inteira também), e à marca "mudou depois do envio" da fita dos meses. */
+/* A BASE QUE A COMISSÃO USA (revisão da onda auditoria, item 6): o valor do
+   ERP quando o painel tem um só para o número (valorDaComissao) e, com
+   conferência por entrega, o rateio dela (valorDasConferidas). Mudar o valor
+   da ficha ou de um item que não muda essa base não é mudança de dinheiro
+   (antes dava o aviso e a marca "mudou depois do envio" falsos). */
 export function dinheiroDaOSMudou(antes, depois, erp = []) {
   if (!objeto(antes) || !objeto(depois)) return false;
   if (valorDaComissao(antes, erp) !== valorDaComissao(depois, erp)) return true;
-  if (valorDasConferidas(antes, erp) !== valorDasConferidas(depois, erp)) return true;
-  const itens = o => (Array.isArray(o.itens) ? o.itens : []).map(i => objeto(i) ? [String(i.uid ?? ''), ...CAMPOS_VALOR_ITEM_CONFERIDO.map(k => i[k] ?? null)] : null);
-  return canon(itens(antes)) !== canon(itens(depois));
+  return valorDasConferidas(antes, erp) !== valorDasConferidas(depois, erp);
 }
 /* A FRASE PARA A GESTÃO quando o dinheiro de uma O.S. de mês fechado muda
    (D1): a gravação vale (nunca 422), e o aviso diz que o mês fechado não se

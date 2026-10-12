@@ -125,3 +125,25 @@ test('P1/pessoas: o crachá de toque cujo nome tem o vínculo salvo no ID anteri
   assert.equal(I.pertenceEquipe({equipe:['100011']},{nome:'Ninha'},r),true);
   assert.equal(I.pertenceEquipe({equipe:['100001']},{nome:'Ninha'},r),true);
 });
+
+test('D1: com o valor do ERP valendo, mudar só o valor da ficha marca "mudou depois do envio" sem mudar o dinheiro', async()=>{
+  const PART=[{id:'A',membros:[{chave:'100002',nome:'J',percentual:100}],por:'Gestor',em:'2026-11-25T10:00:00Z'}];
+  const A=base('A','91001',10000,['100002'],lancada('2026-11-05'));
+  const e=await edge('pcp-sync',{pcp_registros:[A].map(o=>({colecao:'os',id:o.id,apagado:false,atualizado_em:'2026-11-01T10:00:00.000Z',registro:o})),
+    registros:[...FIXAS],pcp_config_global:[{id:true,atualizado_em:'2020-01-01',config:{performancePCP:{equipes:[],participacoes:PART}}}],
+    painel_ordens:[{id:'po1',numero:'91001',valor:10000,data:'2026-11-05'}],equipe_contas:[{sistema:'pcp',usuario:'titular-ficticio',papel:'pcp',ativo:true}]});
+  relogio(e,'2026-12-02T12:00:00Z');
+  const fonte=await e.call({action:'performancePeriodo',...NOV,notaPorValor:true},TITULAR);
+  const fr=await e.call({action:'performanceFechar',...NOV,hash:fonte.hash,anterior:'',requestId:'fechar-0003-ficticio',motivo:'Fechamento ficticio do mes',leGrupos:true,leEntregasItens:true,notaPorValor:true},TITULAR);
+  assert.equal(fr.status,200,JSON.stringify(fr).slice(0,300));
+  relogio(e,'2026-12-03T12:00:00Z');
+  const a=structuredClone(e.db.pcp_registros.find(r=>r.id==='A').registro);
+  const r=await e.call({action:'upsert',os:{...a,valorTotal:12345}},TITULAR);
+  assert.equal(r.status,200);
+  const s=JSON.stringify(fr.fechamento);
+  const c=await e.run(`perfConferirSeloDaComissao(${s},${JSON.stringify(NOV)})`);
+  const marcas=e.db.pcp_registros.filter(x=>x.colecao==='performance_mudancas_fechado').length;
+  assert.ok(!(c.mudancas||[]).length,'o dinheiro não mudou');
+  assert.equal(marcas,0,'mas a O.S. ganhou a marca de dinheiro mudado no mês fechado');
+  assert.ok(!(r.avisos||[]).some(x=>/mês já foi fechado/.test(x)),'nem o aviso');
+});

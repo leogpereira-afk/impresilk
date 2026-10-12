@@ -3516,7 +3516,16 @@ Deno.serve(async (req: Request) => {
              e fica um registro só de inserção por período
              (performance_mudancas_fechado) que a fita dos meses lê para
              marcar "mudou depois do envio". */
-          if (!eraLapide && existing && dinheiroDaOSMudou(existing, gravar, erpMv)) {
+          /* A base da comissão (item 6 da revisão): sem conferência, as linhas do
+             ERP não tinham sido lidas, e o valor da ficha mudado contava como
+             dinheiro mesmo com o valor do ERP valendo. Lê as linhas antes de
+             decidir. */
+          let erpD1 = erpMv;
+          if (!eraLapide && existing && !erpD1.length && String(gravar.numero || "") && dinheiroDaOSMudou(existing, gravar, [])) {
+            const { data: linhasErp, error: erroErp } = await sb.from("painel_ordens").select("numero,valor").eq("numero", String(gravar.numero)).limit(2);
+            if (!erroErp) erpD1 = linhasErp || [];
+          }
+          if (!eraLapide && existing && dinheiroDaOSMudou(existing, gravar, erpD1)) {
             try {
               const fechadosD1 = await perfPeriodosFechados();
               if (fechadosD1.length) {
