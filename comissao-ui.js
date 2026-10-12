@@ -133,14 +133,15 @@ function comissaoConferenciaTxt(c) {
   const pend=(c.pendentes||[]).map(x=>x.numero||x.osId);
   return (c.foraDoDinheiro?` ${c.foraDoDinheiro} ${c.foraDoDinheiro===1?'entrega mudou':'entregas mudaram'} depois do fechamento fora do dinheiro: não muda a comissão.`:'')+(pend.length?` Pendente para a próxima revisão ou compensação: O.S. ${pend.join(', ')} (a origem do retrabalho mudou depois do fechamento).`:'');
 }
-/* QUEM APROVA A COMISSÃO HOJE (D-013 e D-014): a linha no diálogo da
+/* QUEM APROVA A COMISSÃO HOJE (D-013, D-014 e D-017): a linha no diálogo da
    comissão e a seção em Configurações. A configuração é gravada só pelo admin
    (ação comissaoAprovadorGravar, na hora, fora da fila), sempre com motivo;
    o servidor carimba quem e quando e guarda o diário. */
 function comissaoAprovadorQuemTxt(a){
   if(!a||a.modo==='d013'||!a.modo)return 'Quem aprova: a gestão do PCP (pcp ou admin), sem titular designado.';
   const pessoa=(nome,id)=>(nome||'cadastro '+id)+(/^\d{6}$/.test(String(id||''))&&nome?' (cadastro '+id+')':'');
-  if(a.modo==='substituto')return `Quem aprova hoje: ${pessoa(a.nome,a.id)}, substituto${a.titularNome||a.titularId?' de '+pessoa(a.titularNome,a.titularId):''}${a.ate?', até '+comissaoDiaBR(a.ate):''}. O admin também aprova.`;
+  // D-017: com o substituto valendo, os dois aprovam (o substituto é um reserva que ajuda o titular).
+  if(a.modo==='substituto')return `Quem aprova hoje: ${a.titularNome||a.titularId?pessoa(a.titularNome,a.titularId)+', titular, e ':''}${pessoa(a.nome,a.id)}, substituto${a.ate?' até '+comissaoDiaBR(a.ate):''}. Os dois aprovam. O admin também aprova.`;
   return `Quem aprova: ${pessoa(a.nome,a.id)}, titular. O admin também aprova.`;
 }
 const comissaoDiaBR=d=>/^\d{4}-\d{2}-\d{2}$/.test(String(d||''))?d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4):'';
@@ -161,7 +162,10 @@ function comissaoAprovadorSecaoHTML(){
      quais IDs têm acesso pcp com senha ligado à ficha; a lista marca, para o
      admin não escolher em silêncio quem não consegue aprovar. */
   const sabe=Array.isArray(d.aprovamPelaTela),aprovam=new Set(sabe?d.aprovamPelaTela:[]);
-  const opcoes=(sel)=>{const ps=(typeof pessoasRH==='function'?pessoasRH():[]).filter(p=>p&&p.ativo!==false&&/^\d{6}$/.test(String(p.id||''))&&!p.idRepetido);return '<option value="">Escolha a pessoa</option>'+ps.map(p=>`<option value="${esc(p.id)}"${p.id===sel?' selected':''}>${esc(p.nome)} · ${esc(p.id)}${sabe?(aprovam.has(p.id)?' · aprova pela tela':' · sem acesso pcp ligado'):''}</option>`).join('');};
+  /* O SUBSTITUTO PRECISA APROVAR PELA TELA (S1 da auditoria de 12/10/2026):
+     na lista do substituto, quem não tem acesso pcp ligado vem desligado (o
+     servidor recusa do mesmo jeito). */
+  const opcoes=(sel,soQuemAprova)=>{const ps=(typeof pessoasRH==='function'?pessoasRH():[]).filter(p=>p&&p.ativo!==false&&/^\d{6}$/.test(String(p.id||''))&&!p.idRepetido);return '<option value="">Escolha a pessoa</option>'+ps.map(p=>`<option value="${esc(p.id)}"${p.id===sel?' selected':''}${soQuemAprova&&sabe&&!aprovam.has(p.id)?' disabled':''}>${esc(p.nome)} · ${esc(p.id)}${sabe?(aprovam.has(p.id)?' · aprova pela tela':' · sem acesso pcp ligado'):''}</option>`).join('');};
   const subTxt=s?`Substituto: ${esc(s.nome||'cadastro '+s.id)} (cadastro ${esc(s.id)}), de ${esc(comissaoDiaBR(s.de))}${s.ate?' até '+esc(comissaoDiaBR(s.ate)):', sem data de fim'}${s.vigente?'':' (fora do prazo agora)'}. Motivo: ${esc(s.motivo||'')}`:'Sem substituto.';
   const diario=(d.diario||[]).slice(0,10).map(e=>`<li>${esc(comissaoData(e.em))} · ${esc(e.por)}${e.porId?' ('+esc(e.porId)+')':''} · ${esc({titular:'titular designado',substituto:'substituto designado',encerrar:'substituto encerrado'}[e.operacao]||e.operacao)}: ${esc(e.operacao==='titular'?(e.titularNome||e.titularId):e.operacao==='substituto'?(e.substitutoNome||e.substitutoId)+' de '+comissaoDiaBR(e.de)+(e.ate?' até '+comissaoDiaBR(e.ate):''):'')} · ${esc(e.motivo)}</li>`).join('');
   /* O RETORNO DA GRAVAÇÃO FICA NO BLOCO QUE FOI GRAVADO (U1 da revisão da
@@ -175,10 +179,10 @@ function comissaoAprovadorSecaoHTML(){
   const blocos=admin?`<div class="aprov-blocos">
     <form class="aprov-form" data-aprov-op="titular"><h4>Titular</h4><p class="aprov-desc">Quem aprova a comissão todo mês. Troque só quando a função passar para outra pessoa.</p>
       <label class="aprov-campo"><span>Pessoa</span><select name="pessoa">${opcoes(c&&c.titularId)}</select></label>${motivo}${rodape('titular','Designar titular')}</form>
-    <form class="aprov-form" data-aprov-op="substituto"><h4>Substituto</h4><p class="aprov-desc">Aprova no lugar do titular entre o início e o fim (férias, afastamento). Enquanto vale, o titular não aprova; sem fim, vale até ser encerrado.</p>
-      <label class="aprov-campo"><span>Pessoa</span><select name="pessoa">${opcoes('')}</select></label>
+    <form class="aprov-form" data-aprov-op="substituto"><h4>Substituto</h4><p class="aprov-desc">Um reserva que fica configurado para ajudar o titular: entre o início e o fim, os dois aprovam. Precisa de acesso pcp com senha ligado à ficha do RH. Sem fim, vale até ser encerrado.</p>
+      <label class="aprov-campo"><span>Pessoa</span><select name="pessoa">${opcoes('',true)}</select></label>
       <div class="aprov-datas"><label class="aprov-campo"><span>Início</span><input type="date" name="de" value="${esc(d.hoje||'')}"></label><label class="aprov-campo"><span>Fim (opcional)</span><input type="date" name="ate"></label></div>${motivo}${rodape('substituto','Designar substituto')}</form>
-    ${s?`<form class="aprov-form" data-aprov-op="encerrar"><h4>Encerrar o substituto</h4><p class="aprov-desc">Devolve a aprovação ao titular a partir de agora. O substituto continua no diário.</p>${motivo}${rodape('encerrar','Encerrar o substituto')}</form>`:''}
+    ${s?`<form class="aprov-form" data-aprov-op="encerrar"><h4>Encerrar o substituto</h4><p class="aprov-desc">A partir de agora só o titular aprova (e o admin). O substituto continua no diário.</p>${motivo}${rodape('encerrar','Encerrar o substituto')}</form>`:''}
   </div>`:'<p class="text-muted">Só o admin designa o titular e o substituto.</p>';
   return `<div class="cfg-section" id="cfg-aprovador"><h3>✅ Quem aprova a comissão</h3>
     <p class="aprov-quem"><strong>${esc(quem)}</strong></p>

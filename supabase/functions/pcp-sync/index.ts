@@ -2088,21 +2088,22 @@ Deno.serve(async (req: Request) => {
       case "performanceComissaoNova":
       case "performanceComissaoAprovar":
       case "performanceComissaoExportar": {
-        /* QUEM APROVA (D-013 e D-014): o admin sempre; sem configuração, pcp e
-           admin; com ela, só o titular ou, enquanto vale, o substituto, pelo ID
-           do crachá ou da conta. O substituto designado lê e aprova mesmo que o
-           papel dele não seja pcp; prévia, compensação e exportação continuam
-           da gestão (admin e pcp). */
+        /* QUEM APROVA (D-013, D-014 e D-017): o admin sempre; sem configuração,
+           pcp e admin; com ela, o titular e, enquanto vale, também o substituto
+           (D-017), pelo ID do crachá ou da conta. TODAS as ações da comissão
+           exigem o papel admin ou pcp com senha, também para o substituto (S1
+           da auditoria de 12/10/2026): antes o substituto com outro papel lia
+           o demonstrativo com os R$ de todos. Designar como substituto quem
+           não aprova pela tela é recusado em comissaoAprovadorGravar. */
         const gestaoComissao = !!cracha && !ehMaquina && !ehToqueNoNome && ["admin","pcp"].includes(String(cracha.papel));
         let quemAprovaAgora:any = null;
-        if (cracha && !ehMaquina && !ehToqueNoNome && (acao==="performanceComissaoAprovar" || (acao==="performanceComissaoListar" && !gestaoComissao))) {
+        if (gestaoComissao && acao==="performanceComissaoAprovar") {
           let cfgAprovador:any = null;
           try { cfgAprovador = await comissaoAprovadorAtual(); }
           catch { return resp({error:"Não foi possível ler quem aprova a comissão agora. Tente de novo."},503); }
           quemAprovaAgora = COMISSAO.quemAprova({papel:String(cracha.papel||""), porId:(await autorAuditoria()).porId||""}, cfgAprovador, perfDia(new Date().toISOString()));
         }
-        const substitutoAgora = !!quemAprovaAgora?.ok && quemAprovaAgora.como==="substituto";
-        if(!gestaoComissao && !(substitutoAgora && (acao==="performanceComissaoAprovar" || acao==="performanceComissaoListar")))return resp({error:"Comissão restrita à gestão autenticada do PCP."},403);
+        if(!gestaoComissao)return resp({error:"Comissão restrita à gestão autenticada do PCP."},403);
         if(acao==="performanceComissaoAprovar" && !quemAprovaAgora?.ok)return resp({error:quemAprovaAgora?.erro || "Aprovação recusada."},403);
         let periodo;try{periodo=perfPeriodo(body);}catch(e){return resp({error:(e as Error).message},422);}
         // Ler o relógio por O.S. ANTES do histórico: qualquer aprovação que
@@ -3705,6 +3706,13 @@ Deno.serve(async (req: Request) => {
           const id = String(body.substitutoId || "").trim(), erro = conferirPessoa(id, "substituto");
           if (erro) return resp({ error: erro }, 400);
           if (id === atual.titularId) return resp({ error: "O substituto precisa ser outra pessoa, não o titular." }, 400);
+          /* O SUBSTITUTO APROVA PELA TELA (S1 da auditoria de 12/10/2026): só
+             quem tem acesso pcp ou admin com senha ligado à ficha. Antes era só
+             um aviso, e a porta deixava o substituto de outro papel ler os R$
+             de todos. Esta ação é chamada na hora, fora da fila: a recusa não
+             prende nada. */
+          if (!aprovamPelaTela) return resp({ error: "Não foi possível conferir agora se esta pessoa tem acesso pcp com senha ligado à ficha do RH. Nada foi gravado; tente de novo." }, 503);
+          if (!aprovamPelaTela.has(id)) return resp({ error: `${nomeDe(id) || "Esta pessoa"} não pode ser o substituto: o substituto precisa aprovar pela tela, com acesso pcp (ou admin) com senha ligado à ficha do RH (o login igual ao apelido da ficha, ou a conta ligada à pessoa na Central de Acessos). Crie ou ligue esse acesso e designe de novo. Nada foi gravado.` }, 400);
           const de = String(body.de || hoje).slice(0, 10), ate = String(body.ate || "").slice(0, 10);
           if (!/^\d{4}-\d{2}-\d{2}$/.test(de)) return resp({ error: "Data de início inválida." }, 400);
           if (ate && (!/^\d{4}-\d{2}-\d{2}$/.test(ate) || ate < de)) return resp({ error: "O fim precisa ser uma data igual ou depois do início." }, 400);
@@ -3722,8 +3730,8 @@ Deno.serve(async (req: Request) => {
         if (erroGravar) return resp({ error: erroGravar.code === "23505" ? "Outra mudança foi gravada ao mesmo tempo. Atualize e tente de novo." : "Não foi possível gravar agora. Tente de novo." }, erroGravar.code === "23505" ? 409 : 500);
         /* Aviso, não trava (P2 da revisão da onda pessoas): quem não tem acesso
            pcp com senha ligado à ficha não consegue aprovar pela tela. Vale
-           para o titular e para o substituto. O aviso volta junto do que foi
-           gravado, para a tela mostrar ao lado do bloco. */
+           para o titular (o substituto já foi recusado acima, S1). O aviso
+           volta junto do que foi gravado, para a tela mostrar ao lado do bloco. */
         const avisos: string[] = [];
         const alvo = operacao === "titular" ? novo.titularId : operacao === "substituto" ? novo.substituto.id : "";
         if (alvo && (!aprovamPelaTela || !aprovamPelaTela.has(alvo)))

@@ -397,14 +397,17 @@ const COMISSAO = (() => {
     const um=m=>m.numero?'O.S. '+m.numero+(m.texto?': '+m.texto:''):m.texto||'';
     return xs.slice(0,max).map(um).join('; ')+(xs.length>max?'; e mais '+(xs.length-max):'');
   }
-  /* QUEM APROVA A COMISSÃO (D-013 e D-014, 12/10/2026). A configuração (gravada
-     só pelo admin, na ação comissaoAprovadorGravar) diz o TITULAR pelo ID de 6
-     dígitos e, opcional, um SUBSTITUTO com início, fim opcional e motivo.
-     Enquanto o substituto vale (de <= hoje <= até), ele aprova, mesmo que o
-     papel dele não seja pcp, e o titular não; sem substituto, o titular; o
-     admin aprova sempre. Sem configuração (ou sem titular), vale a D-013: pcp e
-     admin. A comparação é pelo ID do crachá ou da conta (porId), nunca pelo
-     nome. `hoje` é o dia de São Paulo (AAAA-MM-DD). */
+  /* QUEM APROVA A COMISSÃO (D-013, D-014 e D-017, 12/10/2026). A configuração
+     (gravada só pelo admin, na ação comissaoAprovadorGravar) diz o TITULAR pelo
+     ID de 6 dígitos e, opcional, um SUBSTITUTO com início, fim opcional e
+     motivo. D-017: o substituto é um reserva que fica configurado para ajudar;
+     enquanto ele vale (de <= hoje <= até), o titular E o substituto aprovam
+     (antes, pela D-014, o titular deixava de aprovar). Sem substituto (ou fora
+     do prazo), só o titular; o admin aprova sempre. Sem configuração (ou sem
+     titular), vale a D-013: pcp e admin. A comparação é pelo ID do crachá ou da
+     conta (porId), nunca pelo nome; quem chama (a porta) ainda exige o papel
+     pcp ou admin (S1 da auditoria de 12/10/2026). `hoje` é o dia de São Paulo
+     (AAAA-MM-DD). */
   const ehId6 = v => /^\d{6}$/.test(String(v ?? '').trim());
   const ehDia = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? ''));
   function substitutoVigente(cfg, hoje) {
@@ -419,20 +422,19 @@ const COMISSAO = (() => {
     return s ? {modo:'substituto', id:String(s.id).trim(), titularId:String(cfg.titularId).trim(), de:s.de, ate:ehDia(s.ate) ? s.ate : ''}
       : {modo:'titular', id:String(cfg.titularId).trim()};
   }
-  const diaBR = d => ehDia(d) ? d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4) : '';
   function quemAprova(quem, cfg, hoje) {
     const papel = String(quem && quem.papel || ''), id = String(quem && quem.porId || '').trim();
     const vigente = aprovadorVigente(cfg, hoje);
     if (papel === 'admin') return {ok:true, como:'admin', vigente};
     if (vigente.modo === 'd013') return papel === 'pcp' ? {ok:true, como:'pcp', vigente} : {ok:false, vigente, erro:'A aprovação da comissão é da gestão do PCP (pcp ou admin).'};
     if (ehId6(id) && id === vigente.id) return {ok:true, como:vigente.modo, vigente};
+    // D-017: com o substituto valendo, o titular continua aprovando.
+    if (vigente.modo === 'substituto' && ehId6(id) && id === vigente.titularId) return {ok:true, como:'titular', vigente};
     /* O texto vai ao lado da linha "Quem aprova: ... O admin também aprova."
        (comissao-ui.js): não repete o admin. O acesso sem ID ligado não é
        chamado de "não titular": a porta só não sabe quem ele é. */
     const semLigacao = 'Seu acesso não está ligado a uma ficha do RH, então a porta não reconhece você pelo ID. Para aprovar, o admin liga a conta à ficha: o login igual ao apelido da ficha do RH, ou a conta ligada à pessoa na Central de Acessos.';
-    if (vigente.modo === 'substituto') return {ok:false, vigente, erro:id === vigente.titularId
-      ? `Enquanto o substituto designado pela gestão estiver valendo${vigente.ate ? ' (até '+diaBR(vigente.ate)+')' : ''}, quem aprova a comissão é ele, não o titular.`
-      : ehId6(id) ? 'Você não aprova: hoje quem aprova a comissão é o substituto designado pela gestão.' : semLigacao};
+    if (vigente.modo === 'substituto') return {ok:false, vigente, erro:ehId6(id) ? 'Você não aprova: hoje quem aprova a comissão é o titular ou o substituto designados pela gestão.' : semLigacao};
     return {ok:false, vigente, erro:ehId6(id) ? 'Você não aprova: quem aprova a comissão é o titular designado pela gestão.' : semLigacao};
   }
   return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase,comissoesAcumuladas,TEXTO_ORIGEM_A_DEFINIR,demonstrativosVigentes,falhaComprovadaNoDia,comFalhasComprovadas,

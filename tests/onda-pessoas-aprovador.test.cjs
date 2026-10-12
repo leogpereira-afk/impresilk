@@ -16,7 +16,7 @@ const RAIZ = path.join(__dirname, '..');
 const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
 
 /* ------------------------------------------------------------ a régua */
-test('régua: sem configuração vale a D-013; com titular, só ele (e o admin); com substituto vigente, só o substituto (e o admin)', async () => {
+test('régua: sem configuração vale a D-013; com titular, só ele (e o admin); com substituto vigente, o titular e o substituto (D-017) e o admin', async () => {
   const {COMISSAO:S} = await import('../supabase/functions/_shared/pcp-comissao.mjs');
   for (const X of [C, S]) {
     const hoje = '2026-12-05';
@@ -28,8 +28,11 @@ test('régua: sem configuração vale a D-013; com titular, só ele (e o admin);
     assert.equal(X.quemAprova({papel:'admin', porId:''}, cfg, hoje).como, 'admin');
     const sub = {titularId:'700001', substituto:{id:'700002', de:'2026-12-04', ate:'2026-12-06'}};
     assert.equal(X.quemAprova({papel:'operacao', porId:'700002'}, sub, hoje).como, 'substituto', 'o substituto aprova mesmo sem o papel pcp');
+    // D-017: o substituto é um reserva; enquanto vale, o titular continua aprovando (antes era recusado).
     const t = X.quemAprova({papel:'pcp', porId:'700001'}, sub, hoje);
-    assert.equal(t.ok, false); assert.match(t.erro, /quem aprova a comissão é ele, não o titular/); assert.match(t.erro, /até 06\/12\/2026/);
+    assert.equal(t.ok, true); assert.equal(t.como, 'titular');
+    const outro = X.quemAprova({papel:'pcp', porId:'700003'}, sub, hoje);
+    assert.equal(outro.ok, false); assert.match(outro.erro, /o titular ou o substituto/);
     assert.equal(X.quemAprova({papel:'admin', porId:''}, sub, hoje).ok, true);
     // Fora do prazo (antes do início ou depois do fim): volta ao titular.
     for (const dia of ['2026-12-03', '2026-12-07']) {
@@ -46,7 +49,9 @@ const EXP = Math.floor(Date.parse('2027-12-31T00:00:00Z') / 1000);
 const conta = (papel, sub, nome) => ({papel, sub, nome, exp:EXP});
 const TITULAR = conta('pcp', 'titular-ficticio', 'Titular Fictício');
 const OUTRO_PCP = conta('pcp', 'outro-pcp', 'Outro Gestor Fictício');
-const SUBST = conta('operacao', 'subst-ficticio', 'Substituta Fictícia');
+const SUBST = conta('pcp', 'subst-ficticio', 'Substituta Fictícia');
+// O mesmo login com o crachá de outro papel (S1 da auditoria de 12/10/2026).
+const SUBST_OPERACAO = conta('operacao', 'subst-ficticio', 'Substituta Fictícia');
 const ADMIN = conta('admin', 'admin-ficticio', 'Admin Fictício');
 const MONTAGEM = conta('montagem', 'montagem-ficticia', 'Montagem Fictícia');
 const ficha = (id, nome, apelido, cpf, extra = {}) => ({id, colecao:'colaboradores', apagado:false, registro:{id, nome, apelido, cpf, statusId:'ativo', ...extra}});
@@ -62,7 +67,7 @@ function banco() {
     horaRetorno:'18:00', retornoEm:'2026-11-05T18:00:00', finalizadaEm:'2026-11-05T21:00:00.000Z', finalizadoPor:'Gestor fictício', entregaLancada:{data:'2026-11-05', em:'2026-11-05T21:00:00.000Z', por:'Gestor fictício'}};
   return {pcp_registros:[{colecao:'os', id:'A', apagado:false, atualizado_em:'2026-11-20T00:00:00Z', registro:o}], registros:structuredClone(FICHAS),
     pcp_config_global:[{id:true, atualizado_em:'2020-01-01', config:{performancePCP:{equipes:[], participacoes:[{id:'A', membros:[{chave:'100001', nome:'Instalador Fictício', percentual:100}], por:'Gestor fictício', em:'2026-11-06T00:00:00Z'}]}}}],
-    painel_ordens:[{numero:'90901', valor:8500}], equipe_contas:[{sistema:'pcp', usuario:'titular-ficticio', papel:'pcp', ativo:true}, {sistema:'pcp', usuario:'subst-ficticio', papel:'operacao', ativo:true}]};
+    painel_ordens:[{numero:'90901', valor:8500}], equipe_contas:[{sistema:'pcp', usuario:'titular-ficticio', papel:'pcp', ativo:true}, {sistema:'pcp', usuario:'subst-ficticio', papel:'pcp', ativo:true}]};
 }
 const entrada = regs => ({config:{modo:'efetivo', inicioEfetivo:'2026-11-01', decisaoGestao:'Autorização fictícia para teste', criteriosExtras:'somente_falha_comprovada'},
   decisoes:Object.fromEntries(regs.map(r => [r.osId || r.id, {...doc, decisao:'sem_falha', tipo:'nenhuma'}])),
@@ -103,12 +108,17 @@ test('só o admin designa; o pcp lê; motivo, ID e pessoa são conferidos (400),
   assert.equal(t.vigente.modo, 'titular'); assert.equal(t.vigente.id, '700001'); assert.equal(t.vigente.nome, 'Titular Fictício');
   assert.equal((await gravar(e, {operacao:'substituto', substitutoId:'700001'})).status, 400, 'o substituto não é o titular');
   assert.equal((await gravar(e, {operacao:'substituto', substitutoId:'700002', de:'2026-12-05', ate:'2026-12-04'})).status, 400, 'fim antes do início');
-  const s = await gravar(e, {operacao:'substituto', substitutoId:'700003', de:'2026-12-02'});
-  assert.equal(s.status, 200);
-  assert.match(s.avisos.join(' '), /Outro Gestor Fictício não consegue aprovar pela tela: precisa de acesso pcp com senha ligado à ficha/, 'quem não tem conta ligada à ficha é avisado (texto da revisão da onda pessoas, P2)');
+  // S1 da auditoria de 12/10/2026: o substituto sem acesso pcp com senha ligado à ficha é recusado (antes era só aviso).
+  const recusado = await gravar(e, {operacao:'substituto', substitutoId:'700003', de:'2026-12-02'});
+  assert.equal(recusado.status, 400);
+  assert.match(recusado.error, /Outro Gestor Fictício não pode ser o substituto: o substituto precisa aprovar pela tela/);
+  assert.equal(e.db.pcp_registros.filter(r => r.colecao === 'comissao_aprovador').length, 1, 'nada foi gravado');
+  const s = await gravar(e, {operacao:'substituto', substitutoId:'700002', de:'2026-12-02'});
+  assert.equal(s.status, 200, JSON.stringify(s));
+  assert.deepEqual(s.avisos, []);
   const l = await e.call({action:'comissaoAprovadorLer'}, TITULAR);
   assert.equal(l.status, 200);
-  assert.equal(l.vigente.modo, 'substituto'); assert.equal(l.config.substituto.id, '700003');
+  assert.equal(l.vigente.modo, 'substituto'); assert.equal(l.config.substituto.id, '700002');
   assert.deepEqual(l.diario.map(d => d.operacao), ['substituto', 'titular']);
   assert.equal(l.diario[1].por, 'Admin Fictício'); assert.match(l.diario[0].motivo, /quinze letras/);
   // Encerrar: o evento novo, nada se apaga.
@@ -129,15 +139,21 @@ test('com titular designado: outro pcp é recusado; o titular aprova e o demonst
   assert.equal(ok.revisao.autor.como, 'titular'); assert.equal(ok.revisao.autor.porId, '700001');
 });
 
-test('substituto vigente: o titular é recusado; o substituto (papel operação) lê e aprova; a montagem não', async () => {
+test('substituto vigente (D-017): o titular e o substituto aprovam; a montagem não', async () => {
+  // O caso ruim (D-014 antiga): o titular era recusado enquanto o substituto valia.
+  const y = await comPrevia();
+  await gravar(y.e, {operacao:'titular', titularId:'700001'});
+  await gravar(y.e, {operacao:'substituto', substitutoId:'700002', de:'2026-12-01', ate:'2026-12-10'});
+  const lt = await y.e.call({action:'performanceComissaoListar', ...NOV}, TITULAR);
+  assert.equal(lt.aprovador.podeAprovar, true); assert.equal(lt.aprovador.como, 'titular');
+  const t = await aprovar(y, TITULAR);
+  assert.equal(t.ok, true, JSON.stringify(t)); assert.equal(t.revisao.autor.como, 'titular'); assert.equal(t.revisao.autor.porId, '700001');
   const x = await comPrevia();
   await gravar(x.e, {operacao:'titular', titularId:'700001'});
   await gravar(x.e, {operacao:'substituto', substitutoId:'700002', de:'2026-12-01', ate:'2026-12-10'});
-  const t = await aprovar(x, TITULAR);
-  assert.equal(t.status, 403); assert.match(t.error, /quem aprova a comissão é ele, não o titular/);
   assert.equal((await aprovar(x, MONTAGEM)).status, 403);
+  assert.equal((await aprovar(x, OUTRO_PCP)).status, 403, 'outro pcp não aprova');
   assert.equal((await x.e.call({action:'performanceComissaoListar', ...NOV}, MONTAGEM)).status, 403);
-  assert.equal((await x.e.call({action:'performanceComissaoNova', ...NOV, compensarId:'x', anterior:x.previa.id, motivo:'Fictício', requestId:'nova-subst-0001'}, SUBST)).status, 403, 'o substituto só lê e aprova');
   const lista = await x.e.call({action:'performanceComissaoListar', ...NOV}, SUBST);
   assert.equal(lista.status, 200); assert.equal(lista.aprovador.podeAprovar, true); assert.equal(lista.aprovador.como, 'substituto');
   const ok = await aprovar(x, SUBST);
@@ -176,10 +192,14 @@ test('tela: a seção de Configurações diz quem aprova hoje; só o admin tem o
     vigente:{modo:'substituto', id:'700002', nome:'Substituta Fictícia', titularId:'700001', ate:'2026-12-10'}, diario:[{em:'2026-12-01T10:00:00Z', operacao:'substituto', motivo:'Férias fictícias do titular', por:'Admin Fictício', substitutoId:'700002', substitutoNome:'Substituta Fictícia', de:'2026-12-01', ate:'2026-12-10'}]};
   ctx.__d = dados; vm.runInContext('comissaoAprovadorDados={carregando:false,dados:__d,erro:""}', ctx);
   const pcp = ctx.comissaoAprovadorSecaoHTML();
-  assert.match(pcp, /Quem aprova hoje: Substituta Fictícia \(cadastro 700002\), substituto de Titular Fictício \(cadastro 700001\), até 10\/12\/2026\. O admin também aprova\./);
+  assert.match(pcp, /Quem aprova hoje: Titular Fictício \(cadastro 700001\), titular, e Substituta Fictícia \(cadastro 700002\), substituto até 10\/12\/2026\. Os dois aprovam\. O admin também aprova\./);
   assert.doesNotMatch(pcp, /data-aprov-op/, 'o pcp não designa');
   ctx.STATE.user.papel = 'admin';
+  ctx.__d.aprovamPelaTela = ['700001'];
   const adm = ctx.comissaoAprovadorSecaoHTML();
+  // S1: na lista do substituto, quem não aprova pela tela vem desligado.
+  assert.match(adm, /data-aprov-op="substituto"[\s\S]*<option value="700002" disabled>Substituta Fictícia · 700002 · sem acesso pcp ligado/);
+  assert.match(adm, /reserva que fica configurado para ajudar o titular: entre o início e o fim, os dois aprovam/);
   for (const op of ['titular', 'substituto', 'encerrar']) assert.match(adm, new RegExp(`data-aprov-op="${op}"`));
   ctx.STATE.user.papel = 'operacao';
   assert.equal(ctx.comissaoAprovadorSecaoHTML(), '');
@@ -191,4 +211,22 @@ test('tela: a seção de Configurações diz quem aprova hoje; só o admin tem o
   assert.equal(vm.runInContext(`comissaoComoTxt({tipo:'aprovacao', autor:{}})`, ctx), '', 'a aprovação antiga não tem a marca');
   // A seção está em Configurações (admin e pcp).
   assert.match(ler('app.js'), /<summary>✅ Aprovação da comissão<\/summary>\$\{comissaoAprovadorSecaoHTML\(\)\}/);
+});
+
+/* S1 DA AUDITORIA DE 12/10/2026: o substituto sem papel de gestão lia o
+   demonstrativo com os R$ de todos pela porta (no fbc56b9, status 200). Agora
+   as ações da comissão exigem o crachá pcp ou admin também para ele. */
+test('S1: o substituto com crachá de outro papel não lê nem aprova (403), mesmo designado', async () => {
+  const x = await comPrevia();
+  // Designado direto no diário (como uma designação antiga, de antes da trava S1).
+  const ev = {id:'2026-12-01T00:00:00Z-s1', em:'2026-12-01T00:00:00Z', operacao:'substituto', motivo:'Designação antiga fictícia', titularId:'700001', substituto:{id:'700002', de:'2026-12-01'}};
+  x.e.db.pcp_registros.push({colecao:'comissao_aprovador', id:ev.id, apagado:false, atualizado_em:ev.em, registro:ev});
+  for (const papel of ['operacao', 'comercial', 'montagem']) {
+    const quem = {...SUBST_OPERACAO, papel};
+    const l = await x.e.call({action:'performanceComissaoListar', ...NOV}, quem);
+    assert.equal(l.status, 403, papel); assert.ok(!JSON.stringify(l).includes('8500'), 'nenhum R$ desce');
+    assert.equal((await aprovar(x, quem)).status, 403, papel);
+  }
+  const ok = await aprovar(x, SUBST);
+  assert.equal(ok.ok, true, JSON.stringify(ok)); assert.equal(ok.revisao.autor.como, 'substituto'); assert.equal(ok.revisao.autor.titularId, '700001');
 });

@@ -167,9 +167,9 @@ test('revisão pessoas: designar quem não tem acesso pcp com senha ligado à fi
   assert.equal(t.status, 200);
   assert.match(t.avisos.join(' '), /^Sem Acesso Fictício não consegue aprovar pela tela: precisa de acesso pcp com senha ligado à ficha do RH/);
   assert.deepEqual(t.gravado, {operacao:'titular', id:'700002', nome:'Sem Acesso Fictício'});
-  // Conta com papel operação: a porta aceitaria o substituto, mas a tela de aprovar não abre para ela.
+  // Conta com papel operação: a tela de aprovar não abre para ela; desde a S1 da auditoria de 12/10/2026, o substituto assim é recusado.
   const s = await gravar(e, {operacao:'substituto', substitutoId:'700003', de:'2026-12-02'});
-  assert.match(s.avisos.join(' '), /Operação Fictícia não consegue aprovar pela tela/);
+  assert.equal(s.status, 400); assert.match(s.error, /Operação Fictícia não pode ser o substituto: o substituto precisa aprovar pela tela/);
   // Com a conta pcp ligada: sem aviso.
   const ok = await gravar(e, {operacao:'titular', titularId:'700001'});
   assert.deepEqual(ok.avisos, []);
@@ -222,7 +222,7 @@ test('revisão pessoas: titular e substituto em blocos com título, frase, rótu
   const bloco = op => (new RegExp(`<form class="aprov-form" data-aprov-op="${op}">([\\s\\S]*?)</form>`).exec(html) || [])[1] || '';
   const t = bloco('titular'), s = bloco('substituto');
   assert.match(t, /^<h4>Titular<\/h4><p class="aprov-desc">Quem aprova a comissão todo mês\./);
-  assert.match(s, /^<h4>Substituto<\/h4><p class="aprov-desc">Aprova no lugar do titular entre o início e o fim/);
+  assert.match(s, /^<h4>Substituto<\/h4><p class="aprov-desc">Um reserva que fica configurado para ajudar o titular: entre o início e o fim, os dois aprovam\./);
   for (const b of [t, s]) {
     assert.match(b, /<label class="aprov-campo"><span>Pessoa<\/span><select name="pessoa">/, 'o rótulo em cima do campo');
     assert.match(b, /<label class="aprov-campo"><span>Motivo da mudança<\/span><input name="motivo"/, 'o motivo dentro do bloco do botão');
@@ -279,7 +279,9 @@ test('revisão pessoas: o acesso sem ID ligado não lê "é o titular designado"
     assert.doesNotMatch(q.erro, /titular designado|admin também aprova|ou o admin/);
     assert.match(X.quemAprova({papel:'pcp', porId:'700003'}, {titularId:'700001'}, '2026-12-02').erro, /^Você não aprova: quem aprova a comissão é o titular designado pela gestão\.$/);
     const sub = {titularId:'700001', substituto:{id:'700002', de:'2026-12-01'}};
-    assert.doesNotMatch(X.quemAprova({papel:'pcp', porId:'700001'}, sub, '2026-12-02').erro, /admin/);
+    // D-017: com o substituto valendo, o titular aprova; quem não é nenhum dos dois lê a frase sem o admin.
+    assert.equal(X.quemAprova({papel:'pcp', porId:'700001'}, sub, '2026-12-02').ok, true);
+    assert.doesNotMatch(X.quemAprova({papel:'pcp', porId:'700003'}, sub, '2026-12-02').erro, /admin/);
   }
   const ctx = telaAprovador('pcp', LEITURA);
   const linha = ctx.comissaoAprovadorLinhaHTML({modo:'titular', id:'700001', nome:'Titular Fictício', podeAprovar:false, motivo:C.quemAprova({papel:'pcp', porId:''}, {titularId:'700001'}, '2026-12-02').erro});
