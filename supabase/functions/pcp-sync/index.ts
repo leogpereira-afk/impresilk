@@ -670,6 +670,10 @@ function perfUltimoDiaDoMes(mes:string) {
 }
 const perfEhMesCalendario = (p:{de:string,ate:string}) => /^\d{4}-\d{2}-01$/.test(p.de) && p.ate===perfUltimoDiaDoMes(p.de.slice(0,7));
 const perfMesTxt = (mes:string) => PERF_MESES[Number(mes.slice(5,7))-1]+" de "+mes.slice(0,4);
+// O primeiro mês do programa (outubro de 2026, teste: D-005) e o mês seguinte, para a fita dos meses (item 10).
+const PERF_MES_INICIO_PROGRAMA = "2026-10";
+const PERF_MES_TESTE = "2026-10";
+function perfMesSeguinte(mes:string) { const [a,m]=mes.split("-").map(Number); return m===12?(a+1)+"-01":a+"-"+String(m+1).padStart(2,"0"); }
 function perfDiaSeguinte(d:string) { return new Date(Date.parse(d+"T12:00:00Z")+864e5).toISOString().slice(0,10); }
 /* OS PERÍODOS JÁ FECHADOS, um por período (a revisão conta uma vez), com a
    última revisão. Uma leitura só de colunas pequenas. Serve à trava do Fechar
@@ -1992,6 +1996,51 @@ Deno.serve(async (req: Request) => {
         const {error}=await sb.from("pcp_registros").insert(inserts);
         if(error){if(error.code==="23505")return resp({error:"Outra aprovação ou revisão foi gravada ao mesmo tempo. Atualize e concilie."},409);throw new Error(error.message);}
         return resp({ok:true,revisao:registro});
+      }
+
+      /* A FITA DOS MESES DO PROGRAMA (item 10 da fila de 11/10/2026): de
+         outubro de 2026 (o primeiro mês, de teste: D-005) até o mês de hoje,
+         o estado de cada um, para a gestão ver de uma vez o que falta fechar,
+         aprovar ou enviar. em_andamento: o mês não terminou; aberto: terminou
+         sem fechamento; fechado: tem fechamento e a última revisão da
+         comissão não é aprovação (ou não há); aprovado: a última revisão é
+         aprovação, ainda não exportada; enviado: a aprovação foi exportada
+         (o evento de exportação, M6). Só leitura, só colunas pequenas, só
+         admin e pcp. Outubro vem marcado como teste. */
+      case "performanceMeses": {
+        if(!cracha || ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha.papel)))return resp({error:"A fita dos meses é da gestão do PCP."},403);
+        const hojeMes=perfDia(new Date().toISOString());
+        const lerLeve=async(colecao:string,campos:string)=>{
+          const out:any[]=[];let cursor="";
+          for(let pagina=0;pagina<200;pagina++){
+            let q=sb.from("pcp_registros").select("id, "+campos).eq("colecao",colecao).eq("apagado",false).order("id").limit(500);
+            if(cursor)q=q.gt("id",cursor);
+            const {data,error}=await q;if(error)throw new Error(error.message);
+            if(!data||!data.length)return out;
+            for(const row of data as any[]){if(typeof row?.id!=="string"||row.id<=cursor)throw new Error("Leitura dos meses inconsistente. Atualize.");cursor=row.id;out.push(row);}
+          }
+          throw new Error("Leitura dos meses excedeu o limite.");
+        };
+        const [fechados,revisoesCom,exportacoes]=await Promise.all([perfPeriodosFechados(),
+          lerLeve("performance_comissao","de:registro->>de, ate:registro->>ate, revisao:registro->revisao, tipo:registro->>tipo, em:registro->>em, modo:registro->apuracao->config->>modo, compensacaoDe:registro->apuracao->>compensacaoDe"),
+          lerLeve("performance_comissao_exportacoes","de:registro->>de, ate:registro->>ate, revisaoId:registro->>revisaoId, em:registro->>em")]);
+        const meses:any[]=[];
+        for(let mes=PERF_MES_INICIO_PROGRAMA;mes<=hojeMes.slice(0,7)&&meses.length<240;mes=perfMesSeguinte(mes)){
+          const de=mes+"-01",ate=perfUltimoDiaDoMes(mes);
+          const f=fechados.find((x:any)=>x.de===de&&x.ate===ate)||null;
+          const livre=f?null:fechados.find((x:any)=>!(x.de>ate||x.ate<de))||null;
+          const rs=revisoesCom.filter((r:any)=>r.de===de&&r.ate===ate).sort((a:any,b:any)=>(Number(b.revisao)||0)-(Number(a.revisao)||0));
+          const ultima=rs[0]||null;
+          const aprovada=ultima&&ultima.tipo==="aprovacao"?ultima:null;
+          const envios=aprovada?exportacoes.filter((x:any)=>x.revisaoId===aprovada.id).sort((a:any,b:any)=>String(a.em).localeCompare(String(b.em))):[];
+          const estado=ate>=hojeMes?"em_andamento":!f?"aberto":!aprovada?"fechado":envios.length?"enviado":"aprovado";
+          meses.push({mes,de,ate,estado,teste:mes===PERF_MES_TESTE,
+            fechamento:f?{revisao:f.ultimaRevisao,em:f.ultimoEm}:null,
+            ...(livre?{periodoLivre:{de:livre.de,ate:livre.ate,revisao:livre.ultimaRevisao}}:{}),
+            comissao:ultima?{revisao:Number(ultima.revisao)||0,tipo:ultima.tipo==="aprovacao"?"aprovacao":"previa",modo:String(ultima.modo||""),compensacao:!!ultima.compensacaoDe,em:String(ultima.em||"")}:null,
+            enviado:envios.length?{vezes:envios.length,ultimaEm:String(envios[envios.length-1].em||"")}:null});
+        }
+        return resp({meses,hoje:hojeMes});
       }
 
       /* O DOCUMENTO OFICIAL DO MÊS FECHADO (item 8 da fila de 11/10/2026): o

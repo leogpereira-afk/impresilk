@@ -3384,6 +3384,14 @@ img.perf-logo{object-fit:cover}
 /* Base e fechamento: o quadro recolhível do fim, com o motivo do Fechar desligado. */
 .perf-base{margin-top:16px}
 .perf-base-fonte{margin:10px 0 6px;font-size:.84rem;line-height:1.5;color:#3d5566;overflow-wrap:anywhere}
+/* A fita dos meses do programa (onda comissão, item 10 da fila de 11/10/2026): um toque abre o mês; outubro, de teste, tracejado. */
+.perf-fita-meses ol{list-style:none;display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;padding:0}
+.perf-fita-mes .btn-sm{display:flex;flex-direction:column;align-items:flex-start;min-height:44px;text-align:left;white-space:normal;max-width:15rem}
+.perf-fita-mes .btn-sm span{font-size:.78rem;line-height:1.3}
+.perf-fita-teste .btn-sm{border-style:dashed}
+.perf-fita-mes .btn-sm[aria-current="true"]{outline:2px solid currentColor;outline-offset:1px}
+.perf-doc-oficial{border:1px solid #c9d6df;border-radius:8px;padding:10px 12px;margin:0 0 12px}
+.perf-doc-oficial dd{margin:0 0 6px;overflow-wrap:anywhere}
 .perf-base-acoes{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 14px;margin:12px 0 8px}
 .perf-base-acoes label{display:grid;gap:6px;font-size:.8rem;color:#3d5566;min-width:0;max-width:100%}
 /* U10 da revisão da onda fechamento: a 375 px o seletor de versão tinha 450 px e saía da tela. */

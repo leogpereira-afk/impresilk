@@ -186,3 +186,33 @@ test('item 6: o documento oficial do mês fechado e o do demonstrativo são regi
     assert.equal((await pedir({tipo:'fechamento',fechamentoId:f.id,requestId:'doc-itens-0006'},quem)).status,403);
   assert.equal(docs().length,3);
 });
+
+/* -------------------------------------------------------- item 7 (item 10 da fila) */
+test('item 7: a fita dos meses diz o estado de cada mês desde outubro (teste): aberto, fechado, aprovado e enviado',async()=>{
+  const DEZ={de:'2026-12-01',ate:'2026-12-31'};
+  const e=await servidor([osF('os1'),osF('os2',{finalizadaEm:'2026-12-10T15:00:00Z'})],{hoje:'2027-01-05T12:00:00Z'});
+  const fita=async()=>{const r=await e.call({action:'performanceMeses'},gestor);assert.equal(r.status,200,JSON.stringify(r));return Object.fromEntries(r.meses.map(m=>[m.mes,m]));};
+  let m=await fita();
+  assert.deepEqual(Object.keys(m),['2026-10','2026-11','2026-12','2027-01']);
+  assert.deepEqual(Object.values(m).map(x=>x.estado),['aberto','aberto','aberto','em_andamento']);
+  assert.equal(m['2026-10'].teste,true);assert.equal(m['2026-11'].teste,false);
+  const fn=await fechar(e);
+  const fd=await fechar(e,DEZ);
+  m=await fita();
+  assert.equal(m['2026-11'].estado,'fechado');assert.equal(m['2026-11'].fechamento.revisao,1);assert.equal(m['2026-12'].estado,'fechado');
+  const p=await previa(e,fn);
+  assert.equal((await fita())['2026-11'].estado,'fechado','a prévia ainda não é aprovação');
+  const a=await aprovar(e,p);
+  m=await fita();
+  assert.equal(m['2026-11'].estado,'aprovado');assert.deepEqual(m['2026-11'].comissao,{revisao:2,tipo:'aprovacao',modo:'efetivo',compensacao:false,em:a.revisao.em});
+  assert.equal((await exportar(e,a.revisao)).status,200);
+  m=await fita();
+  assert.equal(m['2026-11'].estado,'enviado');assert.equal(m['2026-11'].enviado.vezes,1);
+  // Uma prévia nova por cima da aprovação suspende a exportação: volta a "fechado".
+  await previa(e,fn,{n:2});
+  assert.equal((await fita())['2026-11'].estado,'fechado');
+  assert.equal(fd.de,DEZ.de);
+  // Só a gestão.
+  assert.equal((await e.call({action:'performanceMeses'},{papel:'montagem',nome:'Montagem fictícia',sub:'montagem',exp:EXP})).status,403);
+  assert.equal((await e.call({action:'performanceMeses'},'machine')).status,403);
+});

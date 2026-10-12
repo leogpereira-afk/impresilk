@@ -893,7 +893,7 @@ function perfFonteHTML(){
  const quadro=(titulo,corpo)=>`<details class="casa-quadro perf-base" data-quadro="perf-base"${aberto?' open':''}><summary>${titulo}</summary><div class="casa-quadro-corpo">${corpo}</div></details>`;
  if(!perfConsultaServidor())return quadro('🗂 Base da apuração',`<p class="perf-base-fonte">${esc(perfFonteTexto())}</p>`);
  const pode=perfPodeEditar(),bloqueio=pode?perfFechamentoBloqueio(f,pendentes):'';
- return quadro('🗂 Base e fechamento <small>atualizar, versão e fechar período</small>',`<p class="perf-base-fonte">${esc(perfFonteTexto())}</p>${perfAvisosHTML(false)}
+ return quadro('🗂 Base e fechamento <small>atualizar, versão e fechar período</small>',`${perfFitaMesesHTML()}<p class="perf-base-fonte">${esc(perfFonteTexto())}</p>${perfAvisosHTML(false)}
    <div class="perf-base-acoes"><button type="button" class="btn-ghost" id="perf-atualizar-fonte" ${perfRemoto.carregando?'disabled':''}>${perfRemoto.carregando?'Consultando servidor…':'Atualizar apuração'}</button><label>Versão da apuração <select id="perf-versao"><option value="">${perfRemoto.fechamentos.length?'Dados atuais (fora do fechamento)':'Dados atuais'}</option>${perfRemoto.fechamentos.map(r=>`<option value="${esc(r.id)}" ${r.id===perfRemoto.selecionado?'selected':''}>Revisão ${r.revisao}${perfSubstituta(r)?`, substituída pela ${perfSubstituta(r).revisao}`:''} · ${esc(perfDiaBR(String(r.fechadoEm||'').slice(0,10)))} · ${esc(r.fechadoPor)}</option>`).join('')}</select></label>${pode?`<button type="button" class="btn-ghost" id="perf-fechar" ${bloqueio?'disabled aria-describedby="perf-fechar-motivo"':''}>${perfRemoto.fechamentos.length?'Criar nova revisão':'Fechar período'}</button>`:''}</div>
    ${bloqueio?`<p class="perf-fechar-motivo" id="perf-fechar-motivo">${esc(bloqueio)}${/^Para fechar, falta/.test(bloqueio)&&perfFiltroDoBloqueio(f)?` <button type="button" class="btn-ghost btn-sm" data-perf-filtrar="${perfFiltroDoBloqueio(f)}">Abrir na aba Conferência</button>`:''}${/^O fechamento é só de mês inteiro/.test(bloqueio)&&f?.periodo?.de?` <button type="button" class="btn-ghost btn-sm" data-perf-mes-inteiro="${esc(String(f.periodo.de).slice(0,7))}">Escolher ${esc(perfMesTxt(String(f.periodo.de).slice(0,7)))} inteiro</button>`:''}</p>`:''}${f?.motivo?`<p class="perf-base-fonte">Motivo: ${esc(f.motivo)}</p>`:''}${pode&&f?.fechadoEm?'<p><button type="button" class="btn-ghost" id="perf-pdf-oficial">PDF oficial do fechamento</button> <small>Registra o documento no servidor, com o número e a impressão digital do fechamento.</small></p>':''}${pode&&typeof perfComissaoBotaoHTML==='function'?perfComissaoBotaoHTML():''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p>`);
 }
@@ -942,6 +942,42 @@ function perfCoberturaFechamentoHTML(fonte) {
  const nums=Array.isArray(k.aLancarNumeros)?k.aLancarNumeros:[];
  const fora=k.aLancar?`Ficam de fora ${k.aLancar} ${k.aLancar===1?'baixa do ERP a lançar':'baixas do ERP a lançar'}: ${dinheiroCasa((Number(k.aLancarCentavos)||0)/100)}${k.aLancarSemValor?` e ${k.aLancarSemValor} sem valor`:''}${nums.length?` (O.S. ${nums.slice(0,20).map(esc).join(', ')}${nums.length>20||k.aLancar>nums.length?' e outras':''})`:''}.`:'Nenhuma baixa do ERP fica de fora.';
  return `<div class="perf-fech-cob${k.baixa?' baixa':''}"><p><strong>${esc(k.entregas)} de ${esc(total)} entregas</strong> do mês entram no fechamento (${perfPctTxt(Number(k.entregas)||0,total)}) · <strong>${esc(k.pctValor)}% do valor</strong>. ${fora}</p>${k.baixa?`<div class="perf-fech-baixa" role="note"><p><b>Cobertura baixa: só ${esc(k.pctValor)}% do valor do mês está na base.</b> O ranking e a comissão deste fechamento saem sem o que fica de fora. Dá para fechar assim; para confirmar, escreva a frase abaixo.</p><label>Para confirmar, escreva <b>${PERF_FRASE_COBERTURA}</b> <input type="text" name="cobertura" autocomplete="off" spellcheck="false" required></label></div>`:''}</div>`;
+}
+/* A FITA DOS MESES DO PROGRAMA (item 10 da fila de 11/10/2026; ação
+   performanceMeses, só da gestão): cada mês desde outubro de 2026 com o
+   estado (em andamento, aberto, fechado, aprovado ou enviado), para ver de uma
+   vez o que falta fechar, aprovar ou enviar. Outubro é teste (D-005): a fita
+   diz "Mês de teste" e nunca "falta fechar", "falta aprovar" nem "falta
+   exportar" nele. Um toque abre o mês. Só leitura. */
+let perfMeses = {tentado:false,carregando:false,lista:null,erro:''};
+async function perfCarregarMeses(){
+ if(perfMeses.carregando||typeof STORE==='undefined'||typeof STORE.api!=='function')return;
+ perfMeses={...perfMeses,tentado:true,carregando:true,erro:''};
+ try{const r=await STORE.api({action:'performanceMeses'});if(!Array.isArray(r?.meses))throw new Error(r?.error||'Resposta sem os meses.');perfMeses={tentado:true,carregando:false,lista:r.meses,erro:''};}
+ catch(e){perfMeses={tentado:true,carregando:false,lista:null,erro:perfErroTxt(e)};}
+ if(typeof renderPerformanceCasa==='function')renderPerformanceCasa();
+}
+// Depois de fechar, aprovar ou exportar, a fita é lida de novo.
+function perfMesesInvalidar(){perfMeses={...perfMeses,tentado:false};}
+const PERF_MES_CURTO = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+function perfFitaEstadoTxt(m){
+ const teste=!!m.teste;
+ if(m.estado==='em_andamento')return teste?'Mês de teste, em andamento':'Em andamento';
+ if(m.estado==='aberto')return teste?'Mês de teste, sem fechamento':'Aberto: falta fechar';
+ if(m.estado==='fechado')return teste?`Mês de teste, fechado (revisão ${m.fechamento?.revisao||1})`:`Fechado (revisão ${m.fechamento?.revisao||1}): falta aprovar a comissão`;
+ const modoTeste=m.comissao&&m.comissao.modo!=='efetivo';
+ if(m.estado==='aprovado')return teste||modoTeste?`${teste?'Mês de teste, a':'A'}provado em teste (sem pagamento)`:`Aprovado${m.comissao?.compensacao?' (compensação)':''}: falta exportar`;
+ if(m.estado==='enviado')return `Enviado: exportado ${m.enviado?.vezes===1?'1 vez':(m.enviado?.vezes||1)+' vezes'}${teste?' (mês de teste)':''}`;
+ return '';
+}
+function perfFitaMesesHTML(){
+ if(!perfConsultaServidor()||!perfPodeEditar())return '';
+ if(perfMeses.erro)return `<p class="perf-aviso neutro">Fita dos meses indisponível (${esc(perfMeses.erro.replace(/[.!?]$/,''))}).</p>`;
+ if(!Array.isArray(perfMeses.lista))return '<p class="perf-aviso neutro">Consultando os meses do programa…</p>';
+ const atual=periodoOuMes('_fPerf');
+ return `<nav class="perf-fita-meses" aria-label="Meses do programa"><p class="metricas-nota">Meses do programa: o que falta fechar, aprovar ou enviar. Toque num mês para abri-lo.</p><ol>${perfMeses.lista.map(m=>{
+   const [a,mm]=String(m.mes).split('-');const aqui=atual&&atual.de===m.de&&atual.ate===m.ate;
+   return `<li class="perf-fita-mes perf-fita-${esc(m.estado)}${m.teste?' perf-fita-teste':''}"><button type="button" class="btn-ghost btn-sm" data-perf-abrir-mes="${esc(m.mes)}"${aqui?' aria-current="true"':''}><b>${esc(PERF_MES_CURTO[Number(mm)-1]||mm)}/${esc(String(a).slice(2))}</b> <span>${esc(perfFitaEstadoTxt(m))}</span></button></li>`;}).join('')}</ol></nav>`;
 }
 /* O PDF OFICIAL DO MÊS FECHADO (item 8 da fila de 11/10/2026): só sai com o
    documento registrado no servidor (performanceDocumento), com o número do
@@ -1022,13 +1058,15 @@ function perfWireFonte(el){
          return;
        }
        if(!r?.ok||!r.fechamento)throw new Error(r?.error || 'Não foi possível confirmar o fechamento.');
-       d.close();perfFechados={...perfFechados,tentado:false};await perfCarregarFonte();if(perfRemoto.chave===fonte.periodo.de+'|'+fonte.periodo.ate){perfRemoto.selecionado=r.fechamento.id;perfRemoto.escolhido=false;renderPerformanceCasa();}toast('Fechamento preservado no servidor.','success');
+       d.close();perfFechados={...perfFechados,tentado:false};perfMesesInvalidar();await perfCarregarFonte();if(perfRemoto.chave===fonte.periodo.de+'|'+fonte.periodo.ate){perfRemoto.selecionado=r.fechamento.id;perfRemoto.escolhido=false;renderPerformanceCasa();}toast('Fechamento preservado no servidor.','success');
      }catch(e){d.querySelector('#perf-fechar-erro').textContent=e.message;}finally{btn.disabled=false;}
    };
  };
  if(typeof STORE.api==='function' && perfConsultaServidor() && (perfRemoto.chave!==perfChave() || !perfRemoto.tentado))void perfCarregarFonte();
  // Os períodos fechados valem para todos os papéis (U1): o selo do mês e o Modo TV dependem deles.
  if(typeof STORE.api==='function' && !perfFechados.tentado && !perfFechados.carregando)void perfCarregarFechados();
+ // A fita dos meses (item 10), só da gestão.
+ if(typeof STORE.api==='function' && perfConsultaServidor() && perfPodeEditar() && !perfMeses.tentado && !perfMeses.carregando)void perfCarregarMeses();
 }
 
 // Emblemas de antes das equipes fixas: continuam aceitos e exibidos na equipe antiga.

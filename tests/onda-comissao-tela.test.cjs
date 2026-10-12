@@ -127,3 +127,23 @@ test('item 6 na tela: o PDF do demonstrativo da comissão diz a revisão, a impr
   assert.match(impressos[0].html,new RegExp('r'.repeat(64)));
   assert.match(impressos[0].html,/Comissão apurada/,'o demonstrativo vem junto');
 });
+
+/* ------------------------------------------------------------------ item 7 */
+test('item 7 na tela: a fita diz o que falta em cada mês e nunca empurra outubro, que é teste',()=>{
+  const c=tela({papel:'pcp'});
+  c.podeEditar=()=>true;
+  const mes=(m,estado,extra={})=>({mes:m,de:m+'-01',ate:m+'-28',estado,teste:m==='2026-10',fechamento:{revisao:1},comissao:{modo:'efetivo'},enviado:{vezes:1},...extra});
+  c.__l=[mes('2026-10','aberto'),mes('2026-11','fechado'),mes('2026-12','aprovado'),mes('2027-01','enviado'),mes('2027-02','em_andamento')];
+  c.run('perfMeses={tentado:true,carregando:false,lista:__l,erro:""}');
+  const html=c.run('perfFitaMesesHTML()');
+  assert.match(html,/<b>out\/26<\/b> <span>Mês de teste, sem fechamento<\/span>/);
+  assert.match(html,/<b>nov\/26<\/b> <span>Fechado \(revisão 1\): falta aprovar a comissão<\/span>/);
+  assert.match(html,/<b>dez\/26<\/b> <span>Aprovado: falta exportar<\/span>/);
+  assert.match(html,/<b>jan\/27<\/b> <span>Enviado: exportado 1 vez<\/span>/);
+  assert.match(html,/data-perf-abrir-mes="2026-11"/);
+  for(const estado of ['aberto','fechado','aprovado','enviado','em_andamento'])
+    assert.doesNotMatch(c.run(`perfFitaEstadoTxt(${JSON.stringify(mes('2026-10',estado,{comissao:{modo:'teste'}}))})`),/falta/,'outubro: '+estado);
+  // Quem não é gestão não vê a fita.
+  const m=tela({papel:'montagem'});m.run('perfMeses={tentado:true,carregando:false,lista:[],erro:""}');
+  assert.equal(m.run('perfFitaMesesHTML()'),'');
+});
