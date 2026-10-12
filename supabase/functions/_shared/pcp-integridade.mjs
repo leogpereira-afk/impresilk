@@ -1647,12 +1647,20 @@ export function idDaGestao(login, pessoas) {
    dela (ID repetido, sem ficha, quem saiu, ou dois IDs para o mesmo login),
    fica SEM ID: cair no apelido poderia dar outra pessoa. Sem a conta ligada
    na Central, a régua de sempre (idDaGestao: o login é o apelido de uma
-   ficha só). `contas`: linhas {usuario, id_pessoa, ativo, tipo}. */
-export function idDaConta(login, contas, pessoas) {
+   ficha só). `contas`: linhas {usuario, id_pessoa, ativo, tipo, valido_ate}.
+   A CONTA VENCIDA (onda acabamento, da verificação da v170): valido_ate
+   (data) antes de hoje em São Paulo. Se todas as contas ativas do login na
+   Central estão vencidas, não há ID nenhum, nem pelo apelido (a conta não
+   vale mais; a comissão também não a conta como quem aprova). Sem validade,
+   ou válida até hoje, como antes. */
+export function idDaConta(login, contas, pessoas, agora = Date.now()) {
   const ap = normPessoa(login);
   if (!ap) return '';
-  const ligadas = (Array.isArray(contas) ? contas : []).filter(c => c && c.ativo !== false && String(c.tipo || 'pessoa') !== 'funcao'
-    && normPessoa(c.usuario) === ap && ehIdPessoa(c.id_pessoa));
+  const hoje = ENTREGA_ITEM.diaSP(agora) || '';
+  const vigente = c => { const v = String(c?.valido_ate ?? '').slice(0, 10); return !/^\d{4}-\d{2}-\d{2}$/.test(v) || !hoje || v >= hoje; };
+  const doLogin = (Array.isArray(contas) ? contas : []).filter(c => c && c.ativo !== false && String(c.tipo || 'pessoa') !== 'funcao' && normPessoa(c.usuario) === ap);
+  if (doLogin.length && !doLogin.some(vigente)) return '';
+  const ligadas = doLogin.filter(c => vigente(c) && ehIdPessoa(c.id_pessoa));
   if (!ligadas.length) return idDaGestao(login, pessoas);
   const ids = [...new Set(ligadas.map(c => String(c.id_pessoa).trim()))];
   if (ids.length !== 1) return '';

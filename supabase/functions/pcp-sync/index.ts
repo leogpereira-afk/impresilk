@@ -649,12 +649,12 @@ async function comissaoAprovadorAtual(): Promise<any | null> {
   return ultimo && /^\d{6}$/.test(String(ultimo.titularId || "")) ? { titularId: ultimo.titularId, substituto: ultimo.substituto || null, em: ultimo.em } : null;
 }
 /* AS CONTAS DA CENTRAL DE ACESSOS (acesso_conta): só o login, o ID da pessoa
-   ligada, se está ativa e o tipo. Uma leitura por minuto. Quem é a conta em
+   ligada, se está ativa, o tipo e até quando vale (valido_ate, onda acabamento). Uma leitura por minuto. Quem é a conta em
    ID mora em idDaConta (_shared/pcp-integridade.mjs). */
 let _contasAcesso: { ate: number; contas: any[] } | null = null;
 async function contasAcesso(): Promise<any[]> {
   if (_contasAcesso && _contasAcesso.ate > Date.now()) return _contasAcesso.contas;
-  const { data, error } = await sb.from("acesso_conta").select("usuario, id_pessoa, ativo, tipo");
+  const { data, error } = await sb.from("acesso_conta").select("usuario, id_pessoa, ativo, tipo, valido_ate");
   if (error) throw new Error(error.message);
   const contas = (data ?? []) as any[];
   _contasAcesso = { ate: Date.now() + 60_000, contas };
@@ -1377,6 +1377,7 @@ async function rankingEquipeDoPeriodo(periodo:any, porValor=false) {
 // A edição e a exclusão que não passam nunca mais saem da fila do aparelho com estas frases (M18, onda acabamento).
 const MSG_EDICAO_EXCLUIDA = "Esta O.S. foi excluída pela gestão: a edição deste aparelho não foi gravada e saiu da fila. Ela ficou no Histórico da O.S.; para usá-la, a gestão recupera a O.S. com motivo e refaz a edição.";
 const MSG_NUMERO_EXCLUIDO = "Este número é de uma O.S. excluída pela gestão: a O.S. deste aparelho não foi gravada e saiu da fila. Ela ficou no Histórico da O.S. excluída; a gestão recupera a original com motivo e refaz a edição.";
+const AVISO_ID_SEM_RH = "O RH não respondeu agora: a gravação foi feita, mas o ID de quem gravou ficou em branco no histórico desta vez.";
 const MSG_EXCLUSAO_ANTIGA = "Exclusão antiga não enviada: ela saiu da fila e a O.S. continua valendo. Refaça pela ficha informando o motivo.";
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -1655,9 +1656,14 @@ Deno.serve(async (req: Request) => {
     if (!cracha) return (_autorAud = { nome: "Integração", login: "", papel: "maquina", porId: "" });
     const login = String(cracha.sub ?? "").trim(), nome = String(cracha.nome || login).trim();
     let porId = "";
+    /* O RH FORA DO AR NÃO CONFIRMA O ID (onda acabamento, da verificação da
+       v170): o ID assinado no crachá pode estar repetido no RH hoje, e sem a
+       leitura não dá para saber. O ID de quem gravou fica em branco nesta
+       gravação (o nome e o login ficam), e a gravação segue, com aviso. */
+    const semRH = () => { porId = ""; if (!ehMaquina && !avisosToque.includes(AVISO_ID_SEM_RH)) avisosToque.push(AVISO_ID_SEM_RH); };
     if (ehToqueNoNome) {
       try { porId = idDoCracha(quemToque(), await pessoasReq()); }
-      catch { porId = ehIdPessoa(cracha.id) ? String(cracha.id).trim() : ""; }
+      catch { semRH(); }
     } else {
       /* A conta da gestão: o ID assinado no crachá; senão a conta ligada na
          Central de Acessos; senão o apelido (idDaConta). ID repetido no RH
@@ -1666,7 +1672,7 @@ Deno.serve(async (req: Request) => {
         const regua = await pessoasReq();
         if (ehIdPessoa(cracha.id)) porId = regua.repetido(String(cracha.id).trim()) ? "" : String(cracha.id).trim();
         else { let central: any[] = []; try { central = await contasAcesso(); } catch { central = []; } porId = idDaConta(login, central, regua); }
-      } catch { porId = ehIdPessoa(cracha.id) ? String(cracha.id).trim() : ""; }
+      } catch { semRH(); }
     }
     return (_autorAud = { nome, login, papel: String(cracha.papel ?? ""), porId });
   };
