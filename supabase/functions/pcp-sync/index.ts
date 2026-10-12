@@ -705,9 +705,51 @@ async function idsQueAprovamPelaTela(regua: any): Promise<Set<string>> {
   }
   return ids;
 }
-async function pessoasDoPCP(config?: any) {
+/* `semAnteriores` (revisão da onda auditoria, itens 1 e 7): a apuração que o
+   fechamento sela (perfFonte) lê os IDs como estão gravados, como na v174:
+   o RH gravar o ID anterior depois do fechamento não muda o mês fechado (o
+   hash recalcula igual). O ID de hoje entra na comissão (comissaoNoIdDeHoje),
+   no ranking dos funcionários e na tela, sem reescrever o gravado. */
+async function pessoasDoPCP(config?: any, { semAnteriores = false }: { semAnteriores?: boolean } = {}) {
   const cfg = config ?? (await getCfg()) ?? {};
-  return resolverPessoas({ pessoas: await fichasRH(), vinculos: cfg.vinculosRH, lista: cfg.instaladores });
+  const r = resolverPessoas({ pessoas: await fichasRH(), vinculos: cfg.vinculosRH, lista: cfg.instaladores });
+  if (!semAnteriores) return r;
+  // O ID gravado fica o gravado (a chave e o ID); o nome e a pessoa continuam levando o ID anterior a quem ele é.
+  const cru = (v: any) => { const t = String(v ?? "").trim(); return ehIdPessoa(t) ? t : ""; };
+  return { ...r, idDe: (v: any) => cru(v) || r.idDe(v), chave: (v: any) => cru(v) || r.chave(v) };
+}
+/* A COMISSÃO NO ID DE HOJE (revisão da onda auditoria, item 1): o selo do
+   fechamento guarda os IDs como estavam (a divisão confirmada, a
+   participação antiga); a pessoa cujo ID o RH trocou (idPessoaAnteriores)
+   aparecia em duas linhas de pagamento, aprováveis e exportáveis. A prévia
+   lê o selo e a entrada da gestão levando cada ID anterior ao ID de hoje; o
+   selo e a entrada gravados não mudam. Duas chaves que viram a mesma pessoa
+   somam o percentual. */
+function comissaoNoIdDeHoje(fonte: any, entrada: any, regua: any) {
+  const hoje = (id: any) => /^\d{6}$/.test(String(id ?? "").trim()) ? (regua.idDe(String(id).trim()) || String(id).trim()) : id;
+  const registros = (Array.isArray(fonte?.registros) ? fonte.registros : []).map((r: any) => {
+    const juntos = new Map<string, any>();
+    for (const m of Array.isArray(r.membros) ? r.membros : []) {
+      const k = String(hoje(m?.chave) ?? "");
+      const ja = juntos.get(k);
+      if (ja) ja.percentual = Math.round((Number(ja.percentual) + Number(m.percentual)) * 100) / 100;
+      else juntos.set(k, { ...m, chave: k, ...(k !== String(m?.chave) && regua.pessoa(k)?.nome ? { nome: regua.pessoa(k).nome } : {}) });
+    }
+    return { ...r, membros: [...juntos.values()],
+      ...(Array.isArray(r.grupos) ? { grupos: r.grupos.map((g: any) => ({ ...g, membros: [...new Set((Array.isArray(g?.membros) ? g.membros : []).map((x: any) => String(hoje(x))))] })) } : {}) };
+  });
+  const e = JSON.parse(JSON.stringify(entrada && typeof entrada === "object" ? entrada : {}));
+  for (const ent of Object.values(e.entregas && typeof e.entregas === "object" ? e.entregas : {}) as any[]) {
+    if (!ent || typeof ent !== "object") continue;
+    for (const g of Array.isArray(ent.grupos) ? ent.grupos : []) {
+      if (!g || typeof g !== "object") continue;
+      if (g.montadorId != null) g.montadorId = hoje(g.montadorId);
+      for (const p of Array.isArray(g.partes) ? g.partes : []) if (p && typeof p === "object") p.pessoaId = hoje(p.pessoaId);
+    }
+    if (ent.identidades && typeof ent.identidades === "object") for (const k of Object.keys(ent.identidades)) ent.identidades[k] = hoje(ent.identidades[k]);
+    for (const p of Array.isArray(ent.interna?.partes) ? ent.interna.partes : []) if (p && typeof p === "object") p.pessoaId = hoje(p.pessoaId);
+  }
+  return { fonte: { ...fonte, registros }, entrada: e };
 }
 async function getCfgComVersao(): Promise<{ config: any; versao: string }> {
   const { data } = await sb.from("pcp_config_global").select("config, atualizado_em").eq("id", true).maybeSingle();
@@ -1026,7 +1068,7 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
   if(estrito && (cfgAntes.versao!==cfgDepois.versao || mudancas?.length))throw perfBaseMudou();
   const participacoes=cfgAntes.config?.performancePCP?.participacoes || [];
   // A equipe pela PESSOA (ID): a mesma régua do aparelho (OPERACAO.equipe).
-  const pessoasPerf=await pessoasDoPCP(cfgAntes.config);
+  const pessoasPerf=await pessoasDoPCP(cfgAntes.config,{semAnteriores:true});
   const equipesPerf:any[]=Array.isArray(cfgAntes.config?.performancePCP?.equipes)?cfgAntes.config.performancePCP.equipes:[];
   const num=(v:any)=>v==null||v===""?NaN:typeof v==="number"?v:Number(String(v).includes(",")?String(v).replace(/\./g,"").replace(",","."):v);
   /* A régua da volta só entra no conteúdo quando muda alguma entrega (como a
@@ -2251,9 +2293,10 @@ Deno.serve(async (req: Request) => {
           if(!fonte || fonte.id!==fechamentos[0]?.id)return resp({error:"Selecione a última revisão do fechamento operacional para criar a prévia."},409);
           entrada=body.entrada&&typeof body.entrada==="object"?body.entrada:{};
           if(JSON.stringify(entrada).length>250000)return resp({error:"Demonstrativo excede o tamanho permitido."},422);
-          apuracao=COMISSAO.apurar(fonte,entrada,{aprovacoes:todas});
           // Nenhum nome inferido: o ID precisa existir no RH e não ser ambíguo.
           const pessoas=await pessoasDoPCP();
+          const noIdDeHoje=comissaoNoIdDeHoje(fonte,entrada,pessoas);
+          apuracao=COMISSAO.apurar(noIdDeHoje.fonte,noIdDeHoje.entrada,{aprovacoes:todas});
           for(const p of apuracao.pessoas){const ficha=pessoas.pessoa(p.pessoaId);if(!ficha||ficha.semFicha){apuracao.pendencias.push(pessoas.repetido(p.pessoaId)?"O ID "+p.pessoaId+" está em dois cadastros do RH, de pessoas diferentes: não paga ninguém até o RH corrigir.":"Cadastro inexistente ou ambíguo: "+p.pessoaId);}else p.nome=ficha.nome;}
           for(const l of apuracao.linhas)for(const p of l.pagamentos)p.nome=apuracao.pessoas.find((x:any)=>x.pessoaId===p.pessoaId)?.nome||p.pessoaId;
           apuracao=COMISSAO.conciliar(apuracao,revisoes.find((r:any)=>r.tipo==="aprovacao"&&r.apuracao.config.modo===apuracao.config.modo));
