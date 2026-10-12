@@ -2709,6 +2709,35 @@ export function acertarMomentosToque(os, anterior) {
   }
   return avisos;
 }
+/* SAÍDA E RETORNO DA GESTÃO E DA MONTAGEM COM CONTA (C3 da auditoria de
+   12/10/2026). A gravação delas passa pela fila do aparelho, e o 400 sem
+   `definitivo` prendia a fila. Aqui não há o "retorno depois da meia-noite"
+   do celular: o campo que ESTA gravação mudou e que não fecha volta ao
+   gravado (com a hora digitada junto), com aviso; o resto grava. O dado que
+   já estava gravado assim (a gravação não mexeu nele) não trava nada.
+   Devolve os avisos; quem chama confere de novo (validarMomentos). */
+export function acertarMomentosGestao(os, anterior) {
+  const avisos = [];
+  const valido = v => /^\d{4}-\d{2}-\d{2}T/.test(String(v || '')) && Number.isFinite(Date.parse(String(v)));
+  const hora = { saidaEm: 'horaSaida', retornoEm: 'horaRetorno' };
+  const voltar = k => { os[k] = anterior?.[k] ?? ''; if (anterior && proprio(anterior, hora[k])) os[hora[k]] = anterior[hora[k]]; else delete os[hora[k]]; };
+  for (const k of ['saidaEm', 'retornoEm']) {
+    if (os[k] && !valido(os[k]) && os[k] !== anterior?.[k]) {
+      voltar(k);
+      avisos.push('Data de ' + (k === 'saidaEm' ? 'saída' : 'retorno') + ' inválida: não foi gravada.');
+    }
+  }
+  if (valido(os.saidaEm) && valido(os.retornoEm) && Date.parse(os.retornoEm) < Date.parse(os.saidaEm)) {
+    const mudouS = os.saidaEm !== anterior?.saidaEm, mudouR = os.retornoEm !== anterior?.retornoEm;
+    if (mudouR) voltar('retornoEm');
+    if (mudouS && valido(os.retornoEm) && Date.parse(os.retornoEm) < Date.parse(os.saidaEm)) voltar('saidaEm');
+    if (mudouR || mudouS) avisos.push('O retorno ficou antes da saída e não foi gravado. Confira a hora da saída e a do retorno; o resto da O.S. foi gravado.');
+  }
+  return avisos;
+}
+/* O momento gravado que já não fechava antes desta gravação (ela não mexeu na
+   saída nem no retorno) não é culpa dela: não trava (C3). */
+export const momentosComoGravados = (os, anterior) => !!anterior && String(os?.saidaEm ?? '') === String(anterior.saidaEm ?? '') && String(os?.retornoEm ?? '') === String(anterior.retornoEm ?? '');
 /* O QUE DESCE PARA QUEM ENTROU PELO NOME. O crachá de toque sai de um primeiro
    nome, sem senha: precisa de cliente, endereço e contato, não do documento
    nem do dinheiro de ninguém. Vale para TODA saída de O.S. (lista, resposta do

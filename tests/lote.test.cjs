@@ -387,18 +387,32 @@ test('O.S. mudada em outro aparelho: o 409 fica só naquela linha, sem travar as
   b.fechar();
 });
 
-test('recusa do servidor numa linha (400) não segura as outras e diz o motivo', async () => {
-  // A a2 tem retorno antes da saída: o servidor recusa toda gravação dela.
+test('recusa do servidor numa linha não segura as outras e diz o motivo', async () => {
+  // A a2 foi excluída pela gestão em outro aparelho enquanto o lote estava aberto: o servidor recusa a gravação dela (definitiva).
+  const b = await montar({os:[erp('a1'), erp('a2'), erp('a3')]});
+  await abrirPendencias(b);
+  await equipeAguia(b);
+  for (const id of ['a1', 'a2', 'a3']) await naoEConfirma(b, id);
+  b.e.db.pcp_registros.find(r => r.colecao === 'os' && r.id === 'a2').apagado = true;
+  const rel = await salvar(b);
+  assert.deepEqual(rel.itens.map(i => [i.id, i.estado]), [['a1', 'gravada'], ['a2', 'recusada'], ['a3', 'gravada']]);
+  assert.match(itemDe(rel, 'a2').motivo, /foi excluída pela gestão/);
+  assert.equal(noServidor(b.e, 'a3').entregaLancada.data, '2026-09-28');
+  assert.equal(noServidor(b.e, 'a2').entregaLancada, undefined);
+  b.fechar();
+});
+
+test('o retorno antes da saída que já estava gravado não trava mais a linha (C3 da auditoria de 12/10/2026)', async () => {
+  // Caso ruim (fbc56b9): a a2 com o dado antigo assim era recusada (400) em toda gravação, até alguém corrigir a hora.
   const ruim = erp('a2', {saidaEm:'2026-09-28T15:00:00.000Z', retornoEm:'2026-09-28T11:00:00.000Z'});
   const b = await montar({os:[erp('a1'), ruim, erp('a3')]});
   await abrirPendencias(b);
   await equipeAguia(b);
   for (const id of ['a1', 'a2', 'a3']) await naoEConfirma(b, id);
   const rel = await salvar(b);
-  assert.deepEqual(rel.itens.map(i => [i.id, i.estado]), [['a1', 'gravada'], ['a2', 'recusada'], ['a3', 'gravada']]);
-  assert.match(itemDe(rel, 'a2').motivo, /retorno não pode ser anterior à saída/);
-  assert.equal(noServidor(b.e, 'a3').entregaLancada.data, '2026-09-28');
-  assert.equal(noServidor(b.e, 'a2').entregaLancada, undefined);
+  assert.deepEqual(rel.itens.map(i => [i.id, i.estado]), [['a1', 'gravada'], ['a2', 'gravada'], ['a3', 'gravada']]);
+  assert.equal(noServidor(b.e, 'a2').entregaLancada.data, '2026-09-28');
+  assert.equal(noServidor(b.e, 'a2').retornoEm, '2026-09-28T11:00:00.000Z', 'o dado gravado não muda calado');
   b.fechar();
 });
 

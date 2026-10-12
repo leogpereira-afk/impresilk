@@ -62,8 +62,10 @@ test('espelho: carro liberado com a confirmação da véspera não prende a O.S.
  const r=await e.call({action:'upsert',os:{id:'1',rev:1,carroLiberado:true,carroLiberadoEm:'2026-09-19T08:00:00-03:00',fotosCheckinIds:['foto_1'],horaSaida:'08:00'}},toque);
  assert.equal(r.status,200);assert.match(r.avisos.join(' '),/carro não foi liberado/);
  const g=e.db.pcp_registros[0].registro;assert.equal(g.carroLiberado,false);assert.deepEqual(g.fotosCheckinIds,['foto_1']);assert.equal(g.horaSaida,'08:00');
- // A gestão continua recebendo a recusa.
- assert.equal((await e.call({action:'upsert',os:{...g,carroLiberado:true,carroLiberadoEm:'2026-09-19T08:00:00-03:00'}},{papel:'pcp'})).status,422);
+ // A gestão também não prende a fila (C3 da auditoria de 12/10/2026): a liberação fica de fora, com aviso; só a máquina recebe a recusa.
+ const rg=await e.call({action:'upsert',os:{...g,carroLiberado:true,carroLiberadoEm:'2026-09-19T08:00:00-03:00'}},{papel:'pcp'});
+ assert.equal(rg.status,200);assert.match(rg.avisos.join(' '),/O carro não foi liberado: confirme o cliente no dia da saída/);assert.equal(e.db.pcp_registros[0].registro.carroLiberado,false);
+ assert.equal((await e.call({action:'upsert',os:{...e.db.pcp_registros[0].registro,carroLiberado:true,carroLiberadoEm:'2026-09-19T08:00:00-03:00'}})).status,422);
 });
 test('espelho: serviço que vira a noite (saída 13h, retorno 9h) grava o retorno no dia seguinte',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[pronta()]});

@@ -35,11 +35,15 @@ test('setCfg PCP não amplia acesso e preserva usuários e segredos',async()=>{
  const r=await e.call({action:'setCfg',baseCfg:{agendaPCP:{},niveis:{}},cfg:{agendaPCP:{eventos:[{id:'e'}]},niveis:{pcp:{admin:true}}}},{papel:'pcp'});
  assert.equal(r.ok,true);assert.deepEqual(e.db.pcp_config_global[0].config.niveis,{admin:true});assert.equal(r.cfg.usuarios,undefined);assert.equal(r.cfg.funcionarios,undefined);
 });
-test('conclusão sem evidência é recusada no servidor, exceção recebe autor',async()=>{
+test('conclusão sem evidência não finaliza no servidor (aviso, sem prender a fila: C3 da auditoria de 12/10/2026), exceção recebe autor',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[row('1',{tipo:'externo'})]});
  const os={id:'1',rev:1,tipo:'externo',finalizadaEm:'2026-09-19T12:00:00Z'};
- assert.equal((await e.call({action:'upsert',os},{papel:'pcp'})).status,422);
- const r=await e.call({action:'upsert',os:{...os,justificativaConclusao:'Cliente não permite fotos internas.'}},{papel:'pcp',nome:'Gestor'});
+ const sem=await e.call({action:'upsert',os:{...os,obsPCP:'nota da gestão'}},{papel:'pcp'});
+ assert.equal(sem.status,200);assert.ok(!sem.os.finalizadaEm,'não finalizou');assert.equal(sem.os.obsPCP,'nota da gestão','o resto gravou');
+ assert.match(sem.avisos.join(' '),/^A O\.S\. não foi finalizada\. Para concluir: foto de depois/);
+ // A máquina continua recebendo a recusa.
+ assert.equal((await e.call({action:'upsert',os:{...os,rev:2}})).status,422);
+ const r=await e.call({action:'upsert',os:{...os,rev:2,justificativaConclusao:'Cliente não permite fotos internas.'}},{papel:'pcp',nome:'Gestor'});
  assert.equal(r.ok,true);assert.equal(r.os.excecaoConclusao.por,'Gestor');
 });
 test('importação ERP atualiza origem e não revive lápide nem pisa em escrita concorrente',async()=>{
@@ -54,12 +58,15 @@ test('importação ERP atualiza origem e não revive lápide nem pisa em escrita
 test('resposta ERP sem valor não vira valor zero',async()=>{
  const e=await edge('pcp-mubisys');assert.equal(e.run(`mapearOS({numero:'1'}).valorTotal`),null);assert.equal(e.run(`mapearOS({numero:'1',valor_total:0}).valorTotal`),0);
 });
-test('veículo só libera com confirmação no dia da saída registrada, inclusive envio offline',async()=>{
+test('veículo só libera com confirmação no dia da saída registrada, inclusive envio offline (sem confirmação: aviso e o resto grava, C3)',async()=>{
  const agenda={data:'2026-09-19',periodo:'Manhã'};
  const e=await edge('pcp-sync',{pcp_registros:[row('1',{instalacao:agenda,confirmacao:'Confirmado',confEm:'2026-09-18T09:00:00-03:00'})]});
  const os={id:'1',rev:1,instalacao:agenda,confirmacao:'Confirmado',carroLiberado:true,carroLiberadoEm:'2026-09-19T10:00:00-03:00',confEm:'2026-09-18T09:00:00-03:00'};
- assert.equal((await e.call({action:'upsert',os},{papel:'pcp'})).status,422);
- assert.equal((await e.call({action:'upsert',os:{...os,confEm:'2026-09-19T09:00:00-03:00'}},{papel:'pcp'})).ok,true);
+ const sem=await e.call({action:'upsert',os:{...os,obsPCP:'nota'}},{papel:'pcp'});
+ assert.equal(sem.status,200);assert.equal(sem.os.carroLiberado,false);assert.equal(sem.os.obsPCP,'nota');
+ assert.match(sem.avisos.join(' '),/O carro não foi liberado: confirme o cliente no dia da saída antes de liberar o veículo\. O resto da O\.S\. foi gravado\./);
+ assert.equal((await e.call({action:'upsert',os:{...os,rev:2}})).status,422,'a máquina recebe a recusa');
+ assert.equal((await e.call({action:'upsert',os:{...os,rev:2,confEm:'2026-09-19T09:00:00-03:00'}},{papel:'pcp'})).ok,true);
 });
 test('remarcação limpa confirmação anterior e liberação do veículo',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[row('1',{instalacao:{data:'2026-09-19'},confirmacao:'Confirmado',confEm:'2026-09-19T10:00:00Z',carroLiberado:true})]});

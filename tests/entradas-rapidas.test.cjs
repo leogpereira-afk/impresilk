@@ -150,9 +150,9 @@ test('F24: Cancelar o carro liberado em outro dia que não o da confirmação co
   assert.ok(b.toasts.some(([m]) => /^Liberação do carro da O\.S\. 9101 cancelada\. Para liberar de novo, toque em Liberar/.test(m)), 'o aviso de depois também diz (revisão da F24, B3)');
   await b.esvaziar();
   assert.equal(gravada(b.e).carroLiberado, false);
-  // A régua é a do servidor: a liberação de volta com outro dia é recusada lá.
+  // A régua é a do servidor: a liberação de volta com outro dia fica de fora lá (com aviso, sem prender a fila: C3 da auditoria de 12/10/2026).
   const r = await b.e.call({action: 'upsert', os: {...gravada(b.e), carroLiberado: true, carroLiberadoPor: 'Gestor Teste', carroLiberadoEm: ontem()}}, GESTOR);
-  assert.equal(r.status, 422);
+  assert.equal(r.status, 200);assert.equal(gravada(b.e).carroLiberado, false);assert.match(r.avisos.join(' '), /O carro não foi liberado/);
 });
 
 /* ───────────── 2. Desfazer: Confirmei, Liberar PCP, a guarda ───────────── */

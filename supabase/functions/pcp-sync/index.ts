@@ -1,7 +1,7 @@
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
-import { idDoCadastroRH, prazoParaConferir, protegerItensConferidos, mudancaValorConferido, dinheiroDaOSMudou, avisoDinheiroMesFechado, valorDaComissao, guardarOsOriginalId, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, guardarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffEdicaoRecusada, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { idDoCadastroRH, prazoParaConferir, protegerItensConferidos, mudancaValorConferido, dinheiroDaOSMudou, avisoDinheiroMesFechado, valorDaComissao, guardarOsOriginalId, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, guardarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, acertarMomentosGestao, momentosComoGravados, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffEdicaoRecusada, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, atrasoDaOS, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
@@ -2687,14 +2687,30 @@ Deno.serve(async (req: Request) => {
         /* Para o crachá de toque a conclusão sem prova não derruba o envio: a
            finalização fica de fora, com aviso, e check-in, fotos e itens gravam.
            O 422 prendia tudo na fila do celular. */
-        if (erroConclusao && ehToqueNoNome) {
+        /* C3 da auditoria de 12/10/2026: o mesmo para a gestão e a montagem com
+           conta. A gravação delas também passa pela fila do aparelho, e o 422
+           sem `definitivo` prendia a fila até a pessoa corrigir. A finalização
+           fica de fora, com aviso; o resto grava. Só a máquina recebe a recusa. */
+        if (erroConclusao && !ehMaquina) {
           delete os.finalizadaEm; delete os.finalizadoPor;
           avisosToque.push("A O.S. não foi finalizada. " + erroConclusao);
         } else if (erroConclusao) return resp({error:erroConclusao},422);
         if (os.finalizadaEm && !existing?.finalizadaEm && os.justificativaConclusao) {
           os.excecaoConclusao = {motivo:String(os.justificativaConclusao).trim(),por:cracha?.nome || cracha?.sub,em:new Date().toISOString()};
         }
-        const erroMomento = validarMomentos(os);
+        /* SAÍDA E RETORNO (C3 da auditoria de 12/10/2026): o retorno antes da
+           saída, ou a data inválida, da gestão e da montagem com conta era 400
+           sem `definitivo` e prendia a fila. Agora o campo que esta gravação
+           mudou e não fecha volta ao gravado, com aviso, e o resto grava
+           (acertarMomentosGestao); o dado antigo que já estava assim não trava.
+           Só a máquina recebe a recusa. */
+        let erroMomento = validarMomentos(os);
+        if (erroMomento && !ehMaquina) {
+          avisosToque.push(...acertarMomentosGestao(os, existing));
+          erroMomento = validarMomentos(os);
+          if (erroMomento && !momentosComoGravados(os, existing)) return resp({error:erroMomento,definitivo:true},400);
+          erroMomento = "";
+        }
         if (erroMomento) return resp({error:erroMomento},400);
         /* Local do check-in: só os quatro campos que as telas gravam, com número
            de verdade (a mesma régua do mesclarToqueNoNome). Qualquer outra forma
@@ -3176,9 +3192,12 @@ Deno.serve(async (req: Request) => {
             /* O espelho manda a O.S. inteira num envio só: recusar aqui prendia
                na fila, dali em diante, fotos, itens, retorno e finalização. Para
                o crachá de toque só a liberação fica de fora, com aviso. */
-            if (!ehToqueNoNome) return resp({error:"Confirme o cliente no dia da saída antes de liberar o veículo."},422);
+            /* C3 da auditoria de 12/10/2026: o mesmo para a gestão e a montagem
+               com conta (a recusa 422 sem `definitivo` prendia a fila delas). */
+            if (ehMaquina) return resp({error:"Confirme o cliente no dia da saída antes de liberar o veículo."},422);
             os.carroLiberado = !!existing?.carroLiberado; os.carroLiberadoEm = existing?.carroLiberadoEm || ''; os.carroLiberadoPor = existing?.carroLiberadoPor || '';
-            avisosToque.push("O carro não foi liberado: o cliente precisa ser confirmado no dia da saída. Fale com o PCP.");
+            avisosToque.push(ehToqueNoNome ? "O carro não foi liberado: o cliente precisa ser confirmado no dia da saída. Fale com o PCP."
+              : "O carro não foi liberado: confirme o cliente no dia da saída antes de liberar o veículo. O resto da O.S. foi gravado.");
           }
         }
         /* REABRIR FICA CARIMBADO NO SERVIDOR. Quem tira a finalização (o botão
