@@ -907,7 +907,7 @@ function perfFonteHTML(){
  const pode=perfPodeEditar(),bloqueio=pode?perfFechamentoBloqueio(f,pendentes):'';
  return quadro('🗂 Base e fechamento <small>atualizar, versão e fechar período</small>',`${perfFitaMesesHTML()}<p class="perf-base-fonte">${esc(perfFonteTexto())}</p>${perfAvisosHTML(false)}
    <div class="perf-base-acoes"><button type="button" class="btn-ghost" id="perf-atualizar-fonte" ${perfRemoto.carregando?'disabled':''}>${perfRemoto.carregando?'Consultando servidor…':'Atualizar apuração'}</button><label>Versão da apuração <select id="perf-versao"><option value="">${perfRemoto.fechamentos.length?'Dados atuais (fora do fechamento)':'Dados atuais'}</option>${perfRemoto.fechamentos.map(r=>`<option value="${esc(r.id)}" ${r.id===perfRemoto.selecionado?'selected':''}>Revisão ${r.revisao}${perfSubstituta(r)?`, substituída pela ${perfSubstituta(r).revisao}`:''} · ${esc(perfDiaBR(String(r.fechadoEm||'').slice(0,10)))} · ${esc(r.fechadoPor)}</option>`).join('')}</select></label>${pode?`<button type="button" class="btn-ghost" id="perf-fechar" ${bloqueio?'disabled aria-describedby="perf-fechar-motivo"':''}>${perfRemoto.fechamentos.length?'Criar nova revisão':'Fechar período'}</button>`:''}</div>
-   ${bloqueio?`<p class="perf-fechar-motivo" id="perf-fechar-motivo">${esc(bloqueio)}${/^Para fechar, falta/.test(bloqueio)&&perfFiltroDoBloqueio(f)?` <button type="button" class="btn-ghost btn-sm" data-perf-filtrar="${perfFiltroDoBloqueio(f)}">Abrir na aba Conferência</button>`:''}${/^O fechamento é só de mês inteiro/.test(bloqueio)&&f?.periodo?.de?` <button type="button" class="btn-ghost btn-sm" data-perf-mes-inteiro="${esc(String(f.periodo.de).slice(0,7))}">Escolher ${esc(perfMesTxt(String(f.periodo.de).slice(0,7)))} inteiro</button>`:''}</p>`:''}${f?.motivo?`<p class="perf-base-fonte">Motivo: ${esc(f.motivo)}</p>`:''}${pode&&f?.fechadoEm?'<p><button type="button" class="btn-ghost" id="perf-pdf-oficial">PDF oficial do fechamento</button> <small>Registra o documento no servidor, com o número e a impressão digital do fechamento.</small></p>':''}${pode&&typeof perfComissaoBotaoHTML==='function'?perfComissaoBotaoHTML():''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p>`);
+   ${bloqueio?`<p class="perf-fechar-motivo" id="perf-fechar-motivo">${esc(bloqueio)}${/^Para fechar, falta/.test(bloqueio)&&perfFiltroDoBloqueio(f)?` <button type="button" class="btn-ghost btn-sm" data-perf-filtrar="${perfFiltroDoBloqueio(f)}">Abrir na aba Conferência</button>`:''}${/^O fechamento é só de mês inteiro/.test(bloqueio)&&f?.periodo?.de?` <button type="button" class="btn-ghost btn-sm" data-perf-mes-inteiro="${esc(String(f.periodo.de).slice(0,7))}">Escolher ${esc(perfMesTxt(String(f.periodo.de).slice(0,7)))} inteiro</button>`:''}</p>`:''}${f?.motivo?`<p class="perf-base-fonte">Motivo: ${esc(f.motivo)}</p>`:''}${pode&&f?.fechadoEm?`<p><button type="button" class="btn-ghost" id="perf-pdf-oficial">PDF oficial do fechamento</button> <small>Registra o documento no servidor, com o número e a impressão digital do fechamento${perfDigitalCurta(f.hash)?`: <code class="perf-digital">${esc(perfDigitalCurta(f.hash))}</code> (a mesma do PDF)`:''}.</small></p>`:''}${pode&&typeof perfComissaoBotaoHTML==='function'?perfComissaoBotaoHTML():''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p>`);
 }
 async function perfCarregarFonte(){
  const chave=perfChave(),f=periodoOuMes('_fPerf');
@@ -976,12 +976,16 @@ function perfFitaEstadoTxt(m){
  const teste=!!m.teste;
  if(m.estado==='em_andamento')return teste?'Mês de teste, em andamento':'Em andamento';
  if(m.estado==='aberto')return teste?'Mês de teste, sem fechamento':'Aberto: falta fechar';
- if(m.estado==='fechado')return teste?`Mês de teste, fechado (revisão ${m.fechamento?.revisao||1})`:`Fechado (revisão ${m.fechamento?.revisao||1}): falta aprovar a comissão`;
+ if(m.estado==='fechado')return teste?`Mês de teste, fechado (revisão ${m.fechamento?.revisao||1})`:`Fechado (revisão ${m.fechamento?.revisao||1}): ${m.comissao?'falta aprovar a comissão':'falta montar a prévia da comissão'}`;
  const modoTeste=m.comissao&&m.comissao.modo!=='efetivo';
  if(m.estado==='aprovado')return teste||modoTeste?`${teste?'Mês de teste, a':'A'}provado em teste (sem pagamento)`:`Aprovado${m.comissao?.compensacao?' (compensação)':''}: falta exportar`;
  if(m.estado==='enviado')return `Enviado: exportado ${m.enviado?.vezes===1?'1 vez':(m.enviado?.vezes||1)+' vezes'}${teste?' (mês de teste)':''}`;
  return '';
 }
+/* Cada estado com a sua cor e a sua marca (revisão da onda comissão, 12/10/2026):
+   antes só outubro (tracejado) se distinguia. A marca vale para quem não
+   distingue a cor; o texto continua dizendo o que falta. */
+const PERF_FITA_MARCA = {em_andamento:'…',aberto:'!',fechado:'○',aprovado:'◐',enviado:'✓',teste:'◌'};
 function perfFitaMesesHTML(){
  if(!perfConsultaServidor()||!perfPodeEditar())return '';
  if(perfMeses.erro)return `<p class="perf-aviso neutro">Fita dos meses indisponível (${esc(perfMeses.erro.replace(/[.!?]$/,''))}).</p>`;
@@ -989,7 +993,7 @@ function perfFitaMesesHTML(){
  const atual=periodoOuMes('_fPerf');
  return `<nav class="perf-fita-meses" aria-label="Meses do programa"><p class="metricas-nota">Meses do programa: o que falta fechar, aprovar ou enviar. Toque num mês para abri-lo.</p><ol>${perfMeses.lista.map(m=>{
    const [a,mm]=String(m.mes).split('-');const aqui=atual&&atual.de===m.de&&atual.ate===m.ate;
-   return `<li class="perf-fita-mes perf-fita-${esc(m.estado)}${m.teste?' perf-fita-teste':''}"><button type="button" class="btn-ghost btn-sm" data-perf-abrir-mes="${esc(m.mes)}"${aqui?' aria-current="true"':''}><b>${esc(PERF_MES_CURTO[Number(mm)-1]||mm)}/${esc(String(a).slice(2))}</b> <span>${esc(perfFitaEstadoTxt(m))}</span></button></li>`;}).join('')}</ol></nav>`;
+   return `<li class="perf-fita-mes perf-fita-${esc(m.estado)}${m.teste?' perf-fita-teste':''}"><button type="button" class="btn-ghost btn-sm" data-perf-fita-mes="${esc(m.mes)}"${aqui?' aria-current="true"':''}><b><span class="perf-fita-marca" aria-hidden="true">${PERF_FITA_MARCA[m.teste?'teste':m.estado]||''}</span>${esc(PERF_MES_CURTO[Number(mm)-1]||mm)}/${esc(String(a).slice(2))}</b> <span>${esc(perfFitaEstadoTxt(m))}</span></button></li>`;}).join('')}</ol></nav>`;
 }
 /* O PDF OFICIAL DO MÊS FECHADO (item 8 da fila de 11/10/2026): só sai com o
    documento registrado no servidor (performanceDocumento), com o número do
@@ -998,16 +1002,22 @@ function perfFitaMesesHTML(){
    depois, a impressão digital não bate. Sem conexão, não há PDF oficial (o
    "PDF completo" continua para conferência). Só a gestão emite. */
 const perfQuemTxt = (nome, id) => esc(nome || '') + (/^\d{6}$/.test(String(id || '')) ? ' (cadastro ' + esc(id) + ')' : '');
+// O trecho curto da impressão digital (8 caracteres), o mesmo na tela e no PDF (comissao-ui.js, comissaoDigitalCurta).
+const perfDigitalCurta = h => typeof comissaoDigitalCurta === 'function' ? comissaoDigitalCurta(h) : String(h || '').trim().slice(0, 8);
 function perfDocOficialHTML(doc, f) {
  const quando=x=>x?new Date(x).toLocaleString('pt-BR'):'';
- const subst=perfSubstituidaTxt(f);
+ const subst=perfSubstituidaTxt(f), hash=doc.fechamentoHash||f.hash;
  return `<section class="perf-doc-oficial"><h2>Documento oficial nº ${esc(doc.id)}</h2><dl>
-  <dt>Fechamento</dt><dd>${esc(perfDiaBR(f.de||f.periodo?.de))} a ${esc(perfDiaBR(f.ate||f.periodo?.ate))} · revisão ${esc(f.revisao)}${subst?' · '+esc(subst):''} · id ${esc(f.id)}</dd>
-  <dt>Impressão digital do fechamento (sha256)</dt><dd>${esc(doc.fechamentoHash||f.hash)}</dd>
+  <dt>Fechamento</dt><dd>${esc(perfDiaBR(f.de||f.periodo?.de))} a ${esc(perfDiaBR(f.ate||f.periodo?.ate))} · revisão ${esc(f.revisao)}${subst?' · '+esc(subst):''}</dd>
+  <dt>Impressão digital do fechamento</dt><dd><code class="perf-digital">${esc(perfDigitalCurta(hash))}</code></dd>
   <dt>Fechado por</dt><dd>${perfQuemTxt(f.fechadoPor,f.fechadoPorId)} em ${esc(quando(f.fechadoEm))}</dd>
   <dt>Emitido por</dt><dd>${perfQuemTxt(doc.emitidoPor&&doc.emitidoPor.nome,doc.emitidoPor&&doc.emitidoPor.porId)} em ${esc(quando(doc.emitidoEm))}</dd></dl>
   ${doc.emitidosAntes?`<p>Este fechamento já teve ${esc(doc.emitidosAntes)} ${doc.emitidosAntes===1?'documento emitido':'documentos emitidos'} antes deste.</p>`:''}
-  <p>Para conferir: a impressão digital tem de ser a mesma do fechamento no PCP. Se o fechamento mudar, ela não bate.</p>${perfRetratoHTML(f)}</section>`;
+  <p>Para conferir: a impressão digital tem de ser a mesma que o PCP mostra em Base e fechamento, ao lado do botão PDF oficial do fechamento. Se o fechamento mudar, ela não bate.</p>${perfRetratoHTML(f)}</section>`;
+}
+// O rodapé técnico do PDF oficial, em letra pequena: o id interno e a impressão digital completa.
+function perfDocRodapeHTML(doc, f) {
+ return `<p class="perf-doc-rodape">Conferência técnica do documento ${esc(doc.id)}: fechamento ${esc(f.id)}, impressão digital ${esc(doc.fechamentoHash||f.hash||'')}.</p>`;
 }
 // O retrato no PDF oficial: as equipes e as pessoas como eram no fechamento (quem era freelancer naquela época).
 function perfRetratoHTML(f) {
@@ -1025,13 +1035,14 @@ async function perfPdfOficial(el) {
  const de=f.de||(f.periodo&&f.periodo.de), ate=f.ate||(f.periodo&&f.periodo.ate);
  let out=null;
  try{out=await STORE.api({action:'performanceDocumento',tipo:'fechamento',de,ate,fechamentoId:f.id,requestId:STORE.uuid()});}
- catch(e){return toast('O PDF oficial precisa de conexão: o documento é registrado no servidor. '+perfErroTxt(e),'error');}
+ catch(e){const t=perfErroTxt(e);return toast(/^Sem conexão/.test(t)?'O PDF oficial precisa de conexão: o documento é registrado no servidor. '+t:t,'error');}
  if(!out||!out.ok||!out.documento)return toast((out&&out.error)||'Não foi possível registrar o documento.','error');
  const copy=document.createElement('section');
  copy.innerHTML=perfDocOficialHTML(out.documento,f);
  const ws=el&&(el.querySelector('.perf-workspace')||el.querySelector('.perf-dash')||el.querySelector('.perf-report'));
  if(ws){const c=ws.cloneNode(true);c.querySelector('.perf-config')?.remove();c.querySelectorAll('[hidden]').forEach(x=>x.remove());copy.append(c);}
  if(!(el&&el.querySelector('#perf-recorte'))&&typeof performanceConferenciaHTML==='function')copy.insertAdjacentHTML('beforeend','<p class="metricas-nota">Conferência por entrega: todas as entregas do período, sem filtro.</p>'+performanceConferenciaHTML({embutida:true}));
+ copy.insertAdjacentHTML('beforeend',perfDocRodapeHTML(out.documento,f));
  imprimirAnalisePCP('Fechamento oficial · '+perfMesTxt(String(de).slice(0,7))+' · documento '+out.documento.id,copy,{de,ate},perfFonteTexto());
 }
 function perfWireFonte(el){
@@ -1043,6 +1054,13 @@ function perfWireFonte(el){
  // M8: do aviso do mês fechado para os dados atuais e de volta para a revisão que vale.
  todos('[data-perf-ver-atuais]').forEach(b=>b.onclick=()=>{perfRemoto.selecionado='';perfRemoto.escolhido=true;renderPerformanceCasa();});
  todos('[data-perf-ver-selo]').forEach(b=>b.onclick=()=>{if(!perfRemoto.fechamentos.length)return;perfRemoto.selecionado=perfRemoto.fechamentos[0].id;perfRemoto.escolhido=true;renderPerformanceCasa();});
+ /* A FITA DOS MESES leva ao mês em Base e fechamento (revisão da onda
+    comissão, 12/10/2026): o toque jogava para o topo de Rankings > Equipes e
+    tirava a gestão do quadro onde ela estava fechando e aprovando. Agora o
+    mês tocado abre com Base e fechamento aberto e à vista. */
+ todos('[data-perf-fita-mes]').forEach(b=>b.onclick=()=>{const mes=b.dataset.perfFitaMes;if(!/^\d{4}-\d{2}$/.test(mes||''))return;STATE._fPerf={de:mes+'-01',ate:perfUltimoDiaMes(mes)};if(!['equipe','relatorio'].includes(STATE._perfAba))STATE._perfAba='equipe';STATE._perfRolarBase=true;renderPerformanceCasa();});
+ // Rola de novo a cada desenho até a apuração do mês tocado chegar (o desenho do "Consultando" encolhe a página e perdia a rolagem).
+ if(STATE._perfRolarBase){const q=el.querySelector('[data-quadro="perf-base"]');if(q){q.open=true;if(typeof q.scrollIntoView==='function')q.scrollIntoView({block:'start'});if(perfRemoto.chave===perfChave()&&!perfRemoto.carregando)STATE._perfRolarBase=false;}}
  // Item 3: o período livre vira o mês inteiro; item 11: o aviso do mês sem fechamento abre aquele mês.
  todos('[data-perf-mes-inteiro],[data-perf-abrir-mes]').forEach(b=>b.onclick=()=>{const mes=b.dataset.perfMesInteiro||b.dataset.perfAbrirMes;if(!/^\d{4}-\d{2}$/.test(mes||''))return;STATE._fPerf={de:mes+'-01',ate:perfUltimoDiaMes(mes)};if(b.dataset.perfAbrirMes)STATE._perfAba='equipe';renderPerformanceCasa();});
  const fechar=el.querySelector('#perf-fechar');if(fechar)fechar.onclick=()=>{

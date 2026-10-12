@@ -3388,7 +3388,26 @@ img.perf-logo{object-fit:cover}
 .perf-fita-meses ol{list-style:none;display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;padding:0}
 .perf-fita-mes .btn-sm{display:flex;flex-direction:column;align-items:flex-start;min-height:44px;text-align:left;white-space:normal;max-width:15rem}
 .perf-fita-mes .btn-sm span{font-size:.78rem;line-height:1.3}
-.perf-fita-teste .btn-sm{border-style:dashed}
+/* Revisão da onda comissão (12/10/2026): cada estado com cor e marca próprias, não só outubro. */
+.perf-fita-mes .btn-sm{border-left-width:4px;border-left-style:solid}
+.perf-fita-marca{display:inline-block;min-width:1.1em;margin-right:4px;font-weight:800}
+.perf-fita-em_andamento .btn-sm{border-left-color:#9aa9b6}
+.perf-fita-aberto .btn-sm{border-left-color:#c2410c;background:#fff4ed}.perf-fita-aberto .perf-fita-marca{color:#c2410c}
+.perf-fita-fechado .btn-sm{border-left-color:#b45309;background:#fffbeb}.perf-fita-fechado .perf-fita-marca{color:#b45309}
+.perf-fita-aprovado .btn-sm{border-left-color:#1d4ed8;background:#eff6ff}.perf-fita-aprovado .perf-fita-marca{color:#1d4ed8}
+.perf-fita-enviado .btn-sm{border-left-color:#15803d;background:#f0fdf4}.perf-fita-enviado .perf-fita-marca{color:#15803d}
+.perf-fita-teste .btn-sm{border-style:dashed;border-left-color:#94a3b8;background:#f8fafc}.perf-fita-teste .perf-fita-marca{color:#64748b}
+.perf-base{scroll-margin-top:72px}
+/* O trecho curto da impressão digital, na tela e no PDF; o completo só no rodapé técnico, em letra pequena. */
+.perf-digital{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.95em;letter-spacing:.04em;background:#eef2f7;border-radius:4px;padding:0 4px;white-space:nowrap}
+.perf-doc-rodape{margin-top:14px;font-size:.72rem;line-height:1.4;color:#5d7283;overflow-wrap:anywhere}
+/* O demonstrativo da comissão: valor e título inteiros (o PDF quebrava "R$ 120.000,|00" e "EXTERN|A"). */
+.comissao-tabela .comissao-num{white-space:nowrap;text-align:right}
+.comissao-tabela tfoot th{text-align:left}.comissao-tabela tfoot th.comissao-num{text-align:right}
+.comissao-exportado{margin:6px 0 4px;padding:10px 12px;border:1px solid #c9d6df;border-radius:8px;background:#f8fafc}
+.comissao-exportado .comissao-exportacao p{margin:4px 0}.comissao-exportado ul{margin:4px 0;padding-left:1.3rem}
+.comissao-tabela td.comissao-num small{white-space:normal;text-align:left;min-width:9rem}
+@media print{#impressao-pcp .comissao-tabela th{overflow-wrap:normal!important;word-break:normal!important;hyphens:none}#impressao-pcp .comissao-tabela td.comissao-num,#impressao-pcp .comissao-tabela th.comissao-num{white-space:nowrap!important;overflow-wrap:normal!important;word-break:normal!important}#impressao-pcp .comissao-tabela td.comissao-num small{white-space:normal!important;overflow-wrap:normal!important;min-width:30mm}#impressao-pcp .comissao-tabela td{overflow-wrap:normal!important;word-break:normal!important}#impressao-pcp .comissao-tabela th{text-transform:none!important;letter-spacing:0!important}#impressao-pcp .comissao-tabela{font-size:9pt}#impressao-pcp .perf-doc-rodape{font-size:7pt}#impressao-pcp h4{break-after:avoid}}
 .perf-fita-mes .btn-sm[aria-current="true"]{outline:2px solid currentColor;outline-offset:1px}
 .perf-doc-oficial{border:1px solid #c9d6df;border-radius:8px;padding:10px 12px;margin:0 0 12px}
 .perf-doc-oficial dd{margin:0 0 6px;overflow-wrap:anywhere}

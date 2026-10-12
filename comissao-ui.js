@@ -10,6 +10,13 @@ const comissaoRotulo=s=>({sem_falha:'Sem falha comprovada',falha_comprovada:'Fal
 const comissaoData=s=>s?new Date(s.length===10?s+'T12:00:00':s).toLocaleString('pt-BR',s.length===10?{dateStyle:'short'}:{dateStyle:'short',timeStyle:'short'}):'';
 const comissaoDinheiro=c=>c==null?'Pendente':dinheiroCasa(c/100);
 // Quem fez a prévia, a aprovação ou a compensação, pelo ID de 6 dígitos (item 7 da fila de 11/10/2026); o registro antigo sem o ID mostra só o nome.
+/* O TRECHO CURTO DA IMPRESSÃO DIGITAL (revisão da onda comissão, 12/10/2026):
+   os PDFs pediam para conferir a impressão digital com o PCP, mas nenhuma tela
+   a mostrava, e o PDF trazia o hash de 64 caracteres. Agora a tela do
+   fechamento e a da comissão mostram os 8 primeiros caracteres, e o PDF usa o
+   mesmo trecho (o completo fica em letra pequena no rodapé). */
+function comissaoDigitalCurta(h){const t=String(h||'').trim();return t?t.slice(0,8):'';}
+const comissaoDigitalHTML=h=>comissaoDigitalCurta(h)?'<code class="perf-digital">'+esc(comissaoDigitalCurta(h))+'</code>':'';
 const comissaoIdTxt=id=>/^\d{6}$/.test(String(id||''))?' (cadastro '+esc(id)+')':'';
 /* A REVISÃO SUBSTITUÍDA (item 12 da fila de 11/10/2026): o seletor e o
    demonstrativo mostravam a revisão antiga sem dizer que foi trocada. */
@@ -21,25 +28,64 @@ function comissaoSubstituta(r, revisoes) {
    exportada. A coluna "Diferença a conciliar" do CSV é contra a última
    aprovação; o que se paga é a diferença contra a última exportada. */
 const comissaoQuem=a=>a?esc(a.nome||a.login||'')+comissaoIdTxt(a.porId):'';
-function comissaoExportacoesHTML(r, exportacoes) {
+// opcoes.noBloco: o evento que acabou de sair, cuja impressão digital já está no bloco logo abaixo dos botões (uma vez só).
+function comissaoExportacoesHTML(r, exportacoes, opcoes={}) {
   const xs=(Array.isArray(exportacoes)?exportacoes:[]).filter(x=>x&&x.revisaoId===r.id);
   const nunca=r.tipo==='aprovacao'&&r.apuracao?.anteriorAprovacao&&!(Array.isArray(exportacoes)?exportacoes:[]).some(x=>x&&x.revisaoId===r.apuracao.anteriorAprovacao);
   const aviso=nunca?`<p class="perf-aviso" role="note">A aprovação anterior deste período nunca foi exportada. A coluna "Diferença a conciliar" do CSV é contra ela: confira o pagamento pela diferença contra a última exportada, abaixo, e não por essa coluna.</p>`:'';
   if(!xs.length)return aviso+(r.tipo==='aprovacao'&&r.apuracao?.config?.modo==='efetivo'?'<p>Esta aprovação ainda não foi exportada.</p>':'');
-  return aviso+`<p><strong>Já exportada ${xs.length===1?'1 vez':xs.length+' vezes'}:</strong></p><ul>${xs.map(x=>`<li>${esc(comissaoData(x.em))} · ${comissaoQuem(x.autor)} · impressão digital do CSV ${esc(String(x.csvSha256||'').slice(0,12))}…</li>`).join('')}</ul>`;
+  return aviso+`<p><strong>Já exportada ${xs.length===1?'1 vez':xs.length+' vezes'}:</strong></p><ul>${xs.map(x=>`<li>${esc(comissaoData(x.em))} · ${comissaoQuem(x.autor)} · ${x.id&&x.id===opcoes.noBloco?'esta, no quadro abaixo dos botões':'impressão digital do CSV '+comissaoDigitalHTML(x.csvSha256)}</li>`).join('')}</ul>`;
 }
-function comissaoDiferencasHTML(ev) {
+/* A NOVA TENTATIVA DE EXPORTAR (revisão da onda comissão, 12/10/2026): a
+   resposta da exportação se perdeu e a gestão exportou de novo a mesma
+   aprovação. O evento novo tem diferença zero (contra a última exportada, que
+   é ela mesma), e a tela dizia "pague pela diferença acima" sobre zeros. Agora
+   diz que a aprovação já foi exportada, quando e por quem, e que esta não tem
+   diferença a pagar. */
+function comissaoDiferencasHTML(ev, exportacoes) {
   if(!ev)return '';
+  const cab=`<p><strong>Exportação registrada</strong> em ${esc(comissaoData(ev.em))} por ${comissaoQuem(ev.autor)}. Impressão digital do CSV: ${comissaoDigitalHTML(ev.csvSha256)}.</p>`;
+  if(ev.anterior&&ev.anterior.revisaoId&&ev.anterior.revisaoId===ev.revisaoId){
+    const antes=(Array.isArray(exportacoes)?exportacoes:[]).find(x=>x&&x.id===ev.anterior.id)||ev.anterior;
+    return `<div class="comissao-exportacao" role="status">${cab}<p class="perf-aviso" role="note">Esta aprovação já foi exportada em ${esc(comissaoData(antes.em))}${antes.autor?' por '+comissaoQuem(antes.autor):''}: confira se aquele CSV foi recebido; esta nova exportação não tem diferença a pagar.</p></div>`;
+  }
   const ds=(ev.diferencas||[]).filter(d=>d.diferencaCentavos);
   const base=ev.anterior?`contra a última exportada (revisão ${esc(ev.anterior.revisao)}, ${esc(comissaoData(ev.anterior.em))})`:'contra zero: é a primeira exportação deste período';
-  return `<div class="comissao-exportacao" role="status"><p><strong>Exportação registrada</strong> em ${esc(comissaoData(ev.em))} por ${comissaoQuem(ev.autor)}. Impressão digital do CSV: ${esc(ev.csvSha256)}.</p><p>Diferença por pessoa ${base}:</p>${ds.length?`<ul>${ds.map(d=>`<li>${esc(d.nome||d.pessoaId)}${comissaoIdTxt(d.pessoaId)} · ${esc(comissaoRotulo(d.tipo))} · ${comissaoDinheiro(d.anteriorCentavos)} → ${comissaoDinheiro(d.centavos)} · diferença ${comissaoDinheiro(d.diferencaCentavos)}</li>`).join('')}</ul>`:'<p>Nenhuma diferença: o que esta exportação traz já foi exportado.</p>'}${ev.anteriorNaoExportada?'<p class="perf-aviso">A aprovação anterior deste período nunca foi exportada: pague pela diferença acima, e não pela coluna "Diferença a conciliar" do CSV.</p>':''}</div>`;
+  return `<div class="comissao-exportacao" role="status">${cab}<p>Diferença por pessoa ${base}:</p>${ds.length?`<ul>${ds.map(d=>`<li>${esc(d.nome||d.pessoaId)}${comissaoIdTxt(d.pessoaId)} · ${esc(comissaoRotulo(d.tipo))} · ${comissaoDinheiro(d.anteriorCentavos)} → ${comissaoDinheiro(d.centavos)} · diferença ${comissaoDinheiro(d.diferencaCentavos)}</li>`).join('')}</ul>`:'<p>Nenhuma diferença: o que esta exportação traz já foi exportado.</p>'}${ev.anteriorNaoExportada&&ds.length?'<p class="perf-aviso">A aprovação anterior deste período nunca foi exportada: pague pela diferença acima, e não pela coluna "Diferença a conciliar" do CSV.</p>':''}</div>`;
 }
-function comissaoResumoHTML(r, revisoes, exportacoes) {
+/* RATEIOS, TOTAL POR PESSOA E DIFERENÇAS (revisão da onda comissão,
+   12/10/2026): é o papel que se lê para pagar. Cada pessoa com o ID de 6
+   dígitos ao lado do nome, o total de cada uma e as diferenças em tabela, com
+   os valores inteiros (sem quebrar "R$ 120.000,00" no meio) também no PDF. */
+const comissaoPessoaTxt=(nome,id)=>`${esc(nome||'')}${nome?'':esc(id||'')}${comissaoIdTxt(id)}`;
+function comissaoPessoasHTML(a, revisoes) {
+  const nomes=new Map();
+  for(const l of a.linhas||[])for(const p of l.pagamentos||[])if(p&&p.pessoaId&&p.nome&&!nomes.has(p.pessoaId))nomes.set(p.pessoaId,p.nome);
+  for(const p of [...(a.pessoas||[]),...(a.ajustes||[])])if(p&&p.pessoaId&&p.nome&&!nomes.has(p.pessoaId))nomes.set(p.pessoaId,p.nome);
+  const nomeDe=p=>p.nome||nomes.get(p.pessoaId)||'';
+  const num=v=>`<td class="comissao-num">${v}</td>`;
+  const tabela=(cab,linhas,rodape='')=>`<div class="casa-tabela-wrap"><table class="casa-tabela comissao-tabela"><thead><tr>${cab.map(([t,n])=>`<th${n?' class="comissao-num"':''}>${t}</th>`).join('')}</tr></thead><tbody>${linhas.join('')}</tbody>${rodape}</table></div>`;
+  const rateios=(a.linhas||[]).flatMap(l=>(l.pagamentos||[]).map(p=>`<tr><td>${esc(l.numero)}<small class="bloco">${esc(l.entregaId||'Integral')}</small></td><td>${comissaoPessoaTxt(nomeDe(p),p.pessoaId)}</td><td>${esc(comissaoRotulo(p.tipo))}</td>${num(esc((Number(p.cota)/100).toLocaleString('pt-BR'))+'%')}${num(comissaoDinheiro(p.centavos))}</tr>`));
+  const porPessoa=new Map();
+  for(const p of a.pessoas||[]){const x=porPessoa.get(p.pessoaId)||{pessoaId:p.pessoaId,nome:nomeDe(p),tipos:[],centavos:0};x.tipos.push(comissaoRotulo(p.tipo));x.centavos+=Number(p.centavos)||0;porPessoa.set(p.pessoaId,x);}
+  const totais=[...porPessoa.values()].sort((x,y)=>String(x.nome||x.pessoaId).localeCompare(String(y.nome||y.pessoaId),'pt-BR'));
+  const somaTotal=totais.reduce((t,x)=>t+x.centavos,0);
+  const ajustes=(a.ajustes||[]).slice().sort((x,y)=>String(nomeDe(x)||x.pessoaId).localeCompare(String(nomeDe(y)||y.pessoaId),'pt-BR'));
+  return `<h4>Rateios por pessoa e entrega</h4>${rateios.length?tabela([['O.S. / entrega'],['Pessoa'],['Parte'],['Cota da parcela',1],['Valor',1]],rateios):'<p>Nenhum rateio nesta revisão.</p>'}
+  <h4>Total por pessoa</h4>${totais.length?tabela([['Pessoa'],['Parte'],['Total',1]],totais.map(x=>`<tr><td>${comissaoPessoaTxt(x.nome,x.pessoaId)}</td><td>${esc([...new Set(x.tipos)].join(' e '))}</td>${num('<strong>'+comissaoDinheiro(x.centavos)+'</strong>')}</tr>`),`<tfoot><tr><th colspan="2">Total da revisão</th><th class="comissao-num">${comissaoDinheiro(somaTotal)}</th></tr></tfoot>`):'<p>Ninguém a receber nesta revisão.</p>'}
+  <h4>Diferenças para conciliação</h4><p>${a.anteriorAprovacao?'Comparação com a aprovação anterior'+(()=>{const ant=(Array.isArray(revisoes)?revisoes:[]).find(x=>x&&x.id===a.anteriorAprovacao);return ant?' (revisão '+esc(ant.revisao)+')':'';})()+'.':'Primeira aprovação: valor integral a conferir.'} Exportar não efetua pagamento.</p>${ajustes.length?tabela([['Pessoa'],['Parte'],['Antes',1],['Agora',1],['Diferença',1]],ajustes.map(p=>`<tr><td>${comissaoPessoaTxt(nomeDe(p),p.pessoaId)}</td><td>${esc(comissaoRotulo(p.tipo))}</td>${num(comissaoDinheiro(p.anteriorCentavos||0))}${num(comissaoDinheiro(p.centavos||0))}${num('<strong>'+comissaoDinheiro(p.diferencaCentavos)+'</strong>')}</tr>`)):''}`;
+}
+// Logo abaixo dos botões, depois de exportar: o arquivo, o aviso e o bloco da exportação, com o trecho curto da impressão digital uma vez só.
+function comissaoExportadoHTML(out, antes) {
+  const conf=comissaoConferenciaTxt(out&&out.conferencia);
+  return `<p>CSV baixado: <b>${esc(out&&out.arquivo||'')}</b>. Exportação para conferência: não realiza pagamento. Não importe de novo sem conciliação.${esc(conf)}</p>${out&&out.exportacao?comissaoDiferencasHTML(out.exportacao,antes):`<p>Impressão digital do CSV: ${comissaoDigitalHTML(out&&out.csvSha256)}.</p>`}`;
+}
+function comissaoResumoHTML(r, revisoes, exportacoes, opcoes={}) {
   if(!r)return '<p>Ainda não há revisão financeira neste período.</p>';
   const a=r.apuracao, subst=comissaoSubstituta(r,revisoes);
-  return `${subst?`<p class="perf-aviso comissao-substituida" role="note"><strong>Revisão ${esc(r.revisao)}, substituída pela ${esc(subst.revisao)}</strong> (${esc(comissaoRotulo(subst.tipo))} de ${esc(comissaoData(subst.em))}). Este demonstrativo é histórico; o que vale é a última revisão.</p>`:''}<h4>Revisão ${esc(r.revisao)}${subst?`, substituída pela ${esc(subst.revisao)}`:''} · ${r.tipo==='aprovacao'?'Aprovada pela gestão':'Prévia para revisão'} · ${a.config.modo==='efetivo'?'Programa efetivo':'Teste, sem exportação para pagamento'}</h4><p>${r.tipo==='aprovacao'?'Aprovada por ':a.compensacaoDe?'Compensação preparada por ':'Prévia de '}${esc(r.autor?.nome)}${comissaoIdTxt(r.autor?.porId)} · ${esc(comissaoData(r.em))} · ${esc(r.motivo)}</p>${a.compensacaoDe?'<p><strong>Compensação integral da aprovação anterior.</strong> O demonstrativo zera o saldo aprovado deste período e mostra diferenças negativas. Não executa devolução de dinheiro; exige conciliação no financeiro.</p>':''}<p>Comissão apurada: <strong>${comissaoDinheiro(a.totalCentavos)}</strong>${a.pendencias.length?' · total parcial, existem pendências':''}.</p>${a.pendencias.length?`<ul>${a.pendencias.map(p=>`<li>${esc(p)}</li>`).join('')}</ul>`:''}${Array.isArray(a.avisos)&&a.avisos.length?`<div class="perf-aviso comissao-avisos" role="note"><p><strong>Pendências de ajuste (não travam a aprovação):</strong></p><ul>${a.avisos.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></div>`:''}
-  <div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S. / entrega</th><th>Base líquida</th><th>Descontos</th><th>Decisão / pontos do programa</th><th>Comissão</th><th>Interna</th><th>Externa</th></tr></thead><tbody>${a.linhas.map(l=>`<tr><td>${esc(l.numero)} · ${esc(comissaoData(l.dia))}<small class="bloco">${esc(l.entregaId||'Integral')} · ${esc(l.origemValor||'')}</small></td><td>${comissaoDinheiro(l.baseLiquidaCentavos)}</td><td>${l.descontoCentavos==null?'':comissaoDinheiro(l.descontoCentavos)}<small class="bloco">${esc(l.desconto)}</small></td><td>${esc(comissaoRotulo(l.decisao))} · ${l.pontos==null?'pendente':esc(Number(l.pontos.toFixed(4)).toLocaleString('pt-BR'))}<small class="bloco">${l.pendencias.map(esc).join('; ')}</small></td>${l.decisao==='origem_a_definir'?'<td colspan="3">Pendente: não paga e não perde até a origem ser definida</td>':`<td>${comissaoDinheiro(l.comissaoCentavos)}</td><td>${comissaoDinheiro(l.internaCentavos)}</td><td>${comissaoDinheiro(l.externaCentavos)}</td>`}</tr>`).join('')}</tbody></table></div>
-  <h4>Rateios por pessoa e entrega</h4><ul>${a.linhas.flatMap(l=>l.pagamentos.map(p=>`<li>O.S. ${esc(l.numero)} · ${esc(l.entregaId||l.id)} · ${esc(p.nome||p.pessoaId)} · ${esc(comissaoRotulo(p.tipo))} · ${esc(p.cota/100)}% da parcela · ${comissaoDinheiro(p.centavos)}</li>`)).join('')}</ul><h4>Diferenças para conciliação</h4><p>${a.anteriorAprovacao?'Comparação com a aprovação anterior: ' + esc(a.anteriorAprovacao):'Primeira aprovação: valor integral a conferir.'} Exportar não efetua pagamento.</p><ul>${(a.ajustes||[]).map(p=>`<li>${esc(p.nome||p.pessoaId)} · ${esc(comissaoRotulo(p.tipo))} · diferença ${comissaoDinheiro(p.diferencaCentavos)}</li>`).join('')}</ul>${comissaoExportacoesHTML(r,exportacoes)}<h4>Reconhecimento: ${esc(comissaoRotulo(a.reconhecimento.situacao))}</h4><p>${esc(a.reconhecimento.aviso)}</p><dl>${Object.entries(a.reconhecimento.criterios).filter(([k])=>k!=='avaliacoes').map(([k,v])=>`<dt>${esc(comissaoRotulo(k))}</dt><dd>${esc(v)}</dd>`).join('')}</dl><ul>${(a.reconhecimento.equipes||[]).map(e=>`<li>${esc(e.nome)} · ${e.pendente?'pontos pendentes':esc(Number(e.pontos.toFixed(4)).toLocaleString('pt-BR'))+' O.S. equivalentes elegíveis'} · ${esc(comissaoRotulo(e.situacao))}${e.substituicao?' · houve substituição':''}${e.solo?' · composição solo':''}${e.empate?' · empate':''}<small class="bloco">${esc(e.justificativa)}</small></li>`).join('')}</ul>`;
+  return `${subst?`<p class="perf-aviso comissao-substituida" role="note"><strong>Revisão ${esc(r.revisao)}, substituída pela ${esc(subst.revisao)}</strong> (${esc(comissaoRotulo(subst.tipo))} de ${esc(comissaoData(subst.em))}). Este demonstrativo é histórico; o que vale é a última revisão.</p>`:''}<h4>Revisão ${esc(r.revisao)}${subst?`, substituída pela ${esc(subst.revisao)}`:''} · ${r.tipo==='aprovacao'?'Aprovada pela gestão':'Prévia para revisão'} · ${a.config.modo==='efetivo'?'Programa efetivo':'Teste, sem exportação para pagamento'}</h4><p>${r.tipo==='aprovacao'?'Aprovada por ':a.compensacaoDe?'Compensação preparada por ':'Prévia de '}${esc(r.autor?.nome)}${comissaoIdTxt(r.autor?.porId)} · ${esc(comissaoData(r.em))} · ${esc(r.motivo)}</p>${comissaoDigitalCurta(r.hash)?`<p>Impressão digital desta revisão: ${comissaoDigitalHTML(r.hash)}. É a mesma do PDF do demonstrativo.</p>`:''}${a.compensacaoDe?'<p><strong>Compensação integral da aprovação anterior.</strong> O demonstrativo zera o saldo aprovado deste período e mostra diferenças negativas. Não executa devolução de dinheiro; exige conciliação no financeiro.</p>':''}<p>Comissão apurada: <strong>${comissaoDinheiro(a.totalCentavos)}</strong>${a.pendencias.length?' · total parcial, existem pendências':''}.</p>${a.pendencias.length?`<ul>${a.pendencias.map(p=>`<li>${esc(p)}</li>`).join('')}</ul>`:''}${Array.isArray(a.avisos)&&a.avisos.length?`<div class="perf-aviso comissao-avisos" role="note"><p><strong>Pendências de ajuste (não travam a aprovação):</strong></p><ul>${a.avisos.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></div>`:''}
+  <div class="casa-tabela-wrap"><table class="casa-tabela comissao-tabela"><thead><tr><th>O.S. / entrega</th><th class="comissao-num">Base líquida</th><th class="comissao-num">Descontos</th><th>Decisão / pontos do programa</th><th class="comissao-num">Comissão</th><th class="comissao-num">Interna</th><th class="comissao-num">Externa</th></tr></thead><tbody>${a.linhas.map(l=>`<tr><td>${esc(l.numero)} · ${esc(comissaoData(l.dia))}<small class="bloco">${esc(l.entregaId||'Integral')} · ${esc(l.origemValor||'')}</small></td><td class="comissao-num">${comissaoDinheiro(l.baseLiquidaCentavos)}</td><td class="comissao-num">${l.descontoCentavos==null?'':comissaoDinheiro(l.descontoCentavos)}<small class="bloco">${esc(l.desconto)}</small></td><td>${esc(comissaoRotulo(l.decisao))} · ${l.pontos==null?'pendente':esc(Number(l.pontos.toFixed(4)).toLocaleString('pt-BR'))}<small class="bloco">${l.pendencias.map(esc).join('; ')}</small></td>${l.decisao==='origem_a_definir'?'<td colspan="3">Pendente: não paga e não perde até a origem ser definida</td>':`<td class="comissao-num">${comissaoDinheiro(l.comissaoCentavos)}</td><td class="comissao-num">${comissaoDinheiro(l.internaCentavos)}</td><td class="comissao-num">${comissaoDinheiro(l.externaCentavos)}</td>`}</tr>`).join('')}</tbody></table></div>
+  ${comissaoPessoasHTML(a,revisoes)}${comissaoExportacoesHTML(r,exportacoes,opcoes)}<h4>Reconhecimento: ${esc(comissaoRotulo(a.reconhecimento.situacao))}</h4><p>${esc(a.reconhecimento.aviso)}</p><dl>${Object.entries(a.reconhecimento.criterios).filter(([k])=>k!=='avaliacoes').map(([k,v])=>`<dt>${esc(comissaoRotulo(k))}</dt><dd>${esc(v)}</dd>`).join('')}</dl><ul>${(a.reconhecimento.equipes||[]).map(e=>`<li>${esc(e.nome)} · ${e.pendente?'pontos pendentes':esc(Number(e.pontos.toFixed(4)).toLocaleString('pt-BR'))+' O.S. equivalentes elegíveis'} · ${esc(comissaoRotulo(e.situacao))}${e.substituicao?' · houve substituição':''}${e.solo?' · composição solo':''}${e.empate?' · empate':''}<small class="bloco">${esc(e.justificativa)}</small></li>`).join('')}</ul>`;
 }
 /* O PDF DO DEMONSTRATIVO DA COMISSÃO (item 8 da fila de 11/10/2026): não
    existia. Sai com o documento registrado no servidor, com o número, a
@@ -47,23 +93,35 @@ function comissaoResumoHTML(r, revisoes, exportacoes) {
    prévia diz que é prévia; o teste diz que não exporta pagamento. */
 function comissaoDocHTML(doc, r) {
   const quando=x=>x?new Date(x).toLocaleString('pt-BR'):'';
+  const revHash=doc.revisaoHash||r.hash;
   return `<section class="perf-doc-oficial"><h2>Documento oficial nº ${esc(doc.id)}</h2><dl>
-  <dt>Demonstrativo da comissão</dt><dd>Revisão ${esc(r.revisao)} · ${r.tipo==='aprovacao'?'aprovação':'prévia, não aprovada'} · ${r.apuracao?.config?.modo==='efetivo'?'programa efetivo':'teste, sem exportação para pagamento'} · id ${esc(r.id)}</dd>
-  <dt>Impressão digital da revisão (sha256)</dt><dd>${esc(doc.revisaoHash||r.hash)}</dd>
-  <dt>Fechamento</dt><dd>revisão ${esc(doc.fechamentoRevisao)} · id ${esc(doc.fechamentoId)}</dd>
-  <dt>Impressão digital do fechamento (sha256)</dt><dd>${esc(doc.fechamentoHash)}</dd>
+  <dt>Demonstrativo da comissão</dt><dd>Revisão ${esc(r.revisao)} · ${r.tipo==='aprovacao'?'aprovação':'prévia, não aprovada'} · ${r.apuracao?.config?.modo==='efetivo'?'programa efetivo':'teste, sem exportação para pagamento'}</dd>
+  <dt>Impressão digital da revisão</dt><dd>${comissaoDigitalHTML(revHash)}</dd>
+  <dt>Fechamento</dt><dd>revisão ${esc(doc.fechamentoRevisao)} · impressão digital ${comissaoDigitalHTML(doc.fechamentoHash)}</dd>
   <dt>Emitido por</dt><dd>${comissaoQuem(doc.emitidoPor)} em ${esc(quando(doc.emitidoEm))}</dd></dl>
   ${doc.emitidosAntes?`<p>Esta revisão já teve ${esc(doc.emitidosAntes)} ${doc.emitidosAntes===1?'documento emitido':'documentos emitidos'} antes deste.</p>`:''}
-  <p>Para conferir: as impressões digitais têm de ser as mesmas do PCP. Este documento não efetua pagamento.</p></section>`;
+  <p>Para conferir: a impressão digital da revisão tem de ser a mesma que o PCP mostra no diálogo da comissão, e a do fechamento a mesma de Base e fechamento. Este documento não efetua pagamento.</p></section>`;
+}
+// O rodapé técnico, em letra pequena: os ids internos e as impressões digitais completas, para quem precisar conferir no banco.
+function comissaoDocRodapeHTML(doc, r) {
+  return `<p class="perf-doc-rodape">Conferência técnica do documento ${esc(doc.id)}: revisão ${esc(r.id)}, impressão digital ${esc(doc.revisaoHash||r.hash||'')}; fechamento ${esc(doc.fechamentoId||r.fechamentoId||'')}, impressão digital ${esc(doc.fechamentoHash||'')}.</p>`;
+}
+/* O erro do PDF do demonstrativo (revisão da onda comissão, 12/10/2026): toda
+   recusa virava "precisa de conexão". Agora, como no PDF oficial do
+   fechamento, a mensagem do servidor aparece; "sem conexão" só quando não
+   houve resposta. */
+function comissaoErroPdf(e) {
+  const t=typeof perfErroTxt==='function'?perfErroTxt(e):String(e&&e.message||'Sem conexão com o servidor.');
+  return /^Sem conexão/.test(t)?'O PDF do demonstrativo precisa de conexão: o documento é registrado no servidor. '+t:t;
 }
 async function comissaoPdf(r, revisoes, exportacoes, periodo) {
   if(!r)throw new Error('Selecione uma revisão financeira.');
   let out=null;
   try{out=await STORE.api({action:'performanceDocumento',tipo:'comissao',...periodo,fechamentoId:r.fechamentoId,revisaoId:r.id,requestId:crypto.randomUUID()});}
-  catch(e){throw new Error('O PDF do demonstrativo precisa de conexão: o documento é registrado no servidor.');}
+  catch(e){throw new Error(comissaoErroPdf(e));}
   if(!out||!out.ok||!out.documento)throw new Error((out&&out.error)||'Não foi possível registrar o documento.');
   const copia=document.createElement('section');
-  copia.innerHTML=comissaoDocHTML(out.documento,r)+comissaoResumoHTML(r,revisoes,exportacoes);
+  copia.innerHTML=comissaoDocHTML(out.documento,r)+comissaoResumoHTML(r,revisoes,exportacoes)+comissaoDocRodapeHTML(out.documento,r);
   imprimirAnalisePCP('Demonstrativo da comissão · revisão '+r.revisao+' · documento '+out.documento.id,copia,periodo,'Demonstrativo da comissão, revisão '+r.revisao+(r.tipo==='aprovacao'?' (aprovação)':' (prévia)')+'. Documento '+out.documento.id);
   return out.documento;
 }
@@ -86,7 +144,7 @@ async function perfComissaoAbrir() {
     d.querySelector('p')?.remove();
     const corpo=d.querySelector('.perf-dialog-corpo')||d.querySelector('section')||d;
     // O diálogo mantém o botão nativo de fechar; conteúdo criado em um filho próprio.
-    const conteudo=document.createElement('div');conteudo.innerHTML=`<p>Fechamento operacional · revisão ${esc(fonte.revisao)}. Cada revisão financeira preserva sua configuração, evidências e decisões. Uma aprovação não efetua pagamento.</p><label>Revisão financeira <select id="comissao-versao">${revisoes.map(r=>`<option value="${esc(r.id)}">${r.revisao} · ${esc(comissaoRotulo(r.tipo))} · ${esc(comissaoData(r.em))}${comissaoSubstituta(r,revisoes)?` · substituída pela ${comissaoSubstituta(r,revisoes).revisao}`:''}</option>`).join('')}</select></label><div id="comissao-resumo">${comissaoResumoHTML(ultima,revisoes,exportacoes)}</div><p><button type="button" class="btn-primary" id="comissao-nova">Configurar e criar nova prévia</button> <button type="button" class="btn-ghost" id="comissao-aprovar">Revisar e aprovar</button> <button type="button" class="btn-ghost" id="comissao-compensar">Preparar compensação integral</button> <button type="button" class="btn-ghost" id="comissao-exportar">Exportar para conferência de pagamento</button> <button type="button" class="btn-ghost" id="comissao-pdf">PDF do demonstrativo</button></p><p role="alert" id="comissao-erro"></p>`;
+    const conteudo=document.createElement('div');conteudo.innerHTML=`<p>Fechamento operacional · revisão ${esc(fonte.revisao)}${comissaoDigitalCurta(fonte.hash)?` · impressão digital ${comissaoDigitalHTML(fonte.hash)}`:""}. Cada revisão financeira preserva sua configuração, evidências e decisões. Uma aprovação não efetua pagamento.</p><label>Revisão financeira <select id="comissao-versao">${revisoes.map(r=>`<option value="${esc(r.id)}">${r.revisao} · ${esc(comissaoRotulo(r.tipo))} · ${esc(comissaoData(r.em))}${comissaoSubstituta(r,revisoes)?` · substituída pela ${comissaoSubstituta(r,revisoes).revisao}`:''}</option>`).join('')}</select></label><div id="comissao-resumo">${comissaoResumoHTML(ultima,revisoes,exportacoes)}</div><p><button type="button" class="btn-primary" id="comissao-nova">Configurar e criar nova prévia</button> <button type="button" class="btn-ghost" id="comissao-aprovar">Revisar e aprovar</button> <button type="button" class="btn-ghost" id="comissao-compensar">Preparar compensação integral</button> <button type="button" class="btn-ghost" id="comissao-exportar">Exportar para conferência de pagamento</button> <button type="button" class="btn-ghost" id="comissao-pdf">PDF do demonstrativo</button></p><div id="comissao-exportado" class="comissao-exportado" aria-live="polite" hidden></div><p role="alert" id="comissao-erro"></p>`;
     corpo.appendChild(conteudo);
     const sel=conteudo.querySelector('#comissao-versao'),erro=conteudo.querySelector('#comissao-erro');
     const escolhida=()=>revisoes.find(r=>r.id===sel.value)||ultima;
@@ -105,7 +163,7 @@ async function perfComissaoAbrir() {
       dialogo.querySelector('form').onsubmit=async ev=>{ev.preventDefault();const form=ev.currentTarget,btn=form.querySelector('button');btn.disabled=true;try{const out=await STORE.api({action:'performanceComissaoNova',...periodo,anterior:ultima.id,compensarId:r.id,motivo:form.elements.motivo.value,requestId:crypto.randomUUID()});if(!out.ok)throw new Error(out.error);if(typeof perdasInvalidar==='function')perdasInvalidar();if(typeof perfMesesInvalidar==='function')perfMesesInvalidar();dialogo.close();await perfComissaoAbrir();}catch(e){form.querySelector('[role="alert"]').textContent=e.message;}finally{btn.disabled=false;}};
     };
     conteudo.querySelector('#comissao-pdf').onclick=async()=>{try{erro.textContent='';await comissaoPdf(escolhida(),revisoes,exportacoes,periodo);}catch(e){erro.textContent=e.message;}};
-    conteudo.querySelector('#comissao-exportar').onclick=async()=>{try{const r=escolhida();const out=await STORE.api({action:'performanceComissaoExportar',...periodo,id:r?.id});if(!out.ok)throw new Error(out.error);const url=URL.createObjectURL(new Blob([out.csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=out.arquivo;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);erro.textContent=out.aviso+comissaoConferenciaTxt(out.conferencia);if(out.exportacao){if(typeof perfMesesInvalidar==='function')perfMesesInvalidar();exportacoes.push(out.exportacao);conteudo.querySelector('#comissao-resumo').innerHTML=comissaoResumoHTML(escolhida(),revisoes,exportacoes)+comissaoDiferencasHTML(out.exportacao);}}catch(e){erro.textContent=e.message;}};
+    conteudo.querySelector('#comissao-exportar').onclick=async()=>{try{const r=escolhida();const out=await STORE.api({action:'performanceComissaoExportar',...periodo,id:r?.id});if(!out.ok)throw new Error(out.error);const url=URL.createObjectURL(new Blob([out.csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=out.arquivo;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);erro.textContent='';const antes=exportacoes.slice();if(out.exportacao){if(typeof perfMesesInvalidar==='function')perfMesesInvalidar();exportacoes.push(out.exportacao);conteudo.querySelector('#comissao-resumo').innerHTML=comissaoResumoHTML(escolhida(),revisoes,exportacoes,{noBloco:out.exportacao.id});}const caixa=conteudo.querySelector('#comissao-exportado');caixa.innerHTML=comissaoExportadoHTML(out,antes);caixa.hidden=false;if(typeof caixa.scrollIntoView==='function')caixa.scrollIntoView({block:'nearest'});}catch(e){erro.textContent=e.message;}};
   }catch(e){d.appendChild(Object.assign(document.createElement('p'),{textContent:e.message}));}
 }
 /* O RASCUNHO AUTOMÁTICO DA APURAÇÃO DA COMISSÃO (item 9 da fila de
@@ -237,7 +295,7 @@ function comissaoEditar(fonte,ultima,periodo,pai,pessoas=[],revisoes=[]) {
     if(comRegua&&r.perda==='retrabalho_instalacao')return `<details data-comissao-item data-busca="${esc(r.numero+' '+(r.cliente||'')+' perda retrabalho de instalação')}"><summary>Entrega · O.S. ${esc(r.numero)} · ${esc(comissaoData(r.dia))} · perda automática</summary><fieldset><legend>Entrega e participantes</legend><p>Retrabalho de instalação: esta entrega não paga comissão a ninguém, nem a parcela da montagem interna. Não é preciso conferir a entrega, o rateio nem a montagem interna.</p></fieldset></details>`;
     return `<details data-comissao-item data-busca="${esc(r.numero+' '+(r.cliente||'')+' '+r.membros.map(m=>m.nome).join(' '))}"><summary>Entrega · O.S. ${esc(r.numero)} · ${esc(comissaoData(r.dia))} · ${e.entregue?'conferência registrada':'pendente'}</summary><fieldset><legend>Entrega e participantes</legend><p>Base líquida preservada: ${comissaoDinheiro(Math.round(r.valor*100))}</p><label><input type="checkbox" name="e${i}entregue" ${e.entregue?'checked':''}> Entrega física comprovada</label>${doc('e'+i,e)}${r.membros.filter(m=>!/^\d{6}$/.test(m.chave)).map((m,j)=>pessoa('e'+i+'id'+j,`Resolver cadastro “${esc(m.nome)}”`,e.identidades?.[m.chave])).join('')}
   ${gs.map((g,j)=>{const x=e.grupos?.[j]||{};return `<h4>Equipe ${j+1} · ${g.cota/100}% da entrega</h4><p>${g.membros.map(ch=>{const p=r.membros.find(m=>String(m.chave)===String(ch));return esc(p?.nome||ch)+' · '+esc(ch);}).join(' / ')}</p>${g.membros.length===2?pessoa('e'+i+'g'+j+'montador','Montador (60%; auxiliar recebe 40%)',x.montadorId):rateio('e'+i+'g'+j+'partes','Participação de cada pessoa',x.partes)+area('e'+i+'g'+j+'justificativa','Justificativa do rateio solo, trio ou maior',x.justificativa)}`;}).join('')}
-  ${selecao('e'+i+'interna','Montagem interna',interna.situacao,[['pendente','Pendente de análise'],['elegivel','Elegível — reservar 20%'],['impeditivo','Retrabalho impeditivo — parcela fica externa'],['nao_aplicavel','Não aplicável — parcela fica externa']])}${doc('e'+i+'int',interna)}${rateio('e'+i+'internas','Participação da montagem interna',interna.partes)}</fieldset></details>`;}).join('')}
+  ${selecao('e'+i+'interna','Montagem interna',interna.situacao,[['pendente','Pendente de análise'],['elegivel','Elegível: reservar 20%'],['impeditivo','Retrabalho impeditivo: a parcela fica com a externa'],['nao_aplicavel','Não aplicável: a parcela fica com a externa']])}${doc('e'+i+'int',interna)}${rateio('e'+i+'internas','Participação da montagem interna',interna.partes)}</fieldset></details>`;}).join('')}
   ${area('motivo','Motivo desta revisão')}<button class="btn-primary" type="submit">Salvar prévia calculada no servidor</button><p role="alert"></p></form>`);
   d.classList.add('comissao-dialog');
   const adicionarLinha=prefixo=>{const fs=d.querySelector(`[data-rateio="${prefixo}"]`),linhas=fs&&fs.querySelector('[data-rateio-linhas]');if(linhas)linhas.insertAdjacentHTML('beforeend',linhaRateio(prefixo));};

@@ -230,7 +230,11 @@ const COMISSAO = (() => {
     return conciliar({...anterior.apuracao,motor:'comissao-2',compensacaoDe:anterior.id,linhas:[],pessoas:[],totalCentavos:0,pendencias:[],aprovavel:true},anterior);
   }
   function csv(revisao) {
-    if(revisao?.tipo!=='aprovacao'||!revisao.apuracao?.aprovavel||revisao.apuracao.config.modo!=='efetivo')throw new Error('Pagamento exige aprovação de período efetivo. Outubro é teste.');
+    /* A recusa diz o que fazer (revisão da onda comissão, 12/10/2026): a frase
+       antiga citava outubro em qualquer mês. */
+    if(revisao?.tipo!=='aprovacao')throw new Error('Só uma aprovação exporta para pagamento: aprove a última prévia em Revisar e aprovar e exporte de novo.');
+    if(!revisao.apuracao?.aprovavel)throw new Error('Esta aprovação tem pendências e não exporta: resolva-as numa nova prévia e aprove de novo.');
+    if(revisao.apuracao.config?.modo!=='efetivo')throw new Error(String(revisao.de||'').slice(0,7)==='2026-10'?'Outubro é teste: a aprovação em modo teste não exporta para pagamento.':'Esta aprovação é de teste e não exporta para pagamento. Para pagar, crie uma nova prévia no modo efetivo (com o início efetivo e a decisão da gestão) e aprove de novo.');
     const cel=v=>{let s=String(v??'');if(/^[=+@\-\t\r]/.test(s)&&!/^-[0-9]+,[0-9]{2}$/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
     /* O ID E O MÊS COMO TEXTO PARA O EXCEL (item 6 da fila de 11/10/2026): o
        Excel abre 012345 como 12345 (o ID que começa com zero não casaria com o

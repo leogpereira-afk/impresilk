@@ -76,7 +76,8 @@ test('item 5 na tela: o demonstrativo diz quando e por quem foi exportado, e a d
   assert.match(html,/Esta aprovação ainda não foi exportada\./);
   c.__x=[{id:'e1',revisaoId:'r3',em:'2026-12-04T12:00:00Z',csvSha256:'a'.repeat(64),autor:{nome:'Gestor fictício',porId:'044455'}}];
   html=c.run('comissaoResumoHTML(__r,[__r],__x)');
-  assert.match(html,/Já exportada 1 vez:.*Gestor fictício \(cadastro 044455\) · impressão digital do CSV aaaaaaaaaaaa…/s);
+  // Revisão da onda comissão: o trecho curto (8 caracteres), o mesmo da tela e do PDF.
+  assert.match(html,/Já exportada 1 vez:.*Gestor fictício \(cadastro 044455\) · impressão digital do CSV <code class="perf-digital">aaaaaaaa<\/code>/s);
   c.__ev={em:'2026-12-04T12:00:00Z',csvSha256:'b'.repeat(64),autor:{nome:'Gestor fictício',porId:'044455'},anterior:{revisao:2,em:'2026-12-03T12:00:00Z'},anteriorNaoExportada:false,
     diferencas:[{pessoaId:'012345',nome:'Pessoa fictícia',tipo:'externa',anteriorCentavos:100,centavos:150,diferencaCentavos:50},{pessoaId:'100002',nome:'Outra',tipo:'externa',anteriorCentavos:10,centavos:10,diferencaCentavos:0}]};
   html=c.run('comissaoDiferencasHTML(__ev)');
@@ -136,11 +137,12 @@ test('item 7 na tela: a fita diz o que falta em cada mês e nunca empurra outubr
   c.__l=[mes('2026-10','aberto'),mes('2026-11','fechado'),mes('2026-12','aprovado'),mes('2027-01','enviado'),mes('2027-02','em_andamento')];
   c.run('perfMeses={tentado:true,carregando:false,lista:__l,erro:""}');
   const html=c.run('perfFitaMesesHTML()');
-  assert.match(html,/<b>out\/26<\/b> <span>Mês de teste, sem fechamento<\/span>/);
-  assert.match(html,/<b>nov\/26<\/b> <span>Fechado \(revisão 1\): falta aprovar a comissão<\/span>/);
-  assert.match(html,/<b>dez\/26<\/b> <span>Aprovado: falta exportar<\/span>/);
-  assert.match(html,/<b>jan\/27<\/b> <span>Enviado: exportado 1 vez<\/span>/);
-  assert.match(html,/data-perf-abrir-mes="2026-11"/);
+  // Revisão da onda comissão: cada estado com a sua marca antes do mês; o toque usa data-perf-fita-mes.
+  assert.match(html,/out\/26<\/b> <span>Mês de teste, sem fechamento<\/span>/);
+  assert.match(html,/nov\/26<\/b> <span>Fechado \(revisão 1\): falta aprovar a comissão<\/span>/);
+  assert.match(html,/dez\/26<\/b> <span>Aprovado: falta exportar<\/span>/);
+  assert.match(html,/jan\/27<\/b> <span>Enviado: exportado 1 vez<\/span>/);
+  assert.match(html,/data-perf-fita-mes="2026-11"/);
   for(const estado of ['aberto','fechado','aprovado','enviado','em_andamento'])
     assert.doesNotMatch(c.run(`perfFitaEstadoTxt(${JSON.stringify(mes('2026-10',estado,{comissao:{modo:'teste'}}))})`),/falta/,'outubro: '+estado);
   // Quem não é gestão não vê a fita.
