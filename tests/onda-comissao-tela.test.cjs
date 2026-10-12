@@ -65,3 +65,25 @@ test('item 4 na tela: o demonstrativo diz quem fez a prévia e quem aprovou pelo
   comBase(c,fonte([reg('a1',100)]),[s],s.id);
   assert.match(c.run('perfFonteTexto()'),/Fechamento preservado · revisão 1 · Gestor fictício \(cadastro 044455\) · /);
 });
+
+/* ------------------------------------------------------------------ item 5 */
+test('item 5 na tela: o demonstrativo diz quando e por quem foi exportado, e a diferença contra a última exportada',()=>{
+  const c=tela();
+  const ap=revisaoTela({id:'r3',revisao:3,tipo:'aprovacao',apuracao:{...revisaoTela().apuracao,anteriorAprovacao:'r1'}});
+  c.__r=ap;c.__x=[];
+  let html=c.run('comissaoResumoHTML(__r,[__r],__x)');
+  assert.match(html,/A aprovação anterior deste período nunca foi exportada/);
+  assert.match(html,/Esta aprovação ainda não foi exportada\./);
+  c.__x=[{id:'e1',revisaoId:'r3',em:'2026-12-04T12:00:00Z',csvSha256:'a'.repeat(64),autor:{nome:'Gestor fictício',porId:'044455'}}];
+  html=c.run('comissaoResumoHTML(__r,[__r],__x)');
+  assert.match(html,/Já exportada 1 vez:.*Gestor fictício \(cadastro 044455\) · impressão digital do CSV aaaaaaaaaaaa…/s);
+  c.__ev={em:'2026-12-04T12:00:00Z',csvSha256:'b'.repeat(64),autor:{nome:'Gestor fictício',porId:'044455'},anterior:{revisao:2,em:'2026-12-03T12:00:00Z'},anteriorNaoExportada:false,
+    diferencas:[{pessoaId:'012345',nome:'Pessoa fictícia',tipo:'externa',anteriorCentavos:100,centavos:150,diferencaCentavos:50},{pessoaId:'100002',nome:'Outra',tipo:'externa',anteriorCentavos:10,centavos:10,diferencaCentavos:0}]};
+  html=c.run('comissaoDiferencasHTML(__ev)');
+  assert.match(html,/Diferença por pessoa contra a última exportada \(revisão 2,/);
+  assert.match(html,/Pessoa fictícia \(cadastro 012345\) · Equipe externa · R\$ 1\.00 → R\$ 1\.50 · diferença R\$ 0\.50/);
+  assert.doesNotMatch(html,/Outra/,'sem diferença, a pessoa não aparece');
+  // Outubro em teste: nada convida a exportar.
+  c.__r=revisaoTela({tipo:'aprovacao',apuracao:{...revisaoTela().apuracao,config:{modo:'teste'}}});c.__x=[];
+  assert.doesNotMatch(c.run('comissaoResumoHTML(__r,[__r],__x)'),/ainda não foi exportada/);
+});

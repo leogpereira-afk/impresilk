@@ -275,6 +275,23 @@ const COMISSAO = (() => {
       return f?{...r,perda:'falha_comprovada',falhaComprovada:f}:r;
     });
   }
+  /* A DIFERENÇA CONTRA A ÚLTIMA EXPORTADA (M6 da auditoria de 11/10/2026): a
+     coluna "Diferença a conciliar" do CSV é contra a última aprovação; se a
+     anterior nunca foi exportada, pagar só a diferença deixava a pessoa sem
+     receber, e pagar o total depois de exportada pagava duas vezes. Os totais
+     de uma revisão por pessoa e tipo, e a diferença deles contra os totais da
+     última exportação do mesmo período (sem exportação anterior, contra zero). */
+  function totaisDaRevisao(revisao) {
+    const xs=lista(revisao?.apuracao?.ajustes).length?revisao.apuracao.ajustes:lista(revisao?.apuracao?.pessoas);
+    return xs.map(p=>({pessoaId:String(p?.pessoaId??''),nome:texto(p?.nome),tipo:String(p?.tipo||''),centavos:Number.isSafeInteger(p?.centavos)?p.centavos:0}))
+      .sort((a,b)=>a.pessoaId.localeCompare(b.pessoaId)||a.tipo.localeCompare(b.tipo));
+  }
+  function diferencaContraExportada(totais, anteriores) {
+    const mapa=new Map();
+    for(const p of lista(anteriores))mapa.set(p.tipo+':'+p.pessoaId,{pessoaId:p.pessoaId,nome:p.nome||'',tipo:p.tipo,anteriorCentavos:Number.isSafeInteger(p.centavos)?p.centavos:0,centavos:0});
+    for(const p of lista(totais)){const k=p.tipo+':'+p.pessoaId,x=mapa.get(k);mapa.set(k,{pessoaId:p.pessoaId,nome:p.nome||x?.nome||'',tipo:p.tipo,anteriorCentavos:x?x.anteriorCentavos:0,centavos:p.centavos});}
+    return [...mapa.values()].map(p=>({...p,diferencaCentavos:p.centavos-p.anteriorCentavos})).sort((a,b)=>a.pessoaId.localeCompare(b.pessoaId)||a.tipo.localeCompare(b.tipo));
+  }
   /* SÓ O QUE DECIDE A COMISSÃO (onda comissão, 12/10/2026; linha Baixa da
      auditoria de 11/10/2026, "comparar só os campos de dinheiro"). Aprovar e
      Exportar recalculam a fonte do mês e comparavam com o hash do fechamento
@@ -355,7 +372,7 @@ const COMISSAO = (() => {
     return xs.slice(0,max).map(um).join('; ')+(xs.length>max?'; e mais '+(xs.length-max):'');
   }
   return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase,comissoesAcumuladas,TEXTO_ORIGEM_A_DEFINIR,demonstrativosVigentes,falhaComprovadaNoDia,comFalhasComprovadas,
-    dinheiroDoRegistro,dinheiroDaFonte,mudancasDeDinheiro,textoMudancasDeDinheiro};
+    dinheiroDoRegistro,dinheiroDaFonte,mudancasDeDinheiro,textoMudancasDeDinheiro,totaisDaRevisao,diferencaContraExportada};
 })();
 
 export { COMISSAO };

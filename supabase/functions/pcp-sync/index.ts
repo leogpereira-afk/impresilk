@@ -252,7 +252,7 @@ async function contarRegs(colecao: string): Promise<number> {
    entao o que foi exportado fica entre as duas; fora disso, ou colecao
    faltando, o Hub marca a copia como falha. */
 const COLECOES_EXPORTACAO = ["os", "auditoria", "foto_evento", "performance_fechamentos",
-  "performance_regras", "performance_comissao", "performance_comissao_os_versoes"];
+  "performance_regras", "performance_comissao", "performance_comissao_os_versoes", "performance_comissao_exportacoes"];
 const EXPORTACAO_PAGINA = 500; // abaixo do max_rows de 1000 do PostgREST
 /* pcp_META TAMBÉM VAI (revisão da onda-w1-backup, R4, 11/10/2026). Lá mora a
    "cópia recuperável antes da primeira alteração" que o robô do ERP grava
@@ -1838,6 +1838,8 @@ Deno.serve(async (req: Request) => {
             }
           }
         };
+        // Os eventos de exportação (M6) são lidos antes das versões: as versões precedem todo o histórico.
+        const exportacoesLidas=acao==="performanceComissaoListar"||acao==="performanceComissaoExportar"?await lerFinanceiro("performance_comissao_exportacoes"):[];
         const versoes=await lerFinanceiro("performance_comissao_os_versoes");
         const versoesOS=new Map<string,number>();
         for(const row of versoes||[]){const r=row.registro;versoesOS.set(String(r.osId),Math.max(versoesOS.get(String(r.osId))||0,r.versao));}
@@ -1845,10 +1847,12 @@ Deno.serve(async (req: Request) => {
         const todas=(historico||[]).map((r:any)=>r.registro);
         const revisoes=todas.filter((r:any)=>r.de===periodo.de&&r.ate===periodo.ate).sort((a:any,b:any)=>b.revisao-a.revisao);
         const ultima=revisoes[0], chave=periodo.de+":"+periodo.ate;
+        // Os eventos de exportação deste período (M6), na ordem em que foram gravados.
+        const exportacoesDoPeriodo=(rows:any[])=>(rows||[]).map((r:any)=>r.registro).filter((r:any)=>r&&r.de===periodo.de&&r.ate===periodo.ate).sort((a:any,b:any)=>String(a.id).localeCompare(String(b.id)));
         if(acao==="performanceComissaoListar"){
           const fichas=await fichasRH(), regua=resolverPessoas({pessoas:fichas});
           const pessoas=[...new Map(fichas.filter((p:any)=>p.id&&regua.pessoa(p.id)&&!regua.pessoa(p.id).semFicha).map((p:any)=>[p.id,{id:p.id,nome:p.nome}])).values()];
-          return resp({revisoes,pessoas,cobrem:perfComissaoCobrem(todas,periodo)});
+          return resp({revisoes,pessoas,cobrem:perfComissaoCobrem(todas,periodo),exportacoes:exportacoesDoPeriodo(exportacoesLidas)});
         }
         // O que a conferência do selo achou fora do dinheiro e o que ficou pendente (fora do hash da revisão).
         let conferida:any=null;
@@ -1869,13 +1873,41 @@ Deno.serve(async (req: Request) => {
           /* O CSV QUE FOI APROVADO (M21): a aprovação guardou o CSV e a
              impressão digital dele; sai ESTE, conferido, e não um recalculado.
              Guardado que não confere com a impressão digital não sai. */
+          let csv="",sha="";
           if(typeof ultima.csv==="string"){
-            const sha=String(ultima.csvSha256||"");
+            sha=String(ultima.csvSha256||"");
             if(!/^[a-f0-9]{64}$/.test(sha)||await sha256Texto(ultima.csv)!==sha)return resp({error:"O CSV guardado na aprovação não confere com a impressão digital dele. Nada foi exportado; avise a gestão."},409);
-            return resp({ok:true,csv:ultima.csv,csvSha256:sha,arquivo,aviso:aviso(sha),conferencia:resumoConferida()});
+            csv=ultima.csv;
+          }else{
+            // Aprovação de antes desta versão (sem CSV guardado): o CSV sai do registro aprovado, como antes.
+            try{csv=COMISSAO.csv(ultima);sha=await sha256Texto(csv);}catch(e){return resp({error:(e as Error).message},422);}
           }
-          // Aprovação de antes desta versão (sem CSV guardado): o CSV sai do registro aprovado, como antes.
-          try{const csv=COMISSAO.csv(ultima),sha=await sha256Texto(csv);return resp({ok:true,csv,csvSha256:sha,arquivo,aviso:aviso(sha),conferencia:resumoConferida()});}catch(e){return resp({error:(e as Error).message},422);}
+          /* EXPORTAR DEIXA RASTRO (M6 da auditoria de 11/10/2026, item 25 da
+             fila): a mesma aprovação podia ser exportada várias vezes sem
+             registro de quem, quando e o quê, e a coluna "Diferença a
+             conciliar" do CSV é contra a última APROVAÇÃO, não contra a última
+             paga. Cada exportação grava um evento (só inserção, coleção
+             própria, só admin e pcp leem): a revisão, quem (ID de 6 dígitos,
+             login e nome), quando, a impressão digital do CSV, os totais por
+             pessoa e a diferença calculada contra a última EXPORTADA deste
+             período. O CSV aprovado não muda (M21); a diferença vai na
+             resposta e no evento, e a tela a mostra. Sem gravar o evento, o
+             CSV não sai. */
+          const exportadas=exportacoesDoPeriodo(exportacoesLidas);
+          const ultimaExportada=exportadas[exportadas.length-1]||null;
+          const autorExp=await autorAuditoria(), emExp=new Date().toISOString();
+          const totais=COMISSAO.totaisDaRevisao(ultima);
+          const evento:any={...periodo,id:chave+":"+String(exportadas.length+1).padStart(6,"0"),revisaoId:ultima.id,revisao:ultima.revisao,fechamentoId:ultima.fechamentoId||null,
+            modo:ultima.apuracao?.config?.modo||"",compensacaoDe:ultima.apuracao?.compensacaoDe||null,arquivo,csvSha256:sha,em:emExp,
+            autor:{login:autorExp.login,nome:autorExp.nome,porId:autorExp.porId||""},totais,
+            anterior:ultimaExportada?{id:ultimaExportada.id,revisaoId:ultimaExportada.revisaoId,revisao:ultimaExportada.revisao,em:ultimaExportada.em,csvSha256:ultimaExportada.csvSha256}:null,
+            diferencas:COMISSAO.diferencaContraExportada(totais,ultimaExportada?.totais),
+            /* A aprovação anterior deste período que nunca foi exportada: pagar pela coluna do CSV deixaria a pessoa sem receber. */
+            anteriorNaoExportada:!!ultima.apuracao?.anteriorAprovacao&&!exportadas.some((x:any)=>x.revisaoId===ultima.apuracao.anteriorAprovacao),
+            ...(conferida?{conferencia:resumoConferida()}:{})};
+          const {error:erroExp}=await sb.from("pcp_registros").insert({colecao:"performance_comissao_exportacoes",id:evento.id,registro:evento,apagado:false,atualizado_em:emExp});
+          if(erroExp){if(erroExp.code==="23505")return resp({error:"Outra exportação deste período foi registrada ao mesmo tempo. Nada foi exportado; tente de novo."},409);throw new Error(erroExp.message);}
+          return resp({ok:true,csv,csvSha256:sha,arquivo,aviso:aviso(sha),conferencia:resumoConferida(),exportacao:evento});
         }
         const requestId=String(body.requestId||""), motivo=String(body.motivo||"").trim();
         if(!/^[a-zA-Z0-9-]{10,80}$/.test(requestId)||motivo.length<5||motivo.length>500)return resp({error:"Informe identificação do pedido e motivo de 5 a 500 caracteres."},422);

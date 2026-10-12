@@ -104,3 +104,54 @@ test('M5 (D-013): só pcp e admin aprovam; os outros papéis e a máquina são r
   assert.equal(a.status,200,JSON.stringify(a));
   assert.equal(a.revisao.autor.porId,p.autor.porId);
 });
+
+/* ------------------------------------------------- item 5 (M6, item 25 da fila) */
+test('item 5 (M6): exportar grava o evento (quem, quando, impressão digital do CSV) e a diferença contra a última exportada',async()=>{
+  const e=await servidor();
+  const f=await fechar(e);
+  const p1=await previa(e,f);
+  const a1=await aprovar(e,p1);
+  assert.equal(a1.status,200,JSON.stringify(a1));
+  // A aprovação 1 nunca é exportada; uma prévia nova é aprovada por cima dela.
+  const p2=await previa(e,f,{n:2});
+  const a2=await aprovar(e,p2,{n:2,quem:dono});
+  assert.equal(a2.status,200,JSON.stringify(a2));
+  const eventos=()=>e.db.pcp_registros.filter(r=>r.colecao==='performance_comissao_exportacoes').map(r=>r.registro);
+  assert.equal(eventos().length,0);
+  const x1=await exportar(e,a2.revisao);
+  assert.equal(x1.status,200,JSON.stringify(x1));
+  assert.equal(eventos().length,1,'o caso ruim: exportar não deixava rastro');
+  const ev1=eventos()[0];
+  assert.equal(ev1.revisaoId,a2.revisao.id);assert.equal(ev1.csvSha256,x1.csvSha256);
+  assert.deepEqual(ev1.autor,{login:'gestor',nome:'Gestor fictício',porId:'044455'});
+  assert.equal(ev1.anterior,null);
+  assert.equal(ev1.anteriorNaoExportada,true,'a aprovação 1 nunca foi exportada: a coluna do CSV engana');
+  assert.deepEqual(ev1.diferencas.map(d=>[d.pessoaId,d.tipo,d.anteriorCentavos,d.centavos,d.diferencaCentavos]),[['100001','externa',0,72000,72000],['100002','externa',0,48000,48000]]);
+  // A mesma aprovação exportada de novo: outro evento, contra a primeira exportação, diferença zero.
+  const x2=await exportar(e,a2.revisao);
+  assert.equal(x2.status,200);assert.equal(x2.csv,x1.csv);
+  const ev2=eventos()[1];
+  assert.equal(ev2.anterior.id,ev1.id);
+  assert.ok(ev2.diferencas.every(d=>d.diferencaCentavos===0));
+  // Compensação aprovada e exportada: a diferença é contra a última exportada (negativa).
+  const lista=await e.call({action:'performanceComissaoListar',...NOV},gestor);
+  assert.deepEqual(lista.exportacoes.map(x=>x.id),[ev1.id,ev2.id],'a lista do período traz os eventos');
+  const c=await e.call({action:'performanceComissaoNova',...NOV,anterior:lista.revisoes[0].id,compensarId:a2.revisao.id,motivo:'Compensação fictícia',requestId:'compensar-itens-5'},gestor);
+  const ac=await aprovar(e,c.revisao,{n:5});
+  assert.equal(ac.status,200,JSON.stringify(ac));
+  const x3=await exportar(e,ac.revisao);
+  assert.equal(x3.status,200,JSON.stringify(x3));
+  assert.deepEqual(x3.exportacao.diferencas.map(d=>d.diferencaCentavos),[-72000,-48000]);
+  assert.equal(x3.exportacao.anteriorNaoExportada,false);
+  // Só a gestão lê: a lista é da comissão (admin e pcp).
+  assert.equal((await e.call({action:'performanceComissaoListar',...NOV},{papel:'montagem',nome:'Montagem fictícia',sub:'montagem',exp:EXP})).status,403);
+});
+test('item 5: as duas cópias calculam a mesma diferença contra a última exportada',async()=>{
+  const {COMISSAO:S}=await import('../supabase/functions/_shared/pcp-comissao.mjs');
+  const t=[{pessoaId:'100001',nome:'A',tipo:'externa',centavos:500},{pessoaId:'100003',nome:'C',tipo:'interna',centavos:100}];
+  const ant=[{pessoaId:'100001',nome:'A',tipo:'externa',centavos:300},{pessoaId:'100002',nome:'B',tipo:'externa',centavos:200}];
+  const d=C.diferencaContraExportada(t,ant);
+  assert.deepEqual(d.map(x=>[x.pessoaId,x.diferencaCentavos]),[['100001',200],['100002',-200],['100003',100]]);
+  assert.deepEqual(d,S.diferencaContraExportada(t,ant));
+  assert.deepEqual(C.diferencaContraExportada(t,null).map(x=>x.diferencaCentavos),[500,100]);
+});
