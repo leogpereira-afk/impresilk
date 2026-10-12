@@ -53,8 +53,10 @@
     // D-004 nos pontos (revisão da onda a3): a falha comprovada julgada pela gestão também tira os pontos da O.S.
     const falhas=Number(resumo.falhaComprovada)||0;
     const notaFalha=falhas>0?fmt(falhas)+(falhas===1?' entrega com falha comprovada da instalação: conta como entrega, sem pontos.':' entregas com falha comprovada da instalação: contam como entregas, sem pontos.'):'';
-    $('ranking-sem-base').hidden=!notaBase&&!notaPerda&&!notaFalha;
-    $('ranking-sem-base').textContent=[notaBase,notaPerda,notaFalha].filter(Boolean).join(' ');
+    // Sem as decisões da comissão (a leitura falhou no servidor), o ranking sai com o aviso (verificação da v166).
+    const notaDecisoes=typeof dados.avisoDecisoes==='string'?dados.avisoDecisoes:'';
+    $('ranking-sem-base').hidden=!notaBase&&!notaPerda&&!notaFalha&&!notaDecisoes;
+    $('ranking-sem-base').textContent=[notaBase,notaPerda,notaFalha,notaDecisoes].filter(Boolean).join(' ');
     const busca=$('ranking-busca').value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
     const todas=Array.isArray(dados.equipes)?dados.equipes:[];
     const linhas=todas.filter(e=>String(e.nome).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().includes(busca));
@@ -72,7 +74,9 @@
     }));
     $('ranking-vazio').hidden=linhas.length>0;
     $('ranking-vazio').textContent=busca?'Nenhuma equipe encontrada. Tente outro nome.':semBase>0?'As entregas conferidas aguardam base para entrar no ranking.':'O ranking está esperando as primeiras entregas confirmadas deste período.';
-    $('ranking-recorte').textContent=diaBR(dados.periodo?.de)+' a '+diaBR(dados.periodo?.ate)+' · '+(dados.fechado?'Período fechado · revisão '+dados.revisao:'Acompanhamento em andamento')+(busca?' · exibindo '+linhas.length+' de '+todas.length+' equipes':'');
+    /* O mês sem fechamento leva o selo e, no PDF (a impressão desta página), a
+       palavra "Prévia" (item 1 da fila de 11/10/2026). */
+    $('ranking-recorte').textContent=diaBR(dados.periodo?.de)+' a '+diaBR(dados.periodo?.ate)+' · '+(dados.fechado?'Período fechado · revisão '+dados.revisao:'Prévia · Mês aberto, resultado provisório')+(busca?' · exibindo '+linhas.length+' de '+todas.length+' equipes':'');
     const data=new Date(dados.atualizadoEm);
     $('ranking-atualizacao').textContent=Number.isFinite(+data)?'Consultado em '+data.toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'Consulta concluída';
     $('ranking-pdf').disabled=!todas.length&&!resumo.entregasConfirmadas&&!resumo.aConferir;

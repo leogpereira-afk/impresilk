@@ -3015,7 +3015,8 @@ function resumoEntregaFichaTexto(os) {
   if (os?.conferenciasEntrega?.length && typeof CONFERENCIA_ENTREGA !== 'undefined') {
     const ver=typeof STATE!=='undefined' && ['admin','pcp'].includes(STATE.user?.papel), valor=ver && typeof valorDaOS==='function'?valorDaOS(os):null;
     const e=CONFERENCIA_ENTREGA.estado(os,valor);
-    return e.resumo + (ver && e.conferidoValor!==null && typeof dinheiroCasa==='function'?' · Conferido: '+dinheiroCasa(e.conferidoValor/100)+' · Saldo a conferir: '+dinheiroCasa(e.saldo/100):'');
+    // O cancelado não é saldo a conferir (item 4 da fila de 11/10/2026): vai à parte, só quando existe.
+    return e.resumo + (ver && e.conferidoValor!==null && typeof dinheiroCasa==='function'?' · Conferido: '+dinheiroCasa(e.conferidoValor/100)+' · Saldo a conferir: '+dinheiroCasa(e.saldo/100)+(e.cancelado?' · Cancelado: '+dinheiroCasa(e.cancelado/100):''):'');
   }
   if (!temMotorEntrega()) return '';
   let r;

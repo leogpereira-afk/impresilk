@@ -72,9 +72,10 @@ test('cache de valores não converte ausência em zero nem escolhe entre duplica
 });
 test('tela explica por que valor conflitante impede fechar',()=>{
  const fs=require('node:fs'),vm=require('node:vm'),s=fs.readFileSync(require('node:path').join(__dirname,'../performance.js'),'utf8');
- const ctx={perfRemoto:{},perfHojeISO:()=> '2026-10-02'};vm.createContext(ctx);
+ // A trava do mês inteiro (item 3 da fila de 11/10/2026) tem teste próprio (onda-fechamento-tela); aqui ela deixa passar.
+ const ctx={perfRemoto:{},perfHojeISO:()=> '2026-10-02',perfTravaMes:()=>''};vm.createContext(ctx);
  vm.runInContext(s.slice(s.indexOf('function perfFechamentoBloqueio('),s.indexOf('function perfFonteHTML(')),ctx);
- const f={periodo:{ate:'2026-10-01'},registros:[{numero:'20980',valor:100,confirmado:true,avisoValor:'Conflito no ERP'}]};
- assert.match(ctx.perfFechamentoBloqueio(f,0),/valores conflitantes.*20980/);
+ const f={periodo:{de:'2026-09-01',ate:'2026-09-30'},registros:[{numero:'90980',valor:100,confirmado:true,avisoValor:'Conflito no ERP'}]};
+ assert.match(ctx.perfFechamentoBloqueio(f,0),/valores conflitantes.*90980/);
  delete f.registros[0].avisoValor;assert.equal(ctx.perfFechamentoBloqueio(f,0),'');
 });

@@ -3760,8 +3760,13 @@ function painelTVCasa(i, f) {
   ];
   const n = ((i % paineis.length) + paineis.length) % paineis.length;
   const p = paineis[n];
+  /* O SELO DO MÊS ABERTO NA TV (item 1 da fila de 11/10/2026): a TV da fábrica
+     mostra o pódio do mês em andamento, e ele não pode parecer o resultado do
+     mês. A mesma régua da tela (perfSeloAberto); sem o performance.js, o mesmo
+     texto, salvo na revisão fechada. */
+  const seloTV = typeof perfSeloAberto === 'function' ? perfSeloAberto() : (fechada ? null : {texto:'Mês aberto, resultado provisório'});
   return { total: paineis.length, html: `<div class="tv-head">
-      <h2>${p.titulo}</h2>
+      <h2>${p.titulo}</h2>${seloTV ? `<span class="tv-selo">${esc(seloTV.texto)}</span>` : ''}
       <span class="tv-relogio">${new Date().toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
     </div>
     <div class="tv-corpo">${p.corpo}</div>

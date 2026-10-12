@@ -742,11 +742,17 @@ function porOSComissaoHTML(l) {
     if(a.erro) return nota('Itens alterados: confira as entregas novamente.');
     if(a.entregas.some(e=>e.valor==null)) return nota('Confira os valores dos itens antes de calcular a comissão.');
     let total=0,tira=false,definir=false,falha=null;const outras=new Set();
+    /* A O.S. CANCELADA DEPOIS DE TER PARTE ENTREGUE (item 4 da fila de
+       11/10/2026): o cancelamento cancela o saldo; cada parte que a gestão já
+       conferiu conta como a entrega do dia dela, como na apuração do servidor
+       (perfFonte). Por isso o dia é julgado sem o cancelamento. */
+    const cancelada=typeof OPERACAO.cancelada==='function'&&OPERACAO.cancelada(card);
+    const base=cancelada?{...card,cancelamento:null,baixaAutoERP:null,finalizadoPor:''}:card;
     for(const e of a.entregas) {
       const r=REGRAS.regraVigente(_porOSDados.versoes,e.dia);
       if(!r) return nota('Confira cada entrega: há datas sem regra de comissão.');
       // O status da entrega no dia dela, com a regra do dia: as perdas já são as da régua.
-      const estado=OPERACAO.statusEntrega({...card,finalizadaEm:e.dia+'T12:00:00-03:00',entregaLancada:{data:e.dia}},undefined,r);
+      const estado=OPERACAO.statusEntrega({...base,finalizadaEm:e.dia+'T12:00:00-03:00',entregaLancada:{data:e.dia}},undefined,r);
       if(estado.estado==='cancelado')continue;
       if(POR_OS.perdasPelaRegra(estado,r).length){tira=true;continue;}
       const f=porOSFalhaDe(card,e.dia);if(f){falha=falha||f;continue;}
@@ -757,7 +763,7 @@ function porOSComissaoHTML(l) {
     if(tira) return `<b>${esc(dinheiroCasa(0))}</b> ${nota(`prevista: ${tiraTxt}`)}`;
     if(falha&&!total) return `<b>${esc(dinheiroCasa(0))}</b> ${nota(porOSFalhaTxt(falha))}`;
     const extra=[definir?definirTxt:'',falha?porOSFalhaTxt(falha):'',...outras].filter(Boolean).join('; ');
-    return `<b>${esc(dinheiroCasa(total/100))}</b> ${nota(`prevista sobre os itens de ${a.entregas.length} entrega(s) conferida(s); saldo não incluído${extra?'; '+extra:''}`)}`;
+    return `<b>${esc(dinheiroCasa(total/100))}</b> ${nota(`prevista sobre os itens de ${a.entregas.length} entrega(s) conferida(s); ${cancelada?'O.S. cancelada: o saldo foi cancelado e a parte conferida continua valendo':'saldo não incluído'}${extra?'; '+extra:''}`)}`;
   }
   const dia = st.dataEntrega || porOSDia(l.erp.data);
   const regra = REGRAS.regraVigente(_porOSDados.versoes, dia);

@@ -9,6 +9,8 @@ async function conferirItensEntrega(osId, entregaId = '') {
   const os = resposta.os, registros = os.conferenciasEntrega || [], anterior = registros.find(e => e.id === entregaId);
   if (entregaId && !anterior) throw new Error('Esta entrega mudou. Atualize a apuração.');
   const outros = registros.filter(e => e.id !== entregaId), catalogo = CONFERENCIA_ENTREGA.catalogo(os);
+  // O dia (novo ou antigo) em mês fechado: o diálogo diz antes de salvar (M7 e M8).
+  const travaMes = d => confTravaMesFechado(resposta.fechados, anterior && anterior.dia, d);
   const id = anterior?.id || 'ent-' + crypto.randomUUID(), chave = 'itens:' + id;
   let dia = anterior?.dia || diaEntrega(os) || ENTREGA_ITEM.diaSP(new Date().toISOString()), enviando = false;
   const escolhidos = new Map((anterior?.itens || []).map(i => [i.chave,i.qtde]));
@@ -22,6 +24,7 @@ async function conferirItensEntrega(osId, entregaId = '') {
     <p class="metricas-nota">Selecione somente o que esta equipe entregou nesta data. Os itens restantes poderão ser conferidos em outra entrega, com outra equipe.</p>
     ${registros.length?`<nav class="conf-entregas" aria-label="Entregas desta O.S.">${registros.map((e,n)=>`<button type="button" class="btn-ghost btn-sm" data-conf-abrir="${esc(e.id)}" ${e.id===entregaId?'disabled':''}>Entrega ${n+1} · ${esc(e.dia.split('-').reverse().join('/'))}</button>`).join('')}<button type="button" class="btn-ghost btn-sm" data-conf-abrir="" ${!entregaId?'disabled':''}>+ Nova entrega</button></nav>`:''}
     ${!registros.length && os.alocacao?'<p class="aloc-aviso">Esta primeira conferência por item substituirá a divisão da O.S. inteira na apuração aberta. Confira depois os itens restantes. Os fechamentos já salvos permanecem preservados.</p>':''}
+    <p class="aloc-aviso conf-mes-fechado" id="conf-mes-fechado" ${travaMes(dia)?'':'hidden'}>${esc(travaMes(dia))}</p>
     <label class="conf-data">Data desta entrega <input id="conf-data" type="date" value="${esc(dia)}" max="${ENTREGA_ITEM.diaSP(new Date().toISOString())}"></label>
     <section class="conf-itens" aria-label="Itens desta entrega"><div class="conf-itens-topo"><h4>O que foi entregue?</h4><button type="button" class="btn-ghost btn-sm" id="conf-todos">Selecionar saldo disponível</button></div>
       ${catalogo.map((it,n)=>{const saldo=it.qtde-(usados.get(it.chave)||0), trava=saldo<=0||it.ambiguo||it.cancelado;return `<div class="conf-item"><label><input type="checkbox" data-conf-item="${n}" ${escolhidos.has(it.chave)?'checked':''} ${trava?'disabled':''}><span><strong>${esc(it.descricao)}</strong><small>${it.ambiguo?'Itens iguais sem identificação: confira a ficha.':it.cancelado?'Item cancelado':`${saldo} de ${it.qtde} disponível(is) · ${it.qtde>1?'unidades':'item completo'}`}</small></span></label><label class="conf-qtde">Quantidade <input type="number" inputmode="numeric" min="1" max="${saldo}" step="1" data-conf-qtde="${n}" value="${escolhidos.get(it.chave)||saldo||1}" ${trava||!escolhidos.has(it.chave)?'disabled':''}></label></div>`;}).join('') || '<p>Nenhum item cadastrado. Complete a ficha da O.S. para conferir a entrega.</p>'}
@@ -38,7 +41,9 @@ async function conferirItensEntrega(osId, entregaId = '') {
     const entrega={id,dia,itens:selecao()}, erro=CONFERENCIA_ENTREGA.validar(os,[...outros,entrega],ENTREGA_ITEM.diaSP(new Date().toISOString()));
     const ap=erro?null:CONFERENCIA_ENTREGA.apurar(os,resposta.valor,[...outros,entrega]), valor=ap?.entregas.find(e=>e.id===id)?.valor;
     const st=ALOCUI.estado(chave); st.valor=valor==null?null:valor;
-    const motivo=erro || ALOCUI.bloqueio(chave);
+    const mesFechado=travaMes(dia), aviso=d.querySelector('#conf-mes-fechado');
+    if(aviso){aviso.textContent=mesFechado;aviso.hidden=!mesFechado;}
+    const motivo=mesFechado || erro || ALOCUI.bloqueio(chave);
     salvar.disabled=!!motivo; status.textContent=motivo || ''; status.classList.toggle('erro',!!motivo);
     d.querySelector('#conf-resumo').textContent=erro || `${entrega.itens.length} item(ns) selecionado(s) · ${valor==null?'Valor a conferir: faltam valores dos itens.':dinheiroCasa(valor/100)} · ${ap.saldoItens.length} item(ns) com saldo para outra entrega.`;
     d.querySelector('#conf-parte-titulo').textContent=erro?'Confira os itens entregues':ap.saldoItens.length?'Entrega parcial':'Saldo de itens concluído';
@@ -80,6 +85,21 @@ async function conferirItensEntrega(osId, entregaId = '') {
     finally {enviando=false;}
   };
   atualizar();
+}
+
+/* MÊS FECHADO (M7 e M8 da auditoria de 11/10/2026): o servidor recusa
+   conferir com o dia, novo ou antigo, num período já fechado (o selo já
+   contou; mover a parcial dele contaria a mesma unidade duas vezes). O diálogo
+   diz antes de salvar, com os períodos que vieram na abertura (conferenciaEntrega
+   sem entrega). Sem eles (servidor antigo), nada é afirmado: a porta confere. */
+function confTravaMesFechado(fechados, diaAnterior, dia) {
+  const lista = Array.isArray(fechados) ? fechados : [];
+  const de = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? lista.find(x => x && d >= x.de && d <= x.ate) || null : null;
+  const br = d => String(d || '').split('-').reverse().join('/');
+  const v = de(diaAnterior), n = de(dia);
+  if (v) return `Esta entrega foi conferida em ${br(diaAnterior)}, num mês já fechado (${br(v.de)} a ${br(v.ate)}, revisão ${v.ultimaRevisao}). Mês fechado não se recalcula: ela não pode mudar nem ir para outro mês.`;
+  if (n) return `O dia ${br(dia)} está num mês já fechado (${br(n.de)} a ${br(n.ate)}, revisão ${n.ultimaRevisao}). Mês fechado não se recalcula: escolha o dia certo, num mês aberto.`;
+  return '';
 }
 
 // A ficha pode continuar aberta por baixo do diálogo. Pull atualiza o store,

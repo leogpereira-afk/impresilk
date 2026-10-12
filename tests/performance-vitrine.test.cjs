@@ -19,13 +19,14 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;', '<':'&l
 function tela({papel = 'pcp', medida = 'nota', regsServidor = null, fila = []} = {}) {
   const c = {STORE:{getCFG:() => ({performancePCP:{equipes:[], participacoes:[]}}), getAllOS:() => [], getQueue:() => fila},
     STATE:{user:{papel}, _perfPessoaMedida:medida, _perfRankMedida:'entregas'},
-    periodoOuMes:() => ({de:'2026-09-01', ate:'2026-09-19'}), classificarEntregas:os => ({instalacoes:os, aLancar:[]}),
+    // Mês inteiro e já terminado: o Fechar só aceita do dia 01 ao último dia do mês (item 3 da fila de 11/10/2026).
+    periodoOuMes:() => ({de:'2026-09-01', ate:'2026-09-30'}), classificarEntregas:os => ({instalacoes:os, aLancar:[]}),
     OPERACAO:{emIntervalo:() => true, equipe:os => os.equipe || []}, diaEntrega:() => '2026-09-19', valorDaOS:o => o.valorTotal,
     nomeExibicaoCasa:n => ({chave:n, nome:n}), pessoasRH:() => [], avatarRH:() => '', esc, dinheiroCasa:n => 'VALOR-' + n, filtroPeriodoHTML:() => ''};
   vm.createContext(c); vm.runInContext(src, c);
   if (regsServidor) {
     c.__regs = regsServidor;
-    vm.runInContext("perfRemoto.chave=perfChave();perfRemoto.dados={consultadoEm:'2026-09-19T10:00:00',fonte:'teste',periodo:{de:'2026-09-01',ate:'2026-09-19'},registros:__regs};", c);
+    vm.runInContext("perfRemoto.chave=perfChave();perfRemoto.dados={consultadoEm:'2026-09-19T10:00:00',fonte:'teste',periodo:{de:'2026-09-01',ate:'2026-09-30'},registros:__regs};", c);
   }
   return c;
 }
