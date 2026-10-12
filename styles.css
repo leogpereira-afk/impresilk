@@ -3881,6 +3881,11 @@ img.perf-logo{object-fit:cover}
 .lote-l-data input{min-height:40px;padding:4px 8px;border:1px solid var(--border);border-radius:8px;font:inherit}
 .lote-retrab{display:flex;gap:6px;align-items:center;font-size:.78rem;color:#526378}
 .lote-l-entrega{display:flex;gap:6px;flex-wrap:wrap;grid-column:1 / -1}
+/* A linha da O.S. com conferência por entrega (U1 da revisão da onda operação): o estado da conferência no lugar das marcas antigas. */
+.lote-conf-estado{flex:1 1 260px;align-self:center;padding:6px 10px;border-radius:8px;background:#e8f0fa;color:#1e3a8a;font-size:.82rem;line-height:1.35}
+.lote-conf-estado.inconsistente{background:#fff1e6;color:#8a2d0a}
+.lote-l-data-conf{margin:0}
+.lote-l-data-conf small{color:#526378}
 .lote-b{min-height:40px;padding:0 12px;border:1px solid #b9c7d8;border-radius:8px;background:#fff;color:#163654;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center}
 .lote-b.on{background:#183f50;border-color:#183f50;color:#fff}
 .lote-b.sim.on{background:var(--red);border-color:var(--red)}

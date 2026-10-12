@@ -207,6 +207,27 @@ const LOTE = (() => {
   const diaLinha = o => OPERACAO.dia((lancada(o) || {}).data) || OPERACAO.diaDaVolta(o) || OPERACAO.dia(o && o.finalizadaEm);
   const aberta = o => !OPERACAO.dia(o && o.finalizadaEm);
   const baixaERP = o => OPERACAO.encerradaERP(o);
+  /* A O.S. COM CONFERÊNCIA POR ENTREGA (U1 da revisão da onda operação;
+     D-016): a entrega dela é a da conferência. A linha mostra o estado da
+     conferência (X de Y unidades, saldo) e o botão que a abre, sem o campo
+     Entrega (o lote não lança nela, e a data digitada era descartada) e sem
+     as marcas antigas ("Todos os itens entregues", "Marcar a parte"). */
+  const comConferencia = o => !!o && Array.isArray(o.conferenciasEntrega) && o.conferenciasEntrega.length > 0;
+  function conferenciaDaLinha(o) {
+    if (!comConferencia(o) || typeof CONFERENCIA_ENTREGA === 'undefined') return null;
+    let e;
+    try { e = CONFERENCIA_ENTREGA.estado(o, null); } catch (err) { return null; }
+    if (!e) return null;
+    const dia = d => d ? String(d).split('-').reverse().join('/') : '';
+    const n = lista(o.conferenciasEntrega).length, ult = dia(e.ultimoDia);
+    if (e.situacao === 'inconsistente') return {texto: `Conferência por entrega que não se lê mais (${String(e.erro || 'um item mudou').replace(/[.\s]*$/, '')}): revise na conferência.`, inconsistente: true, saldo: null};
+    const itens = lista(e.itens), conferidas = itens.reduce((t, it) => t + (Number(it.conferido) || 0), 0);
+    const total = itens.reduce((t, it) => t + (it.cancelado ? (Number(it.conferido) || 0) : (Number(it.qtde) || 0)), 0);
+    const saldo = Number(e.saldoUnidades) || 0, canc = Number(e.canceladoUnidades) || 0;
+    const partes = [`${conferidas} de ${total} ${total === 1 ? 'unidade conferida' : 'unidades conferidas'}`, saldo ? `saldo de ${saldo} a conferir` : 'sem saldo a conferir'];
+    if (canc) partes.push(`${canc} ${canc === 1 ? 'cancelada' : 'canceladas'}`);
+    return {texto: `Conferência por entrega (${n} ${n === 1 ? 'entrega' : 'entregas'}${ult ? ', a última em ' + ult : ''}): ${partes.join(' · ')}.`, inconsistente: false, saldo};
+  }
   /* A DATA DA ENTREGA QUE A LINHA SUGERE. A lançada; a da finalização do PCP
      e a da baixa do ERP de antes do corte, que já contam num dia (diaEntrega,
      casa.js: sugerir outro mudaria o dia, ou o mês, da entrega calado; na
@@ -302,7 +323,7 @@ const LOTE = (() => {
       /* A O.S. com conferência por entrega (M14, D-016) tem a equipe e a
          divisão em cada conferência: o lote não a lança nem divide (a divisão
          da O.S. inteira não contaria na apuração). Ela se resolve em
-         "Conferir entrega". */
+         "Conferir itens e equipe". */
       if (Array.isArray(o.conferenciasEntrega) && o.conferenciasEntrega.length) continue;
       vistas.add(o.id); out.push(o);
     }
@@ -521,11 +542,13 @@ const LOTE = (() => {
      chegada e a conferência da volta não são pedidas. */
   function faltasDaLinha(o, l, g, rg) {
     const trava = [], nota = [];
-    if (!diaOk(l.data)) trava.push('data da entrega');
+    const conf0 = comConferencia(o);
+    if (conf0) { /* a data não se edita na linha com conferência (U1): ela não é usada */ }
+    else if (!diaOk(l.data)) trava.push('data da entrega');
     else if (l.data > hoje()) trava.push('data da entrega depois de hoje');
     if (!respostaDaLinha(o, l)) trava.push('resposta do retrabalho');
     if (aberta(o) && erpPendente(o)) trava.push(ERP_DECIDIR);
-    else if (aberta(o)) {
+    else if (aberta(o) && !conf0) {
       if (!l.entrega) trava.push('entrega dos itens (todos ou a parte)');
       else if (l.entrega === 'parte' && !Object.values(l.parte || {}).some(q => Number(q) > 0)) trava.push('quantidade entregue da parte');
     }
@@ -534,6 +557,7 @@ const LOTE = (() => {
     if (!lista(eq).length) nota.push('equipe (o Salvar pergunta)');
     else if (conf && conf.erro) nota.push(`divisão da volta: ${conf.erro.replace(/[.\s]*$/, '').toLowerCase()} (sem isso vão só as pessoas)`);
     else if (!rg.equipeConfirmada && !confirmadaNaOS(o)) nota.push(EQUIPE_NAO_CONFERIDA);
+    if (conf0) { const c = conferenciaDaLinha(o); if (c && (c.inconsistente || c.saldo > 0)) nota.push(c.inconsistente ? 'revisar a conferência (Conferir itens e equipe)' : 'saldo a conferir (Conferir itens e equipe)'); }
     if (declaracoesDe(o).length && !l.conferir) nota.push('conferir o que a equipe declarou');
     if (comCarro(g)) {
       // A chegada e a conferência que VALEM nesta O.S.: as da volta, se a pessoa mexeu; senão, as gravadas nela (no dia da jornada).
@@ -595,8 +619,16 @@ const LOTE = (() => {
     const respostasVolta = voltaMexida(rg) && !semVolta ? Object.fromEntries(PERGUNTAS().map(k => [k, rg.volta[k] || ''])) : null;
     // A resposta desta tela; sem ela, a que a O.S. já tinha fica (não recarimba).
     const retrabalho = l.retrabalho && (l.retrabalho.resposta === 'sim' || l.retrabalho.resposta === 'nao') ? copia(l.retrabalho) : null;
+    /* UM CAMINHO SÓ (M14, onda operação; D-016): a O.S. com conferência por
+       entrega não ganha lançamento (ele não contaria na apuração). A linha
+       dela não tem o campo Entrega nem as marcas antigas (U1 da revisão): o
+       lote grava o resto da linha (equipe, volta, retrabalho), e a entrega é
+       a da conferência ("Conferir itens e equipe"). O servidor também não
+       aceita o lançamento (carimbarEntregaLancada). */
+    const conferida = comConferencia(atual);
+    const dataLinha = conferida ? (lancada(atual) ? atual.entregaLancada.data : diaOk(l.data) && l.data <= hoje() ? l.data : hoje()) : l.data;
     let nova;
-    try { nova = aplicarLancamento(atual, {data: l.data, alocacao, pessoas, respostasVolta, retrabalho}); }
+    try { nova = aplicarLancamento(atual, {data: dataLinha, alocacao, pessoas, respostasVolta, retrabalho}); }
     catch (e) { return {erro: String((e && e.message) || e)}; }
     if (respostasVolta) {
       const obs = texto(rg.volta.obs).slice(0, 300);
@@ -609,14 +641,7 @@ const LOTE = (() => {
        conferiu. Na O.S. aberta a entrega fica pelos itens; na finalizada no
        dia certo, a finalização já diz o dia. A baixa do ERP de antes do corte
        já conta no dia dela: só ganha lançamento se a pessoa mudou a data. */
-    /* UM CAMINHO SÓ (M14, onda operação; D-016): a O.S. com conferência por
-       entrega não ganha lançamento (ele não contaria na apuração); o lote
-       grava o resto da linha e avisa que o saldo se confere em "Conferir
-       entrega". O servidor também não aceita (carimbarEntregaLancada). */
-    const conferida = Array.isArray(atual.conferenciasEntrega) && atual.conferenciasEntrega.length > 0;
-    const querLancar = !aberta(atual) && ((baixaERP(atual) && !antesDoCorte(atual)) || l.data !== diaEntrega(atual));
-    const lancar = querLancar && !conferida;
-    if (querLancar && conferida && !(lancada(atual) && atual.entregaLancada.data === l.data)) avisos.push('O lançamento não foi gravado: a O.S. já tem conferência por entrega, e o saldo se confere em "Conferir entrega".');
+    const lancar = !conferida && !aberta(atual) && ((baixaERP(atual) && !antesDoCorte(atual)) || l.data !== diaEntrega(atual));
     if (!lancar) { if ('entregaLancada' in atual) nova.entregaLancada = atual.entregaLancada; else delete nova.entregaLancada; }
     else if (!(lancada(atual) && atual.entregaLancada.data === l.data)) mexeu.lancamento = true;
     /* A CHEGADA CONFERIDA, no dia da jornada (revisão da F17): uma por dia,
@@ -649,7 +674,7 @@ const LOTE = (() => {
         return '';
       };
       const rotuloItem = it => texto(it && (it.descricao || it.item)) || 'item';
-      if (aberta(atual) && (l.entrega === 'todos' || l.entrega === 'parte')) {
+      if (aberta(atual) && !conferida && (l.entrega === 'todos' || l.entrega === 'parte')) {
         const interna = OPERACAO.interno(atual);
         for (const x of itensDe(atual)) {
           if (x.servico) continue;
@@ -1329,14 +1354,14 @@ const LOTE = (() => {
           <li>No computador: setas entre as linhas, Enter confirma a linha em foco, Ctrl+Enter salva. Dentro de um campo, só o Ctrl+Enter vale.</li>
           <li>O rascunho fica guardado neste navegador (por modo e dia) e volta ao reabrir a tela. Sair do app apaga o rascunho.</li>
         </ul>
-        <p><strong>O que o lote ainda não faz:</strong> não finaliza O.S. aberta (a finalização segue na ficha, com fotos e retorno, ou na baixa do ERP); não marca parte de O.S. já finalizada (reabra pela ficha); a O.S. cancelada (no ERP ou pela gestão) fica fora do lote, e cancelar é na ficha, com o motivo; a O.S. que o ERP diz entregue com saldo no PCP se decide em Entregas, na lista "ERP diz entregue, PCP tem saldo"; a baixa do ERP lançada aqui continua sem prova (sem foto nem retorno), e a tela diz isso.</p>
+        <p><strong>O que o lote ainda não faz:</strong> não finaliza O.S. aberta (a finalização segue na ficha, com fotos e retorno, ou na baixa do ERP); não marca parte de O.S. já finalizada (reabra pela ficha); a O.S. cancelada (no ERP ou pela gestão) fica fora do lote, e cancelar é na ficha, com o motivo; a O.S. que o ERP diz entregue com saldo no PCP se decide em Entregas, na lista "ERP diz entregue, PCP tem saldo"; a baixa do ERP lançada aqui continua sem prova (sem foto nem retorno), e a tela diz isso; a O.S. com conferência por entrega não é lançada nem marcada aqui: a linha mostra a conferência e o botão "Conferir itens e equipe".</p>
         ${aberto ? '<button type="button" class="btn-primary btn-sm" data-lote-acao="entendi">Entendi</button>' : ''}
       </div>
     </details>`;
   }
   const seloOrigem = o => {
     if (aberta(o)) return '<span class="lote-selo aberta">Aberta no PCP</span>';
-    if (baixaERP(o)) return `<span class="lote-selo erp">Baixa do ERP${semProva(o) ? ' · sem prova' : ''}${lancada(o) ? ' · lançada' : antesDoCorte(o) ? ' · de antes do corte, já conta' : ' · a lançar'}</span>`;
+    if (baixaERP(o)) return `<span class="lote-selo erp">Baixa do ERP${semProva(o) ? ' · sem prova' : ''}${comConferencia(o) ? ' · entrega pela conferência' : lancada(o) ? ' · lançada' : antesDoCorte(o) ? ' · de antes do corte, já conta' : ' · a lançar'}</span>`;
     if (temMotor()) { const imp = ENTREGA_ITEM.entregaImplicita(o); if (imp && imp.declarado) return '<span class="lote-selo decl">Finalizada pelo celular · declarada</span>'; if (imp && imp.conferido) return '<span class="lote-selo ok">Finalizada pelo celular · conferida</span>'; }
     return '<span class="lote-selo ok">Finalizada no PCP</span>';
   };
@@ -1427,7 +1452,14 @@ const LOTE = (() => {
     const valor = v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) && typeof dinheiroCasa === 'function' ? dinheiroCasa(Number(v)) : '';
     const e7 = aberta(o) ? erpPendente(o) : null;
     const origem = origemSugerida(o, l.data);
-    const entregaBtn = e7
+    const confOS = comConferencia(o), conf = confOS && !e7 ? conferenciaDaLinha(o) : null;
+    const abrirConf = gestao() && typeof conferirItensEntrega === 'function'
+      ? `<button type="button" class="lote-b" data-lote-acao="conferencia" data-os="${escL(o.id)}" data-lote-k="conferencia:${escL(o.id)}">Conferir itens e equipe</button>`
+      : '<span class="lote-b estatico">A gestão confere os itens</span>';
+    const entregaBtn = conf
+      ? `<span class="lote-conf-estado${conf.inconsistente ? ' inconsistente' : ''}">${escL(conf.texto)}</span>${abrirConf}`
+      : confOS && !e7 ? `<span class="lote-conf-estado">Conferência por entrega gravada.</span>${abrirConf}`
+      : e7
       ? `<span class="lote-b estatico lote-erp-decidir">${escL(typeof textoERPDiz === 'function' ? textoERPDiz(e7.aviso) : 'O ERP diz entregue')}: decida em Entregas</span><button type="button" class="lote-b" data-lote-acao="erp-lista" data-os="${escL(o.id)}" data-lote-k="erp:${escL(o.id)}">Abrir a lista</button>`
       : aberta(o)
       ? `<button type="button" class="lote-b ${l.entrega === 'todos' ? 'on' : ''}" aria-pressed="${l.entrega === 'todos'}" data-lote-acao="entrega-todos" data-os="${escL(o.id)}" data-lote-k="todos:${escL(o.id)}">✓ Todos os itens entregues</button>`
@@ -1441,18 +1473,19 @@ const LOTE = (() => {
     return `<div class="lote-linha${l.confirmada ? ' confirmada' : ''}${f.trava.length ? ' com-falta' : ''}${est.foco === o.id ? ' em-foco' : ''}" data-lote-linha="${escL(o.id)}" tabindex="0" aria-label="O.S. ${escL(o.numero || '')}, ${escL(o.cliente || '')}${l.confirmada ? ', confirmada' : ''}">
       <div class="lote-l-os"><button type="button" class="inline-link" data-lote-acao="ficha" data-os="${escL(o.id)}"><strong>O.S ${escL(o.numero || '—')}</strong></button> <span class="lote-l-cli">${escL(o.cliente || '')}</span>
         <small>${escL(o.servico || '')}${valor ? ' · ' + escL(valor) : ''}</small> ${seloOrigem(o)}</div>
-      <label class="lote-l-data">Entrega <input type="date" value="${escL(l.data)}" max="${escL(hoje())}" data-lote-campo="data" data-os="${escL(o.id)}" data-lote-k="data:${escL(o.id)}">${origem ? `<small class="lote-l-origem">${escL(origem)}</small>` : ''}</label>
+      ${confOS ? '<p class="lote-l-data lote-l-data-conf">Entrega <small>pela conferência por entrega, com o dia de cada uma</small></p>'
+        : `<label class="lote-l-data">Entrega <input type="date" value="${escL(l.data)}" max="${escL(hoje())}" data-lote-campo="data" data-os="${escL(o.id)}" data-lote-k="data:${escL(o.id)}">${origem ? `<small class="lote-l-origem">${escL(origem)}</small>` : ''}</label>`}
       ${retrab}
-      <div class="lote-l-entrega">${entregaBtn}<button type="button" class="lote-b" aria-expanded="${est.itensAberto === o.id}" data-lote-acao="itens" data-os="${escL(o.id)}" data-lote-k="itens:${escL(o.id)}">${aberta(o) && !e7 ? 'Marcar a parte' : 'Ver os itens'}</button></div>
+      <div class="lote-l-entrega">${entregaBtn}${confOS && !e7 ? '' : `<button type="button" class="lote-b" aria-expanded="${est.itensAberto === o.id}" data-lote-acao="itens" data-os="${escL(o.id)}" data-lote-k="itens:${escL(o.id)}">${aberta(o) && !e7 ? 'Marcar a parte' : 'Ver os itens'}</button>`}</div>
       ${declHTML}
       ${chegadaLinhaHTML(o, g, l)}
       ${ocorrenciasLinhaHTML(o)}
-      ${baixaERP(o) ? saldoItensHTML(o, true) : ''}
+      ${baixaERP(o) && !confOS ? saldoItensHTML(o, true) : ''}
       <p class="lote-faltas">${f.trava.length ? `<span class="trava">Falta: ${escL(f.trava.join(', '))}.</span> ` : ''}${f.nota.length ? `<span class="nota">Ainda: ${escL(f.nota.join(', '))}.</span>` : ''}${!f.trava.length && !f.nota.length ? '<span class="nota">Tudo preenchido.</span>' : ''}</p>
       <div class="lote-l-acoes">${l.confirmada
         ? `<span class="lote-ok">✓ Confirmada</span><button type="button" class="btn-ghost btn-sm" data-lote-acao="desconfirmar" data-os="${escL(o.id)}">Desfazer a confirmação</button>`
         : `<button type="button" class="btn-primary btn-sm lote-confirmar" data-lote-acao="confirmar" data-os="${escL(o.id)}" data-lote-k="ok:${escL(o.id)}" ${f.trava.length ? 'aria-disabled="true"' : ''}>✓ Confirmar a linha</button>`}${l.salvaEm && !l.confirmada ? `<small class="lote-salva">salva no lote de ${escL(new Date(l.salvaEm).toLocaleString('pt-BR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}))}</small>` : ''}</div>
-      ${est.itensAberto === o.id ? itensHTML(o, l) : ''}
+      ${est.itensAberto === o.id && !(confOS && !e7) ? itensHTML(o, l) : ''}
       ${resultado}
     </div>`;
   }
@@ -1694,6 +1727,7 @@ const LOTE = (() => {
       if (acao === 'desfazer-lote') { void desfazerPelaTela(ds.rel); return; }
       if (acao === 'retrabalho-sim') { marcarFoco(focoAntes); abrirRetrabalho(ds.os); return; }
       if (acao === 'erp-lista') { if (typeof abrirListaErpSaldo === 'function') abrirListaErpSaldo(); return; }
+      if (acao === 'conferencia') { if (typeof conferirItensEntrega === 'function') Promise.resolve().then(() => conferirItensEntrega(ds.os)).catch(e => { if (typeof toast === 'function') toast(String((e && e.message) || e), 'error'); }); return; }
       if (ACOES_F17.has(acao)) { pelaTelaF17(acao, ds); marcarFoco(focoAntes); return; }
       const itensAntes = est.itensAberto, alocAntes = est.alocAberto;
       const erro = executar({acao, os: ds.os, grupo: ds.grupo, k: ds.k, v: ds.v});

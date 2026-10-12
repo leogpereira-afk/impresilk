@@ -156,3 +156,64 @@ test('revisão operação: D2, a porta confere o par número e ID sempre que o n
   r = await e.call({action:'upsert', os:{...g(e, 'corr'), obs:'nota fictícia'}}, gestor);
   assert.equal(g(e, 'corr').osOriginalId, 'd1');
 });
+
+/* ── U1: o Fechar o dia com a O.S. que tem conferência por entrega ─────── */
+function painelLote(b) {
+  const nos = new Map();
+  const no = sel => ({sel, outer:[], inner:[], classList:{add() {}, remove() {}}, focus() {},
+    set outerHTML(v) { this.outer.push(String(v)); }, get outerHTML() { return this.outer[this.outer.length - 1] || ''; },
+    set innerHTML(v) { this.inner.push(String(v)); }, get innerHTML() { return this.inner[this.inner.length - 1] || ''; }});
+  const p = {telas:[], onclick:null, onchange:null,
+    set innerHTML(v) { this.telas.push(String(v)); nos.clear(); }, get innerHTML() { return this.telas[this.telas.length - 1] || ''; },
+    querySelector(sel) { if (!nos.has(sel)) nos.set(sel, no(sel)); return nos.get(sel); }, querySelectorAll:() => [], contains:() => false};
+  b.ctx.document.getElementById = id => id === 'panel-entregas' ? p : null;
+  return p;
+}
+const linhaDoLote = (html, id) => { const i = html.indexOf(`data-lote-linha="${id}"`); assert.ok(i >= 0, 'a linha ' + id + ' está na tela'); const j = html.indexOf('data-lote-linha="', i + 10); return html.slice(i, j < 0 ? undefined : j); };
+const comConf = (o, qtde = 4) => { o.conferenciasEntrega = [{id:'e1', dia:'2026-09-28', itens:[sel(o, 0, qtde)], alocacao:aloc('100001'), por:'Gestor Teste', porId:'111222', em:'2026-09-28T20:00:00.000Z'}]; return o; };
+
+test('revisão operação: U1, no Fechar o dia a linha da O.S. com conferência mostra a conferência e o botão dela, sem campo Entrega nem marcas antigas', async () => {
+  const k1 = comConf(B.aberta('k1')), k2 = comConf(B.erp('k2')), livre = B.aberta('k3');
+  const b = await B.montar({os:[k1, k2, livre]});
+  b.run(ler('conferencia-entrega.js'));
+  const abertas = [];
+  b.ctx.conferirItensEntrega = id => { abertas.push(id); return Promise.resolve(); };
+  const painel = painelLote(b);
+  await b.run(`LOTE.abrir({modo:'dia', dia:'${B.HOJE}'})`);
+  b.run('LOTE.render()');
+  let html = linhaDoLote(painel.innerHTML, 'k1');
+  // Caso ruim (f33877d): a aberta com conferência oferecia "Todos os itens entregues" e "Marcar a parte", com o campo Entrega.
+  assert.doesNotMatch(html, /Todos os itens entregues|Marcar a parte|data-lote-campo="data"/);
+  assert.match(html, /Conferência por entrega \(1 entrega, a última em 28\/09\/2026\): 4 de 12 unidades conferidas · saldo de 8 a conferir\./);
+  assert.match(html, /data-lote-acao="conferencia" data-os="k1"[^>]*>Conferir itens e equipe</);
+  // A O.S. sem conferência continua como era.
+  assert.match(linhaDoLote(painel.innerHTML, 'k3'), /Todos os itens entregues[\s\S]*Marcar a parte/);
+  // A falta não pede a entrega dos itens; a nota diz o saldo e onde conferir.
+  const f = await b.json(`(() => { const o = STORE.getOS('k1'); const g = LOTE.gruposDaTela().find(x => x.os.some(y => y.id === 'k1')); return LOTE.faltasDaLinha(o, LOTE.linha('k1'), g, LOTE.grupo(g.chave)); })()`);
+  assert.ok(!f.trava.some(t => /entrega dos itens|data da entrega/.test(t)), JSON.stringify(f));
+  assert.ok(f.nota.includes('saldo a conferir (Conferir itens e equipe)'), JSON.stringify(f));
+  // O botão abre a conferência daquela O.S.
+  b.ctx.__t = {dataset:{loteAcao:'conferencia', os:'k1'}, disabled:false, closest:sel => sel === '[data-lote-acao]' ? b.ctx.__t : null};
+  b.run('document.getElementById("panel-entregas").onclick({target:__t})');
+  await pausa();
+  assert.deepEqual(abertas, ['k1']);
+  // A baixa do ERP com conferência: não é "a lançar", nem "1 sem prova (baixa do ERP)", nem toda entregue.
+  await b.run(`LOTE.abrir({modo:'dia', dia:'2026-09-28'})`);
+  b.run('LOTE.render()');
+  html = linhaDoLote(painel.innerHTML, 'k2');
+  assert.doesNotMatch(html, /a lançar|sem prova \(baixa do ERP\)|pela finalização|Todos os itens entregues|data-lote-campo="data"|Ver os itens/);
+  assert.match(html, /Baixa do ERP · sem prova · entrega pela conferência/);
+  assert.match(html, /4 de 12 unidades conferidas · saldo de 8 a conferir/);
+  // Salvar a linha grava o resto (retrabalho) sem lançamento e sem aviso de data descartada.
+  assert.equal(await b.acao({acao:'retrabalho-nao', os:'k2'}), '');
+  assert.equal(await b.acao({acao:'confirmar', os:'k2'}), '');
+  const rel = await b.json('LOTE.salvar({prazoMs:3000, passoMs:5})');
+  const item = rel.itens.find(i => i.id === 'k2');
+  assert.equal(item.estado, 'gravada', JSON.stringify(item));
+  assert.ok(!(item.avisos || []).some(a => /lançamento/.test(a)), JSON.stringify(item));
+  await b.sincronizar();
+  const srv = g(b.e, 'k2');
+  assert.equal(srv.entregaLancada, undefined);
+  assert.equal(srv.retrabalhoPerguntado.resposta, 'nao');
+  b.fechar();
+});
