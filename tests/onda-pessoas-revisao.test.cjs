@@ -49,7 +49,8 @@ test('revisão pessoas: duas FICHAS com o mesmo ID e CPFs diferentes: nenhuma fi
   const e = await edge('pcp-sync', banco(DUAS_FICHAS));
   const fichas = await e.run('fichasRH()');
   // Caso ruim: nenhuma marca de repetido, e a régua dava a O.S. da titular ao intruso.
-  assert.equal(JSON.stringify(fichas.map(f => [f.chave, f.id, !!f.idRepetido])), JSON.stringify([['b', '700001', true], ['a', '700001', true]]));
+  // A ordem é a da chave da linha (o RH é lido em páginas desde a auditoria de 12/10/2026).
+  assert.equal(JSON.stringify(fichas.map(f => [f.chave, f.id, !!f.idRepetido])), JSON.stringify([['a', '700001', true], ['b', '700001', true]]));
   const regua = await e.run('pessoasDoPCP()');
   assert.equal(regua.repetido('700001'), true);
   const p = regua.pessoa('700001');

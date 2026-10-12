@@ -573,19 +573,37 @@ let _fichasRH: { ate: number; fichas: any[] } | null = null;
 /* CONTRATOS DE FREELANCER DO RH (F07, caminho B): o prestador que instala
    entra na régua pelo contrato, com o ID do CPF do contrato. Só os campos que
    a régua usa; o CPF inteiro fica neste servidor (juntarFreelancers). */
+/* O RH LIDO INTEIRO, EM PÁGINAS (os pequenos da auditoria de 12/10/2026). A
+   leitura de uma vez só parava calada no teto de linhas do banco (max_rows,
+   1000): acima de 1000 cadastros (fichas, contratos, férias, ausências), a
+   busca por documento e a régua de pessoas não viam todo mundo. Pagina pela
+   chave da linha (apelido `pk`), 500 por vez; leitura que não termina é erro,
+   nunca lista pela metade. `campos`: o select de sempre, sem o id da linha. */
+async function lerRegistrosRH(colecao: string, campos: string, filtro?: (q: any) => any): Promise<any[]> {
+  const out: any[] = [];
+  let depois = "";
+  for (let pagina = 0; pagina < 200; pagina++) {
+    let q = sb.from("registros").select("pk:id, " + campos).eq("colecao", colecao).eq("apagado", false);
+    if (filtro) q = filtro(q);
+    q = q.order("id").limit(500);
+    if (depois) q = q.gt("id", depois);
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as any[];
+    out.push(...rows);
+    if (rows.length < 500) return out;
+    const ultimo = String(rows[rows.length - 1].pk ?? "");
+    if (!ultimo || ultimo <= depois) throw new Error("Leitura do RH inconsistente. Tente de novo.");
+    depois = ultimo;
+  }
+  throw new Error("Leitura do RH excedeu o limite.");
+}
 async function contratosFreelancerRH(comFoto = false): Promise<any[]> {
-  const { data, error } = await sb.from("registros")
-    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->idPessoaAnteriores, registro->>funcao, registro->>situacao, registro->>contratoFim" + (comFoto ? ", registro->>exColaboradorId, registro->>fotoDataUrl" : ""))
-    .eq("colecao", "freelancers").eq("apagado", false);
-  if (error) throw new Error(error.message);
-  return (data ?? []) as any[];
+  return await lerRegistrosRH("freelancers", "registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->idPessoaAnteriores, registro->>funcao, registro->>situacao, registro->>contratoFim" + (comFoto ? ", registro->>exColaboradorId, registro->>fotoDataUrl" : ""));
 }
 async function fichasRH(): Promise<any[]> {
   if (_fichasRH && _fichasRH.ate > Date.now()) return _fichasRH.fichas;
-  const { data, error } = await sb.from("registros")
-    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->idPessoaAnteriores, registro->>dataDesligamento, registro->>statusId")
-    .eq("colecao", "colaboradores").eq("apagado", false);
-  if (error) throw new Error(error.message);
+  const data = await lerRegistrosRH("colaboradores", "registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->idPessoaAnteriores, registro->>dataDesligamento, registro->>statusId");
   // `ativo` com a mesma regra do elenco: ficha inativa com contrato ativo do
   // mesmo CPF cede lugar ao contrato nos dois lados (juntarFreelancers).
   const FORA = new Set(["inativo", "abandono", "externo"]);
@@ -3844,12 +3862,14 @@ Deno.serve(async (req: Request) => {
         if (doc.length !== 11 && doc.length !== 14) return resp({ error: "Digite o CPF (11 dígitos) ou o CNPJ (14 dígitos) inteiro." }, 400);
         const lim = await contarBuscaDocumento(String(cracha.sub ?? cracha.nome ?? ""));
         if (!lim.ok) return resp({ error: `Muitas buscas por documento em pouco tempo (o limite é ${LIMITE_BUSCA_DOC.max} a cada ${LIMITE_BUSCA_DOC.minutos} minutos). Tente de novo em ${lim.minutos} ${lim.minutos === 1 ? "minuto" : "minutos"}.` }, 429);
-        const [fichas, contratos] = await Promise.all([
-          sb.from("registros").select("registro->>id, registro->>nome, registro->>cpf, registro->>idPessoa").eq("colecao", "colaboradores").eq("apagado", false),
-          sb.from("registros").select("registro->>id, registro->>nome, registro->>cpf, registro->>cnpj, registro->>idPessoa").eq("colecao", "freelancers").eq("apagado", false),
-        ]);
-        if (fichas.error || contratos.error) return resp({ error: "Não foi possível ler o RH agora. Tente de novo." }, 500);
-        const achou = pessoasPorDocumento(doc, fichas.data ?? [], contratos.data ?? []);
+        let fichas: any[], contratos: any[];
+        try {
+          [fichas, contratos] = await Promise.all([
+            lerRegistrosRH("colaboradores", "registro->>id, registro->>nome, registro->>cpf, registro->>idPessoa"),
+            lerRegistrosRH("freelancers", "registro->>id, registro->>nome, registro->>cpf, registro->>cnpj, registro->>idPessoa"),
+          ]);
+        } catch { return resp({ error: "Não foi possível ler o RH agora. Tente de novo." }, 500); }
+        const achou = pessoasPorDocumento(doc, fichas, contratos);
         if (achou.erro) return resp({ error: achou.erro }, 400);
         const out = resp({ pessoas: achou.pessoas.map((p: any) => ({ id: String(p.id || ""), nome: String(p.nome || "") })), restantes: lim.restantes });
         out.headers.set("Cache-Control", "no-store");
@@ -3874,15 +3894,15 @@ Deno.serve(async (req: Request) => {
         // quem e a pessoa (nome/apelido), onde trabalha (setor/area/cargo), se
         // esta na ativa (status) e a cara dela (foto). Salario, endereco,
         // telefone, CPF completo e o resto NUNCA passam por esta porta.
-        const { data: col, error: e1 } = await sb.from("registros")
-          .select("registro").eq("colecao", "colaboradores").eq("apagado", false);
-        if (e1) return resp({ error: e1.message }, 500);
+        let col: any[];
+        try { col = await lerRegistrosRH("colaboradores", "registro"); }
+        catch (e) { return resp({ error: (e as Error).message }, 500); }
         // Tabelas de apoio do RH: cargo, area e status sao ids, nao textos.
         const apoio = async (colecao: string) => {
-          const { data } = await sb.from("registros")
-            .select("registro->>id, registro->>nome").eq("colecao", colecao).eq("apagado", false);
+          let data: any[] = [];
+          try { data = await lerRegistrosRH(colecao, "registro->>id, registro->>nome"); } catch { data = []; }
           const m: Record<string, string> = {};
-          for (const r of (data ?? []) as any[]) if (r.id) m[String(r.id)] = String(r.nome ?? "");
+          for (const r of data) if (r.id) m[String(r.id)] = String(r.nome ?? "");
           return m;
         };
         const [cargos, areas, situacoes] = await Promise.all([apoio("cargos"), apoio("areas"), apoio("status")]);
@@ -3996,16 +4016,12 @@ Deno.serve(async (req: Request) => {
         // tela; aqui e UTC). Janela curta para o pacote nao inchar.
         const hojeUTC = new Date().toISOString().slice(0, 10);
         const de = new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
-        const { data: fer } = verFichaRH ? await sb.from("registros")
-          .select("registro->>colaboradorId, registro->>dataInicio, registro->>dataRetorno, registro->>status")
-          .eq("colecao", "ferias").eq("apagado", false) : { data: [] };
+        const fer = verFichaRH ? await lerRegistrosRH("ferias", "registro->>colaboradorId, registro->>dataInicio, registro->>dataRetorno, registro->>status").catch(() => []) : [];
         const ferias = ((fer ?? []) as any[])
           .map((r) => ({ chave: String(r.colaboradorId || ""), de: String(r.dataInicio || "").slice(0, 10),
                          ate: String(r.dataRetorno || "").slice(0, 10), status: String(r.status || "") }))
           .filter((f) => f.chave && f.ate && f.ate >= de);
-        const { data: aus } = verFichaRH ? await sb.from("registros")
-          .select("registro->>colaboradorId, registro->>data, registro->>tipo, registro->>horas")
-          .eq("colecao", "ausencias").eq("apagado", false).gte("registro->>data", de) : { data: [] };
+        const aus = verFichaRH ? await lerRegistrosRH("ausencias", "registro->>colaboradorId, registro->>data, registro->>tipo, registro->>horas", (q: any) => q.gte("registro->>data", de)).catch(() => []) : [];
         const ausencias = ((aus ?? []) as any[])
           .map((r) => ({ chave: String(r.colaboradorId || ""), data: String(r.data || "").slice(0, 10),
                          tipo: String(r.tipo || ""), horas: Number(r.horas) || 0 }))

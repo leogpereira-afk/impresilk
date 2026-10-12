@@ -33,6 +33,8 @@ function banco(initial={}) {
     }}
     // Projeção de JSON como o PostgREST: "registro->>id" (texto), "apelido:registro->campo" (JSON, com nome)
     // e caminhos mais fundos, "linhas:registro->apuracao->linhas" (o nome é o apelido ou o último campo).
+    // Coluna com apelido, como o PostgREST: "pk:id" (a leitura do RH em páginas). Antes da projeção de JSON, que pode cobrir o id da linha.
+    if(op==='read'&&proj)result=result.map(r=>{let o=r;for(const c of proj){const m=c.match(/^(\w+):(\w+)$/);if(m){if(o===r)o={...r};o[m[1]]=r[m[2]];}}return o;});
     if(op==='read'&&proj&&proj.some(c=>c.includes('->')))result=result.map(r=>{const o={...r};for(const c of proj){const m=c.match(/^(?:(\w+):)?(\w+)((?:->>?\w+)+)$/);if(m){const [,alias,a,resto]=m,partes=resto.split(/->>?/).filter(Boolean);o[alias||partes[partes.length-1]]=partes.reduce((v,p)=>v?.[p],r[a]);}}return o;});
     resolve({data:clone(one?result[0]||null:result),count:result.length,error:null});
    } catch(e){reject(e);}
