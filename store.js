@@ -935,6 +935,14 @@ const STORE = (() => {
           if ((item.action === 'upsert' || item.action === 'setCfg') && res && Array.isArray(res.avisos) && res.avisos.length) {
             _notifyListeners('item-aviso', { item, avisos: res.avisos.map(String) });
           }
+          /* A FOTO QUE O SERVIDOR PRESERVOU (C2 da auditoria de 12/10/2026): o
+             409 do deletePhoto ("Foto preservada ...", "Arquivo preservado")
+             saía da fila calado, como se a foto tivesse sido apagada. Ela sai
+             da fila (tentar de novo daria a mesma resposta), com o aviso na
+             tela de que a foto continua no servidor e por quê. */
+          if (item.action === 'deletePhoto' && res && res.error) {
+            _notifyListeners('item-aviso', { item, avisos: ['A foto não foi apagada no servidor: ' + String(res.error)] });
+          }
         }
         consecutiveNetFails = 0;
       } catch (e) {
