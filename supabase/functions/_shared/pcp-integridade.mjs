@@ -22,7 +22,7 @@ export function atualizarSituacaoERP(atual, situacao, em) {
 }
 /* TRABALHO DE GENTE NA O.S. A conciliação horária arquivava toda O.S. que
    saiu da carteira aberta do ERP -- inclusive liberada, com equipe, agenda e
-   confirmação (54 em 3 dias, 12 liberadas; a 23364 sumiu no dia da
+   confirmação (54 em 3 dias, 12 liberadas; uma O.S. sumiu no dia da
    instalação). Só marcas que uma PESSOA põe contam: a importação preenche
    data e período com a previsão do ERP, então data não prova programação. */
 export function temTrabalhoHumano(o) {
@@ -441,7 +441,7 @@ export function carimbarRetornoPrevisto(veio, os, antes, autor, agora, { pode = 
   return { os: r, avisos };
 }
 /* A CHEGADA CONFERIDA DO CARRO (F14, retornoConferido). É o check-in da
-   gestão no Fechar o dia: o Thiago confere a hora em que o carro chegou, uma
+   gestão no Fechar o dia: a gestão do PCP confere a hora em que o carro chegou, uma
    vez por volta, e o lote grava {dia, hora, fonte} em cada O.S. da volta. É
    a régua do retorno antecipado (F17): a hora digitada pelo instalador nunca
    decide. Regras (roda depois do preservarAusentes, que já pôs o gravado no
@@ -1329,8 +1329,8 @@ export function resolverPessoas(dados = {}) {
   const todas = Array.isArray(dados.pessoas) ? dados.pessoas : [];
   const fichas = todas.filter(p => p && ehIdPessoa(p.id));
   /* Contrato de freelancer ainda sem ID (sem CPF, ou CPF que não confere, F07)
-     conta na ambiguidade e nunca é o resultado: "Lucas" com a ficha do Lucas e
-     o contrato do Lucas Prado sem CPF já não é de ninguém, e não muda de dono
+     conta na ambiguidade e nunca é o resultado: "Lucio" com a ficha do Lucio e
+     o contrato do Lucio Prado sem CPF já não é de ninguém, e não muda de dono
      no dia em que o RH preenche o CPF do contrato. */
   const semId = todas.filter(p => p && p.freelancer === true && !ehIdPessoa(p.id) && String(p.nome || '').trim());
   const candidatas = semId.length ? [...fichas, ...semId] : fichas;
@@ -1359,7 +1359,7 @@ export function resolverPessoas(dados = {}) {
   // as fichas, inclusive quem já saiu. Quem saiu nunca é o resultado: "Elias"
   // com um Elias desligado e outro na casa é ambíguo, e não do que ficou --
   // senão o crachá antigo do que saiu passava a abrir as O.S. do xará
-  // (revisão de 29/09/2026). "Adriano" sozinho, com dois Adrianos, fica sem
+  // (revisão de 29/09/2026). "Abriano" sozinho, com dois Abrianos, fica sem
   // ficha de propósito.
   const auto = texto => {
     const ap = normPessoa(texto), tokens = ap.split(' ');
@@ -1369,8 +1369,8 @@ export function resolverPessoas(dados = {}) {
     if (porApelido.length) {
       /* O apelido do CONTRATO não passa por cima do nome de outra pessoa
          (F07): o RH só barra apelido igual ao de outro cadastro, não ao
-         primeiro nome de alguém. "Lucas" com a ficha do Lucas Ferreira e o
-         contrato do Lucas Prado de apelido "lucas" é ambíguo; senão o
+         primeiro nome de alguém. "Lucio" com a ficha do Lucio Ferreira e o
+         contrato do Lucio Prado de apelido "lucio" é ambíguo; senão o
          histórico e o crachá do empregado passavam para o freelancer. */
       const alvo = porApelido.length === 1 && porApelido[0].freelancer === true ? porApelido[0] : null;
       if (alvo && porPrefixo(candidatas).some(p => p !== alvo && (!ehIdPessoa(p.id) || p.id !== alvo.id))) return null;
@@ -1409,7 +1409,7 @@ export function resolverPessoas(dados = {}) {
   const chave = entrada => { const s = String(entrada ?? '').trim(); return s ? (idDe(s) || 'nome:' + normPessoa(s)) : ''; };
   // Nome de exibição: a palavra que o PCP já usa (lista de instaladores,
   // depois vínculo salvo); senão o menor começo do nome completo que só
-  // aquela ficha tem ("Lucas Gabriel", "Hélio").
+  // aquela ficha tem ("Lucio Gabriel", "Hélcio").
   const rotulos = new Map();
   for (const n of Array.isArray(dados.lista) ? dados.lista : []) { const id = idDe(n); if (id && !rotulos.has(id)) rotulos.set(id, String(n).trim()); }
   for (const v of vinculos) { const id = idDe(v.apelido || v.nomePCP); if (id && !rotulos.has(id)) rotulos.set(id, String(v.apelido || v.nomePCP).trim()); }

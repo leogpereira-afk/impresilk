@@ -1,7 +1,7 @@
 'use strict';
 /* ONDA PESSOAS, ITEM 5 DA SESSÃO PRINCIPAL (D-014, 12/10/2026): O APROVADOR DA
    COMISSÃO É SUBSTITUÍVEL. "pode fazer e tem que criar um esquema para colocar
-   outra pessoa no lugar de thiago se houver necessidade" (o dono). Titular e
+   outra pessoa no lugar [do titular] se houver necessidade" (o dono, com o nome trocado). Titular e
    substituto pelo ID de 6 dígitos, gravados só pelo admin, com motivo e
    diário. Os casos ruins: qualquer pcp aprovando com titular designado; o
    titular aprovando enquanto o substituto vale; o substituto aprovando antes

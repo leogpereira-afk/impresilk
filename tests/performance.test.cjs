@@ -111,7 +111,7 @@ test('ranking: empate divide a posição e a próxima pula (1, 1, 3)', () => {
 });
 
 test('equipe nomeada: composição EXATA de uma equipe ativa passa a ter o nome dela', () => {
-  const a = {chave:'1',nome:'Adriano'}, d = {chave:'2',nome:'Douglas'}, j = {chave:'3',nome:'José'};
+  const a = {chave:'1',nome:'Abriano'}, d = {chave:'2',nome:'Durval'}, j = {chave:'3',nome:'José'};
   const salvas = [{id:'eq1',nome:'Horizonte',emblema:'🦅',membros:[d,a],ativo:true}];
   const [igual, maior] = P.comEquipes([
     {id:'os1',membros:P.iguais([a,d])},

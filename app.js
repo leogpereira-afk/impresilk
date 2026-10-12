@@ -4475,7 +4475,7 @@ function tiposServicoHist() {
    primeiro quem está na lista de instaladores, depois o resto da casa por
    área -- e o que a O.S. grava é o ID (6 primeiros dígitos do CPF). Nome da
    lista sem ficha no RH (terceiro ainda sem cadastro) aparece marcado e
-   segue como nome até ganhar ficha. Nome antigo já gravado na O.S. ("Lucas")
+   segue como nome até ganhar ficha. Nome antigo já gravado na O.S. ("Lucio")
    aparece marcado na linha da pessoa e, ao confirmar, vira o ID dela. */
 /* FREELANCER NO SELETOR (F07, caminho B, decisão do dono de 29/09/2026).
    O prestador vem do CONTRATO de freelancer do RH, com o ID do CPF do
@@ -6066,7 +6066,7 @@ function ligarStatusEntregaDaFicha() {
 
 /* PESSOA A CADASTRAR (item 20 da fila de 11/10/2026): a O.S. com alguém na
    equipe que não tem ficha nem contrato de freelancer no RH (o nome que não
-   vira ID; a régua é OPERACAO.aCadastrarDaOS). O Thiago vê quais O.S.
+   vira ID; a régua é OPERACAO.aCadastrarDaOS). A gestão do PCP vê quais O.S.
    esperam cadastro antes do fechamento. Só com o elenco da gestão (fichaRH,
    que traz também quem já saiu): sem ele, quem saiu pareceria sem cadastro. */
 function aCadastrarOS(os) {
@@ -7516,7 +7516,7 @@ function horasExec(os) {
 }
 
 // A pessoa `quem` (ID, nome da lista ou nome antigo) está na equipe da O.S.?
-// Pela pessoa, nunca pelo texto: "Lucas" acha a O.S. gravada com o ID dele.
+// Pela pessoa, nunca pelo texto: "Lucio" acha a O.S. gravada com o ID dele.
 function naEquipe(os, quem) {
   const k = OPERACAO.chavePessoa(quem);
   return !!k && OPERACAO.equipe(os).some(x => OPERACAO.chavePessoa(x) === k || OPERACAO.nomePessoa(x) === String(quem || '').trim());
@@ -8937,7 +8937,7 @@ function renderControle() {
     if (!c[key]) c[key] = [];
     /* O campo digitado dos instaladores é o do TERCEIRO SEM FICHA: o nome fica
        marcado como "sem ficha" e nunca casa sozinho com um xará do RH (um
-       "Charles" terceirizado virava o Charles da ficha). Quem é do RH entra
+       "Carles" terceirizado virava o Carles da ficha). Quem é do RH entra
        pela lista acima, com o ID. */
     if (key === 'instaladores') {
       const nome = val.trim();
@@ -9658,8 +9658,8 @@ function pessoaDoElenco(apelido) {
   // A equipe nova grava o ID do RH: acha a ficha por ele (quem já saiu vem
   // na lista dos antigos, só com nome).
   if (OPERACAO.ehIdPessoa(ap)) return pessoas.find(p => p.id === ap) || (STORE.elenco().antigos || []).find(p => p.id === ap) || null;
-  // Como o PCP escreve: "Osmane" (apelido do RH), "Adriano Pinheiro" (início
-  // do nome, que separa os dois Adrianos). Um só nome sem apelido no RH fica
+  // Como o PCP escreve: "Osvane" (apelido do RH), "Abriano Parreira" (início
+  // do nome, que separa os dois Abrianos). Um só nome sem apelido no RH fica
   // ambíguo de propósito -- melhor sair só o apelido do que o nome errado.
   const tokens = ap.split(' ');
   const prefixo = p => { const n = normNome(p.nome).split(' '); return tokens.every((t, i) => n[i] === t); };

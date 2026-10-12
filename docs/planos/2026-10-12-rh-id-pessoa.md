@@ -85,6 +85,6 @@ vez. Nada aqui foi feito no RH.
 
 ## Pergunta 12 da fila (freelancer novo)
 
-Quem cadastra o contrato de freelancer (o Thiago, papel pcp, ou só o admin do
+Quem cadastra o contrato de freelancer (a pessoa do papel pcp, ou só o admin do
 RH) continua aberto. Qualquer que seja a resposta, o `idPessoa` nasce no
 servidor do RH ao criar o contrato (item 1), então não depende de quem clica.

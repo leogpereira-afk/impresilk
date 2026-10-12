@@ -21,13 +21,13 @@ const HOJE = '2026-10-05';
 const AGORA = HOJE + 'T12:00:00Z';
 
 const ELENCO = {pessoas: [
-  {chave: 'adriano-f', id: '100001', nome: 'Adriano Fictício Souza', apelido: 'adriano', area: 'Montagem', ativo: true},
+  {chave: 'abriano-f', id: '100001', nome: 'Abriano Fictício Souza', apelido: 'abriano', area: 'Montagem', ativo: true},
   {chave: 'bia-f', id: '100002', nome: 'Bia Fictícia', apelido: 'bia', area: 'Montagem', ativo: true},
   {chave: 'caio-f', id: '100003', nome: 'Caio Fictício', apelido: 'caio', area: 'Montagem', ativo: true},
   {chave: 'eva-f', id: '100005', nome: 'Eva Fictícia', apelido: 'eva', area: 'Montagem', ativo: true},
 ], antigos: [], ferias: [], ausencias: [], fichaRH: true};
 const EQUIPES = [
-  {id: 'eq-aguia', nome: 'Águia', animal: 'aguia', cor: 'marinho', liderPadraoId: '100001', membros: [{chave: '100001', nome: 'Adriano'}, {chave: '100002', nome: 'Bia'}], ativo: true},
+  {id: 'eq-aguia', nome: 'Águia', animal: 'aguia', cor: 'marinho', liderPadraoId: '100001', membros: [{chave: '100001', nome: 'Abriano'}, {chave: '100002', nome: 'Bia'}], ativo: true},
   {id: 'eq-leao', nome: 'Leão', animal: 'leao', cor: 'laranja', liderPadraoId: '100005', membros: [{chave: '100005', nome: 'Eva'}, {chave: '100003', nome: 'Caio'}], ativo: true},
 ];
 // Divisão gravada da equipe Leão (Eva líder 60, Caio 40), com o carimbo de quem gravou.
@@ -46,7 +46,7 @@ const osBase = (extra = {}) => ({id: 'o1', numero: '8001', tipo: 'externo', clie
    uma cópia de cada gravação. Cada createElement vira um elemento falso cujos
    filhos (querySelector) nascem na primeira procura e ficam os mesmos. */
 function tela({lista = [], papel = 'pcp', confirmar = () => true} = {}) {
-  const cfg = {instaladores: ['Adriano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
+  const cfg = {instaladores: ['Abriano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
   const salvos = [], toasts = [], perguntas = [], criados = [], dom = {};
   const contagem = {pinturas: 0};
   const elemento = () => {

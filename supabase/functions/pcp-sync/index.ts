@@ -600,7 +600,7 @@ async function fichasRH(): Promise<any[]> {
              desligadoEm: String(g.dataDesligamento || "").trim().slice(0, 10),
              ativo: !FORA.has(String(g.statusId || "").trim()), cpf: d, statusId: String(g.statusId || "").trim() };
   }).filter((p) => p.nome);
-  // Freelancer entra na conta de ambiguidade: "Lucas" com um Lucas na ficha e
+  // Freelancer entra na conta de ambiguidade: "Lucio" com um Lucio na ficha e
   // outro no contrato não escolhe nenhum dos dois.
   const junta = juntarFreelancers(brutas, await contratosFreelancerRH(), { hoje: perfDia(new Date().toISOString()) });
   const fichas = [
@@ -1042,7 +1042,7 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
       valor=e?.valor==null?null:e.valor/100; origem="Itens desta entrega · líquido proporcional";
       o={...o,alocacao:a.erro?null:o._conferencia.alocacao,equipe:a.erro?[]:finaisAlocacao(o._conferencia.alocacao).map((m:any)=>m.pessoaId),entregaLancada:{data:o._dia}};
     }
-    /* "Lucas" antigo e o ID dele na mesma O.S. são um membro só. O membro não
+    /* "Lucio" antigo e o ID dele na mesma O.S. são um membro só. O membro não
        confirmado leva o ID como chave e o nome de exibição; nome antigo sem
        ficha segue como era (chave = o próprio nome). */
     const vistosEq=new Set<string>(), nomes:string[]=[];
@@ -1482,8 +1482,8 @@ Deno.serve(async (req: Request) => {
     /* APAGAR O.S NAO E COISA DE QUEM ENTROU SEM SENHA.
        O cracha do TOQUE NO NOME nasce de um primeiro nome da lista de
        instaladores -- sem senha nenhuma. Medido em 17/08/2026: com o nome
-       "Osmane" sai um cracha, e com ele `delete` respondia 200 e apagava O.S.
-       Nomes dessa lista sao nomes comuns (Charles, Douglas, Lucas, Saulo), e
+       "Osvane" sai um cracha, e com ele `delete` respondia 200 e apagava O.S.
+       Nomes dessa lista sao nomes comuns (Carles, Durval, Lucio, Saulo), e
        ela e publica para quem abre o espelho.
 
        Escrever o proprio trabalho e o motivo do cracha existir, e continua
@@ -3794,10 +3794,10 @@ Deno.serve(async (req: Request) => {
           ...junta.contratos.filter((c: any) => !c.ativo && c.id).map((c: any) => ({ chave: c.chave, id: c.id, nome: c.nome,
             apelido: c.apelido, ativo: false, desligado: true, freelancer: true, ...(c.idRepetido ? { idRepetido: true } : {}) })),
           /* O CONTRATO ENCERRADO SEM CPF CONTA NA AMBIGUIDADE (revisão da F12).
-             A régua do servidor (fichasRH) conta todo contrato sem ID: "Lucas"
-             com a ficha do Lucas Ferreira e o contrato encerrado do Lucas Prado
-             não é de ninguém. Sem ele no aparelho, a tela confirmava "Lucas"
-             como o Lucas Ferreira, e a troca pelo ID gravava o que o servidor
+             A régua do servidor (fichasRH) conta todo contrato sem ID: "Lucio"
+             com a ficha do Lucio Ferreira e o contrato encerrado do Lucio Prado
+             não é de ninguém. Sem ele no aparelho, a tela confirmava "Lucio"
+             como o Lucio Ferreira, e a troca pelo ID gravava o que o servidor
              não lê. Vai só o que a conta usa: nome e apelido, desligado. */
           ...junta.contratos.filter((c: any) => !c.ativo && !c.id).map((c: any) => ({ id: "", nome: c.nome, apelido: c.apelido,
             ativo: false, desligado: true, freelancer: true })),

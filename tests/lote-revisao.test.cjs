@@ -315,7 +315,7 @@ test('revisão: com a resposta perdida, o Desfazer espera a gravação do lote n
   assert.equal(noServidor(b.e, 'a1').entregaLancada.data, '2026-09-28', 'o servidor gravou o lote na a1');
   const doLote = id => itemDe(rel, id).em;
   const naFila = async () => Object.fromEntries((await b.json('STORE.getQueue().filter(q => q.action === "upsert").map(q => [q.os.id, q.os.atualizadoEm])')));
-  // Sem rede, o Thiago desfaz: nada é trocado na fila, e o lote diz por quê.
+  // Sem rede, o Tiberio desfaz: nada é trocado na fila, e o lote diz por quê.
   b.nav.onLine = false;
   const des = await b.json(`LOTE.desfazer(${JSON.stringify(rel.id)}, {prazoMs:300, passoMs:5})`);
   for (const id of ['a1', 'a2']) {

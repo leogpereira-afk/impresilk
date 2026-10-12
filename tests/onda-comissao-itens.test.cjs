@@ -29,7 +29,7 @@ test('item 3: o CSV leva o ID de 6 dígitos e o mês como texto para o Excel (="
 /* ------------------------------------------------- o servidor real, fictício */
 const {edge}=require('./helpers/edge.cjs');
 const EXP=Math.floor(Date.parse('2027-12-31T00:00:00Z')/1000);
-// O Thiago fictício (pcp) tem o ID no crachá; o dono fictício (admin) é achado pelo apelido da ficha.
+// O Tiberio fictício (pcp) tem o ID no crachá; o dono fictício (admin) é achado pelo apelido da ficha.
 const gestor={papel:'pcp',nome:'Gestor fictício',sub:'gestor',id:'044455',exp:EXP};
 const dono={papel:'admin',nome:'Dono fictício',sub:'dono',exp:EXP};
 const doc={origem:'Vistoria PCP',evidencia:'Foto e aceite fictícios 001',justificativa:'Conferido pela gestão fictícia'};
@@ -89,7 +89,7 @@ test('item 4: quem fechou, quem fez a prévia, quem aprovou e quem preparou a co
   assert.equal(e.db.pcp_registros.find(r=>r.colecao==='performance_fechamentos').registro.hash,f.hash);
 });
 
-/* ---------------------------------------------- M5 e D-013 ("THIAGO APROVA") */
+/* ---------------------------------------------- M5 e D-013 (a aprovação é do papel pcp) */
 test('M5 (D-013): só pcp e admin aprovam; os outros papéis e a máquina são recusados na porta; o pcp aprova a própria prévia',async()=>{
   const e=await servidor();
   const f=await fechar(e);
@@ -99,7 +99,7 @@ test('M5 (D-013): só pcp e admin aprovam; os outros papéis e a máquina são r
     assert.equal(r.status,403,'papel '+(quem.papel||quem)+': '+JSON.stringify(r));
   }
   assert.equal(e.db.pcp_registros.filter(r=>r.colecao==='performance_comissao').length,1,'nada foi gravado');
-  // O Thiago fictício (pcp) aprova a prévia que ele mesmo montou.
+  // O Tiberio fictício (pcp) aprova a prévia que ele mesmo montou.
   const a=await aprovar(e,p,{n:3});
   assert.equal(a.status,200,JSON.stringify(a));
   assert.equal(a.revisao.autor.porId,p.autor.porId);

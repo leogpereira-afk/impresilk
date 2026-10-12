@@ -114,7 +114,7 @@ const ALOCUI = (() => {
     }
   }
   /* A gente da O.S. sem olhar ordem nem repetição: a base da trava da equipe.
-     Pela pessoa (o ID quando o nome tem ficha), para o mesmo "Lucas" que o
+     Pela pessoa (o ID quando o nome tem ficha), para o mesmo "Lucio" que o
      servidor devolve como ID não parecer mudança feita em outro aparelho. */
   function genteDe(eq) {
     const O = oper();

@@ -88,7 +88,7 @@ function idPessoaCasa(valor) {
 /* UMA PESSOA TEM VÁRIOS APELIDOS NA O.S — E CADA UM PRECISA DO SEU VÍNCULO.
    Esta leitura deduplicava por `id` (os 6 dígitos do CPF) e jogava fora o
    `chave` (o id do RH). Resultado: ligar o SEGUNDO apelido da mesma pessoa
-   ("Osmane" e "Osmane V.") gravava, dizia "Foto e cargo já aparecem" num toast
+   ("Osvane" e "Osvane V.") gravava, dizia "Foto e cargo já aparecem" num toast
    verde, e o vínculo era descartado na releitura seguinte — a linha continuava
    pendente na tela. E ficha do RH sem CPF de 11 dígitos (`id` vazio) sumia
    inteira. A chave certa é o APELIDO: é ele que a O.S guarda e é dele que a
@@ -469,7 +469,7 @@ function nomeExibicaoCasa(apelido) {
 /* ══════════════════════════════════════════════════════════════════════════
    UMA BASE SÓ: AS PESSOAS VÊM DO RH
    ─────────────────────────────────────────────────────────────────────────
-   O PCP escreve apelidos na O.S ("Osmane", "Adriano Pinheiro"). A ficha mora
+   O PCP escreve apelidos na O.S ("Osvane", "Abriano Parreira"). A ficha mora
    no RH. Ligar os dois tem três caminhos, nesta ordem:
      1. vínculo salvo à mão (humano manda — a tela de Performance tem o botão);
      2. o apelido/nome bate sozinho com a ficha (pessoaDoElenco, em app.js);
@@ -582,7 +582,7 @@ function apelidosSemFicha() {
    de instaladores + equipes das O.S.) aparece com a ficha a que chega, como
    chegou, e os alertas:
    - sem ficha: nenhuma pessoa do RH;
-   - ambíguo: o nome serve para mais de uma pessoa (os dois Adrianos) e por
+   - ambíguo: o nome serve para mais de uma pessoa (os dois Abrianos) e por
      isso não liga sozinho;
    - juntos: dois nomes do PCP chegam à mesma ficha. Pode ser a mesma pessoa
      escrita de dois jeitos (certo) ou duas pessoas grudadas (errado); quem
@@ -892,7 +892,7 @@ function lancarEntregaManual(osId) {
   box.className = 'wpp-picker-overlay';
   /* OS CHIPS SÃO A UNIÃO da lista de instaladores com a equipe gravada na O.S.
      Só a lista de Configurações virava chip: nome da O.S fora dela (variante
-     como "Osmane V.", ou quem saiu da lista) não aparecia e, no Continuar, a
+     como "Osvane V.", ou quem saiu da lista) não aparecia e, no Continuar, a
      equipe era regravada sem ele. A pessoa perdia a entrega sem aviso. Quem
      está só na O.S entra marcado, com "fora da lista". */
   // Pela pessoa (ID): o chip grava o ID do RH e mostra o nome.
@@ -2323,7 +2323,7 @@ function renderEntregas() {
   };
   const baseAcompanhamento = per.os
     .map(o => ({ erp: o, card: porNumero.get(String(o.numero || '').trim()) || null, pendente: aLancarSet.has(String(o.numero || '').trim()) }))
-    // Técnico é a FICHA, não a grafia: "Osmane" e "Osmane V." são a mesma pessoa.
+    // Técnico é a FICHA, não a grafia: "Osvane" e "Osvane V." são a mesma pessoa.
     .filter(x => !tecnico || (x.card && OPERACAO.equipe(x.card).some(a => nomeExibicaoCasa(a).chave === tecnico)))
     .filter(x => !tipo || (typeof OPREV!=='undefined'?OPREV.tipo(x.card||x.erp,STORE.getCFG()):String((x.card && x.card.servico) || x.erp.servico || '').trim()) === tipo)
     .sort((a, b) => String(b.erp.data).localeCompare(String(a.erp.data)) || String(b.erp.numero).localeCompare(String(a.erp.numero)));
@@ -3003,7 +3003,7 @@ function carrosHTML(f) {
 
 /* ══════════════════════════════════════════════════════════════════════════
    NOMES ANTIGOS VIRAM ID PELA TELA (F12, 30/09/2026)
-   As O.S. antigas guardam o nome que o PCP digitava ("Lucas", "Adlando"); a
+   As O.S. antigas guardam o nome que o PCP digitava ("Lucio", "Ablando"); a
    régua de pessoas acha o dono na leitura, mas o primeiro fechamento sela a
    chave, e um xará novo no RH muda a resolução. Aqui a gestão (admin e pcp)
    troca o nome pelo ID em os.equipe, com o vínculo confirmado
@@ -3756,8 +3756,8 @@ async function iniciarDesfazerConversaoCasa() {
   }
 }
 
-/* GRAFIAS PARECIDAS, LADO A LADO (Adlando, Adilsom e Jose Adilando; Adriano,
-   Adriano Pinheiro e Adriano Nunes): juntam-se os nomes que chegam à mesma
+/* GRAFIAS PARECIDAS, LADO A LADO (Ablando, Abilsom e Jose Abilando; Abriano,
+   Abriano Parreira e Abriano Nunes): juntam-se os nomes que chegam à mesma
    ficha (ou à mesma sugestão), os que dividem os candidatos, e os que têm a
    primeira palavra igual ou parecida com uma palavra do outro. É só para a
    pessoa olhar junto e decidir: agrupar não liga ninguém. */
@@ -3931,8 +3931,8 @@ function painelTVCasa(i, f) {
   const c = typeof perfConfig === 'function' ? perfConfig() : {equipes:[],participacoes:[]};
   /* A TV MOSTRA O MESMO RANKING DA TELA. Ela lia só o aparelho e não passava
      pelas duas regras da tela (perfUnirPessoas e PERF.comEquipes): a equipe
-     "Horizonte" saía em duas linhas (com nome nas confirmadas, "Adriano +
-     Douglas" nas sugeridas), sem logo, e quem foi ligado ao RH depois aparecia
+     "Horizonte" saía em duas linhas (com nome nas confirmadas, "Abriano +
+     Durval" nas sugeridas), sem logo, e quem foi ligado ao RH depois aparecia
      duas vezes. Agora a base é perfLista (a do servidor, quando carregada). */
   const temPerf = typeof PERF !== 'undefined';
   const base = typeof perfLista === 'function' ? perfLista() : classificarEntregas(STORE.getAllOS()).instalacoes;
@@ -4456,7 +4456,7 @@ function equipeEscalavel() {
   });
   const jaTem = new Set(doPCP.map(normCasa));
   /* A MESMA PESSOA NÃO ENTRA DUAS VEZES. Comparar só o texto deixava
-     "Charles" (PCP) e "Charles Alves Dias" (RH) como duas pessoas, e o mesmo
+     "Carles" (PCP) e "Carles Alves Dias" (RH) como duas pessoas, e o mesmo
      com todo nome do PCP ligado à ficha por vínculo ou pelo começo do nome
      (conferência de 29/09/2026). Agora conta a FICHA a que o nome do PCP chega. */
   const fichasDoPCP = new Set(doPCP.map(n => fichaDoApelido(n)).filter(Boolean).map(p => p.chave || p.id).filter(Boolean));

@@ -22,7 +22,7 @@ Implementação de 02/10/2026, sobre `f1641109e16606f66885aa0c9cd791a14a9cc080` 
 - Unidades inteiras permitem quantidade parcial. Itens medidos por área ou quantidade fracionária usam o lote inteiro, conforme a regra existente do PCP.
 - Sem valor líquido confiável ou sem subtotais válidos, o valor fica a conferir; não se inventa uma base pelo total bruto.
 - A conferência da volta do carro só acompanha a entrega quando equipe e data coincidem. Não se copia a avaliação de outra equipe.
-- Este recurso não corrige automaticamente a entrega real de Osmane: a gestão precisa selecionar quais itens ele entregou.
+- Este recurso não corrige automaticamente a entrega real de um instalador (nome retirado deste documento público em 12/10/2026, M27): a gestão precisa selecionar quais itens ele entregou.
 
 ## Verificação executada
 
@@ -40,7 +40,7 @@ Esta mudança foi preparada em checkout isolado. A correção publicada de fotos
 2. Atualizar conjuntamente versão dos arquivos e cache. Feito: `config.js`, `index.html`, `equipe.html` e `sw.js` usam v146.
 3. Executar novamente as verificações sobre a revisão conciliada. Feito: 1.354 testes aprovados.
 4. Com autorização para publicação, implantar primeiro `pcp-sync` com os módulos compartilhados; depois publicar a interface.
-5. Confirmar a versão servida e testar a leitura autenticada e os atalhos publicados. Não registrar uma entrega real de teste nem alterar a O.S. de Osmane sem identificar os itens corretos.
+5. Confirmar a versão servida e testar a leitura autenticada e os atalhos publicados. Não registrar uma entrega real de teste nem alterar a O.S. desse instalador sem identificar os itens corretos.
 
 Não há migração de tabela nesta mudança; os registros utilizam o campo JSON existente.
 

@@ -3,7 +3,7 @@
    O.S. (card e ficha) e na lista do fechamento, para a O.S. com alguém na
    equipe sem ficha nem contrato de freelancer no RH (o nome que não vira ID).
    O caso ruim: na v169 a O.S. com "Zé Novo" na equipe passava calada, e o
-   Thiago só descobria no fechamento que a pessoa ficou fora do ranking e da
+   a gestão do PCP só descobria no fechamento que a pessoa ficou fora do ranking e da
    comissão. Dados fictícios. */
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
@@ -15,14 +15,14 @@ const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
 
 const DADOS = {pessoas:[
   {chave:'ana', id:'620001', nome:'Ana Fictícia', apelido:'ana'},
-  {chave:'adriano-a', id:'620002', nome:'Adriano Alves'}, {chave:'adriano-b', id:'620003', nome:'Adriano Borges'},
+  {chave:'abriano-a', id:'620002', nome:'Abriano Alves'}, {chave:'abriano-b', id:'620003', nome:'Abriano Borges'},
   {chave:'bruno', id:'620004', nome:'Bruno Martins Dias'},
   {chave:'osmar', id:'620009', nome:'Osmar Fictício', apelido:'osmar', desligado:true, ativo:false},
   {chave:'freelancer:fl-tiago', id:'', nome:'Tiago Sem Documento', freelancer:true, semCpf:true},
 ], vinculos:[{apelido:'Pantera', semFicha:true}], lista:[]};
 
 test('régua: só o nome sem ficha nem contrato (ou com cadastro sem CPF) é "a cadastrar"', () => {
-  const lista = ['620001', 'Ana', 'Zé Novo', 'zé  novo', 'Tiago Sem Documento', 'Adriano', 'Bruno Martins', 'Osmar', 'Pantera', 'Terceiro', ''];
+  const lista = ['620001', 'Ana', 'Zé Novo', 'zé  novo', 'Tiago Sem Documento', 'Abriano', 'Bruno Martins', 'Osmar', 'Pantera', 'Terceiro', ''];
   assert.deepEqual(O.pessoasACadastrar(lista, DADOS), ['Zé Novo', 'Tiago Sem Documento']);
   assert.deepEqual(O.aCadastrarDaOS({equipe:['620001', 'Zé Novo']}, DADOS), ['Zé Novo']);
   assert.deepEqual(O.aCadastrarDaOS({equipe:['620001', 'Ana']}, DADOS), [], 'quem tem ficha não é "a cadastrar" (só falta trocar pelo ID)');

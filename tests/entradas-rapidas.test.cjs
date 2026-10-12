@@ -313,7 +313,7 @@ test('F24: campo que o servidor guarda quando não vem volta ao vazio com null p
 const HOJE = '2026-10-05';
 const DataFixa = class extends Date { constructor(...a) { super(...(a.length ? a : [HOJE + 'T12:00:00'])); } static now() { return +new Date(HOJE + 'T12:00:00'); } };
 const ELENCO = {pessoas: [
-  {chave: 'adriano-f', id: '100001', nome: 'Adriano Fictício Souza', apelido: 'adriano', area: 'Montagem', ativo: true},
+  {chave: 'abriano-f', id: '100001', nome: 'Abriano Fictício Souza', apelido: 'abriano', area: 'Montagem', ativo: true},
   {chave: 'bia-f', id: '100002', nome: 'Bia Fictícia', apelido: 'bia', area: 'Montagem', ativo: true},
   {chave: 'caio-f', id: '100003', nome: 'Caio Fictício', apelido: 'caio', area: 'Montagem', ativo: true},
 ], antigos: [], ferias: [], ausencias: [], fichaRH: true};
@@ -336,7 +336,7 @@ function telaFicha({papel = 'pcp', lista = []} = {}) {
     getElementById: id => (html.includes(`id="${id}"`) ? el(id) : null), addEventListener() {}, activeElement: null,
     body: {contains: () => false, classList: classes(), appendChild() {}}, visibilityState: 'visible'};
   const salvos = [], toasts = [], desfazer = [];
-  const cfg = {instaladores: ['Adriano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
+  const cfg = {instaladores: ['Abriano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
   const STORE = {getAllOS: () => lista, getCFG: () => cfg, getOS: id => lista.find(o => o.id === id) || null, elenco: () => ELENCO,
     saveOS(o) { salvos.push(js(o)); const i = lista.findIndex(x => x.id === o.id); if (i >= 0) lista[i] = o; else lista.push(o); },
     getQueue: () => [], trySync: async () => {}, on() {}, onConflict() {}, uuid: () => 'u1', valores: () => ({}), regrasLocais: () => null, carimbarMomento() {}};
@@ -625,9 +625,9 @@ test('F24: prefers-reduced-motion desliga as transições e as animações do ap
 test('F24: o fileId novo (foto_<osId>_<hora>_<sorteio>) passa no putPhoto do pcp-sync e no idFoto do _shared, com UUID e com mub-número', async () => {
   const b = await bancada({registros: [row('1', agendada())]});
   const UUID = '3f2b8c9e-1d4a-4b6f-9a7e-0c5d2e8f1a3b';
-  const doUUID = b.run(`STORE.novoIdFoto(${JSON.stringify(UUID)})`), doERP = b.run(`STORE.novoIdFoto('mub-23364')`);
+  const doUUID = b.run(`STORE.novoIdFoto(${JSON.stringify(UUID)})`), doERP = b.run(`STORE.novoIdFoto('mub-93364')`);
   assert.match(doUUID, new RegExp(`^foto_${UUID}_\\d{13}_[a-z0-9]{1,6}$`));
-  assert.match(doERP, /^foto_mub-23364_\d{13}_[a-z0-9]{1,6}$/);
+  assert.match(doERP, /^foto_mub-93364_\d{13}_[a-z0-9]{1,6}$/);
   assert.ok(doUUID.length <= 62 && doUUID.length > 55, `UUID: ${doUUID.length} caracteres`);
   assert.ok(doERP.length <= 36, `mub-número: ${doERP.length} caracteres`);
   // Sem O.S. (o celular) ou com id que não cabe: o formato antigo.

@@ -2,7 +2,7 @@
 
 /* FECHAR O DIA: O LOTE DA GESTÃO (F14 do programa das equipes, 30/09/2026).
    Fato medido: nenhum instalador usa o celular, e toda execução é lançada
-   pela gestão (a conta pcp, o Thiago) no PC da fábrica. Esta tela é o lote
+   pela gestão (a conta pcp) no PC da fábrica. Esta tela é o lote
    dele, dentro de Entregas, só para admin e pcp, com dois modos:
    - "Dia": as O.S. do dia agrupadas por volta (dia, carro e equipe);
    - "Pendências do mês": as instalações entregues sem divisão confirmada e
@@ -1355,7 +1355,7 @@ const LOTE = (() => {
     return `<details class="lote-intro" ${aberto ? 'open' : ''}>
       <summary>${aberto ? 'Primeiro uso: leia antes de lançar' : 'Como funciona e o que o lote ainda não faz'}</summary>
       <div class="lote-intro-corpo">
-        <p><strong>O primeiro uso é acompanhado.</strong> Feche primeiro UMA volta real, junto com quem lança (o Thiago), e confira no card de cada O.S. e no histórico da ficha o que ficou gravado. Só depois aplique às pendências do mês inteiro.</p>
+        <p><strong>O primeiro uso é acompanhado.</strong> Feche primeiro UMA volta real, junto com quem lança (a conta pcp), e confira no card de cada O.S. e no histórico da ficha o que ficou gravado. Só depois aplique às pendências do mês inteiro.</p>
         <ul>
           <li>Cada grupo é uma volta: dia, carro e equipe. Confirme a equipe em ✓ Equipe certa (ou mude a equipe): a divisão vale para todas as O.S. da volta, e só assim ela é gravada. Depois, a hora em que o carro chegou e a conferência da volta.</li>
           <li>Cada linha é uma O.S.: a data vem preenchida; responda o retrabalho (Não num toque, Sim abre a pergunta completa); diga se todos os itens foram entregues ou marque a parte; confira o que a equipe declarou pelo celular; e confirme a linha (✓ ou Enter). Confirmar a linha não grava a equipe.</li>

@@ -50,13 +50,13 @@ Implementar estado derivado único de conferência de itens reutilizado nas tela
 ### Itens aprovados da auditoria
 ### A01 P1 Unificar os estados da entrega parcial
 
-**Evidência:** 20980 tem finalizadaEm e checkout confirmado, mas a conferência por itens atribui só R$ 503,40 e informa saldo a conferir. O endpoint de conferência preserva os estados físicos existentes, conforme seu desenho atual.
+**Evidência:** uma O.S. real (número e valor retirados deste documento público em 12/10/2026, M27 da auditoria de 11/10/2026) tem finalizadaEm e checkout confirmado, mas a conferência por itens atribui só uma parte do valor e informa saldo a conferir. O endpoint de conferência preserva os estados físicos existentes, conforme seu desenho atual.
 
 **Ação:** criar visão única de declarado, conferido, entregue e pendente por item; sinalizar a divergência da finalização antiga. **Dono sugerido:** PCP e desenvolvimento. **Aceite:** a mesma O.S. mostra saldo coerente em ficha, Finalizados, Entregas, Performance e PDF; outras equipes podem entregar o restante sem duplicar quantidade ou valor. Nenhuma reabertura retroativa automática.
 
 ### A04 P1 Tratar as 68 baixas do ERP pendentes
 
-**Evidência:** 68 O.S., R$ 290.652,02 conhecidos e três valores ausentes; a mais antiga, de 15/09, tinha 17 dias.
+**Evidência:** 68 O.S. com valor conhecido (o total em R$ foi retirado deste documento público em 12/10/2026, M27) e três valores ausentes; a mais antiga, de 15/09, tinha 17 dias.
 
 **Ação:** fila diária com responsável, classificação da diferença e evidência. **Dono:** PCP, com apoio comercial. **Aceite:** cada caso termina como entrega total, parcial, retirada, baixa administrativa ou divergência a resolver; nenhuma baixa é aceita em lote sem conferência. O valor conhecido não é “receita perdida”.
 
@@ -125,7 +125,7 @@ Implementar melhorias concretas em todas as áreas: fonte/cobertura clicável do
 
 ### A15 P2 Completar identidade de pessoas e equipes
 
-**Evidência:** aliases de pessoas ainda convivem com IDs; quatro nomes compartilham ficha e existe um marcador Terceiro sem ficha. O quadro Equipe hoje não apresentou Osmane, enquanto a operação e a Performance o incluem como freelancer.
+**Evidência:** aliases de pessoas ainda convivem com IDs; quatro nomes compartilham ficha e existe um marcador Terceiro sem ficha. O quadro Equipe hoje não apresentou um dos instaladores (nome retirado deste documento público em 12/10/2026, M27), enquanto a operação e a Performance o incluem como freelancer.
 
 **Ação:** manter equivalências confirmadas; distinguir colaborador, freelancer e marcador sem pessoa. Explicar a cobertura de cada quadro e incluir os contratados ativos necessários ao planejamento. **Dono:** RH e PCP. **Aceite:** todos os envolvidos no dia aparecem com identidade correta, sem inferir parentesco, duplicidade ou vínculo apenas pelo nome. Férias e ausências devem ser exibidas somente ao perfil que precisa dessas informações.
 

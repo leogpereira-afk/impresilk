@@ -105,7 +105,7 @@ test('revisão: a aba v139 lança a entrega de uma O.S. cancelada: fica o gravad
   const e = await edge('pcp-sync', banco([row('1', fora)]));
   // Caso ruim: a aba da v139 não conhece o cancelamento (não o manda) e lança a entrega da cancelada.
   const v139 = copia(e); delete v139.cancelamento;
-  v139.entregaLancada = {data:'2026-09-22', por:'Thiago'};
+  v139.entregaLancada = {data:'2026-09-22', por:'Tiberio'};
   let r = await e.call({action:'upsert', os:v139}, gestor);
   assert.equal(r.status, 200, JSON.stringify(r));
   assert.ok(!('entregaLancada' in gravada(e)), 'a entrega não foi lançada: ' + JSON.stringify(gravada(e).entregaLancada));

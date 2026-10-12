@@ -17,21 +17,21 @@ const root = path.join(__dirname, '..');
 
 /* ------------------------------------------------------------ régua */
 const PESSOAS = [
-  {chave:'lucas-ferreira', id:'300001', nome:'Lucas Ferreira Gomes', apelido:''},
+  {chave:'lucio-ferreira', id:'300001', nome:'Lucio Ferreira Gomes', apelido:''},
   {chave:'rita-moraes', id:'300003', nome:'Rita Moraes', apelido:'rita'},
-  {chave:'freelancer:fl-lucas', id:'300006', nome:'Lucas Prado', apelido:'', freelancer:true},
+  {chave:'freelancer:fl-lucio', id:'300006', nome:'Lucio Prado', apelido:'', freelancer:true},
   {chave:'freelancer:fl-pantera', id:'300005', nome:'Gilberto Pantera Souza', apelido:'pantera', freelancer:true},
   {chave:'freelancer:fl-renan', id:'300003', nome:'Renan Brito', apelido:'renan', freelancer:true},
 ];
-const DADOS = {pessoas:PESSOAS, vinculos:[], lista:['Lucas', 'Pantera']};
+const DADOS = {pessoas:PESSOAS, vinculos:[], lista:['Lucio', 'Pantera']};
 
-test('régua: freelancer entra na conta de ambiguidade; "Lucas" deixa de casar sozinho com a ficha', () => {
+test('régua: freelancer entra na conta de ambiguidade; "Lucio" deixa de casar sozinho com a ficha', () => {
   const sem = O.resolverPessoas({...DADOS, pessoas:PESSOAS.filter(p => !p.freelancer)});
-  assert.equal(sem.idDe('Lucas'), '300001', 'sem o contrato, o prefixo era só da ficha');
+  assert.equal(sem.idDe('Lucio'), '300001', 'sem o contrato, o prefixo era só da ficha');
   const r = O.resolverPessoas(DADOS);
-  assert.equal(r.idDe('Lucas'), '', 'com o Lucas freelancer, "Lucas" é ambíguo e não escolhe');
-  assert.equal(r.chave('Lucas'), 'nome:lucas');
-  assert.equal(r.idDe('Lucas Prado'), '300006');
+  assert.equal(r.idDe('Lucio'), '', 'com o Lucio freelancer, "Lucio" é ambíguo e não escolhe');
+  assert.equal(r.chave('Lucio'), 'nome:lucio');
+  assert.equal(r.idDe('Lucio Prado'), '300006');
   assert.equal(r.idDe('Pantera'), '300005', 'o apelido do contrato leva ao freelancer');
   assert.equal(r.nome('300005'), 'Pantera', 'a palavra da lista de instaladores é o nome de exibição');
 });
@@ -61,7 +61,7 @@ test('régua: dois contratos do mesmo freelancer não se tornam ambíguos entre 
 test('servidor e aparelho chegam à MESMA pessoa com freelancer na lista (cópia da régua em _shared)', async () => {
   const S = await import('../supabase/functions/_shared/pcp-integridade.mjs');
   const a = O.resolverPessoas(DADOS), b = S.resolverPessoas(DADOS);
-  for (const x of ['Lucas', 'lucas prado', 'Lucas Ferreira', 'Pantera', 'Gilberto', 'Rita', 'Renan', 'Renan Brito', '300003', '300005', '300006', '999999', '']) {
+  for (const x of ['Lucio', 'lucio prado', 'Lucio Ferreira', 'Pantera', 'Gilberto', 'Rita', 'Renan', 'Renan Brito', '300003', '300005', '300006', '999999', '']) {
     assert.equal(b.idDe(x), a.idDe(x), 'idDe ' + x);
     assert.equal(b.chave(x), a.chave(x), 'chave ' + x);
     assert.equal(b.nome(x), a.nome(x), 'nome ' + x);
@@ -160,7 +160,7 @@ test('6 primeiros dígitos iguais, CPFs diferentes: ID repetido, aviso, e nenhum
 const colab = (chave, cpf, nome, extra = {}) => ({id:chave, colecao:'colaboradores', apagado:false, registro:{id:chave, nome, apelido:'', cpf, statusId:'ativo', ...extra}});
 const free = (id, extra) => ({id, colecao:'freelancers', apagado:false, registro:CONTRATO(id, extra)});
 const RH = [
-  colab('lucas-ferreira', '30000111104', 'Lucas Ferreira Gomes'),
+  colab('lucio-ferreira', '30000111104', 'Lucio Ferreira Gomes'),
   colab('osmar-teixeira', '30000222283', 'Osmar Teixeira', {dataDesligamento:'2026-06-22'}),
   colab('rita-moraes', '30000333352', 'Rita Moraes', {apelido:'rita'}),
   free('fl-pantera', {nome:'Gilberto Pantera Souza', apelido:'pantera', cpf:'30000598739'}),
@@ -170,7 +170,7 @@ const RH = [
   free('fl-fim', {nome:'Vitor Encerrado', cpf:'30000776505', situacao:'encerrado'}),
   {id:'fl-apagado', colecao:'freelancers', apagado:true, registro:CONTRATO('fl-apagado', {nome:'Apagado Fulano', cpf:'30000954381'})},
 ];
-const cfg = extra => [{id:true, config:{instaladores:['Pantera', 'Lucas Ferreira'], vinculosRH:[], ...extra}, atualizado_em:'2026-09-19T10:00:00Z'}];
+const cfg = extra => [{id:true, config:{instaladores:['Pantera', 'Lucio Ferreira'], vinculosRH:[], ...extra}, atualizado_em:'2026-09-19T10:00:00Z'}];
 const row = (id, registro) => ({id, colecao:'os', apagado:false, atualizado_em:'2026-09-19T10:00:00Z', registro:{id, rev:1, numero:id, tipo:'externo', cliente:'Cliente', liberadoPCP:true, ...registro}});
 const toque = nome => ({nome, sub:nome, papel:'montagem', montagemIndividual:true});
 
@@ -253,12 +253,12 @@ test('crachá de toque do freelancer abre a O.S. gravada pelo ID do contrato; o 
   const e = await edge('pcp-sync', {registros:RH, pcp_config_global:cfg(), pcp_registros:[row('1', {equipe:['300005']})]});
   const ok = await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, horaSaida:'08:00'}}, toque('Pantera'));
   assert.equal(ok.status, 200, ok.error);
-  const nao = await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, horaSaida:'09:00'}}, toque('Lucas Ferreira'));
+  const nao = await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, horaSaida:'09:00'}}, toque('Lucio Ferreira'));
   assert.equal(nao.status, 422);
 });
 
 test('Atualizar elenco: o "forcar" passa por cima do cache de 60 s da régua do servidor', async () => {
-  const e = await edge('pcp-sync', {registros:RH, pcp_config_global:cfg({instaladores:['Pantera', 'Lucas Ferreira', 'Ivo']}), pcp_registros:[row('1', {equipe:['300010']})]});
+  const e = await edge('pcp-sync', {registros:RH, pcp_config_global:cfg({instaladores:['Pantera', 'Lucio Ferreira', 'Ivo']}), pcp_registros:[row('1', {equipe:['300010']})]});
   // Primeira volta: a régua do servidor fica em cache sem o Ivo.
   const antes = await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, horaSaida:'08:00'}}, toque('Ivo'));
   assert.equal(antes.status, 422);
@@ -289,7 +289,7 @@ function telaPicker(elenco, cfg = {}) {
   return {run:code => vm.runInContext(code, ctx), html:() => node('#picker-list').innerHTML, chamadas};
 }
 const ELENCO = {pessoas:[
-  {chave:'lucas-ferreira', id:'300001', nome:'Lucas Ferreira Gomes', apelido:'', area:'Montagem', ativo:true},
+  {chave:'lucio-ferreira', id:'300001', nome:'Lucio Ferreira Gomes', apelido:'', area:'Montagem', ativo:true},
   {chave:'rita-moraes', id:'300003', nome:'Rita Moraes', apelido:'rita', area:'Montagem', ativo:true, idRepetido:true},
   {chave:'freelancer:fl-pantera', id:'300005', nome:'Gilberto Pantera Souza', apelido:'pantera', area:'', cargo:'Instalador', ativo:true, freelancer:true},
   {chave:'freelancer:fl-renan', id:'300003', nome:'Renan Brito', apelido:'renan', area:'', ativo:true, freelancer:true, idRepetido:true},
@@ -375,7 +375,7 @@ test('presença da fábrica: freelancer não conta como gente da casa', () => {
   vm.runInContext(fs.readFileSync(path.join(root, 'operacao.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(root, 'casa.js'), 'utf8'), ctx);
   const nomes = vm.runInContext(`presencaRH('2026-09-29').presentes.map(p => p.nome).join('|')`, ctx);
-  assert.equal(nomes, 'Lucas Ferreira Gomes|Rita Moraes');
+  assert.equal(nomes, 'Lucio Ferreira Gomes|Rita Moraes');
 });
 
 /* =============================================================== revisão F07
@@ -384,32 +384,32 @@ test('presença da fábrica: freelancer não conta como gente da casa', () => {
 // Alta: o apelido do contrato passava por cima do começo de nome da ficha.
 test('revisão: contrato com apelido igual ao primeiro nome de uma ficha não captura o nome antigo (as duas réguas)', async () => {
   const S = await import('../supabase/functions/_shared/pcp-integridade.mjs');
-  const ficha = {chave:'lucas-ferreira', id:'300001', nome:'Lucas Ferreira Gomes', apelido:'lucasf'};
-  const contrato = {chave:'freelancer:fl-lucas', id:'300006', nome:'Lucas Prado', apelido:'lucas', freelancer:true};
+  const ficha = {chave:'lucio-ferreira', id:'300001', nome:'Lucio Ferreira Gomes', apelido:'lucasf'};
+  const contrato = {chave:'freelancer:fl-lucio', id:'300006', nome:'Lucio Prado', apelido:'lucio', freelancer:true};
   for (const M of [O, S]) {
-    assert.equal(M.resolverPessoas({pessoas:[ficha]}).idDe('Lucas'), '300001', 'antes do contrato');
+    assert.equal(M.resolverPessoas({pessoas:[ficha]}).idDe('Lucio'), '300001', 'antes do contrato');
     const r = M.resolverPessoas({pessoas:[ficha, contrato]});
-    assert.equal(r.idDe('Lucas'), '', '"Lucas" fica ambíguo, não passa ao freelancer');
-    assert.equal(r.chave('Lucas'), 'nome:lucas');
+    assert.equal(r.idDe('Lucio'), '', '"Lucio" fica ambíguo, não passa ao freelancer');
+    assert.equal(r.chave('Lucio'), 'nome:lucio');
     assert.equal(r.idDe('lucasf'), '300001', 'o apelido da ficha continua dela');
-    assert.equal(r.idDe('Lucas Prado'), '300006');
-    assert.equal(r.idDe('Lucas Ferreira'), '300001');
+    assert.equal(r.idDe('Lucio Prado'), '300006');
+    assert.equal(r.idDe('Lucio Ferreira'), '300001');
   }
   // Paridade com o caso na lista de instaladores e o apelido que só o contrato tem.
-  const dados = {pessoas:[ficha, contrato, {chave:'freelancer:fl-p', id:'300005', nome:'Gilberto Pantera Souza', apelido:'pantera', freelancer:true}], lista:['Lucas', 'Pantera']};
+  const dados = {pessoas:[ficha, contrato, {chave:'freelancer:fl-p', id:'300005', nome:'Gilberto Pantera Souza', apelido:'pantera', freelancer:true}], lista:['Lucio', 'Pantera']};
   const a = O.resolverPessoas(dados), b = S.resolverPessoas(dados);
-  for (const x of ['Lucas', 'lucas', 'lucasf', 'Lucas Prado', 'Lucas Ferreira', 'Pantera', 'Gilberto', '300001', '300006'])
+  for (const x of ['Lucio', 'lucio', 'lucasf', 'Lucio Prado', 'Lucio Ferreira', 'Pantera', 'Gilberto', '300001', '300006'])
     for (const f of ['idDe', 'chave', 'nome']) assert.equal(b[f](x), a[f](x), f + ' ' + x);
   assert.equal(a.idDe('Pantera'), '300005', 'apelido de contrato sem xará continua levando ao freelancer');
 });
 
-test('revisão: crachá de toque "Lucas" (ID 300001) não perde a própria O.S. para o freelancer de apelido "lucas"', async () => {
+test('revisão: crachá de toque "Lucio" (ID 300001) não perde a própria O.S. para o freelancer de apelido "lucio"', async () => {
   const RH2 = [
-    colab('lucas-ferreira', '30000111104', 'Lucas Ferreira Gomes', {apelido:'lucasf'}),
-    free('fl-lucas', {nome:'Lucas Prado', apelido:'lucas', cpf:'30000612316'}),
+    colab('lucio-ferreira', '30000111104', 'Lucio Ferreira Gomes', {apelido:'lucasf'}),
+    free('fl-lucio', {nome:'Lucio Prado', apelido:'lucio', cpf:'30000612316'}),
   ];
-  const e = await edge('pcp-sync', {registros:RH2, pcp_config_global:cfg({instaladores:['Lucas']}), pcp_registros:[row('A', {equipe:['300001']}), row('B', {equipe:['300006']})]});
-  const cracha = {nome:'Lucas', sub:'Lucas', papel:'montagem', montagemIndividual:true, id:'300001'};
+  const e = await edge('pcp-sync', {registros:RH2, pcp_config_global:cfg({instaladores:['Lucio']}), pcp_registros:[row('A', {equipe:['300001']}), row('B', {equipe:['300006']})]});
+  const cracha = {nome:'Lucio', sub:'Lucio', papel:'montagem', montagemIndividual:true, id:'300001'};
   const propria = await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, horaSaida:'08:00'}}, cracha);
   assert.equal(propria.status, 200, propria.error);
   const alheia = await e.call({action:'upsert', os:{...e.db.pcp_registros[1].registro, horaSaida:'08:00'}}, cracha);
@@ -421,20 +421,20 @@ test('revisão: crachá de toque "Lucas" (ID 300001) não perde a própria O.S. 
   assert.ok(!autores.some(a => a.porId === '300006'), 'o diário não assina com o ID do freelancer');
 });
 
-// Média: ficha com a situação "freelancer" e contrato ativo do mesmo CPF (o Osmane de hoje).
+// Média: ficha com a situação "freelancer" e contrato ativo do mesmo CPF (o Osvane de hoje).
 test('revisão: ficha com situação Freelancer e contrato ativo do mesmo CPF: vale o contrato, sem mandar encerrar nada', async () => {
   const S = await import('../supabase/functions/_shared/pcp-integridade.mjs');
   const r = S.juntarFreelancers(
-    [{chave:'osmane-ficticio', id:'300002', nome:'Osmane Ficticio Silva', apelido:'', desligado:false, ativo:true, statusId:'freelancer', cpf:'30000222283'}],
-    [CONTRATO('fl-osmane', {nome:'Osmane Ficticio Silva', apelido:'osmane', cpf:'300.002.222-83'})], {hoje:'2026-09-29'});
-  assert.deepEqual([...r.fichasFora], ['osmane-ficticio']);
+    [{chave:'osvane-ficticio', id:'300002', nome:'Osvane Ficticio Silva', apelido:'', desligado:false, ativo:true, statusId:'freelancer', cpf:'30000222283'}],
+    [CONTRATO('fl-osvane', {nome:'Osvane Ficticio Silva', apelido:'osvane', cpf:'300.002.222-83'})], {hoje:'2026-09-29'});
+  assert.deepEqual([...r.fichasFora], ['osvane-ficticio']);
   assert.equal(r.contratos.length, 1);
   assert.equal(r.contratos[0].freelancer, true);
   assert.deepEqual(r.avisos, []);
   // Ficha REALMENTE na ativa: vale a ficha, e o aviso pede para ajustar a situação dela.
   const ativa = S.juntarFreelancers(
-    [{chave:'osmane-ficticio', id:'300002', nome:'Osmane Ficticio Silva', apelido:'', desligado:false, ativo:true, statusId:'ativo', cpf:'30000222283'}],
-    [CONTRATO('fl-osmane', {nome:'Osmane Ficticio Silva', cpf:'30000222283'})], {hoje:'2026-09-29'});
+    [{chave:'osvane-ficticio', id:'300002', nome:'Osvane Ficticio Silva', apelido:'', desligado:false, ativo:true, statusId:'ativo', cpf:'30000222283'}],
+    [CONTRATO('fl-osvane', {nome:'Osvane Ficticio Silva', cpf:'30000222283'})], {hoje:'2026-09-29'});
   assert.equal(ativa.avisos.length, 1);
   assert.doesNotMatch(ativa.avisos[0], /encerr/i, 'o aviso nunca manda encerrar o contrato');
   assert.match(ativa.avisos[0], /situação/);
@@ -442,18 +442,18 @@ test('revisão: ficha com situação Freelancer e contrato ativo do mesmo CPF: v
 
 test('revisão: servidor leva a situação da ficha até a junção (elenco e régua)', async () => {
   const RH2 = [
-    colab('osmane-ficticio', '30000222283', 'Osmane Ficticio Silva', {statusId:'freelancer'}),
-    free('fl-osmane', {nome:'Osmane Ficticio Silva', apelido:'osmane', cpf:'30000222283'}),
+    colab('osvane-ficticio', '30000222283', 'Osvane Ficticio Silva', {statusId:'freelancer'}),
+    free('fl-osvane', {nome:'Osvane Ficticio Silva', apelido:'osvane', cpf:'30000222283'}),
   ];
-  const e = await edge('pcp-sync', {registros:RH2, pcp_config_global:cfg({instaladores:['Osmane']}), pcp_registros:[row('1', {equipe:['300002']})]});
+  const e = await edge('pcp-sync', {registros:RH2, pcp_config_global:cfg({instaladores:['Osvane']}), pcp_registros:[row('1', {equipe:['300002']})]});
   const r = await e.call({action:'elenco', freelancers:true}, {papel:'pcp', nome:'Gestor'});
   assert.equal(r.status, 200, r.error);
-  const osmane = r.pessoas.filter(p => p.id === '300002');
-  assert.equal(osmane.length, 1, 'uma pessoa só');
-  assert.equal(osmane[0].freelancer, true, 'pelo contrato, com a tag');
-  assert.equal(osmane[0].contratoFim, '2099-12-31');
+  const osvane = r.pessoas.filter(p => p.id === '300002');
+  assert.equal(osvane.length, 1, 'uma pessoa só');
+  assert.equal(osvane[0].freelancer, true, 'pelo contrato, com a tag');
+  assert.equal(osvane[0].contratoFim, '2099-12-31');
   assert.deepEqual(r.avisos, []);
-  const ok = await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, horaSaida:'08:00'}}, toque('Osmane'));
+  const ok = await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, horaSaida:'08:00'}}, toque('Osvane'));
   assert.equal(ok.status, 200, ok.error);
 });
 
@@ -493,20 +493,20 @@ test('revisão: o PCP usa o mesmo CPF válido do RH; CPF que não confere fica s
 // Baixa: contrato sem ID conta na ambiguidade, nunca é o resultado.
 test('revisão: contrato sem CPF entra na conta de ambiguidade, e o nome antigo não muda de dono quando o CPF chega', async () => {
   const S = await import('../supabase/functions/_shared/pcp-integridade.mjs');
-  const ficha = {chave:'lucas-ferreira', id:'300001', nome:'Lucas Ferreira Gomes', apelido:''};
-  const semCpf = {chave:'freelancer:fl-lucas', id:'', nome:'Lucas Prado', apelido:'', freelancer:true, semCpf:true};
+  const ficha = {chave:'lucio-ferreira', id:'300001', nome:'Lucio Ferreira Gomes', apelido:''};
+  const semCpf = {chave:'freelancer:fl-lucio', id:'', nome:'Lucio Prado', apelido:'', freelancer:true, semCpf:true};
   const comCpf = {...semCpf, id:'300006', semCpf:undefined};
   for (const M of [O, S]) {
     const antes = M.resolverPessoas({pessoas:[ficha, semCpf]}), depois = M.resolverPessoas({pessoas:[ficha, comCpf]});
-    assert.equal(antes.chave('Lucas'), 'nome:lucas', 'o contrato sem CPF já deixa "Lucas" ambíguo');
-    assert.equal(depois.chave('Lucas'), 'nome:lucas', 'e continua igual quando o CPF chega');
-    assert.equal(antes.idDe('Lucas Prado'), '', 'sem ID, nunca é o resultado');
-    assert.equal(antes.chave('Lucas Prado'), 'nome:lucas prado');
-    assert.equal(antes.idDe('Lucas Ferreira'), '300001');
+    assert.equal(antes.chave('Lucio'), 'nome:lucio', 'o contrato sem CPF já deixa "Lucio" ambíguo');
+    assert.equal(depois.chave('Lucio'), 'nome:lucio', 'e continua igual quando o CPF chega');
+    assert.equal(antes.idDe('Lucio Prado'), '', 'sem ID, nunca é o resultado');
+    assert.equal(antes.chave('Lucio Prado'), 'nome:lucio prado');
+    assert.equal(antes.idDe('Lucio Ferreira'), '300001');
   }
-  const d = {pessoas:[ficha, semCpf], lista:['Lucas']};
+  const d = {pessoas:[ficha, semCpf], lista:['Lucio']};
   const a = O.resolverPessoas(d), b = S.resolverPessoas(d);
-  for (const x of ['Lucas', 'Lucas Prado', 'Lucas Ferreira', '300001'])
+  for (const x of ['Lucio', 'Lucio Prado', 'Lucio Ferreira', '300001'])
     for (const f of ['idDe', 'chave', 'nome']) assert.equal(b[f](x), a[f](x), f + ' ' + x);
 });
 

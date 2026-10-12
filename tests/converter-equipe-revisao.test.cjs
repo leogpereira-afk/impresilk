@@ -22,12 +22,12 @@ const freela = (chave, id, nome, apelido = '', extra = {}) => ({id:chave, coleca
 const RH = [
   colab('bruno-alves', '100001', 'Bruno Alves Costa', 'bruno'),
   colab('bruno-martins', '100002', 'Bruno Martins Dias'),
-  colab('lucas-gabriel', '100010', 'Lucas Gabriel Souza'),
-  colab('lucas-natalino', '100011', 'Lucas Natalino Reis'),
-  colab('jose-adilando', '100020', 'José Adilando Rocha', 'adilsom'),
+  colab('lucio-gabriel', '100010', 'Lucio Gabriel Souza'),
+  colab('lucio-natalício', '100011', 'Lucio Natalício Reis'),
+  colab('jose-abilando', '100020', 'José Abilando Rocha', 'abilsom'),
 ];
 const BETO = [colab('roberto-alves', '100101', 'Roberto Alves Lima', 'beto'), colab('alberto-dias', '100102', 'Alberto Dias Melo', ''),
-  colab('jose-adilando', '100020', 'José Adilando Rocha', 'adilsom')];
+  colab('jose-abilando', '100020', 'José Abilando Rocha', 'abilsom')];
 const OS = (id, equipe, fim, extra = {}) => ({id, numero:'N' + id, tipo:'externo', cliente:'Cliente Fictício ' + id, equipe, finalizadaEm:fim, atualizadoEm:'2026-09-11T10:00:00Z', ...extra});
 const osRow = o => ({id:o.id, colecao:'os', apagado:false, atualizado_em:'2026-09-19T10:00:00Z', registro:{rev:1, ...o}});
 const fechamento = (de, ate, revisao = 1) => ({id:`${de}:${ate}:${String(revisao).padStart(6, '0')}`, colecao:'performance_fechamentos', apagado:false, atualizado_em:'2026-09-02T10:00:00Z',
@@ -108,7 +108,7 @@ const OS_ID = eq => Array.isArray(eq) && eq.length > 0 && eq.every(x => /^\d{6}$
 /* ------------------------------------------------ 1. ALTA: O.S. excluída */
 test('revisão: a O.S. antiga excluída no servidor não volta pelo lote (conferida uma a uma; a lápide tira do histórico da aba)', async () => {
   // O caso ruim: a antiga 'dup' veio do servidor para esta aba e, depois, outra pessoa a excluiu.
-  const todas = [OS('dup', ['Bruno'], '2026-06-10T18:00:00-03:00'), OS('ok', ['Adilsom'], '2026-06-11T18:00:00-03:00'), OS('r1', ['Lucas Natalino Reis'], '2026-09-20T18:00:00-03:00')];
+  const todas = [OS('dup', ['Bruno'], '2026-06-10T18:00:00-03:00'), OS('ok', ['Abilsom'], '2026-06-11T18:00:00-03:00'), OS('r1', ['Lucio Natalício Reis'], '2026-09-20T18:00:00-03:00')];
   const b = await montar({os:todas, local:[todas[2]]});
   await b.run('buscarAntigasConferenciaCasa()');
   assert.deepEqual((await b.json('planoConversaoNomes().tarefas.map(t => t.id)')).sort(), ['dup', 'ok', 'r1']);
@@ -164,7 +164,7 @@ test('revisão: a régua do lote é a do servidor: configuração e RH puxados d
 });
 
 test('revisão: nome que o servidor lê diferente do aparelho fica como nome, com o motivo, e vai para as pendências', async () => {
-  const b = await montar({os:[OS('a', ['Beto'], '2026-09-10T18:00:00-03:00'), OS('b', ['Beto', 'Adilsom'], '2026-09-11T18:00:00-03:00')], rh:BETO});
+  const b = await montar({os:[OS('a', ['Beto'], '2026-09-10T18:00:00-03:00'), OS('b', ['Beto', 'Abilsom'], '2026-09-11T18:00:00-03:00')], rh:BETO});
   // O caso ruim: o RH corrige o apelido logo depois de este aparelho puxar a lista (corrida).
   let feito = false;
   b.rede.depois = async q => {
@@ -195,19 +195,19 @@ test('revisão: nome que o servidor lê diferente do aparelho fica como nome, co
 
 /* ------------------------- 3. MÉDIA: aparelho e servidor com dados diferentes */
 test('revisão: contrato encerrado sem CPF desce ao aparelho da gestão e conta na mesma ambiguidade do servidor', async () => {
-  // O caso ruim: "Lucas" com a ficha do Lucas Ferreira e o contrato ENCERRADO do Lucas Prado, sem CPF.
-  const rh = [colab('lucas-ferreira', '100050', 'Lucas Ferreira Nunes', 'lucas'),
-    freela('fl-lucas-prado', '', 'Lucas Prado Ficticio', 'lucas', {situacao:'encerrado', contratoFim:'2026-07-31'})];
-  const b = await montar({os:[OS('a', ['Lucas'], '2026-06-10T18:00:00-03:00')], rh});
+  // O caso ruim: "Lucio" com a ficha do Lucio Ferreira e o contrato ENCERRADO do Lucio Prado, sem CPF.
+  const rh = [colab('lucio-ferreira', '100050', 'Lucio Ferreira Nunes', 'lucio'),
+    freela('fl-lucio-prado', '', 'Lucio Prado Ficticio', 'lucio', {situacao:'encerrado', contratoFim:'2026-07-31'})];
+  const b = await montar({os:[OS('a', ['Lucio'], '2026-06-10T18:00:00-03:00')], rh});
   const perf = await b.e.call({action:'performancePeriodo', de:'2026-06-01', ate:'2026-06-30'}, b.who);
-  assert.ok(!perf.registros[0].membros.some(m => m.chave === '100050'), 'o servidor não lê "Lucas" como o Lucas Ferreira');
+  assert.ok(!perf.registros[0].membros.some(m => m.chave === '100050'), 'o servidor não lê "Lucio" como o Lucio Ferreira');
   const antigos = await b.json('STORE.elenco().antigos');
-  const prado = antigos.find(p => p.nome === 'Lucas Prado Ficticio');
+  const prado = antigos.find(p => p.nome === 'Lucio Prado Ficticio');
   assert.ok(prado, 'o contrato encerrado sem CPF está no elenco da gestão');
-  assert.deepEqual(prado, {id:'', nome:'Lucas Prado Ficticio', apelido:'lucas', ativo:false, desligado:true, freelancer:true}, 'só nome e apelido, desligado');
-  assert.deepEqual(await b.json('OPERACAO.confirmarNome("Lucas")'), {id:'', motivo:'ambiguo'});
+  assert.deepEqual(prado, {id:'', nome:'Lucio Prado Ficticio', apelido:'lucio', ativo:false, desligado:true, freelancer:true}, 'só nome e apelido, desligado');
+  assert.deepEqual(await b.json('OPERACAO.confirmarNome("Lucio")'), {id:'', motivo:'ambiguo'});
   await b.run('iniciarConversaoNomesCasa(null)');
-  assert.deepEqual(noServidor(b.e, 'a').equipe, ['Lucas'], 'fica nome dos dois lados');
+  assert.deepEqual(noServidor(b.e, 'a').equipe, ['Lucio'], 'fica nome dos dois lados');
   assert.match(b.toasts.at(-1)[1], /Nenhuma O\.S\. com nome confirmado/);
   // Quem não é da gestão continua sem a lista de quem saiu.
   for (const quem of [{papel:'operacao', nome:'Operação', sub:'operacao'}, {papel:'montagem', nome:'Montagem', sub:'montagem'}]) {
@@ -269,13 +269,13 @@ test('revisão: o vínculo da lista vale pelo que o servidor aceitou, não pelo 
 
 /* ---------------------------------- 5. MÉDIA: relatório e Desfazer entre abas */
 test('revisão: duas abas do mesmo navegador não apagam o relatório uma da outra; o Desfazer alcança todas', async () => {
-  const base = [OS('a', ['Bruno'], '2026-09-10T18:00:00-03:00'), OS('b', ['Adilsom'], '2026-09-11T18:00:00-03:00'), OS('c', ['Lucas Gabriel Souza'], '2026-09-12T18:00:00-03:00')];
+  const base = [OS('a', ['Bruno'], '2026-09-10T18:00:00-03:00'), OS('b', ['Abilsom'], '2026-09-11T18:00:00-03:00'), OS('c', ['Lucio Gabriel Souza'], '2026-09-12T18:00:00-03:00')];
   // O caso ruim: aba 1 e aba 2 dividem o localStorage e gravam o relatório uma depois da outra.
   const T1 = await montar({os:base});
   const T2 = await aparelho(T1.e, {os:base, ls:T1.guard, idb:T1.idb});
-  await T2.run('iniciarConversaoNomesCasa(["Lucas Gabriel Souza"])');
+  await T2.run('iniciarConversaoNomesCasa(["Lucio Gabriel Souza"])');
   await T1.run('iniciarConversaoNomesCasa(["Bruno"])');
-  await T2.run('iniciarConversaoNomesCasa(["Adilsom"])');
+  await T2.run('iniciarConversaoNomesCasa(["Abilsom"])');
   for (const id of ['a', 'b', 'c']) assert.ok(OS_ID(noServidor(T1.e, id).equipe), id);
   assert.deepEqual(relGuardado(T1).itens.map(i => i.id).sort(), ['a', 'b', 'c'], 'os três lotes, das duas abas');
   // Fecha as duas e abre de novo: a aba nova puxa do servidor e desfaz as três.
@@ -284,7 +284,7 @@ test('revisão: duas abas do mesmo navegador não apagam o relatório uma da out
   await T3.run('STORE.pull(null, {completo:true})');
   assert.match(T3.run('ligacaoRHHTML()'), /Desfazer: devolver a lista anterior de 3 O\.S\./);
   await T3.run('desfazerConversaoNomesCasa(lerRelConvNomes(), {prazoMs:3000, passoMs:20})');
-  assert.deepEqual(['a', 'b', 'c'].map(id => noServidor(T1.e, id).equipe), [['Bruno'], ['Adilsom'], ['Lucas Gabriel Souza']]);
+  assert.deepEqual(['a', 'b', 'c'].map(id => noServidor(T1.e, id).equipe), [['Bruno'], ['Abilsom'], ['Lucio Gabriel Souza']]);
 });
 test('revisão: com o localStorage cheio, a tela avisa que o Desfazer some ao fechar esta aba', async () => {
   const U = await montar({os:[OS('x', ['Bruno'], '2026-09-10T18:00:00-03:00')]});
@@ -303,7 +303,7 @@ test('revisão: com o localStorage cheio, a tela avisa que o Desfazer some ao fe
 
 /* -------------------------------------- 6. BAIXA: aba fechada no meio do lote */
 test('revisão: aba fechada no meio do lote: a O.S. em envio já está no relatório como "enviando" e o Desfazer a alcança', async () => {
-  const base = [OS('m', ['Bruno'], '2026-09-10T18:00:00-03:00'), OS('n', ['Adilsom'], '2026-09-11T18:00:00-03:00')];
+  const base = [OS('m', ['Bruno'], '2026-09-10T18:00:00-03:00'), OS('n', ['Abilsom'], '2026-09-11T18:00:00-03:00')];
   const V = await montar({os:base});
   // O caso ruim: a segunda gravação fica sem resposta e a aba fecha aí.
   let k = 0;
@@ -314,7 +314,7 @@ test('revisão: aba fechada no meio do lote: a O.S. em envio já está no relat�
   const n = (relGuardado(V) || {itens:[]}).itens.find(i => i.id === 'n');
   assert.ok(n, 'a O.S. que foi para a fila está no relatório');
   assert.equal(n.estado, 'enviando');
-  assert.deepEqual(n.antes, ['Adilsom']); assert.deepEqual(n.depois, ['100020']);
+  assert.deepEqual(n.antes, ['Abilsom']); assert.deepEqual(n.depois, ['100020']);
   // Reabre: a fila manda a 'n'; o Desfazer alcança as duas.
   const V2 = await aparelho(V.e, {os:base, ls:V.guard, idb:V.idb});
   await V2.run('STORE.trySync()');
@@ -325,18 +325,18 @@ test('revisão: aba fechada no meio do lote: a O.S. em envio já está no relat�
   assert.match(html, /Interrompida/);
   await V2.run('desfazerConversaoNomesCasa(lerRelConvNomes(), {prazoMs:3000, passoMs:20})');
   assert.deepEqual(noServidor(V.e, 'm').equipe, ['Bruno']);
-  assert.deepEqual(noServidor(V.e, 'n').equipe, ['Adilsom']);
+  assert.deepEqual(noServidor(V.e, 'n').equipe, ['Abilsom']);
 });
 
 /* ------------------------------------------- 7. BAIXA: período fechado */
 test('revisão: O.S. de período fechado na Performance fica como está (na troca e no Desfazer)', async () => {
   // O caso ruim: agosto está fechado (selado) e a O.S. de 10/08 ainda tem o nome antigo.
   const b = await montar({os:[OS('a', ['Bruno', 'Terceiro'], '2026-08-10T18:00:00-03:00'),
-    OS('c', ['Lucas Gabriel Souza'], '2026-09-01T18:00:00-03:00', {entregaLancada:{data:'2026-08-30', por:'Gestor Fictício', em:'2026-09-01T18:00:00Z'}}),
-    OS('b', ['Adilsom'], '2026-09-10T18:00:00-03:00')], registros:[fechamento('2026-08-01', '2026-08-31'), fechamento('2026-08-01', '2026-08-31', 2)]});
+    OS('c', ['Lucio Gabriel Souza'], '2026-09-01T18:00:00-03:00', {entregaLancada:{data:'2026-08-30', por:'Gestor Fictício', em:'2026-09-01T18:00:00Z'}}),
+    OS('b', ['Abilsom'], '2026-09-10T18:00:00-03:00')], registros:[fechamento('2026-08-01', '2026-08-31'), fechamento('2026-08-01', '2026-08-31', 2)]});
   await b.run('iniciarConversaoNomesCasa(null)');
   assert.deepEqual(noServidor(b.e, 'a').equipe, ['Bruno', 'Terceiro'], 'período fechado: fica');
-  assert.deepEqual(noServidor(b.e, 'c').equipe, ['Lucas Gabriel Souza'], 'o dia da Performance é o do lançamento da entrega');
+  assert.deepEqual(noServidor(b.e, 'c').equipe, ['Lucio Gabriel Souza'], 'o dia da Performance é o do lançamento da entrega');
   assert.deepEqual(noServidor(b.e, 'b').equipe, ['100020'], 'setembro, aberto, troca');
   const rel = relGuardado(b);
   for (const id of ['a', 'c']) {
@@ -354,13 +354,13 @@ test('revisão: O.S. de período fechado na Performance fica como está (na troc
 test('revisão: operação e montagem chamando as funções do lote direto (console) não gravam nada', async () => {
   for (const papel of ['operacao', 'montagem']) {
     // Montagem COM senha (conta em equipe_contas): para o servidor, grava a O.S. inteira.
-    const b = await montar({os:[OS('a', ['Bruno', 'Adilsom'], '2026-09-10T18:00:00-03:00')], papel, contas:[{usuario:'gestor.fictício', sistema:'pcp'}]});
+    const b = await montar({os:[OS('a', ['Bruno', 'Abilsom'], '2026-09-10T18:00:00-03:00')], papel, contas:[{usuario:'gestor.fictício', sistema:'pcp'}]});
     const conv = await b.json('converterNomesNasOSCasa(planoConversaoNomes(), {usuario:"x", prazoMs:3000, passoMs:20})');
     assert.deepEqual(conv.map(i => i.estado), ['recusada'], papel); assert.match(conv[0].motivo, /Só a gestão \(admin e pcp\)/);
     const um = await b.json('gravarEquipesUmaAUmaCasa([{id:"a", numero:"Na"}], () => ({equipe:["100001", "100020"]}), {prazoMs:3000, passoMs:20})');
     assert.deepEqual(um.map(i => i.estado), ['recusada'], papel);
-    await b.json('desfazerConversaoNomesCasa({itens:[{id:"a", numero:"Na", estado:"convertida", antes:["Bruno"], depois:["Bruno", "Adilsom"]}]}, {prazoMs:3000, passoMs:20})');
-    assert.deepEqual(noServidor(b.e, 'a').equipe, ['Bruno', 'Adilsom'], papel);
+    await b.json('desfazerConversaoNomesCasa({itens:[{id:"a", numero:"Na", estado:"convertida", antes:["Bruno"], depois:["Bruno", "Abilsom"]}]}, {prazoMs:3000, passoMs:20})');
+    assert.deepEqual(noServidor(b.e, 'a').equipe, ['Bruno', 'Abilsom'], papel);
     assert.ok(!b.chamadas.some(c => c.action === 'upsert'), 'nada foi enviado: ' + papel);
   }
 });
@@ -406,7 +406,7 @@ test('revisão: conferirNomes resolve com o vinculosRH gravado e o RH de agora (
   // O caso ruim: logo depois (dentro do minuto da cópia das fichas) o RH corrige o apelido e outro aparelho grava um vínculo.
   e.db.registros.find(r => r.id === 'roberto-alves').registro.apelido = '';
   e.db.registros.find(r => r.id === 'alberto-dias').registro.apelido = 'beto';
-  e.db.pcp_config_global[0].config = {instaladores:['Beto'], vinculosRH:[{apelido:'Zé', id:'100020', chave:'jose-adilando', nome:'José Adilando Rocha'}]};
+  e.db.pcp_config_global[0].config = {instaladores:['Beto'], vinculosRH:[{apelido:'Zé', id:'100020', chave:'jose-abilando', nome:'José Abilando Rocha'}]};
   const r2 = await e.call(pedido, gestor);
   assert.deepEqual(r2.nomes.slice(0, 2), [{nome:'Beto', id:'100102', fixado:false}, {nome:'Zé', id:'100020', fixado:true}]);
   // A mesma régua da Performance (pessoasDoPCP, _shared/pcp-integridade.mjs).

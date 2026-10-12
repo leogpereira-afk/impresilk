@@ -253,7 +253,7 @@ async function perfComissaoAbrir() {
   }catch(e){d.appendChild(Object.assign(document.createElement('p'),{textContent:e.message}));}
 }
 /* O RASCUNHO AUTOMÁTICO DA APURAÇÃO DA COMISSÃO (item 9 da fila de
-   11/10/2026; entrou nesta onda com a resposta "THIAGO APROVA", D-013). É o
+   11/10/2026; entrou nesta onda com a resposta do dono que deu a aprovação ao papel pcp, D-013). É o
    formulário mais longo do PCP (cerca de 14 campos por entrega), e salvar a
    prévia cria revisão que não se apaga: não serve de rascunho. O que se digita
    fica guardado neste aparelho, na mesma base dos rascunhos dos diálogos

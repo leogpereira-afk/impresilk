@@ -168,7 +168,7 @@ const EFEITOS = /não pontua|bônus da volta|redutor da volta|fica neutra|tira a
 
 /* ───────────── A · o checklist e o Status da entrega pelo mesmo dia ───────────── */
 test('v144: A, entregue em 30/09 e finalizada em 01/10 não "não pontua": checklist, Divisão e resumo usam o dia e a regra do Status da entrega', () => {
-  // A O.S. que o Thiago fecha nesta semana: chegada conferida em 30/09 (Fechar o dia), prazo 29/09, finalizada hoje.
+  // A O.S. que o Tiberio fecha nesta semana: chegada conferida em 30/09 (Fechar o dia), prazo 29/09, finalizada hoje.
   const v30f = entregueEm('2026-09-30', {finalizadaEm: '2026-10-01T09:05:00', finalizadoPor: 'Gestor Fictício'});
   const t = tela({lista: [v30f]});
   t.abrirOS('v1', 'fechamento');

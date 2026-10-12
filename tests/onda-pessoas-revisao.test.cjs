@@ -306,10 +306,10 @@ test('revisão pessoas: a marca diz "cadastre no RH, ou ligue o nome em Conferir
   const ctx = {OPERACAO:O, normCasa:s => O.normPessoa ? O.normPessoa(s) : String(s).toLowerCase()};
   vm.createContext(ctx);
   vm.runInContext(fatia('casa.js', 'function sugestaoParecidaCasa(', 'function gruposDeGrafiasCasa('), ctx);
-  const ativos = [{id:'710001', nome:'Raimundo Nonato Ferreira'}, {id:'710002', nome:'Raimunda Souza'}, {id:'710003', nome:'Bruno Dias'}, {id:'710004', nome:'Raimundo Melo', idRepetido:true}];
-  // Caso ruim: "Raimundu" (digitado errado) empatava na sugestão única e saía só "Nenhuma", com a marca mandando cadastrar.
-  assert.equal(ctx.sugestaoParecidaCasa('Raimundu', ativos), null, 'a sugestão única empata');
-  const ps = ctx.sugestoesParecidasCasa('Raimundu', ativos).map(p => p.id);
+  const ativos = [{id:'710001', nome:'Ramiro Nonato Ferreira'}, {id:'710002', nome:'Ramira Souza'}, {id:'710003', nome:'Bruno Dias'}, {id:'710004', nome:'Ramiro Melo', idRepetido:true}];
+  // Caso ruim: "Ramiru" (digitado errado) empatava na sugestão única e saía só "Nenhuma", com a marca mandando cadastrar.
+  assert.equal(ctx.sugestaoParecidaCasa('Ramiru', ativos), null, 'a sugestão única empata');
+  const ps = ctx.sugestoesParecidasCasa('Ramiru', ativos).map(p => p.id);
   assert.equal(JSON.stringify(ps), JSON.stringify(['710002', '710001']), 'os parecidos (empate pelo nome), sem o ID repetido e sem quem não parece');
   assert.equal(ctx.sugestoesParecidasCasa('Zé Novo', ativos).length, 0);
   const casa = ler('casa.js');

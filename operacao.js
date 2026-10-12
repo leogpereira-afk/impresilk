@@ -23,7 +23,7 @@ const OPERACAO = (() => {
      Ordem do dono (29/09/2026): "vamos usar o ID em todo o sistema e padrão
      pra não ter erro". O ID é o da casa: os 6 primeiros dígitos do CPF, único
      entre as fichas do RH. A O.S. nova grava o ID na equipe; a antiga guarda o
-     nome que o PCP digitava ("Lucas", "Adlando", "Lucas Natalino"), e é AQUI,
+     nome que o PCP digitava ("Lucio", "Ablando", "Lucio Natalício"), e é AQUI,
      num lugar só, que esse nome vira pessoa: vínculo salvo primeiro, casamento
      único com o RH depois. O que não resolve vira "nome:<texto>", separado de
      todo mundo: melhor uma linha sem ficha do que duas pessoas somadas numa.
@@ -37,8 +37,8 @@ const OPERACAO = (() => {
     const todas = Array.isArray(dados.pessoas) ? dados.pessoas : [];
     const fichas = todas.filter(p => p && ehIdPessoa(p.id));
     /* Contrato de freelancer ainda sem ID (sem CPF, ou CPF que não confere, F07)
-       conta na ambiguidade e nunca é o resultado: "Lucas" com a ficha do Lucas e
-       o contrato do Lucas Prado sem CPF já não é de ninguém, e não muda de dono
+       conta na ambiguidade e nunca é o resultado: "Lucio" com a ficha do Lucio e
+       o contrato do Lucio Prado sem CPF já não é de ninguém, e não muda de dono
        no dia em que o RH preenche o CPF do contrato. */
     const semId = todas.filter(p => p && p.freelancer === true && !ehIdPessoa(p.id) && String(p.nome || '').trim());
     const candidatas = semId.length ? [...fichas, ...semId] : fichas;
@@ -67,7 +67,7 @@ const OPERACAO = (() => {
     // as fichas, inclusive quem já saiu. Quem saiu nunca é o resultado: "Elias"
     // com um Elias desligado e outro na casa é ambíguo, e não do que ficou --
     // senão o crachá antigo do que saiu passava a abrir as O.S. do xará
-    // (revisão de 29/09/2026). "Adriano" sozinho, com dois Adrianos, fica sem
+    // (revisão de 29/09/2026). "Abriano" sozinho, com dois Abrianos, fica sem
     // ficha de propósito.
     const auto = texto => {
       const ap = normPessoa(texto), tokens = ap.split(' ');
@@ -77,8 +77,8 @@ const OPERACAO = (() => {
       if (porApelido.length) {
         /* O apelido do CONTRATO não passa por cima do nome de outra pessoa
            (F07): o RH só barra apelido igual ao de outro cadastro, não ao
-           primeiro nome de alguém. "Lucas" com a ficha do Lucas Ferreira e o
-           contrato do Lucas Prado de apelido "lucas" é ambíguo; senão o
+           primeiro nome de alguém. "Lucio" com a ficha do Lucio Ferreira e o
+           contrato do Lucio Prado de apelido "lucio" é ambíguo; senão o
            histórico e o crachá do empregado passavam para o freelancer. */
         const alvo = porApelido.length === 1 && porApelido[0].freelancer === true ? porApelido[0] : null;
         if (alvo && porPrefixo(candidatas).some(p => p !== alvo && (!ehIdPessoa(p.id) || p.id !== alvo.id))) return null;
@@ -117,7 +117,7 @@ const OPERACAO = (() => {
     const chave = entrada => { const s = String(entrada ?? '').trim(); return s ? (idDe(s) || 'nome:' + normPessoa(s)) : ''; };
     // Nome de exibição: a palavra que o PCP já usa (lista de instaladores,
     // depois vínculo salvo); senão o menor começo do nome completo que só
-    // aquela ficha tem ("Lucas Gabriel", "Hélio").
+    // aquela ficha tem ("Lucio Gabriel", "Hélcio").
     const rotulos = new Map();
     for (const n of Array.isArray(dados.lista) ? dados.lista : []) { const id = idDe(n); if (id && !rotulos.has(id)) rotulos.set(id, String(n).trim()); }
     for (const v of vinculos) { const id = idDe(v.apelido || v.nomePCP); if (id && !rotulos.has(id)) rotulos.set(id, String(v.apelido || v.nomePCP).trim()); }
@@ -180,7 +180,7 @@ const OPERACAO = (() => {
        mudaria o dono;
      - "Terceiro" é marcador, não gente, e o nome decidido "sem ficha" fica
        nome; ID repetido entre ficha e contrato (F07), contrato sem CPF e
-       ambíguo ("Lucas" com três Lucas) nunca viram ID.
+       ambíguo ("Lucio" com três Lucio) nunca viram ID.
      `dados` é o que resolverPessoas recebe ({pessoas, vinculos, lista}); sem
      ele, o retrato de agora (dadosPessoas). */
   const MARCADOR_SEM_PESSOA = /^terceir/;   // Terceiro, Terceiros, Terceirizado
@@ -259,7 +259,7 @@ const OPERACAO = (() => {
   const aCadastrarDaOS = (o, dados) => pessoasACadastrar(equipe(o), dados);
   /* A EQUIPE DA O.S. COM OS NOMES CONFIRMADOS TROCADOS PELO ID. Quem já é ID
      fica como está (nem o espaço muda), o nome sem confirmação fica, e o ID
-     não se repete: "Lucas Natalino" numa O.S. que já tem o ID dele sai da
+     não se repete: "Lucio Natalício" numa O.S. que já tem o ID dele sai da
      lista em vez de virar o segundo. Rodar de novo não muda nada.
      opcoes.nomes: converte só estes nomes (a tela pode ir por partes).
      Devolve {equipe, mudou, trocas:[{de, para, como}], ficam:[{nome, motivo, sugerido}]}. */
@@ -286,7 +286,7 @@ const OPERACAO = (() => {
     return {equipe:trocas.length ? out : entrada.slice(), mudou:trocas.length > 0, trocas, ficam};
   }
   // A equipe da O.S.: as ENTRADAS gravadas (ID ou nome antigo), uma por pessoa
-  // -- "Lucas" e "Lucas Natalino" na mesma O.S. são uma pessoa só.
+  // -- "Lucio" e "Lucio Natalício" na mesma O.S. são uma pessoa só.
   const equipe = o => {
     const vistos = new Set(), out = [];
     for (const x of Array.isArray(o?.equipe) ? o.equipe : []) {
@@ -448,7 +448,7 @@ const OPERACAO = (() => {
   function mensal(lista, mes) {
     const fins = conclusoes(lista).filter(o => !interno(o) && dia(o.finalizadaEm).slice(0,7) === mes);
     const mapa = new Map();
-    // Por pessoa (ID), não por texto: "Lucas" antigo e o ID dele somam juntos.
+    // Por pessoa (ID), não por texto: "Lucio" antigo e o ID dele somam juntos.
     for (const o of fins) for (const x of equipe(o)) {
       const k = chavePessoa(x);
       const d = mapa.get(k) || {id:idPessoa(x), nome:nomePessoa(x), entregas:0, retrab:0};
@@ -663,7 +663,7 @@ const OPERACAO = (() => {
      - 'id': o ID do RH digitado inteiro (6 dígitos). Número só acha o ID
        exato: pedaço de CPF, ou o começo do ID, não acha ninguém;
      - 'direto': o texto da opção contém o que foi digitado ("adri", "silva");
-     - 'sugestao': erro de digitação ("Adrinao" -> Adriano), pela distância de
+     - 'sugestao': erro de digitação ("Abrinao" -> Abriano), pela distância de
        edição de cada palavra (troca de duas letras vizinhas conta 1). A tela
        mostra só como sugestão, nunca como achado;
      - '': não acha.

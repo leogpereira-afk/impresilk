@@ -254,8 +254,8 @@ const PERF = (() => {
   /* A EQUIPE DE UM REGISTRO. Pelo id quando a participação confirmada já diz
      qual foi (vale mesmo que a equipe tenha sido desativada depois: é
      histórico); senão, pela COMPOSIÇÃO EXATA, quando os mesmos integrantes estão
-     cadastrados como equipe ativa. Sem esta segunda regra, nomear "Adriano +
-     Douglas" como equipe não mudaria nada na tela até alguém reconferir cada
+     cadastrados como equipe ativa. Sem esta segunda regra, nomear "Abriano +
+     Durval" como equipe não mudaria nada na tela até alguém reconferir cada
      entrega à mão — e ninguém reconfere 154 entregas para ver um nome. */
   /* A CHAVE DA PESSOA MUDA (apelido -> ficha do RH quando alguém é ligado, ou
      num aparelho em que o elenco ainda não desceu). A equipe guarda as chaves do

@@ -6,7 +6,7 @@ const {edge}=require('./helpers/edge.cjs');
 const membro=n=>({chave:n,nome:n,percentual:100});
 const reg=(id,nome,valor,fracaoOS=1)=>({id,numero:id,membros:[membro(nome)],confirmado:true,valor,fracaoOS,os:{id,numero:id}});
 const valores=[8417.24,7000,2965,2711.84,1650,503.4];
-const nomes=['Adriano + Osmane + Lucas','Pantera + Reinaldo','Águia','Adlando + Hélio','Adriano','Osmane'];
+const nomes=['Abriano + Osvane + Lucio','Pantera + Reinilson','Águia','Ablando + Hélcio','Abriano','Osvane'];
 const regs=valores.map((v,i)=>reg(String(i),nomes[i],v,i===3?2:i===5?.06:1));
 function tela(){const c={STORE:{getCFG:()=>({performancePCP:{equipes:[]}}),getAllOS:()=>[]},STATE:{user:{papel:'pcp'}},periodoOuMes:()=>({de:'2026-10-01',ate:'2026-10-03'}),nomeExibicaoCasa:n=>({chave:n,nome:n}),pessoasRH:()=>[],avatarRH:()=>'',esc:s=>String(s??''),dinheiroCasa:v=>'R$ '+Number(v).toFixed(2)};vm.createContext(c);vm.runInContext(fs.readFileSync(require.resolve('../performance.js'),'utf8'),c);return c;}
 test('equipes abrem por valor: caso da captura tem seis posições distintas e dinheiro em destaque',()=>{

@@ -73,7 +73,7 @@ lista.push(base('ERP-CONFERIR',{rev:1,numero:'TESTE-ERP',cliente:'Baixa ERP fict
 lista.push({...structuredClone(parcialFixture),id:'PARCIAL-ABERTA',numero:'TESTE-PARCIAL-ABERTA',finalizadaEm:'',entregaLancada:null,cliente:'Parcial sem finalização fictícia'});
 lista.push(base('FOTO-ONTEM',{numero:'TESTE-FOTO-ONTEM',cliente:'Foto tardia fictícia · hora real a confirmar',horaSaida:'',saidaEm:'',horaRetorno:'',retornoEm:'',fotosCheckinIds:['foto_FOTO-ONTEM_1780000000000_teste']}));
 // A23: duas entregas já conferidas antes de criar a equipe; nenhuma recebe vínculo implícito.
-const a23Equipe={id:'eq-aguia-tardia',nome:'Águia criada depois · fictícia',animal:'aguia',cor:'marinho',emblema:'🦅',liderPadraoId:'900010',membros:[{chave:'900010',nome:'José Adilando Rocha'},{chave:'900011',nome:'Lucas Gabriel Souza'}],ativo:true};
+const a23Equipe={id:'eq-aguia-tardia',nome:'Águia criada depois · fictícia',animal:'aguia',cor:'marinho',emblema:'🦅',liderPadraoId:'900010',membros:[{chave:'900010',nome:'José Abilando Rocha'},{chave:'900011',nome:'Lucio Gabriel Souza'}],ativo:true};
 cfg.performancePCP.equipes.push(a23Equipe);
 const a23OS=base('A23-VINCULO',{numero:'TESTE-A23',cliente:'Entrega avulsa antes do cadastro · fictícia',equipe:['900010','900011'],valorTotal:1000,finalizadaEm:hoje+'T12:00:00Z',itens:[{uid:'a23-item',item:'1',descricao:'Painel fictício A23',qtde:'4',subtotal:'1000'}]});
 a23OS.conferenciasEntrega=[1,2].map(n=>({id:'a23-parcial-'+n,dia:hoje,itens:[itemFixture(a23OS.itens[0],1)],alocacao:pvAloc([{equipeId:null,cota:10000,liderId:'900010',membros:[{pessoaId:'900010',papel:'lider',cota:6000},{pessoaId:'900011',papel:'ajudante',cota:4000}]}]),por:'Autor original fictício',em:hoje+'T09:00:00Z'}));
@@ -191,17 +191,17 @@ cfg.vinculosRH=[{apelido:'Bia',id:'900002',chave:'bia-costa',nome:'Beatriz Costa
    Pessoas e O.S. FICTÍCIAS. #aba=performance&rolar=[data-quadro="perf-rh"]
    mostra o quadro; &converter=1 roda a troca (confirmação automática, só aqui). */
 ELENCO_PREVIA.pessoas.push(
- {chave:'jose-adilando',id:'900010',nome:'José Adilando Rocha',apelido:'adilsom',area:'Montagem Externa',cargo:'Instalador',ativo:true,foto:''},
- {chave:'lucas-gabriel',id:'900011',nome:'Lucas Gabriel Souza',apelido:'',area:'Montagem Externa',cargo:'Instalador',ativo:true,foto:''},
- {chave:'lucas-natalino',id:'900012',nome:'Lucas Natalino Reis',apelido:'',area:'Montagem Externa',cargo:'Ajudante',ativo:true,foto:''},
- {chave:'adriano-pinheiro',id:'900013',nome:'Adriano Pinheiro Lima',apelido:'',area:'Serralheria',cargo:'Serralheiro',ativo:true,foto:''},
- {chave:'adriano-nunes',id:'900014',nome:'Adriano Nunes Araújo',apelido:'',area:'Serralheria',cargo:'Serralheiro',ativo:true,foto:''});
+ {chave:'jose-abilando',id:'900010',nome:'José Abilando Rocha',apelido:'abilsom',area:'Montagem Externa',cargo:'Instalador',ativo:true,foto:''},
+ {chave:'lucio-gabriel',id:'900011',nome:'Lucio Gabriel Souza',apelido:'',area:'Montagem Externa',cargo:'Instalador',ativo:true,foto:''},
+ {chave:'lucio-natalício',id:'900012',nome:'Lucio Natalício Reis',apelido:'',area:'Montagem Externa',cargo:'Ajudante',ativo:true,foto:''},
+ {chave:'abriano-parreira',id:'900013',nome:'Abriano Parreira Lima',apelido:'',area:'Serralheria',cargo:'Serralheiro',ativo:true,foto:''},
+ {chave:'abriano-nunes',id:'900014',nome:'Abriano Nunes Araújo',apelido:'',area:'Serralheria',cargo:'Serralheiro',ativo:true,foto:''});
 const pvLegado=(id,dias,equipe,extra={})=>base(id,{numero:'T-'+id,cliente:'Cliente fictício '+id+' · nome antigo',instalacao:{data:deslocar(dias),periodo:'Manhã'},equipe,veiculo:'Carro 2',valorTotal:1800,finalizadaEm:deslocar(dias)+'T16:00:00',finalizadoPor:'Gestor de teste',...extra});
-lista.push(pvLegado('G01',-12,['Adlando','Lucas']),pvLegado('G02',-15,['Adilsom','Lucas Gabriel']),pvLegado('G03',-18,['Jose Adilando','Terceiro']),
- pvLegado('G04',-22,['Adriano','Adriano Pinheiro']),pvLegado('G05',-26,['Adriano Nunes','Lucas Natalino']),pvLegado('G06',-30,['Lucas Gabriel Souza','Adilsom']),
- pvLegado('G07',-33,['Adilsom','900011'],{alocacao:{id:'pv-g07',versao:1,grupos:[{equipeId:null,cota:10000,liderId:'900011',membros:[{pessoaId:'900011',papel:'lider',cota:10000}]}],em:deslocar(-33)+'T17:00:00Z'}}));
+lista.push(pvLegado('G01',-12,['Ablando','Lucio']),pvLegado('G02',-15,['Abilsom','Lucio Gabriel']),pvLegado('G03',-18,['Jose Abilando','Terceiro']),
+ pvLegado('G04',-22,['Abriano','Abriano Parreira']),pvLegado('G05',-26,['Abriano Nunes','Lucio Natalício']),pvLegado('G06',-30,['Lucio Gabriel Souza','Abilsom']),
+ pvLegado('G07',-33,['Abilsom','900011'],{alocacao:{id:'pv-g07',versao:1,grupos:[{equipeId:null,cota:10000,liderId:'900011',membros:[{pessoaId:'900011',papel:'lider',cota:10000}]}],em:deslocar(-33)+'T17:00:00Z'}}));
 const pvHist=new Map();
-const PV_ANTIGAS=[pvLegado('H01',-95,['Adilsom','Terceiro']),pvLegado('H02',-104,['Lucas Natalino Reis','Ana'])];
+const PV_ANTIGAS=[pvLegado('H01',-95,['Abilsom','Terceiro']),pvLegado('H02',-104,['Lucio Natalício Reis','Ana'])];
 lista.push(base('112',{cliente:'Mercado Bairro · teste (equipe por ID)',instalacao:{data:deslocar(1),periodo:'Tarde'},equipe:['900004','Ana'],veiculo:'Carro 1'}));
 /* ENTREGA POR ITEM NA FICHA (E4, 30/09/2026): marcas fictícias para ver a
    coluna Entrega, o selo do card e os casos raros (item com problema,

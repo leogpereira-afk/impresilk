@@ -258,19 +258,19 @@ test('ocupados: Instalação interna não é carro (fora da conta dos veículos)
 });
 
 /* ───────────── F10: busca tolerante ───────────── */
-test('busca: "Adrinao" acha Adriano só como sugestão; o texto contido é achado; o ID exato vence', () => {
-  const adriano = {id:'123456', textos:['Adriano', 'Adriano Fictício Souza', 'dri']};
+test('busca: "Abrinao" acha Abriano só como sugestão; o texto contido é achado; o ID exato vence', () => {
+  const abriano = {id:'123456', textos:['Abriano', 'Abriano Fictício Souza', 'dri']};
   const adriana = {id:'654321', textos:['Adriana', 'Adriana Fictícia Lima']};
-  assert.equal(O.buscaTolerante('Adrinao', adriano).tipo, 'sugestao');
-  assert.equal(O.buscaTolerante('Adrinao', adriano).dist, 1, 'troca de duas letras vizinhas conta 1');
-  assert.equal(O.buscaTolerante('adri', adriano).tipo, 'direto');
-  assert.equal(O.buscaTolerante('ADRIANO souza', adriano).tipo, 'direto', 'palavras que começam as do nome, sem acento nem caixa');
-  assert.equal(O.buscaTolerante('123456', adriano).tipo, 'id');
+  assert.equal(O.buscaTolerante('Abrinao', abriano).tipo, 'sugestao');
+  assert.equal(O.buscaTolerante('Abrinao', abriano).dist, 1, 'troca de duas letras vizinhas conta 1');
+  assert.equal(O.buscaTolerante('abri', abriano).tipo, 'direto');
+  assert.equal(O.buscaTolerante('ABRIANO souza', abriano).tipo, 'direto', 'palavras que começam as do nome, sem acento nem caixa');
+  assert.equal(O.buscaTolerante('123456', abriano).tipo, 'id');
   assert.equal(O.buscaTolerante('123456', adriana).tipo, '', 'o ID de um não acha o outro');
-  assert.equal(O.buscaTolerante('Zuleica', adriano).tipo, '');
+  assert.equal(O.buscaTolerante('Zuleica', abriano).tipo, '');
   // Palavra curta não tem tolerância (senão "Ana" achava meio mundo).
-  assert.equal(O.buscaTolerante('Adx', adriano).tipo, '');
-  assert.equal(O.buscaTolerante('', adriano).tipo, 'direto', 'sem busca, tudo aparece');
+  assert.equal(O.buscaTolerante('Adx', abriano).tipo, '');
+  assert.equal(O.buscaTolerante('', abriano).tipo, 'direto', 'sem busca, tudo aparece');
 });
 
 test('busca: pedaço de CPF não acha ninguém; só o ID inteiro de 6 dígitos', () => {

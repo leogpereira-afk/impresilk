@@ -63,7 +63,7 @@ test('ocorrência: o retrabalho traz origem, causa, quem marcou e quando, lidos 
 
 test('ocorrência: o atraso mostra as duas réguas (ficha e apuração) quando divergem', () => {
   const P = perdas();
-  // Prazo 05/11, conferência (dia da apuração) 05/11, finalização no PCP em 08/11: a ficha diz 3 dias, a apuração diz no prazo (a 23442 da M3).
+  // Prazo 05/11, conferência (dia da apuração) 05/11, finalização no PCP em 08/11: a ficha diz 3 dias, a apuração diz no prazo (o caso da M3).
   const c = card('A1', {...semRetrabalho, finalizadaEm:'2026-11-08T15:00:00-03:00'});
   const oc = P.ocorrenciasDaOS({card:c, st:OPERACAO.statusEntrega(c), registros:[{dia:'2026-11-05'}], noDia:noDia(c)});
   assert.deepEqual(oc.tipos, ['atraso']);

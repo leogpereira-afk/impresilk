@@ -20,7 +20,7 @@ Conferência de produção somente de leitura em 06/10/2026: 17 vínculos salvos
 - Seis regressões novas: catálogo completo, freelancer pendente, preservação/deduplicação, busca, atualização concorrente com a edição e falha de consulta.
 - Suíte completa: 1.516 aprovados, zero falhas, com concorrência de dois arquivos. Uma execução anterior simultânea a outra suíte excedeu o limite de um teste de tempo preexistente; a execução isolada passou sem alterar esse teste.
 - Sintaxe de performance.js e diff conferidos.
-- Prévia isolada: busca encontrou os dois nomes de Lucas fictícios; selecionados funcionário novo e freelancer, atualizado o catálogo mantendo escolhas, líder alterado e equipe salva/reaberta com os três integrantes preservados. Dados somente fictícios.
+- Prévia isolada: busca encontrou os dois nomes de Lucio fictícios; selecionados funcionário novo e freelancer, atualizado o catálogo mantendo escolhas, líder alterado e equipe salva/reaberta com os três integrantes preservados. Dados somente fictícios.
 
 ## Publicação
 

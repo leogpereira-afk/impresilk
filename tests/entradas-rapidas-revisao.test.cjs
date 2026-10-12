@@ -230,12 +230,12 @@ test('revisão: M1, quem não é da gestão e marcou retrabalho no Finalizar nã
 test('revisão: B1, o rascunho é por conta (usuario), não pelo nome; a sessão que expira e o crachá de outra pessoa apagam a base', async () => {
   const b = await bancada();
   // Caso ruim: duas contas com o mesmo nome no mesmo aparelho viam o rascunho uma da outra.
-  b.run(`STATE.user = {nome: 'Thiago', papel: 'pcp', usuario: 'thiago'}`);
+  b.run(`STATE.user = {nome: 'Tiberio', papel: 'pcp', usuario: 'tiberio'}`);
   const a = b.run(`chaveRascunhoF24('cancelar', 'os-1')`);
-  b.run(`STATE.user = {nome: 'Thiago', papel: 'montagem', usuario: 'montagem-thiago'}`);
+  b.run(`STATE.user = {nome: 'Tiberio', papel: 'montagem', usuario: 'montagem-tiberio'}`);
   const c = b.run(`chaveRascunhoF24('cancelar', 'os-1')`);
   assert.notEqual(a, c);
-  assert.equal(a, 'thiago|cancelar|os-1');
+  assert.equal(a, 'tiberio|cancelar|os-1');
   // A sessão que expira (AUTH.eu() === false): a base dos rascunhos sai, não só no Sair.
   const boot = async (saved, dono) => {
     b.idb.apagadas.length = 0;
@@ -246,15 +246,15 @@ test('revisão: B1, o rascunho é por conta (usuario), não pelo nome; a sessão
     await tique(); await tique();
     return {apagadas: [...b.idb.apagadas], mem: b.run('_rascMem.size')};
   };
-  const exp = await boot({nome: 'Thiago', papel: 'pcp', usuario: 'thiago'}, {nome: 'Thiago', papel: 'pcp', usuario: 'thiago'});
+  const exp = await boot({nome: 'Tiberio', papel: 'pcp', usuario: 'tiberio'}, {nome: 'Tiberio', papel: 'pcp', usuario: 'tiberio'});
   assert.deepEqual(exp.apagadas, ['impresilk_rascunhos'], 'sessão expirada');
   assert.equal(exp.mem, 0);
-  const sem = await boot(null, {nome: 'Thiago', papel: 'pcp', usuario: 'thiago'});
+  const sem = await boot(null, {nome: 'Tiberio', papel: 'pcp', usuario: 'tiberio'});
   assert.deepEqual(sem.apagadas, ['impresilk_rascunhos'], 'entrada única com crachá vencido');
   // O crachá passou a ser de outra pessoa (tablet dividido): a base sai antes de abrir com o dono do crachá.
   b.ctx.AUTH = {temCracha: () => true, dono: () => ({nome: 'Outra', papel: 'pcp', usuario: 'outra'}), eu: async () => true, esquecer() {}};
   b.idb.apagadas.length = 0;
-  b.run(`STORE.getUser = () => ({nome: 'Thiago', papel: 'pcp', usuario: 'thiago'}); initLogin();`);
+  b.run(`STORE.getUser = () => ({nome: 'Tiberio', papel: 'pcp', usuario: 'tiberio'}); initLogin();`);
   await tique();
   assert.deepEqual([...b.idb.apagadas], ['impresilk_rascunhos'], 'crachá de outra pessoa');
 });
@@ -595,7 +595,7 @@ test('revisão: B3, o aviso comum fica o tempo proporcional ao texto', () => {
 const HOJE = '2026-10-05';
 const DataFixa = class extends Date { constructor(...a) { super(...(a.length ? a : [HOJE + 'T12:00:00'])); } static now() { return +new Date(HOJE + 'T12:00:00'); } };
 const ELENCO = {pessoas: [
-  {chave: 'adriano-f', id: '100001', nome: 'Adriano Fictício Souza', apelido: 'adriano', area: 'Montagem', ativo: true},
+  {chave: 'abriano-f', id: '100001', nome: 'Abriano Fictício Souza', apelido: 'abriano', area: 'Montagem', ativo: true},
   {chave: 'bia-f', id: '100002', nome: 'Bia Fictícia', apelido: 'bia', area: 'Montagem', ativo: true},
   {chave: 'caio-f', id: '100003', nome: 'Caio Fictício', apelido: 'caio', area: 'Montagem', ativo: true},
 ], antigos: [], ferias: [], ausencias: [], fichaRH: true};
@@ -621,7 +621,7 @@ function telaFicha({papel = 'pcp', lista = []} = {}) {
     getElementById: id => (html.includes(`id="${id}"`) ? el(id) : null), addEventListener() {}, activeElement: null,
     body: {contains: () => false, classList: classes(), appendChild() {}}, visibilityState: 'visible'};
   const salvos = [], toasts = [], desfazer = [];
-  const cfg = {instaladores: ['Adriano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
+  const cfg = {instaladores: ['Abriano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
   const STORE = {getAllOS: () => lista, getCFG: () => cfg, getOS: id => lista.find(o => o.id === id) || null, elenco: () => ELENCO,
     saveOS(o) { salvos.push(js(o)); const i = lista.findIndex(x => x.id === o.id); if (i >= 0) lista[i] = o; else lista.push(o); },
     getQueue: () => [], trySync: async () => {}, on() {}, onConflict() {}, uuid: () => 'u1', valores: () => ({}), regrasLocais: () => null, carimbarMomento() {}};

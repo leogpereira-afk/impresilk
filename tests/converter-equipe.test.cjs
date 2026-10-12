@@ -1,8 +1,8 @@
 /* NOMES ANTIGOS VIRAM ID PELA TELA (F12, 30/09/2026).
    A O.S. antiga guarda o nome que o PCP digitava; a tela "Conferir nomes"
    troca esse nome pelo ID da ficha do RH, uma O.S. por vez, pelo upsert
-   normal. Cada teste parte do caso ruim: começo de nome, "Lucas" com três
-   Lucas, "Terceiro", ID repetido, O.S. com divisão, 409 no meio do lote,
+   normal. Cada teste parte do caso ruim: começo de nome, "Lucio" com três
+   Lucio, "Terceiro", ID repetido, O.S. com divisão, 409 no meio do lote,
    outra gravação entre a conferência e o botão. Tudo fictício: o repositório
    é público. */
 const {test} = require('node:test');
@@ -18,21 +18,21 @@ const root = path.join(__dirname, '..');
 const FICHAS = [
   {chave:'bruno-alves', id:'100001', nome:'Bruno Alves Costa', apelido:'bruno', ativo:true},
   {chave:'bruno-martins', id:'100002', nome:'Bruno Martins Dias', apelido:'', ativo:true},
-  {chave:'lucas-gabriel', id:'100010', nome:'Lucas Gabriel Souza', apelido:'', ativo:true},
-  {chave:'lucas-natalino', id:'100011', nome:'Lucas Natalino Reis', apelido:'', ativo:true},
-  {chave:'jose-adilando', id:'100020', nome:'José Adilando Rocha', apelido:'adilsom', ativo:true},
-  {chave:'adriano-pinheiro', id:'100030', nome:'Adriano Pinheiro Lima', apelido:'', ativo:true},
-  {chave:'adriano-nunes', id:'100031', nome:'Adriano Nunes Araujo', apelido:'', ativo:true},
+  {chave:'lucio-gabriel', id:'100010', nome:'Lucio Gabriel Souza', apelido:'', ativo:true},
+  {chave:'lucio-natalício', id:'100011', nome:'Lucio Natalício Reis', apelido:'', ativo:true},
+  {chave:'jose-abilando', id:'100020', nome:'José Abilando Rocha', apelido:'abilsom', ativo:true},
+  {chave:'abriano-parreira', id:'100030', nome:'Abriano Parreira Lima', apelido:'', ativo:true},
+  {chave:'abriano-nunes', id:'100031', nome:'Abriano Nunes Araujo', apelido:'', ativo:true},
   {chave:'rita-moraes', id:'100040', nome:'Rita Moraes', apelido:'rita', ativo:true},
   {chave:'freelancer:fl-renan', id:'100040', nome:'Renan Brito', apelido:'renan', freelancer:true, ativo:true},
   {chave:'freelancer:fl-pantera', id:'', nome:'Paulo Pantera Ficticio', apelido:'pantera', freelancer:true, ativo:true},
 ];
-const DADOS = (vinculos = []) => ({pessoas:FICHAS, vinculos, lista:['Bruno', 'Lucas']});
+const DADOS = (vinculos = []) => ({pessoas:FICHAS, vinculos, lista:['Bruno', 'Lucio']});
 
 /* -------------------------------------------------------------- função pura */
 test('converterEquipe: idempotente; rodar de novo não muda nada', () => {
   const d = DADOS();
-  const a = O.converterEquipe(['Bruno', 'Lucas Gabriel Souza', 'Adilsom'], d);
+  const a = O.converterEquipe(['Bruno', 'Lucio Gabriel Souza', 'Abilsom'], d);
   assert.equal(a.mudou, true);
   assert.deepEqual(a.equipe, ['100001', '100010', '100020']);
   const b = O.converterEquipe(a.equipe, d);
@@ -42,27 +42,27 @@ test('converterEquipe: idempotente; rodar de novo não muda nada', () => {
 });
 
 test('converterEquipe: só troca com vínculo confirmado (salvo, apelido ou nome completo); começo de nome sem confirmação não casa', () => {
-  const sem = O.converterEquipe(['Bruno Martins', 'Lucas Gab', 'Jose Adilando'], DADOS());
+  const sem = O.converterEquipe(['Bruno Martins', 'Lucio Gab', 'Jose Abilando'], DADOS());
   assert.equal(sem.mudou, false, 'começo de nome é sugestão, não vínculo');
-  assert.deepEqual(sem.equipe, ['Bruno Martins', 'Lucas Gab', 'Jose Adilando']);
+  assert.deepEqual(sem.equipe, ['Bruno Martins', 'Lucio Gab', 'Jose Abilando']);
   assert.deepEqual(sem.ficam.map(f => f.motivo), ['comeco', 'nenhuma', 'comeco']);
   assert.equal(sem.ficam[0].sugerido, '100002', 'a tela mostra a sugestão para alguém confirmar');
   assert.equal(O.confirmarNome('Bruno Martins', DADOS()).id, '', 'a régua de hoje acha, mas sem confirmação não converte');
   // Confirmado (vínculo salvo pela tela): troca.
-  const com = O.converterEquipe(['Bruno Martins', 'Jose Adilando'], DADOS([{apelido:'Bruno Martins', id:'100002', chave:'bruno-martins'}, {apelido:'Jose Adilando', id:'100020', chave:'jose-adilando'}]));
+  const com = O.converterEquipe(['Bruno Martins', 'Jose Abilando'], DADOS([{apelido:'Bruno Martins', id:'100002', chave:'bruno-martins'}, {apelido:'Jose Abilando', id:'100020', chave:'jose-abilando'}]));
   assert.deepEqual(com.equipe, ['100002', '100020']);
   assert.deepEqual(com.trocas.map(t => t.como), ['vinculo', 'vinculo']);
   // Apelido e nome completo exatos são o casamento único de hoje.
-  assert.equal(O.confirmarNome('Adilsom', DADOS()).como, 'apelido');
+  assert.equal(O.confirmarNome('Abilsom', DADOS()).como, 'apelido');
   assert.equal(O.confirmarNome('Bruno Martins Dias', DADOS()).como, 'nome');
 });
 
 test('converterEquipe: não duplica ID (nome e ID da mesma pessoa, dois nomes da mesma pessoa)', () => {
-  const r = O.converterEquipe(['Bruno', '100001', 'bruno', 'Bruno Alves Costa', 'Adilsom', 'José Adilando Rocha'], DADOS());
+  const r = O.converterEquipe(['Bruno', '100001', 'bruno', 'Bruno Alves Costa', 'Abilsom', 'José Abilando Rocha'], DADOS());
   assert.deepEqual(r.equipe, ['100001', '100020']);
   assert.equal(new Set(r.equipe).size, r.equipe.length);
   // O nome antes do ID: a pessoa fica uma vez só.
-  assert.deepEqual(O.converterEquipe(['Lucas Natalino Reis', '100011'], DADOS()).equipe, ['100011']);
+  assert.deepEqual(O.converterEquipe(['Lucio Natalício Reis', '100011'], DADOS()).equipe, ['100011']);
 });
 
 test('converterEquipe: não mexe em quem já é ID, nem no espaço dele', () => {
@@ -74,14 +74,14 @@ test('converterEquipe: não mexe em quem já é ID, nem no espaço dele', () => 
   assert.deepEqual(m.equipe, [' 100002 ', '100001'], 'só o nome muda');
 });
 
-test('converterEquipe: "Lucas" com dois Lucas no RH é ambíguo e fica nome', () => {
-  const r = O.converterEquipe(['Lucas', 'Adriano'], DADOS());
+test('converterEquipe: "Lucio" com dois Lucio no RH é ambíguo e fica nome', () => {
+  const r = O.converterEquipe(['Lucio', 'Abriano'], DADOS());
   assert.equal(r.mudou, false);
-  assert.deepEqual(r.ficam.map(f => [f.nome, f.motivo]), [['Lucas', 'ambiguo'], ['Adriano', 'ambiguo']]);
+  assert.deepEqual(r.ficam.map(f => [f.nome, f.motivo]), [['Lucio', 'ambiguo'], ['Abriano', 'ambiguo']]);
   // Dois vínculos diferentes salvos para o mesmo nome também não escolhem.
-  const dois = DADOS([{apelido:'Lucas', id:'100010'}, {apelido:'lucas', id:'100011'}]);
-  assert.equal(O.converterEquipe(['Lucas'], dois).mudou, false);
-  assert.equal(O.confirmarNome('Lucas', dois).motivo, 'vinculo-invalido');
+  const dois = DADOS([{apelido:'Lucio', id:'100010'}, {apelido:'lucio', id:'100011'}]);
+  assert.equal(O.converterEquipe(['Lucio'], dois).mudou, false);
+  assert.equal(O.confirmarNome('Lucio', dois).motivo, 'vinculo-invalido');
 });
 
 test('converterEquipe: "Terceiro" e nome decidido sem ficha nunca viram pessoa', () => {
@@ -99,17 +99,17 @@ test('converterEquipe: ID repetido (ficha e contrato) e contrato sem CPF não co
 });
 
 test('converterEquipe: vínculo salvo para ficha sem CPF é decisão de gente; o xará com ID não leva o nome', () => {
-  // A régua de leitura ignora o vínculo sem ID e casa "Lucas" com o Lucas Ferreira; a troca por ID não grava isso.
-  const pessoas = [{chave:'lucas-ferreira', id:'100050', nome:'Lucas Ferreira', apelido:'lucas'}, {chave:'lucas-prado', id:'', nome:'Lucas Prado'}];
-  const d = {pessoas, vinculos:[{apelido:'Lucas', chave:'lucas-prado', nome:'Lucas Prado'}]};
-  assert.equal(O.resolverPessoas(d).idDe('Lucas'), '100050', 'a leitura de hoje');
-  const r = O.converterEquipe(['Lucas'], d);
+  // A régua de leitura ignora o vínculo sem ID e casa "Lucio" com o Lucio Ferreira; a troca por ID não grava isso.
+  const pessoas = [{chave:'lucio-ferreira', id:'100050', nome:'Lucio Ferreira', apelido:'lucio'}, {chave:'lucio-prado', id:'', nome:'Lucio Prado'}];
+  const d = {pessoas, vinculos:[{apelido:'Lucio', chave:'lucio-prado', nome:'Lucio Prado'}]};
+  assert.equal(O.resolverPessoas(d).idDe('Lucio'), '100050', 'a leitura de hoje');
+  const r = O.converterEquipe(['Lucio'], d);
   assert.equal(r.mudou, false);
   assert.equal(r.ficam[0].motivo, 'vinculo-sem-id');
 });
 
 test('converterEquipe: opcoes.nomes converte só os nomes escolhidos', () => {
-  const r = O.converterEquipe(['Bruno', 'Adilsom'], DADOS(), {nomes:['adilsom']});
+  const r = O.converterEquipe(['Bruno', 'Abilsom'], DADOS(), {nomes:['abilsom']});
   assert.deepEqual(r.equipe, ['Bruno', '100020']);
   assert.equal(r.ficam[0].motivo, 'fora-da-escolha');
 });
@@ -194,7 +194,7 @@ function tela(S, papel = 'pcp', {cheio = () => false} = {}) {
 
 test('lote: O.S. com divisão (alocação) é pulada e vai no relatório; as outras convertem', async () => {
   const aloc = {grupos:[{equipeId:null, cota:10000, liderId:'100001', membros:[{pessoaId:'100001', papel:'lider', cota:10000}]}], em:'2026-09-20T10:00:00Z'};
-  const {S, L} = loja({lista:[osDe('a', ['Bruno', 'Terceiro']), osDe('b', ['Bruno'], {alocacao:aloc}), osDe('c', ['Adilsom'])]});
+  const {S, L} = loja({lista:[osDe('a', ['Bruno', 'Terceiro']), osDe('b', ['Bruno'], {alocacao:aloc}), osDe('c', ['Abilsom'])]});
   const t = tela(S);
   const plano = t.run('planoConversaoNomes()');
   assert.equal(plano.converte, 2); assert.equal(plano.comDivisao, 1);
@@ -209,7 +209,7 @@ test('lote: O.S. com divisão (alocação) é pulada e vai no relatório; as out
 });
 
 test('lote: relê cada O.S. do STORE antes de gravar (o que mudou depois da conferência não se perde)', async () => {
-  const {S, L} = loja({lista:[osDe('a', ['Bruno']), osDe('b', ['Adilsom']), osDe('c', ['Lucas Gabriel Souza'])]});
+  const {S, L} = loja({lista:[osDe('a', ['Bruno']), osDe('b', ['Abilsom']), osDe('c', ['Lucio Gabriel Souza'])]});
   const t = tela(S);
   t.run('var PLANO = planoConversaoNomes()');
   // Entre a conferência e o botão: outro aparelho pôs mais gente na 'a', a
@@ -227,11 +227,11 @@ test('lote: relê cada O.S. do STORE antes de gravar (o que mudou depois da conf
 });
 
 test('lote: vínculo que mudou no meio pula a O.S. em vez de gravar outra pessoa', async () => {
-  const cfg = {instaladores:[], vinculosRH:[{apelido:'Luquinha', id:'100010', chave:'lucas-gabriel'}]};
+  const cfg = {instaladores:[], vinculosRH:[{apelido:'Luquinha', id:'100010', chave:'lucio-gabriel'}]};
   const {S, L} = loja({lista:[osDe('a', ['Luquinha'])], cfg});
   const t = tela(S);
   t.run('var PLANO = planoConversaoNomes()');
-  cfg.vinculosRH = [{apelido:'Luquinha', id:'100011', chave:'lucas-natalino'}];
+  cfg.vinculosRH = [{apelido:'Luquinha', id:'100011', chave:'lucio-natalício'}];
   t.run('esquecerVinculosCasa(); OPERACAO.esquecerPessoas()');
   const itens = await t.json('converterNomesNasOSCasa(PLANO, {})');
   assert.equal(itens[0].estado, 'pulada'); assert.match(itens[0].motivo, /mudou desde a conferência/);
@@ -239,7 +239,7 @@ test('lote: vínculo que mudou no meio pula a O.S. em vez de gravar outra pessoa
 });
 
 test('lote: 409 numa O.S. não trava as outras; o relatório diz qual e por quê', async () => {
-  const {S, L} = loja({lista:[osDe('a', ['Bruno']), osDe('b', ['Adilsom']), osDe('c', ['Bruno Martins Dias'])], conflitos:['b']});
+  const {S, L} = loja({lista:[osDe('a', ['Bruno']), osDe('b', ['Abilsom']), osDe('c', ['Bruno Martins Dias'])], conflitos:['b']});
   const t = tela(S);
   const itens = await t.json('converterNomesNasOSCasa(planoConversaoNomes(), {prazoMs:200, passoMs:5})');
   assert.deepEqual(itens.map(i => [i.id, i.estado]), [['a', 'convertida'], ['b', 'recusada'], ['c', 'convertida']]);
@@ -249,7 +249,7 @@ test('lote: 409 numa O.S. não trava as outras; o relatório diz qual e por quê
 });
 
 test('lote: sem resposta no prazo a troca fica na fila e o relatório diz; servidor mudo para o lote em vez de encher a fila', async () => {
-  const {S, L} = loja({lista:[osDe('a', ['Bruno']), osDe('b', ['Adilsom']), osDe('c', ['Bruno Martins Dias']), osDe('d', ['Lucas Gabriel Souza'])]});
+  const {S, L} = loja({lista:[osDe('a', ['Bruno']), osDe('b', ['Abilsom']), osDe('c', ['Bruno Martins Dias']), osDe('d', ['Lucio Gabriel Souza'])]});
   S.trySync = async () => {};   // servidor mudo
   const t = tela(S);
   const itens = await t.json('converterNomesNasOSCasa(planoConversaoNomes(), {prazoMs:30, passoMs:5})');
@@ -261,8 +261,8 @@ test('lote: sem resposta no prazo a troca fica na fila e o relatório diz; servi
 });
 
 test('desfazer devolve EXATAMENTE a lista anterior (espaço, caixa, repetição); não desfaz por cima de outra gravação', async () => {
-  const original = [' Bruno ', 'Terceiro', 'bruno', 'Adilsom'];
-  const {S, L} = loja({lista:[osDe('a', original), osDe('b', ['Lucas Gabriel Souza'])]});
+  const original = [' Bruno ', 'Terceiro', 'bruno', 'Abilsom'];
+  const {S, L} = loja({lista:[osDe('a', original), osDe('b', ['Lucio Gabriel Souza'])]});
   const t = tela(S);
   t.run('var REL = null');
   await t.run('converterNomesNasOSCasa(planoConversaoNomes(), {}).then(itens => { REL = {itens}; gravarRelConvNomes(REL); })');
@@ -282,12 +282,12 @@ test('desfazer devolve EXATAMENTE a lista anterior (espaço, caixa, repetição)
 });
 
 test('desfazer depois de dois lotes na mesma O.S. (um nome, depois outro) volta à lista do começo', async () => {
-  const original = ['Bruno', 'Adilsom', 'Terceiro'];
+  const original = ['Bruno', 'Abilsom', 'Terceiro'];
   const {S, L} = loja({lista:[osDe('a', original)], cfg:{instaladores:[]}});
   const t = tela(S);
   await t.run('iniciarConversaoNomesCasa(["Bruno"])');
-  assert.deepEqual(L.servidor.get('a').equipe, ['100001', 'Adilsom', 'Terceiro']);
-  await t.run('iniciarConversaoNomesCasa(["Adilsom"])');
+  assert.deepEqual(L.servidor.get('a').equipe, ['100001', 'Abilsom', 'Terceiro']);
+  await t.run('iniciarConversaoNomesCasa(["Abilsom"])');
   assert.deepEqual(L.servidor.get('a').equipe, ['100001', '100020', 'Terceiro']);
   const rel = await t.json('lerRelConvNomes()');
   assert.equal(rel.itens.length, 2, 'o relatório junta os dois lotes');
@@ -299,7 +299,7 @@ test('desfazer depois de dois lotes na mesma O.S. (um nome, depois outro) volta 
 });
 
 test('lote: a O.S. que sai da fila sem o aviso desta troca (conflito resolvido com Recarregar) não vira "convertida"', async () => {
-  const {S, L} = loja({lista:[osDe('a', ['Bruno']), osDe('b', ['Adilsom'])]});
+  const {S, L} = loja({lista:[osDe('a', ['Bruno']), osDe('b', ['Abilsom'])]});
   const envio = S.trySync;
   S.trySync = async () => {
     // "Recarregar do servidor": a O.S. 'a' volta à versão do servidor e sai da fila, sem 'os-gravada'.
@@ -315,7 +315,7 @@ test('lote: a O.S. que sai da fila sem o aviso desta troca (conflito resolvido c
 
 test('lote: O.S. com saída ou retorno que o servidor recusaria é pulada (a mesma conferência do servidor), para não prender a fila', async () => {
   const Sv = await import('../supabase/functions/_shared/pcp-integridade.mjs');
-  const {S, L} = loja({lista:[osDe('a', ['Bruno'], {saidaEm:'2026-06-10T15:00:00-03:00', retornoEm:'2026-06-10T09:00:00-03:00'}), osDe('b', ['Adilsom'], {saidaEm:'10/06/2026'}), osDe('c', ['Bruno'])]});
+  const {S, L} = loja({lista:[osDe('a', ['Bruno'], {saidaEm:'2026-06-10T15:00:00-03:00', retornoEm:'2026-06-10T09:00:00-03:00'}), osDe('b', ['Abilsom'], {saidaEm:'10/06/2026'}), osDe('c', ['Bruno'])]});
   const t = tela(S);
   for (const o of [{}, {saidaEm:'2026-06-10T08:00:00-03:00'}, {saidaEm:'2026-06-10'}, {retornoEm:'lixo'}, {saidaEm:'2026-06-10T15:00:00Z', retornoEm:'2026-06-10T09:00:00Z'}, {saidaEm:'2026-06-10T08:00:00Z', retornoEm:'2026-06-10T09:00:00Z'}])
     assert.equal(t.run('momentosInvalidosCasa(' + JSON.stringify(o) + ')'), Sv.validarMomentos(o), 'paridade com o servidor: ' + JSON.stringify(o));
@@ -327,16 +327,16 @@ test('lote: O.S. com saída ou retorno que o servidor recusaria é pulada (a mes
 
 test('relatório: com o localStorage cheio, a tela mostra o relatório novo (não o velho) e o Desfazer age sobre ele', async () => {
   let cheio = false;
-  const {S, L} = loja({lista:[osDe('a', ['Bruno']), osDe('b', ['Adilsom'])]});
+  const {S, L} = loja({lista:[osDe('a', ['Bruno']), osDe('b', ['Abilsom'])]});
   const t = tela(S, 'pcp', {cheio:k => cheio && k === 'impresilk_inst_conv_nomes'});
   await t.run('iniciarConversaoNomesCasa(["Bruno"])');
   cheio = true;
-  await t.run('iniciarConversaoNomesCasa(["Adilsom"])');
+  await t.run('iniciarConversaoNomesCasa(["Abilsom"])');
   const rel = await t.json('lerRelConvNomes()');
   assert.deepEqual(rel.itens.map(i => i.id), ['a', 'b'], 'o lote novo está no relatório');
   assert.equal(t.ctx.localStorage.getItem('impresilk_inst_conv_nomes'), null, 'o velho não fica para voltar no lugar do novo');
   await t.run('desfazerConversaoNomesCasa(lerRelConvNomes(), {})');
-  assert.deepEqual(L.servidor.get('b').equipe, ['Adilsom']);
+  assert.deepEqual(L.servidor.get('b').equipe, ['Abilsom']);
 });
 
 test('sem a lista do RH neste aparelho, não converte (não dá para conferir ID repetido) e a tela diz por quê', async () => {
@@ -351,35 +351,35 @@ test('sem a lista do RH neste aparelho, não converte (não dá para conferir ID
 });
 
 test('tela: nome com a contagem, quantas O.S. converteria, grafias parecidas lado a lado e as pendências', () => {
-  const lista = [osDe('1', ['Adlando', 'Lucas']), osDe('2', ['Adilsom', 'Lucas Gabriel Souza']), osDe('3', ['Jose Adilando', 'Terceiro']),
-    osDe('4', ['Adriano', 'Adriano Pinheiro']), osDe('5', ['Adriano Nunes', 'Pantera']), osDe('6', ['Adilsom'], {alocacao:{grupos:[]}})];
-  const {S} = loja({lista, cfg:{instaladores:['Lucas']}});
+  const lista = [osDe('1', ['Ablando', 'Lucio']), osDe('2', ['Abilsom', 'Lucio Gabriel Souza']), osDe('3', ['Jose Abilando', 'Terceiro']),
+    osDe('4', ['Abriano', 'Abriano Parreira']), osDe('5', ['Abriano Nunes', 'Pantera']), osDe('6', ['Abilsom'], {alocacao:{grupos:[]}})];
+  const {S} = loja({lista, cfg:{instaladores:['Lucio']}});
   const t = tela(S);
   const html = t.run('ligacaoRHHTML()');
   const grupos = [...html.matchAll(/Grafias parecidas: <strong>([^<]*)<\/strong>/g)].map(m => m[1]);
-  assert.ok(grupos.some(g => /Adlando/.test(g) && /Adilsom/.test(g) && /Jose Adilando/.test(g)), grupos.join(' | '));
-  assert.ok(grupos.some(g => /Adriano/.test(g) && /Adriano Pinheiro/.test(g) && /Adriano Nunes/.test(g)), grupos.join(' | '));
-  assert.ok(grupos.some(g => /Lucas/.test(g) && /Lucas Gabriel Souza/.test(g)), grupos.join(' | '));
-  // "Adilsom" é apelido exato: converteria em 1 O.S. (a com divisão fica).
+  assert.ok(grupos.some(g => /Ablando/.test(g) && /Abilsom/.test(g) && /Jose Abilando/.test(g)), grupos.join(' | '));
+  assert.ok(grupos.some(g => /Abriano/.test(g) && /Abriano Parreira/.test(g) && /Abriano Nunes/.test(g)), grupos.join(' | '));
+  assert.ok(grupos.some(g => /Lucio/.test(g) && /Lucio Gabriel Souza/.test(g)), grupos.join(' | '));
+  // "Abilsom" é apelido exato: converteria em 1 O.S. (a com divisão fica).
   const linhasTab = html.split('<tr>').slice(1);
-  const adilsom = linhasTab.find(l => /<strong>Adilsom<\/strong>/.test(l));
-  assert.match(adilsom, /<strong>1 O\.S\.<\/strong>/); assert.match(adilsom, /1 com divisão fica/);
-  assert.match(adilsom, /data-lig-converter-nome="Adilsom"/);
-  // "Jose Adilando" é só começo de nome: pede confirmação.
-  const jose = linhasTab.find(l => /<strong>Jose Adilando<\/strong>/.test(l));
-  assert.match(jose, /Só pelo começo do nome/); assert.match(jose, /data-lig-confirmar="Jose Adilando"/); assert.match(jose, /depois de confirmar/);
+  const abilsom = linhasTab.find(l => /<strong>Abilsom<\/strong>/.test(l));
+  assert.match(abilsom, /<strong>1 O\.S\.<\/strong>/); assert.match(abilsom, /1 com divisão fica/);
+  assert.match(abilsom, /data-lig-converter-nome="Abilsom"/);
+  // "Jose Abilando" é só começo de nome: pede confirmação.
+  const jose = linhasTab.find(l => /<strong>Jose Abilando<\/strong>/.test(l));
+  assert.match(jose, /Só pelo começo do nome/); assert.match(jose, /data-lig-confirmar="Jose Abilando"/); assert.match(jose, /depois de confirmar/);
   assert.doesNotMatch(jose, /data-lig-converter-nome/);
-  // "Adlando" não tem ficha: a sugestão pela grafia parecida, para alguém decidir.
-  const adlando = linhasTab.find(l => /<strong>Adlando<\/strong>/.test(l));
-  assert.match(adlando, /Sugestão, grafia parecida: <strong>José Adilando Rocha<\/strong>/);
-  assert.doesNotMatch(adlando, /<option value="jose-adilando" selected/, 'a sugestão não vem marcada: um clique em Ligar não pode gravar o palpite');
+  // "Ablando" não tem ficha: a sugestão pela grafia parecida, para alguém decidir.
+  const ablando = linhasTab.find(l => /<strong>Ablando<\/strong>/.test(l));
+  assert.match(ablando, /Sugestão, grafia parecida: <strong>José Abilando Rocha<\/strong>/);
+  assert.doesNotMatch(ablando, /<option value="jose-abilando" selected/, 'a sugestão não vem marcada: um clique em Ligar não pode gravar o palpite');
   // O botão geral e as pendências.
   assert.match(html, /data-lig-converter[^-]/); assert.match(html, />Gravar o ID em 1 O\.S\.</);
   assert.match(html, /1 O\.S\. com divisão fica como está/);
   const pend = html.slice(html.indexOf('Pendências: ficam como nome'));
   assert.match(pend, /Terceiro<\/strong> · 1 O\.S\. · marcador de terceiro/);
   assert.match(pend, /Pantera<\/strong> · 1 O\.S\. · a ficha ou o contrato não tem CPF/);
-  assert.match(pend, /Lucas<\/strong> · 1 O\.S\. · serve para mais de uma pessoa/);
+  assert.match(pend, /Lucio<\/strong> · 1 O\.S\. · serve para mais de uma pessoa/);
   // A janela do aparelho é dita: as antigas ficam de fora até buscar.
   assert.match(html, /As finalizadas antes disso ficam no servidor e não entram na conta nem na troca/);
   assert.match(html, /data-lig-antigas/);
@@ -402,7 +402,7 @@ test('tela: só admin e pcp veem os botões de gravar o ID e de buscar as antiga
 });
 
 test('antigas do servidor: o trecho que passa de 750 é partido; a conversão pega as antigas e o corte é dito', async () => {
-  const velhas = [osDe('v1', ['Bruno'], {finalizadaEm:'2026-06-10T12:00:00'}), osDe('v2', ['Adilsom'], {finalizadaEm:'2026-07-20T12:00:00'})];
+  const velhas = [osDe('v1', ['Bruno'], {finalizadaEm:'2026-06-10T12:00:00'}), osDe('v2', ['Abilsom'], {finalizadaEm:'2026-07-20T12:00:00'})];
   let chamadas = 0;
   const {S, L} = loja({lista:[osDe('a', ['Bruno'])], busca:q => {
     chamadas++;
@@ -529,7 +529,7 @@ function lojaReal({lista, responder}) {
 }
 test('store.js real: aceita, 409 e 422 numa O.S. cada, sem travar as outras; o desfazer volta pela fila', async () => {
   const servidor = new Map();
-  const lista = [osDe('a', ['Bruno']), osDe('b', ['Adilsom']), osDe('c', ['Lucas Gabriel Souza']), osDe('d', ['Bruno Martins Dias'])];
+  const lista = [osDe('a', ['Bruno']), osDe('b', ['Abilsom']), osDe('c', ['Lucio Gabriel Souza']), osDe('d', ['Bruno Martins Dias'])];
   for (const o of lista) servidor.set(o.id, structuredClone(o));
   const envios = [];
   const t = lojaReal({lista, responder:q => {

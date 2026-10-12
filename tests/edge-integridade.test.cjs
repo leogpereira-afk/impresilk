@@ -181,8 +181,8 @@ test('"✓ Conferi" da gestão apaga o selo do ERP com carimbo do crachá; outro
 });
 
 /* ---------------- Conexão com o ERP (23/09/2026) ---------------- */
-test('O.S. 23364: liberada, com equipe e agenda no dia, NÃO é arquivada quando sai da carteira do ERP', async () => {
- const os=row('mub-23364',{numero:'23364',origemMubisys:true,liberadoPCP:true,aptoEm:'2026-09-20T10:00:00Z',equipe:['Ana','Bia'],instalacao:{data:'2026-09-22',periodo:'Manhã'}});
+test('O.S. 93364: liberada, com equipe e agenda no dia, NÃO é arquivada quando sai da carteira do ERP', async () => {
+ const os=row('mub-93364',{numero:'93364',origemMubisys:true,liberadoPCP:true,aptoEm:'2026-09-20T10:00:00Z',equipe:['Ana','Bia'],instalacao:{data:'2026-09-22',periodo:'Manhã'}});
  const e=await edge('pcp-mubisys',{pcp_registros:[os]});
  const r=await e.run("reconciliarCarteira(sb,[{numero:'9',cliente:'Outra'}])");
  assert.equal(r.arquivadas,0);assert.equal(r.marcadasParaConferir,1);
