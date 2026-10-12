@@ -96,3 +96,17 @@ for (const quem of [{nome:'Bruno',sub:'bruno',id:'100002',papel:'montagem'},gest
     assert.equal(reg(e).obs,'outra nota');
   });
 }
+
+/* Item 12 (B3): o resumo "Detalhe da cobertura" (e os outros .perf-method da
+   Performance) tinha 34 px (39 px quando quebra em duas linhas no celular),
+   abaixo da régua de 40 px de controle da casa. Medido no navegador pela
+   prévia: 40 px no computador e no celular depois da correção. */
+test('revisão (item 12): o resumo dos quadros .perf-method da Performance tem 40 px de controle', () => {
+  const css=fs.readFileSync(path.join(__dirname,'..','performance-layout.css'),'utf8');
+  const regra=css.match(/#panel-performance \.perf-method>summary\{([^}]*)\}/);
+  assert.ok(regra,'a regra do resumo existe');
+  assert.match(regra[1],/min-height:40px/);
+  assert.match(regra[1],/box-sizing:border-box/);
+  assert.ok(!/#panel-performance \.perf-method>summary\{[^}]*min-height:3\dpx/.test(css),'nenhuma regra volta a 3x px');
+  assert.match(fs.readFileSync(path.join(__dirname,'..','performance.js'),'utf8'),/<details class="perf-method perf-cob-detalhe"><summary>Detalhe da cobertura/,'o detalhe da cobertura usa a regra');
+});

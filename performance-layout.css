@@ -74,7 +74,7 @@
 .perf-identidade p{margin:0 0 4px}.perf-identidade small{display:block;color:#526471}.perf-identidade .inline-link{font-size:inherit}
 .perf-vinculo-sugerido{display:block;padding:6px 8px;border-radius:6px;background:#fff5dc;color:#765515;font-size:.72rem;line-height:1.4}
 #panel-performance .perf-method{font-size:.82rem;margin:6px 0}
-#panel-performance .perf-method>summary{cursor:pointer;min-height:34px;display:flex;align-items:center;gap:6px}
+#panel-performance .perf-method>summary{cursor:pointer;min-height:40px;box-sizing:border-box;display:flex;align-items:center;gap:6px}
 #panel-performance .perf-method>summary:before{content:'▸'}
 #panel-performance .perf-method[open]>summary:before{content:'▾'}
 #panel-performance .perf-ranking-lista .perf-equipes-cartoes,#panel-performance .perf-ranking-lista .perf-podio{grid-template-columns:1fr}
