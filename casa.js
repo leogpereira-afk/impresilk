@@ -475,6 +475,18 @@ function nomeExibicaoCasa(apelido) {
 function elencoRH() { return (typeof STORE !== 'undefined' && STORE.elenco) ? STORE.elenco() : { pessoas: [], veiculos: [], ferias: [], ausencias: [] }; }
 function pessoasRH() { return elencoRH().pessoas || []; }
 function veiculosRH() { return elencoRH().veiculos || []; }
+/* O ID DO CARRO NO ATIVOS NA O.S. (item 16 da fila de 11/10/2026). A tela
+   escolhe o carro pelo nome da lista do Ativos; o id vai junto, e a chave da
+   volta passa a ser o id (OPERACAO.chaveDaVolta). Só o nome que está na lista
+   uma vez dá o id; nome fora da lista (o antigo das Configurações, "Instalação
+   interna") fica sem id. Nada de juntar nomes parecidos. */
+function definirVeiculoId(os) {
+  if (!os || typeof os !== 'object') return os;
+  const nome = String(os.veiculo || '').trim();
+  const achados = nome ? veiculosRH().filter(v => String(v && v.nome || '').trim() === nome && v.id != null && String(v.id).trim()) : [];
+  if (achados.length === 1) os.veiculoId = String(achados[0].id).trim(); else delete os.veiculoId;
+  return os;
+}
 function pessoaRHPorChave(chave) { const c = String(chave || ''); return c ? pessoasRH().find(p => p.chave === c) || null : null; }
 function pessoaRHPorId6(id) { const i = idPessoaCasa(id); return i ? pessoasRH().find(p => p.id === i) || null : null; }
 function pessoasRHAtivas() { return pessoasRH().filter(p => p.ativo !== false); }
@@ -799,10 +811,15 @@ function aplicarLancamento(os, e = {}) {
   const resp = v => (v === 'sim' || v === 'nao') ? v : '';
   if (e.respostasVolta && typeof e.respostasVolta === 'object' && !OPERACAO.interno(nova)) {
     const respostas = Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, resp(e.respostasVolta[k])]));
-    const antes = nova.retornoConf || {};
-    if (OPERACAO.PERGUNTAS_VOLTA.some(k => respostas[k] !== resp(antes[k]))) {
+    /* A CONFERÊNCIA É DA VIAGEM (onda volta): a de outra viagem não é o ponto
+       de partida; a desta vai com o dia dela, e o servidor carimba de novo. */
+    const comLancamento = {...nova, entregaLancada: {em, por, data}};
+    const daViagem = typeof OPERACAO.confDaViagem === 'function' ? OPERACAO.confDaViagem(comLancamento) : nova.retornoConf;
+    const outraViagem = !!nova.retornoConf && !daViagem;
+    const antes = daViagem || {};
+    if (OPERACAO.PERGUNTAS_VOLTA.some(k => respostas[k] !== resp(antes[k])) || (outraViagem && OPERACAO.voltaRespondida(respostas))) {
       const respondeu = OPERACAO.voltaRespondida(respostas);
-      nova.retornoConf = {...antes, ...respostas, por: respondeu ? por : '', em: respondeu ? em : ''};
+      nova.retornoConf = {...antes, ...respostas, por: respondeu ? por : '', em: respondeu ? em : '', ...(outraViagem ? {dia: OPERACAO.diaDaVolta(comLancamento)} : {})};
     }
   }
   // O retrabalho, como o perguntarRetrabalho grava.
@@ -867,7 +884,8 @@ function lancarEntregaManual(osId) {
      nelas. Sem isto, carro e equipamentos quase nunca teriam resposta e o
      critério nunca entraria na nota (revisão de 23/09/2026). */
   const gestao = ['admin', 'pcp'].includes(STATE.user && STATE.user.papel);
-  const rc = os.retornoConf || {};
+  // A conferência desta viagem (a de outra viagem não aparece como respondida).
+  const rc = (typeof OPERACAO.confDaViagem === 'function' ? OPERACAO.confDaViagem(os) : os.retornoConf) || {};
   const sel = (nome, valor) => `<select name="${nome}"><option value="" ${!valor ? 'selected' : ''}>Não conferido</option><option value="sim" ${valor === 'sim' ? 'selected' : ''}>Sim</option><option value="nao" ${valor === 'nao' ? 'selected' : ''}>Não</option></select>`;
   // As mesmas perguntas da fila Volta do carro e da ficha (OPERACAO.PERGUNTAS_VOLTA).
   const conferencia = gestao && !OPERACAO.interno(os) ? `<div class="conf-volta-grade">
@@ -4728,7 +4746,7 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
         else if (r.divisaoFica) avisos.push('A equipe mudou: a divisão desta O.S. (líder e percentuais) fica para a gestão refazer.');
       }
     } else if (!componente && equipe.length) os.equipe = [...equipe, ...semChip];
-    const veiculo = String(fd.get('veiculo') || ''); if (veiculo) os.veiculo = veiculo;
+    const veiculo = String(fd.get('veiculo') || ''); if (veiculo) { os.veiculo = veiculo; definirVeiculoId(os); }
     // Programou a data: o período "parado no cliente" termina aqui, guardado no log.
     if (os.paradoClienteEm) OPERACAO.fecharParadoPorAgenda(os, agendaAntes, new Date().toISOString(), (STATE.user && STATE.user.nome) || '');
     os.atualizadoEm = new Date().toISOString();

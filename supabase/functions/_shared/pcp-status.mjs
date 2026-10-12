@@ -488,7 +488,9 @@ function ocorrenciasManuais(o) {
    a pessoa (no aparelho, OPERACAO.chavePessoa; sem ela, o texto da equipe).
    Sem carro e sem equipe nada liga uma O.S. à outra: a volta é ela sozinha.
    A retirada no balcão não tem volta, e a O.S. cancelada sai da volta. */
-const carroSt = x => txtSt(x.veiculo).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+/* O carro pelo id do Ativos quando a O.S. o tem (item 16 da fila de
+   11/10/2026); sem ele, o nome. Nomes parecidos não se juntam: só o id casa. */
+const carroSt = x => txtSt(x.veiculoId) ? 'id:' + txtSt(x.veiculoId) : txtSt(x.veiculo).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 const chaveVoltaSt = (x, pessoa) => carroSt(x) + '|' + (Array.isArray(x.equipe) ? x.equipe : []).map(p => txtSt(pessoa(p))).filter(Boolean).sort().join('+');
 const foraDaVoltaSt = x => !objSt(x) || x.tipo === 'interno' || !!cancelamentoDe(x);
 function voltaDoRetorno(o, lista, chave) {

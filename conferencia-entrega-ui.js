@@ -20,7 +20,13 @@ async function conferirItensEntrega(osId, entregaId = '') {
   const travaMes = d => confTravaMesFechado(resposta.fechados, anterior && anterior.dia, d, inteira);
   const soLeitura = !!inteira || !!(anterior && confTravaMesFechado(resposta.fechados, anterior.dia, anterior.dia));
   const id = anterior?.id || 'ent-' + crypto.randomUUID(), chave = 'itens:' + id;
-  let dia = anterior?.dia || diaEntrega(os) || ENTREGA_ITEM.diaSP(new Date().toISOString()), enviando = false;
+  /* O DIA PROPOSTO É O DA VOLTA (M11 da auditoria de 11/10/2026): a tela
+     propunha o dia da finalização, e a volta conferida do carro (que é do dia
+     do retorno) ficava fora da entrega em 6 de 23 O.S. Com retorno registrado
+     (até hoje), a entrega nova começa no dia da volta; sem ele, como antes. */
+  const hojeConf = ENTREGA_ITEM.diaSP(new Date().toISOString());
+  const diaVoltaConf = (os.retornoEm || os.horaRetorno) && typeof CONFERENCIA_ENTREGA.diaDaVolta === 'function' ? CONFERENCIA_ENTREGA.diaDaVolta(os) : '';
+  let dia = anterior?.dia || (diaVoltaConf && diaVoltaConf <= hojeConf ? diaVoltaConf : '') || diaEntrega(os) || hojeConf, enviando = false;
   const escolhidos = new Map((anterior?.itens || []).map(i => [i.chave,i.qtde]));
   const usados = new Map(); outros.forEach(e => e.itens.forEach(i => usados.set(i.chave,(usados.get(i.chave)||0)+i.qtde)));
   const virtual = {...os, alocacao:anterior?.alocacao || (primeira ? os.alocacao : null), equipe:anterior ? DIVISAO.derivarEquipe(anterior.alocacao) : primeira ? os.equipe || [] : []};

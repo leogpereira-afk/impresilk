@@ -366,7 +366,9 @@ const LOTE = (() => {
   }
   // O ponto de partida da conferência: o que o PCP já respondeu na volta (nunca o que a equipe declarou).
   function voltaInicial(g) {
-    const base = (g.os.find(o => OPERACAO.voltaRespondida(o.retornoConf)) || {}).retornoConf || {};
+    // A conferência desta viagem (onda volta): a de outra viagem não é o ponto de partida.
+    const daViagem = o => typeof OPERACAO.confDaViagem === 'function' ? OPERACAO.confDaViagem(o) : o.retornoConf;
+    const base = g.os.map(daViagem).find(c => OPERACAO.voltaRespondida(c)) || {};
     const v = Object.fromEntries(PERGUNTAS().map(k => [k, OPERACAO.respostaVolta(base[k])]));
     v.obs = String(base.obs || '');
     return v;
@@ -532,7 +534,7 @@ const LOTE = (() => {
       // A chegada e a conferência que VALEM nesta O.S.: as da volta, se a pessoa mexeu; senão, as gravadas nela (no dia da jornada).
       const chegou = horaOk(rg.chegada) || !!chegadaGravada(o, jornadaDoGrupo(g));
       if (!chegou) nota.push('chegada do carro');
-      if (!OPERACAO.voltaConferidaParaNota(voltaMexida(rg) ? rg.volta : o.retornoConf)) nota.push('conferência da volta');
+      if (!OPERACAO.voltaConferidaParaNota(voltaMexida(rg) ? rg.volta : (typeof OPERACAO.confDaViagem === 'function' ? OPERACAO.confDaViagem(o) : o.retornoConf))) nota.push('conferência da volta');
     } else if (pedeChegadaNaLinha(o, g) && !horaOk(l.chegada) && !chegadaGravada(o, jornadaDaOS(o, g.dia))) nota.push('chegada da equipe');
     return {trava, nota};
   }
@@ -1472,7 +1474,7 @@ const LOTE = (() => {
     const compacta = !divergem && OPERACAO.voltaConferidaParaNota(conf) && !voltaMexida(rg) && !est.voltaAbertas.has(g.chave);
     // Sem carro informado, a conferência não é pedida: fica fechada (dá para abrir e conferir mesmo assim).
     const naoPedida = !compacta && !comCarro(g) && !divergem && !OPERACAO.voltaRespondida(conf) && !voltaMexida(rg) && !est.voltaAbertas.has(g.chave);
-    const quemConferiu = (g.os.find(o => OPERACAO.voltaRespondida(o.retornoConf)) || {}).retornoConf || {};
+    const quemConferiu = g.os.map(o => typeof OPERACAO.confDaViagem === 'function' ? OPERACAO.confDaViagem(o) : o.retornoConf).find(c => OPERACAO.voltaRespondida(c)) || {};
     const selo = k => { const r = OPERACAO.respostaVolta(conf[k]); return `<span class="volta-resp ${r === 'sim' ? 'ok' : r === 'nao' ? 'ruim' : ''}">${r === 'sim' ? '✓' : r === 'nao' ? '✗' : '·'} ${escL(CURTO[k].toLowerCase())}</span>`; };
     const alocAberto = est.alocAberto === g.chave;
     return `<section class="lote-grupo" data-lote-grupo="${escL(g.chave)}">

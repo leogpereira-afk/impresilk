@@ -3895,7 +3895,8 @@ const VOLTA_CURTO = { carroLimpo: 'limpo', carroArrumado: 'arrumado', equipament
 const voltaGestao = () => ['admin', 'pcp'].includes(STATE.user && STATE.user.papel) && (typeof podeEditar !== 'function' || podeEditar());
 function conferenciaVoltaHTML(os, ro) {
   if (!os || isInterno(os)) return '';
-  const c = os.retornoConf || {};
+  // A conferência desta viagem; a de outra viagem não aparece como respondida (onda volta).
+  const c = OPERACAO.confDaViagem(os) || {};
   const gestao = ['admin', 'pcp'].includes(STATE.user && STATE.user.papel);
   /* NÃO trava na O.S. finalizada. Revisão de 23/09/2026: a nota só lê O.S.
      finalizada, e quase toda O.S. é finalizada ANTES de o carro voltar (pelo
@@ -3978,7 +3979,7 @@ function voltaResumoHTML(g) {
   if (g.situacao === 'conferir') return '<span class="volta-pendente">Ainda não conferida</span>';
   /* "Em parte" tem dois motivos: faltam O.S. da volta, ou todas foram
      tocadas mas sem a resposta que conta na nota (carro E equipamentos). */
-  const todasTocadas = g.os.every(o => OPERACAO.voltaRespondida(o.retornoConf));
+  const todasTocadas = g.os.every(o => OPERACAO.voltaRespondida(OPERACAO.confDaViagem(o)));
   if (!g.respostas) return `<span class="volta-pendente">${g.situacao === 'parcial' ? (todasTocadas ? 'Falta responder carro ou equipamentos' : 'Conferida só em parte das O.S. da volta') : 'As O.S. desta volta têm respostas diferentes'}</span>`;
   const rc = g.respostas;
   const item = k => {
@@ -4037,7 +4038,7 @@ function bindVoltas(root) {
    (voltaEquipe): pré-marcar o que a equipe disse faria o PCP "conferir" sem
    olhar o carro, e a nota passaria a ser a nota que a equipe se deu. */
 function respostasIniciaisVolta(g) {
-  const base = g.respostas || (g.os.find(o => OPERACAO.voltaRespondida(o.retornoConf)) || {}).retornoConf || {};
+  const base = g.respostas || g.os.map(o => OPERACAO.confDaViagem(o)).find(c => OPERACAO.voltaRespondida(c)) || {};
   return {
     ...Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, OPERACAO.respostaVolta(base[k])])),
     obs: String(base.obs || ''),
@@ -4139,13 +4140,18 @@ function salvarConferenciaVolta(g, resp, ocorrencia) {
   for (const o of g.os) {
     const os = STORE.getOS(o.id);   // relê: a fila pode ter sido desenhada antes do último sync
     if (!os) continue;
-    const antes = os.retornoConf || {};
+    /* A CONFERÊNCIA É DA VIAGEM (onda volta, 12/10/2026): a de outra viagem
+       não é o ponto de partida; a desta vai com o dia da volta, e o servidor
+       carimba de novo (a mesma resposta da viagem anterior também conta). */
+    const daViagem = OPERACAO.confDaViagem(os), outraViagem = !!os.retornoConf && !daViagem;
+    const antes = daViagem || {};
     const rc = { ...antes, ...resp };
     // Só a RESPOSTA carimba (mesma regra da ficha e do servidor).
     const mudou = OPERACAO.PERGUNTAS_VOLTA.some(k => OPERACAO.respostaVolta(rc[k]) !== OPERACAO.respostaVolta(antes[k]));
     if (!OPERACAO.voltaRespondida(rc)) { rc.por = ''; rc.em = ''; }
-    else if (mudou) { rc.por = quem; rc.em = agora; }
+    else if (mudou || outraViagem) { rc.por = quem; rc.em = agora; if (outraViagem) rc.dia = g.dia; }
     const comOcorrencia = !!grupo && !OPERACAO.pedirOcorrencia(os, { tipo: ocorrencia.tipo, item: ocorrencia.item, fonte: 'volta', dia: g.dia, grupo });
+    if (outraViagem && !OPERACAO.voltaRespondida(rc) && !comOcorrencia) continue;
     if (!comOcorrencia && JSON.stringify(rc) === JSON.stringify(antes)) continue;
     os.retornoConf = rc;
     os.atualizadoEm = agora; os.atualizadoPor = quem;
@@ -4611,7 +4617,12 @@ function bindModalEvents(os, ro) {
       if (el.dataset.f === 'instalacao.data' && _modalDraft &&
           (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v))) registrarRemarcacao(_modalDraft, v);
       const confAntes = _modalDraft.confirmacao, carroAntes = !!_modalDraft.carroLiberado;
+      /* A conferência de outra viagem (onda volta): mexer nela começa a desta
+         viagem do zero, com o dia dela; a outra fica guardada pelo servidor. */
+      if (/^retornoConf\./.test(el.dataset.f) && _modalDraft.retornoConf && !OPERACAO.confDaViagem(_modalDraft)) _modalDraft.retornoConf = {dia: OPERACAO.diaDaVolta(_modalDraft)};
       setField(el.dataset.f, v);
+      // O carro escolhido na lista do Ativos leva o id dele (item 16).
+      if (el.dataset.f === 'veiculo' && typeof definirVeiculoId === 'function') definirVeiculoId(_modalDraft);
       // "Abrir Zap" e "Ver no Mapa" seguem o que está digitado, sem repintar a
       // ficha (o teclado não cai). Antes abriam o número e o endereço antigos.
       if (el.dataset.f === 'whatsapp' || el.dataset.f === 'endereco') {

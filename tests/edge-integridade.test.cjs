@@ -130,11 +130,14 @@ test('operação não apaga a conferência que a gestão fez', async () => {
  assert.deepEqual({...e.db.pcp_registros[0].registro.retornoConf}, antes);
 });
 test('gestão confere: autor e hora vêm do crachá e do relógio do servidor, não do aparelho', async () => {
- const e = await edge('pcp-sync', {pcp_registros:[volta({})]});
- const r = await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, retornoConf:{carroLimpo:'sim', equipamentosOk:'nao', obs:'x'.repeat(400), por:'Outro', em:'2020-01-01'}}}, {papel:'pcp', nome:'Gestor', sub:'gestor-id'});
+ /* TROCADO DE PROPÓSITO NA ONDA VOLTA (item 17 da fila de 11/10/2026): porId
+    é o ID de 6 dígitos do RH (a ficha cujo apelido é o login), e o login vai
+    em porConta. Ficha fictícia. */
+ const e = await edge('pcp-sync', {pcp_registros:[volta({})], registros:[{colecao:'colaboradores',id:'g',apagado:false,registro:{nome:'Gestor',apelido:'gestor-id',cpf:'111.222.333-44'}}]});
+ const r = await e.call({action:'upsert', os:{...e.db.pcp_registros[0].registro, retornoConf:{carroLimpo:'sim', equipamentosOk:'nao', obs:'x'.repeat(400), por:'Outro', porId:'999999', em:'2020-01-01'}}}, {papel:'pcp', nome:'Gestor', sub:'gestor-id'});
  const rc = e.db.pcp_registros[0].registro.retornoConf;
  assert.equal(r.status, 200);
- assert.equal(rc.por, 'Gestor'); assert.equal(rc.porId, 'gestor-id');
+ assert.equal(rc.por, 'Gestor'); assert.equal(rc.porId, '111222'); assert.equal(rc.porConta, 'gestor-id');
  assert.notEqual(rc.em, '2020-01-01'); assert.ok(Date.now() - Date.parse(rc.em) < 60000);
  assert.equal(rc.obs.length, 300, 'observação cortada no teto, sem travar a fila');
 });
@@ -441,7 +444,8 @@ test('limpeza do carro: equipe grava a declaração; autor do crachá; hora do f
    obs:'x'.repeat(400), fotos:['f1','f2','f3','f4','f5','',3,'../x'], dia:'2026-09-24', veiculo:'Strada', por:'Outro', porId:'outro', em:'2099-01-01T00:00:00Z', recebidoEm:'2020-01-01'}}}, toque);
  assert.equal(r.status, 200, JSON.stringify(r));
  const ve = e.db.pcp_registros[0].registro.voltaEquipe;
- assert.equal(ve.por, 'Ana'); assert.equal(ve.porId, 'Ana');
+ // TROCADO DE PROPÓSITO NA ONDA VOLTA (item 17): porId é o ID de 6 dígitos (sem ficha no RH, vazio) e o login vai em porConta.
+ assert.equal(ve.por, 'Ana'); assert.equal(ve.porId, ''); assert.equal(ve.porConta, 'Ana');
  assert.notEqual(ve.em, '2099-01-01T00:00:00Z'); assert.ok(Math.abs(Date.now() - Date.parse(ve.em)) < 60000);
  assert.equal(ve.fotos.join(), 'f1,f2,f3,f4'); assert.equal(ve.obs.length, 300);
  assert.ok(ve.recebidoEm && ve.recebidoEm !== '2020-01-01');

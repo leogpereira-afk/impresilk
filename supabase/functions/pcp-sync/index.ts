@@ -1,7 +1,7 @@
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
-import { podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
@@ -793,7 +793,7 @@ function valorConferencia(os:any, erp:any[]) {
    a régua é o servidor, nunca o corpo do pedido: o recálculo de um selo
    (perfParametrosDoSelo) usa a do selo, e o selo de antes da régua (sem
    regraPerdas) é recalculado sem ela, com o hash de sempre. */
-async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDAS.id}:{estrito?:boolean,reguaPerdas?:string}={}) {
+async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDAS.id, regraVolta=REGRA_VOLTA}:{estrito?:boolean,reguaPerdas?:string,regraVolta?:string}={}) {
   const regua=reguaPerdas?REGRAS.reguaPorId(reguaPerdas):null;
   if(reguaPerdas&&!regua)throw new Error("A régua das perdas deste fechamento não existe neste servidor. Atualize antes de conferir.");
   const periodo=perfPeriodo(body), inicio=new Date().toISOString();
@@ -851,6 +851,10 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
   const pessoasPerf=await pessoasDoPCP(cfgAntes.config);
   const equipesPerf:any[]=Array.isArray(cfgAntes.config?.performancePCP?.equipes)?cfgAntes.config.performancePCP.equipes:[];
   const num=(v:any)=>v==null||v===""?NaN:typeof v==="number"?v:Number(String(v).includes(",")?String(v).replace(/\./g,"").replace(",","."):v);
+  /* A régua da volta só entra no conteúdo quando muda alguma entrega (como a
+     régua das perdas): o período em que as duas réguas dizem o mesmo fica com
+     o conteúdo e o hash de antes. */
+  let voltaMudou=false;
   const registros=lista.map(o=>{
     const p=participacoes.find((x:any)=>x.id===o.id);
     let valor=num(o.valorTotal), origem="O.S. do PCP";
@@ -860,6 +864,14 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
     // Sem líquido não somar somente os produtos que têm preço: omite itens e descontos.
     if(!Number.isFinite(valor)||valor<0){valor=null;origem="Sem valor";}
     let dadosEntrega:any={}, voltaDaEntrega=true;
+    /* A VOLTA DO CARRO (onda volta, 12/10/2026). Régua nova (volta-1): a
+       volta de cada entrega é a da viagem dela (CONFERENCIA_ENTREGA, as
+       viagens que o servidor guarda em `voltas`; sem elas, a de hoje). Régua
+       da v167: os campos da O.S., pela fotografia de antes da primeira
+       mudança da viagem (voltaLegado) quando ela existe, e as contas de
+       sempre. As duas são feitas; a nova vale quando a apuração é nova. */
+    const oVolta=comVoltaLegado(o);
+    let viagem:any=null;
     const subtotais=(Array.isArray(o.itens)?o.itens:[]).map((it:any)=>num(it.subtotal));
     const bruto=subtotais.length&&subtotais.every((v:number)=>Number.isFinite(v)&&v>=0)?subtotais.reduce((a:number,b:number)=>a+b,0):null;
     let valorBrutoCentavos=bruto===null?null:Math.round(bruto*100);
@@ -877,9 +889,13 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
       const baseAnteriorCentavos=indiceEntrega>=0&&a.entregas.slice(0,indiceEntrega).every((x:any)=>x.valor!==null)?a.entregas.slice(0,indiceEntrega).reduce((s:number,x:any)=>s+x.valor,0):null;
       dadosEntrega={estadoEntrega:CONFERENCIA_ENTREGA.estado(oFim,valorConferencia(o,valoresItens[String(o.numero)] || [])),baseAnteriorCentavos,osId:o._osId,entregaId:o._conferencia.id,itensEntrega:e?.itens || [],saldoItens:a.saldoItens?.length || 0,erroConferencia:a.erro || "",fracaoOS:a.total>0 && e?.valor!=null?e.valor/a.total:0};
       const idsEntrega=finaisAlocacao(o._conferencia.alocacao).map((m:any)=>m.pessoaId).sort();
-      const idsOperacionais=(o.equipe || []).map((n:any)=>pessoasPerf.chave(String(n))).sort();
-      const diaRetorno=perfDia(o.retornoEm) || perfDia(o.entregaLancada?.data) || perfDia(o.finalizadaEm);
+      const idsOperacionais=(oVolta.equipe || []).map((n:any)=>pessoasPerf.chave(String(n))).sort();
+      const diaRetorno=perfDia(oVolta.retornoEm) || perfDia(oVolta.entregaLancada?.data) || perfDia(oVolta.finalizadaEm);
       voltaDaEntrega=JSON.stringify(idsEntrega)===JSON.stringify(idsOperacionais) && diaRetorno===o._dia;
+      /* M11 da auditoria de 11/10/2026 (régua nova): a volta do dia da
+         entrega, com a equipe contida uma na outra (a conferência que pôs
+         alguém a mais ou a menos não descarta a volta). */
+      if(regraVolta)viagem=CONFERENCIA_ENTREGA.voltaDaEntrega(o,o._dia,a.erro?[]:idsEntrega,(n:any)=>pessoasPerf.chave(String(n)));
       valor=e?.valor==null?null:e.valor/100; origem="Itens desta entrega · líquido proporcional";
       o={...o,alocacao:a.erro?null:o._conferencia.alocacao,equipe:a.erro?[]:finaisAlocacao(o._conferencia.alocacao).map((m:any)=>m.pessoaId),entregaLancada:{data:o._dia}};
     }
@@ -924,11 +940,10 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
        na avaliação individual. Só "sim"/"nao" passam; o resto é "não
        conferido" (null) e não pesa contra ninguém. */
     const snv=(v:any)=>v==="sim"||v===true?"sim":(v==="nao"||v===false?"nao":null);
-    const rc=voltaDaEntrega&&o.retornoConf&&typeof o.retornoConf==="object"?o.retornoConf:null;
     /* 24/09/2026: "arrumado" (conta junto com "limpo") e "sem avaria" (não
        conta, mas a tela mostra) vieram com a fila da volta do carro. */
     const PERGUNTAS=["carroLimpo","carroArrumado","equipamentosOk","semAvaria"];
-    const retornoConf=rc&&PERGUNTAS.some(k=>snv(rc[k]))?{...Object.fromEntries(PERGUNTAS.map(k=>[k,snv(rc[k])])),por:String(rc.por||"").slice(0,120),porId:String(rc.porId||"").slice(0,120),em:String(rc.em||"").slice(0,40)}:null;
+    const confDe=(rc:any)=>rc&&typeof rc==="object"&&PERGUNTAS.some(k=>snv(rc[k]))?{...Object.fromEntries(PERGUNTAS.map(k=>[k,snv(rc[k])])),por:String(rc.por||"").slice(0,120),porId:String(rc.porId||"").slice(0,120),em:String(rc.em||"").slice(0,40)}:null;
     /* performance-3: A VOLTA DO CARRO É UMA POR VIAGEM, não uma por O.S. A
        fila (OPERACAO.voltasDoCarro) agrupa por dia + carro + equipe e confere
        uma vez; a nota contava cada O.S. da viagem, e três serviços pequenos no
@@ -936,15 +951,42 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
        volta como OPERACAO.diaDaVolta), e `voltou` é o mesmo filtro: baixa do
        ERP sem retorno nem lançamento não prova viagem e não entra na conta do
        carro (a fila nunca a mostra para conferir). */
-    const baixaERP=o.baixaAutoERP?.em===o.finalizadaEm || /^Mubisys\b/i.test(o.finalizadoPor || "");
     const norm=(x:any)=>String(x||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toLowerCase();
+    /* A RÉGUA DA v167. A O.S. da volta é a fotografia (oVolta) com as mesmas
+       trocas que a entrega por item faz acima (a equipe e o lançamento dela);
+       sem fotografia, é a própria O.S. e tudo sai como antes. */
+    const vo=o._conferencia?{...oVolta,alocacao:o.alocacao,equipe:o.equipe,entregaLancada:o.entregaLancada}:oVolta;
+    // Nomes da volta: os da entrega (por item) ou os da fotografia (O.S. inteira).
+    const nomesVolta:string[]=[];
+    if(o._conferencia)nomesVolta.push(...nomes);
+    else{const vistos=new Set<string>();for(const n of (Array.isArray(vo.equipe)?vo.equipe:[])){const x=String(n??"").trim();if(!x)continue;const k=pessoasPerf.chave(x);if(vistos.has(k))continue;vistos.add(k);nomesVolta.push(x);}}
+    const baixaV167=vo.baixaAutoERP?.em===vo.finalizadaEm || /^Mubisys\b/i.test(vo.finalizadoPor || "");
     /* SEM CARRO ("Instalação interna", 29/09/2026): a equipe foi sem carro, então
        não há volta do carro para conferir nem para pesar na nota. O mesmo nome
        de OPERACAO.SEM_CARRO na tela. */
-    const semCarro=norm(o.veiculo)==="instalacao interna";
-    const voltou=voltaDaEntrega && nomes.length>0 && !semCarro && !!(o.retornoEm || o.horaRetorno || !baixaERP || o.entregaLancada);
-    const diaVolta=perfDia(o.retornoEm) || (o.horaRetorno ? (perfDia(o.saidaEm) || perfDia(o.instalacao?.data)) : "") || (o.entregaLancada ? perfDia(o.entregaLancada.data) : "") || perfDia(o.finalizadaEm);
-    const volta=[diaVolta,norm(o.veiculo),nomes.map((n:string)=>pessoasPerf.chave(n)).sort().join("+")].join("|");
+    const semCarroV167=norm(vo.veiculo)==="instalacao interna";
+    const diaVoltaV167=perfDia(vo.retornoEm) || (vo.horaRetorno ? (perfDia(vo.saidaEm) || perfDia(vo.instalacao?.data)) : "") || (vo.entregaLancada ? perfDia(vo.entregaLancada.data) : "") || perfDia(vo.finalizadaEm);
+    const daV167={retornoConf:confDe(voltaDaEntrega?vo.retornoConf:null),
+      voltou:voltaDaEntrega && nomesVolta.length>0 && !semCarroV167 && !!(vo.retornoEm || vo.horaRetorno || !baixaV167 || vo.entregaLancada),
+      volta:[diaVoltaV167,norm(vo.veiculo),nomesVolta.map((n:string)=>pessoasPerf.chave(n)).sort().join("+")].join("|")};
+    let daVolta=daV167;
+    if(regraVolta){
+      /* A RÉGUA NOVA (volta-1): a entrega por item volta só com a viagem do
+         dia dela; a O.S. inteira, pelo filtro de sempre (o mesmo de
+         OPERACAO.voltou), com a conferência da viagem de hoje. A chave é a da
+         viagem: dia, carro (pelo id do Ativos quando a O.S. o tem, item 16) e
+         a equipe da viagem. */
+      if(!o._conferencia)viagem=CONFERENCIA_ENTREGA.voltaDaOS(o);
+      const baixaERP=o.baixaAutoERP?.em===o.finalizadaEm || /^Mubisys\b/i.test(o.finalizadoPor || "");
+      const nova={retornoConf:confDe(viagem?.retornoConf),
+        voltou:o._conferencia
+          ? !!viagem && nomes.length>0 && !CONFERENCIA_ENTREGA.semCarroV(viagem)
+          : nomes.length>0 && !CONFERENCIA_ENTREGA.semCarroV(o) && !!(o.retornoEm || o.horaRetorno || !baixaERP || o.entregaLancada),
+        volta:viagem?CONFERENCIA_ENTREGA.chaveDaViagem(viagem,(n:any)=>pessoasPerf.chave(String(n))):""};
+      if(canon(nova)!==canon(daV167))voltaMudou=true;
+      daVolta=nova;
+    }
+    const {retornoConf,voltou,volta}=daVolta;
     const quem=alocOk?{equipeId:eqAloc?eqAloc.equipeId:"",equipeNome:eqAloc?eqAloc.equipeNome:"",emblema:eqAloc?eqAloc.emblema:"🤝",obs:"",por:String(aloc.por||""),em:String(aloc.em||"")}
       :{equipeId:pAntiga?.equipeId||"",equipeNome:pAntiga?.equipeNome||"",emblema:pAntiga?.emblema||"🤝",obs:pAntiga?.obs||"",por:pAntiga?.por||"",em:pAntiga?.em||""};
     /* A EQUIPE SUGERIDA (F11) vai só na entrega NÃO confirmada, pela régua
@@ -976,7 +1018,12 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
      fica com o conteúdo e o hash de antes da régua, e o selo antigo confere
      igual. Sem entrega julgada, a régua não muda nada na comissão. */
   const julgou=!!regua&&registros.some((r:any)=>Object.prototype.hasOwnProperty.call(r,"etapaOrigem"));
-  const conteudo={periodo,regra:"performance-3",...(body.notaPorValor===true?{regraNota:REGRA_NOTA_VALOR}:{}),...(julgou?{regraPerdas:regua.id}:{}),criterios,registros};
+  /* A régua da volta (onda volta) entra no conteúdo e no hash só quando
+     muda alguma entrega: o selo diz que foi feito com a volta de cada viagem,
+     e o recálculo dele usa a mesma régua; o selo sem a marca (o da v167 e o
+     período em que as duas réguas dizem o mesmo) recalcula pela de antes,
+     que lê a fotografia guardada na primeira mudança da viagem. */
+  const conteudo={periodo,regra:"performance-3",...(body.notaPorValor===true?{regraNota:REGRA_NOTA_VALOR}:{}),...(julgou?{regraPerdas:regua.id}:{}),...(voltaMudou?{regraVolta}:{}),criterios,registros};
   /* A COBERTURA DO PERÍODO (itens 2 e 29 da fila de 11/10/2026), FORA do
      conteúdo e do hash: o que entrou na base e o que ficou de fora (as baixas
      do ERP a lançar), em centavos. Vai no selo como ele foi visto no
@@ -1012,12 +1059,19 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
    o hash não bate e continua 409 (nunca vira aceite). Mudança real na fonte
    segue mudando o hash. */
 const REGRA_NOTA_VALOR = "nota-valor-1";
+// A volta de cada viagem (onda volta, 12/10/2026).
+const REGRA_VOLTA = "volta-1";
 function perfParametrosDoSelo(selo:any, periodo:any) {
   return {de:periodo.de, ate:periodo.ate, ...(selo?.regraNota===REGRA_NOTA_VALOR?{notaPorValor:true}:{})};
 }
 /* A RÉGUA DAS PERDAS DO SELO (D-010): a que ele guardou em regraPerdas; selo
    de antes da régua, nenhuma (recalcula como foi selado). */
 const perfReguaDoSelo = (selo:any) => typeof selo?.regraPerdas==="string" ? selo.regraPerdas : "";
+/* A RÉGUA DA VOLTA DO SELO (onda volta): a que ele guardou em regraVolta; o
+   selo de antes (v167) recalcula pela régua de antes (os campos da O.S., pela
+   fotografia voltaLegado). Régua que este servidor não conhece fica com a de
+   antes: o hash não bate e continua 409 (nunca vira aceite). */
+const perfRegraVoltaDoSelo = (selo:any) => selo?.regraVolta===REGRA_VOLTA ? REGRA_VOLTA : "";
 async function perfFechamentos(periodo:any) {
   const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_fechamentos").eq("apagado",false).eq("registro->>de",periodo.de).eq("registro->>ate",periodo.ate).order("id").limit(1000);
   if(error)throw new Error(error.message);if(data?.length===1000)throw new Error("Limite de revisões atingido.");
@@ -1691,7 +1745,7 @@ Deno.serve(async (req: Request) => {
           if(!ultima.apuracao?.compensacaoDe){
           const fechamentos=await perfFechamentos(periodo);
           if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"Há outra revisão operacional. Concilie o demonstrativo antes de exportar."},409);
-          const fonteAtual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo),{reguaPerdas:perfReguaDoSelo(fechamentos[0])});
+          const fonteAtual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo),{reguaPerdas:perfReguaDoSelo(fechamentos[0]),regraVolta:perfRegraVoltaDoSelo(fechamentos[0])});
           if(fonteAtual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Revise antes de exportar."},409);
           }
           const arquivo="comissao-"+periodo.de+"-r"+ultima.revisao+".csv";
@@ -1738,7 +1792,7 @@ Deno.serve(async (req: Request) => {
           if(!ultima.apuracao.compensacaoDe){
           const fechamentos=await perfFechamentos(periodo);
           if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"O fechamento operacional recebeu outra revisão. Gere e confira uma nova prévia."},409);
-          const atual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo),{reguaPerdas:perfReguaDoSelo(fechamentos[0])});
+          const atual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo),{reguaPerdas:perfReguaDoSelo(fechamentos[0]),regraVolta:perfRegraVoltaDoSelo(fechamentos[0])});
           if(atual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Crie uma revisão operacional e outra prévia financeira."},409);
           }
           if(!ultima.versoesOS)return resp({error:"Prévia anterior ao controle de versões por O.S. Gere uma nova prévia."},409);
@@ -2394,10 +2448,22 @@ Deno.serve(async (req: Request) => {
             n.obs = String(("obs" in rc ? rc.obs : antes?.obs) ?? "").slice(0, 300);
             const fotos = "fotos" in rc ? rc.fotos : antes?.fotos;
             n.fotos = Array.isArray(fotos) ? fotos.filter((f: unknown) => typeof f === "string" && f).slice(0, 10) : [];
-            const mudou = PERGUNTAS.some((k) => n[k] !== sn(antes?.[k]));
+            /* A CONFERÊNCIA É DA VIAGEM (onda volta, 12/10/2026): o servidor
+               carimba o dia da volta que ela confere (dia). O aparelho que
+               confere uma viagem nova manda o dia dela: a mesma resposta da
+               viagem anterior, com outro dia, é conferência nova. A cópia que
+               só devolve o que está gravado (o mesmo dia, ou sem o dia) não
+               recarimba nada. */
+            const diaViagem = CONFERENCIA_ENTREGA.diaDaVolta(os);
+            const outroDia = "dia" in rc && String(rc.dia ?? "").trim() !== String(antes?.dia ?? "").trim();
+            const mudou = PERGUNTAS.some((k) => n[k] !== sn(antes?.[k])) || outroDia;
+            /* O ID DE 6 DÍGITOS EM porId (item 17 da fila de 11/10/2026): a
+               pessoa é o ID do RH, não o login; o login vai em porConta. Sem
+               ficha que dê o ID, porId fica vazio. A resposta igual mantém o
+               carimbo de quem respondeu, como sempre. */
             if (!PERGUNTAS.some((k) => n[k])) { n.por = ""; n.porId = ""; n.em = ""; }
-            else if (mudou) { n.por = cracha?.nome || cracha?.sub || ""; n.porId = String(cracha?.sub ?? ""); n.em = new Date().toISOString(); }
-            else { n.por = antes?.por || ""; n.porId = antes?.porId || ""; n.em = antes?.em || ""; }
+            else if (mudou) { const autorVolta = await autorAuditoria(); n.por = cracha?.nome || cracha?.sub || ""; n.porId = autorVolta.porId || ""; n.porConta = String(cracha?.sub ?? ""); n.em = new Date().toISOString(); if (diaViagem) n.dia = diaViagem; }
+            else { n.por = antes?.por || ""; n.porId = antes?.porId || ""; if (antes?.porConta) n.porConta = antes.porConta; n.em = antes?.em || ""; if (antes?.dia) n.dia = antes.dia; }
             os.retornoConf = n;
           }
         }
@@ -2412,9 +2478,11 @@ Deno.serve(async (req: Request) => {
         {
           const antes = existing?.voltaEquipe && typeof existing.voltaEquipe === "object" && !Array.isArray(existing.voltaEquipe) ? existing.voltaEquipe : null;
           const pode = ehToqueNoNome && !!existing && existing.tipo !== "interno" && !voltaConferida(existing.retornoConf);
-          const r = pode
-            ? sanearVoltaEquipe(os.voltaEquipe, antes, { nome: String(cracha?.nome || cracha?.sub || ""), sub: String(cracha?.sub ?? "") }, new Date().toISOString())
-            : antes;
+          const agoraVe = new Date().toISOString();
+          const rodarVe = (id: string) => sanearVoltaEquipe(os.voltaEquipe, antes, { nome: String(cracha?.nome || cracha?.sub || ""), sub: String(cracha?.sub ?? ""), id }, agoraVe);
+          let r = pode ? rodarVe("") : antes;
+          // A declaração nova leva o ID de 6 dígitos de quem registrou (item 17); o RH só é lido quando ela muda.
+          if (pode && r && r !== antes && r.recebidoEm === agoraVe) r = rodarVe((await autorAuditoria()).porId || "");
           // Declaração do aparelho que ficou de fora por ser mais velha que a gravada: dito.
           if (pode && r && r === antes && os.voltaEquipe && typeof os.voltaEquipe === "object" && canon(os.voltaEquipe) !== canon(antes)
             && PERGUNTAS_VOLTA.some((k) => os.voltaEquipe[k] === "sim" || os.voltaEquipe[k] === "nao"))
@@ -2550,6 +2618,25 @@ Deno.serve(async (req: Request) => {
         for (const campo of ["conferenciaERP","regularizacaoSaida","revisaoSolicitada","cicloRegistro"]) { if (existing?.[campo]) os[campo]=existing[campo]; else delete os[campo]; }
         if (existing?.vinculosEquipes) os.vinculosEquipes=existing.vinculosEquipes; else delete os.vinculosEquipes;
         if (existing?.conferenciasEntrega) os.conferenciasEntrega = existing.conferenciasEntrega; else delete os.conferenciasEntrega;
+        /* O CARRO PELO ID DO ATIVOS (item 16 da fila de 11/10/2026): a tela
+           grava veiculoId junto com o nome escolhido na lista do Ativos. O id
+           só vale com o nome com que foi escolhido: trocar o carro numa aba
+           que não conhece o id deixava o id do carro anterior (fica de fora);
+           sem carro, sem id; id fora do formato também não entra. Nada aqui
+           recusa. */
+        {
+          const idV = String(os.veiculoId ?? "").trim();
+          const trocouCarro = !!existing && String(os.veiculo ?? "").trim() !== String(existing.veiculo ?? "").trim() && idV === String(existing.veiculoId ?? "").trim();
+          if (!idV || !String(os.veiculo ?? "").trim() || trocouCarro || !/^[\w.:-]{1,80}$/.test(idV)) delete os.veiculoId; else os.veiculoId = idV;
+        }
+        /* A VOLTA DE CADA VIAGEM (onda volta; regras em _shared,
+           registrarVoltas): o servidor guarda a viagem de hoje em `voltas`, e
+           na primeira mudança da viagem a fotografia da O.S. de antes
+           (voltaLegado). Só daqui; nada é 422. */
+        {
+          const agoraVoltas = new Date().toISOString();
+          trocarOS(registrarVoltas(os, existing, { agora: agoraVoltas, hoje: perfDia(agoraVoltas) }).os);
+        }
         /* A PROVA DA ENTREGA (revisão da onda-w1-backup, R1/S1): ver
            guardarFotosProva. Depois de todas as regras acima (a mescla do
            celular, a volta do carro, a conferência), para nenhuma delas

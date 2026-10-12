@@ -115,5 +115,90 @@ export const CONFERENCIA_ENTREGA = (() => {
     if (os.cancelamento && typeof os.cancelamento === 'object' && depois(os.cancelamento.em)) delete out.cancelamento;
     return out;
   }
-  return {catalogo, validar, apurar, estado, noFimDoDia};
+  /* A VOLTA DO CARRO DE CADA VIAGEM (onda volta, 12/10/2026; D2 da revisão
+     da onda fechamento e M11 da auditoria de 11/10/2026). A O.S. guardava UMA
+     volta (retornoEm, retornoConf, equipe e veículo de hoje), e a apuração de
+     novembro lia a volta de hoje: a segunda viagem em dezembro (ou só a troca
+     da equipe da O.S.) mudava o recálculo de novembro fechado, Aprovar e
+     Exportar davam 409 "A fonte mudou" e a revisão nova perdia a volta de
+     novembro. Agora o servidor guarda cada viagem em `voltas` (uma por dia da
+     volta: o dia, a equipe e o carro como estavam no fim daquele dia e a
+     conferência da gestão daquela viagem), e a entrega de cada período lê a
+     viagem do dia dela. A O.S. sem `voltas` (antiga, com um retorno só) é
+     lida pelos campos da O.S., como sempre. Cópia em
+     _shared/pcp-conferencia-entrega.mjs (igual por teste, texto e sorteio). */
+  const PERGUNTAS_VOLTA = ['carroLimpo', 'carroArrumado', 'equipamentosOk', 'semAvaria'];
+  const textoV = v => String(v ?? '').trim();
+  const normalV = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  const respostaV = v => v === 'sim' || v === true ? 'sim' : (v === 'nao' || v === false ? 'nao' : '');
+  const objV = x => !!x && typeof x === 'object' && !Array.isArray(x);
+  const lancadaV = o => objV(o && o.entregaLancada) && o.entregaLancada.desfazer !== true ? o.entregaLancada : null;
+  /* O dia da volta: o do retorno; sem ele, o da saída (ou da agenda) quando há
+     hora de retorno; depois o do lançamento e o da finalização. A mesma ordem
+     de OPERACAO.diaDaVolta, no fuso de São Paulo em qualquer aparelho. */
+  function diaDaVolta(o) {
+    if (!objV(o)) return '';
+    const d = motor().diaSP, l = lancadaV(o);
+    return d(o.retornoEm) || (o.horaRetorno ? (d(o.saidaEm) || d(objV(o.instalacao) ? o.instalacao.data : '')) : '') || d(l ? l.data : '') || d(o.finalizadaEm);
+  }
+  /* O CARRO DA VOLTA PELO ID DO ATIVOS (item 16 da fila de 11/10/2026): com o
+     id gravado na O.S., a chave é o id; sem ele, o nome, como sempre. Nomes
+     parecidos ("Fiat Uno" e "UNO - 10") não se juntam aqui: só o id casa. */
+  const chaveVeiculo = x => textoV(x && x.veiculoId) ? 'id:' + textoV(x.veiculoId) : normalV(x && x.veiculo);
+  const semCarroV = x => normalV(x && x.veiculo) === 'instalacao interna';
+  // A conferência da gestão, só o que a nota lê: as quatro respostas, quem conferiu e quando.
+  function confDaVolta(rc) {
+    if (!objV(rc)) return null;
+    const r = Object.fromEntries(PERGUNTAS_VOLTA.map(k => [k, respostaV(rc[k])]));
+    if (!PERGUNTAS_VOLTA.some(k => r[k])) return null;
+    return {...r, por:textoV(rc.por).slice(0, 120), porId:textoV(rc.porId).slice(0, 120), em:textoV(rc.em).slice(0, 40)};
+  }
+  /* A viagem de hoje, tirada dos campos da O.S. A conferência que o servidor
+     carimbou com o dia de outra viagem não é desta; a antiga, sem o dia, vale
+     para a viagem de hoje (legado se lê como era). */
+  function registroDaVolta(o) {
+    if (!objV(o) || o.tipo === 'interno') return null;
+    const dia = diaDaVolta(o);
+    if (!dia) return null;
+    const rc = objV(o.retornoConf) ? o.retornoConf : null;
+    return {dia, equipe:[...new Set(lista(o.equipe).map(textoV).filter(Boolean))].slice(0, 30), veiculo:textoV(o.veiculo).slice(0, 80), veiculoId:textoV(o.veiculoId).slice(0, 80),
+      retornoEm:textoV(o.retornoEm).slice(0, 40), horaRetorno:textoV(o.horaRetorno).slice(0, 10), retornoConf:rc && (!textoV(rc.dia) || textoV(rc.dia) === dia) ? confDaVolta(rc) : null};
+  }
+  const viagemValida = r => objV(r) && /^\d{4}-\d{2}-\d{2}$/.test(String(r.dia || ''));
+  // As viagens da O.S.: as guardadas pelo servidor; sem elas (O.S. antiga), a de hoje.
+  function voltasDaOS(o) {
+    if (objV(o) && Array.isArray(o.voltas)) return o.voltas.filter(viagemValida);
+    const r = registroDaVolta(o);
+    return r ? [r] : [];
+  }
+  // A viagem da entrega inteira (sem conferência por item): a do dia da volta de hoje.
+  function voltaDaOS(o) {
+    const dia = diaDaVolta(o);
+    if (!dia) return null;
+    if (objV(o) && Array.isArray(o.voltas)) { const r = o.voltas.filter(viagemValida).find(x => x.dia === dia); if (r) return r; }
+    return registroDaVolta(o);
+  }
+  /* A viagem de uma entrega conferida por item: a do mesmo dia, com a equipe
+     contida uma na outra (M11: quem a conferência pôs a mais, ou a menos, na
+     entrega não descarta a volta). Equipes que só se cruzam são outra viagem.
+     `chave` lê a pessoa (no servidor, o ID do RH; sem ela, o texto). */
+  function voltaDaEntrega(o, dia, pessoas, chave) {
+    const k = typeof chave === 'function' ? chave : textoV;
+    const chaves = xs => new Set(lista(xs).map(p => textoV(k(p))).filter(Boolean));
+    const ids = chaves(pessoas);
+    if (!ids.size || !dia) return null;
+    for (const r of voltasDaOS(o)) {
+      if (r.dia !== dia) continue;
+      const t = chaves(r.equipe);
+      if (t.size && ([...t].every(x => ids.has(x)) || [...ids].every(x => t.has(x)))) return r;
+    }
+    return null;
+  }
+  // A chave da viagem: dia + carro + equipe (pela pessoa), a mesma de OPERACAO.chaveDaVolta.
+  function chaveDaViagem(r, chave) {
+    const k = typeof chave === 'function' ? chave : textoV;
+    return [textoV(r && r.dia), chaveVeiculo(r), [...new Set(lista(r && r.equipe).map(p => textoV(k(p))).filter(Boolean))].sort().join('+')].join('|');
+  }
+  return {catalogo, validar, apurar, estado, noFimDoDia, PERGUNTAS_VOLTA, diaDaVolta, chaveVeiculo, semCarroV, confDaVolta, registroDaVolta, voltasDaOS, voltaDaOS, voltaDaEntrega, chaveDaViagem};
 })();
+

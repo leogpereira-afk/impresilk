@@ -1,4 +1,5 @@
 export { CONFERENCIA_ENTREGA } from './pcp-conferencia-entrega.mjs';
+import { CONFERENCIA_ENTREGA as CONF_VOLTA } from './pcp-conferencia-entrega.mjs';
 // Regras puras usadas pelas portas de dados e pelos testes de regressão.
 // O motor de divisão (F04) confere e recalcula a alocação dentro da O.S. (F08).
 import { DIVISAO } from './pcp-divisao.mjs';
@@ -2374,6 +2375,18 @@ export function podarCarimbosF15(r) {
     const ultimo = [...out.etapaOrigemLog].reverse().find(objeto);
     out.etapaOrigemLog = ultimo ? [{ para: String(ultimo.para ?? ''), em: String(ultimo.em ?? '') }] : [];
   }
+  /* A CONFERÊNCIA DA VOLTA E A LIMPEZA QUE A EQUIPE REGISTROU (item 17 da
+     fila de 11/10/2026: porId passou a ser o ID de 6 dígitos) descem com o
+     nome de quem conferiu ou registrou, sem o ID e sem o login; também dentro
+     das viagens guardadas (voltas) e da fotografia da v167 (voltaLegado). A
+     volta sem eles não apaga nada: a conferência só muda pela gestão, a
+     declaração parte da gravada, e voltas e voltaLegado são só do servidor. */
+  const semQuem = x => { if (!objeto(x)) return x; const { porId: _pi, porConta: _pc, ...y } = x; return y; };
+  if (objeto(out.retornoConf)) out.retornoConf = semQuem(out.retornoConf);
+  if (objeto(out.voltaEquipe)) out.voltaEquipe = semQuem(out.voltaEquipe);
+  if (Array.isArray(out.voltas)) out.voltas = out.voltas.map(v => objeto(v) && objeto(v.retornoConf) ? { ...v, retornoConf: semQuem(v.retornoConf) } : v);
+  if (objeto(out.voltaLegado) && objeto(out.voltaLegado.campos) && objeto(out.voltaLegado.campos.retornoConf))
+    out.voltaLegado = { ...out.voltaLegado, campos: { ...out.voltaLegado.campos, retornoConf: semQuem(out.voltaLegado.campos.retornoConf) } };
   // Quem finalizou pelo celular (revisão da E5) desce com o nome, sem o ID; a volta sem ele não apaga.
   if (objeto(out.finalizadaPorCampo)) {
     const { porId: _pi, ...x } = out.finalizadaPorCampo;
@@ -2423,16 +2436,99 @@ export function sanearVoltaEquipe(veio, antes, autor, agora) {
   n.veiculo = String(veio.veiculo ?? '').slice(0, 60);
   const igual = velho && PERGUNTAS_VOLTA.every(k => n[k] === velho[k]) && n.obs === (velho.obs || '') &&
     n.fotos.join() === (Array.isArray(velho.fotos) ? velho.fotos : []).join();
-  if (igual) return { ...n, por: velho.por || '', porId: velho.porId || '', em: velho.em || '', recebidoEm: velho.recebidoEm || '' };
+  if (igual) return { ...n, por: velho.por || '', porId: velho.porId || '', ...(velho.porConta ? { porConta: velho.porConta } : {}), em: velho.em || '', recebidoEm: velho.recebidoEm || '' };
   const t = Date.parse(String(veio.em ?? ''));
   const em = Number.isFinite(t) && t <= Date.parse(agora) + 10 * 60 * 1000 ? new Date(t).toISOString() : agora;
   /* Declaração MAIS VELHA que a do COLEGA não passa por cima: ele corrigiu às
      18:10 e o envio das 18:00, parado sem sinal, chegava depois e desfazia a
      correção calado. A mesma pessoa corrigindo a própria declaração vale
      sempre (a fila do aparelho só guarda a última). Quem chama avisa. */
-  const outro = velho && String(velho.porId || velho.por || '') !== String(autor?.sub || autor?.nome || '');
+  /* Quem registrou antes: a conta (login) na declaração nova; na antiga, o
+     porId guardava o login (item 17 da fila de 11/10/2026). */
+  const outro = velho && String(velho.porConta || velho.porId || velho.por || '') !== String(autor?.sub || autor?.nome || '');
   if (outro && Date.parse(String(velho.em || '')) > Date.parse(em)) return velho;
-  return { ...n, por: String(autor?.nome || ''), porId: String(autor?.sub || ''), em, recebidoEm: agora };
+  /* O ID DE 6 DÍGITOS EM porId (item 17): a pessoa é o ID do RH, não o login.
+     Sem ID resolvido, porId fica vazio e a conta vai em porConta. */
+  const id = ehIdPessoa(autor?.id) ? String(autor.id).trim() : '';
+  return { ...n, por: String(autor?.nome || ''), porId: id, porConta: String(autor?.sub || ''), em, recebidoEm: agora };
+}
+/* A VOLTA DE CADA VIAGEM GUARDADA PELO SERVIDOR (onda volta, 12/10/2026;
+   D2 da revisão da onda fechamento). A O.S. tinha UMA volta: a segunda
+   viagem (ou só a troca da equipe da O.S.) em dezembro mudava a volta que a
+   apuração de novembro lia, e o recálculo de novembro fechado deixava de
+   bater. Agora, a cada gravação, o servidor guarda a viagem de hoje em
+   `voltas`, uma por dia da volta (CONFERENCIA_ENTREGA.registroDaVolta): o
+   dia, a equipe e o carro e a conferência da gestão daquela viagem.
+   - Só o servidor escreve `voltas` e `voltaLegado`: o que o aparelho manda
+     nesses campos não conta (parte sempre do gravado).
+   - A O.S. em que nada da viagem muda continua como era, sem `voltas`: o
+     legado se lê pelos campos da O.S. e não é reescrito.
+   - Na primeira mudança da viagem, o servidor guarda a O.S. como ela estava
+     (`voltaLegado`, só os campos que a apuração da v167 lê para a volta) e a
+     viagem de antes, e só então a de hoje. O selo feito pela v167 recalcula
+     pela fotografia, igual.
+   - A viagem de outro dia nunca muda pela gravação de hoje. A do dia de hoje
+     muda inteira até o fim do dia dela; depois dele, a equipe e o carro ficam
+     como estavam no fim daquele dia ("como estava no fim do dia") e só a
+     conferência da gestão continua entrando.
+   - A conferência antiga, sem o dia, que já está guardada numa viagem não
+     passa para a viagem nova: a segunda viagem começa sem conferência.
+   Nada aqui recusa: a gravação passa pela fila do aparelho. */
+const VOLTA_LEGADO_CAMPOS = ['retornoEm', 'horaRetorno', 'saidaEm', 'horaSaida', 'instalacao', 'entregaLancada', 'finalizadaEm', 'finalizadoPor', 'baixaAutoERP', 'veiculo', 'equipe', 'retornoConf'];
+export function fotografiaVoltaLegado(o) {
+  const c = {};
+  if (!objeto(o)) return c;
+  for (const k of VOLTA_LEGADO_CAMPOS) {
+    if (!Object.prototype.hasOwnProperty.call(o, k) || o[k] === undefined) continue;
+    const v = o[k];
+    if ((k === 'instalacao' || k === 'entregaLancada') && objeto(v)) c[k] = { data: v.data ?? '' };
+    else if (k === 'baixaAutoERP' && objeto(v)) c[k] = { em: v.em ?? '' };
+    else if (k === 'retornoConf' && objeto(v)) c[k] = Object.fromEntries([...PERGUNTAS_VOLTA, 'por', 'porId', 'em'].filter(x => v[x] !== undefined).map(x => [x, v[x]]));
+    else if (k === 'equipe' && Array.isArray(v)) c[k] = v.slice(0, 50);
+    else c[k] = typeof v === 'string' ? v.slice(0, 200) : v;
+  }
+  return c;
+}
+/* A O.S. com os campos da volta como a fotografia guardou (só para a régua
+   da v167, no recálculo de um selo dela): campo que não estava, não está. */
+export function comVoltaLegado(o) {
+  if (!objeto(o) || !objeto(o.voltaLegado) || !objeto(o.voltaLegado.campos)) return o;
+  const r = { ...o }, c = o.voltaLegado.campos;
+  for (const k of VOLTA_LEGADO_CAMPOS) {
+    if (Object.prototype.hasOwnProperty.call(c, k)) r[k] = c[k]; else delete r[k];
+  }
+  return r;
+}
+export function registrarVoltas(os, antes, { agora = '', hoje = '' } = {}) {
+  if (!objeto(os)) return { os, mudou: false };
+  const out = { ...os }, ant = objeto(antes) ? antes : null;
+  delete out.voltas; delete out.voltaLegado;
+  if (ant && objeto(ant.voltaLegado)) out.voltaLegado = ant.voltaLegado;
+  const tinha = ant && Array.isArray(ant.voltas) ? ant.voltas.filter(r => objeto(r) && /^\d{4}-\d{2}-\d{2}$/.test(String(r.dia || ''))) : null;
+  if (tinha) out.voltas = tinha;
+  const atual = CONF_VOLTA.registroDaVolta(out);
+  let voltas;
+  if (tinha) voltas = tinha.slice();
+  else {
+    const velho = ant ? CONF_VOLTA.registroDaVolta(ant) : null;
+    if (canon(velho) === canon(atual)) return { os: out, mudou: false };
+    if (ant) out.voltaLegado = { em: agora, campos: fotografiaVoltaLegado(ant) };
+    voltas = velho ? [{ ...velho, em: agora }] : [];
+  }
+  if (atual) {
+    const i = voltas.findIndex(r => r.dia === atual.dia);
+    const rc = objeto(out.retornoConf) ? out.retornoConf : null;
+    // A conferência antiga (sem o dia) guardada noutra viagem é daquela viagem.
+    const conf = atual.retornoConf && !(rc && String(rc.dia ?? '').trim()) && voltas.some((r, j) => j !== i && canon(r.retornoConf) === canon(atual.retornoConf)) ? null : atual.retornoConf;
+    if (i < 0) voltas.push({ ...atual, retornoConf: conf, em: agora });
+    else {
+      const { em: _e, ...semEm } = voltas[i];
+      const novo = hoje && hoje > atual.dia ? { ...semEm, retornoConf: conf } : { ...atual, retornoConf: conf };
+      if (canon(novo) !== canon(semEm)) voltas[i] = { ...novo, em: agora };
+    }
+  }
+  out.voltas = voltas.slice(-200);
+  return { os: out, mudou: canon(out.voltas) !== canon(tinha) || canon(out.voltaLegado ?? null) !== canon(ant?.voltaLegado ?? null) };
 }
 /* DIÁRIO DE AUDITORIA (F03, 29/09/2026). Pedido do dono: "log de auditoria
    completo (quem, quando, o que alterou, inclusive percentuais)". Quem escreve
@@ -2480,6 +2576,10 @@ export const CAMPOS_AUDITADOS = [
   'agendaLog', 'origemPDF',
   // O "Manter aberta" da gestão na O.S. que o ERP deu como entregue com saldo no PCP (E7).
   'erpSaldoDecisao',
+  /* O id do carro no Ativos (item 16), as viagens guardadas pelo servidor e
+     a fotografia da v167 (onda volta): a nota de cada viagem sai delas, e
+     nada aqui muda às escondidas. */
+  'veiculoId', 'voltas', 'voltaLegado',
 ];
 // Campo com ponto é caminho: 'instalacao.data' lê os.instalacao.data.
 const lerCaminho = (o, caminho) => caminho.split('.').reduce((v, k) => (objeto(v) ? v[k] : undefined), o);

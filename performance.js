@@ -1067,7 +1067,8 @@ function perfRegistro(os,c) {
   /* A RÉGUA DAS PERDAS NA PRÉVIA DO APARELHO (D-010): a mesma conta da
      apuração do servidor (REGRAS.perdaNaApuracao), pelo dia da entrega. */
   const perda = typeof REGRAS !== 'undefined' && REGRAS && typeof REGRAS.perdaNaApuracao === 'function' ? REGRAS.perdaNaApuracao(os, typeof diaEntrega === 'function' ? diaEntrega(os) : OPERACAO.dia(os.finalizadaEm)) : {};
-  const extra = {retornoConf:os.retornoConf || null,voltou:typeof OPERACAO.voltou==='function'?OPERACAO.voltou(os):undefined,volta:typeof OPERACAO.chaveDaVolta==='function'?OPERACAO.chaveDaVolta(os):'',retrabalho:!!os.retrabalho,...perda};
+  // A conferência desta viagem (onda volta): a de outra viagem não pesa nesta entrega, como no servidor.
+  const extra = {retornoConf:(typeof OPERACAO.confDaViagem==='function'?OPERACAO.confDaViagem(os):os.retornoConf) || null,voltou:typeof OPERACAO.voltou==='function'?OPERACAO.voltou(os):undefined,volta:typeof OPERACAO.chaveDaVolta==='function'?OPERACAO.chaveDaVolta(os):'',retrabalho:!!os.retrabalho,...perda};
   /* A DIVISÃO DENTRO DA O.S. (F08) vem primeiro, com a mesma régua do
      servidor (perfFonte): confirmada só quando é válida, não está
      desatualizada e tem a mesma gente de os.equipe. O percentual é o final do

@@ -781,8 +781,29 @@ const OPERACAO = (() => {
   const semCarro = o => !!o && normal(o.veiculo) === normal(SEM_CARRO);
   const normal = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
   /* A CHAVE DA VOLTA: dia + carro + equipe. A base da nota no servidor
-     (pcp-sync, perfFonte) monta a mesma chave; um teste confere as duas. */
-  const chaveDaVolta = o => [diaDaVolta(o), normal(o?.veiculo), equipe(o).map(chavePessoa).sort().join('+')].join('|');
+     (pcp-sync, perfFonte) monta a mesma chave; um teste confere as duas.
+     O CARRO PELO ID DO ATIVOS (item 16 da fila de 11/10/2026): com o id
+     gravado na O.S. (veiculoId), a chave é o id; sem ele, o nome, como
+     sempre. "Fiat Uno" e "UNO - 10" só viram o mesmo carro pelo id, nunca
+     por semelhança do nome. A mesma régua de CONFERENCIA_ENTREGA.chaveVeiculo
+     e do carroSt do status (as quatro cópias da chave, com teste). */
+  const chaveVeiculoVolta = o => String(o?.veiculoId ?? '').trim() ? 'id:' + String(o.veiculoId).trim() : normal(o?.veiculo);
+  const chaveDaVolta = o => [diaDaVolta(o), chaveVeiculoVolta(o), equipe(o).map(chavePessoa).sort().join('+')].join('|');
+  /* A CONFERÊNCIA DA VOLTA DESTA VIAGEM (onda volta, 12/10/2026). A O.S.
+     guarda uma conferência só (retornoConf), e a da primeira viagem ficava
+     valendo para a segunda: a fila dizia "conferida" e a viagem nova nunca era
+     conferida. O servidor carimba o dia da viagem na conferência (dia) e
+     guarda cada viagem em `voltas`. Vale aqui a conferência do dia da volta de
+     hoje; a antiga, sem o dia, vale como sempre, a não ser que o servidor já
+     tenha guardado a viagem de hoje sem conferência. */
+  function confDaViagem(o) {
+    const rc = o && o.retornoConf && typeof o.retornoConf === 'object' ? o.retornoConf : null;
+    if (!rc) return null;
+    const d = diaDaVolta(o), dc = String(rc.dia ?? '').trim();
+    if (dc) return dc === d ? rc : null;
+    if (Array.isArray(o.voltas)) { const v = o.voltas.find(x => x && x.dia === d); if (v && !v.retornoConf) return null; }
+    return rc;
+  }
   function voltasDoCarro(lista, de = '', ate = '') {
     const grupos = new Map();
     for (const o of lista || []) {
@@ -797,11 +818,11 @@ const OPERACAO = (() => {
       grupos.set(chave, g);
     }
     const lista2 = [...grupos.values()].map(g => {
-      const feitas = g.os.filter(o => voltaConferidaParaNota(o.retornoConf));
-      const tocadas = g.os.filter(o => voltaRespondida(o.retornoConf));
+      const feitas = g.os.filter(o => voltaConferidaParaNota(confDaViagem(o)));
+      const tocadas = g.os.filter(o => voltaRespondida(confDaViagem(o)));
       const situacao = feitas.length === g.os.length ? 'conferida' : tocadas.length ? 'parcial' : 'conferir';
       // As respostas da volta só são UMA quando todas as O.S. dizem o mesmo.
-      const assinatura = o => PERGUNTAS_VOLTA.map(k => respostaVolta(o.retornoConf?.[k])).join(',');
+      const assinatura = o => PERGUNTAS_VOLTA.map(k => respostaVolta(confDaViagem(o)?.[k])).join(',');
       const iguais = feitas.length === g.os.length && new Set(g.os.map(assinatura)).size === 1;
       /* O QUE A EQUIPE REGISTROU (voltaEquipe, 25/09/2026): a limpeza do carro
          declarada no espelho. Vem ao lado, nunca no lugar: a situação continua
@@ -812,7 +833,7 @@ const OPERACAO = (() => {
       const quando = v => { const t = Date.parse(v && v.em || ''); return Number.isFinite(t) ? t : 0; };
       const declaracao = declaradas.map(o => o.voltaEquipe).sort((a, b) => quando(b) - quando(a))[0] || null;
       const semDeclaracao = g.os.filter(o => !voltaRespondida(o.voltaEquipe)).map(o => String(o.numero || 's/n'));
-      return { ...g, situacao, respostas: iguais ? g.os[0].retornoConf : null, equipeDisse, declaracao, semDeclaracao };
+      return { ...g, situacao, respostas: iguais ? confDaViagem(g.os[0]) : null, equipeDisse, declaracao, semDeclaracao };
     });
     const ordem = { conferir: 0, parcial: 1, conferida: 2 };
     return lista2.sort((a, b) => ordem[a.situacao] - ordem[b.situacao] || b.dia.localeCompare(a.dia) || a.chave.localeCompare(b.chave));
@@ -836,7 +857,7 @@ const OPERACAO = (() => {
       const time = equipe(o);
       const pessoasDaVolta = time.map(chavePessoa).sort();
       const soltaDasOutras = !pessoasDaVolta.length && (!normal(o.veiculo) || semCarro(o));
-      const chave = [d, normal(o.veiculo), soltaDasOutras ? 'os:' + String(o.id) : pessoasDaVolta.join('+')].join('|');
+      const chave = [d, chaveVeiculoVolta(o), soltaDasOutras ? 'os:' + String(o.id) : pessoasDaVolta.join('+')].join('|');
       const g = grupos.get(chave) || { chave, dia: d, veiculo: String(o.veiculo || '').trim(), semCarro: semCarro(o), equipe: time.map(nomePessoa), pessoas: pessoasDaVolta, os: [] };
       g.os.push(o);
       grupos.set(chave, g);
@@ -1432,7 +1453,9 @@ function ocorrenciasManuais(o) {
    a pessoa (no aparelho, OPERACAO.chavePessoa; sem ela, o texto da equipe).
    Sem carro e sem equipe nada liga uma O.S. à outra: a volta é ela sozinha.
    A retirada no balcão não tem volta, e a O.S. cancelada sai da volta. */
-const carroSt = x => txtSt(x.veiculo).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+/* O carro pelo id do Ativos quando a O.S. o tem (item 16 da fila de
+   11/10/2026); sem ele, o nome. Nomes parecidos não se juntam: só o id casa. */
+const carroSt = x => txtSt(x.veiculoId) ? 'id:' + txtSt(x.veiculoId) : txtSt(x.veiculo).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 const chaveVoltaSt = (x, pessoa) => carroSt(x) + '|' + (Array.isArray(x.equipe) ? x.equipe : []).map(p => txtSt(pessoa(p))).filter(Boolean).sort().join('+');
 const foraDaVoltaSt = x => !objSt(x) || x.tipo === 'interno' || !!cancelamentoDe(x);
 function voltaDoRetorno(o, lista, chave) {
@@ -1825,7 +1848,7 @@ function statusEntrega(o, hoje, regra, volta) {
     o.abonos = o.abonos.map((y, j) => j === i ? {...y, revogar:true} : y);
     return '';
   }
-  return {usarVeiculos,veiculoConfirmado,chaveVeiculo,uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveDaVolta,voltou,voltasDoCarro,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,usarReguaPerdas,...STATUS_ENTREGA,novoIdF17,voltaNaLista,diaDaJornada,pedirChegada,ocorrenciasDoGrupo,pedirOcorrencia,pedirAnularOcorrencia,pedirAbono,pedirRevogarAbono};
+  return {usarVeiculos,veiculoConfirmado,chaveVeiculo,uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveVeiculoVolta,chaveDaVolta,confDaViagem,voltou,voltasDoCarro,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,usarReguaPerdas,...STATUS_ENTREGA,novoIdF17,voltaNaLista,diaDaJornada,pedirChegada,ocorrenciasDoGrupo,pedirOcorrencia,pedirAnularOcorrencia,pedirAbono,pedirRevogarAbono};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
 // Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega
