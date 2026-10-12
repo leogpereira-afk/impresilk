@@ -1886,7 +1886,11 @@ function desenharLimpeza() {
     if (!lote.length) return;
     toast(`Enviando ${lote.length} foto(s)…`);
     // pushPhoto guarda no IndexedDB e a fila leva só o fileId: sem sinal, a foto fica no aparelho.
-    for (const f of lote) { const id = await STORE.pushPhoto(f); if (id && est.fotos.length < LIMPEZA_MAX_FOTOS) est.fotos.push(id); }
+    /* A FOTO COM O ID DA O.S. (item 35 da fila de 11/10/2026): a mesma foto
+       vale para todas as O.S. da volta, e o nome leva a primeira delas, como
+       a foto da ficha (F24). */
+    const osDaFoto = (g.os && g.os[0] && g.os[0].id) || '';
+    for (const f of lote) { const id = await STORE.pushPhoto(f, osDaFoto); if (id && est.fotos.length < LIMPEZA_MAX_FOTOS) est.fotos.push(id); }
     if (EQ.limpeza && EQ.limpeza.est === est) desenharLimpeza();
   };
   $$('[data-img]', root).forEach(async img => {

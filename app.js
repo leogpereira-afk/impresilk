@@ -4101,8 +4101,11 @@ function abrirConferenciaVolta(g) {
       if (!files.length) return;
       enviando += files.length; desenhar();
       // Foto que falha é dita pelo 'foto-falhou' do store, com o motivo certo.
+      /* A FOTO COM O ID DA O.S. (item 35 da fila de 11/10/2026): a mesma foto
+         vale para todas as O.S. da volta; o nome leva a primeira delas. */
+      const osDaFoto = (g.os[0] && g.os[0].id) || '';
       for (const f of files) {
-        const id = await STORE.pushPhoto(f);
+        const id = await STORE.pushPhoto(f, osDaFoto);
         if (id) fotos.push(id);
         enviando--;
       }
