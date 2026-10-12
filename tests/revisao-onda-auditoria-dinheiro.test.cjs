@@ -166,3 +166,39 @@ test('P1/pessoas: o aparelho sem os "antigos" (operação) não junta o que o se
   const g=await e.call({action:'elenco'},TITULAR);
   assert.ok(g.avisos.some(a=>/^O ID 100001 aparece no RH como ID anterior de Instaladora Ficticia, mas hoje é o ID de Pessoa Que Saiu Ficticia/.test(a)),JSON.stringify(g.avisos));
 });
+
+/* Prova do revisor (item 9): o bloqueio da ficha vale para o contrato do mesmo CPF. */
+test('P1: o bloqueio da ficha não vale para o contrato de freelancer da mesma pessoa (mesmo CPF)', async()=>{
+  const I=await import('../supabase/functions/_shared/pcp-integridade.mjs');
+  const c=cpf('300001123');
+  const fichas=[{chave:'f1',id:'',nome:'Pessoa Bloqueada Ficticia',cpf:c,idBloqueado:true,ativo:true}];
+  const contratos=[{id:'k1',nome:'Pessoa Bloqueada Ficticia',cpf:c,situacao:'ativo',contratoFim:'2027-12-31'}];
+  const j=I.juntarFreelancers(fichas,contratos,{hoje:'2026-12-01'});
+  assert.equal(j.contratos[0].id,'','o contrato da mesma pessoa ficou com o ID do CPF que o RH bloqueou');
+});
+
+/* Item 9, o outro lado e o servidor: o contrato bloqueado deixa sem ID a ficha
+   do mesmo CPF (na régua do servidor, no elenco com e sem os contratos e na
+   busca por documento). O ID gravado continua valendo. */
+test('P1: o bloqueio do contrato vale para a ficha do mesmo CPF, no servidor inteiro', async()=>{
+  const I=await import('../supabase/functions/_shared/pcp-integridade.mjs');
+  const c=cpf('300002123');
+  assert.equal(I.idDoCadastroRH({cpf:c},{cpfsBloqueados:new Set([c])}).id,'');
+  assert.equal(I.idDoCadastroRH({cpf:c,idPessoa:'310002'},{cpfsBloqueados:new Set([c])}).id,'310002','o ID gravado continua valendo');
+  const saiu={id:'s',colecao:'colaboradores',apagado:false,registro:{id:'s',nome:'Pessoa Que Saiu Ficticia',apelido:'saiu',cpf:cpf('300002999'),idPessoa:'300002',dataDesligamento:'2026-01-10',statusId:'ativo'}};
+  const fichaMesma={id:'m',colecao:'colaboradores',apagado:false,registro:{id:'m',nome:'Pessoa Bloqueada Ficticia',apelido:'bloqueada',cpf:c,statusId:'ativo'}};
+  const contrato={colecao:'freelancers',id:'k2',apagado:false,registro:{id:'k2',nome:'Pessoa Bloqueada Ficticia',apelido:'bloqueada',cpf:c,funcao:'Instalador',situacao:'ativo',contratoFim:'',idPessoaBloqueado:'id-de-outra-pessoa'}};
+  const e=await edge('pcp-sync',{registros:[...FIXAS,saiu,fichaMesma,contrato],pcp_registros:[],pcp_config_global:[{id:true,atualizado_em:'2020-01-01',config:{instaladores:[]}}],
+    painel_ordens:[],equipe_contas:[{sistema:'pcp',usuario:'titular-ficticio',papel:'pcp',ativo:true}]});
+  const regua=await e.run('pessoasDoPCP()');
+  assert.equal(regua.idDe('bloqueada'),'','a ficha do mesmo CPF ficou com o ID do CPF que o RH bloqueou no contrato');
+  assert.equal(regua.pessoa('300002').nome,'Pessoa Que Saiu Ficticia','o ID de quem saiu continua dele');
+  for(const corpo of [{action:'elenco'},{action:'elenco',freelancers:true}]){
+    const el=await e.call(corpo,TITULAR);
+    assert.equal(el.status,200,JSON.stringify(el).slice(0,300));
+    assert.ok(!el.pessoas.some(p=>p.id==='300002'),JSON.stringify(corpo)+': alguém do elenco ficou com o ID de quem saiu');
+    assert.ok(el.avisos.some(a=>/^A ficha de Pessoa Bloqueada Ficticia no RH está sem ID/.test(a)),JSON.stringify(el.avisos));
+  }
+  const doc=await e.call({action:'pessoaPorDocumento',documento:c},TITULAR);
+  assert.ok(doc.pessoas.length&&doc.pessoas.every(p=>p.id===''),JSON.stringify(doc.pessoas));
+});

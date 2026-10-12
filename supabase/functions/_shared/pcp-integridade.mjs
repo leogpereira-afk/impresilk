@@ -1505,7 +1505,7 @@ export function cpfValido(v) {
    11 dígitos, como sempre foi. Devolve só o ID e as marcas, nunca o CPF. */
 export const CAMPO_ID_PESSOA = 'idPessoa';
 export const CAMPO_ID_BLOQUEADO = 'idPessoaBloqueado';
-export function idDoCadastroRH(reg, { exigirCpfValido = false } = {}) {
+export function idDoCadastroRH(reg, { exigirCpfValido = false, cpfsBloqueados = null } = {}) {
   const gravado = String(reg?.[CAMPO_ID_PESSOA] ?? '').trim();
   const cpf = soDigitosCpf(reg?.cpf);
   const doCpf = exigirCpfValido ? (cpfValido(cpf) ? cpf.slice(0, 6) : '') : (cpf.length === 11 ? cpf.slice(0, 6) : '');
@@ -1515,8 +1515,25 @@ export function idDoCadastroRH(reg, { exigirCpfValido = false } = {}) {
      pessoa SEM ID porque o ID do CPF é ou foi de outra pessoa. Aí o PCP não
      calcula pelo CPF: a pessoa fica sem ID (a gestão vê o aviso e a pessoa a
      cadastrar), nunca com o ID de quem saiu. */
-  if (String(reg?.[CAMPO_ID_BLOQUEADO] ?? '').trim()) return { id: '', fonte: '', divergente: false, gravadoInvalido: !!gravado, bloqueado: true };
+  /* O bloqueio vale para o CPF, não só para o cadastro que o tem (revisão da
+     onda auditoria, item 9): a ficha bloqueada e o contrato de freelancer do
+     mesmo CPF são a mesma pessoa, e nenhum dos dois calcula o ID pelo CPF.
+     `cpfsBloqueados` vem de cpfsComIdBloqueado (fichas e contratos juntos). */
+  const bloqueadoNoCpf = cpf.length === 11 && cpfsBloqueados instanceof Set && cpfsBloqueados.has(cpf);
+  if (String(reg?.[CAMPO_ID_BLOQUEADO] ?? '').trim() || bloqueadoNoCpf) return { id: '', fonte: '', divergente: false, gravadoInvalido: !!gravado, bloqueado: true };
   return { id: doCpf, fonte: doCpf ? 'cpf' : '', divergente: false, gravadoInvalido: !!gravado };
+}
+/* Os CPFs (11 dígitos) com o ID bloqueado em algum cadastro do RH: ficha ou
+   contrato com `idPessoaBloqueado` gravado, ou já com a marca `idBloqueado`
+   (a ficha montada pelo servidor). Fica no servidor: nunca sai numa resposta. */
+export function cpfsComIdBloqueado(...listas) {
+  const out = new Set();
+  for (const l of listas) for (const r of Array.isArray(l) ? l : []) {
+    if (!r || typeof r !== 'object') continue;
+    const cpf = soDigitosCpf(r.cpf);
+    if (cpf.length === 11 && (String(r[CAMPO_ID_BLOQUEADO] ?? '').trim() || r.idBloqueado === true)) out.add(cpf);
+  }
+  return out;
 }
 /* OS IDs QUE A PESSOA JÁ TEVE (P1 da auditoria de 12/10/2026): o RH grava em
    `idPessoaAnteriores` a lista dos IDs de 6 dígitos anteriores (o ID trocado
@@ -1562,11 +1579,11 @@ export function pessoasPorDocumento(documento, fichas, contratos) {
   const d = soDigitosDoc(documento);
   const tipo = d.length === 11 ? 'cpf' : d.length === 14 ? 'cnpj' : '';
   if (!tipo) return { erro: 'Digite o CPF (11 dígitos) ou o CNPJ (14 dígitos) inteiro.' };
-  const achados = new Map();
+  const achados = new Map(), cpfsBloqueados = cpfsComIdBloqueado(fichas, contratos);
   const achou = (reg, contrato) => {
     const nome = String(reg?.nome ?? '').trim();
     if (!nome) return;
-    const id = idDoCadastroRH(reg, { exigirCpfValido: contrato }).id;
+    const id = idDoCadastroRH(reg, { exigirCpfValido: contrato, cpfsBloqueados }).id;
     const k = id || 'sem-id:' + normPessoa(nome);
     if (!achados.has(k)) achados.set(k, { id, nome });
   };
@@ -1581,12 +1598,13 @@ export function contratoAtivo(c, hoje = '') {
 }
 export function juntarFreelancers(fichas, contratos, { hoje = '' } = {}) {
   const avisos = [], repetidos = new Set(), fichasFora = new Set();
+  const cpfsBloqueados = cpfsComIdBloqueado(fichas, contratos);
   const lista = (Array.isArray(contratos) ? contratos : [])
     .filter(c => c && typeof c === 'object' && String(c.nome || '').trim() && String(c.id || '').trim())
     .map(c => {
       const cpf = soDigitosCpf(c.cpf), ok = cpfValido(cpf), ativo = contratoAtivo(c, hoje);
       // O ID gravado no contrato manda; o do CPF só quando o campo falta (D-015).
-      const idc = idDoCadastroRH(c, { exigirCpfValido: true });
+      const idc = idDoCadastroRH(c, { exigirCpfValido: true, cpfsBloqueados });
       return { cpf: ok ? cpf : '', entrada: {
         chave: 'freelancer:' + String(c.id).trim(), id: idc.id, nome: String(c.nome).trim(),
         apelido: String(c.apelido || '').trim(), funcao: String(c.funcao || '').trim(), freelancer: true,
