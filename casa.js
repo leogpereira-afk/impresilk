@@ -967,13 +967,36 @@ function lancarEntregaManual(osId) {
        mudar. */
     ALOCUI.iniciar(chaveAloc, { os, equipes: equipesCadastradasCasa(), papel, modo: ALOCUI.modoPara(papel, os), dica: ALOCUI.dicaModo(papel, os), semAntigo: true, reiniciar: true,
       dia: diaProposto || hojeISO(), valor: typeof valorDaOS === 'function' ? valorDaOS(os) : os.valorTotal, versoes: versoesRegrasCasa() });
-    ALOCUI.montar(document.getElementById('lancar-aloc'), chaveAloc);
+    ALOCUI.montar(document.getElementById('lancar-aloc'), chaveAloc, { aoAlterar: () => { if (rascLancar) rascLancar.mudou(); } });
   }
-  if (campoData) campoData.onchange = () => {
+  const dataMudou = () => {
     // A origem fala da data sugerida: com outra data no campo, ela some.
     if (origemData) origemData.hidden = campoData.value !== diaProposto;
     if (componente && typeof ALOCUI.definirDataEntrega === 'function') ALOCUI.definirDataEntrega(chaveAloc, campoData.value);
   };
+  if (campoData) campoData.onchange = dataMudou;
+  /* O RASCUNHO DO LANÇAR ENTREGA (item 34 da fila de 11/10/2026): a data, a
+     equipe (o componente ou os chips) e as respostas da conferência da volta
+     ficam neste aparelho, pela conta e pela O.S., até a entrega ser lançada;
+     fechar a tela não perde o que foi preenchido. Nunca R$. A equipe que
+     mudou em outro aparelho não volta por cima (ALOCUI.aplicarRetrato). */
+  const formLancar = typeof box.querySelector === 'function' ? box.querySelector('#lancar-form') : null;
+  let rascLancar = null;
+  if (formLancar && typeof ligarRascunhoEstado === 'function') {
+    rascLancar = ligarRascunhoEstado('lancar', os.id, {
+      ler: () => ({ campos: camposDoForm(formLancar), aloc: componente ? ALOCUI.retrato(chaveAloc) : null }),
+      aplicar: (e, como) => {
+        if (!e || typeof e !== 'object' || !box.isConnected && box.isConnected !== undefined) return false;
+        aplicarCamposDoForm(formLancar, e.campos);
+        formLancar.querySelectorAll('.casa-chip input').forEach(cb => { const chip = cb.closest('.casa-chip'); if (chip) chip.classList.toggle('on', cb.checked); });
+        if (campoData) dataMudou();
+        if (componente && e.aloc) ALOCUI.aplicarRetrato(chaveAloc, e.aloc, como && como.descartar ? { tocado: e.aloc.tocado === true } : {});
+        return true;
+      },
+      aoRecuperar: ({ descartar }) => avisoRascunhoEl(formLancar, 'Voltou o que você tinha preenchido neste lançamento e não chegou a lançar.', descartar),
+    });
+    if (typeof formLancar.addEventListener === 'function') { formLancar.addEventListener('input', () => rascLancar.mudou()); formLancar.addEventListener('change', () => rascLancar.mudou()); }
+  }
   // Miniaturas da foto do carro que a equipe registrou.
   box.querySelectorAll('[data-foto-img]').forEach(async img => { const b64 = await STORE.pullPhoto(img.dataset.fotoImg); if (b64) img.src = b64; });
   const fechar = () => box.remove();
@@ -1035,6 +1058,7 @@ function lancarEntregaManual(osId) {
         return;
       }
       STORE.saveOS(nova);
+      if (rascLancar) rascLancar.limpar();
       toast(`Entrega da O.S ${os.numero || ''} lançada.`, 'success');
       if (avisos.length) toast(avisos.join(' '), 'error');
       renderEntregas();
@@ -4869,9 +4893,10 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
     const papel = STATE.user && STATE.user.papel, oc = ocupadosAgora();
     ALOCUI.iniciar(chave, { os: o, equipes: equipesCadastradasCasa(), papel, modo: ALOCUI.modoPara(papel, o), dica: ALOCUI.dicaModo(papel, o), semAntigo: true, reiniciar: !manter,
       ocupados: oc.pessoas, dia, valor: typeof valorDaOS === 'function' ? valorDaOS(o) : o.valorTotal, versoes: versoesRegrasCasa() });
-    ALOCUI.montar(host, chave);
+    ALOCUI.montar(host, chave, { aoAlterar: () => { if (rascAgenda) rascAgenda.mudou(); } });
     pintarVeiculos(oc.veiculos);
   };
+  let rascAgenda = null;
   const repintarOcupados = () => {
     if (!osDoComp) return;
     const oc = ocupadosAgora();
@@ -4897,15 +4922,49 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
      campos primeiro, para os ocupados (pessoas e carro) serem os do período
      que voltou. */
   const esc0 = escolhas[id] && typeof escolhas[id] === 'object' ? escolhas[id] : null;
-  if (componente && selOS && esc0 && esc0.os && [...(selOS.options || [])].some(op => op.value === esc0.os)) {
+  const temOpcao = v => [...(selOS.options || [])].some(op => op.value === v);
+  const daMemoria = !!(componente && selOS && esc0 && esc0.os && temOpcao(esc0.os));
+  if (daMemoria) {
     CAMPOS_FORM.forEach(n => { const x = campo(n); if (x && typeof esc0[n] === 'string') x.value = esc0[n]; });
     selOS.value = esc0.os;
     montarComp(STORE.getOS(esc0.os), true);
+  }
+  /* O RASCUNHO DA AGENDA (item 34 da fila de 11/10/2026): a O.S. escolhida,
+     o período, a hora, a duração, o veículo e a equipe montada ficam neste
+     aparelho, pela conta e pelo dia, até programar; fechar a aba ou o tablet
+     não perde a montagem (a repintura da Agenda já repunha pela memória da
+     aba). Fechar o formulário de propósito desiste e apaga. Nunca R$. A
+     equipe que mudou em outro aparelho não volta por cima. */
+  if (componente && selOS && typeof ligarRascunhoEstado === 'function') {
+    rascAgenda = ligarRascunhoEstado('agenda:' + id, dia, {
+      naoRecuperar: daMemoria,
+      ler: () => ({ osId: String(selOS.value || ''), campos: lerForm(), aloc: osDoComp ? ALOCUI.retrato(chave) : null }),
+      aplicar: (e, como) => {
+        if (!e || typeof e !== 'object') return false;
+        const alvo = String(e.osId || '');
+        if (alvo && !temOpcao(alvo)) return false;
+        const o = alvo ? STORE.getOS(alvo) : null;
+        if (alvo && !o) return false;
+        CAMPOS_FORM.forEach(n => { const x = campo(n); if (x && e.campos && typeof e.campos[n] === 'string') x.value = e.campos[n]; });
+        selOS.value = alvo;
+        montarComp(o, false);
+        if (o && e.aloc) ALOCUI.aplicarRetrato(chave, e.aloc, como && como.descartar ? { tocado: e.aloc.tocado === true } : {});
+        guardarForm();
+        return true;
+      },
+      aoRecuperar: ({ descartar }) => {
+        const caixaR = typeof f.closest === 'function' ? f.closest('details') : null;
+        if (caixaR) caixaR.open = true;
+        avisoRascunhoEl(f.firstElementChild || f.firstChild, 'Voltou a programação que você tinha montado para este dia e não chegou a programar.', descartar);
+      },
+    });
+    if (typeof f.addEventListener === 'function') { f.addEventListener('input', () => rascAgenda.mudou()); f.addEventListener('change', () => rascAgenda.mudou()); }
   }
   // Fechar o formulário sem programar desiste: a escolha, a equipe montada e os campos voltam ao começo.
   const caixa = componente && typeof f.closest === 'function' ? f.closest('details') : null;
   if (caixa && typeof caixa.addEventListener === 'function') caixa.addEventListener('toggle', () => {
     if (caixa.open) return;
+    if (rascAgenda) rascAgenda.apagar();
     if (typeof f.reset === 'function') f.reset();
     f.querySelectorAll('[name="osId"] option').forEach(op => { op.hidden = false; });
     montarComp(null);
@@ -4962,6 +5021,7 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
     if (conf.length) toast(`Programada, mas com possível conflito: ${conf.map(c => [...c.equipe, c.veiculo].filter(Boolean).join(', ')).join(' · ')} já está em outra O.S neste turno.`, 'error');
     else toast(`O.S ${os.numero || ''} programada para ${dia.slice(8, 10)}/${dia.slice(5, 7)}.`, 'success');
     if (avisos.length) toast(avisos.join(' '), 'error');
+    if (rascAgenda) rascAgenda.limpar();
     if (componente) { ALOCUI.esquecer(chave); escolhas[id] = ''; }
     if (aoGravar) aoGravar();
   };

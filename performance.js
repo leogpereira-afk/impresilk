@@ -1620,9 +1620,27 @@ async function perfEditarParticipacao(id) {
     if (destino === 'ficha') { const o = STORE.getOS(id); if (o && typeof openModal === 'function') openModal(o, 'agenda'); return; }
     perfIrParaQuadroRH();
   };
-  ALOCUI.montar(box, chave, {aoMudar:conferirBotao, aoIr});
+  /* O RASCUNHO DESTE CONFERIR (item 34 da fila de 11/10/2026): a divisão (ou
+     a participação do jeito antigo) montada e não confirmada fica neste
+     aparelho, pela conta e pela O.S., até confirmar; fechar o diálogo, a aba
+     ou o tablet não perde a montagem. Recomeçar parte do gravado e apaga o
+     rascunho. A divisão gravada que mudou em outro aparelho não recebe o
+     rascunho. Nunca R$. */
+  let rasc = null;
+  const ligarRasc = () => {
+    if (typeof ligarRascunhoEstado !== 'function') return null;
+    const st = ALOCUI.estado(chave);
+    const h = ligarRascunhoEstado('perf-conferir', id, {
+      ler: () => ({aloc: ALOCUI.retrato(chave)}),
+      aplicar: (e, como) => meu() && ALOCUI.estado(chave) === st && !!e && ALOCUI.aplicarRetrato(chave, e.aloc, como && como.descartar ? {tocado: !!(e.aloc && e.aloc.tocado)} : {}),
+      aoRecuperar: ({descartar}) => avisoRascunhoEl(box, 'Voltou a divisão que você tinha montado nesta O.S. e não chegou a confirmar.', descartar),
+    });
+    return h;
+  };
+  ALOCUI.montar(box, chave, {aoMudar:conferirBotao, aoIr, aoAlterar:() => { if (rasc) rasc.mudou(); }});
+  rasc = ligarRasc();
   d.addEventListener('close', () => { if (!enviando) ALOCUI.esquecer(chave); }, {once:true});
-  recomecar.onclick = () => { abrirComponente(true); recomecar.hidden = true; ALOCUI.repintar(chave); };
+  recomecar.onclick = () => { if (rasc) rasc.limpar(); abrirComponente(true); recomecar.hidden = true; ALOCUI.repintar(chave); rasc = ligarRasc(); };
   /* O JEITO ANTIGO GRAVA COMO A v138: a participação do blob, com a trava de
      "mudou enquanto você editava". O servidor confirma a O.S. que nunca teve
      divisão por ela (participacaoVale), e o Fechar período não trava. */
@@ -1633,6 +1651,7 @@ async function perfEditarParticipacao(id) {
     if (JSON.stringify(agora) !== JSON.stringify(pAntiga)) { status.textContent = 'A participação desta O.S. mudou em outro aparelho enquanto você editava. Nada foi gravado. Feche e toque em Conferir de novo.'; status.classList.add('erro'); return; }
     const novo = {id, numero:String(os.numero || ref.numero || ''), membros:r.membros, equipeId:'', equipeNome:'', emblema:'🤝', obs:String((pAntiga && pAntiga.obs) || ''), em:new Date().toISOString(), por:STATE.user?.nome || ''};
     atual.participacoes = atual.participacoes.filter(p => p.id !== id).concat(novo);
+    if (rasc) rasc.limpar();
     ALOCUI.esquecer(chave); d.close();
     void perfSalvar(atual);
     renderPerformanceCasa();
@@ -1651,6 +1670,7 @@ async function perfEditarParticipacao(id) {
     // Só esquece o estado desta abertura: o Conferir da mesma O.S. reaberto tem o seu.
     const soltar = () => { if (ALOCUI.estado(chave) === st0) ALOCUI.esquecer(chave); };
     if (r.estado === 'gravada' || r.estado === 'pendente' || r.estado === 'sem-mudanca') {
+      if (rasc) rasc.limpar();
       soltar();
       if (dono) d.close();
       toast(r.estado === 'gravada' ? `Divisão gravada na O.S. ${numero}.` : r.mensagem, r.estado === 'pendente' ? '' : 'success');
@@ -2901,6 +2921,11 @@ function perfNovaRegra() {
     return {regra, erro:erroEl.textContent, motivo};
   };
   form.addEventListener('input', () => { if (tentou) { requestId = STORE.uuid(); tentou = false; } conferir(); });
+  /* O RASCUNHO DA NOVA VERSÃO DA REGRA (item 34 da fila de 11/10/2026): o que
+     se digita fica neste aparelho, pela conta e pela versão de partida, até
+     gravar; outra versão gravada no meio (outro aparelho) não recebe o
+     rascunho. Só percentuais, dias e o motivo; nenhum R$. */
+  const rasc = typeof ligarRascunhoForm === 'function' ? ligarRascunhoForm(form, 'regra-nova', anterior || 'embutida', {aoRecuperar: conferir}) : {limpar() {}};
   conferir();
   form.onsubmit = async ev => {
     ev.preventDefault();
@@ -2911,6 +2936,7 @@ function perfNovaRegra() {
     try {
       const r = await STORE.api({action:'performanceRegraNova', regra, motivo, anterior, requestId});
       if (!r?.ok || !r.regra) throw new Error(r?.error || 'Não foi possível gravar a nova versão.');
+      rasc.limpar();
       tentou = false;
       d.close();
       toast(perfRegraConfirmacao(r.regra, r.repetida), 'success');

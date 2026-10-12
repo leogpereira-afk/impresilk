@@ -105,20 +105,52 @@ async function conferirItensEntrega(osId, entregaId = '') {
     d.querySelector('#conf-parte-valor').textContent=erro || `Esta entrega: ${valor==null?'valor a conferir':dinheiroCasa(valor/100)} · Saldo a conferir: ${ap.saldo==null?'valor a conferir':dinheiroCasa(ap.saldo/100)}`;
   };
   const atualizar=()=>{conferir();ALOCUI.repintar(chave);};
-  ALOCUI.montar(box,chave,{aoMudar:conferir});
+  let rasc=null;
+  ALOCUI.montar(box,chave,{aoMudar:conferir,aoAlterar:()=>rasc&&rasc.mudou()});
   d.querySelector('#conf-editar-itens').onclick=()=>{
     const primeiro=d.querySelector('[data-conf-item]:checked:not(:disabled)') || d.querySelector('[data-conf-item]:not(:disabled)');
     d.querySelector('.conf-itens').scrollIntoView({behavior:'smooth',block:'start'});
     primeiro?.focus({preventScroll:true});
   };
-  d.querySelector('#conf-data').onchange=e=>{dia=e.target.value;ALOCUI.definirDataEntrega(chave,dia);const vd=d.querySelector('#conf-volta-dia');if(vd){const t=voltaDoDiaTxt(dia);vd.textContent=t;vd.hidden=!t;}atualizar();};
-  d.querySelectorAll('[data-conf-item]').forEach(el=>el.onchange=()=>{const n=+el.dataset.confItem,it=catalogo[n],q=d.querySelector(`[data-conf-qtde="${n}"]`);q.disabled=!el.checked;if(el.checked)escolhidos.set(it.chave,Number(q.value));else escolhidos.delete(it.chave);atualizar();});
-  d.querySelectorAll('[data-conf-qtde]').forEach(el=>el.oninput=()=>{escolhidos.set(catalogo[+el.dataset.confQtde].chave,Number(el.value));atualizar();});
-  d.querySelector('#conf-todos').onclick=()=>{d.querySelectorAll('[data-conf-item]').forEach(el=>{if(el.disabled||catalogo[+el.dataset.confItem].cancelado)return;const n=+el.dataset.confItem,it=catalogo[n],q=d.querySelector(`[data-conf-qtde="${n}"]`);el.checked=true;q.disabled=false;q.value=it.qtde-(usados.get(it.chave)||0);escolhidos.set(it.chave,Number(q.value));});atualizar();};
+  const mexeu=()=>{if(rasc)rasc.mudou();};
+  const trocarDia=v=>{dia=v;ALOCUI.definirDataEntrega(chave,dia);const vd=d.querySelector('#conf-volta-dia');if(vd){const t=voltaDoDiaTxt(dia);vd.textContent=t;vd.hidden=!t;}};
+  d.querySelector('#conf-data').onchange=e=>{trocarDia(e.target.value);atualizar();mexeu();};
+  d.querySelectorAll('[data-conf-item]').forEach(el=>el.onchange=()=>{const n=+el.dataset.confItem,it=catalogo[n],q=d.querySelector(`[data-conf-qtde="${n}"]`);q.disabled=!el.checked;if(el.checked)escolhidos.set(it.chave,Number(q.value));else escolhidos.delete(it.chave);atualizar();mexeu();});
+  d.querySelectorAll('[data-conf-qtde]').forEach(el=>el.oninput=()=>{escolhidos.set(catalogo[+el.dataset.confQtde].chave,Number(el.value));atualizar();mexeu();});
+  d.querySelector('#conf-todos').onclick=()=>{d.querySelectorAll('[data-conf-item]').forEach(el=>{if(el.disabled||catalogo[+el.dataset.confItem].cancelado)return;const n=+el.dataset.confItem,it=catalogo[n],q=d.querySelector(`[data-conf-qtde="${n}"]`);el.checked=true;q.disabled=false;q.value=it.qtde-(usados.get(it.chave)||0);escolhidos.set(it.chave,Number(q.value));});atualizar();mexeu();};
   d.querySelectorAll('[data-conf-abrir]').forEach(el=>el.onclick=()=>{d.close();void conferirItensEntrega(osId,el.dataset.confAbrir).catch(e=>toast(perfErroTxt(e),'error'));});
   d.querySelector('#conf-cancelar').onclick=()=>d.close();
   const campoRevMotivo=d.querySelector('#conf-rev-motivo');
-  if(campoRevMotivo)campoRevMotivo.oninput=conferir;
+  if(campoRevMotivo)campoRevMotivo.oninput=()=>{conferir();mexeu();};
+  /* O RASCUNHO DESTA CONFERÊNCIA (itens 22 e 34 da fila de 11/10/2026): o
+     dia, os itens e as quantidades marcados, o motivo da revisão e a equipe
+     montada ficam neste aparelho (pela conta, pela O.S. e pela entrega: a
+     nova tem a dela) até salvar ou anular; fechar a tela, a aba ou o
+     aparelho não perde o que foi marcado. Nunca R$: o valor da entrega é
+     recalculado na volta. A entrega que mudou no servidor (outro dia, outros
+     itens) ou a O.S. com outros itens não recebe o rascunho. Só leitura (mês
+     fechado) não guarda nada. */
+  if(!soLeitura && typeof ligarRascunhoEstado==='function'){
+    const catalogoAss=catalogo.map(i=>i.chave+'#'+i.qtde+(i.cancelado?'c':'')).join('|');
+    rasc=ligarRascunhoEstado('conferencia-entrega',osId+':'+(anterior?anterior.id:'nova'),{
+      assinatura:()=>JSON.stringify([anterior?[anterior.id,anterior.dia,(anterior.itens||[]).map(i=>i.chave+'#'+i.qtde)]:'nova',catalogoAss,registros.map(e=>e.id)]),
+      ler:()=>({dia,itens:[...escolhidos.entries()].map(([ch,q])=>[ch,Number(q)||0]),motivo:String(campoRevMotivo&&campoRevMotivo.value||''),aloc:ALOCUI.retrato(chave)}),
+      aplicar:(e,como)=>{
+        if(!e||typeof e!=='object'||!minhaTela())return false;
+        const hojeR=ENTREGA_ITEM.diaSP(new Date().toISOString());
+        if(/^\d{4}-\d{2}-\d{2}$/.test(String(e.dia||''))&&e.dia<=hojeR){const campo=d.querySelector('#conf-data');if(campo)campo.value=e.dia;trocarDia(e.dia);}
+        const marcados=new Map((Array.isArray(e.itens)?e.itens:[]).filter(x=>Array.isArray(x)&&x.length===2).map(([ch,q])=>[String(ch),Math.floor(Number(q))]));
+        escolhidos.clear();
+        d.querySelectorAll('[data-conf-item]').forEach(el=>{const n=+el.dataset.confItem,it=catalogo[n],q=d.querySelector(`[data-conf-qtde="${n}"]`),max=Number(q&&q.max)||0,v=marcados.get(it.chave);
+          const vale=!el.disabled&&Number.isInteger(v)&&v>=1&&(!max||v<=max);el.checked=vale;if(q){q.disabled=!vale;if(vale)q.value=String(v);}if(vale)escolhidos.set(it.chave,v);});
+        if(campoRevMotivo)campoRevMotivo.value=String(e.motivo||'').slice(0,300);
+        if(e.aloc)ALOCUI.aplicarRetrato(chave,e.aloc,como&&como.descartar?{tocado:e.aloc.tocado===true}:{});
+        atualizar();
+        return true;
+      },
+      aoRecuperar:({em,descartar})=>{const alvo=d.querySelector('.conf-campos');avisoRascunhoEl(alvo,'Voltou o que você tinha marcado nesta conferência ('+new Date(em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'America/Sao_Paulo'})+') e não chegou a salvar.',descartar);},
+    });
+  }
   const anular=d.querySelector('#conf-anular');
   if(anular)anular.onclick=async()=>{
     if(enviando)return;
@@ -130,6 +162,7 @@ async function conferirItensEntrega(osId, entregaId = '') {
     try {
       const resp=await STORE.api({action:'conferenciaEntrega',osId,rev:os.rev,entrega:{id:anterior.id},revisao:{acao:'anular',motivo:motivoAn}});
       if(!resp?.ok) throw new Error(resp?.error || 'Não foi possível anular a entrega.');
+      if(rasc)rasc.limpar();
       if(minhaTela())d.close();
       if(typeof STORE.pull==='function') await STORE.pull().catch(()=>{});
       conferenciaRefletirNaFicha(resp.os);
@@ -152,6 +185,7 @@ async function conferirItensEntrega(osId, entregaId = '') {
       const resposta=await STORE.api({action:'conferenciaEntrega',osId,rev:os.rev,entrega:{id,dia,itens:selecao(),alocacao:{...r.alocacao,...(anterior?.alocacao?.em?{em:anterior.alocacao.em}:{})}},
         ...(inconsistente?{revisao:{acao:'revisar',motivo:String(campoRev&&campoRev.value||'').trim()}}:{})});
       if(!resposta?.ok) throw new Error(resposta?.error || 'Não foi possível confirmar a entrega.');
+      if(rasc)rasc.limpar();
       if(minhaTela())d.close();
       // Pull respeita a fila local; não substitui uma edição feita durante a requisição.
       if(typeof STORE.pull==='function') await STORE.pull().catch(()=>{});

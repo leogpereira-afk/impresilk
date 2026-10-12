@@ -1233,6 +1233,49 @@ const ALOCUI = (() => {
     repintar(chave);
     return '';
   }
+  /* O RETRATO PARA O RASCUNHO DO APARELHO (itens 22 e 34 da fila de
+     11/10/2026). Quem hospeda o componente (Lançar entrega, Agenda, a ficha,
+     a conferência por entrega e o Conferir da Performance) guarda a montagem
+     que ainda não foi gravada na base dos rascunhos (ligarRascunhoEstado,
+     app.js: no aparelho, pela conta, 7 dias, apagada ao sair). O retrato
+     leva só quem está, os papéis e os percentuais que a própria pessoa
+     montou; nunca R$ (o valor da O.S. fica fora). `base` é a O.S. de quando
+     a tela abriu (a divisão e a equipe gravadas): se ela mudou em outro
+     aparelho, o rascunho não volta por cima (aplicarRetrato recusa). */
+  const baseDe = st => JSON.stringify([String(st.osId == null ? '' : st.osId), st.modo, nucleo(st.gravada), st.base.equipe, lista(st.semId).map(String).sort()]);
+  function retrato(chave) {
+    const st = estados.get(chave);
+    if (!st) return null;
+    return {base: baseDe(st), aloc: limpar(copia(st.aloc)), soNome: lista(st.soNome).map(String), trazidas: lista(st.trazidas).map(String),
+      antigo: st.antigo ? {aloc: copia(st.antigo.aloc)} : null, tocado: st.tocado === true};
+  }
+  /* Devolve o retrato ao componente. Recusa (false, sem mexer em nada) o que
+     não é desta O.S. como ela está agora, o que não fecha 100% e o que traz
+     gente sem ID: o rascunho nunca deixa a divisão inválida. `o.tocado`: o
+     Descartar volta ao "ninguém mexeu" de quando a tela abriu. */
+  function aplicarRetrato(chave, r, o = {}) {
+    const st = estados.get(chave), D = motor();
+    if (!st || !objeto(r) || r.base !== baseDe(st) || !objeto(r.aloc) || !Array.isArray(r.aloc.grupos)) return false;
+    const ids = r.aloc.grupos.flatMap(g => lista(g && g.membros).map(m => String(m && m.pessoaId)));
+    if (!ids.every(ehId) || new Set(ids).size !== ids.length) return false;
+    const aloc = limpar(r.aloc);
+    if (st.modo === 'divisao' && aloc.grupos.length && D.validar(aloc)) return false;
+    let antigo = null;
+    if (st.antigo && objeto(r.antigo) && objeto(r.antigo.aloc)) {
+      const ms = lista(r.antigo.aloc.grupos && r.antigo.aloc.grupos[0] && r.antigo.aloc.grupos[0].membros);
+      const eram = lista(st.antigo.aloc.grupos[0] && st.antigo.aloc.grupos[0].membros).map(m => String(m.pessoaId)).sort();
+      if (JSON.stringify(ms.map(m => String(m && m.pessoaId)).sort()) !== JSON.stringify(eram) || ms.reduce((s, m) => s + (Number(m && m.cota) || 0), 0) !== TOTAL) return false;
+      antigo = copia(r.antigo.aloc);
+    }
+    st.aloc = aloc;
+    st.soNome = st.modo === 'pessoas' ? lista(r.soNome).map(n => String(n).slice(0, 150)).filter(Boolean) : st.soNome;
+    st.trazidas = lista(r.trazidas).map(String);
+    if (antigo) st.antigo.aloc = antigo;
+    st.tocado = o.tocado === undefined ? true : o.tocado === true;
+    st.erro = ''; st.notas = []; st.painel = null;
+    repintar(chave);
+    return true;
+  }
   function montar(root, chave, o = {}) {
     if (!root) return;
     hosts.set(chave, {root, aoMudar: o.aoMudar, aoIr: o.aoIr, aoAlterar: o.aoAlterar, aoTirar: o.aoTirar});
@@ -1300,6 +1343,6 @@ const ALOCUI = (() => {
   }
 
   return {TOTAL, iniciar, estado, esquecer, definirDataEntrega, executar, previaEstrutura, html, montar, repintar, bloqueio, paraGravar, paraParticipacao, gravarNaOS, mudou, nucleo, lerPct, pctTexto, dataBR,
-    modoPara, dicaModo, paraEquipe, aplicarNaOS, aplicarEquipeNaOS, definirOcupados, estrutura, resultadosHTML: chave => { const st = estados.get(chave); return st ? resultadosHTML(st) : ''; }, textoOcupado, gente: genteDe};
+    modoPara, dicaModo, paraEquipe, aplicarNaOS, aplicarEquipeNaOS, definirOcupados, estrutura, retrato, aplicarRetrato, resultadosHTML: chave => { const st = estados.get(chave); return st ? resultadosHTML(st) : ''; }, textoOcupado, gente: genteDe};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = ALOCUI;

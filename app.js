@@ -3813,11 +3813,11 @@ function divisaoAoFecharFicha() {
   const k = chavesFicha(_modalDraft.id), eq = ALOCUI.estado(k.eq), div = ALOCUI.estado(k.div);
   if (!div || div.modo !== 'divisao' || !ALOCUI.mudou(k.div)) return;
   const num = _modalDraft.numero || '';
-  if (div.tocado) { toast(`O.S. ${num}: a divisão mexida na etapa Divisão não foi confirmada e não foi gravada. Para gravar, abra a ficha e toque em Confirmar divisão.`, 'error'); return; }
+  if (div.tocado) { toast(`O.S. ${num}: a divisão mexida na etapa Divisão não foi confirmada e não foi gravada; ela fica guardada neste aparelho. Para gravar, abra a ficha e toque em Confirmar divisão.`, 'error'); return; }
   const trazidas = eq && eq.tocado && Array.isArray(eq.trazidas) ? eq.trazidas : [];
   if (!(ALOCUI.estrutura(k.eq) || []).some(g => g.equipeId != null && trazidas.includes(String(g.equipeId)))) return;
   const r = ALOCUI.aplicarNaOS(k.div, _modalDraft);
-  if (r.ok && r.estado === 'aplicada') markDirty();
+  if (r.ok && r.estado === 'aplicada') { markDirty(); const h = _rascDivFicha.get(div); if (h) h.limpar(); }
   else if (!r.ok) toast(`O.S. ${num}: a equipe foi gravada, mas a divisão não: ${r.mensagem} Complete na etapa Divisão.`, 'error');
 }
 // A hora e a duração não repintam a ficha (o teclado não cai): só os chips.
@@ -3827,6 +3827,35 @@ function repintarOcupadosDaFicha() {
   for (const ch of [k.eq, k.div]) if (ALOCUI.definirOcupados(ch, oc)) ALOCUI.repintar(ch);
 }
 let _fichaDivEnviando = false;
+/* O RASCUNHO DA DIVISÃO DA FICHA (item 34 da fila de 11/10/2026): a divisão
+   mexida e ainda não confirmada fica neste aparelho, pela conta e pela O.S.,
+   até o Confirmar divisão; fechar a ficha, a aba ou o tablet não perde os
+   percentuais e o líder (antes a ficha avisava "não foi gravada" e a montagem
+   sumia). Um rascunho por montagem aberta (a ficha repinta e liga de novo: o
+   mesmo estado do componente usa o mesmo rascunho). A divisão gravada que
+   mudou em outro aparelho, ou a equipe da O.S. que mudou, não recebe o
+   rascunho. Nunca R$. */
+const _rascDivFicha = new WeakMap();
+function rascunhoDivisaoDaFicha(box, chave, osId) {
+  const st = ALOCUI.estado(chave);
+  if (!st || typeof ligarRascunhoEstado !== 'function') return null;
+  const aviso = h => {
+    if (!h.recuperado() || !box || !box.parentNode) return;
+    const antes = box.previousElementSibling;
+    if (antes && antes.classList && antes.classList.contains('rasc-aviso')) return;
+    avisoRascunhoEl(box, 'Voltou a divisão que você tinha montado nesta O.S. e não chegou a confirmar.', h.descartar);
+  };
+  let h = _rascDivFicha.get(st);
+  if (h) { aviso(h); return h; }
+  h = ligarRascunhoEstado('ficha-divisao', osId, {
+    ler: () => ({aloc: ALOCUI.retrato(chave)}),
+    aplicar: (e, como) => ALOCUI.estado(chave) === st && !!e && ALOCUI.aplicarRetrato(chave, e.aloc, como && como.descartar ? {tocado: !!(e.aloc && e.aloc.tocado)} : {}),
+    aoRecuperar: () => aviso(h),
+    aoDescartar: () => { const antes = box && box.previousElementSibling; if (antes && antes.classList && antes.classList.contains('rasc-aviso')) antes.remove(); },
+  });
+  _rascDivFicha.set(st, h);
+  return h;
+}
 function ligarDivisaoDaFicha(box, oc) {
   const os = _modalDraft, id = os.id, k = chavesFicha(id);
   const ok = document.getElementById('ficha-div-ok'), status = document.getElementById('ficha-div-status'), recomecar = document.getElementById('ficha-div-recomecar');
@@ -3835,14 +3864,17 @@ function ligarDivisaoDaFicha(box, oc) {
     valor: typeof valorDaOS === 'function' ? valorDaOS(_modalDraft) : _modalDraft.valorTotal,
     versoes: typeof perfRegrasFonte === 'function' ? perfRegrasFonte().versoes : []});
   abrir(false);
+  rascunhoDivisaoDaFicha(box, k.div, id);
   const conferirBotao = () => {
     if (!ok || _fichaDivEnviando) return;
     const motivo = ALOCUI.bloqueio(k.div);
     ok.disabled = !!motivo;
     if (status && !status.classList.contains('erro')) status.textContent = motivo ? 'Para gravar: ' + motivo : '';
   };
-  ALOCUI.montar(box, k.div, {aoMudar: () => { if (status) status.classList.remove('erro'); conferirBotao(); }, aoTirar: tirouDaDivisaoDaFicha});
-  if (recomecar) recomecar.onclick = () => { abrir(true); recomecar.hidden = true; if (status) { status.textContent = ''; status.classList.remove('erro'); } ALOCUI.repintar(k.div); };
+  ALOCUI.montar(box, k.div, {aoMudar: () => { if (status) status.classList.remove('erro'); conferirBotao(); }, aoTirar: tirouDaDivisaoDaFicha,
+    aoAlterar: () => { const h = _rascDivFicha.get(ALOCUI.estado(k.div)); if (h) h.mudou(); }});
+  // Recomeçar parte do que está gravado: o rascunho desta divisão sai.
+  if (recomecar) recomecar.onclick = () => { const h0 = _rascDivFicha.get(ALOCUI.estado(k.div)); if (h0) h0.limpar(); abrir(true); recomecar.hidden = true; rascunhoDivisaoDaFicha(box, k.div, id); if (status) { status.textContent = ''; status.classList.remove('erro'); } ALOCUI.repintar(k.div); };
   if (ok) ok.onclick = async () => {
     if (_fichaDivEnviando || ALOCUI.bloqueio(k.div)) return conferirBotao();
     _fichaDivEnviando = true; ok.disabled = true;
@@ -3852,6 +3884,7 @@ function ligarDivisaoDaFicha(box, oc) {
        envio em voo, e a versão com a divisão ficava na fila até o próximo
        ciclo: a tela dizia "o servidor ainda não respondeu" sem motivo. */
     let r;
+    const rascAgora = _rascDivFicha.get(ALOCUI.estado(k.div));
     try {
       r = await ALOCUI.gravarNaOS(k.div, {store: STORE, usuario: (STATE.user && STATE.user.nome) || '',
         alvo: () => (_modalDraft && _modalDraft.id === id ? _modalDraft : null),
@@ -3866,6 +3899,7 @@ function ligarDivisaoDaFicha(box, oc) {
     const naEtapa = mesma && etapaAtualFicha(_modalDraft) === 'divisao' && !!document.getElementById('ficha-div-status');
     if (!mesma) { toast(`O.S. ${os.numero || ''}: ${r.mensagem}`, r.ok ? 'success' : 'error', r.ok ? undefined : { fica: true }); return; }
     if (r.ok) {
+      if (rascAgora) rascAgora.limpar();
       _divErroFicha.delete(id);
       toast(r.estado === 'gravada' ? `Divisão gravada na O.S. ${os.numero || ''}.` : r.mensagem, r.estado === 'pendente' ? '' : 'success');
       reRenderModalKeepOpen();
@@ -11103,6 +11137,8 @@ function fecharDialogoComRascunho(rasc, fechar) {
 }
 async function lerRascunhoF24(chave) {
   const mem = _rascMem.has(chave) ? _rascMem.get(chave) : null;
+  // Lê depois das gravações já pedidas: o apagar de um rascunho não perde para a leitura de logo depois (Recomeçar).
+  try { await _rascCadeia; } catch (e) {}
   const db = await baseRascunhos();
   if (!db) return mem;
   return new Promise(resolve => {
@@ -11192,6 +11228,102 @@ function ligarRascunhoForm(form, tela, osId, opt = {}) {
     if (typeof opt.aoRecuperar === 'function') opt.aoRecuperar();
   });
   return { limpar() { vivo = false; if (timer) { clearTimeout(timer); timer = null; } gravarRascunhoF24(chave, null); }, sujo, descartar };
+}
+/* O RASCUNHO DE UMA TELA INTEIRA (itens 22 e 34 da fila de 11/10/2026): a
+   conferência por entrega, o Lançar entrega avulso, a Agenda, a divisão da
+   ficha, o Conferir da Performance e a nova versão da regra. A mesma base dos
+   rascunhos dos diálogos (no aparelho, pela conta, 7 dias, apagada ao sair),
+   mas o que se guarda é o ESTADO da tela, não só os campos com nome: os itens
+   marcados, as quantidades e a montagem da equipe (ALOCUI.retrato). Nunca R$:
+   quem chama monta o `ler` sem valor nenhum. Volta ao reabrir a mesma tela da
+   mesma O.S., com o aviso e o Descartar (`aoRecuperar`), só se ninguém mexeu
+   antes de ele chegar; some quando a tela grava (`limpar`). `assinatura`: o
+   que precisa ser igual para o rascunho valer (outra entrega, outro dia); a
+   montagem da equipe também confere a dela (aplicarRetrato).
+   opt: {ler(), aplicar(estado, {descartar}) -> false se não voltou,
+   assinatura(), aoRecuperar({em, descartar}), aoDescartar()}. */
+function ligarRascunhoEstado(tela, id, opt = {}) {
+  const nada = { mudou() {}, limpar() {}, apagar() {}, sujo: () => false, descartar() {}, recuperado: () => false, chave: '' };
+  if (!tela || !id || typeof opt.ler !== 'function' || typeof opt.aplicar !== 'function') return nada;
+  const chave = chaveRascunhoF24(tela, String(id));
+  const assinatura = typeof opt.assinatura === 'function' ? String(opt.assinatura() ?? '') : '';
+  const txtInicial = JSON.stringify(opt.ler() ?? null);
+  let timer = null, vivo = true, tocou = false, voltou = false;
+  const guardar = () => {
+    timer = null;
+    if (!vivo) return;
+    const atual = opt.ler() ?? null;
+    gravarRascunhoF24(chave, JSON.stringify(atual) === txtInicial ? null : { em: nowISO(), assinatura, estado: atual });
+  };
+  const mudou = () => { if (!vivo) return; tocou = true; if (timer) clearTimeout(timer); timer = setTimeout(guardar, 400); };
+  const descartar = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    try { opt.aplicar(JSON.parse(txtInicial), { descartar: true }); } catch (e) {}
+    voltou = false;
+    gravarRascunhoF24(chave, null);
+    if (typeof opt.aoDescartar === 'function') opt.aoDescartar();
+  };
+  // `naoRecuperar`: a tela já repôs o que estava na memória desta aba (a Agenda repintada).
+  (opt.naoRecuperar ? Promise.resolve(null) : lerRascunhoF24(chave)).then(r => {
+    if (!vivo || tocou || !r || typeof r !== 'object' || !Object.prototype.hasOwnProperty.call(r, 'estado')) return;
+    const t = Date.parse(String(r.em || ''));
+    if (!Number.isFinite(t) || Date.now() - t > RASC_VALIDADE_MS) { gravarRascunhoF24(chave, null); return; }
+    // Outra entrega, outro dia, outra versão: o rascunho não é desta tela.
+    if (String(r.assinatura ?? '') !== assinatura) return;
+    if (JSON.stringify(r.estado) === txtInicial) return;
+    let ok = false;
+    try { ok = opt.aplicar(r.estado, { descartar: false }) !== false; } catch (e) { ok = false; }
+    if (!ok) return;
+    voltou = true;
+    if (typeof opt.aoRecuperar === 'function') opt.aoRecuperar({ em: t, descartar });
+  });
+  // `apagar`: a pessoa desistiu (fechou o formulário de propósito); o que ela mexer depois volta a ser guardado.
+  return { mudou, limpar() { vivo = false; voltou = false; if (timer) { clearTimeout(timer); timer = null; } gravarRascunhoF24(chave, null); },
+    apagar() { voltou = false; tocou = true; if (timer) { clearTimeout(timer); timer = null; } gravarRascunhoF24(chave, null); },
+    sujo: () => JSON.stringify(opt.ler() ?? null) !== txtInicial, descartar, recuperado: () => voltou, chave };
+}
+// O aviso azul do rascunho que voltou, antes de `antes` (no mesmo pai). Devolve o elemento.
+function avisoRascunhoEl(antes, texto, descartar) {
+  if (!antes || !antes.parentNode || typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+  const aviso = document.createElement('p');
+  aviso.className = 'rasc-aviso'; aviso.setAttribute('role', 'status');
+  const txt = document.createElement('span');
+  txt.textContent = texto;
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'btn-ghost btn-sm rasc-descartar'; b.textContent = 'Descartar';
+  b.onclick = () => { if (typeof aviso.remove === 'function') aviso.remove(); descartar(); };
+  if (typeof aviso.append === 'function') aviso.append(txt, ' ', b); else aviso.textContent = texto;
+  antes.parentNode.insertBefore(aviso, antes);
+  return aviso;
+}
+/* Os campos de um formulário para o rascunho: o valor de cada campo com
+   nome e, nas caixas de marcar e nas opções, se está marcada (pelo nome e
+   pelo valor). Nada de senha nem arquivo. */
+function camposDoForm(form) {
+  const out = {};
+  if (!form || typeof form.querySelectorAll !== 'function') return out;
+  for (const el of Array.from(form.querySelectorAll('input[name], textarea[name], select[name]'))) {
+    const tipo = String(el.type || '').toLowerCase();
+    if (['hidden', 'file', 'password', 'submit', 'button'].includes(tipo)) continue;
+    if (tipo === 'checkbox' || tipo === 'radio') out[el.name + '=' + el.value] = el.checked ? '1' : '';
+    else out[el.name] = String(el.value ?? '');
+  }
+  return out;
+}
+function aplicarCamposDoForm(form, valores) {
+  if (!form || typeof form.querySelectorAll !== 'function' || !valores || typeof valores !== 'object') return 0;
+  let n = 0;
+  for (const el of Array.from(form.querySelectorAll('input[name], textarea[name], select[name]'))) {
+    const tipo = String(el.type || '').toLowerCase();
+    if (['hidden', 'file', 'password', 'submit', 'button'].includes(tipo)) continue;
+    const k = tipo === 'checkbox' || tipo === 'radio' ? el.name + '=' + el.value : el.name;
+    if (!Object.prototype.hasOwnProperty.call(valores, k)) continue;
+    if (tipo === 'checkbox' || tipo === 'radio') { const v = valores[k] === '1'; if (el.checked !== v) { el.checked = v; n++; } continue; }
+    const v = String(valores[k] ?? '');
+    if (String(el.tagName).toUpperCase() === 'SELECT' && !Array.from(el.options || []).some(o => o.value === v)) continue;
+    if (String(el.value ?? '') !== v) { el.value = v; n++; }
+  }
+  return n;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
