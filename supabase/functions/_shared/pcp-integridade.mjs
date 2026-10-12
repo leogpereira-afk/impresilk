@@ -2297,6 +2297,7 @@ export function protegerItensConferidos(os, antes, { avisar = false } = {}) {
   for (const e of regs) for (const p of Array.isArray(e?.itens) ? e.itens : []) if (objeto(p)) citadas.add(String(p.chave ?? ''));
   const cat = CONF_VOLTA.catalogo(antes);
   const avisos = [];
+  let repostosAusentes = false;
   const itens = Array.isArray(os.itens) ? os.itens.slice() : [];
   const chaveDe = it => uidItemValido(it?.uid) ? 'uid:' + it.uid : '';
   cat.forEach((c, i) => {
@@ -2313,15 +2314,27 @@ export function protegerItensConferidos(os, antes, { avisar = false } = {}) {
     const it = itens[pos];
     const mudou = [...CAMPOS_IDENTIDADE_ITEM.filter(k => String(it[k] ?? '') !== String(g[k] ?? '')),
       ...CAMPOS_VALOR_ITEM_CONFERIDO.filter(k => proprio(it, k) && !mesmoValorItem(it[k], g[k]))];
+    /* O VALOR AUSENTE NUNCA APAGA (revisão da onda acabamento, D2): o item
+       conferido que chega sem a chave do valor unitário ou do subtotal (cópia
+       antiga, aparelho que não manda o campo) fica com o gravado, sem aviso
+       (ninguém pediu mudança). Antes o ausente passava e o item perdia o
+       valor, e a entrega conferida ficava sem valor. */
+    const faltam = CAMPOS_VALOR_ITEM_CONFERIDO.filter(k => !proprio(it, k) && proprio(g, k));
+    if (faltam.length) {
+      const r0 = { ...it };
+      for (const k of faltam) r0[k] = structuredClone(g[k]);
+      itens[pos] = r0;
+      if (!mudou.length) { repostosAusentes = true; return; }
+    }
     if (!mudou.length) return;
-    const r = { ...it };
+    const r = { ...itens[pos] };
     for (const k of CAMPOS_IDENTIDADE_ITEM) { if (proprio(g, k)) r[k] = g[k]; else delete r[k]; }
     for (const k of CAMPOS_VALOR_ITEM_CONFERIDO) { if (!mudou.includes(k)) continue; if (proprio(g, k)) r[k] = g[k]; else delete r[k]; }
     itens[pos] = r;
     const nomes = [...new Set(mudou.map(k => NOME_CAMPO_ITEM[k] || k))];
     avisos.push(`O ${rotuloItem(g)} está numa entrega conferida e ${nomes.length === 1 ? (['número', 'valor'].includes(nomes[0]) ? 'o ' : 'a ') + nomes[0] + ' não mudou' : 'não mudou (' + nomes.join(', ') + ')'}: para corrigir o item, ${ONDE_REVISAR_PARCIAL}.`);
   });
-  return { os: avisos.length ? { ...os, itens } : os, avisos: avisar ? avisos.slice(0, TETO_AVISOS_ENTREGA) : [] };
+  return { os: avisos.length || repostosAusentes ? { ...os, itens } : os, avisos: avisar ? avisos.slice(0, TETO_AVISOS_ENTREGA) : [] };
 }
 /* A MARCA QUE O APARELHO MANDOU E NÃO FICOU GRAVADA. Para o reenvio da mesma
    gravação (a resposta se perdeu): o servidor responde sem gravar de novo, e
