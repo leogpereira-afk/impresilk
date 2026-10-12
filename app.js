@@ -6934,7 +6934,7 @@ function renderPrioridades() {
   const resumo = OPERACAO.resumo(STORE.getAllOS());
   const defs = [
     ['hoje','Para hoje','Entrega prevista ou instalação em curso','Abrir o trabalho de hoje'],
-    ['atrasadas','Prazo vencido','Conferir entrega ou remarcar','Revisar prazos'],
+    ['atrasadas','Prazo vencido','Conferir os itens entregues ou remarcar','Revisar prazos'],
     ['semPrazo','Sem prazo','Definir uma data com o responsável','Planejar entregas'],
     ['retirada','Prontas para retirada','Combinar retirada com o cliente','Organizar retiradas'],
     ['semRetorno','Saída a conferir','Registro antigo ou sem data válida','Conferir saídas'],

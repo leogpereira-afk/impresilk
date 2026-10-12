@@ -737,9 +737,10 @@ export const entregaLancadaMudou = (os, antes) => proprio(os, 'entregaLancada') 
    onda operação; D-016: o caminho é a conferência). Na O.S. que já tem
    conferência por entrega gravada, um lançamento NOVO (outra data) não
    entra: fica o gravado, com aviso (nunca 422), e o saldo se confere em
-   "Conferir entrega". O Desfazer continua (limpa um lançamento antigo). A
+   "Conferir itens e equipe" (U3 da revisão: o nome do botão que existe, na
+   ficha, em Conferência e acompanhamento). O Desfazer continua (limpa um lançamento antigo). A
    apuração já ignorava o lançamento de O.S. com conferência (perfFonte). */
-export const AVISO_LANCAR_COM_CONFERENCIA = 'A entrega não foi lançada: esta O.S. já tem conferência por entrega, e o saldo se confere em "Conferir entrega" (o lançamento não conta na apuração de O.S. conferida).';
+export const AVISO_LANCAR_COM_CONFERENCIA = 'A entrega não foi lançada: esta O.S. já tem conferência por entrega, e o saldo se confere em "Conferir itens e equipe" (na ficha da O.S., em Conferência e acompanhamento). O lançamento não conta na apuração de O.S. conferida.';
 export function carimbarEntregaLancada(os, antes, autor, em, { podeDesfazer = false, cancelada = false, comConferencia = false } = {}) {
   const r = { ...os };
   const manter = () => { if (proprio(antes, 'entregaLancada')) r.entregaLancada = antes.entregaLancada; else delete r.entregaLancada; };

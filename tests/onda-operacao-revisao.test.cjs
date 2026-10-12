@@ -276,3 +276,34 @@ test('revisão operação: U8, "Prazos para conferir" é recolhível, fechado po
   assert.match(t.run('prazosParaConferirHTML(STORE.getAllOS())'), /data-prazos-conferir="2" open>/, 'aberto pela pessoa, fica aberto ao repintar');
   assert.match(ler('styles.css'), /\.prazo-conferir-lista>summary\{cursor:pointer;list-style:none;min-height:44px\}/);
 });
+
+/* ── U3: um nome só para abrir a conferência, e o tom do aviso do Lançar ── */
+test('revisão operação: U3, as telas chamam a conferência pelo nome do botão que existe, e o Lançar avisa sem tom de erro', async () => {
+  const fontes = ['casa.js', 'lote.js', 'conferencia-entrega-ui.js', 'performance.js', 'performance-dashboards.js', 'entregas-os.js', 'controle-entrega-ui.js', 'supabase/functions/_shared/pcp-integridade.mjs'].map(f => [f, ler(f)]);
+  // Caso ruim (f33877d): "Conferir entrega" nos textos, e não há botão com esse nome onde a pessoa vai.
+  for (const [f, s] of fontes) assert.doesNotMatch(s, /["'>]Conferir entrega["'<]/, f);
+  assert.doesNotMatch(ler('conferencia-entrega-ui.js'), /um caminho só, D-016/);
+  // Os botões que abrem a conferência têm o mesmo nome.
+  const botoes = [['casa.js', /data-ent-itens="\$\{esc\(card\.id\)\}">Conferir itens e equipe</], ['casa.js', /data-conferir-saldo="\$\{esc\(os\.id\)\}">Conferir itens e equipe</],
+    ['entregas-os.js', /data-poros-itens="\$\{esc\(c\.id\)\}">Conferir itens e equipe</], ['controle-entrega-ui.js', /data-controle="itens"[^>]*>Conferir itens e equipe</],
+    ['lote.js', /data-lote-acao="conferencia"[^>]*>Conferir itens e equipe</], ['performance.js', /'Ver origem':'Conferir itens e equipe'/]];
+  for (const [f, re] of botoes) assert.match(ler(f), re, f);
+  // O aviso do servidor diz o nome e o lugar.
+  const S = await import(path.join(RAIZ, 'supabase/functions/_shared/pcp-integridade.mjs'));
+  assert.match(S.AVISO_LANCAR_COM_CONFERENCIA, /"Conferir itens e equipe" \(na ficha da O\.S\., em Conferência e acompanhamento\)/);
+  // O Lançar: informação (sem o vermelho do erro); a gestão já cai na conferência.
+  const os = osParcial('l1');
+  const t = telaCasa([os]);
+  t.run('globalThis.__t = []; globalThis.__a = []; toast = (m, tp) => globalThis.__t.push([m, tp]); conferirItensEntrega = id => { globalThis.__a.push(id); return Promise.resolve(); }');
+  t.run(`lancarEntregaManual('l1')`);
+  const [msg, tipo] = t.run('globalThis.__t[0]');
+  assert.equal(tipo, '', 'tom de informação, não "error"');
+  assert.match(msg, /Abrimos "Conferir itens e equipe"/);
+  assert.deepEqual(JSON.parse(JSON.stringify(t.run('globalThis.__a'))), ['l1']);
+  // Quem não é da gestão: o aviso diz onde fica.
+  const o2 = telaCasa([osParcial('l2')], 'operacao');
+  o2.run('globalThis.__t = []; toast = (m, tp) => globalThis.__t.push([m, tp])');
+  o2.run(`lancarEntregaManual('l2')`);
+  assert.match(o2.run('globalThis.__t[0][0]'), /"Conferir itens e equipe" \(na ficha da O\.S\., em Conferência e acompanhamento\)/);
+  assert.equal(o2.run('globalThis.__t[0][1]'), '');
+});

@@ -47,7 +47,9 @@ test('M14: o Lançar numa O.S. com conferência não abre o lançamento e diz pa
   const t = tela([js(conferida(erp('a1'), [4, 0, 0]))]);
   t.run(`lancarEntregaManual('a1')`);
   assert.equal(t.toasts.length, 1);
-  assert.match(t.toasts[0][0], /já tem conferência por entrega: o saldo se confere em "Conferir entrega"/);
+  // U3 da revisão da onda operação: o nome do botão que existe, e tom de informação (a conferência abre em seguida).
+  assert.match(t.toasts[0][0], /já tem conferência por entrega: o saldo se confere em "Conferir itens e equipe"/);
+  assert.equal(t.toasts[0][1], '');
 });
 
 test('M14: o servidor não aceita lançamento novo em O.S. com conferência (fica o gravado, com aviso, nunca 422); sem conferência, lança', async () => {

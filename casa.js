@@ -303,7 +303,7 @@ function classificarEntregas(lista) {
     /* UM CAMINHO SÓ (M14, onda operação; D-016): a O.S. com conferência por
        entrega é instalação pela parte conferida e NUNCA vai para "a lançar"
        (antes a baixa do ERP com parcial conferida entrava nas duas listas, e o
-       lançamento nem contava). O saldo se confere em "Conferir entrega"; a
+       lançamento nem contava). O saldo se confere em "Conferir itens e equipe"; a
        Fila diária a mostra como "saldo a conferir". */
     if (o.conferenciasEntrega?.length) { r.instalacoes.push(o); continue; }
     if (!OPERACAO.dia(o.finalizadaEm)) continue;
@@ -868,15 +868,21 @@ function respostaRetrabalhoDe(antes, depois) {
 // Baixa do ERP vira entrega só aqui: alguém confirma data e equipe e responde
 // a pergunta obrigatória do retrabalho. Fica carimbado quem lançou.
 /* A O.S. com conferência por entrega não se lança (M14, D-016): o Lançar
-   leva à conferência, com o motivo. '' quando pode lançar. */
-const AVISO_LANCAR_CONFERIDA = 'Esta O.S. já tem conferência por entrega: o saldo se confere em "Conferir entrega", e o lançamento não contaria na apuração.';
+   leva à conferência, com o motivo. U3 da revisão da onda operação: o nome
+   é o do botão que existe ("Conferir itens e equipe", na ficha, em
+   Conferência e acompanhamento), e o aviso é informação, não erro: a
+   conferência abre logo em seguida para a gestão. */
+const LUGAR_CONFERENCIA = '"Conferir itens e equipe" (na ficha da O.S., em Conferência e acompanhamento)';
+const AVISO_LANCAR_CONFERIDA = `Esta O.S. já tem conferência por entrega: o saldo se confere em ${LUGAR_CONFERENCIA}, e o lançamento não contaria na apuração.`;
+const AVISO_LANCAR_CONFERIDA_ABRIU = 'Esta O.S. já tem conferência por entrega: o saldo se confere nela, e o lançamento não contaria na apuração. Abrimos "Conferir itens e equipe".';
 const temConferenciaCasa = os => !!(os && Array.isArray(os.conferenciasEntrega) && os.conferenciasEntrega.length);
 function lancarEntregaManual(osId) {
   const os = STORE.getOS(osId);
   if (!os) return;
   if (temConferenciaCasa(os)) {
-    toast(AVISO_LANCAR_CONFERIDA, 'error');
-    if (typeof conferirItensEntrega === 'function' && ['admin', 'pcp'].includes(STATE.user && STATE.user.papel)) Promise.resolve(conferirItensEntrega(osId)).catch(e => toast(String(e && e.message || e), 'error'));
+    const abre = typeof conferirItensEntrega === 'function' && ['admin', 'pcp'].includes(STATE.user && STATE.user.papel);
+    toast(abre ? AVISO_LANCAR_CONFERIDA_ABRIU : AVISO_LANCAR_CONFERIDA, '');
+    if (abre) Promise.resolve(conferirItensEntrega(osId)).catch(e => toast(String(e && e.message || e), 'error'));
     return;
   }
   const cfg = STORE.getCFG();
@@ -2376,7 +2382,7 @@ function renderEntregas() {
         <td class="ent-l-serv">${esc((card && card.servico) || erp.servico || '—')}</td>
         <td class="ent-l-tec">${card ? (eqTxt ? esc(eqTxt) : `<span class="ent-sem-equipe">${erp.tipo === 'interno' ? 'balcão' : 'sem equipe'}</span>`) : '—'}</td>
         <td class="ent-l-data">${dataBR(erp.data)}</td>
-        <td class="num">${valorTxt(erp.valor)}${card && card.tipo!=='interno' && ['admin','pcp'].includes(STATE.user?.papel)?`<br><button type="button" class="btn-ghost btn-sm" data-ent-itens="${esc(card.id)}">Itens da entrega</button>`:""}</td>
+        <td class="num">${valorTxt(erp.valor)}${card && card.tipo!=='interno' && ['admin','pcp'].includes(STATE.user?.papel)?`<br><button type="button" class="btn-ghost btn-sm" data-ent-itens="${esc(card.id)}">Conferir itens e equipe</button>`:""}</td>
       </tr>`; }).join('')}</tbody>
     <tfoot><tr><td colspan="5">${lista.length} O.S entregues no período${lista.length > TETO_LINHAS ? ` · mostrando as ${TETO_LINHAS} mais recentes` : ''}${semValorLista ? ` · ${semValorLista} sem valor` : ''}${per.faltando.length ? ` · carregando ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'}…` : ''}${per.comErro.length ? ` · <span class="badge sem-valor">${per.comErro.length} mês${per.comErro.length === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}${per.truncou ? ` · <span class="badge sem-valor">intervalo longo demais: entraram só os primeiros ${TETO_MESES} meses</span>` : ''}</td><td class="num">${dinheiroCasa(totLista)}</td></tr></tfoot>
   </table></div>`;
