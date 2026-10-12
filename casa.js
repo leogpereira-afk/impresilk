@@ -1926,21 +1926,40 @@ function saldoERPDaOS(os) {
 /* A LISTA: O.S. aberta, com o ERP dizendo entregue, com entrega parcial
    marcada, e sem "Manter aberta" para o mesmo aviso do ERP. A decisão que
    ainda está na fila deste aparelho já conta. Vazia para quem não é gestão. */
+/* A CONFERÊNCIA PARCIAL DA GESTÃO (item 30 da fila de 11/10/2026, Baixa E7
+   da auditoria; D-016: a conferência é o modelo que vale), no formato do
+   resumo do motor: a mesma conta do parcialConferida do servidor
+   (_shared/pcp-integridade.mjs; um teste confere as duas). Ela vale antes
+   das marcas antigas. null: sem conferência ou sem saldo a conferir. */
+function parcialConferidaCasa(o) {
+  if (!o || typeof o !== 'object' || !Array.isArray(o.conferenciasEntrega) || !o.conferenciasEntrega.length || typeof CONFERENCIA_ENTREGA === 'undefined') return null;
+  let e;
+  try { e = CONFERENCIA_ENTREGA.estado(o, null); } catch { return null; }
+  if (!e) return null;
+  if (e.situacao === 'inconsistente') return {situacao: 'parcial', conferencia: true, inconsistente: true, erro: String(e.erro || ''), itensTotal: 0, entregues: 0, parciais: 0, saldoItens: 0, unidadesDeclaradas: 0, marcas: 0};
+  if (e.situacao !== 'parcial') return null;
+  const vivos = (e.itens || []).filter(it => !it.cancelado);
+  return {situacao: 'parcial', conferencia: true, itensTotal: vivos.length,
+    entregues: vivos.filter(it => (it.conferido || 0) > 0 && it.saldo === 0).length,
+    parciais: vivos.filter(it => (it.conferido || 0) > 0 && it.saldo > 0).length,
+    saldoItens: Number(e.saldoUnidades) || 0, unidadesConferidas: vivos.reduce((t, it) => t + (it.conferido || 0), 0), unidadesDeclaradas: 0, marcas: 0};
+}
 function listaErpComSaldo(todas) {
   if (!podeDecidirSaldoERP() || !temMotorSaldoERP()) return [];
   const out = [];
   for (const os of Array.isArray(todas) ? todas : []) {
-    // Filtro barato primeiro: aberta, com aviso do ERP gravado e com alguma marca de item.
+    // Filtro barato primeiro: aberta, com aviso do ERP gravado e com alguma marca de item ou conferência.
     if (!os || typeof os !== 'object' || os.finalizadaEm || !(os.erpComSaldo || os.erpSaiuDaCarteiraEm)) continue;
-    if (!(Array.isArray(os.itens) && os.itens.some(it => it && Array.isArray(it.entregas) && it.entregas.length))) continue;
-    let resumo;
-    try { resumo = ENTREGA_ITEM.resumoOS(os); } catch { continue; }
+    const conferida = parcialConferidaCasa(os);
+    if (!conferida && !(Array.isArray(os.itens) && os.itens.some(it => it && Array.isArray(it.entregas) && it.entregas.length))) continue;
+    let resumo = conferida;
+    if (!resumo) { try { resumo = ENTREGA_ITEM.resumoOS(os); } catch { continue; } }
     if (!resumo || resumo.situacao !== 'parcial') continue;
     const aviso = avisoERPSaldo(os);
     if (!aviso) continue;
     const dec = os.erpSaldoDecisao;
     if (dec && typeof dec === 'object' && dec.tipo === 'manter' && dec.selo === aviso.selo) continue;
-    out.push({os, aviso, resumo, saldo: saldoERPDaOS(os)});
+    out.push({os, aviso, resumo, saldo: resumo.conferencia ? {pendentes: [], comProblema: [], unidades: resumo.saldoItens} : saldoERPDaOS(os)});
   }
   return out.sort((a, b) => String(a.aviso.data || a.aviso.desde).localeCompare(String(b.aviso.data || b.aviso.desde)) || String(a.os.numero || '').localeCompare(String(b.os.numero || '')));
 }
@@ -2026,8 +2045,9 @@ function erpSaldoNaOS(os) {
      (entregaParcialMarcada, revisão da junção F16+E7): cancelada, a O.S. dava
      "completa", este aviso sumia e o card voltava a oferecer "Confirmar
      baixa". Quem mostra o aviso esconde a cancelada (erpFechouHTML). */
-  let resumo;
-  try { resumo = ENTREGA_ITEM.resumoOS({...os, cancelamento: undefined}); } catch { return null; }
+  // A conferência parcial da gestão vale antes das marcas antigas (item 30, D-016).
+  let resumo = parcialConferidaCasa({...os, cancelamento: undefined});
+  if (!resumo) { try { resumo = ENTREGA_ITEM.resumoOS({...os, cancelamento: undefined}); } catch { return null; } }
   if (!resumo || resumo.situacao !== 'parcial') return null;
   const aviso = avisoERPSaldo(os);
   if (!aviso) return null;
@@ -2086,10 +2106,14 @@ function erpComSaldoHTML(linhas) {
   const linha = ({os, aviso, resumo, saldo}) => {
     const erp = `${NOME_SITUACAO_ERP[aviso.status] || String(aviso.status).toLowerCase()}${aviso.data ? ` em ${ddmmCasa(aviso.data)}` : ', sem data de entrega'}`;
     const com = resumo.entregues + resumo.parciais;
-    const pcp = `${com} de ${resumo.itensTotal} ite${resumo.itensTotal === 1 ? 'm' : 'ns'} com entrega; faltam ${resumo.saldoItens} unidade${resumo.saldoItens === 1 ? '' : 's'}`;
+    const pcp = resumo.conferencia && resumo.inconsistente ? `conferência gravada que não se lê mais: ${resumo.erro || 'um item mudou'}`
+      : resumo.conferencia ? `${com} de ${resumo.itensTotal} ite${resumo.itensTotal === 1 ? 'm' : 'ns'} conferido${com === 1 ? '' : 's'}; faltam ${resumo.saldoItens} unidade${resumo.saldoItens === 1 ? '' : 's'} a conferir`
+      : `${com} de ${resumo.itensTotal} ite${resumo.itensTotal === 1 ? 'm' : 'ns'} com entrega; faltam ${resumo.saldoItens} unidade${resumo.saldoItens === 1 ? '' : 's'}`;
     const decl = resumo.unidadesDeclaradas > 0 ? `<span class="tag-entrega tag-entrega-decl">${resumo.unidadesDeclaradas} declarada${resumo.unidadesDeclaradas === 1 ? '' : 's'} pelo celular</span>` : '';
     const prob = saldo.comProblema.length ? `<span class="tag-entrega tag-entrega-prob">${saldo.comProblema.length} ite${saldo.comProblema.length === 1 ? 'm' : 'ns'} com problema fica${saldo.comProblema.length === 1 ? '' : 'm'}</span>` : '';
-    const entregar = aviso.data && saldo.pendentes.length
+    // A parcial conferida (D-016) se resolve na conferência, não pelas marcas antigas.
+    const entregar = resumo.conferencia ? `<button type="button" class="btn-primary btn-sm edit-only" data-conferir-saldo="${esc(os.id)}">Conferir o saldo</button>`
+      : aviso.data && saldo.pendentes.length
       ? `<button type="button" class="btn-primary btn-sm edit-only" data-erp-entregar="${esc(os.id)}" data-erp-selo="${esc(aviso.selo)}">Entregar o saldo em ${esc(ddmmCasa(aviso.data))}</button>`
       : `<button type="button" class="btn-ghost btn-sm" data-os-id="${esc(os.id)}">${aviso.data ? 'Resolver na ficha' : 'Marcar na ficha'}</button>`;
     return `<li class="erp-saldo-item">
@@ -2108,6 +2132,9 @@ function erpComSaldoHTML(linhas) {
     </section>`;
 }
 function wireErpComSaldo(el) {
+  el.querySelectorAll('[data-conferir-saldo]').forEach(b => b.onclick = () => {
+    if (typeof conferirItensEntrega === 'function') conferirItensEntrega(b.dataset.conferirSaldo);
+  });
   el.querySelectorAll('[data-erp-entregar]').forEach(b => b.onclick = () => {
     const r = entregarSaldoERP(b.dataset.erpEntregar, b.dataset.erpSelo);
     if (r.erro) { toast(r.erro, 'error'); return; }

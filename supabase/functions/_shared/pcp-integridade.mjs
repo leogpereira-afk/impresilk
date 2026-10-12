@@ -31,8 +31,12 @@ export function temTrabalhoHumano(o) {
     || o.confirmacao === 'Confirmado' || o.paradoClienteEm
     || equipeNaRua(o)
     || (o.reabertaEm && String(o.reabertaEm) > String(o.baixaAutoERP?.em || ''))
-    || temEntregaItem(o));
+    || temEntregaItem(o) || temConferenciaEntrega(o));
 }
+/* A CONFERÊNCIA DA GESTÃO TAMBÉM É GENTE (item 30 da fila de 11/10/2026,
+   Baixa E7 da auditoria; D-016: a conferência é o modelo que vale): a O.S.
+   com conferência por entrega gravada não se arquiva sozinha. */
+export const temConferenciaEntrega = o => !!o && Array.isArray(o.conferenciasEntrega) && o.conferenciasEntrega.length > 0;
 /* MARCA DE ENTREGA POR ITEM (E3): alguém entregou, retirou ou apontou
    problema num item. A O.S. com entrega parcial saiu da carteira do ERP e
    continua com saldo: arquivá-la apagaria da mesa o que ainda falta entregar.
@@ -93,11 +97,36 @@ export const SITUACOES_ERP_ENTREGUE = ['ENTREGUE', 'FINALIZADO'];
    a situação que chega (CANCELADO, em decisaoBaixaERP), não este campo. */
 export function entregaParcialMarcada(o) {
   if (!objeto(o) || String(o.finalizadaEm ?? '').trim()) return null;
+  /* A CONFERÊNCIA PARCIAL (item 30 da fila de 11/10/2026, Baixa E7; D-016):
+     a O.S. com parte conferida pela gestão e saldo a conferir é parcial, como
+     a das marcas antigas, e vale antes delas. Antes a baixa só via as marcas:
+     o ERP "ENTREGUE" finalizava a O.S. com parcial conferida. A conferência
+     que não se lê mais (um item mudou) também segura: a gestão decide. */
+  const pc = parcialConferida({ ...o, cancelamento: undefined });
+  if (pc) return pc;
   let r;
   try { r = ENTREGA_ITEM.resumoOS({ ...o, cancelamento: undefined }); } catch { return null; }
   return r && r.situacao === 'parcial' ? r : null;
 }
+/* A conferência parcial no formato do resumo do motor (o que a baixa e a
+   lista leem): itens com entrega, itens em parte e as unidades de saldo.
+   `conferencia: true` diz de onde veio. null: sem conferência ou sem saldo. */
+export function parcialConferida(o) {
+  if (!temConferenciaEntrega(o)) return null;
+  let e;
+  try { e = CONF_VOLTA.estado(o, null); } catch { return null; }
+  if (!e) return null;
+  if (e.situacao === 'inconsistente') return { situacao: 'parcial', conferencia: true, inconsistente: true, erro: String(e.erro || ''), itensTotal: 0, entregues: 0, parciais: 0, saldoItens: 0, unidadesDeclaradas: 0, marcas: 0 };
+  if (e.situacao !== 'parcial') return null;
+  const vivos = (e.itens || []).filter(it => !it.cancelado);
+  return { situacao: 'parcial', conferencia: true, itensTotal: vivos.length,
+    entregues: vivos.filter(it => (it.conferido || 0) > 0 && it.saldo === 0).length,
+    parciais: vivos.filter(it => (it.conferido || 0) > 0 && it.saldo > 0).length,
+    saldoItens: Number(e.saldoUnidades) || 0, unidadesConferidas: vivos.reduce((t, it) => t + (it.conferido || 0), 0), unidadesDeclaradas: 0, marcas: 0 };
+}
 function textoParcial(r) {
+  if (r.conferencia && r.inconsistente) return `conferência por entrega gravada que não se lê mais (${r.erro || 'um item mudou'})`;
+  if (r.conferencia) return `entrega parcial conferida no PCP: ${r.entregues + r.parciais} de ${r.itensTotal} ite${r.itensTotal === 1 ? 'm' : 'ns'} conferidos, ${r.saldoItens} unidade${r.saldoItens === 1 ? '' : 's'} de saldo a conferir`;
   const itens = r.entregues + r.parciais;
   const decl = r.unidadesDeclaradas > 0 ? `, ${r.unidadesDeclaradas} unidade${r.unidadesDeclaradas === 1 ? '' : 's'} declarada${r.unidadesDeclaradas === 1 ? '' : 's'} pelo celular` : '';
   return `entrega parcial marcada no PCP: ${itens} de ${r.itensTotal} ite${r.itensTotal === 1 ? 'm' : 'ns'} com entrega, ${r.saldoItens} unidade${r.saldoItens === 1 ? '' : 's'} de saldo${decl}`;
