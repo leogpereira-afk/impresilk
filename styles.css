@@ -4502,3 +4502,7 @@ img.perf-logo{object-fit:cover}
  #panel-entregas .ent-controles :is(select,button) { min-height:42px; }
  #panel-entregas .ent-controles .periodo-filtro { flex-wrap:wrap; }
 }
+.tag-a-cadastrar { background:#fee2e2; color:#991b1b; border-radius:999px; padding:.05rem .4rem; font-size:.7rem; font-weight:600; white-space:nowrap; }
+.aviso-a-cadastrar { margin:.35rem 0 0; padding:.4rem .6rem; border-radius:8px; background:#fef2f2; color:#7f1d1d; font-size:.8rem; }
+.perf-a-cadastrar { margin:.5rem 0; }
+.perf-a-cadastrar ul { margin:.25rem 0 0; padding-left:1.1rem; }

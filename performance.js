@@ -898,6 +898,30 @@ function perfFiltroDoBloqueio(f){
  const regs=f&&!f.fechadoEm&&Array.isArray(f.registros)?f.registros:[];
  return regs.some(r=>!r.confirmado)?'pendente':regs.some(r=>r.valor==null)?'sem-valor':'';
 }
+/* PESSOA A CADASTRAR NA LISTA DO FECHAMENTO (item 20 da fila de 11/10/2026):
+   as entregas do período com alguém sem ficha nem contrato de freelancer no
+   RH (o nome que não vira ID; a régua é OPERACAO.pessoasACadastrar, a mesma da
+   marca na O.S.). Sem ID a pessoa fica fora do ranking e da comissão; a
+   gestão vê antes de fechar. Só com o elenco da gestão (fichaRH). */
+function perfACadastrar(f){
+ const regs=f&&Array.isArray(f.registros)?f.registros:[];
+ const el=typeof STORE!=='undefined'&&STORE&&typeof STORE.elenco==='function'?STORE.elenco():null;
+ if(!regs.length||!el||el.fichaRH!==true||typeof OPERACAO==='undefined'||typeof OPERACAO.pessoasACadastrar!=='function')return [];
+ const porOS=new Map();
+ for(const r of regs){
+  const nomes=OPERACAO.pessoasACadastrar((Array.isArray(r.membros)?r.membros:[]).map(m=>m&&m.chave));
+  if(!nomes.length)continue;
+  const k=String(r.osId||r.id),a=porOS.get(k)||{numero:r.numero||'s/n',nomes:new Set()};
+  for(const n of nomes)a.nomes.add(n);
+  porOS.set(k,a);
+ }
+ return [...porOS.values()].map(x=>({numero:x.numero,nomes:[...x.nomes]}));
+}
+function perfACadastrarHTML(f){
+ const l=perfACadastrar(f);
+ if(!l.length)return '';
+ return `<div class="perf-aviso perf-a-cadastrar" role="note"><p><strong>👤 ${l.length} ${l.length===1?'O.S. com pessoa a cadastrar':'O.S. com pessoas a cadastrar'} no RH.</strong> Sem ficha ou contrato de freelancer no RH, a pessoa fica fora do ranking e da comissão${f&&f.fechadoEm?' desta revisão':' deste período'}.</p><ul>${l.slice(0,30).map(x=>`<li>O.S. ${esc(x.numero)}: ${esc(x.nomes.join(', '))}</li>`).join('')}</ul>${l.length>30?`<p>E mais ${l.length-30} O.S.</p>`:''}</div>`;
+}
 function perfFonteHTML(){
  const f=perfFonteAtual(),pendentes=STORE.getQueue?.().length || 0;
  // Aberto ou fechado como a pessoa deixou (a mesma memória dos outros quadros da casa).
@@ -905,7 +929,7 @@ function perfFonteHTML(){
  const quadro=(titulo,corpo)=>`<details class="casa-quadro perf-base" data-quadro="perf-base"${aberto?' open':''}><summary>${titulo}</summary><div class="casa-quadro-corpo">${corpo}</div></details>`;
  if(!perfConsultaServidor())return quadro('🗂 Base da apuração',`<p class="perf-base-fonte">${esc(perfFonteTexto())}</p>`);
  const pode=perfPodeEditar(),bloqueio=pode?perfFechamentoBloqueio(f,pendentes):'';
- return quadro('🗂 Base e fechamento <small>atualizar, versão e fechar período</small>',`${perfFitaMesesHTML()}<p class="perf-base-fonte">${esc(perfFonteTexto())}</p>${perfAvisosHTML(false)}
+ return quadro('🗂 Base e fechamento <small>atualizar, versão e fechar período</small>',`${perfFitaMesesHTML()}<p class="perf-base-fonte">${esc(perfFonteTexto())}</p>${perfAvisosHTML(false)}${pode?perfACadastrarHTML(f):''}
    <div class="perf-base-acoes"><button type="button" class="btn-ghost" id="perf-atualizar-fonte" ${perfRemoto.carregando?'disabled':''}>${perfRemoto.carregando?'Consultando servidor…':'Atualizar apuração'}</button><label>Versão da apuração <select id="perf-versao"><option value="">${perfRemoto.fechamentos.length?'Dados atuais (fora do fechamento)':'Dados atuais'}</option>${perfRemoto.fechamentos.map(r=>`<option value="${esc(r.id)}" ${r.id===perfRemoto.selecionado?'selected':''}>Revisão ${r.revisao}${perfSubstituta(r)?`, substituída pela ${perfSubstituta(r).revisao}`:''} · ${esc(perfDiaBR(String(r.fechadoEm||'').slice(0,10)))} · ${esc(r.fechadoPor)}</option>`).join('')}</select></label>${pode?`<button type="button" class="btn-ghost" id="perf-fechar" ${bloqueio?'disabled aria-describedby="perf-fechar-motivo"':''}>${perfRemoto.fechamentos.length?'Criar nova revisão':'Fechar período'}</button>`:''}</div>
    ${bloqueio?`<p class="perf-fechar-motivo" id="perf-fechar-motivo">${esc(bloqueio)}${/^Para fechar, falta/.test(bloqueio)&&perfFiltroDoBloqueio(f)?` <button type="button" class="btn-ghost btn-sm" data-perf-filtrar="${perfFiltroDoBloqueio(f)}">Abrir na aba Conferência</button>`:''}${/^O fechamento é só de mês inteiro/.test(bloqueio)&&f?.periodo?.de?` <button type="button" class="btn-ghost btn-sm" data-perf-mes-inteiro="${esc(String(f.periodo.de).slice(0,7))}">Escolher ${esc(perfMesTxt(String(f.periodo.de).slice(0,7)))} inteiro</button>`:''}</p>`:''}${f?.motivo?`<p class="perf-base-fonte">Motivo: ${esc(f.motivo)}</p>`:''}${pode&&f?.fechadoEm?`<p><button type="button" class="btn-ghost" id="perf-pdf-oficial">PDF oficial do fechamento</button> <small>Registra o documento no servidor, com o número e a impressão digital do fechamento${perfDigitalCurta(f.hash)?`: <code class="perf-digital">${esc(perfDigitalCurta(f.hash))}</code> (a mesma do PDF)`:''}.</small></p>`:''}${pode&&typeof perfComissaoBotaoHTML==='function'?perfComissaoBotaoHTML():''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p>`);
 }
@@ -1078,7 +1102,7 @@ function perfWireFonte(el){
    const mes=String(fonte.periodo.de).slice(0,7),vigente=perfRemoto.fechamentos[0]||null;
    // A revisão nova mostra antes o que muda por pessoa contra a que vale (M8).
    const porPessoa=vigente?perfMudancasPorPessoaHTML().replace('<details class="perf-mudancas" open>','<details class="perf-mudancas">'):'';
-   const d=perfDialog(vigente?`Criar a revisão ${Number(vigente.revisao)+1} de ${perfMesTxt(mes)}`:`Fechar ${perfMesTxt(mes)}`,`<p>${esc(perfDiaBR(fonte.periodo.de))} a ${esc(perfDiaBR(fonte.periodo.ate))} · ${fonte.registros.length} entregas. A cópia será preservada no servidor.</p>${porPessoa}<form>${perfCoberturaFechamentoHTML(fonte)}<label>Motivo do fechamento ou revisão <textarea name="motivo" minlength="5" maxlength="500" required></textarea></label><p>As revisões anteriores continuarão disponíveis. Não há lançamento de pagamento.</p><button class="btn-primary" type="submit">Confirmar fechamento</button><p role="alert" id="perf-fechar-erro"></p></form>`);
+   const d=perfDialog(vigente?`Criar a revisão ${Number(vigente.revisao)+1} de ${perfMesTxt(mes)}`:`Fechar ${perfMesTxt(mes)}`,`<p>${esc(perfDiaBR(fonte.periodo.de))} a ${esc(perfDiaBR(fonte.periodo.ate))} · ${fonte.registros.length} entregas. A cópia será preservada no servidor.</p>${porPessoa}<form>${perfCoberturaFechamentoHTML(fonte)}${perfACadastrarHTML(fonte)}<label>Motivo do fechamento ou revisão <textarea name="motivo" minlength="5" maxlength="500" required></textarea></label><p>As revisões anteriores continuarão disponíveis. Não há lançamento de pagamento.</p><button class="btn-primary" type="submit">Confirmar fechamento</button><p role="alert" id="perf-fechar-erro"></p></form>`);
    const requestId=STORE.uuid(),anterior=perfRemoto.fechamentos[0]?.id || '';
    const frase=()=>d.querySelector('input[name="cobertura"]')?.value || '';
    d.querySelector('form').onsubmit=async ev=>{

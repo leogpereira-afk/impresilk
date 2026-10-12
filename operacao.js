@@ -227,6 +227,32 @@ const OPERACAO = (() => {
     if (p && normPessoa(p.nome) === ap) return {id, como:'nome'};
     return {id:'', motivo:'comeco', sugerido:id};
   }
+  /* PESSOA A CADASTRAR (item 20 da fila de 11/10/2026): o nome da equipe que
+     não vira ID porque a pessoa não tem ficha nem contrato de freelancer no RH
+     (ou tem o cadastro sem CPF). Sem ID, ela fica fora do ranking e da
+     comissão; a marca na O.S. e na lista do fechamento mostra isso antes do
+     fechamento. Não entram: o ID, o nome que já tem ficha (só falta trocar
+     pelo ID), o ambíguo e o começo de nome (pedem conferência, não cadastro),
+     quem já saiu, o marcador "Terceiro" e o nome que a gestão decidiu ser
+     terceiro sem ficha. Sem o elenco do RH no aparelho, não afirma nada.
+     `dados` como em confirmarNome. Devolve os nomes, sem repetir. */
+  const MOTIVOS_A_CADASTRAR = new Set(['nenhuma', 'sem-cpf', 'vinculo-sem-id']);
+  function pessoasACadastrar(lista, dados) {
+    const {d} = reguaDe(dados);
+    if (!(Array.isArray(d.pessoas) && d.pessoas.some(p => p && ehIdPessoa(p.id)))) return [];
+    const out = [], vistos = new Set();
+    for (const x of Array.isArray(lista) ? lista : []) {
+      const s = String(x ?? '').trim();
+      if (!s || ehIdPessoa(s)) continue;
+      const k = normPessoa(s);
+      if (vistos.has(k)) continue;
+      vistos.add(k);
+      const c = confirmarNome(s, dados);
+      if (!c.id && MOTIVOS_A_CADASTRAR.has(c.motivo)) out.push(s);
+    }
+    return out;
+  }
+  const aCadastrarDaOS = (o, dados) => pessoasACadastrar(equipe(o), dados);
   /* A EQUIPE DA O.S. COM OS NOMES CONFIRMADOS TROCADOS PELO ID. Quem já é ID
      fica como está (nem o espaço muda), o nome sem confirmação fica, e o ID
      não se repete: "Lucas Natalino" numa O.S. que já tem o ID dele sai da
@@ -1969,7 +1995,7 @@ function statusEntrega(o, hoje, regra, volta) {
     o.abonos = o.abonos.map((y, j) => j === i ? {...y, revogar:true} : y);
     return '';
   }
-  return {usarVeiculos,veiculoConfirmado,chaveVeiculo,uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,usarAtivos,ativosDoAparelho,idDoAtivo,chaveVeiculoVolta,chaveDaVolta,confDaViagemDoDia,confDaViagem,declaracaoDaViagem,viagensDaOS,voltou,voltasDoCarro,voltasAnteriores,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,usarReguaPerdas,...STATUS_ENTREGA,novoIdF17,voltaNaLista,diaDaJornada,pedirChegada,ocorrenciasDoGrupo,pedirOcorrencia,pedirAnularOcorrencia,pedirAbono,pedirRevogarAbono};
+  return {usarVeiculos,veiculoConfirmado,chaveVeiculo,uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,pessoasACadastrar,aCadastrarDaOS,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,usarAtivos,ativosDoAparelho,idDoAtivo,chaveVeiculoVolta,chaveDaVolta,confDaViagemDoDia,confDaViagem,declaracaoDaViagem,viagensDaOS,voltou,voltasDoCarro,voltasAnteriores,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,usarReguaPerdas,...STATUS_ENTREGA,novoIdF17,voltaNaLista,diaDaJornada,pedirChegada,ocorrenciasDoGrupo,pedirOcorrencia,pedirAnularOcorrencia,pedirAbono,pedirRevogarAbono};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
 // Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega

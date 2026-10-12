@@ -3513,6 +3513,7 @@ function blocoAgenda(os, ro, done) {
         <label>Equipe</label>
         ${!ro && typeof ALOCUI !== 'undefined' ? `<div class="aloc-host" id="ficha-equipe" role="group" aria-label="Equipe da O.S."${fmsgAttr('equipe')}></div>` : chipsField('equipe', os.equipe || [], cfg.instaladores, ro)}
         ${fmsgHTML(os, 'equipe')}
+        ${notaACadastrarHTML(os)}
       </div>
       ${isInterno(os) ? '' : `<div class="prazo-retorno" id="prazo-retorno">${prazoRetornoHTML(os, ro)}</div>`}
       <div class="field"><label>Obs agenda</label><textarea data-f="obsAgenda">${esc(os.obsAgenda)}</textarea></div>
@@ -5848,6 +5849,26 @@ function ligarStatusEntregaDaFicha() {
   ligarOcorrenciasDaFicha();
 }
 
+/* PESSOA A CADASTRAR (item 20 da fila de 11/10/2026): a O.S. com alguém na
+   equipe que não tem ficha nem contrato de freelancer no RH (o nome que não
+   vira ID; a régua é OPERACAO.aCadastrarDaOS). O Thiago vê quais O.S.
+   esperam cadastro antes do fechamento. Só com o elenco da gestão (fichaRH,
+   que traz também quem já saiu): sem ele, quem saiu pareceria sem cadastro. */
+function aCadastrarOS(os) {
+  try {
+    const el = STORE && typeof STORE.elenco === 'function' ? STORE.elenco() : null;
+    if (!el || el.fichaRH !== true || typeof OPERACAO.aCadastrarDaOS !== 'function') return [];
+    return OPERACAO.aCadastrarDaOS(os);
+  } catch (e) { return []; }
+}
+function seloACadastrarHTML(os) {
+  const n = aCadastrarOS(os);
+  return n.length ? ` <span class="tag-a-cadastrar" title="${esc('Sem cadastro no RH: ' + n.join(', ') + '. Cadastre a ficha ou o contrato de freelancer no RH para a pessoa entrar no ranking e na comissão.')}">👤 pessoa a cadastrar</span>` : '';
+}
+function notaACadastrarHTML(os) {
+  const n = aCadastrarOS(os);
+  return n.length ? `<p class="aviso-a-cadastrar" role="note">👤 <strong>Pessoa a cadastrar no RH:</strong> ${esc(n.join(', '))}. Sem ficha ou contrato de freelancer no RH, ${n.length === 1 ? 'ela fica' : 'elas ficam'} fora do ranking e da comissão.</p>` : '';
+}
 function osCardHTML(os) {
   const st = calcStatus(os);
   const itens = os.itens || [];
@@ -5922,7 +5943,7 @@ function osCardHTML(os) {
     <div class="os-card st-${st} ${alertaOS(os)} ${urgenciaOS(os)} tipo-${interno ? 'interno' : 'externo'}" data-os-id="${esc(os.id)}">
       <div class="card-header card-header-os">
         <div class="card-meta">
-          <div class="card-numero">O.S ${esc(os.numero || '—')}${seloStatus}${tagAtraso}${tagRetrab}${seloParado}${seloVoltouERP}${seloEntregaCardHTML(os)}${os.statusERP === 'CONCLUIDO' && !os.liberadoPCP && !os.finalizadaEm ? ` <span class="tag-erp-pronta" title="O ERP diz que a produção terminou${os.statusERPDesde ? ' em ' + esc(fmtDataBR(os.statusERPDesde)) : ''}; falta liberar no PCP">🏭 ERP: produção concluída</span>` : ''}${erpMudancasAConferir(os).length ? ' <span class="badge sem-valor">ERP mudou · conferir</span>' : ''}</div>
+          <div class="card-numero">O.S ${esc(os.numero || '—')}${seloStatus}${tagAtraso}${tagRetrab}${seloParado}${seloVoltouERP}${seloACadastrarHTML(os)}${seloEntregaCardHTML(os)}${os.statusERP === 'CONCLUIDO' && !os.liberadoPCP && !os.finalizadaEm ? ` <span class="tag-erp-pronta" title="O ERP diz que a produção terminou${os.statusERPDesde ? ' em ' + esc(fmtDataBR(os.statusERPDesde)) : ''}; falta liberar no PCP">🏭 ERP: produção concluída</span>` : ''}${erpMudancasAConferir(os).length ? ' <span class="badge sem-valor">ERP mudou · conferir</span>' : ''}</div>
           <span class="badge st-${st}">${statusLabelDe(os, st)}</span>
         </div>
         <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
