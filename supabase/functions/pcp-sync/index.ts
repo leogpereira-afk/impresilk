@@ -1,7 +1,7 @@
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
-import { podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { idDoCadastroRH, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
@@ -575,7 +575,7 @@ let _fichasRH: { ate: number; fichas: any[] } | null = null;
    a régua usa; o CPF inteiro fica neste servidor (juntarFreelancers). */
 async function contratosFreelancerRH(comFoto = false): Promise<any[]> {
   const { data, error } = await sb.from("registros")
-    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>funcao, registro->>situacao, registro->>contratoFim" + (comFoto ? ", registro->>exColaboradorId, registro->>fotoDataUrl" : ""))
+    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->>funcao, registro->>situacao, registro->>contratoFim" + (comFoto ? ", registro->>exColaboradorId, registro->>fotoDataUrl" : ""))
     .eq("colecao", "freelancers").eq("apagado", false);
   if (error) throw new Error(error.message);
   return (data ?? []) as any[];
@@ -583,7 +583,7 @@ async function contratosFreelancerRH(comFoto = false): Promise<any[]> {
 async function fichasRH(): Promise<any[]> {
   if (_fichasRH && _fichasRH.ate > Date.now()) return _fichasRH.fichas;
   const { data, error } = await sb.from("registros")
-    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>dataDesligamento, registro->>statusId")
+    .select("registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->>dataDesligamento, registro->>statusId")
     .eq("colecao", "colaboradores").eq("apagado", false);
   if (error) throw new Error(error.message);
   // `ativo` com a mesma regra do elenco: ficha inativa com contrato ativo do
@@ -591,7 +591,10 @@ async function fichasRH(): Promise<any[]> {
   const FORA = new Set(["inativo", "abandono", "externo"]);
   const brutas = ((data ?? []) as any[]).map((g) => {
     const d = String(g.cpf || "").replace(/\D/g, "");
-    return { chave: String(g.id || ""), id: d.length === 11 ? d.slice(0, 6) : "", nome: String(g.nome || "").trim(),
+    // O ID gravado na ficha manda; o do CPF só quando o campo falta (D-015).
+    const idf = idDoCadastroRH(g);
+    return { chave: String(g.id || ""), id: idf.id, nome: String(g.nome || "").trim(),
+             ...(idf.divergente ? { idDivergente: true } : {}), ...(idf.gravadoInvalido ? { idGravadoInvalido: true } : {}),
              apelido: String(g.apelido || "").trim(), desligado: !!String(g.dataDesligamento || "").trim(),
              // A data da saída confere a divisão de O.S. antiga de quem saiu depois (F08). Não desce para aparelho nenhum.
              desligadoEm: String(g.dataDesligamento || "").trim().slice(0, 10),
@@ -3351,12 +3354,12 @@ Deno.serve(async (req: Request) => {
           .map((r: any) => r.registro || {})
           .filter((g: any) => String(g.nome || "").trim() && !String(g.dataDesligamento || "").trim())
           .map((g: any) => {
-            const d = String(g.cpf || "").replace(/\D/g, "");
+            const idf = idDoCadastroRH(g); // o ID gravado na ficha manda (D-015)
             const st = String(g.statusId || "").trim();
             const foto = String(g.fotoDataUrl || "");
             return {
               chave: String(g.id || ""),                       // id do RH (slug) -- casa ferias/ausencias
-              id: d.length === 11 ? d.slice(0, 6) : "",        // id de pessoa da casa (6 primeiros do CPF)
+              id: idf.id,                                      // id de pessoa da casa (gravado na ficha; senão, 6 primeiros do CPF)
               nome: String(g.nome).trim(),
               apelido: String(g.apelido || "").trim(),
               setor: String(g.setor || "").trim(),
@@ -3379,8 +3382,7 @@ Deno.serve(async (req: Request) => {
           .map((r: any) => r.registro || {})
           .filter((g: any) => String(g.nome || "").trim() && String(g.dataDesligamento || "").trim())
           .map((g: any) => {
-            const d = String(g.cpf || "").replace(/\D/g, "");
-            return { chave: String(g.id || ""), id: d.length === 11 ? d.slice(0, 6) : "", nome: String(g.nome).trim(),
+            return { chave: String(g.id || ""), id: idDoCadastroRH(g).id, nome: String(g.nome).trim(),
                      apelido: String(g.apelido || "").trim(), ativo: false, desligado: true };
           })
           .filter((g: any) => g.id);
@@ -3402,10 +3404,13 @@ Deno.serve(async (req: Request) => {
            recebe o contrato com ID como pessoa comum, sem as marcas, e não
            recebe o contrato sem ID, que não serve ao celular. */
         const veContrato = verFichaRH || String(cracha?.papel ?? "") === "operacao";
-        const cpfPorChave = new Map<string, string>(), statusPorChave = new Map<string, string>();
+        const cpfPorChave = new Map<string, string>(), statusPorChave = new Map<string, string>(), marcasIdPorChave = new Map<string, any>();
         for (const r of (col ?? []) as any[]) {
           const g = r.registro || {};
           cpfPorChave.set(String(g.id || ""), String(g.cpf || "").replace(/\D/g, ""));
+          // ID gravado que discorda do CPF (ou fora do formato): vira aviso à gestão em juntarFreelancers (D-015).
+          const idf = idDoCadastroRH(g);
+          if (idf.divergente || idf.gravadoInvalido) marcasIdPorChave.set(String(g.id || ""), { idDivergente: idf.divergente, idGravadoInvalido: idf.gravadoInvalido });
           statusPorChave.set(String(g.id || ""), String(g.statusId || "").trim());
         }
         let contratosRH: any[] = [];
@@ -3413,7 +3418,7 @@ Deno.serve(async (req: Request) => {
           try { contratosRH = await contratosFreelancerRH(!body.leve); }
           catch (e) { return resp({ error: (e as Error).message }, 500); }
         }
-        const junta = juntarFreelancers([...pessoas, ...antigos].map((p: any) => ({ ...p, cpf: cpfPorChave.get(p.chave) || "", statusId: statusPorChave.get(p.chave) || "" })),
+        const junta = juntarFreelancers([...pessoas, ...antigos].map((p: any) => ({ ...p, cpf: cpfPorChave.get(p.chave) || "", statusId: statusPorChave.get(p.chave) || "", ...(marcasIdPorChave.get(p.chave) || {}) })),
           contratosRH, { hoje: perfDia(new Date().toISOString()) });
         const marcar = (p: any) => veContrato && junta.repetidos.has(p.id) ? { ...p, idRepetido: true } : p;
         const contratosPorChave = new Map(contratosRH.map((c: any) => [`freelancer:${String(c.id).trim()}`, c]));

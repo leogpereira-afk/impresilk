@@ -1324,6 +1324,33 @@ export function cpfValido(v) {
   };
   return dv(n.slice(0, 9), 10) === Number(n[9]) && dv(n.slice(0, 10), 11) === Number(n[10]);
 }
+/* O ID GRAVADO NO CADASTRO DO RH MANDA (onda pessoas, item 5 da fila de
+   11/10/2026; D-015 em docs/DECISOES.md). O ID da pessoa nasce com a ficha (e
+   com o contrato de freelancer) e não muda quando o CPF é corrigido. O RH
+   grava esse ID no campo `idPessoa` (6 dígitos, texto) do registro; o PCP lê
+   o campo e só calcula pelos 6 primeiros dígitos do CPF quando ele falta.
+   Gravado e CPF que discordam: vale o gravado, e a gestão recebe o aviso (a
+   pessoa não muda de ID em silêncio). Campo gravado fora do formato não vale:
+   o PCP usa o do CPF, também com aviso. `exigirCpfValido` é a régua do
+   contrato (os verificadores do CPF precisam conferir); a da ficha só pede os
+   11 dígitos, como sempre foi. Devolve só o ID e as marcas, nunca o CPF. */
+export const CAMPO_ID_PESSOA = 'idPessoa';
+export function idDoCadastroRH(reg, { exigirCpfValido = false } = {}) {
+  const gravado = String(reg?.[CAMPO_ID_PESSOA] ?? '').trim();
+  const cpf = soDigitosCpf(reg?.cpf);
+  const doCpf = exigirCpfValido ? (cpfValido(cpf) ? cpf.slice(0, 6) : '') : (cpf.length === 11 ? cpf.slice(0, 6) : '');
+  if (/^\d{6}$/.test(gravado)) return { id: gravado, fonte: 'gravado', divergente: !!doCpf && doCpf !== gravado, gravadoInvalido: false };
+  return { id: doCpf, fonte: doCpf ? 'cpf' : '', divergente: false, gravadoInvalido: !!gravado };
+}
+/* O aviso à gestão (admin e pcp) do cadastro cujo ID gravado e CPF discordam,
+   ou cujo campo gravado está fora do formato. Sem CPF no texto. */
+export function avisoIdDoCadastro(c) {
+  if (!c || !String(c.nome || '').trim()) return '';
+  const onde = c.freelancer ? `O contrato de freelancer de ${String(c.nome).trim()}` : `A ficha de ${String(c.nome).trim()}`;
+  if (c.idDivergente) return `${onde} no RH guarda o ID ${c.id}, e o CPF de hoje não começa por ele. No PCP vale o ID gravado: a pessoa não muda de ID quando o CPF é corrigido. Se o ID gravado estiver errado, só o RH corrige, pela tela.`;
+  if (c.idGravadoInvalido) return `${onde} no RH tem o ID gravado fora do formato de 6 dígitos. O PCP usa o ID do CPF${c.id ? ` (${c.id})` : ''} até o RH corrigir o campo.`;
+  return '';
+}
 export function contratoAtivo(c, hoje = '') {
   if (!c || String(c.situacao || '') === 'encerrado') return false;
   const fim = String(c.contratoFim || '').slice(0, 10);
@@ -1335,12 +1362,15 @@ export function juntarFreelancers(fichas, contratos, { hoje = '' } = {}) {
     .filter(c => c && typeof c === 'object' && String(c.nome || '').trim() && String(c.id || '').trim())
     .map(c => {
       const cpf = soDigitosCpf(c.cpf), ok = cpfValido(cpf), ativo = contratoAtivo(c, hoje);
+      // O ID gravado no contrato manda; o do CPF só quando o campo falta (D-015).
+      const idc = idDoCadastroRH(c, { exigirCpfValido: true });
       return { cpf: ok ? cpf : '', entrada: {
-        chave: 'freelancer:' + String(c.id).trim(), id: ok ? cpf.slice(0, 6) : '', nome: String(c.nome).trim(),
+        chave: 'freelancer:' + String(c.id).trim(), id: idc.id, nome: String(c.nome).trim(),
         apelido: String(c.apelido || '').trim(), funcao: String(c.funcao || '').trim(), freelancer: true,
         ativo, desligado: !ativo, contratoFim: String(c.contratoFim || '').slice(0, 10),
         situacaoContrato: String(c.situacao || '') === 'encerrado' ? 'encerrado' : ativo ? 'ativo' : 'vencido',
-        ...(ok ? {} : { semCpf: true, ...(cpf ? { cpfInvalido: true } : {}) }) } };
+        ...(idc.divergente ? { idDivergente: true } : {}), ...(idc.gravadoInvalido ? { idGravadoInvalido: true } : {}),
+        ...(idc.id ? {} : { semCpf: true, ...(cpf ? { cpfInvalido: true } : {}) }) } };
     });
   // Renovação em cadastro novo: um contrato por CPF.
   const porCpf = new Map(), semCpf = [];
@@ -1361,6 +1391,10 @@ export function juntarFreelancers(fichas, contratos, { hoje = '' } = {}) {
   for (const c of porCpf.values()) {
     const mesma = comId.filter(f => soDigitosCpf(f.cpf) === c.cpf);
     if (mesma.length) {
+      /* Mesmo CPF, IDs gravados diferentes na ficha e no contrato (D-015): a
+         pessoa é uma só e o RH precisa acertar o campo de um dos dois. */
+      const ids = [...new Set([...mesma.map(f => String(f.id)), c.entrada.id].filter(Boolean))];
+      if (ids.length > 1) avisos.push(`${c.entrada.nome} tem ficha e contrato de freelancer no RH com o mesmo CPF e IDs gravados diferentes (${ids.join(' e ')}). O RH precisa deixar um ID só para a pessoa.`);
       if (c.entrada.ativo && !mesma.some(naAtiva)) { mesma.forEach(f => fichasFora.add(String(f.chave))); ficam.push(c); }
       // Ficha e contrato ativos: vale a ficha até o RH acertar a SITUAÇÃO da
       // ficha. O aviso nunca manda encerrar o contrato, que é a fonte do freelancer.
@@ -1383,6 +1417,9 @@ export function juntarFreelancers(fichas, contratos, { hoje = '' } = {}) {
     avisos.push(`O ID ${id} aparece em ${nomes.join(' e ')}, com CPFs diferentes. Ninguém é escolhido por esse ID até o RH conferir os CPFs.`);
   }
   const contratos2 = [...ficam, ...semCpf].map(c => repetidos.has(c.entrada.id) ? { ...c.entrada, idRepetido: true } : c.entrada);
+  // ID gravado que discorda do CPF, ou fora do formato: a gestão é avisada (D-015).
+  for (const f of Array.isArray(fichas) ? fichas : []) { const a = avisoIdDoCadastro(f); if (a) avisos.push(a); }
+  for (const c of contratos2) { const a = avisoIdDoCadastro(c); if (a) avisos.push(a); }
   return { contratos: contratos2, fichasFora, repetidos, avisos };
 }
 

@@ -39,15 +39,17 @@ function banco(initial={}) {
   }};return q;
  }};return {db,cliente};
 }
-async function edge(tipo,initial={}) {
+// `opcoes.shared`: outra pasta _shared (a de uma versão antiga tirada do git), para o servidor antigo rodar com as regras dele.
+async function edge(tipo,initial={},opcoes={}) {
  const {db,cliente}=banco(initial);let handler;
- const regras=await import('../../supabase/functions/_shared/pcp-integridade.mjs');
- const {COMISSAO}=await import('../../supabase/functions/_shared/pcp-comissao.mjs');
- const {REGRAS}=await import('../../supabase/functions/_shared/pcp-regras.mjs');
+ const sh=nome=>opcoes.shared?require('node:url').pathToFileURL(path.join(opcoes.shared,nome)).href:'../../supabase/functions/_shared/'+nome;
+ const regras=await import(sh('pcp-integridade.mjs'));
+ const {COMISSAO}=await import(sh('pcp-comissao.mjs'));
+ const {REGRAS}=await import(sh('pcp-regras.mjs'));
  // O status da entrega e o cancelamento (F16): o index.ts os importa de _shared/pcp-status.mjs.
- const status=await import('../../supabase/functions/_shared/pcp-status.mjs');
- const fotos=await import('../../supabase/functions/_shared/foto-freelancer.mjs');
- const ranking=await import('../../supabase/functions/_shared/pcp-ranking-publico.mjs');
+ const status=await import(sh('pcp-status.mjs'));
+ const fotos=await import(sh('foto-freelancer.mjs'));
+ const ranking=await import(sh('pcp-ranking-publico.mjs'));
  const ctx=vm.createContext({console,URL,URLSearchParams,Request,Response,TextEncoder,TextDecoder,atob,btoa,crypto:webcrypto,setTimeout,clearTimeout,
   Deno:{env:{get:k=>({PCP_TOKEN:'machine-test',EQUIPE_JWT_SECRET:'test-secret',SUPABASE_URL:'https://example.invalid',SUPABASE_SERVICE_ROLE_KEY:'test'}[k]||'')},serve:fn=>handler=fn},
   createClient:()=>cliente,...regras,...status,...fotos,...ranking,REGRAS,COMISSAO});
