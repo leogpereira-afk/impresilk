@@ -147,3 +147,22 @@ test('D1: com o valor do ERP valendo, mudar só o valor da ficha marca "mudou de
   assert.equal(marcas,0,'mas a O.S. ganhou a marca de dinheiro mudado no mês fechado');
   assert.ok(!(r.avisos||[]).some(x=>/mês já foi fechado/.test(x)),'nem o aviso');
 });
+
+/* Ajustado (item 8): a régua pura não sabe de quem saiu se não recebe a lista;
+   o servidor resolve o conflito com a lista inteira e o elenco não leva o ID
+   anterior em conflito. O aparelho de quem não é gestão (sem os antigos)
+   chega ao mesmo resultado do servidor. */
+test('P1/pessoas: o aparelho sem os "antigos" (operação) não junta o que o servidor chama de conflito', async()=>{
+  const B=ficha('b','Instaladora Ficticia','inst','100011',{idPessoaAnteriores:['100001']});
+  const C=ficha('c','Pessoa Que Saiu Ficticia','saiu','100001',{dataDesligamento:'2026-01-10'});
+  const e=await edge('pcp-sync',{registros:[...FIXAS,B,C],pcp_config_global:[{id:true,atualizado_em:'2020-01-01',config:{}}],pcp_registros:[],
+    equipe_contas:[{sistema:'pcp',usuario:'titular-ficticio',papel:'pcp',ativo:true}]});
+  const srv=await e.run('pessoasDoPCP()');
+  assert.equal(srv.idDe('100001'),'100001','no servidor, o 100001 é de quem saiu');
+  const op=await e.call({action:'elenco'},{papel:'operacao',sub:'op',nome:'Operacao',exp:EXP});
+  assert.deepEqual(op.antigos,[]);
+  assert.ok(!op.pessoas.find(p=>p.id==='100011').anteriores,'o ID anterior em conflito não desce');
+  assert.equal(O.resolverPessoas({pessoas:op.pessoas}).idDe('100001'),'100001','o aparelho concorda com o servidor');
+  const g=await e.call({action:'elenco'},TITULAR);
+  assert.ok(g.avisos.some(a=>/^O ID 100001 aparece no RH como ID anterior de Instaladora Ficticia, mas hoje é o ID de Pessoa Que Saiu Ficticia/.test(a)),JSON.stringify(g.avisos));
+});

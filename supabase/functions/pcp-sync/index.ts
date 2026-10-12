@@ -4071,6 +4071,18 @@ Deno.serve(async (req: Request) => {
           ...junta.contratos.filter((c: any) => !c.ativo && !c.id).map((c: any) => ({ id: "", nome: c.nome, apelido: c.apelido,
             ativo: false, desligado: true, freelancer: true })),
         ];
+        /* O ID ANTERIOR EM CONFLITO NÃO DESCE (revisão da onda auditoria, item
+           8): o aparelho de quem não é gestão não recebe os antigos (quem saiu),
+           e juntava o ID anterior que o servidor, com a lista inteira, trata
+           como conflito (o ID de hoje de outra pessoa). O conflito é resolvido
+           aqui, com a lista inteira: o ID anterior em conflito sai do elenco. */
+        const reguaElenco = resolverPessoas({ pessoas: [...pessoasComContrato, ...antigosComContrato] });
+        const emConflito = new Set((reguaElenco.conflitosAnteriores || []).map((c: any) => String(c.id)));
+        const semConflito = (p: any) => {
+          if (!Array.isArray(p?.anteriores) || !p.anteriores.some((a: any) => emConflito.has(String(a)))) return p;
+          const ant = p.anteriores.filter((a: any) => !emConflito.has(String(a))), { anteriores: _a, ...x } = p;
+          return ant.length ? { ...x, anteriores: ant } : x;
+        };
         // Presenca: ferias e ausencias vem CRUAS (o dia local quem sabe e a
         // tela; aqui e UTC). Janela curta para o pacote nao inchar.
         const hojeUTC = new Date().toISOString().slice(0, 10);
@@ -4114,10 +4126,10 @@ Deno.serve(async (req: Request) => {
         // dele so mostra as O.S. da propria equipe, que sao de agora).
         // `avisos`: ID repetido entre ficha e contrato, ou pessoa com ficha e
         // contrato ativos ao mesmo tempo. Conferência do RH: só admin/pcp.
-        return resp({ pessoas: pessoasComContrato, antigos: verFichaRH ? antigosComContrato : [], veiculos, hoje: hojeUTC, em: new Date().toISOString(), fichaRH: verFichaRH,
+        return resp({ pessoas: pessoasComContrato.map(semConflito), antigos: verFichaRH ? antigosComContrato.map(semConflito) : [], veiculos, hoje: hojeUTC, em: new Date().toISOString(), fichaRH: verFichaRH,
                       ferias: verFichaRH ? ferias : [], ausencias: verFichaRH ? ausencias : [],
                       // O ID anterior em conflito (P1): a gestão é avisada, como o ID repetido.
-                      avisos: verFichaRH ? [...junta.avisos, ...avisosIdsAnteriores(resolverPessoas({ pessoas: [...pessoasComContrato, ...antigosComContrato] }))] : [] });
+                      avisos: verFichaRH ? [...junta.avisos, ...avisosIdsAnteriores(reguaElenco)] : [] });
       }
 
       case "getCfg": {
