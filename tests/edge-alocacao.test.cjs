@@ -276,12 +276,12 @@ test('alocacaoLog: só acréscimo, montado pelo servidor, com autor, antes e dep
 
 /* ───────────── o que desce para cada aparelho ───────────── */
 
-test('list e getCfg do toque e da montagem com senha sem percentuais; operação sem o ID de quem gravou', async () => {
+test('list e getCfg do toque, da montagem, da operação e do comercial sem percentuais (U1 da auditoria de 12/10/2026)', async () => {
   const cfg = structuredClone(CFG);
   cfg.performancePCP.participacoes = [{id: '1', membros: [{chave: '100001', nome: 'Ana', percentual: 60}, {chave: '100002', nome: 'Bia', percentual: 40}]}];
   const e = await edge('pcp-sync', banco([base()], {pcp_config_global: [{id: true, config: cfg, atualizado_em: '2026-09-19T10:00:00Z'}]}));
   await comAlocacao(e);
-  for (const quem of [toque, montagem]) {
+  for (const quem of [toque, montagem, operacao, {papel: 'comercial', nome: 'Comercial Teste', sub: 'comercial1'}]) {
     const l = await e.call({action: 'list', escopo: 'tudo'}, quem);
     assert.equal(l.status, 200, JSON.stringify(l));
     const os = (l.os || []).find(o => o.id === '1');
@@ -290,10 +290,6 @@ test('list e getCfg do toque e da montagem com senha sem percentuais; operação
     const c = await e.call({action: 'getCfg'}, quem);
     assert.ok(!c.cfg.performancePCP || !('participacoes' in c.cfg.performancePCP), 'sem participações: ' + quem.sub);
   }
-  const l = await e.call({action: 'list', escopo: 'tudo'}, operacao);
-  const os = l.os.find(o => o.id === '1');
-  assert.ok(os.alocacao && !('porId' in os.alocacao), 'operação vê a divisão sem o ID de quem gravou');
-  assert.ok(os.alocacaoLog.every(x => !('porId' in x)));
   const g = (await e.call({action: 'list', escopo: 'tudo'}, gestor)).os.find(o => o.id === '1');
   assert.equal(g.alocacao.porId, '111222', 'a gestão vê tudo');
 });

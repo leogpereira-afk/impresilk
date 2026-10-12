@@ -1690,16 +1690,18 @@ Deno.serve(async (req: Request) => {
   // e o login de quem digitou o prazo e o retorno previstos (F15) só descem
   // para a gestão (admin, pcp) e a máquina.
   const gestaoVeTudo = ehMaquina || ["admin", "pcp"].includes(String(cracha?.papel ?? ""));
-  /* A DIVISÃO DA EQUIPE (alocacao, F08): a montagem com senha também não
-     recebe os percentuais nem o histórico deles (o celular não mostra
-     divisão); os outros papéis recebem sem o ID de quem gravou. */
-  const ehMontagem = String(cracha?.papel ?? "") === "montagem";
+  /* A DIVISÃO DA EQUIPE (alocacao, F08): quem não é da gestão (montagem,
+     operação, comercial) não recebe os percentuais, as cotas nem o histórico
+     deles. Antes só a montagem perdia a divisão; operação e comercial a
+     recebiam inteira, só sem o ID de quem gravou (U1 da auditoria de
+     12/10/2026, regra do AGENTS: R$ e percentuais de colegas não descem para
+     montagem, operação ou comercial). */
   const podarControle = (r:any) => {
     if(!r || gestaoVeTudo)return r;
     const limpo=(x:any):any=>Array.isArray(x)?x.map(limpo):x && typeof x==="object"?Object.fromEntries(Object.entries(x).filter(([k])=>!["porId","responsavelId"].includes(k)).map(([k,v])=>[k,limpo(v)])):x;
     const out={...r};for(const campo of ["conferenciaERP","regularizacaoSaida","revisaoSolicitada","cicloRegistro"])if(out[campo])out[campo]=limpo(out[campo]);return out;
   };
-  const saidaBase = (r: any) => ehToqueNoNome ? podarToque(r) : gestaoVeTudo ? r : podarCarimbosF15(ehMontagem ? podarAlocacao(r) : podarIdsAlocacao(r));
+  const saidaBase = (r: any) => ehToqueNoNome ? podarToque(r) : gestaoVeTudo ? r : podarCarimbosF15(podarAlocacao(r));
 
   const saida = (r:any) => gestaoVeTudo ? podarControle(saidaBase(r)) : podarValoresPCP(podarControle(saidaBase(r)));
 
@@ -3953,9 +3955,11 @@ Deno.serve(async (req: Request) => {
              participações e logos): a ação "valores" já recusa esse crachá, e
              o espelho não usa nada disso. */
           if (ehToqueNoNome) { delete publico.bonusPCP; delete publico.performancePCP; }
-          /* A montagem com senha também não recebe as participações (os
-             percentuais de cada colega, F08); as equipes continuam descendo. */
-          else if (ehMontagem && publico.performancePCP && typeof publico.performancePCP === "object") {
+          /* Quem não é da gestão (montagem, operação, comercial) também não
+             recebe as participações (os percentuais de cada colega, F08); as
+             equipes continuam descendo (U1 da auditoria de 12/10/2026: antes
+             só a montagem perdia as participações). */
+          else if (!gestaoVeTudo && publico.performancePCP && typeof publico.performancePCP === "object") {
             const { participacoes: _p, ...perf } = publico.performancePCP;
             publico.performancePCP = perf;
           }
