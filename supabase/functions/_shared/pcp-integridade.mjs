@@ -2181,6 +2181,7 @@ const TETO_AVISOS_ENTREGA = 5;
    (SELECT, só contagem) havia 0 O.S. com marca. A chave é a do motor
    (ENTREGA_ITEM.MARCAS_NOVAS, lida na hora): a bancada dos testes do legado
    a liga para gravar marcas como a v171 gravava. */
+const ONDE_CONFERIR_ITENS = '"Conferir itens e equipe" (na ficha da O.S., em Conferência e acompanhamento)';
 export const AVISO_MARCA_SO_LEITURA = 'A entrega por item agora é conferida pela gestão do PCP em "Conferir itens e equipe": a marca de entrega deste aparelho não foi gravada. O Instalado, as fotos e a volta continuam valendo.';
 const MOTIVO_MARCA_SO_LEITURA = 'As marcas de entrega por item são só leitura: a entrega se confere em "Conferir itens e equipe".';
 function rotuloItem(it) {
@@ -2258,7 +2259,9 @@ export function guardarEntregasItens(os, antes, { papel = '', avisar = false, au
     if (!marcasDe(g).length || !uidItemValido(g.uid) || presentes.has(g.uid)) return;
     itens.splice(Math.min(i, itens.length), 0, { ...g });
     presentes.add(g.uid); voltaram++;
-    avisos.push(`O ${rotuloItem(g)} já tem marca de entrega e continua na O.S.: item com entrega não sai da lista. Para tirar o saldo que falta, a gestão usa Cancelar item.`);
+    /* Com as marcas só leitura (D-016), o "Cancelar item" não existe mais: o
+       aviso manda à conferência (revisão da onda acabamento, U4). */
+    avisos.push(`O ${rotuloItem(g)} já tem marca de entrega e continua na O.S.: item com entrega não sai da lista. ${ENTREGA_ITEM.MARCAS_NOVAS === true ? 'Para tirar o saldo que falta, a gestão usa Cancelar item.' : `O saldo que falta se confere em ${ONDE_CONFERIR_ITENS}, pela gestão.`}`);
   });
   if (somenteLeitura) avisos.push(AVISO_MARCA_SO_LEITURA);
   avisos.push(...recusas.slice(0, TETO_AVISOS_ENTREGA));

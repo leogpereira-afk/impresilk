@@ -159,3 +159,51 @@ test('revisão acabamento: o Histórico diz que os valores foram repostos, com o
   assert.match(html, /<strong>Valores dos itens<\/strong>: voltaram com o valor gravado: item 1 \(Placa ACM fictícia\) · item novo sem o valor enviado \(só a gestão grava valor\): item 1 \(Lona do PDF fictícia\)/);
   assert.doesNotMatch(html, /R\$|1000/, 'sem R$');
 });
+
+/* U4: os textos que mandavam para ações que sumiram com as marcas só leitura (D-016). */
+const marcaAntiga = (id, qtde) => ({id, tipo: 'entregue', qtde, dia: '2026-09-20', via: 'gestao', por: 'Gestor Teste', porId: '111222', em: '2026-09-20T12:00:00Z'});
+const osMarcaAntiga = () => ({id: 'u4', numero: '93204', rev: 1, tipo: 'externo', cliente: 'Cliente fictício', itens: [
+  {uid: 'm-u4000000001', item: '1', descricao: 'Placa manual fictícia', qtde: '4', manual: true, entregas: [marcaAntiga('ma-1', 6)]},
+  {uid: 'm-u4000000002', item: '2', descricao: 'Lona fictícia', qtde: '3', manual: true, entregas: [{...marcaAntiga('ma-2', 0), tipo: 'problema', motivo: 'Estrutura amassada fictícia'}]}]});
+test('revisão acabamento: o saldo negativo e o item que fica não mandam ao "Avise o PCP" nem ao "Cancelar item" (U4)', () => {
+  const g = ficha('pcp');
+  g.__os = osMarcaAntiga();
+  const html = vm.runInContext('blocoItens(__os, false, 0)', g);
+  // Caso ruim (acfaae1): o próprio PCP lia "Avise o PCP.", e o cadeado mandava ao "Cancelar item", que sumiu.
+  assert.match(html, /⚠ Saldo -2/);
+  assert.doesNotMatch(html, /Avise o PCP|desfaça a marca a mais|a gestão usa Cancelar item/);
+  assert.match(html, /Confira a quantidade do item e a entrega em &quot;Conferir itens e equipe&quot;|Confira a quantidade do item e a entrega em "Conferir itens e equipe"/);
+  assert.match(html, /title="Item com marca de entrega não sai da lista\. O saldo que falta se confere em &quot;Conferir itens e equipe&quot;/);
+  const m = ficha('montagem');
+  m.__os = osMarcaAntiga();
+  const hm = vm.runInContext('blocoItens(__os, false, 0)', m);
+  assert.doesNotMatch(hm, /Avise o PCP|desfaça a marca a mais/);
+  assert.match(hm, /Quem confere e corrige a entrega dos itens é a gestão do PCP, em "Conferir itens e equipe"/);
+});
+
+test('revisão acabamento: o Finalizar com item com problema não manda "resolver no item" (U4)', () => {
+  const caixa = {};
+  const doc = {querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, getElementById: () => null, body: {appendChild() {}},
+    createElement: () => Object.assign(caixa, {querySelectorAll: () => [], querySelector: () => null, remove() {}})};
+  const g = ficha('pcp', {document: doc});
+  g.__os = osMarcaAntiga();
+  vm.runInContext(`perguntarSaldoEntrega(__os, {pendentes: [], comProblema: [{it: __os.itens[1], s: {problema: {motivo: 'Estrutura amassada fictícia'}}}], unidades: 0}, () => {})`, g);
+  // Caso ruim (acfaae1): "fica com problema; resolva no item", e o item não tem mais o que resolver.
+  assert.doesNotMatch(caixa.innerHTML, /resolva no item/);
+  assert.match(caixa.innerHTML, /fica com problema; o saldo dele se confere em &quot;Conferir itens e equipe&quot;/);
+});
+
+test('revisão acabamento: os avisos do remover, da quantidade, do celular e do servidor apontam para a conferência (U4)', async () => {
+  const app = ler('app.js'), cel = ler('equipe.js');
+  // Caso ruim (acfaae1): o remover dizia "a gestão usa Cancelar item"; a quantidade, ao PCP, "fale com o PCP"; o celular, "Para desfazer, fale com o PCP".
+  assert.match(app, /tem marca de entrega e não sai da lista\. \$\{marcasSoLeituraFicha\(\) \? `O saldo que falta se confere em \$\{ONDE_CONFERIR_FICHA\}, pela gestão\.`/);
+  assert.match(app, /marcasSoLeituraFicha\(\) \? \(gestaoDaFicha\(\) \? `confira a entrega em \$\{ONDE_CONFERIR_FICHA\}`/);
+  assert.match(cel, /marcasNovasCel\(\) \? 'A entrega declarada continua registrada\. Para desfazer, fale com o PCP\.'\s*: 'A entrega declarada continua registrada\. Quem confere a entrega dos itens é a gestão do PCP/);
+  const I = await INTEGRIDADE();
+  const antes = {itens: [{uid: '8101:1:1', item: '1', descricao: 'Placa fictícia', qtde: '10', entregas: [marcaAntiga('e-seis', 6)]}, {uid: '8101:2:1', item: '2', descricao: 'Adesivo fictício', qtde: '1'}]};
+  const r = I.guardarEntregasItens({itens: [structuredClone(antes.itens[1])]}, antes, {papel: 'pcp', avisar: true, agora: new Date().toISOString()});
+  const aviso = r.avisos.join(' ');
+  assert.match(aviso, /continua na O\.S\./);
+  assert.doesNotMatch(aviso, /Cancelar item/);
+  assert.match(aviso, /O saldo que falta se confere em "Conferir itens e equipe"/);
+});

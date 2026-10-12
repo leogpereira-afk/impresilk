@@ -1185,7 +1185,11 @@ function marcarStatusItem(idx, uid, val) {
   save(); reRender();
   if (v && !v.ok) toast(v.erro, 'error');
   else if (v) toast(textoDeclarado(it, v), 'success');
-  else if (s && s.declarado > 0) toast('A entrega declarada continua registrada. Para desfazer, fale com o PCP.');
+  /* Com as marcas só leitura (D-016), a gestão não "desfaz" mais a marca:
+     ela confere a entrega, e revisa ou anula a parcial (revisão da onda
+     acabamento, U4). */
+  else if (s && s.declarado > 0) toast(marcasNovasCel() ? 'A entrega declarada continua registrada. Para desfazer, fale com o PCP.'
+    : 'A entrega declarada continua registrada. Quem confere a entrega dos itens é a gestão do PCP: se ela não aconteceu, avise a gestão.');
 }
 /* ENTREGAR PARTE: a parte maior que o saldo é recusada aqui, com a frase do
    servidor; a que passa é declarada. Fechar o saldo pela parte vale como

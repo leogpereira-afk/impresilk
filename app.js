@@ -2760,6 +2760,16 @@ function papelEntrega() {
 function podeMarcarEntrega(tipo) {
   return temMotorEntrega() && ENTREGA_ITEM.MARCAS_NOVAS === true && podeEditar() && ENTREGA_ITEM.podeMarcar(papelEntrega(), tipo);
 }
+/* PARA ONDE A FICHA MANDA quando as marcas por item são só leitura (D-016;
+   revisão da onda acabamento, U4): "desfaça a marca", "Cancelar item" e
+   "Avise o PCP" (dito ao próprio PCP) apontavam para ações que sumiram. A
+   gestão confere (ou revisa e anula a parcial) em "Conferir itens e equipe";
+   quem não é gestão ouve quem faz e onde. Com as marcas ligadas (os testes do
+   legado), as frases de antes. */
+const marcasSoLeituraFicha = () => !(typeof ENTREGA_ITEM !== 'undefined' && ENTREGA_ITEM.MARCAS_NOVAS === true);
+const gestaoDaFicha = () => typeof STATE !== 'undefined' && ['admin', 'pcp'].includes(STATE.user && STATE.user.papel);
+const ONDE_CONFERIR_FICHA = '"Conferir itens e equipe" (na ficha, em Conferência e acompanhamento)';
+const QUEM_CONFERE_FICHA = `Quem confere e corrige a entrega dos itens é a gestão do PCP, em ${ONDE_CONFERIR_FICHA}.`;
 /* Quem DECLARA em vez de marcar (E5): o crachá sem senha e a montagem com
    senha, o celular no motor (via 'toque'). A tela diz "declarar", não
    "marcar", e não oferece a entrega do item com problema aberto (o motor
@@ -3044,7 +3054,7 @@ function seloEntregaItemHTML(it, s, os) {
   const gestao = podeMarcarEntrega('desfeito');
   const dica = soDeclarado ? DICA_DECLARADO : u ? `Última marca: ${ACOES_ENTREGA_NOME[u.tipo] || u.tipo}${u.declarado ? ' (declarada pela equipe)' : ''} em ${ddmmEntrega(u.dia)}${quemMarcou(u) ? ' por ' + quemMarcou(u) : ''}` : '';
   const seloDecl = decl > 0 && !soDeclarado ? `<span class="ent-selo st-declarado" title="${esc(DICA_DECLARADO)}">${esc(s.qtde > 1 ? `${decl} de ${s.qtde} declarado${decl === 1 ? '' : 's'} pela equipe` : 'declarado pela equipe')}</span>` : '';
-  return `<span class="ent-selo ${cls}"${dica ? ` title="${esc(dica)}"` : ''}>${esc(txt)}${retirou ? ` · levou: ${esc(retirou)}` : ''}</span>${seloDecl}${neg < 0 ? `<span class="ent-selo st-negativo" role="note">⚠ Saldo ${neg}: a quantidade (${ENTREGA_ITEM.qtdeNum(it)}) ficou abaixo do que já foi entregue (${entregueSemTeto(it)}). ${gestao ? 'Corrija a quantidade ou desfaça a marca a mais.' : 'Avise o PCP.'}</span>` : ''}`;
+  return `<span class="ent-selo ${cls}"${dica ? ` title="${esc(dica)}"` : ''}>${esc(txt)}${retirou ? ` · levou: ${esc(retirou)}` : ''}</span>${seloDecl}${neg < 0 ? `<span class="ent-selo st-negativo" role="note">⚠ Saldo ${neg}: a quantidade (${ENTREGA_ITEM.qtdeNum(it)}) ficou abaixo do que já foi entregue (${entregueSemTeto(it)}). ${!marcasSoLeituraFicha() ? (gestao ? 'Corrija a quantidade ou desfaça a marca a mais.' : 'Avise o PCP.') : gestaoDaFicha() ? `Confira a quantidade do item e a entrega em ${ONDE_CONFERIR_FICHA}.` : QUEM_CONFERE_FICHA}</span>` : ''}`;
 }
 /* A LINHA ENTREGA, logo abaixo do item: a ficha tem 760 px, e uma sétima
    coluna espremia a descrição a meia palavra ("Placa AC"). Na linha de baixo
@@ -3319,7 +3329,8 @@ function perguntarSaldoEntrega(os, p, aoEscolher) {
   const principal = !n ? `Finalizar: ${np === 1 ? 'o item fica' : `os ${np} itens ficam`} com problema`
     : marca ? `${papelDeclara() ? 'Declarar' : 'Marcar'} ${n === 1 ? 'o item restante' : `os ${n} restantes`} como ${verbo}${papelDeclara() ? ' pela equipe' : ''} ${quando}` : `Finalizar assim: o saldo conta como ${interna ? 'retirado' : 'entregue'} hoje`;
   const linha = ({ it, s }) => `<li>${esc(rotuloItemEntrega(it))}: ${esc(s.situacao === 'parcial' ? `${s.rotulo}, faltam ${s.saldo}` : (interna ? 'a retirar' : 'a entregar') + (s.qtde > 1 ? ` (${s.qtde})` : ''))}</li>`;
-  const linhaProb = ({ it, s }) => `<li>${esc(rotuloItemEntrega(it))}${s.problema && s.problema.motivo ? ` (${esc(s.problema.motivo)})` : ''}: fica com problema; resolva no item</li>`;
+  const resolver = !marcasSoLeituraFicha() ? 'resolva no item' : gestaoDaFicha() ? `o saldo dele se confere em ${ONDE_CONFERIR_FICHA}` : 'quem confere o saldo dele é a gestão do PCP';
+  const linhaProb = ({ it, s }) => `<li>${esc(rotuloItemEntrega(it))}${s.problema && s.problema.motivo ? ` (${esc(s.problema.motivo)})` : ''}: fica com problema; ${esc(resolver)}</li>`;
   const titulo = n ? (interna ? 'Ainda há itens a retirar' : 'Ainda há itens a entregar') : (np === 1 ? 'Item com problema de entrega' : 'Itens com problema de entrega');
   const box = document.createElement('div');
   box.id = 'saldo-entrega-box';
@@ -3390,7 +3401,7 @@ function blocoItens(os, ro, done) {
     const del = !it.manual ? ''
       : gravadoSemVer ? `<span class="ent-fica" title="Item já gravado: só a gestão do PCP tira item da O.S.">🔒 fica</span>`
       : conferido ? `<span class="ent-fica" title="Item numa entrega conferida: não muda nem sai da lista.">🔒 conferido</span>`
-      : marcado ? `<span class="ent-fica" title="Item com marca de entrega não sai da lista. Para tirar o saldo que falta, a gestão usa Cancelar item.">🔒 fica</span>`
+      : marcado ? `<span class="ent-fica" title="${esc(marcasSoLeituraFicha() ? `Item com marca de entrega não sai da lista. O saldo que falta se confere em ${ONDE_CONFERIR_FICHA}, pela gestão.` : 'Item com marca de entrega não sai da lista. Para tirar o saldo que falta, a gestão usa Cancelar item.')}">🔒 fica</span>`
       : `<button class="btn-xs btn-danger edit-only" data-item-del="${i}" ${u} title="Remover item" aria-label="Remover item ${esc(it.descricao || it.item || i+1)}">× remover</button>`;
     return `
     <tr data-item-row="${i}" ${u} class="${it.pronto ? 'item-ok' : ''} ${it.reprovado ? 'item-reprov' : ''}">
@@ -4978,7 +4989,7 @@ function bindModalEvents(os, ro) {
       if (el.dataset.qtdeMinima) {
         const [idx] = el.dataset.item.split('.');
         const it = itemDoDraft(_modalDraft.itens, idx, el.dataset.iuid);
-        toast(`A quantidade não fica abaixo do que já foi entregue (${el.dataset.qtdeMinima}). Para baixar, ${podeMarcarEntrega('desfeito') ? 'desfaça antes a marca a mais' : 'fale com o PCP'}.`, 'error');
+        toast(`A quantidade não fica abaixo do que já foi entregue (${el.dataset.qtdeMinima}). Para baixar, ${podeMarcarEntrega('desfeito') ? 'desfaça antes a marca a mais' : marcasSoLeituraFicha() ? (gestaoDaFicha() ? `confira a entrega em ${ONDE_CONFERIR_FICHA}` : `fale com a gestão do PCP, que confere em ${ONDE_CONFERIR_FICHA}`) : 'fale com o PCP'}.`, 'error');
         el.value = it ? String(it.qtde == null ? '' : it.qtde) : el.value;
         el.removeAttribute('aria-invalid');
         delete el.dataset.qtdeMinima;
@@ -5011,7 +5022,7 @@ function bindModalEvents(os, ro) {
       if (!it) return;
       // Item com marca de entrega não sai (o servidor o devolveria à lista, E3).
       juntarMarcasDoStore(_modalDraft);
-      if (temMarcaEntrega(it)) { toast(`O ${rotuloItemEntrega(it)} tem marca de entrega e não sai da lista. Para tirar o saldo que falta, a gestão usa Cancelar item.`, 'error'); reRenderModalKeepOpen(); return; }
+      if (temMarcaEntrega(it)) { toast(`O ${rotuloItemEntrega(it)} tem marca de entrega e não sai da lista. ${marcasSoLeituraFicha() ? `O saldo que falta se confere em ${ONDE_CONFERIR_FICHA}, pela gestão.` : 'Para tirar o saldo que falta, a gestão usa Cancelar item.'}`, 'error'); reRenderModalKeepOpen(); return; }
       if (itensConferidosDaFicha(_modalDraft).has(_modalDraft.itens.indexOf(it))) { toast('Este item está numa entrega conferida e não sai da lista: revise ou anule antes a entrega conferida, em "Conferir itens e equipe".', ''); reRenderModalKeepOpen(); return; }
       if (!confirm(`Remover o item "${it.descricao || it.item || ''}"?`)) return;
       const pos = _modalDraft.itens.indexOf(it);
