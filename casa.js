@@ -3774,8 +3774,8 @@ function painelTVCasa(i, f) {
   /* O SELO DO MÊS ABERTO NA TV (item 1 da fila de 11/10/2026): a TV da fábrica
      mostra o pódio do mês em andamento, e ele não pode parecer o resultado do
      mês. A mesma régua da tela (perfSeloAberto), que lê a base do servidor
-     (U1 da revisão: o mês fechado diz "Mês fechado · revisão N" também para a
-     montagem e a operação). Sem o performance.js (cache misto) não há base, e
+     (U1 da revisão: o mês fechado diz "Mês fechado · revisão N · prévia do
+     aparelho" também para a montagem e a operação). Sem o performance.js (cache misto) não há base, e
      a TV não afirma nada. */
   const seloTV = typeof perfSeloAberto === 'function' ? perfSeloAberto() : null;
   return { total: paineis.length, html: `<div class="tv-head">

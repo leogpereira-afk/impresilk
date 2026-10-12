@@ -276,14 +276,15 @@ test('revisão fechamento: U1, a tela de quem não lê a apuração diz o mês f
     await new Promise(r => setTimeout(r, 0));
     assert.ok(t.chamadas.some(x => x.action === 'performanceFechados'), papel + ' pede os períodos fechados');
     // Caso ruim: novembro fechado aparecia como "Mês aberto, resultado provisório".
-    assert.match(t.run('perfSituacaoHTML(null)'), /<span class="perf-situacao ok">Mês fechado · revisão 2<\/span>/);
+    // Os números são os do aparelho, não os do fechamento: o selo diz as duas coisas (verificação da correção).
+    assert.match(t.run('perfSituacaoHTML(null)'), /<span class="perf-situacao provisorio">Mês fechado · revisão 2 · prévia do aparelho<\/span>/);
     assert.doesNotMatch(t.run('perfSituacaoHTML(null)'), /Mês aberto/);
     // Dezembro, com a base, é o mês aberto.
     t.STATE._fPerf = {de:'2026-12-01', ate:'2026-12-11'};
     assert.match(t.run('perfSituacaoHTML(null)'), /Mês aberto, resultado provisório/);
     // Um recorte dentro do mês fechado.
     t.STATE._fPerf = {de:'2026-11-01', ate:'2026-11-15'};
-    assert.match(t.run('perfSituacaoHTML(null)'), /Período fechado · revisão 2/);
+    assert.match(t.run('perfSituacaoHTML(null)'), /Período fechado · revisão 2 · prévia do aparelho/);
   }
   // A gestão sem base nenhuma (a apuração e as revisões não vieram) também não afirma.
   const g = tela();

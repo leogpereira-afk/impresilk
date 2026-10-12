@@ -690,7 +690,11 @@ function perfSeloAberto() {
  const cobre=lista&&lista.find(x=>x&&x.de<=de&&ate<=x.ate);
  if(cobre){
    if(gestao)return atuais;
-   return {tipo:'ok',texto:`${cobre.de===de&&cobre.ate===ate&&perfEhMes(cobre)?'Mês fechado':'Período fechado'} · revisão ${cobre.ultimaRevisao}`};
+   /* Os números de quem não lê a apuração são os do aparelho, não os do
+      fechamento (verificação da correção, 12/10/2026): "Mês fechado" sozinho
+      em cima deles parecia o resultado selado, e o ranking.html mostra o do
+      fechamento. O selo diz as duas coisas. */
+   return {tipo:'provisorio',texto:`${cobre.de===de&&cobre.ate===ate&&perfEhMes(cobre)?'Mês fechado':'Período fechado'} · revisão ${cobre.ultimaRevisao} · prévia do aparelho`};
  }
  if(lista&&lista.some(x=>x&&!(x.de>ate||x.ate<de)))return {tipo:'provisorio',texto:'Período com mês fechado: resultado provisório'};
  return {tipo:'provisorio',texto:doMes?PERF_TXT_ABERTO:'Período aberto, resultado provisório'};
