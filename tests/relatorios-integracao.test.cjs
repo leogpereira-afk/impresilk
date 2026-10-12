@@ -38,10 +38,12 @@ test('fixture extensa traz 180 linhas e nomes/valores íntegros, restritos sem c
  const {pagina}=require('../scripts/preview-relatorios.cjs');const admin=pagina('/?papel=admin&modo=mes'),restrito=pagina('/?papel=montagem');
  assert.match(admin,/QA-0180/);assert.match(admin,/123\.456\.789,99/);assert.match(admin,/2026-10-31/);assert.doesNotMatch(restrito,/123\.456\.789,99|<th>Valor completo/);assert.match(restrito,/table-header-group/);
 });
+// Trocado de propósito na onda acabamento (M19): era 422, que prendia a fila; agora o item com valor volta, com aviso, e nunca 422.
 test('item legado financeiro não perde valor em alteração de identidade pelo perfil restrito',async()=>{
  const o=original();delete o.itens[0].uid;const e=await edge('pcp-sync',{pcp_registros:[{id:'o',colecao:'os',apagado:false,registro:o}]});
  const r=await e.call({action:'list'},{papel:'operacao'});r.os[0].itens[0].descricao='Outro produto';
- assert.equal((await e.call({action:'upsert',os:r.os[0]},{papel:'operacao'})).status,422);assert.equal(e.db.pcp_registros[0].registro.itens[0].subtotal,12000);
+ const g=await e.call({action:'upsert',os:r.os[0]},{papel:'operacao'});assert.equal(g.status,200,JSON.stringify(g));assert.ok(g.avisos.some(a=>/tem valor gravado e continua/.test(a)));
+ const itens=e.db.pcp_registros[0].registro.itens;assert.equal(itens.find(i=>i.descricao==='Placa').subtotal,12000);assert.equal(itens.find(i=>i.descricao==='Outro produto').subtotal,undefined);
 });
 test('payload omitido/malformado não apaga ramos financeiros armazenados',async()=>{
  const {preservarValoresPCP}=await import('../supabase/functions/_shared/pcp-integridade.mjs'),o=original();
@@ -57,8 +59,11 @@ test('cache previamente da gestão não expõe montantes após trocar papel e ma
  assert.ok(Number.isFinite(Date.parse(vm.runInContext('STORE.getQueue()[0].enfileiradoEm',ctx))));
  const primeira=vm.runInContext('STORE.getQueue()[0].enfileiradoEm',ctx);vm.runInContext("STORE.saveOS({...STORE.getOS('o'),obs:'Editado novamente'})",ctx);assert.equal(vm.runInContext('STORE.getQueue()[0].enfileiradoEm',ctx),primeira);
 });
+// Trocado de propósito na onda acabamento (M19): era um throw (422 na fila); agora a cópia do código não leva o valor, e a gravação avisa.
 test('perfil restrito não duplica valores copiando UID financeiro',async()=>{
- const {preservarValoresPCP}=await import('../supabase/functions/_shared/pcp-integridade.mjs'),o=original();assert.throws(()=>preservarValoresPCP({...o,itens:[...o.itens,{...o.itens[0]}]},o),/identidade/);
+ const {preservarValoresPCP,guardarValoresPCP}=await import('../supabase/functions/_shared/pcp-integridade.mjs'),o=original();
+ const r=preservarValoresPCP({...o,itens:[...o.itens,{...o.itens[0]}]},o);assert.equal(r.itens[0].subtotal,12000);assert.equal(r.itens[2].subtotal,undefined);assert.equal(r.itens[2].valorUnit,undefined);
+ assert.match(guardarValoresPCP({...o,itens:[...o.itens,{...o.itens[0]}]},o).avisos.join(' '),/não foi gravado: só a gestão do PCP grava valor/);
 });
 test('Performance resumo mantém fonte integral para alternar completo com O.S. recolhidas e pendências',()=>{
  const fs=require('node:fs'),vm=require('node:vm'),R=require('../relatorios-pcp.js');

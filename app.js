@@ -3357,7 +3357,12 @@ function blocoItens(os, ro, done) {
     const lock = it.manual && !conferido ? '' : 'readonly';
     const marcado = temMarcaEntrega(it);
     const u = `data-iuid="${esc(uidItemOk(it.uid) ? it.uid : '')}"`;
+    /* Quem não vê valores não tira item que já está gravado (M19, onda
+       acabamento): ele pode ter valor que esta conta não vê, e o servidor o
+       devolveria. O item que esta ficha acabou de criar ainda sai. */
+    const gravadoSemVer = !podeVerValores() && itemJaGravado(os, it);
     const del = !it.manual ? ''
+      : gravadoSemVer ? `<span class="ent-fica" title="Item já gravado: só a gestão do PCP tira item da O.S.">🔒 fica</span>`
       : conferido ? `<span class="ent-fica" title="Item numa entrega conferida: não muda nem sai da lista.">🔒 conferido</span>`
       : marcado ? `<span class="ent-fica" title="Item com marca de entrega não sai da lista. Para tirar o saldo que falta, a gestão usa Cancelar item.">🔒 fica</span>`
       : `<button class="btn-xs btn-danger edit-only" data-item-del="${i}" ${u} title="Remover item" aria-label="Remover item ${esc(it.descricao || it.item || i+1)}">× remover</button>`;
@@ -3412,6 +3417,12 @@ function blocoItens(os, ro, done) {
   </details>`;
 }
 
+// O item já está na O.S. guardada neste aparelho (pelo código do item); o rascunho salvo também conta.
+function itemJaGravado(os, it) {
+  const g = os && typeof STORE !== 'undefined' && typeof STORE.getOS === 'function' ? STORE.getOS(os.id) : null;
+  if (!g || !Array.isArray(g.itens) || !it || !uidItemOk(it.uid)) return false;
+  return g.itens.some(x => x && x.uid === it.uid);
+}
 /* Os itens da ficha citados numa conferência por entrega gravada (U5 da
    revisão da onda operação), pela posição: a mesma citação do servidor
    (protegerItensConferidos), pela chave da conferência. */
@@ -10199,6 +10210,12 @@ function importarItensPDF(draft) {
       const { texto } = await lerPDF(file);
       const itens = parseItensPDF(texto);
       if (!itens.length) { toast('Nenhum item reconhecido', 'warn'); return; }
+      /* QUEM NÃO VÊ VALORES (M19, onda acabamento): o PDF só ADICIONA itens,
+         sem o valor (só a gestão grava valor; o servidor repõe o item com
+         valor que sumisse e não grava valor de item novo). O "Substituir" tiraria
+         itens com valor que esta conta nem vê. */
+      const semValores = !podeVerValores();
+      if (semValores) for (const it of itens) { delete it.valorUnit; delete it.subtotal; }
       // Importar 2x o mesmo PDF duplicava a tabela: se já há itens, pergunta
       // se substitui; e renumera a partir do total para não repetir números.
       // Duas perguntas: no tablet "Cancelar" quer dizer desistir, e antes ele
@@ -10225,7 +10242,9 @@ function importarItensPDF(draft) {
           : comEntrega.length
           ? `Esta O.S já tem ${atuais.length} item(ns), ${comEntrega.length} com marca de entrega. Substituir os ${atuais.length - comEntrega.length} sem marca pelos ${itens.length - casados} do PDF? Os itens com entrega ficam na lista${casados ? `, e ${casados === 1 ? 'o que é o mesmo produto do PDF é atualizado' : `os ${casados} que são o mesmo produto do PDF são atualizados`} (medida, valor e quantidade), sem repetir` : ''}.`
           : `Esta O.S já tem ${atuais.length} item(ns). Substituir pelos ${itens.length} do PDF?`;
-        if (casa.ambiguos.length) {
+        if (semValores) {
+          if (!confirm(`Adicionar os ${itens.length} item(ns) do PDF no fim da lista? Os itens que já estão ficam (trocar ou tirar item é da gestão do PCP), e o valor do PDF não entra: só a gestão grava valor.`)) return;
+        } else if (casa.ambiguos.length) {
           // Dois iguais: não se adivinha qual é qual. Só o Adicionar, com a explicação.
           if (!confirm(`Substituir está bloqueado: o PDF tem mais de um item igual a item com marca de entrega (${nomes}), e não dá para saber qual é qual. Adicionar os ${itens.length} item(ns) do PDF no fim da lista?`)) return;
         } else if (confirm(pergunta)) {

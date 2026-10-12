@@ -3463,22 +3463,65 @@ export function podarValoresPCP(v) {
 }
 // Restitui somente campos invisíveis; o aparelho não tem autoridade para alterá-los.
 // Listas são casadas por identidade estável, nunca pela posição do produto.
-export function preservarValoresPCP(novo, antigo) {
+/* NUNCA 422 NA TROCA DE ITENS POR QUEM NÃO É GESTÃO (M19 da auditoria de
+   11/10/2026, onda acabamento). A montagem com senha e a operação que usavam
+   "Importar itens do PDF > Substituir" numa O.S. com itens valorados, ou
+   removiam um item manual da gestão, recebiam 422 ("Item com valor sem
+   identidade correspondente") sem `definitivo`: o envio e as edições
+   seguintes da O.S. ficavam presos na fila. Agora:
+   - os itens são casados pela identidade (o código do item, senão número,
+     descrição, medida, quantidade e unidade), na ordem, um a um: dois iguais
+     não são mais "ambíguos", o primeiro casa com o primeiro;
+   - o item gravado COM VALOR que não veio volta ao lugar dele, com o valor, e
+     a gravação diz quais voltaram (`repostos`);
+   - o valor de item NOVO de quem não vê valores não entra (só a gestão grava
+     valor) e não some calado: a gravação diz quais (`semValor`);
+   - nada lança: o resto da gravação segue. Quem chama avisa e registra no
+     diário. */
+const chaveValorItem = x => x?.uid ? 'u:'+x.uid : x?.id ? 'i:'+x.id : x?.chave ? 'c:'+x.chave : JSON.stringify([x?.item,x?.descricao,x?.medidas,x?.qtde,x?.unidade]);
+const comValorProprio = y => objeto(y) && Object.keys(y).some(k => CAMPO_FINANCEIRO.test(k));
+const valorPresente = x => objeto(x) && Object.entries(x).some(([k, v]) => CAMPO_FINANCEIRO.test(k) && v != null && v !== '' && Number(String(v).replace(',', '.')) !== 0);
+function preservarValoresEm(novo, antigo, ctx, caminho) {
   const temValor = v => !!v && typeof v==='object' && Object.entries(v).some(([k,x])=>CAMPO_FINANCEIRO.test(k)||temValor(x));
   if (Array.isArray(novo)) {
-    const chave = x => x?.uid ? 'u:'+x.uid : x?.id ? 'i:'+x.id : x?.chave ? 'c:'+x.chave : JSON.stringify([x?.item,x?.descricao,x?.medidas,x?.qtde,x?.unidade]);
-    for (const y of Array.isArray(antigo)?antigo:[]) {
-      if (y && Object.keys(y).some(k=>CAMPO_FINANCEIRO.test(k)) && novo.filter(x=>chave(x)===chave(y)).length!==1) throw new Error('Item com valor sem identidade correspondente. Peça à gestão para conferir a alteração do produto.');
-    }
-    return novo.map(x => {
-      const pares = (Array.isArray(antigo)?antigo:[]).filter(y => chave(y) === chave(x));
-      if (pares.length > 1 && pares.some(y => Object.keys(y || {}).some(k => CAMPO_FINANCEIRO.test(k)))) throw new Error('Identidade de item ambígua. A gestão precisa conferir os itens antes de salvar.');
-      return preservarValoresPCP(x, pares.length===1?pares[0]:null);
+    const ant = Array.isArray(antigo) ? antigo : [];
+    const filas = new Map();
+    ant.forEach((y, i) => { const k = chaveValorItem(y); if (!filas.has(k)) filas.set(k, []); filas.get(k).push(i); });
+    const usados = new Set();
+    const out = novo.map(x => {
+      const fila = filas.get(chaveValorItem(x));
+      const i = fila && fila.length ? fila.shift() : -1;
+      if (i >= 0) { usados.add(i); return preservarValoresEm(x, ant[i], ctx, caminho); }
+      if (valorPresente(x)) ctx.semValor.push({ caminho, rotulo: rotuloItem(x) });
+      return preservarValoresEm(x, null, ctx, caminho);
     });
+    ant.forEach((y, i) => {
+      if (usados.has(i) || !comValorProprio(y)) return;
+      out.splice(Math.min(i, out.length), 0, structuredClone(y));
+      ctx.repostos.push({ caminho, rotulo: rotuloItem(y) });
+    });
+    return out;
   }
   if (!novo || typeof novo !== 'object') return temValor(antigo) ? structuredClone(antigo) : novo;
   const out = {};
-  for (const [k,v] of Object.entries(novo)) if (!CAMPO_FINANCEIRO.test(k)) out[k] = preservarValoresPCP(v,antigo?.[k]);
+  for (const [k,v] of Object.entries(novo)) if (!CAMPO_FINANCEIRO.test(k)) out[k] = preservarValoresEm(v, antigo?.[k], ctx, caminho ? caminho + '.' + k : k);
   for (const [k,v] of Object.entries(antigo || {})) if (CAMPO_FINANCEIRO.test(k) || (!(k in novo) && temValor(v))) out[k] = structuredClone(v);
   return out;
+}
+export function preservarValoresPCP(novo, antigo) {
+  return preservarValoresEm(novo, antigo, { repostos: [], semValor: [] }, '');
+}
+/* A mesma régua, com o que a gravação precisa dizer: os itens repostos e os
+   valores de item novo que não entraram, em avisos sem R$, e a linha do
+   diário (campos 'itens.repostos' e 'itens.semValor', só os rótulos). */
+export function guardarValoresPCP(novo, antigo) {
+  const ctx = { repostos: [], semValor: [] };
+  const os = preservarValoresEm(novo, antigo, ctx, '');
+  const nomes = l => l.slice(0, 3).map(x => x.rotulo).join(', ') + (l.length > 3 ? ` e mais ${l.length - 3}` : '');
+  const avisos = [];
+  if (ctx.repostos.length) avisos.push(`${ctx.repostos.length === 1 ? 'O item' : 'Os itens'} ${nomes(ctx.repostos)} ${ctx.repostos.length === 1 ? 'tem valor gravado e continua' : 'têm valor gravado e continuam'} na O.S.: só a gestão do PCP tira ou troca item com valor.`);
+  if (ctx.semValor.length) avisos.push(`O valor ${ctx.semValor.length === 1 ? 'do item novo' : 'dos itens novos'} ${nomes(ctx.semValor)} não foi gravado: só a gestão do PCP grava valor. ${ctx.semValor.length === 1 ? 'O item ficou' : 'Os itens ficaram'} sem valor; avise a gestão.`);
+  const diario = ctx.repostos.length || ctx.semValor.length ? { campos: ['itens.valores'], antes: { itens: Array.isArray(antigo?.itens) ? antigo.itens.length : 0 },
+    depois: { repostos: ctx.repostos.map(x => x.rotulo).slice(0, 50), semValor: ctx.semValor.map(x => x.rotulo).slice(0, 50) } } : null;
+  return { os, avisos, diario, repostos: ctx.repostos.length, semValor: ctx.semValor.length };
 }
