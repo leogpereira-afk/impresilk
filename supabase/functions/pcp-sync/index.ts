@@ -1866,7 +1866,10 @@ Deno.serve(async (req: Request) => {
           await auditar(osId,"anular-entrega-conferida",{campos:["conferenciasEntrega"],motivo:motivoRev,antes:{conferenciasEntrega:os.conferenciasEntrega || []},depois:{conferenciasEntrega:conferenciasAn}},os.numero);
           return resp({ok:true,os:saida(gravarAn)});
         }
-        const erro=revisao?CONFERENCIA_ENTREGA.validarRevisao(os,demais,entrega,hoje):CONFERENCIA_ENTREGA.validar(os,[...demais,entrega],hoje);
+        /* D1 da revisão da onda operação: só esta entrega (a nova ou a editada) é
+           conferida contra o item cancelado; a parte já conferida de um item
+           cancelado depois continua valendo nas outras. */
+        const erro=revisao?CONFERENCIA_ENTREGA.validarRevisao(os,demais,entrega,hoje,velho||null):CONFERENCIA_ENTREGA.validar(os,[...demais,entrega],hoje,{novas:new Map([[entrega.id,velho||null]])});
         if(erro) return resp({error:erro},422);
         /* CONFERIR EM MÊS FECHADO (M7 da auditoria de 11/10/2026, pela
            recomendação dela): a conferência nova com o dia num período fechado

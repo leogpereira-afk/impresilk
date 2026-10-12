@@ -9,7 +9,15 @@ const CONFERENCIA_ENTREGA = (() => {
     const cont = new Map(); itens.forEach(i => cont.set(i.chave, (cont.get(i.chave) || 0) + 1));
     return itens.map(i => ({...i, ambiguo:cont.get(i.chave) !== 1}));
   }
-  function validar(os, entregas, hoje = '') {
+  /* O ITEM CANCELADO COM PARTE JÁ CONFERIDA (D1 da revisão da onda
+     operação): o cancelamento vale só para o saldo. A parte que a gestão já
+     conferiu continua valendo na leitura e na apuração (antes a parcial
+     inteira deixava de se ler, "Item cancelado não pode entrar na entrega", e
+     a entrega conferida saía da apuração). Só a entrega NOVA ou EDITADA
+     (`novas`: id → a versão gravada dela, ou null) é conferida contra o
+     cancelamento: a nova não leva o item cancelado, e a editada (inclusive na
+     revisão) mantém dele no máximo o que já tinha. */
+  function validar(os, entregas, hoje = '', {novas = null} = {}) {
     if (!Array.isArray(entregas) || entregas.length > 100) return 'Limite de 100 entregas por O.S.';
     const itens = catalogo(os), por = new Map(itens.map(i => [i.chave, i])), usados = new Map(), ids = new Set();
     for (const e of entregas) {
@@ -17,11 +25,14 @@ const CONFERENCIA_ENTREGA = (() => {
       ids.add(e.id);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(e.dia || '') || !Number.isFinite(Date.parse(e.dia + 'T12:00:00Z')) || new Date(e.dia + 'T12:00:00Z').toISOString().slice(0,10) !== e.dia || e.dia < '2020-01-01' || (hoje && e.dia > hoje)) return 'Informe uma data de entrega válida, até hoje.';
       if (!Array.isArray(e.itens) || !e.itens.length || e.itens.length > itens.length) return 'Selecione ao menos um item entregue.';
-      const vistos = new Set();
+      const vistos = new Set(), nova = !!novas && typeof novas.has === 'function' && novas.has(e.id), antesDela = nova ? novas.get(e.id) : null;
       for (const p of e.itens) {
         const it = por.get(p?.chave);
         if (!it || it.ambiguo || it.identidade !== p.identidade) return 'Um item mudou ou não pode ser identificado. Atualize a O.S. e confira a seleção.';
-        if (it.cancelado) return 'Item cancelado não pode entrar na entrega.';
+        if (it.cancelado && nova) {
+          const tinha = lista(antesDela && antesDela.itens).filter(x => x && x.chave === p.chave).reduce((n, x) => n + (Number(x.qtde) || 0), 0);
+          if (!(Number(p.qtde) <= tinha)) return tinha ? 'Item cancelado: esta entrega mantém dele no máximo o que já tinha sido conferido (' + tinha + ').' : 'Item cancelado não pode entrar na entrega.';
+        }
         if (vistos.has(p.chave)) return 'O mesmo item aparece duas vezes nesta entrega.';
         vistos.add(p.chave);
         if (!Number.isInteger(p.qtde) || p.qtde <= 0 || p.qtde > it.qtde) return 'Quantidade entregue inválida.';
@@ -40,9 +51,9 @@ const CONFERENCIA_ENTREGA = (() => {
      parciais quebradas não tinham conserto pela tela. */
   function lidasParaSaldo(os, entregas) {
     const por = new Map(catalogo(os).map(i => [i.chave, i]));
-    return lista(entregas).filter(e => e && typeof e === 'object').map(e => ({...e, itens:lista(e.itens).filter(p => { const it = por.get(p?.chave); return !!it && !it.ambiguo && !it.cancelado && it.identidade === p.identidade; })})).filter(e => e.itens.length);
+    return lista(entregas).filter(e => e && typeof e === 'object').map(e => ({...e, itens:lista(e.itens).filter(p => { const it = por.get(p?.chave); return !!it && !it.ambiguo && it.identidade === p.identidade; })})).filter(e => e.itens.length);
   }
-  const validarRevisao = (os, outras, editada, hoje = '') => validar(os, [...lidasParaSaldo(os, outras), editada], hoje);
+  const validarRevisao = (os, outras, editada, hoje = '', antes = null) => validar(os, [...lidasParaSaldo(os, outras), editada], hoje, {novas:new Map([[editada && editada.id, antes || null]])});
   function apurar(os, liquido, entregas = lista(os?.conferenciasEntrega)) {
     const erro = validar(os, entregas);
     if (erro) return {erro, entregas:[], saldo:null, total:null};

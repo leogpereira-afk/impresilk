@@ -44,6 +44,8 @@ async function conferirItensEntrega(osId, entregaId = '') {
   const letrasMotivo = t => (String(t || '').normalize('NFC').match(/[\p{L}\p{N}]/gu) || []).length;
   const MOTIVO_REV_MIN = 15;
   const escolhidos = new Map((anterior?.itens || []).map(i => [i.chave,i.qtde]));
+  // O item cancelado depois de conferido (D1 da revisão da onda operação): esta entrega mantém dele no máximo o que já tinha.
+  const daAnterior = new Map(escolhidos);
   const usados = new Map(); outros.forEach(e => e.itens.forEach(i => usados.set(i.chave,(usados.get(i.chave)||0)+i.qtde)));
   const virtual = {...os, alocacao:anterior?.alocacao || (primeira ? os.alocacao : null), equipe:anterior ? DIVISAO.derivarEquipe(anterior.alocacao) : primeira ? os.equipe || [] : []};
   ALOCUI.iniciar(chave, {os:virtual,equipes:perfConfig().equipes,papel:STATE.user.papel,valor:null,rotuloValor:'Valor dos itens desta entrega',dataEntrega:dia,versoes:perfRegrasFonte().versoes,semAntigo:true,reiniciar:true});
@@ -57,7 +59,7 @@ async function conferirItensEntrega(osId, entregaId = '') {
     <label class="conf-data">Data desta entrega <input id="conf-data" type="date" value="${esc(dia)}" max="${ENTREGA_ITEM.diaSP(new Date().toISOString())}"></label>
     <p class="conf-volta-do-dia metricas-nota" id="conf-volta-dia" ${voltaDoDiaTxt(dia)?'':'hidden'}>${esc(voltaDoDiaTxt(dia))}</p>
     <section class="conf-itens" aria-label="Itens desta entrega"><div class="conf-itens-topo"><h4>O que foi entregue?</h4><button type="button" class="btn-ghost btn-sm" id="conf-todos">Selecionar saldo disponível</button></div>
-      ${catalogo.map((it,n)=>{const saldo=it.qtde-(usados.get(it.chave)||0), trava=saldo<=0||it.ambiguo||it.cancelado;return `<div class="conf-item"><label><input type="checkbox" data-conf-item="${n}" ${escolhidos.has(it.chave)?'checked':''} ${trava?'disabled':''}><span><strong>${esc(it.descricao)}</strong><small>${it.ambiguo?'Itens iguais sem identificação: confira a ficha.':it.cancelado?'Item cancelado':`${saldo} de ${it.qtde} disponível(is) · ${it.qtde>1?'unidades':'item completo'}`}</small></span></label><label class="conf-qtde">Quantidade <input type="number" inputmode="numeric" min="1" max="${saldo}" step="1" data-conf-qtde="${n}" value="${escolhidos.get(it.chave)||saldo||1}" ${trava||!escolhidos.has(it.chave)?'disabled':''}></label></div>`;}).join('') || '<p>Nenhum item cadastrado. Complete a ficha da O.S. para conferir a entrega.</p>'}
+      ${catalogo.map((it,n)=>{const tinhaC=it.cancelado?(daAnterior.get(it.chave)||0):0, saldo=it.cancelado?tinhaC:it.qtde-(usados.get(it.chave)||0), trava=saldo<=0||it.ambiguo;return `<div class="conf-item"><label><input type="checkbox" data-conf-item="${n}" ${escolhidos.has(it.chave)?'checked':''} ${trava?'disabled':''}><span><strong>${esc(it.descricao)}</strong><small>${it.ambiguo?'Itens iguais sem identificação: confira a ficha.':it.cancelado?(tinhaC?`Item cancelado: esta entrega mantém até ${tinhaC} já conferida(s); o saldo foi cancelado`:'Item cancelado'):`${saldo} de ${it.qtde} disponível(is) · ${it.qtde>1?'unidades':'item completo'}`}</small></span></label><label class="conf-qtde">Quantidade <input type="number" inputmode="numeric" min="1" max="${saldo}" step="1" data-conf-qtde="${n}" value="${escolhidos.get(it.chave)||saldo||1}" ${trava||!escolhidos.has(it.chave)?'disabled':''}></label></div>`;}).join('') || '<p>Nenhum item cadastrado. Complete a ficha da O.S. para conferir a entrega.</p>'}
       <p id="conf-resumo" class="conf-resumo" aria-live="polite"></p></section>
     <h4>Quem entregou estes itens?</h4>
     <section class="conf-parte" aria-label="Parte entregue por esta equipe"><div class="conf-parte-topo"><strong id="conf-parte-titulo">Selecione os itens entregues</strong><button type="button" class="btn-ghost btn-sm" id="conf-editar-itens">Editar itens e quantidades</button></div><p id="conf-parte-itens"></p><p id="conf-parte-valor" aria-live="polite"></p><small>100% aqui significa a participação nos itens selecionados, não na O.S. inteira.</small></section>
@@ -74,7 +76,7 @@ async function conferirItensEntrega(osId, entregaId = '') {
     if(enviando) return;
     const hojeV=ENTREGA_ITEM.diaSP(new Date().toISOString()), entrega={id,dia,itens:selecao()};
     // Na revisão da parcial (M12), só a editada é validada; as outras entram no saldo pelo que ainda se lê.
-    const erro=inconsistente?CONFERENCIA_ENTREGA.validarRevisao(os,outros,entrega,hojeV):CONFERENCIA_ENTREGA.validar(os,[...outros,entrega],hojeV);
+    const erro=inconsistente?CONFERENCIA_ENTREGA.validarRevisao(os,outros,entrega,hojeV,anterior||null):CONFERENCIA_ENTREGA.validar(os,[...outros,entrega],hojeV,{novas:new Map([[id,anterior||null]])});
     const doSaldo=inconsistente?CONFERENCIA_ENTREGA.lidasParaSaldo(os,outros):outros;
     const ap=erro?null:CONFERENCIA_ENTREGA.apurar(os,resposta.valor,[...doSaldo,entrega]), valor=ap?.entregas.find(e=>e.id===id)?.valor;
     const st=ALOCUI.estado(chave); st.valor=valor==null?null:valor;
@@ -99,7 +101,7 @@ async function conferirItensEntrega(osId, entregaId = '') {
   d.querySelector('#conf-data').onchange=e=>{dia=e.target.value;ALOCUI.definirDataEntrega(chave,dia);const vd=d.querySelector('#conf-volta-dia');if(vd){const t=voltaDoDiaTxt(dia);vd.textContent=t;vd.hidden=!t;}atualizar();};
   d.querySelectorAll('[data-conf-item]').forEach(el=>el.onchange=()=>{const n=+el.dataset.confItem,it=catalogo[n],q=d.querySelector(`[data-conf-qtde="${n}"]`);q.disabled=!el.checked;if(el.checked)escolhidos.set(it.chave,Number(q.value));else escolhidos.delete(it.chave);atualizar();});
   d.querySelectorAll('[data-conf-qtde]').forEach(el=>el.oninput=()=>{escolhidos.set(catalogo[+el.dataset.confQtde].chave,Number(el.value));atualizar();});
-  d.querySelector('#conf-todos').onclick=()=>{d.querySelectorAll('[data-conf-item]').forEach(el=>{if(el.disabled)return;const n=+el.dataset.confItem,it=catalogo[n],q=d.querySelector(`[data-conf-qtde="${n}"]`);el.checked=true;q.disabled=false;q.value=it.qtde-(usados.get(it.chave)||0);escolhidos.set(it.chave,Number(q.value));});atualizar();};
+  d.querySelector('#conf-todos').onclick=()=>{d.querySelectorAll('[data-conf-item]').forEach(el=>{if(el.disabled||catalogo[+el.dataset.confItem].cancelado)return;const n=+el.dataset.confItem,it=catalogo[n],q=d.querySelector(`[data-conf-qtde="${n}"]`);el.checked=true;q.disabled=false;q.value=it.qtde-(usados.get(it.chave)||0);escolhidos.set(it.chave,Number(q.value));});atualizar();};
   d.querySelectorAll('[data-conf-abrir]').forEach(el=>el.onclick=()=>{d.close();void conferirItensEntrega(osId,el.dataset.confAbrir).catch(e=>toast(perfErroTxt(e),'error'));});
   d.querySelector('#conf-cancelar').onclick=()=>d.close();
   const campoRevMotivo=d.querySelector('#conf-rev-motivo');
