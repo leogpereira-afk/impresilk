@@ -246,3 +246,29 @@ test('item 8: o fechamento guarda o retrato das equipes (logo pelo conteúdo, co
   assert.equal((await aprovar(e,p)).status,200);
   assert.equal(e.db.pcp_registros.find(r=>r.colecao==='performance_fechamentos').registro.hash,f.hash);
 });
+
+/* ---------------------------------------------------------------- item 9 (M4) */
+test('item 9 (M4): o líquido mudado no ERP depois de uma parcial aprovada vira pendência visível, sem travar a aprovação',async()=>{
+  const {COMISSAO:S}=await import('../supabase/functions/_shared/pcp-comissao.mjs');
+  const config={modo:'efetivo',inicioEfetivo:'2026-11-01',decisaoGestao:'Autorização fictícia para teste',criteriosExtras:'somente_falha_comprovada'};
+  const registro=(entregaId,dia,valor,fracaoOS)=>({id:'osA::entrega:'+entregaId,osId:'osA',entregaId,numero:'90001',dia,valor,fracaoOS,confirmado:true,membros:membros.map(m=>({chave:m.chave,nome:m.nome,percentual:m.percentual}))});
+  const fonte=(de,ate,registros)=>({id:de+':'+ate+':000001',fechadoEm:ate+'T23:00:00Z',periodo:{de,ate},regra:'performance-3',registros});
+  const entradaDe=f=>({config,decisoes:{osA:{...doc,decisao:'sem_falha',tipo:'nenhuma'}},entregas:Object.fromEntries(f.registros.map(r=>[r.id,{...doc,entregue:true,grupos:[{montadorId:'100001'}],interna:{...doc,situacao:'nao_aplicavel'}}]))});
+  // Novembro: metade da O.S. de R$ 1.000,00 (fictícia), aprovada.
+  const nov=fonte('2026-11-01','2026-11-30',[registro('e1','2026-11-10',500,0.5)]);
+  const apNov={id:'2026-11-01:2026-11-30:000002',de:'2026-11-01',ate:'2026-11-30',revisao:2,tipo:'aprovacao',apuracao:C.apurar(nov,entradaDe(nov),{aprovacoes:[]})};
+  assert.equal(apNov.apuracao.linhas[0].comissaoCentavos,500);
+  for(const M of [C,S]){
+    // Dezembro com o líquido igual: nada a avisar.
+    const igual=fonte('2026-12-01','2026-12-31',[registro('e2','2026-12-05',500,0.5)]);
+    const a=M.apurar(igual,entradaDe(igual),{aprovacoes:[apNov]});
+    assert.equal(a.avisos,undefined);assert.equal(a.linhas[0].liquidoMudou,undefined);
+    // O ERP corrigiu o líquido para R$ 1.200,00 e dezembro entrega o resto: o caso ruim passava calado.
+    const dez=fonte('2026-12-01','2026-12-31',[registro('e2','2026-12-05',600,0.5)]);
+    const b=M.apurar(dez,entradaDe(dez),{aprovacoes:[apNov]});
+    assert.equal(b.aprovavel,true,'não trava: o ajuste depende da pergunta 3');
+    assert.equal(b.linhas[0].comissaoCentavos,600,'a parte nova paga pelo acumulado (11,00 menos 5,00)');
+    assert.deepEqual(b.linhas[0].liquidoMudou,{aprovacaoId:apNov.id,periodo:{de:'2026-11-01',ate:'2026-11-30'},liquidoAprovadoCentavos:100000,liquidoAtualCentavos:120000});
+    assert.deepEqual(b.avisos,['O.S. 90001 · O líquido mudou desde a aprovação de 01/11/2026 a 30/11/2026 (R$ 1000,00 na aprovação, R$ 1200,00 agora). A parte já aprovada ficou no líquido antigo: o ajuste fica pendente (revisão daquele mês ou compensação).']);
+  }
+});

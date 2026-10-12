@@ -93,14 +93,34 @@ const COMISSAO = (() => {
     for(const d of divergencias(contexto.aprovacoes,config.modo))if(d.periodo<chavePeriodo(periodo)&&osDaFonte.has(d.osId))add('Concilie primeiro a aprovação do período '+d.periodo+' da O.S. '+d.osId+'. O acumulado de centavos mudou.');
     const acumulados=new Map();
     const referencias=[];
+    /* O LÍQUIDO MUDADO DEPOIS DA APROVAÇÃO (M4 da auditoria de 11/10/2026, a
+       parte que não depende da pergunta 3): a comissão acumulada vem das
+       aprovações gravadas; se o ERP muda o líquido da O.S. depois de uma
+       parcial aprovada, a parcela seguinte paga certo pela parte nova, e a
+       parte já aprovada fica no líquido antigo, sem aviso. O líquido inteiro da
+       O.S. de cada linha aprovada sai da base e da fração dela (a mesma conta
+       da conferência por entrega); diferente do de agora, a linha e o
+       demonstrativo ganham o aviso (não trava a aprovação: o ajuste no mês
+       aberto, item 27 da fila, depende da pergunta 3). */
+    const liquidoInteiro=(base,fr)=>Number.isSafeInteger(base)&&Number.isFinite(fr)&&fr>0?Math.round(base/fr):null;
+    const liquidosAprovados=new Map(), avisos=[], avisar=t=>{if(!avisos.includes(t))avisos.push(t);};
     for(const a of ativas(contexto.aprovacoes,config.modo)){
       if(chavePeriodo(a)>=chavePeriodo(periodo))continue;
       referencias.push(a.id);
       for(const l of lista(a.apuracao.linhas)){
         const base=baseElegivel(l);
         const x=acumulados.get(l.osId)||{base:0,comissao:0};x.base+=base||0;x.comissao+=l.comissaoCentavos||0;acumulados.set(l.osId,x);
+        const inteiro=liquidoInteiro(l.baseLiquidaCentavos,l.fracaoOS);
+        if(inteiro!==null)liquidosAprovados.set(l.osId,[...(liquidosAprovados.get(l.osId)||[]),{aprovacaoId:a.id,periodo:{de:a.de,ate:a.ate},liquidoCentavos:inteiro}]);
       }
     }
+    const liquidoMudou=(osId,numero,liquido,fracao)=>{
+      const agora=liquidoInteiro(liquido,fracao);if(agora===null)return null;
+      const x=lista(liquidosAprovados.get(osId)).find(y=>y.liquidoCentavos!==agora);if(!x)return null;
+      const br=d=>String(d||'').split('-').reverse().join('/'), rs=c=>(c/100).toFixed(2).replace('.',',');
+      avisar('O.S. '+(numero||osId)+' · O líquido mudou desde a aprovação de '+br(x.periodo.de)+' a '+br(x.periodo.ate)+' (R$ '+rs(x.liquidoCentavos)+' na aprovação, R$ '+rs(agora)+' agora). A parte já aprovada ficou no líquido antigo: o ajuste fica pendente (revisão daquele mês ou compensação).');
+      return {aprovacaoId:x.aprovacaoId,periodo:x.periodo,liquidoAprovadoCentavos:x.liquidoCentavos,liquidoAtualCentavos:agora};
+    };
     const rs=lista(fonte?.registros).slice().sort((a,b)=>String(a.dia).localeCompare(String(b.dia))||String(a.id).localeCompare(String(b.id))), ids=new Set(), fracoes=new Map(), linhas=[], pessoas=new Map();
     if(!rs.length)add('Sem entregas no fechamento.');
     const creditar=(partes,tipo,id)=>{for(const p of partes){const k=tipo+':'+p.pessoaId;const anterior=pessoas.get(k)||{pessoaId:p.pessoaId,tipo,centavos:0,entregas:[]};anterior.centavos+=p.centavos;anterior.entregas.push(id);pessoas.set(k,anterior);}};
@@ -177,6 +197,7 @@ const COMISSAO = (() => {
       // O líquido da fonte já contém descontos proporcionais; não descontar outra vez.
       linhas.push({id:r.id,osId,entregaId:r.entregaId||null,numero:r.numero,dia:r.dia,fracaoOS:fracao,origemValor:r.origemValor,baseLiquidaCentavos:liquido,baseElegivelCentavos:lp.length?null:baseElegivelCentavos,baseBrutaCentavos:r.valorBrutoCentavos??null,descontoCentavos:r.descontoCentavos??null,desconto:descontoTxt,comissaoCentavos:lp.length?null:total,internaCentavos:lp.length?null:internos,externaCentavos:lp.length?null:externo,pontos:lp.length?null:zerada?0:fracao,pagamentos,pendencias:lp,decisao:d.decisao||'pendente'});
     }
+    for(const l of linhas){const m=liquidoMudou(l.osId,l.numero,l.baseLiquidaCentavos,l.fracaoOS);if(m)l.liquidoMudou=m;}
     for(const [os,fracao] of fracoes)if(fracao>1.000001)add('O.S. '+os+' · Parciais ultrapassam uma O.S.; não aprovar.');
     const reconhecimento=config.reconhecimento||{};
     const quadro=new Map();
@@ -190,7 +211,7 @@ const COMISSAO = (() => {
     const equipes=[...quadro.values()].map(x=>{const avaliacao=reconhecimento.avaliacoes?.[x.chave]||{};return {...x,substituicao:x.composicoes.length>1,solo:x.composicoes.some(c=>c.length===1),situacao:['elegivel','inelegivel'].includes(avaliacao.situacao)&&texto(avaliacao.justificativa).length>=5?avaliacao.situacao:'pendente',justificativa:texto(avaliacao.justificativa)};});
     equipes.forEach(x=>x.empate=equipes.some(y=>y!==x&&!x.pendente&&!y.pendente&&Math.abs(x.pontos-y.pontos)<0.000001));
     const revisado=equipes.every(e=>e.situacao!=='pendente')&&['elegibilidade','identidade','substituicoes','empates','premios','decisao'].every(k=>texto(reconhecimento[k]).length>=5);
-    return {motor:'comissao-2',referencias,periodo,fechamentoId:fonte?.id,config,pendencias,aprovavel:pendencias.length===0,linhas,pessoas:[...pessoas.values()],totalCentavos:soma(linhas.map(l=>l.comissaoCentavos||0)),reconhecimento:{situacao:revisado?'criterios_documentados':'pendente',criterios:reconhecimento,equipes,campeao:null,aviso:'Ranking operacional não escolhe campeão nem autoriza prêmio. Resultado e prêmio exigem revisão humana específica.'}};
+    return {motor:'comissao-2',referencias,periodo,fechamentoId:fonte?.id,config,pendencias,...(avisos.length?{avisos}:{}),aprovavel:pendencias.length===0,linhas,pessoas:[...pessoas.values()],totalCentavos:soma(linhas.map(l=>l.comissaoCentavos||0)),reconhecimento:{situacao:revisado?'criterios_documentados':'pendente',criterios:reconhecimento,equipes,campeao:null,aviso:'Ranking operacional não escolhe campeão nem autoriza prêmio. Resultado e prêmio exigem revisão humana específica.'}};
   }
   function erroAprovacao(revisao, hash, confirmacao) {
     if(!revisao || revisao.tipo!=='previa')return 'Selecione a última prévia financeira.';

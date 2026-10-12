@@ -166,3 +166,13 @@ test('item 8 na tela: o mês fechado com retrato mostra a logo, a cor e o animal
   const [y]=d.run('PERF.comEquipes(perfFonteAtual().registros,'+JSON.stringify(hoje)+',perfOpcoesEquipe())');
   assert.deepEqual([y.logo,y.cor||'',y.animal||''],[LOGO_NOVA,'','']);
 });
+
+/* ------------------------------------------------------------------ item 9 */
+test('item 9 na tela: a pendência do líquido mudado aparece no demonstrativo, separada das que travam',()=>{
+  const c=tela();
+  c.__r=revisaoTela({apuracao:{...revisaoTela().apuracao,avisos:['O.S. 90001 · O líquido mudou desde a aprovação de 01/11/2026 a 30/11/2026 (R$ 1000,00 na aprovação, R$ 1200,00 agora).']}});
+  const html=c.run('comissaoResumoHTML(__r,[__r],[])');
+  assert.match(html,/Pendências de ajuste \(não travam a aprovação\):.*O líquido mudou desde a aprovação de 01\/11\/2026/s);
+  c.__r=revisaoTela();
+  assert.doesNotMatch(c.run('comissaoResumoHTML(__r,[__r],[])'),/Pendências de ajuste/);
+});
