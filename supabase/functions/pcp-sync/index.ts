@@ -252,7 +252,8 @@ async function contarRegs(colecao: string): Promise<number> {
    entao o que foi exportado fica entre as duas; fora disso, ou colecao
    faltando, o Hub marca a copia como falha. */
 const COLECOES_EXPORTACAO = ["os", "auditoria", "foto_evento", "performance_fechamentos",
-  "performance_regras", "performance_comissao", "performance_comissao_os_versoes", "performance_comissao_exportacoes"];
+  "performance_regras", "performance_comissao", "performance_comissao_os_versoes", "performance_comissao_exportacoes",
+  "performance_documentos"];
 const EXPORTACAO_PAGINA = 500; // abaixo do max_rows de 1000 do PostgREST
 /* pcp_META TAMBÉM VAI (revisão da onda-w1-backup, R4, 11/10/2026). Lá mora a
    "cópia recuperável antes da primeira alteração" que o robô do ERP grava
@@ -1991,6 +1992,52 @@ Deno.serve(async (req: Request) => {
         const {error}=await sb.from("pcp_registros").insert(inserts);
         if(error){if(error.code==="23505")return resp({error:"Outra aprovação ou revisão foi gravada ao mesmo tempo. Atualize e concilie."},409);throw new Error(error.message);}
         return resp({ok:true,revisao:registro});
+      }
+
+      /* O DOCUMENTO OFICIAL DO MÊS FECHADO (item 8 da fila de 11/10/2026): o
+         PDF oficial do fechamento e o do demonstrativo da comissão (que não
+         existia) só saem com o registro do documento aqui, só de inserção
+         (coleção performance_documentos, entra no backup): o número do
+         documento, o id e a impressão digital (hash) do fechamento e, no da
+         comissão, os da revisão financeira, quem emitiu (ID de 6 dígitos) e
+         quando. Um papel de novembro prova qual selo foi pago: se alguém
+         mexer depois, a impressão digital não bate. Só admin e pcp emitem
+         (o da comissão tem R$ de todos); a ação é chamada na hora, fora da
+         fila do aparelho, então a recusa (409 ou 422) não prende nada. */
+      case "performanceDocumento": {
+        if(!cracha || ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha.papel)))return resp({error:"Documento oficial restrito à gestão autenticada do PCP."},403);
+        let periodo;try{periodo=perfPeriodo(body);}catch(e){return resp({error:(e as Error).message},422);}
+        const tipoDoc=String(body.tipo||"");
+        if(!["fechamento","comissao"].includes(tipoDoc))return resp({error:"Tipo de documento inválido."},422);
+        const requestId=String(body.requestId||"");
+        if(!/^[a-zA-Z0-9-]{10,80}$/.test(requestId))return resp({error:"Identificação do documento inválida."},422);
+        const fechamentos=await perfFechamentos(periodo);
+        const selo=fechamentos.find((f:any)=>f.id===String(body.fechamentoId||""));
+        if(!selo)return resp({error:"Este fechamento não existe neste período. Atualize a apuração antes de emitir o documento."},409);
+        let revisaoCom:any=null;
+        if(tipoDoc==="comissao"){
+          const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_comissao").eq("apagado",false).eq("id",String(body.revisaoId||"")).maybeSingle();
+          if(error)throw new Error(error.message);
+          revisaoCom=data?.registro||null;
+          if(!revisaoCom||revisaoCom.de!==periodo.de||revisaoCom.ate!==periodo.ate||revisaoCom.fechamentoId!==selo.id)return resp({error:"Esta revisão da comissão não é deste fechamento. Atualize o demonstrativo antes de emitir o documento."},409);
+        }
+        const {data:docs,error:erroDocs}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_documentos").order("id").limit(1000);
+        if(erroDocs)throw new Error(erroDocs.message);
+        const todosDocs=(docs||[]).map((r:any)=>r.registro).filter(Boolean);
+        const repetido=todosDocs.find((d:any)=>d.requestId===requestId);
+        if(repetido)return resp({ok:true,documento:repetido,repetido:true});
+        const ano=perfDia(new Date().toISOString()).slice(0,4);
+        const doAno=todosDocs.filter((d:any)=>String(d.id||"").startsWith("DOC-"+ano+"-")).length;
+        const autorDoc=await autorAuditoria(), emDoc=new Date().toISOString();
+        const mesmo=(d:any)=>d.tipo===tipoDoc&&d.fechamentoId===selo.id&&(tipoDoc!=="comissao"||d.revisaoId===revisaoCom?.id);
+        const documento:any={id:"DOC-"+ano+"-"+String(doAno+1).padStart(6,"0"),tipo:tipoDoc,...periodo,requestId,emitidoEm:emDoc,
+          emitidoPor:{login:autorDoc.login,nome:autorDoc.nome,porId:autorDoc.porId||""},
+          fechamentoId:selo.id,fechamentoRevisao:selo.revisao,fechamentoHash:selo.hash,
+          ...(revisaoCom?{revisaoId:revisaoCom.id,revisao:revisaoCom.revisao,revisaoTipo:revisaoCom.tipo,revisaoHash:revisaoCom.hash,modo:revisaoCom.apuracao?.config?.modo||""}:{}),
+          emitidosAntes:todosDocs.filter(mesmo).length};
+        const {error:erroIns}=await sb.from("pcp_registros").insert({colecao:"performance_documentos",id:documento.id,registro:documento,apagado:false,atualizado_em:emDoc});
+        if(erroIns){if(erroIns.code==="23505")return resp({error:"Outro documento foi emitido ao mesmo tempo. Tente de novo."},409);throw new Error(erroIns.message);}
+        return resp({ok:true,documento});
       }
 
       /* REGRAS DO PROGRAMA DAS EQUIPES (F05, 29/09/2026). Coleção própria

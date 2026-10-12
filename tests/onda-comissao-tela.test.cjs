@@ -87,3 +87,43 @@ test('item 5 na tela: o demonstrativo diz quando e por quem foi exportado, e a d
   c.__r=revisaoTela({tipo:'aprovacao',apuracao:{...revisaoTela().apuracao,config:{modo:'teste'}}});c.__x=[];
   assert.doesNotMatch(c.run('comissaoResumoHTML(__r,[__r],__x)'),/ainda não foi exportada/);
 });
+
+/* ------------------------------------------------------------------ item 6 */
+test('item 6 na tela: o PDF oficial do mês fechado só sai com o documento registrado, com o número e a impressão digital',async()=>{
+  const impressos=[];
+  const s=selo(1,[reg('a1',100)],{fechadoPorId:'044455',hash:'f'.repeat(64)});
+  let resposta={ok:true,documento:{id:'DOC-2026-000007',fechamentoId:s.id,fechamentoHash:'f'.repeat(64),emitidoEm:'2026-12-05T12:00:00Z',emitidoPor:{nome:'Gestor fictício',porId:'044455'},emitidosAntes:1}};
+  const c=comBase(tela({api:()=>{if(resposta instanceof Error)throw resposta;return resposta;}}),fonte([reg('a1',100)]),[s],s.id);
+  c.document={createElement:()=>({innerHTML:'',append(){},insertAdjacentHTML(_,h){this.innerHTML+=h;}})};
+  c.imprimirAnalisePCP=(titulo,el,periodo,fonte)=>impressos.push({titulo,html:el.innerHTML,periodo,fonte});
+  c.performanceConferenciaHTML=()=>'<p>Conferência fictícia</p>';
+  await c.run('perfPdfOficial({querySelector:()=>null})');
+  assert.equal(c.chamadas.at(-1).action,'performanceDocumento');assert.equal(c.chamadas.at(-1).fechamentoId,s.id);
+  assert.equal(impressos.length,1);
+  assert.match(impressos[0].titulo,/^Fechamento oficial · novembro de 2026 · documento DOC-2026-000007$/);
+  assert.match(impressos[0].html,/Documento oficial nº DOC-2026-000007/);
+  assert.match(impressos[0].html,new RegExp('f'.repeat(64)));
+  assert.match(impressos[0].html,/Fechado por<\/dt><dd>Gestor fictício \(cadastro 044455\)/);
+  assert.match(impressos[0].html,/já teve 1 documento emitido antes deste/);
+  // Sem conexão: não há PDF oficial, e a tela diz por quê.
+  resposta=new TypeError('Failed to fetch');
+  await c.run('perfPdfOficial({querySelector:()=>null})');
+  assert.equal(impressos.length,1);
+  assert.match(c.toasts.at(-1)[0],/O PDF oficial precisa de conexão/);
+  // O botão só aparece na revisão fechada.
+  assert.match(c.run('perfFonteHTML()'),/id="perf-pdf-oficial"/);
+  c.run("perfRemoto.selecionado=''");
+  assert.doesNotMatch(c.run('perfFonteHTML()'),/id="perf-pdf-oficial"/);
+});
+test('item 6 na tela: o PDF do demonstrativo da comissão diz a revisão, a impressão digital e se é prévia ou teste',async()=>{
+  const impressos=[];
+  const c=tela({api:()=>({ok:true,documento:{id:'DOC-2026-000008',fechamentoId:'f1',fechamentoRevisao:1,fechamentoHash:'f'.repeat(64),revisaoHash:'r'.repeat(64),emitidoEm:'2026-12-05T12:00:00Z',emitidoPor:{nome:'Gestor fictício',porId:'044455'},emitidosAntes:0}})});
+  c.document={createElement:()=>({innerHTML:''})};c.crypto={randomUUID:()=>'req-ficticio-0002'};
+  c.imprimirAnalisePCP=(titulo,el)=>impressos.push({titulo,html:el.innerHTML});
+  c.__r=revisaoTela({fechamentoId:'f1',hash:'r'.repeat(64),apuracao:{...revisaoTela().apuracao,config:{modo:'teste'}}});
+  await c.run('comissaoPdf(__r,[__r],[],{de:"2026-11-01",ate:"2026-11-30"})');
+  assert.equal(c.chamadas.at(-1).tipo,'comissao');assert.equal(c.chamadas.at(-1).revisaoId,c.__r.id);
+  assert.match(impressos[0].html,/Revisão 1 · prévia, não aprovada · teste, sem exportação para pagamento/);
+  assert.match(impressos[0].html,new RegExp('r'.repeat(64)));
+  assert.match(impressos[0].html,/Comissão apurada/,'o demonstrativo vem junto');
+});

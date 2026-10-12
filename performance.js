@@ -895,7 +895,7 @@ function perfFonteHTML(){
  const pode=perfPodeEditar(),bloqueio=pode?perfFechamentoBloqueio(f,pendentes):'';
  return quadro('🗂 Base e fechamento <small>atualizar, versão e fechar período</small>',`<p class="perf-base-fonte">${esc(perfFonteTexto())}</p>${perfAvisosHTML(false)}
    <div class="perf-base-acoes"><button type="button" class="btn-ghost" id="perf-atualizar-fonte" ${perfRemoto.carregando?'disabled':''}>${perfRemoto.carregando?'Consultando servidor…':'Atualizar apuração'}</button><label>Versão da apuração <select id="perf-versao"><option value="">${perfRemoto.fechamentos.length?'Dados atuais (fora do fechamento)':'Dados atuais'}</option>${perfRemoto.fechamentos.map(r=>`<option value="${esc(r.id)}" ${r.id===perfRemoto.selecionado?'selected':''}>Revisão ${r.revisao}${perfSubstituta(r)?`, substituída pela ${perfSubstituta(r).revisao}`:''} · ${esc(perfDiaBR(String(r.fechadoEm||'').slice(0,10)))} · ${esc(r.fechadoPor)}</option>`).join('')}</select></label>${pode?`<button type="button" class="btn-ghost" id="perf-fechar" ${bloqueio?'disabled aria-describedby="perf-fechar-motivo"':''}>${perfRemoto.fechamentos.length?'Criar nova revisão':'Fechar período'}</button>`:''}</div>
-   ${bloqueio?`<p class="perf-fechar-motivo" id="perf-fechar-motivo">${esc(bloqueio)}${/^Para fechar, falta/.test(bloqueio)&&perfFiltroDoBloqueio(f)?` <button type="button" class="btn-ghost btn-sm" data-perf-filtrar="${perfFiltroDoBloqueio(f)}">Abrir na aba Conferência</button>`:''}${/^O fechamento é só de mês inteiro/.test(bloqueio)&&f?.periodo?.de?` <button type="button" class="btn-ghost btn-sm" data-perf-mes-inteiro="${esc(String(f.periodo.de).slice(0,7))}">Escolher ${esc(perfMesTxt(String(f.periodo.de).slice(0,7)))} inteiro</button>`:''}</p>`:''}${f?.motivo?`<p class="perf-base-fonte">Motivo: ${esc(f.motivo)}</p>`:''}${pode&&typeof perfComissaoBotaoHTML==='function'?perfComissaoBotaoHTML():''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p>`);
+   ${bloqueio?`<p class="perf-fechar-motivo" id="perf-fechar-motivo">${esc(bloqueio)}${/^Para fechar, falta/.test(bloqueio)&&perfFiltroDoBloqueio(f)?` <button type="button" class="btn-ghost btn-sm" data-perf-filtrar="${perfFiltroDoBloqueio(f)}">Abrir na aba Conferência</button>`:''}${/^O fechamento é só de mês inteiro/.test(bloqueio)&&f?.periodo?.de?` <button type="button" class="btn-ghost btn-sm" data-perf-mes-inteiro="${esc(String(f.periodo.de).slice(0,7))}">Escolher ${esc(perfMesTxt(String(f.periodo.de).slice(0,7)))} inteiro</button>`:''}</p>`:''}${f?.motivo?`<p class="perf-base-fonte">Motivo: ${esc(f.motivo)}</p>`:''}${pode&&f?.fechadoEm?'<p><button type="button" class="btn-ghost" id="perf-pdf-oficial">PDF oficial do fechamento</button> <small>Registra o documento no servidor, com o número e a impressão digital do fechamento.</small></p>':''}${pode&&typeof perfComissaoBotaoHTML==='function'?perfComissaoBotaoHTML():''}<p class="metricas-nota">Cada revisão preserva datas, participantes, percentuais e valores. Uma nova revisão não apaga a anterior. Fechar não calcula nem paga bonificação.</p>`);
 }
 async function perfCarregarFonte(){
  const chave=perfChave(),f=periodoOuMes('_fPerf');
@@ -943,9 +943,43 @@ function perfCoberturaFechamentoHTML(fonte) {
  const fora=k.aLancar?`Ficam de fora ${k.aLancar} ${k.aLancar===1?'baixa do ERP a lançar':'baixas do ERP a lançar'}: ${dinheiroCasa((Number(k.aLancarCentavos)||0)/100)}${k.aLancarSemValor?` e ${k.aLancarSemValor} sem valor`:''}${nums.length?` (O.S. ${nums.slice(0,20).map(esc).join(', ')}${nums.length>20||k.aLancar>nums.length?' e outras':''})`:''}.`:'Nenhuma baixa do ERP fica de fora.';
  return `<div class="perf-fech-cob${k.baixa?' baixa':''}"><p><strong>${esc(k.entregas)} de ${esc(total)} entregas</strong> do mês entram no fechamento (${perfPctTxt(Number(k.entregas)||0,total)}) · <strong>${esc(k.pctValor)}% do valor</strong>. ${fora}</p>${k.baixa?`<div class="perf-fech-baixa" role="note"><p><b>Cobertura baixa: só ${esc(k.pctValor)}% do valor do mês está na base.</b> O ranking e a comissão deste fechamento saem sem o que fica de fora. Dá para fechar assim; para confirmar, escreva a frase abaixo.</p><label>Para confirmar, escreva <b>${PERF_FRASE_COBERTURA}</b> <input type="text" name="cobertura" autocomplete="off" spellcheck="false" required></label></div>`:''}</div>`;
 }
+/* O PDF OFICIAL DO MÊS FECHADO (item 8 da fila de 11/10/2026): só sai com o
+   documento registrado no servidor (performanceDocumento), com o número do
+   documento, o id e a impressão digital do fechamento, quem fechou e quem
+   emitiu. Um papel de novembro prova qual selo foi pago: se alguém mexer
+   depois, a impressão digital não bate. Sem conexão, não há PDF oficial (o
+   "PDF completo" continua para conferência). Só a gestão emite. */
+const perfQuemTxt = (nome, id) => esc(nome || '') + (/^\d{6}$/.test(String(id || '')) ? ' (cadastro ' + esc(id) + ')' : '');
+function perfDocOficialHTML(doc, f) {
+ const quando=x=>x?new Date(x).toLocaleString('pt-BR'):'';
+ const subst=perfSubstituidaTxt(f);
+ return `<section class="perf-doc-oficial"><h2>Documento oficial nº ${esc(doc.id)}</h2><dl>
+  <dt>Fechamento</dt><dd>${esc(perfDiaBR(f.de||f.periodo?.de))} a ${esc(perfDiaBR(f.ate||f.periodo?.ate))} · revisão ${esc(f.revisao)}${subst?' · '+esc(subst):''} · id ${esc(f.id)}</dd>
+  <dt>Impressão digital do fechamento (sha256)</dt><dd>${esc(doc.fechamentoHash||f.hash)}</dd>
+  <dt>Fechado por</dt><dd>${perfQuemTxt(f.fechadoPor,f.fechadoPorId)} em ${esc(quando(f.fechadoEm))}</dd>
+  <dt>Emitido por</dt><dd>${perfQuemTxt(doc.emitidoPor&&doc.emitidoPor.nome,doc.emitidoPor&&doc.emitidoPor.porId)} em ${esc(quando(doc.emitidoEm))}</dd></dl>
+  ${doc.emitidosAntes?`<p>Este fechamento já teve ${esc(doc.emitidosAntes)} ${doc.emitidosAntes===1?'documento emitido':'documentos emitidos'} antes deste.</p>`:''}
+  <p>Para conferir: a impressão digital tem de ser a mesma do fechamento no PCP. Se o fechamento mudar, ela não bate.</p></section>`;
+}
+async function perfPdfOficial(el) {
+ const f=perfFonteAtual();
+ if(!f||!f.fechadoEm)return toast('Escolha a revisão fechada em Versão da apuração para emitir o PDF oficial.','error');
+ const de=f.de||(f.periodo&&f.periodo.de), ate=f.ate||(f.periodo&&f.periodo.ate);
+ let out=null;
+ try{out=await STORE.api({action:'performanceDocumento',tipo:'fechamento',de,ate,fechamentoId:f.id,requestId:STORE.uuid()});}
+ catch(e){return toast('O PDF oficial precisa de conexão: o documento é registrado no servidor. '+perfErroTxt(e),'error');}
+ if(!out||!out.ok||!out.documento)return toast((out&&out.error)||'Não foi possível registrar o documento.','error');
+ const copy=document.createElement('section');
+ copy.innerHTML=perfDocOficialHTML(out.documento,f);
+ const ws=el&&(el.querySelector('.perf-workspace')||el.querySelector('.perf-dash')||el.querySelector('.perf-report'));
+ if(ws){const c=ws.cloneNode(true);c.querySelector('.perf-config')?.remove();c.querySelectorAll('[hidden]').forEach(x=>x.remove());copy.append(c);}
+ if(!(el&&el.querySelector('#perf-recorte'))&&typeof performanceConferenciaHTML==='function')copy.insertAdjacentHTML('beforeend','<p class="metricas-nota">Conferência por entrega: todas as entregas do período, sem filtro.</p>'+performanceConferenciaHTML({embutida:true}));
+ imprimirAnalisePCP('Fechamento oficial · '+perfMesTxt(String(de).slice(0,7))+' · documento '+out.documento.id,copy,{de,ate},perfFonteTexto());
+}
 function perfWireFonte(el){
  if(typeof perfComissaoWire==='function')perfComissaoWire(el);
  const atualizar=el.querySelector('#perf-atualizar-fonte');if(atualizar)atualizar.onclick=perfCarregarFonte;
+ const oficial=el.querySelector('#perf-pdf-oficial');if(oficial)oficial.onclick=()=>{perfPdfOficial(el).catch(e=>toast(perfErroTxt(e),'error'));};
  const versao=el.querySelector('#perf-versao');if(versao)versao.onchange=()=>{perfRemoto.selecionado=versao.value;perfRemoto.escolhido=true;renderPerformanceCasa();};
  const todos=sel=>typeof el.querySelectorAll==='function'?el.querySelectorAll(sel):[];
  // M8: do aviso do mês fechado para os dados atuais e de volta para a revisão que vale.

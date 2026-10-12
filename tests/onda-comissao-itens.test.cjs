@@ -155,3 +155,34 @@ test('item 5: as duas cópias calculam a mesma diferença contra a última expor
   assert.deepEqual(d,S.diferencaContraExportada(t,ant));
   assert.deepEqual(C.diferencaContraExportada(t,null).map(x=>x.diferencaCentavos),[500,100]);
 });
+
+/* --------------------------------------------------------- item 6 (item 8 da fila) */
+test('item 6: o documento oficial do mês fechado e o do demonstrativo são registrados com o id e a impressão digital, e só a gestão emite',async()=>{
+  const e=await servidor();
+  const f=await fechar(e);
+  const p=await previa(e,f);
+  const docs=()=>e.db.pcp_registros.filter(r=>r.colecao==='performance_documentos').map(r=>r.registro);
+  const pedir=(corpo,quem=gestor)=>e.call({action:'performanceDocumento',...NOV,...corpo},quem);
+  // O caso ruim: sem a ação, não havia registro de documento nem PDF do demonstrativo.
+  const d1=await pedir({tipo:'fechamento',fechamentoId:f.id,requestId:'doc-itens-0001'});
+  assert.equal(d1.status,200,JSON.stringify(d1));
+  assert.equal(d1.documento.id,'DOC-2026-000001');
+  assert.equal(d1.documento.fechamentoHash,f.hash);assert.equal(d1.documento.fechamentoId,f.id);
+  assert.deepEqual(d1.documento.emitidoPor,{login:'gestor',nome:'Gestor fictício',porId:'044455'});
+  assert.equal(d1.documento.emitidosAntes,0);
+  // O mesmo pedido não emite outro; um pedido novo do mesmo fechamento é o segundo documento.
+  assert.equal((await pedir({tipo:'fechamento',fechamentoId:f.id,requestId:'doc-itens-0001'})).documento.id,'DOC-2026-000001');
+  const d2=await pedir({tipo:'fechamento',fechamentoId:f.id,requestId:'doc-itens-0002'});
+  assert.equal(d2.documento.id,'DOC-2026-000002');assert.equal(d2.documento.emitidosAntes,1);
+  // O demonstrativo da comissão (a prévia): a revisão e a impressão digital dela.
+  const d3=await pedir({tipo:'comissao',fechamentoId:f.id,revisaoId:p.id,requestId:'doc-itens-0003'});
+  assert.equal(d3.status,200,JSON.stringify(d3));
+  assert.equal(d3.documento.revisaoHash,p.hash);assert.equal(d3.documento.revisaoTipo,'previa');assert.equal(d3.documento.modo,'efetivo');
+  // Revisão de outro fechamento, fechamento inexistente: recusa, nada gravado.
+  assert.equal((await pedir({tipo:'comissao',fechamentoId:f.id,revisaoId:'outra',requestId:'doc-itens-0004'})).status,409);
+  assert.equal((await pedir({tipo:'fechamento',fechamentoId:'nao-existe',requestId:'doc-itens-0005'})).status,409);
+  // Só admin e pcp.
+  for(const quem of [{papel:'montagem',nome:'Montagem fictícia',sub:'montagem',exp:EXP},{papel:'operacao',nome:'Operação fictícia',sub:'operacao',exp:EXP},'machine'])
+    assert.equal((await pedir({tipo:'fechamento',fechamentoId:f.id,requestId:'doc-itens-0006'},quem)).status,403);
+  assert.equal(docs().length,3);
+});
