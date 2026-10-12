@@ -850,6 +850,17 @@ const STORE = (() => {
             _notifyConflict(item.os, res.servidor);
             continue;                          // segue para o próximo item
           }
+          /* O 409 PASSAGEIRO DO deletePhoto (revisão da onda auditoria, item
+             11): "Não foi possível conferir todas as referências da foto" é o
+             servidor sem ler tudo agora; a próxima tentativa pode apagar. O
+             item fica na fila (a exclusão é leve e não se descarta), com o
+             motivo dito uma vez. Só o 409 com `definitivo` (a foto preservada
+             para recuperar uma O.S. excluída) sai da fila, com o aviso abaixo. */
+          if (item.action === 'deletePhoto' && res && res.error && !res.definitivo) {
+            const motivo = 'exclusão pendente: ' + String(res.error);
+            if (_recusaDita.get(sig) !== motivo) { _recusaDita.set(sig, motivo); _notifyListeners('item-pendente', { item, motivo }); }
+            continue;
+          }
           _removeFromQueue(item);
           _failCount.delete(sig);
           _recusaDita.delete(sig);
@@ -936,10 +947,11 @@ const STORE = (() => {
             _notifyListeners('item-aviso', { item, avisos: res.avisos.map(String) });
           }
           /* A FOTO QUE O SERVIDOR PRESERVOU (C2 da auditoria de 12/10/2026): o
-             409 do deletePhoto ("Foto preservada ...", "Arquivo preservado")
-             saía da fila calado, como se a foto tivesse sido apagada. Ela sai
-             da fila (tentar de novo daria a mesma resposta), com o aviso na
-             tela de que a foto continua no servidor e por quê. */
+             409 definitivo do deletePhoto ("Foto preservada ...") saía da fila
+             calado, como se a foto tivesse sido apagada. Ela sai da fila
+             (tentar de novo daria a mesma resposta), com o aviso na tela de
+             que a foto continua no servidor e por quê. O 409 passageiro fica
+             na fila (acima). */
           if (item.action === 'deletePhoto' && res && res.error) {
             _notifyListeners('item-aviso', { item, avisos: ['A foto não foi apagada no servidor: ' + String(res.error)] });
           }

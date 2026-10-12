@@ -4459,11 +4459,15 @@ Deno.serve(async (req: Request) => {
           if(error)throw new Error(error.message);
           for(const row of data || []) {
             const o=row.registro,refs=[o.layoutFotoId,o.embarqueFotoId,...(o.fotosCheckinIds || []),...(o.fotosRetornoIds || []),...(o.itens || []).map((i:any)=>i.fotoProbId),...(o.voltaEquipe?.fotos || []),...(o.retornoConf?.fotos || []),...fotosDasViagens(o)];
-            if(refs.includes(body.fileId))return resp({error:"Foto preservada para recuperar uma O.S. excluída. Solicite revisão à gestão."},409);
+            if(refs.includes(body.fileId))return resp({error:"Foto preservada para recuperar uma O.S. excluída. Solicite revisão à gestão.",definitivo:true},409);
           }
           if(!data?.length || data.length<500){concluiu=true;break;}
           cursor=data[data.length-1].id;
         }
+        /* Os dois 409 "não foi possível conferir" são passageiros: o aparelho
+           mantém o pedido na fila e tenta de novo. Só a foto preservada para
+           recuperar uma O.S. excluída é `definitivo` (revisão da onda
+           auditoria, item 11). */
         if(!concluiu)return resp({error:"Não foi possível conferir todas as referências da foto. Arquivo preservado."},409);
         /* A PROVA DA ENTREGA (A2, auditoria de 11/10/2026). A foto citada por
            O.S. finalizada (check-in, retorno, item, volta do carro) é o que
