@@ -20,13 +20,22 @@ async function conferirItensEntrega(osId, entregaId = '') {
   const travaMes = d => confTravaMesFechado(resposta.fechados, anterior && anterior.dia, d, inteira);
   const soLeitura = !!inteira || !!(anterior && confTravaMesFechado(resposta.fechados, anterior.dia, anterior.dia));
   const id = anterior?.id || 'ent-' + crypto.randomUUID(), chave = 'itens:' + id;
-  /* O DIA PROPOSTO É O DA VOLTA (M11 da auditoria de 11/10/2026): a tela
-     propunha o dia da finalização, e a volta conferida do carro (que é do dia
-     do retorno) ficava fora da entrega em 6 de 23 O.S. Com retorno registrado
-     (até hoje), a entrega nova começa no dia da volta; sem ele, como antes. */
+  /* O DIA PROPOSTO É O DO SERVIÇO (revisão da onda volta, U4): a onda volta
+     propunha o dia da volta (M11 da auditoria de 11/10/2026), e o serviço
+     feito no dia 31 com o carro de volta no dia 1 ia para o mês seguinte. A
+     entrega volta a propor o dia do serviço (a finalização na obra, como na
+     v167); o dia da volta aparece ao lado, como informação, e o casamento da
+     volta usa o dia da volta (CONFERENCIA_ENTREGA.voltaDaEntrega: o mesmo dia,
+     o seguinte, ou a última antes no mesmo mês), que é o que a M11 queria. */
   const hojeConf = ENTREGA_ITEM.diaSP(new Date().toISOString());
-  const diaVoltaConf = (os.retornoEm || os.horaRetorno) && typeof CONFERENCIA_ENTREGA.diaDaVolta === 'function' ? CONFERENCIA_ENTREGA.diaDaVolta(os) : '';
-  let dia = anterior?.dia || (diaVoltaConf && diaVoltaConf <= hojeConf ? diaVoltaConf : '') || diaEntrega(os) || hojeConf, enviando = false;
+  let dia = anterior?.dia || diaEntrega(os) || hojeConf, enviando = false;
+  const voltaDoDiaTxt = d => {
+    if (typeof CONFERENCIA_ENTREGA.viagemDoDia !== 'function' || os.tipo === 'interno') return '';
+    const v = CONFERENCIA_ENTREGA.viagemDoDia(CONFERENCIA_ENTREGA.voltasDaOS(os), d);
+    if (!v) return 'Volta do carro: nenhuma registrada neste dia, no seguinte ou antes neste mês. A nota não conta a volta nesta entrega.';
+    const c = CONFERENCIA_ENTREGA.confDaVolta(v.retornoConf), nomes = (v.equipe || []).map(p => typeof OPERACAO !== 'undefined' && OPERACAO.nomePessoa ? OPERACAO.nomePessoa(p) : p).join(', ');
+    return `Volta do carro desta entrega: ${v.dia.split('-').reverse().join('/')}${v.veiculo ? ' · ' + v.veiculo : ''}${nomes ? ' · ' + nomes : ''} · ${c ? 'conferida pela gestão' : 'ainda não conferida'}. Conta na nota quando a equipe desta entrega é a da viagem (ou está contida nela).`;
+  };
   const escolhidos = new Map((anterior?.itens || []).map(i => [i.chave,i.qtde]));
   const usados = new Map(); outros.forEach(e => e.itens.forEach(i => usados.set(i.chave,(usados.get(i.chave)||0)+i.qtde)));
   const virtual = {...os, alocacao:anterior?.alocacao || (primeira ? os.alocacao : null), equipe:anterior ? DIVISAO.derivarEquipe(anterior.alocacao) : primeira ? os.equipe || [] : []};
@@ -38,6 +47,7 @@ async function conferirItensEntrega(osId, entregaId = '') {
     <p class="aloc-aviso conf-mes-fechado" id="conf-mes-fechado" role="note" ${travaMes(dia)?'':'hidden'}>${esc(travaMes(dia))}</p>
     <fieldset class="conf-campos${soLeitura?' so-leitura':''}" ${soLeitura?'disabled aria-describedby="conf-mes-fechado"':''}><legend class="perf-sr">${soLeitura?'Entrega em mês fechado: só leitura':'Dados desta entrega'}</legend>
     <label class="conf-data">Data desta entrega <input id="conf-data" type="date" value="${esc(dia)}" max="${ENTREGA_ITEM.diaSP(new Date().toISOString())}"></label>
+    <p class="conf-volta-do-dia metricas-nota" id="conf-volta-dia" ${voltaDoDiaTxt(dia)?'':'hidden'}>${esc(voltaDoDiaTxt(dia))}</p>
     <section class="conf-itens" aria-label="Itens desta entrega"><div class="conf-itens-topo"><h4>O que foi entregue?</h4><button type="button" class="btn-ghost btn-sm" id="conf-todos">Selecionar saldo disponível</button></div>
       ${catalogo.map((it,n)=>{const saldo=it.qtde-(usados.get(it.chave)||0), trava=saldo<=0||it.ambiguo||it.cancelado;return `<div class="conf-item"><label><input type="checkbox" data-conf-item="${n}" ${escolhidos.has(it.chave)?'checked':''} ${trava?'disabled':''}><span><strong>${esc(it.descricao)}</strong><small>${it.ambiguo?'Itens iguais sem identificação: confira a ficha.':it.cancelado?'Item cancelado':`${saldo} de ${it.qtde} disponível(is) · ${it.qtde>1?'unidades':'item completo'}`}</small></span></label><label class="conf-qtde">Quantidade <input type="number" inputmode="numeric" min="1" max="${saldo}" step="1" data-conf-qtde="${n}" value="${escolhidos.get(it.chave)||saldo||1}" ${trava||!escolhidos.has(it.chave)?'disabled':''}></label></div>`;}).join('') || '<p>Nenhum item cadastrado. Complete a ficha da O.S. para conferir a entrega.</p>'}
       <p id="conf-resumo" class="conf-resumo" aria-live="polite"></p></section>
@@ -69,7 +79,7 @@ async function conferirItensEntrega(osId, entregaId = '') {
     d.querySelector('.conf-itens').scrollIntoView({behavior:'smooth',block:'start'});
     primeiro?.focus({preventScroll:true});
   };
-  d.querySelector('#conf-data').onchange=e=>{dia=e.target.value;ALOCUI.definirDataEntrega(chave,dia);atualizar();};
+  d.querySelector('#conf-data').onchange=e=>{dia=e.target.value;ALOCUI.definirDataEntrega(chave,dia);const vd=d.querySelector('#conf-volta-dia');if(vd){const t=voltaDoDiaTxt(dia);vd.textContent=t;vd.hidden=!t;}atualizar();};
   d.querySelectorAll('[data-conf-item]').forEach(el=>el.onchange=()=>{const n=+el.dataset.confItem,it=catalogo[n],q=d.querySelector(`[data-conf-qtde="${n}"]`);q.disabled=!el.checked;if(el.checked)escolhidos.set(it.chave,Number(q.value));else escolhidos.delete(it.chave);atualizar();});
   d.querySelectorAll('[data-conf-qtde]').forEach(el=>el.oninput=()=>{escolhidos.set(catalogo[+el.dataset.confQtde].chave,Number(el.value));atualizar();});
   d.querySelector('#conf-todos').onclick=()=>{d.querySelectorAll('[data-conf-item]').forEach(el=>{if(el.disabled)return;const n=+el.dataset.confItem,it=catalogo[n],q=d.querySelector(`[data-conf-qtde="${n}"]`);el.checked=true;q.disabled=false;q.value=it.qtde-(usados.get(it.chave)||0);escolhidos.set(it.chave,Number(q.value));});atualizar();};

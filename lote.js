@@ -1470,9 +1470,14 @@ const LOTE = (() => {
     // O previsto do dia da jornada (o anterior, quando o carro chegou depois da meia-noite).
     const jornada = jornadaDoGrupo(g), prev = previstoDoDia(g.os, jornada).previsto;
     const disse = g.os.map(o => texto(o.horaRetorno)).filter(Boolean).sort().pop() || '';
-    const declVolta = g.os.map(o => o.voltaEquipe).find(v => OPERACAO.voltaRespondida(v));
+    // A limpeza e a conferência desta viagem (revisão da onda volta, U1): as de outra viagem não contam aqui.
+    const daViagem = o => typeof OPERACAO.confDaViagem === 'function' ? OPERACAO.confDaViagem(o) : o.retornoConf;
+    const declVolta = g.os.map(o => typeof OPERACAO.declaracaoDaViagem === 'function' ? OPERACAO.declaracaoDaViagem(o) : o.voltaEquipe).find(v => OPERACAO.voltaRespondida(v));
     // As O.S. da volta com respostas diferentes: mexer na conferência põe a mesma em todas (como a fila da volta do carro).
-    const assinaturaVolta = o => PERGUNTAS().map(k => OPERACAO.respostaVolta((o.retornoConf || {})[k])).join(',');
+    const assinaturaVolta = o => PERGUNTAS().map(k => OPERACAO.respostaVolta((daViagem(o) || {})[k])).join(',');
+    /* AS OUTRAS VIAGENS DAS O.S. DESTA VOLTA (U3): a conferência daqui é a da
+       viagem de hoje de cada O.S.; as outras aparecem para ver. */
+    const outrasViagens = typeof outrasViagensDaVolta === 'function' ? outrasViagensDaVolta(g) : '';
     const divergem = g.os.length > 1 && new Set(g.os.map(assinaturaVolta)).size > 1;
     /* A VOLTA JÁ CONFERIDA (todas as O.S. com a mesma resposta, e ninguém
        mexeu) aparece resumida numa linha: nas pendências do mês são dezenas
@@ -1480,7 +1485,7 @@ const LOTE = (() => {
     const compacta = !divergem && OPERACAO.voltaConferidaParaNota(conf) && !voltaMexida(rg) && !est.voltaAbertas.has(g.chave);
     // Sem carro informado, a conferência não é pedida: fica fechada (dá para abrir e conferir mesmo assim).
     const naoPedida = !compacta && !comCarro(g) && !divergem && !OPERACAO.voltaRespondida(conf) && !voltaMexida(rg) && !est.voltaAbertas.has(g.chave);
-    const quemConferiu = g.os.map(o => typeof OPERACAO.confDaViagem === 'function' ? OPERACAO.confDaViagem(o) : o.retornoConf).find(c => OPERACAO.voltaRespondida(c)) || {};
+    const quemConferiu = g.os.map(daViagem).find(c => OPERACAO.voltaRespondida(c)) || {};
     const selo = k => { const r = OPERACAO.respostaVolta(conf[k]); return `<span class="volta-resp ${r === 'sim' ? 'ok' : r === 'nao' ? 'ruim' : ''}">${r === 'sim' ? '✓' : r === 'nao' ? '✗' : '·'} ${escL(CURTO[k].toLowerCase())}</span>`; };
     const alocAberto = est.alocAberto === g.chave;
     return `<section class="lote-grupo" data-lote-grupo="${escL(g.chave)}">
@@ -1490,6 +1495,7 @@ const LOTE = (() => {
       ${g.semCarro ? '' : `<div class="lote-g-chegada"><label>Chegada do carro (conferida) <input type="time" value="${escL(rg.chegada || '')}" data-lote-campo="chegada" data-grupo="${escL(g.chave)}" data-lote-k="chegada:${escL(g.chave)}"></label>
         <small>${comCarro(g) ? '' : 'carro não informado: a chegada e a conferência da volta não são pedidas · '}${prev ? `retorno previsto ${escL(prev)}${jornada !== g.dia ? ` da volta de ${escL(dataBR(jornada))}` : ''}` : 'sem retorno previsto'}${rg.chegadaDia ? ` · chegou em ${escL(dataBR(rg.chegadaDia))} (dia seguinte)` : ''}${disse ? ` · a equipe anotou ${escL(disse)} (só declaração)` : ''}</small></div>
       ${retornoGrupoHTML(g, rg)}
+      ${outrasViagens ? `<div class="lote-g-viagens"><span class="lote-g-rot">Outras viagens</span>${outrasViagens}<small>A conferência abaixo é da viagem de ${escL(dataBR(g.dia))}.</small></div>` : ''}
       ${naoPedida ? `<div class="lote-g-volta compacta"><span class="lote-g-rot">Conferência da volta</span><span class="lote-volta-resumo">Carro não informado: não é pedida.</span><button type="button" class="lote-b" data-lote-acao="volta-rever" data-grupo="${escL(g.chave)}" data-lote-k="rever:${escL(g.chave)}">Conferir</button></div>` : compacta ? `<div class="lote-g-volta compacta"><span class="lote-g-rot">Conferência da volta</span><span class="lote-volta-resumo">${PERGUNTAS().map(selo).join(' ')}${conf.obs ? ` <span class="volta-obs">“${escL(conf.obs)}”</span>` : ''}${quemConferiu.por ? ` <small>por ${escL(quemConferiu.por)}</small>` : ''}</span><button type="button" class="lote-b" data-lote-acao="volta-rever" data-grupo="${escL(g.chave)}" data-lote-k="rever:${escL(g.chave)}">Rever</button></div>` : `<div class="lote-g-volta"><span class="lote-g-rot">Conferência da volta</span>${PERGUNTAS().map(seg).join('')}
         <label class="lote-volta-obs">O que faltou ou precisa de atenção <input maxlength="300" value="${escL(conf.obs || '')}" data-lote-campo="volta-obs" data-grupo="${escL(g.chave)}" data-lote-k="obs:${escL(g.chave)}" placeholder="ex.: faltou a escada de 6 m"></label>
         ${declVolta && typeof voltaEquipeHTML === 'function' ? voltaEquipeHTML(declVolta, {fotos: false}) : ''}

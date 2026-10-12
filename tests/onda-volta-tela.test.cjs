@@ -88,12 +88,17 @@ async function dialogoConferir(os){
   await c.conferirItensEntrega(os.id,'');
   return html.match(/id="conf-data" type="date" value="([^"]*)"/)[1];
 }
-test('M11: o diálogo da conferência por item propõe o dia da volta, não o da finalização', async()=>{
+/* TROCADO DE PROPÓSITO NA REVISÃO DA ONDA VOLTA (U4): este teste travava o
+   dia proposto no dia da VOLTA, e o serviço do dia 31 com o carro de volta no
+   dia 1 ia para o mês seguinte. A decisão da sessão principal: a entrega
+   propõe o dia do serviço (a finalização na obra, como na v167); o dia da
+   volta aparece ao lado como informação, e o casamento da volta usa o dia da
+   volta (CONFERENCIA_ENTREGA.voltaDaEntrega). */
+test('U4 (revisão da onda volta): o diálogo da conferência por item propõe o dia do serviço, como na v167, e mostra o dia da volta ao lado', async()=>{
   const base={id:'c1',numero:'90201',rev:1,tipo:'externo',cliente:'Cliente fictício',valorTotal:8500,equipe:['100001'],finalizadaEm:'2026-11-10T15:00:00Z',
     itens:[{uid:'a',item:'1',descricao:'Painel fictício A',qtde:'4',subtotal:'5000'}]};
-  assert.equal(await dialogoConferir({...base,horaRetorno:'18:00',retornoEm:'2026-09-08T18:00:00'}),'2026-09-08','caso ruim: propunha 10/11 (a finalização, aqui do diaEntrega) e a volta de 08/09 ficava de fora');
+  assert.equal(await dialogoConferir({...base,horaRetorno:'18:00',retornoEm:'2026-11-11T01:00:00'}),'2026-11-10','o serviço do dia 10 com o carro de volta no dia 11 fica no dia 10');
   assert.equal(await dialogoConferir(base),'2026-11-10','sem retorno, como antes');
-  assert.equal(await dialogoConferir({...base,horaRetorno:'18:00',retornoEm:'2099-01-01T18:00:00'}),'2026-11-10','retorno no futuro não é proposto');
 });
 
 /* ─────────────────────────────── item 16 na tela ─────────────────────────────── */
@@ -107,9 +112,9 @@ test('item 16: o carro escolhido na lista do Ativos leva o id; nome repetido na 
   assert.equal(ctx.definirVeiculoId({veiculo:'Carro fictício A',veiculoId:'7'}).veiculoId,undefined,'nada de semelhança: outro nome, sem id');
   assert.equal(ctx.definirVeiculoId({veiculo:'Furgão repetido fictício'}).veiculoId,undefined,'dois carros com o mesmo nome: sem id');
   assert.equal(ctx.definirVeiculoId({veiculo:'Instalação interna',veiculoId:'8'}).veiculoId,undefined);
-  // A ficha e o formulário da agenda chamam a mesma função.
-  assert.match(ler('app.js'),/if \(el\.dataset\.f === 'veiculo' && typeof definirVeiculoId === 'function'\) definirVeiculoId\(_modalDraft\);/);
-  assert.match(s,/if \(veiculo\) \{ os\.veiculo = veiculo; definirVeiculoId\(os\); \}/);
+  // A ficha e o formulário da agenda chamam a mesma função (revisão da onda volta, U5: aplicarVeiculoEscolhido, que usa definirVeiculoId).
+  assert.match(ler('app.js'),/if \(el\.dataset\.f === 'veiculo' && typeof aplicarVeiculoEscolhido === 'function'\) aplicarVeiculoEscolhido\(_modalDraft, v\);/);
+  assert.match(s,/if \(veiculo\) aplicarVeiculoEscolhido\(os, veiculo\);/);
 });
 
 test('item 16: as quatro cópias da chave da volta usam o id do carro, e o nome como reserva', async()=>{

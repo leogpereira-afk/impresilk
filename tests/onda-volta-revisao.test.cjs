@@ -272,3 +272,138 @@ test('revisão volta: as cópias da viagem do dia (aparelho, servidor e OPERACAO
     assert.equal(O.chaveVeiculoVolta(a,at),C.chaveVeiculo(a,at),'carro '+i);
   }
 });
+
+/* ─────────────────────────────── as telas ─────────────────────────────── */
+// A tela da gestão (app.js) com a régua da volta (operacao.js e conferencia-entrega.js), num contexto isolado.
+function telaGestao(lista,{hoje='2026-11-10',papel='admin'}={}){
+  const nodes=new Map();
+  function node(sel){
+    if(!nodes.has(sel))nodes.set(sel,{innerHTML:'',textContent:'',value:'',querySelector:node,querySelectorAll:()=>[],setAttribute(){},classList:{toggle(){},add(){},remove(){}},focus(){},scrollIntoView(){},insertAdjacentHTML(_,v){this.innerHTML+=v;}});
+    return nodes.get(sel);
+  }
+  const ctx=vm.createContext({console,Date:class extends Date{constructor(...a){super(...(a.length?a:[hoje+'T12:00:00']));}},document:{querySelector:node,querySelectorAll:()=>[],addEventListener(){}},window:{},localStorage:{getItem:()=>null},
+    STORE:{getAllOS:()=>lista,getCFG:()=>({}),getOS:id=>lista.find(o=>o.id===id),elenco:()=>({veiculos:[]})},setTimeout(){}});
+  for(const f of ['operacao.js','operacao-revisao.js','entrega-item.js','conferencia-entrega.js','app.js'])vm.runInContext(ler(f).replace(/^const (ENTREGA_ITEM|CONFERENCIA_ENTREGA) =/m,'var $1 ='),ctx);
+  vm.runInContext(`STATE.user={nome:'Gestor fictício',papel:'${papel}'}; STATE._painelDia='${hoje}'; wireLinhaTempo=()=>{};`,ctx);
+  return {run:code=>vm.runInContext(code,ctx),ctx};
+}
+// Uma O.S. com duas viagens, como o servidor guarda: a primeira conferida (com observação e foto), a de hoje ainda não.
+const CONF1={...SIM,obs:'faltou a escada fictícia',fotos:['foto_vt_1'],por:'Gestor fictício',em:'2026-11-06T12:00:00.000Z',dia:'2026-11-05'};
+const duasViagens=(id='vt1',extra={})=>({id,numero:'9'+id.slice(-1)+'901',rev:3,tipo:'externo',cliente:'Cliente fictício '+id,equipe:['Ana','Bia'],veiculo:'Carro fictício',liberadoPCP:true,
+  saidaEm:'2026-11-10T08:00:00',horaSaida:'08:00',retornoEm:'2026-11-10T16:00:00',horaRetorno:'16:00',retornoConf:CONF1,
+  voltas:[{dia:'2026-11-05',equipe:['Ana','Bia'],veiculo:'Carro fictício',retornoEm:'2026-11-05T17:00:00',retornoConf:{...CONF1}},
+    {dia:'2026-11-10',equipe:['Ana','Bia'],veiculo:'Carro fictício',retornoEm:'2026-11-10T16:00:00',retornoConf:null}],...extra});
+
+test('revisão volta: U3, a fila "Todas" mostra também a primeira viagem (com a conferência e a observação), a ficha e o diálogo dizem qual viagem está sendo conferida', ()=>{
+  const t=telaGestao([duasViagens()]);
+  t.run(`voltaEstado().filtro='todas'; voltaEstado().dias=30`);
+  const todas=t.run('voltasDoRecorte().lista');
+  assert.equal(todas.length,2,'caso ruim: a fila "Todas" perdia a primeira viagem');
+  const html=t.run('voltasHTML()');
+  assert.match(html,/Viagem anterior · conferida/);
+  assert.match(html,/faltou a escada fictícia/,'a observação da primeira viagem aparece');
+  assert.match(html,/teve outra viagem em/,'o cartão da viagem de hoje cita a outra');
+  assert.equal((html.match(/data-volta-conferir=/g)||[]).length,1,'só a viagem de hoje tem o botão de conferir');
+  // "A conferir" fica só com o que dá para conferir.
+  t.run(`voltaEstado().filtro='conferir'`);
+  assert.equal(t.run('voltasDoRecorte().lista.length'),1);
+  // A ficha: as duas viagens, a de hoje marcada como a conferida.
+  const ficha=t.run(`conferenciaVoltaHTML(STORE.getOS('vt1'), false)`);
+  assert.match(ficha,/Viagens desta O\.S\. \(2\)/);
+  assert.match(ficha,/esta é a que está sendo conferida/);
+  assert.match(ficha,/faltou a escada fictícia/);
+  // O lote cita as outras viagens das O.S. da volta.
+  assert.match(ler('lote.js'),/outrasViagensDaVolta\(g\)/);
+  assert.match(t.run(`outrasViagensDaVolta(voltasDoCarroGrupo = OPERACAO.voltasDoCarro(STORE.getAllOS(), '2026-11-01', '2026-11-30')[0])`),/teve outra viagem em/);
+  // O Lançar também mostra a lista (a mesma função).
+  assert.match(ler('casa.js'),/viagensDaOSHTML\(os, gestao \? \{\} : \{semConferir: true\}\)/);
+});
+
+test('revisão volta: U2 na tela, o Lançar com a data do serviço leva a conferência (observação e fotos) para o dia corrigido; a viagem nova de fato começa sem ela', ()=>{
+  const s=ler('casa.js'), a=ler('app.js');
+  const ctx={OPERACAO:O,STATE:{user:{nome:'Gestor fictício',papel:'pcp'}},nowISO:()=>'2026-10-12T12:00:00Z',podeOrigemRetrabalho:()=>true,REGRAS:{origemRetrabalho:x=>x},CONFERENCIA_ENTREGA:C};
+  vm.createContext(ctx);
+  vm.runInContext(a.slice(a.indexOf('function acompanharDiaDaViagem('),a.indexOf('const voltaGestao = () =>')),ctx);
+  vm.runInContext(s.slice(s.indexOf('const CAMPOS_RETRABALHO'),s.indexOf('/* A resposta que o perguntarRetrabalho deu')),ctx);
+  const os={id:'x1',tipo:'externo',equipe:['100001'],veiculo:'Carro fictício',finalizadaEm:'2026-10-11T18:00:00.000Z',finalizadoPor:'Mubisys (auto)',baixaAutoERP:{em:'2026-10-11T18:00:00.000Z',status:'ENTREGUE'},
+    retornoConf:{...SIM,equipamentosOk:'nao',obs:'faltou a escada fictícia',fotos:['foto_x1_1'],por:'Gestor fictício',em:'2026-10-11T21:00:00.000Z',dia:'2026-10-11'}};
+  const nova=ctx.aplicarLancamento(os,{data:'2026-10-09',respostasVolta:{...SIM,equipamentosOk:'nao'}});
+  assert.equal(nova.retornoConf.obs,'faltou a escada fictícia','caso ruim: o Lançar gravava a conferência sem a observação');
+  assert.deepEqual(nova.retornoConf.fotos,['foto_x1_1']);
+  assert.equal(nova.retornoConf.dia,'2026-10-09');
+  assert.equal(nova.retornoConf.em,os.retornoConf.em,'mesmas respostas: não recarimba');
+  // Viagem nova de fato (saída e retorno depois do retorno da anterior): a conferência da outra não é o ponto de partida.
+  const outra={...os,saidaEm:'2026-10-20T08:00:00',retornoEm:'2026-10-20T18:00:00',horaRetorno:'18:00',retornoConf:{...os.retornoConf,dia:'2026-10-09'},voltas:[{dia:'2026-10-09',equipe:['100001'],veiculo:'Carro fictício',retornoEm:'',retornoConf:{...SIM}}]};
+  const n2=ctx.aplicarLancamento(outra,{data:'2026-10-20',respostasVolta:{...SIM}});
+  assert.equal(n2.retornoConf.dia,'2026-10-20');assert.equal(n2.retornoConf.obs,undefined);
+});
+
+test('revisão volta: U1, no celular a segunda viagem convida a registrar a limpeza e o salvar grava (a conferência da primeira viagem não trava); a viagem já conferida não convida', ()=>{
+  const hoje=O.dia(new Date()), ontem=O.somarDias(hoje,-3);
+  const conf1={...SIM,obs:'',fotos:[],por:'Gestor fictício',em:ontem+'T21:00:00.000Z',dia:ontem};
+  const vt=(id,extra={})=>({id,numero:'L'+id,cliente:'Cliente fictício '+id,tipo:'externo',equipe:['Ana','Bia'],veiculo:'Carro fictício',liberadoPCP:true,confirmacao:'Confirmado',
+    instalacao:{data:hoje,periodo:'Manhã'},horaSaida:'08:00',saidaEm:hoje+'T08:00:00',horaRetorno:'15:00',retornoEm:hoje+'T15:00:00',fotosRetornoIds:['r'+id],retornoConf:conf1,
+    voltaEquipe:{...SIM,fotos:['fa'],dia:ontem,veiculo:'Carro fictício',por:'Ana',em:ontem+'T20:00:00.000Z'},
+    voltas:[{dia:ontem,equipe:['Ana','Bia'],veiculo:'Carro fictício',retornoEm:ontem+'T17:00:00',retornoConf:{...conf1}},{dia:hoje,equipe:['Ana','Bia'],veiculo:'Carro fictício',retornoEm:hoje+'T15:00:00',retornoConf:null}],...extra});
+  const nodes=new Map(), salvas=[], toasts=[];
+  const node=sel=>{if(!nodes.has(sel))nodes.set(sel,{innerHTML:'',textContent:'',value:'',querySelector:node,querySelectorAll:()=>[],setAttribute(){},classList:{toggle(){},add(){},remove(){}}});return nodes.get(sel);};
+  const lista=[vt('1')];
+  const ctx=vm.createContext({console,Date,document:{querySelector:node,querySelectorAll:()=>[],addEventListener(){}},window:{},localStorage:{getItem:()=>null,setItem(){}},
+    STORE:{getCFG:()=>({}),getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id)||null,getQueue:()=>[],pushPhoto:async()=>'fc',saveOS:o=>salvas.push(JSON.parse(JSON.stringify(o))),pullPhoto:async()=>null,carimbarMomento(){}},
+    setTimeout(){},mostrarCelebracao(){},confirm:()=>true,__toasts:toasts});
+  vm.runInContext(ler('operacao.js'),ctx);
+  vm.runInContext(ler('equipe.js'),ctx);
+  vm.runInContext('toast=(m,t)=>__toasts.push(m); fraseAleatoria=()=>""; EQ.instalador="Ana";',ctx);
+  const pend=vm.runInContext('limpezasPendentes()',ctx);
+  assert.equal(pend.length,1,'a segunda viagem, que o PCP não conferiu, convida');
+  assert.equal(pend[0].equipeDisse,'nenhuma','a limpeza da primeira viagem não vale para a segunda');
+  const n=vm.runInContext(`salvarLimpezaCarro(limpezasPendentes()[0], {resp:{carroLimpo:'sim',carroArrumado:'sim',equipamentosOk:'sim',semAvaria:'sim'}, obs:'', fotos:['fc']})`,ctx);
+  assert.equal(n,1,'caso ruim: o salvar lia a conferência da primeira viagem e dizia "O PCP já conferiu esta volta" (laço)');
+  assert.equal(salvas[0].voltaEquipe.dia,hoje);
+  // A viagem de hoje já conferida pelo PCP: não convida, e a ficha diz que conferiu.
+  lista[0]={...lista[0],retornoConf:{...SIM,por:'Gestor fictício',em:hoje+'T18:00:00.000Z',dia:hoje}};
+  assert.equal(vm.runInContext('limpezasPendentes().length',ctx),0);
+  assert.match(vm.runInContext(`limpezaLinhaHTML(STORE.getOS('1'))`,ctx),/O PCP já conferiu esta volta/);
+});
+
+test('revisão volta: U4, a conferência por item propõe o dia do serviço (o 31 fica no mês dele) e mostra ao lado o dia da volta que a nota lê', async()=>{
+  let html='';
+  const elemento=()=>({textContent:'',hidden:false,disabled:false,value:'',classList:{toggle(){},add(){}},querySelector:()=>null,focus(){},scrollIntoView(){}});
+  const els={};
+  const os={id:'c1',numero:'90201',rev:1,tipo:'externo',cliente:'Cliente fictício',valorTotal:8500,equipe:['100001'],veiculo:'Carro fictício',finalizadaEm:'2026-09-30T21:00:00Z',horaRetorno:'00:40',retornoEm:'2026-10-01T00:40:00',
+    itens:[{uid:'a',item:'1',descricao:'Painel fictício A',qtde:'4',subtotal:'5000'}]};
+  const c={console,crypto:{randomUUID:()=>'nova-0001'},STATE:{user:{papel:'pcp'}},OPERACAO:O,esc:s=>String(s??'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])),
+    perfPodeEditar:()=>true,toast:()=>{},perfConfig:()=>({equipes:[]}),perfRegrasFonte:()=>({versoes:[]}),diaEntrega:()=>'2026-09-30',dinheiroCasa:n=>'R$ '+n,
+    STORE:{getQueue:()=>[],api:async()=>({os,valor:8500,fechados:[],inteira:null})},
+    ALOCUI:{iniciar(){},montar(){},repintar(){},estado:()=>({}),bloqueio:()=>'',esquecer(){},definirDataEntrega(){}},
+    DIVISAO:D,perfDialog:(t,h)=>{html=h;return {open:true,querySelector:sel=>els[sel]||(els[sel]=elemento()),querySelectorAll:()=>[],addEventListener(){},close(){}};}};
+  vm.createContext(c);
+  for(const f of ['entrega-item.js','conferencia-entrega.js'])vm.runInContext(ler(f).replace(/^const (ENTREGA_ITEM|CONFERENCIA_ENTREGA) =/m,'var $1 ='),c);
+  vm.runInContext(ler('conferencia-entrega-ui.js'),c);
+  await c.conferirItensEntrega('c1','');
+  assert.equal(html.match(/id="conf-data" type="date" value="([^"]*)"/)[1],'2026-09-30','caso ruim: propunha 01/10 (a volta) e o serviço de setembro ia para outubro');
+  assert.match(html,/Volta do carro desta entrega: 01\/10\/2026 · Carro fictício/);
+  // E o casamento no servidor usa o dia da volta: a entrega de 30/09 lê a viagem de 01/10.
+  assert.equal(C.voltaDaEntrega(os,'2026-09-30',['100001']).dia,'2026-10-01');
+});
+
+test('revisão volta: U5, o carro com nome repetido no Ativos tem opções distintas (pela placa), com o aviso, e a escolha grava o carro escolhido', ()=>{
+  const s=ler('casa.js');
+  const ativos=[{id:'ativo-8',nome:'Furgão repetido fictício',placa:'TST0A08'},{id:'ativo-9',nome:'Furgão repetido fictício',placa:'TST0A09'},{id:'ativo-7',nome:'Carro fictício',placa:'TST0A07'}];
+  const ctx={elencoRH:()=>({veiculos:ativos}),OPERACAO:O,STORE:{getCFG:()=>({})},esc:x=>String(x??'')};vm.createContext(ctx);
+  vm.runInContext(s.slice(s.indexOf('function veiculosRH()'),s.indexOf('function',s.indexOf('function definirVeiculoId(')+10)),ctx);
+  const iniOpcoes=s.indexOf("const VALOR_ATIVO = 'ativo:';")>=0?s.indexOf("const VALOR_ATIVO = 'ativo:';"):s.indexOf('function optionsVeiculoCasa(');
+  vm.runInContext(s.slice(iniOpcoes,s.indexOf('// Aviso quando a pessoa escalada está de férias')),ctx);
+  const html=ctx.optionsVeiculoCasa('Furgão repetido fictício','ativo-9');
+  const valores=[...html.matchAll(/<option value="([^"]*)"/g)].map(m=>m[1]);
+  assert.equal(new Set(valores).size,valores.length,'caso ruim: as duas opções tinham o mesmo valor (o nome)');
+  assert.ok(valores.includes('ativo:ativo-8')&&valores.includes('ativo:ativo-9'));
+  assert.match(html,/value="ativo:ativo-9" selected>Furgão repetido fictício · TST0A09 · nome repetido no Ativos/);
+  assert.doesNotMatch(html,/value="ativo:ativo-8" selected/);
+  const o=ctx.aplicarVeiculoEscolhido({},'ativo:ativo-9');
+  assert.equal(o.veiculo,'Furgão repetido fictício');assert.equal(o.veiculoId,'ativo-9');
+  // O nome único continua pelo nome, com o id.
+  assert.equal(ctx.aplicarVeiculoEscolhido({},'Carro fictício').veiculoId,'ativo-7');
+  // A O.S. antiga só com o nome repetido: a opção pede a placa.
+  assert.match(ctx.optionsVeiculoCasa('Furgão repetido fictício',''),/selected>Furgão repetido fictício · escolha a placa \(nome repetido no Ativos\)/);
+});

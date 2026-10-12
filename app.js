@@ -3506,7 +3506,7 @@ function blocoAgenda(os, ro, done) {
         <div class="field"><label>Duração (dias)</label><input type="number" min="1" data-f="instalacao.duracaoDias" value="${esc(inst.duracaoDias || 1)}"></div>
         <div class="field"><label>Responsável pelo agendamento</label>${chipsField('responsavelAgenda', os.responsavelAgenda || [], cfg.responsaveis, ro)}</div>
         <div class="field"><label>Veículo</label>
-          <select data-f="veiculo"><option value=""></option>${veiculoOptionsFicha(os.veiculo, cfg)}</select>
+          <select data-f="veiculo"><option value=""></option>${veiculoOptionsFicha(os.veiculo, cfg, os.veiculoId)}</select>
         </div>
       </div>
       <div class="field aloc-campo">
@@ -3892,6 +3892,25 @@ const VOLTA_ROTULO = {
 };
 // Rótulo curto dos selos (fila, diálogo, ficha e Lançar entrega).
 const VOLTA_CURTO = { carroLimpo: 'limpo', carroArrumado: 'arrumado', equipamentosOk: 'equipamentos', semAvaria: 'sem avaria' };
+/* O DIA CORRIGIDO DA MESMA VIAGEM NA TELA (revisão da onda volta, U2): a
+   mesma régua do servidor (CONFERENCIA_ENTREGA.movimentoDaViagem): quando a
+   mudança do rascunho troca o dia da volta sem ser viagem nova, a conferência
+   e a limpeza da viagem do dia antigo passam ao dia novo, com a observação e
+   as fotos (o servidor faz o mesmo e guarda a correção no diário). Viagem
+   nova, ou conferência de outra viagem, ficam como estão. */
+function acompanharDiaDaViagem(nova, gravada) {
+  if (!nova || !gravada || typeof CONFERENCIA_ENTREGA === 'undefined' || !CONFERENCIA_ENTREGA || typeof CONFERENCIA_ENTREGA.movimentoDaViagem !== 'function') return nova;
+  const mov = CONFERENCIA_ENTREGA.movimentoDaViagem(gravada, nova);
+  if (!mov || mov.nova) return nova;
+  for (const [campo, deDia] of [['retornoConf', CONFERENCIA_ENTREGA.confDaViagemDoDia], ['voltaEquipe', CONFERENCIA_ENTREGA.declaracaoDaViagemDoDia]]) {
+    const c = nova[campo];
+    if (!c || typeof c !== 'object' || Array.isArray(c)) continue;
+    const dc = String(c.dia ?? '').trim();
+    if (dc === mov.para) continue;
+    if (dc ? dc === mov.de : !!deDia(gravada, mov.de)) nova[campo] = {...c, dia: mov.para};
+  }
+  return nova;
+}
 const voltaGestao = () => ['admin', 'pcp'].includes(STATE.user && STATE.user.papel) && (typeof podeEditar !== 'function' || podeEditar());
 function conferenciaVoltaHTML(os, ro) {
   if (!os || isInterno(os)) return '';
@@ -3914,7 +3933,8 @@ function conferenciaVoltaHTML(os, ro) {
   return `<div class="conf-volta ${trava ? '' : 'lock-allow'}">
       <div class="conf-volta-titulo">🔎 Conferência da volta <small>${gestao ? 'feita pela gestão · conta na nota de cada instalador' : 'feita pela gestão'}</small></div>
       ${gestao && !trava ? '<p class="conf-volta-dica">Mais rápido pela fila PCP › Volta do carro: uma conferência vale para todas as O.S. da mesma volta. Responda sim ou não: em branco não conta como OK.</p>' : ''}
-      ${voltaEquipeHTML(os.voltaEquipe, { fotos: true })}
+      ${viagensDaOSHTML(os)}
+      ${voltaEquipeHTML(OPERACAO.declaracaoDaViagem(os), { fotos: true })}
       <div class="conf-volta-grade">
         ${OPERACAO.PERGUNTAS_VOLTA.map(k => `<div class="field"><label>${esc(VOLTA_ROTULO[k])}</label>${op(k, OPERACAO.respostaVolta(c[k]))}</div>`).join('')}
       </div>
@@ -3956,6 +3976,38 @@ function voltaEquipeDaVolta(g, fotos) {
   const parte = g.equipeDisse === 'parte' ? `${g.os.length - g.semDeclaracao.length} de ${g.os.length} O.S.` : '';
   return voltaEquipeHTML(g.declaracao, { fotos, veiculo: g.veiculo, parte });
 }
+/* TODAS AS VIAGENS DA O.S. (revisão da onda volta, U3): a ficha, o Lançar, a
+   fila e o lote mostravam só a viagem de hoje, e a conferência da primeira
+   sumia da tela quando a O.S. ganhava outra viagem. Aqui vai cada viagem (o
+   dia, o carro, a equipe, a conferência da gestão com a observação, e a
+   limpeza que a equipe registrou), e a de hoje diz que é a que está sendo
+   conferida. Só aparece quando a O.S. tem mais de uma viagem. */
+function voltaRespostasHTML(c) {
+  if (!OPERACAO.voltaRespondida(c)) return '<span class="volta-pendente">Não conferida</span>';
+  const item = k => { const r = OPERACAO.respostaVolta(c[k]); return `<span class="volta-resp ${r === 'sim' ? 'ok' : r === 'nao' ? 'ruim' : ''}">${r === 'sim' ? '✓' : r === 'nao' ? '✗' : '·'} ${VOLTA_CURTO[k]}</span>`; };
+  const quando = c.em && Number.isFinite(Date.parse(c.em)) ? new Date(c.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  return `${OPERACAO.PERGUNTAS_VOLTA.map(item).join('')}${c.obs ? `<span class="volta-obs">“${esc(c.obs)}”</span>` : ''}${Array.isArray(c.fotos) && c.fotos.length ? `<span class="volta-por">📷 ${c.fotos.length}</span>` : ''}${c.por || quando ? `<span class="volta-por">${esc(c.por || '')}${quando ? ' · ' + esc(quando) : ''}</span>` : ''}`;
+}
+function viagensDaOSHTML(os, opt = {}) {
+  const vs = typeof OPERACAO.viagensDaOS === 'function' ? OPERACAO.viagensDaOS(os) : [];
+  if (vs.length < 2) return '';
+  const atual = vs.find(v => v.atual);
+  const li = v => `<li class="viagem-os${v.atual ? ' atual' : ''}">
+      <div class="viagem-os-topo"><strong>${esc(fmtInstalacao({ data: v.dia }))}</strong><span>🚗 ${esc(v.veiculo || 'carro não informado')}</span><span>👷 ${esc(v.equipe.join(', ') || 'sem equipe')}</span>${v.atual ? `<span class="badge viagem-os-esta">${opt.semConferir ? 'viagem de hoje' : 'esta é a que está sendo conferida'}</span>` : '<span class="badge viagem-os-outra">outra viagem</span>'}</div>
+      <div class="volta-linha-resp">${voltaRespostasHTML(v.retornoConf || {})}</div>
+      ${v.voltaEquipe ? voltaEquipeHTML(v.voltaEquipe) : ''}
+    </li>`;
+  return `<div class="viagens-os-bloco"><div class="viagens-os-titulo">Viagens desta O.S. (${vs.length})${atual && !opt.semConferir ? ` · a conferência ${opt.abaixo === false ? '' : 'abaixo '}é da viagem de ${esc(fmtInstalacao({ data: atual.dia }))}` : ''}</div><ul class="viagens-os">${vs.map(li).join('')}</ul></div>`;
+}
+// A linha do cartão da fila: as outras viagens das O.S. desta volta (U3).
+function outrasViagensDaVolta(g) {
+  const linhas = [];
+  for (const o of g.os) for (const v of (typeof OPERACAO.viagensDaOS === 'function' ? OPERACAO.viagensDaOS(o) : [])) {
+    if (v.atual || v.dia === g.dia) continue;
+    linhas.push(`O.S ${esc(o.numero || '—')} teve outra viagem em ${esc(fmtInstalacao({ data: v.dia }))} (${OPERACAO.voltaConferidaParaNota(v.retornoConf) ? 'conferida' : OPERACAO.voltaRespondida(v.retornoConf) ? 'conferida em parte' : 'não conferida'})`);
+  }
+  return linhas.length ? `<div class="volta-linha-resp volta-outras">${linhas.map(t => `<span class="volta-por">↺ ${t}</span>`).join('')}</div>` : '';
+}
 
 /* ══ FILA "VOLTA DO CARRO" (PCP) ══════════════════════════════════════════
    A volta é o dia + o carro + a equipe (OPERACAO.voltasDoCarro): a equipe que
@@ -3970,10 +4022,16 @@ function voltaEstado() {
 function voltasDoRecorte() {
   const est = voltaEstado();
   const hoje = hojeISO();
-  const todas = OPERACAO.voltasDoCarro(STORE.getAllOS(), OPERACAO.somarDias(hoje, 1 - est.dias), hoje);
+  const de = OPERACAO.somarDias(hoje, 1 - est.dias);
+  /* AS VIAGENS ANTERIORES (revisão da onda volta, U3): a O.S. que ganhou outra
+     viagem sumia da fila com a primeira. Elas entram em "Todas" e, as
+     conferidas, em "Conferidas", só para ver (a conferência da gestão é a da
+     viagem de hoje); "A conferir" fica só com as que dá para conferir. */
+  const anteriores = typeof OPERACAO.voltasAnteriores === 'function' ? OPERACAO.voltasAnteriores(STORE.getAllOS(), de, hoje) : [];
+  const todas = [...OPERACAO.voltasDoCarro(STORE.getAllOS(), de, hoje), ...anteriores];
   const q = String(STATE.filtroBusca || '').trim();
   const casa = q ? todas.filter(g => applyFilter(g.os, q).length || normNome(`${g.veiculo} ${g.equipe.join(' ')}`).includes(normNome(q))) : todas;
-  return { todas: casa, lista: est.filtro === 'todas' ? casa : casa.filter(g => est.filtro === 'conferida' ? g.situacao === 'conferida' : g.situacao !== 'conferida') };
+  return { todas: casa, lista: est.filtro === 'todas' ? casa : casa.filter(g => est.filtro === 'conferida' ? g.situacao === 'conferida' : g.situacao !== 'conferida' && !g.anterior) };
 }
 function voltaResumoHTML(g) {
   if (g.situacao === 'conferir') return '<span class="volta-pendente">Ainda não conferida</span>';
@@ -3991,13 +4049,26 @@ function voltaResumoHTML(g) {
 function voltasHTML() {
   const est = voltaEstado();
   const { todas, lista } = voltasDoRecorte();
-  const n = f => todas.filter(g => f === 'todas' ? true : f === 'conferida' ? g.situacao === 'conferida' : g.situacao !== 'conferida').length;
+  const n = f => todas.filter(g => f === 'todas' ? true : f === 'conferida' ? g.situacao === 'conferida' : g.situacao !== 'conferida' && !g.anterior).length;
   const chips = [['conferir', 'A conferir'], ['conferida', 'Conferidas'], ['todas', 'Todas']]
     .map(([k, r]) => `<button class="pcp-chip ${est.filtro === k ? 'active' : ''}" aria-pressed="${est.filtro === k}" data-volta-filtro="${k}">${r} <span class="pcp-chip-n">${n(k)}</span></button>`).join('');
   const dias = VOLTA_DIAS.map(d => `<option value="${d}" ${est.dias === d ? 'selected' : ''}>Últimos ${d} dias</option>`).join('');
   const gestao = voltaGestao();
   const cards = lista.map(g => {
     const dia = fmtInstalacao({ data: g.dia });
+    // A viagem anterior de uma O.S. que já tem outra (U3): só para ver, sem o botão de conferir.
+    if (g.anterior) return `<article class="volta-card st-${g.situacao} volta-anterior">
+      <div class="volta-topo">
+        <strong>${esc(dia)}</strong>
+        <span>🚗 ${esc(g.veiculo || 'carro não informado')}</span>
+        <span>👷 ${esc(g.equipe.join(', '))}</span>
+        <span class="badge volta-badge-anterior">Viagem anterior · ${g.situacao === 'conferida' ? 'conferida' : g.situacao === 'parcial' ? 'em parte' : 'não conferida'}</span>
+      </div>
+      <div class="volta-os">${g.os.map(o => `<button class="inline-link" data-volta-os="${esc(o.id)}">O.S ${esc(o.numero || '—')}</button> <span class="text-muted">${esc(o.cliente || '')}</span>`).join('<br>')}</div>
+      <div class="volta-linha-resp volta-linha-eq">${voltaEquipeDaVolta(g, false)}</div>
+      <div class="volta-linha-resp">${g.respostas ? voltaRespostasHTML(g.respostas) : `<span class="volta-pendente">${g.situacao === 'conferir' ? 'Não conferida' : 'As O.S. desta viagem têm respostas diferentes'}</span>`}</div>
+      <p class="volta-por volta-anterior-nota">Esta O.S. já tem outra viagem depois desta: a conferência da gestão vale para a viagem de hoje, e esta fica como foi.</p>
+    </article>`;
     return `<article class="volta-card st-${g.situacao}">
       <div class="volta-topo">
         <strong>${esc(dia)}</strong>
@@ -4008,6 +4079,7 @@ function voltasHTML() {
       <div class="volta-os">${g.os.map(o => `<button class="inline-link" data-volta-os="${esc(o.id)}">O.S ${esc(o.numero || '—')}</button> <span class="text-muted">${esc(o.cliente || '')}</span>`).join('<br>')}</div>
       <div class="volta-linha-resp volta-linha-eq">${voltaEquipeDaVolta(g, false)}</div>
       <div class="volta-linha-resp">${voltaResumoHTML(g)}</div>
+      ${outrasViagensDaVolta(g)}
       ${gestao ? `<button class="${g.situacao === 'conferida' ? 'btn-ghost' : 'btn-primary'} btn-sm volta-acao" data-volta-conferir="${esc(g.chave)}">${g.situacao === 'conferida' ? 'Rever' : 'Conferir a volta'}</button>` : ''}
     </article>`;
   }).join('');
@@ -4062,6 +4134,7 @@ function abrirConferenciaVolta(g) {
   const desenhar = () => {
     d.innerHTML = `<div class="perf-dialog-head"><h2>Volta do carro · ${esc(fmtInstalacao({ data: g.dia }))}</h2><button type="button" class="btn-ghost" data-volta-fechar aria-label="Fechar">✕</button></div>
       <p class="volta-dialog-sub">🚗 ${esc(g.veiculo || 'carro não informado')} · 👷 ${esc(g.equipe.join(', '))} · ${g.os.length === 1 ? 'O.S ' + esc(g.os[0].numero || '') : g.os.length + ' O.S: ' + esc(g.os.map(o => o.numero).join(', '))}</p>
+      ${g.os.map(o => viagensDaOSHTML(o)).filter(Boolean).length ? `<p class="volta-dialog-sub"><strong>Esta conferência é da viagem de ${esc(fmtInstalacao({ data: g.dia }))}.</strong></p>${g.os.map(o => { const h = viagensDaOSHTML(o, { abaixo: false }); return h ? `<div class="volta-viagens-os"><small class="text-muted">O.S ${esc(o.numero || '—')}</small>${h}</div>` : ''; }).join('')}` : ''}
       <div class="eq-registrou-bloco"><div class="eq-registrou-titulo">O que a equipe registrou (não conta na nota)</div>${voltaEquipeDaVolta(g, true)}</div>
       ${g.situacao !== 'conferir' && !g.respostas ? '<p class="volta-aviso">As O.S. desta volta tinham respostas diferentes (ou só parte foi conferida). Salvar põe a mesma resposta em todas.</p>' : ''}
       ${OPERACAO.PERGUNTAS_VOLTA.map(k => `<div class="volta-pergunta"><span>${esc(VOLTA_ROTULO[k])}</span>
@@ -4481,11 +4554,11 @@ function initPicker() {
 /* Veículo da ficha com a mesma fonte da Agenda (Ativos do RH + Configurações).
    O carro escolhido pela Agenda que só existe nos Ativos aparecia em branco
    aqui, como se ninguém tivesse escolhido. Valor fora das listas fica marcado. */
-function veiculoOptionsFicha(atual, cfg) {
+function veiculoOptionsFicha(atual, cfg, idAtual = '') {
   const doCfg = (cfg.veiculos || []);
   const doRH = typeof veiculosRH === 'function' ? (veiculosRH() || []).map(v => v.nome) : [];
   const base = typeof optionsVeiculoCasa === 'function'
-    ? optionsVeiculoCasa(atual)
+    ? optionsVeiculoCasa(atual, idAtual)
     : doCfg.map(v => `<option ${atual === v ? 'selected' : ''}>${esc(v)}</option>`).join('');
   const fora = atual && !doCfg.includes(atual) && !doRH.includes(atual) && !OPERACAO.semCarro({ veiculo: atual });
   return (fora ? `<option value="${esc(atual)}" selected>${esc(atual)}</option>` : '') + base;
@@ -4621,11 +4694,16 @@ function bindModalEvents(os, ro) {
           (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v))) registrarRemarcacao(_modalDraft, v);
       const confAntes = _modalDraft.confirmacao, carroAntes = !!_modalDraft.carroLiberado;
       /* A conferência de outra viagem (onda volta): mexer nela começa a desta
-         viagem do zero, com o dia dela; a outra fica guardada pelo servidor. */
-      if (/^retornoConf\./.test(el.dataset.f) && _modalDraft.retornoConf && !OPERACAO.confDaViagem(_modalDraft)) _modalDraft.retornoConf = {dia: OPERACAO.diaDaVolta(_modalDraft)};
+         viagem a partir do que a viagem guardou (ou do zero), com o dia dela;
+         a outra fica guardada pelo servidor. */
+      if (/^retornoConf\./.test(el.dataset.f) && _modalDraft.retornoConf) {
+        const daViagem = OPERACAO.confDaViagem(_modalDraft);
+        if (daViagem !== _modalDraft.retornoConf) _modalDraft.retornoConf = {...(daViagem ? JSON.parse(JSON.stringify(daViagem)) : {}), dia: OPERACAO.diaDaVolta(_modalDraft)};
+      }
       setField(el.dataset.f, v);
-      // O carro escolhido na lista do Ativos leva o id dele (item 16).
-      if (el.dataset.f === 'veiculo' && typeof definirVeiculoId === 'function') definirVeiculoId(_modalDraft);
+      // O carro escolhido na lista do Ativos leva o id dele (item 16); o de nome repetido vem pelo id (U5).
+      if (el.dataset.f === 'veiculo' && typeof aplicarVeiculoEscolhido === 'function') aplicarVeiculoEscolhido(_modalDraft, v);
+      else if (el.dataset.f === 'veiculo' && typeof definirVeiculoId === 'function') definirVeiculoId(_modalDraft);
       // "Abrir Zap" e "Ver no Mapa" seguem o que está digitado, sem repintar a
       // ficha (o teclado não cai). Antes abriam o número e o endereço antigos.
       if (el.dataset.f === 'whatsapp' || el.dataset.f === 'endereco') {
@@ -4659,6 +4737,8 @@ function bindModalEvents(os, ro) {
       // Hora de saída/retorno sem dia não reconstrói o passado (carimbarMomento).
       if (el.dataset.f === 'horaSaida')   STORE.carimbarMomento(_modalDraft, 'horaSaida', 'saidaEm');
       if (el.dataset.f === 'horaRetorno') STORE.carimbarMomento(_modalDraft, 'horaRetorno', 'retornoEm');
+      // O dia corrigido da MESMA viagem leva a conferência e a limpeza junto (revisão da onda volta, U2).
+      acompanharDiaDaViagem(_modalDraft, STORE.getOS(_modalDraft.id));
       // A conferência da volta leva o nome de quem conferiu e quando — é
       // avaliação de pessoa, e avaliação sem autor não se sustenta. Só a
       // RESPOSTA carimba: anotar a observação depois não troca quem conferiu, e

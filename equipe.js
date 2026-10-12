@@ -1739,7 +1739,10 @@ function horaCurta(iso) {
 }
 const numerosDaVolta = g => g.os.map(o => o.numero || 's/n').join(', ');
 // Só hoje e ontem (registrar o carro de três dias atrás seria prova falsa) e
-// só volta que o PCP ainda não conferiu.
+// só volta que o PCP ainda não conferiu. A conferência e a limpeza são da
+// VIAGEM (revisão da onda volta, U1): a da primeira viagem não vale para a
+// segunda, e o cartão, o salvar e o servidor dizem o mesmo
+// (OPERACAO.confDaViagemDoDia e OPERACAO.declaracaoDaViagem).
 function limpezasPendentes(lista = minhasOS()) {
   if (EQ.comercial) return [];
   const hoje = OPERACAO.dia(new Date());
@@ -1789,7 +1792,8 @@ function limpezaLinhaHTML(os) {
   const g = OPERACAO.voltasDoCarro(lista).find(x => x.os.some(o => o.id === os.id));
   if (!g) return '';
   const ontem = OPERACAO.somarDias(OPERACAO.dia(new Date()), -1);
-  const ve = os.voltaEquipe;
+  // A limpeza desta viagem (U1): a de outra viagem não aparece como registrada.
+  const ve = OPERACAO.declaracaoDaViagem(os, g.dia);
   let txt, botao = '';
   if (g.situacao !== 'conferir') txt = '🧽 O PCP já conferiu esta volta.';
   else if (OPERACAO.voltaRespondida(ve)) txt = `🧽 Limpeza do carro registrada${horaCurta(ve.em) ? ' às ' + horaCurta(ve.em) : ''}${ve.por ? ' por ' + esc(ve.por) : ''}.`;
@@ -1928,7 +1932,8 @@ function salvarLimpezaCarro(g, est) {
   const agora = nowISO(); let n = 0;
   for (const o of g.os) {
     const os = STORE.getOS(o.id);
-    if (!os || OPERACAO.voltaRespondida(os.retornoConf)) continue;   // PCP já conferiu: não mexe
+    // PCP já conferiu ESTA viagem: não mexe. A conferência de outra viagem não trava (U1: a equipe ficava em laço).
+    if (!os || OPERACAO.voltaRespondida(OPERACAO.confDaViagemDoDia(os, g.dia))) continue;
     os.voltaEquipe = {
       ...Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, est.resp[k]])),
       obs: String(est.obs || '').trim().slice(0, 300), fotos: est.fotos.slice(0, LIMPEZA_MAX_FOTOS),

@@ -809,13 +809,20 @@ function aplicarLancamento(os, e = {}) {
   } else if (Array.isArray(e.pessoas)) nova.equipe = e.pessoas.slice();
   // A conferência da volta: só o que mudou recarimba (quem e quando).
   const resp = v => (v === 'sim' || v === 'nao') ? v : '';
+  /* O LANÇAR COM A DATA DO SERVIÇO É A MESMA VIAGEM (revisão da onda volta,
+     U2): a data da entrega diferente da baixa do ERP muda o dia da volta sem
+     ser viagem nova. A conferência gravada (com a observação e as fotos) e a
+     limpeza da equipe passam ao dia novo; antes, o Lançar gravava por cima
+     uma conferência sem a observação e sem as fotos, e o servidor criava uma
+     viagem que não existiu. A mesma régua do servidor. */
+  if (typeof acompanharDiaDaViagem === 'function') acompanharDiaDaViagem(Object.assign(nova, {entregaLancada: {em, por, data}}), os);
   if (e.respostasVolta && typeof e.respostasVolta === 'object' && !OPERACAO.interno(nova)) {
     const respostas = Object.fromEntries(OPERACAO.PERGUNTAS_VOLTA.map(k => [k, resp(e.respostasVolta[k])]));
     /* A CONFERÊNCIA É DA VIAGEM (onda volta): a de outra viagem não é o ponto
        de partida; a desta vai com o dia dela, e o servidor carimba de novo. */
     const comLancamento = {...nova, entregaLancada: {em, por, data}};
     const daViagem = typeof OPERACAO.confDaViagem === 'function' ? OPERACAO.confDaViagem(comLancamento) : nova.retornoConf;
-    const outraViagem = !!nova.retornoConf && !daViagem;
+    const outraViagem = !!nova.retornoConf && daViagem !== nova.retornoConf;
     const antes = daViagem || {};
     if (OPERACAO.PERGUNTAS_VOLTA.some(k => respostas[k] !== resp(antes[k])) || (outraViagem && OPERACAO.voltaRespondida(respostas))) {
       const respondeu = OPERACAO.voltaRespondida(respostas);
@@ -894,9 +901,14 @@ function lancarEntregaManual(osId) {
   /* O QUE A EQUIPE REGISTROU no espelho (voltaEquipe): aparece ao lado, para
      o PCP comparar. Os selects acima continuam saindo de retornoConf, nunca
      daqui: a declaração da equipe não responde pela conferência nem conta na nota. */
+  // A limpeza desta viagem (revisão da onda volta, U1): a de outra viagem não aparece aqui.
+  const declViagem = typeof OPERACAO.declaracaoDaViagem === 'function' ? OPERACAO.declaracaoDaViagem(os) : os.voltaEquipe;
   const equipeRegistrou = OPERACAO.interno(os) ? ''
-    : OPERACAO.voltaRespondida(os.voltaEquipe) ? voltaEquipeHTML(os.voltaEquipe, { fotos: true })
+    : OPERACAO.voltaRespondida(declViagem) ? voltaEquipeHTML(declViagem, { fotos: true })
     : '<p class="text-muted" style="font-size:.8rem">A equipe não registrou a limpeza desta volta.</p>';
+  /* TODAS AS VIAGENS DA O.S. (U3): com mais de uma, a lista diz qual é a
+     conferida aqui (a viagem de hoje da O.S.). */
+  const viagens = !OPERACAO.interno(os) && typeof viagensDaOSHTML === 'function' ? viagensDaOSHTML(os, gestao ? {} : {semConferir: true}) : '';
   /* O dia que o Lançar cita é o da entrega que o ERP baixou (diaDaBaixaERP,
      revisão da E7), e não o dia em que a baixa rodou. O que ele PROPÕE é o
      do Fechar o dia (sugestaoDaBaixaERP, junção da v142): a data da E7; na
@@ -915,6 +927,7 @@ function lancarEntregaManual(osId) {
         <form id="lancar-form" class="retrab-form">
           <div class="field"><label>Data da entrega <span class="req">*</span></label><input name="data" type="date" required value="${esc(diaProposto || hojeISO())}">${origemTxt ? `<small class="text-muted lancar-data-origem" id="lancar-data-origem">${esc(origemTxt[0].toUpperCase() + origemTxt.slice(1))}.</small>` : ''}</div>
           <div class="field"><label>Equipe que instalou</label>${componente ? '<div class="aloc-host" id="lancar-aloc"></div>' : `<div class="casa-chips">${chipsEquipe}</div>`}</div>
+          ${viagens}
           ${equipeRegistrou}
           ${conferencia}
           <button class="btn-primary w-100" type="submit">Continuar → pergunta do retrabalho</button>
@@ -4298,13 +4311,44 @@ function optionsEquipeCasa(selecionado) {
   return `${gravado}${pcp ? `<optgroup label="Instalação (PCP)">${pcp}</optgroup>` : ''}
     ${rh}`;
 }
-function optionsVeiculoCasa(selecionado) {
-  const doAtivos = veiculosRH();
+/* O CARRO COM NOME REPETIDO NO ATIVOS (revisão da onda volta, U5; já na
+   v167): as duas opções tinham o mesmo valor (o nome), e a tela trocava a
+   placa escolhida pela primeira. Agora o carro de nome repetido tem o valor
+   pelo id ('ativo:' + id), mostra a placa e o aviso de nome repetido, e a
+   escolha grava o nome e o id daquele carro (aplicarVeiculoEscolhido). O
+   carro de nome único continua com o valor pelo nome, como sempre. */
+const VALOR_ATIVO = 'ativo:';
+function nomesRepetidosAtivos() {
+  const cont = new Map();
+  for (const v of veiculosRH()) { const n = String(v && v.nome || '').trim(); if (n) cont.set(n, (cont.get(n) || 0) + 1); }
+  return new Set([...cont].filter(([, n]) => n > 1).map(([k]) => k));
+}
+function aplicarVeiculoEscolhido(os, valor) {
+  if (!os || typeof os !== 'object') return os;
+  const v = String(valor || '');
+  if (v.startsWith(VALOR_ATIVO)) {
+    const id = v.slice(VALOR_ATIVO.length), a = veiculosRH().find(x => String(x && x.id) === id);
+    if (a) { os.veiculo = String(a.nome || '').trim(); os.veiculoId = String(a.id); return os; }
+  }
+  os.veiculo = v;
+  return definirVeiculoId(os);
+}
+function optionsVeiculoCasa(selecionado, idSelecionado = '') {
+  const doAtivos = veiculosRH(), repetidos = nomesRepetidosAtivos(), idSel = String(idSelecionado || '').trim();
   /* SEM CARRO (pedido do Léo, 29/09/2026): "tem vezes que não precisa de
      carro". Primeira opção da lista; ver OPERACAO.SEM_CARRO. */
   const semCarro = `<optgroup label="Sem carro"><option value="${esc(OPERACAO.SEM_CARRO)}" ${OPERACAO.semCarro({ veiculo: selecionado }) ? 'selected' : ''}>🏠 ${esc(OPERACAO.SEM_CARRO)} (sem carro)</option></optgroup>`;
   const doCfg = (STORE.getCFG().veiculos || []).filter(v => !doAtivos.some(x => x.nome===v || OPERACAO.veiculoConfirmado(v).id===String(x.id)));
-  return `${semCarro}${doAtivos.map(v => `<option value="${esc(v.nome)}" ${v.nome === selecionado || OPERACAO.veiculoConfirmado(selecionado).id===String(v.id) ? 'selected' : ''}>${esc(v.nome)}${v.lugares ? ` · ${v.lugares} lugares` : ''}${v.placa ? ` · ${v.placa}` : ''}</option>`).join('')}
+  const nomeSel = String(selecionado || '').trim();
+  // O nome repetido sem o id na O.S. (programada antes): fica marcado, pedindo a placa.
+  const semPlaca = repetidos.has(nomeSel) && !doAtivos.some(v => String(v.id) === idSel)
+    ? `<option value="${esc(selecionado)}" selected>${esc(selecionado)} · escolha a placa (nome repetido no Ativos)</option>` : '';
+  const opcao = v => {
+    const rep = repetidos.has(String(v.nome || '').trim());
+    const sel = rep ? String(v.id) === idSel : (v.nome === selecionado || OPERACAO.veiculoConfirmado(selecionado).id===String(v.id));
+    return `<option value="${esc(rep ? VALOR_ATIVO + v.id : v.nome)}" ${sel ? 'selected' : ''}>${esc(v.nome)}${v.lugares ? ` · ${v.lugares} lugares` : ''}${v.placa ? ` · ${v.placa}` : ''}${rep ? ' · nome repetido no Ativos' : ''}</option>`;
+  };
+  return `${semCarro}${semPlaca}${doAtivos.map(opcao).join('')}
     ${doCfg.length ? `<optgroup label="Só no PCP (cadastrar no Ativos)">${doCfg.map(v => `<option value="${esc(v)}" ${v === selecionado ? 'selected' : ''}>${esc(v)}</option>`).join('')}</optgroup>` : ''}`;
 }
 // Aviso quando a pessoa escalada está de férias/atestado no dia. Sem acesso à
@@ -4746,7 +4790,7 @@ function wireAddOSCasa(el, id, dia, aoGravar) {
         else if (r.divisaoFica) avisos.push('A equipe mudou: a divisão desta O.S. (líder e percentuais) fica para a gestão refazer.');
       }
     } else if (!componente && equipe.length) os.equipe = [...equipe, ...semChip];
-    const veiculo = String(fd.get('veiculo') || ''); if (veiculo) { os.veiculo = veiculo; definirVeiculoId(os); }
+    const veiculo = String(fd.get('veiculo') || ''); if (veiculo) aplicarVeiculoEscolhido(os, veiculo);
     // Programou a data: o período "parado no cliente" termina aqui, guardado no log.
     if (os.paradoClienteEm) OPERACAO.fecharParadoPorAgenda(os, agendaAntes, new Date().toISOString(), (STATE.user && STATE.user.nome) || '');
     os.atualizadoEm = new Date().toISOString();
