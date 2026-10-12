@@ -5782,12 +5782,18 @@ function statusEntregaFichaHTML(os) {
   if (podeCancelarOS() && c && c.origem === 'manual') acao = '<button type="button" class="btn-ghost btn-sm st-ent-btn" id="btn-desfazer-cancelamento">↩ Desfazer cancelamento</button>';
   else if (podeCancelarOS() && !c) acao = '<button type="button" class="btn-ghost btn-sm st-ent-btn st-ent-cancelar" id="btn-cancelar-os">Cancelar O.S.</button>';
   const erp = c && c.origem === 'erp' ? '<p class="st-ent-hist">Cancelada no ERP: ela só volta se for reaberta no ERP.</p>' : '';
+  /* TRABALHO REGISTRADO NUMA O.S. CANCELADA (C1 da auditoria de 12/10/2026):
+     a marca que o servidor põe quando a finalização ou o carro liberado
+     chegam (pela fila do celular) numa O.S. já cancelada. O trabalho ficou
+     gravado; a gestão decide se a O.S. continua cancelada. */
+  const tc = Array.isArray(os.trabalhoCancelada) ? os.trabalhoCancelada.filter(x => x && typeof x === 'object') : [];
+  const trabalhoCancelada = tc.length ? `<p class="st-ent-hist st-ent-trab-cancelada" role="note"><strong>Trabalho registrado numa O.S. cancelada:</strong> ${tc.slice(-3).map(x => `${esc((Array.isArray(x.oque) ? x.oque : []).map(q => q === 'finalizacao' ? 'finalização' : q === 'carro' ? 'carro liberado' : String(q)).join(' e ') || 'registro')}${x.por ? ' por ' + esc(x.por) : ''}${x.em ? ' em ' + esc(fmtDataBR(x.em)) : ''}`).join('; ')}. O que foi registrado ficou guardado; confira se a O.S. continua cancelada.</p>` : '';
   return `<section class="st-entrega lock-allow" aria-label="Status da entrega">
       <div class="st-ent-linha"><span class="st-ent-rot">Status da entrega</span>${seloStatusEntregaHTML(st)}</div>
       <p class="st-ent-motivo">${esc(motivoExibido.charAt(0).toUpperCase() + motivoExibido.slice(1))}.</p>
       ${outros ? `<ul class="st-ent-outros" aria-label="Também vale">${outros}</ul>` : ''}
       ${retornoFichaHTML(st.retornoAntecipado, st.motivo, st.perdas, !foraDoProgramaFicha(os))}
-      ${erp}${desfeito}
+      ${erp}${desfeito}${trabalhoCancelada}
       ${acao ? `<div class="st-ent-acoes">${acao}</div>` : ''}
       ${ocorrenciasFichaHTML(os, st)}
     </section>`;

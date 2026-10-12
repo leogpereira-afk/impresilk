@@ -1699,7 +1699,7 @@ Deno.serve(async (req: Request) => {
   const podarControle = (r:any) => {
     if(!r || gestaoVeTudo)return r;
     const limpo=(x:any):any=>Array.isArray(x)?x.map(limpo):x && typeof x==="object"?Object.fromEntries(Object.entries(x).filter(([k])=>!["porId","responsavelId"].includes(k)).map(([k,v])=>[k,limpo(v)])):x;
-    const out={...r};for(const campo of ["conferenciaERP","regularizacaoSaida","revisaoSolicitada","cicloRegistro"])if(out[campo])out[campo]=limpo(out[campo]);return out;
+    const out={...r};for(const campo of ["conferenciaERP","regularizacaoSaida","revisaoSolicitada","cicloRegistro","trabalhoCancelada"])if(out[campo])out[campo]=limpo(out[campo]);return out;
   };
   const saidaBase = (r: any) => ehToqueNoNome ? podarToque(r) : gestaoVeTudo ? r : podarCarimbosF15(podarAlocacao(r));
 
@@ -3318,6 +3318,31 @@ Deno.serve(async (req: Request) => {
           const gp = guardarFotosProva(os, existing, { gestao: !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp) });
           trocarOS(gp.os);
           if (!ehMaquina) avisosToque.push(...gp.avisos);
+        }
+        /* O TRABALHO NUMA O.S. CANCELADA (C1 da auditoria de 12/10/2026). A
+           gestão cancela a O.S. enquanto o celular está sem sinal; o celular
+           volta e manda a finalização ou o carro liberado pela fila. O
+           trabalho continua gravado (nunca se perde, nunca 4xx), mas antes
+           ninguém ficava sabendo. Agora a O.S. leva a marca
+           `trabalhoCancelada` (só o servidor escreve: o que o aparelho manda
+           nesse campo é ignorado; só cresce, até 20 linhas; quem e quando
+           carimbados aqui), a resposta traz o aviso (o celular mostra) e a
+           gestão vê a marca na ficha. */
+        {
+          if (existing && Array.isArray(existing.trabalhoCancelada)) os.trabalhoCancelada = existing.trabalhoCancelada; else delete os.trabalhoCancelada;
+          if (existing && !ehMaquina && cancelada(existing) && cancelada(os)) {
+            const oque = [...(!existing.finalizadaEm && os.finalizadaEm ? ["finalizacao"] : []), ...(existing.carroLiberado !== true && os.carroLiberado === true ? ["carro"] : [])];
+            if (oque.length) {
+              const autorC1 = await autorAuditoria();
+              const marca = { em: new Date().toISOString(), por: autorC1.nome, porId: autorC1.porId || "", oque };
+              os.trabalhoCancelada = [...(Array.isArray(existing.trabalhoCancelada) ? existing.trabalhoCancelada : []), marca].slice(-20);
+              const oqueTxt = oque.map((x: string) => x === "finalizacao" ? "a finalização" : "o carro liberado").join(" e ");
+              const gestaoC1 = !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
+              avisosToque.push(gestaoC1
+                ? `Trabalho registrado numa O.S. cancelada: ${oqueTxt} ficou gravado. Confira na ficha se a O.S. continua cancelada ou se o cancelamento deve ser desfeito.`
+                : `Esta O.S. foi cancelada enquanto você estava sem sinal; o que você registrou ficou guardado (${oqueTxt}). Fale com o PCP.`);
+            }
+          }
         }
         const executado = carimbarExecucao(os, existing, cracha?.nome || cracha?.sub || "Integração", new Date().toISOString());
         const autorCarimbo = carimbosQueMudaram(executado, existing).length ? await autorAuditoria() : { nome: "", login: "", porId: "" };
