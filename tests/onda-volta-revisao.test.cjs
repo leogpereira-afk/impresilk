@@ -443,3 +443,27 @@ test('revisão volta: D4, a O.S. selada inteira, reaberta e finalizada de novo s
   assert.match(faixa,/1 O\.S\. já entrou inteira no fechamento de outro período e não conta de novo aqui: O\.S\. 90201 \(fechamento de 01\/11\/2026 a 30\/11\/2026, revisão 1\)/);
   assert.ok(!/—/.test(faixa.replace(/<[^>]+>/g,'')),'sem travessão no texto');
 });
+
+/* V1 da verificação da correção (12/10/2026): a cópia velha de outra aba, de antes da
+   2ª viagem, que a gestão sobrescreve, era lida como "dia corrigido" e apagava a 2ª viagem
+   guardada e a conferência dela. Caso ruim primeiro. */
+test('revisão volta, verificação V1: a cópia velha com o retorno da 1ª viagem não apaga a 2ª viagem (nem a conferência dela)', async()=>{
+  const e=await edge('pcp-sync',banco([osBase('k1','91001')]));
+  relogio(e,'2026-10-05T21:00:00Z');
+  await gravar(e,'k1',{horaSaida:'08:00',saidaEm:'2026-10-05T08:00:00',horaRetorno:'18:00',retornoEm:'2026-10-05T18:00:00'},toque);
+  relogio(e,'2026-10-06T12:00:00Z');
+  await gravar(e,'k1',{retornoConf:{...SIM,obs:'conf A fictícia',fotos:['fA']}});
+  const velha=structuredClone(reg(e,'k1'));
+  relogio(e,'2026-10-20T21:00:00Z');
+  await gravar(e,'k1',{horaSaida:'08:00',saidaEm:'2026-10-20T08:00:00',horaRetorno:'18:00',retornoEm:'2026-10-20T18:00:00'},toque);
+  relogio(e,'2026-10-21T12:00:00Z');
+  await gravar(e,'k1',{retornoConf:{...SIM,carroLimpo:'nao',obs:'conf B fictícia',fotos:['fB'],dia:'2026-10-20'}});
+  const antes=structuredClone(reg(e,'k1').voltas);
+  // A aba velha sobrescreve (rev do servidor), mudando só a observação técnica.
+  relogio(e,'2026-10-22T12:00:00Z');
+  const r=await e.call({action:'upsert',os:{...velha,obsTecnicas:'Observação fictícia',rev:reg(e,'k1').rev}},gestor);
+  assert.equal(r.ok,true,JSON.stringify(r));
+  const g=reg(e,'k1');
+  assert.deepEqual(g.voltas.map(v=>v.dia),['2026-10-05','2026-10-20'],'a 2ª viagem sumiu das voltas');
+  assert.equal(g.voltas.find(v=>v.dia==='2026-10-05').retornoConf.obs,'conf A fictícia','a conferência da 1ª viagem foi trocada');
+});

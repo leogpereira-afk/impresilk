@@ -293,6 +293,11 @@ export const CONFERENCIA_ENTREGA = (() => {
     const ult = ultimaViagem(antes);
     const de = ult ? ult.dia : diaDaVolta(antes), para = diaDaVolta(depois);
     if (!de || !para || de === para) return null;
+    /* A cópia velha de outra aba (verificação da correção, V1): o dia "para" já é
+       de outra viagem guardada, ou anterior a ela. Não é correção da última
+       viagem (que apagaria a viagem de dia maior e a conferência dela): a
+       viagem guardada fica como está. */
+    if (para < de && (Array.isArray(antes.voltas) ? antes.voltas : []).some(r => viagemValida(r) && r.dia !== de && r.dia >= para)) return null;
     const rOld = textoV(ult ? ult.retornoEm : antes.retornoEm), rNew = textoV(depois.retornoEm), sNew = textoV(depois.saidaEm);
     const tOld = Date.parse(rOld), tNew = Date.parse(rNew), tSai = Date.parse(sNew);
     const saiuDepois = Number.isFinite(tSai) && (Number.isFinite(tOld) ? tSai > tOld : motor().diaSP(sNew) > de);
