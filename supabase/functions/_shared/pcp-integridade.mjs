@@ -2545,11 +2545,17 @@ export function guardarRetrabalho(os, antes, { pode = false, avisar = false, aut
     return { os: r, aviso: '', mudouPergunta };
   }
   const avisos = [];
-  // A resposta da pergunta fica a gravada.
-  if (canon(pVeio ?? null) !== canon(pAntes ?? null)) {
+  /* A resposta da pergunta fica a gravada. A comparação é só da resposta e do
+     `em` (item 31 da fila de 11/10/2026, onda acabamento): quem não é gestão
+     recebe a resposta sem o ID e sem o login de quem respondeu, e devolvia a
+     cópia podada; a comparação do objeto inteiro dava "não foi gravada" a
+     cada gravação, sem ninguém ter mexido na resposta. */
+  const mesmaResposta = (a, b) => (objeto(a) ? String(a.resposta ?? '') : '') === (objeto(b) ? String(b.resposta ?? '') : '')
+    && (objeto(a) ? String(a.em ?? '') : '') === (objeto(b) ? String(b.em ?? '') : '') && objeto(a) === objeto(b);
+  if (!mesmaResposta(pVeio, pAntes)) {
     if (proprio(antes, 'retrabalhoPerguntado')) r.retrabalhoPerguntado = antes.retrabalhoPerguntado; else delete r.retrabalhoPerguntado;
     if (objeto(pVeio)) avisos.push('A resposta da pergunta do retrabalho não foi gravada: só a gestão do PCP (admin ou pcp) responde por ela.');
-  }
+  } else if (pAntes) r.retrabalhoPerguntado = pAntes; // a mesma resposta: fica a gravada, com o ID e o login que a cópia podada não tem
   if (marcadaRetrabalhoSrv(antes)) {
     if (antes.retrabalho && !r.retrabalho) { r.retrabalho = antes.retrabalho; avisos.unshift('O retrabalho continua marcado: só a gestão do PCP (admin ou pcp) desmarca o retrabalho.'); }
     for (const c of TAXONOMIA_RETRABALHO) {
@@ -3455,11 +3461,18 @@ export { composicaoApurada, equipeDaComposicao, equipeSugeridaDe, gruposApurados
 
 // A18: projeção financeira e de autoria pessoal para leitura restrita.
 // porId é o identificador do RH do autor; IDs operacionais (id/pessoaId) permanecem.
+/* O LOGIN DE QUEM GRAVOU (porConta, desfeitoPorConta, revogadoPorConta) também
+   não desce para quem não é gestão (item 31 da fila de 11/10/2026, onda
+   acabamento): o porId já era podado e o login da conta da gestão ia junto
+   (na resposta do retrabalho, no lançamento da entrega). O nome continua. As
+   duas cópias (privacidade-valores.js e _shared/pcp-integridade.mjs) são
+   iguais por teste. */
+const AUTORIA_RESTRITA = /^(?:porId|porConta|[a-z]+PorConta)$/;
 const CAMPO_FINANCEIRO = /^(?:valor.*|montante|baseLiquida|totalCentavos|reais|subtotal|preco.*|custo.*|comissao.*|premio.*|orcamento.*|salario.*|desconto.*|acrescimo.*|liquido|bruto|centavos|bonusPCP|erpAlteracoes|medicoesRetrabalho)$/i;
 export function podarValoresPCP(v) {
   if (Array.isArray(v)) return v.map(podarValoresPCP);
   if (!v || typeof v !== 'object') return v;
-  return Object.fromEntries(Object.entries(v).filter(([k]) => k !== 'porId' && !CAMPO_FINANCEIRO.test(k)).map(([k,x]) => [k,podarValoresPCP(x)]));
+  return Object.fromEntries(Object.entries(v).filter(([k]) => !AUTORIA_RESTRITA.test(k) && !CAMPO_FINANCEIRO.test(k)).map(([k,x]) => [k,podarValoresPCP(x)]));
 }
 // Restitui somente campos invisíveis; o aparelho não tem autoridade para alterá-los.
 // Listas são casadas por identidade estável, nunca pela posição do produto.
