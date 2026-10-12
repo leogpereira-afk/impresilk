@@ -793,7 +793,7 @@ function valorConferencia(os:any, erp:any[]) {
    a régua é o servidor, nunca o corpo do pedido: o recálculo de um selo
    (perfParametrosDoSelo) usa a do selo, e o selo de antes da régua (sem
    regraPerdas) é recalculado sem ela, com o hash de sempre. */
-async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDAS.id, regraVolta=REGRA_VOLTA}:{estrito?:boolean,reguaPerdas?:string,regraVolta?:string}={}) {
+async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDAS.id, regraVolta=REGRA_VOLTA, marcaVolta=false}:{estrito?:boolean,reguaPerdas?:string,regraVolta?:string,marcaVolta?:boolean}={}) {
   const regua=reguaPerdas?REGRAS.reguaPorId(reguaPerdas):null;
   if(reguaPerdas&&!regua)throw new Error("A régua das perdas deste fechamento não existe neste servidor. Atualize antes de conferir.");
   const periodo=perfPeriodo(body), inicio=new Date().toISOString();
@@ -1023,7 +1023,8 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
      e o recálculo dele usa a mesma régua; o selo sem a marca (o da v167 e o
      período em que as duas réguas dizem o mesmo) recalcula pela de antes,
      que lê a fotografia guardada na primeira mudança da viagem. */
-  const conteudo={periodo,regra:"performance-3",...(body.notaPorValor===true?{regraNota:REGRA_NOTA_VALOR}:{}),...(julgou?{regraPerdas:regua.id}:{}),...(voltaMudou?{regraVolta}:{}),criterios,registros};
+  // O recálculo de um selo com a marca a mantém (marcaVolta), mesmo que hoje as duas réguas digam o mesmo.
+  const conteudo={periodo,regra:"performance-3",...(body.notaPorValor===true?{regraNota:REGRA_NOTA_VALOR}:{}),...(julgou?{regraPerdas:regua.id}:{}),...(regraVolta&&(voltaMudou||marcaVolta)?{regraVolta}:{}),criterios,registros};
   /* A COBERTURA DO PERÍODO (itens 2 e 29 da fila de 11/10/2026), FORA do
      conteúdo e do hash: o que entrou na base e o que ficou de fora (as baixas
      do ERP a lançar), em centavos. Vai no selo como ele foi visto no
@@ -1072,6 +1073,8 @@ const perfReguaDoSelo = (selo:any) => typeof selo?.regraPerdas==="string" ? selo
    fotografia voltaLegado). Régua que este servidor não conhece fica com a de
    antes: o hash não bate e continua 409 (nunca vira aceite). */
 const perfRegraVoltaDoSelo = (selo:any) => selo?.regraVolta===REGRA_VOLTA ? REGRA_VOLTA : "";
+// As opções do recálculo de um selo: a régua da volta dele e a marca, como ele foi selado.
+const perfOpcoesDoSelo = (selo:any) => ({reguaPerdas:perfReguaDoSelo(selo),regraVolta:perfRegraVoltaDoSelo(selo),marcaVolta:perfRegraVoltaDoSelo(selo)===REGRA_VOLTA});
 async function perfFechamentos(periodo:any) {
   const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_fechamentos").eq("apagado",false).eq("registro->>de",periodo.de).eq("registro->>ate",periodo.ate).order("id").limit(1000);
   if(error)throw new Error(error.message);if(data?.length===1000)throw new Error("Limite de revisões atingido.");
@@ -1745,7 +1748,7 @@ Deno.serve(async (req: Request) => {
           if(!ultima.apuracao?.compensacaoDe){
           const fechamentos=await perfFechamentos(periodo);
           if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"Há outra revisão operacional. Concilie o demonstrativo antes de exportar."},409);
-          const fonteAtual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo),{reguaPerdas:perfReguaDoSelo(fechamentos[0]),regraVolta:perfRegraVoltaDoSelo(fechamentos[0])});
+          const fonteAtual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo),perfOpcoesDoSelo(fechamentos[0]));
           if(fonteAtual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Revise antes de exportar."},409);
           }
           const arquivo="comissao-"+periodo.de+"-r"+ultima.revisao+".csv";
@@ -1792,7 +1795,7 @@ Deno.serve(async (req: Request) => {
           if(!ultima.apuracao.compensacaoDe){
           const fechamentos=await perfFechamentos(periodo);
           if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"O fechamento operacional recebeu outra revisão. Gere e confira uma nova prévia."},409);
-          const atual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo),{reguaPerdas:perfReguaDoSelo(fechamentos[0]),regraVolta:perfRegraVoltaDoSelo(fechamentos[0])});
+          const atual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo),perfOpcoesDoSelo(fechamentos[0]));
           if(atual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Crie uma revisão operacional e outra prévia financeira."},409);
           }
           if(!ultima.versoesOS)return resp({error:"Prévia anterior ao controle de versões por O.S. Gere uma nova prévia."},409);

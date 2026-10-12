@@ -58,7 +58,7 @@ async function gravar(e,id,campos){
   assert.equal(r.ok,true,JSON.stringify(r));
 }
 // O recálculo que Aprovar e Exportar fazem (o selo diz a régua), para comparar o hash.
-const recalculo=(e,selo)=>e.run(`perfFonte(perfParametrosDoSelo(${JSON.stringify({regraNota:selo.regraNota,regraPerdas:selo.regraPerdas,regraVolta:selo.regraVolta})},${JSON.stringify(NOV)}),{reguaPerdas:perfReguaDoSelo(${JSON.stringify({regraPerdas:selo.regraPerdas})}),regraVolta:perfRegraVoltaDoSelo(${JSON.stringify({regraVolta:selo.regraVolta})})})`);
+const recalculo=(e,selo)=>{const s=JSON.stringify({regraNota:selo.regraNota,regraPerdas:selo.regraPerdas,regraVolta:selo.regraVolta});return e.run(`perfFonte(perfParametrosDoSelo(${s},${JSON.stringify(NOV)}),perfOpcoesDoSelo(${s}))`);};
 
 test('o fechamento feito pela v167 recalcula igual no servidor novo: logo depois e depois da segunda viagem, da troca da equipe e da conferência tardia', async t=>{
   let antigo='';
@@ -115,4 +115,16 @@ test('o selo novo, feito sem mudança de régua (as duas dizem o mesmo), não le
   await gravar(e,'B',{horaRetorno:'18:00',retornoEm:'2026-12-08T18:00:00'});
   await gravar(e,'A',{equipe:['200002'],retornoConf:{...reg(e,'A').retornoConf,carroLimpo:'nao'}});
   assert.equal((await recalculo(e,f.fechamento)).hash,f.fechamento.hash);
+});
+
+test('o selo com a marca regraVolta recalcula com a marca, mesmo que hoje as duas réguas digam o mesmo', async()=>{
+  const [A]=osFixas();
+  const e=await edge('pcp-sync',banco([A]));
+  relogio(e,'2026-12-02T12:00:00Z');
+  const sem=await e.run(`perfFonte(${JSON.stringify({...NOV,notaPorValor:true})})`);
+  assert.equal(sem.regraVolta,undefined,'apuração nova sem mudança de régua: sem a marca');
+  const comMarca=await e.run(`perfFonte(perfParametrosDoSelo({regraNota:'nota-valor-1',regraVolta:'volta-1'},${JSON.stringify(NOV)}),perfOpcoesDoSelo({regraVolta:'volta-1'}))`);
+  assert.equal(comMarca.regraVolta,'volta-1','o recálculo do selo marcado mantém a marca (o hash não muda por isso)');
+  const antigo=await e.run(`perfFonte(perfParametrosDoSelo({regraNota:'nota-valor-1'},${JSON.stringify(NOV)}),perfOpcoesDoSelo({}))`);
+  assert.equal(antigo.regraVolta,undefined);assert.equal(antigo.hash,sem.hash);
 });
