@@ -2805,7 +2805,7 @@ function servicosEntreguesHTML() {
      e manda o dono para onde a resposta inteira está. */
   const janela = (typeof STORE.JANELA_LOCAL_DIAS === 'number') ? STORE.JANELA_LOCAL_DIAS : 60;
 
-  return `<p class="text-muted" style="font-size:.8rem">${entregues.length} registros de entrega (incluindo parcelas) entre as O.S guardadas neste aparelho (as dos últimos ${janela} dias. Não entram as retiradas internas nem as que o ERP encerrou e ainda esperam lançamento. Cada parcela permanece no seu mês. O.S. equivalentes = valor da parcela ÷ líquido da O.S.; sem base monetária, a equivalência não é somada. Este quadro ignora o filtro de período acima, de propósito; para o histórico de todos os anos, a aba 📦 Entregas.</p>
+  return `<p class="text-muted" style="font-size:.8rem">${entregues.length} registros de entrega (incluindo parcelas) entre as O.S guardadas neste aparelho, que são as dos últimos ${janela} dias. Não entram as retiradas internas nem as que o ERP encerrou e ainda esperam lançamento. Cada parcela permanece no seu mês. O.S. equivalentes = valor da parcela ÷ líquido da O.S.; sem base monetária, a equivalência não é somada. Este quadro ignora o filtro de período acima, de propósito; para o histórico de todos os anos, a aba 📦 Entregas.</p>
     <div class="casa-kpi-cards">
       <div class="casa-kpi"><b>${entregues.length}</b><small>registros de entrega, no aparelho</small></div>
       <div class="casa-kpi"><b>${esteAno ? fmtEquivalenteCasa(esteAno.n) : 0}</b><small>O.S. equivalentes em ${anoAtual}</small></div>
