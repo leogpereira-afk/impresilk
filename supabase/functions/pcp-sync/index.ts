@@ -3958,6 +3958,10 @@ Deno.serve(async (req: Request) => {
         if (cracha && !ehMaquina && String(cracha.papel ?? "") !== "admin") {
           const { usuarios: _u, funcionarios: _f, ...publico } = cfg;
           if(!["admin","pcp"].includes(String(cracha?.papel)))delete publico.medicoesRetrabalho;
+          /* O REGISTRO DOS LOTES DE CATEGORIAS (lotesCategoria, M17) é da gestão:
+             quem classificou, o motivo e até 3000 descrições por lote. Descia
+             até o celular do crachá de toque (S2 da auditoria de 12/10/2026). */
+          if(!gestaoVeTudo)delete publico.lotesCategoria;
           /* Quem entrou pelo nome também não recebe bônus (orçamento, teto e
              pontos de cada colega) nem a apuração da performance (percentuais,
              participações e logos): a ação "valores" já recusa esse crachá, e
@@ -4117,9 +4121,22 @@ Deno.serve(async (req: Request) => {
                nunca 422 (a configuração passa pela fila do aparelho). */
             if(mudancaOperacional.includes("lotesCategoria")){
               const letras=(t:any)=>(String(t??"").match(/\p{L}/gu)||[]).length,cats=["Adesivos","Fachadas","Letreiros","Sinalização","Estruturas","Impressos","Outros"];
-              const lista=Array.isArray(limpo.lotesCategoria)?limpo.lotesCategoria.slice(0,1000):[];
+              const bruto=Array.isArray(limpo.lotesCategoria)?limpo.lotesCategoria:[],lista=bruto.slice(0,2000);
               const antigos=new Map(((Array.isArray(atual.lotesCategoria)?atual.lotesCategoria:[]) as any[]).filter((l:any)=>l&&typeof l.id==="string").map((l:any)=>[l.id,l]));
-              const out:any[]=[],vistos=new Set();let foraLote=0;
+              const out:any[]=[],vistos=new Set();let foraLote=0,foraTeto=0;
+              /* O TETO NO TOTAL (S2 da auditoria de 12/10/2026): o registro dos
+                 lotes crescia sem limite (1000 lotes por gravação, somando a cada
+                 gravação, cada um com até 3000 descrições) dentro da
+                 configuração. Agora o total guardado tem teto, como o de 3000 das
+                 categorias: LOTES_TETO lotes e LOTES_DESCRICOES_TETO descrições
+                 somando todos. O lote novo que passaria do teto não é gravado
+                 (aviso, nunca 422); a classificação das descrições continua
+                 valendo (categoriasServico), só sem o registro para desfazer. Os
+                 lotes já gravados ficam (lote não se apaga). */
+              const LOTES_TETO=1000,LOTES_DESCRICOES_TETO=3000;
+              const nDesc=(l:any)=>Array.isArray(l?.descricoes)?l.descricoes.length:0;
+              foraTeto+=bruto.length-lista.length;
+              let totalLotes=antigos.size,totalDesc=[...antigos.values()].reduce((n:number,l:any)=>n+nDesc(l),0);
               for(const l of lista){
                 if(!l||typeof l.id!=="string"||!l.id.trim()||l.id.length>80||vistos.has(l.id)){foraLote++;continue;}
                 vistos.add(l.id);
@@ -4134,11 +4151,14 @@ Deno.serve(async (req: Request) => {
                 const descricoes=Array.isArray(l.descricoes)?[...new Set(l.descricoes.filter((d:any)=>typeof d==="string"&&d.trim()&&d.length<=1000))].slice(0,3000):[];
                 const motivo=typeof l.motivo==="string"?l.motivo.trim().slice(0,300):"";
                 if(!cats.includes(l.categoria)||!descricoes.length||letras(motivo)<15||l.desfeito){foraLote++;continue;}
+                if(totalLotes+1>LOTES_TETO||totalDesc+descricoes.length>LOTES_DESCRICOES_TETO){foraTeto++;continue;}
+                totalLotes++;totalDesc+=descricoes.length;
                 out.push(assinar({id:l.id,busca:typeof l.busca==="string"?l.busca.trim().slice(0,100):"",categoria:l.categoria,motivo,descricoes}));
               }
               // O registro gravado que não veio (aba antiga) continua: lote não se apaga.
               for(const [id,l] of antigos)if(!vistos.has(id))out.push(l);
               limpo.lotesCategoria=out;
+              if(foraTeto)avisosCfg.push(`${foraTeto===1?"Um lote de categorias não teve o registro gravado":foraTeto+" lotes de categorias não tiveram o registro gravado"}: o registro dos lotes chegou ao teto (${LOTES_TETO} lotes ou ${LOTES_DESCRICOES_TETO} descrições somando todos). A classificação das descrições foi gravada; só o "Desfazer este lote" não fica disponível para ${foraTeto===1?"ele":"eles"}.`);
               if(foraLote)avisosCfg.push(`${foraLote===1?"Um registro de lote de categorias não foi gravado":foraLote+" registros de lote de categorias não foram gravados"}: o registro do lote não muda depois de gravado, e o desfazer pede o motivo (15 letras ou mais).`);
             }
             if(mudancaOperacional.includes("medicoesRetrabalho")){
