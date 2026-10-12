@@ -67,7 +67,10 @@
       const logo=criar('div','ranking-logo');logo.setAttribute('aria-hidden','true');
       const src=typeof e.logo==='string'&&e.logo.length<=40000&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(e.logo)?e.logo:animais.has(e.animal)?'equipe-'+e.animal+'.webp':'';
       if(src){const img=criar('img');img.src=src;img.alt='';img.loading='lazy';logo.append(img);}else logo.textContent=e.emblema || '🤝';
-      const equipe=criar('div','ranking-equipe');equipe.append(criar('h3','',e.nome),criar('small','',(e.tipo==='individual'?'Participação individual':e.tipo==='composicao'?'Composição da entrega':'Equipe')+' · '+fmt(e.entregas)+(e.entregas===1?' entrega com produção calculada':' entregas com produção calculada')+(Number(e.semPontos)>0?' · '+fmt(e.semPontos)+' sem pontos (retrabalho de instalação)':'')+(Number(e.falhaComprovada)>0?' · '+fmt(e.falhaComprovada)+' sem pontos (falha comprovada)':'')));
+      const equipe=criar('div','ranking-equipe'),titulo=criar('h3','',e.nome);
+      // A etiqueta "Freelancer" na linha individual (item 15 da fila de 11/10/2026), pela marca do contrato do RH.
+      if(e.tipo==='individual'&&e.freelancer===true){titulo.append(' ',criar('span','tag-freelancer','Freelancer'));}
+      equipe.append(titulo,criar('small','',(e.tipo==='individual'?'Participação individual':e.tipo==='composicao'?'Composição da entrega':'Equipe')+' · '+fmt(e.entregas)+(e.entregas===1?' entrega com produção calculada':' entregas com produção calculada')+(Number(e.semPontos)>0?' · '+fmt(e.semPontos)+' sem pontos (retrabalho de instalação)':'')+(Number(e.falhaComprovada)>0?' · '+fmt(e.falhaComprovada)+' sem pontos (falha comprovada)':'')));
       const barra=criar('progress');barra.max=lider;barra.value=e.equivalentes;barra.setAttribute('aria-label','Produção de '+e.nome);if(!porValor)equipe.append(barra);
       const producao=criar('div','ranking-producao');producao.append(criar('strong','',fmt(e.equivalentes)),criar('small','','O.S. equivalentes'),criar('small','ranking-distancia',porValor?(e.posicao===1?'Maior valor confirmado':'Classificação por valor'):e.faltaLideranca>0?fmt(e.faltaLideranca)+' até a liderança':e.posicao===1?'Na liderança':'Produção confirmada'));
       li.append(pos,logo,equipe,producao);return li;

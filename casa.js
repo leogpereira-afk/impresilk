@@ -3776,14 +3776,18 @@ function painelTVCasa(i, f) {
      empate), sem botões, e do 4º em diante a lista de sempre. Sem o
      performance.js carregado, fica só a lista. */
   const temPodio = temPerf && typeof perfPodioHTML === 'function' && typeof perfCortarPodio === 'function';
-  const linhaTV = (p, rosto, num) => `<li class="tv-linha${corDe(p)}">${p.posicao ? `<span class="tv-pos">${p.posicao}º</span>` : ''}${rosto(p, 'tv-foto')}<span class="tv-nome">${esc(p.nome)}</span><span class="tv-num">${esc(num(p))}</span></li>`;
+  /* A etiqueta "Freelancer" nas pessoas (item 15 da fila de 11/10/2026), pela
+     mesma régua da tela (perfEtiquetaFreelancerHTML); a equipe não leva. Sem o
+     performance.js novo (cache misto), sem etiqueta. */
+  const etiqueta = (p, rosto) => rosto === rostoPessoa && typeof perfEtiquetaFreelancerHTML === 'function' ? perfEtiquetaFreelancerHTML(p.chave) : '';
+  const linhaTV = (p, rosto, num) => `<li class="tv-linha${corDe(p)}">${p.posicao ? `<span class="tv-pos">${p.posicao}º</span>` : ''}${rosto(p, 'tv-foto')}<span class="tv-nome">${esc(p.nome)}${etiqueta(p, rosto)}</span><span class="tv-num">${esc(num(p))}</span></li>`;
   // Acima do que cabe a TV não mostra; diz quantas ficaram de fora em vez de cortar calada.
   const mais = n => n > 0 ? `<p class="metricas-nota">+${n} no ranking completo, na tela Performance.</p>` : '';
   const lista = (ps, rosto, num) => `<ol class="tv-lista">${ps.slice(0,8).map(p => linhaTV(p, rosto, num)).join('')}</ol>${mais(ps.length - 8)}`;
   const ranking = (ps, medida, rosto, clsPodio, num, unidade) => {
     if (!temPodio) return lista(ps, rosto, p => num(p) + ' ' + unidade);
     const { podio, resto } = perfCortarPodio(PERF.ranquear(ps, medida));
-    const pod = perfPodioHTML(podio.map(p => ({ posicao: p.posicao, nome: p.nome, visual: rosto(p, clsPodio), classe: corDe(p), numero: num(p), unidade })), { animar: true, classe: clsPodio === 'perf-podio-logo' ? 'perf-podio-tv perf-podio-equipes' : 'perf-podio-tv', rotulo: 'Pódio' });
+    const pod = perfPodioHTML(podio.map(p => ({ posicao: p.posicao, nome: p.nome, etiqueta: etiqueta(p, rosto), visual: rosto(p, clsPodio), classe: corDe(p), numero: num(p), unidade })), { animar: true, classe: clsPodio === 'perf-podio-logo' ? 'perf-podio-tv perf-podio-equipes' : 'perf-podio-tv', rotulo: 'Pódio' });
     const cabe = podio.length ? 3 : 8;
     return pod + (resto.length ? `<ol class="tv-lista tv-lista-resto">${resto.slice(0, cabe).map(p => linhaTV(p, rosto, x => num(x) + ' ' + unidade)).join('')}</ol>` : '') + mais(resto.length - cabe);
   };

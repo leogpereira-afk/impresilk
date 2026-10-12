@@ -1770,7 +1770,7 @@ function perfPodioHTML(itens, opcoes) {
   return `<ol class="perf-podio n${itens.length}${o.animar ? ' perf-animar' : ''}${o.classe ? ' ' + o.classe : ''}" aria-label="${esc(o.rotulo || 'Pódio')}">${itens.map((x, i) => `<li class="perf-podio-item pos-${Math.min(3, x.posicao)} lugar-${lugar(i)}${x.classe || ''}">
       <div class="perf-podio-topo">
         <span class="perf-podio-visual">${x.visual}<span class="perf-medalha" aria-hidden="true">${PERF_MEDALHAS[x.posicao] || ''}</span></span>
-        <h4 class="perf-podio-nome"><span class="perf-sr">${x.posicao}º lugar: </span>${esc(x.nome)}</h4>
+        <h4 class="perf-podio-nome"><span class="perf-sr">${x.posicao}º lugar: </span>${esc(x.nome)}${x.etiqueta || ''}</h4>
         <div class="perf-podio-selo">${x.selo || ''}</div>
         <p class="perf-podio-num"><strong>${esc(x.numero)}</strong><span>${esc(x.unidade)}</span></p>
         <p class="perf-podio-linha">${x.linha || ''}</p>
@@ -1969,6 +1969,21 @@ function perfEquipeDaPessoa(chave, salvas) {
   const suas = (salvas || []).filter(e => e.ativo !== false && (e.membros || []).some(m => perfIdMembro(m) === alvo));
   return suas;
 }
+/* A ETIQUETA "FREELANCER" NO RANKING INDIVIDUAL (item 15 da fila de
+   11/10/2026), pela marca do contrato de freelancer do RH: dá para ver na
+   hora quem é contratado e quem é freelancer. Na revisão fechada com retrato
+   vale quem era freelancer no fechamento; sem retrato, o cadastro de hoje (o
+   elenco só traz a marca a quem pode vê-la). */
+function perfEhFreelancer(chave) {
+  const k = String(chave ?? '').trim();
+  if (!k) return false;
+  const id = perfIdMembro({chave:k});
+  const f = perfFonteAtual();
+  if (f && f.fechadoEm && f.retrato && Array.isArray(f.retrato.pessoas)) return f.retrato.pessoas.some(p => p && String(p.id) === id && p.freelancer === true);
+  const rh = typeof pessoasRH === 'function' ? pessoasRH() : [];
+  return rh.some(p => p && p.freelancer === true && ((id && String(p.id) === id) || String(p.chave) === k));
+}
+function perfEtiquetaFreelancerHTML(chave) { return perfEhFreelancer(chave) ? ' <span class="tag-freelancer">Freelancer</span>' : ''; }
 function perfRankingPessoasHTML(regs, c) {
   const medida = ['nota', 'peso', 'valor', 'geral'].includes(STATE._perfPessoaMedida) ? STATE._perfPessoaMedida : 'nota';
   const geral = medida === 'geral', comNota = medida === 'nota' || geral;
@@ -2035,7 +2050,7 @@ function perfRankingPessoasHTML(regs, c) {
   const acoes = p => `<button type="button" class="inline-link" data-perf-fonte-medida="${medida==='peso'?'producao':medida==='valor'?'valor':'entregas'}" data-perf-pessoa="${esc(p.chave)}">Ver entregas</button>`;
   const situacao = perfSituacao(regs);
   const podioHTML = perfPodioHTML(podio.map(p => ({
-    posicao: p.posicao, nome: p.nome, visual: foto(p, 'perf-podio-foto'), selo: selo(p),
+    posicao: p.posicao, nome: p.nome, etiqueta: perfEtiquetaFreelancerHTML(p.chave), visual: foto(p, 'perf-podio-foto'), selo: selo(p),
     numero: numero(p), unidade: rotulo(p),
     linha: esc(entregasTxt(p)) + (medida !== 'valor' && valorTxt(p) ? ' · ' + esc(valorTxt(p)) : ''),
     aviso: selinho(p),
@@ -2057,7 +2072,7 @@ function perfRankingPessoasHTML(regs, c) {
     const eqs = perfEquipeDaPessoa(p.chave, c.equipes);
     return `<tr>
       <td class="perf-td-pos">${posTxt(p)}</td>
-      <td class="perf-td-quem"><div class="perf-quem">${foto(p, 'perf-tab-foto')}<div class="perf-quem-txt"><strong>${esc(p.nome)}</strong>${selo(p)}${detalhe(p)}</div></div></td>
+      <td class="perf-td-quem"><div class="perf-quem">${foto(p, 'perf-tab-foto')}<div class="perf-quem-txt"><strong>${esc(p.nome)}</strong>${perfEtiquetaFreelancerHTML(p.chave)}${selo(p)}${detalhe(p)}</div></div></td>
       <td class="perf-td-medida" data-rot="${colMedida}"><div class="perf-medida">${perfBarraHTML(topo > 0 ? medidaDe(p) / topo : 0, perfCorClasse(eqs[0]))}<strong>${esc(numero(p))}</strong></div>${medida === 'valor' && semValorP(p) ? `<small class="perf-parcial">parcial (${semValorP(p)} sem valor)</small>` : ''}</td>
       <td class="perf-td-num" data-rot="Entregas"><b>${p.entregas}</b>${selinho(p)}</td>
       ${comValor ? `<td class="perf-td-num" data-rot="Valor confirmado">${valorTxt(p) ? esc(valorTxt(p)) : '<span class="perf-nada">sem valor confirmado</span>'}</td>` : ''}

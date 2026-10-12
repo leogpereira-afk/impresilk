@@ -12,6 +12,14 @@ export function podeVerRankingEquipe(cracha) {
 export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porValor = false) {
   const salvas = new Map((Array.isArray(cadastro) ? cadastro : []).filter(e => e?.id).map(e => [String(e.id), e]));
   const historico = !!fonte?.fechadoEm, grupos = new Map(), vistos = new Set();
+  /* A ETIQUETA "FREELANCER" NA LINHA INDIVIDUAL (item 15 da fila de
+     11/10/2026), pela marca do contrato de freelancer do RH. O fechamento com
+     retrato diz quem era freelancer na época; sem retrato (o mês aberto ou o
+     selo de antes do retrato), o cadastro de hoje. Sai só o sim/não, nunca o
+     ID nem o contrato. */
+  const retratoPessoas = historico && Array.isArray(fonte?.retrato?.pessoas) ? fonte.retrato.pessoas : null;
+  const ehFreelancer = id => retratoPessoas ? retratoPessoas.some(p => p && String(p.id) === String(id) && p.freelancer === true)
+    : pessoas?.pessoa?.(String(id))?.freelancer === true;
   let entregasConfirmadas = 0, equivalentes = 0, aConferir = 0, semBase = 0, semPontos = 0, falhaComprovada = 0;
   for (const r of Array.isArray(fonte?.registros) ? fonte.registros : []) {
     if (!r?.id || vistos.has(String(r.id))) continue;
@@ -74,7 +82,8 @@ export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porVal
       const nome = texto(visual.nome || visual.equipeNome || g.membros.map(m => texto(m.nome, 70)).join(' + '));
       const row = grupos.get(chave) || { nome, logo:logoSeguro(salva?.logo || visual.logo), animal,
         emblema:texto(visual.emblema || '🤝', 12), cor:/^#[0-9a-f]{6}$/i.test(visual.cor) ? visual.cor : '',
-        tipo:g.equipeId ? 'equipe' : g.membros.length > 1 ? 'composicao' : 'individual', entregas:0, equivalentes:0, centavos:0, comValor:0, semPontos:0, falhaComprovada:0 };
+        tipo:g.equipeId ? 'equipe' : g.membros.length > 1 ? 'composicao' : 'individual', entregas:0, equivalentes:0, centavos:0, comValor:0, semPontos:0, falhaComprovada:0,
+        freelancer:!g.equipeId && g.membros.length === 1 && ehFreelancer(g.membros[0].chave) };
       // A entrega que perdeu os pontos tem valor conhecido: zero (não fica fora do ranking de valor como "sem valor").
       if (perde) { if (porFalha) row.falhaComprovada++; else row.semPontos++; row.comValor++; }
       else if (valorValido) { row.centavos += valores[indice]; row.comValor++; }
@@ -92,7 +101,7 @@ export function rankingEquipeSeguro(fonte, cadastro = [], pessoas = null, porVal
     anterior = medida;
     // Allowlist explícita: nem spread da fonte, nem membros, IDs ou dinheiro.
     return { posicao, nome:r.nome, tipo:r.tipo, logo:r.logo, animal:r.animal, emblema:r.emblema, cor:r.cor,
-      entregas:r.entregas, equivalentes:r.equivalentes, ...(r.semPontos ? {semPontos:r.semPontos} : {}), ...(r.falhaComprovada ? {falhaComprovada:r.falhaComprovada} : {}), faltaLideranca:porValor ? null : numero(lider-r.equivalentes) };
+      entregas:r.entregas, equivalentes:r.equivalentes, ...(r.freelancer ? {freelancer:true} : {}), ...(r.semPontos ? {semPontos:r.semPontos} : {}), ...(r.falhaComprovada ? {falhaComprovada:r.falhaComprovada} : {}), faltaLideranca:porValor ? null : numero(lider-r.equivalentes) };
   });
   return { ...(porValor ? {criterio:'valor-confirmado'} : {}), periodo:{de:texto(fonte?.periodo?.de,10),ate:texto(fonte?.periodo?.ate,10)},
     atualizadoEm:texto(fonte?.consultadoEm,40), fechado:historico,
