@@ -190,7 +190,12 @@ function relEntDiaValido(v){
  return Number.isFinite(t) && new Date(t).toISOString().slice(0,10)===dia?dia:'';
 }
 function relEntPontualidade(meses){
- const p={total:0,comparaveis:0,noPrazo:0,antecipadas:0,atrasadas:0,semComparacao:0,somaAtraso:0,mediaAtraso:null,maiorAtraso:null,percentualNoPrazo:null,percentualAtraso:null,cobertura:null,mesesSemFonte:[],linhas:[]};
+ const p={total:0,comparaveis:0,noPrazo:0,antecipadas:0,atrasadas:0,semComparacao:0,somaAtraso:0,mediaAtraso:null,maiorAtraso:null,percentualNoPrazo:null,percentualAtraso:null,cobertura:null,mesesSemFonte:[],linhas:[],
+  /* A RÉGUA DO ATRASO DO PCP (M3, onda operação): a mesma da ficha e das
+     ocorrências da comissão, que o servidor manda em cada linha (pcp). Não
+     medida (sem prazo combinado, entrega sem o dia, ou fora do PCP) fica à
+     parte, nunca zero. */
+  pcp:{medidas:0,noPrazo:0,atrasadas:0,naoMedidas:0,foraDoPCP:0,somaAtraso:0,mediaAtraso:null,percentualNoPrazo:null,alertas:0}};
  for(const m of meses.filter(x=>!x.futuro)){
   if(m.entregasCarregadas!==true){p.mesesSemFonte.push(m.mes);continue;}
   for(const o of m.entregas || []){
@@ -198,12 +203,17 @@ function relEntPontualidade(meses){
    const diferenca=prevista && realizada?Math.round((Date.parse(realizada+'T12:00:00Z')-Date.parse(prevista+'T12:00:00Z'))/86400000):null;
    const situacao=diferenca===null?'semDados':diferenca>0?'atraso':'noPrazo';
    p.total++;if(diferenca===null)p.semComparacao++;else{p.comparaveis++;if(diferenca<=0){p.noPrazo++;if(diferenca<0)p.antecipadas++;}else{p.atrasadas++;p.somaAtraso+=diferenca;p.maiorAtraso=Math.max(p.maiorAtraso || 0,diferenca);}}
+   const m=o.pcp && typeof o.pcp==='object'?o.pcp:null;
+   if(!m)p.pcp.foraDoPCP++;else if(m.situacao==='atraso'){p.pcp.medidas++;p.pcp.atrasadas++;p.pcp.somaAtraso+=Number(m.dias)||0;}else if(m.situacao==='no_prazo'){p.pcp.medidas++;p.pcp.noPrazo++;}else p.pcp.naoMedidas++;
+   if(m&&m.alerta)p.pcp.alertas++;
    p.linhas.push({...o,prevista,realizada,diferenca,situacao});
   }
  }
  if(p.comparaveis){p.percentualNoPrazo=100*p.noPrazo/p.comparaveis;p.percentualAtraso=100*p.atrasadas/p.comparaveis;}
  if(p.total)p.cobertura=100*p.comparaveis/p.total;
  if(p.atrasadas)p.mediaAtraso=p.somaAtraso/p.atrasadas;
+ if(p.pcp.medidas)p.pcp.percentualNoPrazo=100*p.pcp.noPrazo/p.pcp.medidas;
+ if(p.pcp.atrasadas)p.pcp.mediaAtraso=p.pcp.somaAtraso/p.pcp.atrasadas;
  return p;
 }
 const relEntPercentual=v=>v===null?'Sem base':v.toLocaleString('pt-BR',{maximumFractionDigits:1})+'%';
@@ -215,12 +225,29 @@ function relEntPontualidadeHTML(){
  return `<details class="rel-ent-quadro rel-ent-pontualidade" data-rel-quadro="quadro-pontualidade" ${(r.abertos['quadro-pontualidade']??true)?'open':''}><summary aria-label="Pontualidade das entregas"><header><div><span class="perf-report-eyebrow">PRAZO PREVISTO × ENTREGA EFETIVA</span><h3 id="rel-ent-prazo-titulo">Pontualidade das entregas</h3><p>${esc(periodo)} · pela data em que a O.S. foi entregue.</p></div><span class="rel-ent-fonte">Mubisys</span></header><span class="rel-ent-recolher">Recolher</span><span class="rel-ent-expandir">Expandir</span></summary><div class="rel-ent-quadro-corpo">
  ${p.mesesSemFonte.length?`<p class="rel-ent-aviso">Comparativo incompleto: sem fonte de entregas em ${p.mesesSemFonte.map(m=>esc(m.slice(5)+'/'+m.slice(0,4))).join(', ')}. Esses meses não entram no cálculo.</p>`:''}
  <details class="rel-ent-cartoes" data-rel-quadro="cards-pontualidade" ${(r.abertos['cards-pontualidade']??true)?'open':''}><summary>Indicadores do período</summary><div class="rel-ent-prazo-cards"><article class="prazo-ok"><span>Entregues no prazo</span><strong>${relEntPercentual(p.percentualNoPrazo)}</strong><small>${p.noPrazo} de ${p.comparaveis} O.S. comparáveis · inclui ${p.antecipadas} antecipada(s)</small></article><article class="prazo-atraso"><span>Entregues com atraso</span><strong>${relEntPercentual(p.percentualAtraso)}</strong><small>${p.atrasadas} de ${p.comparaveis} O.S. comparáveis</small></article><article><span>Atraso médio</span><strong>${relEntDias(p.mediaAtraso)}</strong><small>${p.atrasadas?'Somente as atrasadas · maior: '+relEntDias(p.maiorAtraso):'Nenhuma entrega atrasada comparável'}</small></article><article><span>Sem comparação</span><strong>${p.semComparacao} O.S.</strong><small>Previsão ou entrega ausente/inválida · fora dos percentuais</small></article></div></details>
+ ${relEntReguaPCPHTML(p)}
  ${p.comparaveis?`<div class="rel-ent-prazo-barra" role="img" aria-label="${relEntPercentual(p.percentualNoPrazo)} no prazo e ${relEntPercentual(p.percentualAtraso)} com atraso"><span style="width:${p.percentualNoPrazo}%"></span><span style="width:${p.percentualAtraso}%"></span></div>`:''}
  <p class="metricas-nota">Base: ${p.comparaveis} O.S. comparáveis de ${p.total} entregues nos meses carregados${p.cobertura===null?'':' · cobertura de '+relEntPercentual(p.cobertura)}. Antecipadas e entregues na data contam como no prazo. Atraso em dias corridos, sem descontar fins de semana. Pedidos em aberto não entram.</p>
  ${relEntGraficoPontualidade()}
  ${!r.foco?`<details data-rel-quadro="tabela-pontualidade" ${r.abertos['tabela-pontualidade']?'open':''}><summary>Pontualidade mês a mês</summary><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>Mês</th><th>Comparáveis / entregues</th><th>No prazo</th><th>Com atraso</th><th>Atraso médio</th><th>Sem comparação</th></tr></thead><tbody>${meses.map(m=>{const v=relEntPontualidade([m]);return `<tr><th>${relEntMesTxt(m)}</th><td>${v.mesesSemFonte.length?'Sem fonte':v.comparaveis+' / '+v.total}</td><td>${relEntPercentual(v.percentualNoPrazo)}</td><td>${relEntPercentual(v.percentualAtraso)}</td><td>${relEntDias(v.mediaAtraso)}</td><td>${v.mesesSemFonte.length?'—':v.semComparacao}</td></tr>`;}).join('')}</tbody></table></div></details>`:''}
- <details class="rel-ent-prazo-detalhes" data-rel-quadro="pontualidade" ${r.abertos.pontualidade?'open':''}><summary>Conferir as datas por O.S. (${p.total})</summary><div class="rel-ent-prazo-filtro"><label for="rel-ent-prazo-filtro">Mostrar entregas</label><select id="rel-ent-prazo-filtro">${[['todas','Todas'],['atraso','Com atraso'],['noPrazo','No prazo'],['semDados','Sem comparação']].map(([v,n])=>`<option value="${v}" ${filtro===v?'selected':''}>${n}</option>`).join('')}</select><span>Exibindo ${exibidas.length} de ${linhas.length} O.S.${filtro==='todas'?'':' neste filtro'} · maiores atrasos primeiro.</span></div><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S.</th><th>Cliente</th><th>Prevista no Mubisys</th><th>Entrega efetiva</th><th>Resultado</th></tr></thead><tbody>${exibidas.map(o=>`<tr data-rel-prazo-linha><td>${esc(o.numero)}</td><td>${esc(o.cliente || '—')}</td><td>${relEntData(o.prevista)}</td><td>${relEntData(o.realizada)}</td><td><span class="rel-ent-prazo-status ${o.situacao==='atraso'?'prazo-atraso':o.situacao==='noPrazo'?'prazo-ok':''}">${o.situacao==='semDados'?'Sem comparação':o.diferenca>0?relEntDias(o.diferenca)+' de atraso':o.diferenca<0?'No prazo · '+relEntDias(-o.diferenca)+' antes':'No prazo · na data'}</span></td></tr>`).join('') || '<tr><td colspan="5">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div>${exibidas.length<linhas.length?'<button class="btn-ghost" id="rel-ent-prazo-mais">Mostrar mais 50</button>':''}</details>
- <p class="metricas-nota">Previsão conforme a última carga do Mubisys. Alterações posteriores no ERP podem mudar o comparativo; esta régua não é a primeira agenda do PCP e não altera abonos ou comissões.</p></div></details>`;
+ <details class="rel-ent-prazo-detalhes" data-rel-quadro="pontualidade" ${r.abertos.pontualidade?'open':''}><summary>Conferir as datas por O.S. (${p.total})</summary><div class="rel-ent-prazo-filtro"><label for="rel-ent-prazo-filtro">Mostrar entregas</label><select id="rel-ent-prazo-filtro">${[['todas','Todas'],['atraso','Com atraso'],['noPrazo','No prazo'],['semDados','Sem comparação']].map(([v,n])=>`<option value="${v}" ${filtro===v?'selected':''}>${n}</option>`).join('')}</select><span>Exibindo ${exibidas.length} de ${linhas.length} O.S.${filtro==='todas'?'':' neste filtro'} · maiores atrasos primeiro.</span></div><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S.</th><th>Cliente</th><th>Prevista no Mubisys</th><th>Entrega efetiva</th><th>Resultado</th><th>Régua do PCP</th></tr></thead><tbody>${exibidas.map(o=>`<tr data-rel-prazo-linha><td>${esc(o.numero)}</td><td>${esc(o.cliente || '—')}</td><td>${relEntData(o.prevista)}</td><td>${relEntData(o.realizada)}</td><td><span class="rel-ent-prazo-status ${o.situacao==='atraso'?'prazo-atraso':o.situacao==='noPrazo'?'prazo-ok':''}">${o.situacao==='semDados'?'Sem comparação':o.diferenca>0?relEntDias(o.diferenca)+' de atraso':o.diferenca<0?'No prazo · '+relEntDias(-o.diferenca)+' antes':'No prazo · na data'}</span></td><td>${relEntPCPCelula(o.pcp)}</td></tr>`).join('') || '<tr><td colspan="6">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div>${exibidas.length<linhas.length?'<button class="btn-ghost" id="rel-ent-prazo-mais">Mostrar mais 50</button>':''}</details>
+ <p class="metricas-nota">Previsão conforme a última carga do Mubisys (sem ela, a do cartão do PCP). Alterações posteriores no ERP podem mudar o comparativo. Esta é a régua documental do ERP; a do atraso, a mesma da ficha e da comissão, é a "Régua do PCP".</p></div></details>`;
+}
+/* A RÉGUA DO PCP no relatório (M3): o prazo combinado no PCP contra o dia da
+   entrega (a conferência, senão o lançamento, senão a finalização), a mesma
+   conta da ficha (OPERACAO.atrasoDaOS no servidor). Ocorrência: não tira
+   nada sozinha (D-011). */
+function relEntReguaPCPHTML(p){
+ const g=p.pcp;if(!g || !p.total)return '';
+ return `<div class="rel-ent-regua-pcp" data-rel-regua-pcp><p><strong>Régua do PCP</strong> (a mesma da ficha e das ocorrências da comissão): prazo combinado no PCP contra o dia da entrega, pela conferência, senão o lançamento, senão a finalização.</p><div class="rel-ent-prazo-cards"><article class="prazo-ok"><span>No prazo pelo PCP</span><strong>${relEntPercentual(g.percentualNoPrazo)}</strong><small>${g.noPrazo} de ${g.medidas} O.S. medidas</small></article><article class="prazo-atraso"><span>Com atraso pelo PCP</span><strong>${g.atrasadas} O.S.</strong><small>${g.atrasadas?'Atraso médio: '+relEntDias(g.mediaAtraso):'Nenhuma com atraso medido'}</small></article><article><span>Não medidas</span><strong>${g.naoMedidas+g.foraDoPCP} O.S.</strong><small>${g.naoMedidas} sem prazo combinado ou sem o dia da entrega · ${g.foraDoPCP} fora do PCP</small></article>${g.alertas?`<article class="prazo-atraso"><span>Prazos para conferir</span><strong>${g.alertas} O.S.</strong><small>Prazo mudado no mesmo minuto ou mais de 20 dias da previsão do ERP: corrija na ficha, com motivo</small></article>`:''}</div><p class="metricas-nota">Ocorrência registrada: não tira pontos nem comissão sozinha; a gestão pode julgar como falha comprovada.</p></div>`;
+}
+function relEntPCPCelula(m){
+ if(!m || typeof m!=='object')return '<span class="text-muted">Fora do PCP</span>';
+ const prazo=m.prazo?'Prazo '+relEntData(m.prazo):'';
+ const alerta=m.alerta?` <small class="rel-ent-prazo-alerta" title="${esc(m.alerta.motivo || '')}">⚠ prazo para conferir</small>`:'';
+ if(m.situacao==='atraso')return `<span class="rel-ent-prazo-status prazo-atraso">${relEntDias(Number(m.dias)||0)} de atraso</span><small> ${esc(prazo)}</small>${alerta}`;
+ if(m.situacao==='no_prazo')return `<span class="rel-ent-prazo-status prazo-ok">No prazo</span><small> ${esc(prazo)}</small>${alerta}`;
+ return `<span class="text-muted">Não medido${m.motivo?': '+esc(m.motivo):''}</span>${alerta}`;
 }
 function renderRelatoriosEntregas() {
  const el=document.getElementById('panel-entregas'),r=REL_ENT;if(!el)return;

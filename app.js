@@ -3458,7 +3458,12 @@ function prazoRetornoHTML(os, ro) {
     ? `<p class="prazo-linha">Prazo combinado: <strong>${esc(fmtDataBR(pc.data))}</strong> <span class="text-muted">· ${esc(origem)}</span>${agendaAtual && agendaAtual !== pc.data ? ` <span class="badge sem-valor" title="Remarcar não muda o prazo combinado. Remarcação pedida pelo cliente vira abono.">agenda atual ${esc(fmtDataBR(agendaAtual))}</span>` : ''}</p>`
     : semPrazo ? '<p class="prazo-linha text-muted">Prazo combinado: <strong>sem prazo</strong>. A O.S. já estava entregue quando ganhou data ou equipe no PCP.</p>'
     : '<p class="prazo-linha text-muted">Prazo combinado: nasce com a primeira data agendada no PCP. A previsão do ERP não conta.</p>';
-  const corrigir = gestao && (pc || semPrazo) ? `<details class="prazo-corrigir"><summary>Corrigir o prazo</summary>
+  /* O PRAZO PARA CONFERIR (M3, onda operação): mudado no mesmo minuto em que
+     congelou, ou mais de 20 dias longe da previsão do ERP. Só a gestão vê; a
+     correção é a de sempre, com motivo. */
+  const alertaPrazo = podeDigitarPrevisto() && !pedido && typeof OPERACAO.prazoParaConferir === 'function' ? OPERACAO.prazoParaConferir(os) : null;
+  const avisoPrazo = alertaPrazo ? `<p class="retorno-aviso prazo-conferir" role="note" data-prazo-conferir="${esc(alertaPrazo.tipo)}">Prazo para conferir: ${esc(alertaPrazo.motivo)}. Se estiver errado, use "Corrigir o prazo", com o motivo.</p>` : '';
+  const corrigir = gestao && (pc || semPrazo) ? `<details class="prazo-corrigir"${alertaPrazo ? ' open' : ''}><summary>Corrigir o prazo</summary>
       <p class="text-muted">Só para prazo gravado errado. Remarcação pedida pelo cliente não se corrige aqui: vira abono.</p>
       <div class="field-row"><div class="field"><label for="prazo-corr-data">Prazo correto</label><input type="date" id="prazo-corr-data" value="${esc(pc ? pc.data : agendaAtual)}"></div>
       <div class="field"><label for="prazo-corr-motivo">Motivo (15 letras ou mais)</label><input id="prazo-corr-motivo" maxlength="300"></div></div>
@@ -3478,7 +3483,7 @@ function prazoRetornoHTML(os, ro) {
   const retornos = dias.length
     ? dias.map(dia).join('')
     : '<p class="text-muted">Defina a data da instalação para digitar o retorno previsto.</p>';
-  return `${prazo}${corrigir}
+  return `${prazo}${avisoPrazo}${corrigir}
     <div class="retorno-previsto"><p class="retorno-titulo">Retorno previsto <span class="text-muted">· digitado pela gestão; sem hora digitada, o retorno antecipado não é medido (com ou sem hora, ele fica só registrado, sem tirar nada sozinho)</span></p>${retornos}</div>`;
 }
 

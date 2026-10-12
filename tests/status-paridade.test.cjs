@@ -14,6 +14,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const O = require('../operacao.js');
 const E = require('../entrega-item.js');
+const CONF = require('../conferencia-entrega.js');
+const js = v => JSON.parse(JSON.stringify(v));
 
 const RAIZ = path.join(__dirname, '..');
 const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
@@ -38,7 +40,7 @@ test('as duas cópias exportam o mesmo status, e o operacao.js não chama o moto
      F17: as chegadas por dia, o índice das voltas, o abono preso à medida e a
      régua das letras do motivo. */
   assert.deepEqual(nomes, ['ESTADOS_ENTREGA', 'MOTIVO_ABONO_MAX', 'MOTIVO_ABONO_MIN', 'MOTIVO_CANCELAMENTO_MAX', 'MOTIVO_CANCELAMENTO_MIN', 'OCORRENCIAS_ABONAVEIS',
-    'ROTULOS_ENTREGA', 'ROTULOS_OCORRENCIA', 'TIPOS_OCORRENCIA', 'TIPOS_OCORRENCIA_MANUAL', 'TOLERANCIA_RETORNO_PADRAO', 'abonoDaOcorrencia', 'abonoVigente', 'abonosDe', 'cancelada', 'cancelamentoDe',
+    'ROTULOS_ENTREGA', 'ROTULOS_OCORRENCIA', 'TIPOS_OCORRENCIA', 'TIPOS_OCORRENCIA_MANUAL', 'TOLERANCIA_RETORNO_PADRAO', 'abonoDaOcorrencia', 'abonoVigente', 'abonosDe', 'atrasoDaOS', 'cancelada', 'cancelamentoDe',
     'chegadaConferida', 'chegadaDoDia', 'chegadasConferidas', 'indiceDasVoltas', 'letrasMotivoSt', 'motivoAbonoInvalido', 'motivoCancelamentoInvalido', 'ocorrenciasDaOS', 'ocorrenciasDerivadas', 'ocorrenciasManuais',
     'pareceDiaSeguinte', 'prazoDaEntrega', 'retornoAntecipado', 'statusEntrega', 'toleranciaRetorno', 'voltaDoRetorno', 'voltaNoIndice']);
   for (const k of nomes) assert.equal(typeof O[k], typeof S.STATUS_ENTREGA[k], k);
@@ -101,6 +103,14 @@ function osGerada(g, i) {
       return it;
     });
   }
+  /* A CONFERÊNCIA DA GESTÃO (M3 e M16, onda operação): o dia da entrega sai
+     dela nas duas cópias. Sorteada por último, para os casos de antes não
+     mudarem. Inclui a conferência inválida (um item mudou) e a vazia. */
+  if (Array.isArray(o.itens) && o.itens.length && g.r() < 0.35) {
+    const cat = CONF.catalogo(o);
+    o.conferenciasEntrega = Array.from({length:g.int(0, 2)}, (_, k) => ({id:'c' + k, dia:g.um(DIAS.slice(0, 7)),
+      itens:cat.filter(() => g.r() < 0.7).map(it => ({chave:it.chave, identidade:g.r() < 0.97 ? it.identidade : 'mudou', qtde:k ? 1 : g.um([1, it.qtde, it.qtde, 0])}))}));
+  }
   return o;
 }
 const HOJES = ['2026-09-09', '2026-09-10', '2026-09-11', '2026-09-20', '2026-09-30', undefined];
@@ -108,7 +118,7 @@ const HOJES = ['2026-09-09', '2026-09-10', '2026-09-11', '2026-09-20', '2026-09-
 test('600 O.S. geradas dão o mesmo status no aparelho e no servidor; o cancelamento é o mesmo do motor', async () => {
   const S = await servidor(), MS = await motorServidor();
   const vistos = new Set();
-  let canceladas = 0, comItens = 0;
+  let canceladas = 0, comItens = 0, comConferencia = 0;
   for (let i = 0; i < 600; i++) {
     const g = gerador(7000 + i);
     const o = osGerada(g, i), hoje = g.um(HOJES);
@@ -126,11 +136,14 @@ test('600 O.S. geradas dão o mesmo status no aparelho e no servidor; o cancelam
     vistos.add(a.estado);
     if (a.estado === 'cancelado') canceladas++;
     if (a.fonteEntrega === 'itens') comItens++;
+    if (/^conferencia/.test(a.fonteEntrega)) comConferencia++;
+    assert.deepEqual(js(S.atrasoDaOS(o, hoje)), js(O.atrasoDaOS(o, hoje)), `caso ${i}: régua do atraso`);
   }
   // Os casos exercitam todos os estados (menos o retorno antecipado: estas O.S. não têm chegada conferida; a paridade dele está em tests/ocorrencias-f17.test.cjs).
   assert.deepEqual([...vistos].sort(), ['agendado', 'atraso', 'cancelado', 'entregue', 'execucao', 'no_prazo', 'retrabalho']);
   assert.ok(canceladas > 60, `canceladas: ${canceladas}`);
   assert.ok(comItens > 20, `entregas julgadas pelos itens: ${comItens}`);
+  assert.ok(comConferencia > 10, `entregas julgadas pela conferência: ${comConferencia}`);
 });
 
 test('sem o motor (o celular): o cancelamento é lido igual; com marca por item, o status avisa `semMotor`', async () => {
@@ -146,8 +159,11 @@ test('sem o motor (o celular): o cancelamento é lido igual; com marca por item,
     const a = C.statusEntrega(o, '2026-09-20');
     assert.equal(C.cancelada(o), S.cancelada(o), `caso ${i}`);
     assert.equal(a.semMotor, temMarca, `caso ${i}`);
+    const temConf = Array.isArray(o.conferenciasEntrega) && o.conferenciasEntrega.length > 0;
+    // Com conferência (M3, onda operação): o celular não carrega a conferência e avisa `semConferencia`.
+    assert.equal(a.semConferencia, temConf, `caso ${i}: semConferencia`);
     if (temMarca) comMarca++;
-    else assert.deepEqual(JSON.parse(JSON.stringify(a)), S.statusEntrega(o, '2026-09-20'), `caso ${i}: sem marca, o mesmo status`);
+    else if (!temConf) assert.deepEqual(JSON.parse(JSON.stringify(a)), S.statusEntrega(o, '2026-09-20'), `caso ${i}: sem marca, o mesmo status`);
   }
   assert.ok(comMarca > 20);
   // O motor se apresenta ao carregar depois (a ordem do index.html): o status passa a ler os itens.

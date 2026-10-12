@@ -495,6 +495,40 @@ const OPERACAO = (() => {
     const atual = agendaDeGente(o);
     return atual ? { data: atual, fonte: 'agenda', derivado: true } : null;
   }
+  /* O PRAZO PARA CONFERIR (M3 da auditoria de 11/10/2026, onda operação): o
+     ponto de atenção da gestão. Dois sinais de data digitada errada, sem
+     mexer em nada (quem corrige é a gestão, em "Corrigir prazo", com motivo):
+       'minuto'  o prazo congelou (o carimbo do servidor) e a agenda mudou para
+                 outro dia no mesmo minuto (o histórico de remarcações): a
+                 primeira data foi digitada e corrigida em seguida;
+       'erp'     o prazo combinado difere mais de 20 dias da previsão do ERP
+                 (o mês trocado: 30/10 no lugar de 30/09).
+     O prazo já corrigido pela gestão ('correcao') não é apontado de novo.
+     Devolve {tipo, motivo, prazo, ...} ou null. Cópia de _shared/pcp-integridade.mjs;
+     um teste confere as duas. */
+  const PRAZO_ERP_DIFERENCA_DIAS = 20;
+  const PRAZO_MESMO_MINUTO_MS = 60000;
+  function prazoParaConferir(o) {
+    const pc = prazoCombinadoDe(o);
+    if (!pc || pc.fonte === 'correcao') return null;
+    const br = d => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
+    const gravado = objF15(o?.prazoCombinado) ? o.prazoCombinado : null;
+    const t0 = !pc.derivado && gravado ? Date.parse(String(gravado.em ?? '')) : NaN;
+    if (Number.isFinite(t0)) {
+      for (const x of (Array.isArray(o?.agendaLog) ? o.agendaLog : []).filter(objF15)) {
+        const d = diaPlausivel(x.data), t = Date.parse(String(x.em ?? ''));
+        if (d && d !== pc.data && Number.isFinite(t) && Math.abs(t - t0) <= PRAZO_MESMO_MINUTO_MS)
+          return { tipo: 'minuto', prazo: pc.data, agenda: d, motivo: `o prazo congelou em ${br(pc.data)} e a agenda mudou para ${br(d)} no mesmo minuto: confira se a primeira data foi digitada errada` };
+      }
+    }
+    const prev = diaPlausivel(o?.previsaoEntrega);
+    if (prev) {
+      const dias = Math.round(Math.abs(Date.parse(pc.data + 'T12:00:00Z') - Date.parse(prev + 'T12:00:00Z')) / 864e5);
+      if (dias > PRAZO_ERP_DIFERENCA_DIAS)
+        return { tipo: 'erp', prazo: pc.data, previsao: prev, dias, motivo: `o prazo combinado (${br(pc.data)}) difere ${dias} dias da previsão do ERP (${br(prev)}): confira se a data foi digitada no mês errado` };
+    }
+    return null;
+  }
   function retornosPrevistos(o) {
     const v = o?.retornoPrevisto;
     const lista = Array.isArray(v) ? v : objF15(v) ? [v] : [];
@@ -1119,7 +1153,7 @@ const OPERACAO = (() => {
      nada tira pontos. No Node (testes), o require. */
   let reguaDasPerdas = null;
   const usarReguaPerdas = r => { reguaDasPerdas = r && typeof r.efeitoDaOcorrencia === 'function' && typeof r.origemRetrabalho === 'function' ? r : null; };
-  const STATUS_ENTREGA = ((prazoCombinadoDe, motorItem, retornosPrevistos, reguaPerdas) => {
+  const STATUS_ENTREGA = ((prazoCombinadoDe, motorItem, retornosPrevistos, reguaPerdas, conferenciaEntrega) => {
 /* ==== STATUS DA ENTREGA: daqui até FIM DO STATUS, cópia byte a byte de _shared/pcp-status.mjs ==== */
 /* O STATUS DA ENTREGA EM 7 ESTADOS (F16). Função pura: não lê tela e não
    grava nada. Precedência, do que mais pesa para o que menos pesa:
@@ -1178,6 +1212,7 @@ const ROTULOS_ENTREGA = Object.freeze({cancelado:'Cancelado', retrabalho:'Retrab
 const ROTULO_SEM_PRAZO_ST = 'Entregue, sem prazo combinado';
 const ROTULO_A_LANCAR_ST = 'Entregue (baixa do ERP a lançar)';
 const ROTULO_ERP_SEM_DATA_ST = 'Entregue (baixa do ERP, sem data)';
+const ROTULO_SALDO_CONFERIR_ST = 'Entregue (saldo a conferir)';
 /* O CORTE DO LANÇAMENTO MANUAL (decisão do dono, 14/09/2026): a baixa do ERP
    anterior a este dia conta como entregue sem lançamento; a partir dele, a
    data real da entrega vem do lançamento à mão. O mesmo dia do casa.js e do
@@ -1334,11 +1369,48 @@ function erpDisseEntregueSt(o) {
    disse ENTREGUE, a régua da entrega implícita do motor ("fora da carteira"
    não conta como entrega no dia da baixa). Com marca por item, vale a última
    marca quando todo item físico foi por marca; o implícito dessa baixa não. */
+/* A ENTREGA PELA CONFERÊNCIA DA GESTÃO (M3 da auditoria de 11/10/2026,
+   onda operação; D-016: o modelo de entrega por item que vale é a
+   conferência). Uma régua só para o dia da entrega, a mesma da apuração
+   (perfFonte): a CONFERÊNCIA, senão o lançamento, senão a finalização (a
+   baixa do ERP continua sem prova). Devolve {ultimo, completa, unidades,
+   total} ou null: sem conferência, sem o motor da conferência carregado (o
+   celular) ou com a conferência que não se lê mais (um item mudou: o
+   apurar diz o erro), a O.S. é lida como antes. `completa`: nenhum item que
+   vale ficou com saldo a conferir (o cancelado não é saldo). */
+function conferidaSt(o) {
+  const regs = Array.isArray(o.conferenciasEntrega) ? o.conferenciasEntrega : [];
+  const C = regs.length ? conferenciaEntrega() : null;
+  if (!C || typeof C.apurar !== 'function') return null;
+  let ap = null;
+  try { ap = C.apurar(o, null); } catch { ap = null; }
+  if (!ap || ap.erro || !Array.isArray(ap.entregas) || !ap.entregas.length) return null;
+  const ultimo = ap.entregas.reduce((m, e) => { const d = diaValidoSt(txtSt(e && e.dia)); return d > m ? d : m; }, '');
+  if (!ultimo) return null;
+  const unidades = ap.entregas.reduce((t, e) => t + (Array.isArray(e.itens) ? e.itens : []).reduce((s, p) => s + (Number(p.qtde) || 0), 0), 0);
+  const saldo = (Array.isArray(ap.saldoItens) ? ap.saldoItens : []).reduce((t, it) => t + (Number(it.saldo) || 0), 0);
+  return {ultimo, completa:saldo === 0, unidades, total:unidades + saldo};
+}
 function entregaDaOS(o, M, r, canc) {
   const fim = o.finalizadaEm ? diaSt(o.finalizadaEm) : '';
   const erp = encerradaNoERPSt(o);
   const l = o.entregaLancada;
   const lancada = diaSt(l && typeof l === 'object' ? l.data : l);
+  /* Com conferência (M3): a cancelada fica com o que foi conferido; a
+     conferida inteira e encerrada (finalizada ou lançada) fica no ÚLTIMO dia
+     de conferência; com saldo a conferir, a encerrada no PCP fica no dia
+     mais tarde entre a última conferência e o encerramento, e a baixa do ERP
+     sem lançamento fica entregue sem dia (o prazo é julgado quando a
+     conferência terminar). Aberta com saldo: ainda não foi entregue. */
+  const cf = conferidaSt(o);
+  if (cf) {
+    if (canc) return {dia:cf.ultimo, fonte:'conferencia', semProva:false};
+    const encerrou = lancada || (fim && !erp ? fim : '');
+    if (cf.completa && (fim || lancada)) return {dia:cf.ultimo, fonte:'conferencia', semProva:false};
+    if (encerrou) return {dia:encerrou > cf.ultimo ? encerrou : cf.ultimo, fonte:'conferenciaParcial', semProva:false};
+    if (fim) return {dia:'', fonte:'saldoAConferir', semProva:true};
+    return null;
+  }
   const aLancar = erp && !lancada && !!fim && o.tipo !== 'interno' && fim >= CORTE_LANCAMENTO_ST;
   const semDia = aLancar ? {dia:'', fonte:'aLancar', semProva:true}
     : erp && !lancada && !erpDisseEntregueSt(o) ? {dia:'', fonte:'erpSemData', semProva:true} : null;
@@ -1358,7 +1430,8 @@ function entregaDaOS(o, M, r, canc) {
   if (semDia) return semDia;
   return erp ? {dia:fim, fonte:'erp', semProva:true} : {dia:fim, fonte:'finalizada', semProva:false};
 }
-const FONTE_TXT_ST = Object.freeze({itens:'última entrega por item', lancada:'lançada à mão', finalizada:'finalizada no PCP', erp:'baixa do ERP, sem prova'});
+const FONTE_TXT_ST = Object.freeze({itens:'última entrega por item', lancada:'lançada à mão', finalizada:'finalizada no PCP', erp:'baixa do ERP, sem prova',
+  conferencia:'último dia de conferência', conferenciaParcial:'encerrada com saldo a conferir'});
 /* A ENTREGA PARCIAL da O.S. aberta, a mesma conta do selo do card (E4): itens
    entregues de itens que valem (o cancelado não conta), ou unidades quando é
    um item só ("6 de 10"). Parte entregue só de item cancelado depois não é
@@ -1824,6 +1897,7 @@ function statusEntrega(o, hoje, regra, volta) {
   if (!canc && entrega && !entrega.dia) {
     const baixa = ddmmSt(diaSt(os.finalizadaEm));
     if (entrega.fonte === 'aLancar') poe('entregue', `baixa do ERP em ${baixa}, ainda a lançar: a data real da entrega vem no lançamento, e só com ela o prazo é julgado`, ROTULO_A_LANCAR_ST);
+    else if (entrega.fonte === 'saldoAConferir') poe('entregue', `baixa do ERP em ${baixa} com parte conferida e saldo a conferir: o prazo é julgado quando a conferência terminar`, ROTULO_SALDO_CONFERIR_ST);
     else poe('entregue', `baixa do ERP em ${baixa} sem o dia da entrega (o ERP não disse entregue): o prazo não é julgado`, ROTULO_ERP_SEM_DATA_ST);
   } else if (!canc && entrega) {
     const como = `${os.tipo === 'interno' ? 'retirada' : 'entregue'} em ${ddmmSt(entrega.dia)} (${FONTE_TXT_ST[entrega.fonte]})`;
@@ -1865,14 +1939,41 @@ function statusEntrega(o, hoje, regra, volta) {
     parcial, cancelamento:canc, retornoAntecipado:ret, ocorrencias, perdas,
     // O.S. com marca por item e sem o motor carregado (versões misturadas): a data e a parcial não leem os itens.
     semMotor:temMarca && !M,
+    // O.S. com conferência e sem o motor da conferência carregado (o celular): o dia da entrega não lê a conferência.
+    semConferencia:Array.isArray(os.conferenciasEntrega) && os.conferenciasEntrega.length > 0 && !conferenciaEntrega(),
   };
 }
+/* A RÉGUA DO ATRASO, UMA SÓ (M3, onda operação): o prazo combinado no PCP
+   (a primeira agenda congelada, ou a corrigida pela gestão com motivo)
+   contra o dia da entrega (a conferência, senão o lançamento, senão a
+   finalização; a baixa do ERP sem prova). A mesma conta do status da ficha,
+   para o relatório de pontualidade e para quem mais medir o atraso. É
+   ocorrência (D-011): não tira nada sozinha. `situacao`: 'atraso',
+   'no_prazo', 'aberta' (ainda não entregue; `dias` é o vencido, ou 0),
+   'cancelada' ou 'nao_medido' (com o `motivo`: sem prazo combinado, ou a
+   entrega sem o dia). Nunca zero para o que não se mede. */
+function atrasoDaOS(o, hoje) {
+  const os = objSt(o) ? o : {};
+  const ap = apurarSt(os, hoje);
+  const prazo = ap.prazo ? ap.prazo.fim : '', entrega = ap.entrega ? ap.entrega.dia : '', fonte = ap.entrega ? ap.entrega.fonte : '';
+  const base = {prazo, prazoInicio:ap.prazo ? ap.prazo.inicio : '', prazoFonte:ap.prazo ? ap.prazo.fonte : '', entrega, fonte, semProva:!!(ap.entrega && ap.entrega.semProva), dias:0, motivo:''};
+  if (ap.canc) return {...base, situacao:'cancelada', motivo:'cancelada'};
+  if (!ap.prazo) return {...base, situacao:'nao_medido', motivo:'sem prazo combinado no PCP'};
+  if (!ap.entrega) return {...base, situacao:'aberta', dias:ap.atraso ? ap.atraso.dias : 0};
+  if (!entrega) return {...base, situacao:'nao_medido', motivo:fonte === 'aLancar' ? 'baixa do ERP a lançar' : fonte === 'saldoAConferir' ? 'saldo a conferir' : 'baixa do ERP sem o dia da entrega'};
+  return ap.atraso ? {...base, situacao:'atraso', dias:ap.atraso.dias} : {...base, situacao:'no_prazo'};
+}
 /* ==== FIM DO STATUS ==== */
-    return {ESTADOS_ENTREGA, ROTULOS_ENTREGA, MOTIVO_CANCELAMENTO_MIN, MOTIVO_CANCELAMENTO_MAX, motivoCancelamentoInvalido, cancelamentoDe, cancelada, prazoDaEntrega, statusEntrega, TIPOS_OCORRENCIA, TIPOS_OCORRENCIA_MANUAL, ROTULOS_OCORRENCIA, OCORRENCIAS_ABONAVEIS, MOTIVO_ABONO_MIN, MOTIVO_ABONO_MAX, TOLERANCIA_RETORNO_PADRAO, motivoAbonoInvalido, toleranciaRetorno, chegadaConferida, chegadasConferidas, chegadaDoDia, pareceDiaSeguinte, abonosDe, abonoVigente, abonoDaOcorrencia, ocorrenciasManuais, voltaDoRetorno, indiceDasVoltas, voltaNoIndice, retornoAntecipado, ocorrenciasDerivadas, ocorrenciasDaOS, letrasMotivoSt};
+    return {ESTADOS_ENTREGA, ROTULOS_ENTREGA, MOTIVO_CANCELAMENTO_MIN, MOTIVO_CANCELAMENTO_MAX, motivoCancelamentoInvalido, cancelamentoDe, cancelada, prazoDaEntrega, statusEntrega, atrasoDaOS, TIPOS_OCORRENCIA, TIPOS_OCORRENCIA_MANUAL, ROTULOS_OCORRENCIA, OCORRENCIAS_ABONAVEIS, MOTIVO_ABONO_MIN, MOTIVO_ABONO_MAX, TOLERANCIA_RETORNO_PADRAO, motivoAbonoInvalido, toleranciaRetorno, chegadaConferida, chegadasConferidas, chegadaDoDia, pareceDiaSeguinte, abonosDe, abonoVigente, abonoDaOcorrencia, ocorrenciasManuais, voltaDoRetorno, indiceDasVoltas, voltaNoIndice, retornoAntecipado, ocorrenciasDerivadas, ocorrenciasDaOS, letrasMotivoSt};
   })(prazoCombinadoDe, () => motorDaEntrega
     || (typeof module !== 'undefined' && module.exports && typeof require === 'function' ? require('./entrega-item.js') : null), retornosPrevistos,
   () => reguaDasPerdas
-    || (typeof module !== 'undefined' && module.exports && typeof require === 'function' ? require('./regras.js') : null));
+    || (typeof module !== 'undefined' && module.exports && typeof require === 'function' ? require('./regras.js') : null),
+  /* A CONFERÊNCIA POR ENTREGA (M3, D-016): o index.html carrega o
+     conferencia-entrega.js depois deste arquivo, então ela é lida na hora da
+     conta. O equipe.html não a carrega: sem ela, a O.S. é lida como antes. */
+  () => (typeof CONFERENCIA_ENTREGA !== 'undefined' ? CONFERENCIA_ENTREGA : null)
+    || (typeof module !== 'undefined' && module.exports && typeof require === 'function' ? require('./conferencia-entrega.js') : null));
   /* OS PEDIDOS DA F17 NO RASCUNHO DA O.S. (ocorrência manual, anular,
      abonar, revogar). Só o PEDIDO vai: autor e hora são carimbados pelo
      servidor, que confere tudo de novo (_shared/pcp-status.mjs,
@@ -1999,7 +2100,7 @@ function statusEntrega(o, hoje, regra, volta) {
     o.abonos = o.abonos.map((y, j) => j === i ? {...y, revogar:true} : y);
     return '';
   }
-  return {usarVeiculos,veiculoConfirmado,chaveVeiculo,uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,pessoasACadastrar,aCadastrarDaOS,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,usarAtivos,ativosDoAparelho,idDoAtivo,chaveVeiculoVolta,chaveDaVolta,confDaViagemDoDia,confDaViagem,declaracaoDaViagem,viagensDaOS,voltou,voltasDoCarro,voltasAnteriores,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,usarReguaPerdas,...STATUS_ENTREGA,novoIdF17,voltaNaLista,diaDaJornada,pedirChegada,ocorrenciasDoGrupo,pedirOcorrencia,pedirAnularOcorrencia,pedirAbono,pedirRevogarAbono};
+  return {usarVeiculos,veiculoConfirmado,chaveVeiculo,uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,pessoasACadastrar,aCadastrarDaOS,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,usarAtivos,ativosDoAparelho,idDoAtivo,chaveVeiculoVolta,chaveDaVolta,confDaViagemDoDia,confDaViagem,declaracaoDaViagem,viagensDaOS,voltou,voltasDoCarro,voltasAnteriores,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,prazoParaConferir,PRAZO_ERP_DIFERENCA_DIAS,PRAZO_MESMO_MINUTO_MS,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,usarReguaPerdas,...STATUS_ENTREGA,novoIdF17,voltaNaLista,diaDaJornada,pedirChegada,ocorrenciasDoGrupo,pedirOcorrencia,pedirAnularOcorrencia,pedirAbono,pedirRevogarAbono};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
 // Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega

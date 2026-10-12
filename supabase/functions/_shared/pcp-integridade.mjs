@@ -266,6 +266,40 @@ export function prazoCombinadoDe(o) {
   const atual = agendaDeGente(o);
   return atual ? { data: atual, fonte: 'agenda', derivado: true } : null;
 }
+/* O PRAZO PARA CONFERIR (M3 da auditoria de 11/10/2026, onda operação): o
+   ponto de atenção da gestão. Dois sinais de data digitada errada, sem
+   mexer em nada (quem corrige é a gestão, em "Corrigir prazo", com motivo):
+     'minuto'  o prazo congelou (o carimbo do servidor) e a agenda mudou para
+               outro dia no mesmo minuto (o histórico de remarcações): a
+               primeira data foi digitada e corrigida em seguida;
+     'erp'     o prazo combinado difere mais de 20 dias da previsão do ERP
+               (o mês trocado: 30/10 no lugar de 30/09).
+   O prazo já corrigido pela gestão ('correcao') não é apontado de novo.
+   Devolve {tipo, motivo, prazo, ...} ou null. A mesma conta em
+   operacao.js (OPERACAO.prazoParaConferir); um teste confere as duas. */
+export const PRAZO_ERP_DIFERENCA_DIAS = 20;
+export const PRAZO_MESMO_MINUTO_MS = 60000;
+export function prazoParaConferir(o) {
+  const pc = prazoCombinadoDe(o);
+  if (!pc || pc.fonte === 'correcao') return null;
+  const br = d => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
+  const gravado = objeto(o?.prazoCombinado) ? o.prazoCombinado : null;
+  const t0 = !pc.derivado && gravado ? Date.parse(String(gravado.em ?? '')) : NaN;
+  if (Number.isFinite(t0)) {
+    for (const x of (Array.isArray(o?.agendaLog) ? o.agendaLog : []).filter(objeto)) {
+      const d = diaPlausivel(x.data), t = Date.parse(String(x.em ?? ''));
+      if (d && d !== pc.data && Number.isFinite(t) && Math.abs(t - t0) <= PRAZO_MESMO_MINUTO_MS)
+        return { tipo: 'minuto', prazo: pc.data, agenda: d, motivo: `o prazo congelou em ${br(pc.data)} e a agenda mudou para ${br(d)} no mesmo minuto: confira se a primeira data foi digitada errada` };
+    }
+  }
+  const prev = diaPlausivel(o?.previsaoEntrega);
+  if (prev) {
+    const dias = Math.round(Math.abs(Date.parse(pc.data + 'T12:00:00Z') - Date.parse(prev + 'T12:00:00Z')) / 864e5);
+    if (dias > PRAZO_ERP_DIFERENCA_DIAS)
+      return { tipo: 'erp', prazo: pc.data, previsao: prev, dias, motivo: `o prazo combinado (${br(pc.data)}) difere ${dias} dias da previsão do ERP (${br(prev)}): confira se a data foi digitada no mês errado` };
+  }
+  return null;
+}
 /* OS RETORNOS PREVISTOS, um por dia da agenda: [{dia, hora, saida}] em ordem
    de dia (hora = retorno previsto; saida = saída prevista, opcional). Aceita
    também o formato de um dia só ({dia, hora}). Entrada sem dia ou sem hora

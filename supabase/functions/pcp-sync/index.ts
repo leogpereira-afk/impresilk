@@ -1,10 +1,10 @@
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
-import { idDoCadastroRH, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { idDoCadastroRH, prazoParaConferir, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
-import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
+import { cancelada, atrasoDaOS, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
 // ============================================================================
 // pcp-sync — Edge Function do PCP / Instalacao (substitui netlify/functions/os.js)
 //
@@ -1722,6 +1722,21 @@ Deno.serve(async (req: Request) => {
         const entradas=fluxo.data?.valor?.anos?.[ano]?.entradas;
         const numero=(v:any)=>v!==null && v!==undefined && v!=="" && Number.isFinite(Number(v))?Number(v):null;
         const soma=(rows:any[])=>rows.some(r=>numero(r.valor)===null)?null:Math.round(rows.reduce((n,r)=>n+Number(r.valor),0)*100)/100;
+        /* A RÉGUA DO ATRASO DO PCP (M3, onda operação): a O.S. que passou pelo
+           PCP leva, em cada linha, a mesma medida da ficha (atrasoDaOS: o prazo
+           combinado contra a conferência, senão o lançamento, senão a
+           finalização) e o ponto de atenção do prazo (prazoParaConferir). Sem
+           a O.S. no PCP, a linha fica sem a medida (não medido, nunca zero).
+           A previsão do ERP que falta no pacote vem do cartão do PCP (a mesma
+           reserva do quadro de prazo de Entregas, casa.js slaEntregas). */
+        const numerosPCP=[...new Set(meses.flatMap(mes=>{const pk:any=pacotes.get("entregues:"+mes);return (Array.isArray(pk?.os)?pk.os:[]).map((r:any)=>String(r.numero || "").trim()).filter(Boolean);}))];
+        const osPCP=new Map<string,any>();
+        for(let i=0;i<numerosPCP.length;i+=200){
+          const {data:regs,error:erroPCP}=await sb.from("pcp_registros").select("id,registro").eq("colecao","os").eq("apagado",false).in("registro->>numero",numerosPCP.slice(i,i+200));
+          if(erroPCP)throw new Error(erroPCP.message);
+          for(const x of regs || []){const n=String(x.registro?.numero || "").trim();if(n && !osPCP.has(n))osPCP.set(n,{...x.registro,id:x.id});}
+        }
+        const medidaPCP=(n:string)=>{const o=osPCP.get(n);if(!o)return null;const a:any=atrasoDaOS(o,hoje);const alerta=prazoParaConferir(o);return {...a,...(alerta?{alerta:{tipo:alerta.tipo,motivo:alerta.motivo}}:{})};};
         const linhas=meses.map(mes=>{
           if(mes>ate.slice(0,7))return {mes,futuro:true};
           const pacote:any=pacotes.get("entregues:"+mes);
@@ -1729,7 +1744,11 @@ Deno.serve(async (req: Request) => {
           const entregas=(Array.isArray(pacote?.os)?pacote.os:[]).filter((r:any)=>{
             const dia=String(r.data || "").slice(0,10), n=String(r.numero || "");
             if(!n || vistos.has(n) || !dia.startsWith(mes) || dia>ate)return false;vistos.add(n);return true;
-          }).map((r:any)=>({numero:r.numero,cliente:r.cliente,data:r.data,previsao:String(r.previsao || ""),valor:numero(r.valor)}));
+          }).map((r:any)=>{
+            const n=String(r.numero || "").trim(),card=osPCP.get(n),prevCard=String(card?.previsaoEntrega || "").slice(0,10);
+            const previsao=String(r.previsao || "") || (/^\d{4}-\d{2}-\d{2}$/.test(prevCard)?prevCard:"");
+            return {numero:r.numero,cliente:r.cliente,data:r.data,previsao,...(!String(r.previsao || "") && previsao?{previsaoFonte:"pcp"}:{}),valor:numero(r.valor),pcp:medidaPCP(n)};
+          });
           const vendas=ordens.filter(r=>String(r.data).startsWith(mes)).map(r=>({numero:r.numero,cliente:r.cliente,data:r.data,valor:numero(r.valor)}));
           const instalacoes=operacao.registros.filter((r:any)=>r.dia.startsWith(mes));
           const retrabalhos=instalacoes.filter((r:any)=>r.retrabalho===true).map((r:any)=>({numero:r.numero,cliente:r.cliente,data:r.dia}));
@@ -1743,7 +1762,8 @@ Deno.serve(async (req: Request) => {
           recebido:"Pagamentos de contas a receber pela data de pagamento/crédito, no fluxo mensal do Painel. Fonte agregada: não contém títulos individuais. Anos preservados podem ter atualização anterior à carga indicada.",
           retrabalho:"Instalações finalizadas no PCP no mês com marca de retrabalho ÷ instalações finalizadas registradas no mesmo mês. Histórico operacional pode ser incompleto; ausência de marca não comprova inspeção de qualidade.",
           entregue:"O.S. com status entregue no Mubisys pela data de entrega, incluindo retiradas. Valores líquidos; alterações posteriores dependem de nova sincronização.",
-          pontualidade:"Previsão do Mubisys comparada à entrega efetiva, por O.S., incluindo retiradas. Entrega antecipada ou na data conta como no prazo; atraso em dias corridos. Percentuais usam somente O.S. com as duas datas válidas. Previsão conforme a última carga do ERP (pode incluir previsão calculada a partir do prazo cadastrado); não é a primeira agenda congelada do PCP. Não mede pedidos ainda em aberto nem altera abonos ou comissões."}});
+          pontualidadePCP:"A régua do atraso do PCP, a mesma da ficha e das ocorrências da comissão (D-011): o prazo combinado no PCP (a primeira agenda congelada, ou a corrigida pela gestão com motivo) contra o dia da entrega (a conferência da gestão, senão o lançamento, senão a finalização). É ocorrência e não tira nada sozinha. Sem prazo combinado, ou com a entrega ainda sem o dia (baixa a lançar, saldo a conferir), a O.S. fica como não medida, nunca zero; a O.S. que não passou pelo PCP não tem essa medida.",
+          pontualidade:"Previsão do Mubisys comparada à entrega efetiva, por O.S., incluindo retiradas. Entrega antecipada ou na data conta como no prazo; atraso em dias corridos. Percentuais usam somente O.S. com as duas datas válidas. Previsão conforme a última carga do ERP (pode incluir previsão calculada a partir do prazo cadastrado); sem ela no pacote, a previsão do ERP guardada no cartão do PCP. É a régua documental do ERP, não a do atraso do PCP. Não mede pedidos ainda em aberto nem altera abonos ou comissões."}});
       }
 
       // Alteração estreita: nunca reaplica os integrantes atuais sobre a entrega.

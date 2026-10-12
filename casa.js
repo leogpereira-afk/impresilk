@@ -2052,6 +2052,34 @@ function abrirListaErpSaldo() {
   const aba = document.querySelector('.tab[data-tab="entregas"]:not([data-vista])');
   if (aba) { aba.click(); setTimeout(rolar, 80); } else rolar();
 }
+/* PRAZOS PARA CONFERIR (M3 da auditoria de 11/10/2026, onda operação): o
+   ponto de atenção da gestão para o prazo combinado que mudou no mesmo
+   minuto em que congelou, ou que fica a mais de 20 dias da previsão do ERP
+   (OPERACAO.prazoParaConferir). Só mostra: a correção é na ficha, em
+   "Corrigir o prazo", com motivo. A cancelada fica de fora. */
+function listaPrazosParaConferir(todas) {
+  if (typeof OPERACAO.prazoParaConferir !== 'function') return [];
+  return (todas || []).filter(o => o && !(typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(o)))
+    .map(os => ({os, alerta:OPERACAO.prazoParaConferir(os)})).filter(x => x.alerta)
+    .sort((a, b) => String(a.os.numero || '').localeCompare(String(b.os.numero || ''), 'pt-BR', {numeric:true}));
+}
+function prazosParaConferirHTML(todas) {
+  if (!podeDecidirSaldoERP()) return '';
+  const linhas = listaPrazosParaConferir(todas);
+  if (!linhas.length) return '';
+  const n = linhas.length;
+  return `<section class="erp-saldo prazo-conferir-lista" aria-labelledby="prazo-conferir-tit" data-prazos-conferir="${n}">
+      <div class="erp-saldo-cab"><span class="ent-fila-icone" aria-hidden="true">!</span>
+        <div><h3 id="prazo-conferir-tit">Prazos para conferir <span class="erp-saldo-n">${n}</span></h3>
+        <p class="ent-fila-frase">O prazo combinado mede o atraso da ficha e do relatório. ${n === 1 ? 'Este parece digitado errado' : 'Estes parecem digitados errados'}: confira na ficha e, se for o caso, use "Corrigir o prazo", com o motivo.</p></div>
+      </div>
+      <ul class="erp-saldo-lista">${linhas.map(({os, alerta}) => `<li class="erp-saldo-item">
+        <div class="erp-saldo-os"><strong>${esc(os.numero || '')}</strong> ${esc(os.cliente || '')}</div>
+        <p class="erp-saldo-fatos"><span>${esc(alerta.motivo[0].toUpperCase() + alerta.motivo.slice(1))}.</span></p>
+        <div class="erp-saldo-acoes"><button type="button" class="btn-ghost btn-sm" data-os-id="${esc(os.id)}">Abrir a ficha</button></div>
+      </li>`).join('')}</ul>
+    </section>`;
+}
 function erpComSaldoHTML(linhas) {
   if (!podeDecidirSaldoERP() || !Array.isArray(linhas) || !linhas.length) return '';
   const n = linhas.length;
@@ -2338,6 +2366,7 @@ function renderEntregas() {
       </details>
       ${typeof controleConferidasHTML==='function'?controleConferidasHTML(todas,f):''}
       ${erpComSaldoHTML(listaErpComSaldo(todas))}
+      ${prazosParaConferirHTML(todas)}
 
       ${lista.length ? (porOS ? porOSSecaoHTML() : STATE._entVista === 'cards' ? cards() : tabela()) : emptyState('', focoEntregas !== 'todas' ? 'Nenhuma O.S. neste filtro' : vazioEntregas(per).titulo, focoEntregas !== 'todas' ? 'Escolha outro chip ou ajuste o período.' : vazioEntregas(per).dica) + (porOS && typeof porOSVazioPeriodoHTML === 'function' ? porOSVazioPeriodoHTML() : '')}
       ${lista.length ? prazoEntregasHTML(lista.map(x => x.erp), porNumero) : ''}

@@ -752,7 +752,7 @@ function porOSComissaoHTML(l) {
       const r=REGRAS.regraVigente(_porOSDados.versoes,e.dia);
       if(!r) return nota('Confira cada entrega: há datas sem regra de comissão.');
       // O status da entrega no dia dela, com a regra do dia: as perdas já são as da régua.
-      const estado=OPERACAO.statusEntrega({...base,finalizadaEm:e.dia+'T12:00:00-03:00',entregaLancada:{data:e.dia}},undefined,r);
+      const estado=OPERACAO.statusEntrega({...base,finalizadaEm:e.dia+'T12:00:00-03:00',entregaLancada:{data:e.dia},conferenciasEntrega:[]},undefined,r);
       if(estado.estado==='cancelado')continue;
       if(POR_OS.perdasPelaRegra(estado,r).length){tira=true;continue;}
       const f=porOSFalhaDe(card,e.dia);if(f){falha=falha||f;continue;}

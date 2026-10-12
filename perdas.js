@@ -44,7 +44,9 @@
    última que não é, e a tela avisa da compensação.
 
    DUAS RÉGUAS DE ATRASO (M3 e M10). A ficha mede o prazo combinado contra a
-   entrega da ficha (lançamento, senão finalização). O ranking conta a
+   entrega da ficha: desde a onda operação (M3), a mesma régua da apuração,
+   a conferência, senão o lançamento, senão a finalização; as duas só
+   divergem com saldo a conferir (a ficha usa o encerramento). O ranking conta a
    entrega no dia da apuração (a conferência, senão o lançamento, senão a
    finalização) e não desconta atraso. Quando as duas dão atrasos diferentes,
    a tela mostra as duas, sem escolher. Sem prazo combinado, ou sem retorno
@@ -497,7 +499,8 @@ function perdasStatus(c) {
 }
 // O dia da entrega do ranking no lugar da entrega da ficha: o mesmo jeito da célula de comissão do Por O.S.
 function perdasNoDia(c, dia) {
-  try { return OPERACAO.statusEntrega({...c, finalizadaEm:dia + 'T12:00:00-03:00', entregaLancada:{data:dia}}); } catch { return null; }
+  // Sem as conferências: com elas o status leria o último dia de conferência (M3), e aqui o dia é o da entrega da apuração.
+  try { return OPERACAO.statusEntrega({...c, finalizadaEm:dia + 'T12:00:00-03:00', entregaLancada:{data:dia}, conferenciasEntrega:[]}); } catch { return null; }
 }
 function perdasDados() {
   if (!perdasPode()) return null;
