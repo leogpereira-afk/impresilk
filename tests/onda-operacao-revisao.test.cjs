@@ -362,3 +362,45 @@ test('revisão operação: U5, o item conferido fica só leitura na ficha (sem "
   assert.doesNotMatch(String(r.avisos), /qtde|descricao/);
   assert.match(String(r.avisos), /está numa entrega conferida e a quantidade não mudou: para corrigir o item, revise ou anule antes a entrega conferida, com motivo, em "Conferir itens e equipe" \(na ficha da O\.S\., em Conferência e acompanhamento\)\./);
 });
+
+/* ── U6: revisar ou anular a parcial que não se lê mais ─────────────────── */
+function dialogoConferencia(os, entregaId) {
+  const el = () => { const x = {textContent:'', value:'', hidden:false, disabled:false, dataset:{}, classList:{add() {}, remove() {}, toggle() {}}, focus() {}, scrollIntoView() {}, addEventListener() {}, removeEventListener() {}, open:true}; x.querySelector = () => el(); x.querySelectorAll = () => []; return x; };
+  const capt = {html:''};
+  const c = vm.createContext({console, Date, Map, Set, JSON, Promise, crypto:globalThis.crypto, capt,
+    STATE:{user:{papel:'pcp', nome:'Gestor Teste'}}, esc:s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+    STORE:{getQueue:() => [], api:async () => ({os, valor:1000, fechados:[], inteira:null})},
+    perfPodeEditar:() => true, perfConfig:() => ({equipes:[]}), perfRegrasFonte:() => ({versoes:[]}), diaEntrega:() => '', dinheiroCasa:v => 'R$ ' + v, toast() {},
+    ALOCUI:{iniciar() {}, montar() {}, estado:() => ({}), bloqueio:() => '', repintar() {}, definirDataEntrega() {}, paraGravar:() => ({}), esquecer() {}},
+    perfDialog:(_t, html) => { capt.html = html; const d = el(); d.open = true; const filhos = new Map(); d.querySelector = sel => { if (!filhos.has(sel)) filhos.set(sel, el()); return filhos.get(sel); }; return d; }});
+  for (const f of ['entrega-item.js', 'divisao.js', 'conferencia-entrega.js', 'conferencia-entrega-ui.js']) vm.runInContext(ler(f), c, {filename:f});
+  return vm.runInContext(`conferirItensEntrega(${JSON.stringify(os.id)}, ${JSON.stringify(entregaId)})`, c).then(() => ({html:capt.html, c}));
+}
+
+test('revisão operação: U6, na entrega que não se lê mais o aviso vem no topo e o botão diz "Salvar a revisão"; a gestão vê quem revisou ou anulou', async () => {
+  const o = osParcial('u6');
+  o.conferenciasRevisoes = [
+    {id:'rev-1', entregaId:'e0', acao:'anular', motivo:'Entrega fictícia registrada em dobro', por:'Gestor Teste', porId:'444555', porConta:'gestor', em:'2026-10-07T13:00:00.000Z', antes:{dia:'2026-10-04', itens:[]}},
+    {id:'rev-2', entregaId:'e1', acao:'revisar', motivo:'Item fictício trocado pelo ERP depois', por:'Outra Gestora', porId:'444666', porConta:'outra', em:'2026-10-08T14:30:00.000Z', antes:{dia:'2026-10-05', itens:[]}, depois:{dia:'2026-10-06', itens:[]}}];
+  const inconsistente = structuredClone(o); inconsistente.itens[0].descricao = 'Painel fictício A, nova descrição do ERP';
+  const {html} = await dialogoConferencia(inconsistente, 'e1');
+  // Caso ruim (f33877d): o aviso ficava no fim, dentro de "Revisar ou anular", e o botão dizia "Salvar alterações da entrega".
+  const iAviso = html.indexOf('conf-inconsistente'), iCampos = html.indexOf('class="conf-campos');
+  assert.ok(iAviso > 0 && iAviso < iCampos, 'o aviso vem antes dos campos');
+  assert.match(html, /id="conf-salvar">Salvar a revisão desta entrega</);
+  assert.doesNotMatch(html, /Salvar alterações da entrega/);
+  // O diário: o mais novo primeiro, com quem, quando e o motivo.
+  const iRev = html.indexOf('Revisões e anulações desta O.S. (2)');
+  assert.ok(iRev > 0);
+  const lista = html.slice(iRev);
+  assert.ok(lista.indexOf('Revisou') < lista.indexOf('Anulou'));
+  assert.match(lista, /<strong>Revisou<\/strong> a entrega de 05\/10\/2026 \(agora em 06\/10\/2026\) · Outra Gestora · 08\/10\/2026, 11:30/);
+  assert.match(lista, /Motivo: Item fictício trocado pelo ERP depois/);
+  assert.match(lista, /<strong>Anulou<\/strong> a entrega de 04\/10\/2026 · Gestor Teste/);
+  // A entrega que se lê continua com o botão de sempre e sem o aviso.
+  const normal = await dialogoConferencia(osParcial('u6b'), 'e1');
+  assert.match(normal.html, /id="conf-salvar">Salvar alterações da entrega</);
+  assert.doesNotMatch(normal.html, /conf-inconsistente/);
+  // Na ficha (Conferência e acompanhamento), a gestão vê o mesmo diário.
+  assert.match(ler('controle-entrega-ui.js'), /gestao&&typeof confRevisoesHTML==='function'\?confRevisoesHTML\(os\):''/);
+});

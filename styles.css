@@ -4168,6 +4168,11 @@ img.perf-logo{object-fit:cover}
 /* Seleção de itens: compacta, legível no celular e separada da divisão. */
 .conf-itens-abrir{margin:0 0 1rem}
 .conf-entregas,.conf-itens-topo{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.75rem}
+/* A revisão da parcial (U6 da revisão da onda operação): o aviso no topo e o diário das revisões. */
+.conf-inconsistente{font-weight:600}
+.conf-revisoes{margin:.6rem 0;font-size:.85rem}
+.conf-revisoes>summary{cursor:pointer;min-height:40px;display:flex;align-items:center;font-weight:600;color:#163654}
+.conf-revisoes ul{margin:.25rem 0 0;padding-left:1.1rem;display:grid;gap:.4rem}
 .conf-itens-topo{justify-content:space-between}.conf-itens-topo h4{margin:0}
 .conf-data{display:flex;align-items:center;gap:.6rem;margin:1rem 0;font-weight:600}
 /* Os campos da entrega num fieldset (U2 da revisão da onda fechamento): a entrega já conferida num mês fechado fica só leitura, os campos e não só o botão. */

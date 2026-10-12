@@ -1,5 +1,16 @@
 /* A conferência por item é on-line: data, equipe e saldo são verificados
    juntos no servidor. A fila antiga de O.S. não sobrescreve esse registro. */
+/* O DIÁRIO DAS REVISÕES (U6 da revisão da onda operação): quem revisou ou
+   anulou uma entrega conferida, quando e o motivo (conferenciasRevisoes, que
+   o servidor carimba e só desce para a gestão). O mais novo primeiro. */
+function confRevisoesHTML(os) {
+  const regs = Array.isArray(os && os.conferenciasRevisoes) ? os.conferenciasRevisoes.filter(r => r && typeof r === 'object') : [];
+  if (!regs.length) return '';
+  const dia = d => String(d || '').slice(0, 10).split('-').reverse().join('/');
+  const quando = em => { const t = Date.parse(em || ''); return Number.isFinite(t) ? new Date(t).toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', timeZone:'America/Sao_Paulo'}) : ''; };
+  const linha = r => `<li><strong>${r.acao === 'anular' ? 'Anulou' : 'Revisou'}</strong> a entrega de ${esc(dia(r.antes && r.antes.dia) || '?')}${r.acao !== 'anular' && r.depois && r.depois.dia && r.antes && r.depois.dia !== r.antes.dia ? ` (agora em ${esc(dia(r.depois.dia))})` : ''} · ${esc(r.por || 'sem nome')}${quando(r.em) ? ' · ' + esc(quando(r.em)) : ''}<br><span class="text-muted">Motivo: ${esc(r.motivo || '')}</span></li>`;
+  return `<details class="conf-revisoes"><summary>Revisões e anulações desta O.S. (${regs.length})</summary><ul>${regs.slice(-20).reverse().map(linha).join('')}</ul></details>`;
+}
 async function conferirItensEntrega(osId, entregaId = '') {
   if (!perfPodeEditar()) return;
   const pendente = () => STORE.getQueue().some(x => x.action === 'setCfg' || x.os?.id === osId || x.id === osId);
@@ -50,6 +61,7 @@ async function conferirItensEntrega(osId, entregaId = '') {
   const virtual = {...os, alocacao:anterior?.alocacao || (primeira ? os.alocacao : null), equipe:anterior ? DIVISAO.derivarEquipe(anterior.alocacao) : primeira ? os.equipe || [] : []};
   ALOCUI.iniciar(chave, {os:virtual,equipes:perfConfig().equipes,papel:STATE.user.papel,valor:null,rotuloValor:'Valor dos itens desta entrega',dataEntrega:dia,versoes:perfRegrasFonte().versoes,semAntigo:true,reiniciar:true});
   const d = perfDialog('Itens e equipe · O.S. ' + (os.numero || ''), `<p class="aloc-os">${esc(os.cliente || '')}</p>
+    ${inconsistente&&!soLeitura?'<p class="aloc-aviso conf-inconsistente" role="note">Esta entrega conferida não se lê mais: um item mudou depois de conferido. Marque abaixo os itens e as quantidades de hoje e escreva o motivo (no fim, em "Revisar ou anular esta entrega") para salvar a revisão, ou anule a entrega. As outras entregas ficam como estão até a revisão delas.</p>':''}
     <p class="metricas-nota">Selecione somente o que esta equipe entregou nesta data. Os itens restantes poderão ser conferidos em outra entrega, com outra equipe.</p>
     ${registros.length?`<nav class="conf-entregas" aria-label="Entregas desta O.S.">${registros.map((e,n)=>`<button type="button" class="btn-ghost btn-sm" data-conf-abrir="${esc(e.id)}" ${e.id===entregaId?'disabled':''}>Entrega ${n+1} · ${esc(e.dia.split('-').reverse().join('/'))}</button>`).join('')}<button type="button" class="btn-ghost btn-sm" data-conf-abrir="" ${!entregaId?'disabled':''}>+ Nova entrega</button></nav>`:''}
     ${!registros.length && os.alocacao?'<p class="aloc-aviso">Esta primeira conferência por item substituirá a divisão da O.S. inteira na apuração aberta. Confira depois os itens restantes. Os fechamentos já salvos permanecem preservados.</p>':''}
@@ -65,10 +77,11 @@ async function conferirItensEntrega(osId, entregaId = '') {
     <section class="conf-parte" aria-label="Parte entregue por esta equipe"><div class="conf-parte-topo"><strong id="conf-parte-titulo">Selecione os itens entregues</strong><button type="button" class="btn-ghost btn-sm" id="conf-editar-itens">Editar itens e quantidades</button></div><p id="conf-parte-itens"></p><p id="conf-parte-valor" aria-live="polite"></p><small>100% aqui significa a participação nos itens selecionados, não na O.S. inteira.</small></section>
     <div id="conf-aloc"></div></fieldset>
     ${anterior&&!soLeitura?`<details class="conf-revisar" ${inconsistente?'open':''}><summary>Revisar ou anular esta entrega</summary>
-      ${inconsistente?'<p class="aloc-aviso" role="note">Esta O.S. tem conferência que não se lê mais (um item mudou depois de conferido). Revise esta entrega com os itens de hoje, ou anule-a; as outras entregas ficam como estão até a revisão delas.</p>':'<p class="metricas-nota">Anular tira esta entrega da conferência e da apuração do mês aberto. Fica registrado quem anulou, quando e o motivo.</p>'}
+      <p class="metricas-nota">${inconsistente?'O motivo vale para salvar a revisão ou para anular. ':''}Anular tira esta entrega da conferência e da apuração do mês aberto. Fica registrado quem ${inconsistente?'revisou ou ':''}anulou, quando e o motivo.</p>
       <label class="conf-rev-motivo">Motivo (${MOTIVO_REV_MIN} letras ou mais) <input id="conf-rev-motivo" maxlength="300" autocomplete="off"></label>
       <button type="button" class="btn-ghost btn-sm" id="conf-anular">Anular esta entrega</button></details>`:''}
-    <p class="aloc-status" id="conf-status" role="status" aria-live="polite"></p><div class="aloc-acoes"><button type="button" class="btn-primary" id="conf-salvar">${anterior?'Salvar alterações da entrega':'Confirmar esta entrega'}</button><button type="button" class="btn-ghost" id="conf-cancelar">Cancelar</button></div>`);
+    ${confRevisoesHTML(os)}
+    <p class="aloc-status" id="conf-status" role="status" aria-live="polite"></p><div class="aloc-acoes"><button type="button" class="btn-primary" id="conf-salvar">${inconsistente?'Salvar a revisão desta entrega':anterior?'Salvar alterações da entrega':'Confirmar esta entrega'}</button><button type="button" class="btn-ghost" id="conf-cancelar">Cancelar</button></div>`);
   const box=d.querySelector('#conf-aloc'), status=d.querySelector('#conf-status'), salvar=d.querySelector('#conf-salvar');
   const minhaTela=()=>d.open && d.querySelector('#conf-aloc')===box;
   const selecao=()=>catalogo.filter(i=>escolhidos.has(i.chave)).map(i=>({chave:i.chave,identidade:i.identidade,qtde:escolhidos.get(i.chave)}));
@@ -185,6 +198,8 @@ function conferenciaRefletirNaFicha(confirmada) {
   const modal=typeof document!=='undefined'?document.querySelector('#modal-os'):null;
   const anterior=modal?.querySelector('[data-controle="itens"]'),aberto=anterior?.closest('details')?.open;
   _modalDraft.conferenciasEntrega=JSON.parse(JSON.stringify(base.conferenciasEntrega || []));
+  // O diário das revisões (U6) também, para a ficha dizer quem revisou ou anulou.
+  if(Array.isArray(base.conferenciasRevisoes))_modalDraft.conferenciasRevisoes=JSON.parse(JSON.stringify(base.conferenciasRevisoes));
   const pendente=STORE.getQueue().some(x=>x.os?.id===base.id || x.id===base.id);
   if(!pendente && !_modalDirty) _modalDraft=JSON.parse(JSON.stringify(base));
   // Com edição local em andamento, não rebasa silenciosamente a revisão nem
