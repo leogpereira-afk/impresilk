@@ -2812,6 +2812,9 @@ export function acertarMomentosGestao(os, anterior) {
     if (os[k] && !valido(os[k]) && os[k] !== anterior?.[k]) {
       voltar(k);
       avisos.push('Data de ' + (k === 'saidaEm' ? 'saída' : 'retorno') + ' inválida: não foi gravada.');
+    } else if (os[k] && !valido(os[k])) {
+      // O inválido antigo (já gravado, esta gravação não mexeu): conta como ausente na conferência (momentosParaConferir), com aviso.
+      avisos.push('A ' + (k === 'saidaEm' ? 'saída' : 'hora do retorno') + ' gravada antes está fora do formato e não foi conferida. O resto da O.S. foi gravado; confira a ' + (k === 'saidaEm' ? 'hora da saída' : 'hora do retorno') + '.');
     }
   }
   if (valido(os.saidaEm) && valido(os.retornoEm) && Date.parse(os.retornoEm) < Date.parse(os.saidaEm)) {
@@ -2824,6 +2827,17 @@ export function acertarMomentosGestao(os, anterior) {
 }
 /* O momento gravado que já não fechava antes desta gravação (ela não mexeu na
    saída nem no retorno) não é culpa dela: não trava (C3). */
+/* O MOMENTO ANTIGO INVÁLIDO NÃO DERRUBA O ENVIO (revisão da onda auditoria,
+   item 10): a saída ou o retorno já gravados fora do formato, que esta
+   gravação não mudou, contam como ausentes na conferência; o dado gravado não
+   se apaga. Sem isso, o retorno novo com a saída antiga inválida era 400
+   definitivo e o envio inteiro (as notas, as fotos) saía da fila. */
+export function momentosParaConferir(os, anterior) {
+  const valido = v => /^\d{4}-\d{2}-\d{2}T/.test(String(v || '')) && Number.isFinite(Date.parse(String(v)));
+  const r = { ...os };
+  for (const k of ['saidaEm', 'retornoEm']) if (r[k] && !valido(r[k]) && anterior && r[k] === anterior[k]) delete r[k];
+  return r;
+}
 export const momentosComoGravados = (os, anterior) => !!anterior && String(os?.saidaEm ?? '') === String(anterior.saidaEm ?? '') && String(os?.retornoEm ?? '') === String(anterior.retornoEm ?? '');
 /* O QUE DESCE PARA QUEM ENTROU PELO NOME. O crachá de toque sai de um primeiro
    nome, sem senha: precisa de cliente, endereço e contato, não do documento

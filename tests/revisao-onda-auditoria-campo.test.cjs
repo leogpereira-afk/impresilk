@@ -72,3 +72,27 @@ test('revisão (item 4): um percentual só para o valor, o do mês, com o nome c
   assert.match(src, /% do valor do mês<\/strong> no ranking/);
   assert.match(src, /só \$\{m\.pct\}% do valor do mês está no ranking/);
 });
+
+/* Item 10 (C3 legado): a saída antiga gravada fora do formato, que o envio não
+   mexeu, contava contra o retorno novo e dava 400 definitivo: o envio inteiro
+   (as notas do dia) saía da fila. Agora ela conta como ausente, com aviso; o
+   resto grava e o dado antigo não se apaga. A troca para outra data inválida
+   continua não gravando. */
+for (const quem of [{nome:'Bruno',sub:'bruno',id:'100002',papel:'montagem'},gestor]) {
+  test(`revisão campo (C3 legado, ${quem.papel}): a saída antiga inválida não derruba o retorno novo nem a nota`,async()=>{
+    const b=banco();b.pcp_registros[0].registro.saidaEm=HOJE+' 08:00';
+    const e=await edge('pcp-sync',b);
+    const c=structuredClone((await e.call({action:'list',escopo:'abertas'},quem)).os.find(o=>o.id==='1'));
+    const r=await e.call({action:'upsert',os:{...c,horaRetorno:'17:00',retornoEm:HOJE+'T17:00:00',obs:'trabalho do dia',atualizadoEm:agoraISO()}},quem);
+    assert.equal(r.status,200,JSON.stringify({error:r.error,definitivo:r.definitivo}));
+    const f=reg(e);
+    assert.equal(f.obs,'trabalho do dia');
+    assert.equal(f.retornoEm,HOJE+'T17:00:00');
+    assert.equal(f.saidaEm,HOJE+' 08:00','o dado antigo não se apaga');
+    assert.ok((r.avisos||[]).some(a=>/^A saída gravada antes está fora do formato e não foi conferida/.test(a)),JSON.stringify(r.avisos));
+    const r2=await e.call({action:'upsert',os:{...structuredClone(reg(e)),saidaEm:'ontem',obs:'outra nota',atualizadoEm:agoraISO()}},quem);
+    assert.equal(r2.status,200,JSON.stringify(r2).slice(0,300));
+    assert.equal(reg(e).saidaEm,HOJE+' 08:00','a data inválida nova não é gravada');
+    assert.equal(reg(e).obs,'outra nota');
+  });
+}
