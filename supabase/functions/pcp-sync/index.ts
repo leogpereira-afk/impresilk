@@ -599,11 +599,11 @@ async function lerRegistrosRH(colecao: string, campos: string, filtro?: (q: any)
   throw new Error("Leitura do RH excedeu o limite.");
 }
 async function contratosFreelancerRH(comFoto = false): Promise<any[]> {
-  return await lerRegistrosRH("freelancers", "registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->idPessoaAnteriores, registro->>funcao, registro->>situacao, registro->>contratoFim" + (comFoto ? ", registro->>exColaboradorId, registro->>fotoDataUrl" : ""));
+  return await lerRegistrosRH("freelancers", "registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->idPessoaAnteriores, registro->>idPessoaBloqueado, registro->>funcao, registro->>situacao, registro->>contratoFim" + (comFoto ? ", registro->>exColaboradorId, registro->>fotoDataUrl" : ""));
 }
 async function fichasRH(): Promise<any[]> {
   if (_fichasRH && _fichasRH.ate > Date.now()) return _fichasRH.fichas;
-  const data = await lerRegistrosRH("colaboradores", "registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->idPessoaAnteriores, registro->>dataDesligamento, registro->>statusId");
+  const data = await lerRegistrosRH("colaboradores", "registro->>id, registro->>nome, registro->>apelido, registro->>cpf, registro->>idPessoa, registro->idPessoaAnteriores, registro->>idPessoaBloqueado, registro->>dataDesligamento, registro->>statusId");
   // `ativo` com a mesma regra do elenco: ficha inativa com contrato ativo do
   // mesmo CPF cede lugar ao contrato nos dois lados (juntarFreelancers).
   const FORA = new Set(["inativo", "abandono", "externo"]);
@@ -614,7 +614,7 @@ async function fichasRH(): Promise<any[]> {
     // Os IDs que a pessoa já teve (P1 da auditoria de 12/10/2026): a régua leva cada um ao ID de hoje.
     const ant = idsAnterioresDoCadastro(g, idf.id);
     return { chave: String(g.id || ""), id: idf.id, nome: String(g.nome || "").trim(), ...(ant.length ? { anteriores: ant } : {}),
-             ...(idf.divergente ? { idDivergente: true } : {}), ...(idf.gravadoInvalido ? { idGravadoInvalido: true } : {}),
+             ...(idf.divergente ? { idDivergente: true } : {}), ...(idf.gravadoInvalido ? { idGravadoInvalido: true } : {}), ...(idf.bloqueado ? { idBloqueado: true } : {}),
              apelido: String(g.apelido || "").trim(), desligado: !!String(g.dataDesligamento || "").trim(),
              // A data da saída confere a divisão de O.S. antiga de quem saiu depois (F08). Não desce para aparelho nenhum.
              desligadoEm: String(g.dataDesligamento || "").trim().slice(0, 10),
@@ -3865,8 +3865,8 @@ Deno.serve(async (req: Request) => {
         let fichas: any[], contratos: any[];
         try {
           [fichas, contratos] = await Promise.all([
-            lerRegistrosRH("colaboradores", "registro->>id, registro->>nome, registro->>cpf, registro->>idPessoa"),
-            lerRegistrosRH("freelancers", "registro->>id, registro->>nome, registro->>cpf, registro->>cnpj, registro->>idPessoa"),
+            lerRegistrosRH("colaboradores", "registro->>id, registro->>nome, registro->>cpf, registro->>idPessoa, registro->>idPessoaBloqueado"),
+            lerRegistrosRH("freelancers", "registro->>id, registro->>nome, registro->>cpf, registro->>cnpj, registro->>idPessoa, registro->>idPessoaBloqueado"),
           ]);
         } catch { return resp({ error: "Não foi possível ler o RH agora. Tente de novo." }, 500); }
         const achou = pessoasPorDocumento(doc, fichas, contratos);
@@ -3973,7 +3973,7 @@ Deno.serve(async (req: Request) => {
           cpfPorChave.set(String(g.id || ""), String(g.cpf || "").replace(/\D/g, ""));
           // ID gravado que discorda do CPF (ou fora do formato): vira aviso à gestão em juntarFreelancers (D-015).
           const idf = idDoCadastroRH(g);
-          if (idf.divergente || idf.gravadoInvalido) marcasIdPorChave.set(String(g.id || ""), { idDivergente: idf.divergente, idGravadoInvalido: idf.gravadoInvalido });
+          if (idf.divergente || idf.gravadoInvalido || idf.bloqueado) marcasIdPorChave.set(String(g.id || ""), { idDivergente: idf.divergente, idGravadoInvalido: idf.gravadoInvalido, ...(idf.bloqueado ? { idBloqueado: true } : {}) });
           statusPorChave.set(String(g.id || ""), String(g.statusId || "").trim());
         }
         let contratosRH: any[] = [];

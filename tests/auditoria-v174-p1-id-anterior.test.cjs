@@ -120,3 +120,28 @@ test('P1: gravar os IDs anteriores no RH não recalcula diferente o mês fechado
   const s=JSON.stringify({regraNota:selo.regraNota,regraPerdas:selo.regraPerdas,regraVolta:selo.regraVolta});
   assert.equal((await e2.run(`perfFonte(perfParametrosDoSelo(${s},${JSON.stringify(NOV)}),perfOpcoesDoSelo(${s}))`)).hash,selo.hash);
 });
+
+/* A MARCA idPessoaBloqueado (P1, pedido da sessão principal): o RH salva a
+   pessoa SEM ID quando o ID do CPF é ou foi de outra pessoa, e marca o
+   cadastro. O caso ruim (fbc56b9): sem idPessoa, o PCP calculava pelo CPF e a
+   pessoa nova virava o ID de quem saiu (e herdava o histórico dela). */
+test('P1: o cadastro com idPessoaBloqueado fica sem ID (não vira o ID de quem saiu pelo CPF), com aviso à gestão',async()=>{
+  const I=await S();
+  assert.deepEqual(I.idDoCadastroRH({cpf:'70000955555',idPessoaBloqueado:'id-de-outra-pessoa'}),{id:'',fonte:'',divergente:false,gravadoInvalido:false,bloqueado:true});
+  assert.equal(I.idDoCadastroRH({cpf:'70000955555',idPessoa:'710005',idPessoaBloqueado:'id-de-outra-pessoa'}).id,'710005','o ID gravado continua valendo');
+  // Quem saiu tinha o ID 700009; a pessoa nova, com o CPF que começa por ele, vem bloqueada.
+  const saiu=ficha('s','Pessoa Que Saiu','saiu','70000911111',{idPessoa:'700009',dataDesligamento:'2026-01-10'});
+  const nova=ficha('n','Pessoa Nova Fictícia','nova-ficticia','70000955555',{idPessoaBloqueado:'id-de-outra-pessoa'});
+  const contrato={colecao:'freelancers',id:'c1',apagado:false,registro:{id:'c1',nome:'Prestador Novo Fictício',apelido:'prestador',cpf:'70000966666',funcao:'Instalador',situacao:'ativo',contratoFim:'',idPessoaBloqueado:'id-de-outra-pessoa'}};
+  const e=await edge('pcp-sync',banco([...FICHAS,saiu,nova,contrato]));
+  const regua=await e.run('pessoasDoPCP()');
+  assert.equal(regua.pessoa('700009').nome,'Pessoa Que Saiu','o ID de quem saiu continua dele');
+  assert.ok(!regua.fichas.some(p=>p.id==='700009'&&p.nome!=='Pessoa Que Saiu'),'nem a ficha nem o contrato novos ficam com o ID de quem saiu');
+  assert.equal(regua.idDe('nova-ficticia'),'','a pessoa nova fica sem ID');
+  const el=await e.call({action:'elenco',freelancers:true},{papel:'pcp',sub:'titular-ficticio',nome:'Titular Fictício',exp:EXP});
+  assert.equal(el.pessoas.find(p=>p.nome==='Pessoa Nova Fictícia').id,'');
+  assert.ok(el.avisos.some(a=>/^A ficha de Pessoa Nova Fictícia no RH está sem ID: o ID do CPF é ou foi de outra pessoa/.test(a)),JSON.stringify(el.avisos));
+  assert.ok(el.avisos.some(a=>/^O contrato de freelancer de Prestador Novo Fictício no RH está sem ID/.test(a)),JSON.stringify(el.avisos));
+  const doc=await e.call({action:'pessoaPorDocumento',documento:'70000955555'},{papel:'pcp',sub:'titular-ficticio',nome:'Titular Fictício',exp:EXP});
+  assert.deepEqual(doc.pessoas,[{id:'',nome:'Pessoa Nova Fictícia'}]);
+});

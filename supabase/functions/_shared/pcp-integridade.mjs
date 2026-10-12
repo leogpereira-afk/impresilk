@@ -1502,11 +1502,18 @@ export function cpfValido(v) {
    contrato (os verificadores do CPF precisam conferir); a da ficha só pede os
    11 dígitos, como sempre foi. Devolve só o ID e as marcas, nunca o CPF. */
 export const CAMPO_ID_PESSOA = 'idPessoa';
+export const CAMPO_ID_BLOQUEADO = 'idPessoaBloqueado';
 export function idDoCadastroRH(reg, { exigirCpfValido = false } = {}) {
   const gravado = String(reg?.[CAMPO_ID_PESSOA] ?? '').trim();
   const cpf = soDigitosCpf(reg?.cpf);
   const doCpf = exigirCpfValido ? (cpfValido(cpf) ? cpf.slice(0, 6) : '') : (cpf.length === 11 ? cpf.slice(0, 6) : '');
   if (/^\d{6}$/.test(gravado)) return { id: gravado, fonte: 'gravado', divergente: !!doCpf && doCpf !== gravado, gravadoInvalido: false };
+  /* O ID DO CPF BLOQUEADO PELO RH (P1 da auditoria de 12/10/2026): o RH grava
+     `idPessoaBloqueado` (o motivo, ex. "id-de-outra-pessoa") quando salva a
+     pessoa SEM ID porque o ID do CPF é ou foi de outra pessoa. Aí o PCP não
+     calcula pelo CPF: a pessoa fica sem ID (a gestão vê o aviso e a pessoa a
+     cadastrar), nunca com o ID de quem saiu. */
+  if (String(reg?.[CAMPO_ID_BLOQUEADO] ?? '').trim()) return { id: '', fonte: '', divergente: false, gravadoInvalido: !!gravado, bloqueado: true };
   return { id: doCpf, fonte: doCpf ? 'cpf' : '', divergente: false, gravadoInvalido: !!gravado };
 }
 /* OS IDs QUE A PESSOA JÁ TEVE (P1 da auditoria de 12/10/2026): o RH grava em
@@ -1538,6 +1545,7 @@ export function avisoIdDoCadastro(c) {
   if (!c || !String(c.nome || '').trim()) return '';
   const onde = c.freelancer ? `O contrato de freelancer de ${String(c.nome).trim()}` : `A ficha de ${String(c.nome).trim()}`;
   if (c.idDivergente) return `${onde} no RH guarda o ID ${c.id}, e o CPF de hoje não começa por ele. No PCP vale o ID gravado: a pessoa não muda de ID quando o CPF é corrigido. Se o ID gravado estiver errado, só o RH corrige, pela tela.`;
+  if (c.idBloqueado) return `${onde} no RH está sem ID: o ID do CPF é ou foi de outra pessoa, e o RH bloqueou o cálculo. No PCP ela fica sem ID (pessoa a cadastrar) até o RH gravar o ID dela, pela tela.`;
   if (c.idGravadoInvalido) return `${onde} no RH tem o ID gravado fora do formato de 6 dígitos. O PCP usa o ID do CPF${c.id ? ` (${c.id})` : ''} até o RH corrigir o campo.`;
   return '';
 }
@@ -1582,9 +1590,9 @@ export function juntarFreelancers(fichas, contratos, { hoje = '' } = {}) {
         apelido: String(c.apelido || '').trim(), funcao: String(c.funcao || '').trim(), freelancer: true,
         ativo, desligado: !ativo, contratoFim: String(c.contratoFim || '').slice(0, 10),
         situacaoContrato: String(c.situacao || '') === 'encerrado' ? 'encerrado' : ativo ? 'ativo' : 'vencido',
-        ...(idc.divergente ? { idDivergente: true } : {}), ...(idc.gravadoInvalido ? { idGravadoInvalido: true } : {}),
+        ...(idc.divergente ? { idDivergente: true } : {}), ...(idc.gravadoInvalido ? { idGravadoInvalido: true } : {}), ...(idc.bloqueado ? { idBloqueado: true } : {}),
         ...(idsAnterioresDoCadastro(c, idc.id).length ? { anteriores: idsAnterioresDoCadastro(c, idc.id) } : {}),
-        ...(idc.id ? {} : { semCpf: true, ...(cpf ? { cpfInvalido: true } : {}) }) } };
+        ...(idc.id || idc.bloqueado ? {} : { semCpf: true, ...(cpf ? { cpfInvalido: true } : {}) }) } };
     });
   // Renovação em cadastro novo: um contrato por CPF.
   const porCpf = new Map(), semCpf = [];
