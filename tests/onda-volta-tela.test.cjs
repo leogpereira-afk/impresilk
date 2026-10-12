@@ -99,12 +99,13 @@ test('M11: o diálogo da conferência por item propõe o dia da volta, não o da
 /* ─────────────────────────────── item 16 na tela ─────────────────────────────── */
 test('item 16: o carro escolhido na lista do Ativos leva o id; nome repetido na lista ou fora dela fica sem id', ()=>{
   const s=ler('casa.js');
-  const ativos=[{id:'7',nome:'CARRO A - 1 fictício',placa:'AAA0A00'},{id:'8',nome:'Strada'},{id:'9',nome:'Strada'}];
+  // D5 da revisão da onda volta: nomes de carro inventados (o modelo de um carro de verdade saiu).
+  const ativos=[{id:'7',nome:'CARRO A - 1 fictício',placa:'AAA0A00'},{id:'8',nome:'Furgão repetido fictício'},{id:'9',nome:'Furgão repetido fictício'}];
   const ctx={elencoRH:()=>({veiculos:ativos})};vm.createContext(ctx);
   vm.runInContext(s.slice(s.indexOf('function veiculosRH()'),s.indexOf('function',s.indexOf('function definirVeiculoId(')+10)),ctx);
   assert.equal(ctx.definirVeiculoId({veiculo:'CARRO A - 1 fictício'}).veiculoId,'7');
   assert.equal(ctx.definirVeiculoId({veiculo:'Carro fictício A',veiculoId:'7'}).veiculoId,undefined,'nada de semelhança: outro nome, sem id');
-  assert.equal(ctx.definirVeiculoId({veiculo:'Strada'}).veiculoId,undefined,'dois carros com o mesmo nome: sem id');
+  assert.equal(ctx.definirVeiculoId({veiculo:'Furgão repetido fictício'}).veiculoId,undefined,'dois carros com o mesmo nome: sem id');
   assert.equal(ctx.definirVeiculoId({veiculo:'Instalação interna',veiculoId:'8'}).veiculoId,undefined);
   // A ficha e o formulário da agenda chamam a mesma função.
   assert.match(ler('app.js'),/if \(el\.dataset\.f === 'veiculo' && typeof definirVeiculoId === 'function'\) definirVeiculoId\(_modalDraft\);/);

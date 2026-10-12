@@ -199,9 +199,15 @@ test('item 17: a conferência da volta grava o ID de 6 dígitos em porId (e o lo
   assert.equal(g.retornoConf.porId,'444555');
 });
 
-test('item 16: a chave da volta pelo id do carro no Ativos; o nome é a reserva; nomes parecidos não se juntam; o id do carro anterior não fica', async()=>{
-  const oss=[osItens('v1','90401',{veiculo:'Carro fictício A',veiculoId:'ativo-7'}),osItens('v2','90402',{veiculo:'CARRO A - 1 fictício',veiculoId:'ativo-7'}),osItens('v3','90403',{veiculo:'CARRO A - 1 fictício'})];
-  const e=await edge('pcp-sync',banco(oss));
+/* TROCADO DE PROPÓSITO NA REVISÃO DA ONDA VOLTA (D1): este teste dizia "sem
+   id, o nome" para qualquer O.S. sem veiculoId, e travava a divisão da mesma
+   viagem em duas voltas quando uma O.S. tinha o id e a outra só o nome (29
+   O.S. abertas têm o carro só pelo nome). Agora, sem o id na O.S., o nome
+   EXATO e único no Ativos dá o id; o nome que não está no Ativos (v3, um
+   apelido) continua pelo nome, e semelhança continua sem juntar nada. */
+test('item 16: a chave da volta pelo id do carro no Ativos; o nome exato e único do Ativos dá o id; o resto é pelo nome; nomes parecidos não se juntam; o id do carro anterior não fica', async()=>{
+  const oss=[osItens('v1','90401',{veiculo:'Carro fictício A',veiculoId:'ativo-7'}),osItens('v2','90402',{veiculo:'CARRO A - 1 fictício',veiculoId:'ativo-7'}),osItens('v3','90403',{veiculo:'CARRO A - 1 fictício'}),osItens('v4','90404',{veiculo:'Carro fictício A'})];
+  const e=await edge('pcp-sync',banco(oss,{painel_registros:[{colecao:'ativo',id:'ativo-7',apagado:false,registro:{tipo:'veiculo',nome:'Carro fictício A'}}]}));
   for(const o of oss){
     relogio(e,'2026-11-05T21:00:00Z');
     await gravar(e,o.id,{horaRetorno:'18:00',retornoEm:'2026-11-05T18:00:00',finalizadaEm:'2026-11-05T21:00:00Z',finalizadoPor:'Gestor fictício',justificativaConclusao:'Conclusão fictícia sem foto'});
@@ -211,7 +217,8 @@ test('item 16: a chave da volta pelo id do carro no Ativos; o nome é a reserva;
   const de=id=>nov.registros.find(r=>r.id===id);
   assert.equal(de('v1').volta,'2026-11-05|id:ativo-7|100001');
   assert.equal(de('v1').volta,de('v2').volta,'o mesmo carro pelo id: uma volta só');
-  assert.equal(de('v3').volta,'2026-11-05|carro a - 1 ficticio|100001','sem id, o nome (e nada de juntar por semelhança)');
+  assert.equal(de('v3').volta,'2026-11-05|carro a - 1 ficticio|100001','sem id e fora do Ativos: o nome (e nada de juntar por semelhança)');
+  assert.equal(de('v4').volta,'2026-11-05|id:ativo-7|100001','sem id na O.S., o nome exato e único do Ativos dá o id');
   // Uma aba que não conhece o id troca o carro: o id do carro anterior não fica.
   await gravar(e,'v1',{veiculo:'Carro fictício novo'});
   assert.equal(reg(e,'v1').veiculoId,undefined);

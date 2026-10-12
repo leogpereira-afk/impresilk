@@ -417,12 +417,19 @@ async function paginaExportacao(cursor: { fase: string; colecao: string; id: str
      carimbo até o pedido de apagar com motivo. */
 const FOTOS_PROVA_TETO = 500;
 const idFotoProva = (x: unknown) => typeof x === "string" && x.length > 0 && x.length <= 200;
+/* As fotos guardadas nas viagens (revisão da onda volta, U2): a conferência
+   e a limpeza de cada viagem levam as fotos dela; a da primeira viagem
+   continua citada pela O.S. quando a segunda chega. */
+function fotosDasViagens(o: any): string[] {
+  const lista = (v: unknown) => (Array.isArray(v) ? v : []);
+  return lista(o?.voltas).flatMap((v: any) => [...lista(v?.retornoConf?.fotos), ...lista(v?.voltaEquipe?.fotos)]).filter((x: unknown) => typeof x === "string" && x) as string[];
+}
 function idsDeFotoDaOS(o: any): string[] {
   if (!o || typeof o !== "object") return [];
   const lista = (v: unknown) => (Array.isArray(v) ? v : []);
   return [...new Set([o.layoutFotoId, o.embarqueFotoId, ...lista(o.fotosCheckinIds), ...lista(o.fotosRetornoIds),
     ...lista(o.itens).map((i: any) => i?.fotoProbId), ...lista(o.voltaEquipe?.fotos), ...lista(o.retornoConf?.fotos),
-    ...lista(o.fotosTiradas)].filter(idFotoProva))] as string[];
+    ...lista(o.fotosTiradas), ...fotosDasViagens(o)].filter(idFotoProva))] as string[];
 }
 function guardarFotosProva(os: any, existing: any, { gestao }: { gestao: boolean }) {
   const avisos: string[] = [];
@@ -712,6 +719,28 @@ async function perfInteiraFechada(osId:string, fechados:any[]) {
   }
   return null;
 }
+/* OS CARROS DO ATIVOS DO PAINEL (só o id e o nome), para a chave da volta
+   (revisão da onda volta, D1): a mesma lista e o mesmo filtro do elenco. */
+async function ativosDoPainel():Promise<any[]> {
+  const {data,error}=await sb.from("painel_registros").select("id, registro").eq("colecao","ativo");
+  if(error)throw new Error(error.message);
+  return (data??[]).filter((r:any)=>r.registro?.tipo==="veiculo"&&String(r.registro?.nome||"").trim()).map((r:any)=>({id:String(r.id),nome:String(r.registro.nome).trim()}));
+}
+/* A CONFERÊNCIA (ou a limpeza) GRAVADA ACOMPANHA O DIA CORRIGIDO DA MESMA
+   VIAGEM (revisão da onda volta, U2): quando a gravação muda o dia da volta
+   sem ser viagem nova (CONFERENCIA_ENTREGA.movimentoDaViagem), a que era da
+   viagem do dia antigo passa ao dia novo, com tudo o que tem. A de outra
+   viagem, ou a que já está no dia novo, fica como está. */
+function seguirCorrecaoDaVolta(c:any, existing:any, os:any, tipo:"conf"|"decl") {
+  if(!c||typeof c!=="object"||Array.isArray(c))return c;
+  const mov=CONFERENCIA_ENTREGA.movimentoDaViagem(existing,os);
+  if(!mov||mov.nova)return c;
+  const dc=String(c.dia??"").trim();
+  if(dc===mov.para)return c;
+  const daViagemAntiga=tipo==="conf"?CONFERENCIA_ENTREGA.confDaViagemDoDia(existing,mov.de):CONFERENCIA_ENTREGA.declaracaoDaViagemDoDia(existing,mov.de);
+  const era=dc?dc===mov.de:!!daViagemAntiga;
+  return era?{...c,dia:mov.para}:c;
+}
 /* A FRASE DO MÊS FECHADO NA CONFERÊNCIA (revisão da onda fechamento, U2): não
    empurra a pessoa a trocar a data para um mês aberto (a entrega de setembro
    contaria em outubro). O ajuste de mês fechado depende da pergunta 3 da fila
@@ -855,6 +884,11 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
      régua das perdas): o período em que as duas réguas dizem o mesmo fica com
      o conteúdo e o hash de antes. */
   let voltaMudou=false;
+  /* O CARRO PELO NOME DO ATIVOS (revisão da onda volta, D1): sem o id na O.S.
+     (a programada antes do item 16), o nome exato e único no Ativos dá o id,
+     na leitura; a mesma viagem com e sem o id era contada duas vezes. Só a
+     régua nova (volta-1) lê; a da v167 fica como era. */
+  const ativosPerf=regraVolta?await ativosDoPainel():[];
   const registros=lista.map(o=>{
     const p=participacoes.find((x:any)=>x.id===o.id);
     let valor=num(o.valorTotal), origem="O.S. do PCP";
@@ -976,13 +1010,17 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
          OPERACAO.voltou), com a conferência da viagem de hoje. A chave é a da
          viagem: dia, carro (pelo id do Ativos quando a O.S. o tem, item 16) e
          a equipe da viagem. */
-      if(!o._conferencia)viagem=CONFERENCIA_ENTREGA.voltaDaOS(o);
+      /* D3 (revisão da onda volta): a O.S. inteira lê a viagem do dia da
+         entrega dela (o._dia: o lançamento ou a finalização), nunca a viagem
+         de hoje; a segunda viagem de dezembro mudava a volta da O.S. entregue
+         em novembro e o recálculo de novembro fechado. */
+      if(!o._conferencia)viagem=CONFERENCIA_ENTREGA.voltaDaOS(o,o._dia);
       const baixaERP=o.baixaAutoERP?.em===o.finalizadaEm || /^Mubisys\b/i.test(o.finalizadoPor || "");
       const nova={retornoConf:confDe(viagem?.retornoConf),
         voltou:o._conferencia
           ? !!viagem && nomes.length>0 && !CONFERENCIA_ENTREGA.semCarroV(viagem)
           : nomes.length>0 && !CONFERENCIA_ENTREGA.semCarroV(o) && !!(o.retornoEm || o.horaRetorno || !baixaERP || o.entregaLancada),
-        volta:viagem?CONFERENCIA_ENTREGA.chaveDaViagem(viagem,(n:any)=>pessoasPerf.chave(String(n))):""};
+        volta:viagem?CONFERENCIA_ENTREGA.chaveDaViagem(viagem,(n:any)=>pessoasPerf.chave(String(n)),ativosPerf):""};
       if(canon(nova)!==canon(daV167))voltaMudou=true;
       daVolta=nova;
     }
@@ -1378,7 +1416,7 @@ Deno.serve(async (req: Request) => {
        abri-la, senão vê "registrada por Ana" com a miniatura quebrada. Só para
        LER: apagar pelo crachá de toque tiraria a foto das outras O.S. da volta,
        e o espelho nunca apaga essa foto (o × só a tira da lista). */
-    const fotosDaVolta = (r: any) => acao === "getPhoto" && Array.isArray(r.registro?.voltaEquipe?.fotos) ? r.registro.voltaEquipe.fotos : [];
+    const fotosDaVolta = (r: any) => acao === "getPhoto" ? [...(Array.isArray(r.registro?.voltaEquipe?.fotos) ? r.registro.voltaEquipe.fotos : []), ...(Array.isArray(r.registro?.voltas) ? r.registro.voltas.flatMap((v: any) => Array.isArray(v?.voltaEquipe?.fotos) ? v.voltaEquipe.fotos : []) : [])] : [];
     /* APAGAR é mais estreito que abrir: o layout é do PCP, e a foto de O.S.
        finalizada é a prova que validarConclusao exigiu. Quem entrou sem senha
        apaga só foto de execução de O.S. ainda aberta. */
@@ -1389,7 +1427,7 @@ Deno.serve(async (req: Request) => {
        finalizada, como layout, na limpeza do carro ou na conferência da volta
        não é apagado por este crachá. */
     const execucao = (r: any) => [...(r.registro.fotosCheckinIds || []),...(r.registro.fotosRetornoIds || []),...(r.registro.itens || []).map((i: any) => i?.fotoProbId)];
-    const protegida = apagando && (data || []).some((r: any) => [r.registro.layoutFotoId,...(r.registro.voltaEquipe?.fotos || []),...(r.registro.retornoConf?.fotos || []),...(r.registro.finalizadaEm ? execucao(r) : [])].filter(Boolean).includes(body.fileId));
+    const protegida = apagando && (data || []).some((r: any) => [r.registro.layoutFotoId,...(r.registro.voltaEquipe?.fotos || []),...(r.registro.retornoConf?.fotos || []),...fotosDasViagens(r.registro),...(r.registro.finalizadaEm ? execucao(r) : [])].filter(Boolean).includes(body.fileId));
     const permitida = !protegida && (data || []).some((r: any) => !(apagando && r.registro.finalizadaEm) && [apagando ? "" : r.registro.layoutFotoId,...execucao(r),...fotosDaVolta(r)].filter(Boolean).includes(body.fileId));
     if (!permitida) return resp({error:apagando ? "Esta foto não pode ser apagada por este aparelho." : "Esta foto não está vinculada às O.S. da sua equipe."},403);
   }
@@ -2436,8 +2474,17 @@ Deno.serve(async (req: Request) => {
         {
           const antes = existing?.retornoConf && typeof existing.retornoConf === "object" ? existing.retornoConf : null;
           const gestao = !ehMaquina && ["admin", "pcp"].includes(String(cracha?.papel ?? ""));
+          /* O DIA CORRIGIDO DA MESMA VIAGEM (revisão da onda volta, U2): o
+             Lançar com a data do serviço e a correção do dia do retorno mudam
+             o dia da volta sem ser viagem nova (CONFERENCIA_ENTREGA.movimentoDaViagem).
+             A conferência gravada da viagem acompanha o dia novo, com a
+             observação e as fotos; a correção fica no diário (retornoConf e
+             voltas). Antes, ela ficava no dia antigo, e o Lançar gravava por
+             cima uma conferência sem a observação e sem as fotos. */
+          const seguirVolta = (c: any) => existing ? seguirCorrecaoDaVolta(c, existing, os, "conf") : c;
+          const antesV = seguirVolta(antes);
           if (!gestao || os.retornoConf == null) {
-            if (antes) os.retornoConf = antes; else delete os.retornoConf;
+            if (antesV) os.retornoConf = antesV; else delete os.retornoConf;
           } else {
             /* 24/09/2026: "arrumado" e "sem avaria" entraram com a fila da volta
                do carro, e as fotos da volta. Campo que o aparelho NÃO mandou fica
@@ -2448,27 +2495,32 @@ Deno.serve(async (req: Request) => {
             const PERGUNTAS = ["carroLimpo", "carroArrumado", "equipamentosOk", "semAvaria"];
             /* A CONFERÊNCIA É DA VIAGEM (onda volta, 12/10/2026): o servidor
                carimba o dia da volta que ela confere (dia). O aparelho que
-               confere uma viagem nova manda o dia dela: a mesma resposta da
-               viagem anterior, com outro dia, é conferência nova, e o que ela
-               não trouxe (observação, fotos, respostas) não vem da conferência
-               da outra viagem. A cópia que só devolve o que está gravado (o
-               mesmo dia, ou sem o dia) não recarimba nada. */
+               confere a viagem de HOJE, que não é a da conferência gravada,
+               manda o dia dela: a mesma resposta da viagem anterior, com o dia
+               da viagem de hoje, é conferência nova, e o que ela não trouxe
+               (observação, fotos, respostas) não vem da conferência da outra
+               viagem. A cópia que só devolve o que está gravado (com o dia
+               gravado, um dia antigo de uma cópia velha, ou sem o dia) não é
+               outra viagem e não recarimba nada: o dia que vale é o gravado
+               (revisão da onda volta: a cópia velha com o dia de antes da
+               correção apagava a observação e as fotos). */
             const diaViagem = CONFERENCIA_ENTREGA.diaDaVolta(os);
-            const outroDia = "dia" in rc && String(rc.dia ?? "").trim() !== String(antes?.dia ?? "").trim();
-            const base = outroDia ? null : antes;
+            const rcDia = "dia" in rc ? String(rc.dia ?? "").trim() : "";
+            const outraViagem = !!rcDia && rcDia === diaViagem && rcDia !== String(antesV?.dia ?? "").trim();
+            const base = outraViagem ? null : antesV;
             const n: any = {};
             for (const k of PERGUNTAS) n[k] = k in rc ? sn(rc[k]) : sn(base?.[k]);
             n.obs = String(("obs" in rc ? rc.obs : base?.obs) ?? "").slice(0, 300);
             const fotos = "fotos" in rc ? rc.fotos : base?.fotos;
             n.fotos = Array.isArray(fotos) ? fotos.filter((f: unknown) => typeof f === "string" && f).slice(0, 10) : [];
-            const mudou = PERGUNTAS.some((k) => n[k] !== sn(antes?.[k])) || outroDia;
+            const mudou = PERGUNTAS.some((k) => n[k] !== sn(base?.[k])) || outraViagem;
             /* O ID DE 6 DÍGITOS EM porId (item 17 da fila de 11/10/2026): a
                pessoa é o ID do RH, não o login; o login vai em porConta. Sem
                ficha que dê o ID, porId fica vazio. A resposta igual mantém o
                carimbo de quem respondeu, como sempre. */
             if (!PERGUNTAS.some((k) => n[k])) { n.por = ""; n.porId = ""; n.em = ""; }
             else if (mudou) { const autorVolta = await autorAuditoria(); n.por = cracha?.nome || cracha?.sub || ""; n.porId = autorVolta.porId || ""; n.porConta = String(cracha?.sub ?? ""); n.em = new Date().toISOString(); if (diaViagem) n.dia = diaViagem; }
-            else { n.por = antes?.por || ""; n.porId = antes?.porId || ""; if (antes?.porConta) n.porConta = antes.porConta; n.em = antes?.em || ""; if (antes?.dia) n.dia = antes.dia; }
+            else { n.por = base?.por || ""; n.porId = base?.porId || ""; if (base?.porConta) n.porConta = base.porConta; n.em = base?.em || ""; if (base?.dia) n.dia = base.dia; }
             os.retornoConf = n;
           }
         }
@@ -2482,7 +2534,13 @@ Deno.serve(async (req: Request) => {
            Nada aqui recusa: um 422 trancaria a fila do aparelho. */
         {
           const antes = existing?.voltaEquipe && typeof existing.voltaEquipe === "object" && !Array.isArray(existing.voltaEquipe) ? existing.voltaEquipe : null;
-          const pode = ehToqueNoNome && !!existing && existing.tipo !== "interno" && !voltaConferida(existing.retornoConf);
+          /* A LIMPEZA É DA VIAGEM (revisão da onda volta, U1): "o PCP já
+             conferiu" é a conferência da viagem que a equipe declara (o dia da
+             declaração; sem ele, a viagem de hoje), não a de outra viagem. A
+             segunda viagem, que o PCP ainda não conferiu, aceita a limpeza da
+             equipe, como o cartão do celular e o salvar dizem. */
+          const diaDecl = /^\d{4}-\d{2}-\d{2}$/.test(String(os.voltaEquipe?.dia ?? "")) ? String(os.voltaEquipe.dia) : CONFERENCIA_ENTREGA.diaDaVolta(existing || {});
+          const pode = ehToqueNoNome && !!existing && existing.tipo !== "interno" && !voltaConferida(CONFERENCIA_ENTREGA.confDaViagemDoDia(existing, diaDecl));
           const agoraVe = new Date().toISOString();
           const rodarVe = (id: string) => sanearVoltaEquipe(os.voltaEquipe, antes, { nome: String(cracha?.nome || cracha?.sub || ""), sub: String(cracha?.sub ?? ""), id }, agoraVe);
           let r = pode ? rodarVe("") : antes;
@@ -2605,7 +2663,10 @@ Deno.serve(async (req: Request) => {
               const { data, error } = await sb.from("pcp_registros").select("registro").eq("colecao", "os").eq("apagado", false)
                 .gte("registro->retornoConferido->>dia", diasRetorno[0]).lte("registro->retornoConferido->>dia", ateDia).limit(1000);
               if (error) throw new Error(error.message);
-              volta = voltaDoRetorno(os, (data || []).map((r: any) => r.registro).filter((r: any) => r && r.id !== os.id));
+              // O carro pelo nome do Ativos quando a O.S. não tem o id (revisão da onda volta, D1).
+              let ativosSt: any[] = [];
+              try { ativosSt = await ativosDoPainel(); } catch { ativosSt = []; }
+              volta = voltaDoRetorno(os, (data || []).map((r: any) => r.registro).filter((r: any) => r && r.id !== os.id), undefined, ativosSt);
             } catch { volta = [os]; }
             try {
               const { data, error } = await sb.from("pcp_registros").select("registro").eq("colecao", "performance_regras").eq("apagado", false).limit(1000);
@@ -2640,7 +2701,26 @@ Deno.serve(async (req: Request) => {
            (voltaLegado). Só daqui; nada é 422. */
         {
           const agoraVoltas = new Date().toISOString();
-          trocarOS(registrarVoltas(os, existing, { agora: agoraVoltas, hoje: perfDia(agoraVoltas) }).os);
+          // A conferência e a limpeza da viagem acompanham o dia corrigido (U2), com o estado final da O.S.
+          if (existing) {
+            if (os.retornoConf && typeof os.retornoConf === "object") os.retornoConf = seguirCorrecaoDaVolta(os.retornoConf, existing, os, "conf");
+            if (os.voltaEquipe && typeof os.voltaEquipe === "object") os.voltaEquipe = seguirCorrecaoDaVolta(os.voltaEquipe, existing, os, "decl");
+          }
+          /* D2 (revisão da onda volta): só a viagem de um dia num período
+             FECHADO fica como estava. Os períodos só são lidos quando a viagem
+             muda; sem eles, fica como estava toda viagem de antes de hoje (a
+             gravação seguinte corrige a do mês aberto). */
+          let rv = registrarVoltas(os, existing, { agora: agoraVoltas });
+          if (rv.mudou) {
+            let fechadosV: any[] | null = null, ativosV: any[] | null = null;
+            try { fechadosV = await perfPeriodosFechados(); } catch { fechadosV = null; }
+            // O id do carro que o nome do Ativos dá, guardado na viagem (D1); sem a lista, a viagem fica com o nome.
+            try { ativosV = await ativosDoPainel(); } catch { ativosV = null; }
+            const hojeV = perfDia(agoraVoltas);
+            const fechado = fechadosV ? (d: string) => !!perfPeriodoDoDia(fechadosV!, d) : (d: string) => d < hojeV;
+            rv = registrarVoltas(os, existing, { agora: agoraVoltas, fechado, ativos: ativosV });
+          }
+          trocarOS(rv.os);
         }
         /* A PROVA DA ENTREGA (revisão da onda-w1-backup, R1/S1): ver
            guardarFotosProva. Depois de todas as regras acima (a mescla do
@@ -3386,7 +3466,7 @@ Deno.serve(async (req: Request) => {
           const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","os").eq("apagado",true).gt("id",cursor).order("id").limit(500);
           if(error)throw new Error(error.message);
           for(const row of data || []) {
-            const o=row.registro,refs=[o.layoutFotoId,o.embarqueFotoId,...(o.fotosCheckinIds || []),...(o.fotosRetornoIds || []),...(o.itens || []).map((i:any)=>i.fotoProbId),...(o.voltaEquipe?.fotos || []),...(o.retornoConf?.fotos || [])];
+            const o=row.registro,refs=[o.layoutFotoId,o.embarqueFotoId,...(o.fotosCheckinIds || []),...(o.fotosRetornoIds || []),...(o.itens || []).map((i:any)=>i.fotoProbId),...(o.voltaEquipe?.fotos || []),...(o.retornoConf?.fotos || []),...fotosDasViagens(o)];
             if(refs.includes(body.fileId))return resp({error:"Foto preservada para recuperar uma O.S. excluída. Solicite revisão à gestão."},409);
           }
           if(!data?.length || data.length<500){concluiu=true;break;}

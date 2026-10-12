@@ -2384,7 +2384,7 @@ export function podarCarimbosF15(r) {
   const semQuem = x => { if (!objeto(x)) return x; const { porId: _pi, porConta: _pc, ...y } = x; return y; };
   if (objeto(out.retornoConf)) out.retornoConf = semQuem(out.retornoConf);
   if (objeto(out.voltaEquipe)) out.voltaEquipe = semQuem(out.voltaEquipe);
-  if (Array.isArray(out.voltas)) out.voltas = out.voltas.map(v => objeto(v) && objeto(v.retornoConf) ? { ...v, retornoConf: semQuem(v.retornoConf) } : v);
+  if (Array.isArray(out.voltas)) out.voltas = out.voltas.map(v => !objeto(v) ? v : { ...v, ...(objeto(v.retornoConf) ? { retornoConf: semQuem(v.retornoConf) } : {}), ...(objeto(v.voltaEquipe) ? { voltaEquipe: semQuem(v.voltaEquipe) } : {}) });
   if (objeto(out.voltaLegado) && objeto(out.voltaLegado.campos) && objeto(out.voltaLegado.campos.retornoConf))
     out.voltaLegado = { ...out.voltaLegado, campos: { ...out.voltaLegado.campos, retornoConf: semQuem(out.voltaLegado.campos.retornoConf) } };
   // Quem finalizou pelo celular (revisão da E5) desce com o nome, sem o ID; a volta sem ele não apaga.
@@ -2434,8 +2434,9 @@ export function sanearVoltaEquipe(veio, antes, autor, agora) {
   n.fotos = (Array.isArray(veio.fotos) ? veio.fotos : []).filter(f => typeof f === 'string' && /^[\w.-]{1,100}$/.test(f) && !f.includes('..')).slice(0, 4);
   n.dia = /^\d{4}-\d{2}-\d{2}$/.test(String(veio.dia ?? '')) ? String(veio.dia) : '';
   n.veiculo = String(veio.veiculo ?? '').slice(0, 60);
+  // A limpeza é da viagem (revisão da onda volta, U1): a mesma resposta para outra viagem é outro registro.
   const igual = velho && PERGUNTAS_VOLTA.every(k => n[k] === velho[k]) && n.obs === (velho.obs || '') &&
-    n.fotos.join() === (Array.isArray(velho.fotos) ? velho.fotos : []).join();
+    n.fotos.join() === (Array.isArray(velho.fotos) ? velho.fotos : []).join() && n.dia === String(velho.dia || '');
   if (igual) return { ...n, por: velho.por || '', porId: velho.porId || '', ...(velho.porConta ? { porConta: velho.porConta } : {}), em: velho.em || '', recebidoEm: velho.recebidoEm || '' };
   const t = Date.parse(String(veio.em ?? ''));
   const em = Number.isFinite(t) && t <= Date.parse(agora) + 10 * 60 * 1000 ? new Date(t).toISOString() : agora;
@@ -2458,7 +2459,8 @@ export function sanearVoltaEquipe(veio, antes, autor, agora) {
    apuração de novembro lia, e o recálculo de novembro fechado deixava de
    bater. Agora, a cada gravação, o servidor guarda a viagem de hoje em
    `voltas`, uma por dia da volta (CONFERENCIA_ENTREGA.registroDaVolta): o
-   dia, a equipe e o carro e a conferência da gestão daquela viagem.
+   dia, a equipe e o carro, a conferência da gestão daquela viagem (com a
+   observação e as fotos) e a limpeza que a equipe registrou.
    - Só o servidor escreve `voltas` e `voltaLegado`: o que o aparelho manda
      nesses campos não conta (parte sempre do gravado).
    - A O.S. em que nada da viagem muda continua como era, sem `voltas`: o
@@ -2467,10 +2469,19 @@ export function sanearVoltaEquipe(veio, antes, autor, agora) {
      (`voltaLegado`, só os campos que a apuração da v167 lê para a volta) e a
      viagem de antes, e só então a de hoje. O selo feito pela v167 recalcula
      pela fotografia, igual.
-   - A viagem de outro dia nunca muda pela gravação de hoje. A do dia de hoje
-     muda inteira até o fim do dia dela; depois dele, a equipe e o carro ficam
-     como estavam no fim daquele dia ("como estava no fim do dia") e só a
-     conferência da gestão continua entrando.
+   - REVISÃO DA ONDA VOLTA (D2): a viagem acompanha a correção da gestão (a
+     equipe, o carro, o dia) enquanto o dia dela estiver num mês aberto; só a
+     viagem de um dia que caiu num período FECHADO (`fechado(dia)`) fica como
+     estava (a equipe e o carro; a conferência da gestão continua entrando,
+     como antes). "Como estava no fim do dia" dividia a viagem em duas voltas
+     quando a gestão corrigia a equipe no dia seguinte, e não havia conserto
+     pela tela.
+   - REVISÃO DA ONDA VOLTA (U2): o dia corrigido da MESMA viagem
+     (CONFERENCIA_ENTREGA.movimentoDaViagem) muda o dia da viagem guardada, e
+     ela leva a conferência, a observação, as fotos e a limpeza; viagem nova só
+     nasce de fato novo (a volta registrada depois da anterior). A viagem do
+     dia antigo num período fechado fica como estava, e a corrigida nasce no
+     dia novo.
    - A conferência antiga, sem o dia, que já está guardada numa viagem não
      passa para a viagem nova: a segunda viagem começa sem conferência.
    Nada aqui recusa: a gravação passa pela fila do aparelho. */
@@ -2499,9 +2510,21 @@ export function comVoltaLegado(o) {
   }
   return r;
 }
-export function registrarVoltas(os, antes, { agora = '', hoje = '' } = {}) {
+export function registrarVoltas(os, antes, { agora = '', fechado = () => false, ativos = null } = {}) {
   if (!objeto(os)) return { os, mudou: false };
   const out = { ...os }, ant = objeto(antes) ? antes : null;
+  const travado = d => { try { return !!fechado(d); } catch { return true; } };
+  /* O ID DO CARRO NA VIAGEM GUARDADA (revisão da onda volta, D1): sem o id na
+     O.S., a viagem guarda o id que o nome exato e único do Ativos dá na hora em
+     que ela é guardada (e o mantém enquanto o nome do carro não muda). Assim
+     renomear um carro no Ativos depois do fechamento não muda o recálculo do
+     mês fechado; a leitura pelo nome fica só para a O.S. antiga sem viagens. */
+  const comId = (r, guardado) => {
+    if (!r || String(r.veiculoId ?? '').trim()) return r;
+    if (guardado && String(guardado.veiculoId ?? '').trim() && String(guardado.veiculo ?? '') === String(r.veiculo ?? '')) return { ...r, veiculoId: guardado.veiculoId };
+    const id = CONF_VOLTA.idDoAtivo(r.veiculo, ativos);
+    return id ? { ...r, veiculoId: id } : r;
+  };
   delete out.voltas; delete out.voltaLegado;
   if (ant && objeto(ant.voltaLegado)) out.voltaLegado = ant.voltaLegado;
   const tinha = ant && Array.isArray(ant.voltas) ? ant.voltas.filter(r => objeto(r) && /^\d{4}-\d{2}-\d{2}$/.test(String(r.dia || ''))) : null;
@@ -2513,20 +2536,27 @@ export function registrarVoltas(os, antes, { agora = '', hoje = '' } = {}) {
     const velho = ant ? CONF_VOLTA.registroDaVolta(ant) : null;
     if (canon(velho) === canon(atual)) return { os: out, mudou: false };
     if (ant) out.voltaLegado = { em: agora, campos: fotografiaVoltaLegado(ant) };
-    voltas = velho ? [{ ...velho, em: agora }] : [];
+    voltas = velho ? [{ ...comId(velho), em: agora }] : [];
   }
   if (atual) {
+    const mov = ant ? CONF_VOLTA.movimentoDaViagem(ant, out) : null;
+    const corrigiu = !!mov && !mov.nova;
+    // O dia corrigido da mesma viagem: a viagem do dia antigo sai (vira a do dia novo), a não ser num período fechado.
+    if (corrigiu) { const j = voltas.findIndex(r => r.dia === mov.de); if (j >= 0 && !travado(mov.de)) voltas.splice(j, 1); }
     const i = voltas.findIndex(r => r.dia === atual.dia);
     const rc = objeto(out.retornoConf) ? out.retornoConf : null;
-    // A conferência antiga (sem o dia) guardada noutra viagem é daquela viagem.
-    const conf = atual.retornoConf && !(rc && String(rc.dia ?? '').trim()) && voltas.some((r, j) => j !== i && canon(r.retornoConf) === canon(atual.retornoConf)) ? null : atual.retornoConf;
-    if (i < 0) voltas.push({ ...atual, retornoConf: conf, em: agora });
+    // A conferência antiga (sem o dia) guardada noutra viagem é daquela viagem (a não ser na correção do dia, que a leva).
+    const conf = atual.retornoConf && !corrigiu && !(rc && String(rc.dia ?? '').trim()) && voltas.some((r, j) => j !== i && canon(r.retornoConf) === canon(atual.retornoConf)) ? null : atual.retornoConf;
+    if (i < 0) voltas.push({ ...comId(atual), retornoConf: conf, em: agora });
     else {
       const { em: _e, ...semEm } = voltas[i];
-      const novo = hoje && hoje > atual.dia ? { ...semEm, retornoConf: conf } : { ...atual, retornoConf: conf };
+      // Num período fechado a viagem fica como estava; a conferência e a limpeza continuam entrando.
+      const comDecl = x => { const { voltaEquipe: _v, ...y } = x; return atual.voltaEquipe ? { ...y, voltaEquipe: atual.voltaEquipe } : y; };
+      const novo = travado(atual.dia) ? comDecl({ ...semEm, retornoConf: conf }) : { ...comId(atual, semEm), retornoConf: conf };
       if (canon(novo) !== canon(semEm)) voltas[i] = { ...novo, em: agora };
     }
   }
+  voltas.sort((a, b) => String(a.dia).localeCompare(String(b.dia)));
   out.voltas = voltas.slice(-200);
   return { os: out, mudou: canon(out.voltas) !== canon(tinha) || canon(out.voltaLegado ?? null) !== canon(ant?.voltaLegado ?? null) };
 }

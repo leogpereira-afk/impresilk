@@ -489,21 +489,30 @@ function ocorrenciasManuais(o) {
    Sem carro e sem equipe nada liga uma O.S. à outra: a volta é ela sozinha.
    A retirada no balcão não tem volta, e a O.S. cancelada sai da volta. */
 /* O carro pelo id do Ativos quando a O.S. o tem (item 16 da fila de
-   11/10/2026); sem ele, o nome. Nomes parecidos não se juntam: só o id casa. */
-const carroSt = x => txtSt(x.veiculoId) ? 'id:' + txtSt(x.veiculoId) : txtSt(x.veiculo).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-const chaveVoltaSt = (x, pessoa) => carroSt(x) + '|' + (Array.isArray(x.equipe) ? x.equipe : []).map(p => txtSt(pessoa(p))).filter(Boolean).sort().join('+');
+   11/10/2026); sem ele, o nome. Nomes parecidos não se juntam: só o id casa.
+   Revisão da onda volta (D1): sem o id na O.S., o nome exato e único na lista
+   do Ativos (`ativos`, opcional: [{id, nome}]) dá o id, na leitura; nome
+   repetido ou fora da lista continua pelo nome. */
+function idDoAtivoSt(nome, ativos) {
+  const n = txtSt(nome);
+  if (!n || !Array.isArray(ativos)) return '';
+  const xs = ativos.filter(v => objSt(v) && txtSt(v.nome) === n);
+  return xs.length === 1 ? txtSt(xs[0].id) : '';
+}
+const carroSt = (x, ativos) => { const id = txtSt(x.veiculoId) || idDoAtivoSt(x.veiculo, ativos); return id ? 'id:' + id : txtSt(x.veiculo).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase(); };
+const chaveVoltaSt = (x, pessoa, ativos) => carroSt(x, ativos) + '|' + (Array.isArray(x.equipe) ? x.equipe : []).map(p => txtSt(pessoa(p))).filter(Boolean).sort().join('+');
 const foraDaVoltaSt = x => !objSt(x) || x.tipo === 'interno' || !!cancelamentoDe(x);
-function voltaDoRetorno(o, lista, chave) {
+function voltaDoRetorno(o, lista, chave, ativos) {
   if (!objSt(o)) return [];
   const dias = new Set(chegadasConferidas(o).map(c => c.dia));
   if (!dias.size || o.tipo === 'interno') return [o];
   const pessoa = typeof chave === 'function' ? chave : txtSt;
-  const k = chaveVoltaSt(o, pessoa);
+  const k = chaveVoltaSt(o, pessoa, ativos);
   if (k === '|') return [o];
   const out = [o], vistos = new Set([txtSt(o.id)]);
   for (const x of Array.isArray(lista) ? lista : []) {
     if (foraDaVoltaSt(x) || vistos.has(txtSt(x.id))) continue;
-    if (!chegadasConferidas(x).some(c => dias.has(c.dia)) || chaveVoltaSt(x, pessoa) !== k) continue;
+    if (!chegadasConferidas(x).some(c => dias.has(c.dia)) || chaveVoltaSt(x, pessoa, ativos) !== k) continue;
     vistos.add(txtSt(x.id));
     out.push(x);
   }
@@ -514,23 +523,23 @@ function voltaDoRetorno(o, lista, chave) {
    de cards de uma vez, e procurar em toda a lista a cada card era O(N²).
    voltaNoIndice(o, indiceDasVoltas(lista, chave)) dá as mesmas O.S. que
    voltaDoRetorno(o, lista, chave). */
-function indiceDasVoltas(lista, chave) {
+function indiceDasVoltas(lista, chave, ativos) {
   const pessoa = typeof chave === 'function' ? chave : txtSt, ind = new Map();
   for (const x of Array.isArray(lista) ? lista : []) {
     if (foraDaVoltaSt(x)) continue;
     const cs = chegadasConferidas(x);
     if (!cs.length) continue;
-    const k = chaveVoltaSt(x, pessoa);
+    const k = chaveVoltaSt(x, pessoa, ativos);
     if (k === '|') continue;
     for (const c of cs) { const l = ind.get(c.dia + '|' + k); if (l) l.push(x); else ind.set(c.dia + '|' + k, [x]); }
   }
-  return {pessoa, ind};
+  return {pessoa, ind, ativos};
 }
 function voltaNoIndice(o, indice) {
   if (!objSt(o)) return [];
   const cs = chegadasConferidas(o);
   if (!cs.length || o.tipo === 'interno' || !objSt(indice) || !(indice.ind instanceof Map)) return [o];
-  const k = chaveVoltaSt(o, typeof indice.pessoa === 'function' ? indice.pessoa : txtSt);
+  const k = chaveVoltaSt(o, typeof indice.pessoa === 'function' ? indice.pessoa : txtSt, indice.ativos);
   if (k === '|') return [o];
   const out = [o], vistos = new Set([txtSt(o.id)]);
   for (const c of cs) for (const x of indice.ind.get(c.dia + '|' + k) || []) {

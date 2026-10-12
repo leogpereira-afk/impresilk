@@ -121,17 +121,20 @@ const CONFERENCIA_ENTREGA = (() => {
      da equipe da O.S.) mudava o recálculo de novembro fechado, Aprovar e
      Exportar davam 409 "A fonte mudou" e a revisão nova perdia a volta de
      novembro. Agora o servidor guarda cada viagem em `voltas` (uma por dia da
-     volta: o dia, a equipe e o carro como estavam no fim daquele dia e a
-     conferência da gestão daquela viagem), e a entrega de cada período lê a
-     viagem do dia dela. A O.S. sem `voltas` (antiga, com um retorno só) é
-     lida pelos campos da O.S., como sempre. Cópia em
-     _shared/pcp-conferencia-entrega.mjs (igual por teste, texto e sorteio). */
+     volta: o dia, a equipe e o carro da viagem, a conferência da gestão
+     daquela viagem, com a observação e as fotos, e a limpeza que a equipe
+     registrou), e a entrega de cada período lê a viagem do dia dela. A O.S.
+     sem `voltas` (antiga, com um retorno só) é lida pelos campos da O.S., como
+     sempre. Cópia em _shared/pcp-conferencia-entrega.mjs (igual por teste,
+     texto e sorteio). */
   const PERGUNTAS_VOLTA = ['carroLimpo', 'carroArrumado', 'equipamentosOk', 'semAvaria'];
   const textoV = v => String(v ?? '').trim();
   const normalV = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
   const respostaV = v => v === 'sim' || v === true ? 'sim' : (v === 'nao' || v === false ? 'nao' : '');
   const objV = x => !!x && typeof x === 'object' && !Array.isArray(x);
   const lancadaV = o => objV(o && o.entregaLancada) && o.entregaLancada.desfazer !== true ? o.entregaLancada : null;
+  const diaOk = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
+  const somarDiasV = (d, n) => { const t = new Date(d + 'T12:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
   /* O dia da volta: o do retorno; sem ele, o da saída (ou da agenda) quando há
      hora de retorno; depois o do lançamento e o da finalização. A mesma ordem
      de OPERACAO.diaDaVolta, no fuso de São Paulo em qualquer aparelho. */
@@ -142,8 +145,20 @@ const CONFERENCIA_ENTREGA = (() => {
   }
   /* O CARRO DA VOLTA PELO ID DO ATIVOS (item 16 da fila de 11/10/2026): com o
      id gravado na O.S., a chave é o id; sem ele, o nome, como sempre. Nomes
-     parecidos (dois apelidos do mesmo carro) não se juntam aqui: só o id casa. */
-  const chaveVeiculo = x => textoV(x && x.veiculoId) ? 'id:' + textoV(x.veiculoId) : normalV(x && x.veiculo);
+     parecidos (dois apelidos do mesmo carro) não se juntam aqui: só o id casa.
+     REVISÃO DA ONDA VOLTA (D1): a O.S. programada antes do item 16 tem só o
+     nome, e a nova tem nome e id: a mesma viagem virava duas voltas. Sem o id
+     na O.S., o nome EXATO (sem os espaços das pontas) e ÚNICO na lista do
+     Ativos (`ativos`: [{id, nome}]) dá o id, na leitura; nome repetido no
+     Ativos ou fora dele continua pelo nome. A mesma régua de OPERACAO.idDoAtivo
+     e do status (idDoAtivoSt). */
+  function idDoAtivo(nome, ativos) {
+    const n = textoV(nome);
+    if (!n || !Array.isArray(ativos)) return '';
+    const xs = ativos.filter(v => objV(v) && textoV(v.nome) === n);
+    return xs.length === 1 ? textoV(xs[0].id) : '';
+  }
+  const chaveVeiculo = (x, ativos) => { const id = textoV(x && x.veiculoId) || idDoAtivo(x && x.veiculo, ativos); return id ? 'id:' + id : normalV(x && x.veiculo); };
   const semCarroV = x => normalV(x && x.veiculo) === 'instalacao interna';
   // A conferência da gestão, só o que a nota lê: as quatro respostas, quem conferiu e quando.
   function confDaVolta(rc) {
@@ -152,52 +167,137 @@ const CONFERENCIA_ENTREGA = (() => {
     if (!PERGUNTAS_VOLTA.some(k => r[k])) return null;
     return {...r, por:textoV(rc.por).slice(0, 120), porId:textoV(rc.porId).slice(0, 120), em:textoV(rc.em).slice(0, 40)};
   }
+  const fotosV = x => lista(x).filter(f => typeof f === 'string' && f).slice(0, 10);
+  /* O QUE A VIAGEM GUARDA (revisão da onda volta, U2): a conferência com a
+     observação e as fotos (a nota continua lendo só confDaVolta), e a limpeza
+     que a equipe registrou para ela (U1). Assim a conferência da primeira
+     viagem não some quando a O.S. ganha outra. */
+  function confGuardada(rc) {
+    const c = confDaVolta(rc);
+    if (!c) return null;
+    const porConta = textoV(rc.porConta).slice(0, 120);
+    return {...c, ...(porConta ? {porConta} : {}), obs:textoV(rc.obs).slice(0, 300), fotos:fotosV(rc.fotos)};
+  }
+  function declaracaoGuardada(ve) {
+    if (!objV(ve) || !PERGUNTAS_VOLTA.some(k => respostaV(ve[k]))) return null;
+    const porConta = textoV(ve.porConta).slice(0, 120);
+    return {...Object.fromEntries(PERGUNTAS_VOLTA.map(k => [k, respostaV(ve[k])])), obs:textoV(ve.obs).slice(0, 300), fotos:fotosV(ve.fotos).slice(0, 4),
+      por:textoV(ve.por).slice(0, 120), porId:textoV(ve.porId).slice(0, 120), ...(porConta ? {porConta} : {}), em:textoV(ve.em).slice(0, 40)};
+  }
+  const registroDe = (o, dia) => Array.isArray(o && o.voltas) ? o.voltas.find(r => objV(r) && r.dia === dia) || null : null;
+  /* A CONFERÊNCIA DA VIAGEM DE UM DIA. A carimbada com o dia vale só para a
+     viagem daquele dia; a viagem guardada responde pela dela; a antiga, sem o
+     dia, vale para a viagem de hoje quando o servidor ainda não guardou outra
+     coisa para ela (legado se lê como era). A mesma régua de
+     OPERACAO.confDaViagemDoDia (o celular não carrega este arquivo). */
+  function daViagemDoDia(o, campo, dia) {
+    if (!objV(o)) return null;
+    const x = objV(o[campo]) ? o[campo] : null, dx = x ? textoV(x.dia) : '', hoje = diaDaVolta(o);
+    // Sem o dia da viagem (a O.S. sem volta), vale só a antiga, sem o dia.
+    if (!diaOk(dia)) return x && !dx && !hoje ? x : null;
+    if (x && dx === dia) return x;
+    const reg = registroDe(o, dia);
+    if (reg) return objV(reg[campo]) ? reg[campo] : null;
+    return x && !dx && (dia === hoje || !hoje) ? x : null;
+  }
+  const confDaViagemDoDia = (o, dia) => daViagemDoDia(o, 'retornoConf', dia);
+  // A limpeza que a equipe registrou para a viagem de um dia (U1): a mesma régua.
+  const declaracaoDaViagemDoDia = (o, dia) => daViagemDoDia(o, 'voltaEquipe', dia);
   /* A viagem de hoje, tirada dos campos da O.S. A conferência que o servidor
      carimbou com o dia de outra viagem não é desta; a antiga, sem o dia, vale
-     para a viagem de hoje (legado se lê como era). */
+     para a viagem de hoje (legado se lê como era). O mesmo para a limpeza. */
   function registroDaVolta(o) {
     if (!objV(o) || o.tipo === 'interno') return null;
     const dia = diaDaVolta(o);
     if (!dia) return null;
-    const rc = objV(o.retornoConf) ? o.retornoConf : null;
+    const rc = objV(o.retornoConf) ? o.retornoConf : null, ve = objV(o.voltaEquipe) ? o.voltaEquipe : null;
+    const daqui = x => !!x && (!textoV(x.dia) || textoV(x.dia) === dia);
+    const decl = daqui(ve) ? declaracaoGuardada(ve) : null;
     return {dia, equipe:[...new Set(lista(o.equipe).map(textoV).filter(Boolean))].slice(0, 30), veiculo:textoV(o.veiculo).slice(0, 80), veiculoId:textoV(o.veiculoId).slice(0, 80),
-      retornoEm:textoV(o.retornoEm).slice(0, 40), horaRetorno:textoV(o.horaRetorno).slice(0, 10), retornoConf:rc && (!textoV(rc.dia) || textoV(rc.dia) === dia) ? confDaVolta(rc) : null};
+      retornoEm:textoV(o.retornoEm).slice(0, 40), horaRetorno:textoV(o.horaRetorno).slice(0, 10), retornoConf:daqui(rc) ? confGuardada(rc) : null, ...(decl ? {voltaEquipe:decl} : {})};
   }
-  const viagemValida = r => objV(r) && /^\d{4}-\d{2}-\d{2}$/.test(String(r.dia || ''));
+  const viagemValida = r => objV(r) && diaOk(r.dia);
   // As viagens da O.S.: as guardadas pelo servidor; sem elas (O.S. antiga), a de hoje.
   function voltasDaOS(o) {
     if (objV(o) && Array.isArray(o.voltas)) return o.voltas.filter(viagemValida);
     const r = registroDaVolta(o);
     return r ? [r] : [];
   }
-  // A viagem da entrega inteira (sem conferência por item): a do dia da volta de hoje.
-  function voltaDaOS(o) {
-    const dia = diaDaVolta(o);
-    if (!dia) return null;
-    if (objV(o) && Array.isArray(o.voltas)) { const r = o.voltas.filter(viagemValida).find(x => x.dia === dia); if (r) return r; }
-    return registroDaVolta(o);
+  /* A VIAGEM DE UMA ENTREGA (revisão da onda volta, D3 e U4). A entrega leva o
+     dia do serviço (a finalização na obra); o casamento usa o DIA DA VOLTA:
+     a viagem do mesmo dia; sem ela, a do dia seguinte (o serviço noturno que
+     voltou depois da meia-noite); sem ela, a última viagem antes do dia, no
+     mesmo mês (a gestão que finalizou dias depois do retorno). Nunca uma
+     viagem de depois (a segunda viagem de dezembro não é a da entrega de
+     novembro) nem de outro mês antes (a volta conta no mês da entrega, uma
+     vez só). `aceita` filtra a viagem (a equipe, na entrega por item). */
+  function viagemDoDia(vs, dia, aceita = () => true) {
+    if (!diaOk(dia)) return null;
+    const mesmo = vs.find(r => r.dia === dia && aceita(r));
+    if (mesmo) return mesmo;
+    const seguinte = somarDiasV(dia, 1), s = vs.find(r => r.dia === seguinte && aceita(r));
+    if (s) return s;
+    let ant = null;
+    for (const r of vs) if (r.dia < dia && r.dia.slice(0, 7) === dia.slice(0, 7) && aceita(r) && (!ant || r.dia > ant.dia)) ant = r;
+    return ant;
   }
-  /* A viagem de uma entrega conferida por item: a do mesmo dia, com a equipe
-     contida uma na outra (M11: quem a conferência pôs a mais, ou a menos, na
-     entrega não descarta a volta). Equipes que só se cruzam são outra viagem.
-     `chave` lê a pessoa (no servidor, o ID do RH; sem ela, o texto). */
+  /* A entrega conferida por item: a viagem do dia (acima) com a equipe contida
+     uma na outra (M11: quem a conferência pôs a mais, ou a menos, na entrega
+     não descarta a volta). Equipes que só se cruzam são outra viagem. `chave`
+     lê a pessoa (no servidor, o ID do RH; sem ela, o texto). */
   function voltaDaEntrega(o, dia, pessoas, chave) {
     const k = typeof chave === 'function' ? chave : textoV;
     const chaves = xs => new Set(lista(xs).map(p => textoV(k(p))).filter(Boolean));
     const ids = chaves(pessoas);
-    if (!ids.size || !dia) return null;
-    for (const r of voltasDaOS(o)) {
-      if (r.dia !== dia) continue;
-      const t = chaves(r.equipe);
-      if (t.size && ([...t].every(x => ids.has(x)) || [...ids].every(x => t.has(x)))) return r;
-    }
-    return null;
+    if (!ids.size || !diaOk(dia)) return null;
+    return viagemDoDia(voltasDaOS(o), dia, r => { const t = chaves(r.equipe); return t.size > 0 && ([...t].every(x => ids.has(x)) || [...ids].every(x => t.has(x))); });
+  }
+  /* A entrega inteira (sem conferência por item), D3: a viagem do dia da
+     entrega da O.S. (o lançamento ou a finalização), pela mesma régua, e
+     nunca a viagem de hoje: a segunda viagem de dezembro mudava a volta da
+     O.S. entregue em novembro. A O.S. com uma viagem só lê essa (o legado e a
+     régua da v167). Sem o dia, a de hoje. */
+  function voltaDaOS(o, dia) {
+    const vs = voltasDaOS(o);
+    if (vs.length <= 1) return vs[0] || null;
+    return viagemDoDia(vs, diaOk(dia) ? dia : diaDaVolta(o));
   }
   // A chave da viagem: dia + carro + equipe (pela pessoa), a mesma de OPERACAO.chaveDaVolta.
-  function chaveDaViagem(r, chave) {
+  function chaveDaViagem(r, chave, ativos) {
     const k = typeof chave === 'function' ? chave : textoV;
-    return [textoV(r && r.dia), chaveVeiculo(r), [...new Set(lista(r && r.equipe).map(p => textoV(k(p))).filter(Boolean))].sort().join('+')].join('|');
+    return [textoV(r && r.dia), chaveVeiculo(r, ativos), [...new Set(lista(r && r.equipe).map(p => textoV(k(p))).filter(Boolean))].sort().join('+')].join('|');
   }
-  return {catalogo, validar, apurar, estado, noFimDoDia, PERGUNTAS_VOLTA, diaDaVolta, chaveVeiculo, semCarroV, confDaVolta, registroDaVolta, voltasDaOS, voltaDaOS, voltaDaEntrega, chaveDaViagem};
+  /* A MESMA VIAGEM COM O DIA CORRIGIDO, OU UMA VIAGEM NOVA (revisão da onda
+     volta, U2). O Lançar com a data do serviço (diferente da baixa do ERP) e a
+     correção do dia do retorno pela gestão mudavam o dia da volta: a
+     conferência (com a observação e as fotos) ficava na viagem do dia antigo e
+     nascia uma viagem que não existiu. Regra: viagem nova só nasce de FATO
+     NOVO, a volta registrada depois da anterior: o dia novo depois do dia da
+     última viagem guardada, e a saída registrada depois do retorno dela (sem
+     o retorno dela, num dia depois do dela), ou, sem saída, um retorno novo
+     depois do dela. Qualquer outra troca do dia (o lançamento, a finalização,
+     a agenda, o retorno corrigido com a mesma saída, venha da tela, do celular
+     ou do ERP) é a MESMA viagem com o dia corrigido: a conferência, a
+     observação, as fotos e a limpeza acompanham, e a correção fica no diário.
+     A viagem de antes é a última guardada (a do maior dia); sem viagens
+     guardadas, a de hoje da O.S. de antes. Devolve null quando o dia não
+     mudou. */
+  function ultimaViagem(o) {
+    let u = null;
+    for (const r of Array.isArray(o && o.voltas) ? o.voltas : []) if (viagemValida(r) && (!u || r.dia > u.dia)) u = r;
+    return u;
+  }
+  function movimentoDaViagem(antes, depois) {
+    if (!objV(antes) || !objV(depois)) return null;
+    const ult = ultimaViagem(antes);
+    const de = ult ? ult.dia : diaDaVolta(antes), para = diaDaVolta(depois);
+    if (!de || !para || de === para) return null;
+    const rOld = textoV(ult ? ult.retornoEm : antes.retornoEm), rNew = textoV(depois.retornoEm), sNew = textoV(depois.saidaEm);
+    const tOld = Date.parse(rOld), tNew = Date.parse(rNew), tSai = Date.parse(sNew);
+    const saiuDepois = Number.isFinite(tSai) && (Number.isFinite(tOld) ? tSai > tOld : motor().diaSP(sNew) > de);
+    const voltouDepois = !Number.isFinite(tSai) && !!rNew && rNew !== rOld && Number.isFinite(tOld) && Number.isFinite(tNew) && tNew > tOld;
+    return {de, para, nova:para > de && (saiuDepois || voltouDepois)};
+  }
+  return {catalogo, validar, apurar, estado, noFimDoDia, PERGUNTAS_VOLTA, diaDaVolta, idDoAtivo, chaveVeiculo, semCarroV, confDaVolta, confGuardada, declaracaoGuardada, confDaViagemDoDia, declaracaoDaViagemDoDia, registroDaVolta, voltasDaOS, viagemDoDia, voltaDaEntrega, voltaDaOS, chaveDaViagem, ultimaViagem, movimentoDaViagem};
 })();
 if (typeof module !== 'undefined') module.exports = CONFERENCIA_ENTREGA;

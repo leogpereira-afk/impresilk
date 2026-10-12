@@ -787,31 +787,96 @@ const OPERACAO = (() => {
      sempre. Dois apelidos do mesmo carro só viram um carro pelo id, nunca
      por semelhança do nome. A mesma régua de CONFERENCIA_ENTREGA.chaveVeiculo
      e do carroSt do status (as quatro cópias da chave, com teste). */
-  const chaveVeiculoVolta = o => String(o?.veiculoId ?? '').trim() ? 'id:' + String(o.veiculoId).trim() : normal(o?.veiculo);
-  const chaveDaVolta = o => [diaDaVolta(o), chaveVeiculoVolta(o), equipe(o).map(chavePessoa).sort().join('+')].join('|');
+  /* O NOME QUE O ATIVOS CONHECE (revisão da onda volta, D1): a O.S. programada
+     antes do item 16 tem o carro só pelo nome, e a nova tem o nome e o id; a
+     mesma viagem virava duas voltas. Sem o id na O.S., o nome EXATO (sem os
+     espaços das pontas) e ÚNICO na lista do Ativos dá o id, na leitura; nome
+     repetido no Ativos, ou fora dele, continua pelo nome. A mesma régua no
+     status (idDoAtivoSt), em CONFERENCIA_ENTREGA.idDoAtivo e no servidor. A
+     lista vem do elenco (STORE.elenco().veiculos) ou de usarAtivos (testes). */
+  let ativosInjetados = null;
+  const usarAtivos = l => { ativosInjetados = Array.isArray(l) ? l : null; };
+  function ativosDoAparelho() {
+    if (ativosInjetados) return ativosInjetados;
+    try { const e = typeof STORE !== 'undefined' && STORE && typeof STORE.elenco === 'function' ? STORE.elenco() : null; return e && Array.isArray(e.veiculos) ? e.veiculos : []; } catch (e) { return []; }
+  }
+  const mapasAtivos = new WeakMap();
+  function idDoAtivo(nome, ativos) {
+    const n = String(nome ?? '').trim();
+    if (!n || !Array.isArray(ativos) || !ativos.length) return '';
+    let m = mapasAtivos.get(ativos);
+    if (!m || m.tamanho !== ativos.length) {
+      m = new Map(); m.tamanho = ativos.length;
+      for (const v of ativos) {
+        const k = String(v && v.nome != null ? v.nome : '').trim();
+        if (!k) continue;
+        const id = String(v.id ?? '').trim();
+        m.set(k, m.has(k) ? '' : id);
+      }
+      mapasAtivos.set(ativos, m);
+    }
+    return m.get(n) || '';
+  }
+  const chaveVeiculoVolta = (o, ativos = ativosDoAparelho()) => {
+    const id = String(o?.veiculoId ?? '').trim() || idDoAtivo(o?.veiculo, ativos);
+    return id ? 'id:' + id : normal(o?.veiculo);
+  };
+  const chaveDaVolta = (o, ativos = ativosDoAparelho()) => [diaDaVolta(o), chaveVeiculoVolta(o, ativos), equipe(o).map(chavePessoa).sort().join('+')].join('|');
   /* A CONFERÊNCIA DA VOLTA DESTA VIAGEM (onda volta, 12/10/2026). A O.S.
      guarda uma conferência só (retornoConf), e a da primeira viagem ficava
      valendo para a segunda: a fila dizia "conferida" e a viagem nova nunca era
      conferida. O servidor carimba o dia da viagem na conferência (dia) e
-     guarda cada viagem em `voltas`. Vale aqui a conferência do dia da volta de
-     hoje; a antiga, sem o dia, vale como sempre, a não ser que o servidor já
-     tenha guardado a viagem de hoje sem conferência. */
-  function confDaViagem(o) {
-    const rc = o && o.retornoConf && typeof o.retornoConf === 'object' ? o.retornoConf : null;
-    if (!rc) return null;
-    const d = diaDaVolta(o), dc = String(rc.dia ?? '').trim();
-    if (dc) return dc === d ? rc : null;
-    if (Array.isArray(o.voltas)) { const v = o.voltas.find(x => x && x.dia === d); if (v && !v.retornoConf) return null; }
-    return rc;
+     guarda cada viagem em `voltas`. Vale aqui a conferência do dia da viagem:
+     a carimbada com o dia vale só para ele; a viagem guardada responde pela
+     dela; a antiga, sem o dia, vale para a viagem de hoje quando o servidor
+     ainda não guardou outra coisa para ela. A mesma régua de
+     CONFERENCIA_ENTREGA.confDaViagemDoDia (cópia: o celular não carrega aquele
+     arquivo; um teste confere as duas por sorteio). */
+  const textoVg = v => String(v ?? '').trim();
+  const objVg = x => !!x && typeof x === 'object' && !Array.isArray(x);
+  const diaOkVg = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
+  const registroVg = (o, d) => Array.isArray(o && o.voltas) ? o.voltas.find(r => objVg(r) && r.dia === d) || null : null;
+  function daViagemDoDiaVg(o, campo, d) {
+    if (!objVg(o)) return null;
+    const x = objVg(o[campo]) ? o[campo] : null, dx = x ? textoVg(x.dia) : '', hoje = diaDaVolta(o);
+    // Sem o dia da viagem (a O.S. sem volta), vale só a antiga, sem o dia.
+    if (!diaOkVg(d)) return x && !dx && !hoje ? x : null;
+    if (x && dx === d) return x;
+    const reg = registroVg(o, d);
+    if (reg) return objVg(reg[campo]) ? reg[campo] : null;
+    return x && !dx && (d === hoje || !hoje) ? x : null;
+  }
+  const confDaViagemDoDia = (o, d) => daViagemDoDiaVg(o, 'retornoConf', d);
+  const confDaViagem = o => confDaViagemDoDia(o, diaDaVolta(o));
+  /* A LIMPEZA QUE A EQUIPE REGISTROU, POR VIAGEM (revisão da onda volta, U1):
+     a mesma régua da conferência. A limpeza da primeira viagem não vale para
+     a segunda, e a segunda viagem, que o PCP ainda não conferiu, aceita a
+     limpeza da equipe (o cartão, o salvar e o servidor dizem o mesmo). */
+  const declaracaoDaViagem = (o, d = diaDaVolta(o)) => daViagemDoDiaVg(o, 'voltaEquipe', d);
+  /* TODAS AS VIAGENS DA O.S. PARA MOSTRAR (revisão da onda volta, U3): as que
+     o servidor guardou e a de hoje (dos campos da O.S., que podem estar num
+     rascunho ainda não salvo), em ordem de dia. Cada uma com o carro, a
+     equipe, a conferência e a limpeza dela; `atual` é a que a ficha, o
+     Lançar, a fila e o lote conferem. Só leitura. */
+  function viagensDaOS(o) {
+    if (!objVg(o) || interno(o)) return [];
+    const hoje = voltou(o) ? diaDaVolta(o) : '';
+    const out = new Map();
+    for (const r of Array.isArray(o.voltas) ? o.voltas : []) {
+      if (!objVg(r) || !diaOkVg(r.dia)) continue;
+      out.set(r.dia, {dia:r.dia, veiculo:textoVg(r.veiculo), equipe:(Array.isArray(r.equipe) ? r.equipe : []).map(nomePessoa), retornoConf:objVg(r.retornoConf) ? r.retornoConf : null, voltaEquipe:objVg(r.voltaEquipe) ? r.voltaEquipe : null, atual:false});
+    }
+    if (hoje) out.set(hoje, {dia:hoje, veiculo:textoVg(o.veiculo), equipe:equipe(o).map(nomePessoa), retornoConf:confDaViagem(o), voltaEquipe:declaracaoDaViagem(o, hoje), atual:true});
+    return [...out.values()].sort((a, b) => a.dia.localeCompare(b.dia));
   }
   function voltasDoCarro(lista, de = '', ate = '') {
-    const grupos = new Map();
+    const grupos = new Map(), ativos = ativosDoAparelho();
     for (const o of lista || []) {
       if (!voltou(o)) continue;
       const d = diaDaVolta(o);
       if (!d || !emIntervalo(d, de, ate)) continue;
       const time = equipe(o);
-      const chave = chaveDaVolta(o);
+      const chave = chaveDaVolta(o, ativos);
       // `equipe` é para mostrar (nomes de exibição); a chave já é pela pessoa.
       const g = grupos.get(chave) || { chave, dia: d, veiculo: String(o.veiculo || '').trim(), equipe: time.map(nomePessoa), os: [] };
       g.os.push(o);
@@ -828,15 +893,50 @@ const OPERACAO = (() => {
          declarada no espelho. Vem ao lado, nunca no lugar: a situação continua
          saindo só de retornoConf, porque a conferência é do PCP e é ela que
          conta na nota. "parte" = O.S. que voltou depois do registro. */
-      const declaradas = g.os.filter(o => voltaRespondida(o.voltaEquipe));
+      // A limpeza é da viagem (revisão da onda volta, U1): a da viagem anterior não conta nesta.
+      const daViagem = o => declaracaoDaViagem(o, g.dia);
+      const declaradas = g.os.filter(o => voltaRespondida(daViagem(o)));
       const equipeDisse = declaradas.length === g.os.length ? 'toda' : declaradas.length ? 'parte' : 'nenhuma';
       const quando = v => { const t = Date.parse(v && v.em || ''); return Number.isFinite(t) ? t : 0; };
-      const declaracao = declaradas.map(o => o.voltaEquipe).sort((a, b) => quando(b) - quando(a))[0] || null;
-      const semDeclaracao = g.os.filter(o => !voltaRespondida(o.voltaEquipe)).map(o => String(o.numero || 's/n'));
+      const declaracao = declaradas.map(daViagem).sort((a, b) => quando(b) - quando(a))[0] || null;
+      const semDeclaracao = g.os.filter(o => !voltaRespondida(daViagem(o))).map(o => String(o.numero || 's/n'));
       return { ...g, situacao, respostas: iguais ? confDaViagem(g.os[0]) : null, equipeDisse, declaracao, semDeclaracao };
     });
     const ordem = { conferir: 0, parcial: 1, conferida: 2 };
     return lista2.sort((a, b) => ordem[a.situacao] - ordem[b.situacao] || b.dia.localeCompare(a.dia) || a.chave.localeCompare(b.chave));
+  }
+  /* AS VIAGENS ANTERIORES NA FILA (revisão da onda volta, U3): a fila "Todas"
+     perdia a primeira viagem da O.S. que ganhou outra. Aqui saem as viagens
+     guardadas pelo servidor que não são a de hoje de cada O.S., agrupadas pela
+     mesma chave (dia, carro e equipe da viagem), com a conferência e a
+     limpeza de cada uma. São só para ver: a conferência da gestão é sempre a
+     da viagem de hoje (anterior: true). */
+  function voltasAnteriores(lista, de = '', ate = '') {
+    const grupos = new Map(), ativos = ativosDoAparelho();
+    for (const o of lista || []) {
+      if (!objVg(o) || interno(o) || !Array.isArray(o.voltas)) continue;
+      const hoje = diaDaVolta(o);
+      for (const r of o.voltas) {
+        if (!objVg(r) || !diaOkVg(r.dia) || r.dia === hoje || !emIntervalo(r.dia, de, ate) || semCarro(r)) continue;
+        const time = Array.isArray(r.equipe) ? r.equipe : [];
+        if (!time.length) continue;
+        const chave = 'anterior|' + [r.dia, chaveVeiculoVolta(r, ativos), time.map(chavePessoa).sort().join('+')].join('|');
+        const g = grupos.get(chave) || {chave, dia:r.dia, veiculo:textoVg(r.veiculo), equipe:time.map(nomePessoa), os:[], viagens:[], anterior:true};
+        g.os.push(o); g.viagens.push(r);
+        grupos.set(chave, g);
+      }
+    }
+    return [...grupos.values()].map(g => {
+      const feitas = g.viagens.filter(r => voltaConferidaParaNota(r.retornoConf)), tocadas = g.viagens.filter(r => voltaRespondida(r.retornoConf));
+      const situacao = feitas.length === g.viagens.length ? 'conferida' : tocadas.length ? 'parcial' : 'conferir';
+      const assinatura = r => PERGUNTAS_VOLTA.map(k => respostaVolta(r.retornoConf?.[k])).join(',');
+      const iguais = feitas.length === g.viagens.length && new Set(g.viagens.map(assinatura)).size === 1;
+      const declaradas = g.viagens.filter(r => voltaRespondida(r.voltaEquipe));
+      const quando = v => { const t = Date.parse(v && v.em || ''); return Number.isFinite(t) ? t : 0; };
+      return {...g, situacao, respostas:iguais ? g.viagens[0].retornoConf : null, equipeDisse:declaradas.length === g.viagens.length ? 'toda' : declaradas.length ? 'parte' : 'nenhuma',
+        declaracao:declaradas.map(r => r.voltaEquipe).sort((a, b) => quando(b) - quando(a))[0] || null,
+        semDeclaracao:g.viagens.map((r, i) => voltaRespondida(r.voltaEquipe) ? '' : String(g.os[i].numero || 's/n')).filter(Boolean)};
+    }).sort((a, b) => b.dia.localeCompare(a.dia) || a.chave.localeCompare(b.chave));
   }
   /* O AGRUPAMENTO DO FECHAR O DIA (F14): a mesma chave da volta (dia + carro
      + equipe, pela pessoa), SEM exigir equipe nem retorno. O lote junta a
@@ -849,7 +949,7 @@ const OPERACAO = (() => {
      falsa, com uma equipe e uma chegada para O.S. sem relação; cada uma vira
      a própria volta, e a chave leva o id. */
   function agruparPorVolta(lista, diaDe = diaDaVolta) {
-    const grupos = new Map();
+    const grupos = new Map(), ativos = ativosDoAparelho();
     for (const o of lista || []) {
       if (!o) continue;
       const d = dia(diaDe(o));
@@ -857,7 +957,7 @@ const OPERACAO = (() => {
       const time = equipe(o);
       const pessoasDaVolta = time.map(chavePessoa).sort();
       const soltaDasOutras = !pessoasDaVolta.length && (!normal(o.veiculo) || semCarro(o));
-      const chave = [d, chaveVeiculoVolta(o), soltaDasOutras ? 'os:' + String(o.id) : pessoasDaVolta.join('+')].join('|');
+      const chave = [d, chaveVeiculoVolta(o, ativos), soltaDasOutras ? 'os:' + String(o.id) : pessoasDaVolta.join('+')].join('|');
       const g = grupos.get(chave) || { chave, dia: d, veiculo: String(o.veiculo || '').trim(), semCarro: semCarro(o), equipe: time.map(nomePessoa), pessoas: pessoasDaVolta, os: [] };
       g.os.push(o);
       grupos.set(chave, g);
@@ -1454,21 +1554,30 @@ function ocorrenciasManuais(o) {
    Sem carro e sem equipe nada liga uma O.S. à outra: a volta é ela sozinha.
    A retirada no balcão não tem volta, e a O.S. cancelada sai da volta. */
 /* O carro pelo id do Ativos quando a O.S. o tem (item 16 da fila de
-   11/10/2026); sem ele, o nome. Nomes parecidos não se juntam: só o id casa. */
-const carroSt = x => txtSt(x.veiculoId) ? 'id:' + txtSt(x.veiculoId) : txtSt(x.veiculo).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-const chaveVoltaSt = (x, pessoa) => carroSt(x) + '|' + (Array.isArray(x.equipe) ? x.equipe : []).map(p => txtSt(pessoa(p))).filter(Boolean).sort().join('+');
+   11/10/2026); sem ele, o nome. Nomes parecidos não se juntam: só o id casa.
+   Revisão da onda volta (D1): sem o id na O.S., o nome exato e único na lista
+   do Ativos (`ativos`, opcional: [{id, nome}]) dá o id, na leitura; nome
+   repetido ou fora da lista continua pelo nome. */
+function idDoAtivoSt(nome, ativos) {
+  const n = txtSt(nome);
+  if (!n || !Array.isArray(ativos)) return '';
+  const xs = ativos.filter(v => objSt(v) && txtSt(v.nome) === n);
+  return xs.length === 1 ? txtSt(xs[0].id) : '';
+}
+const carroSt = (x, ativos) => { const id = txtSt(x.veiculoId) || idDoAtivoSt(x.veiculo, ativos); return id ? 'id:' + id : txtSt(x.veiculo).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase(); };
+const chaveVoltaSt = (x, pessoa, ativos) => carroSt(x, ativos) + '|' + (Array.isArray(x.equipe) ? x.equipe : []).map(p => txtSt(pessoa(p))).filter(Boolean).sort().join('+');
 const foraDaVoltaSt = x => !objSt(x) || x.tipo === 'interno' || !!cancelamentoDe(x);
-function voltaDoRetorno(o, lista, chave) {
+function voltaDoRetorno(o, lista, chave, ativos) {
   if (!objSt(o)) return [];
   const dias = new Set(chegadasConferidas(o).map(c => c.dia));
   if (!dias.size || o.tipo === 'interno') return [o];
   const pessoa = typeof chave === 'function' ? chave : txtSt;
-  const k = chaveVoltaSt(o, pessoa);
+  const k = chaveVoltaSt(o, pessoa, ativos);
   if (k === '|') return [o];
   const out = [o], vistos = new Set([txtSt(o.id)]);
   for (const x of Array.isArray(lista) ? lista : []) {
     if (foraDaVoltaSt(x) || vistos.has(txtSt(x.id))) continue;
-    if (!chegadasConferidas(x).some(c => dias.has(c.dia)) || chaveVoltaSt(x, pessoa) !== k) continue;
+    if (!chegadasConferidas(x).some(c => dias.has(c.dia)) || chaveVoltaSt(x, pessoa, ativos) !== k) continue;
     vistos.add(txtSt(x.id));
     out.push(x);
   }
@@ -1479,23 +1588,23 @@ function voltaDoRetorno(o, lista, chave) {
    de cards de uma vez, e procurar em toda a lista a cada card era O(N²).
    voltaNoIndice(o, indiceDasVoltas(lista, chave)) dá as mesmas O.S. que
    voltaDoRetorno(o, lista, chave). */
-function indiceDasVoltas(lista, chave) {
+function indiceDasVoltas(lista, chave, ativos) {
   const pessoa = typeof chave === 'function' ? chave : txtSt, ind = new Map();
   for (const x of Array.isArray(lista) ? lista : []) {
     if (foraDaVoltaSt(x)) continue;
     const cs = chegadasConferidas(x);
     if (!cs.length) continue;
-    const k = chaveVoltaSt(x, pessoa);
+    const k = chaveVoltaSt(x, pessoa, ativos);
     if (k === '|') continue;
     for (const c of cs) { const l = ind.get(c.dia + '|' + k); if (l) l.push(x); else ind.set(c.dia + '|' + k, [x]); }
   }
-  return {pessoa, ind};
+  return {pessoa, ind, ativos};
 }
 function voltaNoIndice(o, indice) {
   if (!objSt(o)) return [];
   const cs = chegadasConferidas(o);
   if (!cs.length || o.tipo === 'interno' || !objSt(indice) || !(indice.ind instanceof Map)) return [o];
-  const k = chaveVoltaSt(o, typeof indice.pessoa === 'function' ? indice.pessoa : txtSt);
+  const k = chaveVoltaSt(o, typeof indice.pessoa === 'function' ? indice.pessoa : txtSt, indice.ativos);
   if (k === '|') return [o];
   const out = [o], vistos = new Set([txtSt(o.id)]);
   for (const c of cs) for (const x of indice.ind.get(c.dia + '|' + k) || []) {
@@ -1751,12 +1860,12 @@ function statusEntrega(o, hoje, regra, volta) {
   function indiceDaLista(lista) {
     const versao = versaoDaLista(lista), c = indiceVoltasCache;
     if (c && c.vivo && c.lista === lista && c.versao === versao) return c.indice;
-    const novo = {lista, versao, indice:STATUS_ENTREGA.indiceDasVoltas(lista, chavePessoa), vivo:true};
+    const novo = {lista, versao, indice:STATUS_ENTREGA.indiceDasVoltas(lista, chavePessoa, ativosDoAparelho()), vivo:true};
     indiceVoltasCache = novo;
     Promise.resolve().then(() => { novo.vivo = false; });
     return novo.indice;
   }
-  const voltaNaLista = (o, lista) => Array.isArray(lista) ? STATUS_ENTREGA.voltaNoIndice(o, indiceDaLista(lista)) : STATUS_ENTREGA.voltaDoRetorno(o, lista, chavePessoa);
+  const voltaNaLista = (o, lista) => Array.isArray(lista) ? STATUS_ENTREGA.voltaNoIndice(o, indiceDaLista(lista)) : STATUS_ENTREGA.voltaDoRetorno(o, lista, chavePessoa, ativosDoAparelho());
   /* O DIA DA JORNADA de uma volta que o lote fecha no dia `d` (revisão da
      F17): o próprio dia, quando ele está na agenda da O.S.; o dia anterior,
      quando só ele está (a volta que passou da meia-noite: o carro chegou no
@@ -1848,7 +1957,7 @@ function statusEntrega(o, hoje, regra, volta) {
     o.abonos = o.abonos.map((y, j) => j === i ? {...y, revogar:true} : y);
     return '';
   }
-  return {usarVeiculos,veiculoConfirmado,chaveVeiculo,uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,chaveVeiculoVolta,chaveDaVolta,confDaViagem,voltou,voltasDoCarro,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,usarReguaPerdas,...STATUS_ENTREGA,novoIdF17,voltaNaLista,diaDaJornada,pedirChegada,ocorrenciasDoGrupo,pedirOcorrencia,pedirAnularOcorrencia,pedirAbono,pedirRevogarAbono};
+  return {usarVeiculos,veiculoConfirmado,chaveVeiculo,uidItemValido,novoUidItem,casarItens,adotarUidsItens,ehIdPessoa,resolverPessoas,usarPessoas,esquecerPessoas,dadosPessoas,confirmarNome,converterEquipe,idPessoa,chavePessoa,nomePessoa,pessoaDe,pessoaFixada,idRepetido,equipeNomes,equipeTexto,SEM_CARRO,semCarro,PERGUNTAS_VOLTA,respostaVolta,voltaRespondida,voltaConferidaParaNota,diaDaVolta,usarAtivos,ativosDoAparelho,idDoAtivo,chaveVeiculoVolta,chaveDaVolta,confDaViagemDoDia,confDaViagem,declaracaoDaViagem,viagensDaOS,voltou,voltasDoCarro,voltasAnteriores,agruparPorVolta,confirmadaHoje,pendencias,fecharParado,fecharParadoPorAgenda,retrabalhoPendente,filhasDeRetrabalho,destaqueDoDia,taxaRetrabalho,dia,somarDias,interno,equipe,prazo,atrasada,agendaCompleta,status,paradoNoCliente,diasAgenda,emIntervalo,programadas,situacaoSaida,naRua,encerradaERP,concluida,entregaLancadaValida,conclusoes,horas,mensal,conflitos,ocupados,distanciaEdicao,buscaTolerante,resumo,diaPlausivel,agendaDeGente,PRAZO_SEM_AGENDA,prazoCombinadoDe,retornosPrevistos,retornoPrevistoDoDia,saidaPrevista,janelaPrevista,retornoPrevistoParaMostrar,periodoRapido,missaoFoco,usarMotorItem,usarReguaPerdas,...STATUS_ENTREGA,novoIdF17,voltaNaLista,diaDaJornada,pedirChegada,ocorrenciasDoGrupo,pedirOcorrencia,pedirAnularOcorrencia,pedirAbono,pedirRevogarAbono};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = OPERACAO;
 // Nas páginas, as pessoas vêm do elenco do RH e do CFG (store.js carrega
