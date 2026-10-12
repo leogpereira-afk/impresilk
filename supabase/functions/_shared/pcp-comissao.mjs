@@ -211,9 +211,17 @@ const COMISSAO = (() => {
   function csv(revisao) {
     if(revisao?.tipo!=='aprovacao'||!revisao.apuracao?.aprovavel||revisao.apuracao.config.modo!=='efetivo')throw new Error('Pagamento exige aprovação de período efetivo. Outubro é teste.');
     const cel=v=>{let s=String(v??'');if(/^[=+@\-\t\r]/.test(s)&&!/^-[0-9]+,[0-9]{2}$/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
-    const rows=[['Revisão','Fechamento','Aprovação anterior','Pessoa ID','Nome','Tipo','Total atual (R$)','Diferença a conciliar (R$)']];
-    for(const p of (revisao.apuracao.ajustes||[]))rows.push([revisao.id,revisao.apuracao.fechamentoId,revisao.apuracao.anteriorAprovacao||'',p.pessoaId,p.nome||'',p.tipo,(p.centavos/100).toFixed(2).replace('.',','),(p.diferencaCentavos/100).toFixed(2).replace('.',',')]);
-    return '\uFEFF'+rows.map(r=>r.map(cel).join(';')).join('\r\n');
+    /* O ID E O MÊS COMO TEXTO PARA O EXCEL (item 6 da fila de 11/10/2026): o
+       Excel abre 012345 como 12345 (o ID que começa com zero não casaria com o
+       RH) e 2026-11 como data. A célula vai como a fórmula de texto ="012345",
+       só para o ID de 6 dígitos e o mês AAAA-MM; o resto continua com a
+       proteção contra fórmula. */
+    const textoExcel=(v,re)=>re.test(String(v??''))?'"=""'+String(v)+'"""':cel(v);
+    const ID=/^\d{6}$/,MES=/^\d{4}-\d{2}$/;
+    const mes=String(revisao.de||revisao.apuracao.periodo?.de||'').slice(0,7);
+    const rows=[['Revisão','Mês','Fechamento','Aprovação anterior','Pessoa ID','Nome','Tipo','Total atual (R$)','Diferença a conciliar (R$)'].map(cel)];
+    for(const p of (revisao.apuracao.ajustes||[]))rows.push([cel(revisao.id),textoExcel(mes,MES),cel(revisao.apuracao.fechamentoId),cel(revisao.apuracao.anteriorAprovacao||''),textoExcel(p.pessoaId,ID),cel(p.nome||''),cel(p.tipo),cel((p.centavos/100).toFixed(2).replace('.',',')),cel((p.diferencaCentavos/100).toFixed(2).replace('.',','))]);
+    return '\uFEFF'+rows.map(r=>r.join(';')).join('\r\n');
   }
   /* A FALHA COMPROVADA NOS PONTOS (D-004: "zera só os pontos e a comissão da
      O.S. afetada"; revisão da onda a3, 11/10/2026). O ranking, a Nota, a

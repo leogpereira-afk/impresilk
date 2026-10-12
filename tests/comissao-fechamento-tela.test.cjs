@@ -61,9 +61,12 @@ async function previaComoATela(e,periodo,fechamento,modo='efetivo'){
 const aprovarComoATela=(e,periodo,r,n=1,corpo={})=>e.call({action:'performanceComissaoAprovar',...periodo,anterior:r.id,hash:r.hash,motivo:'Aprovação fictícia',confirmacao:true,requestId:'aprovar-tela-'+n+'-'+periodo.de,...corpo},gestor);
 const exportarComoATela=(e,periodo,r,corpo={})=>e.call({action:'performanceComissaoExportar',...periodo,id:r.id,...corpo},gestor);
 // O CSV em centavos por pessoa e tipo (a coluna "Total atual (R$)").
+// Pelas colunas do cabeçalho; o ID vai como texto para o Excel (="012345", item 6 da fila de 11/10/2026).
 function csvCentavos(csv){
-  const linhas=csv.replace(/^﻿/,'').split('\r\n').slice(1).map(l=>l.split(';').map(c=>c.replace(/^"|"$/g,'')));
-  return Object.fromEntries(linhas.map(c=>[c[3]+':'+c[5],Math.round(Number(c[6].replace(',','.'))*100)]));
+  const celula=c=>c.replace(/^"|"$/g,'').replace(/""/g,'"').replace(/^="(.*)"$/,'$1');
+  const [cab,...linhas]=csv.replace(/^﻿/,'').split('\r\n').map(l=>l.split(';').map(celula));
+  const i=k=>cab.indexOf(k);
+  return Object.fromEntries(linhas.map(c=>[c[i('Pessoa ID')]+':'+c[i('Tipo')],Math.round(Number(c[i('Total atual (R$)')].replace(',','.'))*100)]));
 }
 const aprovadoPorPessoa=r=>Object.fromEntries(r.apuracao.pessoas.map(p=>[p.pessoaId+':'+p.tipo,p.centavos]));
 
