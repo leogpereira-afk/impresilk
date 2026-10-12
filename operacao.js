@@ -366,7 +366,17 @@ const OPERACAO = (() => {
     const afetadas = base.filter(o => o.retrabalho || originaisComFilhas.has(String(o.numero || '').trim()));
     return {entregues:base.length, afetadas:afetadas.length, taxa:base.length ? Math.round(1000*afetadas.length/base.length)/10 : null};
   }
+  /* O STATUS DE AGENDA (o funil). CANCELADA É ESTADO FINAL (item 19 da fila
+     de 11/10/2026, onda operação): a O.S. cancelada, no ERP (a baixa
+     CANCELADO) ou pela gestão (o cancelamento gravado, ou o pedido deste
+     aparelho), sai do funil como a finalizada: "Apto", "Agendada" e "Em
+     andamento" não contam mais um serviço que não vai acontecer, o histórico
+     de etapas (lead time) ganha a etapa 'cancelada' e o Painel lê o mesmo
+     (a cópia dele, supabase/functions/_shared/agenda-pcp.ts do
+     painel-impresilk, recebe o patch em docs/patches/). Desfazer o
+     cancelamento devolve a O.S. à etapa em que ela está. */
   function status(o) {
+    if (o && STATUS_ENTREGA.cancelada(o)) return 'cancelada';
     if (o?.finalizadaEm) return 'finalizada';
     if (!o?.liberadoPCP) return 'aguardando_producao';
     if (interno(o) || !agendaCompleta(o)) return 'apto';

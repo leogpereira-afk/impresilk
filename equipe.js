@@ -51,7 +51,9 @@ function calcStatus(os) {
 // "Aguardando" e na gestão "Aguardando produção".
 const STATUS_LABEL = {
   aguardando_producao:'Aguardando produção', apto:'Apto', agendada:'Agendada',
-  confirmada:'Confirmada', em_andamento:'Em andamento', finalizada:'Finalizada'
+  confirmada:'Confirmada', em_andamento:'Em andamento', finalizada:'Finalizada',
+  // Estado final (item 19, onda operação), o mesmo rótulo da gestão.
+  cancelada:'Cancelada'
 };
 // Cliente retira fala outra língua (espelha o app.js): "Apto" = pronto p/
 // retirada e "Finalizada" = retirado. Só exibição — o status é o mesmo.

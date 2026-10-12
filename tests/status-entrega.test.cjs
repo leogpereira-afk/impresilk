@@ -215,11 +215,14 @@ test('cancelado: o da O.S. cancela todo o saldo e o entregue fica; o item cancel
 });
 
 /* ───────────── a O.S. cancelada fora das listas de trabalho ───────────── */
-test('cancelada: o status de agenda (que o Painel copia) não muda; sai de pendências, atrasadas, agenda e destaque', () => {
+test('cancelada: o status de agenda é o estado final "cancelada" (item 19); sai de pendências, atrasadas, agenda e destaque', () => {
   const aberta = os({liberadoPCP:true, confirmacao:'Confirmado', instalacao:{data:HOJE, periodo:'Manhã', duracaoDias:1}, prazoCombinado:{data:'2026-09-10', fonte:'agenda'}, veiculo:'Fiorino'});
   const c = {...aberta, cancelamento:cancel()};
-  // Caso ruim: mexer no OPERACAO.status quebraria calado a cópia do Painel.
-  assert.equal(O.status(c), O.status(aberta));assert.equal(O.status(c), 'confirmada');
+  /* TROCADO DE PROPÓSITO NA ONDA OPERAÇÃO (item 19 da fila de 11/10/2026):
+     o status de agenda da cancelada era o da aberta ("confirmada"), para não
+     quebrar a cópia do Painel; agora é o estado final "cancelada", e a cópia
+     do Painel recebe o mesmo (docs/patches/painel-status-cancelada.patch). */
+  assert.equal(O.status(aberta), 'confirmada');assert.equal(O.status(c), 'cancelada');
   assert.ok(O.pendencias(aberta).length > 0);assert.deepEqual(O.pendencias(c), []);
   assert.equal(O.atrasada({...aberta, instalacao:{data:'2026-09-10'}}, HOJE), true);
   assert.equal(O.atrasada({...c, instalacao:{data:'2026-09-10'}}, HOJE), false);

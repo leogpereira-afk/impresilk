@@ -1,0 +1,42 @@
+Patch para o painel-impresilk (não publicado; onda operação do PCP, item 19
+da fila de 11/10/2026). Aplica-se a supabase/functions/_shared/agenda-pcp.ts
+da main do painel lida em 12/10/2026 (leitura pelo GitHub, sem clonar).
+
+O que faz: o status de agenda da O.S. cancelada passa a ser o estado final
+"cancelada" (rótulo "Cancelada"), igual ao OPERACAO.status do PCP desde a
+onda operação: a cancelada à mão no PCP (canceladaPCP, a marca gravada
+{ativo:true, motivo}) e a cancelada no ERP (a baixa automática CANCELADO).
+Antes ela continuava "Confirmada" ou "Agendada" na agenda do Painel.
+
+Ordem de publicação: este patch entra no painel junto com (ou logo depois
+de) o PCP da onda operação; sem ele, o Painel mostra a cancelada como antes
+(nada quebra, só fica diferente do PCP). Quem aplicar: git apply no clone do
+painel, um teste em tests/ do painel para status() com as duas canceladas, e
+o functions.yml de sempre. Dados fictícios.
+
+--- a/supabase/functions/_shared/agenda-pcp.ts	2026-10-12 10:59:23
++++ b/supabase/functions/_shared/agenda-pcp.ts	2026-10-12 10:59:23
+@@ -97,7 +97,15 @@
+   );
+ }
+ 
++/* CANCELADA E ESTADO FINAL (item 19 da fila do PCP de 11/10/2026, onda
++   operacao; o mesmo OPERACAO.status do PCP): a O.S. cancelada a mao no PCP
++   (canceladaPCP) ou no ERP (a baixa CANCELADO) sai do funil como a
++   finalizada. Antes ela continuava "Confirmada" ou "Agendada" aqui. */
++export function canceladaNoERP(o: OS): boolean {
++  return encerradaERP(o) && /cancel/i.test(`${o?.baixaAutoERP?.status ?? ""} ${o?.finalizadoPor ?? ""}`);
++}
+ export function status(o: OS): string {
++  if (canceladaPCP(o) || canceladaNoERP(o)) return "cancelada";
+   if (o?.finalizadaEm) return "finalizada";
+   if (!o?.liberadoPCP) return "aguardando_producao";
+   if (interno(o) || !agendaCompleta(o)) return "apto";
+@@ -177,6 +185,7 @@
+   confirmada: "Confirmada",
+   em_andamento: "Em andamento",
+   finalizada: "Finalizada",
++  cancelada: "Cancelada",
+ };
+ const ROTULO_STATUS_INTERNO: Record<string, string> = {
+   aguardando_producao: "Aguardando produção",

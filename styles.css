@@ -321,6 +321,8 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .badge.st-confirmada          { background: #dbeafe; color: #1d4ed8; }
 .badge.st-em_andamento        { background: var(--blue); color: #fff; }
 .badge.st-finalizada          { background: #dcfce7; color: #15803d; }
+/* Cancelada: estado final do funil (item 19, onda operação). */
+.badge.st-cancelada           { background: #f1f5f9; color: #475569; text-decoration: line-through; }
 .badge.st-retrabalho          { background: #fef3c7; color: #92400e; }
 
 /* ── Modal ───────────────────────────────────────────────────────────────── */
@@ -887,6 +889,7 @@ body:not(.equipe-app) #modal-os .modal-meta { white-space: nowrap; overflow: hid
 .cal-chip.st-confirmada          { background: #dbeafe; color: var(--blue); }
 .cal-chip.st-em_andamento        { background: var(--blue); color: #fff; }
 .cal-chip.st-finalizada          { background: #dcfce7; color: var(--green); }
+.cal-chip.st-cancelada           { background: #f1f5f9; color: #475569; }
 
 .cal-chip.multi-start { border-radius: 4px 0 0 4px; margin-right: 0; }
 .cal-chip.multi-mid   { border-radius: 0; margin-right: 0; margin-left: 0; }
@@ -923,6 +926,7 @@ body:not(.equipe-app) #modal-os .modal-meta { white-space: nowrap; overflow: hid
 .kanban-card.st-confirmada   { border-left-color: var(--blue); }
 .kanban-card.st-em_andamento { border-left-color: var(--blue); }
 .kanban-card.st-finalizada   { border-left-color: var(--green); }
+.kanban-card.st-cancelada    { border-left-color: #94a3b8; }
 .kanban-hora { font-weight: 800; font-size: .95rem; color: var(--blue); }
 .kanban-os   { font-size: .75rem; font-weight: 700; color: var(--muted); }
 .kanban-cliente { font-size: .85rem; font-weight: 600; margin-top: 2px; }
@@ -1066,6 +1070,7 @@ body:not(.equipe-app) #modal-os .modal-meta { white-space: nowrap; overflow: hid
 .os-list-item.st-confirmada   { border-left-color: var(--blue); }
 .os-list-item.st-agendada     { border-left-color: var(--teal); }
 .os-list-item.st-finalizada   { border-left-color: var(--green); }
+.os-list-item.st-cancelada    { border-left-color: #94a3b8; }
 .os-list-item.st-retrabalho   { border-left-color: var(--amber); }
 .os-list-item.st-apto         { border-left-color: var(--purple); }
 

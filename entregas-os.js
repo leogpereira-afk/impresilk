@@ -94,7 +94,7 @@ const POR_OS = ((O) => {
      ocorrências derivadas e o retorno antecipado; `opc.diario` as entradas
      do diário (STORE.auditoriaOS); `opc.descreverCampo(campo, entrada)` o
      texto de cada campo do diário (a tela usa o da ficha). */
-  const ETAPAS = {aguardando_producao: 'Aguardando produção', apto: 'Apto', agendada: 'Agendada', confirmada: 'Confirmada', em_andamento: 'Em andamento', finalizada: 'Finalizada'};
+  const ETAPAS = {aguardando_producao: 'Aguardando produção', apto: 'Apto', agendada: 'Agendada', confirmada: 'Confirmada', em_andamento: 'Em andamento', finalizada: 'Finalizada', cancelada: 'Cancelada'};
   const ETAPAS_INT = {apto: 'Pronta para retirada', finalizada: 'Retirada'};
   const ORDEM = ['pedido', 'criada', 'etapa', 'remarcacao', 'prazo', 'retorno_previsto', 'saida', 'chegada', 'retorno', 'item', 'finalizacao', 'lancamento', 'conferencia', 'ocorrencia', 'abono', 'cancelamento', 'reabertura', 'diario'];
   const MARCA_TXT = {entregue: 'entregue', retirado: 'retirado pelo cliente', problema: 'problema na entrega', cancelado: 'saldo cancelado', desfeito: 'marca desfeita', conferido: 'declaração conferida'};

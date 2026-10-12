@@ -364,8 +364,9 @@ test('tela: a operação vê o selo e não vê Cancelar O.S.; a O.S. cancelada n
   assert.equal(b.run(`proximoPasso(STORE.getOS('2'))`), null);
   const card = b.run(`osCardHTML(STORE.getOS('2'))`);
   assert.match(card, /se-cancelado/);assert.match(card, /prazo-tag prazo-cancelada/);assert.doesNotMatch(card, /Próximo passo/);
-  // O status de agenda (o badge da etapa, que o Painel copia) é o mesmo da aberta.
-  assert.equal(b.run(`calcStatus(STORE.getOS('2'))`), b.run(`calcStatus(STORE.getOS('1'))`));
+  // TROCADO DE PROPÓSITO NA ONDA OPERAÇÃO (item 19): a cancelada tem o estado final "cancelada" no funil, a aberta não.
+  assert.equal(b.run(`calcStatus(STORE.getOS('2'))`), 'cancelada');
+  assert.notEqual(b.run(`calcStatus(STORE.getOS('1'))`), 'cancelada');
 });
 
 /* ───────────── a prévia da divisão (crítica 5.4) ───────────── */

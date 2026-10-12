@@ -372,6 +372,8 @@ function isInterno(os) { return osTipo(os) === 'interno'; }
 function calcStatus(os) {
   return OPERACAO.status(os);
 }
+// Os estados finais do funil (item 19, onda operação): fora de "Em aberto", das etapas e do "nesta etapa".
+const STATUS_FINAIS_FUNIL = ['finalizada', 'cancelada'];
 
 const STATUS_LABEL = {
   aguardando_producao: 'Aguardando produção',
@@ -379,7 +381,9 @@ const STATUS_LABEL = {
   agendada:            'Agendada',
   confirmada:          'Confirmada',
   em_andamento:        'Em andamento',
-  finalizada:          'Finalizada'
+  finalizada:          'Finalizada',
+  // Estado final (item 19, onda operação): a O.S. cancelada sai do funil.
+  cancelada:           'Cancelada'
 };
 
 /* ── Etapas do processo (stepper / régua do funil) ───────────────────────── */
@@ -390,7 +394,9 @@ const STEP_DEFS = {
   agendada:            { curto: 'Agenda',     icon: '📅' },
   confirmada:          { curto: 'Confirmado', icon: '📞' },
   em_andamento:        { curto: 'Em rota',    icon: '🚚' },
-  finalizada:          { curto: 'Final',      icon: '🏁' }
+  finalizada:          { curto: 'Final',      icon: '🏁' },
+  // Estado final fora da régua (item 19, onda operação): não é etapa do funil.
+  cancelada:           { curto: 'Cancelada',  icon: '⛔' }
 };
 const ETAPAS_EXT = ['aguardando_producao', 'apto', 'agendada', 'confirmada', 'em_andamento', 'finalizada'];
 const ETAPAS_INT = ['aguardando_producao', 'apto', 'finalizada'];
@@ -440,6 +446,8 @@ function stepperHTML(os, compact) {
   const passos = seq.map((s, i) => {
     let cls = i < idx ? 'done' : (i === idx ? 'cur' : 'todo');
     if (erp && s !== 'finalizada') cls = fato[s] ? 'done' : 'todo nao-registrada';
+    // Cancelada (item 19): a régua mostra o que foi registrado; a etapa final não é alcançada.
+    if (atual === 'cancelada') cls = s !== 'finalizada' && fato[s] ? 'done' : 'todo';
     const d = (interno && STEP_DEFS_INT[s]) || STEP_DEFS[s];
     const h = hist.find(x => x.etapa === s);
     const quando = h && h.em ? ` — ${new Date(h.em).toLocaleDateString('pt-BR')}${h.por ? ' · ' + h.por : ''}` : '';
@@ -2312,12 +2320,16 @@ function renderModal() {
 
   // Régua do funil (o selo compacto) + próximo passo + tempos do processo.
   const histAtual = (Array.isArray(os.historico) ? os.historico : []).filter(h => h.etapa === st).slice(-1)[0];
-  const diasPedido = os.dataEntrada ? diasDesde(os.dataEntrada)
-                   : (os.criadoEm ? diasEntre(os.criadoEm, todayISO()) : null);
+  /* O LEAD TIME DA CANCELADA PARA NO CANCELAMENTO (item 19): o pedido conta
+     até o dia em que foi cancelado, e não há "dias nesta etapa" (estado final). */
+  const cancOS = st === 'cancelada' && typeof OPERACAO.cancelamentoDe === 'function' ? OPERACAO.cancelamentoDe(os) : null;
+  const fimLT = cancOS && cancOS.em ? String(cancOS.em).slice(0, 10) : todayISO();
+  const diasPedido = os.dataEntrada ? diasEntre(os.dataEntrada, fimLT)
+                   : (os.criadoEm ? diasEntre(os.criadoEm, fimLT) : null);
   const diasEtapa = histAtual && histAtual.em ? diasEntre(histAtual.em, todayISO()) : null;
   const temposTags = [];
-  if (diasPedido != null && diasPedido >= 0) temposTags.push(`⏱ ${diasPedido}d desde o pedido`);
-  if (diasEtapa != null && diasEtapa >= 0 && !finalizada) temposTags.push(`📍 ${diasEtapa}d nesta etapa`);
+  if (diasPedido != null && diasPedido >= 0) temposTags.push(cancOS ? `⏱ cancelada ${diasPedido}d depois do pedido` : `⏱ ${diasPedido}d desde o pedido`);
+  if (diasEtapa != null && diasEtapa >= 0 && !finalizada && st !== 'cancelada') temposTags.push(`📍 ${diasEtapa}d nesta etapa`);
   // O selo do status e o próximo passo: repintados ao vivo (pintarPendenciasFicha), sem repintar a ficha.
   const seloStatusBotao = seloTopoFichaHTML(os), ppHTML = proximoPassoFichaHTML(os);
   _hostsFicha.set('fe-selo-topo', seloStatusBotao); _hostsFicha.set('fe-pp', ppHTML);
@@ -6769,7 +6781,8 @@ function pcpAtualizarChips() {
   const porTipo = list => STATE.pcpTipo === 'todos' ? list : list.filter(o => osTipo(o) === STATE.pcpTipo);
   const porStatus = list => {
     if (STATE.pcpVista !== '') return list;
-    if (STATE.pcpStatus === 'todos') return list.filter(o => calcStatus(o) !== 'finalizada');
+    // "Em aberto" sem os estados finais: a finalizada e a cancelada (item 19).
+    if (STATE.pcpStatus === 'todos') return list.filter(o => !STATUS_FINAIS_FUNIL.includes(calcStatus(o)));
     return list.filter(o => calcStatus(o) === STATE.pcpStatus);
   };
   const setN = (sel, n) => { const s = el.querySelector(`${sel} .pcp-chip-n`); if (s) s.textContent = n; };
@@ -6777,7 +6790,7 @@ function pcpAtualizarChips() {
   const base = pcpBaseList();
   // Chips de status: base da vista × tipo × busca
   const bST = applyFilter(porTipo(base), busca);
-  setN('[data-pcp-status="todos"]', bST.filter(o => calcStatus(o) !== 'finalizada').length);
+  setN('[data-pcp-status="todos"]', bST.filter(o => !STATUS_FINAIS_FUNIL.includes(calcStatus(o))).length);
   Object.keys(STATUS_LABEL).forEach(k => setN(`[data-pcp-status="${k}"]`, bST.filter(o => calcStatus(o) === k).length));
   // Chips de tipo: base da vista × status × busca
   const bTP = applyFilter(porStatus(base), busca);
@@ -6785,7 +6798,7 @@ function pcpAtualizarChips() {
   ['externo', 'interno'].forEach(k => setN(`[data-pcp-tipo="${k}"]`, bTP.filter(o => osTipo(o) === k).length));
   // Botões de vista: cada vista com a própria base × tipo × busca
   const fAll = applyFilter(porTipo(STORE.getAllOS().slice()), busca);
-  setN('[data-pcp-vista=""]', fAll.filter(o => !o.finalizadaEm).length);
+  setN('[data-pcp-vista=""]', fAll.filter(o => !o.finalizadaEm && calcStatus(o) !== 'cancelada').length);
   setN('[data-pcp-vista="parado"]', fAll.filter(o => OPERACAO.paradoNoCliente(o)).length);
   setN('[data-pcp-vista="retrabalho"]', fAll.filter(retrabPendente).length);
   setN('[data-pcp-vista="voltas"]', voltasDoRecorte().todas.filter(g => g.situacao !== 'conferida').length);
@@ -6806,7 +6819,7 @@ function pcpRenderCards() {
   if (STATE.pcpTipo !== 'todos') list = list.filter(o => osTipo(o) === STATE.pcpTipo);
   if (STATE.pcpVista === '') {
     // "Em aberto" esconde finalizadas; os demais chips filtram pelo status exato.
-    if (STATE.pcpStatus === 'todos') list = list.filter(o => calcStatus(o) !== 'finalizada');
+    if (STATE.pcpStatus === 'todos') list = list.filter(o => !STATUS_FINAIS_FUNIL.includes(calcStatus(o)));
     else list = list.filter(o => calcStatus(o) === STATE.pcpStatus);
   }
   list = applyFilter(list, STATE.filtroBusca);
@@ -7061,6 +7074,11 @@ const TABLER_ICOS = {
 // Em que etapa a O.S estava no instante T (reconstruído do historico[]).
 // O.S sem histórico até T: se já existia, aproxima como "aguardando produção".
 function etapaEmT(os, T) {
+  /* Cancelada até T é cancelada (item 19, onda operação): o cancelamento
+     gravado tem o carimbo do servidor; a cancelada no ERP, o da baixa. O
+     desfeito, ou o cancelado depois de T, segue a régua de sempre. */
+  const canc = typeof OPERACAO.cancelamentoDe === 'function' ? OPERACAO.cancelamentoDe(os) : null;
+  if (canc && !canc.pendente && canc.em && new Date(canc.em) <= T) return 'cancelada';
   // Finalizada até T é finalizada — o espelho da equipe finaliza SEM gravar
   // no histórico, então sem este fallback a O.S ficava eterna no funil.
   if (os.finalizadaEm && new Date(os.finalizadaEm) <= T) return 'finalizada';
@@ -7124,7 +7142,7 @@ function fotografiaLT(offset, todas) {
   const T = offset === 0 ? new Date() : new Date(dia.getFullYear(), dia.getMonth(), dia.getDate(), 23, 59, 59);
   const hhT = `${String(T.getHours()).padStart(2, '0')}:${String(T.getMinutes()).padStart(2, '0')}`;
   const cont = {};
-  todas.forEach(o => { const st = offset === 0 ? calcStatus(o) : etapaEmT(o, T); if (st && st !== 'finalizada') cont[st] = (cont[st] || 0) + 1; });
+  todas.forEach(o => { const st = offset === 0 ? calcStatus(o) : etapaEmT(o, T); if (st && !STATUS_FINAIS_FUNIL.includes(st)) cont[st] = (cont[st] || 0) + 1; });
   const funil = ETAPAS_EXT.filter(k => k !== 'finalizada')
     .map(k => `<span class="pcp-chip">${esc(STATUS_LABEL[k])} <span class="pcp-chip-n">${cont[k] || 0}</span></span>`).join('');
   // PASSADO: o dia da saída vem do CARIMBO (saidaEm), não do agendamento de
