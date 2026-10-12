@@ -64,6 +64,9 @@ test('item 1: o mês sem fechamento leva o selo "Mês aberto, resultado provisó
   assert.match(situacao, /<span class="perf-situacao provisorio">Mês aberto, resultado provisório<\/span><span class="perf-situacao ok">Participações confirmadas<\/span>/);
   assert.match(c.perfRankingEquipesHTML(regsTela(c), c.perfConfig(), 'todas'), /Mês aberto, resultado provisório/);
   assert.match(c.perfFonteTexto(), /^Prévia: mês aberto, resultado provisório\. Base compartilhada do PCP/);
+  // A Jornada e o Relatório também diziam só "Apuração em andamento".
+  assert.match(c.perfJornadaHTML(regsTela(c), c.perfConfig()), /<span class="perf-jornada-selo">Mês aberto, resultado provisório<\/span>/);
+  assert.match(c.performanceRelatorioHTML(), /<span class="perf-report-state">Mês aberto, resultado provisório<\/span>/);
   // O mês corrente até hoje (o período padrão) também é o mês aberto.
   const h = tela({hoje:'2026-11-19', periodo:{de:'2026-11-01', ate:'2026-11-19'}});
   assert.match(h.perfSituacaoHTML(null), /Mês aberto, resultado provisório/);
