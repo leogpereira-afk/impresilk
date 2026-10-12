@@ -8813,24 +8813,28 @@ function renderControle() {
   // ── Níveis de acesso configuráveis (somente admin) ───────────────────────
   const PERM = getPermissoes();
   const PAPEIS = ['pcp', 'montagem', 'operacao', 'comercial'];
+  /* O NOME DE GENTE DO PAPEL (U4 da auditoria de 12/10/2026): a tabela
+     mostrava "operacao" e "pcp", os nomes internos. */
+  const ROTULO_PAPEL = { pcp: 'PCP', montagem: 'Montagem', operacao: 'Operação', comercial: 'Comercial' };
   const niveisHTML = isAdmin ? `
     <div class="cfg-section">
       <h3>🔐 Níveis de acesso</h3>
       <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">Defina o que cada nível pode ver/editar. Admin tem acesso total (não editável).</p>
-      <table class="control-table niveis-table">
+      <div class="niveis-rolagem" role="region" aria-label="Níveis de acesso (a tabela rola de lado)" tabindex="0"><table class="control-table niveis-table">
         <thead><tr><th>Nível</th>${ABAS_DISPONIVEIS.map(a=>`<th>${esc(ABAS_NOMES[a])}</th>`).join('')}<th>Editar</th><th>Cadastrar</th></tr></thead>
         <tbody>
           ${PAPEIS.map(papel => {
             const p = PERM[papel];
             const abas = p.abas === '*' ? ABAS_DISPONIVEIS : p.abas;
-            return `<tr><td><strong>${esc(papel)}</strong></td>
-              ${ABAS_DISPONIVEIS.map(a => `<td><input type="checkbox" aria-label="${esc(papel)}: acesso a ${esc(ABAS_NOMES[a])}" data-nivel-aba="${papel}|${a}" ${abas.includes(a)?'checked':''}></td>`).join('')}
-              <td><input type="checkbox" data-nivel-flag="${papel}|editar" ${p.editar?'checked':''}></td>
-              <td><input type="checkbox" data-nivel-flag="${papel}|cadastrar" ${p.cadastrar?'checked':''}></td>
+            const rot = ROTULO_PAPEL[papel] || papel;
+            return `<tr><th scope="row"><strong>${esc(rot)}</strong></th>
+              ${ABAS_DISPONIVEIS.map(a => `<td><input type="checkbox" aria-label="${esc(rot)}: acesso a ${esc(ABAS_NOMES[a])}" data-nivel-aba="${papel}|${a}" ${abas.includes(a)?'checked':''}></td>`).join('')}
+              <td><input type="checkbox" aria-label="${esc(rot)}: editar" data-nivel-flag="${papel}|editar" ${p.editar?'checked':''}></td>
+              <td><input type="checkbox" aria-label="${esc(rot)}: cadastrar" data-nivel-flag="${papel}|cadastrar" ${p.cadastrar?'checked':''}></td>
             </tr>`;
           }).join('')}
         </tbody>
-      </table>
+      </table></div>
       <button class="btn-ghost btn-sm mt-8" data-nivel-reset>↺ Restaurar padrão</button>
     </div>` : '';
 

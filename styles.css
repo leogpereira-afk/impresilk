@@ -961,7 +961,11 @@ body:not(.equipe-app) #modal-os .modal-meta { white-space: nowrap; overflow: hid
 /* ── Tabela de níveis de acesso ──────────────────────────────────────────── */
 .niveis-table th { text-transform: capitalize; font-size: .68rem; text-align: center; }
 .niveis-table td { text-align: center; }
-.niveis-table td:first-child { text-align: left; text-transform: capitalize; }
+.niveis-table td:first-child, .niveis-table th[scope=row] { text-align: left; text-transform: none; font-size: .85rem; }
+/* U4 da auditoria de 12/10/2026: a tabela rola dentro do quadro, não a página inteira. */
+.niveis-rolagem { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.niveis-rolagem:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.niveis-rolagem .niveis-table th[scope=row] { position: sticky; left: 0; background: #fff; z-index: 1; }
 
 /* ── Painel de KPIs ──────────────────────────────────────────────────────── */
 .kpi-grid {
