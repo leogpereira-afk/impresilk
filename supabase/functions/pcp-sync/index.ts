@@ -1151,6 +1151,35 @@ const perfReguaDoSelo = (selo:any) => typeof selo?.regraPerdas==="string" ? selo
 const perfRegraVoltaDoSelo = (selo:any) => selo?.regraVolta===REGRA_VOLTA ? REGRA_VOLTA : "";
 // As opções do recálculo de um selo: a régua da volta dele e a marca, como ele foi selado.
 const perfOpcoesDoSelo = (selo:any) => ({reguaPerdas:perfReguaDoSelo(selo),regraVolta:perfRegraVoltaDoSelo(selo),marcaVolta:perfRegraVoltaDoSelo(selo)===REGRA_VOLTA});
+/* A APROVAÇÃO E A EXPORTAÇÃO CONFEREM SÓ O DINHEIRO (onda comissão,
+   12/10/2026; linha Baixa da auditoria de 11/10/2026). O recálculo do selo
+   com a régua dele continua; o hash igual segue valendo como antes. Hash
+   diferente: compara só o que decide a comissão (COMISSAO.mudancasDeDinheiro,
+   a mesma régua da tela). Mudança fora do dinheiro (a conferência da volta, o
+   carro renomeado, os pesos da Nota, o cliente) deixa aprovar e exportar e
+   fica contada; mudança de dinheiro continua 409, com a lista do que mudou. A
+   O.S. com a origem a definir no selo não trava: definir a origem depois vira
+   pendência para a próxima revisão ou compensação (item 2 da onda). O hash
+   do fechamento não muda: mês fechado não se recalcula. Régua que este
+   servidor não conhece nunca vira aceite. */
+function perfReguaDesconhecida(selo:any) {
+  if(selo&&Object.prototype.hasOwnProperty.call(selo,"regraNota")&&selo.regraNota!==REGRA_NOTA_VALOR)return true;
+  if(selo&&Object.prototype.hasOwnProperty.call(selo,"regraVolta")&&selo.regraVolta!==REGRA_VOLTA)return true;
+  if(selo&&Object.prototype.hasOwnProperty.call(selo,"regraPerdas")&&!(typeof selo.regraPerdas==="string"&&REGRAS.reguaPorId(selo.regraPerdas)))return true;
+  return false;
+}
+async function perfConferirSeloDaComissao(selo:any, periodo:any) {
+  if(perfReguaDesconhecida(selo))return {ok:false,regua:true,mudancas:[],pendentes:[]};
+  const atual=await perfFonte(perfParametrosDoSelo(selo,periodo),perfOpcoesDoSelo(selo));
+  if(atual.hash===selo?.hash)return {ok:true,hashIgual:true,foraDoDinheiro:0,mudancas:[],pendentes:[]};
+  const m=COMISSAO.mudancasDeDinheiro(selo,atual);
+  return {ok:m.igual,hashIgual:false,foraDoDinheiro:m.foraDoDinheiro,mudancas:m.dinheiro,pendentes:m.pendentes};
+}
+// A resposta 409 da mudança de dinheiro: a causa, o que mudou e o que fazer.
+function perfRespostaFonteMudou(c:any, oQueFazer:string) {
+  if(c.regua)return {error:"A régua deste fechamento não existe neste servidor. Atualize o servidor antes de aprovar ou exportar; nada foi gravado.",reguaDesconhecida:true};
+  return {error:"A fonte mudou depois do fechamento no que decide a comissão ("+COMISSAO.textoMudancasDeDinheiro(c.mudancas)+"). "+oQueFazer,mudancasDinheiro:c.mudancas.slice(0,200),pendentes:c.pendentes.slice(0,200)};
+}
 async function perfFechamentos(periodo:any) {
   const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_fechamentos").eq("apagado",false).eq("registro->>de",periodo.de).eq("registro->>ate",periodo.ate).order("id").limit(1000);
   if(error)throw new Error(error.message);if(data?.length===1000)throw new Error("Limite de revisões atingido.");
@@ -1816,6 +1845,9 @@ Deno.serve(async (req: Request) => {
           const pessoas=[...new Map(fichas.filter((p:any)=>p.id&&regua.pessoa(p.id)&&!regua.pessoa(p.id).semFicha).map((p:any)=>[p.id,{id:p.id,nome:p.nome}])).values()];
           return resp({revisoes,pessoas,cobrem:perfComissaoCobrem(todas,periodo)});
         }
+        // O que a conferência do selo achou fora do dinheiro e o que ficou pendente (fora do hash da revisão).
+        let conferida:any=null;
+        const resumoConferida=()=>conferida?{hashIgual:conferida.hashIgual,foraDoDinheiro:conferida.foraDoDinheiro,pendentes:conferida.pendentes.slice(0,200)}:null;
         if(acao==="performanceComissaoExportar"){
           if(!ultima || ultima.id!==body.id)return resp({error:"Selecione a última revisão aprovada. Uma nova prévia suspende a exportação anterior."},409);
           const osExportadas=new Set((ultima.apuracao?.linhas||[]).map((l:any)=>l.osId));
@@ -1824,8 +1856,8 @@ Deno.serve(async (req: Request) => {
           if(!ultima.apuracao?.compensacaoDe){
           const fechamentos=await perfFechamentos(periodo);
           if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"Há outra revisão operacional. Concilie o demonstrativo antes de exportar."},409);
-          const fonteAtual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo),perfOpcoesDoSelo(fechamentos[0]));
-          if(fonteAtual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Revise antes de exportar."},409);
+          conferida=await perfConferirSeloDaComissao(fechamentos[0],periodo);
+          if(!conferida.ok)return resp(perfRespostaFonteMudou(conferida,"Revise antes de exportar: crie uma revisão operacional e outra prévia financeira."),409);
           }
           const arquivo="comissao-"+periodo.de+"-r"+ultima.revisao+".csv";
           const aviso=(sha:string)=>"Exportação para conferência; não realiza pagamento. Não importar novamente sem conciliação. Impressão digital (sha256) do CSV: "+sha+".";
@@ -1835,10 +1867,10 @@ Deno.serve(async (req: Request) => {
           if(typeof ultima.csv==="string"){
             const sha=String(ultima.csvSha256||"");
             if(!/^[a-f0-9]{64}$/.test(sha)||await sha256Texto(ultima.csv)!==sha)return resp({error:"O CSV guardado na aprovação não confere com a impressão digital dele. Nada foi exportado; avise a gestão."},409);
-            return resp({ok:true,csv:ultima.csv,csvSha256:sha,arquivo,aviso:aviso(sha)});
+            return resp({ok:true,csv:ultima.csv,csvSha256:sha,arquivo,aviso:aviso(sha),conferencia:resumoConferida()});
           }
           // Aprovação de antes desta versão (sem CSV guardado): o CSV sai do registro aprovado, como antes.
-          try{const csv=COMISSAO.csv(ultima),sha=await sha256Texto(csv);return resp({ok:true,csv,csvSha256:sha,arquivo,aviso:aviso(sha)});}catch(e){return resp({error:(e as Error).message},422);}
+          try{const csv=COMISSAO.csv(ultima),sha=await sha256Texto(csv);return resp({ok:true,csv,csvSha256:sha,arquivo,aviso:aviso(sha),conferencia:resumoConferida()});}catch(e){return resp({error:(e as Error).message},422);}
         }
         const requestId=String(body.requestId||""), motivo=String(body.motivo||"").trim();
         if(!/^[a-zA-Z0-9-]{10,80}$/.test(requestId)||motivo.length<5||motivo.length>500)return resp({error:"Informe identificação do pedido e motivo de 5 a 500 caracteres."},422);
@@ -1871,8 +1903,8 @@ Deno.serve(async (req: Request) => {
           if(!ultima.apuracao.compensacaoDe){
           const fechamentos=await perfFechamentos(periodo);
           if(ultima.fechamentoId!==fechamentos[0]?.id)return resp({error:"O fechamento operacional recebeu outra revisão. Gere e confira uma nova prévia."},409);
-          const atual=await perfFonte(perfParametrosDoSelo(fechamentos[0],periodo),perfOpcoesDoSelo(fechamentos[0]));
-          if(atual.hash!==fechamentos[0]?.hash)return resp({error:"A fonte mudou depois do fechamento. Crie uma revisão operacional e outra prévia financeira."},409);
+          conferida=await perfConferirSeloDaComissao(fechamentos[0],periodo);
+          if(!conferida.ok)return resp(perfRespostaFonteMudou(conferida,"Crie uma revisão operacional e outra prévia financeira."),409);
           }
           if(!ultima.versoesOS)return resp({error:"Prévia anterior ao controle de versões por O.S. Gere uma nova prévia."},409);
           for(const [osId,versao] of Object.entries(ultima.versoesOS))if((versoesOS.get(osId)||0)!==versao)return resp({error:"Outra aprovação alterou o saldo desta O.S. Gere uma nova prévia e confira os centavos."},409);
@@ -1885,6 +1917,9 @@ Deno.serve(async (req: Request) => {
         const revisao=(ultima?.revisao||0)+1,id=chave+":"+String(revisao).padStart(6,"0"),em=new Date().toISOString();
         const hash=await perfHash({apuracao,entrada,fechamentoId});
         const registro:any={...periodo,id,revisao,tipo,anterior:ultima?.id||null,requestId,assinatura,motivo,fechamentoId,entrada,apuracao,hash,versoesOS:referenciaVersoes,em,autor:{login:String(cracha.sub||""),nome:String(cracha.nome||"")}};
+        /* O que a conferência do selo achou na aprovação (onda comissão): mudança fora do dinheiro e as O.S. com a
+           origem a definir no selo que mudaram depois (pendência para a próxima revisão ou compensação). Fora do hash. */
+        if(tipo==="aprovacao"&&conferida)registro.fonteConferida={em,...resumoConferida()};
         /* O CSV APROVADO E A IMPRESSÃO DIGITAL DELE (M21; revisão da onda
            onda-w1-backup, R2 e S5). A aprovação de período efetivo guarda, no
            próprio registro (só inserção, como tudo aqui), o CSV que vai à

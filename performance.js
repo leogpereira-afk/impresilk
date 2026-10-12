@@ -804,6 +804,22 @@ function perfMudancasDoSelo(selo, atual) {
  const pesos=!!(selo.criterios&&atual.criterios)&&JSON.stringify(PERF.criteriosValidos(selo.criterios))!==JSON.stringify(PERF.criteriosValidos(atual.criterios));
  return {entraram,sairam,mudaram,total:entraram+sairam+mudaram,pesos};
 }
+/* O QUE A COMISSÃO CONFERE (onda comissão, 12/10/2026, item 1): Aprovar e
+   Exportar a comissão comparam só o que decide o dinheiro
+   (COMISSAO.mudancasDeDinheiro, a mesma régua da porta). O aviso do mês
+   fechado diz quais mudanças travam a comissão e quais não, e a O.S. com a
+   origem a definir no selo que teve a origem definida depois (fica pendente
+   para a próxima revisão ou compensação, item 2). Só para quem vê valores. */
+function perfDinheiroDoSelo(selo, atual) {
+ if(typeof COMISSAO==='undefined'||!COMISSAO.mudancasDeDinheiro||!selo||!atual||!Array.isArray(selo.registros)||!Array.isArray(atual.registros))return null;
+ return COMISSAO.mudancasDeDinheiro(selo,atual);
+}
+function perfDinheiroDoSeloTxt(selo, atual) {
+ const d=perfDinheiroDoSelo(selo,atual);if(!d)return '';
+ const pend=d.pendentes.length?` ${d.pendentes.length===1?'A O.S.':'As O.S.'} ${esc(d.pendentes.map(x=>x.numero||x.osId).join(', '))} ${d.pendentes.length===1?'tinha':'tinham'} a origem do retrabalho a definir no fechamento e ${d.pendentes.length===1?'mudou':'mudaram'} depois: no demonstrativo ${d.pendentes.length===1?'ela fica pendente':'elas ficam pendentes'} (não paga e não perde) e entra numa revisão seguinte ou compensação.`:'';
+ if(d.dinheiro.length)return ` <strong>Na comissão: ${d.dinheiro.length} ${d.dinheiro.length===1?'mudança muda':'mudanças mudam'} o dinheiro (${esc(COMISSAO.textoMudancasDeDinheiro(d.dinheiro))}). Aprovar e Exportar a comissão deste mês ficam travados até uma nova revisão e outra prévia.</strong>${pend}`;
+ return ` Nenhuma delas muda a comissão: Aprovar e Exportar continuam valendo.${pend}`;
+}
 function perfMudancasTxt(m) {
  const n=(x,um,varios)=>x?`${x} ${x===1?um:varios}`:'';
  return [n(m.entraram,'entrega nova','entregas novas'),n(m.sairam,'entrega saiu','entregas saíram'),n(m.mudaram,'entrega mudou','entregas mudaram'),m.pesos?'os pesos da nota mudaram':''].filter(Boolean).join(', ');
@@ -816,7 +832,7 @@ function perfAvisoFechadoHTML(f,comAcao) {
    const subst=perfSubstituta(f);
    if(subst)return `<p class="perf-aviso">Você está vendo a revisão ${esc(f.revisao)}, substituída pela ${esc(subst.revisao)} (${esc(quando(subst))}). O que vale é a revisão ${esc(vigente.revisao)}.${botao('data-perf-ver-selo',`Ver a revisão ${esc(vigente.revisao)}`)}</p>`;
    const m=perfMudancasDoSelo(f,perfRemoto.dados);
-   if(m&&(m.total||m.pesos))return `<p class="perf-aviso">Mês fechado: você está vendo a revisão ${esc(f.revisao)}, de ${esc(quando(f))}. Há ${m.total?`${m.total} ${m.total===1?'mudança':'mudanças'} nas entregas`:'mudança'} depois do fechamento (${esc(perfMudancasTxt(m))}). Elas não entram no fechamento: para valer, crie uma nova revisão em Base e fechamento.${botao('data-perf-ver-atuais','Ver os dados atuais')}</p>`;
+   if(m&&(m.total||m.pesos))return `<p class="perf-aviso">Mês fechado: você está vendo a revisão ${esc(f.revisao)}, de ${esc(quando(f))}. Há ${m.total?`${m.total} ${m.total===1?'mudança':'mudanças'} nas entregas`:'mudança'} depois do fechamento (${esc(perfMudancasTxt(m))}). Elas não entram no fechamento: para valer, crie uma nova revisão em Base e fechamento.${perfDinheiroDoSeloTxt(f,perfRemoto.dados)}${botao('data-perf-ver-atuais','Ver os dados atuais')}</p>`;
    if(m)return `<p class="perf-aviso neutro">Mês fechado: você está vendo a revisão ${esc(f.revisao)}, de ${esc(quando(f))}. Nada mudou nas entregas depois do fechamento.</p>`;
    return `<p class="perf-aviso neutro">Mês fechado: você está vendo a revisão ${esc(f.revisao)}, de ${esc(quando(f))}.</p>`;
  }

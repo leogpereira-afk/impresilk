@@ -268,7 +268,87 @@ const COMISSAO = (() => {
       return f?{...r,perda:'falha_comprovada',falhaComprovada:f}:r;
     });
   }
-  return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase,comissoesAcumuladas,TEXTO_ORIGEM_A_DEFINIR,demonstrativosVigentes,falhaComprovadaNoDia,comFalhasComprovadas};
+  /* SÓ O QUE DECIDE A COMISSÃO (onda comissão, 12/10/2026; linha Baixa da
+     auditoria de 11/10/2026, "comparar só os campos de dinheiro"). Aprovar e
+     Exportar recalculam a fonte do mês e comparavam com o hash do fechamento
+     inteiro: a conferência da volta mudada depois, o carro renomeado no
+     Ativos, os pesos da Nota ou o cliente renomeado davam 409 "A fonte
+     mudou", sem nada mudar no dinheiro. O hash do fechamento NÃO muda (mês
+     fechado não se recalcula); o que muda é o que a aprovação confere: de cada
+     entrega, só o que este motor lê para pagar. O líquido, quem recebe e a
+     parte de cada um (as pessoas, as equipes e as cotas delas), a confirmação
+     e a conferência do valor, o dia e a fração (a ordem e o acumulado da O.S.)
+     e o efeito da régua das perdas (retrabalho de instalação e a origem a
+     definir); e, do selo, o período e a régua. As decisões de falha
+     comprovada, a entrega física e os rateios moram na prévia, que tem o hash
+     dela. O bruto e o desconto (só exibidos), o cliente, o número, a volta, a
+     Nota e quem confirmou ficam de fora.
+     A O.S. COM A ORIGEM A DEFINIR NO SELO (item 2 da onda): ela não paga e não
+     perde no demonstrativo; definir a origem depois não trava a aprovação nem
+     a exportação. A mudança vira pendência para a próxima revisão ou
+     compensação (`pendentes`). */
+  const proprio=(o,k)=>!!o&&typeof o==='object'&&Object.prototype.hasOwnProperty.call(o,k);
+  const canon=v=>{
+    if(Array.isArray(v))return '['+v.map(x=>x===undefined?'null':canon(x)).join(',')+']';
+    if(v&&typeof v==='object')return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}';
+    const t=JSON.stringify(v);return t===undefined?'null':t;
+  };
+  const reguaDoSelo=selo=>typeof selo?.regraPerdas==='string'&&selo.regraPerdas!==''?selo.regraPerdas:'';
+  function efeitoNaComissao(r, comRegua) {
+    if(!comRegua||!r)return '';
+    if(r.perda==='retrabalho_instalacao')return 'retrabalho_instalacao';
+    if(r.retrabalho===true&&proprio(r,'etapaOrigem')&&!r.etapaOrigem)return 'origem_a_definir';
+    return '';
+  }
+  function dinheiroDoRegistro(r, comRegua) {
+    const fr=r?.entregaId?(Number.isFinite(r.fracaoOS)?Math.round(r.fracaoOS*1e9)/1e9:null):1;
+    const efeito=efeitoNaComissao(r,comRegua);
+    const base={id:String(r?.id??''),osId:String(r?.osId||r?.id||''),entregaId:r?.entregaId||null,dia:String(r?.dia||''),fracaoOS:fr,efeito};
+    // A perda automática não paga ninguém e a origem a definir fica pendente: só a marca conta.
+    if(efeito)return base;
+    const grupos=lista(r.grupos).length?lista(r.grupos).map(g=>({equipeId:String(g?.equipeId||''),cota:Number.isInteger(g?.cota)?g.cota:null,membros:lista(g?.membros).map(String).sort()})):null;
+    return {...base,liquidoCentavos:centavos(r.valor),confirmado:r.confirmado===true,avisoValor:!!r.avisoValor,erroConferencia:!!r.erroConferencia,
+      equipeId:grupos?'':String(r.equipeId||''),membros:lista(r.membros).map(m=>String(m?.chave??'')).sort(),grupos};
+  }
+  // A impressão do dinheiro de uma fonte inteira (o selo ou o recálculo), com a régua do selo.
+  function dinheiroDaFonte(fonte, regua=reguaDoSelo(fonte)) {
+    const per=fonte?.periodo||{de:fonte?.de,ate:fonte?.ate};
+    return {periodo:{de:String(per?.de||''),ate:String(per?.ate||'')},regra:String(fonte?.regra||''),regraPerdas:regua,
+      registros:lista(fonte?.registros).map(r=>dinheiroDoRegistro(r,!!regua)).sort((a,b)=>a.id.localeCompare(b.id))};
+  }
+  const CAMPO_DINHEIRO={liquidoCentavos:'valor líquido',membros:'quem recebe',grupos:'equipes e cotas',equipeId:'equipe',confirmado:'participação confirmada',avisoValor:'conferência do valor',erroConferencia:'conferência dos itens',fracaoOS:'parte da O.S. na entrega',dia:'dia da entrega',entregaId:'entrega',osId:'O.S.',efeito:'retrabalho de instalação ou a origem',saiu:'saiu da base do mês',entrou:'entrou na base do mês',regua:'régua ou período do fechamento'};
+  function mudancasDeDinheiro(selo, atual) {
+    const regua=reguaDoSelo(selo), comRegua=!!regua;
+    const a=new Map(lista(selo?.registros).map(r=>[String(r?.id),r])), b=new Map(lista(atual?.registros).map(r=>[String(r?.id),r]));
+    const dinheiro=[], pendentes=[];let foraDoDinheiro=0;
+    const da=dinheiroDaFonte(selo,regua), db=dinheiroDaFonte(atual,regua);
+    if(canon(da.periodo)!==canon(db.periodo)||da.regra!==db.regra)dinheiro.push({id:'',osId:'',numero:'',dia:'',campos:['regua'],texto:CAMPO_DINHEIRO.regua});
+    const linha=(r,campos,antes,depois)=>({id:String(r.id),osId:String(r.osId||r.id),numero:String(r.numero||''),dia:String(r.dia||''),campos,texto:campos.map(c=>CAMPO_DINHEIRO[c]||c).join(', '),
+      ...(antes!==undefined?{antesCentavos:antes}:{}),...(depois!==undefined?{depoisCentavos:depois}:{})});
+    for(const [id,r] of a){
+      const x=b.get(id), pa=dinheiroDoRegistro(r,comRegua);
+      if(pa.efeito==='origem_a_definir'){
+        const px=x?dinheiroDoRegistro(x,comRegua):null;
+        if(!x||canon(px)!==canon(pa))pendentes.push({...linha(r,[x?'efeito':'saiu']),origemDefinida:!!x&&px.efeito!=='origem_a_definir',efeitoAgora:px?px.efeito:''});
+        continue;
+      }
+      if(!x){dinheiro.push(linha(r,['saiu'],pa.liquidoCentavos));continue;}
+      const px=dinheiroDoRegistro(x,comRegua);
+      const campos=[...new Set([...Object.keys(pa),...Object.keys(px)])].filter(k=>canon(pa[k])!==canon(px[k]));
+      if(campos.length)dinheiro.push(linha(r,campos,pa.liquidoCentavos,px.liquidoCentavos));
+      else if(canon(r)!==canon(x))foraDoDinheiro++;
+    }
+    for(const [id,x] of b)if(!a.has(id))dinheiro.push(linha(x,['entrou'],undefined,dinheiroDoRegistro(x,comRegua).liquidoCentavos));
+    return {igual:!dinheiro.length,dinheiro,pendentes,foraDoDinheiro};
+  }
+  // A frase de uma lista de mudanças de dinheiro: a mesma na porta e na tela.
+  function textoMudancasDeDinheiro(ms, max=6) {
+    const xs=lista(ms);
+    const um=m=>m.numero?'O.S. '+m.numero+(m.texto?': '+m.texto:''):m.texto||'';
+    return xs.slice(0,max).map(um).join('; ')+(xs.length>max?'; e mais '+(xs.length-max):'');
+  }
+  return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase,comissoesAcumuladas,TEXTO_ORIGEM_A_DEFINIR,demonstrativosVigentes,falhaComprovadaNoDia,comFalhasComprovadas,
+    dinheiroDoRegistro,dinheiroDaFonte,mudancasDeDinheiro,textoMudancasDeDinheiro};
 })();
 
 if (typeof module !== 'undefined') module.exports = COMISSAO;

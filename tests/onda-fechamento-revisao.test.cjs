@@ -155,25 +155,30 @@ test('revisão fechamento: D2, a mudança de verdade em novembro continua dando 
   const p = await previaComissao(e, NOV, f.fechamento);
   assert.equal(p.ok, true, JSON.stringify(p));
   assert.equal(p.revisao.apuracao.aprovavel, true, JSON.stringify(p.revisao.apuracao.pendencias));
-  // Uma mudança que a comparação antiga da tela não via (o cliente da O.S. mudou no ERP): o servidor dava 409 e a tela dizia "Nada mudou".
+  /* ONDA COMISSÃO (12/10/2026, item 1): a porta passou a conferir só o
+     dinheiro. Antes, o cliente renomeado no ERP dava 409; agora a mudança de
+     dinheiro (o valor do ERP) continua 409 e a de fora do dinheiro aprova. A
+     tela diz que as duas mudaram (a mesma régua do hash) e qual trava a
+     comissão (tests/onda-comissao-tela.test.cjs). */
+  e.db.painel_ordens[0].valor = 9000;
+  relogio(e, '2026-12-07T12:00:00Z');
+  const ap2 = await aprovarComissao(e, NOV, p.revisao, 2);
+  assert.equal(ap2.status, 409);assert.match(ap2.error, /A fonte mudou depois do fechamento no que decide a comissão/);
+  const nov2 = await e.call({action:'performancePeriodo', ...NOV, notaPorValor:true}, gestor);
+  assert.equal(telaComBase(plano(f.fechamento), plano(nov2)).run('perfMudancasDoSelo(__selo,__atual)').mudaram, 1);
+  e.db.painel_ordens[0].valor = 8500;
+  // Uma mudança que a comparação antiga da tela não via (o cliente da O.S. mudou no ERP): a tela diz que mudou; a comissão aprova.
   const row = linha(e, 'c1');
   row.registro = {...row.registro, cliente:'Cliente fictício renomeado'};
   row.atualizado_em = '2026-12-05T13:00:00Z';
-  relogio(e, '2026-12-06T12:00:00Z');
-  const ap = await aprovarComissao(e, NOV, p.revisao);
-  assert.equal(ap.status, 409);assert.match(ap.error, /A fonte mudou depois do fechamento/);
+  relogio(e, '2026-12-08T12:00:00Z');
   const nov = await e.call({action:'performancePeriodo', ...NOV, notaPorValor:true}, gestor);
   assert.notEqual(nov.hash, f.fechamento.hash);
   const t = telaComBase(plano(f.fechamento), plano(nov));
   assert.equal(t.run('perfMudancasDoSelo(__selo,__atual)').mudaram, 1);
   assert.match(t.run('perfAvisoFechadoHTML(perfFonteAtual(),true)'), /Há 1 mudança nas entregas depois do fechamento \(1 entrega mudou\)/);
-  // E o valor do ERP que muda (a mudança de dinheiro): 409 e a tela diz que mudou.
-  e.db.painel_ordens[0].valor = 9000;
-  relogio(e, '2026-12-07T12:00:00Z');
-  const ap2 = await aprovarComissao(e, NOV, p.revisao, 2);
-  assert.equal(ap2.status, 409);
-  const nov2 = await e.call({action:'performancePeriodo', ...NOV, notaPorValor:true}, gestor);
-  assert.equal(telaComBase(plano(f.fechamento), plano(nov2)).run('perfMudancasDoSelo(__selo,__atual)').mudaram, 1);
+  const ap = await aprovarComissao(e, NOV, p.revisao);
+  assert.equal(ap.status, 200, JSON.stringify(ap));
 });
 test('revisão fechamento: D2, a régua "como estava no fim do dia" é a mesma nas duas cópias do motor', async () => {
   const {CONFERENCIA_ENTREGA:S} = await import('../supabase/functions/_shared/pcp-conferencia-entrega.mjs');
