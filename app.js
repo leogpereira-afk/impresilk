@@ -2457,7 +2457,9 @@ const AUD_ROTULOS = {
   // A foto apagada pela gestão, com o motivo (A2; revisão da onda-w1-backup, S2).
   foto: 'Foto', motivo: 'Motivo',
   // O valor das entregas conferidas que mudou pelo rateio (revisão da onda acabamento, D1), em centavos.
-  valorConferido: 'Valor das entregas conferidas'
+  valorConferido: 'Valor das entregas conferidas',
+  // Os itens com valor que a gravação de quem não vê valores repôs (M19, onda acabamento).
+  'itens.valores': 'Valores dos itens'
 };
 // Por dentro dos campos que são objeto (conferência da volta, limpeza do
 // carro, exceção, entrega lançada, baixa do ERP): rótulo em português. O ID
@@ -2482,7 +2484,27 @@ function audTexto(v) {
 }
 const AUD_ACOES = { criar: 'Criou a O.S.', alterar: 'Alterou', excluir: 'Excluiu a O.S.', restaurar: 'Restaurou a O.S.', configuracao: 'Alterou a configuração',
   descartar: 'Tentou alterar a divisão da equipe (recusado)', 'foto-apagada': 'Apagou a foto (prova da entrega), com motivo',
-  'valor-conferido': 'O valor das entregas conferidas mudou (o rateio usa o valor de cada item e o valor total da O.S.)' };
+  'valor-conferido': 'O valor das entregas conferidas mudou (o rateio usa o valor de cada item e o valor total da O.S.)',
+  /* A edição que chegou depois da exclusão (M18) e os valores que a gravação
+     de quem não vê valores repôs (M19), com nome de gente (revisão da onda
+     acabamento, U2): sem rótulo, as duas liam "Alterou". */
+  'edicao-recusada': 'Edição recusada: a O.S. estava excluída; nada foi gravado',
+  'repor-valores': 'Valores dos itens repostos: quem gravou não muda valor, e os valores gravados ficaram' };
+/* O texto de um campo da entrada do Histórico (a ficha e Entregas por O.S.
+   usam o mesmo). A edição recusada diz o que a pessoa TENTOU mudar (nada foi
+   gravado); a reposição de valores diz quais itens voltaram com o valor e de
+   quais itens novos o valor não entrou (só os rótulos, sem R$). */
+function audCampoTexto(c, a) {
+  const antes = a && a.antes ? a.antes[c] : undefined, depois = a && a.depois ? a.depois[c] : undefined;
+  if (a && a.acao === 'repor-valores' && c === 'itens.valores') {
+    const d = a.depois && typeof a.depois === 'object' ? a.depois : {};
+    const nomes = x => (Array.isArray(x) ? x : []).filter(v => typeof v === 'string' && v.trim()).join(', ');
+    const partes = [nomes(d.repostos) ? 'voltaram com o valor gravado: ' + nomes(d.repostos) : '', nomes(d.semValor) ? 'item novo sem o valor enviado (só a gestão grava valor): ' + nomes(d.semValor) : ''].filter(Boolean);
+    return partes.join(' · ') || 'os valores gravados ficaram';
+  }
+  if (a && a.acao === 'edicao-recusada') return `tentou mudar de ${audValor(c, antes)} para ${audValor(c, depois)} (não gravado)`;
+  return `${audValor(c, antes)} → ${audValor(c, depois)}`;
+}
 /* A DIVISÃO DA EQUIPE (F08) no histórico: cada pessoa com o percentual FINAL
    (o nome pela régua de hoje, nunca o ID de quem gravou), a equipe e as
    marcas. A recusa mostra o motivo e o que foi proposto. */
@@ -2576,7 +2598,7 @@ function htmlHistoricoAlteracoes(st) {
     const autor = a.autor || {};
     const quem = [autor.nome || autor.login || 'Sem autor', autor.papel ? `(${AUD_PAPEIS[autor.papel] || autor.papel})` : ''].filter(Boolean).join(' ');
     const quando = a.em && Number.isFinite(Date.parse(a.em)) ? new Date(a.em).toLocaleString('pt-BR') : '';
-    const campos = (a.campos || []).map(c => `<li><strong>${esc(AUD_ROTULOS[c] || c)}</strong>: ${esc(audValor(c, a.antes && a.antes[c]))} → ${esc(audValor(c, a.depois && a.depois[c]))}</li>`).join('');
+    const campos = (a.campos || []).map(c => `<li><strong>${esc(AUD_ROTULOS[c] || c)}</strong>: ${esc(audCampoTexto(c, a))}</li>`).join('');
     return `<div class="aud-entrada"><p><strong>${esc(quando)}</strong> · ${esc(quem)} ${esc(AUD_ORIGENS[a.origem] || '')}<br>${esc(AUD_ACOES[a.acao] || 'Alterou')}</p><ul>${campos}</ul></div>`;
   }).join('');
   return linhas + (st.cortado ? '<p class="text-muted">Mostrando as 500 alterações mais recentes.</p>' : '') + recarregar;

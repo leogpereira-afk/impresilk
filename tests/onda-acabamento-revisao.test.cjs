@@ -114,3 +114,48 @@ test('revisão acabamento: o Histórico da ficha diz o valor das entregas confer
   assert.match(html, /O valor das entregas conferidas mudou/);
   assert.match(html, /Valor das entregas conferidas<\/strong>: R\$\s250,00 → R\$\s125,00/);
 });
+
+/* A ficha (app.js) num contexto de mentira, para o Histórico e a lista de itens. */
+function ficha(papel = 'pcp', extra = {}) {
+  const ctx = vm.createContext({console, Date, document: {querySelector: () => null, querySelectorAll: () => [], addEventListener() {}}, window: {}, localStorage: {getItem: () => null},
+    STORE: {getAllOS: () => [], getCFG: () => ({}), getOS: () => null}, setTimeout() {}, ...extra});
+  for (const f of ['operacao.js', 'entrega-item.js', 'conferencia-entrega.js', 'controle-entrega-ui.js', 'app.js']) vm.runInContext(ler(f), ctx, {filename: f});
+  vm.runInContext(`STATE.user = {nome: 'Pessoa Teste', papel: ${JSON.stringify(papel)}};`, ctx);
+  return ctx;
+}
+const INTEGRIDADE = () => import('../supabase/functions/_shared/pcp-integridade.mjs');
+test('revisão acabamento: o Histórico diz "Edição recusada" e o que a pessoa TENTOU mudar (U2)', async () => {
+  const I = await INTEGRIDADE();
+  const lapide = {id: 'x', rev: 3, numero: '7001', obsTecnicas: 'antiga fictícia'};
+  const diff = I.diffEdicaoRecusada(lapide, {...lapide, obsTecnicas: 'edição fictícia feita sem sinal'});
+  const entrada = I.entradaAuditoria({id: 'a1', osId: 'x', numero: '7001', acao: 'edicao-recusada', diff, autor: {nome: 'Gestor Teste', papel: 'pcp'}, origem: 'tela', em: '2026-10-12T12:00:00Z'});
+  const ctx = ficha();
+  ctx.__st = {entradas: [entrada]};
+  const html = vm.runInContext('htmlHistoricoAlteracoes(__st)', ctx);
+  // Caso ruim (acfaae1): a ação não tinha rótulo e lia "Alterou", com "antiga → nova" como se tivesse gravado.
+  assert.doesNotMatch(html, /<br>Alterou</);
+  assert.match(html, /Edição recusada: a O\.S\. estava excluída; nada foi gravado/);
+  assert.match(html, /tentou mudar de antiga fictícia para edição fictícia feita sem sinal \(não gravado\)/);
+  assert.doesNotMatch(html, /antiga fictícia → /);
+  // Entregas por O.S. usa o mesmo texto.
+  ctx.__a = entrada;
+  for (const f of ['entregas-os.js']) vm.runInContext(ler(f), ctx, {filename: f});
+  assert.match(vm.runInContext('porOSDescreverCampo("obsTecnicas", __a)', ctx), /tentou mudar de antiga fictícia para/);
+});
+
+test('revisão acabamento: o Histórico diz que os valores foram repostos, com os itens, sem nome interno (U2)', async () => {
+  const I = await INTEGRIDADE();
+  const antigo = {id: 'r', itens: [{uid: '8101:1:1', item: '1', descricao: 'Placa ACM fictícia', qtde: '10', valorUnit: '100', subtotal: '1000'}]};
+  const novo = {id: 'r', itens: [{uid: 'm-pdf000000001', item: '1', descricao: 'Lona do PDF fictícia', qtde: '3', valorUnit: '10', subtotal: 30, manual: true}]};
+  const gv = I.guardarValoresPCP(novo, antigo);
+  assert.ok(gv.diario, 'a gravação tem linha de diário');
+  const entrada = I.entradaAuditoria({id: 'a2', osId: 'r', acao: 'repor-valores', diff: gv.diario, autor: {nome: 'Operação Teste', papel: 'operacao'}, origem: 'tela', em: '2026-10-12T12:00:00Z'});
+  const ctx = ficha();
+  ctx.__st = {entradas: [entrada]};
+  const html = vm.runInContext('htmlHistoricoAlteracoes(__st)', ctx);
+  // Caso ruim (acfaae1): "Alterou" e "itens.valores: (vazio) → (vazio)", o nome interno e nada do que aconteceu.
+  assert.doesNotMatch(html, /itens\.valores|\(vazio\) → \(vazio\)|<br>Alterou</);
+  assert.match(html, /Valores dos itens repostos: quem gravou não muda valor, e os valores gravados ficaram/);
+  assert.match(html, /<strong>Valores dos itens<\/strong>: voltaram com o valor gravado: item 1 \(Placa ACM fictícia\) · item novo sem o valor enviado \(só a gestão grava valor\): item 1 \(Lona do PDF fictícia\)/);
+  assert.doesNotMatch(html, /R\$|1000/, 'sem R$');
+});

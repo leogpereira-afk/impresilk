@@ -118,7 +118,8 @@ const POR_OS = ((O) => {
     'erp-depois-da-finalizacao': 'viu mudança no ERP depois da finalização (não aplicada)', 'conferir-entrega': 'conferiu uma entrega', 'revisar-entrega-conferida': 'revisou uma entrega conferida, com motivo',
     'anular-entrega-conferida': 'anulou uma entrega conferida, com motivo',
     // A edição que chegou depois da exclusão (M18, onda acabamento): não gravou, e fica aqui para a gestão refazer.
-    'edicao-recusada': 'tentou alterar a O.S. excluída (recusado; a edição que não entrou está aqui)',
+    'edicao-recusada': 'tentou alterar a O.S. excluída (edição recusada; nada foi gravado, e o que a pessoa tentou mudar está aqui)',
+    'repor-valores': 'gravou, e os valores dos itens foram repostos (quem gravou não muda valor)',
     // O valor das entregas conferidas que mudou pelo rateio (revisão da onda acabamento, D1).
     'valor-conferido': 'mudou o valor das entregas conferidas (pelo rateio dos itens)'};
   const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
@@ -856,6 +857,7 @@ function porOSCardHTML(l) {
 // O texto de um campo do diário: o rótulo e o antes e depois da ficha (app.js), quando carregou.
 function porOSDescreverCampo(campo, a) {
   const rot = typeof AUD_ROTULOS !== 'undefined' && AUD_ROTULOS[campo] ? AUD_ROTULOS[campo] : campo;
+  if (typeof audCampoTexto === 'function') return `${rot}: ${audCampoTexto(campo, a)}`;
   if (typeof audValor !== 'function') return rot;
   return `${rot}: ${audValor(campo, a.antes && a.antes[campo])} → ${audValor(campo, a.depois && a.depois[campo])}`;
 }
