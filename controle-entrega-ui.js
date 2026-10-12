@@ -69,12 +69,72 @@ async function controleFotos(osId) {
   const d=perfDialog('Horários das fotos',`<p>Em envio posterior, confirme a hora real da captura. Esse registro não altera saída, retorno nem cria punição.</p>${fotos.map((f,i)=>`<article><h3>Foto ${i+1}</h3><p>Anexada no aparelho: ${esc(fmt(f.anexadoEm))}<br>Recebida no servidor: ${esc(fmt(f.recebidoEm))}<br>Capturada / fato declarado: ${esc(fmt(f.ocorridoEm))}${f.confirmacao?`<br>Confirmado por ${esc(f.confirmacao.por)} · ${esc(fmt(f.confirmacao.em))}`:''}</p><form data-foto-evento="${i}"><label>Data e hora real da captura <input type="datetime-local" name="ocorridoEm" required></label><label>Motivo da confirmação ou correção <input name="motivo" minlength="5" maxlength="500" required></label><p role="status"></p><button type="submit" class="btn-primary">Confirmar horário desta foto</button></form></article>`).join('') || '<p>Nenhuma foto vinculada nesta ficha. Sincronize os anexos pendentes.</p>'}`);
   d.querySelectorAll('form').forEach(form=>form.onsubmit=async e=>{e.preventDefault();const f=fotos[+form.dataset.fotoEvento],v=new FormData(form),b=form.querySelector('button');b.disabled=true;try{await STORE.api({action:'fotosEvento',osId,fileId:f.id,rev:f.rev || 0,ocorridoEm:new Date(v.get('ocorridoEm')).toISOString(),motivo:v.get('motivo')});form.querySelector('[role="status"]').textContent='Horário confirmado. Feche e abra novamente para ver a revisão.';b.disabled=true;}catch(err){form.querySelector('[role="status"]').textContent=perfErroTxt(err);b.disabled=false;}});
 }
+/* A FILA DIÁRIA (M15 da auditoria de 11/10/2026, onda operação). Antes ela
+   pegava toda baixa automática (as de antes do corte de 15/09, que já contam
+   como entregues, as retiradas e as já classificadas: 453 cartões para cerca
+   de 85 pendências), sem sair da fila nem ordenar. Agora ela é montada pela
+   MESMA régua de Entregas ("a lançar", classificarEntregas), mais: o ERP que
+   fechou a O.S. aberta e ainda espera a decisão da gestão, o saldo a
+   conferir da O.S. encerrada com conferência parcial (M14, D-016), as saídas
+   sem retorno e os pedidos de revisão ainda sem resposta. Sem as internas,
+   as canceladas e as já classificadas (a "Divergência a resolver" continua),
+   ordenada por DIAS PARADOS (o mais antigo primeiro). Função pura sobre a
+   cópia do aparelho; nada é gravado. A baixa de antes do corte não entra (a
+   pergunta 18 da fila, se ela pode ser reclassificada, continua aberta: o
+   botão de classificar na ficha não mudou). */
+const FILA_MOTIVOS = {aLancar:'Baixa do ERP a lançar', erpFechou:'O ERP fechou a O.S.: a gestão decide', saldoConferir:'Saldo a conferir', semRetorno:'Saída sem retorno', revisao:'Revisão pedida à gestão'};
+function filaDiaria(todas, hoje = OPERACAO.dia(new Date())) {
+  const lista = (todas || []).filter(o => o && typeof o === 'object');
+  const parados = d => d ? Math.max(0, Math.round((Date.parse(hoje + 'T12:00:00Z') - Date.parse(d + 'T12:00:00Z')) / 864e5)) : 0;
+  const fora = o => OPERACAO.interno(o) || (typeof OPERACAO.cancelada === 'function' && OPERACAO.cancelada(o));
+  const classificada = o => !!(o.conferenciaERP && o.conferenciaERP.classificacao && o.conferenciaERP.classificacao !== 'divergencia');
+  const out = new Map();
+  const poe = (o, tipo, desde) => {
+    if (fora(o)) return;
+    const d = OPERACAO.dia(desde) || '';
+    const x = out.get(o.id) || {os:o, motivos:[], desde:''};
+    if (!x.motivos.some(m => m.tipo === tipo)) x.motivos.push({tipo, rotulo:FILA_MOTIVOS[tipo], desde:d});
+    if (d && (!x.desde || d < x.desde)) x.desde = d;
+    out.set(o.id, x);
+  };
+  const cls = typeof classificarEntregas === 'function' ? classificarEntregas(lista) : {aLancar:[]};
+  for (const o of cls.aLancar) if (!classificada(o)) poe(o, 'aLancar', o.finalizadaEm);
+  for (const o of lista) {
+    if (!o.finalizadaEm && (o.erpSaiuDaCarteiraEm || o.erpComSaldo) && !classificada(o)) {
+      const s = typeof erpSaldoNaOS === 'function' ? erpSaldoNaOS(o) : null;
+      if (!(s && s.mantida)) poe(o, 'erpFechou', (s && s.aviso && s.aviso.desde) || o.erpSaiuDaCarteiraEm || (o.erpComSaldo && o.erpComSaldo.desde));
+    }
+    if (o.finalizadaEm && Array.isArray(o.conferenciasEntrega) && o.conferenciasEntrega.length && typeof CONFERENCIA_ENTREGA !== 'undefined') {
+      const st = CONFERENCIA_ENTREGA.estado(o).situacao;
+      if (st === 'parcial' || st === 'inconsistente') poe(o, 'saldoConferir', o.finalizadaEm);
+    }
+    if (['sem-retorno', 'conferir'].includes(OPERACAO.situacaoSaida(o, hoje))) poe(o, 'semRetorno', o.saidaEm || (o.instalacao && o.instalacao.data));
+    const rv = (Array.isArray(o.revisaoSolicitada) ? o.revisaoSolicitada : []).filter(r => r && r.em);
+    const ult = rv[rv.length - 1];
+    const respondida = !!ult && [o.conferenciaERP && o.conferenciaERP.em, o.regularizacaoSaida && o.regularizacaoSaida.em].some(e => e && String(e) >= String(ult.em));
+    if (ult && !respondida) poe(o, 'revisao', ult.em);
+  }
+  return [...out.values()].map(x => ({...x, diasParados:parados(x.desde)}))
+    .sort((a, b) => b.diasParados - a.diasParados || String(a.os.numero || '').localeCompare(String(b.os.numero || ''), 'pt-BR', {numeric:true}));
+}
+function filaDiariaHTML(fila) {
+  const conta = {};
+  for (const x of fila) for (const m of x.motivos) conta[m.tipo] = (conta[m.tipo] || 0) + 1;
+  const resumo = Object.keys(FILA_MOTIVOS).filter(k => conta[k]).map(k => `${FILA_MOTIVOS[k]}: ${conta[k]}`).join(' · ');
+  const dias = n => n === 1 ? '1 dia parada' : `${n} dias parada`;
+  return `<p>A mesma régua da faixa "a lançar" de Entregas, mais o ERP que fechou a O.S. aberta, o saldo a conferir, as saídas sem retorno e os pedidos de revisão. Sem internas, canceladas e já classificadas; a mais antiga primeiro. Cada O.S. exige conferência individual. Ausência de evidência não prova ausência de entrega.</p>
+    ${fila.length ? `<p class="metricas-nota" data-fila-resumo>${fila.length} O.S. · ${esc(resumo)}</p>` : ''}
+    ${fila.map(x => `<article data-fila-os="${esc(x.os.id)}"><h3>O.S. ${esc(x.os.numero)} · ${esc(x.os.cliente)} <small>${esc(dias(x.diasParados))}</small></h3><p>${x.motivos.map(m => esc(m.rotulo)).join(' · ')}</p>${x.motivos.some(m => m.tipo === 'aLancar') ? `<button type="button" class="btn-primary btn-sm" data-controle="lancar" data-controle-os="${esc(x.os.id)}">Lançar entrega</button>` : ''}${controleEntregaHTML(x.os)}</article>`).join('') || '<p>Nenhuma pendência nesta cópia do aparelho.</p>'}
+    <p>Fonte: cópia local e histórico carregado. Consulte o período completo em Entregas para conferir a cobertura.</p>`;
+}
 function controleFila() {
-  const todas=typeof osDaConferencia==='function'?osDaConferencia():STORE.getAllOS(), pend=todas.filter(o=>o.baixaAutoERP || o.erpComSaldo || o.erpSaiuDaCarteiraEm || o.conferenciaERP || ['sem-retorno','conferir'].includes(OPERACAO.situacaoSaida(o)) || o.revisaoSolicitada?.length);
-  const d=perfDialog('Fila diária de conferência',`<p>Valores de baixas pendentes não representam receita perdida. Cada O.S. exige conferência individual. Ausência de evidência não prova ausência de entrega.</p>${pend.map(o=>`<article><h3>O.S. ${esc(o.numero)} · ${esc(o.cliente)}</h3>${controleEntregaHTML(o)}</article>`).join('') || '<p>Nenhuma pendência nesta cópia do aparelho.</p>'}<p>Fonte: cópia local e histórico carregado. Consulte o período completo em Entregas para conferir cobertura.</p>`);return d;
+  const todas=typeof osDaConferencia==='function'?osDaConferencia():STORE.getAllOS();
+  return perfDialog('Fila diária de conferência',filaDiariaHTML(filaDiaria(todas)));
 }
 if(typeof document!=='undefined')document.addEventListener('click',e=>{
   const b=e.target.closest?.('[data-controle]');if(!b)return;
   e.preventDefault(); const tipo=b.dataset.controle;
+  // Lançar a partir da Fila diária (M15): fecha a fila e abre o Lançar de Entregas (a mesma porta, com a régua da conferência, M14).
+  if(tipo==='lancar'){b.closest?.('dialog')?.close?.();if(typeof lancarEntregaManual==='function')lancarEntregaManual(b.dataset.controleOs);return;}
   Promise.resolve().then(()=>tipo==='recuperar'?controleRecuperar():tipo==='fila'?controleFila():controleEditar(b.dataset.controleOs,tipo)).catch(err=>toast(perfErroTxt(err),'error'));
 });
