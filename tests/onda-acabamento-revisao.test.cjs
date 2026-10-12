@@ -52,3 +52,65 @@ test('revisão acabamento: o item conferido enviado sem a chave do valor fica co
   assert.deepEqual([gravada(e).itens[0].valorUnit, gravada(e).itens[0].subtotal], ['250', 500]);
   assert.ok(r2.avisos.some(a => /o valor não mudou/.test(a)), JSON.stringify(r2.avisos));
 });
+
+const diario = e => e.db.pcp_registros.filter(r => r.colecao === 'auditoria').map(r => r.registro);
+test('revisão acabamento: mudar o valor de OUTRO item muda o valor da entrega conferida com aviso "de R$ X para R$ Y" e linha no diário (D1, PROVA 1)', async () => {
+  const e = await edge('pcp-sync', banco());
+  const antes = valorE1(gravada(e));
+  const o = structuredClone(gravada(e));
+  o.itens[1].valorUnit = '1500'; o.itens[1].subtotal = 1500;
+  const r = await e.call({action: 'upsert', os: o}, GESTOR);
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const depois = valorE1(gravada(e));
+  assert.deepEqual([antes, depois], [25000, 12500], 'a gestão corrige o valor: a gravação vale');
+  // Caso ruim (acfaae1): o valor da entrega conferida mudava sem aviso nenhum (avisos []).
+  assert.ok((r.avisos || []).some(a => a.includes('O valor da entrega conferida desta O.S. mudou de R$ 250,00 para R$ 125,00')), JSON.stringify(r.avisos));
+  const d = diario(e).find(x => x.acao === 'valor-conferido');
+  assert.ok(d, 'a linha do diário');
+  assert.deepEqual([d.campos, d.antes, d.depois], [['valorConferido'], {valorConferido: 25000}, {valorConferido: 12500}]);
+  assert.equal(d.autor.nome, 'Gestor Teste');
+  // A gravação que não muda o rateio não avisa nem escreve a linha.
+  const o2 = structuredClone(gravada(e)); o2.obsPCP = 'só a observação';
+  const r2 = await e.call({action: 'upsert', os: o2}, GESTOR);
+  assert.ok(!(r2.avisos || []).some(a => /entrega conferida desta O\.S\. mudou/.test(a)));
+  assert.equal(diario(e).filter(x => x.acao === 'valor-conferido').length, 1);
+});
+
+test('revisão acabamento: item NOVO com valor e valor total novo também avisam a gestão (D1, PROVA 2)', async () => {
+  const e = await edge('pcp-sync', banco());
+  const o = structuredClone(gravada(e));
+  o.itens.push({uid: 'm-c0000000001', item: '3', descricao: 'Item novo fictício', qtde: '1', valorUnit: '3000', subtotal: 3000, manual: true});
+  const r = await e.call({action: 'upsert', os: o}, GESTOR);
+  assert.equal(r.status, 200);
+  assert.equal(valorE1(gravada(e)), 6250);
+  // Caso ruim (acfaae1): de R$ 250,00 para R$ 62,50 sem aviso.
+  assert.ok(r.avisos.some(a => a.includes('de R$ 250,00 para R$ 62,50')), JSON.stringify(r.avisos));
+  const o2 = structuredClone(gravada(e)); o2.valorTotal = 2000;
+  const r2 = await e.call({action: 'upsert', os: o2}, GESTOR);
+  assert.ok(r2.avisos.some(a => a.includes('de R$ 62,50 para R$ 125,00')), JSON.stringify(r2.avisos));
+  assert.equal(diario(e).filter(x => x.acao === 'valor-conferido').length, 2);
+});
+
+test('revisão acabamento: quem não é gestão não muda o valor, nem recebe aviso com R$ (D1)', async () => {
+  const fichas = [...structuredClone(FICHAS), {colecao: 'colaboradores', id: 'op', apagado: false, registro: {id: 'op', nome: 'Operação Teste', apelido: 'operacao1', cpf: '55566677788'}}];
+  const b = banco(); b.registros = fichas;
+  const e = await edge('pcp-sync', b);
+  const o = structuredClone(gravada(e));
+  o.itens[1].valorUnit = '1500'; o.itens[1].subtotal = 1500; o.obsPCP = 'fictícia';
+  const r = await e.call({action: 'upsert', os: o}, {papel: 'operacao', nome: 'Operação Teste', sub: 'operacao1'});
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.equal(valorE1(gravada(e)), 25000, 'o valor é o gravado');
+  assert.ok(!(r.avisos || []).some(a => /R\$/.test(a)), JSON.stringify(r.avisos));
+  assert.equal(diario(e).filter(x => x.acao === 'valor-conferido').length, 0);
+});
+
+test('revisão acabamento: o Histórico da ficha diz o valor das entregas conferidas em R$ (D1)', () => {
+  const ctx = vm.createContext({console, Date, document: {querySelector: () => null, querySelectorAll: () => [], addEventListener() {}}, window: {}, localStorage: {getItem: () => null},
+    STORE: {getAllOS: () => [], getCFG: () => ({}), getOS: () => null}, setTimeout() {}});
+  for (const f of ['operacao.js', 'entrega-item.js', 'conferencia-entrega.js', 'app.js']) vm.runInContext(ler(f), ctx, {filename: f});
+  ctx.__st = {entradas: [{acao: 'valor-conferido', em: '2026-10-12T12:00:00Z', autor: {nome: 'Gestor Teste', papel: 'pcp'}, origem: 'tela',
+    campos: ['valorConferido'], antes: {valorConferido: 25000}, depois: {valorConferido: 12500}}]};
+  const html = vm.runInContext('htmlHistoricoAlteracoes(__st)', ctx);
+  assert.match(html, /O valor das entregas conferidas mudou/);
+  assert.match(html, /Valor das entregas conferidas<\/strong>: R\$\s250,00 → R\$\s125,00/);
+});

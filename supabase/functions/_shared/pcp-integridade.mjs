@@ -2336,6 +2336,47 @@ export function protegerItensConferidos(os, antes, { avisar = false } = {}) {
   });
   return { os: avisos.length || repostosAusentes ? { ...os, itens } : os, avisos: avisar ? avisos.slice(0, TETO_AVISOS_ENTREGA) : [] };
 }
+/* O VALOR DAS ENTREGAS CONFERIDAS NÃO MUDA ÀS CEGAS (revisão da onda
+   acabamento, D1). O valor de uma entrega conferida é o rateio do valor da
+   O.S. pelo subtotal de TODOS os itens (valorItemRateado): o item conferido
+   tem o valor protegido (protegerItensConferidos), mas a gestão pode mudar o
+   valor de OUTRO item, pôr item novo com valor ou mudar o valor total, e o
+   valor da entrega conferida mudava calado. A regra é a gestão poder
+   corrigir valores, mas sabendo: a gravação vale, e quando a soma das
+   entregas conferidas muda, a gestão recebe o aviso "de R$ X para R$ Y" e o
+   diário ganha a linha "valor-conferido" (em centavos). Quem não é gestão
+   não grava valor (preservarValoresPCP); a linha do diário vale para todos.
+   A base é o valor total de cada versão (o que a ficha usa sem o valor do
+   painel). O mês fechado não muda: o fechamento é um retrato selado. */
+// O valor total em reais, lido como o motor lê (centavosDe): '1.234,56' do PDF, '1234.56' do ERP, ou número.
+const reaisDoTotal = v => {
+  if (v == null || v === '') return null;
+  let n = v;
+  if (typeof v !== 'number') { const t = String(v).replace(/R\$/g, '').replace(/\s+/g, ''); n = t ? Number(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t) : NaN; }
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
+export function valorDasConferidas(os) {
+  const regs = Array.isArray(os?.conferenciasEntrega) ? os.conferenciasEntrega : [];
+  if (!objeto(os) || !regs.length) return null;
+  let ap;
+  try { ap = CONF_VOLTA.apurar(os, reaisDoTotal(os.valorTotal)); } catch { return null; }
+  if (!ap || ap.erro || !ap.entregas.length || ap.entregas.some(e => !Number.isInteger(e.valor))) return null;
+  return ap.entregas.reduce((s, e) => s + e.valor, 0);
+}
+export const reaisDeCentavos = c => {
+  if (!Number.isInteger(c)) return 'sem valor';
+  const n = Math.abs(c), inteiro = String(Math.floor(n / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${c < 0 ? '-' : ''}R$ ${inteiro},${String(n % 100).padStart(2, '0')}`;
+};
+export function mudancaValorConferido(antes, depois) {
+  const ids = o => (Array.isArray(o?.conferenciasEntrega) ? o.conferenciasEntrega : []).map(e => String(e?.id ?? '')).join('|');
+  if (!ids(antes) || ids(antes) !== ids(depois)) return null;
+  const a = valorDasConferidas(antes), d = valorDasConferidas(depois);
+  if (a === d) return null;
+  const n = (Array.isArray(antes.conferenciasEntrega) ? antes.conferenciasEntrega : []).length;
+  const aviso = `O valor ${n === 1 ? 'da entrega conferida' : `das ${n} entregas conferidas`} desta O.S. mudou de ${reaisDeCentavos(a)} para ${reaisDeCentavos(d)}: o rateio usa o valor de cada item e o valor total da O.S. A gravação valeu; se não era isso, corrija o valor.`;
+  return { antes: a, depois: d, aviso, diario: { campos: ['valorConferido'], antes: { valorConferido: a }, depois: { valorConferido: d } } };
+}
 /* A MARCA QUE O APARELHO MANDOU E NÃO FICOU GRAVADA. Para o reenvio da mesma
    gravação (a resposta se perdeu): o servidor responde sem gravar de novo, e
    diz de novo quais marcas caíram, para o aparelho tirá-las da cópia. */

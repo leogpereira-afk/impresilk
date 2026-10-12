@@ -2455,7 +2455,9 @@ const AUD_ROTULOS = {
   ocorrencias: 'Ocorrências', abonos: 'Abonos',
   apagado: 'Excluída',
   // A foto apagada pela gestão, com o motivo (A2; revisão da onda-w1-backup, S2).
-  foto: 'Foto', motivo: 'Motivo'
+  foto: 'Foto', motivo: 'Motivo',
+  // O valor das entregas conferidas que mudou pelo rateio (revisão da onda acabamento, D1), em centavos.
+  valorConferido: 'Valor das entregas conferidas'
 };
 // Por dentro dos campos que são objeto (conferência da volta, limpeza do
 // carro, exceção, entrega lançada, baixa do ERP): rótulo em português. O ID
@@ -2479,7 +2481,8 @@ function audTexto(v) {
   return t;
 }
 const AUD_ACOES = { criar: 'Criou a O.S.', alterar: 'Alterou', excluir: 'Excluiu a O.S.', restaurar: 'Restaurou a O.S.', configuracao: 'Alterou a configuração',
-  descartar: 'Tentou alterar a divisão da equipe (recusado)', 'foto-apagada': 'Apagou a foto (prova da entrega), com motivo' };
+  descartar: 'Tentou alterar a divisão da equipe (recusado)', 'foto-apagada': 'Apagou a foto (prova da entrega), com motivo',
+  'valor-conferido': 'O valor das entregas conferidas mudou (o rateio usa o valor de cada item e o valor total da O.S.)' };
 /* A DIVISÃO DA EQUIPE (F08) no histórico: cada pessoa com o percentual FINAL
    (o nome pela régua de hoje, nunca o ID de quem gravou), a equipe e as
    marcas. A recusa mostra o motivo e o que foi proposto. */
@@ -2500,6 +2503,7 @@ function audValor(campo, v) {
   if (v == null || v === '' || (Array.isArray(v) && !v.length)) return '(vazio)';
   if (typeof v === 'boolean') return v ? 'sim' : 'não';
   if (campo === 'valorTotal' && Number.isFinite(Number(v))) return Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  if (campo === 'valorConferido' && Number.isInteger(v)) return (v / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   if (campo === 'equipe' && Array.isArray(v)) return v.map(n => OPERACAO.nomePessoa(n)).join(', ');
   if (campo === 'tipo') return v === 'interno' ? 'Cliente retira' : v === 'externo' ? 'Externo' : String(v);
   if (campo === 'alocacao' && v && typeof v === 'object') {

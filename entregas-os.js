@@ -118,7 +118,9 @@ const POR_OS = ((O) => {
     'erp-depois-da-finalizacao': 'viu mudança no ERP depois da finalização (não aplicada)', 'conferir-entrega': 'conferiu uma entrega', 'revisar-entrega-conferida': 'revisou uma entrega conferida, com motivo',
     'anular-entrega-conferida': 'anulou uma entrega conferida, com motivo',
     // A edição que chegou depois da exclusão (M18, onda acabamento): não gravou, e fica aqui para a gestão refazer.
-    'edicao-recusada': 'tentou alterar a O.S. excluída (recusado; a edição que não entrou está aqui)'};
+    'edicao-recusada': 'tentou alterar a O.S. excluída (recusado; a edição que não entrou está aqui)',
+    // O valor das entregas conferidas que mudou pelo rateio (revisão da onda acabamento, D1).
+    'valor-conferido': 'mudou o valor das entregas conferidas (pelo rateio dos itens)'};
   const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
   const minTxt = n => n === 1 ? '1 minuto' : n < 60 ? `${n} minutos` : `${Math.floor(n / 60)} h${n % 60 ? ` ${n % 60} min` : ''}`;
   /* O rótulo da ocorrência que o abono aponta. O id é 'osId:tipo' e, no
