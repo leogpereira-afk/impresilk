@@ -231,6 +231,30 @@ export function preservarAusentes(os, antes, { podeLimpar = false } = {}, campos
   }
   return r;
 }
+/* O ID DA O.S. ORIGINAL NO RETRABALHO (item 37 da fila de 11/10/2026, onda
+   operação; FP-33). A O.S. de correção que o ERP emite aponta a original pelo
+   NÚMERO (osOriginal), e o número pode repetir ou mudar; a medição do custo
+   do retrabalho exigia escolher a original por ID a cada vez. Agora a ficha
+   da gestão grava também o ID (osOriginalId) quando o número aponta uma O.S.
+   só. A porta confere: só admin e pcp gravam (campo da gestão); a O.S. do ID
+   existe, não é a própria e tem o número do osOriginal deste envio; senão fica
+   o gravado, com aviso, nunca 422. O vazio de admin e pcp limpa (como os
+   outros campos da gestão). `original` é o registro do ID que veio (quem
+   chama o lê), ou null. Devolve { os, aviso }. */
+export function guardarOsOriginalId(veio, os, antes, original, { pode = false, avisar = false } = {}) {
+  const r = { ...os };
+  const manter = () => { if (proprio(antes, 'osOriginalId')) r.osOriginalId = antes.osOriginalId; else delete r.osOriginalId; };
+  const id = typeof veio === 'string' ? veio.trim() : '';
+  if (veio === undefined || !id) return { os: r, aviso: '' };
+  if (id === String(antes?.osOriginalId ?? '')) { r.osOriginalId = antes.osOriginalId; return { os: r, aviso: '' }; }
+  const dizer = msg => ({ os: (manter(), r), aviso: avisar ? msg : '' });
+  if (!pode) return dizer('O vínculo com a O.S. original pelo ID é da gestão (admin e PCP): não foi gravado.');
+  const numero = String(os?.osOriginal ?? '').trim();
+  if (!objeto(original) || id === String(os?.id ?? '') || !numero || String(original.numero ?? '').trim() !== numero)
+    return dizer(`O vínculo com a O.S. original não foi gravado: o ID não é de uma O.S. com o número ${numero || 'informado'}.`);
+  r.osOriginalId = id;
+  return { os: r, aviso: '' };
+}
 /* PRAZO COMBINADO E RETORNO PREVISTO (F15, 29/09/2026). Decisões do dono:
    - O PRAZO é a PRIMEIRA data agendada no PCP, congelada. O ERP não define
      prazo: a importação põe a previsão do ERP em instalacao.data, e essa data

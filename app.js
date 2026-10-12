@@ -2635,7 +2635,11 @@ function blocoPCP(os, ro, done) {
           .sort((a, b) => String(b.numero).localeCompare(String(a.numero))).slice(0, 12);
         return `<div class="field ${ehFilha ? '' : 'field-discreto'}"><label>🔁 Esta O.S é retrabalho da O.S nº <span class="text-muted">(o ERP emite uma O.S nova; aponte a original)</span></label>
           <input data-f="osOriginal" list="os-orig-${esc(os.id)}" inputmode="numeric" value="${esc(os.osOriginal || '')}" placeholder="${ehFilha ? 'nº da O.S original' : 'só se for retrabalho'}">
-          <datalist id="os-orig-${esc(os.id)}">${mesmoCliente.map(o => `<option value="${esc(o.numero)}">${esc(o.numero)} — ${esc((o.servico || '').slice(0, 40))}</option>`).join('')}</datalist>
+          <datalist id="os-orig-${esc(os.id)}">${mesmoCliente.map(o => `<option value="${esc(o.numero)}">${esc(o.numero)} · ${esc((o.servico || '').slice(0, 40))}</option>`).join('')}</datalist>
+          ${os.osOriginal ? (() => { const xs = originaisPorNumero(os.osOriginal, os.id);
+            return os.osOriginalId && xs.some(o => o.id === os.osOriginalId) ? '<small class="text-muted" data-os-original="ligada">Ligada à O.S. original pelo ID.</small>'
+              : xs.length > 1 ? '<small class="text-muted" data-os-original="varias">Há mais de uma O.S. com este número: a medição do retrabalho pede a escolha.</small>'
+              : !xs.length ? '<small class="text-muted" data-os-original="nenhuma">A O.S. original não está neste aparelho: busque-a em Arquivados para ligar pelo ID.</small>' : ''; })() : ''}
         </div>`;
       })()}
       <div class="field"><label>Cliente <span class="req">*</span></label><div class="cli-campo"><input data-f="cliente" value="${esc(os.cliente)}" ${lockPed}${fmsgAttr('cliente')}>${fmsgHTML(os, 'cliente')}${lockPed ? '' : '<div class="cli-sug" id="cli-sug" role="listbox" aria-label="Clientes que já existem" hidden></div>'}</div></div>
@@ -4624,6 +4628,30 @@ function repintarPrazoRetorno(root, ro) {
   ligarPrazoRetorno(box, ro);
 }
 
+/* O ID DA O.S. ORIGINAL DO RETRABALHO (item 37 da fila de 11/10/2026, onda
+   operação). O número que a ficha digita (osOriginal) aponta a original; a
+   gestão grava também o ID dela (osOriginalId) quando o número é de uma O.S.
+   só neste aparelho (as abertas, as finalizadas da janela e o histórico já
+   buscado). Número vazio limpa o ID; número sem O.S. ou com mais de uma não
+   grava ID (a medição pede a escolha). Quem não é da gestão não grava: o
+   servidor fica com o gravado. Devolve {id, situacao}. */
+function originaisPorNumero(numero, proprioId) {
+  const n = String(numero || '').trim();
+  if (!n) return [];
+  const vistos = new Set();
+  return (STORE.getAllOS() || []).concat(STORE.historico ? STORE.historico() : [])
+    .filter(o => o && o.id !== proprioId && String(o.numero || '').trim() === n && !vistos.has(o.id) && vistos.add(o.id));
+}
+function ligarOsOriginal(os) {
+  if (!os) return {id:'', situacao:''};
+  const gestao = ['admin', 'pcp'].includes(STATE.user && STATE.user.papel);
+  const n = String(os.osOriginal || '').trim();
+  if (!n) { if (gestao && os.osOriginalId) os.osOriginalId = null; return {id:'', situacao:'vazio'}; }
+  const xs = originaisPorNumero(n, os.id);
+  if (xs.length !== 1) return {id:'', situacao:xs.length ? 'varias' : 'nenhuma'};
+  if (gestao) os.osOriginalId = xs[0].id;
+  return {id:xs[0].id, situacao:'ligada'};
+}
 function registrarRemarcacao(os, novaData) {
   if (!os) return;
   const v = novaData || '';
@@ -4719,6 +4747,8 @@ function bindModalEvents(os, ro) {
         if (daViagem !== _modalDraft.retornoConf) _modalDraft.retornoConf = {...(daViagem ? JSON.parse(JSON.stringify(daViagem)) : {}), dia: OPERACAO.diaDaVolta(_modalDraft)};
       }
       setField(el.dataset.f, v);
+      // O número da O.S. original do retrabalho leva o ID dela (item 37, onda operação).
+      if (el.dataset.f === 'osOriginal') ligarOsOriginal(_modalDraft);
       // O carro escolhido na lista do Ativos leva o id dele (item 16); o de nome repetido vem pelo id (U5).
       if (el.dataset.f === 'veiculo' && typeof aplicarVeiculoEscolhido === 'function') aplicarVeiculoEscolhido(_modalDraft, v);
       else if (el.dataset.f === 'veiculo' && typeof definirVeiculoId === 'function') definirVeiculoId(_modalDraft);
