@@ -201,8 +201,8 @@ const PERF = (() => {
      A cor é CHAVE da paleta, nunca hex: vira a classe perf-cor-<chave>, e o hex
      mora só no styles.css. Chave fora da lista não vira classe nem style=.
      Águia e Falcão, Pantera e Onça dividem o ícone: a cor e o rótulo separam.
-     A equipe Pantera não tem relação com a pessoa de apelido Pantera: equipe é
-     pelo id da equipe, pessoa pelo ID do RH. */
+     Uma equipe não tem relação com uma pessoa de apelido igual ao nome dela:
+     equipe é pelo id da equipe, pessoa pelo ID do RH. */
   const ANIMAIS = [
     {id:'aguia', rotulo:'Águia', icone:'🦅'},
     {id:'leao', rotulo:'Leão', icone:'🦁'},
@@ -254,7 +254,7 @@ const PERF = (() => {
   /* A EQUIPE DE UM REGISTRO. Pelo id quando a participação confirmada já diz
      qual foi (vale mesmo que a equipe tenha sido desativada depois: é
      histórico); senão, pela COMPOSIÇÃO EXATA, quando os mesmos integrantes estão
-     cadastrados como equipe ativa. Sem esta segunda regra, nomear "Abriano +
+     cadastrados como equipe ativa. Sem esta segunda regra, nomear "Juviano +
      Durval" como equipe não mudaria nada na tela até alguém reconferir cada
      entrega à mão — e ninguém reconfere 154 entregas para ver um nome. */
   /* A CHAVE DA PESSOA MUDA (apelido -> ficha do RH quando alguém é ligado, ou

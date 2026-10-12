@@ -15,14 +15,14 @@ const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
 
 const DADOS = {pessoas:[
   {chave:'ana', id:'620001', nome:'Ana Fictícia', apelido:'ana'},
-  {chave:'abriano-a', id:'620002', nome:'Abriano Alves'}, {chave:'abriano-b', id:'620003', nome:'Abriano Borges'},
-  {chave:'bruno', id:'620004', nome:'Bruno Martins Dias'},
+  {chave:'juviano-a', id:'620002', nome:'Juviano Alves'}, {chave:'juviano-b', id:'620003', nome:'Juviano Borges'},
+  {chave:'bruno', id:'620004', nome:'Bruno Martins Dorneles'},
   {chave:'osmar', id:'620009', nome:'Osmar Fictício', apelido:'osmar', desligado:true, ativo:false},
   {chave:'freelancer:fl-tiago', id:'', nome:'Tiago Sem Documento', freelancer:true, semCpf:true},
-], vinculos:[{apelido:'Pantera', semFicha:true}], lista:[]};
+], vinculos:[{apelido:'Tigre', semFicha:true}], lista:[]};
 
 test('régua: só o nome sem ficha nem contrato (ou com cadastro sem CPF) é "a cadastrar"', () => {
-  const lista = ['620001', 'Ana', 'Zé Novo', 'zé  novo', 'Tiago Sem Documento', 'Abriano', 'Bruno Martins', 'Osmar', 'Pantera', 'Terceiro', ''];
+  const lista = ['620001', 'Ana', 'Zé Novo', 'zé  novo', 'Tiago Sem Documento', 'Juviano', 'Bruno Martins', 'Osmar', 'Tigre', 'Terceiro', ''];
   assert.deepEqual(O.pessoasACadastrar(lista, DADOS), ['Zé Novo', 'Tiago Sem Documento']);
   assert.deepEqual(O.aCadastrarDaOS({equipe:['620001', 'Zé Novo']}, DADOS), ['Zé Novo']);
   assert.deepEqual(O.aCadastrarDaOS({equipe:['620001', 'Ana']}, DADOS), [], 'quem tem ficha não é "a cadastrar" (só falta trocar pelo ID)');

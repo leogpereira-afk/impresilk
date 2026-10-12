@@ -313,7 +313,7 @@ test('F24: campo que o servidor guarda quando não vem volta ao vazio com null p
 const HOJE = '2026-10-05';
 const DataFixa = class extends Date { constructor(...a) { super(...(a.length ? a : [HOJE + 'T12:00:00'])); } static now() { return +new Date(HOJE + 'T12:00:00'); } };
 const ELENCO = {pessoas: [
-  {chave: 'abriano-f', id: '100001', nome: 'Abriano Fictício Souza', apelido: 'abriano', area: 'Montagem', ativo: true},
+  {chave: 'juviano-f', id: '100001', nome: 'Juviano Fictício Souza', apelido: 'juviano', area: 'Montagem', ativo: true},
   {chave: 'bia-f', id: '100002', nome: 'Bia Fictícia', apelido: 'bia', area: 'Montagem', ativo: true},
   {chave: 'caio-f', id: '100003', nome: 'Caio Fictício', apelido: 'caio', area: 'Montagem', ativo: true},
 ], antigos: [], ferias: [], ausencias: [], fichaRH: true};
@@ -336,7 +336,7 @@ function telaFicha({papel = 'pcp', lista = []} = {}) {
     getElementById: id => (html.includes(`id="${id}"`) ? el(id) : null), addEventListener() {}, activeElement: null,
     body: {contains: () => false, classList: classes(), appendChild() {}}, visibilityState: 'visible'};
   const salvos = [], toasts = [], desfazer = [];
-  const cfg = {instaladores: ['Abriano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
+  const cfg = {instaladores: ['Juviano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
   const STORE = {getAllOS: () => lista, getCFG: () => cfg, getOS: id => lista.find(o => o.id === id) || null, elenco: () => ELENCO,
     saveOS(o) { salvos.push(js(o)); const i = lista.findIndex(x => x.id === o.id); if (i >= 0) lista[i] = o; else lista.push(o); },
     getQueue: () => [], trySync: async () => {}, on() {}, onConflict() {}, uuid: () => 'u1', valores: () => ({}), regrasLocais: () => null, carimbarMomento() {}};

@@ -18,7 +18,7 @@ const HOJE = '2026-10-05';
 const tique = () => new Promise(r => setImmediate(r));
 
 const ELENCO = {pessoas: [
-  {chave: 'abriano-f', id: '100001', nome: 'Abriano Fictício', apelido: 'abriano', area: 'Montagem', ativo: true},
+  {chave: 'juviano-f', id: '100001', nome: 'Juviano Fictício', apelido: 'juviano', area: 'Montagem', ativo: true},
   {chave: 'bia-f', id: '100002', nome: 'Bia Fictícia', apelido: 'bia', area: 'Montagem', ativo: true},
   {chave: 'caio-f', id: '100003', nome: 'Caio Fictício', apelido: 'caio', area: 'Montagem', ativo: true},
   {chave: 'eva-f', id: '100005', nome: 'Eva Fictícia', apelido: 'eva', area: 'Montagem', ativo: true},

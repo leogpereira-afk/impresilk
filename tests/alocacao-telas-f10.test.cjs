@@ -14,7 +14,7 @@ const js = x => JSON.parse(JSON.stringify(x));
 const HOJE = '2026-10-05';
 
 const ELENCO = {pessoas: [
-  {chave: 'abriano-f', id: '100001', nome: 'Abriano Fictício Souza', apelido: 'abriano', area: 'Montagem', ativo: true},
+  {chave: 'juviano-f', id: '100001', nome: 'Juviano Fictício Souza', apelido: 'juviano', area: 'Montagem', ativo: true},
   {chave: 'bia-f', id: '100002', nome: 'Bia Fictícia', apelido: 'bia', area: 'Montagem', ativo: true},
   {chave: 'caio-f', id: '100003', nome: 'Caio Fictício', apelido: 'caio', area: 'Montagem', ativo: true},
   {chave: 'eva-f', id: '100005', nome: 'Eva Fictícia', apelido: 'eva', area: 'Montagem', ativo: true},
@@ -22,7 +22,7 @@ const ELENCO = {pessoas: [
   {chave: 'rita-f', id: '100009', nome: 'Rita Fictícia', apelido: 'rita', area: 'Montagem', ativo: true, idRepetido: true},
 ], antigos: [], ferias: [], ausencias: [], fichaRH: true};
 const EQUIPES = [
-  {id: 'eq-aguia', nome: 'Águia', animal: 'aguia', cor: 'marinho', liderPadraoId: '100001', membros: [{chave: '100001', nome: 'Abriano'}, {chave: '100002', nome: 'Bia'}], ativo: true},
+  {id: 'eq-aguia', nome: 'Águia', animal: 'aguia', cor: 'marinho', liderPadraoId: '100001', membros: [{chave: '100001', nome: 'Juviano'}, {chave: '100002', nome: 'Bia'}], ativo: true},
   {id: 'eq-leao', nome: 'Leão', animal: 'leao', cor: 'laranja', liderPadraoId: '100005', membros: [{chave: '100005', nome: 'Eva'}, {chave: '100003', nome: 'Caio'}], ativo: true},
 ];
 const escH = s => String(s ?? '').replace(/[&<>"]/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[ch]));
@@ -36,7 +36,7 @@ const osBase = (extra = {}) => ({id: 'o1', numero: '8001', tipo: 'externo', clie
    de pessoas do app.js (as travas da F07). O STORE é de mentira e conta o que
    grava. `dom` liga os elementos que a tela procura pelo id. */
 function tela({lista = [], papel = 'pcp', dom = {}, confirmar = () => true} = {}) {
-  const cfg = {instaladores: ['Abriano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
+  const cfg = {instaladores: ['Juviano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
   const salvos = [], toasts = [], perguntas = [];
   const STORE = {getCFG: () => cfg, saveCFG() {}, getAllOS: () => lista, getOS: id => lista.find(o => o.id === id) || null,
     saveOS: o => { salvos.push(js(o)); const i = lista.findIndex(x => x.id === o.id); if (i >= 0) lista[i] = o; else lista.push(o); },
@@ -108,21 +108,21 @@ test('só pessoas: nunca grava a divisão, nem pelo gravarNaOS nem no mesmo envi
 });
 
 test('só pessoas: nome antigo sem ficha no RH aparece marcado e só sai se alguém tirar', () => {
-  const os = osBase({equipe: ['Osvane V.', '100002']});
+  const os = osBase({equipe: ['Ervane V.', '100002']});
   const {A} = tela({papel: 'operacao', lista: [os]});
   A.iniciar('op', {os, equipes: EQUIPES, papel: 'operacao', modo: 'pessoas'});
-  assert.match(A.html('op'), /Osvane V\.[\s\S]*sem ficha no RH/);
+  assert.match(A.html('op'), /Ervane V\.[\s\S]*sem ficha no RH/);
   // Caso ruim: mexer na equipe tirava calado quem não tinha ficha.
   A.executar('op', {alocAcao: 'equipe', e: 'eq-leao'});
-  assert.deepEqual(js(A.paraEquipe('op').equipe), ['100002', '100005', '100003', 'Osvane V.']);
-  assert.equal(A.executar('op', {alocAcao: 'remover-nome', nome: 'osvane v.'}), '');
+  assert.deepEqual(js(A.paraEquipe('op').equipe), ['100002', '100005', '100003', 'Ervane V.']);
+  assert.equal(A.executar('op', {alocAcao: 'remover-nome', nome: 'ervane v.'}), '');
   assert.deepEqual(js(A.paraEquipe('op').equipe), ['100002', '100005', '100003']);
   // A divisão (admin) trava com o motivo em vez de montar pela metade.
   const {A: G} = tela({papel: 'pcp', lista: [os]});
   assert.equal(G.modoPara('pcp', os), 'pessoas', 'nome sem ficha: a tela da gestão monta só as pessoas');
   G.iniciar('div', {os, equipes: EQUIPES, papel: 'pcp', semAntigo: true});
   assert.match(G.html('div'), /A divisão precisa do cadastro de todos/);
-  assert.match(G.bloqueio('div'), /Osvane V\. está nesta O\.S\. só pelo nome/);
+  assert.match(G.bloqueio('div'), /Ervane V\. está nesta O\.S\. só pelo nome/);
 });
 
 /* ───────────── ocupados ───────────── */
@@ -140,7 +140,7 @@ test('ocupados: o chip de quem já está em outra O.S. no mesmo horário aparece
   A.executar('t', {alocAcao: 'equipe', e: 'eq-aguia'});
   html = A.html('t');
   assert.match(html, /class="aloc-chip ocupado"[\s\S]*?Bia[\s\S]*?⚠ Ocupado na O\.S\. 8002 \(Manhã\)/);
-  assert.doesNotMatch(html.split('Bia')[0].split('aloc-chip lider')[1] || '', /Ocupado/, 'o Abriano não está ocupado');
+  assert.doesNotMatch(html.split('Bia')[0].split('aloc-chip lider')[1] || '', /Ocupado/, 'o Juviano não está ocupado');
   // A tela troca o período: a tarde não bate com a manhã, e o chip deixa de ser marcado.
   assert.equal(A.definirOcupados('t', c.ocupadosNoDiaCasa(HOJE, 'Tarde', 'o1', {os}).pessoas), true);
   assert.doesNotMatch(A.html('t'), /Ocupado na O\.S\./);
@@ -152,19 +152,19 @@ test('ocupados: o chip de quem já está em outra O.S. no mesmo horário aparece
 
 /* ───────────── busca tolerante no componente ───────────── */
 
-test('busca: "Abrinao" acha o Abriano só em "Você quis dizer"; o ID exato vence; pedaço de CPF não acha', () => {
+test('busca: "Juvinao" acha o Juviano só em "Você quis dizer"; o ID exato vence; pedaço de CPF não acha', () => {
   const {A} = tela({papel: 'pcp'});
   A.iniciar('t', {os: osBase(), equipes: EQUIPES, papel: 'pcp'});
   A.executar('t', {alocAcao: 'painel'});
   const busca = q => { A.estado('t').painel.busca = q; return A.resultadosHTML('t'); };
-  const r = busca('Abrinao');
+  const r = busca('Juvinao');
   const [antes, sugestao] = partes(r);
   assert.ok(sugestao, 'aparece a seção de sugestão');
-  assert.match(sugestao, /data-p="100001"/, 'o Abriano é sugerido');
+  assert.match(sugestao, /data-p="100001"/, 'o Juviano é sugerido');
   assert.doesNotMatch(antes, /data-p="100001"/, 'e nunca como achado direto');
   assert.match(sugestao, /class="aloc-opcao sugestao"/);
   // O texto contido continua achado direto.
-  assert.match(partes(busca('abri'))[0], /data-p="100001"/);
+  assert.match(partes(busca('juvi'))[0], /data-p="100001"/);
   // ID exato: só ele.
   const porId = busca('100003');
   assert.match(porId, /data-p="100003"/);
@@ -299,13 +299,13 @@ test('Lançar entrega: sem equipe continua perguntando; "não" não lança', () 
 });
 
 test('Lançar entrega: tocar Continuar sem mexer não tira ninguém (nem o nome sem ficha) e não pergunta', () => {
-  const t = tela({papel: 'pcp', lista: [baixada({equipe: ['100005', 'Osvane V.']})]});
+  const t = tela({papel: 'pcp', lista: [baixada({equipe: ['100005', 'Ervane V.']})]});
   const l = lancar(t, 'o1');
   assert.equal(t.A.estado(l.chave).modo, 'pessoas', 'com nome sem ficha, a gestão monta só as pessoas');
-  assert.match(l.host.innerHTML, /Osvane V\.[\s\S]*sem ficha no RH/);
+  assert.match(l.host.innerHTML, /Ervane V\.[\s\S]*sem ficha no RH/);
   l.submeter();
   assert.equal(t.perguntas.length, 0);
-  assert.deepEqual(t.salvos[0].equipe, ['100005', 'Osvane V.']);
+  assert.deepEqual(t.salvos[0].equipe, ['100005', 'Ervane V.']);
   assert.equal(t.salvos[0].entregaLancada.data, '2026-10-02');
 });
 

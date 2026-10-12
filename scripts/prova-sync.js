@@ -195,7 +195,7 @@ console.log('\n#24 limparCache');
   mem.clear();
   mem.set('impresilk_inst_os', JSON.stringify([{ id: 'a', cliente: 'Fulano' }]));
   mem.set('impresilk_inst_cfg', JSON.stringify({
-    instaladores: ['Osvane'], usuarios: [{ nome: 'Leo', senha: 'x' }],
+    instaladores: ['Ervane'], usuarios: [{ nome: 'Leo', senha: 'x' }],
     funcionarios: [{ nome: 'Ana', numero: '3399' }],
   }));
   mem.set('impresilk_inst_fila', JSON.stringify([{ action: 'upsert', os: { id: 'a' } }]));
@@ -207,7 +207,7 @@ console.log('\n#24 limparCache');
   eq('O.S saíram', localStorage.getItem('impresilk_inst_os'), null);
   eq('marca de último sync saiu', localStorage.getItem('impresilk_inst_lastsync'), null);
   const cfg = JSON.parse(mem.get('impresilk_inst_cfg'));
-  eq('lista de instaladores fica (o espelho precisa dela)', cfg.instaladores, ['Osvane']);
+  eq('lista de instaladores fica (o espelho precisa dela)', cfg.instaladores, ['Ervane']);
   eq('usuários saem', cfg.usuarios, undefined);
   eq('agenda de telefones sai', cfg.funcionarios, undefined);
 }

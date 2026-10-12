@@ -258,19 +258,19 @@ test('ocupados: Instalação interna não é carro (fora da conta dos veículos)
 });
 
 /* ───────────── F10: busca tolerante ───────────── */
-test('busca: "Abrinao" acha Abriano só como sugestão; o texto contido é achado; o ID exato vence', () => {
-  const abriano = {id:'123456', textos:['Abriano', 'Abriano Fictício Souza', 'dri']};
-  const adriana = {id:'654321', textos:['Adriana', 'Adriana Fictícia Lima']};
-  assert.equal(O.buscaTolerante('Abrinao', abriano).tipo, 'sugestao');
-  assert.equal(O.buscaTolerante('Abrinao', abriano).dist, 1, 'troca de duas letras vizinhas conta 1');
-  assert.equal(O.buscaTolerante('abri', abriano).tipo, 'direto');
-  assert.equal(O.buscaTolerante('ABRIANO souza', abriano).tipo, 'direto', 'palavras que começam as do nome, sem acento nem caixa');
-  assert.equal(O.buscaTolerante('123456', abriano).tipo, 'id');
+test('busca: "Juvinao" acha Juviano só como sugestão; o texto contido é achado; o ID exato vence', () => {
+  const juviano = {id:'123456', textos:['Juviano', 'Juviano Fictício Souza', 'vian']};
+  const adriana = {id:'654321', textos:['Adriana', 'Adriana Fictícia Lacerda']};
+  assert.equal(O.buscaTolerante('Juvinao', juviano).tipo, 'sugestao');
+  assert.equal(O.buscaTolerante('Juvinao', juviano).dist, 1, 'troca de duas letras vizinhas conta 1');
+  assert.equal(O.buscaTolerante('juvi', juviano).tipo, 'direto');
+  assert.equal(O.buscaTolerante('JUVIANO souza', juviano).tipo, 'direto', 'palavras que começam as do nome, sem acento nem caixa');
+  assert.equal(O.buscaTolerante('123456', juviano).tipo, 'id');
   assert.equal(O.buscaTolerante('123456', adriana).tipo, '', 'o ID de um não acha o outro');
-  assert.equal(O.buscaTolerante('Zuleica', abriano).tipo, '');
+  assert.equal(O.buscaTolerante('Zuleica', juviano).tipo, '');
   // Palavra curta não tem tolerância (senão "Ana" achava meio mundo).
-  assert.equal(O.buscaTolerante('Adx', abriano).tipo, '');
-  assert.equal(O.buscaTolerante('', abriano).tipo, 'direto', 'sem busca, tudo aparece');
+  assert.equal(O.buscaTolerante('Adx', juviano).tipo, '');
+  assert.equal(O.buscaTolerante('', juviano).tipo, 'direto', 'sem busca, tudo aparece');
 });
 
 test('busca: pedaço de CPF não acha ninguém; só o ID inteiro de 6 dígitos', () => {

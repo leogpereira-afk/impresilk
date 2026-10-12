@@ -1329,8 +1329,8 @@ export function resolverPessoas(dados = {}) {
   const todas = Array.isArray(dados.pessoas) ? dados.pessoas : [];
   const fichas = todas.filter(p => p && ehIdPessoa(p.id));
   /* Contrato de freelancer ainda sem ID (sem CPF, ou CPF que não confere, F07)
-     conta na ambiguidade e nunca é o resultado: "Lucio" com a ficha do Lucio e
-     o contrato do Lucio Prado sem CPF já não é de ninguém, e não muda de dono
+     conta na ambiguidade e nunca é o resultado: "Lisandro" com a ficha do Lisandro e
+     o contrato do Lisandro Prado sem CPF já não é de ninguém, e não muda de dono
      no dia em que o RH preenche o CPF do contrato. */
   const semId = todas.filter(p => p && p.freelancer === true && !ehIdPessoa(p.id) && String(p.nome || '').trim());
   const candidatas = semId.length ? [...fichas, ...semId] : fichas;
@@ -1359,7 +1359,7 @@ export function resolverPessoas(dados = {}) {
   // as fichas, inclusive quem já saiu. Quem saiu nunca é o resultado: "Elias"
   // com um Elias desligado e outro na casa é ambíguo, e não do que ficou --
   // senão o crachá antigo do que saiu passava a abrir as O.S. do xará
-  // (revisão de 29/09/2026). "Abriano" sozinho, com dois Abrianos, fica sem
+  // (revisão de 29/09/2026). "Juviano" sozinho, com dois Juvianos, fica sem
   // ficha de propósito.
   const auto = texto => {
     const ap = normPessoa(texto), tokens = ap.split(' ');
@@ -1369,8 +1369,8 @@ export function resolverPessoas(dados = {}) {
     if (porApelido.length) {
       /* O apelido do CONTRATO não passa por cima do nome de outra pessoa
          (F07): o RH só barra apelido igual ao de outro cadastro, não ao
-         primeiro nome de alguém. "Lucio" com a ficha do Lucio Ferreira e o
-         contrato do Lucio Prado de apelido "lucio" é ambíguo; senão o
+         primeiro nome de alguém. "Lisandro" com a ficha do Lisandro Ferreira e o
+         contrato do Lisandro Prado de apelido "lisandro" é ambíguo; senão o
          histórico e o crachá do empregado passavam para o freelancer. */
       const alvo = porApelido.length === 1 && porApelido[0].freelancer === true ? porApelido[0] : null;
       if (alvo && porPrefixo(candidatas).some(p => p !== alvo && (!ehIdPessoa(p.id) || p.id !== alvo.id))) return null;
@@ -1409,7 +1409,7 @@ export function resolverPessoas(dados = {}) {
   const chave = entrada => { const s = String(entrada ?? '').trim(); return s ? (idDe(s) || 'nome:' + normPessoa(s)) : ''; };
   // Nome de exibição: a palavra que o PCP já usa (lista de instaladores,
   // depois vínculo salvo); senão o menor começo do nome completo que só
-  // aquela ficha tem ("Lucio Gabriel", "Hélcio").
+  // aquela ficha tem ("Lisandro Gaspar", "Hermílio").
   const rotulos = new Map();
   for (const n of Array.isArray(dados.lista) ? dados.lista : []) { const id = idDe(n); if (id && !rotulos.has(id)) rotulos.set(id, String(n).trim()); }
   for (const v of vinculos) { const id = idDe(v.apelido || v.nomePCP); if (id && !rotulos.has(id)) rotulos.set(id, String(v.apelido || v.nomePCP).trim()); }
@@ -1701,8 +1701,8 @@ export function validarConclusao(os, anterior, papel) {
    classe (perf-cor-<chave>), e o hex mora só no styles.css. Texto livre ali
    viraria style= injetado no ranking de todo tablet.
    Águia e Falcão, Pantera e Onça dividem o ícone: quem separa é a cor e o
-   rótulo. A equipe Pantera não tem relação nenhuma com a pessoa de apelido
-   Pantera: equipe é pelo id da equipe, pessoa é pelo ID do RH. */
+   rótulo. Uma equipe não tem relação nenhuma com uma pessoa de apelido igual
+   ao nome dela: equipe é pelo id da equipe, pessoa é pelo ID do RH. */
 export const ANIMAIS_EQUIPE = [
   { id: 'aguia', rotulo: 'Águia', icone: '🦅' },
   { id: 'leao', rotulo: 'Leão', icone: '🦁' },

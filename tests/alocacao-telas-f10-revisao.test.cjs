@@ -14,7 +14,7 @@ const js = x => JSON.parse(JSON.stringify(x));
 const HOJE = '2026-10-05';
 
 const ELENCO = {pessoas: [
-  {chave: 'abriano-f', id: '100001', nome: 'Abriano Fictício Souza', apelido: 'abriano', area: 'Montagem', ativo: true},
+  {chave: 'juviano-f', id: '100001', nome: 'Juviano Fictício Souza', apelido: 'juviano', area: 'Montagem', ativo: true},
   {chave: 'bia-f', id: '100002', nome: 'Bia Fictícia', apelido: 'bia', area: 'Montagem', ativo: true},
   {chave: 'caio-f', id: '100003', nome: 'Caio Fictício', apelido: 'caio', area: 'Montagem', ativo: true},
   {chave: 'eva-f', id: '100005', nome: 'Eva Fictícia', apelido: 'eva', area: 'Montagem', ativo: true},
@@ -32,7 +32,7 @@ const DataFixa = class extends Date { constructor(...a) { super(...(a.length ? a
    operacao, divisao, regras, performance, o componente, o casa.js e o seletor
    de pessoas do app.js. STORE de mentira que conta o que grava. */
 function tela({lista = [], papel = 'pcp', elenco = ELENCO, cfg: cfgX} = {}) {
-  const cfg = cfgX || {instaladores: ['Abriano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
+  const cfg = cfgX || {instaladores: ['Juviano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
   const salvos = [], toasts = [];
   const STORE = {getCFG: () => cfg, saveCFG() {}, getAllOS: () => lista, getOS: id => lista.find(o => o.id === id) || null,
     saveOS: o => { salvos.push(js(o)); const i = lista.findIndex(x => x.id === o.id); if (i >= 0) lista[i] = o; else lista.push(o); },
@@ -98,7 +98,7 @@ function ficha({papel = 'admin', lista = [], aoSincronizar} = {}) {
     getElementById: id => (html.includes(`id="${id}"`) ? el(id) : null), addEventListener() {}, activeElement: null,
     body: {contains: () => false, classList: classes(), appendChild() {}}, visibilityState: 'visible'};
   const salvos = [], toasts = [], ouvintes = {};
-  const cfg = {instaladores: ['Abriano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
+  const cfg = {instaladores: ['Juviano'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
   const emitir = (ev, d) => (ouvintes[ev] || []).forEach(fn => fn(d));
   const STORE = {getAllOS: () => lista, getCFG: () => cfg, getOS: id => lista.find(o => o.id === id) || null, elenco: () => ELENCO,
     saveOS(o) { salvos.push(js(o)); const i = lista.findIndex(x => x.id === o.id); if (i >= 0) lista[i] = o; else lista.push(o); },
@@ -333,7 +333,7 @@ async function confirmarComStoreReal(comEnvioEmVoo) {
   vm.runInContext(ler('store.js'), c, {filename: 'store.js'});
   for (const f of ['operacao.js', 'divisao.js', 'regras.js', 'alocacao-ui.js']) vm.runInContext(ler(f), c, {filename: f});
   const S = vm.runInContext('STORE', c), A = vm.runInContext('ALOCUI', c);
-  S.elenco = () => ({pessoas: [{chave: 'a', id: '100001', nome: 'Abriano', ativo: true}, {chave: 'b', id: '100002', nome: 'Bia', ativo: true}], antigos: []});
+  S.elenco = () => ({pessoas: [{chave: 'a', id: '100001', nome: 'Juviano', ativo: true}, {chave: 'b', id: '100002', nome: 'Bia', ativo: true}], antigos: []});
   const rascunho = js(S.getOS('o1'));
   A.iniciar('ficha-div:o1', {os: rascunho, equipes: [], papel: 'pcp', modo: 'divisao', semAntigo: true, seguirEquipe: true});
   A.executar('ficha-div:o1', {alocAcao: 'lider', g: '0', p: '100001'});
@@ -366,7 +366,7 @@ test('revisão: nome da lista de instaladores que é de cadastro travado (ID rep
   const elenco = js(ELENCO);
   elenco.pessoas.push({chave: 'rita-f', id: '100009', nome: 'Rita Fictícia', apelido: 'rita', area: 'Montagem', ativo: true, idRepetido: true});
   elenco.pessoas.push({chave: 'fl-2', id: '', nome: 'Pedro Prestador', apelido: 'pedro', ativo: true, freelancer: true, semCpf: true});
-  const cfg = {instaladores: ['Abriano', 'Rita', 'Pedro', 'Osvane V.'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
+  const cfg = {instaladores: ['Juviano', 'Rita', 'Pedro', 'Ervane V.'], vinculosRH: [], performancePCP: {equipes: js(EQUIPES), participacoes: []}};
   const os = osBase({equipe: []});
   const t = tela({papel: 'operacao', lista: [os], elenco, cfg});
   t.A.iniciar('p', {os, equipes: EQUIPES, papel: 'operacao', modo: 'pessoas'});
@@ -388,9 +388,9 @@ test('revisão: nome da lista de instaladores que é de cadastro travado (ID rep
   assert.match(ops.find(o => o.nome === 'Rita').bloqueio, /ID repetido/);
   assert.match(ops.find(o => o.nome === 'Pedro').bloqueio, /sem CPF/);
   // O nome sem cadastro nenhum continua entrando pelo nome, como sempre.
-  assert.match(busca('osvane'), /data-aloc-acao="nome" data-nome="Osvane V\."/);
-  assert.equal(t.A.executar('p', {alocAcao: 'nome', nome: 'Osvane V.'}), '');
-  assert.deepEqual(js(t.A.paraEquipe('p').equipe), ['Osvane V.']);
+  assert.match(busca('ervane'), /data-aloc-acao="nome" data-nome="Ervane V\."/);
+  assert.equal(t.A.executar('p', {alocAcao: 'nome', nome: 'Ervane V.'}), '');
+  assert.deepEqual(js(t.A.paraEquipe('p').equipe), ['Ervane V.']);
   // A decisão salva de que o nome não é ninguém do RH (terceiro) continua valendo: a Rita terceira entra pelo nome.
   cfg.vinculosRH = [{apelido: 'Rita', semFicha: true}];
   assert.equal(t.run('opcoesEquipe([])').find(o => o.nome === 'Rita').bloqueio, '');

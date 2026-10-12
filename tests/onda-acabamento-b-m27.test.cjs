@@ -8,9 +8,10 @@
    As guardas abaixo começam pelo caso ruim (a v172 falha nelas) e impedem
    que volte: nenhum número na faixa das O.S. reais (20000 a 23999) nos
    arquivos, e nenhum valor em R$ com centavos em docs/ sem a marca de
-   fictício. Os nomes não têm guarda automática: uma lista de nomes reais
-   aqui seria o próprio dado real (confira na revisão; use nomes fictícios
-   e diga que são). */
+   fictício. Os nomes reais não entram aqui (a lista seria o próprio dado
+   real): a guarda dos nomes, no fim do arquivo, usa só resumos das grafias
+   que a primeira troca deixou (confira na revisão; use nomes inventados e
+   confira cada um no RH com contagem 0). */
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -56,4 +57,65 @@ test('M27: os trechos citados pela auditoria foram reescritos sem perder o senti
   assert.match(plano, /não apresentou um dos instaladores \(nome retirado deste documento público/);
   assert.match(parciais, /a entrega real de um instalador \(nome retirado deste documento público/);
   assert.match(parciais, /nem alterar a O\.S\. desse instalador sem/);
+});
+
+/* REVISÃO DA ONDA ACABAMENTO B (12/10/2026): a primeira troca mudou só uma
+   letra do primeiro nome e manteve os sobrenomes reais (o par de sobrenomes
+   sozinho ainda apontava a pessoa no RH). Agora as pessoas desses testes têm
+   nome e sobrenomes inteiramente inventados, conferidos por contagem no RH
+   (fichas e contratos) igual a zero, e o apelido de pessoa que era o mesmo de
+   uma equipe passou a outro animal (a equipe fixa continua com o nome dela).
+   A guarda abaixo não guarda nome nenhum: guarda o RESUMO (sha256 cortado)
+   das grafias que a primeira troca deixou, e cai se qualquer uma voltar a
+   aparecer em qualquer arquivo. A lista de nomes reais nunca entra aqui. */
+const crypto = require('node:crypto');
+const resumo = w => crypto.createHash('sha256').update('m27:' + w).digest('hex').slice(0, 16);
+const RESUMOS_PROIBIDOS = new Set(['e5373e0cc9e3f351', '1b745353024772ea', '6689e1192e3f9787', 'cc26e933652fc6dc',
+  '5d9c9526d71987f4', '6a7c8780ac5ece9e', '19ea0d471efb6d3c', 'e0fcfe6d9334901e', 'e0b5b623bc118a3b',
+  '55e2763a6bb03fe1', '3b974dfcc96e375b', '6431f24407f1dba3']);
+const palavras = texto => (texto.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().match(/\p{L}+/gu) || []);
+
+test('M27 (revisão): nenhuma das grafias da primeira troca volta a nenhum arquivo', () => {
+  const achados = [];
+  for (const f of arquivos()) {
+    if (f === 'tests/onda-acabamento-b-m27.test.cjs' || !/\.(js|cjs|mjs|ts|md|html|sql|css|json|txt|yml|patch)$/.test(f)) continue;
+    const vistas = new Set();
+    ler(f).split('\n').forEach((linha, i) => {
+      for (const w of palavras(linha)) if (RESUMOS_PROIBIDOS.has(resumo(w)) && !vistas.has(w)) { vistas.add(w); achados.push(`${f}:${i + 1}`); }
+    });
+  }
+  // Caso ruim (5124974): as grafias de uma letra trocada em tests/casa.test.cjs,
+  // casa.js, tests/converter-equipe.test.cjs, scripts/preview-auditoria.cjs,
+  // pcp-sync e mais 20 arquivos de teste e comentários.
+  assert.deepEqual(achados, [], 'troque por nome inteiramente inventado (confira no RH: contagem 0)');
+});
+
+test('M27 (revisão): os trechos apontados agora usam nomes inventados, com a mesma distância de grafia', () => {
+  const casaT = ler('tests/casa.test.cjs'), casaJs = ler('casa.js'), conv = ler('tests/converter-equipe.test.cjs');
+  const prev = ler('scripts/preview-auditoria.cjs'), sync = ler('supabase/functions/pcp-sync/index.ts');
+  assert.match(casaT, /nome: 'Juviano Neiva Aragão'/);
+  assert.match(casaT, /nome: 'Juviano Pacheco Leme'/);
+  assert.match(casaT, /apelido: 'Cirilinho', chave: 'cirilo-dutra', id: '777777', nome: 'Cirilo Avelar Dutra'/);
+  assert.match(casaJs, /"Cirilo" \(PCP\) e "Cirilo Avelar Dutra" \(RH\)/);
+  assert.match(conv, /nome:'Juviano Neiva Aragao'/);
+  assert.match(conv, /nome:'Lisandro Gaspar Seixas'/);
+  assert.match(conv, /nome:'Lisandro Nazário Rangel'/);
+  assert.match(prev, /nome:'Juviano Neiva Aragão'/);
+  assert.match(sync, /nomes comuns \(Cirilo, Durval, Lisandro, Otavio\)/);
+  // A busca tolerante continua provando o mesmo: "Juvinao" é Juviano com duas letras vizinhas trocadas,
+  // "Ozlando" é Ozilando sem uma letra (como antes, com a mesma distância).
+  const O = require('../operacao.js');
+  assert.equal(O.distanciaEdicao('juvinao', 'juviano'), 1);
+  assert.equal(O.distanciaEdicao('ozlando', 'ozilando'), 1);
+});
+
+test('M27 (revisão): o apelido de pessoa nos testes não é mais o de uma pessoa real; a equipe fixa fica', () => {
+  // A equipe Pantera é uma das dez fixas (pública na tela) e continua; a PESSOA de mesmo apelido virou "Tigre" nos testes.
+  const perf = ler('performance.js');
+  assert.match(perf, /\{id:'pantera', rotulo:'Pantera'/);
+  for (const f of ['tests/freelancer-f07.test.cjs', 'tests/divisao.test.cjs', 'tests/casa.test.cjs', 'tests/converter-equipe.test.cjs',
+    'tests/pessoas-id.test.cjs', 'tests/divisao-paridade.test.cjs', 'tests/onda-pessoas-a-cadastrar.test.cjs', 'tests/ranking-equipes-valor.test.cjs'])
+    assert.doesNotMatch(ler(f), /pantera/i, f);
+  for (const f of ['divisao.js', 'supabase/functions/_shared/pcp-divisao.mjs', 'performance.js', 'supabase/functions/_shared/pcp-integridade.mjs'])
+    assert.doesNotMatch(ler(f), /apelido Pantera|pessoa de apelido\s+Pantera/, f);
 });

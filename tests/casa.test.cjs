@@ -12,7 +12,7 @@ function casa(lista, cfg = {}, elenco = null, agora = null) {
     Date: agora ? class extends Date { constructor(...args) { super(...(args.length ? args : [agora])); } static now() { return +new Date(agora); } } : Date,
     STORE: {
       getAllOS: () => lista,
-      getCFG: () => ({ instaladores: ['Natan', 'Paulo', 'Lucio', 'Rafael'], ...cfg }),
+      getCFG: () => ({ instaladores: ['Natan', 'Paulo', 'Lisandro', 'Rafael'], ...cfg }),
       saveCFG(c) { Object.assign(cfg, c); },
       uuid: () => 'id-1',
       elenco: () => elenco || { pessoas: [], veiculos: [], ferias: [], ausencias: [] },
@@ -55,8 +55,8 @@ const fin = (id, patch) => ({
 });
 const NATAN = { id: '111111', nome: 'Natan da Silva', apelido: 'Natan' };
 const PAULO = { id: '222222', nome: 'Paulo Souza', apelido: 'Paulo' };
-const LUCIO = { id: '333333', nome: 'Lucio Lima', apelido: 'Lucio' };
-const FICHAS = { vinculosRH: [NATAN, PAULO, LUCIO] };
+const LISANDRO = { id: '333333', nome: 'Lisandro Lima', apelido: 'Lisandro' };
+const FICHAS = { vinculosRH: [NATAN, PAULO, LISANDRO] };
 
 test('entrega da casa é O.S. finalizada no PCP, não baixa Mubisys', () => {
   const t = casa([
@@ -89,7 +89,7 @@ test('id da ficha são 6 dígitos; nome não casa sozinho', () => {
 test('ponto vai para o ID apontado; várias fichas na mesma O.S. levam ponto', () => {
   const t = casa([
     fin('a', { equipe: ['Natan'] }),
-    fin('b', { equipe: ['Paulo', 'Lucio'] }),
+    fin('b', { equipe: ['Paulo', 'Lisandro'] }),
     fin('c', { equipe: [] }),
   ], FICHAS);
   const rank = t.run(`rankingFinalizadas('${mes}', {})`);
@@ -99,7 +99,7 @@ test('ponto vai para o ID apontado; várias fichas na mesma O.S. levam ponto', (
   const um = t.run(`rankingFinalizadas('${mes}', {b:['333333']})`);
   assert.equal(um.length, 2);
   assert.equal(um.find(p => p.id === '333333').osCount, 1);
-  const legado = t.run(`rankingFinalizadas('${mes}', {b:'Lucio'})`);
+  const legado = t.run(`rankingFinalizadas('${mes}', {b:'Lisandro'})`);
   assert.equal(legado.find(p => p.id === '333333').osCount, 1);
   const dois = t.run(`rankingFinalizadas('${mes}', {b:['222222','333333']})`);
   assert.equal(dois.length, 3);
@@ -186,11 +186,11 @@ const ELENCO = {
   pessoas: [
     { chave: 'natan-silva', id: '111111', nome: 'Natan da Silva', apelido: 'Natan', cargo: 'Instalador de CV', area: 'Instalação Externa', statusId: 'ativo', status: 'Ativo', ativo: true, foto: 'data:image/jpeg;base64,AAA' },
     { chave: 'paulo-souza', id: '222222', nome: 'Paulo Souza', apelido: 'Paulo', cargo: 'Soldador', area: 'Serralheria', statusId: 'inativo', status: 'Inativo', ativo: false, foto: '' },
-    { chave: 'lucio-lima', id: '333333', nome: 'Lucio Lima', apelido: 'Lucio', cargo: 'Operador', area: 'Montagem Interna', statusId: 'ativo', status: 'Ativo', ativo: true, foto: '' },
+    { chave: 'lisandro-lima', id: '333333', nome: 'Lisandro Lima', apelido: 'Lisandro', cargo: 'Operador', area: 'Montagem Interna', statusId: 'ativo', status: 'Ativo', ativo: true, foto: '' },
     { chave: 'ana-dias', id: '444444', nome: 'Ana Dias', apelido: 'ana', cargo: 'Consultora', area: 'Comercial', statusId: 'ativo', status: 'Ativo', ativo: true, foto: '' },
   ],
   veiculos: [{ id: 'v1', nome: 'Strada', categoria: 'Utilitário', placa: 'ABC1D23', modelo: 'Fire Flex', lugares: 2, grade: true, motorista: 'Natan da Silva' }],
-  ferias: [{ chave: 'lucio-lima', de: '2026-09-10', ate: '2026-09-20', status: 'Agendada' }],
+  ferias: [{ chave: 'lisandro-lima', de: '2026-09-10', ate: '2026-09-20', status: 'Agendada' }],
   ausencias: [{ chave: 'ana-dias', data: '2026-09-14', tipo: 'Falta', horas: 8 }],
 };
 
@@ -199,17 +199,17 @@ test('ficha do apelido: vínculo salvo manda, senão casa sozinho pelo RH', () =
   assert.equal(t.run("fichaDoApelido('Natan').nome"), 'Natan da Silva');
   assert.equal(t.run("fichaDoApelido('Ninguém')"), null);
   // vínculo salvo à mão vence o casamento automático
-  const t2 = casa([], { vinculosRH: [{ id: '333333', chave: 'lucio-lima', nome: 'Lucio Lima', apelido: 'Natan' }] }, ELENCO);
-  assert.equal(t2.run("fichaDoApelido('Natan').chave"), 'lucio-lima');
+  const t2 = casa([], { vinculosRH: [{ id: '333333', chave: 'lisandro-lima', nome: 'Lisandro Lima', apelido: 'Natan' }] }, ELENCO);
+  assert.equal(t2.run("fichaDoApelido('Natan').chave"), 'lisandro-lima');
 });
 
 test('presença de hoje: férias e falta saem; inativo não entra em nenhuma lista', () => {
   const t = casa([], {}, ELENCO);
   assert.equal(t.run("presencaRH('2026-09-14').presentes.map(x => x.nome).join('|')"), 'Natan da Silva');
-  assert.equal(t.run("presencaRH('2026-09-14').ausentes.map(x => x.p.nome + ': ' + x.motivo).join('|')"), 'Ana Dias: Falta|Lucio Lima: Férias');
+  assert.equal(t.run("presencaRH('2026-09-14').ausentes.map(x => x.p.nome + ': ' + x.motivo).join('|')"), 'Ana Dias: Falta|Lisandro Lima: Férias');
   assert.equal(t.run("presencaRH('2026-09-14').fora.map(x => x.nome).join('|')"), 'Paulo Souza');
-  // fora do intervalo das férias, Lucio volta
-  assert.match(t.run("presencaRH('2026-09-25').presentes.map(x => x.nome).join('|')"), /Lucio Lima/);
+  // fora do intervalo das férias, Lisandro volta
+  assert.match(t.run("presencaRH('2026-09-25').presentes.map(x => x.nome).join('|')"), /Lisandro Lima/);
 });
 
 // O CASO RUIM: quem entra pelo nome, sem senha, NÃO recebe férias nem ausências
@@ -224,7 +224,7 @@ test('sem acesso à ficha do RH, a presença não afirma que ninguém está fora
   assert.equal(t.run("presencaRH('2026-09-14').sabeSituacao"), false, 'a tela precisa saber que não sabe');
   assert.equal(t.run("presencaRH('2026-09-14').ausentes.length"), 0, 'sem dado, ninguém é classificado como ausente');
   // e o aviso da escala diz que não conferiu, em vez de ficar mudo
-  assert.match(t.run("avisoAusenciaCasa(['Lucio'], '2026-09-14')"), /não foram conferidos|crachá da gestão/);
+  assert.match(t.run("avisoAusenciaCasa(['Lisandro'], '2026-09-14')"), /não foram conferidos|crachá da gestão/);
   // com a ficha (gestão), nada muda: continua apontando quem está fora
   const comFicha = casa([], {}, ELENCO);
   assert.equal(comFicha.run('temFichaRH()'), true);
@@ -238,7 +238,7 @@ test('quem está inativo no RH sai da lista de escala; o RH entra para o plantã
   const pcp = t.run("equipeEscalavel().doPCP.join('|')");
   const rh = t.run("equipeEscalavel().doRH.map(p => p.nome).join('|')");
   assert.ok(!pcp.includes('Paulo'), 'Paulo está inativo e não pode ser escalado');
-  assert.match(pcp, /Natan/); assert.match(pcp, /Lucio/);
+  assert.match(pcp, /Natan/); assert.match(pcp, /Lisandro/);
   assert.match(pcp, /Rafael/, 'apelido sem ficha continua na lista do PCP');
   assert.match(rh, /Ana Dias/, 'a empresa toda entra pelo RH');
   assert.ok(!rh.includes('Paulo Souza'), 'inativo não entra nem pelo RH');
@@ -248,8 +248,8 @@ test('apelido sem ficha aparece para ligar, e ligar resolve', () => {
   const cfg = {};
   const t = casa([fin('a', { equipe: ['Natan', 'Zeca'] })], cfg, ELENCO);
   assert.equal(t.run("apelidosSemFicha().map(x => x.apelido).join('|')"), 'Zeca');
-  assert.equal(t.run("ligarApelidoRH('Zeca', 'lucio-lima')"), true);
-  assert.equal(t.run("fichaDoApelido('Zeca').nome"), 'Lucio Lima');
+  assert.equal(t.run("ligarApelidoRH('Zeca', 'lisandro-lima')"), true);
+  assert.equal(t.run("fichaDoApelido('Zeca').nome"), 'Lisandro Lima');
   assert.equal(t.run('apelidosSemFicha().length'), 0);
 });
 
@@ -331,15 +331,15 @@ test('ficha do RH sem CPF de 11 dígitos ainda pode ser ligada pela chave', () =
 test('retrabalho cobra a viagem da O.S de CORREÇÃO, não a da entrega original', () => {
   // 900 = a entrega que voltou (viagem cara). 901 = a correção (viagem curta).
   const mae = fin('900', { numero: '900', retrabalho: true, equipe: ['Natan'], horaSaida: '08:00', horaRetorno: '18:00', kmSaida: '1000', kmRetorno: '1200' });
-  const filha = fin('901', { numero: '901', osOriginal: '900', equipe: ['Lucio'], horaSaida: '08:00', horaRetorno: '09:00', kmSaida: '2000', kmRetorno: '2010' });
+  const filha = fin('901', { numero: '901', osOriginal: '900', equipe: ['Lisandro'], horaSaida: '08:00', horaRetorno: '09:00', kmSaida: '2000', kmRetorno: '2010' });
   const t = casa([mae, filha], { custoRetrabalho: { hora: 100, km: 1 }, ...FICHAS }, ELENCO);
   const html = t.run("retrabalhoHTML({de:'2026-09-01', ate:'2026-09-30'})");
   // filha: 1 h × R$100 + 10 km × R$1 = R$110. A mãe daria 10 h + 200 km = R$1.200.
   assert.match(html, /R\$\s?110,00/, 'o custo tem de vir da filha');
   assert.doesNotMatch(html, /R\$\s?1\.200,00/, 'a viagem da entrega original não é custo de retrabalho');
-  // e quem foi refazer é a equipe da FILHA (Lucio), não quem entregou (Natan)
+  // e quem foi refazer é a equipe da FILHA (Lisandro), não quem entregou (Natan)
   const quem = html.split('Quem foi refazer')[1].split('Responsável da etapa')[0];
-  assert.match(quem, /Lucio/);
+  assert.match(quem, /Lisandro/);
   assert.doesNotMatch(quem, /Natan/, 'quem entregou não pode ser listado como quem refez');
 });
 
@@ -392,8 +392,8 @@ test('sem ficha do RH, plantões não marcam ninguém como disponível por omiss
     pessoas: ELENCO.pessoas.map(p => ({ ...p, statusId: '', status: '' })) };
   const t = casa([], {}, semFicha);
   assert.equal(t.run("temFichaRH()"), false);
-  assert.equal(t.run("ausenciaRH(fichaDoApelido('Lucio'), '2026-09-14')"), null, 'sem dado não há como afirmar ausência');
-  assert.match(t.run("avisoAusenciaCasa(['Lucio'], '2026-09-14')"), /não foram conferidos/);
+  assert.equal(t.run("ausenciaRH(fichaDoApelido('Lisandro'), '2026-09-14')"), null, 'sem dado não há como afirmar ausência');
+  assert.match(t.run("avisoAusenciaCasa(['Lisandro'], '2026-09-14')"), /não foram conferidos/);
 });
 
 /* A versão dessincronizada é o defeito que mais custou tempo neste app: a v79
@@ -1298,14 +1298,14 @@ test('correção auditada do ERP vence cache auxiliar e valor zero continua vál
 });
 
 /* ── Correções da auditoria (25/09/2026) ───────────────────────────────── */
-const OSVANE = { id: '444444', chave: 'osvane-vieira', nome: 'Osvane Vieira', apelido: 'Osvane', ativo: true };
+const ERVANE = { id: '444444', chave: 'ervane-varela', nome: 'Ervane Varela', apelido: 'Ervane', ativo: true };
 
 test('bônus: apelido que casou sozinho com o RH entra no ranking, sem vínculo salvo', () => {
-  const t = casa([fin('a', { equipe: ['Osvane'] })], {}, { pessoas: [OSVANE], veiculos: [], ferias: [], ausencias: [] });
+  const t = casa([fin('a', { equipe: ['Ervane'] })], {}, { pessoas: [ERVANE], veiculos: [], ferias: [], ausencias: [] });
   const rank = t.run(`rankingFinalizadas('${mes}', {})`);
   assert.equal(rank.length, 1, 'o instalador solo casado pelo RH não pode sair "sem ficha"');
   assert.equal(rank[0].id, '444444');
-  assert.equal(rank[0].nome, 'Osvane Vieira · ID 444444', 'o nome vem da ficha do RH');
+  assert.equal(rank[0].nome, 'Ervane Varela · ID 444444', 'o nome vem da ficha do RH');
 });
 
 test('bônus: vínculo salvo só pela chave (sem id) não vira linha em branco no ranking', () => {
@@ -1327,7 +1327,7 @@ test('bônus: cada mês com seus pagamentos; trocar o mês não arrasta nem apag
 });
 
 test('lançar entrega: nome da O.S fora da lista de instaladores continua na equipe', () => {
-  const os = { id: 'x1', numero: '900', tipo: 'externo', finalizadaEm: '2026-09-20T12:00:00', finalizadoPor: 'Mubisys · baixa', equipe: ['Natan', 'Osvane V.'] };
+  const os = { id: 'x1', numero: '900', tipo: 'externo', finalizadaEm: '2026-09-20T12:00:00', finalizadoPor: 'Mubisys · baixa', equipe: ['Natan', 'Ervane V.'] };
   const t = casa([os]);
   const r = t.run(`(() => {
     let salvo = null, box = null, form = null;
@@ -1350,7 +1350,7 @@ test('lançar entrega: nome da O.S fora da lista de instaladores continua na equ
     form.onsubmit({ preventDefault() {}, target: form });
     return { equipe: salvo && salvo.equipe, fora: /fora da lista/.test(box.innerHTML) };
   })()`);
-  assert.deepEqual([...(r.equipe || [])], ['Natan', 'Osvane V.'], 'tocar Continuar sem mexer não pode tirar ninguém da O.S');
+  assert.deepEqual([...(r.equipe || [])], ['Natan', 'Ervane V.'], 'tocar Continuar sem mexer não pode tirar ninguém da O.S');
   assert.ok(r.fora, 'quem está só na O.S aparece marcado como fora da lista');
 });
 
@@ -1410,29 +1410,29 @@ const ELENCO_CONF = {
   ...ELENCO,
   pessoas: [
     ...ELENCO.pessoas,
-    { chave: 'abriano-nunes', id: '555555', nome: 'Abriano Nunes Araújo', apelido: '', ativo: true, cargo: '', area: 'Montagem' },
-    { chave: 'abriano-parreira', id: '666666', nome: 'Abriano Parreira Lima', apelido: '', ativo: true, cargo: '', area: 'Montagem' },
-    { chave: 'carles-dias', id: '777777', nome: 'Carles Alves Dias', apelido: '', ativo: true, cargo: '', area: 'Acabamento' },
+    { chave: 'juviano-neiva', id: '555555', nome: 'Juviano Neiva Aragão', apelido: '', ativo: true, cargo: '', area: 'Montagem' },
+    { chave: 'juviano-pacheco', id: '666666', nome: 'Juviano Pacheco Leme', apelido: '', ativo: true, cargo: '', area: 'Montagem' },
+    { chave: 'cirilo-dutra', id: '777777', nome: 'Cirilo Avelar Dutra', apelido: '', ativo: true, cargo: '', area: 'Acabamento' },
   ],
 };
 test('lista do plantão não mostra a mesma pessoa duas vezes (nome do PCP e nome do RH)', () => {
-  const t = casa([], { instaladores: ['Natan', 'Charlinho'], vinculosRH: [{ apelido: 'Charlinho', chave: 'carles-dias', id: '777777', nome: 'Carles Alves Dias' }] }, ELENCO_CONF);
+  const t = casa([], { instaladores: ['Natan', 'Cirilinho'], vinculosRH: [{ apelido: 'Cirilinho', chave: 'cirilo-dutra', id: '777777', nome: 'Cirilo Avelar Dutra' }] }, ELENCO_CONF);
   const rh = t.run("equipeEscalavel().doRH.map(p => p.nome).join('|')");
-  assert.ok(!rh.includes('Carles Alves Dias'), 'Charlinho do PCP já é o Carles do RH');
+  assert.ok(!rh.includes('Cirilo Avelar Dutra'), 'Cirilinho do PCP já é o Cirilo do RH');
   assert.ok(!rh.includes('Natan da Silva'), 'Natan já está na lista do PCP');
   assert.match(rh, /Ana Dias/, 'quem não está no PCP continua vindo do RH');
 });
 test('conferência: todo nome do PCP aparece com a ficha, como ligou e os alertas', () => {
-  const lista = [fin('a', { equipe: ['Natan', 'Abriano'] }), fin('b', { equipe: ['Lucio', 'Lucio Lima'] }), fin('c', { equipe: ['Paulo', 'Pantera'] })];
-  const cfg = { instaladores: ['Natan', 'Lucio', 'Pantera', 'Charlinho'], vinculosRH: [{ apelido: 'Charlinho', chave: 'carles-dias', id: '777777', nome: 'Carles Alves Dias' }] };
+  const lista = [fin('a', { equipe: ['Natan', 'Juviano'] }), fin('b', { equipe: ['Lisandro', 'Lisandro Lima'] }), fin('c', { equipe: ['Paulo', 'Tigre'] })];
+  const cfg = { instaladores: ['Natan', 'Lisandro', 'Tigre', 'Cirilinho'], vinculosRH: [{ apelido: 'Cirilinho', chave: 'cirilo-dutra', id: '777777', nome: 'Cirilo Avelar Dutra' }] };
   const t = casa(lista, cfg, ELENCO_CONF);
   const linha = ap => t.run(`conferenciaRH().find(l => l.apelido === ${JSON.stringify(ap)})`);
-  assert.equal(linha('Pantera').como, 'sem-ficha');
-  assert.equal(linha('Abriano').como, 'ambiguo');
-  assert.equal(linha('Abriano').candidatos.map(p => p.nome).join('|'), 'Abriano Nunes Araújo|Abriano Parreira Lima');
+  assert.equal(linha('Tigre').como, 'sem-ficha');
+  assert.equal(linha('Juviano').como, 'ambiguo');
+  assert.equal(linha('Juviano').candidatos.map(p => p.nome).join('|'), 'Juviano Neiva Aragão|Juviano Pacheco Leme');
   assert.equal(linha('Natan').como, 'auto'); assert.equal(linha('Natan').pessoa.nome, 'Natan da Silva');
-  assert.equal(linha('Charlinho').como, 'salvo'); assert.equal(linha('Charlinho').n, 0, 'só na lista, sem O.S.');
-  assert.equal(linha('Lucio').juntos.join('|'), 'Lucio Lima', 'dois nomes na mesma ficha ficam à vista');
+  assert.equal(linha('Cirilinho').como, 'salvo'); assert.equal(linha('Cirilinho').n, 0, 'só na lista, sem O.S.');
+  assert.equal(linha('Lisandro').juntos.join('|'), 'Lisandro Lima', 'dois nomes na mesma ficha ficam à vista');
   assert.equal(linha('Paulo').inativa, true);
   assert.deepEqual([...t.run('conferenciaRH()').slice(0, 2).map(l => l.como)].sort().join(), 'ambiguo,sem-ficha', 'o que falta resolver vem primeiro');
   assert.equal(t.run('pendentesConferenciaRH()'), 2);

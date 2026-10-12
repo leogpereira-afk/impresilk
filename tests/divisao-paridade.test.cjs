@@ -38,7 +38,7 @@ const FICHAS = [
   {chave:'caio-reis', id:'300003', nome:'Caio Reis', apelido:'', ativo:true},
   {chave:'davi-luz', id:'300004', nome:'Davi Luz', apelido:'davi', ativo:true, freelancer:true},
 ];
-const NOMES = ['Ana', 'ana', 'Caio', 'Caio Rosa', 'Davi', 'Ninguém', '300002', '300004', '', 'Pantera'];
+const NOMES = ['Ana', 'ana', 'Caio', 'Caio Rosa', 'Davi', 'Ninguém', '300002', '300004', '', 'Tigre'];
 
 function caso(g) {
   const qtdGrupos = g.int(1, 3);
@@ -79,9 +79,9 @@ function rodar(M, S, g) {
   const centavos = g.um([0, 1, 7, 99, 100001, 123456789, -2503, null]);
   saida.fim = {alocacao:a, validar:M.validar(a), equipe:M.derivarEquipe(a), centavos:M.ratearCentavosLider(centavos, a)};
   const entradas = Array.from({length:g.int(0, 4)}, () => g.um(NOMES));
-  saida.sugerida = M.alocacaoSugerida({equipe:entradas}, {pessoas:S.resolverPessoas({pessoas:FICHAS, vinculos:[{apelido:'Pantera', id:'300004'}]}), equipes:[{id:'eq-x', ativo:true, liderPadraoId:'300004', membros:[{chave:'300001'}, {chave:'300004'}]}], regra});
+  saida.sugerida = M.alocacaoSugerida({equipe:entradas}, {pessoas:S.resolverPessoas({pessoas:FICHAS, vinculos:[{apelido:'Tigre', id:'300004'}]}), equipes:[{id:'eq-x', ativo:true, liderPadraoId:'300004', membros:[{chave:'300001'}, {chave:'300004'}]}], regra});
   // Divisão gravada: com a mesma gente de os.equipe ou outra, marcada desatualizada ou não.
-  const pessoas = S.resolverPessoas({pessoas:FICHAS, vinculos:[{apelido:'Pantera', id:'300004'}]});
+  const pessoas = S.resolverPessoas({pessoas:FICHAS, vinculos:[{apelido:'Tigre', id:'300004'}]});
   saida.gravada = M.alocacaoSugerida({equipe:g.r() < 0.5 ? M.derivarEquipe(a) : entradas, alocacao:{...a, desatualizada:g.r() < 0.3}}, {pessoas, regra});
   return saida;
 }

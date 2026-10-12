@@ -263,18 +263,18 @@ test('tela: a pessoa na equipe pelo slug antigo do RH é achada pelo ID (selo e 
   assert.equal(c.perfIdMembro({chave:'carla-lima', nome:'Carla Ficticia Lima'}), '100003');
   assert.equal(c.perfIdMembro({chave:'100003', nome:'Carla'}), '100003');
   // Apelido antigo sem ficha fica como está (não vira um xará).
-  assert.equal(c.perfIdMembro({chave:'Pantera', nome:'Pantera', apelido:'Pantera'}), 'Pantera');
+  assert.equal(c.perfIdMembro({chave:'Tigre', nome:'Tigre', apelido:'Tigre'}), 'Tigre');
   assert.equal(c.perfPessoa('carla').chave, '100003', 'a chave nova da pessoa é o ID');
   const reg = {id:'os1', membros:P.iguais([{chave:'100003', nome:'Carla'}])};
   assert.equal(P.comEquipes([reg], [eq], c.perfOpcoesEquipe())[0].equipeId, 'eq');
 });
 
-test('tela: a equipe Pantera e a pessoa de apelido Pantera não se confundem', () => {
-  const rh = [{chave:'pan', id:'300001', nome:'Joao Ficticio Pantera', apelido:'Pantera'}];
-  const time = {id:'eq-pantera', nome:'Pantera', emblema:'🐆', animal:'pantera', cor:'roxo', membros:[{chave:'100001', nome:'Ana'}], ativo:true};
+test('tela: a equipe Tigre e a pessoa de apelido Tigre não se confundem', () => {
+  const rh = [{chave:'tig', id:'300001', nome:'Joao Ficticio Tigre', apelido:'Tigre'}];
+  const time = {id:'eq-tigre', nome:'Tigre', emblema:'🐯', animal:'tigre', cor:'roxo', membros:[{chave:'100001', nome:'Ana'}], ativo:true};
   const c = tela({equipes:[time], participacoes:[]}, rh);
-  const reg = {id:'os1', membros:P.iguais([{chave:'300001', nome:'Pantera'}])};
-  assert.equal(P.comEquipes([reg], [time], c.perfOpcoesEquipe())[0].equipeId, undefined, 'o freelancer Pantera não é a equipe Pantera');
+  const reg = {id:'os1', membros:P.iguais([{chave:'300001', nome:'Tigre'}])};
+  assert.equal(P.comEquipes([reg], [time], c.perfOpcoesEquipe())[0].equipeId, undefined, 'o freelancer Tigre não é a equipe Tigre');
 });
 
 /* O aparelho mostra o aviso do setCfg. Sem isto a gestão via a cor inválida

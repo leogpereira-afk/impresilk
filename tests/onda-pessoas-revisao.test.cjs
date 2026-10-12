@@ -306,7 +306,7 @@ test('revisão pessoas: a marca diz "cadastre no RH, ou ligue o nome em Conferir
   const ctx = {OPERACAO:O, normCasa:s => O.normPessoa ? O.normPessoa(s) : String(s).toLowerCase()};
   vm.createContext(ctx);
   vm.runInContext(fatia('casa.js', 'function sugestaoParecidaCasa(', 'function gruposDeGrafiasCasa('), ctx);
-  const ativos = [{id:'710001', nome:'Ramiro Nonato Ferreira'}, {id:'710002', nome:'Ramira Souza'}, {id:'710003', nome:'Bruno Dias'}, {id:'710004', nome:'Ramiro Melo', idRepetido:true}];
+  const ativos = [{id:'710001', nome:'Ramiro Nonato Ferreira'}, {id:'710002', nome:'Ramira Souza'}, {id:'710003', nome:'Bruno Dorneles'}, {id:'710004', nome:'Ramiro Melo', idRepetido:true}];
   // Caso ruim: "Ramiru" (digitado errado) empatava na sugestão única e saía só "Nenhuma", com a marca mandando cadastrar.
   assert.equal(ctx.sugestaoParecidaCasa('Ramiru', ativos), null, 'a sugestão única empata');
   const ps = ctx.sugestoesParecidasCasa('Ramiru', ativos).map(p => p.id);

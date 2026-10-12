@@ -306,7 +306,7 @@ function ratearCentavosLider(centavos, aloc) {
   return out;
 }
 /* SUGESTÃO A PARTIR DO LEGADO. A O.S. antiga guarda a equipe como nomes
-   ("Bruno", "Diegão", "Pantera"). `pessoas` é a régua de pessoas
+   ("Bruno", "Diegão", "Tigre"). `pessoas` é a régua de pessoas
    (OPERACAO.resolverPessoas no aparelho, a cópia de _shared no servidor):
    nome vira ID só por vínculo salvo ou casamento único. O que não resolve fica
    em `pendentes` (um por pessoa, pela chave da mesma régua: "Carla" e "CARLA"
@@ -314,8 +314,8 @@ function ratearCentavosLider(centavos, aloc) {
    (dividir só entre os conhecidos daria 100% a quem estava acompanhado).
    Composição igual à de UMA equipe ativa vira essa equipe com o líder padrão
    dela; igual à de duas ou mais, cai no legado COM aviso (`equipesIguais`).
-   O nome da equipe nunca entra na conta: a equipe Pantera e o freelancer de
-   apelido Pantera são coisas diferentes, ligadas só por ID. Sem papel
+   O nome da equipe nunca entra na conta: a equipe Tigre e um freelancer de
+   apelido Tigre são coisas diferentes, ligadas só por ID. Sem papel
    conhecido: partes iguais e a marca "sem líder". Só leitura: nada é gravado.
    A DIVISÃO GRAVADA só volta como confirmada ('gravada') se não estiver
    marcada `desatualizada` e tiver a mesma gente de os.equipe, sem pendente:

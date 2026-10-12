@@ -284,7 +284,7 @@ test('validar: inteiros, 10000 por nível, um líder por grupo, pessoa em um gru
   assert.match(com(x => { x.grupos[0].membros[1].papel = 'lider'; }), /um líder/);
   assert.match(com(x => { x.grupos[0].membros[0].papel = 'ajudante'; }), /líder/);
   assert.match(com(x => { x.grupos[0].liderId = b; }), /líder/);
-  assert.match(com(x => { x.grupos[0].membros[0].pessoaId = 'Pantera'; x.grupos[0].liderId = 'Pantera'; }), /6 dígitos/, 'nome não é ID');
+  assert.match(com(x => { x.grupos[0].membros[0].pessoaId = 'Tigre'; x.grupos[0].liderId = 'Tigre'; }), /6 dígitos/, 'nome não é ID');
   assert.match(com(x => { x.grupos[0].membros[0].pessoaId = '12345'; }), /6 dígitos/);
   assert.match(com(x => { x.grupos[1].equipeId = 'eq-aguia'; }), /mesma equipe/);
   assert.match(com(x => { x.grupos[1].membros = []; }), /pelo menos uma pessoa/);
@@ -320,21 +320,21 @@ test('centavos: R$ 0,01 e R$ 1.000,01 com a sobra no líder; soma sempre o total
   assert.deepEqual(D.ratearCentavosLider(null, dupla).map(x => x.centavos), [null, null]);
 });
 
-/* LEGADO. A O.S. antiga guarda nomes ("Bruno", "Diegão", "Pantera"). A
+/* LEGADO. A O.S. antiga guarda nomes ("Bruno", "Diegão", "Tigre"). A
    sugestão resolve pela régua de pessoas do OPERACAO e nunca inventa gente:
    nome ambíguo fica pendente e, sem a composição inteira, não sai divisão. A
-   EQUIPE Pantera e a PESSOA Pantera (freelancer) são coisas diferentes: o nome
+   EQUIPE Tigre e a PESSOA Tigre (freelancer) são coisas diferentes: o nome
    da pessoa nunca casa com o nome da equipe, só a composição por ID. */
 const FICHAS = [
-  {chave:'bruno-alves', id:'100001', nome:'Bruno Alves Costa', apelido:'bruno', ativo:true},
+  {chave:'bruno-arantes', id:'100001', nome:'Bruno Arantes Costa', apelido:'bruno', ativo:true},
   {chave:'carla-lima', id:'100003', nome:'Carla Souza Lima', apelido:'', ativo:true},
   {chave:'carla-neves', id:'100004', nome:'Carla Souza Neves', apelido:'', ativo:true},
   {chave:'diego-ramos', id:'100005', nome:'Diego Ramos', apelido:'diego', ativo:true},
   {chave:'paulo-teixeira', id:'200009', nome:'Paulo Teixeira', apelido:'', ativo:true, freelancer:true},
 ];
-const DADOS = {pessoas:FICHAS, vinculos:[{apelido:'Diegão', id:'100005'}, {apelido:'Pantera', id:'200009'}], lista:['Bruno', 'Diegão', 'Pantera']};
+const DADOS = {pessoas:FICHAS, vinculos:[{apelido:'Diegão', id:'100005'}, {apelido:'Tigre', id:'200009'}], lista:['Bruno', 'Diegão', 'Tigre']};
 const EQUIPES = [
-  {id:'eq-pantera', nome:'Pantera', ativo:true, liderPadraoId:'100005', membros:[{chave:'100001', nome:'Bruno'}, {chave:'100005', nome:'Diegão'}]},
+  {id:'eq-tigre', nome:'Tigre', ativo:true, liderPadraoId:'100005', membros:[{chave:'100001', nome:'Bruno'}, {chave:'100005', nome:'Diegão'}]},
   {id:'eq-velha', nome:'Antiga', ativo:false, membros:[{chave:'100001'}, {chave:'200009'}]},
   {id:'eq-slug', nome:'Carcará', ativo:true, liderPadraoId:'100003', membros:[{chave:'carla-lima'}, {chave:'200009'}]},
 ];
@@ -343,23 +343,23 @@ test('alocacaoSugerida: composição igual a uma equipe ativa vira a equipe com 
   const pessoas = O.resolverPessoas(DADOS);
   const s = D.alocacaoSugerida({equipe:['Diegão', 'Bruno']}, {pessoas, equipes:EQUIPES});
   assert.equal(s.origem, 'equipe');
-  assert.equal(s.equipeId, 'eq-pantera');
+  assert.equal(s.equipeId, 'eq-tigre');
   assert.equal(s.completa, true);
   assert.deepEqual(s.alocacao.grupos[0].membros.map(m => [m.pessoaId, m.papel, m.cota]), [['100005', 'lider', 6000], ['100001', 'ajudante', 4000]]);
   assert.equal(D.validar(s.alocacao), '');
   // O membro gravado pela chave antiga do RH (slug) também casa.
-  const t = D.alocacaoSugerida(['Carla Souza Lima', 'Pantera'], {pessoas, equipes:EQUIPES});
+  const t = D.alocacaoSugerida(['Carla Souza Lima', 'Tigre'], {pessoas, equipes:EQUIPES});
   assert.equal(t.equipeId, 'eq-slug');
   assert.deepEqual(t.alocacao.grupos[0].membros.map(m => [m.pessoaId, m.papel, !!m.freelancer]), [['100003', 'lider', false], ['200009', 'ajudante', true]]);
 });
 
-test('alocacaoSugerida: a pessoa Pantera não é a equipe Pantera; equipe inativa não sugere', () => {
+test('alocacaoSugerida: a pessoa Tigre não é a equipe Tigre; equipe inativa não sugere', () => {
   const pessoas = O.resolverPessoas(DADOS);
-  const s = D.alocacaoSugerida({equipe:['Pantera']}, {pessoas, equipes:EQUIPES});
+  const s = D.alocacaoSugerida({equipe:['Tigre']}, {pessoas, equipes:EQUIPES});
   assert.equal(s.equipeId, null, 'nome de pessoa não casa com nome de equipe');
   assert.deepEqual(D.derivarEquipe(s.alocacao), ['200009']);
   assert.equal(s.alocacao.grupos[0].membros[0].cota, 10000);
-  const v = D.alocacaoSugerida(['Bruno', 'Pantera'], {pessoas, equipes:EQUIPES});
+  const v = D.alocacaoSugerida(['Bruno', 'Tigre'], {pessoas, equipes:EQUIPES});
   assert.equal(v.equipeId, null, 'a equipe com essa composição está inativa');
   assert.equal(v.semLider, true);
   assert.deepEqual(v.alocacao.grupos[0].membros.map(m => [m.papel, m.cota]), [['', 5000], ['', 5000]]);
@@ -440,12 +440,12 @@ test('alocacaoSugerida: duas equipes ativas com a mesma composição avisam em v
   const pessoas = O.resolverPessoas(DADOS);
   // Uma gravada pelo slug antigo do RH, a outra pelo ID: é a mesma gente.
   const equipes = [...EQUIPES, {id:'eq-id', nome:'Onça', ativo:true, liderPadraoId:'100003', membros:[{chave:'100003'}, {chave:'200009'}]}];
-  const s = D.alocacaoSugerida(['Carla Souza Lima', 'Pantera'], {pessoas, equipes});
+  const s = D.alocacaoSugerida(['Carla Souza Lima', 'Tigre'], {pessoas, equipes});
   assert.equal(s.origem, 'legado');
   assert.equal(s.equipeId, null);
   assert.deepEqual(s.equipesIguais, ['eq-slug', 'eq-id']);
   assert.match(s.aviso, /mesma composição/);
-  const t = D.alocacaoSugerida(['Carla Souza Lima', 'Pantera'], {pessoas, equipes:EQUIPES});
+  const t = D.alocacaoSugerida(['Carla Souza Lima', 'Tigre'], {pessoas, equipes:EQUIPES});
   assert.deepEqual(t.equipesIguais, []);
   assert.equal(t.aviso, '');
 });
