@@ -858,12 +858,24 @@ const OPERACAO = (() => {
      rascunho ainda não salvo), em ordem de dia. Cada uma com o carro, a
      equipe, a conferência e a limpeza dela; `atual` é a que a ficha, o
      Lançar, a fila e o lote conferem. Só leitura. */
+  /* A viagem guardada que a de hoje SUBSTITUI: o rascunho (ou a cópia deste
+     aparelho, antes de o servidor responder) que corrigiu o dia da mesma
+     viagem ainda tem a viagem guardada no dia antigo. A mesma régua do
+     servidor (CONFERENCIA_ENTREGA.movimentoDaViagem, que a tela da gestão
+     carrega): sem ser viagem nova, a guardada do dia antigo não aparece como
+     outra viagem. Sem a régua carregada (o celular), nada se esconde. */
+  function diaSubstituido(o) {
+    const C = typeof CONFERENCIA_ENTREGA !== 'undefined' && CONFERENCIA_ENTREGA && typeof CONFERENCIA_ENTREGA.movimentoDaViagem === 'function' ? CONFERENCIA_ENTREGA : null;
+    if (!C || !objVg(o) || !Array.isArray(o.voltas) || !o.voltas.length) return '';
+    const mov = C.movimentoDaViagem(o, o);
+    return mov && !mov.nova ? mov.de : '';
+  }
   function viagensDaOS(o) {
     if (!objVg(o) || interno(o)) return [];
-    const hoje = voltou(o) ? diaDaVolta(o) : '';
+    const hoje = voltou(o) ? diaDaVolta(o) : '', trocada = hoje ? diaSubstituido(o) : '';
     const out = new Map();
     for (const r of Array.isArray(o.voltas) ? o.voltas : []) {
-      if (!objVg(r) || !diaOkVg(r.dia)) continue;
+      if (!objVg(r) || !diaOkVg(r.dia) || r.dia === trocada) continue;
       out.set(r.dia, {dia:r.dia, veiculo:textoVg(r.veiculo), equipe:(Array.isArray(r.equipe) ? r.equipe : []).map(nomePessoa), retornoConf:objVg(r.retornoConf) ? r.retornoConf : null, voltaEquipe:objVg(r.voltaEquipe) ? r.voltaEquipe : null, atual:false});
     }
     if (hoje) out.set(hoje, {dia:hoje, veiculo:textoVg(o.veiculo), equipe:equipe(o).map(nomePessoa), retornoConf:confDaViagem(o), voltaEquipe:declaracaoDaViagem(o, hoje), atual:true});
@@ -915,9 +927,9 @@ const OPERACAO = (() => {
     const grupos = new Map(), ativos = ativosDoAparelho();
     for (const o of lista || []) {
       if (!objVg(o) || interno(o) || !Array.isArray(o.voltas)) continue;
-      const hoje = diaDaVolta(o);
+      const hoje = diaDaVolta(o), trocada = diaSubstituido(o);
       for (const r of o.voltas) {
-        if (!objVg(r) || !diaOkVg(r.dia) || r.dia === hoje || !emIntervalo(r.dia, de, ate) || semCarro(r)) continue;
+        if (!objVg(r) || !diaOkVg(r.dia) || r.dia === hoje || r.dia === trocada || !emIntervalo(r.dia, de, ate) || semCarro(r)) continue;
         const time = Array.isArray(r.equipe) ? r.equipe : [];
         if (!time.length) continue;
         const chave = 'anterior|' + [r.dia, chaveVeiculoVolta(r, ativos), time.map(chavePessoa).sort().join('+')].join('|');

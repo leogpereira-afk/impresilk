@@ -317,6 +317,11 @@ test('revisão volta: U3, a fila "Todas" mostra também a primeira viagem (com a
   assert.match(t.run(`outrasViagensDaVolta(voltasDoCarroGrupo = OPERACAO.voltasDoCarro(STORE.getAllOS(), '2026-11-01', '2026-11-30')[0])`),/teve outra viagem em/);
   // O Lançar também mostra a lista (a mesma função).
   assert.match(ler('casa.js'),/viagensDaOSHTML\(os, gestao \? \{\} : \{semConferir: true\}\)/);
+  // A cópia deste aparelho que corrigiu o dia da mesma viagem (o Lançar, antes de o servidor responder) não mostra a viagem do dia antigo como outra.
+  const lancada={...duasViagens('vt2'),saidaEm:'',horaSaida:'',retornoEm:'',horaRetorno:'',finalizadaEm:'2026-11-09T10:00:00.000Z',finalizadoPor:'Mubisys (auto)',entregaLancada:{data:'2026-11-07'},
+    voltas:[{dia:'2026-11-09',equipe:['Ana','Bia'],veiculo:'Carro fictício',retornoEm:'',retornoConf:{...CONF1,dia:'2026-11-09'}}]};
+  const t2=telaGestao([lancada]);
+  assert.equal(t2.run(`OPERACAO.viagensDaOS(STORE.getOS('vt2')).map(v=>v.dia).join()`),'2026-11-07');
 });
 
 test('revisão volta: U2 na tela, o Lançar com a data do serviço leva a conferência (observação e fotos) para o dia corrigido; a viagem nova de fato começa sem ela', ()=>{
