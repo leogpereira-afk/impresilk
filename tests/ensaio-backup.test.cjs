@@ -26,6 +26,9 @@ test('ensaio do backup: ida pela porta nova e volta num PCP vazio, com as onze p
   assert.ok(r.paginas > 1, 'a exportação passou por mais de uma página');
   for (const c of ['os', 'auditoria', 'foto_evento', 'performance_fechamentos', 'performance_regras', 'performance_comissao', 'performance_comissao_os_versoes'])
     assert.ok(r.contagem[c] >= 1, c);
+  // As três da onda comissão entram na lista das que a contagem tem de trazer, mesmo vazias (hoje 0 linhas).
+  for (const c of ['performance_comissao_exportacoes', 'performance_documentos', 'performance_retrato_logos'])
+    assert.ok(E.OBRIGATORIAS.includes(c), c);
 });
 
 test('pacote pcp-backup-5: as mesmas chaves que o painel-backup grava em pcp/AAAA-MM-DD.json', () => {

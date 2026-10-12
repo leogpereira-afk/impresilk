@@ -100,8 +100,9 @@ test('M20/M21/M29: entrega todas as coleções, lápides, demandas e configuraç
 test('M21: as coleções conhecidas aparecem na contagem mesmo vazias (o Hub confere que nenhuma sumiu da porta)',async()=>{
   const e=await edge('pcp-sync',{pcp_registros:[linha('os','os-1',{numero:'1'})]});
   const [p]=await exportarTudo(e);
-  for(const c of ['os','auditoria','foto_evento','performance_fechamentos','performance_regras','performance_comissao','performance_comissao_os_versoes'])
+  for(const c of ['os','auditoria','foto_evento','performance_fechamentos','performance_regras','performance_comissao','performance_comissao_os_versoes','performance_comissao_exportacoes','performance_documentos','performance_retrato_logos'])
     assert.ok(p.contagemInicio.pcp_registros[c],'falta '+c);
+  assert.deepEqual(p.contagemInicio.pcp_registros.performance_documentos,{total:0,apagados:0});
   assert.deepEqual(p.contagemInicio.pcp_registros.performance_fechamentos,{total:0,apagados:0});
   assert.equal(p.contagemInicio.pcp_demandas,0);
   assert.equal(p.registros.length,1);assert.deepEqual(p.demandas,[]);

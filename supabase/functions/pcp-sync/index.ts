@@ -1958,7 +1958,7 @@ Deno.serve(async (req: Request) => {
           const evento:any={...periodo,id:chave+":"+String(exportadas.length+1).padStart(6,"0"),revisaoId:ultima.id,revisao:ultima.revisao,fechamentoId:ultima.fechamentoId||null,
             modo:ultima.apuracao?.config?.modo||"",compensacaoDe:ultima.apuracao?.compensacaoDe||null,arquivo,csvSha256:sha,em:emExp,
             autor:{login:autorExp.login,nome:autorExp.nome,porId:autorExp.porId||""},totais,
-            anterior:ultimaExportada?{id:ultimaExportada.id,revisaoId:ultimaExportada.revisaoId,revisao:ultimaExportada.revisao,em:ultimaExportada.em,csvSha256:ultimaExportada.csvSha256}:null,
+            anterior:ultimaExportada?{id:ultimaExportada.id,revisaoId:ultimaExportada.revisaoId,revisao:ultimaExportada.revisao,em:ultimaExportada.em,csvSha256:ultimaExportada.csvSha256,autor:ultimaExportada.autor||null}:null,
             diferencas:COMISSAO.diferencaContraExportada(totais,ultimaExportada?.totais),
             /* A aprovação anterior deste período que nunca foi exportada: pagar pela coluna do CSV deixaria a pessoa sem receber. */
             anteriorNaoExportada:!!ultima.apuracao?.anteriorAprovacao&&!exportadas.some((x:any)=>x.revisaoId===ultima.apuracao.anteriorAprovacao),
@@ -2123,20 +2123,43 @@ Deno.serve(async (req: Request) => {
           revisaoCom=data?.registro||null;
           if(!revisaoCom||revisaoCom.de!==periodo.de||revisaoCom.ate!==periodo.ate||revisaoCom.fechamentoId!==selo.id)return resp({error:"Esta revisão da comissão não é deste fechamento. Atualize o demonstrativo antes de emitir o documento."},409);
         }
-        const {data:docs,error:erroDocs}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_documentos").order("id").limit(1000);
-        if(erroDocs)throw new Error(erroDocs.message);
-        const todosDocs=(docs||[]).map((r:any)=>r.registro).filter(Boolean);
-        const repetido=todosDocs.find((d:any)=>d.requestId===requestId);
-        if(repetido)return resp({ok:true,documento:repetido,repetido:true});
+        /* Revisão da comissão (12/10/2026): nada aqui lê a coleção inteira (o
+           .limit(1000) de antes travava todo documento do 1001 em diante com
+           o número repetido). O pedido repetido é procurado direto pelo
+           requestId no banco; o número é o último DOC do ano + 1 (o id tem o
+           número com 6 dígitos, então a ordem do texto é a do número); e a
+           contagem do mesmo fechamento ou da mesma revisão é uma contagem. */
+        const {data:repetidos,error:erroRep}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_documentos").eq("registro->>requestId",requestId).limit(1);
+        if(erroRep)throw new Error(erroRep.message);
+        const repetido=(repetidos||[])[0]?.registro||null;
+        if(repetido){
+          /* O mesmo pedido de novo (a resposta se perdeu) devolve o mesmo
+             documento; o mesmo requestId com OUTRO pedido (outro tipo, outro
+             período, outro fechamento ou outra revisão) é 409, como na
+             aprovação: nunca devolver calado o papel de outra coisa. */
+          const assinaturaDoc=(d:any)=>JSON.stringify([String(d.tipo||""),String(d.de||""),String(d.ate||""),String(d.fechamentoId||""),d.tipo==="comissao"?String(d.revisaoId||""):""]);
+          const pedido={tipo:tipoDoc,...periodo,fechamentoId:selo.id,revisaoId:revisaoCom?.id||""};
+          if(assinaturaDoc(repetido)!==assinaturaDoc(pedido))return resp({error:"Este pedido já emitiu o documento "+String(repetido.id||"")+" de outro conteúdo. Atualize a tela e emita de novo."},409);
+          return resp({ok:true,documento:repetido,repetido:true});
+        }
         const ano=perfDia(new Date().toISOString()).slice(0,4);
-        const doAno=todosDocs.filter((d:any)=>String(d.id||"").startsWith("DOC-"+ano+"-")).length;
+        const {data:ultimos,error:erroUlt}=await sb.from("pcp_registros").select("id").eq("colecao","performance_documentos").gte("id","DOC-"+ano+"-").lte("id","DOC-"+ano+"-999999").order("id",{ascending:false}).limit(1);
+        if(erroUlt)throw new Error(erroUlt.message);
+        const ultimoId=String((ultimos||[])[0]?.id||"");
+        const mUlt=ultimoId.match(new RegExp("^DOC-"+ano+"-(\\d{6})$"));
+        if(ultimoId&&!mUlt)throw new Error("Numeração dos documentos inconsistente ("+ultimoId+").");
+        const numeroDoc=(mUlt?Number(mUlt[1]):0)+1;
+        if(numeroDoc>999999)throw new Error("Numeração dos documentos do ano esgotada.");
+        let qMesmo=sb.from("pcp_registros").select("id",{count:"exact",head:true}).eq("colecao","performance_documentos").eq("registro->>tipo",tipoDoc).eq("registro->>fechamentoId",selo.id);
+        if(tipoDoc==="comissao")qMesmo=qMesmo.eq("registro->>revisaoId",String(revisaoCom?.id||""));
+        const {count:qtMesmo,error:erroMesmo}=await qMesmo;
+        if(erroMesmo)throw new Error(erroMesmo.message);
         const autorDoc=await autorAuditoria(), emDoc=new Date().toISOString();
-        const mesmo=(d:any)=>d.tipo===tipoDoc&&d.fechamentoId===selo.id&&(tipoDoc!=="comissao"||d.revisaoId===revisaoCom?.id);
-        const documento:any={id:"DOC-"+ano+"-"+String(doAno+1).padStart(6,"0"),tipo:tipoDoc,...periodo,requestId,emitidoEm:emDoc,
+        const documento:any={id:"DOC-"+ano+"-"+String(numeroDoc).padStart(6,"0"),tipo:tipoDoc,...periodo,requestId,emitidoEm:emDoc,
           emitidoPor:{login:autorDoc.login,nome:autorDoc.nome,porId:autorDoc.porId||""},
           fechamentoId:selo.id,fechamentoRevisao:selo.revisao,fechamentoHash:selo.hash,
           ...(revisaoCom?{revisaoId:revisaoCom.id,revisao:revisaoCom.revisao,revisaoTipo:revisaoCom.tipo,revisaoHash:revisaoCom.hash,modo:revisaoCom.apuracao?.config?.modo||""}:{}),
-          emitidosAntes:todosDocs.filter(mesmo).length};
+          emitidosAntes:Number(qtMesmo)||0};
         const {error:erroIns}=await sb.from("pcp_registros").insert({colecao:"performance_documentos",id:documento.id,registro:documento,apagado:false,atualizado_em:emDoc});
         if(erroIns){if(erroIns.code==="23505")return resp({error:"Outro documento foi emitido ao mesmo tempo. Tente de novo."},409);throw new Error(erroIns.message);}
         return resp({ok:true,documento});

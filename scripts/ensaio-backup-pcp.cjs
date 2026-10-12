@@ -40,7 +40,12 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const {edge} = require('../tests/helpers/edge.cjs');
 
 const BUCKETS = ['pcp-arquivos', 'pcp-demandas'];
-const OBRIGATORIAS = ['os', 'auditoria', 'foto_evento', 'performance_fechamentos', 'performance_regras', 'performance_comissao', 'performance_comissao_os_versoes'];
+/* As coleções que a contagem do PCP tem de trazer (mesmo com zero linhas). As
+   três da onda comissão (o rastro da exportação, o documento oficial e as
+   logos do retrato) entraram na revisão de 12/10/2026: hoje vazias, mas a
+   cópia que não as conta não serve. */
+const OBRIGATORIAS = ['os', 'auditoria', 'foto_evento', 'performance_fechamentos', 'performance_regras', 'performance_comissao', 'performance_comissao_os_versoes',
+  'performance_comissao_exportacoes', 'performance_documentos', 'performance_retrato_logos'];
 const sha256 = b => crypto.createHash('sha256').update(b).digest('hex');
 const SHA = /^[a-f0-9]{64}$/;
 
@@ -442,4 +447,4 @@ if (require.main === module) {
   const tarefa = arg('--arquivo') ? conferirArquivoReal(arg('--arquivo'), arg('--copia')) : executar();
   tarefa.then(r => console.log(JSON.stringify(r, null, 2)), e => { console.error('Ensaio reprovado: ' + e.message); process.exit(1); });
 }
-module.exports = {executar, conferirArquivoReal, validarPacote, restaurarPacote, exportarPeloServidor, copiarArquivos, montarPacote, storageMemoria, montarOriginal};
+module.exports = {OBRIGATORIAS, executar, conferirArquivoReal, validarPacote, restaurarPacote, exportarPeloServidor, copiarArquivos, montarPacote, storageMemoria, montarOriginal};
