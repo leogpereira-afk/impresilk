@@ -676,40 +676,41 @@ async function perfPeriodosFechados() {
   const porPeriodo=new Map<string,any>();
   for(const f of (data??[]) as any[]){
     if(!dataOk(f.de)||!dataOk(f.ate)||f.de>f.ate)continue;
-    const k=f.de+":"+f.ate, atual=porPeriodo.get(k)||{de:String(f.de),ate:String(f.ate),revisoes:0,ultimaRevisao:0,ultimoEm:""};
+    const k=f.de+":"+f.ate, atual=porPeriodo.get(k)||{de:String(f.de),ate:String(f.ate),revisoes:0,ultimaRevisao:0,ultimoEm:"",ultimoId:""};
     atual.revisoes++;
     const rev=Number(f.revisao)||0;
-    if(rev>=atual.ultimaRevisao){atual.ultimaRevisao=rev;atual.ultimoEm=String(f.fechadoEm||"");}
+    // ultimoId: a linha da revisão que vale, para a trava da O.S. já selada inteira (D1) ler só ela.
+    if(rev>=atual.ultimaRevisao){atual.ultimaRevisao=rev;atual.ultimoEm=String(f.fechadoEm||"");atual.ultimoId=String(f.id||"");}
     porPeriodo.set(k,atual);
   }
   return [...porPeriodo.values()].sort((a,b)=>a.de.localeCompare(b.de)||a.ate.localeCompare(b.ate));
 }
 const perfPeriodoDoDia = (fechados:any[], dia:string) => (fechados||[]).find((f:any)=>dia>=f.de&&dia<=f.ate)||null;
-/* O DIA EM QUE A O.S. CONTA INTEIRA NA APURAÇÃO (revisão da onda fechamento,
-   D1): a O.S. sem conferência por item entra inteira no dia do lançamento ou
-   da finalização, pela mesma régua do perfFonte (fora: a classificada como
-   baixa administrativa ou retirada, a interna, a cancelada e a baixa do ERP a
-   lançar, que não entram na base). Vazio: ela não conta inteira em dia nenhum. */
-function perfDiaInteira(o:any):string {
-  if(!o||typeof o!=="object"||o.conferenciasEntrega?.length||o.tipo==="interno")return "";
-  if(["baixa_administrativa","retirada"].includes(o.conferenciaERP?.classificacao))return "";
-  const fim=perfDia(o.finalizadaEm);
-  if(!fim||cancelada(o))return "";
-  const erp=o.baixaAutoERP?.em===o.finalizadaEm || /^Mubisys\b/i.test(o.finalizadoPor || "");
-  if(erp && !o.entregaLancada && fim>=CORTE_LANCAMENTO_MANUAL)return "";
-  return (o.entregaLancada && perfDia(o.entregaLancada.data)) || fim;
-}
-/* O PERÍODO FECHADO EM QUE A O.S. JÁ ENTROU INTEIRA (D1), com o dia. Só
-   quando ela está mesmo na revisão que vale desse período (a finalizada com
-   data antiga depois do fechamento não entrou no selo, e conferir não a conta
-   duas vezes). A leitura do selo só acontece quando o dia cai num período
-   fechado, o que é raro. */
-async function perfInteiraFechada(o:any, fechados:any[], osId:string) {
-  const dia=perfDiaInteira(o), f=dia?perfPeriodoDoDia(fechados,dia):null;
-  if(!f)return null;
-  const vale=(await perfFechamentos({de:f.de,ate:f.ate}))[0];
-  if(!vale||!Array.isArray(vale.registros)||!vale.registros.some((r:any)=>String(r?.id??"")===osId))return null;
-  return {dia,de:f.de,ate:f.ate,ultimaRevisao:f.ultimaRevisao};
+/* O PERÍODO FECHADO EM QUE A O.S. JÁ ENTROU INTEIRA (D1 da revisão da onda
+   fechamento), com o dia em que ela contou. ONDA VOLTA (12/10/2026): a v167
+   achava o dia pelo estado de HOJE da O.S. (o dia do lançamento ou da
+   finalização) e o Reabrir apaga o finalizadaEm: a O.S. selada inteira em
+   novembro, reaberta em dezembro, recebia a primeira conferência por item com
+   dia de dezembro e o mesmo valor contava nos dois meses. Agora a trava
+   procura o id da O.S. nos fechamentos que valem (a última revisão de cada
+   período fechado), sem depender do estado de hoje: a O.S. está inteira no
+   selo quando um registro dele tem o id dela (a entrega por item tem o id
+   "<O.S.>::entrega:<id>" e não conta aqui). Só a linha da última revisão de
+   cada período é lida, e só a lista de registros dela. */
+async function perfInteiraFechada(osId:string, fechados:any[]) {
+  const vale=(fechados||[]).filter((f:any)=>f&&f.ultimoId);
+  if(!osId||!vale.length)return null;
+  const porId=new Map<string,any[]>();
+  for(let i=0;i<vale.length;i+=100){
+    const {data,error}=await sb.from("pcp_registros").select("id, registros:registro->registros").eq("colecao","performance_fechamentos").eq("apagado",false).in("id",vale.slice(i,i+100).map((f:any)=>f.ultimoId));
+    if(error)throw new Error(error.message);
+    for(const row of (data||[]) as any[])porId.set(String(row.id),Array.isArray(row.registros)?row.registros:[]);
+  }
+  for(const f of vale){
+    const r=(porId.get(f.ultimoId)||[]).find((x:any)=>String(x?.id??"")===osId);
+    if(r)return {dia:/^\d{4}-\d{2}-\d{2}$/.test(String(r.dia||""))?String(r.dia):"",de:f.de,ate:f.ate,ultimaRevisao:f.ultimaRevisao};
+  }
+  return null;
 }
 /* A FRASE DO MÊS FECHADO NA CONFERÊNCIA (revisão da onda fechamento, U2): não
    empurra a pessoa a trocar a data para um mês aberto (a entrega de setembro
@@ -1516,8 +1517,8 @@ Deno.serve(async (req: Request) => {
           let fechados:any[]|null=null;try{fechados=await perfPeriodosFechados();}catch{fechados=null;}
           /* A O.S. que já entrou inteira num período fechado (D1): o diálogo diz
              antes de salvar e fica só leitura (a gravação recusa aqui). */
-          let inteira:any=null;if(fechados){try{inteira=await perfInteiraFechada(os,fechados,osId);}catch{inteira=null;}}
-          return resp({os:saida(os),valor:valorConferencia(os,erp || []),fechados,inteira});
+          let inteira:any=null;if(fechados){try{inteira=await perfInteiraFechada(osId,fechados);}catch{inteira=null;}}
+          return resp({os:saida(os),valor:valorConferencia(os,erp || []),fechados:fechados&&fechados.map(({ultimoId:_u,...f}:any)=>f),inteira});
         }
         if(body.rev!==os.rev) return resp({error:"A O.S. mudou. Reabra a conferência antes de salvar.",conflito:true},409);
         if(["baixa_administrativa","retirada"].includes(os.conferenciaERP?.classificacao)) return resp({error:"Revise a classificação ERP para divergência antes de conferir uma instalação. A classificação anterior será preservada no histórico."},422);
@@ -1546,7 +1547,7 @@ Deno.serve(async (req: Request) => {
            finalização; a primeira conferência por item com o dia num mês aberto
            contaria a mesma unidade de novo. Recusa, como a M7. O ajuste de mês
            fechado depende da pergunta 3 da fila do dono (P-006 a P-010). */
-        const fInteira=!velho&&!demais.length?await perfInteiraFechada(os,fechadosConf,osId):null;
+        const fInteira=!velho&&!demais.length?await perfInteiraFechada(osId,fechadosConf):null;
         if(fInteira)return resp({error:`Esta O.S. já entrou inteira no fechamento de ${perfDiaBR(fInteira.de)} a ${perfDiaBR(fInteira.ate)} (revisão ${fInteira.ultimaRevisao}), com a entrega de ${perfDiaBR(fInteira.dia)}. Conferir os itens agora contaria a mesma entrega de novo em outro mês: ${PERF_AJUSTE_FECHADO} Nada foi gravado.`,periodoFechado:{de:fInteira.de,ate:fInteira.ate},inteiraNoFechamento:true},409);
         const cfg=(await getCfg()) || {}, pessoas=await pessoasReq(), autor=await autorAuditoria(), agora=new Date().toISOString();
         const anterior={...os,equipe:velho?.alocacao?finaisAlocacao(velho.alocacao).map((m:any)=>m.pessoaId):[],alocacao:velho?.alocacao};
@@ -1578,7 +1579,7 @@ Deno.serve(async (req: Request) => {
         const gestaoFech=ehMaquina || ["admin","pcp"].includes(String(cracha?.papel || ""));
         if(!gestaoFech && !podeVerRankingEquipe(cracha))return resp({error:"Entre com seu acesso de funcionário do PCP.",semSessao:!cracha},cracha?403:401);
         const lista=await perfPeriodosFechados();
-        return resp({fechados:gestaoFech?lista:lista.map((f:any)=>({de:f.de,ate:f.ate,revisoes:f.revisoes,ultimaRevisao:f.ultimaRevisao})),hoje:perfDia(new Date().toISOString())});
+        return resp({fechados:gestaoFech?lista.map(({ultimoId:_u,...f}:any)=>f):lista.map((f:any)=>({de:f.de,ate:f.ate,revisoes:f.revisoes,ultimaRevisao:f.ultimaRevisao})),hoje:perfDia(new Date().toISOString())});
       }
 
       case "performancePeriodo":
