@@ -184,19 +184,29 @@ test('revisão: uma O.S. muda e só ela e as da volta dela recalculam; com 1.500
      MELHOR DE 5 E TETO DE 900 ms (onda comissão, 12/10/2026): numa rodada
      inteira da suíte com o Mac carregado, a melhor de 3 deu 778 ms. A melhor
      de 5 tira o pico de carga; o O(N²) (1,7 s) continua quase o dobro do teto. */
+  /* RELATIVO, NÃO TETO FIXO (revisão da onda auditoria, 12/10/2026): com a
+     máquina carregada a melhor de 5 passou dos 900 ms em rodadas da suíte. O
+     que o teste segura é que o caminho frio não é O(N²): ele mede, no mesmo
+     processo e intercalados, as 1.502 O.S. e um quarto delas. Linear dá a
+     razão perto de 4; o O(N²) de antes (1,7 s contra ~85 ms) dava perto de
+     16. A razão abaixo de 9 separa os dois, com a mesma carga dos dois lados. */
   const MEDIDAS = 5;
   t.run('var __erp = _porOSDados.linhas.map(l => l.erp); var __perf = 0; var __pr = perfRegistro; perfRegistro = (...a) => { __perf++; return __pr(...a); };');
-  let melhor = Infinity;
+  t.run('var __erpQ = __erp.slice(0, Math.ceil(__erp.length / 4)); var __numsQ = new Set(__erpQ.map(e => String(e.numero))); var __osQ = STORE.getAllOS().filter(o => __numsQ.has(String(o.numero)));');
+  const nQ = t.run('__osQ.length');
+  let melhor = Infinity, melhorQ = Infinity;
+  const frio = (erp, lista) => { const ini = process.hrtime.bigint(); t.run(`porOSEsquecer(); porOSMontar(${erp}, ${lista}, "2026-10-20"); porOSSecaoHTML().length`); return Number(process.hrtime.bigint() - ini) / 1e6; };
   for (let k = 0; k < MEDIDAS; k++) {
     await tique();
-    const ini = process.hrtime.bigint();
-    t.run('porOSEsquecer(); porOSMontar(__erp, STORE.getAllOS(), "2026-10-20"); porOSSecaoHTML().length');
-    melhor = Math.min(melhor, Number(process.hrtime.bigint() - ini) / 1e6);
+    melhor = Math.min(melhor, frio('__erp', 'STORE.getAllOS()'));
+    await tique();
+    melhorQ = Math.min(melhorQ, frio('__erpQ', '__osQ'));
   }
-  assert.equal(t.run('__chamadas') - antes2, MEDIDAS * n, 'com a memória vazia, um status por O.S.');
-  assert.equal(t.run('__perf'), MEDIDAS * 2, 'e uma conta da equipe por gente (900001 com 900002; 900004)');
-  assert.ok(melhor < 900, `memória vazia: ${melhor.toFixed(1)} ms`);
-  if (process.env.F18_MEDIR) console.log('F18 revisão, memória vazia, 1.502 O.S. (ms):', melhor.toFixed(1));
+  assert.equal(t.run('__chamadas') - antes2, MEDIDAS * (n + nQ), 'com a memória vazia, um status por O.S.');
+  assert.equal(t.run('__perf'), MEDIDAS * 4, 'e uma conta da equipe por gente (900001 com 900002; 900004), nas duas medidas');
+  const razao = melhor / Math.max(melhorQ, 1);
+  if (process.env.F18_MEDIR) console.log('F18 revisão, memória vazia (ms): 1.502 O.S.', melhor.toFixed(1), '· um quarto', melhorQ.toFixed(1), '· razão', razao.toFixed(2));
+  assert.ok(razao < 9, `memória vazia: ${melhor.toFixed(1)} ms com ${n} O.S. contra ${melhorQ.toFixed(1)} ms com ${nQ} (razão ${razao.toFixed(2)})`);
 });
 
 test('revisão: a O.S. sem ficha no aparelho ganha "Procurar no servidor"; "nunca passou pelo PCP" só depois de o servidor dizer que não tem', async () => {

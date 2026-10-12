@@ -480,11 +480,22 @@ test('500 O.S.: cada filtro ou toque repinta em menos de 100 ms, sem recalcular 
     'mostrar mais': 'porOSMais()',
     'abrir a linha do tempo': 'porOSLinhaHTML(_porOSDados.linhas[7])',
   };
+  /* RELATIVO À LINHA DE BASE DO MESMO PROCESSO (revisão da onda auditoria,
+     12/10/2026): com a máquina carregada, 4 de 12 rodadas da suíte passaram
+     do teto fixo de 100 ms. O que o teste segura é que o toque não recalcula
+     o status das 500 O.S. (a conta de chamadas abaixo) e não volta a custar o
+     mesmo que recalcular: cada toque fica abaixo de metade do custo de
+     calcular o status das 500, medido agora, no mesmo processo e com a mesma
+     carga (melhor de 5 dos dois lados). Sozinhos: toques de 1 a 3 ms, o
+     status das 500 perto de 100 ms. O teto fixo antigo fica só como folga
+     para máquina muito rápida (a linha de base nunca abaixo de 20 ms). */
+  const base = Math.max(20, medir('STORE.getAllOS().forEach(o => __st(o))'));
   const tempos = {};
   for (const [nome, codigo] of Object.entries(toques)) tempos[nome] = medir(codigo);
   // A busca acima são 5 repinturas; a meta vale para cada uma.
   tempos['busca, letra a letra'] /= 5;
-  for (const [nome, ms] of Object.entries(tempos)) assert.ok(ms < 100, `${nome}: ${ms.toFixed(1)} ms`);
+  if (process.env.F18_MEDIR) console.log('F18, linha de base e toques (ms):', base.toFixed(1), JSON.stringify(Object.fromEntries(Object.entries(tempos).map(([k, v]) => [k, +v.toFixed(1)]))));
+  for (const [nome, ms] of Object.entries(tempos)) assert.ok(ms < base / 2, `${nome}: ${ms.toFixed(1)} ms (linha de base ${base.toFixed(1)} ms)`);
   assert.equal(t.run('__statusChamadas'), 500, 'nenhum toque recalcula o status');
   assert.ok(t.run('__pedacos["#poros-corpo"].innerHTML').includes('poros-card'), 'o toque pintou o corpo');
   // "Mostrar mais" acrescenta só os 24 novos: os que já estão na tela não são pintados de novo.
@@ -510,7 +521,9 @@ test('500 O.S.: cada filtro ou toque repinta em menos de 100 ms, sem recalcular 
     if (k === 0) assert.equal(t.run('__statusChamadas'), 500, 'trocar o período não recalcula');
   }
   assert.equal(t.run('__statusChamadas'), 500, 'trocar o período, cinco vezes, não recalcula');
-  assert.ok(periodo < 150, `período: ${periodo.toFixed(1)} ms`);
+  // A troca de período é pintura completa sem recalcular: abaixo do custo de recalcular as 500 (a mesma linha de base).
+  if (process.env.F18_MEDIR) console.log('F18, troca de período (ms):', periodo.toFixed(1));
+  assert.ok(periodo < Math.max(base, 60), `período: ${periodo.toFixed(1)} ms (linha de base ${base.toFixed(1)} ms)`);
   /* Mudou uma O.S.: a próxima pintura completa recalcula ela e as da volta
      dela (o retorno é medido pela volta), não as outras (revisão da F18: a
      memória é por O.S.). A x3 deste teste ficou fora do período de 05 a 12 e
