@@ -7,15 +7,15 @@ passar, liberar, aceitar), que monta o commit em cima da origin/main; nunca à
 mão num ramo de trabalho. Regra completa no AGENTS.md (igual ao CLAUDE.md),
 seções 0, 5 e 6.
 
-agente: claude
+agente: ninguem
 desde: 2026-10-12T18:31:14.511Z
 ramo: HEAD
 tarefa: tirar o número de O.S. real da Passagem (guarda M27)
-sessao: claude:306725b2 (impresilk-fechamento)
+sessao: -
 versao_reservada: -
 arquivos_em_uso: -
 passou_por: claude
-passou_em: 2026-10-12T18:27:37.636Z
+passou_em: 2026-10-12T18:31:42.916Z
 
 ## Passagem (o que o último agente deixou para o próximo)
 
@@ -26,12 +26,12 @@ alguém, os campos podem estar em "-" enquanto ele trabalha; com a vez livre
 (ninguem), têm de estar todos cheios. "sessao: -" quer dizer que nenhuma
 sessão se registrou ainda: o primeiro `pegar` do mesmo agente a adota.
 
-no_ar: -
-ramos: -
-feito: -
-pela_metade: -
-decisoes: -
-perguntas_ao_dono: -
-nao_fazer: -
-testes: -
-dados: -
+no_ar: origin/main b7da13d (código) = v173 (APP_VERSAO e CACHE v173, conferidos no site por curl em 12/10/2026 às 15h30); pcp-sync v145 e pcp-mubisys v126 publicadas pelo functions.yml do painel com pcp_ref onda-acabamento-b (run 38290508751) antes da tela; Deploy verde na 1a tentativa
+ramos: onda-fechamento, onda-volta, onda-comissao, onda-pessoas, onda-operacao, onda-acabamento e onda-acabamento-b: todos já na main (na origem também; apagar com o aval do dono). SUPERADOS, NÃO JUNTAR: f19, f20, f20t, f21, f22s, f22t e poda-valores-operacao (docs/RAMOS.md). Apagar com o aval do dono (P-022): origin/codex/entregas-parciais-equipes, origin/producao-lateral, origin/claude/admiring-noether-ly12p1, onda-a3, onda-w1
+feito: 12/10/2026, a fila única de Dre/fila-pcp-2026-10-11.md inteira, menos o que depende do dono: v167 fechamento (mês calendário, cobertura, selo do mês aberto, mês fechado na tela inteira, M7, M8), v168 volta do carro por viagem, v169 comissão (só dinheiro trava, CSV com ID, exportação registrada, PDFs oficiais, fita dos meses, retrato no fechamento, rascunho da apuração, D-013), v170 pessoas e IDs (idPessoa do RH manda, ID repetido não é de ninguém, Freelancer, pessoa a cadastrar, busca por documento, aprovador substituível D-014, D-015), v171 operação (régua única de atraso, M12, M14, M15, M16, E7, itens 18, 19, 23, 37; D-016 "vale a conferencia"), v172 acabamento A (M13 marcas antigas só leitura, M17, M18, M19, itens 24, 31, 33), v173 acabamento B (rascunhos, M27, M32, pequenos da tabela Baixa). Cada onda: implementação, 2 revisões, correção, verificação independente. Também: protocolo da vez no RH e ID da pessoa no RH (impresilkrh 5d11b43), painel-acesso e agenda-pcp no Painel (8143af5)
+pela_metade: nada de código pela metade; ficam: rascunho e régua de pessoa das Demandas (pergunta 15), item 27 ajuste no mês fechado e "decisões diferentes na mesma O.S." (resto da pergunta 3), M9 (pergunta 5), item 36 variação contra o mês anterior (depois do 1o fechamento real), item 16 apelidos dos carros (Thiago), reclassificar baixa de antes do corte (pergunta 18), F25 no RH (o sync do RH recusar o ciclo do bônus), a 422 da regra de CPF do contrato de instalador no RH (F07), ensaio do backup com arquivo do Hub de depois da v169; baixas registradas: cancelamento gravado depois do fechamento com data no mês fechado muda o hash (já na v170), volta com só o retorno lida como correção, ID pelos 6 primeiros dígitos do CPF pode repetir o de quem saiu
+decisoes: nesta vez: D-012 (fechamento, notas da volta), D-013 "THIAGO APROVA", D-014 aprovador substituível, D-015 o ID gravado no RH manda, D-016 "vale a conferencia"; notas das ondas comissão, pessoas, operação e acabamento
+perguntas_ao_dono: em docs/DECISOES.md e na seção 4 de Dre/fila-pcp-2026-10-11.md: prêmio de outubro antes de 31/10 (P-002 a P-005); resto da pergunta 3 (outubro só teste? pagamento a partir de 01/11? O.S. afetada inclui outros meses?); pergunta 4 (O.S. pendente no fechamento); pergunta 5 (ranking); falha comprovada desde a prévia ou só aprovada; retrabalho pelo celular fica "a definir"; 6, 7, 8, 10 a 18; GitHub P-021 a P-026 (inclui reescrever o histórico com dado real, P-023). Ações do dono na tela: designar o titular da aprovação em Configurações, usar o botão do RH "Gravar o ID nas fichas antigas", Thiago não fechar outubro, Thiago conferir a data de conferência da O.S. que ele já conhece (07/08 ou 07/10) e os apelidos dos carros
+nao_fazer: não juntar f19 a f22t nem poda-valores-operacao; servidor ANTES da tela (functions.yml do painel com pcp_ref do ramo que contém a main, depois push na main e Deploy verde); conferir a versão no ar; não fechar outubro, não aprovar nem divulgar outubro como resultado; não classificar baixas em lote por script nem mexer nas de antes do corte; não restaurar o PCP só pelo arquivo do Hub; nenhum UPDATE automático em dado real; uma frente por vez nos arquivos quentes (app.js, performance.js, pcp-sync/index.ts, _shared/pcp-integridade.mjs, styles.css); não mexer no VEZ.md no ramo de trabalho; juntar a main só com rebase e vez.cjs conferir antes do push; nunca subir versão à mão (subir-versao.cjs --proxima, 85 lugares); a marca antiga por item está desligada por ENTREGA_ITEM.MARCAS_NOVAS=false (D-016): não religar; o arquivo de saída de um agente pequeno não prova que ele morreu (olhar a pasta antes de relançar)
+testes: node scripts/verificar.cjs (Node 24) na main b7da13d (v173) em 12/10/2026: 1992 testes, 1992 passam, 0 falham, 0 pulados; no GitHub (publicar-pcp-ramo) verde; Deploy verde
+dados: nenhuma migration aplicada (os arquivos de migration foram renomeados para AAAAMMDDHHMMSS; as duas aplicadas batem com a versão registrada no banco); nenhum dado real tocado (só SELECT de contagem); em produção, em 12/10: 0 fechamentos, 0 revisões de comissão, 0 versões de regra
