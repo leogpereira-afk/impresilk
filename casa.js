@@ -300,7 +300,12 @@ function classificarEntregas(lista) {
     }
     if (o.conferenciaERP?.classificacao === 'baixa_administrativa') { continue; }
     if (o.conferenciaERP?.classificacao === 'retirada') { r.retiradas.push(o); continue; }
-    if (o.conferenciasEntrega?.length) { r.instalacoes.push(o); if (o.baixaAutoERP && CONFERENCIA_ENTREGA.estado(o).situacao !== 'saldo_concluido') r.aLancar.push(o); continue; }
+    /* UM CAMINHO SÓ (M14, onda operação; D-016): a O.S. com conferência por
+       entrega é instalação pela parte conferida e NUNCA vai para "a lançar"
+       (antes a baixa do ERP com parcial conferida entrava nas duas listas, e o
+       lançamento nem contava). O saldo se confere em "Conferir entrega"; a
+       Fila diária a mostra como "saldo a conferir". */
+    if (o.conferenciasEntrega?.length) { r.instalacoes.push(o); continue; }
     if (!OPERACAO.dia(o.finalizadaEm)) continue;
     if (OPERACAO.interno(o)) { r.retiradas.push(o); continue; }
     // O pedido de Desfazer do lote ainda na fila ({desfazer:true}) não é lançamento (OPERACAO.entregaLancadaValida).
@@ -862,9 +867,18 @@ function respostaRetrabalhoDe(antes, depois) {
 
 // Baixa do ERP vira entrega só aqui: alguém confirma data e equipe e responde
 // a pergunta obrigatória do retrabalho. Fica carimbado quem lançou.
+/* A O.S. com conferência por entrega não se lança (M14, D-016): o Lançar
+   leva à conferência, com o motivo. '' quando pode lançar. */
+const AVISO_LANCAR_CONFERIDA = 'Esta O.S. já tem conferência por entrega: o saldo se confere em "Conferir entrega", e o lançamento não contaria na apuração.';
+const temConferenciaCasa = os => !!(os && Array.isArray(os.conferenciasEntrega) && os.conferenciasEntrega.length);
 function lancarEntregaManual(osId) {
   const os = STORE.getOS(osId);
   if (!os) return;
+  if (temConferenciaCasa(os)) {
+    toast(AVISO_LANCAR_CONFERIDA, 'error');
+    if (typeof conferirItensEntrega === 'function' && ['admin', 'pcp'].includes(STATE.user && STATE.user.papel)) Promise.resolve(conferirItensEntrega(osId)).catch(e => toast(String(e && e.message || e), 'error'));
+    return;
+  }
   const cfg = STORE.getCFG();
   const old = document.getElementById('lancar-box'); if (old) old.remove();
   const box = document.createElement('div');

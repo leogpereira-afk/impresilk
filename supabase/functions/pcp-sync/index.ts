@@ -2856,7 +2856,9 @@ Deno.serve(async (req: Request) => {
           const podeDesfazer = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
           // O.S. cancelada (revisão da F16): o lançamento fica o gravado, com aviso; a mesma régua das marcas de item.
           const canceladaLanc = !!existing && cancelada({ ...existing, cancelamento: cancelamentoDoEnvio });
-          const el = carimbarEntregaLancada(os, existing, autorEntrega, new Date().toISOString(), { podeDesfazer, cancelada: canceladaLanc });
+          // M14 (D-016): a O.S. com conferência por entrega não ganha lançamento novo; o saldo se confere.
+          const comConferenciaLanc = Array.isArray(existing?.conferenciasEntrega) && existing.conferenciasEntrega.length > 0;
+          const el = carimbarEntregaLancada(os, existing, autorEntrega, new Date().toISOString(), { podeDesfazer, cancelada: canceladaLanc, comConferencia: comConferenciaLanc });
           trocarOS(el.os);
           if (el.aviso) avisosToque.push(el.aviso);
         }

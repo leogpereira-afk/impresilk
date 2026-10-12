@@ -299,6 +299,11 @@ const LOTE = (() => {
     for (const o of cls.instalacoes) {
       if (!noMes(o) || cancelada(o) || vistas.has(o.id)) continue;
       if (confirmadaNaOS(o)) continue;
+      /* A O.S. com conferência por entrega (M14, D-016) tem a equipe e a
+         divisão em cada conferência: o lote não a lança nem divide (a divisão
+         da O.S. inteira não contaria na apuração). Ela se resolve em
+         "Conferir entrega". */
+      if (Array.isArray(o.conferenciasEntrega) && o.conferenciasEntrega.length) continue;
       vistas.add(o.id); out.push(o);
     }
     return {os: out, canceladas, aLancar, semDivisao: out.length - aLancar};
@@ -604,7 +609,14 @@ const LOTE = (() => {
        conferiu. Na O.S. aberta a entrega fica pelos itens; na finalizada no
        dia certo, a finalização já diz o dia. A baixa do ERP de antes do corte
        já conta no dia dela: só ganha lançamento se a pessoa mudou a data. */
-    const lancar = !aberta(atual) && ((baixaERP(atual) && !antesDoCorte(atual)) || l.data !== diaEntrega(atual));
+    /* UM CAMINHO SÓ (M14, onda operação; D-016): a O.S. com conferência por
+       entrega não ganha lançamento (ele não contaria na apuração); o lote
+       grava o resto da linha e avisa que o saldo se confere em "Conferir
+       entrega". O servidor também não aceita (carimbarEntregaLancada). */
+    const conferida = Array.isArray(atual.conferenciasEntrega) && atual.conferenciasEntrega.length > 0;
+    const querLancar = !aberta(atual) && ((baixaERP(atual) && !antesDoCorte(atual)) || l.data !== diaEntrega(atual));
+    const lancar = querLancar && !conferida;
+    if (querLancar && conferida && !(lancada(atual) && atual.entregaLancada.data === l.data)) avisos.push('O lançamento não foi gravado: a O.S. já tem conferência por entrega, e o saldo se confere em "Conferir entrega".');
     if (!lancar) { if ('entregaLancada' in atual) nova.entregaLancada = atual.entregaLancada; else delete nova.entregaLancada; }
     else if (!(lancada(atual) && atual.entregaLancada.data === l.data)) mexeu.lancamento = true;
     /* A CHEGADA CONFERIDA, no dia da jornada (revisão da F17): uma por dia,

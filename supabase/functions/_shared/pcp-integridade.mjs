@@ -708,7 +708,14 @@ export const entregaLancadaMudou = (os, antes) => proprio(os, 'entregaLancada') 
    neste envio; o pedido de cancelar só vale depois da gravação). Nela o
    lançamento não muda: fica o gravado, com aviso. A aba v139 não conhece o
    cancelamento e lançava a entrega de uma cancelada calada. */
-export function carimbarEntregaLancada(os, antes, autor, em, { podeDesfazer = false, cancelada = false } = {}) {
+/* UM CAMINHO SÓ ENTRE LANÇAR E CONFERIR (M14 da auditoria de 11/10/2026,
+   onda operação; D-016: o caminho é a conferência). Na O.S. que já tem
+   conferência por entrega gravada, um lançamento NOVO (outra data) não
+   entra: fica o gravado, com aviso (nunca 422), e o saldo se confere em
+   "Conferir entrega". O Desfazer continua (limpa um lançamento antigo). A
+   apuração já ignorava o lançamento de O.S. com conferência (perfFonte). */
+export const AVISO_LANCAR_COM_CONFERENCIA = 'A entrega não foi lançada: esta O.S. já tem conferência por entrega, e o saldo se confere em "Conferir entrega" (o lançamento não conta na apuração de O.S. conferida).';
+export function carimbarEntregaLancada(os, antes, autor, em, { podeDesfazer = false, cancelada = false, comConferencia = false } = {}) {
   const r = { ...os };
   const manter = () => { if (proprio(antes, 'entregaLancada')) r.entregaLancada = antes.entregaLancada; else delete r.entregaLancada; };
   if (!proprio(os, 'entregaLancada')) { manter(); return { os: r, aviso: '' }; }
@@ -740,6 +747,7 @@ export function carimbarEntregaLancada(os, antes, autor, em, { podeDesfazer = fa
     return { os: r, aviso: 'A entrega não foi lançada: a data não é válida. Ficou a que estava gravada.' };
   }
   if (gravada && gravada.data === data) { r.entregaLancada = gravada; return { os: r, aviso: '' }; }
+  if (comConferencia) { manter(); return { os: r, aviso: AVISO_LANCAR_COM_CONFERENCIA }; }
   r.entregaLancada = {
     data, por: String(autor.nome ?? '').slice(0, 120), porConta: String(autor.login ?? '').slice(0, 120),
     porId: ehIdPessoa(autor.porId) ? String(autor.porId).trim() : '', em,
