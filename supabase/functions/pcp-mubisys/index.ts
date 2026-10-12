@@ -1,4 +1,4 @@
-import { atualizarOrigemERP, atualizarSituacaoERP, temTrabalhoHumano, motivoAgendaViva, carimbarUidsERP, decisaoBaixaERP, marcarErpComSaldo, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { atualizarOrigemERP, atualizarSituacaoERP, temTrabalhoHumano, motivoAgendaViva, carimbarUidsERP, decisaoBaixaERP, marcarErpComSaldo, entradaAuditoria, AUTOR_MAQUINA, diffBaixa, diffReimportacao, mudancasERPDepoisDaFinalizacao, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 // ============================================================================
 // pcp-mubisys — integracao com o ERP (substitui mubisys.js + mubisys-sync.mjs)
 //
@@ -37,6 +37,36 @@ const CORS = {
 const resp = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
+/* O DIÁRIO DA MÁQUINA (item 18 da fila de 11/10/2026, onda operação): a
+   baixa automática, a baixa poupada, a baixa desfeita e a da carteira, e a
+   reimportação do ERP (inclusive a mudança vista depois da finalização, que
+   não é aplicada) entram no Histórico de alterações da O.S. (coleção
+   'auditoria', origem 'maquina'). Melhor esforço, em lote: o diário que
+   falha não para a baixa; vira aviso no log e conta em
+   pcp_meta.auditoria_falhas (o mesmo contador do pcp-sync, que a ação
+   saude mostra). Devolve quantas entradas gravou. */
+async function diarioMaquina(sb: any, itens: any[]): Promise<number> {
+  const entradas = (itens || []).filter((x: any) => x && x.osId && x.diff && x.diff.campos?.length).map((x: any) => {
+    const r = entradaAuditoria({ id: crypto.randomUUID(), osId: x.osId, numero: x.numero, acao: x.acao, diff: x.diff, autor: AUTOR_MAQUINA, origem: "maquina", em: x.em || new Date().toISOString() });
+    return { colecao: "auditoria", id: r.id, registro: r, apagado: false, atualizado_em: r.em };
+  });
+  if (!entradas.length) return 0;
+  try {
+    for (let i = 0; i < entradas.length; i += 200) {
+      const { error } = await sb.from("pcp_registros").insert(entradas.slice(i, i + 200));
+      if (error) throw new Error(error.message);
+    }
+    return entradas.length;
+  } catch (e) {
+    const erro = String((e as Error)?.message ?? e).slice(0, 200), em = new Date().toISOString();
+    console.warn("[pcp-mubisys] diario da maquina nao gravou:", erro);
+    try {
+      const antes = await getMeta("auditoria_falhas");
+      await sb.from("pcp_meta").upsert({ chave: "auditoria_falhas", valor: { total: (Number(antes?.total) || 0) + entradas.length, ultimaEm: em, ultimoErro: erro, osId: String(entradas[0].registro.osId) }, atualizado_em: em }, { onConflict: "chave" });
+    } catch { /* o log já disse */ }
+    return 0;
+  }
+}
 async function getMeta(chave: string): Promise<any | null> {
   const { data } = await sb.from("pcp_meta").select("valor").eq("chave", chave).maybeSingle();
   return data?.valor ?? null;
@@ -752,7 +782,7 @@ async function baixaAutomatica(sb: any, base: string, publicKey: string, headers
    carimbo da LINHA (atualizado_em) anda: o pull incremental acha a O.S., e
    o aparelho copia SO a marca com o mesmo rev (store.js, _camposDoServidor). */
 async function gravarBaixas(sb: any, lote: any[], hojeLocal: string) {
-  const desistencias: any[] = [], poupadas: any[] = [], canceladasComEntrega: any[] = [];
+  const desistencias: any[] = [], poupadas: any[] = [], canceladasComEntrega: any[] = [], diario: any[] = [];
   let baixadas = 0, marcadas = 0;
   const motivoParaNaoBaixar = (linha: any) => {
     if (!linha || linha.apagado) return "excluída no PCP enquanto esperava o ERP";
@@ -800,7 +830,13 @@ async function gravarBaixas(sb: any, lote: any[], hojeLocal: string) {
         .eq("colecao", "os").eq("id", a.id).eq("apagado", false)
         .eq("atualizado_em", String(linha.atualizado_em ?? "")).select("id");
       if (error) throw new Error(error.message);
-      if (gravou?.length) { if (dec.acao === "poupar") marcadas++; else baixadas++; motivo = ""; break; }
+      if (gravou?.length) {
+        if (dec.acao === "poupar") marcadas++; else baixadas++; motivo = "";
+        // O diário da máquina (item 18): o que a baixa mudou, com o status do ERP e a causa da E7.
+        const d = diffBaixa(linha.registro, registro);
+        if (d) diario.push({ osId: a.id, numero: String(registro?.numero || ""), acao: dec.acao === "poupar" ? "baixa-poupada" : "baixa-automatica", diff: d, em: agora });
+        break;
+      }
       motivo = tentativa ? "alterada no PCP duas vezes durante a baixa" : "alterada no PCP durante a baixa";
     }
     const numero = String(linha.registro?.numero || a.registro?.numero || "");
@@ -816,7 +852,8 @@ async function gravarBaixas(sb: any, lote: any[], hojeLocal: string) {
       console.log(`[pcp-mubisys] baixa da O.S. ${numero} (${a.id}) [${a.statusERP}]: ${dec.causa}.`);
     }
   }
-  return { baixadas, desistencias, poupadas, marcadas, canceladasComEntrega };
+  const noDiario = await diarioMaquina(sb, diario);
+  return { baixadas, desistencias, poupadas, marcadas, canceladasComEntrega, noDiario };
 }
 
 // Esqueleto identico ao novaOS() do app, preenchido com os campos do Mubisys.
@@ -961,9 +998,20 @@ async function gravarImportadas(sb: any, remotas: any[]) {
          as duas ficam em zero com a mescla desligada. */
       let itensAtualizados = 0, itensListaPCP = 0;
       const em = new Date().toISOString();
+      const diario: any[] = [];
       for (const linha of (jaTem ?? [])) {
         if (linha.apagado) continue;
         const remoto = porNumeroERP.get(String(linha.registro?.numero)) || {};
+        /* A MUDANÇA DO ERP DEPOIS DA FINALIZAÇÃO (item 18): não se aplica (a
+           O.S. encerrada fica como está), mas entra no diário, uma vez por
+           mudança (a última entrada igual da mesma O.S. não se repete). */
+        const depoisFim = mudancasERPDepoisDaFinalizacao(linha.registro, remoto);
+        if (depoisFim) {
+          const { data: ult } = await sb.from("pcp_registros").select("registro").eq("colecao", "auditoria").eq("registro->>osId", String(linha.id))
+            .eq("registro->>acao", "erp-depois-da-finalizacao").order("atualizado_em", { ascending: false }).limit(1);
+          const ultima = (ult ?? [])[0]?.registro;
+          if (!ultima || JSON.stringify(ultima.depois ?? null) !== JSON.stringify(depoisFim.depois)) diario.push({ osId: linha.id, numero: String(linha.registro?.numero || ""), acao: "erp-depois-da-finalizacao", diff: depoisFim, em });
+        }
         const r = atualizarOrigemERP(linha.registro, remoto, em, { mesclarItens: MESCLA_ITENS_ERP });
         if (r.itens?.pulou === "a lista tem item do PCP") itensListaPCP++;
         const itensMudaram = !!r.itens && (r.itens.novos + r.itens.mudados + r.itens.sairam + r.itens.marcados + r.itens.perguntas) > 0;
@@ -977,8 +1025,13 @@ async function gravarImportadas(sb: any, remotas: any[]) {
           .eq("colecao","os").eq("id",linha.id).eq("apagado",false)
           .eq("atualizado_em",linha.atualizado_em).select("id");
         if (error) throw new Error(error.message);
-        if (data?.length) { atualizadas++; if (itensMudaram && r.alteracoes.length) itensAtualizados++; } else conflitosAtualizacao++;
+        if (data?.length) {
+          atualizadas++; if (itensMudaram && r.alteracoes.length) itensAtualizados++;
+          const d = diffReimportacao(r.alteracoes);
+          if (d) diario.push({ osId: linha.id, numero: String(linha.registro?.numero || ""), acao: "reimportacao-erp", diff: d, em });
+        } else conflitosAtualizacao++;
       }
+      const noDiario = await diarioMaquina(sb, diario);
       // Deduplicação de novas O.S. dentro do lote.
       const porId = new Map<string, any>();
       for (const l of linhas.filter((l) => !existentes.has(String(l.registro.numero)))) porId.set(l.id, l);
@@ -992,7 +1045,7 @@ async function gravarImportadas(sb: any, remotas: any[]) {
       }
       const novas = novasLinhas.length;
       const jaExistiam = linhas.length - novas;
-  return { novas, atualizadas, conflitosAtualizacao, jaExistiam, total: remotas.length, semNumero, itensAtualizados, itensListaPCP };
+  return { novas, atualizadas, conflitosAtualizacao, jaExistiam, total: remotas.length, semNumero, itensAtualizados, itensListaPCP, noDiario };
 }
 
 // Carteira do acompanhamento: concluída na produção ainda aguarda entrega.
@@ -1096,6 +1149,7 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
   }
   let restauradas=0, arquivadas=0, marcadas=0, conflitos=0;
   const marcarIds = new Set(marcar.map((l:any) => l.id));
+  const diarioCarteira: any[] = [];
   for (const l of alvos) {
     const volta = numeros.has(String(l.registro.numero));
     const r = {...l.registro,rev:(Number(l.registro.rev)||0)+1,atualizadoEm:em,atualizadoPor:'Mubisys · conciliação de carteira'};
@@ -1117,9 +1171,12 @@ async function reconciliarCarteira(sb: any, remotas: any[]) {
       .eq('colecao','os').eq('id',l.id).eq('apagado',false).eq('atualizado_em',l.atualizado_em).select('id');
     if(e) throw new Error(e.message);
     if(!data?.length) conflitos++;else if(volta) restauradas++;else if(marcarIds.has(l.id)) marcadas++;else arquivadas++;
+    // O diário da máquina (item 18): a baixa desfeita (a O.S. voltou à carteira), a finalizada por sair dela e a marca de saída.
+    if(data?.length){const d=diffBaixa(l.registro,r);if(d)diarioCarteira.push({osId:l.id,numero:String(l.registro?.numero||''),acao:volta?'baixa-desfeita':marcarIds.has(l.id)?'erp-saiu-da-carteira':'baixa-carteira',diff:d,em});}
   }
+  const noDiarioCarteira = await diarioMaquina(sb,diarioCarteira);
   const importacao = await gravarImportadas(sb,remotas);
-  return {...importacao,restauradas,arquivadas,marcadasParaConferir:marcadas,conflitosCarteira:conflitos,carteiraCompleta:true};
+  return {...importacao,noDiario:(importacao.noDiario||0)+noDiarioCarteira,restauradas,arquivadas,marcadasParaConferir:marcadas,conflitosCarteira:conflitos,carteiraCompleta:true};
 }
 
 /* O BATIMENTO GUARDA DUAS DATAS: a da ultima TENTATIVA e a da ultima que DEU

@@ -111,7 +111,12 @@ const POR_OS = ((O) => {
     'itens.entregas': 'item', saidaEm: 'saida', horaSaida: 'saida', retornoEm: 'retorno', horaRetorno: 'retorno', prazoCombinado: 'prazo', retornoPrevisto: 'retorno_previsto',
   };
   const JANELA_DIARIO = 15 * 60000;
-  const DIARIO_ACOES = {criar: 'criou a O.S.', alterar: 'alterou', excluir: 'excluiu a O.S.', restaurar: 'restaurou a O.S.', descartar: 'tentou alterar a divisão (recusado)'};
+  const DIARIO_ACOES = {criar: 'criou a O.S.', alterar: 'alterou', excluir: 'excluiu a O.S.', restaurar: 'restaurou a O.S.', descartar: 'tentou alterar a divisão (recusado)',
+    // O diário da máquina (item 18, onda operação) e a revisão da parcial (M12).
+    'baixa-automatica': 'deu a baixa automática do ERP', 'baixa-poupada': 'segurou a baixa do ERP (o PCP tem saldo)', 'baixa-desfeita': 'desfez a baixa do ERP (a O.S. voltou à carteira aberta)',
+    'baixa-carteira': 'finalizou a O.S. que saiu da carteira do ERP', 'erp-saiu-da-carteira': 'marcou que a O.S. saiu da carteira do ERP', 'reimportacao-erp': 'atualizou os dados do ERP',
+    'erp-depois-da-finalizacao': 'viu mudança no ERP depois da finalização (não aplicada)', 'conferir-entrega': 'conferiu uma entrega', 'revisar-entrega-conferida': 'revisou uma entrega conferida, com motivo',
+    'anular-entrega-conferida': 'anulou uma entrega conferida, com motivo'};
   const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
   const minTxt = n => n === 1 ? '1 minuto' : n < 60 ? `${n} minutos` : `${Math.floor(n / 60)} h${n % 60 ? ` ${n % 60} min` : ''}`;
   /* O rótulo da ocorrência que o abono aponta. O id é 'osId:tipo' e, no

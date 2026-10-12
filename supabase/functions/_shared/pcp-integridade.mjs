@@ -1208,6 +1208,50 @@ export function atualizarOrigemERP(atual, remoto, em, { sortear = sortearUid, me
   }
   return {registro, alteracoes, itens};
 }
+/* O DIÁRIO DA MÁQUINA (item 18 da fila de 11/10/2026, onda operação). A
+   baixa automática, a baixa desfeita pela conciliação e a reimportação do
+   ERP não deixavam rastro no Histórico de alterações, e a mudança do ERP
+   depois da finalização nem era registrada. Funções puras que montam a
+   entrada do diário (a mesma coleção 'auditoria', com origem 'maquina' e o
+   autor "Mubisys (auto)"); quem grava é o pcp-mubisys, melhor esforço: a
+   falha do diário não para a baixa, vira aviso no log e conta em
+   pcp_meta.auditoria_falhas, como no pcp-sync. Sem R$ novo: os campos são
+   os que o diário já guardava (o diário só desce para a gestão). */
+export const AUTOR_MAQUINA = Object.freeze({ nome: 'Mubisys (auto)', login: '', papel: 'maquina' });
+const CAMPOS_BAIXA = ['finalizadaEm', 'finalizadoPor', 'baixaAutoERP', 'erpSaiuDaCarteiraEm', 'erpComSaldo', 'arquivadaEm'];
+// O antes e o depois só dos campos da baixa que mudaram: {campos, antes, depois} ou null.
+export function diffBaixa(antes, depois) {
+  const campos = CAMPOS_BAIXA.filter(c => !igual(antes?.[c] ?? null, depois?.[c] ?? null));
+  if (!campos.length) return null;
+  return { campos, antes: Object.fromEntries(campos.map(c => [c, antes?.[c] ?? null])), depois: Object.fromEntries(campos.map(c => [c, depois?.[c] ?? null])) };
+}
+// A reimportação: as alterações do atualizarOrigemERP (os itens vão como resumo, não a lista inteira).
+export function diffReimportacao(alteracoes) {
+  const lista = (Array.isArray(alteracoes) ? alteracoes : []).filter(objeto);
+  if (!lista.length) return null;
+  const campos = [...new Set(lista.map(a => String(a.campo ?? '').split('.')[0] || 'itens'))];
+  const valor = (a, k) => CAMPOS_ERP.includes(String(a.campo)) ? (a[k] ?? null) : 'alterado';
+  const antes = {}, depois = {};
+  for (const a of lista) { const c = String(a.campo ?? '').split('.')[0] || 'itens'; if (!(c in antes)) { antes[c] = valor(a, 'antes'); depois[c] = valor(a, 'depois'); } }
+  return { campos, antes, depois };
+}
+/* A MUDANÇA DO ERP DEPOIS DA FINALIZAÇÃO: os campos do ERP (CAMPOS_ERP) que
+   o ERP diz diferente numa O.S. já finalizada. NÃO são aplicados (a O.S.
+   encerrada fica como está, como sempre foi); vão só para o diário, uma vez
+   por mudança (quem grava compara com a última entrada da mesma O.S.). */
+export function mudancasERPDepoisDaFinalizacao(atual, remoto) {
+  if (!atual?.origemMubisys || !String(atual.finalizadaEm ?? '').trim() || !objeto(remoto)) return null;
+  const alteracoes = [];
+  for (const campo of CAMPOS_ERP) {
+    if (!proprio(remoto, campo) || remoto[campo] == null) continue;
+    const valor = remoto[campo];
+    if (campo === 'valorTotal' && (!Number.isFinite(Number(valor)) || Number(valor) < 0)) continue;
+    if (campo !== 'valorTotal' && String(valor).trim() === '') continue;
+    if (igual(atual[campo], valor)) continue;
+    alteracoes.push({ campo, antes: atual[campo] ?? null, depois: valor });
+  }
+  return diffReimportacao(alteracoes);
+}
 // Mescla de três vias. Coleções com id são comparadas item a item; excluir ou
 // alterar o mesmo item simultaneamente gera conflito, nunca vence por relógio.
 export function mesclarConfiguracao(base, local, remoto) {
