@@ -1142,8 +1142,10 @@ test('retrabalho: dimensão vazia vira frase, não barra de "não informado"', (
      resposta e é ausência de resposta. */
   assert.ok(!/não informado/.test(html), 'ainda desenha "não informado" como categoria');
   assert.match(html, /Nenhuma das 2 O\.S tem isto preenchido/);
-  // Descrição permanece na O.S.; categoria exige confirmação explícita.
-  assert.match(html, /Sem categoria/);
+  // Descrição permanece na O.S.; categoria exige confirmação explícita. Sem ela, vale a descrição do ERP
+  // (M17, onda acabamento; trocado de propósito: na v164 tudo virava "Sem categoria").
+  assert.match(html, /Instalação de fachada/);
+  assert.doesNotMatch(html, /Sem categoria/);
   assert.match(html, /Por tipo de serviço/);
 });
 

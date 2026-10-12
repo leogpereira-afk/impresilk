@@ -1658,7 +1658,8 @@ function relatoriosEntregasHTML(lista, porNumero, estadoPCP) {
   const mediaMes = meses.length ? total / meses.length : 0;
 
   // 2. Tipo de serviço
-  const tiposR = agrupar(o => typeof OPREV!=='undefined'?OPREV.categoria(o,STORE.getCFG()):o.servico, 12);
+  // A categoria confirmada; sem ela, a descrição do ERP (M17, onda acabamento).
+  const tiposR = agrupar(o => typeof OPREV!=='undefined'?OPREV.tipo(o,STORE.getCFG()):o.servico, 12);
   const tiposHTML = barrasCasa(
     tiposR.map(t => ({ rotulo: t.rotulo, valor: t.valor, extra: `${t.n} O.S · ${dinheiroCurto(t.valor / t.n)}/O.S` })),
     dinheiroCurto
@@ -2300,7 +2301,7 @@ function renderEntregas() {
     .map(o => ({ erp: o, card: porNumero.get(String(o.numero || '').trim()) || null, pendente: aLancarSet.has(String(o.numero || '').trim()) }))
     // Técnico é a FICHA, não a grafia: "Osmane" e "Osmane V." são a mesma pessoa.
     .filter(x => !tecnico || (x.card && OPERACAO.equipe(x.card).some(a => nomeExibicaoCasa(a).chave === tecnico)))
-    .filter(x => !tipo || (typeof OPREV!=='undefined'?OPREV.categoria(x.card||x.erp,STORE.getCFG()):String((x.card && x.card.servico) || x.erp.servico || '').trim()) === tipo)
+    .filter(x => !tipo || (typeof OPREV!=='undefined'?OPREV.tipo(x.card||x.erp,STORE.getCFG()):String((x.card && x.card.servico) || x.erp.servico || '').trim()) === tipo)
     .sort((a, b) => String(b.erp.data).localeCompare(String(a.erp.data)) || String(b.erp.numero).localeCompare(String(a.erp.numero)));
   const acompanhamento = acompanhamentoEntregas(baseAcompanhamento);
   const focoEntregas = Object.hasOwn(acompanhamento.grupos, STATE._entFocoChip || '') ? STATE._entFocoChip : 'todas';
@@ -2322,7 +2323,10 @@ function renderEntregas() {
     if (!tecMapa.has(n.chave)) tecMapa.set(n.chave, n.nome);
   }
   const tecnicos = [...tecMapa.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  const tipos = typeof OPREV!=='undefined'?['Sem categoria',...OPREV.CATEGORIAS]:typeof tiposServicoHist === 'function' ? tiposServicoHist() : [];
+  /* O filtro de tipo (M17, onda acabamento): as categorias e as descrições do
+     ERP ainda sem categoria que aparecem no período (antes era só "Sem
+     categoria" e as categorias, e escolher uma dava "Nenhuma entrega"). */
+  const tipos = typeof OPREV!=='undefined'?OPREV.tiposDoFiltro(per.os.map(o => porNumero.get(String(o.numero || '').trim()) || o), STORE.getCFG()).concat(tipo && !OPREV.CATEGORIAS.includes(tipo) && !per.os.some(o => OPREV.tipo(porNumero.get(String(o.numero || '').trim()) || o, STORE.getCFG()) === tipo) ? [tipo] : []):typeof tiposServicoHist === 'function' ? tiposServicoHist() : [];
   const opt = (v, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(v)}</option>`;
   const dataBR = iso => { const d = OPERACAO.dia(iso); return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'; };
   const valorTxt = v => (v !== null && Number.isFinite(Number(v))) ? dinheiroCasa(Number(v)) : '<span class="badge sem-valor">sem valor</span>';
@@ -2439,7 +2443,7 @@ function renderEntregas() {
       ${erpComSaldoHTML(listaErpComSaldo(todas))}
       ${prazosParaConferirHTML(todas)}
 
-      ${lista.length ? (porOS ? porOSSecaoHTML() : STATE._entVista === 'cards' ? cards() : tabela()) : emptyState('', focoEntregas !== 'todas' ? 'Nenhuma O.S. neste filtro' : vazioEntregas(per).titulo, focoEntregas !== 'todas' ? 'Escolha outro chip ou ajuste o período.' : vazioEntregas(per).dica) + (porOS && typeof porOSVazioPeriodoHTML === 'function' ? porOSVazioPeriodoHTML() : '')}
+      ${lista.length ? (porOS ? porOSSecaoHTML() : STATE._entVista === 'cards' ? cards() : tabela()) : emptyState('', focoEntregas !== 'todas' || ((tipo || tecnico) && per.os.length) ? 'Nenhuma O.S. neste filtro' : vazioEntregas(per).titulo, focoEntregas !== 'todas' || ((tipo || tecnico) && per.os.length) ? 'Escolha outro tipo, técnico ou chip, ou ajuste o período.' : vazioEntregas(per).dica) + (porOS && typeof porOSVazioPeriodoHTML === 'function' ? porOSVazioPeriodoHTML() : '')}
       ${lista.length ? prazoEntregasHTML(lista.map(x => x.erp), porNumero) : ''}
       ${relatoriosEntregasHTML(lista.map(x => x.erp), porNumero, estadoPCP)}
       ${relatorioAnosHTML()}
@@ -2846,7 +2850,7 @@ function retrabalhoHTML(f) {
      pergunta, respostas opostas -- e a errada e a que vai para a Gestao e
      para o Modo TV. Aqui passa a valer a MESMA regra da outra tela. */
   const etapas = contar('etapaOrigem'), causas = contar(o => o.causaRaiz || o.causa), responsaveis = contar('responsavelEtapa');
-  const tipos = contar(o=>o.servico && typeof OPREV!=='undefined'?OPREV.categoria(o,STORE.getCFG()):o.servico), clientes = contar('cliente');
+  const tipos = contar(o=>o.servico && typeof OPREV!=='undefined'?OPREV.tipo(o,STORE.getCFG()):o.servico), clientes = contar('cliente');
   /* Uma dimensão 100% vazia não vira gráfico: vira uma frase que diz o que
      preencher e onde. Gráfico de um item só chamado "não informado" ocupa o
      lugar da informação sem ser informação. */
