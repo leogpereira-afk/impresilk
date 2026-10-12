@@ -185,7 +185,7 @@ test('item 29: a cobertura do mês vem acima do pódio; abaixo de 50% do valor o
   const iCob = html.indexOf('class="perf-cob-extra perf-cob-mes'), iRank = html.indexOf('class="perf-ranking'), iPodio = html.indexOf('class="perf-podio');
   assert.ok(iCob > 0 && iRank > 0 && iCob < iRank, 'a linha da cobertura do mês vem antes do ranking');
   assert.ok(iPodio > iRank, 'o pódio continua à vista');
-  assert.match(html, /Cobertura do mês: <strong>40% do valor<\/strong> no ranking · <strong>3 de 5 entregas<\/strong> do mês contam \(as confirmadas e com valor; 3 lançadas no PCP e 2 a lançar\)\. Ficam de fora 2 baixas do ERP a lançar \(R\$ 900\.00\)/);
+  assert.match(html, /Cobertura do mês: <strong>40% do valor<\/strong> no ranking · <strong>3 de 5 entregas<\/strong> do mês \(2 são baixas do ERP a lançar, R\$ 900\.00\) <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento<\/button>/);
   assert.match(html, /<p class="perf-aviso perf-aviso-forte" role="note"><strong>Este pódio não representa o mês:<\/strong> só 40% do valor/);
   assert.ok(html.indexOf('perf-aviso-forte') < iPodio, 'o aviso vem antes do pódio');
   // Com metade ou mais do valor, sem o aviso forte.

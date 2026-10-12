@@ -371,9 +371,10 @@ test('revisão fechamento: U3, U4 e U5, só a cobertura do mês sobe; as baixas 
   assert.ok(iQuadro > iComo && iComo > iPodio, 'o quadro "Participantes nas entregas" voltou para depois de "Como interpretar", como na v166');
   // U4. Caso ruim: "N baixas do ERP" aparecia três vezes (linha do mês, aviso do pódio e linha do lançamento).
   assert.equal((html.match(/baixas? do ERP/g) || []).length, 1, 'uma menção só às baixas do ERP');
-  assert.match(html, /Ficam de fora 2 baixas do ERP a lançar \(R\$ 900\.00\)\. <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento<\/button>/);
   // U4. Os rótulos dizem a diferença: o mês inteiro (com as baixas a lançar) lá em cima, só as lançadas no PCP no quadro.
-  assert.match(html, /<strong>2 de 5 entregas<\/strong> do mês contam \(as confirmadas e com valor; 3 lançadas no PCP e 2 a lançar\)/);
+  assert.match(html, /<strong>2 de 5 entregas<\/strong> do mês \(2 são baixas do ERP a lançar, R\$ 900\.00\) <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento<\/button><\/p>/);
+  assert.match(html, /title="No ranking entram as entregas confirmadas e com valor\. O mês conta também as que ainda esperam lançamento\."/);
+  assert.match(html, /das lançadas no PCP neste período|Todas as 3 entregas do período têm participantes/);
   assert.match(html, /<strong>3 de 3<\/strong> entregas com participantes|Todas as 3 entregas do período têm participantes/);
   // U5. Com pódio, o aviso forte vem antes dele.
   assert.ok(html.indexOf('perf-aviso-forte') > 0 && html.indexOf('perf-aviso-forte') < iPodio);
@@ -415,7 +416,7 @@ test('revisão fechamento: U8, o selo do mês é legível de longe na TV e desta
   // Caso ruim: 16 px a 1920 (o título tinha 41,6 px).
   assert.ok(px(1920) >= 28, 'a 1920 px o selo tem ' + px(1920) + ' px');
   assert.ok(px(375) >= 15 && px(375) <= 17, 'e não estoura no celular: ' + px(375) + ' px');
-  assert.match(css, /\.tv-head\{flex-wrap:wrap/);
+  assert.match(css, /\.tv-head>\.tv-relogio\{grid-column:2;grid-row:1\}\.tv-head>\.tv-selo\{grid-column:1\/-1;grid-row:2;justify-self:start\}/, 'o relógio fica na linha do título e o selo vai para a linha de baixo');
   assert.match(css, /\.tv-selo\.ok\{/);
   // ranking.html: antes, o fim da legenda cinza de 12 px; agora um selo próprio, acima dos números.
   const html = ler('ranking.html'), rcss = ler('ranking.css');

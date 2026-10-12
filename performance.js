@@ -1715,9 +1715,8 @@ function perfCoberturaMes(regs) {
 function perfCoberturaMesHTML(regs) {
   const m = perfCoberturaMes(regs);
   if (!m) return '';
-  const lancadas = m.entregas - m.aLancar;
-  const fora = m.aLancar ? ` Ficam de fora ${m.aLancar} ${m.aLancar === 1 ? 'baixa do ERP a lançar' : 'baixas do ERP a lançar'} (${esc(dinheiroCasa(m.aLancarCentavos / 100))}). <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento</button>` : '';
-  return `<p class="perf-cob-extra perf-cob-mes${m.baixa ? ' baixa' : ''}">Cobertura do mês: <strong>${m.pct}% do valor</strong> no ranking · <strong>${m.noRanking} de ${m.entregas} entregas</strong> do mês contam (as confirmadas e com valor; ${lancadas} ${lancadas === 1 ? 'lançada' : 'lançadas'} no PCP${m.aLancar ? ` e ${m.aLancar} a lançar` : ''}).${fora}</p>`;
+  const fora = m.aLancar ? ` (${m.aLancar === 1 ? '1 é baixa do ERP a lançar' : m.aLancar + ' são baixas do ERP a lançar'}, ${esc(dinheiroCasa(m.aLancarCentavos / 100))}) <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento</button>` : '';
+  return `<p class="perf-cob-extra perf-cob-mes${m.baixa ? ' baixa' : ''}" title="No ranking entram as entregas confirmadas e com valor. O mês conta também as que ainda esperam lançamento.">Cobertura do mês: <strong>${m.pct}% do valor</strong> no ranking · <strong>${m.noRanking} de ${m.entregas} entregas</strong> do mês${fora}</p>`;
 }
 /* Abaixo de 50% do valor, o pódio continua à vista (decisão do dono), com o
    aviso forte de que ele não representa o mês. Só junto do pódio (U5 da
@@ -1726,7 +1725,7 @@ function perfCoberturaMesHTML(regs) {
 function perfAvisoPodioHTML(regs, podio) {
   const m = perfCoberturaMes(regs);
   if (!m || !m.baixa || !podio) return '';
-  return `<p class="perf-aviso perf-aviso-forte" role="note"><strong>Este pódio não representa o mês:</strong> só ${m.pct}% do valor das entregas do período está no ranking. Confira e lance as entregas antes de divulgar.</p>`;
+  return `<p class="perf-aviso perf-aviso-forte" role="note"><strong>Este pódio não representa o mês:</strong> só ${m.pct}% do valor está no ranking. Confira e lance as entregas antes de divulgar.</p>`;
 }
 /* O TOPO DOS RANKINGS (U3 da revisão da onda fechamento): só a linha da
    cobertura do mês e, no mês com revisão, o aviso do mês fechado (M8), em
