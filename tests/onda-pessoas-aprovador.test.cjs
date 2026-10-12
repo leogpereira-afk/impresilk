@@ -105,7 +105,7 @@ test('só o admin designa; o pcp lê; motivo, ID e pessoa são conferidos (400),
   assert.equal((await gravar(e, {operacao:'substituto', substitutoId:'700002', de:'2026-12-05', ate:'2026-12-04'})).status, 400, 'fim antes do início');
   const s = await gravar(e, {operacao:'substituto', substitutoId:'700003', de:'2026-12-02'});
   assert.equal(s.status, 200);
-  assert.match(s.avisos.join(' '), /Outro Gestor Fictício não tem acesso ao PCP com senha/, 'quem não tem conta ligada à ficha é avisado');
+  assert.match(s.avisos.join(' '), /Outro Gestor Fictício não consegue aprovar pela tela: precisa de acesso pcp com senha ligado à ficha/, 'quem não tem conta ligada à ficha é avisado (texto da revisão da onda pessoas, P2)');
   const l = await e.call({action:'comissaoAprovadorLer'}, TITULAR);
   assert.equal(l.status, 200);
   assert.equal(l.vigente.modo, 'substituto'); assert.equal(l.config.substituto.id, '700003');

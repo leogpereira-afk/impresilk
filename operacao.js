@@ -52,7 +52,9 @@ const OPERACAO = (() => {
        de mandar e marca `idRepetido` no resto; a régua também percebe o par
        sozinha. ID repetido nunca é o resultado de um nome: melhor "sem ficha"
        do que o ponto indo para a pessoa errada. Contrato com contrato do mesmo
-       ID é a mesma pessoa renovada, não repetição. */
+       ID é a mesma pessoa renovada, não repetição. Duas FICHAS com o mesmo ID e
+       CPFs diferentes (o ID gravado da D-015) só o servidor percebe, pelo CPF:
+       chegam com `idRepetido` (juntarFreelancers), e o ID não é de nenhuma. */
     const repetidos = new Set(fichas.filter(p => p.idRepetido === true).map(p => p.id));
     const tipoDoId = new Map();
     for (const p of fichas) {
@@ -132,10 +134,12 @@ const OPERACAO = (() => {
       const s = String(entrada ?? '').trim();
       const id = idDe(s);
       if (!id) return s;
-      if (!rotulos.has(id)) { const p = porId.get(id); rotulos.set(id, p ? curto(p) : ehIdPessoa(s) ? 'ID ' + s : s); }
+      // ID repetido (dois cadastros de pessoas diferentes): nenhum dos dois dá o nome.
+      if (!rotulos.has(id)) { const p = repetidos.has(id) ? null : porId.get(id); rotulos.set(id, p ? curto(p) : repetidos.has(id) ? 'ID ' + id + ' (repetido no RH)' : ehIdPessoa(s) ? 'ID ' + s : s); }
       return rotulos.get(id);
     };
-    const pessoa = entrada => { const id = idDe(entrada); return id ? (porId.get(id) || { id, chave: '', nome: '', semFicha: true }) : null; };
+    // O ID repetido não é de nenhum dos dois cadastros: a pessoa fica sem ficha até o RH corrigir.
+    const pessoa = entrada => { const id = idDe(entrada); if (!id) return null; if (repetidos.has(id)) return { id, chave: '', nome: '', semFicha: true, repetido: true }; return porId.get(id) || { id, chave: '', nome: '', semFicha: true }; };
     const repetido = id => repetidos.has(String(id ?? '').trim());
     return { idDe, chave, nome, pessoa, fixado, fichas, repetido };
   }

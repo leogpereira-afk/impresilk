@@ -1,7 +1,7 @@
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
-import { idDoCadastroRH, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { idDoCadastroRH, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
@@ -647,6 +647,35 @@ async function comissaoAprovadorEventos(limite = 1): Promise<any[]> {
 async function comissaoAprovadorAtual(): Promise<any | null> {
   const [ultimo] = await comissaoAprovadorEventos(1);
   return ultimo && /^\d{6}$/.test(String(ultimo.titularId || "")) ? { titularId: ultimo.titularId, substituto: ultimo.substituto || null, em: ultimo.em } : null;
+}
+/* AS CONTAS DA CENTRAL DE ACESSOS (acesso_conta): só o login, o ID da pessoa
+   ligada, se está ativa e o tipo. Uma leitura por minuto. Quem é a conta em
+   ID mora em idDaConta (_shared/pcp-integridade.mjs). */
+let _contasAcesso: { ate: number; contas: any[] } | null = null;
+async function contasAcesso(): Promise<any[]> {
+  if (_contasAcesso && _contasAcesso.ate > Date.now()) return _contasAcesso.contas;
+  const { data, error } = await sb.from("acesso_conta").select("usuario, id_pessoa, ativo, tipo");
+  if (error) throw new Error(error.message);
+  const contas = (data ?? []) as any[];
+  _contasAcesso = { ate: Date.now() + 60_000, contas };
+  return contas;
+}
+/* QUEM CONSEGUE APROVAR A COMISSÃO PELA TELA (P2 da revisão da onda
+   pessoas): a tela de apuração e o diálogo da comissão só abrem para admin e
+   pcp com senha, e a porta só reconhece a pessoa pelo ID da conta. Devolve os
+   IDs que têm conta pcp ou admin ativa no PCP ligada a eles (idDaConta). */
+async function idsQueAprovamPelaTela(regua: any): Promise<Set<string>> {
+  const { data, error } = await sb.from("equipe_contas").select("usuario, papel, ativo").eq("sistema", "pcp");
+  if (error) throw new Error(error.message);
+  let central: any[] = [];
+  try { central = await contasAcesso(); } catch { central = []; }
+  const ids = new Set<string>();
+  for (const c of (data ?? []) as any[]) {
+    if (c.ativo === false || !["pcp", "admin"].includes(String(c.papel || ""))) continue;
+    const id = idDaConta(String(c.usuario || ""), central, regua);
+    if (id) ids.add(id);
+  }
+  return ids;
 }
 async function pessoasDoPCP(config?: any) {
   const cfg = config ?? (await getCfg()) ?? {};
@@ -1623,10 +1652,15 @@ Deno.serve(async (req: Request) => {
     if (ehToqueNoNome) {
       try { porId = idDoCracha(quemToque(), await pessoasReq()); }
       catch { porId = ehIdPessoa(cracha.id) ? String(cracha.id).trim() : ""; }
-    } else if (ehIdPessoa(cracha.id)) {
-      porId = String(cracha.id).trim();
     } else {
-      try { porId = idDaGestao(login, await pessoasReq()); } catch { porId = ""; }
+      /* A conta da gestão: o ID assinado no crachá; senão a conta ligada na
+         Central de Acessos; senão o apelido (idDaConta). ID repetido no RH
+         (dois cadastros de pessoas diferentes) não é de ninguém. */
+      try {
+        const regua = await pessoasReq();
+        if (ehIdPessoa(cracha.id)) porId = regua.repetido(String(cracha.id).trim()) ? "" : String(cracha.id).trim();
+        else { let central: any[] = []; try { central = await contasAcesso(); } catch { central = []; } porId = idDaConta(login, central, regua); }
+      } catch { porId = ehIdPessoa(cracha.id) ? String(cracha.id).trim() : ""; }
     }
     return (_autorAud = { nome, login, papel: String(cracha.papel ?? ""), porId });
   };
@@ -2047,7 +2081,7 @@ Deno.serve(async (req: Request) => {
           apuracao=COMISSAO.apurar(fonte,entrada,{aprovacoes:todas});
           // Nenhum nome inferido: o ID precisa existir no RH e não ser ambíguo.
           const pessoas=await pessoasDoPCP();
-          for(const p of apuracao.pessoas){const ficha=pessoas.pessoa(p.pessoaId);if(!ficha||ficha.semFicha){apuracao.pendencias.push("Cadastro inexistente ou ambíguo: "+p.pessoaId);}else p.nome=ficha.nome;}
+          for(const p of apuracao.pessoas){const ficha=pessoas.pessoa(p.pessoaId);if(!ficha||ficha.semFicha){apuracao.pendencias.push(pessoas.repetido(p.pessoaId)?"O ID "+p.pessoaId+" está em dois cadastros do RH, de pessoas diferentes: não paga ninguém até o RH corrigir.":"Cadastro inexistente ou ambíguo: "+p.pessoaId);}else p.nome=ficha.nome;}
           for(const l of apuracao.linhas)for(const p of l.pagamentos)p.nome=apuracao.pessoas.find((x:any)=>x.pessoaId===p.pessoaId)?.nome||p.pessoaId;
           apuracao=COMISSAO.conciliar(apuracao,revisoes.find((r:any)=>r.tipo==="aprovacao"&&r.apuracao.config.modo===apuracao.config.modo));
           apuracao.aprovavel=apuracao.pendencias.length===0;
@@ -3390,11 +3424,15 @@ Deno.serve(async (req: Request) => {
         const hoje = perfDia(new Date().toISOString());
         const regua = await pessoasDoPCP();
         const nomeDe = (id: string) => id ? String(regua.pessoa(id)?.nome || "") : "";
-        const leitura = async (avisos: string[] = []) => {
+        // Quem consegue aprovar pela tela (P2): a lista de escolha marca, e a gravação avisa.
+        let aprovamPelaTela: Set<string> | null = null;
+        try { aprovamPelaTela = await idsQueAprovamPelaTela(regua); } catch { aprovamPelaTela = null; }
+        const leitura = async (avisos: string[] = [], gravado: any = null) => {
           const eventos = await comissaoAprovadorEventos(30);
           const atual = eventos[0] && /^\d{6}$/.test(String(eventos[0].titularId || "")) ? { titularId: eventos[0].titularId, substituto: eventos[0].substituto || null } : null;
           const v = COMISSAO.aprovadorVigente(atual, hoje);
-          return resp({ hoje, avisos,
+          return resp({ hoje, avisos, ...(gravado ? { gravado } : {}),
+            ...(aprovamPelaTela ? { aprovamPelaTela: [...aprovamPelaTela].sort() } : {}),
             config: atual ? { titularId: atual.titularId, titularNome: nomeDe(atual.titularId),
               substituto: atual.substituto ? { ...atual.substituto, nome: nomeDe(atual.substituto.id), vigente: !!COMISSAO.substitutoVigente(atual, hoje) } : null } : null,
             vigente: { ...v, nome: nomeDe(v.id || "") },
@@ -3416,10 +3454,11 @@ Deno.serve(async (req: Request) => {
         // A pessoa precisa estar no RH, na ativa e com o ID só dela.
         const conferirPessoa = (id: string, papel: string) => {
           if (!/^\d{6}$/.test(id)) return `Escolha o ${papel} pelo ID de 6 dígitos.`;
+          // ID repetido primeiro: ele não é de nenhum dos cadastros (pessoa() devolve "sem ficha").
+          if (regua.repetido(id)) return `O ID ${id} está em dois cadastros do RH, de pessoas diferentes: ele não é de ninguém até o RH corrigir. Escolha o ${papel} depois da correção.`;
           const p: any = regua.pessoa(id);
           if (!p || p.semFicha) return `O ID do ${papel} não está no RH.`;
           if (p.desligado) return `O ${papel} escolhido já saiu da empresa.`;
-          if (regua.repetido(id)) return `O ID do ${papel} está repetido no RH (ficha e contrato). Confira no RH antes.`;
           return "";
         };
         let novo: any;
@@ -3448,16 +3487,17 @@ Deno.serve(async (req: Request) => {
           por: { nome: autor.nome, login: autor.login, papel: autor.papel, porId: autor.porId || "" } };
         const { error: erroGravar } = await sb.from("pcp_registros").insert({ colecao: COLECAO_APROVADOR, id: evento.id, registro: evento, apagado: false, atualizado_em: em });
         if (erroGravar) return resp({ error: erroGravar.code === "23505" ? "Outra mudança foi gravada ao mesmo tempo. Atualize e tente de novo." : "Não foi possível gravar agora. Tente de novo." }, erroGravar.code === "23505" ? 409 : 500);
-        // Aviso, não trava: quem não tem acesso com senha ligado à ficha não consegue aprovar.
+        /* Aviso, não trava (P2 da revisão da onda pessoas): quem não tem acesso
+           pcp com senha ligado à ficha não consegue aprovar pela tela. Vale
+           para o titular e para o substituto. O aviso volta junto do que foi
+           gravado, para a tela mostrar ao lado do bloco. */
         const avisos: string[] = [];
         const alvo = operacao === "titular" ? novo.titularId : operacao === "substituto" ? novo.substituto.id : "";
-        if (alvo) {
-          const ap = normPessoa(String(regua.pessoa(alvo)?.apelido || ""));
-          const { data: contas } = await sb.from("equipe_contas").select("usuario, papel, ativo").eq("sistema", "pcp");
-          const temConta = !!ap && ((contas ?? []) as any[]).some((c) => c.ativo !== false && normPessoa(String(c.usuario || "")) === ap);
-          if (!temConta) avisos.push(`${nomeDe(alvo) || "Esta pessoa"} não tem acesso ao PCP com senha cujo login seja o apelido da ficha do RH. Sem isso a porta não reconhece o ID dela e recusa a aprovação; o admin continua aprovando.`);
-        }
-        return await leitura(avisos);
+        if (alvo && (!aprovamPelaTela || !aprovamPelaTela.has(alvo)))
+          avisos.push(aprovamPelaTela
+            ? `${nomeDe(alvo) || "Esta pessoa"} não consegue aprovar pela tela: precisa de acesso pcp com senha ligado à ficha do RH (o login igual ao apelido da ficha, ou a conta ligada à pessoa na Central de Acessos). Até lá, o admin aprova.`
+            : `Não foi possível conferir agora se ${nomeDe(alvo) || "esta pessoa"} tem acesso pcp com senha ligado à ficha. Sem ele, ela não consegue aprovar pela tela; o admin aprova.`);
+        return await leitura(avisos, { operacao, id: alvo, nome: nomeDe(alvo) });
       }
 
       /* ---- pessoaPorDocumento: BUSCA DE PESSOA POR CPF OU CNPJ (item 21) ----

@@ -138,9 +138,11 @@ const ALOCUI = (() => {
     const p = O && typeof O.pessoaDe === 'function' ? O.pessoaDe(id) : null;
     const ficha = p && p.semFicha !== true ? p : null;
     const rotulo = O && typeof O.nomePessoa === 'function' ? O.nomePessoa(id) : '';
-    return {id, nome: rotulo || (ficha && ficha.nome) || 'ID ' + id, completo: ficha ? String(ficha.nome || '') : '',
-      foto: ficha && ficha.foto ? String(ficha.foto) : '', freelancer: !!(ficha && ficha.freelancer === true), semFicha: !ficha,
-      repetido: !!(O && typeof O.idRepetido === 'function' && O.idRepetido(id))};
+    // ID repetido (dois cadastros de pessoas diferentes): não é de nenhum dos dois, e o nome de um deles não aparece.
+    const repetido = !!(O && typeof O.idRepetido === 'function' && O.idRepetido(id));
+    return {id, nome: repetido ? 'ID ' + id : rotulo || (ficha && ficha.nome) || 'ID ' + id, completo: ficha ? String(ficha.nome || '') : '',
+      foto: ficha && ficha.foto ? String(ficha.foto) : '', freelancer: !!(ficha && ficha.freelancer === true), semFicha: !ficha && !repetido,
+      repetido};
   }
   function avatar(p) {
     const f = fn('avatarRH');
@@ -474,7 +476,7 @@ const ALOCUI = (() => {
     const tocados = new Set(), novos = [];
     for (const id of ids) {
       const p = pessoa(id);
-      if (p.repetido) { notas.push(`${p.nome}: ID repetido no RH (ficha e contrato). Confira o CPF no RH.`); continue; }
+      if (p.repetido) { notas.push(`O ${p.nome} é um ID repetido no RH (dois cadastros de pessoas diferentes). O RH precisa corrigir.`); continue; }
       const gi = ondeEsta(st, id);
       if (gi >= 0) {
         const g = st.aloc.grupos[gi];
@@ -496,7 +498,7 @@ const ALOCUI = (() => {
   function adicionarPessoa(st, grupo, id) {
     if (!ehId(id)) return 'Só entra na divisão quem tem ID do RH (6 dígitos).';
     const p = pessoa(id);
-    if (p.repetido) return `${p.nome}: ID repetido no RH (ficha e contrato). O RH precisa conferir o CPF.`;
+    if (p.repetido) return `O ${p.nome} é um ID repetido no RH (dois cadastros de pessoas diferentes). O RH precisa corrigir.`;
     const ja = ondeEsta(st, id);
     if (ja >= 0) return `${p.nome} já está na ${st.modo === 'pessoas' ? 'equipe' : 'divisão'} (${nomeGrupo(st, st.aloc.grupos[ja])}).`;
     let g = Number.isInteger(grupo) ? st.aloc.grupos[grupo] : null;
@@ -663,7 +665,7 @@ const ALOCUI = (() => {
        a sugestão que parte da O.S. antiga também precisa travar, senão a
        divisão ia e o servidor a descartava (ID em dois cadastros do RH). */
     const rep = [...new Set(motor().derivarEquipe(st.aloc))].filter(id => pessoa(id).repetido);
-    if (rep.length) return `${rep.map(id => pessoa(id).nome).join(', ')}: ID repetido no RH (ficha e contrato). O RH precisa conferir o CPF. Até lá, tire ${rep.length === 1 ? 'essa pessoa' : 'essas pessoas'} da divisão para gravar.`;
+    if (rep.length) return `${rep.length === 1 ? 'O ' + pessoa(rep[0]).nome + ' é um ID repetido' : 'Os ' + rep.map(id => pessoa(id).nome).join(', ') + ' são IDs repetidos'} no RH (dois cadastros de pessoas diferentes). O RH precisa corrigir. Até lá, tire ${rep.length === 1 ? 'essa pessoa' : 'essas pessoas'} da divisão para gravar.`;
     return motor().validar(st.aloc) || '';
   }
   /* A divisão pronta para enviar, só com o que a gestão edita. Nunca sai com

@@ -39,8 +39,18 @@ vez. Nada aqui foi feito no RH.
    grava `idPessoa` = 6 primeiros dígitos do CPF. Se o CPF é o mesmo de outro
    cadastro (o ex-colaborador que volta como freelancer), herda o `idPessoa`
    desse cadastro, não recalcula. Se os 6 dígitos já são de OUTRA pessoa (CPF
-   diferente), não grava o ID e avisa: o RH escolhe (o PCP já trava o ID
-   repetido e avisa a gestão).
+   diferente), não grava o ID e avisa: o RH escolhe. O PCP confere do lado
+   dele (revisão da onda pessoas, 12/10/2026): o ID que aparece em dois
+   cadastros de pessoas diferentes (duas fichas, ficha e contrato, ou dois
+   contratos, com CPFs diferentes ou sem CPF que prove ser a mesma pessoa,
+   inclusive o contrato com ID gravado e CPF inválido) é REPETIDO: nenhum dos
+   cadastros fica com ele. O nome, o crachá, a porta de aprovar a comissão e
+   a designação de titular ou substituto não chegam a esse ID, a prévia da
+   comissão não paga o ID (pendência), e a gestão vê o aviso "o ID está em
+   duas fichas" (sem CPF). A pessoa fica sem ID no PCP até o RH corrigir. Até
+   12/10/2026 a v169 só percebia o repetido entre ficha e contrato: a ficha B
+   que gravasse o ID da A passava a receber as O.S., o crachá e a aprovação
+   da A.
 2. NUNCA mudar o `idPessoa` no conserto do CPF. A gravação que troca o CPF
    mantém o campo; o servidor do RH preserva o valor gravado quando o envio
    vem sem ele (campo ausente nunca apaga) e recusa, com aviso, a troca vinda
@@ -56,7 +66,10 @@ vez. Nada aqui foi feito no RH.
    acima, hoje são 57 fichas e 2 contratos, sem caso que peça decisão. Incluir
    as fichas desligadas: o ID delas dá nome ao histórico.
 4. A conta de acesso (`acesso_conta.id_pessoa`) passa a copiar o
-   `idPessoa` da ficha (ou do contrato), em vez de recalcular pelo CPF.
+   `idPessoa` da ficha (ou do contrato), em vez de recalcular pelo CPF. O PCP
+   já lê essa ligação primeiro para saber quem é a conta da gestão (antes do
+   apelido igual ao login): conta de pessoa ativa com `id_pessoa` que não leva
+   a uma ficha na ativa, só dela, fica sem ID.
 5. A tela do RH mostra o ID gravado ao lado do nome (como já mostra o
    calculado) e, quando o CPF não começa por ele, a mesma marca do PCP.
 6. Testes no RH pelo caso ruim: CPF corrigido não muda o `idPessoa`; envio

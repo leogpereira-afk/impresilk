@@ -426,10 +426,14 @@ const COMISSAO = (() => {
     if (papel === 'admin') return {ok:true, como:'admin', vigente};
     if (vigente.modo === 'd013') return papel === 'pcp' ? {ok:true, como:'pcp', vigente} : {ok:false, vigente, erro:'A aprovação da comissão é da gestão do PCP (pcp ou admin).'};
     if (ehId6(id) && id === vigente.id) return {ok:true, como:vigente.modo, vigente};
+    /* O texto vai ao lado da linha "Quem aprova: ... O admin também aprova."
+       (comissao-ui.js): não repete o admin. O acesso sem ID ligado não é
+       chamado de "não titular": a porta só não sabe quem ele é. */
+    const semLigacao = 'Seu acesso não está ligado a uma ficha do RH, então a porta não reconhece você pelo ID. Para aprovar, o admin liga a conta à ficha: o login igual ao apelido da ficha do RH, ou a conta ligada à pessoa na Central de Acessos.';
     if (vigente.modo === 'substituto') return {ok:false, vigente, erro:id === vigente.titularId
-      ? `Enquanto o substituto designado pela gestão estiver valendo${vigente.ate ? ' (até '+diaBR(vigente.ate)+')' : ''}, quem aprova a comissão é ele, não o titular. O admin também aprova.`
-      : 'Quem aprova a comissão hoje é o substituto designado pela gestão (ou o admin).'};
-    return {ok:false, vigente, erro:'Quem aprova a comissão é o titular designado pela gestão (ou o admin).' + (ehId6(id) ? '' : ' Este acesso não tem o ID de 6 dígitos ligado: o login precisa ser o apelido da ficha do RH.')};
+      ? `Enquanto o substituto designado pela gestão estiver valendo${vigente.ate ? ' (até '+diaBR(vigente.ate)+')' : ''}, quem aprova a comissão é ele, não o titular.`
+      : ehId6(id) ? 'Você não aprova: hoje quem aprova a comissão é o substituto designado pela gestão.' : semLigacao};
+    return {ok:false, vigente, erro:ehId6(id) ? 'Você não aprova: quem aprova a comissão é o titular designado pela gestão.' : semLigacao};
   }
   return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase,comissoesAcumuladas,TEXTO_ORIGEM_A_DEFINIR,demonstrativosVigentes,falhaComprovadaNoDia,comFalhasComprovadas,
     dinheiroDoRegistro,dinheiroDaFonte,mudancasDeDinheiro,textoMudancasDeDinheiro,totaisDaRevisao,diferencaContraExportada,

@@ -464,7 +464,8 @@ test('revisão: ID repetido vindo da O.S. antiga trava a gravação e marca o ch
   A.iniciar('t', {os: lista[0], equipes: EQUIPES, papel: 'pcp'});
   A.executar('t', {alocAcao: 'lider', g: '0', p: '100001'});
   // Caso ruim: nada travava e a divisão ia (o servidor a descartava pelo ID em dois cadastros).
-  assert.match(A.bloqueio('t'), /^Rita: ID repetido no RH \(ficha e contrato\)\. O RH precisa conferir o CPF\. Até lá, tire essa pessoa da divisão para gravar\./);
+  // Revisão da onda pessoas (12/10/2026): o ID repetido não é de nenhum dos dois cadastros, então nem o nome de um deles aparece.
+  assert.match(A.bloqueio('t'), /^O ID 100009 é um ID repetido no RH \(dois cadastros de pessoas diferentes\)\. O RH precisa corrigir\. Até lá, tire essa pessoa da divisão para gravar\./);
   const chip = /<li class="aloc-chip[^"]*">(?:(?!<\/li>)[\s\S])*?ID 100009[\s\S]*?<\/li>/.exec(A.html('t'))[0];
   assert.match(chip, /<span class="aloc-badge alerta">ID repetido no RH<\/span>/);
   assert.equal((await A.gravarNaOS('t', {usuario: 'Gestor', prazoMs: 20})).estado, 'invalida');

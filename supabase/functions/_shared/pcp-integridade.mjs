@@ -1203,7 +1203,9 @@ export function resolverPessoas(dados = {}) {
      de mandar e marca `idRepetido` no resto; a régua também percebe o par
      sozinha. ID repetido nunca é o resultado de um nome: melhor "sem ficha"
      do que o ponto indo para a pessoa errada. Contrato com contrato do mesmo
-     ID é a mesma pessoa renovada, não repetição. */
+     ID é a mesma pessoa renovada, não repetição. Duas FICHAS com o mesmo ID e
+     CPFs diferentes (o ID gravado da D-015) só o servidor percebe, pelo CPF:
+     chegam com `idRepetido` (juntarFreelancers), e o ID não é de nenhuma. */
   const repetidos = new Set(fichas.filter(p => p.idRepetido === true).map(p => p.id));
   const tipoDoId = new Map();
   for (const p of fichas) {
@@ -1283,10 +1285,12 @@ export function resolverPessoas(dados = {}) {
     const s = String(entrada ?? '').trim();
     const id = idDe(s);
     if (!id) return s;
-    if (!rotulos.has(id)) { const p = porId.get(id); rotulos.set(id, p ? curto(p) : ehIdPessoa(s) ? 'ID ' + s : s); }
+    // ID repetido (dois cadastros de pessoas diferentes): nenhum dos dois dá o nome.
+    if (!rotulos.has(id)) { const p = repetidos.has(id) ? null : porId.get(id); rotulos.set(id, p ? curto(p) : repetidos.has(id) ? 'ID ' + id + ' (repetido no RH)' : ehIdPessoa(s) ? 'ID ' + s : s); }
     return rotulos.get(id);
   };
-  const pessoa = entrada => { const id = idDe(entrada); return id ? (porId.get(id) || { id, chave: '', nome: '', semFicha: true }) : null; };
+  // O ID repetido não é de nenhum dos dois cadastros: a pessoa fica sem ficha até o RH corrigir.
+  const pessoa = entrada => { const id = idDe(entrada); if (!id) return null; if (repetidos.has(id)) return { id, chave: '', nome: '', semFicha: true, repetido: true }; return porId.get(id) || { id, chave: '', nome: '', semFicha: true }; };
   const repetido = id => repetidos.has(String(id ?? '').trim());
   return { idDe, chave, nome, pessoa, fixado, fichas, repetido };
 }
@@ -1426,23 +1430,34 @@ export function juntarFreelancers(fichas, contratos, { hoje = '' } = {}) {
     }
     ficam.push(c);
   }
-  // Mesmos 6 dígitos, CPFs diferentes: entre ficha e contrato, ou entre dois contratos.
-  const porId = new Map();
-  for (const f of comId) if (!fichasFora.has(String(f.chave))) { const l = porId.get(f.id) || []; l.push({ nome: String(f.nome || ''), cpf: soDigitosCpf(f.cpf) }); porId.set(f.id, l); }
-  const contratosPorId = new Map();
-  for (const c of ficam) { const l = contratosPorId.get(c.entrada.id) || []; l.push(c); contratosPorId.set(c.entrada.id, l); }
-  for (const [id, cs] of contratosPorId) {
-    const outros = porId.get(id) || [];
-    const cpfs = new Set([...outros.map(o => o.cpf), ...cs.map(c => c.cpf)]);
-    if (cpfs.size < 2) continue;
+  /* O MESMO ID EM CADASTROS DE PESSOAS DIFERENTES (CPFs diferentes): duas
+     fichas, ficha e contrato, ou dois contratos. Vale para o ID do CPF (dois
+     CPFs que começam igual) e para o ID gravado (D-015: a ficha B que grava o
+     ID da A). NENHUM dos cadastros fica com o ID: o nome, o crachá, a
+     aprovação e a comissão não chegam a ele até o RH corrigir (revisão
+     "com dinheiro" da onda pessoas, 12/10/2026: a ficha B gravava o ID da A
+     e passava a abrir, aprovar e receber pela A). CPF vazio ou que não
+     confere conta como outra pessoa: sem o CPF não há como provar que é a
+     mesma. O contrato com ID gravado e CPF inválido entra na conferência. */
+  const cadastros = new Map();
+  const somar = (id, x) => { if (!id) return; const l = cadastros.get(id) || []; l.push(x); cadastros.set(id, l); };
+  for (const f of comId) if (!fichasFora.has(String(f.chave))) somar(String(f.id), { tipo: 'ficha', nome: String(f.nome || '').trim(), cpf: soDigitosCpf(f.cpf) });
+  for (const c of [...ficam, ...semCpf]) somar(c.entrada.id, { tipo: 'contrato', nome: c.entrada.nome, cpf: c.cpf });
+  const quantos = (n, um, dois, muitos) => n === 1 ? um : n === 2 ? dois : `${n} ${muitos}`;
+  for (const [id, cs] of cadastros) {
+    const pessoas = new Set(cs.filter(x => x.cpf).map(x => x.cpf)).size + cs.filter(x => !x.cpf).length;
+    if (pessoas < 2) continue;
     repetidos.add(id);
-    const nomes = [...outros.map(o => `na ficha de ${o.nome}`), ...cs.map(c => `no contrato de freelancer de ${c.entrada.nome}`)];
-    avisos.push(`O ID ${id} aparece em ${nomes.join(' e ')}, com CPFs diferentes. Ninguém é escolhido por esse ID até o RH conferir os CPFs.`);
+    const nf = cs.filter(x => x.tipo === 'ficha').length, nc = cs.length - nf;
+    const onde = [nf ? quantos(nf, 'uma ficha', 'duas fichas', 'fichas') : '', nc ? quantos(nc, 'um contrato de freelancer', 'dois contratos de freelancer', 'contratos de freelancer') : ''].filter(Boolean).join(' e ');
+    const quem = cs.map(x => (x.tipo === 'ficha' ? 'a ficha de ' : 'o contrato de ') + x.nome).join(', ');
+    avisos.push(`O ID ${id} está em ${onde} do RH (${quem}), de pessoas com CPFs diferentes. Nenhum desses cadastros fica com o ID até o RH corrigir: o PCP não liga a ele nome, crachá, aprovação nem comissão. Se um ID foi gravado errado, só o RH corrige, pela tela.`);
   }
   const contratos2 = [...ficam, ...semCpf].map(c => repetidos.has(c.entrada.id) ? { ...c.entrada, idRepetido: true } : c.entrada);
   // ID gravado que discorda do CPF, ou fora do formato: a gestão é avisada (D-015).
-  for (const f of Array.isArray(fichas) ? fichas : []) { const a = avisoIdDoCadastro(f); if (a) avisos.push(a); }
-  for (const c of contratos2) { const a = avisoIdDoCadastro(c); if (a) avisos.push(a); }
+  // O ID repetido já tem o aviso dele: o "vale o ID gravado" seria mentira ali.
+  for (const f of Array.isArray(fichas) ? fichas : []) { const a = repetidos.has(String(f?.id || '')) ? '' : avisoIdDoCadastro(f); if (a) avisos.push(a); }
+  for (const c of contratos2) { const a = repetidos.has(c.id) ? '' : avisoIdDoCadastro(c); if (a) avisos.push(a); }
   return { contratos: contratos2, fichasFora, repetidos, avisos };
 }
 
@@ -1465,7 +1480,9 @@ export function idDoCracha(quem, pessoas) {
   const r = pessoas && typeof pessoas.chave === 'function' ? pessoas : null;
   // Nome com decisão salva (vínculo ou "sem ficha") não cai no `id` antigo.
   const fixo = !!(r && nome && typeof r.fixado === 'function' && r.fixado(nome));
-  return (r && nome ? r.idDe(nome) : '') || (!fixo && ehIdPessoa(q.id) ? String(q.id).trim() : '');
+  // O `id` assinado no crachá também não vale se hoje está repetido no RH.
+  const repetido = id => !!(r && typeof r.repetido === 'function' && r.repetido(id));
+  return (r && nome ? r.idDe(nome) : '') || (!fixo && ehIdPessoa(q.id) && !repetido(String(q.id).trim()) ? String(q.id).trim() : '');
 }
 /* QUEM É A CONTA DA GESTÃO, em ID. O crachá da gestão não traz ID; a única
    ligação aceita é a da identidade única (apelido do RH = login): UMA ficha,
@@ -1478,7 +1495,29 @@ export function idDaGestao(login, pessoas) {
   const fichas = pessoas && Array.isArray(pessoas.fichas) ? pessoas.fichas : [];
   if (!ap) return '';
   const achadas = fichas.filter(p => normPessoa(p.apelido) === ap);
-  return achadas.length === 1 && !achadas[0].desligado && ehIdPessoa(achadas[0].id) ? String(achadas[0].id) : '';
+  // ID repetido (dois cadastros de pessoas diferentes) não é de ninguém.
+  const repetido = id => achadas[0].idRepetido === true || (typeof pessoas.repetido === 'function' && pessoas.repetido(id));
+  return achadas.length === 1 && !achadas[0].desligado && ehIdPessoa(achadas[0].id) && !repetido(String(achadas[0].id)) ? String(achadas[0].id) : '';
+}
+/* QUEM É A CONTA, em ID, lendo primeiro a Central de Acessos (P3 da revisão
+   da onda pessoas, 12/10/2026). A conta de pessoa da Central guarda o ID dela
+   (acesso_conta.id_pessoa), posto pelo admin: essa ligação vale antes do
+   apelido. Conta com ID na Central que não leva a uma pessoa na ativa, só
+   dela (ID repetido, sem ficha, quem saiu, ou dois IDs para o mesmo login),
+   fica SEM ID: cair no apelido poderia dar outra pessoa. Sem a conta ligada
+   na Central, a régua de sempre (idDaGestao: o login é o apelido de uma
+   ficha só). `contas`: linhas {usuario, id_pessoa, ativo, tipo}. */
+export function idDaConta(login, contas, pessoas) {
+  const ap = normPessoa(login);
+  if (!ap) return '';
+  const ligadas = (Array.isArray(contas) ? contas : []).filter(c => c && c.ativo !== false && String(c.tipo || 'pessoa') !== 'funcao'
+    && normPessoa(c.usuario) === ap && ehIdPessoa(c.id_pessoa));
+  if (!ligadas.length) return idDaGestao(login, pessoas);
+  const ids = [...new Set(ligadas.map(c => String(c.id_pessoa).trim()))];
+  if (ids.length !== 1) return '';
+  const id = ids[0], fichas = pessoas && Array.isArray(pessoas.fichas) ? pessoas.fichas : [];
+  const repetido = (typeof pessoas?.repetido === 'function' && pessoas.repetido(id)) || fichas.some(p => String(p.id) === id && p.idRepetido === true);
+  return !repetido && fichas.some(p => String(p.id) === id && !p.desligado) ? id : '';
 }
 export function pertenceEquipe(os, quem, pessoas) {
   const q = typeof quem === 'object' && quem ? quem : { nome: quem };
