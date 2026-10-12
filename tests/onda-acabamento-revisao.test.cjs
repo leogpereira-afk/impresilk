@@ -135,7 +135,7 @@ test('revisão acabamento: o Histórico diz "Edição recusada" e o que a pessoa
   // Caso ruim (acfaae1): a ação não tinha rótulo e lia "Alterou", com "antiga → nova" como se tivesse gravado.
   assert.doesNotMatch(html, /<br>Alterou</);
   assert.match(html, /Edição recusada: a O\.S\. estava excluída; nada foi gravado/);
-  assert.match(html, /tentou mudar de antiga fictícia para edição fictícia feita sem sinal \(não gravado\)/);
+  assert.match(html, /<strong>Obs técnicas<\/strong>: tentou mudar de antiga fictícia para edição fictícia feita sem sinal \(não gravado\)/, 'com o nome do campo como a ficha o chama');
   assert.doesNotMatch(html, /antiga fictícia → /);
   // Entregas por O.S. usa o mesmo texto.
   ctx.__a = entrada;

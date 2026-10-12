@@ -2459,7 +2459,17 @@ const AUD_ROTULOS = {
   // O valor das entregas conferidas que mudou pelo rateio (revisão da onda acabamento, D1), em centavos.
   valorConferido: 'Valor das entregas conferidas',
   // Os itens com valor que a gravação de quem não vê valores repôs (M19, onda acabamento).
-  'itens.valores': 'Valores dos itens'
+  'itens.valores': 'Valores dos itens',
+  /* Os campos da ficha que só a edição recusada (M18) traz ao Histórico: ela
+     guarda tudo o que o envio mudava, e o nome interno ("obsTecnicas") não é
+     de gente (revisão da onda acabamento, U2). */
+  cliente: 'Cliente', contato: 'Contato', endereco: 'Endereço', whatsapp: 'WhatsApp', servico: 'Serviço', vendedor: 'Vendedor',
+  obsTecnicas: 'Obs técnicas', obsPCP: 'Observação do PCP', obsAgenda: 'Observação da agenda', responsavelPCP: 'Responsável no PCP',
+  responsavelEtapa: 'Responsável pela etapa', problema: 'Problema', confCanal: 'Canal da confirmação', confHora: 'Hora da confirmação',
+  confObs: 'Observação da confirmação', confPor: 'Confirmado por', confAcompanha: 'Quem acompanha', confAcompanhaContato: 'Contato de quem acompanha',
+  kmSaida: 'Km na saída', kmRetorno: 'Km no retorno', osOriginal: 'O.S. original', dataEntrada: 'Data de entrada', dataRetrabalho: 'Data do retrabalho',
+  dataResolvido: 'Data em que foi resolvido', resolvidoPor: 'Resolvido por', checkout: 'Encerramento na obra', acesso: 'Acesso', fixacao: 'Fixação',
+  ferramentas: 'Ferramentas', suprimentos: 'Suprimentos'
 };
 // Por dentro dos campos que são objeto (conferência da volta, limpeza do
 // carro, exceção, entrega lançada, baixa do ERP): rótulo em português. O ID
