@@ -91,7 +91,7 @@ async function perfComissaoAbrir() {
     const sel=conteudo.querySelector('#comissao-versao'),erro=conteudo.querySelector('#comissao-erro');
     const escolhida=()=>revisoes.find(r=>r.id===sel.value)||ultima;
     sel.onchange=()=>{conteudo.querySelector('#comissao-resumo').innerHTML=comissaoResumoHTML(escolhida(),revisoes,exportacoes);};
-    conteudo.querySelector('#comissao-nova').onclick=()=>comissaoEditar(fonte,ultima,periodo,d,resposta.pessoas||[]);
+    conteudo.querySelector('#comissao-nova').onclick=()=>comissaoEditar(fonte,ultima,periodo,d,resposta.pessoas||[],revisoes);
     conteudo.querySelector('#comissao-aprovar').onclick=()=>{
       const r=escolhida(),e=COMISSAO.erroAprovacao(r,r?.hash,true);
       if(e||r!==ultima){erro.textContent=e||'Apenas a última prévia pode ser aprovada.';return;}
@@ -108,8 +108,20 @@ async function perfComissaoAbrir() {
     conteudo.querySelector('#comissao-exportar').onclick=async()=>{try{const r=escolhida();const out=await STORE.api({action:'performanceComissaoExportar',...periodo,id:r?.id});if(!out.ok)throw new Error(out.error);const url=URL.createObjectURL(new Blob([out.csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=out.arquivo;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);erro.textContent=out.aviso+comissaoConferenciaTxt(out.conferencia);if(out.exportacao){if(typeof perfMesesInvalidar==='function')perfMesesInvalidar();exportacoes.push(out.exportacao);conteudo.querySelector('#comissao-resumo').innerHTML=comissaoResumoHTML(escolhida(),revisoes,exportacoes)+comissaoDiferencasHTML(out.exportacao);}}catch(e){erro.textContent=e.message;}};
   }catch(e){d.appendChild(Object.assign(document.createElement('p'),{textContent:e.message}));}
 }
-function comissaoEditar(fonte,ultima,periodo,pai,pessoas=[]) {
-  const anterior=ultima?.entrada||{},config=anterior.config||{},rs=fonte.registros;
+/* A PRÉVIA DEPOIS DE UMA COMPENSAÇÃO ABRE PREENCHIDA (linha Baixa da
+   auditoria de 11/10/2026): a última revisão era a compensação, cuja entrada
+   é só {compensarId}, e a prévia nova abria em branco e em Teste (o servidor
+   recusa aprovar em branco). Agora vale a entrada da revisão mais nova que
+   tem configuração; a compensação não muda as decisões nem as evidências. */
+function comissaoEntradaBase(revisoes, ultima) {
+  const tem=r=>!!(r&&r.entrada&&typeof r.entrada==='object'&&r.entrada.config&&typeof r.entrada.config==='object');
+  if(tem(ultima))return {revisao:ultima,entrada:ultima.entrada};
+  const r=(Array.isArray(revisoes)?revisoes:[]).filter(tem).sort((a,b)=>(Number(b.revisao)||0)-(Number(a.revisao)||0))[0]||null;
+  return {revisao:r,entrada:r?r.entrada:{}};
+}
+function comissaoEditar(fonte,ultima,periodo,pai,pessoas=[],revisoes=[]) {
+  const base=comissaoEntradaBase(revisoes,ultima), anterior=base.entrada||{},config=anterior.config||{},rs=fonte.registros;
+  const preenchida=base.revisao&&base.revisao!==ultima?`<p class="perf-aviso neutro" role="note">Preenchida com a revisão ${esc(base.revisao.revisao)} (a última com configuração): a compensação não muda as decisões nem as evidências. Confira antes de salvar.</p>`:'';
   const campo=(nome,rotulo,valor='',tipo='text')=>`<label>${rotulo}<input name="${nome}" type="${tipo}" ${tipo==='number'?'step="0.01" min="0" max="100"':''} value="${esc(valor??'')}"></label>`;
   const area=(nome,rotulo,valor='')=>`<label>${rotulo}<textarea name="${nome}" maxlength="2000">${esc(valor||'')}</textarea></label>`;
   const selecao=(nome,rotulo,valor,opcoes)=>`<label>${rotulo}<select name="${nome}">${opcoes.map(([v,t])=>`<option value="${v}" ${v===valor?'selected':''}>${t}</option>`).join('')}</select></label>`;
@@ -138,7 +150,7 @@ function comissaoEditar(fonte,ultima,periodo,pai,pessoas=[]) {
   const txtPerda=(textos.retrabalhoInstalacao||'Retrabalho de instalação: tira os pontos e a comissão desta O.S.')+' Perda automática: não pede decisão aqui. '+(textos.naoSeAbona||'Retrabalho de instalação não se abona: quem discorda da origem troca a origem, com motivo')+'; depois, feche o período de novo.';
   // A origem a definir não trava o demonstrativo (revisão da onda a3): só esta O.S. fica pendente. A frase é a do motor.
   const txtDefinir=COMISSAO.TEXTO_ORIGEM_A_DEFINIR||'Retrabalho com origem a definir: esta O.S. fica pendente (não paga e não perde) e não trava o demonstrativo. Defina a origem na ficha: ela entra numa revisão seguinte (feche o período de novo e gere nova prévia).';
-  const d=perfDialog('Configurar apuração da comissão',`<form><p>Regra desta revisão: 1% do líquido entregue elegível; 20% internos quando elegíveis; restante da dupla 60% montador e 40% auxiliar. Retrabalho de instalação é perda automática da O.S.; atraso e retorno antecipado ficam registrados e só cortam se a gestão julgar falha comprovada aqui. Valores da entrega já incluem descontos; não digite valores monetários aqui. Campos vazios geram pendência, sem aprovação automática.</p>
+  const d=perfDialog('Configurar apuração da comissão',`<form>${preenchida}<p>Regra desta revisão: 1% do líquido entregue elegível; 20% internos quando elegíveis; restante da dupla 60% montador e 40% auxiliar. Retrabalho de instalação é perda automática da O.S.; atraso e retorno antecipado ficam registrados e só cortam se a gestão julgar falha comprovada aqui. Valores da entrega já incluem descontos; não digite valores monetários aqui. Campos vazios geram pendência, sem aprovação automática.</p>
   ${selecao('modo','Situação do programa',config.modo||'teste',[['teste','Teste: sem pagamento'],['efetivo','Efetivo: exige decisão da gestão']])}${campo('inicio','Início efetivo autorizado',config.inicioEfetivo,'date')}${area('gestao','Decisão da gestão sobre início',config.decisaoGestao)}<label><input type="checkbox" name="extras" ${config.criteriosExtras==='somente_falha_comprovada'?'checked':''}> Confirmo a régua: atraso e retorno antecipado são ocorrências registradas e só zeram pontos e comissão da O.S. com falha comprovada da instalação, decidida aqui; o retrabalho de instalação zera sozinho.</label>
   <details><summary>Configuração do reconhecimento (não escolhe campeão)</summary>${['elegibilidade','identidade','substituicoes','empates','premios','decisao'].map(k=>area('rec_'+k,{elegibilidade:'Equipes elegíveis, solo e composições avulsas',identidade:'Identidade da equipe durante o período',substituicoes:'Tratamento de substituições',empates:'Tratamento de empates',premios:'Prêmios autorizados e período aplicável',decisao:'Validação humana dos critérios'}[k],config.reconhecimento?.[k])).join('')}${gruposReconhecimento.map((g,i)=>`<fieldset><legend>${esc(g.nome)}${g.substituicao?' · substituição no período':''}${g.solo?' · solo':''}</legend><p>Composições preservadas: ${g.composicoes.map(ids=>ids.map(id=>esc(pessoas.find(p=>p.id===id)?.nome||id)).join(' + ')).join('; ')}</p>${selecao('req'+i,'Elegibilidade para reconhecimento',config.reconhecimento?.avaliacoes?.[g.chave]?.situacao,[['pendente','Pendente de decisão'],['elegivel','Elegível após revisão'],['inelegivel','Não elegível após revisão']])}${area('reqj'+i,'Justificativa',config.reconhecimento?.avaliacoes?.[g.chave]?.justificativa)}</fieldset>`).join('')}<p>Campeão e prêmio permanecem sujeitos a revisão específica. Nenhum vencedor anual é inferido deste período.</p></details>
   <label>Buscar O.S., cliente, pessoa ou ocorrência <input type="search" data-comissao-busca></label>${os.some(temOc)?'<p>As O.S. com retrabalho, atraso ou retorno antecipado vêm primeiro. Para ver só essas, busque por "ocorrência".</p>':''}<p data-comissao-contagem></p><button type="button" class="btn-ghost" data-comissao-anterior>Anterior</button> <button type="button" class="btn-ghost" data-comissao-proxima>Próximas 10 conferências</button>

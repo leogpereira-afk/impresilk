@@ -176,3 +176,18 @@ test('item 9 na tela: a pendência do líquido mudado aparece no demonstrativo, 
   c.__r=revisaoTela();
   assert.doesNotMatch(c.run('comissaoResumoHTML(__r,[__r],[])'),/Pendências de ajuste/);
 });
+
+/* ----------------------------------------------------------------- item 10 */
+test('item 10: a prévia depois de uma compensação abre preenchida com a última revisão que tem configuração',()=>{
+  const c=tela();
+  const entrada={config:{modo:'efetivo',inicioEfetivo:'2026-11-01',decisaoGestao:'Autorização fictícia',criteriosExtras:'somente_falha_comprovada'},decisoes:{os1:{decisao:'sem_falha'}},entregas:{}};
+  c.__rs=[{id:'r4',revisao:4,tipo:'aprovacao',entrada:{compensarId:'r2'}},{id:'r3',revisao:3,tipo:'previa',entrada:{compensarId:'r2'}},{id:'r2',revisao:2,tipo:'aprovacao',entrada},{id:'r1',revisao:1,tipo:'previa',entrada:{config:{modo:'teste'}}}];
+  // O caso ruim: a última revisão (a compensação) não tem configuração e a prévia abria em branco, em Teste.
+  const b=c.run('comissaoEntradaBase(__rs,__rs[0])');
+  assert.equal(b.revisao.id,'r2');assert.equal(b.entrada.config.modo,'efetivo');
+  // Sem compensação, vale a última, como antes.
+  c.__u={id:'r5',revisao:5,tipo:'previa',entrada:{config:{modo:'efetivo'}}};
+  assert.equal(c.run('comissaoEntradaBase(__rs,__u)').revisao.id,'r5');
+  assert.deepEqual(plano(c.run('comissaoEntradaBase([],null)')),{revisao:null,entrada:{}});
+  assert.match(fs.readFileSync(path.join(RAIZ,'comissao-ui.js'),'utf8'),/comissaoEditar\(fonte,ultima,periodo,d,resposta\.pessoas\|\|\[\],revisoes\)/,'o botão passa as revisões');
+});
