@@ -53,11 +53,14 @@ test('M12: a ficha não muda a descrição nem a quantidade de um item conferido
   assert.equal(r.status, 200);
   assert.deepEqual(gravada(e).itens.map(i => i.uid), ['a', 'b']);
   assert.match(String(r.avisos), /continua na O\.S\.: para tirá-lo, revise ou anule antes a entrega conferida/);
-  // O valor do item (não é identidade) segue mudando.
+  // Trocado de propósito na onda acabamento (da verificação da v171): o valor do item conferido é o
+  // peso do rateio e também fica o gravado, com aviso (era "o valor segue mudando").
   await pausa();
   const g3 = structuredClone(gravada(e));
   r = await e.call({action:'upsert', os:{...g3, itens:[{...g3.itens[0], subtotal:'5100'}, g3.itens[1]]}}, gestor);
-  assert.equal(gravada(e).itens[0].subtotal, '5100');
+  assert.equal(r.status, 200);
+  assert.equal(gravada(e).itens[0].subtotal, '5000');
+  assert.match(String(r.avisos), /está numa entrega conferida e o valor não mudou/);
 });
 
 test('M12: com duas parciais quebradas (o item mudou fora da ficha), a gestão revisa cada uma com motivo, validando só a editada', async () => {

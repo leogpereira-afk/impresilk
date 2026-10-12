@@ -2267,13 +2267,20 @@ export function guardarEntregasItens(os, antes, { papel = '', avisar = false, au
    identidade gravada, e o que saiu da lista volta ao lugar dele, com aviso
    (nunca 422). Para mudar o item, a gestão revisa ou anula antes a parcial
    que o cita (ação conferenciaEntrega com `revisao`, pela tela, com motivo).
-   O resto do item (valor, situação, fotos) segue como veio. A citação é
+   O resto do item (situação, fotos) segue como veio; o valor também fica o gravado desde a onda acabamento (CAMPOS_VALOR_ITEM_CONFERIDO). A citação é
    pela chave da conferência (o código do item; sem código, a identidade).
    Devolve { os, avisos }. */
 export const CAMPOS_IDENTIDADE_ITEM = ['item', 'descricao', 'medidas', 'qtde', 'qtd', 'unidade'];
 /* O aviso diz o campo como a tela o chama e onde revisar (U5 da revisão da
    onda operação): "descricao, qtde" era o nome interno. */
-const NOME_CAMPO_ITEM = { item: 'número', descricao: 'descrição', medidas: 'medida', qtde: 'quantidade', qtd: 'quantidade', unidade: 'unidade' };
+const NOME_CAMPO_ITEM = { item: 'número', descricao: 'descrição', medidas: 'medida', qtde: 'quantidade', qtd: 'quantidade', unidade: 'unidade', valorUnit: 'valor', subtotal: 'valor' };
+/* O VALOR DO ITEM CONFERIDO TAMBÉM FICA (onda acabamento, da verificação da
+   v171): o valor unitário e o subtotal são o peso do item no rateio da
+   entrega conferida, e o "Valor unitário" da ficha os mudava. Ficam os
+   gravados, com aviso, nunca 422, como a identidade. O mesmo número escrito
+   de outro jeito ("250" e "250.00") não é mudança (mesmoValorItem, a régua
+   da mescla do ERP). */
+const CAMPOS_VALOR_ITEM_CONFERIDO = ['valorUnit', 'subtotal'];
 const ONDE_REVISAR_PARCIAL = 'revise ou anule antes a entrega conferida, com motivo, em "Conferir itens e equipe" (na ficha da O.S., em Conferência e acompanhamento)';
 export function protegerItensConferidos(os, antes, { avisar = false } = {}) {
   const regs = Array.isArray(antes?.conferenciasEntrega) ? antes.conferenciasEntrega : [];
@@ -2296,13 +2303,15 @@ export function protegerItensConferidos(os, antes, { avisar = false } = {}) {
       return;
     }
     const it = itens[pos];
-    const mudou = CAMPOS_IDENTIDADE_ITEM.filter(k => String(it[k] ?? '') !== String(g[k] ?? ''));
+    const mudou = [...CAMPOS_IDENTIDADE_ITEM.filter(k => String(it[k] ?? '') !== String(g[k] ?? '')),
+      ...CAMPOS_VALOR_ITEM_CONFERIDO.filter(k => proprio(it, k) && !mesmoValorItem(it[k], g[k]))];
     if (!mudou.length) return;
     const r = { ...it };
     for (const k of CAMPOS_IDENTIDADE_ITEM) { if (proprio(g, k)) r[k] = g[k]; else delete r[k]; }
+    for (const k of CAMPOS_VALOR_ITEM_CONFERIDO) { if (!mudou.includes(k)) continue; if (proprio(g, k)) r[k] = g[k]; else delete r[k]; }
     itens[pos] = r;
     const nomes = [...new Set(mudou.map(k => NOME_CAMPO_ITEM[k] || k))];
-    avisos.push(`O ${rotuloItem(g)} está numa entrega conferida e ${nomes.length === 1 ? (nomes[0] === 'número' ? 'o ' : 'a ') + nomes[0] + ' não mudou' : 'não mudou (' + nomes.join(', ') + ')'}: para corrigir o item, ${ONDE_REVISAR_PARCIAL}.`);
+    avisos.push(`O ${rotuloItem(g)} está numa entrega conferida e ${nomes.length === 1 ? (['número', 'valor'].includes(nomes[0]) ? 'o ' : 'a ') + nomes[0] + ' não mudou' : 'não mudou (' + nomes.join(', ') + ')'}: para corrigir o item, ${ONDE_REVISAR_PARCIAL}.`);
   });
   return { os: avisos.length ? { ...os, itens } : os, avisos: avisar ? avisos.slice(0, TETO_AVISOS_ENTREGA) : [] };
 }

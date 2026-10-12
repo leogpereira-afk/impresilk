@@ -3378,10 +3378,10 @@ function blocoItens(os, ro, done) {
       </td>
       <td class="item-del-cell">${del}</td>
     </tr>
-    ${conferido && it.manual ? `<tr class="motivo-row item-conferido"><td colspan="${cols}" data-label="Conferido">🔒 Este item está numa entrega conferida: número, descrição, medida e quantidade não mudam, e ele não sai da lista. Para corrigi-lo, a gestão revisa ou anula antes a entrega conferida, com motivo${gestaoConf ? `: <button type="button" class="btn-ghost btn-xs" data-controle="itens" data-controle-os="${esc(os.id)}">Conferir itens e equipe</button>` : ', em "Conferir itens e equipe" (Conferência e acompanhamento).'}</td></tr>` : ''}
+    ${conferido && it.manual ? `<tr class="motivo-row item-conferido"><td colspan="${cols}" data-label="Conferido">🔒 Este item está numa entrega conferida: número, descrição, medida, quantidade e valor não mudam, e ele não sai da lista. Para corrigi-lo, a gestão revisa ou anula antes a entrega conferida, com motivo${gestaoConf ? `: <button type="button" class="btn-ghost btn-xs" data-controle="itens" data-controle-os="${esc(os.id)}">Conferir itens e equipe</button>` : ', em "Conferir itens e equipe" (Conferência e acompanhamento).'}</td></tr>` : ''}
     ${it.saiuDoERP && typeof it.saiuDoERP === 'object' ? `<tr class="motivo-row item-saiu-erp"><td colspan="${cols}" data-label="ERP">Saiu do ERP${fmtDataBR(it.saiuDoERP.em) ? ' em ' + fmtDataBR(it.saiuDoERP.em) : ''}. Fica na O.S. porque tem marca.</td></tr>` : ''}
     ${comEntrega ? linhaEntregaHTML(it, i, os, ro, u, cols) : ''}
-    ${valorItemHTML(it, i, os, ro, u, cols)}
+    ${valorItemHTML(it, i, os, ro, u, cols, conferido)}
     ${it.reprovado ? `<tr class="motivo-row"><td colspan="${cols}" data-label="O que deu errado?"><input data-item="${i}.motivoReprovado" ${u} value="${esc(it.motivoReprovado || '')}" placeholder="❗ O que deu errado neste item?"></td></tr>` : ''}
     ${it.statusInst === 'retrab' ? `<tr class="motivo-row"><td colspan="${cols}" data-label="Retrabalho na instalação">🔴 Retrabalho na instalação: ${esc(it.motivo || 'sem motivo')}${it.obsProb ? ` (${esc(it.obsProb)})` : ''}${it.fotoProbId ? `<div class="fotos-grid"><div class="foto-thumb-wrap"><img class="foto-thumb" data-foto-img="${esc(it.fotoProbId)}" alt="foto do problema"></div></div>` : ''}</td></tr>` : ''}`;
   }).join('');
@@ -10667,8 +10667,11 @@ const idAvisoValorF24 = i => 'valor-aviso-' + String(i).replace(/[^\w-]/g, '-');
    "0,00" escrito fazia o clique no meio virar 1500,00 e o clique no fim
    virar 0,00150. Zero aparece vazio, com o "0,00" só de dica. A 375 px a
    linha cola no cartão do item e diz de qual item é (B6). */
-function valorItemHTML(it, i, os, ro, u, cols) {
+function valorItemHTML(it, i, os, ro, u, cols, conferido = false) {
   if (!it || !verValorDosItens(os)) return '';
+  /* O item numa entrega conferida (onda acabamento, da verificação da v171):
+     o valor é o peso do rateio, e o servidor devolve o gravado. Só leitura. */
+  if (conferido) ro = true;
   const unit = valorBR(it.valorUnit), sub = it.subtotal == null || it.subtotal === '' ? NaN : Number(it.subtotal);
   // Item que não é manual e não tem valor nenhum: a linha só diria "—".
   if (!it.manual && !Number.isFinite(unit) && !Number.isFinite(sub)) return '';
