@@ -150,8 +150,23 @@ const STORE = (() => {
     const papel=getUser()?.papel;
     return papel && !['admin','pcp'].includes(papel) && typeof PRIVACIDADE_VALORES!=='undefined' ? PRIVACIDADE_VALORES.podar(v) : v;
   }
+  /* A PODA UMA VEZ POR VERSÃO DA LISTA (M32 da auditoria de 11/10/2026): para
+     quem não é gestão, cada getAllOS e cada getOS copiava e podava a lista
+     inteira (cerca de 700 O.S.), e a tela chama isso dentro de laços: o
+     tablet da montagem ficava lento. Agora a cópia podada é feita uma vez por
+     versão da lista (_osVersao, que toda gravação sobe) e por papel, e as
+     leituras seguintes devolvem a mesma cópia, como a gestão já recebia a
+     mesma lista. O que a poda tira continua sem descer: a cópia nasce da
+     poda e quem grava devolve a lista à _setAllOS, que sobe a versão. */
+  let _podaMemo = { lista: null, versao: -1, papel: '', saida: null };
   function getAllOS() {
-    if (_osMem) return leituraAutorizada(_osMem);
+    if (_osMem) {
+      const papel = getUser()?.papel;
+      if (!papel || ['admin','pcp'].includes(papel) || typeof PRIVACIDADE_VALORES === 'undefined') return _osMem;
+      if (_podaMemo.lista !== _osMem || _podaMemo.versao !== _osVersao || _podaMemo.papel !== papel)
+        _podaMemo = { lista: _osMem, versao: _osVersao, papel, saida: PRIVACIDADE_VALORES.podar(_osMem) };
+      return _podaMemo.saida;
+    }
     return leituraAutorizada(lsGet(K.OS, []));   // antes do pronto(), ou sem IndexedDB
   }
 
@@ -267,8 +282,10 @@ const STORE = (() => {
   // Nao vai para o disco: some ao recarregar, volta na proxima busca.
   const _osHistorico = new Map();
   function historico() { return leituraAutorizada([..._osHistorico.values()]); }
+  // Da lista: a O.S. já podada da versão (M32). Do histórico buscado: podada aqui.
   function getOS(id) {
-    return leituraAutorizada(getAllOS().find(o => o.id === id) || _osHistorico.get(id) || null);
+    const naLista = getAllOS().find(o => o.id === id);
+    return naLista || leituraAutorizada(_osHistorico.get(id) || null);
   }
 
   /* Conta as gravações da lista: quem guarda uma conta feita sobre ela (o
