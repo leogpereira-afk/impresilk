@@ -175,7 +175,7 @@ const resp = (data: unknown, status = 200) =>
 // ---------------------------------------------------------------- registros
 
 // APAGADO E LAPIDE, nao sumico: o delete marca `apagado` em vez de remover a
-// linha (a coluna existe desde o 0001_init). Motivo: a importacao horaria decide
+// linha (a coluna existe desde o 20260731164244_pcp_init). Motivo: a importacao horaria decide
 // o que e novo perguntando quais NUMEROS ja existem na tabela — com a linha
 // removida, o numero "nao existe" e a O.S excluida voltava como esqueleto zerado
 // na hora seguinte, para sempre. A lapide continua ocupando o numero (o indice
@@ -1409,7 +1409,10 @@ Deno.serve(async (req: Request) => {
         return resp({ error: "Seu acesso ao PCP foi encerrado. Fale com a gestão.", semSessao: true }, 401);
       }
     } catch {
-      return resp({error:"Não foi possível conferir seu acesso ao ranking. Tente novamente."},503);
+      /* Texto neutro (linha Baixa da auditoria de 11/10/2026): a mesma conferência
+         vale para o ranking e para as Demandas, e as Demandas respondiam
+         "acesso ao ranking". */
+      return resp({error:acao === "demandas" ? "Não foi possível conferir seu acesso agora. Tente novamente." : "Não foi possível conferir seu acesso ao ranking. Tente novamente."},503);
     }
   }
 
@@ -1762,8 +1765,15 @@ Deno.serve(async (req: Request) => {
             return {numero:r.numero,cliente:r.cliente,data:r.data,previsao,...(!String(r.previsao || "") && previsao?{previsaoFonte:"pcp"}:{}),valor:numero(r.valor),pcp:medidaPCP(n)};
           });
           const vendas=ordens.filter(r=>String(r.data).startsWith(mes)).map(r=>({numero:r.numero,cliente:r.cliente,data:r.data,valor:numero(r.valor)}));
-          const instalacoes=operacao.registros.filter((r:any)=>r.dia.startsWith(mes));
-          const retrabalhos=instalacoes.filter((r:any)=>r.retrabalho===true).map((r:any)=>({numero:r.numero,cliente:r.cliente,data:r.dia}));
+          /* O % DE RETRABALHO É POR O.S. (linha Baixa da auditoria de
+             11/10/2026): cada entrega parcial contava como uma instalação, e
+             a O.S. com retrabalho em duas parciais virava duas (66,7% em vez
+             de 50%). Uma O.S. conta uma vez no mês, pelo id dela. */
+          const chaveOS=(r:any)=>String(r.osId || String(r.id || "").split("::")[0] || r.numero || "");
+          const porOS=(xs:any[])=>{const m=new Map<string,any>();for(const r of xs){const k=chaveOS(r);if(!m.has(k))m.set(k,r);}return [...m.values()];};
+          const doMes=operacao.registros.filter((r:any)=>r.dia.startsWith(mes));
+          const instalacoes=porOS(doMes);
+          const retrabalhos=porOS(doMes.filter((r:any)=>r.retrabalho===true)).map((r:any)=>({numero:r.numero,cliente:r.cliente,data:r.dia}));
           return {mes,entregue:pacote?.v>=2 && Array.isArray(pacote.os)?soma(entregas):null,
             vendido:vendas.length?soma(vendas):null,recebido:entradas && Object.prototype.hasOwnProperty.call(entradas,mes)?numero(entradas[mes]):null,
             retrabalho:instalacoes.length?100*retrabalhos.length/instalacoes.length:null,baseRetrabalho:instalacoes.length,
@@ -1814,7 +1824,12 @@ Deno.serve(async (req: Request) => {
         });
         if(err)throw new Error(err.message);
         if(salva!==true)return resp({error:"O cadastro ou a O.S. mudou. Reabra a comparação.",conflito:true},409);
-        await auditar(osId,"vincular-equipe",vinculo,os.numero);
+        /* O VÍNCULO NO DIÁRIO (linha Baixa da auditoria de 11/10/2026): o
+           objeto ia sem "campos" e o diário o descartava calado (auditar só
+           grava diff com campos). Agora vai no formato de todo diff: o campo
+           equipeVinculada, antes e depois, e a entrega e o grupo do vínculo. */
+        const equipeAntes=grupo.equipeId ? ((cfgAntes.config?.performancePCP?.equipes || []).find((x:any)=>x.id===grupo.equipeId)?.nome || grupo.equipeId) : null;
+        await auditar(osId,"vincular-equipe",{campos:["equipeVinculada"],antes:{equipeVinculada:equipeAntes},depois:{equipeVinculada:equipe.nome || equipe.id,entregaId:entregaId || null,grupo:indice,equipeId:equipe.id}},os.numero);
         return resp({ok:true,os:saida(gravar)});
       }
 
@@ -3899,7 +3914,11 @@ Deno.serve(async (req: Request) => {
           if (!body.baseCfg) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:["Configuração salva por versão antiga; revise antes de reaplicar."]},409);
           const base = paraMescla(body.baseCfg), local = paraMescla(body.cfg), remoto = paraMescla(atual);
           if (cracha?.papel === "pcp" && !ehMaquina) {
-            const permitidas = new Set(["agendaPCP","bonusPCP","performancePCP","vinculosRH","mensagemDia","veiculosAliases","categoriasServico","lotesCategoria","medicoesRetrabalho","prioridadesPCP"]);
+            /* F25 (linha Baixa da auditoria de 11/10/2026): o bônus manual
+               antigo (bonusPCP) é só leitura no PCP; o programa que vale é a
+               comissão de 1% (D-001). O pcp não grava mais bonusPCP: a parte
+               dele que chegue fica como está no servidor, sem 422. */
+            const permitidas = new Set(["agendaPCP","performancePCP","vinculosRH","mensagemDia","veiculosAliases","categoriasServico","lotesCategoria","medicoesRetrabalho","prioridadesPCP"]);
             for (const k of new Set([...Object.keys(base),...Object.keys(local),...Object.keys(remoto)])) {
               if (!permitidas.has(k)) { delete base[k]; delete local[k]; delete remoto[k]; }
             }
@@ -4076,6 +4095,13 @@ Deno.serve(async (req: Request) => {
         if(ehMaquina)return resp({error:"Entre com uma sessão do PCP."},403);
         const os=await getReg("os",String(body.osId || ""));
         if(!os)return resp({error:"O.S. não encontrada."},404);
+        /* O CRACHÁ SEM SENHA NÃO CONFIRMA A HORA DA FOTO (linha Baixa da
+           auditoria de 11/10/2026): ele gravava a "hora real" que quisesse e
+           passava por cima da hora confirmada pela gestão. A hora da foto
+           dele fica a do recebimento (o carimbo do servidor no foto_evento);
+           confirmar é da gestão ou da montagem com senha. A ação é chamada
+           na hora, fora da fila: o 403 não prende nada. */
+        if(body.fileId && ehToqueNoNome)return resp({error:"O horário da foto é confirmado pela gestão ou pela montagem com senha. A foto fica com a hora em que chegou ao servidor."},403);
         if(String(cracha?.papel)==="montagem" && !pertenceEquipe(os,quemToque(),await pessoasReq()))return resp({error:"O.S. fora da sua equipe."},403);
         const ids=[os.layoutFotoId,os.embarqueFotoId,...(os.fotosCheckinIds || []),...(os.fotosRetornoIds || []),...(os.itens || []).map((i:any)=>i.fotoProbId)].filter(Boolean);
         if(body.fileId) {

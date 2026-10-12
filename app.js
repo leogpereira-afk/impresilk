@@ -450,7 +450,7 @@ function stepperHTML(os, compact) {
     if (atual === 'cancelada') cls = s !== 'finalizada' && fato[s] ? 'done' : 'todo';
     const d = (interno && STEP_DEFS_INT[s]) || STEP_DEFS[s];
     const h = hist.find(x => x.etapa === s);
-    const quando = h && h.em ? ` — ${new Date(h.em).toLocaleDateString('pt-BR')}${h.por ? ' · ' + h.por : ''}` : '';
+    const quando = h && h.em ? ` · ${new Date(h.em).toLocaleDateString('pt-BR')}${h.por ? ' · ' + h.por : ''}` : '';
     const titulo = erp && s !== 'finalizada' && !fato[s] ? statusLabelDe(os, s) + ': não registrada no PCP (a O.S. foi encerrada pelo ERP)' : statusLabelDe(os, s) + quando;
     return `<span class="step ${cls}" title="${esc(titulo)}">
       <span class="step-dot">${cls === 'done' ? '✓' : d.icon}</span>
@@ -799,7 +799,7 @@ async function doLogin() {
     // desativado (403) trazem a própria explicação. Culpar a internet mandava a
     // pessoa mexer no Wi-Fi com a porta trancada por 15 minutos.
     if (e.status) { mostrarErro(e.erro || ('O servidor recusou a entrada (' + e.status + ').')); return; }
-    mostrarErro('Não consegui falar com o servidor. Entrar precisa de internet — depois disso o app trabalha offline.');
+    mostrarErro('Não consegui falar com o servidor. Entrar precisa de internet; depois disso o app trabalha offline.');
     return;
   }
   _entrando = false; bt.disabled = false; bt.textContent = rot;
@@ -836,7 +836,7 @@ function telaEsqueciSenha() {
       '<h2>Esqueci minha senha</h2>' +
       '<ol class="ajuda-passos">' +
         '<li><strong>1. Confira o usuário antes da senha.</strong>' +
-          'Ele costuma ser só o <em>primeiro nome</em>, em minúsculas e sem acento — não o nome ' +
+          'Ele costuma ser só o <em>primeiro nome</em>, em minúsculas e sem acento, não o nome ' +
           'completo. Se o navegador preencheu sozinho, apague e escreva à mão.' +
           '<div class="ajuda-obs">O aviso é o mesmo para usuário errado e senha errada, então ' +
           'vale descartar esta parte primeiro.</div></li>' +
@@ -1019,7 +1019,7 @@ function avaliarImportacao(s) {
   const ult = s && s.ultimaImportacao;
   // Ausência de heartbeat = importação NUNCA rodou (ou parou faz muito) — é o
   // caso-limite que o vigia existe para pegar, não sinal de saúde.
-  if (!ult || !ult.em || !Number.isFinite(Date.parse(ult.em))) return { parada: true, motivo: 'nenhuma importação registrada — o robô horário pode estar desligado' };
+  if (!ult || !ult.em || !Number.isFinite(Date.parse(ult.em))) return { parada: true, motivo: 'nenhuma importação registrada; o robô horário pode estar desligado' };
   const horas = (Date.now() - new Date(ult.em).getTime()) / 3600000;
   if (ult.ok === false) {
     const bom = ult.ultimoSucesso && ult.ultimoSucesso.em
@@ -1065,7 +1065,7 @@ function vigiarImportacao() {
       else document.body.prepend(ban);
       ban.onclick = () => { const t = $('[data-tab="controle"]'); if (t) t.click(); };
     }
-    ban.innerHTML = `⚠️ <strong>Importação do Mubisys parada</strong> — ${esc(av.motivo)}. Toque para abrir a Saúde da conexão.`;
+    ban.innerHTML = `⚠️ <strong>Importação do Mubisys parada</strong>: ${esc(av.motivo)}. Toque para abrir a Saúde da conexão.`;
     return { s, av };
   }).catch(() => null);
 }
@@ -1344,7 +1344,7 @@ async function verificarNuvem() {
     if (fila || (v && v.av.parada)) toast(`☁️ ${n} O.S na nuvem${fila ? ` · ⏳ ${fila} ainda na fila deste aparelho` : ''}${imp}`, 'error');
     else toast(`✅ Tudo salvo na nuvem: ${n} O.S confirmada(s)${imp}`, 'success');
   } catch {
-    toast('❌ Sem resposta da nuvem — offline ou backend não publicado/TOKEN ausente', 'error');
+    toast('❌ Sem resposta da nuvem: offline ou backend não publicado/TOKEN ausente', 'error');
   } finally {
     if (vBtn) { vBtn.disabled = false; vBtn.textContent = '☁️ Verificar'; }
   }
@@ -2469,7 +2469,13 @@ const AUD_ROTULOS = {
   confObs: 'Observação da confirmação', confPor: 'Confirmado por', confAcompanha: 'Quem acompanha', confAcompanhaContato: 'Contato de quem acompanha',
   kmSaida: 'Km na saída', kmRetorno: 'Km no retorno', osOriginal: 'O.S. original', dataEntrada: 'Data de entrada', dataRetrabalho: 'Data do retrabalho',
   dataResolvido: 'Data em que foi resolvido', resolvidoPor: 'Resolvido por', checkout: 'Encerramento na obra', acesso: 'Acesso', fixacao: 'Fixação',
-  ferramentas: 'Ferramentas', suprimentos: 'Suprimentos'
+  ferramentas: 'Ferramentas', suprimentos: 'Suprimentos',
+  /* Os campos de gente que ainda saíam com o nome interno no Histórico
+     (baixa da verificação da v172), e o vínculo da equipe (linha Baixa da
+     auditoria de 11/10/2026: o vínculo não ia ao diário). */
+  aptoEm: 'Liberada pelo PCP em', aptoPor: 'Liberada pelo PCP por', arquivadaEm: 'Arquivada em', carroLiberadoEm: 'Carro liberado em',
+  carroLiberadoPor: 'Carro liberado por', checkinGPS: 'Local ao chegar (GPS)', confEm: 'Confirmação do cliente em', fotosTiradas: 'Fotos tiradas',
+  equipeVinculada: 'Equipe cadastrada da entrega'
 };
 // Por dentro dos campos que são objeto (conferência da volta, limpeza do
 // carro, exceção, entrega lançada, baixa do ERP): rótulo em português. O ID
@@ -2478,7 +2484,9 @@ const AUD_SUBROTULOS = {
   carroLimpo: 'Carro limpo', carroArrumado: 'Carro arrumado', equipamentosOk: 'Equipamentos ok', semAvaria: 'Sem avaria',
   obs: 'Observação', dia: 'Dia', veiculo: 'Veículo', motivo: 'Motivo', data: 'Data', status: 'Situação',
   por: 'Por', em: 'Em', recebidoEm: 'Recebido em', confirmadoPor: 'Confirmado por', fotos: 'Fotos',
-  descartada: 'Recusada', hora: 'Hora', fonte: 'Origem'
+  descartada: 'Recusada', hora: 'Hora', fonte: 'Origem',
+  // O local ao chegar (checkinGPS).
+  lat: 'Latitude', lng: 'Longitude', precisao: 'Precisão (m)'
 };
 // porConta (o login de quem lançou a entrega) também: "Por conta" leria outra coisa.
 const AUD_SUBOCULTAS = new Set(['porId', 'porConta', 'desfeitoPorId', 'desfeitoPorConta']);
@@ -2499,7 +2507,8 @@ const AUD_ACOES = { criar: 'Criou a O.S.', alterar: 'Alterou', excluir: 'Excluiu
      de quem não vê valores repôs (M19), com nome de gente (revisão da onda
      acabamento, U2): sem rótulo, as duas liam "Alterou". */
   'edicao-recusada': 'Edição recusada: a O.S. estava excluída; nada foi gravado',
-  'repor-valores': 'Valores dos itens repostos: quem gravou não muda valor, e os valores gravados ficaram' };
+  'repor-valores': 'Valores dos itens repostos: quem gravou não muda valor, e os valores gravados ficaram',
+  'vincular-equipe': 'Vinculou a entrega a uma equipe cadastrada' };
 /* O texto de um campo da entrada do Histórico (a ficha e Entregas por O.S.
    usam o mesmo). A edição recusada diz o que a pessoa TENTOU mudar (nada foi
    gravado); a reposição de valores diz quais itens voltaram com o valor e de
@@ -2702,7 +2711,7 @@ function blocoPCP(os, ro, done) {
       <div class="field-row3">
         <div class="field"><label>Data entrada</label><input type="date" data-f="dataEntrada" value="${esc(os.dataEntrada)}" ${lockPed}></div>
         <div class="field"><label>Responsável PCP *</label>
-          <select data-f="responsavelPCP"${fmsgAttr('responsavelPCP')}><option value="">— selecionar —</option>${respOpts}${respExtra}</select>${fmsgHTML(os, 'responsavelPCP')}
+          <select data-f="responsavelPCP"${fmsgAttr('responsavelPCP')}><option value="">Selecionar</option>${respOpts}${respExtra}</select>${fmsgHTML(os, 'responsavelPCP')}
         </div>
         <div class="field"><label>Vendedor</label><input data-f="vendedor" value="${esc(os.vendedor)}" ${lockPed}></div>
       </div>
@@ -3636,7 +3645,7 @@ function blocoAgenda(os, ro, done) {
   const confClass = os.confirmacao === 'Confirmado' ? 'confirmado'
     : os.confirmacao === 'Pendente' ? 'pendente'
     : os.confirmacao === 'Recusado' ? 'recusado' : 'nenhum';
-  const confOpts = CONF_OPTS.map(o => `<option value="${o}" ${os.confirmacao === o ? 'selected' : ''}>${o || '— selecionar —'}</option>`).join('');
+  const confOpts = CONF_OPTS.map(o => `<option value="${o}" ${os.confirmacao === o ? 'selected' : ''}>${o || 'Selecionar'}</option>`).join('');
   const canalSel = os.confCanal && !CANAL_OPTS.includes(os.confCanal) ? `<option selected>${esc(os.confCanal)}</option>` : '';
   const canalOpts = CANAL_OPTS.map(o => `<option ${os.confCanal === o ? 'selected' : ''}>${o}</option>`).join('');
 
@@ -3684,11 +3693,11 @@ function blocoAgenda(os, ro, done) {
         </div>
         <div class="field-row3">
           <div class="field"><label>Situação</label><select data-f="confirmacao"${fmsgAttr('confirmacao')}>${confOpts}</select>${fmsgHTML(os, 'confirmacao')}</div>
-          <div class="field"><label>Canal</label><select data-f="confCanal"><option value="">— selecionar —</option>${canalOpts}${canalSel}</select></div>
+          <div class="field"><label>Canal</label><select data-f="confCanal"><option value="">Selecionar</option>${canalOpts}${canalSel}</select></div>
           <div class="field"><label>Hora</label><input type="time" data-f="confHora" value="${esc(os.confHora)}"></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Confirmado por</label><select data-f="confPor"><option value="">— selecionar —</option>${peopleOptions(cfg, os.confPor)}</select></div>
+          <div class="field"><label>Confirmado por</label><select data-f="confPor"><option value="">Selecionar</option>${peopleOptions(cfg, os.confPor)}</select></div>
           <div class="field"><label>Obs</label><input data-f="confObs" value="${esc(os.confObs)}"></div>
         </div>
         <details class="conf-acomp"${(os.confAcompanha || os.confAcompanhaContato) ? ' open' : ''}>
@@ -4028,7 +4037,7 @@ function blocoExec(os, ro, done) {
       ${conferenciaVoltaHTML(os, ro)}
       ${atalhoOcorrenciaJornadaHTML(os)}
       <div class="field-row">
-        <div class="field"><label>Situação</label><select data-f="checkout.situacao"${fmsgAttr('checkout.situacao')}><option value="">— selecionar —</option>${sitOpts}${sitExtra}</select>${fmsgHTML(os, 'checkout.situacao')}</div>
+        <div class="field"><label>Situação</label><select data-f="checkout.situacao"${fmsgAttr('checkout.situacao')}><option value="">Selecionar</option>${sitOpts}${sitExtra}</select>${fmsgHTML(os, 'checkout.situacao')}</div>
         <div class="field"><label>Obs de fechamento</label><input data-f="checkout.obs" value="${esc(co.obs)}"></div>
       </div>
       <div class="field"><label>Obs técnicas</label><textarea data-f="obsTecnicas">${esc(os.obsTecnicas)}</textarea></div>
@@ -6101,7 +6110,7 @@ function osCardHTML(os) {
   const etapaDone = os.finalizadaEm && pct >= 100;
   // Cliente retira, pronto: botão para avisar o cliente pelo WhatsApp.
   const avisarBtn = interno && !os.finalizadaEm && st === 'apto'
-    ? `<button class="btn-ghost btn-sm card-avisar ${os.avisadoEm ? 'avisado' : ''}" data-avisar-os="${esc(os.id)}" title="${os.avisadoEm ? `Cliente avisado em ${new Date(os.avisadoEm).toLocaleString('pt-BR')}${os.avisadoPor ? ' por ' + esc(os.avisadoPor) : ''} — clique para avisar de novo` : 'Avisar o cliente no WhatsApp que o pedido está pronto'}">${os.avisadoEm ? '✅ Avisado ' + fmtDataBR(os.avisadoEm) : '📢 Avisar cliente'}</button>`
+    ? `<button class="btn-ghost btn-sm card-avisar ${os.avisadoEm ? 'avisado' : ''}" data-avisar-os="${esc(os.id)}" title="${os.avisadoEm ? `Cliente avisado em ${new Date(os.avisadoEm).toLocaleString('pt-BR')}${os.avisadoPor ? ' por ' + esc(os.avisadoPor) : ''} (clique para avisar de novo)` : 'Avisar o cliente no WhatsApp que o pedido está pronto'}">${os.avisadoEm ? '✅ Avisado ' + fmtDataBR(os.avisadoEm) : '📢 Avisar cliente'}</button>`
     : '';
   /* O SELO. Sem a etapa no funil, o badge do card volta a dizer "Apto" -- e a
      O.S parada some de vista no meio das outras, que e o oposto do pedido. A
@@ -6360,7 +6369,7 @@ function bindCardClicks(container) {
       const os = STORE.getOS(b.dataset.avisarOs);
       if (!os) return;
       const dig = String(os.whatsapp || '').replace(/\D/g, '');
-      if (!dig) { toast('Sem WhatsApp cadastrado nesta O.S — preencha no bloco PCP & Cliente.', 'error'); return; }
+      if (!dig) { toast('Sem WhatsApp cadastrado nesta O.S: preencha no bloco PCP & Cliente.', 'error'); return; }
       // Mesma régua da ficha (10 dígitos ou mais): sem DDD o Zap abria um número
       // que não existe e o card marcava "Avisado" com o cliente sem saber.
       if (dig.length < 10) { toast('WhatsApp sem DDD nesta O.S.: corrija no bloco PCP & Cliente.', 'error'); return; }
@@ -7375,7 +7384,7 @@ function fotografiaLT(offset, todas) {
   const nota = t => `<div class="text-muted lt-vazio" style="margin-top:6px">${t}</div>`;
   return `
     <div class="lt-resumo">${offset === 0
-      ? `📸 <strong>Agora — ${rotDia} · ${hhT}</strong>`
+      ? `📸 <strong>Agora: ${rotDia} · ${hhT}</strong>`
       : `🕰 <strong>Como estava em ${rotDia}</strong> <span class="text-muted">(há ${-offset} dia${offset < -1 ? 's' : ''} · fim do dia, reconstruído pelo histórico)</span>`}</div>
     <div class="lt-funil">${funil}</div>
     ${sec(offset === 0 ? '🚗 Na rua agora' : '🚗 Rodaram na rua neste dia',
@@ -7677,7 +7686,7 @@ function renderPainelKPIs() {
       `<div class="trend-grid">${trendHTML}</div>`)}
 
     ${painelBloco('func', 'Serviços por funcionário',
-      `<div class="filter-bar"><select id="painel-func"><option value="">— selecionar funcionário —</option>${funcOpts}</select></div>`)}
+      `<div class="filter-bar"><select id="painel-func"><option value="">Selecionar funcionário</option>${funcOpts}</select></div>`)}
 
     ${painelBloco('oper', 'Qualidade do cadastro por último responsável · histórico completo',
       `<p class="metricas-nota">Agrupa pelo último autor registrado; não mede trabalho realizado por pessoa. O percentual indica campos preenchidos, sem avaliar se o conteúdo está correto.</p><table class="control-table">
@@ -7789,7 +7798,7 @@ function renderPainelDetalhe(todas, todasOS, finalizadas, porInst, rolar) {
   if (d === 'todas')            { titulo = 'Instalações agendadas no período · inclui encerradas'; list = todas; }
   else if (d === 'finalizadas') { titulo = 'Finalizadas no período'; list = finalizadas; }
   else if (d === 'retrab')      { titulo = 'Com retrabalho'; list = finalizadas.filter(o => o.retrabalho); }
-  else if (d === 'erp')         { titulo = 'Encerramentos recebidos do ERP — data de sincronização'; const {de,ate}=painelIntervalo(); list=todasOS.filter(o => OPERACAO.encerradaERP(o) && OPERACAO.emIntervalo(o.finalizadaEm,de,ate)); }
+  else if (d === 'erp')         { titulo = 'Encerramentos recebidos do ERP (data de sincronização)'; const {de,ate}=painelIntervalo(); list=todasOS.filter(o => OPERACAO.encerradaERP(o) && OPERACAO.emIntervalo(o.finalizadaEm,de,ate)); }
   else if (d === 'emrua')       { titulo = 'Em execução agora'; list = todasOS.filter(o => OPERACAO.naRua(o)); }
   else if (d === 'hoje')        { titulo = 'Instalações em aberto hoje'; list = OPERACAO.programadas(todasOS,hojeISO(),hojeISO()); }
   else if (d === 'aptas')       { titulo = 'Aptas (aguardando)'; list = todasOS.filter(o => calcStatus(o) === 'apto'); }
@@ -8169,7 +8178,7 @@ function renderRetrabalho() {
       <div class="casa-kpi ${semCusto ? 'alerta' : ''}"><b>${semCusto === custos.length ? 'Custo não medido' : custos.some(c=>c.reais!=null) ? brMoney(somaR) : `${custos.some(c => c.horas != null) ? fmtH(somaH) : 'tempo não apurado'} · ${custos.some(c => c.km != null) ? Math.round(somaKm) + ' km' : 'km não apurado'}`}</b><small>custo conhecido · ${custos.length - semCusto} de ${custos.length} intervenções com medição${somaR ? ` · ${fmtH(somaH)} · ${Math.round(somaKm)} km` : ''}${semCusto ? ` · ${semCusto} sem custo monetário medido` : ''}${!(rHora || rKm) ? ' · sem R$/h e R$/km em Configurações' : ''}</small></div>
       <div class="casa-kpi"><b>${taxa == null ? '—' : taxa.toString().replace('.', ',') + '%'}</b><small>O.S. com retrabalho · ${indicador.afetadas} em ${entregues} entrega${entregues === 1 ? '' : 's'} no período</small></div>
     </div>
-    <p class="metricas-nota">Taxa calculada sobre entregas originais concluídas pela equipe no período, com retrabalho conhecido até agora. Cancelamentos e O.S. filhas não entram na base. Duas correções da mesma O.S. contam uma vez na taxa. Original = O.S marcada com o problema. Retrabalho = a O.S nova que o ERP emite (aponte a original na ficha dela, campo "🔁 retrabalho da O.S nº"). Sem filha apontada, o custo fica em branco.${semTaxonomia ? ` <strong>${semTaxonomia} sem etapa de origem/causa raiz</strong> — abra a ficha e complete.` : ''}</p>
+    <p class="metricas-nota">Taxa calculada sobre entregas originais concluídas pela equipe no período, com retrabalho conhecido até agora. Cancelamentos e O.S. filhas não entram na base. Duas correções da mesma O.S. contam uma vez na taxa. Original = O.S marcada com o problema. Retrabalho = a O.S nova que o ERP emite (aponte a original na ficha dela, campo "🔁 retrabalho da O.S nº"). Sem filha apontada, o custo fica em branco.${semTaxonomia ? ` <strong>${semTaxonomia} sem etapa de origem/causa raiz</strong>: abra a ficha e complete.` : ''}</p>
     <div class="casa-tabela-wrap"><table class="casa-tabela">
       <thead><tr><th>O.S original</th><th>O.S retrabalho</th><th>Cliente</th><th>Motivo</th><th>Técnico</th><th class="num">Custo</th><th>Data</th></tr></thead>
       <tbody>${lista.map((p, i) => {
@@ -8715,7 +8724,7 @@ function renderControle() {
     <div class="cfg-section">
       <h3>👤 Acessos da gestão</h3>
       <p class="text-muted" style="font-size:12px;margin:-4px 0 8px">
-        A senha fica no servidor, embaralhada — ninguém consegue lê-la, nem eu.
+        A senha fica no servidor, embaralhada: ninguém consegue lê-la, nem eu.
         Senha que você cria para outra pessoa é temporária: ela troca na primeira entrada.
         <br>A montagem usa conta própria ou um aparelho autorizado pela gestão. Escolher um nome, sozinho, não libera acesso.
       </p>
@@ -8767,12 +8776,12 @@ function renderControle() {
       <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">É o texto que sai no botão "Mensagem do dia" (Calendário e Instalação). O cabeçalho, as O.S, a equipe e o veículo são montados sozinhos; aqui ficam as partes fixas.</p>
       <div class="field"><label>Regra crítica (sai logo abaixo do título)</label>
         <textarea data-msg-campo="regra" rows="4" ${ro ? 'disabled' : ''}>${esc(msg.regra)}</textarea></div>
-      <div class="field"><label>Lembretes (um por linha — saem no fim, se houver)</label>
+      <div class="field"><label>Lembretes (um por linha; saem no fim, se houver)</label>
         <textarea data-msg-campo="lembretes" rows="3" ${ro ? 'disabled' : ''} placeholder="Ex.: Conferir EPI antes de sair">${esc((msg.lembretes || []).join('\n'))}</textarea></div>
       <div class="field"><label>Gerente de instalação (assina a mensagem)</label>
         <input data-msg-campo="gerente" list="msg-gerentes" value="${esc(msg.gerente)}" placeholder="Nome como deve aparecer" ${ro ? 'disabled' : ''}>
         <datalist id="msg-gerentes">${gerentes.map(p => `<option value="${esc(p.nome)}">`).join('')}</datalist></div>
-      <p class="text-muted" style="font-size:.72rem">Equipe sai como <em>Apelido (Nome completo)</em> pela ficha do RH e o veículo com lugares/grade/motorista pelo Ativos do Painel — uma base só. Elenco atualizado ${STORE.elenco().em ? new Date(STORE.elenco().em).toLocaleString('pt-BR') : 'ainda não neste aparelho'}.</p>
+      <p class="text-muted" style="font-size:.72rem">Equipe sai como <em>Apelido (Nome completo)</em> pela ficha do RH e o veículo com lugares/grade/motorista pelo Ativos do Painel: uma base só. Elenco atualizado ${STORE.elenco().em ? new Date(STORE.elenco().em).toLocaleString('pt-BR') : 'ainda não neste aparelho'}.</p>
     </div>`;
 
   // ── Custo do retrabalho (R$/hora da equipe e R$/km) ──────────────────────
@@ -8815,7 +8824,7 @@ function renderControle() {
   const mubisysHTML = isAdmin ? `
     <div class="cfg-section">
       <h3>🔌 Integração Mubisys (Importar O.S)</h3>
-      <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">Cadastre a chave da API para puxar as O.S automaticamente. O <strong>Access-Token fica guardado só no servidor</strong> — nunca é enviado aos aparelhos da equipe.</p>
+      <p class="text-muted" style="font-size:.75rem;margin-bottom:8px">Cadastre a chave da API para puxar as O.S automaticamente. O <strong>Access-Token fica guardado só no servidor</strong>: nunca é enviado aos aparelhos da equipe.</p>
       <div id="mubisys-status" class="text-muted" style="font-size:.78rem;margin-bottom:10px">Verificando configuração…</div>
       <div class="field"><label>publicKey (chave da empresa)</label><input data-mub-pk placeholder="publicKey"></div>
       <div class="field mt-8"><label>Access-Token</label><input type="password" data-mub-token placeholder="cole o token (em branco mantém o atual)" autocomplete="off"></div>
@@ -8988,7 +8997,7 @@ function renderControle() {
       await AUTH.salvarConta({ usuario: nome, nome, papel: $('[data-user-papel]', el).value, senha, ativo: true });
     } catch (e) { toast(e.erro || 'Não consegui salvar', 'error'); return; }
     $('[data-user-nome]', el).value = ''; $('[data-user-senha]', el).value = '';
-    toast('Acesso criado — a pessoa troca a senha na primeira entrada', 'success');
+    toast('Acesso criado: a pessoa troca a senha na primeira entrada', 'success');
     pintarAcessos(el);
   };
 }
@@ -9009,7 +9018,7 @@ async function pintarAcessos(el) {
     box.innerHTML = '<div class="text-muted">' +
       (e.status === 401 || e.status === 403
         ? 'Sua sessão expirou. Saia e entre de novo para administrar os acessos.'
-        : 'Não consegui ler os acessos: ' + esc(e.erro || e.message) + ' — esta lista precisa de internet.') + '</div>';
+        : 'Não consegui ler os acessos: ' + esc(e.erro || e.message) + '. Esta lista precisa de internet.') + '</div>';
     return;
   }
   box.innerHTML = contas.map(u => `
@@ -9035,7 +9044,7 @@ async function pintarAcessos(el) {
     const conta = contas.find(c => c.usuario === u) || {};
     try { await AUTH.salvarConta({ usuario: u, nome: conta.nome || u, papel: conta.papel, senha: nova }); }
     catch (e) { toast(e.erro || 'Não consegui trocar', 'error'); return; }
-    toast('Senha definida — ela troca na primeira entrada', 'success'); pintarAcessos(el);
+    toast('Senha definida: ela troca na primeira entrada', 'success'); pintarAcessos(el);
   });
 }
 
@@ -9209,10 +9218,10 @@ function wireSaude(el) {
       if (ult && ult.em) {
         const horas = (Date.now() - new Date(ult.em).getTime()) / 3600000;
         const quando = new Date(ult.em).toLocaleString('pt-BR');
-        if (ult.ok === false) { impIcone = '❌'; impTxt = `${quando} — ERRO: ${esc(ult.erro || 'desconhecido')}`; }
+        if (ult.ok === false) { impIcone = '❌'; impTxt = `${quando} · ERRO: ${esc(ult.erro || 'desconhecido')}`; }
         else {
           impIcone = horas < 2 ? '✅' : '⚠️';
-          impTxt = `${quando} — ${ult.novas || 0} nova(s)` +
+          impTxt = `${quando} · ${ult.novas || 0} nova(s)` +
             (ult.duplicatasRemovidas ? `, ${ult.duplicatasRemovidas} duplicata(s) limpas` : '') +
             (horas >= 2 ? ` — <strong>há mais de ${Math.floor(horas)}h sem rodar!</strong>` : '');
         }
@@ -9223,7 +9232,7 @@ function wireSaude(el) {
       const bom = (ult && ult.ultimoSucesso && ult.ultimoSucesso.em) ? ult.ultimoSucesso
         : (ult && ult.ok !== false && ult.em ? { em: ult.em, novas: ult.novas } : null);
       const completaTxt = bom
-        ? `${new Date(bom.em).toLocaleString('pt-BR')} — ${bom.novas || 0} nova(s)`
+        ? `${new Date(bom.em).toLocaleString('pt-BR')} · ${bom.novas || 0} nova(s)`
         : 'nenhuma registrada ainda';
       const dif = ult?.baixa?.divergencias || [];
       const semNoticia = Number(ult?.baixa?.semNoticiaDoErp || 0);
@@ -9264,7 +9273,7 @@ function wireMubisys(el) {
   STORE.apiFn('mubisys', { action: 'statusConfig' }).then(s => {
     if (s.error) { statusEl.textContent = '⚠️ ' + s.error; return; }
     if (s.configurado) {
-      statusEl.innerHTML = `✅ Configurado — publicKey <code>${esc(s.publicKey)}</code>, token <code>${esc(s.tokenMascarado)}</code>`;
+      statusEl.innerHTML = `✅ Configurado: publicKey <code>${esc(s.publicKey)}</code>, token <code>${esc(s.tokenMascarado)}</code>`;
     } else {
       statusEl.textContent = '➖ Ainda não configurado.';
     }
@@ -9363,7 +9372,7 @@ function abrirInstrucoes() {
       <ul>
         <li><strong>🔒 Saída / liberar carro:</strong> só após <em>Confirmação = Confirmado</em> (POP EXI‑002).</li>
         <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + conferências do embarque (embarque, produtos e ferramentas) + saída registrada + Instalação OK + conferido por + ≥1 foto de antes (ao chegar, antes de começar) + foto de depois (serviço pronto) + data e hora do retorno (+ descrição do problema, se retrabalho). PCP e admin podem trocar a foto de depois e a hora do retorno por uma exceção de encerramento com justificativa.<br>
-          <em>Pedido interno (retirada) é diferente:</em> basta PCP liberado + ≥1 item — não há agenda, nem embarque, nem foto.</li>
+          <em>Pedido interno (retirada) é diferente:</em> basta PCP liberado + ≥1 item; não há agenda, nem embarque, nem foto.</li>
       </ul>
       <p>Todo o resto é guia: nenhum campo trava por ordem. Preencha na ordem que quiser; a barra de <strong>% preenchida</strong> no topo da ficha mostra o quanto falta.</p>
 
@@ -9394,21 +9403,21 @@ function abrirInstrucoes() {
 
       <h2>A barra lateral</h2>
       <ul>
-        <li><strong>Operação</strong> — 📋 <strong>PCP</strong> (todas as O.S por data de entrega, com % preenchido e responsável), 🚚 <strong>Instalação</strong> (quadro <em>Kanban</em> por dia; o 🖨 gera o espelho), ⚡ <strong>Execução</strong> (o que está na rua agora), ⏸ <strong>Parado Cliente</strong>, 🔧 <strong>Retrabalho</strong>, 🏁 <strong>Finalizados</strong> e 🚗 <strong>Volta do carro</strong>.</li>
+        <li><strong>Operação</strong>: 📋 <strong>PCP</strong> (todas as O.S por data de entrega, com % preenchido e responsável), 🚚 <strong>Instalação</strong> (quadro <em>Kanban</em> por dia; o 🖨 gera o espelho), ⚡ <strong>Execução</strong> (o que está na rua agora), ⏸ <strong>Parado Cliente</strong>, 🔧 <strong>Retrabalho</strong>, 🏁 <strong>Finalizados</strong> e 🚗 <strong>Volta do carro</strong>.</li>
         <li><strong>Entrega</strong>: 📦 Entregas e 🏅 Performance. Em Entregas fica a aba ✅ Fechar o dia, o lote da gestão, por dia ou pelas pendências do mês. A vista Por O.S. mostra um cartão por O.S. entregue, com status, prazo, retorno, equipe e a linha do tempo, e filtra por status, equipe e busca (número, cliente ou pessoa) sem mudar os cartões de cima.</li>
-        <li><strong>Agenda</strong> — 📅 Calendário, ☑️ Demandas, ⏰ Plantões e 🗓️ Programação. Em Demandas, use os chips de atenção e o botão Filtros para localizar responsáveis, situações e O.S.</li>
-        <li><strong>Casa</strong> — 📊 <strong>Painel</strong> (indicadores, ranking e tendências; clique nos números para abrir o detalhe) e ⚙️ <strong>Configurações</strong> (admin: listas, usuários, contatos e níveis de acesso).</li>
+        <li><strong>Agenda</strong>: 📅 Calendário, ☑️ Demandas, ⏰ Plantões e 🗓️ Programação. Em Demandas, use os chips de atenção e o botão Filtros para localizar responsáveis, situações e O.S.</li>
+        <li><strong>Casa</strong>: 📊 <strong>Painel</strong> (indicadores, ranking e tendências; clique nos números para abrir o detalhe) e ⚙️ <strong>Configurações</strong> (admin: listas, usuários, contatos e níveis de acesso).</li>
       </ul>
       <p><strong>⏸ Parado Cliente e 🚗 Volta do carro são atalhos, não telas separadas:</strong> cada um abre o próprio PCP já na vista certa. É a mesma lista que o botão da barra de vistas mostra: um caminho a mais para o mesmo lugar, não um segundo lugar.</p>
 
       <h2>As vistas do PCP</h2>
       <p>Logo acima dos cards há cinco botões, e o número em cada um conta o que aquela vista mostra:</p>
       <ul>
-        <li><strong>Ativos</strong> — a carteira em aberto. Só aqui aparecem os chips de etapa (Aguardando produção, Apto, Agendado…).</li>
-        <li><strong>⏸ Parado Cliente</strong> — prontas, esperando o cliente liberar a instalação.</li>
-        <li><strong>Retrabalho</strong> — voltou com problema e ainda não foi resolvido.</li>
+        <li><strong>Ativos</strong>: a carteira em aberto. Só aqui aparecem os chips de etapa (Aguardando produção, Apto, Agendado…).</li>
+        <li><strong>⏸ Parado Cliente</strong>: prontas, esperando o cliente liberar a instalação.</li>
+        <li><strong>Retrabalho</strong>: voltou com problema e ainda não foi resolvido.</li>
         <li><strong>🚗 Volta do carro</strong>: as voltas que a gestão ainda não conferiu (o número conta só essas).</li>
-        <li><strong>Arquivados</strong> — o histórico finalizado, por ano e mês. A busca aqui vale para o histórico inteiro, não só para o recorte escolhido.</li>
+        <li><strong>Arquivados</strong>: o histórico finalizado, por ano e mês. A busca aqui vale para o histórico inteiro, não só para o recorte escolhido.</li>
       </ul>
 
       <h2>🚗 Volta do carro</h2>
@@ -9557,14 +9566,14 @@ async function exportarFichaPDF(os) {
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>O.S ${esc(os.numero)}</title>
     <style>body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;background:#f0f4fa;padding:6px 8px;margin:16px 0 4px;border-radius:6px}table{width:100%;border-collapse:collapse;font-size:13px}.date{font-size:15px;color:#0d9488;font-weight:700;margin-bottom:12px}</style>
     </head><body>
-    <h1>Impresilk — O.S ${esc(os.numero || '—')}</h1>
+    <h1>Impresilk · O.S ${esc(os.numero || '—')}</h1>
     <div class="date">📅 ${esc(fmtInstalacao(os.instalacao))}</div>
 
     <h2>1 · PCP &amp; Cliente</h2><table>
       ${kv('Cliente', os.cliente)}${kv('Contato', os.contato)}${kv('WhatsApp', os.whatsapp)}
       ${kv('CNPJ/CPF', os.cnpjCpf)}${kv('Endereço', os.endereco)}${kv('Serviço', os.servico)}
       ${kv('Data entrada', os.dataEntrada)}${kv('Responsável PCP', os.responsavelPCP)}${kv('Obs PCP', os.obsPCP)}${kv('Vendedor', os.vendedor)}
-      ${kv('Liberado p/ instalação', os.liberadoPCP ? `Sim — ${os.aptoPor||''}` : 'Não')}
+      ${kv('Liberado p/ instalação', os.liberadoPCP ? `Sim, ${os.aptoPor||''}` : 'Não')}
     </table>
 
     <h2>2 · Serviço &amp; Itens</h2><table>${kv('Acesso', os.acesso)}${kv('Fixação', os.fixacao)}${kv('Ferramentas', (os.ferramentas||[]).join(', '))}${kv('Suprimentos', (os.suprimentos||[]).join(', '))}</table>
@@ -9580,15 +9589,15 @@ async function exportarFichaPDF(os) {
 
     <h2>4 · Embarque &amp; Execução</h2><table>
       ${kv('Embarque conferido por', os.embarqueConferidoPor)}${kv('Produtos conferidos por', os.produtosConferidosPor)}
-      ${kv('Ferramentas conferidas', os.ferramentasConferidas ? `Sim — ${os.ferramentasConferidasPor||''}` : '')}
-      ${kv('Carro liberado', os.carroLiberado?`Sim — ${os.carroLiberadoPor||''}`:'Não')}
+      ${kv('Ferramentas conferidas', os.ferramentasConferidas ? `Sim, ${os.ferramentasConferidasPor||''}` : '')}
+      ${kv('Carro liberado', os.carroLiberado?`Sim, ${os.carroLiberadoPor||''}`:'Não')}
       ${kv('Hora saída', os.horaSaida)}${kv('KM saída', os.kmSaida)}${kv('Hora retorno', os.horaRetorno)}${kv('KM retorno', os.kmRetorno)}
       ${kv('KM rodado', (os.kmSaida && os.kmRetorno && (+os.kmRetorno - +os.kmSaida) >= 0) ? (+os.kmRetorno - +os.kmSaida) + ' km' : '')}
       ${kv('Instalação OK', os.instalacaoOK?'Sim':'Não')}
       ${kv('Conferido por', os.conferidoPor)}${kv('Situação', os.checkout && os.checkout.situacao)}${kv('Retrabalho', os.retrabalho?'Sim':'')}${kv('Problema', os.problema)}${kv('Etapa de origem', os.etapaOrigem)}${kv('Causa raiz', os.causaRaiz)}${kv('Responsável da etapa', os.responsavelEtapa)}${kv('Causa', os.causa)}
       ${kv('Obs técnicas', os.obsTecnicas)}${kv('Fotos de antes', (os.fotosCheckinIds||[]).length+' foto(s)')}${kv('Fotos de depois', (os.fotosRetornoIds||[]).length ? (os.fotosRetornoIds||[]).length+' foto(s)' : '')}
-      ${os.checkinGPS ? kv('Local do check‑in', `${os.checkinGPS.lat}, ${os.checkinGPS.lng} (±${os.checkinGPS.precisao||'?'}m) — maps.google.com/?q=${os.checkinGPS.lat},${os.checkinGPS.lng}`) : ''}
-      ${kv('Finalizada', os.finalizadaEm?`${new Date(os.finalizadaEm).toLocaleString('pt-BR')} — ${os.finalizadoPor||''}`:'')}
+      ${os.checkinGPS ? kv('Local do check‑in', `${os.checkinGPS.lat}, ${os.checkinGPS.lng} (±${os.checkinGPS.precisao||'?'}m) · maps.google.com/?q=${os.checkinGPS.lat},${os.checkinGPS.lng}`) : ''}
+      ${kv('Finalizada', os.finalizadaEm?`${new Date(os.finalizadaEm).toLocaleString('pt-BR')} · ${os.finalizadoPor||''}`:'')}
     </table>
 
     ${galeria}
@@ -9713,7 +9722,7 @@ function montarMensagemDia(dia, lista) {
     const hora = inst.periodo === 'Horário' || /^\d{2}:\d{2}$/.test(inst.hora || '') ? (inst.hora || inst.periodo) : (inst.periodo || '—');
     const veic = rotuloVeiculoMsg(os.veiculo);
     txt += `${sep}\n`;
-    txt += `⏰ ${hora} 📍 O.S: ${os.numero || '—'} — ${os.cliente || ''}\n`;
+    txt += `⏰ ${hora} 📍 O.S: ${os.numero || '—'} · ${os.cliente || ''}\n`;
     txt += `${emojiServico(os.servico)} Serviço: ${os.servico || '—'}\n`;
     txt += `👥 Equipe: ${listarPessoasMsg(os.equipe)}\n`;
     txt += os.veiculo ? `${veic.emoji} Veículo: ${veic.texto}\n` : `🚗 Veículo: a definir\n`;
@@ -9775,7 +9784,7 @@ function abrirMensagemDia(dia) {
     const t = textoAtual();
     try { await navigator.clipboard.writeText(t); }
     catch { const ta = $('#wpp-texto', box); ta.focus(); ta.select(); document.execCommand('copy'); }
-    registrar(); toast('Mensagem copiada — cole no grupo.', 'success');
+    registrar(); toast('Mensagem copiada: cole no grupo.', 'success');
   };
   $$('[data-wpp-num]', box).forEach(b => b.onclick = () => {
     const num = b.dataset.wppNum;
@@ -9786,7 +9795,7 @@ function abrirMensagemDia(dia) {
 
 function montarTextoWhatsApp(os) {
   const co = os.checkout || {};
-  return `*O.S ${os.numero || '—'}* — ${os.cliente || ''}\n` +
+  return `*O.S ${os.numero || '—'}* · ${os.cliente || ''}\n` +
     `📅 ${fmtInstalacao(os.instalacao)}\n` +
     // Sem o endereço do cadastro do cliente (o do CNPJ): não é o local da instalação.
     `👷 ${OPERACAO.equipeTexto(os, ', ') || '—'}\n` +
@@ -9818,7 +9827,7 @@ function abrirWhatsApp(os) {
       <div class="wpp-picker-body">
         <button class="btn-ghost w-100" id="wpp-pdf">🖨 Gerar PDF para anexar</button>
         <p class="text-muted" style="font-size:.78rem;margin:6px 0 8px">Gere o PDF, salve, e anexe na conversa após escolher o contato.</p>
-        ${numCliente ? `<button class="btn-success w-100" data-wpp-num="${esc(numCliente)}">📱 Cliente — ${esc(os.cliente||'')}</button>` : ''}
+        ${numCliente ? `<button class="btn-success w-100" data-wpp-num="${esc(numCliente)}">📱 Cliente: ${esc(os.cliente||'')}</button>` : ''}
         ${contatos.map((c, i) => `<button class="btn-ghost w-100 mt-6" data-wpp-num="${esc(String(c.numero||'').replace(/\D/g,''))}">👤 ${esc(c.nome)} <span class="text-muted">(${esc(c.departamento||'—')})</span></button>`).join('')}
         <button class="btn-ghost w-100 mt-6" data-wpp-num="">🔗 Escolher na hora (sem número)</button>
       </div>
@@ -9851,7 +9860,7 @@ function exportarDiaPDF(dia, lista) {
     const ferr = (os.ferramentas || []);
     const sup  = (os.suprimentos || []);
     return `<div class="esp-os">
-      <div class="esp-head"><strong>⏰ ${esc(rotuloHora(os))}</strong> · O.S ${esc(os.numero||'—')} — ${esc(os.cliente||'')}</div>
+      <div class="esp-head"><strong>⏰ ${esc(rotuloHora(os))}</strong> · O.S ${esc(os.numero||'—')} · ${esc(os.cliente||'')}</div>
       <div class="esp-end">📍 ${esc(os.endereco||'—')}</div>
       <div class="esp-eq">👷 ${esc(OPERACAO.equipeTexto(os, ', ')||'—')}${os.veiculo?` · 🚚 ${esc(os.veiculo)}`:''}</div>
       <div class="esp-cols">
@@ -9881,9 +9890,9 @@ function exportarDiaPDF(dia, lista) {
       .esp-vazio{margin:0;color:#999;font-size:13px}
       @media print{.esp-os{border-color:#bbb}}
     </style></head><body>
-    <div class="top">${logo}<h1>Programação — ${esc(titulo)}</h1></div>
+    <div class="top">${logo}<h1>Programação: ${esc(titulo)}</h1></div>
     <table><thead><tr><th>Horário</th><th>O.S</th><th>Cliente</th><th>Endereço</th><th>Equipe</th></tr></thead><tbody>${linhas}</tbody></table>
-    <h2>Espelho do instalador — equipamentos &amp; suprimentos</h2>
+    <h2>Espelho do instalador: equipamentos &amp; suprimentos</h2>
     ${espelho || '<p style="color:#999">Sem O.S neste dia.</p>'}
     <script>window.onload=function(){window.print()}<\/script></body></html>`);
   prepararPDFJanela(w,{titulo:'Execução do dia',periodo:{de:dia,ate:dia},cobertura:lista.length+' O.S. da lista selecionada'});
@@ -9936,13 +9945,13 @@ function relatorioServicosDia(dataISO) {
     <style>body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}h1{font-size:20px;margin:0 0 4px}.date{font-size:15px;color:#0d9488;font-weight:700;margin-bottom:12px}
     table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;background:#f0f4fa;padding:6px;border-bottom:2px solid #ccc}td{padding:5px 6px;border-bottom:1px solid #eee}</style>
     </head><body>
-    <h1>Impresilk — Serviços do dia</h1>
+    <h1>Impresilk · Serviços do dia</h1>
     <div class="date">📅 ${esc(titulo)} · ${lista.length} serviço(s)</div>
     <table><thead><tr><th>Hora</th><th>O.S</th><th>Cliente</th><th>Endereço</th><th>Equipe</th><th>Veículo</th><th>Status</th></tr></thead>
     <tbody>${linhas}</tbody></table>
     <script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script>
     </body></html>`);
-  prepararPDFJanela(w,{titulo:'Instalação — serviços do dia',periodo:{de:dataISO,ate:dataISO},cobertura:lista.length+' serviços abertos de instalação externa'});
+  prepararPDFJanela(w,{titulo:'Instalação: serviços do dia',periodo:{de:dataISO,ate:dataISO},cobertura:lista.length+' serviços abertos de instalação externa'});
   w.document.close();
 }
 
@@ -9987,7 +9996,7 @@ function relatorioMensalPorPessoa(mesISO) {
     <style>body{font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111}h1{font-size:20px;margin:0 0 4px}.date{font-size:15px;color:#0d9488;font-weight:700;margin-bottom:12px}
     table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;background:#f0f4fa;padding:6px;border-bottom:2px solid #ccc}td{padding:6px;border-bottom:1px solid #eee}tfoot td{font-weight:700;border-top:2px solid #ccc}</style>
     </head><body>
-    <h1>Impresilk — Participação nas instalações concluídas</h1>
+    <h1>Impresilk · Participação nas instalações concluídas</h1>
     <div class="date">📅 ${esc(titulo)} · ${total} O.S únicas · ${r.participacoes} participações · ${r.semEquipe} sem equipe</div>
     <p>Uma O.S pode envolver várias pessoas. Retiradas e baixas automáticas do ERP ficam fora desta contagem.</p>
     <table><thead><tr><th>Instalador</th><th>Participações em O.S</th><th>Com retrabalho</th></tr></thead>
@@ -10005,7 +10014,7 @@ function abrirWhatsAppDia(dia, lista) {
   let txt = `*Programação ${titulo}*\n\n`;
   lista.forEach(os => {
     // Sem o endereço do cadastro do cliente (o do CNPJ): não é o local da instalação.
-    txt += `*O.S ${os.numero||'—'}* — ${os.cliente||''}\n⏰ ${os.instalacao?.periodo||''} · 👷 ${OPERACAO.equipeTexto(os, ', ')||'—'}\n\n`;
+    txt += `*O.S ${os.numero||'—'}* · ${os.cliente||''}\n⏰ ${os.instalacao?.periodo||''} · 👷 ${OPERACAO.equipeTexto(os, ', ')||'—'}\n\n`;
   });
   window.open(`https://wa.me/?text=${encodeURIComponent(txt)}`, '_blank');
 }
@@ -10038,7 +10047,7 @@ function garantirPdfJs() {
     s.onload = () => ok();
     s.onerror = () => {
       _pdfJsPronto = null;
-      falhou(new Error('pdf.js indisponível (sem internet) — use o cadastro manual.'));
+      falhou(new Error('pdf.js indisponível (sem internet): use o cadastro manual.'));
     };
     document.head.appendChild(s);
   });
@@ -10048,7 +10057,7 @@ function garantirPdfJs() {
 async function lerPDF(file) {
   await garantirPdfJs();
   if (typeof pdfjsLib === 'undefined') {
-    throw new Error('pdf.js indisponível (sem internet) — use o cadastro manual.');
+    throw new Error('pdf.js indisponível (sem internet): use o cadastro manual.');
   }
   pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_CDN + '/pdf.worker.min.js';
   const buf = await file.arrayBuffer();
@@ -10248,7 +10257,7 @@ function importarPDF() {
       openModal(os);
       toast('O.S importada: confira os campos', 'success');
     } catch (e) {
-      toast(e.message || 'Falha ao ler PDF — use cadastro manual', 'error');
+      toast(e.message || 'Falha ao ler PDF: use cadastro manual', 'error');
       openModal(novaOS());
     }
   };
@@ -11350,7 +11359,16 @@ function mostrarDiagnosticoItens() {
   el.innerHTML='<h2>Identidade dos itens</h2><p>'+r.itens+' itens; '+r.semUID+' sem UID; '+r.ambiguos+' ambíguos. Ausência de UID não comprova perda de entrega. Mescla automática permanece desligada.</p><table><thead><tr><th>O.S.</th><th>Itens</th><th>Sem UID</th><th>Ambíguos</th><th>Alternativa válida</th><th>UID repetido</th><th>Posição ausente/repetida</th><th>Referência órfã</th></tr></thead><tbody>'+r.linhas.map(l=>'<tr>'+[l.numero,l.itens,l.semUID,l.ambiguos,l.alternativasValidas,l.uidDuplicado.join(', ')||'—',l.posicaoAusente+' / '+l.posicaoDuplicada.join(', '),l.referenciasOrfas].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table><p>Candidatos ERP por O.S.: '+esc(JSON.stringify(r.linhas.map(l=>({os:l.numero,candidatos:l.candidatosERP}))))+'</p>';
   imprimirAnalisePCP('Diagnóstico de identidade',el,{},r.fonte);
 }
+/* A FAIXA DA FILA (linha Baixa da auditoria de 11/10/2026, "faixa de
+   sincronização em UTC e piscando"): a hora da pendência mais antiga sai no
+   horário de São Paulo (antes, o carimbo cru em UTC), e a chamada sem status
+   (a conferência da importação, de tempos em tempos) usa o último status do
+   envio: antes ela trocava "edição recusada" ou "entre novamente" pela fila
+   comum, e a faixa piscava entre os dois. */
+let _statusFilaPCP;
+const horaFilaSP = iso => { const t = Date.parse(iso || ''); return Number.isFinite(t) ? new Date(t).toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'America/Sao_Paulo'}) : ''; };
 function vigiarFilaPCP(status) {
+  if (status !== undefined) _statusFilaPCP = status; else status = _statusFilaPCP;
   if(typeof ALERTAS_SYNC==='undefined')return;
   const av=ALERTAS_SYNC.fila(STORE.getQueue(),{online:navigator.onLine,sessao:!!STATE.user&&status!=='sem-sessao'&&(typeof AUTH==='undefined'||AUTH.temCracha()),recusada:status==='recusa'});
   const r=ALERTAS_SYNC.registrar(localStorage,'fila',av);
@@ -11358,5 +11376,5 @@ function vigiarFilaPCP(status) {
   if(!av){box?.remove();return;}
   if(!box){box=document.createElement('div');box.id='alerta-fila';box.className='alerta-importacao';document.querySelector('main')?.prepend(box);}
   if(r.notificar)box.setAttribute('role','alert');else box.removeAttribute('role');
-  box.textContent='Sincronização: '+({'sem-sessao':'entre novamente para enviar','offline':'aparelho sem conexão','recusa':'há edição recusada; confira o motivo exibido','fila-sem-data':'fila legada sem data confiável; conferir envio','fila-antiga':'há alterações aguardando há pelo menos 30 minutos'}[av.tipo])+'. '+av.quantidade+' pendência(s). Mais antiga: '+(av.desde||'não registrada');
+  box.textContent='Sincronização: '+({'sem-sessao':'entre novamente para enviar','offline':'aparelho sem conexão','recusa':'há edição recusada; confira o motivo exibido','fila-sem-data':'fila legada sem data confiável; conferir envio','fila-antiga':'há alterações aguardando há pelo menos 30 minutos'}[av.tipo])+'. '+av.quantidade+' pendência(s). Mais antiga: '+(horaFilaSP(av.desde)||'não registrada');
 }

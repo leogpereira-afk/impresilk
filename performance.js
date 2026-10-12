@@ -2758,7 +2758,7 @@ function perfRegraExemploHTML(regra) {
     return `<li><strong>${rotulo}</strong>, O.S. de ${perfCentavos(valor)} sem retrabalho de instalação: comissão total ${perfCentavos(ex.comissaoCentavos)}, ${n === 1 ? 'quem foi sozinho' : 'líder'} ${perfCentavos(lider.centavos)}${ajTxt}.</li>`;
   };
   const v = regra.volta, base = valor;
-  return `<div class="perf-regra-exemplo" aria-live="polite"><h4>Exemplo legado — não configura a nova comissão</h4><ul>${linha(2,'Dupla')}${linha(3,'Trio')}${linha(4,'Equipe de 4')}${linha(1,'Sozinho')}</ul>
+  return `<div class="perf-regra-exemplo" aria-live="polite"><h4>Exemplo legado: não configura a nova comissão</h4><ul>${linha(2,'Dupla')}${linha(3,'Trio')}${linha(4,'Equipe de 4')}${linha(1,'Sozinho')}</ul>
     <p>${esc(perfReguaPerdasTxt())}</p>
     <p>Volta do carro, sobre o valor válido da volta: carro limpo e arrumado ${v.carroLimpoBp ? '+' + perfPct(v.carroLimpoBp) : 'sem bônus'} (${perfCentavos(base)} vira ${perfCentavos(base + Math.round(base * REGRAS.ajusteDaVolta(regra, {carroCerto:true}) / 10000))}); equipamento faltante ou danificado ${v.equipamentoFaltaBp ? '-' + perfPct(v.equipamentoFaltaBp) : 'sem redutor'} (vira ${perfCentavos(base + Math.round(base * REGRAS.ajusteDaVolta(regra, {equipamentoOk:false}) / 10000))}); volta não conferida fica como está.</p></div>`;
 }

@@ -120,6 +120,8 @@ const POR_OS = ((O) => {
     // A edição que chegou depois da exclusão (M18, onda acabamento): não gravou, e fica aqui para a gestão refazer.
     'edicao-recusada': 'tentou alterar a O.S. excluída (edição recusada; nada foi gravado, e o que a pessoa tentou mudar está aqui)',
     'repor-valores': 'gravou, e os valores dos itens foram repostos (quem gravou não muda valor)',
+    // O vínculo da entrega a uma equipe cadastrada (linha Baixa da auditoria de 11/10/2026).
+    'vincular-equipe': 'vinculou a entrega a uma equipe cadastrada',
     // O valor das entregas conferidas que mudou pelo rateio (revisão da onda acabamento, D1).
     'valor-conferido': 'mudou o valor das entregas conferidas (pelo rateio dos itens)'};
   const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';

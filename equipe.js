@@ -1474,7 +1474,9 @@ function renderModal() {
    na cópia atual desta O.S. (o mesmo padrão da gestão, persistirAposFoto).
    `aplicar(o, id)` põe a foto num objeto e não duplica; `depois(o)` roda uma
    vez no fim (carimbo, retrabalho). Devolve quantas fotos entraram. */
-async function anexarFotos(files, aplicar, depois) {
+/* `avisoOk`: o aviso de quando a foto entrou de verdade (nenhuma entrou: o
+   'foto-falhou' do store já disse o motivo, e nada de "Foto anexada"). */
+async function anexarFotos(files, aplicar, depois, avisoOk) {
   const d = _draft;
   if (!d || !files.length) return 0;
   toast(files.length > 1 ? `Enviando ${files.length} fotos…` : 'Enviando foto…');
@@ -1501,7 +1503,8 @@ async function anexarFotos(files, aplicar, depois) {
     }
   }
   const fila = fotosNaFila();
-  if (ids.some(id => fila.has(id))) toast('Foto guardada no celular. Sobe quando tiver sinal.');
+  if (ids.some(id => fila.has(id))) toast('Foto guardada no celular. Sobe quando tiver sinal.' + (avisoOk ? ' ' + avisoOk : ''));
+  else if (avisoOk) toast(avisoOk);
   return ids.length;
 }
 const porNaLista = campo => (o, id) => { o[campo] = o[campo] || []; if (!o[campo].includes(id)) o[campo].push(id); };
@@ -1706,7 +1709,7 @@ function bindModal(os, ro) {
     }
   };
 
-  // Fotos de check-in: só pela câmera, porque provam a presença no cliente.
+  // Fotos de antes (ao chegar, antes de começar): só pela câmera, porque provam a presença no cliente.
   const ck = $('[data-checkin]', root);
   if (ck) ck.onchange = async () => {
     const d = _draft;
@@ -1719,11 +1722,12 @@ function bindModal(os, ro) {
     save(); reRender();
   });
 
-  // Fotos do serviço pronto (câmera ou galeria): a primeira carimba a hora de
-  // retorno, se faltar, com o dia de hoje (carimbarAgora).
+  // Fotos de depois (serviço pronto; câmera ou galeria). A foto não carimba a
+  // hora do retorno: ela é confirmada no campo de horário (ou no "Agora").
+  // "Foto anexada" só quando a foto entrou (antes saía mesmo com a foto
+  // recusada, e a O.S. não fechava sem ela).
   $$('[data-retorno]', root).forEach(inp => inp.onchange = async () => {
-    await anexarFotos(Array.from(inp.files || []), porNaLista('fotosRetornoIds'));
-    toast('Foto anexada. A hora real do retorno deve ser confirmada no campo de horário.');
+    await anexarFotos(Array.from(inp.files || []), porNaLista('fotosRetornoIds'), null, 'Foto anexada. A hora real do retorno deve ser confirmada no campo de horário.');
   });
   $$('[data-rm-ret]', root).forEach(b => b.onclick = () => {
     if (!apagarFoto(b.dataset.rmRet)) return;

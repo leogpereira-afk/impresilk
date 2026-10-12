@@ -70,7 +70,7 @@ test('RPC ausente falha sem sucesso e sem alterar o histórico',async()=>{
  const r=await e.call(body,gestor);assert.ok(r.status>=400);assert.deepEqual(e.db.pcp_registros[0].registro,os);
 });
 test('migration restringe RPC, trava configuração antes do CAS e fixa resolução de schemas',()=>{
- const sql=require('node:fs').readFileSync(require('node:path').join(__dirname,'../supabase/migrations/0004_vinculo_equipe_cas.sql'),'utf8');
+ const sql=require('node:fs').readFileSync(require('node:path').join(__dirname,'../supabase/migrations/20261003153006_pcp_vinculo_equipe_cas.sql'),'utf8');
  assert.match(sql,/security definer set search_path = pg_catalog/i);
  assert.ok(sql.indexOf('for update')<sql.indexOf('update public.pcp_registros'));
  assert.match(sql,/v_versao is distinct from p_cfg_versao/);

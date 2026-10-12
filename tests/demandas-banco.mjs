@@ -5,7 +5,7 @@ const {PGlite}=await import(process.env.PGLITE_MODULE||'@electric-sql/pglite');
 const db=new PGlite();
 try{
  await db.exec("create role anon;create role authenticated;create role service_role;create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table pcp_registros(id text primary key,registro jsonb);insert into pcp_registros values ('os-original','{\"prazo\":\"2026-10-09\",\"prioridade\":\"alta\"}');");
- await db.exec(fs.readFileSync(new URL('../supabase/migrations/20261008_demandas.sql',import.meta.url),'utf8'));
+ await db.exec(fs.readFileSync(new URL('../supabase/migrations/20261008175142_pcp_demandas_isoladas.sql',import.meta.url),'utf8'));
  const put=(rev,mutation,registro={id:'d1',titulo:'Teste'})=>db.query('select pcp_demanda_gravar($1,$2,$3,$4) r',['d1',registro,rev,mutation]);
  assert.equal((await put(0,'m1')).rows[0].r.revision,1);
  assert.equal((await put(0,'m1')).rows[0].r.revision,1);

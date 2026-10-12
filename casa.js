@@ -46,11 +46,18 @@ function osNoMesCasa(mes) {
   return STORE.getAllOS().filter(o => !OPERACAO.encerradaERP(o) && !canc(o) && diasCasa(o).some(d => d.startsWith(mes)));
 }
 
+/* O BÔNUS MANUAL ANTIGO É SÓ LEITURA (F25, linha Baixa da auditoria de
+   11/10/2026): a tela não tem mais Orçamento, Teto, Aprovar, Pagar, Reabrir
+   nem o apontar do ponto; o programa que vale é a comissão de 1% (D-001), e o
+   pcp-sync não aceita bonusPCP do pcp. O mês da apuração é só da tela
+   (STATE._bonusMes), não vai para a configuração. */
 function lerBonusCasa() {
   const cfg = STORE.getCFG();
   const b = cfg.bonusPCP || {};
   return {
-    mes: b.mes || mesCasa(),
+    mes: (typeof STATE !== 'undefined' && STATE && STATE._bonusMes) || b.mes || mesCasa(),
+    // O mês gravado: o item antigo sem mês é dele (itensBonusDoMes), mesmo vendo outro mês na tela.
+    mesGravado: b.mes || mesCasa(),
     orcamento: Number(b.orcamento) || 0,
     teto: Number(b.teto) || 0,
     pontos: b.pontos && typeof b.pontos === 'object' ? b.pontos : {},
@@ -66,17 +73,13 @@ function lerBonusCasa() {
    troca de mês carimba esse mês nele antes de mudar. */
 function itensBonusDoMes(b, mes) {
   const m = mes || b.mes;
-  return (b.itens || []).filter(x => (x.mes || b.mes) === m);
+  return (b.itens || []).filter(x => (x.mes || b.mesGravado || b.mes) === m);
 }
 function trocarMesBonus(b, novo) {
   return { ...b, mes: novo, itens: (b.itens || []).map(x => (x.mes ? x : { ...x, mes: b.mes })) };
 }
 
-function gravarBonusCasa(b) {
-  const cfg = STORE.getCFG();
-  cfg.bonusPCP = b;
-  STORE.saveCFG(cfg);
-}
+// gravarBonusCasa saiu (F25): a tela não grava mais o bônus manual antigo.
 
 function idPessoaCasa(valor) {
   const d = String(valor ?? '').replace(/\D/g, '');
@@ -2624,7 +2627,7 @@ function renderEntregas() {
 function chipFichaHTML(osId, f, on) {
   const nome = (f.nome || f.apelido || rotuloPessoaCasa(f.id) || 'ID').split(' ')[0];
   return `<label class="casa-chip${on ? ' on' : ''}">
-    <input type="checkbox" data-ponto="${esc(osId)}" value="${esc(f.id)}" ${on ? 'checked' : ''}>
+    <input type="checkbox" data-ponto="${esc(osId)}" value="${esc(f.id)}" ${on ? 'checked' : ''} disabled title="Histórico do bônus manual antigo: só leitura">
     <span>${esc(nome)}</span>
     <small>ID ${esc(f.id)}</small>
   </label>`;
@@ -2725,7 +2728,7 @@ function produtividadeHTML() {
       <h3>Produtividade</h3>
       <p>Cada parcela usa a data, o valor proporcional e a equipe conferidos; registros antigos usam a equipe da O.S. O valor da parcela é integral por participante e não deve ser somado entre colaboradores. O.S. equivalentes = valor da parcela ÷ líquido da O.S.; sem base, a equivalência fica pendente. Tempo disponível apenas para registros sem parcelas. Para apuração, use o relatório de participações.</p>
       ${avisoJanelaCasa(f)}
-      ${semEquipe ? `<p class="metricas-nota">${semEquipe} O.S no período sem equipe registrada — não contam para ninguém.</p>` : ''}
+      ${semEquipe ? `<p class="metricas-nota">${semEquipe} O.S no período sem equipe registrada: não contam para ninguém.</p>` : ''}
       ${pessoas.length ? `<div class="casa-prod-grid">${cards}</div>` : foraDaJanelaCasa(f)
         ? emptyState('', 'Nenhuma entrega com equipe nas O.S deste aparelho', `O aparelho guarda só os últimos ${janelaLocalCasa()} dias. O histórico está em Entregas.`)
         : emptyState('', 'Nenhuma entrega com equipe no período', 'A O.S precisa ter equipe e ser finalizada no PCP.')}
@@ -2802,14 +2805,14 @@ function servicosEntreguesHTML() {
      e manda o dono para onde a resposta inteira está. */
   const janela = (typeof STORE.JANELA_LOCAL_DIAS === 'number') ? STORE.JANELA_LOCAL_DIAS : 60;
 
-  return `<p class="text-muted" style="font-size:.8rem">${entregues.length} registros de entrega (incluindo parcelas) entre as O.S guardadas neste aparelho — as dos últimos ${janela} dias. Não entram as retiradas internas nem as que o ERP encerrou e ainda esperam lançamento. Cada parcela permanece no seu mês. O.S. equivalentes = valor da parcela ÷ líquido da O.S.; sem base monetária, a equivalência não é somada. Este quadro ignora o filtro de período acima, de propósito; para o histórico de todos os anos, a aba 📦 Entregas.</p>
+  return `<p class="text-muted" style="font-size:.8rem">${entregues.length} registros de entrega (incluindo parcelas) entre as O.S guardadas neste aparelho (as dos últimos ${janela} dias. Não entram as retiradas internas nem as que o ERP encerrou e ainda esperam lançamento. Cada parcela permanece no seu mês. O.S. equivalentes = valor da parcela ÷ líquido da O.S.; sem base monetária, a equivalência não é somada. Este quadro ignora o filtro de período acima, de propósito; para o histórico de todos os anos, a aba 📦 Entregas.</p>
     <div class="casa-kpi-cards">
       <div class="casa-kpi"><b>${entregues.length}</b><small>registros de entrega, no aparelho</small></div>
       <div class="casa-kpi"><b>${esteAno ? fmtEquivalenteCasa(esteAno.n) : 0}</b><small>O.S. equivalentes em ${anoAtual}</small></div>
     </div>
     <div class="casa-duas">
       <div><h4>Por ano</h4>${anosHTML}</div>
-      <div><h4>Mês a mês <small>— últimos ${meses.length}</small></h4>${mesesHTML}</div>
+      <div><h4>Mês a mês <small>(últimos ${meses.length})</small></h4>${mesesHTML}</div>
     </div>`;
 }
 
@@ -2879,7 +2882,7 @@ function retrabalhoHTML(f) {
      preencher e onde. Gráfico de um item só chamado "não informado" ocupa o
      lugar da informação sem ser informação. */
   const dimensao = (d, ondePreencher) => {
-    if (!d.itens.length) return `<p class="text-muted">Nenhuma das ${d.total} O.S tem isto preenchido${ondePreencher ? ` — ${ondePreencher}` : ''}.</p>`;
+    if (!d.itens.length) return `<p class="text-muted">Nenhuma das ${d.total} O.S tem isto preenchido${ondePreencher ? `: ${ondePreencher}` : ''}.</p>`;
     const barras = barrasCasa(d.itens, v => `${v}`);
     return barras + (d.vazios ? `<p class="text-muted" style="font-size:.78rem">${d.vazios} de ${d.total} sem preencher.</p>` : '');
   };
@@ -2927,7 +2930,7 @@ function retrabalhoHTML(f) {
         <td class="num">${d.voltou || '—'}</td>
         <td class="num">${d.entregas ? (d.voltou / d.entregas * 100).toFixed(0) + '%' : '—'}</td>
         <td class="num">${d.refez || '—'}</td></tr>`).join('')}</tbody></table></div>
-      <p class="text-muted" style="font-size:.78rem">Taxa é sobre as entregas da própria pessoa no período — com poucas entregas ela sobe fácil e não quer dizer muito.</p>`
+      <p class="text-muted" style="font-size:.78rem">Taxa é sobre as entregas da própria pessoa no período: com poucas entregas ela sobe fácil e não quer dizer muito.</p>`
     : '<p class="text-muted">Ninguém com retrabalho no período.</p>';
 
   /* A TAXA É A MESMA DA ABA RETRABALHO (OPERACAO.taxaRetrabalho): O.S afetadas
@@ -2962,7 +2965,7 @@ function retrabalhoHTML(f) {
       <div><h4>Responsável da etapa de origem</h4>${dimensao(responsaveis, 'preenche-se na O.S que voltou')}</div>
       <div></div>
     </div>
-    <p class="text-muted" style="font-size:.8rem"><strong>Quem foi refazer</strong> é a equipe da O.S de correção. <strong>De quem voltou serviço</strong> é a equipe da entrega original — e não quer dizer culpa: quem causou está na etapa de origem e no responsável acima. Valor por hora e por km ficam em ⚙️ Configurações.</p>`;
+    <p class="text-muted" style="font-size:.8rem"><strong>Quem foi refazer</strong> é a equipe da O.S de correção. <strong>De quem voltou serviço</strong> é a equipe da entrega original, e não quer dizer culpa: quem causou está na etapa de origem e no responsável acima. Valor por hora e por km ficam em ⚙️ Configurações.</p>`;
 }
 
 /* ── Carros mais usados ────────────────────────────────────────────────────
@@ -2986,7 +2989,7 @@ function carrosHTML(f) {
   if (!lista.length) {
     const foraDoPeriodo = STORE.getAllOS().filter(o => String(o.veiculo || '').trim()).length;
     if (foraDaJanelaCasa(f)) return `<p class="text-muted">Nenhuma O.S com veículo entre as guardadas neste aparelho. Ele guarda só os últimos ${janelaLocalCasa()} dias.</p>`;
-    return `<p class="text-muted">Nenhuma O.S com veículo neste período.${foraDoPeriodo ? ` Há ${foraDoPeriodo} O.S com veículo em outras datas — amplie o período acima para vê-las.` : ' O campo Veículo da O.S está em branco em todas — sem ele não dá para saber que carro rodou.'}</p>`;
+    return `<p class="text-muted">Nenhuma O.S com veículo neste período.${foraDoPeriodo ? ` Há ${foraDoPeriodo} O.S com veículo em outras datas: amplie o período acima para vê-las.` : ' O campo Veículo da O.S está em branco em todas: sem ele não dá para saber que carro rodou.'}</p>`;
   }
   const semUso = veiculosRH().filter(v => !lista.some(x => normCasa(x.nome) === normCasa(v.nome)));
   return `${avisoJanelaCasa(f)}${barrasCasa(lista.map(c => ({ rotulo: c.nome, valor: c.os, extra: c.km ? `${Math.round(c.km)} km` : '' })), v => `${v} O.S`)}
@@ -4095,17 +4098,11 @@ function renderPerformanceCasa() {
     const valor = item && item.status !== 'aberto' ? item.valor : propostaCasa(p.osCount, totalOs, b.orcamento, b.teto);
     const st = item ? item.status : 'aberto';
     const rotulo = st === 'pago' ? `Pago ${dinheiroCasa(valor)}` : st === 'aprovado' ? `Aprovado ${dinheiroCasa(valor)}` : (b.orcamento > 0 && valor > 0 ? dinheiroCasa(valor) : '—');
-    const acao = st === 'aberto'
-      ? `<button class="btn-primary btn-sm" data-aprovar="${esc(p.id)}" ${valor <= 0 ? 'disabled' : ''}>Aprovar</button>`
-      : st === 'aprovado'
-        ? `<button class="btn-primary btn-sm" data-pagar="${esc(p.id)}">Pagar</button><button class="btn-ghost btn-sm" data-reabrir="${esc(p.id)}">Reabrir</button>`
-        : `<button class="btn-ghost btn-sm" data-reabrir="${esc(p.id)}">Reabrir</button>`;
     return `<tr class="casa-rank-row${filtroId === p.id ? ' on' : ''}" data-filtro-id="${esc(p.id)}">
       <td class="casa-pos">${i + 1}</td>
       <td><strong>${esc(p.nome)}</strong></td>
       <td class="num">${p.osCount}${p.retrab ? ` <small>${p.retrab} retrab</small>` : ''}</td>
       <td class="num">${esc(rotulo)}</td>
-      <td class="casa-rank-acao">${acao}</td>
     </tr>`;
   }).join('');
   const semPonto = fins.filter(os => !instaladoresDaOs(os, b.pontos).length);
@@ -4141,9 +4138,9 @@ function renderPerformanceCasa() {
     </li>`;
   }).join('');
   const bonusHTML = `<div class="casa-perf-bar">
-        <label>Orçamento <input type="number" min="0" step="0.01" id="perf-orc" value="${b.orcamento || ''}" placeholder="0"></label>
-        <label>Teto por pessoa <input type="number" min="0" step="0.01" id="perf-teto" value="${b.teto || ''}" placeholder="Sem teto"></label>
-        <label class="casa-mes">Mês da apuração <input type="month" id="perf-mes" value="${esc(mes)}"></label>
+        <span>Orçamento registrado: <b>${b.orcamento > 0 ? dinheiroCasa(b.orcamento) : 'nenhum'}</b></span>
+        <span>Teto por pessoa: <b>${b.teto > 0 ? dinheiroCasa(b.teto) : 'sem teto'}</b></span>
+        <label class="casa-mes">Mês do histórico <input type="month" id="perf-mes" value="${esc(mes)}"></label>
         <span class="casa-kpis">
           <span><b>${rank.length}</b> pessoas</span>
           <span><b>${fins.length}</b> O.S.</span>
@@ -4152,17 +4149,18 @@ function renderPerformanceCasa() {
         </span>
       </div>
       ${pago ? `<p class="metricas-nota">Já marcado como pago nesta apuração: ${dinheiroCasa(pago)}. Não lança na folha.</p>` : ''}
-      ${semPonto.length ? `<p class="metricas-nota">${semPonto.length} O.S. sem ficha apontada — não entram no ranking até você apontar.</p>` : ''}
+      <p class="metricas-nota">Histórico do bônus manual antigo, só leitura: não se aprova, não se paga e não se aponta mais por aqui. O programa que vale é a comissão de 1%, em Base e fechamento.</p>
+      ${semPonto.length ? `<p class="metricas-nota">${semPonto.length} O.S. sem ficha apontada neste histórico.</p>` : ''}
       ${filtroId ? `<p class="metricas-nota">Filtrando ${esc(rotuloPessoaCasa(filtroId))}. <button type="button" class="pcp-ver-carteira" data-limpar-filtro>Ver todas</button></p>` : ''}
       <div class="casa-perf-grid">
         <section class="casa-apontar">
-          <h3>Apontar quem leva o ponto</h3>
-          <p>Marque uma ou mais fichas. O ponto grava o ID. Não divide sozinho.</p>
+          <h3>Quem levou o ponto</h3>
+          <p>As fichas apontadas no bônus manual antigo (só leitura).</p>
           <ul class="casa-apontar-lista">${apontar || `<li class="text-muted">${fins.length ? 'Nenhuma O.S. neste filtro.' : 'Nenhuma O.S. finalizada no PCP neste mês. A baixa do ERP não entra.'}</li>`}</ul>
         </section>
         <aside class="casa-rank-box">
-          <h3>Apuração para revisão</h3><p class="metricas-nota">Pontos e valores são sugestões manuais. Não lançam pagamento nem horas extras na folha. Compare tipo de serviço, retrabalho e evidências antes de aprovar.</p>
-          ${rank.length ? `<table class="casa-rank-tabela"><thead><tr><th>#</th><th>Pessoa</th><th>Pts</th><th>Valor</th><th></th></tr></thead><tbody>${rankRows}</tbody></table>` : emptyState('', 'Nenhum ponto apontado neste mês', 'A apuração lê O.S. finalizada no PCP. Pessoa sem ficha do RH não entra.')}
+          <h3>Apuração do histórico</h3><p class="metricas-nota">Pontos e valores do bônus manual antigo. Não lançam pagamento nem horas extras na folha.</p>
+          ${rank.length ? `<table class="casa-rank-tabela"><thead><tr><th>#</th><th>Pessoa</th><th>Pts</th><th>Valor</th></tr></thead><tbody>${rankRows}</tbody></table>` : emptyState('', 'Nenhum ponto apontado neste mês', 'A apuração lê O.S. finalizada no PCP. Pessoa sem ficha do RH não entra.')}
         </aside>
       </div>`;
 
@@ -4287,22 +4285,8 @@ function renderPerformanceCasa() {
   const tv = document.getElementById('perf-tv'); if (tv) tv.onclick = abrirTVCasa;
   const compartilhar=el.querySelector('#perf-compartilhar'); if(compartilhar)compartilhar.onclick=perfCompartilharRanking;
   const mesEl = document.getElementById('perf-mes');
-  if (mesEl) mesEl.onchange = () => { if (mesEl.value) { gravarBonusCasa(trocarMesBonus(lerBonusCasa(), mesEl.value)); renderPerformanceCasa(); } };
-  /* O change do Orçamento dispara no toque do Teto: redesenhar na hora
-     destruía o campo recém-tocado e era preciso tocar de novo. Grava já e
-     redesenha quando ninguém está com um campo da aba na mão. O do app.js
-     tenta de novo até o campo ficar livre; o daqui desistia e a tela ficava
-     com o orçamento velho. */
-  const repintarBonus = () => setTimeout(() => {
-    if (typeof repintarSeLivre === 'function') { repintarSeLivre(); return; }
-    const a = document.activeElement;
-    if (a && el.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
-    renderPerformanceCasa();
-  }, 0);
-  const orcEl = document.getElementById('perf-orc');
-  if (orcEl) orcEl.onchange = () => { gravarBonusCasa({ ...lerBonusCasa(), orcamento: Math.max(0, Number(orcEl.value) || 0) }); repintarBonus(); };
-  const tetoEl = document.getElementById('perf-teto');
-  if (tetoEl) tetoEl.onchange = () => { gravarBonusCasa({ ...lerBonusCasa(), teto: Math.max(0, Number(tetoEl.value) || 0) }); repintarBonus(); };
+  // O mês do histórico é só da tela (F25): não grava a configuração.
+  if (mesEl) mesEl.onchange = () => { if (mesEl.value) { STATE._bonusMes = mesEl.value; renderPerformanceCasa(); } };
   wireBuscaDocumentoCasa(el);
   el.querySelectorAll('[data-lig-ok]').forEach(btn => {
     btn.onclick = () => {
@@ -4363,60 +4347,7 @@ function renderPerformanceCasa() {
       renderPerformanceCasa();
     };
   });
-  const gravarPontosDaOs = osId => {
-    const ids = [...el.querySelectorAll(`[data-ponto="${osId}"]`)].filter(cb => cb.checked).map(cb => cb.value);
-    const bA = lerBonusCasa();
-    const pontos = { ...bA.pontos, [osId]: ids };
-    gravarBonusCasa({ ...bA, pontos });
-    renderPerformanceCasa();
-  };
-  el.querySelectorAll('[data-ponto]').forEach(cb => {
-    cb.onchange = () => gravarPontosDaOs(cb.dataset.ponto);
-  });
-  // Aprovar, pagar e reabrir mexem só nos itens DESTE mês: os de outro mês ficam.
-  /* E leem o bônus NA HORA DO TOQUE (lerBonusCasa), não o `b` da pintura: o
-     orçamento trocado com o foco ainda no Teto não repinta a tela, e gravar
-     {...b} devolvia ao cfg o orçamento e o teto antigos, calado, e aprovava o
-     valor calculado com eles. */
-  const mesmaPessoa = (x, id) => (x.mes || b.mes) === mes && (x.id === id || (!x.id && chavePessoaCasa(x.nome) === id));
-  el.querySelectorAll('[data-aprovar]').forEach(btn => {
-    btn.onclick = ev => {
-      ev.stopPropagation();
-      const id = btn.dataset.aprovar;
-      const p = rank.find(x => x.id === id);
-      const bA = lerBonusCasa();
-      const valor = propostaCasa(p ? p.osCount : 0, totalOs, bA.orcamento, bA.teto);
-      if (valor <= 0) return;
-      const itens = bA.itens.filter(x => !mesmaPessoa(x, id)).concat([{ id, nome: rotuloPessoaCasa(id), valor, status: 'aprovado', mes }]);
-      gravarBonusCasa({ ...bA, itens });
-      renderPerformanceCasa();
-      toast('Proposta aprovada. Ainda não é pagamento na folha.', 'success');
-    };
-  });
-  el.querySelectorAll('[data-pagar]').forEach(btn => {
-    btn.onclick = ev => {
-      ev.stopPropagation();
-      const id = btn.dataset.pagar;
-      const bA = lerBonusCasa();
-      const itens = bA.itens.map(x => mesmaPessoa(x, id) && x.status === 'aprovado' ? { ...x, id, status: 'pago' } : x);
-      gravarBonusCasa({ ...bA, itens });
-      renderPerformanceCasa();
-      toast('Bônus marcado como pago nesta apuração.', 'success');
-    };
-  });
-  el.querySelectorAll('[data-reabrir]').forEach(btn => {
-    btn.onclick = ev => {
-      ev.stopPropagation();
-      const id = btn.dataset.reabrir;
-      // Reabrir apaga o registro. Num bônus já pago, um toque torto abria espaço
-      // para pagar duas vezes: pergunta antes.
-      const it = itemDaPessoa(itensMes, id);
-      if (it && it.status === 'pago' && !confirm(`${rotuloPessoaCasa(id)} está marcado como pago (${dinheiroCasa(it.valor)}). Reabrir apaga esse registro. Continuar?`)) return;
-      const bA = lerBonusCasa();
-      gravarBonusCasa({ ...bA, itens: bA.itens.filter(x => !mesmaPessoa(x, id)) });
-      renderPerformanceCasa();
-    };
-  });
+  // F25: o apontar do ponto, Aprovar, Pagar e Reabrir do bônus manual antigo saíram (só leitura).
   el.querySelectorAll('[data-filtro-id]').forEach(row => {
     row.onclick = ev => {
       if (ev.target.closest('button')) return;
@@ -4595,7 +4526,7 @@ function notaMesAgendaCasa(mes, osMes) {
   const quantas = (osMes || []).length;
   return `<p class="metricas-nota">${quantas
     ? `Mês passado: aparecem só as <strong>${quantas}</strong> O.S que este aparelho ainda guarda.`
-    : 'Nenhuma O.S deste mês está guardada no aparelho.'} O que o ERP encerrou, e o que saiu da janela de ${STORE.JANELA_LOCAL_DIAS || 60} dias, não entra nesta grade — procure em Entregas ou em Arquivados.</p>`;
+    : 'Nenhuma O.S deste mês está guardada no aparelho.'} O que o ERP encerrou, e o que saiu da janela de ${STORE.JANELA_LOCAL_DIAS || 60} dias, não entra nesta grade: procure em Entregas ou em Arquivados.</p>`;
 }
 
 function chipsAgendaCasa(mes) {
@@ -4720,7 +4651,7 @@ function renderAgendaCasa() {
         <div class="casa-cal-box">
           <div class="casa-cal-dow">${dow.map(d => `<span>${d}</span>`).join('')}</div>
           <div class="casa-cal">${grade}</div>
-          <p class="metricas-nota"><span class="casa-pill diarista">Diarista</span> <span class="casa-pill sobreaviso">Sobreaviso</span> <span class="casa-pill folga">Folga</span> — plantões vêm da aba Plantões.</p>
+          <p class="metricas-nota"><span class="casa-pill diarista">Diarista</span> <span class="casa-pill sobreaviso">Sobreaviso</span> <span class="casa-pill folga">Folga</span>: plantões vêm da aba Plantões.</p>
           ${notaMesAgendaCasa(mes, osMes)}
         </div>
         </details>
@@ -4767,7 +4698,7 @@ function renderAgendaCasa() {
     };
   });
   const wpp = document.getElementById('ag-wpp'); if (wpp) wpp.onclick = () => { if (typeof whatsappServicosDia === 'function') whatsappServicosDia(sel); };
-  const pdf = document.getElementById('ag-pdf'); if (pdf) pdf.onclick = () => { if (typeof relatorioServicosDia === 'function') pdfAgendaRecorte('Calendário — dia selecionado',osDia,{de:sel,ate:sel},STATE._agendaConcluidas); };
+  const pdf = document.getElementById('ag-pdf'); if (pdf) pdf.onclick = () => { if (typeof relatorioServicosDia === 'function') pdfAgendaRecorte('Calendário: dia selecionado',osDia,{de:sel,ate:sel},STATE._agendaConcluidas); };
   const add = el.querySelector('.casa-add-os'); if (add) add.ontoggle = () => { STATE._agAddAberto = add.open; };
   wireAddOSCasa(el, 'ag-add', sel, () => { STATE._agAddAberto = false; renderAgendaCasa(); });
   const form = document.getElementById('ag-form');
@@ -4834,7 +4765,7 @@ function formAddOSHTML(id, dia, candidatas) {
       </div>
       <div class="linha2">
         <label>Duração (dias) <input name="dias" type="number" min="1" value="1"></label>
-        <label>Veículo <select name="veiculo"><option value="">— sem veículo —</option>${optionsVeiculoCasa('')}</select></label>
+        <label>Veículo <select name="veiculo"><option value="">Sem veículo</option>${optionsVeiculoCasa('')}</select></label>
       </div>
       ${componente ? `<div class="campo-grupo aloc-campo"><span>Equipe</span><div class="aloc-host" data-aloc-host="${esc(id)}"><p class="aloc-dica">Escolha a O.S. para montar a equipe.</p></div></div>` : `${typeof perfModeloEquipeHTML === 'function' ? perfModeloEquipeHTML() : ''}
       <div class="campo-grupo"><span>Equipe</span><div class="casa-chips">${equipeEscalavel().doPCP.map(n => {
@@ -5142,7 +5073,7 @@ function renderPlantoesCasa() {
       <td>${pillPlantao(p)}</td>
       <td><span class="casa-quem">${avatarRH(pes || { nome: p.quem }, 'mini')}<span>${esc(pes ? pes.nome : p.quem)}${aus ? `<small class="alerta-txt">${esc(aus.motivo)}</small>` : (pes && pes.cargo ? `<small>${esc(pes.cargo)}</small>` : '')}</span></span></td>
       <td class="num">${esc(p.inicio)}–${esc(p.fim)}</td>
-      <td>${esc(p.titulo)}${p.obs ? ` <small class="text-muted">— ${esc(p.obs)}</small>` : ''}
+      <td>${esc(p.titulo)}${p.obs ? ` <small class="text-muted">(${esc(p.obs)})</small>` : ''}
         ${oss.length ? `<div class="casa-chips" style="margin-top:4px">${oss.map(o => `<span class="casa-pill os" data-abrir-os="${esc(o.id)}" title="${esc(o.cliente || '')}">O.S ${esc(o.numero || '—')}</span>`).join('')}</div>` : ''}</td>
       <td class="casa-rank-acao"><button class="btn-ghost btn-xs edit-only" data-edit-pl="${esc(p.id)}">Editar</button><button class="btn-ghost btn-xs edit-only" data-del-pl="${esc(p.id)}">Apagar</button></td>
     </tr>`;
@@ -5151,7 +5082,7 @@ function renderPlantoesCasa() {
   el.innerHTML = `
     <div class="casa-pagina">
       <div class="casa-pagina-head">
-        <div><h2>Plantões</h2><p>Escala da casa: diarista, sobreaviso e folga. Entra a empresa toda — a lista de gente vem do RH. Vínculos com O.S. aparecem na Performance; horas extras e pagamento são conferidos separadamente.</p></div>
+        <div><h2>Plantões</h2><p>Escala da casa: diarista, sobreaviso e folga. Entra a empresa toda: a lista de gente vem do RH. Vínculos com O.S. aparecem na Performance; horas extras e pagamento são conferidos separadamente.</p></div>
         <span class="casa-vista">
           <button class="btn-ghost btn-sm ${STATE._plVista === 'mes' ? 'active' : ''}" data-pl-vista="mes">Mês escolhido</button>
           <button class="btn-ghost btn-sm ${STATE._plVista === 'proximos' ? 'active' : ''}" data-pl-vista="proximos">De hoje em diante</button>
@@ -5198,7 +5129,7 @@ function renderPlantoesCasa() {
                40 plantões no passado é a tela escondendo o próprio recorte. */
             (STATE._plVista === 'proximos' && vivos.length)
               ? `Há ${vivos.length} plantã${vivos.length === 1 ? 'o registrado' : 'os registrados'} antes de hoje. <button class="btn-ghost btn-sm" data-pl-vista="todos">Ver todos</button>`
-              : 'A escala é registrada aqui mesmo, no formulário acima — o RH não manda plantão para o PCP.')}
+              : 'A escala é registrada aqui mesmo, no formulário acima; o RH não manda plantão para o PCP.')}
     </div>`;
   wireQuadrosCasa(el);
   el.querySelectorAll('[data-pl-vista]').forEach(b => b.onclick = () => { STATE._plVista = b.dataset.plVista; renderPlantoesCasa(); });
@@ -5381,7 +5312,7 @@ function renderGradeCasa() {
   el.innerHTML = `
     <div class="casa-pagina">
       <div class="casa-pagina-head">
-        <div><h2>Programação de serviços</h2><p>O que sai para a rua. A programação mora na O.S — mudou aqui, mudou em todo lugar.</p></div>
+        <div><h2>Programação de serviços</h2><p>O que sai para a rua. A programação mora na O.S: mudou aqui, mudou em todo lugar.</p></div>
         <span class="casa-vista">
           <button class="btn-ghost btn-sm ${STATE._grVista === 'dia' ? 'active' : ''}" data-gr-vista="dia">Um dia</button>
           <button class="btn-ghost btn-sm ${STATE._grVista === 'mes' ? 'active' : ''}" data-gr-vista="mes">Mês inteiro</button>
@@ -5420,7 +5351,7 @@ function renderGradeCasa() {
           <summary>+ Programar O.S neste dia</summary>
           ${formAddOSHTML('gr-add', dia, candidatas)}
         </details>`
-      : (mesHTML ? `<p class="metricas-nota">${esc(rotuloMesCasa(mes))} — clique no dia para abrir a programação dele.</p>${mesHTML}`
+      : (mesHTML ? `<p class="metricas-nota">${esc(rotuloMesCasa(mes))}: clique no dia para abrir a programação dele.</p>${mesHTML}`
                  : emptyState('', 'Nada programado neste mês', 'Programe pelo Calendário ou pela vista de um dia.'))}
     </div>`;
   const concluidas = document.getElementById('gr-concluidas'); if (concluidas) concluidas.onchange = () => { STATE._agendaConcluidas = concluidas.checked; renderGradeCasa(); };
@@ -5432,7 +5363,7 @@ function renderGradeCasa() {
   el.querySelectorAll('[data-gr-vista]').forEach(b => b.onclick = () => { STATE._grVista = b.dataset.grVista; renderGradeCasa(); });
   el.querySelectorAll('[data-ir-dia]').forEach(b => b.onclick = () => { STATE._grDia = b.dataset.irDia; STATE._grVista = 'dia'; renderGradeCasa(); });
   const wpp = document.getElementById('gr-wpp'); if (wpp) wpp.onclick = () => { if (typeof whatsappServicosDia === 'function') whatsappServicosDia(dia); };
-  const pdf = document.getElementById('gr-pdf'); if (pdf) pdf.onclick = () => { if (listaPDF.length) pdfAgendaRecorte('Programação — '+(pdfMes?'mês inteiro':'dia selecionado'),listaPDF,periodoPDF,STATE._agendaConcluidas); };
+  const pdf = document.getElementById('gr-pdf'); if (pdf) pdf.onclick = () => { if (listaPDF.length) pdfAgendaRecorte('Programação: '+(pdfMes?'mês inteiro':'dia selecionado'),listaPDF,periodoPDF,STATE._agendaConcluidas); };
   const add = el.querySelector('.casa-add-os'); if (add) add.ontoggle = () => { STATE._grAddAberto = add.open; };
   wireAddOSCasa(el, 'gr-add', dia, () => { STATE._grAddAberto = false; renderGradeCasa(); });
   if(typeof wireOperacaoRevisao==='function')wireOperacaoRevisao(el);

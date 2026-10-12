@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Garante a coluna `apagado` antes de o pcp-sync passar a depender dela.
 --
--- POR QUE ESTE ARQUIVO EXISTE: a coluna já é declarada no 0001_init.sql, mas lá
+-- POR QUE ESTE ARQUIVO EXISTE: a coluna já é declarada no 20260731164244_pcp_init.sql (antes 0001_init.sql), mas lá
 -- dentro de um `create table if not exists`. Se a tabela tivesse sido criada
 -- antes por qualquer outro caminho, o `if not exists` teria PULADO o comando
 -- inteiro em silêncio — e a coluna não existiria, sem nada avisar. A partir de

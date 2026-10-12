@@ -959,7 +959,8 @@ test('performance: as duas abas existem e nenhuma seção se perde', () => {
   assert.match(equipe, /Conferir nomes do PCP/);
   assert.doesNotMatch(equipe, /Bônus por ponto/);
   assert.match(rel, /Histórico de bônus manual/);
-  assert.match(rel, /Apontar quem leva o ponto/);
+  // Trocado de propósito na onda acabamento B (F25): o bônus manual antigo virou histórico só leitura.
+  assert.match(rel, /Quem levou o ponto/);
   assert.ok(!/Carros mais usados/.test(equipe), 'carros é relatório');
   // Relatório: retrabalho e carros, com o filtro de período junto.
   assert.match(rel, /Retrabalho/);
@@ -1371,28 +1372,35 @@ test('retrabalho: a taxa diz o próprio numerador e não conta O.S. aberta nem b
   assert.match(html, /<b>0%<\/b><small>0 de 12 entregas finalizadas voltaram/, 'a O.S. aberta não entra na taxa, e a linha diz de onde vem o número');
 });
 
-/* Orçamento trocado com o foco ainda no Teto não repinta a tela: Aprovar
-   gravava {...b} da pintura velha e devolvia o orçamento antigo ao cfg. */
-test('bônus: Aprovar depois de trocar o orçamento usa o orçamento novo e não desfaz a troca', () => {
-  const cfg = { ...FICHAS, bonusPCP: { mes, orcamento: 1000, teto: 0, pontos: {}, itens: [] } };
+/* TROCADO DE PROPÓSITO NA ONDA ACABAMENTO B (F25, linha Baixa da auditoria
+   de 11/10/2026): este teste conferia o Aprovar do bônus manual antigo depois
+   de trocar o orçamento. O bônus manual ficou só leitura (o programa que vale
+   é a comissão de 1%, D-001): a tela não tem Orçamento, Teto, Aprovar, Pagar,
+   Reabrir nem o apontar do ponto, e o mês do histórico não grava a
+   configuração. */
+test('bônus manual antigo: só leitura (sem Orçamento, Teto, Aprovar, Pagar, Reabrir nem apontar); o mês não grava a configuração', () => {
+  const cfg = { ...FICHAS, bonusPCP: { mes, orcamento: 1000, teto: 0, pontos: {}, itens: [{ id: '100001', nome: 'Pessoa', valor: 300, status: 'pago' }] } };
   const t = casa([fin('1'), fin('2', { equipe: ['Paulo'] })], cfg, null, '2026-09-20T12:00:00');
+  const perfSource = fs.readFileSync(path.join(root, 'performance.js'), 'utf8');
+  t.run(perfSource.slice(perfSource.indexOf('function perfPeriodoCompactoHTML('), perfSource.indexOf('function perfCompartilharRanking(')));
   const r = t.run(`(() => {
-    wireFiltroPeriodo = () => '';
-    const btns = {};
-    const fake = sel => { const m = sel.match(/^\\[data-(aprovar)\\]$/); if (!m) return []; return rankingFinalizadas('${mes}', {}).map(p => (btns[p.id] = { dataset: { aprovar: p.id } })); };
-    const el = { innerHTML: '', querySelectorAll: fake, querySelector: () => null, contains: () => true };
+    wireFiltroPeriodo = () => ''; globalThis.perfCompartilharRanking = () => {}; globalThis.abrirTVCasa = () => {};
+    const el = { innerHTML: '', querySelectorAll: () => [], querySelector: () => ({ value: '' }), contains: () => true };
+    let gravou = 0; const salvar = STORE.saveCFG; STORE.saveCFG = c => { gravou++; };
     document.getElementById = id => (id === 'panel-performance' ? el : null);
     document.activeElement = null;
+    STATE._perfAba = 'relatorio';
     renderPerformanceCasa();
-    // O orçamento muda depois da pintura (change do campo, sem repintar).
-    gravarBonusCasa({ ...lerBonusCasa(), orcamento: 2000 });
-    const id = Object.keys(btns)[0];
-    btns[id].onclick({ stopPropagation() {} });
-    const b = lerBonusCasa();
-    return { orcamento: b.orcamento, valor: b.itens[0] && b.itens[0].valor };
+    STORE.saveCFG = salvar;
+    return { html: el.innerHTML, gravou, temGravar: typeof gravarBonusCasa };
   })()`);
-  assert.equal(r.orcamento, 2000, 'a troca do orçamento não pode sumir');
-  assert.equal(r.valor, 1000, 'metade das entregas de um orçamento de 2000');
+  assert.doesNotMatch(r.html, /data-aprovar|data-pagar|data-reabrir|id="perf-orc"|id="perf-teto"/, 'caso ruim (v172): o bônus manual ainda aprovava e pagava');
+  assert.match(r.html, /data-ponto="[^"]*" value="[^"]*" (?:checked )?disabled/, 'o apontar é só leitura');
+  assert.match(r.html, /Histórico do bônus manual antigo, só leitura/);
+  assert.match(r.html, /Orçamento registrado: <b>/);
+  assert.equal(r.gravou, 0);
+  assert.equal(r.temGravar, 'undefined', 'nenhuma escrita do bônus manual na tela');
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'casa.js'), 'utf8'), /if \(mesEl\) mesEl\.onchange = \(\) => \{ if \(mesEl\.value\) \{ STATE\._bonusMes = mesEl\.value; renderPerformanceCasa\(\); \} \};/);
 });
 
 /* CONFERÊNCIA PCP × RH (pedido do Léo, 29/09/2026): "conferir pra puxar o
