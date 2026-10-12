@@ -3334,11 +3334,19 @@ function blocoItens(os, ro, done) {
      porque tem marca) leva a linha 'Saiu do ERP' logo embaixo. */
   const comEntrega = temMotorEntrega();
   const cols = 6;
+  const conferidos = itensConferidosDaFicha(os);
+  const gestaoConf = ['admin', 'pcp'].includes(STATE.user && STATE.user.papel) && typeof conferirItensEntrega === 'function';
   const rows = itens.map((it, i) => {
-    const lock = it.manual ? '' : 'readonly';
+    /* O ITEM CITADO NUMA CONFERÊNCIA (U5 da revisão da onda operação): o
+       servidor devolve a identidade gravada (M12); a ficha já o mostra só
+       leitura, sem "× remover", com a explicação e o caminho para revisar a
+       parcial. */
+    const conferido = conferidos.has(i);
+    const lock = it.manual && !conferido ? '' : 'readonly';
     const marcado = temMarcaEntrega(it);
     const u = `data-iuid="${esc(uidItemOk(it.uid) ? it.uid : '')}"`;
     const del = !it.manual ? ''
+      : conferido ? `<span class="ent-fica" title="Item numa entrega conferida: não muda nem sai da lista.">🔒 conferido</span>`
       : marcado ? `<span class="ent-fica" title="Item com marca de entrega não sai da lista. Para tirar o saldo que falta, a gestão usa Cancelar item.">🔒 fica</span>`
       : `<button class="btn-xs btn-danger edit-only" data-item-del="${i}" ${u} title="Remover item" aria-label="Remover item ${esc(it.descricao || it.item || i+1)}">× remover</button>`;
     return `
@@ -3353,6 +3361,7 @@ function blocoItens(os, ro, done) {
       </td>
       <td class="item-del-cell">${del}</td>
     </tr>
+    ${conferido && it.manual ? `<tr class="motivo-row item-conferido"><td colspan="${cols}" data-label="Conferido">🔒 Este item está numa entrega conferida: número, descrição, medida e quantidade não mudam, e ele não sai da lista. Para corrigi-lo, a gestão revisa ou anula antes a entrega conferida, com motivo${gestaoConf ? `: <button type="button" class="btn-ghost btn-xs" data-controle="itens" data-controle-os="${esc(os.id)}">Conferir itens e equipe</button>` : ', em "Conferir itens e equipe" (Conferência e acompanhamento).'}</td></tr>` : ''}
     ${it.saiuDoERP && typeof it.saiuDoERP === 'object' ? `<tr class="motivo-row item-saiu-erp"><td colspan="${cols}" data-label="ERP">Saiu do ERP${fmtDataBR(it.saiuDoERP.em) ? ' em ' + fmtDataBR(it.saiuDoERP.em) : ''}. Fica na O.S. porque tem marca.</td></tr>` : ''}
     ${comEntrega ? linhaEntregaHTML(it, i, os, ro, u, cols) : ''}
     ${valorItemHTML(it, i, os, ro, u, cols)}
@@ -3389,6 +3398,19 @@ function blocoItens(os, ro, done) {
       </div>
     </div>
   </details>`;
+}
+
+/* Os itens da ficha citados numa conferência por entrega gravada (U5 da
+   revisão da onda operação), pela posição: a mesma citação do servidor
+   (protegerItensConferidos), pela chave da conferência. */
+function itensConferidosDaFicha(os) {
+  const regs = os && Array.isArray(os.conferenciasEntrega) ? os.conferenciasEntrega : [];
+  if (!regs.length || typeof CONFERENCIA_ENTREGA === 'undefined') return new Set();
+  const citadas = new Set();
+  for (const e of regs) for (const p of (e && Array.isArray(e.itens) ? e.itens : [])) if (p && typeof p === 'object') citadas.add(String(p.chave ?? ''));
+  let cat = [];
+  try { cat = CONFERENCIA_ENTREGA.catalogo(os); } catch { cat = []; }
+  return new Set(cat.filter(c => citadas.has(c.chave)).map(c => c.indice));
 }
 
 /* ── Bloco 3: Agendamento & Confirmação ──────────────────────────────────── */
@@ -4941,6 +4963,7 @@ function bindModalEvents(os, ro) {
       // Item com marca de entrega não sai (o servidor o devolveria à lista, E3).
       juntarMarcasDoStore(_modalDraft);
       if (temMarcaEntrega(it)) { toast(`O ${rotuloItemEntrega(it)} tem marca de entrega e não sai da lista. Para tirar o saldo que falta, a gestão usa Cancelar item.`, 'error'); reRenderModalKeepOpen(); return; }
+      if (itensConferidosDaFicha(_modalDraft).has(_modalDraft.itens.indexOf(it))) { toast('Este item está numa entrega conferida e não sai da lista: revise ou anule antes a entrega conferida, em "Conferir itens e equipe".', ''); reRenderModalKeepOpen(); return; }
       if (!confirm(`Remover o item "${it.descricao || it.item || ''}"?`)) return;
       const pos = _modalDraft.itens.indexOf(it);
       if (pos >= 0) _modalDraft.itens.splice(pos, 1);

@@ -43,7 +43,8 @@ test('M12: a ficha não muda a descrição nem a quantidade de um item conferido
   assert.equal(r.status, 200, JSON.stringify(r));
   assert.equal(gravada(e).itens[0].descricao, 'Painel fictício A');
   assert.equal(gravada(e).itens[0].qtde, '4');
-  assert.match(String(r.avisos), /item 1 \(Painel fictício A\) está numa entrega conferida e não mudou \(descricao, qtde\)/);
+  // U5 da revisão da onda operação: o nome do campo na tela (não "descricao, qtde") e onde revisar.
+  assert.match(String(r.avisos), /item 1 \(Painel fictício A\) está numa entrega conferida e não mudou \(descrição, quantidade\): para corrigir o item, revise ou anule antes a entrega conferida, com motivo, em "Conferir itens e equipe"/);
   assert.equal(C.validar(gravada(e), gravada(e).conferenciasEntrega), '', 'as parciais continuam válidas');
   await pausa();
   // Tirar o item da lista: ele volta ao lugar dele.

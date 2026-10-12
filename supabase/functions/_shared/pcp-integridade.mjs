@@ -2249,6 +2249,10 @@ export function guardarEntregasItens(os, antes, { papel = '', avisar = false, au
    pela chave da conferência (o código do item; sem código, a identidade).
    Devolve { os, avisos }. */
 export const CAMPOS_IDENTIDADE_ITEM = ['item', 'descricao', 'medidas', 'qtde', 'qtd', 'unidade'];
+/* O aviso diz o campo como a tela o chama e onde revisar (U5 da revisão da
+   onda operação): "descricao, qtde" era o nome interno. */
+const NOME_CAMPO_ITEM = { item: 'número', descricao: 'descrição', medidas: 'medida', qtde: 'quantidade', qtd: 'quantidade', unidade: 'unidade' };
+const ONDE_REVISAR_PARCIAL = 'revise ou anule antes a entrega conferida, com motivo, em "Conferir itens e equipe" (na ficha da O.S., em Conferência e acompanhamento)';
 export function protegerItensConferidos(os, antes, { avisar = false } = {}) {
   const regs = Array.isArray(antes?.conferenciasEntrega) ? antes.conferenciasEntrega : [];
   if (!objeto(os) || !regs.length || !Array.isArray(antes?.itens)) return { os, avisos: [] };
@@ -2266,7 +2270,7 @@ export function protegerItensConferidos(os, antes, { avisar = false } = {}) {
       : itens.findIndex(it => objeto(it) && JSON.stringify([String(it.item || ''), String(it.descricao || ''), String(it.medidas || ''), String(it.qtde ?? it.qtd ?? ''), String(it.unidade || '')]) === c.identidade);
     if (pos < 0) {
       itens.splice(Math.min(i, itens.length), 0, { ...g });
-      avisos.push(`O ${rotuloItem(g)} está numa entrega conferida e continua na O.S.: para tirá-lo, revise ou anule antes a entrega conferida, com motivo.`);
+      avisos.push(`O ${rotuloItem(g)} está numa entrega conferida e continua na O.S.: para tirá-lo, ${ONDE_REVISAR_PARCIAL}.`);
       return;
     }
     const it = itens[pos];
@@ -2275,7 +2279,8 @@ export function protegerItensConferidos(os, antes, { avisar = false } = {}) {
     const r = { ...it };
     for (const k of CAMPOS_IDENTIDADE_ITEM) { if (proprio(g, k)) r[k] = g[k]; else delete r[k]; }
     itens[pos] = r;
-    avisos.push(`O ${rotuloItem(g)} está numa entrega conferida e não mudou (${mudou.join(', ')}): para corrigir o item, revise ou anule antes a entrega conferida, com motivo.`);
+    const nomes = [...new Set(mudou.map(k => NOME_CAMPO_ITEM[k] || k))];
+    avisos.push(`O ${rotuloItem(g)} está numa entrega conferida e ${nomes.length === 1 ? (nomes[0] === 'número' ? 'o ' : 'a ') + nomes[0] + ' não mudou' : 'não mudou (' + nomes.join(', ') + ')'}: para corrigir o item, ${ONDE_REVISAR_PARCIAL}.`);
   });
   return { os: avisos.length ? { ...os, itens } : os, avisos: avisar ? avisos.slice(0, TETO_AVISOS_ENTREGA) : [] };
 }

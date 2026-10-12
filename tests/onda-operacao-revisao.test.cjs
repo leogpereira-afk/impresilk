@@ -334,3 +334,31 @@ test('revisão operação: U4, o relatório separa a Régua do ERP (cartões, ba
   assert.match(css, /\.rel-ent-regua-pcp\{[^}]+\}/);
   assert.match(css, /\.rel-ent-regua-tit\{[^}]+\}/);
 });
+
+/* ── U5: o item citado em conferência, só leitura na ficha ──────────────── */
+test('revisão operação: U5, o item conferido fica só leitura na ficha (sem "× remover"), com a explicação e o caminho; o aviso do servidor sem nome de campo interno', async () => {
+  const o = {id:'u5', numero:'95005', tipo:'externo', cliente:'Cliente Fictício', servico:'Fachada fictícia', valorTotal:1000,
+    itens:[{uid:'a', item:'1', descricao:'Painel fictício A', qtde:'2', subtotal:'500', manual:true}, {uid:'b', item:'2', descricao:'Painel fictício B', qtde:'1', subtotal:'500', manual:true}]};
+  o.conferenciasEntrega = [{id:'e1', dia:'2026-10-05', itens:[sel(o, 0, 1)], alocacao:aloc('100001'), por:'Gestor Teste', porId:'444555', em:'2026-10-05T20:00:00.000Z'}];
+  const t = await telaFicha([o]);
+  t.run('globalThis.conferirItensEntrega = () => Promise.resolve()');
+  const html = t.run(`blocoItens(STORE.getOS('u5'), false, false)`);
+  const linhaA = html.slice(html.indexOf('data-item-row="0"'), html.indexOf('data-item-row="1"'));
+  const linhaB = html.slice(html.indexOf('data-item-row="1"'));
+  // Caso ruim (f33877d): o item conferido (manual) tinha os campos abertos e o "× remover"; o servidor desfazia calado na tela.
+  assert.doesNotMatch(linhaA, /× remover/);
+  assert.match(linhaA, /data-item="0\.descricao"[^>]*readonly/);
+  assert.match(linhaA, /data-item="0\.qtde"[^>]*readonly/);
+  assert.match(linhaA, /🔒 conferido/);
+  assert.match(linhaA, /Este item está numa entrega conferida[\s\S]*revisa ou anula antes a entrega conferida, com motivo: <button type="button" class="btn-ghost btn-xs" data-controle="itens" data-controle-os="u5">Conferir itens e equipe<\/button>/);
+  // O item que não está em conferência continua como era.
+  assert.match(linhaB, /× remover/);
+  assert.doesNotMatch(linhaB, /data-item="1\.descricao"[^>]*readonly/);
+  // O aviso do servidor: o nome do campo na tela e onde revisar.
+  const e = await edge('pcp-sync', {pcp_registros:[{id:'u5', colecao:'os', registro:{rev:1, ...o}, apagado:false, atualizado_em:'2026-10-06T21:00:00Z'}], registros:B.FICHAS});
+  const gr = structuredClone(g(e, 'u5'));
+  const r = await e.call({action:'upsert', os:{...gr, itens:[{...gr.itens[0], qtde:'3'}, gr.itens[1]]}}, gestor);
+  assert.equal(r.status, 200);
+  assert.doesNotMatch(String(r.avisos), /qtde|descricao/);
+  assert.match(String(r.avisos), /está numa entrega conferida e a quantidade não mudou: para corrigir o item, revise ou anule antes a entrega conferida, com motivo, em "Conferir itens e equipe" \(na ficha da O\.S\., em Conferência e acompanhamento\)\./);
+});
