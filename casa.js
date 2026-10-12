@@ -4089,9 +4089,7 @@ function renderPerformanceCasa() {
   }
   const pendentes = apelidosSemFicha();
   const itensMes = itensBonusDoMes(b, mes);
-  const aprovados = itensMes.filter(i => i.status === 'aprovado' || i.status === 'pago');
   const pago = itensMes.filter(i => i.status === 'pago').reduce((s, i) => s + (Number(i.valor) || 0), 0);
-  const aprovado = aprovados.reduce((s, i) => s + (Number(i.valor) || 0), 0);
   const filtroId = STATE._perfFiltro || '';
   const rankRows = rank.map((p, i) => {
     const item = itemDaPessoa(itensMes, p.id);
@@ -4107,22 +4105,15 @@ function renderPerformanceCasa() {
   }).join('');
   const semPonto = fins.filter(os => !instaladoresDaOs(os, b.pontos).length);
   const finsFiltro = filtroId ? fins.filter(os => instaladoresDaOs(os, b.pontos).includes(filtroId)) : fins;
-  const apontar = finsFiltro.map(os => {
+  /* HISTÓRICO, SÓ LEITURA (revisão da onda acabamento B, 12/10/2026): o
+     bônus manual antigo não se aponta mais, então a lista mostra só quem
+     LEVOU o ponto em cada O.S. As fichas de quem não levou, as etiquetas de
+     quem está na O.S. sem ficha e o "+ outra ficha" eram do tempo do apontar
+     e liam como se ainda desse para marcar. O.S. sem ponto fica na contagem
+     acima ("O.S. sem ficha apontada neste histórico"). */
+  const apontar = finsFiltro.filter(os => instaladoresDaOs(os, b.pontos).length).map(os => {
     const marcados = instaladoresDaOs(os, b.pontos);
-    const eqIds = OPERACAO.equipe(os).map(n => fichaPorApelido(n)).filter(f2 => f2 && f2.id).map(f2 => f2.id);
-    const primarios = new Set([...marcados, ...eqIds]);
-    const principais = [];
-    for (const id of primarios) {
-      const ficha = fichas.find(x => x.id === id) || { id, nome: (pessoaRHPorId6(id) || {}).nome || '', apelido: '' };
-      principais.push(ficha);
-    }
-    const outras = fichas.filter(x => !primarios.has(x.id));
-    const mostrarOutras = fichas.length > 8;
-    const chipsMain = (mostrarOutras ? principais : fichas.slice()).map(x =>
-      chipFichaHTML(os.id, x, marcados.includes(x.id))
-    ).join('');
-    const chipsMais = mostrarOutras ? outras.map(x => chipFichaHTML(os.id, x, marcados.includes(x.id))).join('') : '';
-    const semFicha = OPERACAO.equipe(os).filter(n => { const f2 = fichaPorApelido(n); return !(f2 && f2.id); });
+    const chips = marcados.map(id => chipFichaHTML(os.id, fichas.find(x => x.id === id) || { id, nome: (pessoaRHPorId6(id) || {}).nome || '', apelido: '' }, true)).join('');
     const d = OPERACAO.dia(os.finalizadaEm);
     const data = d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '';
     return `<li class="casa-apontar-os">
@@ -4132,9 +4123,7 @@ function renderPerformanceCasa() {
         <span>${esc(data)}</span>
         ${os.retrabalho ? '<span class="badge st-retrabalho">Retrabalho</span>' : ''}
       </div>
-      <div class="casa-pontos">${chipsMain}${semFicha.map(n =>
-        `<span class="sem-ficha">${esc(n)} · ${fichaPorApelido(n) ? 'sem ID no RH' : 'sem ficha'}</span>`
-      ).join('')}${chipsMais ? `<details class="casa-mais-fichas"><summary>+ outra ficha</summary>${chipsMais}</details>` : ''}</div>
+      <div class="casa-pontos">${chips}</div>
     </li>`;
   }).join('');
   const bonusHTML = `<div class="casa-perf-bar">
@@ -4145,7 +4134,6 @@ function renderPerformanceCasa() {
           <span><b>${rank.length}</b> pessoas</span>
           <span><b>${fins.length}</b> O.S.</span>
           <span><b>${totalOs}</b> pontos</span>
-          <span><b>${dinheiroCasa(Math.max(0, b.orcamento - aprovado))}</b> disponível</span>
         </span>
       </div>
       ${pago ? `<p class="metricas-nota">Já marcado como pago nesta apuração: ${dinheiroCasa(pago)}. Não lança na folha.</p>` : ''}
@@ -4154,9 +4142,9 @@ function renderPerformanceCasa() {
       ${filtroId ? `<p class="metricas-nota">Filtrando ${esc(rotuloPessoaCasa(filtroId))}. <button type="button" class="pcp-ver-carteira" data-limpar-filtro>Ver todas</button></p>` : ''}
       <div class="casa-perf-grid">
         <section class="casa-apontar">
-          <h3>Quem levou o ponto</h3>
-          <p>As fichas apontadas no bônus manual antigo (só leitura).</p>
-          <ul class="casa-apontar-lista">${apontar || `<li class="text-muted">${fins.length ? 'Nenhuma O.S. neste filtro.' : 'Nenhuma O.S. finalizada no PCP neste mês. A baixa do ERP não entra.'}</li>`}</ul>
+          <h3>Quem levou o ponto no histórico</h3>
+          <p>Só as fichas que levaram o ponto no bônus manual antigo. Histórico, só leitura.</p>
+          <ul class="casa-apontar-lista">${apontar || `<li class="text-muted">${fins.length ? 'Nenhuma O.S. com ponto neste filtro.' : 'Nenhuma O.S. finalizada no PCP neste mês. A baixa do ERP não entra.'}</li>`}</ul>
         </section>
         <aside class="casa-rank-box">
           <h3>Apuração do histórico</h3><p class="metricas-nota">Pontos e valores do bônus manual antigo. Não lançam pagamento nem horas extras na folha.</p>
