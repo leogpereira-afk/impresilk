@@ -116,7 +116,9 @@ const POR_OS = ((O) => {
     'baixa-automatica': 'deu a baixa automática do ERP', 'baixa-poupada': 'segurou a baixa do ERP (o PCP tem saldo)', 'baixa-desfeita': 'desfez a baixa do ERP (a O.S. voltou à carteira aberta)',
     'baixa-carteira': 'finalizou a O.S. que saiu da carteira do ERP', 'erp-saiu-da-carteira': 'marcou que a O.S. saiu da carteira do ERP', 'reimportacao-erp': 'atualizou os dados do ERP',
     'erp-depois-da-finalizacao': 'viu mudança no ERP depois da finalização (não aplicada)', 'conferir-entrega': 'conferiu uma entrega', 'revisar-entrega-conferida': 'revisou uma entrega conferida, com motivo',
-    'anular-entrega-conferida': 'anulou uma entrega conferida, com motivo'};
+    'anular-entrega-conferida': 'anulou uma entrega conferida, com motivo',
+    // A edição que chegou depois da exclusão (M18, onda acabamento): não gravou, e fica aqui para a gestão refazer.
+    'edicao-recusada': 'tentou alterar a O.S. excluída (recusado; a edição que não entrou está aqui)'};
   const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
   const minTxt = n => n === 1 ? '1 minuto' : n < 60 ? `${n} minutos` : `${Math.floor(n / 60)} h${n % 60 ? ` ${n % 60} min` : ''}`;
   /* O rótulo da ocorrência que o abono aponta. O id é 'osId:tipo' e, no

@@ -293,14 +293,6 @@ const STORE = (() => {
     trySync();
   }
 
-  async function deleteOS(id, motivo, rev) {
-    if(getQueue().some(x=>x.os?.id===id || x.id===id))throw new Error('Sincronize as alterações desta O.S. antes de excluir.');
-    const r=await apiFn('os',{action:'delete',id,motivo,rev});
-    if(!r?.ok)throw new Error(r?.error || 'Exclusão não confirmada.');
-    _setAllOS(getAllOS().filter(o=>o.id!==id));
-    return r;
-  }
-
   // ── CFG ───────────────────────────────────────────────────────────────────
   const CFG_DEFAULT = {
     instaladores: [],
@@ -2450,7 +2442,7 @@ const STORE = (() => {
   // ── API pública ───────────────────────────────────────────────────────────
   return {
     // CRUD O.S
-    getAllOS, getOS, saveOS, deleteOS, pronto, versaoOS: () => _osVersao,
+    getAllOS, getOS, saveOS, pronto, versaoOS: () => _osVersao,
     // CFG
     getCFG, saveCFG,
     // Identidade

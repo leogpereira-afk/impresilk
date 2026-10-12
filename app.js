@@ -1304,7 +1304,12 @@ function initSyncIndicator() {
       toast(`⛔ O servidor recusou a alteração das configurações, e ela foi desfeita: ${motivo || 'sem permissão'}. ${status === 403 ? 'Peça a um administrador.' : 'Corrija e salve de novo.'}`, 'error');
       return;
     }
-    const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : (item && item.action) || 'a alteração';
+    /* A EDIÇÃO DE O.S. EXCLUÍDA E A EXCLUSÃO ANTIGA SEM MOTIVO (M18, onda
+       acabamento) saem da fila com a frase do servidor, que já diz onde a
+       edição ficou e o que fazer; "ficou só neste aparelho" não seria verdade. */
+    const osDela = item && item.action === 'delete' && typeof STORE.getOS === 'function' ? STORE.getOS(item.id) : null;
+    const ref = (item && item.os && item.os.numero) ? 'O.S ' + item.os.numero : osDela && osDela.numero ? 'a exclusão da O.S ' + osDela.numero : item && item.action === 'delete' ? 'uma exclusão' : (item && item.action) || 'a alteração';
+    if ((item && item.action === 'delete') || status === 422) { toast(`⛔ O servidor recusou ${ref}: ${motivo || 'recusa definitiva'} O resto da fila seguiu normalmente.`, 'error'); return; }
     toast(`⛔ O servidor recusou ${ref}: ${motivo || 'sem permissão'}. A alteração ficou só neste aparelho; peça a um administrador. O resto da fila seguiu normalmente.`, 'error');
   });
   STORE.on('pull-truncado', () => toast('A lista de O.S pode estar incompleta. Recarregue.', 'error'));

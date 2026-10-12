@@ -2967,6 +2967,15 @@ function marcasDaOS(o) {
   }
   return m;
 }
+/* A EDIÇÃO RECUSADA POR O.S. EXCLUÍDA (M18, onda acabamento): o diário
+   guarda tudo o que o envio mudou em relação à lápide (os campos auditados e
+   os outros campos de cima da O.S.), para a gestão que recuperar a O.S.
+   refazer a edição. Nada é gravado na O.S. */
+const FORA_EDICAO_RECUSADA = new Set(['id', 'rev', 'atualizadoEm', 'atualizadoPor']);
+export function diffEdicaoRecusada(lapide, envio) {
+  const outros = Object.keys(objeto(envio) ? envio : {}).filter(k => !FORA_EDICAO_RECUSADA.has(k) && !CAMPOS_AUDITADOS.some(c => c === k || c.startsWith(k + '.')));
+  return diffAuditavel(lapide, envio, [...CAMPOS_AUDITADOS, ...outros]);
+}
 export function diffAuditavel(antes, depois, campos = CAMPOS_AUDITADOS) {
   const a = objeto(antes) ? antes : {}, d = objeto(depois) ? depois : {};
   const out = { campos: [], antes: {}, depois: {} };

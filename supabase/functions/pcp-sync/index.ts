@@ -1,7 +1,7 @@
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
-import { idDoCadastroRH, prazoParaConferir, protegerItensConferidos, guardarOsOriginalId, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { idDoCadastroRH, prazoParaConferir, protegerItensConferidos, guardarOsOriginalId, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffEdicaoRecusada, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, atrasoDaOS, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
@@ -1374,6 +1374,10 @@ async function rankingEquipeDoPeriodo(periodo:any, porValor=false) {
 
 // ---------------------------------------------------------------- handler
 
+// A edição e a exclusão que não passam nunca mais saem da fila do aparelho com estas frases (M18, onda acabamento).
+const MSG_EDICAO_EXCLUIDA = "Esta O.S. foi excluída pela gestão: a edição deste aparelho não foi gravada e saiu da fila. Ela ficou no Histórico da O.S.; para usá-la, a gestão recupera a O.S. com motivo e refaz a edição.";
+const MSG_NUMERO_EXCLUIDO = "Este número é de uma O.S. excluída pela gestão: a O.S. deste aparelho não foi gravada e saiu da fila. Ela ficou no Histórico da O.S. excluída; a gestão recupera a original com motivo e refaz a edição.";
+const MSG_EXCLUSAO_ANTIGA = "Exclusão antiga não enviada: ela saiu da fila e a O.S. continua valendo. Refaça pela ficha informando o motivo.";
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return resp({ error: "Method not allowed" }, 405);
@@ -2553,11 +2557,23 @@ Deno.serve(async (req: Request) => {
 
         const {data:linhaAtual,error:erroAtual} = await sb.from("pcp_registros").select("registro,atualizado_em,apagado").eq("colecao","os").eq("id",os.id).maybeSingle();
         if (erroAtual) throw new Error(erroAtual.message);
-        if(linhaAtual?.apagado) return resp({error:"O.S. excluída. Sua edição continua pendente; peça à gestão para recuperar o registro antes de reenviar.",restauracaoNecessaria:true},422);
+        /* A EDIÇÃO DE O.S. EXCLUÍDA SAI DA FILA (M18 da auditoria de 11/10/2026,
+           onda acabamento). Antes o 422 sem `definitivo` deixava a edição na
+           fila do aparelho para sempre (com ela, o Sair e o resto da O.S.), a
+           não ser que a gestão recuperasse a O.S., mesmo com a exclusão certa.
+           Agora a recusa é definitiva: o aparelho tira a edição da fila e
+           avisa; a edição recusada fica no Histórico da O.S. excluída (diário,
+           ação "edicao-recusada"), e a gestão que quiser usá-la recupera a O.S.
+           com motivo e refaz. A lápide não muda. */
+        const edicaoRecusada = async (lapide: any, mensagem: string) => {
+          await auditar(String(lapide?.id ?? os.id), "edicao-recusada", diffEdicaoRecusada(lapide?.registro ?? null, os), String(os.numero ?? lapide?.registro?.numero ?? ""));
+          return resp({ error: mensagem, restauracaoNecessaria: true, definitivo: true }, 422);
+        };
+        if(linhaAtual?.apagado) return await edicaoRecusada({ id: os.id, registro: linhaAtual.registro }, MSG_EDICAO_EXCLUIDA);
         if(!linhaAtual && os.numero) {
-          const {data:morta,error:err}=await sb.from("pcp_registros").select("id").eq("colecao","os").eq("apagado",true).eq("registro->>numero",String(os.numero).trim()).limit(1).maybeSingle();
+          const {data:morta,error:err}=await sb.from("pcp_registros").select("id,registro").eq("colecao","os").eq("apagado",true).eq("registro->>numero",String(os.numero).trim()).limit(1).maybeSingle();
           if(err)throw new Error(err.message);
-          if(morta)return resp({error:"Número de O.S. excluída. A gestão precisa recuperar o registro original com motivo; sua edição permanece pendente.",restauracaoNecessaria:true},422);
+          if(morta)return await edicaoRecusada(morta, MSG_NUMERO_EXCLUIDO);
         }
         const existing = linhaAtual?.registro ?? null;
         /* REENVIO DA MESMA GRAVAÇÃO. Com sinal ruim a O.S. chega e grava, mas a
@@ -3247,7 +3263,8 @@ Deno.serve(async (req: Request) => {
               .eq("colecao", "os").eq("apagado", true)
               .eq("registro->>numero", num).limit(1).maybeSingle();
             if (morta?.id) {
-              return resp({error:"Número de O.S. excluída. Recupere o registro original pela gestão antes de reenviar.",restauracaoNecessaria:true},422);
+              await auditar(String(morta.id), "edicao-recusada", diffEdicaoRecusada(morta.registro ?? null, os), num);
+              return resp({error:MSG_NUMERO_EXCLUIDO,restauracaoNecessaria:true,definitivo:true},422);
             }
           }
           throw e;
@@ -3275,6 +3292,13 @@ Deno.serve(async (req: Request) => {
       case "restaurarOS": {
         if(ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha?.papel || ""))) return resp({error:"Só admin e PCP podem excluir ou recuperar O.S. Solicite revisão à gestão."},403);
         const id=String(body.id || ""), motivo=String(body.motivo || "").trim(), apagar=acao==="delete";
+        /* A EXCLUSÃO ANTIGA SEM MOTIVO SAI DA FILA (M18, onda acabamento). Até a
+           v147 a exclusão feita sem sinal ia para a fila sem motivo e sem rev;
+           hoje ela é só na hora, com motivo (o aparelho não a enfileira mais).
+           O 422 deixava a da fila presa para sempre (o store nunca descarta
+           exclusão) e escondia a O.S. viva naquele aparelho. A recusa por 403
+           é a que todo store tira da fila e diz; a O.S. continua como está. */
+        if(apagar && !motivo && !Object.prototype.hasOwnProperty.call(body,"rev"))return resp({error:MSG_EXCLUSAO_ANTIGA,definitivo:true},403);
         if(motivo.length<5 || motivo.length>500)return resp({error:"Informe o motivo, de 5 a 500 caracteres."},422);
         const {data:row,error}=await sb.from("pcp_registros").select("registro,apagado,atualizado_em").eq("colecao","os").eq("id",id).maybeSingle();
         if(error)throw new Error(error.message);
