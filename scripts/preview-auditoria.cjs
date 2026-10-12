@@ -105,7 +105,7 @@ async function previewApi(body){
   if(out.error)throw new Error(out.error);if(out.lista)lista=out.lista;if(out.cfg){Object.assign(cfg,out.cfg);pvCfgBase=structuredClone(cfg);}return out;
  }
 
- if(new URLSearchParams(location.hash.slice(1)).has('comissao') && /^(performanceComissao|performancePeriodo|performanceFechamentos|performanceFechar)/.test(body.action))return fetch('/comissao-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+ if(new URLSearchParams(location.hash.slice(1)).has('comissao') && /^(performanceComissao|performancePeriodo|performanceFechamentos|performanceFechar|performanceMeses|performanceDocumento)/.test(body.action))return fetch('/comissao-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
  if(body.action==='conferenciaEntrega'){
   const os=lista.find(o=>o.id===body.osId);if(!os)throw new Error('O.S. de teste não encontrada');
   if(!body.entrega)return {os:structuredClone(os),valor:os.valorTotal};

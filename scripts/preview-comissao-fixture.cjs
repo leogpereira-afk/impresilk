@@ -4,6 +4,8 @@ const {edge}=require('../tests/helpers/edge.cjs');
 const bancos=new Map();
 const who={papel:'pcp',nome:'Gestor fictício da prévia',sub:'gestor-preview'};
 module.exports=async body=>{
+ // A fita dos meses (performanceMeses) não tem período: usa o banco do último período aberto na prévia.
+ if(!body.de&&!body.ate){const ultimo=[...bancos.keys()].pop();if(!ultimo)return {meses:[],hoje:''};const e=await bancos.get(ultimo);return e.call(body,who);}
  const chave=body.de+'|'+body.ate;
  if(!bancos.has(chave))bancos.set(chave,(async()=>{
   const nomes=['Ana Paula Souza','Beatriz Costa Lima','Fernanda Alves Rocha'],ids=['900001','900002','900009'];
