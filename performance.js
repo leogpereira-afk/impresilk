@@ -386,6 +386,13 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
     const o = opcoes || {};
     const lista = Array.isArray(salvas) ? salvas : [];
     const vestir = (x, e) => ({...x, equipeId:e.id, equipeNome:e.nome, emblema:e.emblema || '🤝', logo:e.logo || '', animal:animalDe(e.animal) ? e.animal : '', cor:corValida(e.cor) ? e.cor : ''});
+    /* O retrato do selo (opcoes.retrato, id da equipe -> {logo, cor, animal}),
+       só numa revisão fechada que o tem; o selo antigo sem retrato segue como
+       era (só a logo de hoje, pelo id). */
+    const retratoDe = id => {
+      const x = o.retrato && Object.prototype.hasOwnProperty.call(o.retrato, id) ? o.retrato[id] : null;
+      return x ? {logo:typeof x.logo === 'string' ? x.logo : '', animal:animalDe(x.animal) ? x.animal : '', cor:corValida(x.cor) ? x.cor : ''} : null;
+    };
     return (registros || []).map(r => {
       /* DUAS EQUIPES OU MAIS NA DIVISÃO (F11): cada equipe com o nome, a logo e
          a cor de hoje; numa revisão fechada, o nome da época e só a logo. Não
@@ -395,10 +402,15 @@ function sugestaoApurada(membros, aloc, finais, equipes, idDe) {
         const marca = r.confirmado ? {} : {sugerida:true};
         return {...r, grupos:r.grupos.map(g => {
           const e = g && g.equipeId ? lista.find(q => q.id === g.equipeId) : null;
+          const rt = o.historico && g && g.equipeId ? retratoDe(g.equipeId) : null;
+          if (rt) return {...g, ...rt};
           if (!e) return {...g, ...marca};
           return o.historico ? {...g, logo:e.logo || g.logo || ''} : {...vestir(g, e), ...marca};
         })};
       }
+      // O RETRATO DO FECHAMENTO (item 13 da fila de 11/10/2026): a logo, a cor e o animal da época, guardados no selo; o nome e o emblema já vêm do registro.
+      const rt = o.historico && r && r.equipeId ? retratoDe(r.equipeId) : null;
+      if (rt) return {...r, ...rt};
       const e = equipeDoRegistro(r, lista, o.resolver);
       if (!e) return r;
       /* Cor e animal são de HOJE e o fechamento não os guarda: numa revisão
@@ -916,7 +928,7 @@ async function perfCarregarFonte(){
       configuração vem junto: os pesos da nota na tela têm de ser os que o
       fechamento vai selar. */
    const [dados,historico]=await Promise.allSettled([apuracao(),STORE.api({action:'performanceFechamentos',...f}),typeof STORE.pullCFG==='function'?STORE.pullCFG().catch(()=>false):null]);
-   if(historico.status==='fulfilled'&&Array.isArray(historico.value?.fechamentos))pedido.fechamentos=historico.value.fechamentos;
+   if(historico.status==='fulfilled'&&Array.isArray(historico.value?.fechamentos)){pedido.fechamentos=historico.value.fechamentos;pedido.logos=historico.value.logos&&typeof historico.value.logos==='object'?historico.value.logos:{};}
    else pedido.erroRevisoes=historico.status==='rejected'?perfErroTxt(historico.reason):perfErroTxt({message:historico.value?.error||'Consulta incompleta das revisões.'});
    const d=dados.status==='fulfilled'?dados.value:null;
    if(d?.completo && Array.isArray(d.registros))pedido.dados=d;
@@ -995,7 +1007,17 @@ function perfDocOficialHTML(doc, f) {
   <dt>Fechado por</dt><dd>${perfQuemTxt(f.fechadoPor,f.fechadoPorId)} em ${esc(quando(f.fechadoEm))}</dd>
   <dt>Emitido por</dt><dd>${perfQuemTxt(doc.emitidoPor&&doc.emitidoPor.nome,doc.emitidoPor&&doc.emitidoPor.porId)} em ${esc(quando(doc.emitidoEm))}</dd></dl>
   ${doc.emitidosAntes?`<p>Este fechamento já teve ${esc(doc.emitidosAntes)} ${doc.emitidosAntes===1?'documento emitido':'documentos emitidos'} antes deste.</p>`:''}
-  <p>Para conferir: a impressão digital tem de ser a mesma do fechamento no PCP. Se o fechamento mudar, ela não bate.</p></section>`;
+  <p>Para conferir: a impressão digital tem de ser a mesma do fechamento no PCP. Se o fechamento mudar, ela não bate.</p>${perfRetratoHTML(f)}</section>`;
+}
+// O retrato no PDF oficial: as equipes e as pessoas como eram no fechamento (quem era freelancer naquela época).
+function perfRetratoHTML(f) {
+ const r=f&&f.retrato;
+ if(!r)return '<p class="metricas-nota">Fechamento de antes do retrato: as equipes aparecem com a logo de hoje.</p>';
+ if(r.erro)return `<p class="metricas-nota">${esc(r.erro)}</p>`;
+ const animal=a=>{const x=PERF.animalDe(a);return x?x.rotulo:'';};
+ const eqs=(r.equipes||[]).map(e=>`<li>${esc(e.nome)}${animal(e.animal)?' · '+esc(animal(e.animal)):''}${e.cor?' · cor '+esc(e.cor):''}</li>`).join('');
+ const ps=(r.pessoas||[]).map(p=>`<li>${esc(p.nome||p.id)}${p.apelido&&p.apelido!==p.nome?' ('+esc(p.apelido)+')':''} · cadastro ${esc(p.id)}${p.freelancer?' · Freelancer':''}</li>`).join('');
+ return `<h3>Retrato do fechamento</h3>${eqs?`<p>Equipes:</p><ul>${eqs}</ul>`:''}${ps?`<p>Pessoas:</p><ul>${ps}</ul>`:''}`;
 }
 async function perfPdfOficial(el) {
  const f=perfFonteAtual();
@@ -1605,7 +1627,18 @@ async function perfEditarParticipacao(id) {
 /* As opções da regra de equipe na tela: a chave de cada pessoa resolvida
    agora (ficha do RH ou apelido) e, numa revisão fechada, o histórico intacto. */
 function perfOpcoesEquipe() {
-  return { resolver: m => perfIdMembro(m), historico: !!(perfFonteAtual() && perfFonteAtual().fechadoEm) };
+  const f = perfFonteAtual(), historico = !!(f && f.fechadoEm);
+  return { resolver: m => perfIdMembro(m), historico, ...(historico && perfRetratoEquipes(f) ? {retrato: perfRetratoEquipes(f)} : {}) };
+}
+/* O RETRATO DAS EQUIPES DE UM FECHAMENTO (item 13 da fila de 11/10/2026): id
+   da equipe -> a logo (pelo conteúdo, das logos que vieram com as revisões),
+   a cor e o animal da época. Sem retrato no selo (o de antes desta versão),
+   nada: a tela segue como era. */
+function perfRetratoEquipes(f) {
+  const eqs = f && f.retrato && Array.isArray(f.retrato.equipes) ? f.retrato.equipes : null;
+  if (!eqs) return null;
+  const logos = perfRemoto && perfRemoto.logos && typeof perfRemoto.logos === 'object' ? perfRemoto.logos : {};
+  return Object.fromEntries(eqs.filter(e => e && e.id).map(e => [String(e.id), {logo:e.logoSha && perfLogoValido(logos[e.logoSha]) ? logos[e.logoSha] : '', cor:e.cor || '', animal:e.animal || ''}]));
 }
 const PERF_LOGOS_MAX = 400000;
 function perfSomaLogos(equipes) { return (equipes || []).reduce((t, e) => t + (perfLogoValido(e.logo) ? e.logo.length : 0), 0); }

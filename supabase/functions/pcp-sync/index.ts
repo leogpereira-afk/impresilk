@@ -253,7 +253,7 @@ async function contarRegs(colecao: string): Promise<number> {
    faltando, o Hub marca a copia como falha. */
 const COLECOES_EXPORTACAO = ["os", "auditoria", "foto_evento", "performance_fechamentos",
   "performance_regras", "performance_comissao", "performance_comissao_os_versoes", "performance_comissao_exportacoes",
-  "performance_documentos"];
+  "performance_documentos", "performance_retrato_logos"];
 const EXPORTACAO_PAGINA = 500; // abaixo do max_rows de 1000 do PostgREST
 /* pcp_META TAMBÉM VAI (revisão da onda-w1-backup, R4, 11/10/2026). Lá mora a
    "cópia recuperável antes da primeira alteração" que o robô do ERP grava
@@ -1190,6 +1190,54 @@ async function perfFechamentos(periodo:any) {
   if(error)throw new Error(error.message);if(data?.length===1000)throw new Error("Limite de revisões atingido.");
   return (data||[]).map((r:any)=>r.registro).sort((a:any,b:any)=>b.revisao-a.revisao);
 }
+/* O RETRATO NO FECHAMENTO (item 13 da fila de 11/10/2026): o selo guardava o
+   nome e o emblema da equipe, e a tela buscava a logo, a cor e o animal de
+   HOJE pelo id; trocar a logo depois mudava o PDF de um mês fechado, e nada
+   dizia quem era freelancer naquela época. O fechamento novo guarda, FORA do
+   conteúdo e do hash (por isso a aprovação compara só o dinheiro, item 1), o
+   retrato das equipes que aparecem nele (o nome, a cor, o animal, o emblema e
+   a logo pelo conteúdo: a impressão digital sha256 dela, com a imagem
+   guardada uma vez em performance_retrato_logos, só de inserção) e das
+   pessoas (o nome, o apelido e a marca de freelancer). O selo antigo sem o
+   retrato continua como era (a tela usa a equipe de hoje só para a logo). */
+const PERF_LOGO_RETRATO_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+async function perfRetratoDoFechamento(registros:any[], config:any) {
+  const ids=new Set<string>(), chaves=new Set<string>();
+  for(const r of registros||[]){
+    if(r?.equipeId)ids.add(String(r.equipeId));
+    for(const g of Array.isArray(r?.grupos)?r.grupos:[]){if(g?.equipeId)ids.add(String(g.equipeId));for(const m of Array.isArray(g?.membros)?g.membros:[])chaves.add(String(m));}
+    for(const m of Array.isArray(r?.membros)?r.membros:[])if(m?.chave!=null)chaves.add(String(m.chave));
+  }
+  const equipesCfg:any[]=Array.isArray(config?.performancePCP?.equipes)?config.performancePCP.equipes:[];
+  const logos:{id:string,logo:string}[]=[];
+  const equipes=[];
+  for(const id of [...ids].sort()){
+    const e=equipesCfg.find((x:any)=>x&&String(x.id)===id);if(!e)continue;
+    let logoSha="";
+    if(typeof e.logo==="string"&&e.logo.length<=40000&&PERF_LOGO_RETRATO_RE.test(e.logo)){logoSha=await sha256Texto(e.logo);logos.push({id:logoSha,logo:e.logo});}
+    equipes.push({id,nome:String(e.nome||""),emblema:String(e.emblema||""),animal:String(e.animal||""),cor:String(e.cor||""),logoSha});
+  }
+  const regua=await pessoasDoPCP(config);
+  const pessoas=[...chaves].filter(k=>/^\d{6}$/.test(k)).sort().map(id=>{const p=regua.pessoa(id);return {id,nome:String(p?.nome||""),apelido:String(p?.apelido||""),freelancer:p?.freelancer===true};});
+  return {retrato:{equipes,pessoas},logos};
+}
+async function perfGuardarLogos(logos:{id:string,logo:string}[], em:string) {
+  const unicas=[...new Map(logos.map(l=>[l.id,l])).values()];
+  if(!unicas.length)return;
+  const {error}=await sb.from("pcp_registros").upsert(unicas.map(l=>({colecao:"performance_retrato_logos",id:l.id,registro:{id:l.id,logo:l.logo,em},apagado:false,atualizado_em:em})),{onConflict:"colecao,id",ignoreDuplicates:true});
+  if(error)throw new Error(error.message);
+}
+// As logos (pelo conteúdo) dos retratos de uma lista de fechamentos, para a tela.
+async function perfLogosDosRetratos(fechamentos:any[]) {
+  const shas=[...new Set((fechamentos||[]).flatMap((f:any)=>(f?.retrato?.equipes||[]).map((e:any)=>String(e?.logoSha||"")).filter(Boolean)))];
+  const out:Record<string,string>={};
+  for(let i=0;i<shas.length;i+=100){
+    const {data,error}=await sb.from("pcp_registros").select("id,registro").eq("colecao","performance_retrato_logos").in("id",shas.slice(i,i+100));
+    if(error)throw new Error(error.message);
+    for(const r of (data||[]) as any[])if(typeof r?.registro?.logo==="string")out[String(r.id)]=r.registro.logo;
+  }
+  return out;
+}
 
 /* AS REVISÕES DA COMISSÃO QUE COBREM UM PERÍODO (revisão da onda a3, D-004
    nos pontos), para o ranking dos funcionários ler a falha comprovada que
@@ -1756,7 +1804,8 @@ Deno.serve(async (req: Request) => {
         let periodo;try{periodo=perfPeriodo(body);}catch(e){return resp({error:(e as Error).message},422);}
         if(acao==="performancePeriodo")return resp(await perfFonte(body));
         const fechamentos=await perfFechamentos(periodo);
-        if(acao==="performanceFechamentos")return resp({fechamentos});
+        // As logos dos retratos (item 13) vão junto; sem elas a tela usa a de hoje, como antes.
+        if(acao==="performanceFechamentos"){let logos:Record<string,string>={};try{logos=await perfLogosDosRetratos(fechamentos);}catch{logos={};}return resp({fechamentos,logos});}
         /* SÓ MÊS CALENDÁRIO QUE JÁ TERMINOU (item 3 da fila de 11/10/2026).
            Um "até" no futuro viraria o último dia fechado e travaria toda regra
            nova até lá; um período livre (01 a 19/09, 10 a 30/09) gravava selos
@@ -1807,8 +1856,12 @@ Deno.serve(async (req: Request) => {
            "fechadoPorId"): o selo guardava só o nome. O ID de 6 dígitos vem da
            mesma régua do diário (autorAuditoria); sem ID resolvido fica vazio,
            e o selo antigo sem o campo continua legível pelo nome. Fora do hash. */
-        const autorFech=await autorAuditoria();
-        const registro={...fonte,...periodo,id,revisao,anterior:anterior?.id||null,requestId,motivo,fechadoEm:new Date().toISOString(),fechadoPor:cracha?.nome || "Integração autorizada",fechadoPorId:autorFech.porId||"",...(cob?.baixa?{coberturaBaixaConfirmada:PERF_FRASE_COBERTURA}:{})};
+        const autorFech=await autorAuditoria(), emFech=new Date().toISOString();
+        /* O retrato não decide nada: se ele falhar (o RH fora do ar, por exemplo), o mês fecha sem ele, e o selo diz por quê. */
+        let retrato:any;
+        try{const r=await perfRetratoDoFechamento(fonte.registros,(await getCfg())||{});await perfGuardarLogos(r.logos,emFech);retrato=r.retrato;}
+        catch(e){retrato={equipes:[],pessoas:[],erro:"Retrato indisponível no fechamento: "+String((e as Error)?.message||e).slice(0,200)};}
+        const registro={...fonte,...periodo,id,revisao,anterior:anterior?.id||null,requestId,motivo,fechadoEm:emFech,fechadoPor:cracha?.nome || "Integração autorizada",fechadoPorId:autorFech.porId||"",retrato:{em:emFech,...retrato},...(cob?.baixa?{coberturaBaixaConfirmada:PERF_FRASE_COBERTURA}:{})};
         const {error}=await sb.from("pcp_registros").insert({colecao:"performance_fechamentos",id,registro,apagado:false,atualizado_em:registro.fechadoEm});
         if(error){if(error.code==="23505")return resp({error:"O período recebeu outra revisão. Atualize antes de fechar."},409);throw new Error(error.message);}
         return resp({ok:true,fechamento:registro});

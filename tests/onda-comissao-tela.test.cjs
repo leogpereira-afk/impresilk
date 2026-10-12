@@ -147,3 +147,22 @@ test('item 7 na tela: a fita diz o que falta em cada mês e nunca empurra outubr
   const m=tela({papel:'montagem'});m.run('perfMeses={tentado:true,carregando:false,lista:[],erro:""}');
   assert.equal(m.run('perfFitaMesesHTML()'),'');
 });
+
+/* ------------------------------------------------------------------ item 8 */
+test('item 8 na tela: o mês fechado com retrato mostra a logo, a cor e o animal da época; o selo antigo segue como era',()=>{
+  const LOGO='data:image/png;base64,QUJDRA==', LOGO_NOVA='data:image/png;base64,WFlaVw==';
+  const hoje=[{id:'q1',nome:'Nome de hoje',emblema:'🦁',animal:'leao',cor:'verde',logo:LOGO_NOVA,membros:[]}];
+  const r=reg('a1',100,{equipeId:'q1',equipeNome:'Nome da época',emblema:'🦅'});
+  const comRetrato=selo(1,[r],{retrato:{equipes:[{id:'q1',nome:'Nome da época',emblema:'🦅',animal:'aguia',cor:'azul',logoSha:'sha-ficticio'}],pessoas:[{id:'900001',nome:'Pessoa 900001',apelido:'Apelido fictício',freelancer:true}]}});
+  const c=comBase(tela({equipes:hoje}),fonte([r]),[comRetrato],comRetrato.id);
+  c.run("perfRemoto.logos={'sha-ficticio':"+JSON.stringify(LOGO)+"}");
+  const [x]=c.run('PERF.comEquipes(perfFonteAtual().registros,'+JSON.stringify(hoje)+',perfOpcoesEquipe())');
+  assert.deepEqual([x.equipeNome,x.logo,x.cor,x.animal],['Nome da época',LOGO,'azul','aguia']);
+  const html=c.run('perfRetratoHTML(perfFonteAtual())');
+  assert.match(html,/Nome da época · Águia · cor azul/);assert.match(html,/Pessoa 900001 \(Apelido fictício\) · cadastro 900001 · Freelancer/);
+  // O selo de antes do retrato: só a logo de hoje, sem cor nem animal (como era).
+  const antigo=selo(1,[r]);
+  const d=comBase(tela({equipes:hoje}),fonte([r]),[antigo],antigo.id);
+  const [y]=d.run('PERF.comEquipes(perfFonteAtual().registros,'+JSON.stringify(hoje)+',perfOpcoesEquipe())');
+  assert.deepEqual([y.logo,y.cor||'',y.animal||''],[LOGO_NOVA,'','']);
+});

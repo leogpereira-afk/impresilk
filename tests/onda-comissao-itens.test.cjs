@@ -216,3 +216,33 @@ test('item 7: a fita dos meses diz o estado de cada mês desde outubro (teste): 
   assert.equal((await e.call({action:'performanceMeses'},{papel:'montagem',nome:'Montagem fictícia',sub:'montagem',exp:EXP})).status,403);
   assert.equal((await e.call({action:'performanceMeses'},'machine')).status,403);
 });
+
+/* -------------------------------------------------------- item 8 (item 13 da fila) */
+test('item 8: o fechamento guarda o retrato das equipes (logo pelo conteúdo, cor, animal) e das pessoas (apelido, freelancer), fora do hash',async()=>{
+  const crypto=require('node:crypto');
+  const LOGO='data:image/png;base64,QUJDRA==', LOGO_NOVA='data:image/png;base64,WFlaVw==';
+  const mem=[{chave:'100001',nome:'Pessoa 1',percentual:60},{chave:'100003',nome:'Pessoa 3',percentual:40}];
+  const e=await edge('pcp-sync',{
+    pcp_registros:[osF('os1',{equipe:['100001','100003']})],
+    registros:[{colecao:'colaboradores',id:'p1',apagado:false,registro:{id:'p1',nome:'Pessoa 1',apelido:'Um',cpf:'10000112345'}},
+      {colecao:'freelancers',id:'fr3',apagado:false,registro:{id:'fr3',nome:'Pessoa 3',apelido:'Três',cpf:'10000312339',situacao:'ativo',contratoFim:'2027-12-31'}}],
+    pcp_config_global:[{id:true,atualizado_em:'2020-01-01',config:{performancePCP:{equipes:[{id:'q1',nome:'Equipe fictícia',emblema:'🦅',animal:'aguia',cor:'azul',logo:LOGO,membros:mem.map(m=>({chave:m.chave,nome:m.nome}))}],
+      participacoes:[{id:'os1',equipeId:'q1',equipeNome:'Equipe fictícia',emblema:'🦅',membros:mem,por:'Gestor',em:'2026-11-10'}]}}}],
+    painel_ordens:[]});
+  relogio(e,'2026-12-02T12:00:00Z');
+  const f=await fechar(e);
+  assert.equal(f.registros[0].equipeId,'q1');
+  const sha=crypto.createHash('sha256').update(LOGO,'utf8').digest('hex');
+  assert.deepEqual(f.retrato.equipes,[{id:'q1',nome:'Equipe fictícia',emblema:'🦅',animal:'aguia',cor:'azul',logoSha:sha}],'o caso ruim: o selo não guardava a logo, a cor nem o animal');
+  assert.deepEqual(f.retrato.pessoas.map(p=>[p.id,p.apelido,p.freelancer]),[['100001','Um',false],['100003','Três',true]]);
+  assert.equal(e.db.pcp_registros.filter(r=>r.colecao==='performance_retrato_logos').length,1,'a logo é guardada uma vez, pelo conteúdo');
+  // A equipe troca a logo, a cor e o animal depois do fechamento.
+  Object.assign(e.db.pcp_config_global[0].config.performancePCP.equipes[0],{logo:LOGO_NOVA,cor:'verde',animal:'leao'});e.db.pcp_config_global[0].atualizado_em='2026-12-03T00:00:00Z';
+  const h=await e.call({action:'performanceFechamentos',...NOV},gestor);
+  assert.equal(h.fechamentos[0].retrato.equipes[0].cor,'azul');
+  assert.deepEqual(h.logos,{[sha]:LOGO},'a tela recebe a logo da época');
+  // O retrato fica fora do hash: o selo recalcula igual e a comissão aprova.
+  const p=await previa(e,f);
+  assert.equal((await aprovar(e,p)).status,200);
+  assert.equal(e.db.pcp_registros.find(r=>r.colecao==='performance_fechamentos').registro.hash,f.hash);
+});
