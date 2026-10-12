@@ -1981,7 +1981,7 @@ function perfCoberturaMesHTML(regs) {
 function perfAvisoPodioHTML(regs, podio) {
   const m = perfCoberturaMes(regs);
   if (!m || !m.baixa || !podio) return '';
-  return `<p class="perf-aviso perf-aviso-forte" role="note"><strong>Este pódio não representa o mês:</strong> só ${m.pct}% do valor está no ranking. Confira e lance as entregas antes de divulgar.</p>`;
+  return `<p class="perf-aviso perf-aviso-forte" role="note"><strong>Este pódio não representa o mês:</strong> só ${m.pct}% do valor do mês está no ranking. Confira e lance as entregas antes de divulgar.</p>`;
 }
 /* O TOPO DOS RANKINGS (U3 da revisão da onda fechamento): só a linha da
    cobertura do mês e, no mês com revisão, o aviso do mês fechado (M8), em
@@ -2004,11 +2004,15 @@ function perfCoberturaLinhaHTML(regs){
   const k=perfCoberturaConta(regs),m=perfCoberturaMes(regs),falta=perfConferenciaPendentes(),total=k.total,conferidas=Math.max(0,total-falta);
   const fechada=!!(perfFonteAtual()&&perfFonteAtual().fechadoEm),pode=perfPodeEditar()&&!fechada;
   if(!total&&!(m&&m.aLancar))return '<p class="perf-aviso-linha perf-cob-mes">Nenhuma entrega finalizada neste período.</p>';
-  const valor=m?`, <strong>${m.pct}% do valor</strong>`:'';
+  /* UMA CONTA SÓ PARA O VALOR (item 4 da revisão da onda auditoria): o
+     percentual é o do valor do MÊS (as lançadas mais as baixas do ERP a
+     lançar) que está no ranking (conferido e com valor). O detalhe da
+     cobertura mostra só os R$, sem outro percentual sobre outra base. */
+  const valor=m?`, <strong>${m.pct}% do valor do mês</strong> no ranking`:'';
   const aConferir=falta&&!fechada?` · <strong>${falta} a conferir</strong> (as notas só valem depois da conferência)`:'';
-  const lancar=m&&m.aLancar?` · ${m.aLancar===1?'1 baixa do ERP a lançar':m.aLancar+' baixas do ERP a lançar'} (${esc(dinheiroCasa(m.aLancarCentavos/100))}), fora da conta`:'';
+  const lancar=m&&m.aLancar?` · ${m.aLancar===1?'1 baixa do ERP a lançar':m.aLancar+' baixas do ERP a lançar'} (${esc(dinheiroCasa(m.aLancarCentavos/100))}), no valor do mês e ainda fora do ranking`:'';
   const botoes=(falta&&!fechada?`<button type="button" class="btn-primary btn-sm" data-perf-filtrar="pendente">${pode?'Conferir agora':'Ver na Conferência'}</button>`:'')+(m&&m.aLancar?'<button type="button" class="btn-ghost btn-sm" data-perf-lancar>Abrir o lançamento</button>':'');
-  return `<p class="perf-aviso-linha perf-cob-mes${m&&m.baixa?' baixa':''}" title="Conferidas: as entregas com a participação confirmada. O valor conta as confirmadas e com valor contra o do mês inteiro, com as baixas a lançar."><span>Cobertura do mês: <strong>${conferidas} de ${total} ${total===1?'entrega conferida':'entregas conferidas'}</strong>${valor}${aConferir}${lancar}</span>${botoes}</p>`;
+  return `<p class="perf-aviso-linha perf-cob-mes${m&&m.baixa?' baixa':''}" title="Conferidas: as entregas com a participação confirmada. O valor do mês soma as entregas lançadas no PCP e o que o ERP já deu como entregue e falta lançar; no ranking entra o das conferidas e com valor."><span>Cobertura do mês: <strong>${conferidas} de ${total} ${total===1?'entrega conferida':'entregas conferidas'}</strong>${valor}${aConferir}${lancar}</span>${botoes}</p>`;
 }
 /* No celular a caixa vem fechada, com o resumo numa linha (o pódio volta para
    perto do topo); na tela larga ela abre sempre e o resumo some (CSS). */
@@ -2020,7 +2024,7 @@ function perfAvisosTopoHTML(regs){
   const linhas=[perda,perfCoberturaLinhaHTML(regs),mes,fechado].filter(Boolean).join('');
   if(!linhas)return '';
   const falta=perfConferenciaPendentes(),m=perfCoberturaMes(regs);
-  const resumo=[perda?'perdas por retrabalho':'',falta?falta+' a conferir':'',m?m.pct+'% do valor conferido':'',mes?'mês sem fechamento':'',fechado?'mês fechado':''].filter(Boolean).join(' · ');
+  const resumo=[perda?'perdas por retrabalho':'',falta?falta+' a conferir':'',m?m.pct+'% do valor do mês no ranking':'',mes?'mês sem fechamento':'',fechado?'mês fechado':''].filter(Boolean).join(' · ');
   const largo=typeof window==='undefined'||typeof window.matchMedia!=='function'||!window.matchMedia('(max-width: 600px)').matches;
   const aberto=STATE._perfAvisosAbertos!==undefined?!!STATE._perfAvisosAbertos:largo;
   return `<details class="perf-avisos-topo" data-perf-avisos${aberto?' open':''}><summary><span aria-hidden="true">⚠</span> Avisos do período: ${esc(resumo||'ver')}</summary>${linhas}</details>`;
@@ -2056,9 +2060,10 @@ function perfCoberturaHTML(regs, f) {
   // As marcas das sugeridas: a divisão que uma aba antiga deixou para trás, a que espera o RH e a quebrada.
   const marcas = [k.desatualizadas ? `${k.desatualizadas} com a divisão desatualizada` : '', k.conferirRH ? `${k.conferirRH} com pessoa a conferir no RH` : '', incons ? `${incons} com percentuais inconsistentes` : ''].filter(Boolean);
   const marcasTxt = marcas.length ? ` (${marcas.join(', ')})` : '';
-  const parte = v => verValor ? ` <span class="perf-cob-valor">${esc(dinheiroCasa(v))} · ${perfPctTxt(v, k.valor.total)} do valor</span>` : '';
+  // Só os R$: o percentual do valor é um só, o do mês, na linha de cobertura do topo (item 4 da revisão da onda auditoria).
+  const parte = v => verValor ? ` <span class="perf-cob-valor">${esc(dinheiroCasa(v))}</span>` : '';
   const semValorTxt = k.semValor ? ` ${k.semValor} ${k.semValor === 1 ? 'entrega está sem valor e fica fora da conta' : 'entregas estão sem valor e ficam fora da conta'}.` : '';
-  const valorLinha = verValor && (k.valor.total || k.semValor) ? `<p class="perf-cob-extra perf-cob-valor-linha">Valor do período: ${esc(dinheiroCasa(k.valor.total))}, com ${esc(dinheiroCasa(k.valor.conf))} em entregas confirmadas (${perfPctTxt(k.valor.conf, k.valor.total)}).${semValorTxt}</p>` : '';
+  const valorLinha = verValor && (k.valor.total || k.semValor) ? `<p class="perf-cob-extra perf-cob-valor-linha">Valor das entregas lançadas no PCP neste período: ${esc(dinheiroCasa(k.valor.total))}, com ${esc(dinheiroCasa(k.valor.conf))} em entregas confirmadas.${semValorTxt}</p>` : '';
   const antigasTxt = k.antigas ? ` (${k.antigas} pela participação antiga)` : '';
   if (!sem) {
     const falta = total - conf;

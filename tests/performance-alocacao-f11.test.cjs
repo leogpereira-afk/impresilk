@@ -275,14 +275,15 @@ test('cobertura: a faixa "Equipe nas entregas" diz confirmadas, sugeridas, sem e
   // O valor: 1000 + 1000 + 500 + 150 confirmados de 3980 no período.
   const k = c.perfCoberturaConta(c.perfUnirPessoas(srv.registros.map(r => c.perfRegistro({id:r.id, _perf:r}, c.perfConfig()))));
   assert.deepEqual(plano(k.valor), {conf:2650, sug:1250, sem:80, total:3980});
-  assert.match(cortar(faixa), /R\$2650\.00 · 67% do valor/);assert.match(cortar(faixa), /R\$80\.00 · 2% do valor/);
-  assert.match(cortar(faixa), /Valor do período: R\$3980\.00, com R\$2650\.00 em entregas confirmadas \(67%\)/);
+  // Item 4 da revisão da onda auditoria: o detalhe mostra só os R$; o percentual do valor é um só, o do mês, na linha do topo.
+  assert.match(cortar(faixa), /R\$2650\.00/);assert.match(cortar(faixa), /R\$80\.00/);assert.doesNotMatch(cortar(faixa), /% do valor/);
+  assert.match(cortar(faixa), /Valor das entregas lançadas no PCP neste período: R\$3980\.00, com R\$2650\.00 em entregas confirmadas\./);
   // "Completar equipes" continua levando à conferência filtrada em "Sem equipe".
   assert.match(faixa, /data-perf-filtrar="sem-equipe">Informar participantes</);
   // Quem não vê R$ (montagem) vê as contagens e não o valor.
   const m = comBase(aparelho({papel:'montagem'}), srv);
   const mont = m.perfCoberturaHTML(m.perfUnirPessoas(srv.registros.map(r => m.perfRegistro({id:r.id, _perf:r}, m.perfConfig()))), periodo);
-  assert.doesNotMatch(mont, /R\$|do valor|Valor do período/);assert.match(mont, /<b>4<\/b> confirmadas/);
+  assert.doesNotMatch(mont, /R\$|do valor|Valor das entregas/);assert.match(mont, /<b>4<\/b> confirmadas/);
 });
 
 /* ───────────── hash: aberto muda, fechado não ───────────── */

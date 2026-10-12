@@ -62,3 +62,13 @@ test('revisão campo: a marca antiga gravada por engano não desce para a gestã
   ctx.podeVerValores=()=>false;
   assert.equal(ctx.statusEntregaDe({conferenciaSoGestao:true}).conferenciaSoGestao,true);
 });
+
+test('revisão (item 4): um percentual só para o valor, o do mês, com o nome certo', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'performance.js'), 'utf8');
+  // Caso ruim: a caixa dizia "14% do valor" (com as baixas no denominador) e "fora da conta"; o detalhe e o "Valor do período" diziam 39%.
+  assert.doesNotMatch(src, /, fora da conta`/);
+  assert.doesNotMatch(src, /perfPctTxt\(v, k\.valor\.total\)} do valor/);
+  assert.doesNotMatch(src, /em entregas confirmadas \(\$\{perfPctTxt/);
+  assert.match(src, /% do valor do mês<\/strong> no ranking/);
+  assert.match(src, /só \$\{m\.pct\}% do valor do mês está no ranking/);
+});

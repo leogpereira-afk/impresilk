@@ -379,9 +379,9 @@ test('revisão fechamento: U3, U4 e U5, só a cobertura do mês sobe; as baixas 
   // U4. Caso ruim: "N baixas do ERP" aparecia três vezes (linha do mês, aviso do pódio e linha do lançamento).
   assert.equal((html.match(/baixas? do ERP/g) || []).length, 1, 'uma menção só às baixas do ERP');
   // U4. Os rótulos dizem a diferença: o mês inteiro (com as baixas a lançar) lá em cima, só as lançadas no PCP no quadro.
-  assert.match(html, /Cobertura do mês: <strong>2 de 3 entregas conferidas<\/strong>, <strong>33% do valor<\/strong> · <strong>1 a conferir<\/strong> \(as notas só valem depois da conferência\) · 2 baixas do ERP a lançar \(R\$ 900\.00\), fora da conta<\/span>/);
+  assert.match(html, /Cobertura do mês: <strong>2 de 3 entregas conferidas<\/strong>, <strong>33% do valor do mês<\/strong> no ranking · <strong>1 a conferir<\/strong> \(as notas só valem depois da conferência\) · 2 baixas do ERP a lançar \(R\$ 900\.00\), no valor do mês e ainda fora do ranking<\/span>/);
   assert.match(html, /<button type="button" class="btn-ghost btn-sm" data-perf-lancar>Abrir o lançamento<\/button><\/p>/);
-  assert.match(html, /title="Conferidas: as entregas com a participação confirmada\. O valor conta as confirmadas e com valor contra o do mês inteiro, com as baixas a lançar\."/);
+  assert.match(html, /title="Conferidas: as entregas com a participação confirmada\. O valor do mês soma as entregas lançadas no PCP e o que o ERP já deu como entregue e falta lançar; no ranking entra o das conferidas e com valor\."/);
   assert.match(html, /das lançadas no PCP neste período|Todas as 3 entregas do período têm participantes/);
   assert.match(html, /<strong>3 de 3<\/strong> entregas com participantes|Todas as 3 entregas do período têm participantes/);
   // U5. Com pódio, o aviso forte vem antes dele.
