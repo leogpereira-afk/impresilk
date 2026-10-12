@@ -338,6 +338,8 @@ test('revisão acabamento: "Desfazer este lote" devolve as descrições à class
   assert.equal(c.lotesCategoria[0].desfeito.motivo, 'Lote feito por engano: não são letreiros');
   assert.equal(c.lotesCategoria[0].descricoes.length, 3, 'o registro do lote fica');
   assert.match(d2.el('#op-revisao-status').textContent, /Lote desfeito: 2 descrições voltaram a ficar sem categoria; 1 descrição já tinha outra classificação, feita depois, e ficou como está/);
+  assert.match(d2.el(`[data-lote-status="${id}"]`).textContent, /Lote desfeito: 2 descrições voltaram/, 'a resposta aparece junto do botão');
+  assert.match(d2.corpo(), new RegExp(`<p role="status" aria-live="polite" class="op-lote-status" data-lote-status="${id}"></p>`));
   assert.deepEqual(lista.map(o => o.servico), DESCRICOES, 'nenhuma O.S. muda');
 });
 

@@ -86,7 +86,7 @@ function lotesFeitosHTML(cfg){
  const um=l=>{const n=(l.descricoes||[]).length,quem=[l.por,dia(l.em)].filter(Boolean).join(' em ');
   return `<article class="op-lote-feito${l.desfeito?' desfeito':''}"><p><strong>${esc(l.categoria)}</strong> · ${n===1?'1 descrição':n+' descrições'}${l.busca?` · palavra "${esc(l.busca)}"`:''}${quem?` · ${esc(quem)}`:''}</p><p>Motivo: ${esc(l.motivo||'')}</p><details><summary>Ver as descrições</summary><ul>${(l.descricoes||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></details>${l.desfeito
    ?`<p class="op-lote-desfeito">Desfeito${l.desfeito.por?' por '+esc(l.desfeito.por):''}${dia(l.desfeito.em)?' em '+dia(l.desfeito.em):''}: ${esc(l.desfeito.motivo||'')}</p>`
-   :`<label>Motivo para desfazer (15 letras ou mais) <input data-lote-motivo="${esc(l.id)}" maxlength="300"></label><button type="button" class="btn-ghost btn-sm" data-lote-desfazer="${esc(l.id)}">Desfazer este lote</button>`}</article>`;};
+   :`<label>Motivo para desfazer (15 letras ou mais) <input data-lote-motivo="${esc(l.id)}" maxlength="300"></label><button type="button" class="btn-ghost btn-sm" data-lote-desfazer="${esc(l.id)}">Desfazer este lote</button><p role="status" aria-live="polite" class="op-lote-status" data-lote-status="${esc(l.id)}"></p>`}</article>`;};
  return `<details id="op-lotes" class="op-lotes"><summary>Lotes já feitos (${xs.length})</summary><p><small>Desfazer devolve as descrições do lote à classificação de antes (sem categoria); a descrição reclassificada depois, uma a uma, fica.</small></p>${xs.map(um).join('')}</details>`;
 }
 function abrirRevisaoOperacional(){
@@ -107,11 +107,14 @@ function abrirRevisaoOperacional(){
  if(busca&&previa){busca.oninput=pintar;previa.onchange=ev=>{const t=ev&&ev.target;if(!t||!t.dataset||!('loteItem' in t.dataset))return;if(t.checked)fora.delete(t.value);else fora.add(t.value);contar();};}
  // O "Desfazer este lote": pelo registro do lote, com motivo (U3).
  const lotes=d.querySelector('#op-lotes');
- if(lotes)lotes.onclick=async ev=>{const b=ev&&ev.target&&ev.target.closest?ev.target.closest('[data-lote-desfazer]'):null;if(!b)return;const id=b.dataset.loteDesfazer,st=d.querySelector('#op-revisao-status'),campo=d.querySelector(`[data-lote-motivo="${id}"]`);
+ if(lotes)lotes.onclick=async ev=>{const b=ev&&ev.target&&ev.target.closest?ev.target.closest('[data-lote-desfazer]'):null;if(!b)return;const id=b.dataset.loteDesfazer,campo=d.querySelector(`[data-lote-motivo="${id}"]`);
+  // A resposta aparece junto do botão (o status do formulário fica lá embaixo) e no status do formulário.
+  const sts=[d.querySelector('#op-revisao-status'),d.querySelector(`[data-lote-status="${id}"]`)].filter(Boolean),dizer=t=>sts.forEach(x=>{x.textContent=t;});
   const r=OPREV.desfazerLote(STORE.getCFG(),id,campo?campo.value:'',STATE.user.nome,new Date().toISOString());
-  if(r.erro){st.textContent=r.erro;return;}
-  STORE.saveCFG(r.cfg);st.textContent=`Lote desfeito: ${r.voltam.length===1?'1 descrição voltou':r.voltam.length+' descrições voltaram'} a ficar sem categoria${r.ficam.length?`; ${r.ficam.length===1?'1 descrição já tinha':r.ficam.length+' descrições já tinham'} outra classificação, feita depois, e ficou como está`:''}. Sincronizando…`;
-  try{await STORE.trySync();if(STORE.getQueue().length)throw new Error('Alteração pendente de sincronização.');st.textContent=st.textContent.replace('Sincronizando…','Configuração sincronizada.');}catch(e){st.textContent=perfErroTxt(e);}};
+  if(r.erro){dizer(r.erro);return;}
+  const feito=`Lote desfeito: ${r.voltam.length===1?'1 descrição voltou':r.voltam.length+' descrições voltaram'} a ficar sem categoria${r.ficam.length?`; ${r.ficam.length===1?'1 descrição já tinha':r.ficam.length+' descrições já tinham'} outra classificação, feita depois, e ficou como está`:''}.`;
+  STORE.saveCFG(r.cfg);dizer(feito+' Sincronizando…');b.disabled=true;
+  try{await STORE.trySync();if(STORE.getQueue().length)throw new Error('Alteração pendente de sincronização.');dizer(feito+' Configuração sincronizada.');}catch(e){dizer(perfErroTxt(e));}};
  d.querySelector('[name=correcao]').onchange=ev=>{const m=cfg.medicoesRetrabalho?.[ev.target.value]||{};
   // A original já ligada pelo ID na ficha (item 37, onda operação) vem preenchida.
   const ligada=(STORE.getOS(ev.target.value)||{}).osOriginalId||'';
