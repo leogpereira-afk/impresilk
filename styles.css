@@ -2810,6 +2810,8 @@ body.tv-ligada { overflow:hidden; }
 .perf-ranking{margin:0 0 16px;padding:22px 24px 20px;background:var(--surface,#fff);border:1px solid #dfe7ee;border-radius:18px}
 .perf-ranking-head{display:flex;justify-content:space-between;align-items:center;gap:12px 16px;flex-wrap:wrap;margin-bottom:6px}
 .perf-ranking-titulo{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
+/* U2 da auditoria de 12/10/2026: a medida fixa do ranking de quem não é da gestão. */
+.perf-rank-medida-fixa{margin:0;font-size:.85rem;font-weight:600;color:#5d7283}
 .perf-ranking-titulo h3{margin:0;font-size:1.25rem;color:var(--navy,#173c50);letter-spacing:-.01em}
 .perf-ranking-ctrl{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .perf-ranking-lead{margin:0 0 10px;font-size:.86rem;line-height:1.5;color:#4f6475;max-width:900px}

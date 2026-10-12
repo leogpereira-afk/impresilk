@@ -2539,10 +2539,15 @@ function perfComFalhas(regs){
    "A conferir" e o mesmo que trava o fechamento (perfFechamentoBloqueio). */
 function perfConferenciaPendentes() {
   if(perfConsultaServidor()&&!perfFonteAtual())return 0;
+  /* Quem não é da gestão recebe as O.S. sem as conferências (U1): pelo
+     aparelho, toda entrega pareceria "a conferir". O número é o do servidor
+     (o ranking dos funcionários), o mesmo da linha de cobertura (U2 e U3). */
+  if(!perfConsultaServidor()){const st=perfRankFuncAtual();return st&&st.dados&&st.dados.resumo?Number(st.dados.resumo.aConferir)||0:0;}
   return perfRegsDoPeriodo().filter(r=>!r.confirmado).length;
 }
 function perfFaixaConferenciaHTML(n) {
-  if(!n)return '';
+  // Quem não é da gestão lê a mesma conta na linha do ranking (U3): a faixa não repete.
+  if(!n||!perfConsultaServidor())return '';
   return `<section class="perf-faixa-conferir" role="status" aria-label="Entregas a conferir"><p><span aria-hidden="true">⚠</span> <strong>${n} ${n===1?'entrega a conferir':'entregas a conferir'}:</strong> as notas só valem depois da conferência.</p><button type="button" class="btn-primary btn-sm" data-perf-filtrar="pendente">${perfPodeEditar()?'Conferir agora':'Ver na Conferência'}</button></section>`;
 }
 /* Os atalhos dos Rankings ("Conferir as N", "Informar participantes", "Ver
@@ -2590,8 +2595,83 @@ function perfAvisoMesSemFechamentoHTML() {
     : `${lista.charAt(0).toUpperCase() + lista.slice(1)} ${meses.length === 1 ? 'terminou e ainda não foi fechado' : 'terminaram e ainda não foram fechados'}.`;
   return `<section class="perf-faixa-conferir perf-faixa-mes" role="status" aria-label="Mês sem fechamento"><p><span aria-hidden="true">⚠</span> <strong>${esc(frase)}</strong> Confira as entregas e feche ${meses.length === 1 ? 'o mês' : 'um mês de cada vez, do mais antigo,'} em Base e fechamento.</p>${botoes.map(m => `<button type="button" class="btn-primary btn-sm" data-perf-abrir-mes="${esc(m)}">Abrir ${esc(perfMesTxt(m))}</button>`).join('')}</section>`;
 }
+/* O RANKING DE QUEM NÃO É DA GESTÃO (U2 da auditoria de 12/10/2026).
+   Montagem, operação e comercial recebem as O.S. sem a divisão, as
+   conferências e os valores (U1): o ranking montado no aparelho ficava vazio,
+   e a tela mostrava R$ 0,00, "N sem valor" e todas as entregas "a conferir".
+   Agora esses papéis veem o ranking do servidor, o mesmo do link dos
+   funcionários (performanceRankingEquipe): só a produção confirmada (O.S.
+   equivalentes), sem R$ e sem a divisão de ninguém. */
+let perfRankFunc={chave:'',dados:null,carregando:false,erro:'',tentado:false};
+function perfRankFuncPeriodo(){const f=periodoOuMes('_fPerf'),hoje=perfHojeISO();return {de:String(f.de||''),ate:String(f.ate||'')>hoje?hoje:String(f.ate||'')};}
+// `pedido`: a leitura já marcada por perfRankFuncAtual (uma só por período, mesmo com várias pinturas antes dela).
+async function perfCarregarRankFunc(pedido){
+  const per=perfRankFuncPeriodo(),chave=per.de+'|'+per.ate;
+  if(!pedido&&perfRankFunc.carregando&&perfRankFunc.chave===chave)return;
+  if(pedido&&perfRankFunc!==pedido)return;
+  if(!pedido)perfRankFunc={chave,dados:null,carregando:true,erro:'',tentado:true};
+  try{
+    if(!per.de||!per.ate||per.de>per.ate)throw new Error('Escolha um período até hoje.');
+    const r=await STORE.api({action:'performanceRankingEquipe',...per});
+    if(!r||!Array.isArray(r.equipes))throw new Error((r&&r.error)||'Resposta sem o ranking.');
+    if(perfRankFunc.chave===chave)perfRankFunc={...perfRankFunc,dados:r,carregando:false};
+  }catch(e){if(perfRankFunc.chave===chave)perfRankFunc={...perfRankFunc,carregando:false,erro:perfErroTxt(e)};}
+  if(typeof renderPerformanceCasa==='function')renderPerformanceCasa();
+}
+function perfRankFuncAtual(){
+  const per=perfRankFuncPeriodo(),chave=per.de+'|'+per.ate;
+  if(perfRankFunc.chave!==chave||!perfRankFunc.tentado){
+    if(typeof STORE==='undefined'||!STORE||typeof STORE.api!=='function')return null;
+    const pedido={chave,dados:null,carregando:true,erro:'',tentado:true};perfRankFunc=pedido;
+    setTimeout(()=>perfCarregarRankFunc(pedido),0);return perfRankFunc;
+  }
+  return perfRankFunc;
+}
+// A cobertura em uma linha só, a mesma em todo lugar (U3): quantas conferidas e quantas a conferir.
+function perfRankFuncCoberturaHTML(r){
+  const conf=Number(r&&r.entregasConfirmadas)||0,falta=Number(r&&r.aConferir)||0,total=conf+falta;
+  if(!total)return '<p class="perf-cob-extra perf-cob-mes">Nenhuma entrega deste período foi conferida pela gestão ainda.</p>';
+  return `<p class="perf-cob-extra perf-cob-mes"><strong>${conf} de ${total} ${total===1?'entrega conferida':'entregas conferidas'}</strong> pela gestão${falta?` · ${falta} a conferir, fora do ranking até a conferência`:''}.</p>`;
+}
+/* O selo do ranking dos funcionários: o servidor diz se o período é o de um
+   fechamento (o ranking lê o selo) ou dados atuais (provisório). Não é
+   "prévia do aparelho": os números vêm do servidor. */
+function perfRankFuncSelo(d){
+  if(d&&d.fechado)return {tipo:'ok',texto:'Mês fechado · revisão '+(d.revisao||1)};
+  const p=periodoOuMes('_fPerf'),de=String(p&&p.de||''),ate=String(p&&p.ate||'');
+  const doMes=/^\d{4}-\d{2}-01$/.test(de)&&ate.slice(0,7)===de.slice(0,7)&&(ate===perfUltimoDiaMes(de.slice(0,7))||ate>=perfHojeISO());
+  return {tipo:'provisorio',texto:doMes?PERF_TXT_ABERTO:'Período aberto, resultado provisório'};
+}
+function perfRankingFuncionariosHTML(){
+  const st=perfRankFuncAtual(),d=st&&st.dados,sl=perfRankFuncSelo(d);
+  const selo=`<span class="perf-situacao ${esc(sl.tipo)}">${esc(sl.texto)}</span>`;
+  const cab=`<header class="perf-ranking-head"><div class="perf-ranking-titulo"><h3 id="perf-rank-titulo">Ranking das equipes</h3>${selo}</div><p class="perf-rank-medida-fixa">Produção confirmada</p></header>`;
+  if(!st||st.carregando)return `<section class="perf-ranking" aria-labelledby="perf-rank-titulo">${cab}<p role="status">Consultando o ranking das equipes…</p></section>`;
+  if(st.erro)return `<section class="perf-ranking" aria-labelledby="perf-rank-titulo">${cab}<p class="perf-aviso" role="status">Não foi possível consultar o ranking agora (${esc(String(st.erro).replace(/[.!?]$/,''))}). <button type="button" class="btn-ghost btn-sm" data-perf-rankfunc-tentar>Tentar de novo</button></p></section>`;
+  const c=perfConfig(),daCfg=x=>c.equipes.find(e=>e&&e.nome===x.nome)||null;
+  // A cor da equipe vem do cadastro (chave da paleta); o servidor não manda a chave.
+  const linhas=(Array.isArray(d.equipes)?d.equipes:[]).map(x=>{const e=daCfg(x);return {...x,cor:e?e.cor:'',...(e&&!x.animal?{animal:e.animal}:{})};});
+  const num=x=>perfFormato(x.equivalentes);
+  const entregasTxt=x=>`${x.entregas} ${x.entregas===1?'entrega':'entregas'}${x.semPontos?` · ${x.semPontos} sem pontos (retrabalho de instalação)`:''}${x.falhaComprovada?` · ${x.falhaComprovada} com falha comprovada`:''}`;
+  const lideranca=x=>`<div class="perf-conquistas"><span>${x.faltaLideranca>1e-8?esc(perfFormato(x.faltaLideranca))+' O.S. equivalente(s) até a liderança':'Liderança neste recorte'}</span></div>`;
+  const {podio,resto}=perfCortarPodio(linhas);
+  const podioHTML=perfPodioHTML(podio.map(x=>({posicao:x.posicao,nome:x.nome,visual:perfLogoHTML(x,'perf-podio-logo'),classe:perfCorClasse(x),
+    etiqueta:x.freelancer?' <span class="tag-freelancer">Freelancer</span>':'',numero:num(x),unidade:'O.S. equivalentes confirmadas',linha:esc(entregasTxt(x)),aviso:lideranca(x)})),
+    {rotulo:'Pódio das equipes',classe:'perf-podio-equipes',animar:perfAnimarPodio(['funcionarios',st.chave,...podio.map(x=>x.nome+':'+x.posicao)].join('|'))});
+  const topo=linhas.reduce((m,x)=>Math.max(m,Number(x.equivalentes)||0),0);
+  const cartoes=resto.length?`<ol class="perf-equipes-cartoes" aria-label="Equipes${podio.length?`, do ${podio.length+1}º lugar em diante`:''}">${resto.map(x=>`<li class="perf-equipe-cartao${perfCorClasse(x)}">
+      <div class="perf-cartao-topo"><span class="perf-cartao-pos">${x.posicao}º</span>${perfLogoHTML(x,'perf-cartao-logo')}<div class="perf-cartao-nome"><h4>${esc(x.nome)}</h4></div></div>
+      <p class="perf-cartao-num"><strong>${esc(num(x))}</strong> <span>O.S. equivalentes confirmadas</span></p>${perfBarraHTML(topo>0?x.equivalentes/topo:0)}
+      <p class="perf-cartao-linha">${esc(entregasTxt(x))}</p>${lideranca(x)}</li>`).join('')}</ol>`:'';
+  const vazio=linhas.length?'':'<p class="perf-rank-vazio">A corrida começa com a primeira entrega conferida pela gestão neste período.</p>';
+  return `<section class="perf-ranking perf-ranking-funcionarios" aria-labelledby="perf-rank-titulo">${cab}${perfRankFuncCoberturaHTML(d.resumo)}${vazio}${podioHTML}${cartoes}
+    <p class="perf-ranking-lead">O que cada equipe entregou, proporcional aos itens e à sua parte no serviço; só entram as entregas conferidas pela gestão. É o mesmo ranking do link dos funcionários. Os valores em R$ e a divisão de cada pessoa ficam com a gestão.</p></section>`;
+}
 function performanceEquipesHTML() {
   const c=perfConfig(), f=periodoOuMes('_fPerf');
+  if(!perfConsultaServidor())return `<section class="perf-workspace"><div class="perf-controls">${perfPeriodoCompactoHTML(f)}</div>
+    ${perfRankingFuncionariosHTML()}
+    ${typeof operacaoPrioridadesHTML==='function'?operacaoPrioridadesHTML():''}</section>`;
   if(perfConsultaServidor()&&!perfFonteAtual())return `<section class="perf-workspace">${perfPeriodoCompactoHTML(f)}<p role="status">${perfRemoto.erro?'Não foi possível consultar a apuração. Nenhuma falta de cadastro foi inferida.':'Consultando entregas e equipes…'}</p>${perfAvisosHTML(true)}</section>`;
   const regs=perfRegsDoPeriodo();
   const modo=['pessoas','composicoes'].includes(STATE._perfModo)?STATE._perfModo:'equipes';
@@ -2616,6 +2696,17 @@ function performanceEquipesHTML() {
    completo" dos Rankings, que sempre levou a conferência. */
 function performanceConferenciaHTML({embutida=false}={}) {
   const c=perfConfig(), f=periodoOuMes('_fPerf');
+  /* QUEM NÃO É DA GESTÃO (U2 da auditoria de 12/10/2026) não recebe as
+     conferências nem os percentuais (U1): a lista do aparelho diria "Divisão
+     sugerida" em toda entrega. A aba diz o que é da gestão e a conta do
+     servidor, em uma linha (U3). */
+  if(!perfConsultaServidor()){
+    if(embutida)return '';
+    const st=perfRankFuncAtual(),r=st&&st.dados?st.dados.resumo:null;
+    return `<section class="perf-workspace perf-conferencia"><div class="perf-controls">${perfPeriodoCompactoHTML(f)}</div>
+      <section class="perf-entregas"><div class="perf-entregas-cabeca"><h3>Conferência das entregas</h3><p>A conferência de quem fez cada entrega, e com qual parte, é da gestão do PCP. Os percentuais de cada pessoa ficam com a gestão; o ranking das equipes mostra o resultado.</p></div>
+      ${r?perfRankFuncCoberturaHTML(r):st&&st.erro?`<p class="perf-aviso" role="status">Não foi possível consultar agora (${esc(String(st.erro).replace(/[.!?]$/,''))}).</p>`:'<p role="status">Consultando…</p>'}</section></section>`;
+  }
   if(perfConsultaServidor()&&!perfFonteAtual())return embutida?'':`<section class="perf-workspace perf-conferencia">${perfPeriodoCompactoHTML(f)}<p role="status">${perfRemoto.erro?'Não foi possível consultar a apuração. Nenhuma falta de cadastro foi inferida.':'Consultando entregas e equipes…'}</p>${perfAvisosHTML(true)}</section>`;
   const regs=perfRegsDoPeriodo(), pesquisa=STATE._perfBusca || '';
   const podeConferir=perfPodeEditar()&&!perfFonteAtual()?.fechadoEm, verValor=perfPodeEditar();
@@ -2660,6 +2751,7 @@ function wirePerformanceEquipes(el) {
   el.querySelectorAll('[data-perf-audit-id]').forEach(b=>b.onclick=()=>perfEditarParticipacao(b.dataset.perfAuditId).catch(e=>toast(perfErroTxt(e),'error')));
   el.querySelectorAll('[data-perf-audit-volta]').forEach(b=>b.onclick=async()=>{try{const r=perfRegistro(perfOS(b.dataset.perfAuditVolta),perfConfig());await LOTE.abrir({modo:'dia',dia:diaEntrega(r.os)});STATE._loteModo='dia';STATE._entAba='lote';document.querySelector('.tab[data-tab="entregas"]:not([data-vista])')?.click();}catch(e){toast('Não foi possível abrir a volta: '+perfErroTxt(e),'error');}});
   el.querySelectorAll('[data-perf-rank-medida]').forEach(b=>b.onclick=()=>{STATE._perfRankMedida=b.dataset.perfRankMedida;renderPerformanceCasa();});
+  el.querySelectorAll('[data-perf-rankfunc-tentar]').forEach(b=>b.onclick=()=>perfCarregarRankFunc());
   el.querySelectorAll('[data-perf-pessoa-medida]').forEach(b=>b.onclick=()=>{STATE._perfPessoaMedida=b.dataset.perfPessoaMedida;renderPerformanceCasa();});
   const crit=el.querySelector('#perf-criterios');if(crit)crit.onclick=perfEditarCriterios;
   // Nomear uma composição abre a criação já com os integrantes marcados.
@@ -2758,6 +2850,12 @@ function perfWireModelo(form) {
 }
 
 function performanceRelatorioHTML() {
+  /* QUEM NÃO É DA GESTÃO (U2 da auditoria de 12/10/2026): sem a divisão e as
+     conferências (U1), os painéis do aparelho diziam "0% conferidas" e "0 O.S.
+     eq." em toda equipe. O relatório da conferência e da produção por equipe
+     é da gestão; aqui fica a linha do servidor e os quadros operacionais. */
+  if(!perfConsultaServidor()){const st=perfRankFuncAtual(),r=st&&st.dados?st.dados.resumo:null;
+    return `<section class="perf-report"><h3>Relatório de performance</h3><p>Os painéis da conferência, da produção por equipe e por pessoa são da gestão do PCP. O ranking das equipes, com a produção confirmada, está em Rankings.</p>${r?perfRankFuncCoberturaHTML(r):''}</section>`;}
   if(perfConsultaServidor()&&!perfFonteAtual())return `<p role="status">${perfRemoto.erro?'Consulta indisponível; tente atualizar a apuração.':'Consultando a apuração…'}</p>`;
   const f=periodoOuMes('_fPerf'),c=perfConfig();
   // Nome e logo das equipes pela mesma regra do ranking, em todos os quadros do

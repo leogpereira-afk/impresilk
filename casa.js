@@ -1732,6 +1732,29 @@ function relatoriosEntregasHTML(lista, porNumero, estadoPCP) {
 
   const kpiLinha = (rotulo, valor, nota) => `<div class="casa-kpi"><b>${valor}</b><small>${rotulo}${nota ? ` · ${nota}` : ''}</small></div>`;
 
+  /* SEM R$ (U2 da auditoria de 12/10/2026): quem não é da gestão recebe o
+     pacote do ERP sem valores, e os quadros diziam "R$ 0,00" e "Sem valor no
+     período". Ficam as contagens: mês a mês, tipo de serviço, dia da semana,
+     instalação × retirada e como o PCP registrou. */
+  if (!verValorEntregasCasa()) {
+    const contar = (xs, n) => barrasCasa(xs.map(x => ({ rotulo: x.rotulo, valor: x.n })), v => `${v} O.S`);
+    const tiposN = agrupar(o => typeof OPREV!=='undefined'?OPREV.tipo(o,STORE.getCFG()):o.servico).sort((a, b) => b.n - a.n).slice(0, 12);
+    return `<section class="casa-relatorios">
+    <h3>📊 Relatórios do período</h3>
+    <p class="text-muted" style="font-size:.8rem">${lista.length} O.S entregues no período. Os valores em R$ ficam com a gestão. Todos os quadros leem o mesmo pacote do ERP dos cartões acima.</p>
+    ${quadroCasa('ent-meses', '📅 Mês a mês', contar(meses.map(m => ({ rotulo: rotuloMesCasa(m.rotulo), n: m.n }))) || '<p class="text-muted">Sem entrega no período.</p>', true)}
+    ${quadroCasa('ent-tipos', '🛠️ Por tipo de serviço', contar(tiposN) || '<p class="text-muted">O ERP não mandou o serviço nestas O.S.</p>', true)}
+    ${quadroCasa('ent-dow', '📆 Dia da semana <small>onde o volume cai</small>', contar(porDow) || '<p class="text-muted">Sem data de entrega no período.</p>', false)}
+    ${quadroCasa('ent-tipo-entrega', '📦 Instalação × retirada', `<div class="casa-kpi-cards">
+        ${kpiLinha('instalações', String(instal.length), '')}
+        ${kpiLinha('retiradas no balcão', String(retiradas.length), '')}
+        ${kpiLinha('participação da retirada', (lista.length ? Math.round(retiradas.length / lista.length * 100) : 0) + '%', '')}
+      </div>`, false)}
+    ${quadroCasa('ent-registro', '✅ Como o PCP registrou', `${contar([...estados.values()].sort((a, b) => b.n - a.n))}
+      <p class="text-muted" style="font-size:.8rem">${foraDoPCP ? `<strong>${foraDoPCP}</strong> O.S o ERP entregou sem nunca passar pelo PCP. ` : ''}${aLancarN ? `<strong>${aLancarN}</strong> esperam lançamento manual. ` : ''}Quanto mais "registrada", melhor está o registro da equipe.</p>`, false)}
+  </section>`;
+  }
+
   return `<section class="casa-relatorios">
     <h3>📊 Relatórios do período</h3>
     <p class="text-muted" style="font-size:.8rem">${lista.length} O.S entregues · ${dinheiroCasa(total)}${comValor < lista.length ? ` · ${lista.length - comValor} sem valor no ERP` : ''}. Todos os quadros leem o mesmo pacote do ERP dos KPIs acima.</p>
@@ -1814,7 +1837,14 @@ function idadeTxtCasa(n) {
    deixa de ser "de ontem" e passa a ser esquecida. Só a cor muda; a ordem e a
    contagem são as mesmas. */
 const FILA_LANCAR_VELHA = 7;
+/* R$ NA TELA DE ENTREGAS SÓ PARA A GESTÃO (U2 da auditoria de 12/10/2026).
+   Montagem, operação e comercial recebem as O.S. e o pacote do ERP sem
+   valores: a tela mostrava "R$ 0,00", "68 sem valor" e a coluna Valor cheia
+   de "sem valor", como se o dado faltasse. Sem o papel de gestão, as colunas,
+   os totais e o filtro de valor não aparecem. */
+const verValorEntregasCasa = () => typeof podeVerValores !== 'function' || podeVerValores();
 function filaLancarHTML(aLancar, f, hoje) {
+  const verValor = verValorEntregasCasa();
   if (!aLancar.length) return '<p class="ent-fila-vazia"><span aria-hidden="true">✓</span> Nada pendente de lançamento.</p>';
   const dataBR = d => d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—';
   const baixa = os => OPERACAO.dia(os.finalizadaEm) || '';
@@ -1831,7 +1861,7 @@ function filaLancarHTML(aLancar, f, hoje) {
      lista é para quem vai lançar. */
   const resumo = `<p class="ent-fila-resumo">
       <span class="ent-fila-fato"><strong>${n} ${n === 1 ? 'baixa do ERP espera' : 'baixas do ERP esperam'}</strong> lançamento</span>
-      <span class="ent-fila-fato"><strong>${dinheiroCasa(total)}</strong> em valores conhecidos a conferir${semValor ? ` <span class="badge sem-valor">${semValor} sem valor</span>` : ''}</span>
+      ${verValor ? `<span class="ent-fila-fato"><strong>${dinheiroCasa(total)}</strong> em valores conhecidos a conferir${semValor ? ` <span class="badge sem-valor">${semValor} sem valor</span>` : ''}</span>` : ''}
       ${antiga ? `<span class="ent-fila-fato">a mais antiga é ${idadeAntiga ? `de <strong>${dataBR(antiga)}</strong>, ${idadeTxtCasa(idadeAntiga)}` : 'de hoje'}</span>` : ''}
     </p>`;
   /* A EXPLICAÇÃO LONGA FOI PARA "COMO FUNCIONA". Nenhuma informação saiu:
@@ -1851,7 +1881,7 @@ function filaLancarHTML(aLancar, f, hoje) {
     /* ORDEM: a mais antiga primeiro (é a que está esquecida há mais tempo) ou
        a de maior valor (é a que mais pesa no mês). A escolha fica no STATE,
        porque a tela repinta sozinha a cada mês que chega do ERP. */
-    const ordem = STATE._entFilaOrdem === 'valor' ? 'valor' : 'antigas';
+    const ordem = STATE._entFilaOrdem === 'valor' && verValor ? 'valor' : 'antigas';
     const porAntiga = (a, b) => baixa(a).localeCompare(baixa(b)) || String(a.numero || '').localeCompare(String(b.numero || ''));
     const ordenada = aLancar.slice().sort(ordem === 'valor'
       ? (a, b) => { const va = valorDaOS(a), vb = valorDaOS(b); return (valorOk(vb) ? Number(vb) : -Infinity) - (valorOk(va) ? Number(va) : -Infinity) || porAntiga(a, b); }
@@ -1871,7 +1901,7 @@ function filaLancarHTML(aLancar, f, hoje) {
           <td class="ent-fila-os"><span class="ent-fila-id"><strong>${esc(os.numero || '—')}</strong> ${esc(os.cliente || '')}</span>${os.servico ? `<small>${esc(os.servico)}</small>` : ''}</td>
           ${comEquipe ? `<td class="ent-fila-tec${eq ? '' : ' vazio'}">${eq ? esc(eq) : '<span class="ent-fila-traco" title="Sem equipe na O.S.">—</span>'}</td>` : ''}
           <td class="ent-fila-baixa">${dataBR(d)} <small class="ent-fila-idade${idade !== null && idade >= FILA_LANCAR_VELHA ? ' velha' : ''}">${idadeTxtCasa(idade)}</small>${fora ? ' <small class="text-muted ent-fila-fora">fora do período</small>' : ''}</td>
-          <td class="num ent-fila-valor">${valorOk(v) ? dinheiroCasa(Number(v)) : '<span class="badge sem-valor">sem valor</span>'}</td>
+          ${verValor ? `<td class="num ent-fila-valor">${valorOk(v) ? dinheiroCasa(Number(v)) : '<span class="badge sem-valor">sem valor</span>'}</td>` : ''}
           <td class="ent-fila-acao"><button type="button" class="btn-ghost btn-sm" data-controle="erp" data-controle-os="${esc(os.id)}">Classificar / revisar</button><small>${esc(os.conferenciaERP ? (CONTROLE_CLASSIFICACOES[os.conferenciaERP.classificacao]+' · '+os.conferenciaERP.responsavelNome+' · prazo '+os.conferenciaERP.prazo) : 'Sem responsável confirmado')}</small><button type="button" class="btn-ghost btn-sm edit-only ent-fila-lancar" data-lancar-os="${esc(os.id)}" aria-label="Lançar a entrega da O.S ${esc(os.numero || '')}">Lançar</button></td>
         </tr>`;
     };
@@ -1879,11 +1909,11 @@ function filaLancarHTML(aLancar, f, hoje) {
     lista = `<div class="ent-fila-corpo" id="ent-fila-lista">
         <div class="ent-fila-ferramentas">
           <span class="ent-fila-ordem-rot" id="ent-fila-ordem-rot">Ordenar</span>
-          <span class="casa-vista" role="group" aria-labelledby="ent-fila-ordem-rot">${botaoOrdem('antigas', 'Mais antigas')}${botaoOrdem('valor', 'Maior valor')}</span>
+          <span class="casa-vista" role="group" aria-labelledby="ent-fila-ordem-rot">${botaoOrdem('antigas', 'Mais antigas')}${verValor ? botaoOrdem('valor', 'Maior valor') : ''}</span>
           <span class="ent-fila-contagem">${todas ? `${n} ${n === 1 ? 'baixa' : 'baixas'}` : `${FILA_LANCAR_PRIMEIRAS} de ${n}`}</span>
         </div>
         <div class="casa-tabela-wrap"><table class="casa-tabela ent-fila-tabela">
-          <thead><tr><th>O.S e cliente</th>${comEquipe ? '<th>Técnicos</th>' : ''}<th>Baixa ERP</th><th class="num">Valor</th><th><span class="sr-only">Ação</span></th></tr></thead>
+          <thead><tr><th>O.S e cliente</th>${comEquipe ? '<th>Técnicos</th>' : ''}<th>Baixa ERP</th>${verValor ? '<th class="num">Valor</th>' : ''}<th><span class="sr-only">Ação</span></th></tr></thead>
           <tbody>${visiveis.map(linha).join('')}</tbody>
         </table></div>
         ${n > FILA_LANCAR_PRIMEIRAS ? `<button type="button" class="btn-ghost ent-fila-mais" data-ent-fila-todas>${STATE._entFilaTodas ? `Mostrar só as ${FILA_LANCAR_PRIMEIRAS} primeiras` : `Mostrar todas (${n})`}</button>` : ''}
@@ -2239,7 +2269,7 @@ function acompanhamentoEntregas(lista) {
   return { grupos, dias: [...dias].sort((a,b) => a[0].localeCompare(b[0])), semFicha: lista.filter(x => !x.card).length };
 }
 function acompanhamentoChipsHTML(a, foco) {
-  const nomes = {todas:'📦 Todas',externo:'🚚 Instalações',interno:'🛍️ Retiradas',aLancar:'📝 A lançar no PCP',semEquipe:'👥 Sem equipe no PCP',semValor:'💰 Sem valor'};
+  const nomes = {todas:'📦 Todas',externo:'🚚 Instalações',interno:'🛍️ Retiradas',aLancar:'📝 A lançar no PCP',semEquipe:'👥 Sem equipe no PCP',...(verValorEntregasCasa() ? {semValor:'💰 Sem valor'} : {})};
   return `<nav class="ent-chips" aria-label="Acompanhar entregas do período">${Object.entries(nomes).map(([k,n]) => `<button type="button" data-ent-foco="${k}" aria-pressed="${foco === k}" class="ent-chip ent-chip-${k}">${n}<b>${a.grupos[k].length}</b></button>`).join('')}</nav>`;
 }
 function acompanhamentoGraficosHTML(lista, per, f) {
@@ -2257,7 +2287,7 @@ function acompanhamentoGraficosHTML(lista, per, f) {
   const grafico = pontos.length ? `<svg viewBox="0 0 ${largura} ${altura}" role="img" aria-label="Quantidade de O.S. por ${mensal?'mês':'data'} de baixa no ERP"><title>${esc(pontos.map(([d,n])=>fmt(d)+': '+n+' O.S.').join('; '))}</title>${[0,1,2].map(i=>`<line x1="18" x2="622" y1="${25+i*38}" y2="${25+i*38}" stroke="currentColor" opacity=".12"/>`).join('')}<polyline points="${xy.map(p=>p.x+','+p.y).join(' ')}" fill="none" stroke="#2563eb" stroke-width="3" stroke-linejoin="round"/>${xy.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="4" fill="white" stroke="#2563eb" stroke-width="2"><title>${esc(fmt(p.d))}: ${p.n} O.S.</title></circle>`).join('')}</svg><div class="ent-chart-axis"><span>${fmt(pontos[0][0])}</span><span>Pico: ${max} O.S. / ${mensal?'mês':'dia'}</span><span>${fmt(pontos.at(-1)[0])}</span></div>` : '<p class="ent-chart-empty">Nenhum registro disponível neste recorte.</p>';
   return `<section class="ent-insights" aria-label="Análise das entregas">
     <article class="ent-insight"><header><div><span class="ent-eyebrow">RITMO DO PERÍODO</span><h3>📈 Baixas no ERP</h3></div><strong>${n}<small> O.S.</small></strong></header>${grafico}<p class="ent-chart-note">${incompleto?'⚠️ Leitura parcial: há meses sem resposta, em carga ou fora do limite.':'Somente datas com registros; intervalos sem registros não são desenhados.'} Não comprova entrega física.</p></article>
-    <article class="ent-insight"><header><div><span class="ent-eyebrow">PERFIL E CADASTRO</span><h3>🎯 Composição das entregas</h3></div></header><div class="ent-composicao">${[['externo','🚚 Instalações'],['interno','🛍️ Retiradas']].map(([k,t])=>`<div><span>${t}</span><b>${a.grupos[k].length} <small>· ${n?Math.round(a.grupos[k].length/n*100):0}%</small></b><meter min="0" max="${Math.max(n,1)}" value="${a.grupos[k].length}" aria-label="${t}"></meter></div>`).join('')}</div><p class="ent-chart-note">${a.grupos.semEquipe.length} instalações com ficha sem equipe · ${a.semFicha} O.S. sem ficha neste aparelho · ${a.grupos.semValor.length} sem valor informado.</p></article>
+    <article class="ent-insight"><header><div><span class="ent-eyebrow">PERFIL E CADASTRO</span><h3>🎯 Composição das entregas</h3></div></header><div class="ent-composicao">${[['externo','🚚 Instalações'],['interno','🛍️ Retiradas']].map(([k,t])=>`<div><span>${t}</span><b>${a.grupos[k].length} <small>· ${n?Math.round(a.grupos[k].length/n*100):0}%</small></b><meter min="0" max="${Math.max(n,1)}" value="${a.grupos[k].length}" aria-label="${t}"></meter></div>`).join('')}</div><p class="ent-chart-note">${a.grupos.semEquipe.length} instalações com ficha sem equipe · ${a.semFicha} O.S. sem ficha neste aparelho${verValorEntregasCasa() ? ` · ${a.grupos.semValor.length} sem valor informado` : ''}.</p></article>
   </section>`;
 }
 
@@ -2358,9 +2388,11 @@ function renderEntregas() {
   const dataBR = iso => { const d = OPERACAO.dia(iso); return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'; };
   const valorTxt = v => (v !== null && Number.isFinite(Number(v))) ? dinheiroCasa(Number(v)) : '<span class="badge sem-valor">sem valor</span>';
   const totaisFonte=[];
-  const kpiHTML = (k, rotulo, extra) => `<div class="casa-kpi ${extra || ''} ${k.semValor || k.faltando || k.comErro ? 'alerta' : ''}">
-      <button type="button" class="inline-link" data-total-fonte="${totaisFonte.push({k,rotulo})-1}"><b>${valorKpiCasa(k)}</b></button>
-      <small>ERP · ${esc(rotulo)} · ${k.n} O.S${k.inst ? ` · ${k.inst} instalaç${k.inst === 1 ? 'ão' : 'ões'}` : ''}${k.retiradas ? ` · ${k.retiradas} retirada${k.retiradas === 1 ? '' : 's'}` : ''}${k.semValor ? ` · <span class="badge sem-valor">${k.semValor} sem valor</span>` : ''}${k.faltando ? ` · <span class="badge st-agendada">carregando ${k.faltando} de ${k.meses} mês${k.meses === 1 ? '' : 'es'}…</span>` : ''}${k.comErro ? ` · <span class="badge sem-valor">${k.comErro} mês${k.comErro === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}</small>
+  // Sem R$ (U2): o número grande do cartão é a quantidade de O.S., sem o selo "sem valor".
+  const verValor = verValorEntregasCasa();
+  const kpiHTML = (k, rotulo, extra) => `<div class="casa-kpi ${extra || ''} ${(verValor && k.semValor) || k.faltando || k.comErro ? 'alerta' : ''}">
+      ${verValor ? `<button type="button" class="inline-link" data-total-fonte="${totaisFonte.push({k,rotulo})-1}"><b>${valorKpiCasa(k)}</b></button>` : `<b>${k.n} O.S</b>`}
+      <small>ERP · ${esc(rotulo)}${verValor ? ` · ${k.n} O.S` : ''}${k.inst ? ` · ${k.inst} instalaç${k.inst === 1 ? 'ão' : 'ões'}` : ''}${k.retiradas ? ` · ${k.retiradas} retirada${k.retiradas === 1 ? '' : 's'}` : ''}${verValor && k.semValor ? ` · <span class="badge sem-valor">${k.semValor} sem valor</span>` : ''}${k.faltando ? ` · <span class="badge st-agendada">carregando ${k.faltando} de ${k.meses} mês${k.meses === 1 ? '' : 'es'}…</span>` : ''}${k.comErro ? ` · <span class="badge sem-valor">${k.comErro} mês${k.comErro === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}</small>
     </div>`;
   /* O nome do período no cartão: "em mai/2026" quando é um mês inteiro, "em
      2026" quando é o ano, e as duas datas quando é qualquer outro recorte. */
@@ -2411,16 +2443,16 @@ function renderEntregas() {
   /* Tabela e Cards só são montados na vista escolhida (F18): os Cards
      calculam o status de até 300 O.S., e a vista Por O.S. não usa nenhum dos dois. */
   const tabela = () => `<div class="casa-tabela-wrap"><table class="casa-tabela ent-lista-tabela">
-    <thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Entrega (ERP)</th><th class="num">Valor</th></tr></thead>
+    <thead><tr><th>O.S</th><th>Cliente</th><th>Serviço</th><th>Técnicos</th><th>Entrega (ERP)</th>${verValor ? '<th class="num">Valor</th>' : ''}</tr></thead>
     <tbody>${visiveis.map(({ erp, card }) => { const st = estadoPCP(erp); const eqTxt = card ? OPERACAO.equipeTexto(card, ', ') : ''; return `<tr ${card ? `data-os-id="${esc(card.id)}"` : ''}>
         <td class="ent-l-os"><strong>${esc(erp.numero || '—')}</strong> <span class="badge ${st.classe}" title="${esc(st.dica)}">${esc(st.rotulo)}</span>${card && card.retrabalho ? ' <span class="badge st-retrabalho">Retrabalho</span>' : ''}</td>
         <td class="ent-l-cli">${esc(erp.cliente || (card && card.cliente) || '')}</td>
         <td class="ent-l-serv">${esc((card && card.servico) || erp.servico || '—')}</td>
         <td class="ent-l-tec">${card ? (eqTxt ? esc(eqTxt) : `<span class="ent-sem-equipe">${erp.tipo === 'interno' ? 'balcão' : 'sem equipe'}</span>`) : '—'}</td>
         <td class="ent-l-data">${dataBR(erp.data)}</td>
-        <td class="num">${valorTxt(erp.valor)}${card && card.tipo!=='interno' && ['admin','pcp'].includes(STATE.user?.papel)?`<br><button type="button" class="btn-ghost btn-sm" data-ent-itens="${esc(card.id)}">Conferir itens e equipe</button>`:""}</td>
+        ${verValor ? `<td class="num">${valorTxt(erp.valor)}${card && card.tipo!=='interno' && ['admin','pcp'].includes(STATE.user?.papel)?`<br><button type="button" class="btn-ghost btn-sm" data-ent-itens="${esc(card.id)}">Conferir itens e equipe</button>`:""}</td>` : ''}
       </tr>`; }).join('')}</tbody>
-    <tfoot><tr><td colspan="5">${lista.length} O.S entregues no período${lista.length > TETO_LINHAS ? ` · mostrando as ${TETO_LINHAS} mais recentes` : ''}${semValorLista ? ` · ${semValorLista} sem valor` : ''}${per.faltando.length ? ` · carregando ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'}…` : ''}${per.comErro.length ? ` · <span class="badge sem-valor">${per.comErro.length} mês${per.comErro.length === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}${per.truncou ? ` · <span class="badge sem-valor">intervalo longo demais: entraram só os primeiros ${TETO_MESES} meses</span>` : ''}</td><td class="num">${dinheiroCasa(totLista)}</td></tr></tfoot>
+    <tfoot><tr><td colspan="5">${lista.length} O.S entregues no período${lista.length > TETO_LINHAS ? ` · mostrando as ${TETO_LINHAS} mais recentes` : ''}${verValor && semValorLista ? ` · ${semValorLista} sem valor` : ''}${per.faltando.length ? ` · carregando ${per.faltando.length} mês${per.faltando.length === 1 ? '' : 'es'}…` : ''}${per.comErro.length ? ` · <span class="badge sem-valor">${per.comErro.length} mês${per.comErro.length === 1 ? '' : 'es'} sem resposta do ERP</span>` : ''}${per.truncou ? ` · <span class="badge sem-valor">intervalo longo demais: entraram só os primeiros ${TETO_MESES} meses</span>` : ''}</td>${verValor ? `<td class="num">${dinheiroCasa(totLista)}</td>` : ''}</tr></tfoot>
   </table></div>`;
   const cardFn = typeof osCardHTML === 'function' ? osCardHTML : null;
   /* Cards só existem para O.S com card no aparelho. As só do ERP, ou que já
@@ -2428,7 +2460,7 @@ function renderEntregas() {
      ficava em branco. O rodapé diz quantas ficaram só na Tabela. */
   const semCard = visiveis.filter(x => !x.card).length;
   const cards = () => cardFn ? `<div class="cards-grid">${visiveis.filter(x => x.card).map(x => cardFn(x.card)).join('')}</div>
-    <p class="metricas-nota">${lista.length} O.S entregues no período · ${dinheiroCasa(totLista)}${semCard ? ` · ${semCard} sem card neste aparelho aparece${semCard === 1 ? '' : 'm'} só na Tabela` : ''}.</p>` : tabela();
+    <p class="metricas-nota">${lista.length} O.S entregues no período${verValor ? ' · ' + dinheiroCasa(totLista) : ''}${semCard ? ` · ${semCard} sem card neste aparelho aparece${semCard === 1 ? '' : 'm'} só na Tabela` : ''}.</p>` : tabela();
   /* A fila de lançamento é a única lista de tarefas desta tela. Ficava no
      fim da rolagem e ninguém a via; depois subiu inteira para cima da lista e
      passou a esconder a lista. Agora é uma faixa compacta logo abaixo dos
@@ -2773,11 +2805,11 @@ function servicosEntreguesHTML() {
   const anosHTML = barrasCasa(anos.map(a => ({
     rotulo: a.k + (a.k === anoAtual ? ' (em curso)' : ''),
     valor: a.n,
-    extra: `${a.semValor ? "valor conhecido: " : ""}${dinheiroCasa(a.valor)}${a.semValor ? ` · ${a.semValor} sem valor` : ''}${a.semEquivalente ? ` · ${a.semEquivalente} sem equivalência` : ''}`
+    extra: verValorEntregasCasa() ? `${a.semValor ? "valor conhecido: " : ""}${dinheiroCasa(a.valor)}${a.semValor ? ` · ${a.semValor} sem valor` : ''}${a.semEquivalente ? ` · ${a.semEquivalente} sem equivalência` : ''}` : (a.semEquivalente ? `${a.semEquivalente} sem equivalência` : '')
   })), v => `${fmtEquivalenteCasa(v)} O.S equivalentes`) || '<p class="text-muted">Sem ano apurado.</p>';
 
   const mesesHTML = barrasCasa(meses.map(m => ({
-    rotulo: rotuloMesCasa(m.k), valor: m.n, extra: `${m.semValor ? "valor conhecido: " : ""}${dinheiroCasa(m.valor)}${m.semValor ? ` · ${m.semValor} sem valor` : ''}${m.semEquivalente ? ` · ${m.semEquivalente} sem equivalência` : ''}`
+    rotulo: rotuloMesCasa(m.k), valor: m.n, extra: verValorEntregasCasa() ? `${m.semValor ? "valor conhecido: " : ""}${dinheiroCasa(m.valor)}${m.semValor ? ` · ${m.semValor} sem valor` : ''}${m.semEquivalente ? ` · ${m.semEquivalente} sem equivalência` : ''}` : (m.semEquivalente ? `${m.semEquivalente} sem equivalência` : '')
   })), v => `${fmtEquivalenteCasa(v)} O.S equivalentes`) || '<p class="text-muted">Sem mês apurado.</p>';
 
   /* NÃO EXISTE "MÉDIA POR ANO FECHADO" AQUI, e havia um cartão afirmando uma.
@@ -3982,6 +4014,33 @@ function painelTVCasa(i, f) {
   const medidaEquipe=p=>fechada?p.os:Math.round(p.equivalentes*1e8)/1e8;
   equipesTV.sort((a,b)=>medidaEquipe(b)-medidaEquipe(a)||a.nome.localeCompare(b.nome));
   const nota='<p class="metricas-nota">Participação operacional; não é nota de mérito ou bonificação. Divisão igual quando ainda não confirmada.</p>';
+  /* QUEM NÃO É DA GESTÃO (U2 da auditoria de 12/10/2026) recebe as O.S. sem a
+     divisão e as conferências (U1): a TV montada no aparelho dizia "Nenhuma
+     produção confirmada" e "Sem participação registrada". Ela mostra o
+     ranking do servidor (o mesmo da Performance e do link dos funcionários),
+     e o painel das pessoas, que depende da divisão de cada uma, não aparece. */
+  const funcionarios = typeof perfConsultaServidor === 'function' && !perfConsultaServidor() && typeof perfRankFuncAtual === 'function';
+  if (funcionarios) {
+    const st = perfRankFuncAtual(), d = st && st.dados;
+    const daCfg = x => (c.equipes || []).find(e => e && e.nome === x.nome) || null;
+    const eqs = d && Array.isArray(d.equipes) ? d.equipes.map(x => { const e = daCfg(x); return { ...x, cor: e ? e.cor : '' }; }) : [];
+    const corpoEq = !d ? `<p class="tv-vazio">${st && st.erro ? 'Não foi possível consultar o ranking agora.' : 'Consultando o ranking das equipes…'}</p>`
+      : eqs.length ? ranking(eqs, p => Math.round((Number(p.equivalentes) || 0) * 1e8) / 1e8, rostoEquipe, 'perf-podio-logo', p => perfFormato(p.equivalentes), 'O.S. equivalentes')
+      : '<p class="tv-vazio">Nenhuma entrega conferida pela gestão neste período ainda.</p>';
+    const pf = [
+      {titulo:'🤝 Produção confirmada das equipes',corpo:corpoEq+'<p class="metricas-nota">Só entram as entregas conferidas pela gestão. Classificação operacional do período.</p>'},
+      {titulo:'🚚 Carros mais usados',corpo:carrosHTML(f)},
+      {titulo:'🔧 Retrabalho no período',corpo:retrabalhoHTML(f)},
+    ];
+    const nf = ((i % pf.length) + pf.length) % pf.length, pp = pf[nf];
+    const seloF = typeof perfRankFuncSelo === 'function' ? perfRankFuncSelo(d) : null;
+    return { total: pf.length, html: `<div class="tv-head">
+      <h2>${pp.titulo}</h2>${seloF ? `<span class="tv-selo ${esc(seloF.tipo || 'provisorio')}">${esc(seloF.texto)}</span>` : ''}
+      <span class="tv-relogio">${new Date().toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+    </div>
+    <div class="tv-corpo">${pp.corpo}</div>
+    <div class="tv-rodape"><span>Impresilk · Instalação</span><span class="tv-pontos">${pf.map((_, k) => `<i class="${k === nf ? 'on' : ''}"></i>`).join('')}</span><span>${esc(rotuloPeriodoCasa(f))}</span></div>` };
+  }
   const paineis = [
     {titulo:fechada?'🤝 Equipes em ação':'🤝 Produção confirmada das equipes',corpo:(equipesTV.length?ranking(equipesTV,medidaEquipe,rostoEquipe,'perf-podio-logo',p=>perfFormato(medidaEquipe(p)),fechada?'O.S.':'O.S. equivalentes'):'<p class="tv-vazio">Nenhuma produção confirmada neste período. Confira as entregas na Performance.</p>')+'<p class="metricas-nota">Classificação operacional do período. O resultado do programa depende da apuração das regras e ocorrências.</p>'},
     {titulo:'📦 Participação nas entregas',corpo:(resumo.pessoas.length?ranking(resumo.pessoas,p=>p.equivalentes,rostoPessoa,'perf-podio-foto',p=>perfFormato(p.equivalentes),'O.S. equivalentes'):'<p class="tv-vazio">Sem participação registrada.</p>')+nota},
@@ -4231,14 +4290,14 @@ function renderPerformanceCasa() {
         ${quadroCasa('perf-plantoes', '🗓 Plantões vinculados às O.S.', plantaoPerformanceHTML(), false)}
 
       ` : `
-        <div class="perf-report-toolbar">${perfPeriodoCompactoHTML(f)}<button class="btn-ghost btn-sm" id="perf-rel-pdf">📄 PDF deste painel</button><button class="btn-ghost btn-sm" id="perf-rel-detalhado">PDF com O.S.</button></div>
+        <div class="perf-report-toolbar">${perfPeriodoCompactoHTML(f)}<button class="btn-ghost btn-sm" id="perf-rel-pdf">📄 PDF deste painel</button>${verValorEntregasCasa() ? '<button class="btn-ghost btn-sm" id="perf-rel-detalhado">PDF com O.S.</button>' : ''}</div>
         ${typeof performanceRelatorioHTML === 'function' ? performanceRelatorioHTML() : ''}
         ${typeof perfFonteHTML === 'function' ? perfFonteHTML() : ''}
         ${quadroCasa('perf-entregues', '📦 Serviços entregues <small>ano a ano e mês a mês</small>', servicosEntreguesHTML(), false)}
         ${quadroCasa('perf-gente', '👷 Indicadores operacionais <small>horas e registros do período</small>', produtividadeHTML(), false)}
         ${quadroCasa('perf-retrab', '🔧 Retrabalho <small>de onde veio, de quem e de que tipo</small>', retrabalhoHTML(f), false)}
         ${quadroCasa('perf-carros', '🚚 Carros mais usados', carrosHTML(f), false)}
-        ${quadroCasa('perf-bonus', 'Histórico de bônus manual <small>separado do programa de comissão de 1%</small>', bonusHTML, false)}
+        ${verValorEntregasCasa() ? quadroCasa('perf-bonus', 'Histórico de bônus manual <small>separado do programa de comissão de 1%</small>', bonusHTML, false) : ''}
       `}`}
     </div>`;
   if (detAbertos.size) { const detDepois = [...el.querySelectorAll('details')]; chaveDet(detDepois).forEach((k, i) => { if (detAbertos.has(k)) detDepois[i].open = true; }); }
@@ -5292,7 +5351,7 @@ function renderGradeCasa() {
     if (!l.length) return '';
     const dd = new Date(k + 'T12:00:00');
     return `<div class="casa-dia-bloco">
-      <h4><button type="button" class="inline-link" data-ir-dia="${k}">${esc((typeof DIAS_SEMANA !== 'undefined' ? DIAS_SEMANA[dd.getDay()] : '') + ' ' + k.slice(8, 10) + '/' + k.slice(5, 7))}</button> <small>${l.length} O.S · ${dinheiroCasa(somaValores(l).total)}</small></h4>
+      <h4><button type="button" class="inline-link" data-ir-dia="${k}">${esc((typeof DIAS_SEMANA !== 'undefined' ? DIAS_SEMANA[dd.getDay()] : '') + ' ' + k.slice(8, 10) + '/' + k.slice(5, 7))}</button> <small>${l.length} O.S${verValorEntregasCasa() ? ' · ' + dinheiroCasa(somaValores(l).total) : ''}</small></h4>
       <div class="casa-tabela-wrap"><table class="casa-tabela"><tbody>${l.map(linha).join('')}</tbody></table></div>
     </div>`;
   }).filter(Boolean).join('');
@@ -5325,7 +5384,7 @@ function renderGradeCasa() {
           <div class="casa-kpi"><b>${lista.length}</b><small>O.S neste dia</small></div>
           <div class="casa-kpi"><b>${escalados.length}</b><small>pessoas escaladas</small></div>
           <div class="casa-kpi"><b>${new Set(lista.filter(o => !OPERACAO.semCarro(o)).map(o => OPERACAO.chaveVeiculo(o)).filter(Boolean)).size}</b><small>veículos programados</small></div>
-          <div class="casa-kpi ${valorDia.semValor ? 'alerta' : ''}"><b>${dinheiroCasa(valorDia.total)}</b><small>valor programado${valorDia.semValor ? ` · ${valorDia.semValor} sem valor` : ''}</small></div>
+          ${verValorEntregasCasa() ? `<div class="casa-kpi ${valorDia.semValor ? 'alerta' : ''}"><b>${dinheiroCasa(valorDia.total)}</b><small>valor programado${valorDia.semValor ? ` · ${valorDia.semValor} sem valor` : ''}</small></div>` : ''}
         </div>
         ${conflitos.length ? `<p class="metricas-nota alerta-ausencia">${conflitos.map(c=>esc(c.motivo)+' · O.S. '+esc(c.a.numero)+' / '+esc(c.b.numero)+' · '+esc([...c.equipe,c.veiculo].filter(Boolean).join(', '))).join('<br>')}</p>` : ''}${capacidade.length?`<p class="metricas-nota alerta-ausencia">${capacidade.map(esc).join('<br>')}</p>`:''}${typeof operacaoPrioridadesHTML==='function'?operacaoPrioridadesHTML():''}
         ${avisoAusenciaCasa(escalados, dia)}

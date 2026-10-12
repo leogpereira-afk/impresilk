@@ -3547,6 +3547,11 @@ export const diarioDescarteAlocacao = (antes, veio, motivo) => ({
 export function podarAlocacao(r) {
   if (!objeto(r)) return r;
   const { alocacao: _a, alocacaoLog: _l, conferenciasEntrega: _ce, conferenciasRevisoes: _cr, ...x } = r;
+  /* A MARCA DE QUE HÁ CONFERÊNCIA (U2 da auditoria de 12/10/2026): sem as
+     conferências, a tela de quem não é da gestão media o prazo pelo
+     lançamento e escrevia "No prazo" onde a gestão via "Conferência parcial".
+     Com a marca, a tela diz "Conferência só para a gestão". */
+  if (Array.isArray(_ce) && _ce.length) x.conferenciaSoGestao = true;
   return x;
 }
 export function podarIdsAlocacao(r) {

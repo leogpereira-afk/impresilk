@@ -379,8 +379,8 @@ test('ninguém sem papel vê R$: montagem e operação na Conferência, sem aba 
   for (const papel of ['montagem', 'operacao']) {
     const t = tela({papel, lista, aba:'conferencia'});
     const html = t.render();
-    assert.match(html, /Conferência por entrega/, papel);
-    assert.match(html, /T-L1/, papel + ' vê a entrega');
+    // Desde a U2 da auditoria de 12/10/2026, a aba diz que a conferência é da gestão (sem a lista com percentuais).
+    assert.match(html, /A conferência de quem fez cada entrega, e com qual parte, é da gestão do PCP/, papel);
     assert.doesNotMatch(texto(html), /R\$|4\.321/, papel + ' não vê valor');
     assert.equal(t.run('perdasDados()'), null, papel);
     assert.equal(t.run('perdasPontoHTML(perdasDados())'), '', papel);

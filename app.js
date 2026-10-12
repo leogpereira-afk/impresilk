@@ -2272,7 +2272,7 @@ function pintarHostFicha(id, gerar, ligar) {
    Fechamento, com o retorno antecipado, as ocorrências e o Cancelar O.S. */
 function seloTopoFichaHTML(os) {
   const st = statusEntregaDe(os);
-  return st ? `<button type="button" class="fe-selo" data-ir-etapa="fechamento" data-ir-foco="status" aria-label="${esc('Status da entrega: ' + st.rotulo + '. Ver no Fechamento, com as ocorrências')}">${seloStatusEntregaHTML(st)}</button>` : '';
+  return st ? `<button type="button" class="fe-selo" data-ir-etapa="fechamento" data-ir-foco="status" aria-label="${esc('Status da entrega: ' + (st.conferenciaSoGestao ? 'conferência só para a gestão' : st.rotulo) + '. Ver no Fechamento, com as ocorrências')}">${seloStatusEntregaHTML(st)}</button>` : '';
 }
 /* O próximo passo leva à etapa em que ele se faz. Na própria etapa o botão
    fica invisível, sem sair do lugar: a caixa não muda de altura e o
@@ -5747,6 +5747,11 @@ function statusEntregaDe(os) {
   const ctx = contextoStatusDe(os);
   try {
     const st=OPERACAO.statusEntrega(os, undefined, ctx.regra, ctx.volta);
+    /* A CONFERÊNCIA PODADA (U2 da auditoria de 12/10/2026): quem não é da
+       gestão recebe a O.S. sem as conferências, só com a marca de que elas
+       existem. O prazo medido sem elas não é o da gestão: o selo diz
+       "Conferência só para a gestão", não "No prazo". */
+    if(os.conferenciaSoGestao===true && !os.conferenciasEntrega?.length && st.estado!=='cancelado')return {...st,conferenciaSoGestao:true};
     const conf=os.conferenciasEntrega?.length && typeof CONFERENCIA_ENTREGA!=='undefined'?CONFERENCIA_ENTREGA.estado(os):null;
     return conf && ['parcial','inconsistente'].includes(conf.situacao) && st.estado!=='cancelado'?{...st,conferenciaParcial:conf.resumo}:st;
   } catch { return null; }
@@ -5759,6 +5764,7 @@ const ICONE_STATUS_ENTREGA = { cancelado: '⛔', retrabalho: '🔴', retorno_ant
 function seloStatusEntregaHTML(st) {
   if (!st || !st.estado) return '';
   if(st.conferenciaParcial)return `<span class="selo-entrega se-agendado" title="${esc(st.conferenciaParcial)}">Conferência parcial · prazo do registro anterior: ${esc(st.rotulo)}</span>`;
+  if(st.conferenciaSoGestao)return `<span class="selo-entrega se-agendado" title="A entrega desta O.S. foi conferida item a item pela gestão do PCP. O prazo e o resultado da conferência ficam com a gestão.">Conferência só para a gestão</span>`;
   const dica = (st.aplicaveis || []).map(a => `${a.rotulo}: ${a.motivo}`).join('\n');
   // O abonado (F17) tem cor própria: não é perda.
   const abonado = st.aplicaveis && st.aplicaveis[0] && st.aplicaveis[0].abonado ? ' se-abonado' : '';
@@ -5773,8 +5779,9 @@ function statusEntregaFichaHTML(os) {
   const st = statusEntregaDe(os);
   if (!st) return '';
   const c = st.cancelamento;
-  const motivoExibido=st.conferenciaParcial?st.conferenciaParcial+'. Referência do registro anterior: '+st.motivo.replace(/entregue em/gi,'declarada em'):st.motivo;
-  const outros = (st.aplicaveis || []).slice(1).map(a => `<li><strong>${esc(a.rotulo)}:</strong> ${esc(a.motivo)}</li>`).join('');
+  const motivoExibido=st.conferenciaSoGestao?'a entrega foi conferida item a item pela gestão do PCP; o prazo e o resultado da conferência ficam com a gestão':st.conferenciaParcial?st.conferenciaParcial+'. Referência do registro anterior: '+st.motivo.replace(/entregue em/gi,'declarada em'):st.motivo;
+  // Com a conferência podada (U2), as outras medidas de prazo também seriam as do lançamento: não aparecem.
+  const outros = st.conferenciaSoGestao ? '' : (st.aplicaveis || []).slice(1).map(a => `<li><strong>${esc(a.rotulo)}:</strong> ${esc(a.motivo)}</li>`).join('');
   const g = os.cancelamento && typeof os.cancelamento === 'object' ? os.cancelamento : null;
   const desfeito = !c && g && g.ativo === false && g.desfeitoEm
     ? `<p class="st-ent-hist">Cancelamento desfeito${g.desfeitoPor ? ' por ' + esc(g.desfeitoPor) : ''} em ${esc(fmtDataBR(g.desfeitoEm))}${g.motivo ? ` (o motivo era: ${esc(g.motivo)})` : ''}.</p>` : '';

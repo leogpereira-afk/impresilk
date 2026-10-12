@@ -98,11 +98,15 @@ lista.push(base('RETRAB-CORRECAO',{numero:'TESTE-CORRECAO',cliente:'Correção f
 let pvCfgBase=structuredClone(cfg),pvCfgPendente=null;
 const revisoesPreview=[];
 async function previewApi(body){
+ // O ranking dos funcionários (o do servidor, sem R$ e sem a divisão de ninguém), fictício.
+ if(body.action==='performanceRankingEquipe'){const eq=(id,nome,animal,posicao,equivalentes,entregas,falta)=>({posicao,nome,tipo:'equipe',logo:'',animal,emblema:'',cor:'',entregas,equivalentes,faltaLideranca:falta});
+  return {periodo:{de:body.de,ate:body.ate},atualizadoEm:new Date().toISOString(),fechado:false,fechadoEm:null,revisao:null,resumo:{equipes:4,entregasConfirmadas:12,equivalentes:9.4,aConferir:20,semBase:0},
+   equipes:[eq('eq-leao','Leão','leao',1,4.2,5,0),eq('eq-aguia','Águia','aguia',2,3,4,1.2),eq('eq-lobo','Lobo','lobo',3,1.7,2,2.5),eq('eq-touro','Touro','touro',4,0.5,1,3.7)]};}
  if(new URLSearchParams(location.hash.slice(1)).has('perdas')&&['performanceComissaoListar','performanceFechamentos'].includes(body.action))return previewPerdas(body);
  if(body.action==='demandas')return fetch('/demandas-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
  if(['previewEstado','getCfg','setCfg','performanceVincularEquipe','controleEntrega','delete','restaurarOS','excluidasOS','fotosEvento','conferenciaEntrega'].includes(body.action)||(!new URLSearchParams(location.hash.slice(1)).has('comissao')&&['performancePeriodo','performanceFechamentos','performanceFechar','performanceFechados'].includes(body.action))){
   const r=await fetch('/controle-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,seed:lista,pessoas:ELENCO_PREVIA.pessoas,cfg})});const out=await r.json();
-  if(out.error)throw new Error(out.error);if(out.lista)lista=out.lista;if(out.cfg){Object.assign(cfg,out.cfg);pvCfgBase=structuredClone(cfg);}return out;
+  if(out.error)throw new Error(out.error);if(out.lista)lista=typeof pvPodar==='function'?pvPodar(out.lista):out.lista;if(out.cfg){Object.assign(cfg,out.cfg);if(typeof pvSoVe!=='undefined'&&pvSoVe&&cfg.performancePCP)delete cfg.performancePCP.participacoes;pvCfgBase=structuredClone(cfg);}return out;
  }
 
  if(new URLSearchParams(location.hash.slice(1)).has('comissao') && /^(performanceComissao|performancePeriodo|performanceFechamentos|performanceFechar|performanceMeses|performanceDocumento)/.test(body.action))return fetch('/comissao-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
@@ -330,6 +334,16 @@ lista.push(pvE7('E7A',{erpComSaldo:{status:'ENTREGUE',dataEntregue:deslocar(-3),
 lista.push(pvE7('E7B',{erpComSaldo:{status:'FINALIZADO',dataEntregue:'',selo:'FINALIZADO|',desde:deslocar(-1)+'T13:20:00.000Z',em:deslocar(-1)+'T13:20:00.000Z'}},{itens:pvItensE7('E7B',{1:[pvMarca('pv-7b1','entregue',10,deslocar(-5))],4:[pvMarca('pv-7b4','problema',0,deslocar(-4),{motivo:'Estrutura amassada no transporte'})]})}));
 lista.push(pvE7('E7C',{erpSaiuDaCarteiraEm:deslocar(-1)+'T13:20:00.000Z'},{itens:pvItensE7('E7C',{2:[pvMarca('pv-7c2','entregue',1,deslocar(-5))],3:[pvMarca('pv-7c3','entregue',1,deslocar(-5))]})}));
 {const d=deslocar(-2);if(PV_ERP[d.slice(0,7)])PV_ERP[d.slice(0,7)].os.push({numero:'T-E7C',cliente:'Cliente fictício E7C · entrega parcial',servico:'Fachada em ACM',data:d,valor:2000,tipo:'externo',previsao:d});}
+/* O QUE O SERVIDOR PODA PARA QUEM NÃO É DA GESTÃO (U1 e U2 da auditoria de
+   12/10/2026): com &papel=montagem, operacao ou comercial as O.S. chegam sem
+   valores, divisão, conferências (só a marca) e participações, como no ar. */
+const pvSoVe=!['admin','pcp'].includes(new URLSearchParams(location.hash.slice(1)).get('papel')||'admin');
+// O banco da prévia (controle-api) guarda as O.S. inteiras; a poda vale para cada lista que chega a este aparelho.
+function pvPodar(l){return !pvSoVe?l:l.map(o=>{const {alocacao,alocacaoLog,conferenciasEntrega,conferenciasRevisoes,valorTotal,...x}=o;if(Array.isArray(conferenciasEntrega)&&conferenciasEntrega.length)x.conferenciaSoGestao=true;if(Array.isArray(x.itens))x.itens=x.itens.map(({valorUnit,subtotal,...i})=>i);return x;});}
+if(pvSoVe){
+ if(cfg.performancePCP)delete cfg.performancePCP.participacoes;
+ for(const k of Object.keys(PV_ERP))PV_ERP[k]={...PV_ERP[k],os:PV_ERP[k].os.map(r=>({...r,valor:null}))};
+}
 const STORE={JANELA_LOCAL_DIAS:60,historico:()=>[...pvHist.values()],faixaHistorico:async()=>({de:deslocar(-120),ate:hoje}),
  buscarHistorico:async q=>{const itens=PV_ANTIGAS.filter(o=>(!q.de||o.finalizadaEm.slice(0,10)>=q.de)&&(!q.ate||o.finalizadaEm.slice(0,10)<=q.ate));for(const o of itens)pvHist.set(o.id,structuredClone(o));return {itens,truncou:false};},
  getAllOS:()=>lista,getOS:id=>lista.find(o=>o.id===id)||pvHist.get(id)||null,getCFG:()=>cfg,getUser:()=>null,getInstalador:()=>null,elenco:()=>ELENCO_PREVIA, valores:()=>({}), pullValores:async()=>{}, pullElenco:async()=>true, entreguesMes:m=>PV_ERP[m]||null, pullEntreguesMes:async()=>{}, anosEntregues:()=>[2026], carregarTudoEntregues:async()=>{}, getQueue:()=>pvCfgPendente?[{action:'setCfg'}]:[],getLastSync:()=>'',getFoto:async()=>null,pullPhoto:async()=>null,on(){},onSync(){},onConflict(){},pull:async()=>{},pullCFG:async()=>false,trySync:async()=>{if(pvCfgPendente){const p=pvCfgPendente;await previewApi({action:'setCfg',cfg:p,baseCfg:pvCfgBase});pvCfgPendente=null;}},pronto:async()=>lista,api:previewApi,conferirNomes:async(nomes,ids)=>{const r=OPERACAO.resolverPessoas({pessoas:[...ELENCO_PREVIA.pessoas,...ELENCO_PREVIA.antigos],vinculos:cfg.vinculosRH,lista:cfg.instaladores});return {nomes:nomes.map(n=>({nome:n,id:r.idDe(n),fixado:r.fixado(n)})),os:Object.fromEntries(ids.map(i=>[i,'viva'])),fechados:[]};},apiFn:async()=>({ok:true,usuarios:[],configurado:false}),saveOS:o=>{if(pvHist.has(o.id))pvHist.set(o.id,structuredClone(o));lista=lista.map(x=>x.id===o.id?structuredClone(o):x);},saveCFG(c){pvCfgPendente=structuredClone(c);Object.assign(cfg,c)},conflitoCFG:()=>null,uuid:()=>crypto.randomUUID(),carimbarMomento(){},

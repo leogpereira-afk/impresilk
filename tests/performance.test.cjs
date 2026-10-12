@@ -64,7 +64,7 @@ test('pessoa nova na divisão entra pela regra (40/30/30), não com 0% esperando
  assert.deepEqual(a.grupos[0].membros.map(m=>m.cota),[4000,3000,3000]);
  assert.equal(D.validar(a),'');
 });
-test('cards e relatório usam somente valor confirmado e filtro de período é único',()=>{
+test('quem não é da gestão não vê valor nos cards nem no relatório (U2 da auditoria de 12/10/2026), e o filtro de período é único',()=>{
  const fs=require('fs'),vm=require('vm');
  const src=fs.readFileSync(require.resolve('../performance.js'),'utf8');
  const regs=[{id:'1',numero:'1',cliente:'Teste',valorTotal:100,equipe:['Ana']},{id:'2',numero:'2',cliente:'Outro',valorTotal:200,equipe:['Ana']}];
@@ -74,8 +74,9 @@ test('cards e relatório usam somente valor confirmado e filtro de período é �
  const c={STORE:{getCFG:()=>({performancePCP:{equipes:[],participacoes:[{id:'1',membros}]}}),getAllOS:()=>regs},STATE:{user:{papel:'leitura'},_perfPessoaMedida:'valor'},periodoOuMes:()=>({de:'2026-09-01',ate:'2026-09-19'}),classificarEntregas:os=>({instalacoes:os}),OPERACAO:{emIntervalo:()=>true,equipe:os=>os.equipe},diaEntrega:()=> '2026-09-19',valorDaOS:o=>o.valorTotal,nomeExibicaoCasa:()=>({chave:'a',nome:'Ana'}),pessoasRH:()=>[],avatarRH:()=>'',esc:s=>String(s??''),dinheiroCasa:n=>'VALOR-'+n,filtroPeriodoHTML:()=>''};
  vm.createContext(c);vm.runInContext(src,c);
  const cards=c.performanceEquipesHTML(),report=c.performanceRelatorioHTML();
- assert.ok(cards.includes('VALOR-100'));assert.ok(report.includes('VALOR-100'));
- assert.ok(!cards.includes('VALOR-300'));assert.ok(!report.includes('VALOR-300'));
+ // Caso ruim (fbc56b9): o papel sem gestão via "VALOR-100" no ranking e no relatório montados no aparelho.
+ assert.ok(!cards.includes('VALOR-'));assert.ok(!report.includes('VALOR-'));
+ assert.match(cards,/Ranking das equipes/);assert.match(report,/são da gestão do PCP/);
  const casa=fs.readFileSync(require.resolve('../casa.js'),'utf8');
  const prod=casa.slice(casa.indexOf('function produtividadeHTML()'),casa.indexOf('/* ── Retrabalho cruzado'));
  assert.ok(!prod.includes("filtroPeriodoHTML('_fPerf')"));
