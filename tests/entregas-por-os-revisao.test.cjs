@@ -176,7 +176,11 @@ test('revisão: uma O.S. muda e só ela e as da volta dela recalculam; com 1.500
      150 ms é do aparelho e foi medida na prévia (Chrome), com a pintura
      inteira; aqui, sozinho, o caminho frio leva ~85 ms, e com a suíte
      rodando os arquivos em paralelo chegou a 150 ms. O teto de 300 ms segura
-     a volta do O(N²) (eram 1,7 s) sem fazer a suíte falhar por carga. */
+     a volta do O(N²) (eram 1,7 s) sem fazer a suíte falhar por carga.
+     TETO DE 600 ms (onda fechamento, 11/10/2026): o Deploy da v166 caiu aqui
+     com 309,8 ms contra os 300, na máquina da CI com a suíte em paralelo.
+     Neste Mac o caminho frio leva de 85 a 92 ms; o O(N²) que o teste segura
+     dava 1,7 s, ainda quase três vezes acima do teto novo. */
   t.run('var __erp = _porOSDados.linhas.map(l => l.erp); var __perf = 0; var __pr = perfRegistro; perfRegistro = (...a) => { __perf++; return __pr(...a); };');
   let melhor = Infinity;
   for (let k = 0; k < 3; k++) {
@@ -187,7 +191,7 @@ test('revisão: uma O.S. muda e só ela e as da volta dela recalculam; com 1.500
   }
   assert.equal(t.run('__chamadas') - antes2, 3 * n, 'com a memória vazia, um status por O.S.');
   assert.equal(t.run('__perf'), 3 * 2, 'e uma conta da equipe por gente (900001 com 900002; 900004)');
-  assert.ok(melhor < 300, `memória vazia: ${melhor.toFixed(1)} ms`);
+  assert.ok(melhor < 600, `memória vazia: ${melhor.toFixed(1)} ms`);
   if (process.env.F18_MEDIR) console.log('F18 revisão, memória vazia, 1.502 O.S. (ms):', melhor.toFixed(1));
 });
 
