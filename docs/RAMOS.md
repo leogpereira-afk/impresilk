@@ -54,3 +54,15 @@ do f22t, o semEquipe.valorBruto e o range() do f22s.
 |---|---|---|---|
 | a1-comissao | 8e959a0 | 1 / 0 | A1: aprovar e exportar a comissão com a régua do selo (só servidor). JÁ NA MAIN desde 11/10/2026 (pcp-sync v131) |
 | protocolo | sobre a1-comissao | à frente da main 8e959a0, 0 atrás | AGENTS.md, VEZ.md, DECISOES.md, RAMOS.md, vez.cjs, subir-versao.cjs, testes e passos de CI |
+
+## Aproveitado à mão (só se acrescenta)
+
+- 12/10/2026, onda acabamento (claude): a correção do histórico da divisão
+  (anulaUltimaDoLog), que só existia sem commit no worktree impresilk-f22s,
+  foi refeita à mão sobre a main, com teste, no commit 87dfedf
+  (tests/onda-acabamento-item33.test.cjs). O worktree e o ramo f22s não foram
+  mexidos nem juntados.
+- 12/10/2026, onda acabamento (claude): os casos da M19 dos testes do
+  poda-valores-operacao (repor o item com valor em vez de 422; não descartar
+  calado o valor de item novo) foram refeitos em
+  tests/onda-acabamento-m19.test.cjs, commit f7d43ba. O ramo não foi juntado.
