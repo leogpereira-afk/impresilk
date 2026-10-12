@@ -1678,7 +1678,7 @@ export function pertenceEquipe(os, quem, pessoas) {
 export function validarConclusao(os, anterior, papel) {
   if (!os.finalizadaEm || anterior?.finalizadaEm || os.tipo === 'interno') return '';
   const faltas = [];
-  if (!(os.fotosRetornoIds || []).length) faltas.push('foto do serviço concluído');
+  if (!(os.fotosRetornoIds || []).length) faltas.push('foto de depois (serviço pronto)');
   if (!os.retornoEm) faltas.push('data e hora do retorno');
   if (faltas.length && !(['admin','pcp'].includes(papel) && String(os.justificativaConclusao || '').trim().length >= 15)) return 'Para concluir: ' + faltas.join(', ') + '. A gestão pode registrar uma justificativa de exceção.';
   return '';
@@ -2402,7 +2402,7 @@ export function mesclarToqueNoNome(atual, veio, autor, agora) {
       const lista = [...new Set(velha ? [...gravadas, ...novas] : novas)].filter(f => !tiradas.has(f));
       // O teto segura o registro que desce para todo tablet; o corte é dito,
       // senão a foto subia, sumia da O.S. e ninguém sabia.
-      if (lista.length > 60) avisos.push(`${lista.length - 60 === 1 ? '1 foto ficou' : lista.length - 60 + ' fotos ficaram'} de fora da O.S.: o limite é 60 ${k === 'fotosCheckinIds' ? 'de check-in' : 'do serviço pronto'}. Fale com o PCP.`);
+      if (lista.length > 60) avisos.push(`${lista.length - 60 === 1 ? '1 foto ficou' : lista.length - 60 + ' fotos ficaram'} de fora da O.S.: o limite é 60 fotos ${k === 'fotosCheckinIds' ? 'de antes' : 'de depois'}. Fale com o PCP.`);
       m[k] = lista.slice(0, 60);
       continue;
     }

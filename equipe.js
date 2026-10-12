@@ -1147,14 +1147,14 @@ function faltasParaFinalizar(d) {
     return f;
   }
   if (d.confirmacao !== 'Confirmado') add('confirmação do cliente', 'saida');
-  if (!(d.fotosCheckinIds||[]).length) add('foto de check-in', 'chegada');
+  if (!(d.fotosCheckinIds||[]).length) add('foto de antes', 'chegada');
   const semMotivo = (d.itens||[]).filter(i => i.statusInst === 'retrab' && !i.motivo);
   if (semMotivo.length) add('motivo do retrabalho em: ' + semMotivo.map(i => i.item || 'item').join(', '), 'itens');
   /* DECISÃO (B) DO LÉO, 23/09/2026: "O instalador finaliza, e o espelho passa
      a pedir a foto do serviço pronto." O servidor recusa a finalização sem a
      foto e sem a hora de retorno (validarConclusao); pedir aqui é o que evita
      o instalador ver "finalizada" e a O.S. ficar presa na fila. */
-  if (!(d.fotosRetornoIds||[]).length) add('foto do serviço pronto', 'pronto');
+  if (!(d.fotosRetornoIds||[]).length) add('foto de depois', 'pronto');
   if (!d.instalacaoOK) add('Instalação OK', 'pronto');
   if (!d.retornoEm) add('hora de retorno', 'volta');
   return f;

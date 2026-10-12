@@ -353,7 +353,7 @@ const pronta=(extra={})=>row('1',{numero:'1',tipo:'externo',cliente:'Cliente',eq
 test('toque no nome: finalizar sem a foto do serviço pronto não finaliza, e o resto do trabalho grava com aviso',async()=>{
  const e=await edge('pcp-sync',{pcp_registros:[pronta()]});
  const r=await e.call({action:'upsert',os:{id:'1',rev:1,finalizadaEm:'2026-09-23T15:00:00-03:00',finalizadoPor:'Ana',horaRetorno:'15:00',retornoEm:'2026-09-23T15:00:00',obsTecnicas:'parafuso extra'}},toque);
- assert.equal(r.status,200);assert.match(r.avisos.join(' '),/foto do serviço concluído/);
+ assert.equal(r.status,200);assert.match(r.avisos.join(' '),/foto de depois \(serviço pronto\)/); // um nome só para as fotos (item 24, onda acabamento): era "foto do serviço concluído"
  const g=e.db.pcp_registros[0].registro;
  assert.equal(g.finalizadaEm,undefined);assert.equal(g.finalizadoPor,undefined);assert.equal(g.obsTecnicas,'parafuso extra');
 });

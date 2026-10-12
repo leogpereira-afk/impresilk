@@ -2442,7 +2442,7 @@ const AUD_ROTULOS = {
   previsaoEntrega: 'Previsão de entrega', valorTotal: 'Valor total', itens: 'Itens', 'itens.entregas': 'Entrega por item',
   liberadoPCP: 'Liberada pelo PCP', confirmacao: 'Confirmação do cliente', carroLiberado: 'Carro liberado',
   horaSaida: 'Hora de saída', horaRetorno: 'Hora de retorno', saidaEm: 'Saída registrada', retornoEm: 'Retorno registrado',
-  fotosCheckinIds: 'Fotos do check-in', fotosRetornoIds: 'Fotos do serviço pronto', layoutFotoId: 'Layout',
+  fotosCheckinIds: 'Fotos de antes', fotosRetornoIds: 'Fotos de depois', layoutFotoId: 'Layout',
   retornoConf: 'Conferência da volta', voltaEquipe: 'Limpeza do carro (equipe)', excecaoConclusao: 'Exceção de encerramento',
   finalizadaEm: 'Finalizada em', finalizadoPor: 'Finalizada por', reabertaEm: 'Reaberta em', reabertaPor: 'Reaberta por',
   finalizadaPorCampo: 'Finalizada pelo celular (declarada)',
@@ -9249,7 +9249,7 @@ function abrirInstrucoes() {
       <h2>As 2 únicas travas</h2>
       <ul>
         <li><strong>🔒 Saída / liberar carro:</strong> só após <em>Confirmação = Confirmado</em> (POP EXI‑002).</li>
-        <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + conferências do embarque (embarque, produtos e ferramentas) + saída registrada + Instalação OK + conferido por + ≥1 foto de antes (ao chegar, antes de começar) + foto de depois (serviço pronto) + data e hora do retorno (+ descrição do problema, se retrabalho). PCP e admin podem trocar a foto de retorno e a hora do retorno por uma exceção de encerramento com justificativa.<br>
+        <li><strong>🔒 Finalizar:</strong> exige PCP liberado + cliente confirmado + conferências do embarque (embarque, produtos e ferramentas) + saída registrada + Instalação OK + conferido por + ≥1 foto de antes (ao chegar, antes de começar) + foto de depois (serviço pronto) + data e hora do retorno (+ descrição do problema, se retrabalho). PCP e admin podem trocar a foto de depois e a hora do retorno por uma exceção de encerramento com justificativa.<br>
           <em>Pedido interno (retirada) é diferente:</em> basta PCP liberado + ≥1 item — não há agenda, nem embarque, nem foto.</li>
       </ul>
       <p>Todo o resto é guia: nenhum campo trava por ordem. Preencha na ordem que quiser; a barra de <strong>% preenchida</strong> no topo da ficha mostra o quanto falta.</p>
@@ -9275,7 +9275,7 @@ function abrirInstrucoes() {
         <li><strong>⏸ Parado no cliente</strong> (quando for o caso): a O.S está pronta e o cliente ainda não liberou a instalação. No card, toque em <strong>Etapa</strong> e escolha <em>"⏸ Marcar parado"</em>. Ela some da fila de agendamento e passa a aparecer na vista <strong>Parado Cliente</strong>, que separa o que está parado <em>por culpa nossa</em> do que está parado esperando o cliente. Quando ele liberar, a mesma lista traz <em>"▶ Cliente liberou"</em> e ela volta para a fila; o tempo que ficou parada fica guardado.</li>
         <li><strong>Etapa no card:</strong> todo card tem a linha <strong>Etapa</strong>, com as etapas da barra lateral (PCP, Instalação, Parado Cliente, Execução, Retrabalho, Finalizados). O que é de um toque acontece no toque e o aviso traz <em>Desfazer</em>; o que precisa de dado (data, saída, retrabalho, finalização) abre a ficha no lugar certo. Etapa que ainda não dá diz por quê.</li>
         <li><strong>Embarque:</strong> confere embarque/produtos/ferramentas e registra o <strong>KM de saída</strong>.</li>
-        <li><strong>Execução:</strong> libera o carro (após confirmar), tira fotos de saída.</li>
+        <li><strong>Execução:</strong> libera o carro (após confirmar); ao chegar ao cliente, a equipe tira as fotos de antes.</li>
         <li><strong>Check‑out:</strong> registra situação, <strong>KM de retorno</strong> e finaliza. A O.S vai para <em>Finalizados</em>.</li>
       </ol>
 
@@ -9425,10 +9425,10 @@ async function exportarFichaPDF(os) {
 
   const layoutImg = await imgTag(os.layoutFotoId, 'Layout');
   const checkinImgs = (await Promise.all(
-    (os.fotosCheckinIds || []).map((id, i) => imgTag(id, `Saída (check-in) ${i + 1}`))
+    (os.fotosCheckinIds || []).map((id, i) => imgTag(id, `Foto de antes ${i + 1}`))
   )).join('');
   const retornoImgs = (await Promise.all(
-    (os.fotosRetornoIds || []).map((id, i) => imgTag(id, `Retorno (serviço pronto) ${i + 1}`))
+    (os.fotosRetornoIds || []).map((id, i) => imgTag(id, `Foto de depois ${i + 1}`))
   )).join('');
   // Foto do problema que o instalador tirou no retrabalho do item.
   const problemaImgs = (await Promise.all(
@@ -9473,7 +9473,7 @@ async function exportarFichaPDF(os) {
       ${kv('KM rodado', (os.kmSaida && os.kmRetorno && (+os.kmRetorno - +os.kmSaida) >= 0) ? (+os.kmRetorno - +os.kmSaida) + ' km' : '')}
       ${kv('Instalação OK', os.instalacaoOK?'Sim':'Não')}
       ${kv('Conferido por', os.conferidoPor)}${kv('Situação', os.checkout && os.checkout.situacao)}${kv('Retrabalho', os.retrabalho?'Sim':'')}${kv('Problema', os.problema)}${kv('Etapa de origem', os.etapaOrigem)}${kv('Causa raiz', os.causaRaiz)}${kv('Responsável da etapa', os.responsavelEtapa)}${kv('Causa', os.causa)}
-      ${kv('Obs técnicas', os.obsTecnicas)}${kv('Fotos check‑in', (os.fotosCheckinIds||[]).length+' foto(s)')}${kv('Fotos de retorno', (os.fotosRetornoIds||[]).length ? (os.fotosRetornoIds||[]).length+' foto(s)' : '')}
+      ${kv('Obs técnicas', os.obsTecnicas)}${kv('Fotos de antes', (os.fotosCheckinIds||[]).length+' foto(s)')}${kv('Fotos de depois', (os.fotosRetornoIds||[]).length ? (os.fotosRetornoIds||[]).length+' foto(s)' : '')}
       ${os.checkinGPS ? kv('Local do check‑in', `${os.checkinGPS.lat}, ${os.checkinGPS.lng} (±${os.checkinGPS.precisao||'?'}m) — maps.google.com/?q=${os.checkinGPS.lat},${os.checkinGPS.lng}`) : ''}
       ${kv('Finalizada', os.finalizadaEm?`${new Date(os.finalizadaEm).toLocaleString('pt-BR')} — ${os.finalizadoPor||''}`:'')}
     </table>

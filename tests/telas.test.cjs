@@ -302,7 +302,7 @@ test('espelho: finalizar sem a foto do serviço pronto e sem a hora de retorno �
   const t=espelho({...naRua});
   assert.match(t.node('#modal-os').innerHTML,/data-retorno/,'o espelho oferece a foto do serviço pronto');
   t.node('#m-finalizar').onclick();
-  assert.match(t.toasts.join(' '),/foto do serviço pronto/);
+  assert.match(t.toasts.join(' '),/foto de depois/); // um nome só para as fotos (item 24, onda acabamento): era "foto do serviço pronto"
   assert.match(t.toasts.join(' '),/hora de retorno/);
   assert.equal(t.run('_draft.finalizadaEm'),undefined);
   assert.equal(t.salvas.length,0);

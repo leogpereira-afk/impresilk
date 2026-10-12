@@ -137,7 +137,8 @@ test('espelho: o que falta para finalizar fica escrito acima do botão, não só
   t.run(`openModal(STORE.getOS('1'))`);
   t.node('#m-finalizar').onclick();
   const html = t.node('#modal-os').innerHTML;
-  assert.match(html, /class="trava-msg eq-falta"[^]*foto de check-in[^]*foto do serviço pronto[^]*hora de retorno/);
+  // Um nome só para as fotos (item 24 da fila de 11/10/2026, onda acabamento): era "foto de check-in" e "foto do serviço pronto".
+  assert.match(html, /class="trava-msg eq-falta"[^]*foto de antes[^]*foto de depois[^]*hora de retorno/);
   // E a ficha rolou até o primeiro bloco a resolver (a chegada, com a foto de check-in).
   assert.equal(t.node('#modal-os [data-bloco="chegada"]').open, true);
 });
