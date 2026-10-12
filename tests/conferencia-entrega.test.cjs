@@ -94,9 +94,12 @@ test('tela antiga não fecha parciais; revisão salva preserva itens, equipes e 
  const p=await e.call(periodo,gestor), fechar={...periodo,action:'performanceFechar',hash:p.hash,anterior:'',requestId:'teste-parcial-fechar-01',motivo:'Conferência de teste',leGrupos:true};
  const velho=await e.call(fechar,gestor);assert.equal(velho.status,422);assert.match(velho.error,/itens/);
  const f=await e.call({...fechar,leEntregasItens:true},gestor);assert.equal(f.status,200,JSON.stringify(f));
+ /* Trocado de propósito pela M7 da auditoria de 11/10/2026: a entrega
+    conferida num mês já fechado não muda mais (o selo já a contou). Antes a
+    edição passava e só a apuração aberta mudava. */
  const alterada=entrega(os,'e1','2026-09-26',[selecao(os,0,1)],'100002');alterada.alocacao.em=e.db.pcp_registros[0].registro.conferenciasEntrega[0].alocacao.em;
- assert.equal((await salvar(e,os,alterada,2)).status,200);
- const atual=await e.call(periodo,gestor);assert.equal(atual.registros.length,1);assert.equal(atual.registros[0].valor,1062.5);assert.equal(atual.registros[0].membros[0].chave,'100002');
+ const recusa=await salvar(e,os,alterada,2);assert.equal(recusa.status,409);assert.match(recusa.error,/período já fechado/);
+ const atual=await e.call(periodo,gestor);assert.equal(atual.registros.length,1);assert.equal(atual.registros[0].valor,2125);assert.equal(atual.registros[0].membros[0].chave,'100001');
  const hist=await e.call({...periodo,action:'performanceFechamentos'},gestor);assert.deepEqual(hist.fechamentos[0],f.fechamento);
 });
 test('prévia e apuração usam a mesma base monetária; subtotal sem líquido não inventa desconto',async()=>{

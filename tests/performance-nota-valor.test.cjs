@@ -81,7 +81,7 @@ test('tela e PDF usam valor na nota atual e preservam a régua dos fechamentos a
 });
 
 test('servidor sela a régua de valor no hash sem reescrever revisões antigas',async()=>{
- const periodo={de:'2026-09-01',ate:'2026-09-19'},who={papel:'pcp',nome:'Gestor fictício'};
+ const periodo={de:'2026-09-01',ate:'2026-09-30'},who={papel:'pcp',nome:'Gestor fictício'};
  const dados={pcp_registros:[{colecao:'os',id:'000001',apagado:false,atualizado_em:'2020-01-01',registro:{id:'000001',numero:'1',tipo:'externo',cliente:'Teste',finalizadaEm:'2026-09-10T14:00:00Z',equipe:['Ana'],valorTotal:100}}],pcp_config_global:[{id:true,atualizado_em:'2020-01-01',config:{performancePCP:{equipes:[],criterios:pesos,participacoes:[{id:'000001',membros:[membro('Ana')],por:'Gestor',em:'2026-09-11'}]}}}],painel_ordens:[]};
  const e=await edge('pcp-sync',dados);
  const anterior=await e.call({action:'performancePeriodo',...periodo},who);

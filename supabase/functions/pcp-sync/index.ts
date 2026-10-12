@@ -645,6 +645,51 @@ function perfPeriodo(body: any) {
   if(!valido(de)||!valido(ate)||de>ate||(Date.parse(ate)-Date.parse(de))/864e5>366) throw new Error("Escolha um período válido de até um ano.");
   return {de,ate};
 }
+/* O FECHAMENTO É DE MÊS CALENDÁRIO (item 3 da fila de 11/10/2026). Fechar de
+   01 a 19/09, de 10 a 30/09 e só o dia 15/09 dava 200 nos três e gravava três
+   selos com a mesma O.S.: o dinheiro ficava protegido, mas o ranking e a Nota
+   contavam em dobro. Agora o selo novo é sempre do dia 01 ao último dia do
+   mês, só depois que o mês terminou (no relógio de São Paulo) e sem cruzar
+   outro período já fechado. O selo antigo de período livre continua legível
+   (performanceFechamentos, o ranking dos funcionários e a comissão o leem
+   pelo período exato); ele só não ganha revisão nova. Em 12/10/2026 a
+   produção tinha 0 fechamentos (SELECT na coleção performance_fechamentos). */
+const PERF_MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+const perfDiaBR = (d:string) => String(d||"").split("-").reverse().join("/");
+function perfUltimoDiaDoMes(mes:string) {
+  const [a,m]=mes.split("-").map(Number);
+  return mes+"-"+String(new Date(Date.UTC(a,m,0)).getUTCDate()).padStart(2,"0");
+}
+const perfEhMesCalendario = (p:{de:string,ate:string}) => /^\d{4}-\d{2}-01$/.test(p.de) && p.ate===perfUltimoDiaDoMes(p.de.slice(0,7));
+const perfMesTxt = (mes:string) => PERF_MESES[Number(mes.slice(5,7))-1]+" de "+mes.slice(0,4);
+function perfDiaSeguinte(d:string) { return new Date(Date.parse(d+"T12:00:00Z")+864e5).toISOString().slice(0,10); }
+/* OS PERÍODOS JÁ FECHADOS, um por período (a revisão conta uma vez), com a
+   última revisão. Uma leitura só de colunas pequenas. Serve à trava do Fechar
+   (sobreposição), à conferência por entrega (M7), ao aviso do mês sem
+   fechamento (item 11) e à tela do mês fechado (M8). */
+async function perfPeriodosFechados() {
+  const {data,error}=await sb.from("pcp_registros").select("id, de:registro->>de, ate:registro->>ate, revisao:registro->revisao, fechadoEm:registro->>fechadoEm")
+    .eq("colecao","performance_fechamentos").eq("apagado",false).limit(1000);
+  if(error)throw new Error(error.message);
+  if((data||[]).length>=1000)throw new Error("Limite de fechamentos atingido na leitura.");
+  const dataOk=(d:any)=>/^\d{4}-\d{2}-\d{2}$/.test(String(d??""));
+  const porPeriodo=new Map<string,any>();
+  for(const f of (data??[]) as any[]){
+    if(!dataOk(f.de)||!dataOk(f.ate)||f.de>f.ate)continue;
+    const k=f.de+":"+f.ate, atual=porPeriodo.get(k)||{de:String(f.de),ate:String(f.ate),revisoes:0,ultimaRevisao:0,ultimoEm:""};
+    atual.revisoes++;
+    const rev=Number(f.revisao)||0;
+    if(rev>=atual.ultimaRevisao){atual.ultimaRevisao=rev;atual.ultimoEm=String(f.fechadoEm||"");}
+    porPeriodo.set(k,atual);
+  }
+  return [...porPeriodo.values()].sort((a,b)=>a.de.localeCompare(b.de)||a.ate.localeCompare(b.ate));
+}
+const perfPeriodoDoDia = (fechados:any[], dia:string) => (fechados||[]).find((f:any)=>dia>=f.de&&dia<=f.ate)||null;
+// A confirmação escrita do Fechar com a cobertura do valor abaixo de 50% (item 2): a mesma frase da tela.
+const PERF_FRASE_COBERTURA = "fechar com cobertura baixa";
+/* A BASE QUE MUDA DURANTE A CONSULTA É 409, NÃO 500 (item 14). A tela trata o
+   409 como "tente de novo" e o diário de erros não se enche de falha falsa. */
+const perfBaseMudou = () => Object.assign(new Error("A base mudou durante a consulta. Atualize para conferir novamente."),{baseMudou:true});
 /* OS DEMONSTRATIVOS QUE COBREM O RECORTE (revisão da onda w3, R1). A aba
    Perdas por retrabalho pode estar em qualquer recorte (quinzena, últimos 30
    dias), e o demonstrativo da comissão é de um período fechado, quase sempre o
@@ -721,7 +766,7 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
   if(reguaPerdas&&!regua)throw new Error("A régua das perdas deste fechamento não existe neste servidor. Atualize antes de conferir.");
   const periodo=perfPeriodo(body), inicio=new Date().toISOString();
   const cfgAntes=await getCfgComVersao();
-  const lista:any[]=[]; let after="", terminou=false;
+  const lista:any[]=[], aLancar:any[]=[]; let after="", terminou=false;
   for(let pagina=0;pagina<100;pagina++) {
     let q=sb.from("pcp_registros").select("id,registro,atualizado_em").eq("colecao","os").eq("apagado",false).order("id").limit(500);
     if(after) q=q.gt("id",after);
@@ -733,10 +778,18 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
       if((!fim && !o?.conferenciasEntrega?.length) || o?.tipo==="interno") continue;
       /* A O.S. CANCELADA (F16), no ERP ou à mão pela gestão, não é entrega:
          sai da base. O hash do período aberto muda; a revisão selada é lida
-         do selo e fica como foi. */
-      if(cancelada(o)) continue;
+         do selo e fica como foi.
+         A CANCELADA DEPOIS DE TER PARTE ENTREGUE (item 4 da fila de
+         11/10/2026): o cancelamento cancela o SALDO; a parte que a gestão já
+         conferiu (conferenciasEntrega) continua contando pela parte entregue,
+         no ranking e na comissão. Conferir de novo depois do cancelamento
+         continua recusado (D-009). A cancelada sem conferência sai, como antes. */
+      if(cancelada(o) && !o?.conferenciasEntrega?.length) continue;
       const erp=o.baixaAutoERP?.em===o.finalizadaEm || /^Mubisys\b/i.test(o.finalizadoPor || "");
-      if(erp && !o.entregaLancada && !o.conferenciasEntrega?.length && fim>=CORTE_LANCAMENTO_MANUAL) continue;
+      /* A BAIXA DO ERP A LANÇAR fica fora da base (baixa não prova entrega
+         física, D-007), mas entra na COBERTURA do período (item 2): quem
+         fecha vê quantas e quanto ficam de fora. */
+      if(erp && !o.entregaLancada && !o.conferenciasEntrega?.length && fim>=CORTE_LANCAMENTO_MANUAL){if(fim>=periodo.de && fim<=periodo.ate)aLancar.push({...o,id:row.id});continue;}
       const dia=(o.entregaLancada && perfDia(o.entregaLancada.data)) || fim;
       if(o.conferenciasEntrega?.length) {
         for(const e of o.conferenciasEntrega) if(e.dia>=periodo.de && e.dia<=periodo.ate) lista.push({...o,id:row.id+"::entrega:"+e.id,_osId:row.id,_dia:e.dia,_conferencia:e});
@@ -748,7 +801,7 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
   if(!terminou)throw new Error("Consulta excedeu o limite; nenhum fechamento foi criado.");
   const valores:Record<string,number>={};
   const valoresItens:Record<string,any[]>={};
-  const nums=[...new Set(lista.map(o=>String(o.numero || "").trim()).filter(Boolean))];
+  const nums=[...new Set([...lista,...aLancar].map(o=>String(o.numero || "").trim()).filter(Boolean))];
   for(let i=0;i<nums.length;i+=300){
     const {data,error}=await sb.from("painel_ordens").select("numero,valor").in("numero",nums.slice(i,i+300));
     if(error)throw new Error(error.message);
@@ -760,7 +813,7 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
   const cfgDepois=await getCfgComVersao();
   const {data:mudancas,error:erroMudancas}=await sb.from("pcp_registros").select("id").eq("colecao","os").gte("atualizado_em",inicio).limit(1);
   if(erroMudancas)throw new Error(erroMudancas.message);
-  if(estrito && (cfgAntes.versao!==cfgDepois.versao || mudancas?.length))throw new Error("A base mudou durante a consulta. Atualize para conferir novamente.");
+  if(estrito && (cfgAntes.versao!==cfgDepois.versao || mudancas?.length))throw perfBaseMudou();
   const participacoes=cfgAntes.config?.performancePCP?.participacoes || [];
   // A equipe pela PESSOA (ID): a mesma régua do aparelho (OPERACAO.equipe).
   const pessoasPerf=await pessoasDoPCP(cfgAntes.config);
@@ -885,7 +938,28 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
      igual. Sem entrega julgada, a régua não muda nada na comissão. */
   const julgou=!!regua&&registros.some((r:any)=>Object.prototype.hasOwnProperty.call(r,"etapaOrigem"));
   const conteudo={periodo,regra:"performance-3",...(body.notaPorValor===true?{regraNota:REGRA_NOTA_VALOR}:{}),...(julgou?{regraPerdas:regua.id}:{}),criterios,registros};
-  return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP."};
+  /* A COBERTURA DO PERÍODO (itens 2 e 29 da fila de 11/10/2026), FORA do
+     conteúdo e do hash: o que entrou na base e o que ficou de fora (as baixas
+     do ERP a lançar), em centavos. Vai no selo como ele foi visto no
+     fechamento; recalcular o selo não a compara. */
+  const centavosDe=(o:any)=>{
+    const lista=valoresItens[String(o.numero)]||[];
+    let v=num(o.valorTotal);
+    const mudou=o.erpAlteracoes?.some((h:any)=>h.campos?.some((x:any)=>x.campo==="valorTotal"));
+    if(!mudou && lista.length===1 && Number.isFinite(valores[String(o.numero)]))v=valores[String(o.numero)];
+    return Number.isFinite(v)&&v>=0?Math.round(v*100):null;
+  };
+  const baseConhecida=registros.filter((r:any)=>r.valor!==null&&Number.isFinite(r.valor));
+  const entregasCentavos=baseConhecida.reduce((s:number,r:any)=>s+Math.round(r.valor*100),0);
+  const foraCentavos=aLancar.map(centavosDe);
+  const aLancarCentavos=foraCentavos.reduce((s:number,c:any)=>s+(c??0),0);
+  const totalCentavos=entregasCentavos+aLancarCentavos;
+  const pctValor=totalCentavos>0?Math.floor(100*entregasCentavos/totalCentavos):(aLancar.length?0:100);
+  const cobertura={entregas:registros.length,entregasCentavos,entregasSemValor:registros.length-baseConhecida.length,
+    aLancar:aLancar.length,aLancarCentavos,aLancarSemValor:foraCentavos.filter((c:any)=>c===null).length,
+    aLancarNumeros:[...new Set(aLancar.map((o:any)=>String(o.numero||"").trim()).filter(Boolean))].sort().slice(0,100),
+    pctValor,baixa:registros.length+aLancar.length>0&&pctValor<50};
+  return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP.",cobertura};
 }
 /* A RÉGUA DO SELO (A1, auditoria da v164, 11/10/2026). A tela fecha com a
    nota por valor (performance.js manda notaPorValor:true na apuração e no
@@ -914,11 +988,18 @@ async function perfFechamentos(periodo:any) {
 /* AS REVISÕES DA COMISSÃO QUE COBREM UM PERÍODO (revisão da onda a3, D-004
    nos pontos), para o ranking dos funcionários ler a falha comprovada que
    vale (COMISSAO.demonstrativosVigentes). Paginada pela chave; só uma página
-   vazia confirma o fim. Nada daqui sai na resposta além do ranking. */
+   vazia confirma o fim. Nada daqui sai na resposta além do ranking.
+   SÓ O PERÍODO E SÓ OS CAMPOS QUE A RÉGUA LÊ (verificação da v166): a cada
+   60 s o ranking lia todas as revisões, com o registro inteiro (evidências,
+   rateios, CSV), e filtrava o período no código. Agora o banco filtra pelo
+   período (de até o fim do recorte, até a partir do início) e devolve só o
+   que demonstrativosVigentes usa: id, período, revisão, tipo, hora, as
+   decisões da entrada, a compensação e as linhas da apuração. */
 async function perfComissaoQueCobrem(periodo:{de:string,ate:string}) {
   const out:any[]=[];let cursor="";
   for(let pagina=0;pagina<400;pagina++){
-    let q=sb.from("pcp_registros").select("id,registro").eq("colecao","performance_comissao").eq("apagado",false).order("id").limit(500);
+    let q=sb.from("pcp_registros").select("id, de:registro->>de, ate:registro->>ate, revisao:registro->revisao, tipo:registro->>tipo, em:registro->>em, decisoes:registro->entrada->decisoes, compensacaoDe:registro->apuracao->compensacaoDe, linhas:registro->apuracao->linhas")
+      .eq("colecao","performance_comissao").eq("apagado",false).lte("registro->>de",periodo.ate).gte("registro->>ate",periodo.de).order("id").limit(500);
     if(cursor)q=q.gt("id",cursor);
     const {data,error}=await q;if(error)throw new Error(error.message);
     const rows=data||[];
@@ -926,8 +1007,10 @@ async function perfComissaoQueCobrem(periodo:{de:string,ate:string}) {
     for(const row of rows){
       if(typeof row?.id!=="string"||row.id<=cursor)throw new Error("Leitura da comissão inconsistente. Atualize o ranking.");
       cursor=row.id;
-      const r=row.registro;
-      if(r&&typeof r==="object"&&typeof r.de==="string"&&typeof r.ate==="string"&&!(r.de>periodo.ate||r.ate<periodo.de))out.push(r);
+      if(typeof row.de!=="string"||typeof row.ate!=="string"||row.de>periodo.ate||row.ate<periodo.de)continue;
+      out.push({id:row.id,de:row.de,ate:row.ate,revisao:row.revisao,tipo:row.tipo,em:row.em,
+        entrada:{decisoes:row.decisoes&&typeof row.decisoes==="object"?row.decisoes:{}},
+        apuracao:{compensacaoDe:row.compensacaoDe??null,linhas:Array.isArray(row.linhas)?row.linhas:[]}});
     }
   }
   throw new Error("Revisões da comissão excederam o limite da leitura.");
@@ -947,13 +1030,18 @@ async function rankingEquipeDoPeriodo(periodo:any, porValor=false) {
        demonstrativo da comissão que cobre a entrega tira os pontos dela aqui
        também, como na tela da gestão (COMISSAO.comFalhasComprovadas, a mesma
        régua). Só leitura: o fechamento e o hash dele não mudam. */
-    const demos = COMISSAO.demonstrativosVigentes(await perfComissaoQueCobrem(periodo), periodo);
+    /* Se a leitura das decisões falhar, o ranking sai sem elas e com o aviso,
+       em vez de cair (verificação da v166); essa resposta não fica no cache. */
+    let demos:any[] = [], avisoDecisoes = "";
+    try { demos = COMISSAO.demonstrativosVigentes(await perfComissaoQueCobrem(periodo), periodo); }
+    catch { avisoDecisoes = "Não foi possível ler as decisões da comissão agora. A falha comprovada julgada pela gestão pode não aparecer neste ranking; atualize daqui a pouco."; }
     const fonte = demos.length ? {...fonteBase, registros:COMISSAO.comFalhasComprovadas(fonteBase.registros, demos)} : fonteBase;
     const cfg = await getCfg();
     // Como a gestão, unifica a mesma ficha em formatos antigos só na visão.
     // Fonte, nome histórico da equipe e hash do fechamento ficam intactos.
     const pessoas = await pessoasDoPCP(cfg);
-    const dados = rankingEquipeSeguro(fonte, cfg?.performancePCP?.equipes || [], pessoas, porValor);
+    const dados = {...rankingEquipeSeguro(fonte, cfg?.performancePCP?.equipes || [], pessoas, porValor), ...(avisoDecisoes ? {avisoDecisoes} : {})};
+    if (avisoDecisoes) return dados;
     if (CACHE_RANKING_EQUIPE.size >= 24) CACHE_RANKING_EQUIPE.delete(CACHE_RANKING_EQUIPE.keys().next().value!);
     CACHE_RANKING_EQUIPE.set(chave, {ate:Date.now()+60_000, dados});
     return dados;
@@ -1384,7 +1472,11 @@ Deno.serve(async (req: Request) => {
         if(!body.entrega) {
           const {data:erp,error:err}=await sb.from("painel_ordens").select("numero,valor").eq("numero",String(os.numero || "")).limit(2);
           if(err) throw new Error(err.message);
-          return resp({os:saida(os),valor:valorConferencia(os,erp || [])});
+          /* Os períodos fechados vão junto (M7): o diálogo diz antes de salvar
+             que o dia cai em mês fechado. Sem eles, o diálogo abre igual e a
+             gravação confere aqui. */
+          let fechados:any[]|null=null;try{fechados=await perfPeriodosFechados();}catch{fechados=null;}
+          return resp({os:saida(os),valor:valorConferencia(os,erp || []),fechados});
         }
         if(body.rev!==os.rev) return resp({error:"A O.S. mudou. Reabra a conferência antes de salvar.",conflito:true},409);
         if(["baixa_administrativa","retirada"].includes(os.conferenciaERP?.classificacao)) return resp({error:"Revise a classificação ERP para divergência antes de conferir uma instalação. A classificação anterior será preservada no histórico."},422);
@@ -1394,6 +1486,17 @@ Deno.serve(async (req: Request) => {
         const demais=(os.conferenciasEntrega || []).filter((e:any)=>e.id!==entrega.id);
         const erro=CONFERENCIA_ENTREGA.validar(os,[...demais,entrega],hoje);
         if(erro) return resp({error:erro},422);
+        /* CONFERIR EM MÊS FECHADO (M7 da auditoria de 11/10/2026, pela
+           recomendação dela): a conferência nova com o dia num período fechado
+           ficava fora de tudo sem aviso, e mover uma parcial do mês selado para
+           o aberto contava a mesma unidade duas vezes (no selo e na apuração
+           aberta). Se o dia novo ou o antigo cai num período fechado, recusa
+           com a causa e nada se grava. Esta ação é chamada na hora, fora da
+           fila do aparelho: a recusa não prende nada. */
+        const fechadosConf=await perfPeriodosFechados();
+        const fNovo=perfPeriodoDoDia(fechadosConf,String(entrega.dia||"")), fVelho=velho?perfPeriodoDoDia(fechadosConf,String(velho.dia||"")):null;
+        if(fVelho)return resp({error:`Esta entrega foi conferida em ${perfDiaBR(velho.dia)}, num período já fechado (${perfDiaBR(fVelho.de)} a ${perfDiaBR(fVelho.ate)}, revisão ${fVelho.ultimaRevisao}). Mês fechado não se recalcula: ela não pode mudar nem ir para outro mês. Nada foi gravado.`,periodoFechado:{de:fVelho.de,ate:fVelho.ate}},409);
+        if(fNovo)return resp({error:`O dia ${perfDiaBR(entrega.dia)} cai num período já fechado (${perfDiaBR(fNovo.de)} a ${perfDiaBR(fNovo.ate)}, revisão ${fNovo.ultimaRevisao}). Mês fechado não se recalcula: nada foi gravado. Se a data está errada, escolha o dia certo, num mês aberto.`,periodoFechado:{de:fNovo.de,ate:fNovo.ate}},409);
         const cfg=(await getCfg()) || {}, pessoas=await pessoasReq(), autor=await autorAuditoria(), agora=new Date().toISOString();
         const anterior={...os,equipe:velho?.alocacao?finaisAlocacao(velho.alocacao).map((m:any)=>m.pessoaId):[],alocacao:velho?.alocacao};
         const virtual={...os,entregaLancada:{data:entrega.dia},equipe:pedido.alocacao?.grupos?.flatMap((g:any)=>g.membros?.map((m:any)=>m.pessoaId) || []) || []};
@@ -1409,6 +1512,15 @@ Deno.serve(async (req: Request) => {
         return resp({ok:true,os:saida(gravar)});
       }
 
+      /* OS PERÍODOS JÁ FECHADOS, de todos os meses (M8 e itens 3 e 11 da fila
+         de 11/10/2026): só leitura, só a gestão do PCP, como a apuração. A tela
+         avisa o mês que terminou sem fechamento, trava o Fechar que cruzaria
+         outro período e diz no Conferir que o dia está num mês fechado. */
+      case "performanceFechados": {
+        if(!ehMaquina && !["admin","pcp"].includes(String(cracha?.papel || "")))return resp({error:"Apuração restrita à gestão do PCP."},403);
+        return resp({fechados:await perfPeriodosFechados(),hoje:perfDia(new Date().toISOString())});
+      }
+
       case "performancePeriodo":
       case "performanceFechamentos":
       case "performanceFechar": {
@@ -1417,12 +1529,15 @@ Deno.serve(async (req: Request) => {
         if(acao==="performancePeriodo")return resp(await perfFonte(body));
         const fechamentos=await perfFechamentos(periodo);
         if(acao==="performanceFechamentos")return resp({fechamentos});
-        /* Fechamento só de período que já chegou: um "até" no futuro viraria o
-           último dia fechado e travaria toda regra nova até lá, sem saída pela
-           tela (fechamento é só de acréscimo). A tela chama esta ação na hora,
-           fora da fila, então o 422 aqui não prende nada e mostra a causa. */
+        /* SÓ MÊS CALENDÁRIO QUE JÁ TERMINOU (item 3 da fila de 11/10/2026).
+           Um "até" no futuro viraria o último dia fechado e travaria toda regra
+           nova até lá; um período livre (01 a 19/09, 10 a 30/09) gravava selos
+           que se cruzam e o ranking contava em dobro. O mês só fecha depois do
+           último dia dele, no relógio de São Paulo. A tela chama esta ação na
+           hora, fora da fila, então o 422 aqui não prende nada e mostra a causa. */
+        if(!perfEhMesCalendario(periodo))return resp({error:`O fechamento é só de mês inteiro, do dia 01 ao último dia (por exemplo, ${perfDiaBR(periodo.de.slice(0,8)+"01")} a ${perfDiaBR(perfUltimoDiaDoMes(periodo.de.slice(0,7)))}). Escolha o mês no período e feche de novo.`,mesInteiro:true},422);
         const hojeFechar=perfDia(new Date().toISOString());
-        if(periodo.ate>hojeFechar)return resp({error:`O fechamento vai no máximo até hoje (${hojeFechar.split("-").reverse().join("/")}). Escolha um período que termine hoje ou antes.`},422);
+        if(periodo.ate>=hojeFechar)return resp({error:`O mês ainda não terminou: ${perfMesTxt(periodo.de.slice(0,7))} pode ser fechado a partir de ${perfDiaBR(perfDiaSeguinte(periodo.ate))}.`},422);
         const requestId=String(body.requestId || "");
         if(!/^[a-zA-Z0-9-]{10,80}$/.test(requestId))return resp({error:"Identificação do fechamento inválida."},422);
         const repetido=fechamentos.find((r:any)=>r.requestId===requestId);if(repetido)return resp({ok:true,fechamento:repetido});
@@ -1430,6 +1545,11 @@ Deno.serve(async (req: Request) => {
         if((anterior?.id || "")!==String(body.anterior || ""))return resp({error:"Outro fechamento foi criado. Recarregue as revisões."},409);
         const motivo=String(body.motivo || "").trim();
         if(motivo.length<5 || motivo.length>500)return resp({error:"Informe um motivo de 5 a 500 caracteres para o fechamento ou revisão."},422);
+        /* SEM SOBREPOR OUTRO PERÍODO JÁ FECHADO (item 3): uma revisão nova do
+           MESMO mês continua valendo; um selo antigo de período livre que cruza
+           o mês trava o fechamento com a causa (mês fechado não se recalcula). */
+        const sobreposto=(await perfPeriodosFechados()).find((f:any)=>!(f.de===periodo.de&&f.ate===periodo.ate)&&!(f.de>periodo.ate||f.ate<periodo.de));
+        if(sobreposto)return resp({error:`O mês se sobrepõe a um período já fechado (${perfDiaBR(sobreposto.de)} a ${perfDiaBR(sobreposto.ate)}). Mês fechado não se recalcula: nada foi gravado.`,sobreposto:{de:sobreposto.de,ate:sobreposto.ate}},409);
         const fonte=await perfFonte(body);
         /* A ABA PRESA NUMA VERSÃO ANTERIOR À F11 não lê `grupos`: mostra a O.S.
            dividida entre duas equipes inteira numa composição avulsa, e o selo
@@ -1446,8 +1566,14 @@ Deno.serve(async (req: Request) => {
         if(fonte.hash!==body.hash)return resp({error:"Os dados mudaram desde a consulta. Toque em Atualizar apuração (no quadro Base e fechamento), confira e feche de novo."},409);
         if(!fonte.registros.length || fonte.registros.some((r:any)=>!r.confirmado || r.valor===null))return resp({error:"Confirme todas as participações e confira os valores antes de fechar."},422);
         if(fonte.registros.some((r:any)=>r.avisoValor))return resp({error:"Confira os valores conflitantes no ERP antes de fechar. Veja as pendências da auditoria."},422);
+        /* A COBERTURA DENTRO DA CONFIRMAÇÃO (item 2): abaixo de 50% do valor do
+           mês na base (as baixas do ERP a lançar ficam de fora), o Fechar pede
+           a frase escrita. Não trava o mês: quem fecha sabe o que fica de fora. */
+        const cob=fonte.cobertura;
+        const fraseCobertura=String(body.confirmaCobertura || "").trim().toLowerCase().replace(/\s+/g," ");
+        if(cob?.baixa && fraseCobertura!==PERF_FRASE_COBERTURA)return resp({error:`Só ${cob.pctValor}% do valor do mês está na base: ${cob.aLancar} ${cob.aLancar===1?"baixa do ERP a lançar fica":"baixas do ERP a lançar ficam"} de fora. Para fechar assim, escreva "${PERF_FRASE_COBERTURA}" na confirmação (recarregue a página se o campo não aparecer).`,coberturaBaixa:true,cobertura:cob},422);
         const revisao=(anterior?.revisao || 0)+1,id=periodo.de+":"+periodo.ate+":"+String(revisao).padStart(6,"0");
-        const registro={...fonte,...periodo,id,revisao,anterior:anterior?.id||null,requestId,motivo,fechadoEm:new Date().toISOString(),fechadoPor:cracha?.nome || "Integração autorizada"};
+        const registro={...fonte,...periodo,id,revisao,anterior:anterior?.id||null,requestId,motivo,fechadoEm:new Date().toISOString(),fechadoPor:cracha?.nome || "Integração autorizada",...(cob?.baixa?{coberturaBaixaConfirmada:PERF_FRASE_COBERTURA}:{})};
         const {error}=await sb.from("pcp_registros").insert({colecao:"performance_fechamentos",id,registro,apagado:false,atualizado_em:registro.fechadoEm});
         if(error){if(error.code==="23505")return resp({error:"O período recebeu outra revisão. Atualize antes de fechar."},409);throw new Error(error.message);}
         return resp({ok:true,fechamento:registro});
@@ -3258,6 +3384,8 @@ Deno.serve(async (req: Request) => {
         return resp({ error: `Ação desconhecida: ${body.action}` }, 400);
     }
   } catch (e) {
+    // A base que mudou durante a consulta (item 14): "tente de novo", não erro do servidor.
+    if ((e as any)?.baseMudou) return resp({ error: (e as Error).message, tenteDeNovo: true }, 409);
     console.error("[pcp-sync] erro:", e);
     return resp({ error: (e as Error)?.message ?? "Erro interno" }, 500);
   }

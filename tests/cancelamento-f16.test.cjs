@@ -202,7 +202,8 @@ const aloc = () => plano(D.montar([{equipeId:null, liderId:'100001', membros:['1
 const entregue = (id, numero, extra = {}) => row(id, {numero, tipo:'externo', cliente:'Cliente ' + numero, veiculo:'Fiorino', equipe:['100001', '100002'],
   finalizadaEm:'2026-09-25T18:00:00Z', finalizadoPor:'Gestor Teste', valorTotal:500, alocacao:{...aloc(), por:'Gestor Teste', em:'2026-09-25T18:00:00Z'}, ...extra});
 const bancoPerf = regs => ({...banco(regs), pcp_config_global:[{id:true, config:{instaladores:['Ana', 'Bia'], performancePCP:{equipes:[], participacoes:[]}}, atualizado_em:'2026-09-19T10:00:00Z'}]});
-const periodo = {de:'2026-09-01', ate:'2026-09-29'};
+// Mês inteiro: o Fechar só aceita do dia 01 ao último dia do mês (item 3 da fila de 11/10/2026).
+const periodo = {de:'2026-09-01', ate:'2026-09-30'};
 test('a cancelada sai da base da apuração: à mão e no ERP (mesmo antes do corte)', async () => {
   const e = await edge('pcp-sync', bancoPerf([
     entregue('K1', '7101'),

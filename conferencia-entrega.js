@@ -53,24 +53,43 @@ const CONFERENCIA_ENTREGA = (() => {
       });
       return {...e, itens:detalhes, valor:valorConhecido ? valor : null};
     });
-    const saldoItens = itens.filter(it => !it.cancelado && (usados.get(it.chave) || 0) < it.qtde).map(it => ({...it, saldo:it.qtde - (usados.get(it.chave) || 0)}));
-    return {erro:'', entregas:saida, saldoItens, total:valorConhecido ? rateio.total : null, saldo:valorConhecido ? rateio.total - saida.reduce((s,e) => s + e.valor,0) : null};
+    /* O CANCELADO NÃO É SALDO (item 4 da fila de 11/10/2026 e a linha Baixa
+       "saldo do cancelado" da auditoria). O item cancelado e, na O.S.
+       cancelada (no ERP ou à mão), tudo o que ainda não foi conferido saem do
+       saldo a conferir: o cancelamento cancela o SALDO, e o que a gestão já
+       conferiu continua valendo. O valor do que foi cancelado vai à parte
+       (cancelado), só quando existe: a O.S. sem cancelamento sai igual. */
+    const osCancelada = !!(motor().canceladaOS && motor().canceladaOS(os));
+    let canceladoValor = 0, canceladoUnidades = 0;
+    for (const it of itens) {
+      const u = usados.get(it.chave) || 0;
+      if (u >= it.qtde || !(it.cancelado || osCancelada)) continue;
+      const v = rateio.itens[it.indice] || 0;
+      canceladoUnidades += it.qtde - u; canceladoValor += v - Math.floor(v * u / it.qtde);
+    }
+    const saldoItens = itens.filter(it => !it.cancelado && !osCancelada && (usados.get(it.chave) || 0) < it.qtde).map(it => ({...it, saldo:it.qtde - (usados.get(it.chave) || 0)}));
+    return {erro:'', entregas:saida, saldoItens, total:valorConhecido ? rateio.total : null, saldo:valorConhecido ? rateio.total - saida.reduce((s,e) => s + e.valor,0) - canceladoValor : null,
+      ...(canceladoUnidades ? {cancelado:valorConhecido ? canceladoValor : null, canceladoUnidades} : {})};
   }
   // Conferência administrativa e declaração física são evidências distintas.
   // Nunca altera finalizadaEm nem soma marcas físicas às quantidades conferidas.
   function estado(os, liquido) {
     const registros = lista(os?.conferenciasEntrega), ap = apurar(os || {}, liquido);
+    // A O.S. cancelada: o que não foi conferido não é saldo (item 4). A parte conferida continua.
+    const osCancelada = !!(motor().canceladaOS && motor().canceladaOS(os || {}));
     const itens = catalogo(os).map(it => {
       const fisico = motor().situacaoItem(os.itens[it.indice], os);
       const conferido = ap.erro ? null : registros.reduce((n,e) => n + lista(e.itens).filter(p => p.chave === it.chave).reduce((a,p) => a + p.qtde,0),0);
-      return {...it, declarado: Number(fisico.declarado) || 0, entregueFisico: Number(fisico.entregue) || 0, conferido, saldo: conferido === null ? null : it.cancelado ? 0 : it.qtde-conferido};
+      return {...it, declarado: Number(fisico.declarado) || 0, entregueFisico: Number(fisico.entregue) || 0, conferido, saldo: conferido === null ? null : it.cancelado || osCancelada ? 0 : it.qtde-conferido};
     });
     const saldoUnidades = ap.erro ? null : itens.reduce((n,i)=>n+(i.saldo || 0),0);
-    const situacao = ap.erro ? 'inconsistente' : !registros.length ? 'sem_conferencia' : saldoUnidades > 0 ? 'parcial' : 'saldo_concluido';
-    const divergencia = !!os?.finalizadaEm && registros.length > 0 && situacao !== 'saldo_concluido';
-    const rotulo = {inconsistente:'Conferência inconsistente',sem_conferencia:'Sem conferência por item',parcial:'Entrega parcial conferida',saldo_concluido:'Saldo de itens conferido'}[situacao];
-    const resumo = rotulo + (registros.length && !ap.erro ? ' · ' + itens.reduce((n,i)=>n+(i.conferido || 0),0) + ' unidades conferidas · ' + saldoUnidades + ' a conferir' : '') + (divergencia ? ' · finalização anterior com saldo: revisar' : '') + (ap.erro ? ' · '+ap.erro : '');
-    return {...ap,itens,situacao,rotulo,resumo,saldoUnidades,divergencia,conferidoValor:ap.saldo===null?null:ap.total-ap.saldo,ultimoDia:registros.map(e=>e.dia).sort().pop() || ''};
+    const restoCancelado = !ap.erro && osCancelada && registros.length > 0 && Number(ap.canceladoUnidades) > 0;
+    const situacao = ap.erro ? 'inconsistente' : !registros.length ? 'sem_conferencia' : saldoUnidades > 0 ? 'parcial' : restoCancelado ? 'saldo_cancelado' : 'saldo_concluido';
+    const divergencia = !!os?.finalizadaEm && registros.length > 0 && situacao !== 'saldo_concluido' && situacao !== 'saldo_cancelado';
+    const rotulo = {inconsistente:'Conferência inconsistente',sem_conferencia:'Sem conferência por item',parcial:'Entrega parcial conferida',saldo_concluido:'Saldo de itens conferido',saldo_cancelado:'Parte entregue conferida, saldo cancelado'}[situacao];
+    const conferidas = itens.reduce((n,i)=>n+(i.conferido || 0),0);
+    const resumo = rotulo + (registros.length && !ap.erro ? ' · ' + conferidas + ' unidades conferidas · ' + (restoCancelado ? ap.canceladoUnidades + ' canceladas' : saldoUnidades + ' a conferir') : '') + (divergencia ? ' · finalização anterior com saldo: revisar' : '') + (ap.erro ? ' · '+ap.erro : '');
+    return {...ap,itens,situacao,rotulo,resumo,saldoUnidades,divergencia,conferidoValor:ap.saldo===null?null:ap.total-ap.saldo-(ap.cancelado || 0),ultimoDia:registros.map(e=>e.dia).sort().pop() || ''};
   }
   return {catalogo, validar, apurar, estado};
 })();

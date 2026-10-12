@@ -30,8 +30,9 @@ function banco(initial={}) {
      if(old && op==='insert') {resolve({data:null,error:{code:'23505',message:'duplicate key'}});return;}
      if(old){if(!ignorar)Object.assign(old,r);result.push(old);}else{const novo={apagado:false,atualizado_em:new Date().toISOString(),...r};rows.push(novo);result.push(novo);}
     }}
-    // Projeção de JSON como o PostgREST: "registro->>id" (texto) e "apelido:registro->campo" (JSON, com nome).
-    if(op==='read'&&proj&&proj.some(c=>c.includes('->')))result=result.map(r=>{const o={...r};for(const c of proj){const m=c.match(/^(?:(\w+):)?(\w+)->>?(\w+)$/);if(m){const [,alias,a,b]=m;o[alias||b]=r[a]?.[b];}}return o;});
+    // Projeção de JSON como o PostgREST: "registro->>id" (texto), "apelido:registro->campo" (JSON, com nome)
+    // e caminhos mais fundos, "linhas:registro->apuracao->linhas" (o nome é o apelido ou o último campo).
+    if(op==='read'&&proj&&proj.some(c=>c.includes('->')))result=result.map(r=>{const o={...r};for(const c of proj){const m=c.match(/^(?:(\w+):)?(\w+)((?:->>?\w+)+)$/);if(m){const [,alias,a,resto]=m,partes=resto.split(/->>?/).filter(Boolean);o[alias||partes[partes.length-1]]=partes.reduce((v,p)=>v?.[p],r[a]);}}return o;});
     resolve({data:clone(one?result[0]||null:result),count:result.length,error:null});
    } catch(e){reject(e);}
   }};return q;

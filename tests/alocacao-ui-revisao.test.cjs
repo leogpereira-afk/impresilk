@@ -375,12 +375,12 @@ test('revisão: O.S. antiga com nome sem ficha confirma pelo jeito antigo; o ser
   const rs = await e.call({action: 'setCfg', cfg: {...base, performancePCP: cfgs[0].performancePCP}, baseCfg: base}, gestor);
   assert.equal(rs.status, 200, JSON.stringify(rs));
   await pausa(5);
-  const per = await e.call({action: 'performancePeriodo', de: '2026-09-01', ate: '2026-09-29'}, gestor);
+  const per = await e.call({action: 'performancePeriodo', de: '2026-09-01', ate: '2026-09-30'}, gestor);
   const reg = per.registros.find(x => x.id === '1');
   assert.equal(reg.confirmado, true, JSON.stringify(reg));
   assert.equal(reg.fonte, 'participacao');
   assert.deepEqual(reg.membros.map(m => [m.chave, m.percentual]), [['100001', 70], ['Terceiro Fictício', 30]]);
-  const f = await e.call({action: 'performanceFechar', de: '2026-09-01', ate: '2026-09-29', hash: per.hash, requestId: 'req-f09-jeito-antigo', motivo: 'fechar setembro', anterior: ''}, gestor);
+  const f = await e.call({action: 'performanceFechar', de: '2026-09-01', ate: '2026-09-30', hash: per.hash, requestId: 'req-f09-jeito-antigo', motivo: 'fechar setembro', anterior: ''}, gestor);
   assert.equal(f.status, 200, JSON.stringify(f));
   // Reabrir a O.S. confirmada mostra o que foi confirmado (70/30), não um 50/50 novo.
   cfg.performancePCP = js(cfgs[0].performancePCP);

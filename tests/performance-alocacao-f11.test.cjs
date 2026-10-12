@@ -84,7 +84,8 @@ function osFixas() {
 const cfgBase = (extra = {}) => ({instaladores:['Ana', 'Bia', 'Zeca'], performancePCP:{equipes:plano(EQUIPES), participacoes:plano(PARTICIPACOES), ...extra}});
 const bancoCom = (regs, cfg = cfgBase()) => ({pcp_registros:regs, registros:plano(FICHAS_RH), pcp_config_global:[{id:true, config:cfg, atualizado_em:'2026-09-19T10:00:00Z'}]});
 const gestor = {papel:'pcp', nome:'Gestor Teste', sub:'gestor'};
-const periodo = {de:'2026-09-01', ate:'2026-09-29'};
+// Mês inteiro: o Fechar só aceita do dia 01 ao último dia do mês (item 3 da fila de 11/10/2026).
+const periodo = {de:'2026-09-01', ate:'2026-09-30'};
 async function apurar(e) { const r = await e.call({action:'performancePeriodo', ...periodo}, gestor); assert.equal(r.status, 200, JSON.stringify(r)); return r; }
 const porId = (regs, id) => regs.find(r => r.id === id);
 

@@ -1,7 +1,8 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const {edge}=require('./helpers/edge.cjs');
 const who={papel:'pcp',nome:'Gestor'};
-const periodo={de:'2026-09-01',ate:'2026-09-19'};
+// Mês inteiro (item 3 da fila de 11/10/2026): o Fechar só aceita do dia 01 ao último dia do mês.
+const periodo={de:'2026-09-01',ate:'2026-09-30'};
 function dados(n=1){
  const os=Array.from({length:n},(_,i)=>({colecao:'os',id:String(i).padStart(6,'0'),apagado:false,atualizado_em:'2020-01-01',registro:{id:String(i).padStart(6,'0'),numero:String(i),tipo:'externo',cliente:'Teste',finalizadaEm:'2026-09-10T14:00:00Z',equipe:['Ana'],valorTotal:100}}));
  const participacoes=os.map(o=>({id:o.id,membros:[{chave:'rh-ana',nome:'Ana',percentual:100}],por:'Gestor',em:'2026-09-11'}));

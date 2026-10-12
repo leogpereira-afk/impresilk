@@ -511,9 +511,17 @@ test('servidor: fechamento com "até" depois de hoje é recusado com a causa e n
   const hoje = new Intl.DateTimeFormat('en-CA', {timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date());
   const amanha = new Date(Date.parse(hoje + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10);
   const e = await edge('pcp-sync');
+  /* Trocado de propósito pelo item 3 da fila de 11/10/2026: o Fechar é só de
+     mês inteiro e só depois do fim do mês. O período livre que passa de hoje
+     agora para na primeira trava (mês inteiro); o mês corrente, inteiro, para
+     na segunda (o mês ainda não terminou). */
   const r = await e.call({action:'performanceFechar', de:hoje, ate:amanha, requestId:'fechar-futuro-000001', motivo:'Fechamento por engano', hash:'x', anterior:''}, PCP);
   assert.equal(r.status, 422);
-  assert.match(r.error, /O fechamento vai no máximo até hoje/);
+  assert.match(r.error, /só de mês inteiro/);
+  const ultimo = new Date(Date.UTC(Number(hoje.slice(0, 4)), Number(hoje.slice(5, 7)), 0)).toISOString().slice(0, 10);
+  const mes = await e.call({action:'performanceFechar', de:hoje.slice(0, 8) + '01', ate:ultimo, requestId:'fechar-futuro-000002', motivo:'Fechamento por engano', hash:'x', anterior:''}, PCP);
+  assert.equal(mes.status, 422);
+  assert.match(mes.error, /O mês ainda não terminou/);
   assert.equal(e.db.pcp_registros.filter(x => x.colecao === 'performance_fechamentos').length, 0);
   // Consultar um período que termina no futuro continua liberado (só lê).
   assert.equal((await e.call({action:'performanceFechamentos', de:hoje, ate:amanha}, PCP)).status ?? 200, 200);

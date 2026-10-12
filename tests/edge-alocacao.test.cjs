@@ -545,10 +545,10 @@ test('revisão: divisão gravada com o RH fora não confirma; com o RH de volta 
   assert.equal(gravada(e).alocacao.conferirRH, true, 'não passou: continua marcada');
   assert.match((r.avisos || []).join(' '), /não passou na conferência.*777777/);
   await espera(5);
-  let p = await e.call({action: 'performancePeriodo', de: '2026-09-01', ate: '2026-09-29'}, gestor);
+  let p = await e.call({action: 'performancePeriodo', de: '2026-09-01', ate: '2026-09-30'}, gestor);
   let reg = p.registros.find(x => x.id === '1');
   assert.equal(reg.confirmado, false);assert.equal(reg.fonte, 'alocacao-conferir-rh');
-  const f = await e.call({action: 'performanceFechar', de: '2026-09-01', ate: '2026-09-29', hash: p.hash, requestId: 'req-f08-conferir-1', motivo: 'fechar setembro', anterior: ''}, gestor);
+  const f = await e.call({action: 'performanceFechar', de: '2026-09-01', ate: '2026-09-30', hash: p.hash, requestId: 'req-f08-conferir-1', motivo: 'fechar setembro', anterior: ''}, gestor);
   assert.notEqual(f.status, 200, 'o fechamento não sela a divisão a conferir');
   // Gente certa gravada com o RH fora: a próxima gravação da gestão confere e tira a marca.
   e = await edge('pcp-sync', banco([base(fim)]));
@@ -558,7 +558,7 @@ test('revisão: divisão gravada com o RH fora não confirma; com o RH de volta 
   assert.equal(gravada(e).alocacao.conferirRH, true);
   e.cliente.from = volta2;
   await espera(5);
-  p = await e.call({action: 'performancePeriodo', de: '2026-09-01', ate: '2026-09-29'}, gestor);
+  p = await e.call({action: 'performancePeriodo', de: '2026-09-01', ate: '2026-09-30'}, gestor);
   assert.equal(p.registros.find(x => x.id === '1').confirmado, false, 'antes de conferir, não confirma');
   const emAntes = gravada(e).alocacao.em;
   // A operação não confere (só a gestão).
@@ -571,7 +571,7 @@ test('revisão: divisão gravada com o RH fora não confirma; com o RH de volta 
   assert.equal(g.alocacao.em, emAntes, 'o carimbo da divisão fica o de quem a fez');
   assert.equal(g.alocacaoLog.at(-1).acao, 'conferir');assert.equal(g.alocacaoLog.at(-1).por, 'Gestor Teste');
   await espera(5);
-  p = await e.call({action: 'performancePeriodo', de: '2026-09-01', ate: '2026-09-29'}, gestor);
+  p = await e.call({action: 'performancePeriodo', de: '2026-09-01', ate: '2026-09-30'}, gestor);
   reg = p.registros.find(x => x.id === '1');
   assert.equal(reg.confirmado, true);assert.equal(reg.fonte, 'alocacao');
 });
@@ -587,7 +587,7 @@ test('revisão: o dia da conferência da ficha desligada é o da apuração (O.S
   assert.equal(diaDaOS({equipe: ['100001'], instalacao: {data: '2026-09-25'}, saidaEm: '2026-09-24T08:00:00Z'}), '2026-09-24');
   const e = await edge('pcp-sync', banco([os]));
   await espera(5);
-  const p = await e.call({action: 'performancePeriodo', de: '2026-09-01', ate: '2026-09-29'}, gestor);
+  const p = await e.call({action: 'performancePeriodo', de: '2026-09-01', ate: '2026-09-30'}, gestor);
   assert.equal(p.registros.find(x => x.id === 'mub-8').dia, '2026-09-18');
   const caio = JSON.parse(JSON.stringify(D.montar([{equipeId: null, liderId: '100003', membros: ['100003']}])));
   const r = await e.call({action: 'upsert', os: {...copia(e, 'mub-8'), alocacao: caio}}, gestor);
@@ -604,7 +604,7 @@ test('revisão: limpar a divisão não ressuscita a participação antiga (servi
   const g = gravada(e);
   assert.equal(g.alocacao, null);assert.equal(g.alocacaoLog.at(-1).acao, 'limpar');
   await espera(5);
-  const p = await e.call({action: 'performancePeriodo', de: '2026-09-01', ate: '2026-09-29'}, gestor);
+  const p = await e.call({action: 'performancePeriodo', de: '2026-09-01', ate: '2026-09-30'}, gestor);
   const reg = p.registros.find(x => x.id === '1');
   assert.equal(reg.confirmado, false);assert.equal(reg.fonte, 'sugestao');
   // Regra pura: a participação confirmada depois da limpeza vale; a de antes, não; sem divisão nunca, vale.
