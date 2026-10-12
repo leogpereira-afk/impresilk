@@ -2443,19 +2443,21 @@ Deno.serve(async (req: Request) => {
             const sn = (x: any) => x === "sim" || x === "nao" ? x : "";
             const rc = typeof os.retornoConf === "object" ? os.retornoConf : {};
             const PERGUNTAS = ["carroLimpo", "carroArrumado", "equipamentosOk", "semAvaria"];
-            const n: any = {};
-            for (const k of PERGUNTAS) n[k] = k in rc ? sn(rc[k]) : sn(antes?.[k]);
-            n.obs = String(("obs" in rc ? rc.obs : antes?.obs) ?? "").slice(0, 300);
-            const fotos = "fotos" in rc ? rc.fotos : antes?.fotos;
-            n.fotos = Array.isArray(fotos) ? fotos.filter((f: unknown) => typeof f === "string" && f).slice(0, 10) : [];
             /* A CONFERÊNCIA É DA VIAGEM (onda volta, 12/10/2026): o servidor
                carimba o dia da volta que ela confere (dia). O aparelho que
                confere uma viagem nova manda o dia dela: a mesma resposta da
-               viagem anterior, com outro dia, é conferência nova. A cópia que
-               só devolve o que está gravado (o mesmo dia, ou sem o dia) não
-               recarimba nada. */
+               viagem anterior, com outro dia, é conferência nova, e o que ela
+               não trouxe (observação, fotos, respostas) não vem da conferência
+               da outra viagem. A cópia que só devolve o que está gravado (o
+               mesmo dia, ou sem o dia) não recarimba nada. */
             const diaViagem = CONFERENCIA_ENTREGA.diaDaVolta(os);
             const outroDia = "dia" in rc && String(rc.dia ?? "").trim() !== String(antes?.dia ?? "").trim();
+            const base = outroDia ? null : antes;
+            const n: any = {};
+            for (const k of PERGUNTAS) n[k] = k in rc ? sn(rc[k]) : sn(base?.[k]);
+            n.obs = String(("obs" in rc ? rc.obs : base?.obs) ?? "").slice(0, 300);
+            const fotos = "fotos" in rc ? rc.fotos : base?.fotos;
+            n.fotos = Array.isArray(fotos) ? fotos.filter((f: unknown) => typeof f === "string" && f).slice(0, 10) : [];
             const mudou = PERGUNTAS.some((k) => n[k] !== sn(antes?.[k])) || outroDia;
             /* O ID DE 6 DÍGITOS EM porId (item 17 da fila de 11/10/2026): a
                pessoa é o ID do RH, não o login; o login vai em porConta. Sem

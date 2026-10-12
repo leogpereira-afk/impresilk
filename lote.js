@@ -886,13 +886,19 @@ const LOTE = (() => {
       const respostas = rc => PERGUNTAS().map(k => OPERACAO.respostaVolta(rc[k])).join(',');
       if (respostas(rcAtual) === respostas(rcDepois)) {
         const rc = {...rcAtual};
-        for (const k of PERGUNTAS()) rc[k] = OPERACAO.respostaVolta(rcAntes[k]);
+        /* A CONFERÊNCIA DE ANTES ERA DE OUTRA VIAGEM (onda volta, 12/10/2026):
+           o lote conferiu esta viagem (com o dia dela) por cima da conferência
+           de outra. Desfazer deixa esta viagem sem conferência; a outra fica
+           guardada na viagem dela pelo servidor e não volta para esta. */
+        const deOutraViagem = !!texto(rcDepois.dia) && texto(rcAntes.dia) !== texto(rcDepois.dia);
+        const deAntes = deOutraViagem ? {} : rcAntes;
+        for (const k of PERGUNTAS()) rc[k] = OPERACAO.respostaVolta(deAntes[k]);
         // A observação e as fotos: voltam ao antes só se estão como o lote deixou; as de outra pessoa ficam.
-        if (texto(rcAtual.obs) === texto(rcDepois.obs)) rc.obs = String(rcAntes.obs || '');
+        if (texto(rcAtual.obs) === texto(rcDepois.obs)) rc.obs = String(deAntes.obs || '');
         else notas.push('a observação da volta mudou depois do lote e ficou');
-        if (JSON.stringify(lista(rcAtual.fotos)) === JSON.stringify(lista(rcDepois.fotos))) rc.fotos = copia(lista(rcAntes.fotos));
+        if (JSON.stringify(lista(rcAtual.fotos)) === JSON.stringify(lista(rcDepois.fotos))) rc.fotos = copia(lista(deAntes.fotos));
         else notas.push('as fotos da volta mudaram depois do lote e ficaram');
-        rc.por = String(rcAntes.por || ''); rc.em = String(rcAntes.em || '');
+        rc.por = String(deAntes.por || ''); rc.em = String(deAntes.em || '');
         volta.retornoConf = rc;
         algo = true;
       } else if (respostas(rcAtual) !== respostas(rcAntes)) notas.push('a conferência da volta mudou depois do lote e ficou como está');
