@@ -693,32 +693,6 @@ async function perfPeriodosFechados() {
   return [...porPeriodo.values()].sort((a,b)=>a.de.localeCompare(b.de)||a.ate.localeCompare(b.ate));
 }
 const perfPeriodoDoDia = (fechados:any[], dia:string) => (fechados||[]).find((f:any)=>dia>=f.de&&dia<=f.ate)||null;
-/* O PERÍODO FECHADO EM QUE A O.S. JÁ ENTROU INTEIRA (D1 da revisão da onda
-   fechamento), com o dia em que ela contou. ONDA VOLTA (12/10/2026): a v167
-   achava o dia pelo estado de HOJE da O.S. (o dia do lançamento ou da
-   finalização) e o Reabrir apaga o finalizadaEm: a O.S. selada inteira em
-   novembro, reaberta em dezembro, recebia a primeira conferência por item com
-   dia de dezembro e o mesmo valor contava nos dois meses. Agora a trava
-   procura o id da O.S. nos fechamentos que valem (a última revisão de cada
-   período fechado), sem depender do estado de hoje: a O.S. está inteira no
-   selo quando um registro dele tem o id dela (a entrega por item tem o id
-   "<O.S.>::entrega:<id>" e não conta aqui). Só a linha da última revisão de
-   cada período é lida, e só a lista de registros dela. */
-async function perfInteiraFechada(osId:string, fechados:any[]) {
-  const vale=(fechados||[]).filter((f:any)=>f&&f.ultimoId);
-  if(!osId||!vale.length)return null;
-  const porId=new Map<string,any[]>();
-  for(let i=0;i<vale.length;i+=100){
-    const {data,error}=await sb.from("pcp_registros").select("id, registros:registro->registros").eq("colecao","performance_fechamentos").eq("apagado",false).in("id",vale.slice(i,i+100).map((f:any)=>f.ultimoId));
-    if(error)throw new Error(error.message);
-    for(const row of (data||[]) as any[])porId.set(String(row.id),Array.isArray(row.registros)?row.registros:[]);
-  }
-  for(const f of vale){
-    const r=(porId.get(f.ultimoId)||[]).find((x:any)=>String(x?.id??"")===osId);
-    if(r)return {dia:/^\d{4}-\d{2}-\d{2}$/.test(String(r.dia||""))?String(r.dia):"",de:f.de,ate:f.ate,ultimaRevisao:f.ultimaRevisao};
-  }
-  return null;
-}
 /* OS CARROS DO ATIVOS DO PAINEL (só o id e o nome), para a chave da volta
    (revisão da onda volta, D1): a mesma lista e o mesmo filtro do elenco. */
 async function ativosDoPainel():Promise<any[]> {
@@ -740,6 +714,49 @@ function seguirCorrecaoDaVolta(c:any, existing:any, os:any, tipo:"conf"|"decl") 
   const daViagemAntiga=tipo==="conf"?CONFERENCIA_ENTREGA.confDaViagemDoDia(existing,mov.de):CONFERENCIA_ENTREGA.declaracaoDaViagemDoDia(existing,mov.de);
   const era=dc?dc===mov.de:!!daViagemAntiga;
   return era?{...c,dia:mov.para}:c;
+}
+/* AS O.S. QUE JÁ ENTRARAM INTEIRAS NOS PERÍODOS FECHADOS (D1 da revisão da
+   onda fechamento; onda volta e revisão da onda volta, D4): o mapa id da
+   O.S. -> {dia em que contou, de, ate, ultimaRevisao}, lido da revisão que vale
+   (a última) de cada período fechado. A O.S. está inteira no selo quando um
+   registro dele tem o id dela (a entrega por item tem o id
+   "<O.S.>::entrega:<id>" e não conta). O fechamento novo guarda essa lista em
+   `inteiras` (fora do conteúdo e do hash), e só ela é lida; o selo sem a
+   lista (anterior a esta revisão) é lido pelos registros. `exceto`: o período
+   que está sendo apurado (ele não exclui a si mesmo). */
+async function perfInteirasFechadas(fechados:any[], exceto:{de:string,ate:string}|null=null) {
+  const vale=(fechados||[]).filter((f:any)=>f&&f.ultimoId&&!(exceto&&f.de<=exceto.ate&&f.ate>=exceto.de));
+  const mapa=new Map<string,any>();
+  if(!vale.length)return mapa;
+  const porId=new Map<string,any[]>(), semLista:string[]=[];
+  for(let i=0;i<vale.length;i+=100){
+    const {data,error}=await sb.from("pcp_registros").select("id, inteiras:registro->inteiras").eq("colecao","performance_fechamentos").eq("apagado",false).in("id",vale.slice(i,i+100).map((f:any)=>f.ultimoId));
+    if(error)throw new Error(error.message);
+    for(const row of (data||[]) as any[]){if(Array.isArray(row.inteiras))porId.set(String(row.id),row.inteiras);else semLista.push(String(row.id));}
+  }
+  for(let i=0;i<semLista.length;i+=50){
+    const {data,error}=await sb.from("pcp_registros").select("id, registros:registro->registros").eq("colecao","performance_fechamentos").eq("apagado",false).in("id",semLista.slice(i,i+50));
+    if(error)throw new Error(error.message);
+    for(const row of (data||[]) as any[])porId.set(String(row.id),(Array.isArray(row.registros)?row.registros:[]).filter((r:any)=>r&&!String(r.id??"").includes("::entrega:")).map((r:any)=>({id:String(r.id??""),dia:String(r.dia??"")})));
+  }
+  for(const f of vale)for(const r of porId.get(f.ultimoId)||[]){
+    const id=String(r?.id??"");
+    if(!id||mapa.has(id))continue;
+    mapa.set(id,{dia:/^\d{4}-\d{2}-\d{2}$/.test(String(r.dia||""))?String(r.dia):"",de:f.de,ate:f.ate,ultimaRevisao:f.ultimaRevisao});
+  }
+  return mapa;
+}
+/* O PERÍODO FECHADO EM QUE A O.S. JÁ ENTROU INTEIRA (D1 da revisão da onda
+   fechamento), com o dia em que ela contou. ONDA VOLTA (12/10/2026): a v167
+   achava o dia pelo estado de HOJE da O.S. (o dia do lançamento ou da
+   finalização) e o Reabrir apaga o finalizadaEm: a O.S. selada inteira em
+   novembro, reaberta em dezembro, recebia a primeira conferência por item com
+   dia de dezembro e o mesmo valor contava nos dois meses. Agora a trava
+   procura o id da O.S. nos fechamentos que valem, sem depender do estado de
+   hoje. */
+async function perfInteiraFechada(osId:string, fechados:any[]) {
+  if(!osId)return null;
+  return (await perfInteirasFechadas(fechados)).get(osId)||null;
 }
 /* A FRASE DO MÊS FECHADO NA CONFERÊNCIA (revisão da onda fechamento, U2): não
    empurra a pessoa a trocar a data para um mês aberto (a entrega de setembro
@@ -860,6 +877,25 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
     const proximo=String(rows[rows.length-1].id);if(proximo<=after)throw new Error("Paginação inconsistente. Refaça a consulta.");after=proximo;
   }
   if(!terminou)throw new Error("Consulta excedeu o limite; nenhum fechamento foi criado.");
+  /* A O.S. QUE JÁ ENTROU INTEIRA NUM PERÍODO FECHADO NÃO CONTA DE NOVO EM
+     OUTRO (revisão da onda volta, D4). A O.S. selada inteira em novembro,
+     reaberta e finalizada de novo em dezembro sem lançamento, contava outra
+     vez em dezembro (a comissão em dobro). A finalização passa pela fila do
+     aparelho e não pode ser recusada: a regra é na leitura. Ela sai da base
+     do outro período e vai em `jaFechadas` (fora do conteúdo e do hash), para
+     a tela avisar. Vale a revisão que vale (a última) de cada período. */
+  const jaFechadas:any[]=[];
+  if(lista.some(o=>!o._conferencia)){
+    const inteirasFechadas=await perfInteirasFechadas(await perfPeriodosFechados(),periodo);
+    for(let i=lista.length-1;i>=0;i--){
+      const o=lista[i];if(o._conferencia)continue;
+      const f=inteirasFechadas.get(String(o.id));
+      if(!f)continue;
+      jaFechadas.push({osId:String(o.id),numero:String(o.numero||""),dia:o._dia,fechadoDe:f.de,fechadoAte:f.ate,diaNoFechamento:f.dia,revisao:f.ultimaRevisao});
+      lista.splice(i,1);
+    }
+    jaFechadas.reverse();
+  }
   const valores:Record<string,number>={};
   const valoresItens:Record<string,any[]>={};
   const nums=[...new Set([...lista,...aLancar].map(o=>String(o.numero || "").trim()).filter(Boolean))];
@@ -1084,7 +1120,9 @@ async function perfFonte(body:any, {estrito=true, reguaPerdas=REGRAS.REGUA_PERDA
     aLancar:aLancar.length,aLancarCentavos,aLancarSemValor:foraCentavos.filter((c:any)=>c===null).length,
     aLancarNumeros:[...new Set(aLancar.map((o:any)=>String(o.numero||"").trim()).filter(Boolean))].sort().slice(0,100),
     pctValor,baixa:registros.length+aLancar.length>0&&pctValor<50};
-  return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP.",cobertura};
+  // As O.S. inteiras deste período (D4): o fechamento as guarda fora do hash, para a leitura dos outros períodos.
+  const inteiras=registros.filter((r:any)=>!String(r.id).includes("::entrega:")).map((r:any)=>({id:String(r.id),dia:String(r.dia||"")}));
+  return {...conteudo,hash:await perfHash(conteudo),consultadoEm:new Date().toISOString(),completo:true,fonte:"Todas as instalações registradas no PCP no período; não certifica serviços ausentes do ERP.",cobertura,inteiras,jaFechadas};
 }
 /* A RÉGUA DO SELO (A1, auditoria da v164, 11/10/2026). A tela fecha com a
    nota por valor (performance.js manda notaPorValor:true na apuração e no

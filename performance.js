@@ -1758,7 +1758,14 @@ function perfCoberturaHTML(regs, f) {
   // A linha da cobertura do mês, no topo, já diz as baixas a lançar (U4): aqui só sem ela (montagem, operação).
   const lancar = (pendLancar && !perfCoberturaMes(regs) ? `<p class="perf-cob-extra">${pendLancar} ${pendLancar === 1 ? 'baixa do ERP deste período espera lançamento em Entregas e ainda não conta' : 'baixas do ERP deste período esperam lançamento em Entregas e ainda não contam'} aqui. <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento</button></p>` : '')
     + (segurasERP ? `<p class="perf-cob-extra perf-cob-erp-saldo">${segurasERP} ${segurasERP === 1 ? 'entrega o ERP diz entregue e o PCP ainda tem saldo' : 'entregas o ERP diz entregues e o PCP ainda tem saldo'}; decida em Entregas. <button type="button" class="inline-link" data-perf-erp-saldo>Abrir a lista</button></p>` : '');
-  const avisos = perfAvisosHTML(true, true);
+  /* A O.S. QUE JÁ ENTROU INTEIRA NUM MÊS FECHADO (revisão da onda volta, D4):
+     reaberta e finalizada de novo em outro mês, ela não conta de novo (o
+     servidor a tira da base e manda em jaFechadas, fora do hash). A tela diz
+     quais são, para ninguém procurar a entrega que "sumiu". */
+  const fonteAtual = perfFonteAtual(), jaF = fonteAtual && Array.isArray(fonteAtual.jaFechadas) ? fonteAtual.jaFechadas : [];
+  const brDia = d => String(d || '').split('-').reverse().join('/');
+  const jaFechadasTxt = jaF.length ? `<p class="perf-cob-extra perf-cob-ja-fechadas" role="note">${jaF.length === 1 ? '1 O.S. já entrou inteira' : jaF.length + ' O.S. já entraram inteiras'} no fechamento de outro período e não ${jaF.length === 1 ? 'conta' : 'contam'} de novo aqui: ${jaF.slice(0, 8).map(x => `O.S. ${esc(x.numero || x.osId)} (fechamento de ${esc(brDia(x.fechadoDe))} a ${esc(brDia(x.fechadoAte))}, revisão ${esc(x.revisao)})`).join(', ')}${jaF.length > 8 ? ' e outras' : ''}. A finalização nova não é recusada, só não conta outra vez; o ajuste de mês fechado ainda não existe: fale com a gestão.</p>` : '';
+  const avisos = jaFechadasTxt + perfAvisosHTML(true, true);
   if (!total) return `<section class="perf-cobertura perf-cob-linha" aria-label="Cobertura das participações"><p>Nenhuma entrega finalizada neste período.</p>${lancar}${avisos}</section>`;
   // As marcas das sugeridas: a divisão que uma aba antiga deixou para trás, a que espera o RH e a quebrada.
   const marcas = [k.desatualizadas ? `${k.desatualizadas} com a divisão desatualizada` : '', k.conferirRH ? `${k.conferirRH} com pessoa a conferir no RH` : '', incons ? `${incons} com percentuais inconsistentes` : ''].filter(Boolean);

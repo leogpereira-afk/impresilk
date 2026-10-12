@@ -98,7 +98,8 @@ test('D1: vale a última revisão do período: a O.S. que saiu do selo na revis�
   assert.deepEqual(fonte.registros,[]);
   const f1=(await e.call({action:'performanceFechamentos',...NOV},gestor)).fechamentos[0];
   e.db.pcp_registros.push({colecao:'performance_fechamentos',id:'2026-11-01:2026-11-30:000002',apagado:false,atualizado_em:'2026-12-03T12:00:00Z',
-    registro:{...f1,id:'2026-11-01:2026-11-30:000002',revisao:2,anterior:f1.id,registros:[],hash:fonte.hash,fechadoEm:'2026-12-03T12:00:00Z'}});
+    // Revisão da onda volta (D4): o fechamento guarda a lista das O.S. inteiras (inteiras); a revisão fabricada aqui leva a dela, vazia.
+    registro:{...f1,id:'2026-11-01:2026-11-30:000002',revisao:2,anterior:f1.id,registros:[],inteiras:[],hash:fonte.hash,fechadoEm:'2026-12-03T12:00:00Z'}});
   const r=await e.call({action:'conferenciaEntrega',osId:'w5',rev:linha(e,'w5').registro.rev,entrega:conf('e1','2026-12-03',[sel(o,0,4)])},gestor);
   assert.equal(r.ok,true,JSON.stringify(r));
 });

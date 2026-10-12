@@ -407,3 +407,34 @@ test('revisão volta: U5, o carro com nome repetido no Ativos tem opções disti
   // A O.S. antiga só com o nome repetido: a opção pede a placa.
   assert.match(ctx.optionsVeiculoCasa('Furgão repetido fictício',''),/selected>Furgão repetido fictício · escolha a placa \(nome repetido no Ativos\)/);
 });
+
+/* ─────────────────────────────── D4 ─────────────────────────────── */
+test('revisão volta: D4, a O.S. selada inteira, reaberta e finalizada de novo sem lançamento, não conta outra vez no mês novo, e a tela avisa', async()=>{
+  const o=osBase('w1','90201',{valorTotal:8500,finalizadaEm:'2026-11-10T15:00:00Z',finalizadoPor:'Gestor fictício'});
+  const e=await edge('pcp-sync',banco([o]));
+  relogio(e,'2026-12-02T12:00:00Z');
+  const nov=await fechar(e,NOV,'d4');
+  assert.deepEqual(nov.registros.map(r=>r.id),['w1']);
+  relogio(e,'2026-12-05T12:00:00Z');
+  await gravar(e,'w1',{finalizadaEm:'',finalizadoPor:''});
+  relogio(e,'2026-12-06T12:00:00Z');
+  await gravar(e,'w1',{finalizadaEm:'2026-12-06T12:00:00Z',finalizadoPor:'Gestor fictício',justificativaConclusao:'Finalização fictícia de teste'});
+  assert.ok(reg(e,'w1').finalizadaEm,'a finalização passa (não é recusada)');
+  const dez=await e.call({action:'performancePeriodo',...DEZ,notaPorValor:true},gestor);
+  assert.deepEqual(dez.registros.map(r=>r.osId||r.id),[],'caso ruim: contava de novo em dezembro, com o valor inteiro');
+  assert.deepEqual(dez.jaFechadas.map(x=>[x.osId,x.fechadoDe,x.revisao]),[['w1','2026-11-01',1]]);
+  assert.deepEqual(nov.inteiras,[{id:'w1',dia:'2026-11-10'}],'o fechamento guarda as O.S. inteiras (fora do hash), e só elas são lidas');
+  /* Novembro: o selo fica como foi. O recálculo de novembro muda porque a O.S.
+     saiu de novembro ao ser reaberta (Aprovar e Exportar de novembro dão 409
+     "A fonte mudou", sem pagar errado), como antes desta revisão. */
+  // A tela da Performance avisa.
+  const src=ler('performance.js');
+  const c={STORE:{getCFG:()=>({performancePCP:{equipes:[],participacoes:[]}}),getAllOS:()=>[],getQueue:()=>[]},STATE:{user:{papel:'pcp'},_perfPessoaMedida:'nota',_perfRankMedida:'entregas'},
+    periodoOuMes:()=>({de:'2026-12-01',ate:'2026-12-31'}),classificarEntregas:os=>({instalacoes:os,aLancar:[]}),OPERACAO:{emIntervalo:()=>true,equipe:os=>os.equipe||[]},diaEntrega:()=>'2026-12-06',valorDaOS:o=>o.valorTotal,
+    nomeExibicaoCasa:n=>({chave:n,nome:n}),pessoasRH:()=>[],avatarRH:()=>'',esc:s=>String(s??''),dinheiroCasa:n=>'VALOR-'+n,filtroPeriodoHTML:()=>''};
+  vm.createContext(c);vm.runInContext(src,c);
+  c.__dez=dez;vm.runInContext("perfRemoto.chave=perfChave();perfRemoto.dados={...__dez,consultadoEm:'2026-12-06T12:00:00'};",c);
+  const faixa=c.perfCoberturaHTML([],{de:'2026-12-01',ate:'2026-12-31'});
+  assert.match(faixa,/1 O\.S\. já entrou inteira no fechamento de outro período e não conta de novo aqui: O\.S\. 90201 \(fechamento de 01\/11\/2026 a 30\/11\/2026, revisão 1\)/);
+  assert.ok(!/—/.test(faixa.replace(/<[^>]+>/g,'')),'sem travessão no texto');
+});
