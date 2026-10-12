@@ -18,6 +18,8 @@ const comissaoDinheiro=c=>c==null?'Pendente':dinheiroCasa(c/100);
 function comissaoDigitalCurta(h){const t=String(h||'').trim();return t?t.slice(0,8):'';}
 const comissaoDigitalHTML=h=>comissaoDigitalCurta(h)?'<code class="perf-digital">'+esc(comissaoDigitalCurta(h))+'</code>':'';
 const comissaoIdTxt=id=>/^\d{6}$/.test(String(id||''))?' (cadastro '+esc(id)+')':'';
+/* COMO A APROVAÇÃO FOI FEITA (D-014): titular, substituto (de quem), admin ou pcp (sem configuração, D-013). A aprovação antiga não tem a marca. */
+const comissaoComoTxt=r=>{const c=r&&r.tipo==='aprovacao'&&r.autor?r.autor.como:'';return c==='titular'?', titular da aprovação':c==='substituto'?', substituto do titular'+comissaoIdTxt(r.autor.titularId):c==='admin'?', como admin':'';};
 /* A REVISÃO SUBSTITUÍDA (item 12 da fila de 11/10/2026): o seletor e o
    demonstrativo mostravam a revisão antiga sem dizer que foi trocada. */
 function comissaoSubstituta(r, revisoes) {
@@ -83,7 +85,7 @@ function comissaoExportadoHTML(out, antes) {
 function comissaoResumoHTML(r, revisoes, exportacoes, opcoes={}) {
   if(!r)return '<p>Ainda não há revisão financeira neste período.</p>';
   const a=r.apuracao, subst=comissaoSubstituta(r,revisoes);
-  return `${subst?`<p class="perf-aviso comissao-substituida" role="note"><strong>Revisão ${esc(r.revisao)}, substituída pela ${esc(subst.revisao)}</strong> (${esc(comissaoRotulo(subst.tipo))} de ${esc(comissaoData(subst.em))}). Este demonstrativo é histórico; o que vale é a última revisão.</p>`:''}<h4>Revisão ${esc(r.revisao)}${subst?`, substituída pela ${esc(subst.revisao)}`:''} · ${r.tipo==='aprovacao'?'Aprovada pela gestão':'Prévia para revisão'} · ${a.config.modo==='efetivo'?'Programa efetivo':'Teste, sem exportação para pagamento'}</h4><p>${r.tipo==='aprovacao'?'Aprovada por ':a.compensacaoDe?'Compensação preparada por ':'Prévia de '}${esc(r.autor?.nome)}${comissaoIdTxt(r.autor?.porId)} · ${esc(comissaoData(r.em))} · ${esc(r.motivo)}</p>${comissaoDigitalCurta(r.hash)?`<p>Impressão digital desta revisão: ${comissaoDigitalHTML(r.hash)}. É a mesma do PDF do demonstrativo.</p>`:''}${a.compensacaoDe?'<p><strong>Compensação integral da aprovação anterior.</strong> O demonstrativo zera o saldo aprovado deste período e mostra diferenças negativas. Não executa devolução de dinheiro; exige conciliação no financeiro.</p>':''}<p>Comissão apurada: <strong>${comissaoDinheiro(a.totalCentavos)}</strong>${a.pendencias.length?' · total parcial, existem pendências':''}.</p>${a.pendencias.length?`<ul>${a.pendencias.map(p=>`<li>${esc(p)}</li>`).join('')}</ul>`:''}${Array.isArray(a.avisos)&&a.avisos.length?`<div class="perf-aviso comissao-avisos" role="note"><p><strong>Pendências de ajuste (não travam a aprovação):</strong></p><ul>${a.avisos.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></div>`:''}
+  return `${subst?`<p class="perf-aviso comissao-substituida" role="note"><strong>Revisão ${esc(r.revisao)}, substituída pela ${esc(subst.revisao)}</strong> (${esc(comissaoRotulo(subst.tipo))} de ${esc(comissaoData(subst.em))}). Este demonstrativo é histórico; o que vale é a última revisão.</p>`:''}<h4>Revisão ${esc(r.revisao)}${subst?`, substituída pela ${esc(subst.revisao)}`:''} · ${r.tipo==='aprovacao'?'Aprovada pela gestão':'Prévia para revisão'} · ${a.config.modo==='efetivo'?'Programa efetivo':'Teste, sem exportação para pagamento'}</h4><p>${r.tipo==='aprovacao'?'Aprovada por ':a.compensacaoDe?'Compensação preparada por ':'Prévia de '}${esc(r.autor?.nome)}${comissaoIdTxt(r.autor?.porId)}${comissaoComoTxt(r)} · ${esc(comissaoData(r.em))} · ${esc(r.motivo)}</p>${comissaoDigitalCurta(r.hash)?`<p>Impressão digital desta revisão: ${comissaoDigitalHTML(r.hash)}. É a mesma do PDF do demonstrativo.</p>`:''}${a.compensacaoDe?'<p><strong>Compensação integral da aprovação anterior.</strong> O demonstrativo zera o saldo aprovado deste período e mostra diferenças negativas. Não executa devolução de dinheiro; exige conciliação no financeiro.</p>':''}<p>Comissão apurada: <strong>${comissaoDinheiro(a.totalCentavos)}</strong>${a.pendencias.length?' · total parcial, existem pendências':''}.</p>${a.pendencias.length?`<ul>${a.pendencias.map(p=>`<li>${esc(p)}</li>`).join('')}</ul>`:''}${Array.isArray(a.avisos)&&a.avisos.length?`<div class="perf-aviso comissao-avisos" role="note"><p><strong>Pendências de ajuste (não travam a aprovação):</strong></p><ul>${a.avisos.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></div>`:''}
   <div class="casa-tabela-wrap"><table class="casa-tabela comissao-tabela"><thead><tr><th>O.S. / entrega</th><th class="comissao-num">Base líquida</th><th class="comissao-num">Descontos</th><th>Decisão / pontos do programa</th><th class="comissao-num">Comissão</th><th class="comissao-num">Interna</th><th class="comissao-num">Externa</th></tr></thead><tbody>${a.linhas.map(l=>`<tr><td>${esc(l.numero)} · ${esc(comissaoData(l.dia))}<small class="bloco">${esc(l.entregaId||'Integral')} · ${esc(l.origemValor||'')}</small></td><td class="comissao-num">${comissaoDinheiro(l.baseLiquidaCentavos)}</td><td class="comissao-num">${l.descontoCentavos==null?'':comissaoDinheiro(l.descontoCentavos)}<small class="bloco">${esc(l.desconto)}</small></td><td>${esc(comissaoRotulo(l.decisao))} · ${l.pontos==null?'pendente':esc(Number(l.pontos.toFixed(4)).toLocaleString('pt-BR'))}<small class="bloco">${l.pendencias.map(esc).join('; ')}</small></td>${l.decisao==='origem_a_definir'?'<td colspan="3">Pendente: não paga e não perde até a origem ser definida</td>':`<td class="comissao-num">${comissaoDinheiro(l.comissaoCentavos)}</td><td class="comissao-num">${comissaoDinheiro(l.internaCentavos)}</td><td class="comissao-num">${comissaoDinheiro(l.externaCentavos)}</td>`}</tr>`).join('')}</tbody></table></div>
   ${comissaoPessoasHTML(a,revisoes)}${comissaoExportacoesHTML(r,exportacoes,opcoes)}<h4>Reconhecimento: ${esc(comissaoRotulo(a.reconhecimento.situacao))}</h4><p>${esc(a.reconhecimento.aviso)}</p><dl>${Object.entries(a.reconhecimento.criterios).filter(([k])=>k!=='avaliacoes').map(([k,v])=>`<dt>${esc(comissaoRotulo(k))}</dt><dd>${esc(v)}</dd>`).join('')}</dl><ul>${(a.reconhecimento.equipes||[]).map(e=>`<li>${esc(e.nome)} · ${e.pendente?'pontos pendentes':esc(Number(e.pontos.toFixed(4)).toLocaleString('pt-BR'))+' O.S. equivalentes elegíveis'} · ${esc(comissaoRotulo(e.situacao))}${e.substituicao?' · houve substituição':''}${e.solo?' · composição solo':''}${e.empate?' · empate':''}<small class="bloco">${esc(e.justificativa)}</small></li>`).join('')}</ul>`;
 }
@@ -131,6 +133,68 @@ function comissaoConferenciaTxt(c) {
   const pend=(c.pendentes||[]).map(x=>x.numero||x.osId);
   return (c.foraDoDinheiro?` ${c.foraDoDinheiro} ${c.foraDoDinheiro===1?'entrega mudou':'entregas mudaram'} depois do fechamento fora do dinheiro: não muda a comissão.`:'')+(pend.length?` Pendente para a próxima revisão ou compensação: O.S. ${pend.join(', ')} (a origem do retrabalho mudou depois do fechamento).`:'');
 }
+/* QUEM APROVA A COMISSÃO HOJE (D-013 e D-014): a linha no diálogo da
+   comissão e a seção em Configurações. A configuração é gravada só pelo admin
+   (ação comissaoAprovadorGravar, na hora, fora da fila), sempre com motivo;
+   o servidor carimba quem e quando e guarda o diário. */
+function comissaoAprovadorQuemTxt(a){
+  if(!a||a.modo==='d013'||!a.modo)return 'Quem aprova: a gestão do PCP (pcp ou admin), sem titular designado.';
+  const pessoa=(nome,id)=>(nome||'cadastro '+id)+(/^\d{6}$/.test(String(id||''))&&nome?' (cadastro '+id+')':'');
+  if(a.modo==='substituto')return `Quem aprova hoje: ${pessoa(a.nome,a.id)}, substituto${a.titularNome||a.titularId?' de '+pessoa(a.titularNome,a.titularId):''}${a.ate?', até '+comissaoDiaBR(a.ate):''}. O admin também aprova.`;
+  return `Quem aprova: ${pessoa(a.nome,a.id)}, titular. O admin também aprova.`;
+}
+const comissaoDiaBR=d=>/^\d{4}-\d{2}-\d{2}$/.test(String(d||''))?d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4):'';
+function comissaoAprovadorLinhaHTML(a){
+  if(!a)return '';
+  return `<p class="comissao-aprovador">${esc(comissaoAprovadorQuemTxt(a))}${a.podeAprovar===false?` <strong>${esc(a.motivo||'Você não aprova a comissão hoje.')}</strong>`:''}</p>`;
+}
+let comissaoAprovadorDados={carregando:false,dados:null,erro:''};
+function comissaoAprovadorSecaoHTML(){
+  const papel=String((typeof STATE!=='undefined'&&STATE.user&&STATE.user.papel)||'');
+  if(!['admin','pcp'].includes(papel))return '';
+  const x=comissaoAprovadorDados,d=x.dados,admin=papel==='admin';
+  if(x.erro&&!d)return `<div class="cfg-section" id="cfg-aprovador"><h3>✅ Quem aprova a comissão</h3><p class="text-muted">${esc(x.erro)}</p><button class="btn-ghost btn-sm" type="button" data-aprov-ler>Tentar de novo</button></div>`;
+  if(!d)return '<div class="cfg-section" id="cfg-aprovador"><h3>✅ Quem aprova a comissão</h3><p class="text-muted">Consultando…</p></div>';
+  const c=d.config,s=c&&c.substituto,v=d.vigente||{};
+  const quem=comissaoAprovadorQuemTxt({...v,titularNome:c&&c.titularNome});
+  const opcoes=(sel)=>{const ps=(typeof pessoasRH==='function'?pessoasRH():[]).filter(p=>p&&p.ativo!==false&&/^\d{6}$/.test(String(p.id||''))&&!p.idRepetido);return '<option value="">Escolha a pessoa</option>'+ps.map(p=>`<option value="${esc(p.id)}"${p.id===sel?' selected':''}>${esc(p.nome)} · ${esc(p.id)}</option>`).join('');};
+  const subTxt=s?`Substituto: ${esc(s.nome||'cadastro '+s.id)} (cadastro ${esc(s.id)}), de ${esc(comissaoDiaBR(s.de))}${s.ate?' até '+esc(comissaoDiaBR(s.ate)):', sem data de fim'}${s.vigente?'':' (fora do prazo agora)'}. Motivo: ${esc(s.motivo||'')}`:'Sem substituto.';
+  const diario=(d.diario||[]).slice(0,10).map(e=>`<li>${esc(comissaoData(e.em))} · ${esc(e.por)}${e.porId?' ('+esc(e.porId)+')':''} · ${esc({titular:'titular designado',substituto:'substituto designado',encerrar:'substituto encerrado'}[e.operacao]||e.operacao)}: ${esc(e.operacao==='titular'?(e.titularNome||e.titularId):e.operacao==='substituto'?(e.substitutoNome||e.substitutoId)+' de '+comissaoDiaBR(e.de)+(e.ate?' até '+comissaoDiaBR(e.ate):''):'')} · ${esc(e.motivo)}</li>`).join('');
+  return `<div class="cfg-section" id="cfg-aprovador"><h3>✅ Quem aprova a comissão</h3>
+    <p><strong>${esc(quem)}</strong></p>
+    <p class="text-muted">Titular: ${c?esc((c.titularNome||'cadastro '+c.titularId)+' (cadastro '+c.titularId+')'):'nenhum (vale a regra de sempre: pcp e admin aprovam)'}. ${subTxt}</p>
+    ${(d.avisos||[]).map(a=>`<p class="perf-aviso">${esc(a)}</p>`).join('')}
+    ${admin?`<form class="aprov-form" data-aprov-op="titular"><label>Titular <select name="pessoa">${opcoes(c&&c.titularId)}</select></label><label>Motivo <input name="motivo" minlength="15" maxlength="500" required></label><button class="btn-ghost btn-sm" type="submit">Designar titular</button></form>
+    <form class="aprov-form" data-aprov-op="substituto"><label>Substituto <select name="pessoa">${opcoes('')}</select></label><label>Início <input type="date" name="de" value="${esc(d.hoje||'')}"></label><label>Fim (opcional) <input type="date" name="ate"></label><label>Motivo <input name="motivo" minlength="15" maxlength="500" required></label><button class="btn-ghost btn-sm" type="submit">Designar substituto</button></form>
+    ${s?`<form class="aprov-form" data-aprov-op="encerrar"><label>Motivo <input name="motivo" minlength="15" maxlength="500" required></label><button class="btn-ghost btn-sm" type="submit">Encerrar o substituto</button></form>`:''}`:'<p class="text-muted">Só o admin designa o titular e o substituto.</p>'}
+    <p role="alert" class="aprov-erro"></p>
+    ${diario?`<details><summary>Diário das mudanças</summary><ul>${diario}</ul></details>`:''}
+  </div>`;
+}
+async function comissaoAprovadorCarregar(repintar){
+  if(comissaoAprovadorDados.carregando)return;
+  comissaoAprovadorDados={...comissaoAprovadorDados,carregando:true};
+  try{const r=await STORE.api({action:'comissaoAprovadorLer'});if(!r||!('vigente' in r))throw new Error((r&&r.error)||'Resposta incompleta.');comissaoAprovadorDados={carregando:false,dados:r,erro:''};}
+  catch(e){comissaoAprovadorDados={carregando:false,dados:comissaoAprovadorDados.dados,erro:(e&&e.message)||'Sem conexão com o servidor.'};}
+  if(typeof repintar==='function')repintar();
+}
+function comissaoAprovadorWire(el,repintar){
+  const sec=el&&el.querySelector?el.querySelector('#cfg-aprovador'):null;
+  if(!sec)return;
+  if(!comissaoAprovadorDados.dados&&!comissaoAprovadorDados.carregando&&!comissaoAprovadorDados.erro)comissaoAprovadorCarregar(repintar);
+  const ler=sec.querySelector('[data-aprov-ler]');if(ler)ler.onclick=()=>{comissaoAprovadorDados={...comissaoAprovadorDados,erro:''};comissaoAprovadorCarregar(repintar);};
+  sec.querySelectorAll('form[data-aprov-op]').forEach(form=>{form.onsubmit=async ev=>{
+    if(ev&&ev.preventDefault)ev.preventDefault();
+    const op=form.dataset.aprovOp,campo=n=>form.querySelector(`[name="${n}"]`),val=n=>String((campo(n)&&campo(n).value)||'').trim(),alerta=sec.querySelector('.aprov-erro');
+    const corpo={action:'comissaoAprovadorGravar',operacao:op,motivo:val('motivo'),requestId:crypto.randomUUID()};
+    if(op==='titular')corpo.titularId=val('pessoa');
+    if(op==='substituto'){corpo.substitutoId=val('pessoa');corpo.de=val('de');if(val('ate'))corpo.ate=val('ate');}
+    const botao=form.querySelector('button');if(botao)botao.disabled=true;
+    try{const r=await STORE.api(corpo);if(!r||!('vigente' in r))throw new Error((r&&r.error)||'Não foi possível gravar.');comissaoAprovadorDados={carregando:false,dados:r,erro:''};if(typeof toast==='function')toast('Quem aprova a comissão: gravado.','success');if(typeof repintar==='function')repintar();}
+    catch(e){if(alerta)alerta.textContent=(e&&e.message)||'Não foi possível gravar.';}
+    finally{if(botao)botao.disabled=false;}
+  };});
+}
 async function perfComissaoAbrir() {
   const fonte=perfFonteAtual();
   if(!fonte?.fechadoEm)return toast('Selecione uma revisão fechada em Base e fechamento para apurar a comissão.','error');
@@ -144,7 +208,7 @@ async function perfComissaoAbrir() {
     d.querySelector('p')?.remove();
     const corpo=d.querySelector('.perf-dialog-corpo')||d.querySelector('section')||d;
     // O diálogo mantém o botão nativo de fechar; conteúdo criado em um filho próprio.
-    const conteudo=document.createElement('div');conteudo.innerHTML=`<p>Fechamento operacional · revisão ${esc(fonte.revisao)}${comissaoDigitalCurta(fonte.hash)?` · impressão digital ${comissaoDigitalHTML(fonte.hash)}`:""}. Cada revisão financeira preserva sua configuração, evidências e decisões. Uma aprovação não efetua pagamento.</p><label>Revisão financeira <select id="comissao-versao">${revisoes.map(r=>`<option value="${esc(r.id)}">${r.revisao} · ${esc(comissaoRotulo(r.tipo))} · ${esc(comissaoData(r.em))}${comissaoSubstituta(r,revisoes)?` · substituída pela ${comissaoSubstituta(r,revisoes).revisao}`:''}</option>`).join('')}</select></label><div id="comissao-resumo">${comissaoResumoHTML(ultima,revisoes,exportacoes)}</div><p><button type="button" class="btn-primary" id="comissao-nova">Configurar e criar nova prévia</button> <button type="button" class="btn-ghost" id="comissao-aprovar">Revisar e aprovar</button> <button type="button" class="btn-ghost" id="comissao-compensar">Preparar compensação integral</button> <button type="button" class="btn-ghost" id="comissao-exportar">Exportar para conferência de pagamento</button> <button type="button" class="btn-ghost" id="comissao-pdf">PDF do demonstrativo</button></p><div id="comissao-exportado" class="comissao-exportado" aria-live="polite" hidden></div><p role="alert" id="comissao-erro"></p>`;
+    const conteudo=document.createElement('div');conteudo.innerHTML=`<p>Fechamento operacional · revisão ${esc(fonte.revisao)}${comissaoDigitalCurta(fonte.hash)?` · impressão digital ${comissaoDigitalHTML(fonte.hash)}`:""}. Cada revisão financeira preserva sua configuração, evidências e decisões. Uma aprovação não efetua pagamento.</p>${comissaoAprovadorLinhaHTML(resposta.aprovador)}<label>Revisão financeira <select id="comissao-versao">${revisoes.map(r=>`<option value="${esc(r.id)}">${r.revisao} · ${esc(comissaoRotulo(r.tipo))} · ${esc(comissaoData(r.em))}${comissaoSubstituta(r,revisoes)?` · substituída pela ${comissaoSubstituta(r,revisoes).revisao}`:''}</option>`).join('')}</select></label><div id="comissao-resumo">${comissaoResumoHTML(ultima,revisoes,exportacoes)}</div><p><button type="button" class="btn-primary" id="comissao-nova">Configurar e criar nova prévia</button> <button type="button" class="btn-ghost" id="comissao-aprovar">Revisar e aprovar</button> <button type="button" class="btn-ghost" id="comissao-compensar">Preparar compensação integral</button> <button type="button" class="btn-ghost" id="comissao-exportar">Exportar para conferência de pagamento</button> <button type="button" class="btn-ghost" id="comissao-pdf">PDF do demonstrativo</button></p><div id="comissao-exportado" class="comissao-exportado" aria-live="polite" hidden></div><p role="alert" id="comissao-erro"></p>`;
     corpo.appendChild(conteudo);
     const sel=conteudo.querySelector('#comissao-versao'),erro=conteudo.querySelector('#comissao-erro');
     const escolhida=()=>revisoes.find(r=>r.id===sel.value)||ultima;
@@ -152,6 +216,8 @@ async function perfComissaoAbrir() {
     conteudo.querySelector('#comissao-nova').onclick=()=>comissaoEditar(fonte,ultima,periodo,d,resposta.pessoas||[],revisoes);
     conteudo.querySelector('#comissao-aprovar').onclick=()=>{
       const r=escolhida(),e=COMISSAO.erroAprovacao(r,r?.hash,true);
+      // Quem não é a vez de aprovar (D-014) sabe na hora; a porta confere de novo.
+      if(resposta.aprovador&&resposta.aprovador.podeAprovar===false){erro.textContent=resposta.aprovador.motivo||'Você não aprova a comissão hoje.';return;}
       if(e||r!==ultima){erro.textContent=e||'Apenas a última prévia pode ser aprovada.';return;}
       const confirmar=perfDialog('Aprovar demonstrativo',`<form><p>Revisão ${r.revisao}: ${comissaoDinheiro(r.apuracao.totalCentavos)}. ${r.apuracao.config.modo==='teste'?'Teste, sem exportação para pagamento.':'Programa efetivo.'} ${r.apuracao.compensacaoDe?'Esta compensação zera o saldo anterior e gera diferenças negativas para conciliação.':'Confira os rateios e as evidências antes de aprovar.'}</p><label>Justificativa da aprovação <textarea name="motivo" required minlength="5" maxlength="500"></textarea></label><label><input name="confirmacao" type="checkbox" required> Revisei a entrega física, a responsabilidade, os cadastros e os centavos do demonstrativo.</label><button class="btn-primary" type="submit">Confirmar aprovação</button><p role="alert"></p></form>`);
       confirmar.classList.add('comissao-dialog');

@@ -80,7 +80,7 @@ test('item 4: quem fechou, quem fez a prévia, quem aprovou e quem preparou a co
   // O dono fictício (admin) não tem o ID no crachá: sai da ficha pelo apelido, a régua do diário.
   const a=await aprovar(e,p,{quem:dono});
   assert.equal(a.status,200,JSON.stringify(a));
-  assert.deepEqual(a.revisao.autor,{login:'dono',nome:'Dono fictício',porId:'055666'});
+  assert.deepEqual(a.revisao.autor,{login:'dono',nome:'Dono fictício',porId:'055666',como:'admin'}); // D-014: a aprovação diz também COMO aprovou
   const lista=await e.call({action:'performanceComissaoListar',...NOV},gestor);
   const c=await e.call({action:'performanceComissaoNova',...NOV,anterior:lista.revisoes[0].id,compensarId:a.revisao.id,motivo:'Compensação fictícia',requestId:'compensar-itens-1'},gestor);
   assert.equal(c.ok,true,JSON.stringify(c));

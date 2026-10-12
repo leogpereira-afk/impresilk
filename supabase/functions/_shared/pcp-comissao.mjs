@@ -396,8 +396,43 @@ const COMISSAO = (() => {
     const um=m=>m.numero?'O.S. '+m.numero+(m.texto?': '+m.texto:''):m.texto||'';
     return xs.slice(0,max).map(um).join('; ')+(xs.length>max?'; e mais '+(xs.length-max):'');
   }
+  /* QUEM APROVA A COMISSÃO (D-013 e D-014, 12/10/2026). A configuração (gravada
+     só pelo admin, na ação comissaoAprovadorGravar) diz o TITULAR pelo ID de 6
+     dígitos e, opcional, um SUBSTITUTO com início, fim opcional e motivo.
+     Enquanto o substituto vale (de <= hoje <= até), ele aprova, mesmo que o
+     papel dele não seja pcp, e o titular não; sem substituto, o titular; o
+     admin aprova sempre. Sem configuração (ou sem titular), vale a D-013: pcp e
+     admin. A comparação é pelo ID do crachá ou da conta (porId), nunca pelo
+     nome. `hoje` é o dia de São Paulo (AAAA-MM-DD). */
+  const ehId6 = v => /^\d{6}$/.test(String(v ?? '').trim());
+  const ehDia = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? ''));
+  function substitutoVigente(cfg, hoje) {
+    const s = cfg && cfg.substituto;
+    if (!s || !ehId6(s.id) || !ehDia(s.de) || !ehDia(hoje)) return null;
+    if (hoje < s.de || (ehDia(s.ate) && hoje > s.ate)) return null;
+    return s;
+  }
+  function aprovadorVigente(cfg, hoje) {
+    if (!cfg || !ehId6(cfg.titularId)) return {modo:'d013'};
+    const s = substitutoVigente(cfg, hoje);
+    return s ? {modo:'substituto', id:String(s.id).trim(), titularId:String(cfg.titularId).trim(), de:s.de, ate:ehDia(s.ate) ? s.ate : ''}
+      : {modo:'titular', id:String(cfg.titularId).trim()};
+  }
+  const diaBR = d => ehDia(d) ? d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4) : '';
+  function quemAprova(quem, cfg, hoje) {
+    const papel = String(quem && quem.papel || ''), id = String(quem && quem.porId || '').trim();
+    const vigente = aprovadorVigente(cfg, hoje);
+    if (papel === 'admin') return {ok:true, como:'admin', vigente};
+    if (vigente.modo === 'd013') return papel === 'pcp' ? {ok:true, como:'pcp', vigente} : {ok:false, vigente, erro:'A aprovação da comissão é da gestão do PCP (pcp ou admin).'};
+    if (ehId6(id) && id === vigente.id) return {ok:true, como:vigente.modo, vigente};
+    if (vigente.modo === 'substituto') return {ok:false, vigente, erro:id === vigente.titularId
+      ? `Enquanto o substituto designado pela gestão estiver valendo${vigente.ate ? ' (até '+diaBR(vigente.ate)+')' : ''}, quem aprova a comissão é ele, não o titular. O admin também aprova.`
+      : 'Quem aprova a comissão hoje é o substituto designado pela gestão (ou o admin).'};
+    return {ok:false, vigente, erro:'Quem aprova a comissão é o titular designado pela gestão (ou o admin).' + (ehId6(id) ? '' : ' Este acesso não tem o ID de 6 dígitos ligado: o login precisa ser o apelido da ficha do RH.')};
+  }
   return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase,comissoesAcumuladas,TEXTO_ORIGEM_A_DEFINIR,demonstrativosVigentes,falhaComprovadaNoDia,comFalhasComprovadas,
-    dinheiroDoRegistro,dinheiroDaFonte,mudancasDeDinheiro,textoMudancasDeDinheiro,totaisDaRevisao,diferencaContraExportada};
+    dinheiroDoRegistro,dinheiroDaFonte,mudancasDeDinheiro,textoMudancasDeDinheiro,totaisDaRevisao,diferencaContraExportada,
+    aprovadorVigente,substitutoVigente,quemAprova};
 })();
 
 export { COMISSAO };

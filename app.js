@@ -8602,12 +8602,15 @@ function renderControle() {
     `<details class="cfg-grupo" open><summary>🔌 Conexões e sincronização</summary>${saudeHTML}${mubisysHTML}</details>` +
     `<details class="cfg-grupo"><summary>👥 Equipe e acesso</summary>${usuariosHTML}${niveisHTML}${contatosHTML}</details>` +
     `<details class="cfg-grupo"><summary>🛠 Regras e recursos da operação</summary>${custoHTML}<div class="cfg-grid">${listasHTML}</div></details>` +
-    `<details class="cfg-grupo"><summary>💬 Mensagens da programação</summary>${mensagemHTML}</details>`;
+    `<details class="cfg-grupo"><summary>💬 Mensagens da programação</summary>${mensagemHTML}</details>` +
+    // Quem aprova a comissão (D-013 e D-014): admin e pcp veem; só o admin designa.
+    (typeof comissaoAprovadorSecaoHTML === 'function' && ['admin','pcp'].includes(STATE.user.papel) ? `<details class="cfg-grupo"><summary>✅ Aprovação da comissão</summary>${comissaoAprovadorSecaoHTML()}</details>` : '');
   if (gruposAbertos.length) $$('details.cfg-grupo', el).forEach((d, i) => { if (i < gruposAbertos.length) d.open = gruposAbertos[i]; });
 
   // Handlers da Integração Mubisys e do painel de saúde (admin)
   if (isAdmin) wireMubisys(el);
   if (['admin','pcp'].includes(STATE.user.papel)) wireSaude(el);
+  if (typeof comissaoAprovadorWire === 'function') comissaoAprovadorWire(el, () => { if (typeof repintarSeLivre === 'function') repintarSeLivre(); else renderControle(); });
 
   // Handlers de níveis (admin) — funcionam mesmo quando ro é false
   if (isAdmin) {

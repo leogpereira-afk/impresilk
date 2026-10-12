@@ -1,7 +1,7 @@
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
-import { idDoCadastroRH, pessoasPorDocumento, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { idDoCadastroRH, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
@@ -632,6 +632,21 @@ async function contarBuscaDocumento(login: string): Promise<{ ok: boolean; resta
   _buscasDoc.set(login, m);
   try { await sb.from("pcp_meta").upsert({ chave, valor: m, atualizado_em: new Date(agora).toISOString() }, { onConflict: "chave" }); } catch { /* a memória segura */ }
   return { ok: true, restantes: LIMITE_BUSCA_DOC.max - m.n };
+}
+/* QUEM APROVA A COMISSÃO (D-013 e D-014): a configuração é uma sequência de
+   eventos só de inserção na coleção comissao_aprovador (o diário: quem mudou,
+   quando, por quê, carimbados por este servidor). Vale o mais novo. Sem
+   evento, vale a D-013 (pcp e admin). A regra mora em COMISSAO.quemAprova. */
+const COLECAO_APROVADOR = "comissao_aprovador";
+async function comissaoAprovadorEventos(limite = 1): Promise<any[]> {
+  const { data, error } = await sb.from("pcp_registros").select("id,registro").eq("colecao", COLECAO_APROVADOR).eq("apagado", false)
+    .order("id", { ascending: false }).limit(limite);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as any[]).map((r) => r.registro).filter((r) => r && typeof r === "object");
+}
+async function comissaoAprovadorAtual(): Promise<any | null> {
+  const [ultimo] = await comissaoAprovadorEventos(1);
+  return ultimo && /^\d{6}$/.test(String(ultimo.titularId || "")) ? { titularId: ultimo.titularId, substituto: ultimo.substituto || null, em: ultimo.em } : null;
 }
 async function pessoasDoPCP(config?: any) {
   const cfg = config ?? (await getCfg()) ?? {};
@@ -1895,7 +1910,22 @@ Deno.serve(async (req: Request) => {
       case "performanceComissaoNova":
       case "performanceComissaoAprovar":
       case "performanceComissaoExportar": {
-        if(!cracha || ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha.papel)))return resp({error:"Comissão restrita à gestão autenticada do PCP."},403);
+        /* QUEM APROVA (D-013 e D-014): o admin sempre; sem configuração, pcp e
+           admin; com ela, só o titular ou, enquanto vale, o substituto, pelo ID
+           do crachá ou da conta. O substituto designado lê e aprova mesmo que o
+           papel dele não seja pcp; prévia, compensação e exportação continuam
+           da gestão (admin e pcp). */
+        const gestaoComissao = !!cracha && !ehMaquina && !ehToqueNoNome && ["admin","pcp"].includes(String(cracha.papel));
+        let quemAprovaAgora:any = null;
+        if (cracha && !ehMaquina && !ehToqueNoNome && (acao==="performanceComissaoAprovar" || (acao==="performanceComissaoListar" && !gestaoComissao))) {
+          let cfgAprovador:any = null;
+          try { cfgAprovador = await comissaoAprovadorAtual(); }
+          catch { return resp({error:"Não foi possível ler quem aprova a comissão agora. Tente de novo."},503); }
+          quemAprovaAgora = COMISSAO.quemAprova({papel:String(cracha.papel||""), porId:(await autorAuditoria()).porId||""}, cfgAprovador, perfDia(new Date().toISOString()));
+        }
+        const substitutoAgora = !!quemAprovaAgora?.ok && quemAprovaAgora.como==="substituto";
+        if(!gestaoComissao && !(substitutoAgora && (acao==="performanceComissaoAprovar" || acao==="performanceComissaoListar")))return resp({error:"Comissão restrita à gestão autenticada do PCP."},403);
+        if(acao==="performanceComissaoAprovar" && !quemAprovaAgora?.ok)return resp({error:quemAprovaAgora?.erro || "Aprovação recusada."},403);
         let periodo;try{periodo=perfPeriodo(body);}catch(e){return resp({error:(e as Error).message},422);}
         // Ler o relógio por O.S. ANTES do histórico: qualquer aprovação que
         // altere os saldos depois desta leitura disputa a mesma próxima versão.
@@ -1932,7 +1962,14 @@ Deno.serve(async (req: Request) => {
         if(acao==="performanceComissaoListar"){
           const fichas=await fichasRH(), regua=resolverPessoas({pessoas:fichas});
           const pessoas=[...new Map(fichas.filter((p:any)=>p.id&&regua.pessoa(p.id)&&!regua.pessoa(p.id).semFicha).map((p:any)=>[p.id,{id:p.id,nome:p.nome}])).values()];
-          return resp({revisoes,pessoas,cobrem:perfComissaoCobrem(todas,periodo),exportacoes:exportacoesDoPeriodo(exportacoesLidas)});
+          // Quem aprova hoje (D-013 e D-014), para a tela dizer e travar o Aprovar de quem não é a vez.
+          let aprovador:any=null;
+          try{
+            const q=quemAprovaAgora||COMISSAO.quemAprova({papel:String(cracha.papel||""),porId:(await autorAuditoria()).porId||""},await comissaoAprovadorAtual(),perfDia(new Date().toISOString()));
+            const v=q.vigente||{},nomeDe=(id:string)=>id?String(regua.pessoa(id)?.nome||""):"";
+            aprovador={modo:v.modo||"d013",id:v.id||"",nome:nomeDe(v.id),ate:v.ate||"",titularId:v.titularId||"",titularNome:nomeDe(v.titularId),podeAprovar:!!q.ok,como:q.ok?q.como:"",motivo:q.ok?"":String(q.erro||"")};
+          }catch{aprovador=null;}
+          return resp({revisoes,pessoas,cobrem:perfComissaoCobrem(todas,periodo),exportacoes:exportacoesDoPeriodo(exportacoesLidas),aprovador});
         }
         // O que a conferência do selo achou fora do dinheiro e o que ficou pendente (fora do hash da revisão).
         let conferida:any=null;
@@ -2033,7 +2070,9 @@ Deno.serve(async (req: Request) => {
         const referenciaVersoes=Object.fromEntries(afetadas.map(osId=>[osId,versoesOS.get(osId)||0]));
         const revisao=(ultima?.revisao||0)+1,id=chave+":"+String(revisao).padStart(6,"0"),em=new Date().toISOString();
         const hash=await perfHash({apuracao,entrada,fechamentoId});
-        const registro:any={...periodo,id,revisao,tipo,anterior:ultima?.id||null,requestId,assinatura,motivo,fechamentoId,entrada,apuracao,hash,versoesOS:referenciaVersoes,em,autor:{login:String(cracha.sub||""),nome:String(cracha.nome||""),porId:(await autorAuditoria()).porId||""}};
+        const registro:any={...periodo,id,revisao,tipo,anterior:ultima?.id||null,requestId,assinatura,motivo,fechamentoId,entrada,apuracao,hash,versoesOS:referenciaVersoes,em,autor:{login:String(cracha.sub||""),nome:String(cracha.nome||""),porId:(await autorAuditoria()).porId||"",
+          /* Na aprovação, COMO aprovou (D-014): admin, pcp (sem configuração, D-013), titular ou substituto (com o titular de então). */
+          ...(tipo==="aprovacao"&&quemAprovaAgora?.ok?{como:quemAprovaAgora.como,...(quemAprovaAgora.como==="substituto"?{titularId:quemAprovaAgora.vigente.titularId}:{})}:{})}};
         /* O que a conferência do selo achou na aprovação (onda comissão): mudança fora do dinheiro e as O.S. com a
            origem a definir no selo que mudaram depois (pendência para a próxima revisão ou compensação). Fora do hash. */
         if(tipo==="aprovacao"&&conferida)registro.fonteConferida={em,...resumoConferida()};
@@ -3333,6 +3372,92 @@ Deno.serve(async (req: Request) => {
           desdeQuando: primeiraSaida,
           em: new Date().toISOString(),
         });
+      }
+
+      /* ---- QUEM APROVA A COMISSÃO (D-013 e D-014) ----
+         comissaoAprovadorLer: admin e pcp veem a configuração, quem aprova hoje
+         e o diário. comissaoAprovadorGravar: só o admin (com senha) designa o
+         titular, designa o substituto (início, fim opcional) e encerra o
+         substituto, sempre com motivo; autor e hora carimbados aqui; cada
+         mudança é um evento novo (nada se apaga). Chamadas na hora, fora da
+         fila do aparelho. */
+      case "comissaoAprovadorLer":
+      case "comissaoAprovadorGravar": {
+        const ehAdmin = !!cracha && !ehMaquina && !ehToqueNoNome && String(cracha.papel ?? "") === "admin";
+        const ehGestao = ehAdmin || (!!cracha && !ehMaquina && !ehToqueNoNome && String(cracha.papel ?? "") === "pcp");
+        if (acao === "comissaoAprovadorLer" ? !ehGestao : !ehAdmin)
+          return resp({ error: acao === "comissaoAprovadorLer" ? "Quem aprova a comissão é assunto da gestão do PCP (admin e pcp)." : "Só o admin designa quem aprova a comissão." }, 403);
+        const hoje = perfDia(new Date().toISOString());
+        const regua = await pessoasDoPCP();
+        const nomeDe = (id: string) => id ? String(regua.pessoa(id)?.nome || "") : "";
+        const leitura = async (avisos: string[] = []) => {
+          const eventos = await comissaoAprovadorEventos(30);
+          const atual = eventos[0] && /^\d{6}$/.test(String(eventos[0].titularId || "")) ? { titularId: eventos[0].titularId, substituto: eventos[0].substituto || null } : null;
+          const v = COMISSAO.aprovadorVigente(atual, hoje);
+          return resp({ hoje, avisos,
+            config: atual ? { titularId: atual.titularId, titularNome: nomeDe(atual.titularId),
+              substituto: atual.substituto ? { ...atual.substituto, nome: nomeDe(atual.substituto.id), vigente: !!COMISSAO.substitutoVigente(atual, hoje) } : null } : null,
+            vigente: { ...v, nome: nomeDe(v.id || "") },
+            diario: eventos.map((e: any) => ({ em: e.em, operacao: e.operacao, motivo: e.motivo, por: e.por?.nome || "", porId: e.por?.porId || "",
+              titularId: e.titularId || "", titularNome: nomeDe(e.titularId || ""), substitutoId: e.substituto?.id || "", substitutoNome: nomeDe(e.substituto?.id || ""),
+              de: e.substituto?.de || "", ate: e.substituto?.ate || "" })) });
+        };
+        if (acao === "comissaoAprovadorLer") return await leitura();
+        const operacao = String(body.operacao || "");
+        const motivo = String(body.motivo || "").trim();
+        const requestId = String(body.requestId || "");
+        if (!["titular", "substituto", "encerrar"].includes(operacao)) return resp({ error: "Escolha o que fazer: designar o titular, designar o substituto ou encerrar o substituto." }, 400);
+        if (!/^[a-zA-Z0-9-]{10,80}$/.test(requestId)) return resp({ error: "Identificação do pedido inválida." }, 400);
+        if (motivo.length < 15 || motivo.length > 500) return resp({ error: "Escreva o motivo com 15 letras ou mais (até 500)." }, 400);
+        const recentes = await comissaoAprovadorEventos(30);
+        const repetido = recentes.find((e: any) => e.requestId === requestId);
+        if (repetido) return await leitura();
+        const atual = recentes[0] && /^\d{6}$/.test(String(recentes[0].titularId || "")) ? { titularId: String(recentes[0].titularId), substituto: recentes[0].substituto || null } : { titularId: "", substituto: null };
+        // A pessoa precisa estar no RH, na ativa e com o ID só dela.
+        const conferirPessoa = (id: string, papel: string) => {
+          if (!/^\d{6}$/.test(id)) return `Escolha o ${papel} pelo ID de 6 dígitos.`;
+          const p: any = regua.pessoa(id);
+          if (!p || p.semFicha) return `O ID do ${papel} não está no RH.`;
+          if (p.desligado) return `O ${papel} escolhido já saiu da empresa.`;
+          if (regua.repetido(id)) return `O ID do ${papel} está repetido no RH (ficha e contrato). Confira no RH antes.`;
+          return "";
+        };
+        let novo: any;
+        if (operacao === "titular") {
+          const id = String(body.titularId || "").trim(), erro = conferirPessoa(id, "titular");
+          if (erro) return resp({ error: erro }, 400);
+          if (atual.substituto && String(atual.substituto.id) === id) return resp({ error: "O titular não pode ser o mesmo que o substituto. Encerre o substituto antes." }, 400);
+          novo = { titularId: id, substituto: atual.substituto };
+        } else if (operacao === "substituto") {
+          if (!atual.titularId) return resp({ error: "Designe o titular antes do substituto." }, 400);
+          const id = String(body.substitutoId || "").trim(), erro = conferirPessoa(id, "substituto");
+          if (erro) return resp({ error: erro }, 400);
+          if (id === atual.titularId) return resp({ error: "O substituto precisa ser outra pessoa, não o titular." }, 400);
+          const de = String(body.de || hoje).slice(0, 10), ate = String(body.ate || "").slice(0, 10);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(de)) return resp({ error: "Data de início inválida." }, 400);
+          if (ate && (!/^\d{4}-\d{2}-\d{2}$/.test(ate) || ate < de)) return resp({ error: "O fim precisa ser uma data igual ou depois do início." }, 400);
+          if (ate && ate < hoje) return resp({ error: "O fim já passou: o substituto nem começaria a valer." }, 400);
+          novo = { titularId: atual.titularId, substituto: { id, de, ...(ate ? { ate } : {}), motivo } };
+        } else {
+          if (!atual.substituto) return resp({ error: "Não há substituto para encerrar." }, 400);
+          novo = { titularId: atual.titularId, substituto: null };
+        }
+        const em = new Date().toISOString(), autor = await autorAuditoria();
+        const evento = { id: em + "-" + crypto.randomUUID().slice(0, 8), em, requestId, operacao, motivo, ...novo,
+          ...(operacao === "encerrar" ? { substitutoEncerrado: atual.substituto } : {}),
+          por: { nome: autor.nome, login: autor.login, papel: autor.papel, porId: autor.porId || "" } };
+        const { error: erroGravar } = await sb.from("pcp_registros").insert({ colecao: COLECAO_APROVADOR, id: evento.id, registro: evento, apagado: false, atualizado_em: em });
+        if (erroGravar) return resp({ error: erroGravar.code === "23505" ? "Outra mudança foi gravada ao mesmo tempo. Atualize e tente de novo." : "Não foi possível gravar agora. Tente de novo." }, erroGravar.code === "23505" ? 409 : 500);
+        // Aviso, não trava: quem não tem acesso com senha ligado à ficha não consegue aprovar.
+        const avisos: string[] = [];
+        const alvo = operacao === "titular" ? novo.titularId : operacao === "substituto" ? novo.substituto.id : "";
+        if (alvo) {
+          const ap = normPessoa(String(regua.pessoa(alvo)?.apelido || ""));
+          const { data: contas } = await sb.from("equipe_contas").select("usuario, papel, ativo").eq("sistema", "pcp");
+          const temConta = !!ap && ((contas ?? []) as any[]).some((c) => c.ativo !== false && normPessoa(String(c.usuario || "")) === ap);
+          if (!temConta) avisos.push(`${nomeDe(alvo) || "Esta pessoa"} não tem acesso ao PCP com senha cujo login seja o apelido da ficha do RH. Sem isso a porta não reconhece o ID dela e recusa a aprovação; o admin continua aprovando.`);
+        }
+        return await leitura(avisos);
       }
 
       /* ---- pessoaPorDocumento: BUSCA DE PESSOA POR CPF OU CNPJ (item 21) ----
