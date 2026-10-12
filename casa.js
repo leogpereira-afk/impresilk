@@ -3671,6 +3671,37 @@ function gruposDeGrafiasCasa(linhas) {
    Todos os nomes que o PCP usa, cada um com a ficha a que chega. O que falta
    resolver vem primeiro; qualquer ligação (automática ou salva) pode ser
    trocada ali mesmo. Ver conferenciaRH(). */
+/* BUSCA DE PESSOA POR CPF OU CNPJ (item 21 da fila de 11/10/2026): ajuda
+   com xarás e apelidos. Só a gestão (admin e pcp). O documento vai ao
+   servidor, que compara e devolve só o ID e o nome; o campo é limpo na hora
+   e o documento não fica guardado no aparelho (nem rascunho, nem cache). O
+   servidor limita as buscas por crachá. */
+function buscaDocumentoCasaHTML() {
+  const papel = String((typeof STATE !== 'undefined' && STATE.user && STATE.user.papel) || '');
+  if (!['admin', 'pcp'].includes(papel)) return '';
+  return `<form class="busca-doc" data-busca-doc autocomplete="off"><label>Buscar pessoa por CPF ou CNPJ <input type="text" name="documento" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="20" placeholder="Documento inteiro"></label> <button class="btn-ghost btn-sm" type="submit">Buscar</button><p class="busca-doc-res" role="status" aria-live="polite"></p><small class="text-muted">O servidor compara e devolve só o nome e o ID. O documento não fica guardado.</small></form>`;
+}
+function buscaDocumentoResultadoTxt(r) {
+  const ps = Array.isArray(r && r.pessoas) ? r.pessoas : [];
+  if (!ps.length) return 'Nenhum cadastro do RH com este documento.';
+  return ps.map(p => `${p.nome}${/^\d{6}$/.test(String(p.id || '')) ? ' · ID ' + p.id : ' · sem ID (o cadastro do RH não tem CPF válido)'}`).join('; ') + '.';
+}
+function wireBuscaDocumentoCasa(el) {
+  const form = el && el.querySelector ? el.querySelector('[data-busca-doc]') : null;
+  if (!form) return;
+  form.onsubmit = async ev => {
+    if (ev && ev.preventDefault) ev.preventDefault();
+    const campo = form.querySelector('input[name="documento"]'), saida = form.querySelector('.busca-doc-res'), botao = form.querySelector('button[type="submit"]');
+    const doc = String((campo && campo.value) || '').replace(/\D/g, '');
+    if (campo) campo.value = '';
+    if (doc.length !== 11 && doc.length !== 14) { if (saida) saida.textContent = 'Digite o CPF (11 dígitos) ou o CNPJ (14 dígitos) inteiro.'; return; }
+    if (saida) saida.textContent = 'Buscando…';
+    if (botao) botao.disabled = true;
+    try { const r = await STORE.api({ action: 'pessoaPorDocumento', documento: doc }); if (saida) saida.textContent = buscaDocumentoResultadoTxt(r); }
+    catch (e) { if (saida) saida.textContent = (e && e.servidor) || (e && e.status ? String(e.message || 'Não foi possível buscar.') : 'A busca precisa de conexão.'); }
+    finally { if (botao) botao.disabled = false; }
+  };
+}
 function ligacaoRHHTML() {
   const linhas = conferenciaRH();
   const ativos = pessoasRHAtivas();
@@ -3735,6 +3766,7 @@ function ligacaoRHHTML() {
   const corpo = grupos.map(g => `<tbody class="${g.length > 1 ? 'lig-grupo' : ''}">${g.length > 1 ? `<tr class="lig-grupo-cab"><td colspan="6">Grafias parecidas: <strong>${esc(e(g.map(l => l.apelido)))}</strong>. Confira se são a mesma pessoa antes de ligar.</td></tr>` : ''}${g.map(linhaHTML).join('')}</tbody>`).join('');
   return `<p>Cada nome que o PCP usa (lista de instaladores e equipes das O.S.) e a ficha do RH a que ele chega. O que falta resolver vem primeiro. Qualquer ligação pode ser trocada aqui: a partir dela, a foto, o cargo e o nome completo aparecem sozinhos, aqui e na mensagem do dia. Com o nome confirmado, a O.S. antiga pode trocar o nome pelo ID da pessoa.</p>
     ${avisosRH}
+    ${buscaDocumentoCasaHTML()}
     <p class="text-muted" style="font-size:.8rem">${linhas.length} nomes · ${pend ? `<strong>${pend} sem ficha ou ambíguo${pend === 1 ? '' : 's'}</strong>` : 'todos com ficha'}${juntos ? ` · ${juntos} nomes dividem a ficha com outro` : ''}.</p>
     ${soAuto ? `<p class="metricas-nota">📌 ${soAuto} ${soAuto === 1 ? 'nome da lista de instaladores está ligado' : 'nomes da lista de instaladores estão ligados'} só pelo nome. Se entrar no RH alguém com o mesmo começo de nome, a ligação some e o celular dessa pessoa deixa de ver as O.S. gravadas pelo ID. <button class="btn-primary btn-xs edit-only" data-lig-fixar type="button">Fixar ${soAuto === 1 ? 'a ligação' : `as ${soAuto} ligações`}</button></p>` : ''}
     ${f12 ? conversaoNomesHTML(linhas, uso, plano) : '<p class="metricas-nota">Esta tela está com uma parte desatualizada: recarregue a página para trocar os nomes antigos pelo ID.</p>'}
@@ -4122,6 +4154,7 @@ function renderPerformanceCasa() {
   if (orcEl) orcEl.onchange = () => { gravarBonusCasa({ ...lerBonusCasa(), orcamento: Math.max(0, Number(orcEl.value) || 0) }); repintarBonus(); };
   const tetoEl = document.getElementById('perf-teto');
   if (tetoEl) tetoEl.onchange = () => { gravarBonusCasa({ ...lerBonusCasa(), teto: Math.max(0, Number(tetoEl.value) || 0) }); repintarBonus(); };
+  wireBuscaDocumentoCasa(el);
   el.querySelectorAll('[data-lig-ok]').forEach(btn => {
     btn.onclick = () => {
       const ap = btn.dataset.ligOk;

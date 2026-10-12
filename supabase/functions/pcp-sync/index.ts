@@ -1,7 +1,7 @@
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
-import { idDoCadastroRH, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { idDoCadastroRH, pessoasPorDocumento, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
@@ -613,6 +613,25 @@ async function fichasRH(): Promise<any[]> {
   ];
   _fichasRH = { ate: Date.now() + 60_000, fichas };
   return fichas;
+}
+/* O LIMITE DA BUSCA POR CPF OU CNPJ (item 21): 10 buscas a cada 15 minutos
+   por crachá (o login). A conta fica em memória e em pcp_meta, para valer
+   também quando a função recicla ou roda em outra instância; se o banco não
+   gravar, a memória segura. Pedido mal formado (400) não conta. */
+const LIMITE_BUSCA_DOC = { max: 10, minutos: 15 };
+const _buscasDoc = new Map<string, { inicio: number; n: number }>();
+async function contarBuscaDocumento(login: string): Promise<{ ok: boolean; restantes?: number; minutos?: number }> {
+  const agora = Date.now(), janela = LIMITE_BUSCA_DOC.minutos * 60_000, chave = "limite_busca_documento:" + login;
+  const vale = (x: any) => x && Number.isFinite(Number(x.inicio)) && agora - Number(x.inicio) < janela && agora >= Number(x.inicio);
+  let m: any = _buscasDoc.get(login);
+  if (!vale(m)) m = null;
+  try { const b = await getMeta(chave); if (vale(b) && (!m || Number(b.n) > m.n)) m = { inicio: Number(b.inicio), n: Number(b.n) || 0 }; } catch { /* a memória segura */ }
+  if (!m) m = { inicio: agora, n: 0 };
+  if (m.n >= LIMITE_BUSCA_DOC.max) return { ok: false, minutos: Math.max(1, Math.ceil((m.inicio + janela - agora) / 60_000)) };
+  m = { inicio: m.inicio, n: m.n + 1 };
+  _buscasDoc.set(login, m);
+  try { await sb.from("pcp_meta").upsert({ chave, valor: m, atualizado_em: new Date(agora).toISOString() }, { onConflict: "chave" }); } catch { /* a memória segura */ }
+  return { ok: true, restantes: LIMITE_BUSCA_DOC.max - m.n };
 }
 async function pessoasDoPCP(config?: any) {
   const cfg = config ?? (await getCfg()) ?? {};
@@ -3314,6 +3333,29 @@ Deno.serve(async (req: Request) => {
           desdeQuando: primeiraSaida,
           em: new Date().toISOString(),
         });
+      }
+
+      /* ---- pessoaPorDocumento: BUSCA DE PESSOA POR CPF OU CNPJ (item 21) ----
+         Só a gestão (admin e pcp, com senha); a ação é chamada na hora, fora
+         da fila. Compara no servidor (pessoasPorDocumento) e devolve só o ID
+         e o nome de quem bate; nunca o documento nem a lista inteira. */
+      case "pessoaPorDocumento": {
+        if (!cracha || ehMaquina || ehToqueNoNome || !["admin", "pcp"].includes(String(cracha.papel ?? "")))
+          return resp({ error: "A busca por CPF ou CNPJ é só da gestão do PCP (admin e pcp)." }, 403);
+        const doc = String(body.documento ?? "").replace(/\D/g, "");
+        if (doc.length !== 11 && doc.length !== 14) return resp({ error: "Digite o CPF (11 dígitos) ou o CNPJ (14 dígitos) inteiro." }, 400);
+        const lim = await contarBuscaDocumento(String(cracha.sub ?? cracha.nome ?? ""));
+        if (!lim.ok) return resp({ error: `Muitas buscas por documento em pouco tempo (o limite é ${LIMITE_BUSCA_DOC.max} a cada ${LIMITE_BUSCA_DOC.minutos} minutos). Tente de novo em ${lim.minutos} ${lim.minutos === 1 ? "minuto" : "minutos"}.` }, 429);
+        const [fichas, contratos] = await Promise.all([
+          sb.from("registros").select("registro->>id, registro->>nome, registro->>cpf, registro->>idPessoa").eq("colecao", "colaboradores").eq("apagado", false),
+          sb.from("registros").select("registro->>id, registro->>nome, registro->>cpf, registro->>cnpj, registro->>idPessoa").eq("colecao", "freelancers").eq("apagado", false),
+        ]);
+        if (fichas.error || contratos.error) return resp({ error: "Não foi possível ler o RH agora. Tente de novo." }, 500);
+        const achou = pessoasPorDocumento(doc, fichas.data ?? [], contratos.data ?? []);
+        if (achou.erro) return resp({ error: achou.erro }, 400);
+        const out = resp({ pessoas: achou.pessoas.map((p: any) => ({ id: String(p.id || ""), nome: String(p.nome || "") })), restantes: lim.restantes });
+        out.headers.set("Cache-Control", "no-store");
+        return out;
       }
 
       case "elenco": {

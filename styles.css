@@ -4506,3 +4506,8 @@ img.perf-logo{object-fit:cover}
 .aviso-a-cadastrar { margin:.35rem 0 0; padding:.4rem .6rem; border-radius:8px; background:#fef2f2; color:#7f1d1d; font-size:.8rem; }
 .perf-a-cadastrar { margin:.5rem 0; }
 .perf-a-cadastrar ul { margin:.25rem 0 0; padding-left:1.1rem; }
+.busca-doc { margin:.5rem 0 .75rem; display:flex; flex-wrap:wrap; align-items:flex-end; gap:.4rem; }
+.busca-doc label { display:flex; flex-direction:column; gap:.2rem; font-size:.8rem; font-weight:600; }
+.busca-doc input { min-width:0; width:14rem; max-width:100%; }
+.busca-doc .busca-doc-res { flex-basis:100%; margin:0; font-size:.85rem; }
+.busca-doc small { flex-basis:100%; }

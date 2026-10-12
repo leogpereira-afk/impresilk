@@ -1351,6 +1351,29 @@ export function avisoIdDoCadastro(c) {
   if (c.idGravadoInvalido) return `${onde} no RH tem o ID gravado fora do formato de 6 dígitos. O PCP usa o ID do CPF${c.id ? ` (${c.id})` : ''} até o RH corrigir o campo.`;
   return '';
 }
+/* BUSCA DE PESSOA POR CPF OU CNPJ (item 21 da fila de 11/10/2026): ajuda
+   com xarás e apelidos. A comparação é feita aqui, no servidor, com o
+   documento inteiro (só os dígitos): CPF nas fichas e nos contratos de
+   freelancer, CNPJ nos contratos. Sai só o ID e o nome de quem bate (o
+   mesmo ID uma vez só), nunca o documento nem a lista inteira. Pedaço de
+   documento não acha ninguém. */
+export const soDigitosDoc = v => String(v ?? '').replace(/\D/g, '');
+export function pessoasPorDocumento(documento, fichas, contratos) {
+  const d = soDigitosDoc(documento);
+  const tipo = d.length === 11 ? 'cpf' : d.length === 14 ? 'cnpj' : '';
+  if (!tipo) return { erro: 'Digite o CPF (11 dígitos) ou o CNPJ (14 dígitos) inteiro.' };
+  const achados = new Map();
+  const achou = (reg, contrato) => {
+    const nome = String(reg?.nome ?? '').trim();
+    if (!nome) return;
+    const id = idDoCadastroRH(reg, { exigirCpfValido: contrato }).id;
+    const k = id || 'sem-id:' + normPessoa(nome);
+    if (!achados.has(k)) achados.set(k, { id, nome });
+  };
+  if (tipo === 'cpf') for (const f of Array.isArray(fichas) ? fichas : []) if (soDigitosDoc(f?.cpf) === d) achou(f, false);
+  for (const c of Array.isArray(contratos) ? contratos : []) if (soDigitosDoc(tipo === 'cpf' ? c?.cpf : c?.cnpj) === d) achou(c, true);
+  return { tipo, pessoas: [...achados.values()] };
+}
 export function contratoAtivo(c, hoje = '') {
   if (!c || String(c.situacao || '') === 'encerrado') return false;
   const fim = String(c.contratoFim || '').slice(0, 10);
