@@ -263,7 +263,8 @@ test('M7: o diálogo da conferência por entrega diz o mês fechado (dia novo ou
   assert.equal(c.confTravaMesFechado(fechados, '', '2026-12-01'), '');
   assert.equal(c.confTravaMesFechado(null, '', '2026-11-20'), '', 'sem a lista (servidor antigo), nada se afirma: a porta confere');
   // O motivo trava o Salvar, antes dos outros.
-  assert.match(ler('conferencia-entrega-ui.js'), /const motivo=mesFechado \|\| erro \|\| ALOCUI\.bloqueio\(chave\);/);
+  // Trocado de propósito na onda operação (M12): o motivo da revisão da parcial entra entre o erro e o bloqueio; o mês fechado continua primeiro.
+  assert.match(ler('conferencia-entrega-ui.js'), /const motivo=mesFechado \|\| erro \|\| faltaMotivo \|\| ALOCUI\.bloqueio\(chave\);/);
 });
 
 /* ------------------------------------------------------------- item 11 */

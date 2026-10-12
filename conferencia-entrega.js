@@ -32,6 +32,17 @@ const CONFERENCIA_ENTREGA = (() => {
     }
     return '';
   }
+  /* REVISAR UMA PARCIAL (M12 da auditoria de 11/10/2026, onda operação):
+     valida SÓ a entrega editada. As outras entram no saldo só pelos itens que
+     ainda se leem (o mesmo código e a mesma identidade); a outra que não se
+     lê mais (um item mudou) fica como está, para a revisão dela. Antes cada
+     parcial só podia ser refeita se a outra estivesse válida, e duas
+     parciais quebradas não tinham conserto pela tela. */
+  function lidasParaSaldo(os, entregas) {
+    const por = new Map(catalogo(os).map(i => [i.chave, i]));
+    return lista(entregas).filter(e => e && typeof e === 'object').map(e => ({...e, itens:lista(e.itens).filter(p => { const it = por.get(p?.chave); return !!it && !it.ambiguo && !it.cancelado && it.identidade === p.identidade; })})).filter(e => e.itens.length);
+  }
+  const validarRevisao = (os, outras, editada, hoje = '') => validar(os, [...lidasParaSaldo(os, outras), editada], hoje);
   function apurar(os, liquido, entregas = lista(os?.conferenciasEntrega)) {
     const erro = validar(os, entregas);
     if (erro) return {erro, entregas:[], saldo:null, total:null};
@@ -303,6 +314,6 @@ const CONFERENCIA_ENTREGA = (() => {
     const voltouDepois = !Number.isFinite(tSai) && !!rNew && rNew !== rOld && Number.isFinite(tOld) && Number.isFinite(tNew) && tNew > tOld;
     return {de, para, nova:para > de && (saiuDepois || voltouDepois)};
   }
-  return {catalogo, validar, apurar, estado, noFimDoDia, PERGUNTAS_VOLTA, diaDaVolta, idDoAtivo, chaveVeiculo, semCarroV, confDaVolta, confGuardada, declaracaoGuardada, confDaViagemDoDia, declaracaoDaViagemDoDia, registroDaVolta, voltasDaOS, viagemDoDia, voltaDaEntrega, voltaDaOS, chaveDaViagem, ultimaViagem, movimentoDaViagem};
+  return {catalogo, validar, validarRevisao, lidasParaSaldo, apurar, estado, noFimDoDia, PERGUNTAS_VOLTA, diaDaVolta, idDoAtivo, chaveVeiculo, semCarroV, confDaVolta, confGuardada, declaracaoGuardada, confDaViagemDoDia, declaracaoDaViagemDoDia, registroDaVolta, voltasDaOS, viagemDoDia, voltaDaEntrega, voltaDaOS, chaveDaViagem, ultimaViagem, movimentoDaViagem};
 })();
 if (typeof module !== 'undefined') module.exports = CONFERENCIA_ENTREGA;

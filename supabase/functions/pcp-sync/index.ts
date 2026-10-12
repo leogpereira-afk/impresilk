@@ -1,7 +1,7 @@
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
-import { idDoCadastroRH, prazoParaConferir, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { idDoCadastroRH, prazoParaConferir, protegerItensConferidos, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, atrasoDaOS, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
@@ -834,6 +834,8 @@ async function perfInteiraFechada(osId:string, fechados:any[]) {
    contaria em outubro). O ajuste de mês fechado depende da pergunta 3 da fila
    do dono (P-006 a P-010) e ainda não existe. */
 const PERF_AJUSTE_FECHADO = "o ajuste de mês fechado ainda não existe; fale com a gestão.";
+// O motivo de revisar ou anular uma parcial conferida (M12, onda operação): a mesma régua de letras dos outros motivos da gestão.
+const MOTIVO_REVISAO_PARCIAL_MIN = 15;
 // A confirmação escrita do Fechar com a cobertura do valor abaixo de 50% (item 2): a mesma frase da tela.
 const PERF_FRASE_COBERTURA = "fechar com cobertura baixa";
 /* A BASE QUE MUDA DURANTE A CONSULTA É 409, NÃO 500 (item 14). A tela trata o
@@ -1828,11 +1830,43 @@ Deno.serve(async (req: Request) => {
         }
         if(body.rev!==os.rev) return resp({error:"A O.S. mudou. Reabra a conferência antes de salvar.",conflito:true},409);
         if(["baixa_administrativa","retirada"].includes(os.conferenciaERP?.classificacao)) return resp({error:"Revise a classificação ERP para divergência antes de conferir uma instalação. A classificação anterior será preservada no histórico."},422);
+        /* REVISAR OU ANULAR UMA PARCIAL (M12 da auditoria de 11/10/2026, onda
+           operação): só a gestão (esta ação já é de admin e pcp), pela tela,
+           na hora (fora da fila: a recusa não prende nada), com motivo de 15
+           letras ou mais. A revisão valida SÓ a entrega editada (as outras
+           entram no saldo pelo que ainda se lê); a anulação tira a entrega.
+           As duas ficam no diário da O.S. (conferenciasRevisoes, só
+           acréscimo, com o antes e o depois, quem e quando, carimbados aqui)
+           e no diário de auditoria. Mês fechado continua recusado (M7). */
+        const revisao=body.revisao&&typeof body.revisao==="object"?body.revisao:null;
+        const motivoRev=revisao?String(revisao.motivo ?? "").trim().slice(0,300):"";
+        if(revisao){
+          const letras=(motivoRev.normalize("NFC").match(/[\p{L}\p{N}]/gu) || []).length;
+          if(letras<MOTIVO_REVISAO_PARCIAL_MIN)return resp({error:`Escreva o motivo da revisão com ${MOTIVO_REVISAO_PARCIAL_MIN} letras ou mais. Nada foi gravado.`},400);
+          if(!["revisar","anular"].includes(String(revisao.acao || "")))return resp({error:"Escolha revisar ou anular a entrega conferida."},400);
+        }
         const velho=(os.conferenciasEntrega || []).find((e:any)=>e.id===body.entrega.id);
+        if(revisao && !velho)return resp({error:"Esta entrega conferida não existe mais. Reabra a conferência."},409);
         const pedido=body.entrega, hoje=perfDia(new Date().toISOString());
         const entrega={id:pedido.id,dia:pedido.dia,itens:pedido.itens,alocacao:pedido.alocacao};
         const demais=(os.conferenciasEntrega || []).filter((e:any)=>e.id!==entrega.id);
-        const erro=CONFERENCIA_ENTREGA.validar(os,[...demais,entrega],hoje);
+        if(revisao?.acao==="anular"){
+          const fechadosAn=await perfPeriodosFechados();
+          const fAn=perfPeriodoDoDia(fechadosAn,String(velho.dia||""));
+          if(fAn)return resp({error:`Esta entrega foi conferida em ${perfDiaBR(velho.dia)}, num período já fechado (${perfDiaBR(fAn.de)} a ${perfDiaBR(fAn.ate)}, revisão ${fAn.ultimaRevisao}). Mês fechado não se recalcula: ela não pode ser anulada. ${PERF_AJUSTE_FECHADO}`},409);
+          const autorAn=await autorAuditoria(), agoraAn=new Date().toISOString();
+          const registroAn={id:"rev-"+crypto.randomUUID(),entregaId:velho.id,acao:"anular",motivo:motivoRev,por:autorAn.nome,porId:autorAn.porId,porConta:autorAn.login,em:agoraAn,
+            antes:{dia:velho.dia,itens:(velho.itens || []).map((i:any)=>({chave:i.chave,identidade:i.identidade,qtde:i.qtde}))}};
+          const conferenciasAn=demais;
+          const gravarAn={...os,conferenciasEntrega:conferenciasAn,conferenciasRevisoes:[...(Array.isArray(os.conferenciasRevisoes)?os.conferenciasRevisoes:[]),registroAn].slice(-100),rev:(Number(os.rev)||0)+1,atualizadoEm:agoraAn,atualizadoPor:autorAn.nome};
+          if(!conferenciasAn.length)delete gravarAn.conferenciasEntrega;
+          const {data:salvaAn,error:erroAn}=await sb.from("pcp_registros").update({registro:gravarAn,atualizado_em:new Date(Math.max(Date.now(),Date.parse(row.atualizado_em)+1 || 0)).toISOString()}).eq("colecao","os").eq("id",osId).eq("atualizado_em",row.atualizado_em).select("id");
+          if(erroAn) throw new Error(erroAn.message);
+          if(!salvaAn?.length) return resp({error:"Outra pessoa alterou a O.S. Reabra a conferência.",conflito:true},409);
+          await auditar(osId,"anular-entrega-conferida",{campos:["conferenciasEntrega"],motivo:motivoRev,antes:{conferenciasEntrega:os.conferenciasEntrega || []},depois:{conferenciasEntrega:conferenciasAn}},os.numero);
+          return resp({ok:true,os:saida(gravarAn)});
+        }
+        const erro=revisao?CONFERENCIA_ENTREGA.validarRevisao(os,demais,entrega,hoje):CONFERENCIA_ENTREGA.validar(os,[...demais,entrega],hoje);
         if(erro) return resp({error:erro},422);
         /* CONFERIR EM MÊS FECHADO (M7 da auditoria de 11/10/2026, pela
            recomendação dela): a conferência nova com o dia num período fechado
@@ -1862,11 +1896,13 @@ Deno.serve(async (req: Request) => {
         if(ra.descartado || !ra.os.alocacao || !alocacaoConfirmada(ra.os)) return resp({error:ra.descartado?.motivo || "Confira a equipe e os vínculos no RH antes de confirmar."},422);
         const limpa={id:entrega.id,dia:entrega.dia,itens:entrega.itens.map((i:any)=>({chave:i.chave,identidade:i.identidade,qtde:i.qtde})),alocacao:ra.os.alocacao,por:autor.nome,porId:autor.porId,em:agora};
         const conferenciasEntrega=[...demais,limpa].sort((a:any,b:any)=>a.dia.localeCompare(b.dia)||a.id.localeCompare(b.id));
-        const gravar={...os,conferenciasEntrega,rev:(Number(os.rev)||0)+1,atualizadoEm:agora,atualizadoPor:autor.nome};
+        const gravar:any={...os,conferenciasEntrega,rev:(Number(os.rev)||0)+1,atualizadoEm:agora,atualizadoPor:autor.nome};
+        if(revisao)gravar.conferenciasRevisoes=[...(Array.isArray(os.conferenciasRevisoes)?os.conferenciasRevisoes:[]),{id:"rev-"+crypto.randomUUID(),entregaId:velho.id,acao:"revisar",motivo:motivoRev,por:autor.nome,porId:autor.porId,porConta:autor.login,em:agora,
+          antes:{dia:velho.dia,itens:(velho.itens || []).map((i:any)=>({chave:i.chave,identidade:i.identidade,qtde:i.qtde}))},depois:{dia:limpa.dia,itens:limpa.itens}}].slice(-100);
         const {data:salva,error:erroSalvar}=await sb.from("pcp_registros").update({registro:gravar,atualizado_em:new Date(Math.max(Date.now(),Date.parse(row.atualizado_em)+1 || 0)).toISOString()}).eq("colecao","os").eq("id",osId).eq("atualizado_em",row.atualizado_em).select("id");
         if(erroSalvar) throw new Error(erroSalvar.message);
         if(!salva?.length) return resp({error:"Outra pessoa alterou a O.S. Reabra a conferência.",conflito:true},409);
-        await auditar(osId,"conferir-entrega",{campos:["conferenciasEntrega"],antes:{conferenciasEntrega:os.conferenciasEntrega || []},depois:{conferenciasEntrega}},os.numero);
+        await auditar(osId,revisao?"revisar-entrega-conferida":"conferir-entrega",{campos:["conferenciasEntrega"],...(revisao?{motivo:motivoRev}:{}),antes:{conferenciasEntrega:os.conferenciasEntrega || []},depois:{conferenciasEntrega}},os.numero);
         return resp({ok:true,os:saida(gravar)});
       }
 
@@ -2982,6 +3018,15 @@ Deno.serve(async (req: Request) => {
           trocarOS(gi.os);
           avisosToque.push(...gi.avisos);
         }
+        /* O ITEM CITADO EM CONFERÊNCIA FICA PROTEGIDO (M12, onda operação):
+           a identidade gravada volta e o item que saiu volta ao lugar, com
+           aviso, nunca 422. Corrigir o item é revisar ou anular antes a
+           parcial (ação conferenciaEntrega com revisão, com motivo). */
+        {
+          const pi = protegerItensConferidos(os, existing, { avisar: !ehMaquina });
+          trocarOS(pi.os);
+          avisosToque.push(...pi.avisos);
+        }
         if (os.carroLiberado && !existing?.carroLiberado) {
           const diaSP = (x: string) => Number.isFinite(Date.parse(x)) ? new Date(Date.parse(x)-3*3600*1000).toISOString().slice(0,10) : '';
           const diaSaida = diaSP(os.carroLiberadoEm || '');
@@ -3083,6 +3128,8 @@ Deno.serve(async (req: Request) => {
         for (const campo of ["conferenciaERP","regularizacaoSaida","revisaoSolicitada","cicloRegistro"]) { if (existing?.[campo]) os[campo]=existing[campo]; else delete os[campo]; }
         if (existing?.vinculosEquipes) os.vinculosEquipes=existing.vinculosEquipes; else delete os.vinculosEquipes;
         if (existing?.conferenciasEntrega) os.conferenciasEntrega = existing.conferenciasEntrega; else delete os.conferenciasEntrega;
+        // O diário das revisões e anulações de parcial (M12) só muda pela ação conferenciaEntrega.
+        if (existing?.conferenciasRevisoes) os.conferenciasRevisoes = existing.conferenciasRevisoes; else delete os.conferenciasRevisoes;
         /* O CARRO PELO ID DO ATIVOS (item 16 da fila de 11/10/2026): a tela
            grava veiculoId junto com o nome escolhido na lista do Ativos. O id
            só vale com o nome com que foi escolhido: trocar o carro numa aba

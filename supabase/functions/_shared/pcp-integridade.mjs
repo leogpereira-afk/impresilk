@@ -2166,6 +2166,49 @@ export function guardarEntregasItens(os, antes, { papel = '', avisar = false, au
   const r = Array.isArray(os.itens) || voltaram ? { ...os, itens } : { ...os };
   return { os: r, avisos: avisar ? avisos : [], eventos, recusadas: recusadas.slice(0, 200) };
 }
+/* O ITEM CITADO EM CONFERÊNCIA FICA PROTEGIDO (M12 da auditoria de
+   11/10/2026, onda operação), como o item com marca de entrega: mudar o
+   número, a descrição, a medida, a quantidade ou a unidade de um item que
+   uma conferência por entrega gravada cita invalidava todas as parciais da
+   O.S. ("Um item mudou"), e com duas parciais não havia conserto pela tela.
+   Agora, em toda gravação pelo pcp-sync: o item citado volta com a
+   identidade gravada, e o que saiu da lista volta ao lugar dele, com aviso
+   (nunca 422). Para mudar o item, a gestão revisa ou anula antes a parcial
+   que o cita (ação conferenciaEntrega com `revisao`, pela tela, com motivo).
+   O resto do item (valor, situação, fotos) segue como veio. A citação é
+   pela chave da conferência (o código do item; sem código, a identidade).
+   Devolve { os, avisos }. */
+export const CAMPOS_IDENTIDADE_ITEM = ['item', 'descricao', 'medidas', 'qtde', 'qtd', 'unidade'];
+export function protegerItensConferidos(os, antes, { avisar = false } = {}) {
+  const regs = Array.isArray(antes?.conferenciasEntrega) ? antes.conferenciasEntrega : [];
+  if (!objeto(os) || !regs.length || !Array.isArray(antes?.itens)) return { os, avisos: [] };
+  const citadas = new Set();
+  for (const e of regs) for (const p of Array.isArray(e?.itens) ? e.itens : []) if (objeto(p)) citadas.add(String(p.chave ?? ''));
+  const cat = CONF_VOLTA.catalogo(antes);
+  const avisos = [];
+  const itens = Array.isArray(os.itens) ? os.itens.slice() : [];
+  const chaveDe = it => uidItemValido(it?.uid) ? 'uid:' + it.uid : '';
+  cat.forEach((c, i) => {
+    if (!citadas.has(c.chave)) return;
+    const g = antes.itens[c.indice];
+    if (!objeto(g)) return;
+    const pos = c.chave.startsWith('uid:') ? itens.findIndex(it => objeto(it) && chaveDe(it) === c.chave)
+      : itens.findIndex(it => objeto(it) && JSON.stringify([String(it.item || ''), String(it.descricao || ''), String(it.medidas || ''), String(it.qtde ?? it.qtd ?? ''), String(it.unidade || '')]) === c.identidade);
+    if (pos < 0) {
+      itens.splice(Math.min(i, itens.length), 0, { ...g });
+      avisos.push(`O ${rotuloItem(g)} está numa entrega conferida e continua na O.S.: para tirá-lo, revise ou anule antes a entrega conferida, com motivo.`);
+      return;
+    }
+    const it = itens[pos];
+    const mudou = CAMPOS_IDENTIDADE_ITEM.filter(k => String(it[k] ?? '') !== String(g[k] ?? ''));
+    if (!mudou.length) return;
+    const r = { ...it };
+    for (const k of CAMPOS_IDENTIDADE_ITEM) { if (proprio(g, k)) r[k] = g[k]; else delete r[k]; }
+    itens[pos] = r;
+    avisos.push(`O ${rotuloItem(g)} está numa entrega conferida e não mudou (${mudou.join(', ')}): para corrigir o item, revise ou anule antes a entrega conferida, com motivo.`);
+  });
+  return { os: avisos.length ? { ...os, itens } : os, avisos: avisar ? avisos.slice(0, TETO_AVISOS_ENTREGA) : [] };
+}
 /* A MARCA QUE O APARELHO MANDOU E NÃO FICOU GRAVADA. Para o reenvio da mesma
    gravação (a resposta se perdeu): o servidor responde sem gravar de novo, e
    diz de novo quais marcas caíram, para o aparelho tirá-las da cópia. */
@@ -2467,7 +2510,7 @@ export function podarToque(r) {
   /* A divisão da equipe (alocacao, F08) e o histórico dela (alocacaoLog)
      também não descem: são os percentuais de cada colega, e o log guarda o
      antes e o depois deles. A mescla parte do gravado: nada se perde. */
-  const { cnpjCpf: _c, valorTotal: _v, erpAlteracoes: _h, [MEMORIA_IDS]: _m, alocacao: _a, alocacaoLog: _al, conferenciasEntrega: _ce, ...resto } = r;
+  const { cnpjCpf: _c, valorTotal: _v, erpAlteracoes: _h, [MEMORIA_IDS]: _m, alocacao: _a, alocacaoLog: _al, conferenciasEntrega: _ce, conferenciasRevisoes: _cr, ...resto } = r;
   for (const c of Object.keys(CARIMBOS_COM_ID)) delete resto[c + 'Id'];
   if (objeto(resto.entregaLancada)) {
     const { porId: _pi, porConta: _pc, ...el } = resto.entregaLancada;
@@ -3183,12 +3226,14 @@ export const diarioDescarteAlocacao = (antes, veio, motivo) => ({
    apaga nada: ausente fica o gravado. */
 export function podarAlocacao(r) {
   if (!objeto(r)) return r;
-  const { alocacao: _a, alocacaoLog: _l, conferenciasEntrega: _ce, ...x } = r;
+  const { alocacao: _a, alocacaoLog: _l, conferenciasEntrega: _ce, conferenciasRevisoes: _cr, ...x } = r;
   return x;
 }
 export function podarIdsAlocacao(r) {
   if (!objeto(r)) return r;
   const out = { ...r };
+  // O diário das revisões e anulações de parcial (M12) é da gestão: motivo, ID e login de quem fez.
+  delete out.conferenciasRevisoes;
   if (Array.isArray(out.conferenciasEntrega)) out.conferenciasEntrega = out.conferenciasEntrega.map(e => { const {porId, ...x} = e; return {...x, alocacao: podarIdsAlocacao({alocacao:e.alocacao}).alocacao}; });
   if (objeto(out.alocacao) && 'porId' in out.alocacao) { const { porId: _p, ...a } = out.alocacao; out.alocacao = a; }
   if (Array.isArray(out.alocacaoLog)) out.alocacaoLog = out.alocacaoLog.map(e => { if (!objeto(e)) return e; const { porId: _p, ...x } = e; return x; });

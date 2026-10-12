@@ -36,6 +36,13 @@ async function conferirItensEntrega(osId, entregaId = '') {
     const c = CONFERENCIA_ENTREGA.confDaVolta(v.retornoConf), nomes = (v.equipe || []).map(p => typeof OPERACAO !== 'undefined' && OPERACAO.nomePessoa ? OPERACAO.nomePessoa(p) : p).join(', ');
     return `Volta do carro desta entrega: ${v.dia.split('-').reverse().join('/')}${v.veiculo ? ' · ' + v.veiculo : ''}${nomes ? ' · ' + nomes : ''} · ${c ? 'conferida pela gestão' : 'ainda não conferida'}. Conta na nota quando a equipe desta entrega é a da viagem (ou está contida nela).`;
   };
+  /* REVISAR OU ANULAR A PARCIAL (M12, onda operação): a conferência que não
+     se lê mais (um item mudou) se revisa entrega por entrega, validando só a
+     editada, com motivo; qualquer entrega conferida se anula com motivo. Só
+     a gestão abre este diálogo; o servidor confere de novo. */
+  const inconsistente = !!anterior && !!CONFERENCIA_ENTREGA.validar(os, registros);
+  const letrasMotivo = t => (String(t || '').normalize('NFC').match(/[\p{L}\p{N}]/gu) || []).length;
+  const MOTIVO_REV_MIN = 15;
   const escolhidos = new Map((anterior?.itens || []).map(i => [i.chave,i.qtde]));
   const usados = new Map(); outros.forEach(e => e.itens.forEach(i => usados.set(i.chave,(usados.get(i.chave)||0)+i.qtde)));
   const virtual = {...os, alocacao:anterior?.alocacao || (primeira ? os.alocacao : null), equipe:anterior ? DIVISAO.derivarEquipe(anterior.alocacao) : primeira ? os.equipe || [] : []};
@@ -55,18 +62,27 @@ async function conferirItensEntrega(osId, entregaId = '') {
     <h4>Quem entregou estes itens?</h4>
     <section class="conf-parte" aria-label="Parte entregue por esta equipe"><div class="conf-parte-topo"><strong id="conf-parte-titulo">Selecione os itens entregues</strong><button type="button" class="btn-ghost btn-sm" id="conf-editar-itens">Editar itens e quantidades</button></div><p id="conf-parte-itens"></p><p id="conf-parte-valor" aria-live="polite"></p><small>100% aqui significa a participação nos itens selecionados, não na O.S. inteira.</small></section>
     <div id="conf-aloc"></div></fieldset>
+    ${anterior&&!soLeitura?`<details class="conf-revisar" ${inconsistente?'open':''}><summary>Revisar ou anular esta entrega</summary>
+      ${inconsistente?'<p class="aloc-aviso" role="note">Esta O.S. tem conferência que não se lê mais (um item mudou depois de conferido). Revise esta entrega com os itens de hoje, ou anule-a; as outras entregas ficam como estão até a revisão delas.</p>':'<p class="metricas-nota">Anular tira esta entrega da conferência e da apuração do mês aberto. Fica registrado quem anulou, quando e o motivo.</p>'}
+      <label class="conf-rev-motivo">Motivo (${MOTIVO_REV_MIN} letras ou mais) <input id="conf-rev-motivo" maxlength="300" autocomplete="off"></label>
+      <button type="button" class="btn-ghost btn-sm" id="conf-anular">Anular esta entrega</button></details>`:''}
     <p class="aloc-status" id="conf-status" role="status" aria-live="polite"></p><div class="aloc-acoes"><button type="button" class="btn-primary" id="conf-salvar">${anterior?'Salvar alterações da entrega':'Confirmar esta entrega'}</button><button type="button" class="btn-ghost" id="conf-cancelar">Cancelar</button></div>`);
   const box=d.querySelector('#conf-aloc'), status=d.querySelector('#conf-status'), salvar=d.querySelector('#conf-salvar');
   const minhaTela=()=>d.open && d.querySelector('#conf-aloc')===box;
   const selecao=()=>catalogo.filter(i=>escolhidos.has(i.chave)).map(i=>({chave:i.chave,identidade:i.identidade,qtde:escolhidos.get(i.chave)}));
   const conferir=()=>{
     if(enviando) return;
-    const entrega={id,dia,itens:selecao()}, erro=CONFERENCIA_ENTREGA.validar(os,[...outros,entrega],ENTREGA_ITEM.diaSP(new Date().toISOString()));
-    const ap=erro?null:CONFERENCIA_ENTREGA.apurar(os,resposta.valor,[...outros,entrega]), valor=ap?.entregas.find(e=>e.id===id)?.valor;
+    const hojeV=ENTREGA_ITEM.diaSP(new Date().toISOString()), entrega={id,dia,itens:selecao()};
+    // Na revisão da parcial (M12), só a editada é validada; as outras entram no saldo pelo que ainda se lê.
+    const erro=inconsistente?CONFERENCIA_ENTREGA.validarRevisao(os,outros,entrega,hojeV):CONFERENCIA_ENTREGA.validar(os,[...outros,entrega],hojeV);
+    const doSaldo=inconsistente?CONFERENCIA_ENTREGA.lidasParaSaldo(os,outros):outros;
+    const ap=erro?null:CONFERENCIA_ENTREGA.apurar(os,resposta.valor,[...doSaldo,entrega]), valor=ap?.entregas.find(e=>e.id===id)?.valor;
     const st=ALOCUI.estado(chave); st.valor=valor==null?null:valor;
     const mesFechado=travaMes(dia), aviso=d.querySelector('#conf-mes-fechado');
     if(aviso){aviso.textContent=mesFechado;aviso.hidden=!mesFechado;}
-    const motivo=mesFechado || erro || ALOCUI.bloqueio(chave);
+    const campoRev=d.querySelector('#conf-rev-motivo');
+    const faltaMotivo=inconsistente && letrasMotivo(campoRev && campoRev.value)<MOTIVO_REV_MIN ? `Escreva o motivo da revisão com ${MOTIVO_REV_MIN} letras ou mais.` : '';
+    const motivo=mesFechado || erro || faltaMotivo || ALOCUI.bloqueio(chave);
     salvar.disabled=!!motivo; status.textContent=motivo || ''; status.classList.toggle('erro',!!motivo);
     d.querySelector('#conf-resumo').textContent=erro || `${entrega.itens.length} item(ns) selecionado(s) · ${valor==null?'Valor a conferir: faltam valores dos itens.':dinheiroCasa(valor/100)} · ${ap.saldoItens.length} item(ns) com saldo para outra entrega.`;
     d.querySelector('#conf-parte-titulo').textContent=erro?'Confira os itens entregues':ap.saldoItens.length?'Entrega parcial':'Saldo de itens concluído';
@@ -86,6 +102,27 @@ async function conferirItensEntrega(osId, entregaId = '') {
   d.querySelector('#conf-todos').onclick=()=>{d.querySelectorAll('[data-conf-item]').forEach(el=>{if(el.disabled)return;const n=+el.dataset.confItem,it=catalogo[n],q=d.querySelector(`[data-conf-qtde="${n}"]`);el.checked=true;q.disabled=false;q.value=it.qtde-(usados.get(it.chave)||0);escolhidos.set(it.chave,Number(q.value));});atualizar();};
   d.querySelectorAll('[data-conf-abrir]').forEach(el=>el.onclick=()=>{d.close();void conferirItensEntrega(osId,el.dataset.confAbrir).catch(e=>toast(perfErroTxt(e),'error'));});
   d.querySelector('#conf-cancelar').onclick=()=>d.close();
+  const campoRevMotivo=d.querySelector('#conf-rev-motivo');
+  if(campoRevMotivo)campoRevMotivo.oninput=conferir;
+  const anular=d.querySelector('#conf-anular');
+  if(anular)anular.onclick=async()=>{
+    if(enviando)return;
+    const motivoAn=String(campoRevMotivo&&campoRevMotivo.value||'').trim();
+    if(letrasMotivo(motivoAn)<MOTIVO_REV_MIN){status.textContent=`Escreva o motivo da anulação com ${MOTIVO_REV_MIN} letras ou mais.`;status.classList.add('erro');campoRevMotivo?.focus();return;}
+    if(pendente()){status.textContent='Sincronize as alterações pendentes antes de anular.';return;}
+    if(!confirm(`Anular a entrega conferida em ${anterior.dia.split('-').reverse().join('/')}? Ela sai da conferência e da apuração do mês aberto.`))return;
+    enviando=true;anular.disabled=true;salvar.disabled=true;status.textContent='Anulando a entrega…';
+    try {
+      const resp=await STORE.api({action:'conferenciaEntrega',osId,rev:os.rev,entrega:{id:anterior.id},revisao:{acao:'anular',motivo:motivoAn}});
+      if(!resp?.ok) throw new Error(resp?.error || 'Não foi possível anular a entrega.');
+      if(minhaTela())d.close();
+      if(typeof STORE.pull==='function') await STORE.pull().catch(()=>{});
+      conferenciaRefletirNaFicha(resp.os);
+      toast('Entrega conferida anulada, com o motivo registrado.','success');
+      perfDepoisDeGravar({estado:'gravada'});
+    } catch(e) {if(minhaTela()){status.textContent=perfErroTxt(e);status.classList.add('erro');anular.disabled=false;salvar.disabled=false;}else toast(perfErroTxt(e),'error');}
+    finally {enviando=false;}
+  };
   // O dialog é reutilizado. Um close enfileirado da tela anterior não pode
   // apagar a divisão da tela que acabou de abrir no mesmo elemento.
   const aoFechar=()=>{if(minhaTela())return;ALOCUI.esquecer(chave);d.removeEventListener('close',aoFechar);};
@@ -96,7 +133,9 @@ async function conferirItensEntrega(osId, entregaId = '') {
     const r=ALOCUI.paraGravar(chave);if(r.erro){status.textContent=r.erro;return;}
     enviando=true;salvar.disabled=true;status.textContent='Conferindo e salvando a entrega…';
     try {
-      const resposta=await STORE.api({action:'conferenciaEntrega',osId,rev:os.rev,entrega:{id,dia,itens:selecao(),alocacao:{...r.alocacao,...(anterior?.alocacao?.em?{em:anterior.alocacao.em}:{})}}});
+      const campoRev=d.querySelector('#conf-rev-motivo');
+      const resposta=await STORE.api({action:'conferenciaEntrega',osId,rev:os.rev,entrega:{id,dia,itens:selecao(),alocacao:{...r.alocacao,...(anterior?.alocacao?.em?{em:anterior.alocacao.em}:{})}},
+        ...(inconsistente?{revisao:{acao:'revisar',motivo:String(campoRev&&campoRev.value||'').trim()}}:{})});
       if(!resposta?.ok) throw new Error(resposta?.error || 'Não foi possível confirmar a entrega.');
       if(minhaTela())d.close();
       // Pull respeita a fila local; não substitui uma edição feita durante a requisição.
