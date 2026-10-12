@@ -112,7 +112,8 @@ function abrirRevisaoOperacional(){
   const sts=[d.querySelector('#op-revisao-status'),d.querySelector(`[data-lote-status="${id}"]`)].filter(Boolean),dizer=t=>sts.forEach(x=>{x.textContent=t;});
   const r=OPREV.desfazerLote(STORE.getCFG(),id,campo?campo.value:'',STATE.user.nome,new Date().toISOString());
   if(r.erro){dizer(r.erro);return;}
-  const feito=`Lote desfeito: ${r.voltam.length===1?'1 descrição voltou':r.voltam.length+' descrições voltaram'} a ficar sem categoria${r.ficam.length?`; ${r.ficam.length===1?'1 descrição já tinha':r.ficam.length+' descrições já tinham'} outra classificação, feita depois, e ficou como está`:''}.`;
+  const v=r.voltam.length,f=r.ficam.length;
+  const feito=`Lote desfeito: ${!v?'nenhuma descrição voltou':v===1?'1 descrição voltou':v+' descrições voltaram'} a ficar sem categoria${f?`; ${f===1?'1 descrição já tinha outra classificação, feita depois, e ficou como está':f+' descrições já tinham outra classificação, feita depois, e ficaram como estão'}`:''}.`;
   STORE.saveCFG(r.cfg);dizer(feito+' Sincronizando…');b.disabled=true;
   try{await STORE.trySync();if(STORE.getQueue().length)throw new Error('Alteração pendente de sincronização.');dizer(feito+' Configuração sincronizada.');}catch(e){dizer(perfErroTxt(e));}};
  d.querySelector('[name=correcao]').onchange=ev=>{const m=cfg.medicoesRetrabalho?.[ev.target.value]||{};

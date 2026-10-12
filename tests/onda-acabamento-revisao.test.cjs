@@ -367,3 +367,12 @@ test('revisão acabamento: o servidor assina o lote e o desfazer, guarda o lote 
   assert.deepEqual([r3.cfg.lotesCategoria[0].desfeito.motivo, r3.cfg.lotesCategoria[0].desfeito.por], ['Lote feito por engano na revisão fictícia', 'Gestor Teste']);
   assert.equal(r3.cfg.lotesCategoria[0].descricoes.length, 1, 'o registro fica');
 });
+
+test('revisão acabamento: a resposta do desfazer concorda no plural e diz "nenhuma" (U3)', async () => {
+  const lote = {id: 'lote-x', busca: 'placa', categoria: 'Sinalização', motivo: 'Lote fictício das placas de obra', descricoes: ['Placa fictícia A', 'Placa fictícia B'], por: 'Gestor Teste', em: '2026-10-11T12:00:00Z'};
+  const d = dialogoOp([], {categoriasServico: [{descricao: 'Placa fictícia A', categoria: 'Fachadas'}, {descricao: 'Placa fictícia B', categoria: 'Fachadas'}], lotesCategoria: [lote]});
+  d.el('[data-lote-motivo="lote-x"]').value = 'Lote fictício feito por engano na revisão';
+  await d.el('#op-lotes').onclick({target: {closest: () => ({dataset: {loteDesfazer: 'lote-x'}})}});
+  // Caso ruim (primeira versão da correção): "0 descrições voltaram" e "2 descrições já tinham ... e ficou como está".
+  assert.match(d.el('#op-revisao-status').textContent, /Lote desfeito: nenhuma descrição voltou a ficar sem categoria; 2 descrições já tinham outra classificação, feita depois, e ficaram como estão\./);
+});
