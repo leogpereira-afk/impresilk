@@ -2859,12 +2859,28 @@ Deno.serve(async (req: Request) => {
         /* O ID DA O.S. ORIGINAL (item 37, onda operação): a gestão liga a
            correção à original pelo ID; a porta lê a O.S. do ID e confere o
            número. O que não passa fica o gravado, com aviso, nunca 422. */
+        let idOriginalConferido = false;
         if (typeof veioOriginalId === "string" && veioOriginalId.trim() && veioOriginalId.trim() !== String(existing?.osOriginalId ?? "")) {
           const gestaoOrig = !ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(papelUp);
           const original = gestaoOrig && veioOriginalId.trim().length <= 200 ? await getReg("os", veioOriginalId.trim()) : null;
           const go = guardarOsOriginalId(veioOriginalId, os, existing, original, { pode: gestaoOrig, avisar: !ehMaquina && !ehToqueNoNome });
           trocarOS(go.os);
           if (go.aviso) avisosToque.push(go.aviso);
+          idOriginalConferido = !go.aviso;
+        }
+        /* O NÚMERO DA ORIGINAL MUDOU (D2 da revisão da onda operação): o ID
+           que ficou (o gravado, ou o mesmo que o aparelho devolveu) era
+           conferido só quando o ID mudava, e o par número 97003 com o ID da
+           97001 entrava calado. Agora, sempre que o número muda, a porta
+           confere o par: o ID que não é de uma O.S. com o número novo sai,
+           com aviso (nunca 422). */
+        if (existing && !idOriginalConferido && String(os.osOriginal ?? "").trim() !== String(existing?.osOriginal ?? "").trim() && typeof os.osOriginalId === "string" && os.osOriginalId.trim()) {
+          const idPar = os.osOriginalId.trim(), numeroPar = String(os.osOriginal ?? "").trim();
+          const doPar = numeroPar && idPar.length <= 200 && idPar !== String(os.id ?? "") ? await getReg("os", idPar) : null;
+          if (!doPar || String(doPar.numero ?? "").trim() !== numeroPar) {
+            trocarOS({ ...os, osOriginalId: null });
+            if (!ehMaquina && !ehToqueNoNome) avisosToque.push(numeroPar ? `O vínculo pelo ID com a O.S. original saiu: o número mudou para ${numeroPar}, e o ID gravado não é de uma O.S. com esse número. Escolha a original de novo na ficha.` : "O vínculo pelo ID com a O.S. original saiu junto com o número.");
+          }
         }
         /* O CANCELAMENTO DECIDIDO LA EM CIMA (F16) entra aqui, depois do
            preservarAusentes (que deixou o gravado): o pedido aceito troca o

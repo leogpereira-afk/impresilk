@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {edge} = require('./helpers/edge.cjs');
+const {telaFicha} = require('./helpers/ficha-tela.cjs');
 const B = require('./helpers/lote-bancada.cjs');
 const C = require('../conferencia-entrega.js');
 const D = require('../divisao.js');
@@ -98,4 +99,60 @@ test('revisão operação: D1, a tela da conferência deixa a entrega editada ma
   assert.match(ui, /validarRevisao\(os,outros,entrega,hojeV,anterior\|\|null\)/);
   assert.match(ui, /esta entrega mantém até \$\{tinhaC\} já conferida/);
   assert.match(ui, /if\(el\.disabled\|\|catalogo\[\+el\.dataset\.confItem\]\.cancelado\)return/);
+});
+
+/* ── D2: osOriginalId velho quando a gestão troca o número ──────────────── */
+const osN = (id, numero, extra = {}) => ({id, numero, tipo:'externo', cliente:'Cliente Fictício', servico:'Fachada fictícia', ...extra});
+const linhaN = o => ({colecao:'os', id:o.id, apagado:false, atualizado_em:'2026-10-01T10:00:00Z', registro:{rev:1, ...o}});
+
+test('revisão operação: D2, a ficha limpa o ID da original quando o número novo aponta 0 ou 2+ O.S.', async () => {
+  const t = await telaFicha([osN('orig', '97001'), osN('corr', '97050'), osN('d1', '97003'), osN('d2', '97003')]);
+  t.abrir('corr');
+  t.run(`_modalDraft.osOriginal = '97001'`);
+  assert.equal(t.json(`ligarOsOriginal(_modalDraft)`).situacao, 'ligada');
+  assert.equal(t.run(`_modalDraft.osOriginalId`), 'orig');
+  // Caso ruim (f33877d): com 2+ O.S. do número novo, a ficha ficava com o ID da 97001.
+  t.run(`_modalDraft.osOriginal = '97003'`);
+  assert.equal(t.json(`ligarOsOriginal(_modalDraft)`).situacao, 'varias');
+  assert.equal(t.run(`_modalDraft.osOriginalId`), null);
+  // Com 2+, o ID que é de uma delas fica.
+  t.run(`_modalDraft.osOriginalId = 'd2'`);
+  t.json(`ligarOsOriginal(_modalDraft)`);
+  assert.equal(t.run(`_modalDraft.osOriginalId`), 'd2');
+  // Número sem O.S. no aparelho: o ID sai.
+  t.run(`_modalDraft.osOriginal = '97999'`);
+  assert.equal(t.json(`ligarOsOriginal(_modalDraft)`).situacao, 'nenhuma');
+  assert.equal(t.run(`_modalDraft.osOriginalId`), null);
+});
+
+test('revisão operação: D2, a porta confere o par número e ID sempre que o número muda (aviso, nunca 422)', async () => {
+  const e = await edge('pcp-sync', {pcp_registros:[linhaN(osN('orig', '97001')), linhaN(osN('d1', '97003')), linhaN(osN('corr', '97050'))], registros:B.FICHAS});
+  let r = await e.call({action:'upsert', os:{...g(e, 'corr'), osOriginal:'97001', osOriginalId:'orig'}}, gestor);
+  assert.equal(g(e, 'corr').osOriginalId, 'orig');
+  await pausa();
+  // Caso ruim (f33877d): número 97003 com o ID da 97001 entrava calado (o aparelho velho devolve o mesmo ID).
+  r = await e.call({action:'upsert', os:{...g(e, 'corr'), osOriginal:'97003', osOriginalId:'orig'}}, gestor);
+  assert.equal(r.status, 200);
+  assert.equal(g(e, 'corr').osOriginal, '97003');
+  assert.equal(g(e, 'corr').osOriginalId, null, 'o ID que não é do número novo sai');
+  assert.match(String(r.avisos), /o número mudou para 97003/);
+  await pausa();
+  // O aparelho que nem manda o ID (campo ausente): o gravado também é conferido quando o número muda.
+  r = await e.call({action:'upsert', os:{...g(e, 'corr'), osOriginal:'97001', osOriginalId:'orig'}}, gestor);
+  assert.equal(g(e, 'corr').osOriginalId, 'orig');
+  await pausa();
+  const {osOriginalId: _fora, ...semId} = g(e, 'corr');
+  r = await e.call({action:'upsert', os:{...semId, osOriginal:'97003'}}, gestor);
+  assert.equal(r.status, 200);
+  assert.equal(g(e, 'corr').osOriginalId, null);
+  await pausa();
+  // O par certo continua entrando: número e ID da mesma O.S.
+  r = await e.call({action:'upsert', os:{...g(e, 'corr'), osOriginal:'97003', osOriginalId:'d1'}}, gestor);
+  assert.equal(r.status, 200);
+  assert.equal(g(e, 'corr').osOriginalId, 'd1');
+  assert.equal(r.avisos, undefined);
+  await pausa();
+  // Mudar outro campo sem mexer no número não confere nem tira nada.
+  r = await e.call({action:'upsert', os:{...g(e, 'corr'), obs:'nota fictícia'}}, gestor);
+  assert.equal(g(e, 'corr').osOriginalId, 'd1');
 });

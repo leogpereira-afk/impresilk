@@ -4648,7 +4648,14 @@ function ligarOsOriginal(os) {
   const n = String(os.osOriginal || '').trim();
   if (!n) { if (gestao && os.osOriginalId) os.osOriginalId = null; return {id:'', situacao:'vazio'}; }
   const xs = originaisPorNumero(n, os.id);
-  if (xs.length !== 1) return {id:'', situacao:xs.length ? 'varias' : 'nenhuma'};
+  /* O NÚMERO NOVO QUE NÃO APONTA UMA O.S. SÓ (D2 da revisão da onda
+     operação): o ID da original de antes saía junto e ficava apontando o
+     número velho. Agora o ID que não é de uma O.S. com o número novo sai
+     (com 2 ou mais, fica só se for uma delas). */
+  if (xs.length !== 1) {
+    if (gestao && os.osOriginalId && !xs.some(o => o.id === os.osOriginalId)) os.osOriginalId = null;
+    return {id:'', situacao:xs.length ? 'varias' : 'nenhuma'};
+  }
   if (gestao) os.osOriginalId = xs[0].id;
   return {id:xs[0].id, situacao:'ligada'};
 }

@@ -32,13 +32,15 @@ test('item 37: a gestão grava o ID da original junto com o número; a porta con
   assert.match(String(r.avisos), /não é de uma O\.S\. com o número 97001/);
   await new Promise(ok => setTimeout(ok, 3));
   // A própria O.S. também não.
-  r = await e.call({action:'upsert', os:{...g(e, 'corr'), osOriginal:'97050', osOriginalId:'corr'}}, gestor);
+  r = await e.call({action:'upsert', os:{...g(e, 'corr'), osOriginalId:'corr'}}, gestor);
   assert.equal(g(e, 'corr').osOriginalId, 'orig');
   await new Promise(ok => setTimeout(ok, 3));
-  // A operação não grava o vínculo (fica o gravado), sem 422.
+  // A operação não grava o vínculo, sem 422. Trocado de propósito na revisão
+  // da onda (D2): o número mudou e o ID gravado (da 97001) não é dele, então
+  // ele sai em vez de ficar apontando o número velho.
   r = await e.call({action:'upsert', os:{...g(e, 'corr'), osOriginal:'97002', osOriginalId:'outra'}}, operacao);
   assert.equal(r.status, 200);
-  assert.equal(g(e, 'corr').osOriginalId, 'orig');
+  assert.equal(g(e, 'corr').osOriginalId, null);
   assert.match(String(r.avisos), /é da gestão/);
   await new Promise(ok => setTimeout(ok, 3));
   // O vazio da gestão limpa.
