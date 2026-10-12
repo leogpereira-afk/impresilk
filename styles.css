@@ -666,6 +666,13 @@ body:not(.equipe-app) #modal-os .modal-meta { white-space: nowrap; overflow: hid
 /* Quantidade abaixo do que já foi entregue: o campo acusa e a O.S. fica com a de antes. */
 .items-table input[aria-invalid="true"] { border-color: var(--red); background: #fef2f2; }
 .ent-resumo { font-weight: 600; }
+/* O caminho da entrega dos itens na O.S. aberta (revisão da onda acabamento, U1). */
+.ent-conferir {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 0 10px; padding: 10px 12px;
+  border-radius: 8px; background: #eff6ff; border: 1px solid #bfdbfe; color: var(--text); font-size: .84rem; line-height: 1.4;
+}
+.ent-conferir > span { flex: 1 1 260px; min-width: 0; }
+.ent-conferir > button { min-height: 44px; }
 .ent-erro { color: var(--red); font-size: .82rem; margin: 6px 0; }
 .saldo-ent-lista { margin: 0 0 12px 18px; font-size: .84rem; display: grid; gap: 4px; }
 /* Item com problema aberto: fora da marcação do Finalizar, listado à parte. */

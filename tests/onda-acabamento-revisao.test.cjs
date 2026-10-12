@@ -207,3 +207,42 @@ test('revisão acabamento: os avisos do remover, da quantidade, do celular e do 
   assert.doesNotMatch(aviso, /Cancelar item/);
   assert.match(aviso, /O saldo que falta se confere em "Conferir itens e equipe"/);
 });
+
+/* U1: a O.S. aberta tinha "Entrega · a entregar (N)" em cada item e nenhum caminho para conferir. */
+const osAberta = () => ({id: 'u1', numero: '93211', rev: 1, tipo: 'externo', cliente: 'Cliente fictício', itens: [
+  {uid: 'm-u1000000001', item: '1', descricao: 'Placa fictícia', qtde: '2', manual: true},
+  {uid: 'm-u1000000002', item: '2', descricao: 'Adesivo fictício', qtde: '1', manual: true}]});
+test('revisão acabamento: a O.S. aberta tem, uma vez no bloco de itens, o "Conferir itens e equipe" para a gestão (U1)', async () => {
+  const ouvintes = [], abertas = [];
+  const doc = {querySelector: () => null, querySelectorAll: () => [], addEventListener: (t, f) => ouvintes.push([t, f])};
+  const g = ficha('pcp', {document: doc, conferirItensEntrega: async id => { abertas.push(id); }, perfErroTxt: String, toast() {}});
+  g.__os = osAberta();
+  const html = vm.runInContext('blocoItens(__os, false, 0)', g);
+  // Caso ruim (acfaae1): a linha "Entrega · a entregar" de cada item e nenhum botão nem caminho.
+  assert.match(html, /a entregar \(2\)/);
+  const botoes = html.match(/<button[^>]*data-controle="itens" data-controle-os="u1"[^>]*>Conferir itens e equipe<\/button>/g) || [];
+  assert.equal(botoes.length, 1, 'uma vez no bloco, não um por item');
+  assert.match(html, /2 itens a entregar\. A entrega dos itens se confere pela gestão, por unidade e dia:/);
+  assert.ok(html.indexOf('ent-conferir') < html.indexOf('<table class="items-table'), 'acima da lista de itens');
+  // O botão abre a conferência daquela O.S. (o mesmo caminho de Conferência e acompanhamento).
+  const clique = ouvintes.find(([t]) => t === 'click')[1];
+  clique({target: {closest: () => ({dataset: {controle: 'itens', controleOs: 'u1'}})}, preventDefault() {}});
+  await new Promise(r => setTimeout(r, 5));
+  assert.deepEqual(abertas, ['u1']);
+  // Finalizada: sem o caminho (a conferência fica em Conferência e acompanhamento).
+  g.__os = {...osAberta(), finalizadaEm: '2026-10-10T12:00:00Z'};
+  assert.doesNotMatch(vm.runInContext('blocoItens(__os, false, 0)', g), /class="ent-conferir"/);
+  // Com conferência gravada: o saldo é o da conferência.
+  g.__os = osBase();
+  assert.match(vm.runInContext('blocoItens(__os, false, 0)', g), /2 unidades a conferir\. A entrega dos itens se confere pela gestão/);
+});
+
+test('revisão acabamento: quem não é gestão lê na O.S. aberta quem confere a entrega e onde (U1)', () => {
+  for (const papel of ['montagem', 'operacao']) {
+    const m = ficha(papel);
+    m.__os = osAberta();
+    const html = vm.runInContext('blocoItens(__os, false, 0)', m);
+    assert.doesNotMatch(html, /data-controle="itens"/, papel + ': sem o botão da gestão');
+    assert.match(html, /<p class="ent-conferir" role="note">2 itens a entregar\. A entrega dos itens não se marca na ficha: quem confere é a gestão do PCP, em &quot;Conferir itens e equipe&quot; \(na ficha, em Conferência e acompanhamento\)\.<\/p>/, papel);
+  }
+});

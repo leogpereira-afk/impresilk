@@ -3439,6 +3439,7 @@ function blocoItens(os, ro, done) {
         <label>Suprimentos (ex.: álcool, flanela)</label>
         ${chipsField('suprimentos', os.suprimentos || [], cfg.suprimentos, ro)}
       </div>
+      ${comEntrega ? conferirEntregaFichaHTML(os, gestaoConf) : ''}
       <table class="items-table items-cards"${fmsgAttr('itens')}>
         <thead><tr><th>Item</th><th>Descrição</th><th>Medidas</th><th>Qtde</th><th>OK</th><th></th></tr></thead>
         <tbody id="itens-tbody">${rows || `<tr><td colspan="${cols}" class="text-muted" style="text-align:center;padding:12px">Nenhum item</td></tr>`}</tbody>
@@ -3454,6 +3455,37 @@ function blocoItens(os, ro, done) {
   </details>`;
 }
 
+/* O CAMINHO DA ENTREGA DOS ITENS NA O.S. ABERTA (revisão da onda acabamento,
+   U1). Com as marcas por item só leitura (D-016), a linha "Entrega · a
+   entregar (N)" de cada item ficou sem botão nem caminho. Uma vez no bloco,
+   acima da lista: a gestão tem o "Conferir itens e equipe" (o mesmo de
+   Conferência e acompanhamento); quem não é gestão lê quem confere e onde.
+   Só na O.S. aberta, não cancelada, com saldo a entregar num item que não é
+   serviço (ou saldo a conferir na conferência gravada). */
+function conferirEntregaFichaHTML(os, gestao) {
+  if (!os || os.finalizadaEm || !marcasSoLeituraFicha() || (typeof canceladaNaTela === 'function' && canceladaNaTela(os))) return '';
+  let quanto = '';
+  if (os.conferenciasEntrega?.length) {
+    // Com conferência gravada, o saldo é o dela (D-016), não o das marcas antigas.
+    let e = null;
+    try { e = typeof CONFERENCIA_ENTREGA !== 'undefined' ? CONFERENCIA_ENTREGA.estado(os) : null; } catch { e = null; }
+    if (!e) return '';
+    if (e.situacao === 'inconsistente') quanto = 'A conferência desta O.S. precisa ser revista.';
+    else if (e.saldoUnidades > 0) quanto = `${e.saldoUnidades === 1 ? '1 unidade' : e.saldoUnidades + ' unidades'} a conferir.`;
+    else return '';
+  } else {
+    let comSaldo = 0;
+    for (const it of Array.isArray(os.itens) ? os.itens : []) {
+      if (!it || typeof it !== 'object') continue;
+      try { if (!ENTREGA_ITEM.ehServico(it) && ENTREGA_ITEM.situacaoItem(it, os).saldo > 0) comSaldo++; } catch {}
+    }
+    if (!comSaldo) return '';
+    quanto = `${comSaldo === 1 ? '1 item' : comSaldo + ' itens'} a ${isInterno(os) ? 'retirar' : 'entregar'}.`;
+  }
+  return gestao
+    ? `<div class="ent-conferir" role="note"><span>${esc(quanto)} A entrega dos itens se confere pela gestão, por unidade e dia:</span><button type="button" class="btn-primary btn-sm" data-controle="itens" data-controle-os="${esc(os.id)}">Conferir itens e equipe</button></div>`
+    : `<p class="ent-conferir" role="note">${esc(quanto)} A entrega dos itens não se marca na ficha: quem confere é a gestão do PCP, em ${esc(ONDE_CONFERIR_FICHA)}.</p>`;
+}
 // O item já está na O.S. guardada neste aparelho (pelo código do item); o rascunho salvo também conta.
 function itemJaGravado(os, it) {
   const g = os && typeof STORE !== 'undefined' && typeof STORE.getOS === 'function' ? STORE.getOS(os.id) : null;
