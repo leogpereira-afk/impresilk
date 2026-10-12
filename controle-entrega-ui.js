@@ -2,6 +2,25 @@
 const CONTROLE_CLASSIFICACOES = {total:'Entrega total',parcial:'Entrega parcial',retirada:'Retirada',baixa_administrativa:'Baixa administrativa',divergencia:'Divergência a resolver'};
 const controleGestao = () => ['admin','pcp'].includes(STATE.user?.papel);
 const controlePendente = id => STORE.getQueue().some(x=>x.os?.id===id || x.id===id);
+/* O ITEM SEM VALOR NUMA O.S. COM ENTREGA CONFERIDA (baixa da verificação da
+   v172): quem não é gestão pode pôr item novo, mas não o valor dele (M19), e
+   um item sem valor deixa o rateio sem base: o valor de TODAS as entregas
+   conferidas da O.S. fica "a conferir" e a comissão delas espera. A gravação
+   vale (nunca 422); a gestão vê a pendência na ficha (Conferência e
+   acompanhamento) e na Fila diária, e põe o valor do item. Com um item só, o
+   rateio não precisa do valor dele (CONFERENCIA_ENTREGA.apurar). */
+function itensSemValorConferida(os) {
+  if (!os || !Array.isArray(os.conferenciasEntrega) || !os.conferenciasEntrega.length) return [];
+  const itens = Array.isArray(os.itens) ? os.itens.filter(it => it && typeof it === 'object') : [];
+  if (itens.length < 2) return [];
+  const numero = v => v == null || v === '' ? NaN : Number(typeof v === 'string' && v.includes(',') ? v.replace(/\./g,'').replace(',','.') : v);
+  return itens.filter(it => { const v = numero(it.subtotal); return !(Number.isFinite(v) && v >= 0); }).map(it => String(it.descricao || it.item || 'item sem descrição'));
+}
+function pendenciaValorItemHTML(os) {
+  const xs = itensSemValorConferida(os);
+  if (!xs.length) return '';
+  return `<p class="aloc-aviso conf-item-sem-valor" role="note"><strong>Pendência de valor:</strong> ${xs.length === 1 ? 'o item' : 'os itens'} ${esc(xs.join(', '))} ${xs.length === 1 ? 'está' : 'estão'} sem valor, e o valor das entregas conferidas desta O.S. ficou a conferir (a comissão delas espera). Ponha o valor ${xs.length === 1 ? 'do item' : 'dos itens'} na ficha.</p>`;
+}
 function controleEntregaHTML(os) {
   const botao=(tipo,texto)=>`<button type="button" class="btn-ghost btn-sm" data-controle="${tipo}" data-controle-os="${esc(os.id)}">${texto}</button>`;
   const gestao=controleGestao(), erp=os.conferenciaERP, saida=os.regularizacaoSaida;
@@ -9,8 +28,9 @@ function controleEntregaHTML(os) {
     ${erp?`<p>${esc(CONTROLE_CLASSIFICACOES[erp.classificacao] || erp.classificacao)} · ${esc(erp.responsavelNome)} · revisar até ${esc(erp.prazo)}<br>${esc(erp.evidencia)}<br>Motivo: ${esc(erp.motivo)} · ${esc(erp.por)} · ${esc(erp.em)}</p>`:''}
     ${saida?`<p>Saída ${saida.situacao==='regularizada'?'regularizada':'em conferência'} · ${esc(saida.responsavelNome)} · prazo ${esc(saida.prazo)}<br>${esc(saida.evidencia)}<br>Motivo: ${esc(saida.motivo)} · ${esc(saida.por)} · ${esc(saida.em)}</p>`:''}
     ${(os.revisaoSolicitada || []).map(r=>`<p>Revisão solicitada: ${esc(r.motivo)} · ${esc(r.por)} · ${esc(r.em)}</p>`).join('')}
+    ${gestao?pendenciaValorItemHTML(os):''}
     ${gestao&&typeof confRevisoesHTML==='function'?confRevisoesHTML(os):''}
-    ${gestao?`<button type="button" class="btn-ghost btn-sm" data-controle="itens" data-controle-os="${esc(os.id)}">Conferir itens e equipe</button>${os.baixaAutoERP || os.erpComSaldo || os.erpSaiuDaCarteiraEm || os.conferenciaERP?botao('erp','Classificar baixa ERP'):''}${os.saidaEm || os.horaSaida?botao('saida','Regularizar saída antiga'):''}`:botao('solicitarRevisao','Solicitar revisão à gestão')}
+    ${gestao?`<button type="button" class="btn-ghost btn-sm" data-controle="itens" data-controle-secao="acompanhamento" data-controle-os="${esc(os.id)}">Conferir itens e equipe</button>${os.baixaAutoERP || os.erpComSaldo || os.erpSaiuDaCarteiraEm || os.conferenciaERP?botao('erp','Classificar baixa ERP'):''}${os.saidaEm || os.horaSaida?botao('saida','Regularizar saída antiga'):''}`:botao('solicitarRevisao','Solicitar revisão à gestão')}
     ${botao('fotos','Horários das fotos')}
     <p>Hora da foto, anexo e recebimento são registros separados. Nenhum deles preenche automaticamente saída ou retorno.</p></details>`;
 }
@@ -83,7 +103,7 @@ async function controleFotos(osId) {
    cópia do aparelho; nada é gravado. A baixa de antes do corte não entra (a
    pergunta 18 da fila, se ela pode ser reclassificada, continua aberta: o
    botão de classificar na ficha não mudou). */
-const FILA_MOTIVOS = {aLancar:'Baixa do ERP a lançar', erpFechou:'O ERP fechou a O.S.: a gestão decide', saldoConferir:'Saldo a conferir', semRetorno:'Saída sem retorno', revisao:'Revisão pedida à gestão'};
+const FILA_MOTIVOS = {aLancar:'Baixa do ERP a lançar', erpFechou:'O ERP fechou a O.S.: a gestão decide', saldoConferir:'Saldo a conferir', semRetorno:'Saída sem retorno', revisao:'Revisão pedida à gestão', valorItem:'Item sem valor: entrega conferida a conferir'};
 function filaDiaria(todas, hoje = OPERACAO.dia(new Date())) {
   const lista = (todas || []).filter(o => o && typeof o === 'object');
   const parados = d => d ? Math.max(0, Math.round((Date.parse(hoje + 'T12:00:00Z') - Date.parse(d + 'T12:00:00Z')) / 864e5)) : 0;
@@ -110,6 +130,8 @@ function filaDiaria(todas, hoje = OPERACAO.dia(new Date())) {
       if (st === 'parcial' || st === 'inconsistente') poe(o, 'saldoConferir', o.finalizadaEm);
     }
     if (['sem-retorno', 'conferir'].includes(OPERACAO.situacaoSaida(o, hoje))) poe(o, 'semRetorno', o.saidaEm || (o.instalacao && o.instalacao.data));
+    // O item sem valor que deixou a entrega conferida sem valor (baixa da verificação da v172).
+    if (itensSemValorConferida(o).length) poe(o, 'valorItem', o.atualizadoEm || o.finalizadaEm);
     const rv = (Array.isArray(o.revisaoSolicitada) ? o.revisaoSolicitada : []).filter(r => r && r.em);
     const ult = rv[rv.length - 1];
     const respondida = !!ult && [o.conferenciaERP && o.conferenciaERP.em, o.regularizacaoSaida && o.regularizacaoSaida.em].some(e => e && String(e) >= String(ult.em));

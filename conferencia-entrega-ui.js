@@ -230,7 +230,12 @@ function conferenciaRefletirNaFicha(confirmada) {
   const atual=STORE.getOS(confirmada.id),base=atual && Number(atual.rev)>=Number(confirmada.rev)?atual:confirmada;
   if(Number(_modalDraft.rev)>Number(base.rev))return;
   const modal=typeof document!=='undefined'?document.querySelector('#modal-os'):null;
-  const anterior=modal?.querySelector('[data-controle="itens"]'),aberto=anterior?.closest('details')?.open;
+  /* O BOTÃO DA SEÇÃO CERTA (baixa da verificação da v172): a ficha tem mais
+     de um "Conferir itens e equipe" (acima da lista de itens, no item
+     conferido e em Conferência e acompanhamento), e o primeiro da ficha não
+     era o da seção recolhível: o "aberto" e o foco iam para o lugar errado. */
+  const doAcompanhamento=()=>modal?.querySelector('[data-controle="itens"][data-controle-secao="acompanhamento"]')||modal?.querySelector('[data-controle="itens"]');
+  const anterior=doAcompanhamento(),aberto=anterior?.closest('details')?.open;
   _modalDraft.conferenciasEntrega=JSON.parse(JSON.stringify(base.conferenciasEntrega || []));
   // O diário das revisões (U6) também, para a ficha dizer quem revisou ou anulou.
   if(Array.isArray(base.conferenciasRevisoes))_modalDraft.conferenciasRevisoes=JSON.parse(JSON.stringify(base.conferenciasRevisoes));
@@ -239,7 +244,7 @@ function conferenciaRefletirNaFicha(confirmada) {
   // Com edição local em andamento, não rebasa silenciosamente a revisão nem
   // substitui campos operacionais: o controle de concorrência continua valendo.
   reRenderModalKeepOpen();
-  const novo=modal?.querySelector('[data-controle="itens"]');
+  const novo=doAcompanhamento();
   if(aberto && novo?.closest('details'))novo.closest('details').open=true;
   novo?.focus();
 }

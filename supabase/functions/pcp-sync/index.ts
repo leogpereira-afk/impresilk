@@ -1,7 +1,7 @@
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
-import { idDoCadastroRH, prazoParaConferir, protegerItensConferidos, mudancaValorConferido, guardarOsOriginalId, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, guardarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffEdicaoRecusada, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { idDoCadastroRH, prazoParaConferir, protegerItensConferidos, mudancaValorConferido, valorDaComissao, guardarOsOriginalId, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, guardarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffEdicaoRecusada, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, atrasoDaOS, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
@@ -893,12 +893,9 @@ async function sha256Texto(t:string) {
 const CORTE_LANCAMENTO_MANUAL = "2026-09-15";
 // A conferência e a apuração por item precisam da mesma base líquida.
 // Não substituímos um líquido ausente pela soma bruta dos produtos.
+// A régua mora no _shared (valorDaComissao): o aviso do valor conferido usa a mesma.
 function valorConferencia(os:any, erp:any[]) {
-  const numero=(v:any)=>v==null||v===""?NaN:Number(typeof v==="string" && v.includes(",")?v.replace(/\./g,"").replace(",","."):v);
-  let valor=numero(os.valorTotal);
-  const mudou=os.erpAlteracoes?.some((h:any)=>h.campos?.some((x:any)=>x.campo==="valorTotal"));
-  if(!mudou && erp.length===1 && Number.isFinite(numero(erp[0].valor))) valor=numero(erp[0].valor);
-  return Number.isFinite(valor) && valor>=0 ? valor : null;
+  return valorDaComissao(os, erp || []);
 }
 /* `estrito` é a trava de "a base mudou durante a consulta": vale para a
    apuração, que sela um hash. O relatório de entregas só lê; com a equipe
@@ -3310,10 +3307,22 @@ Deno.serve(async (req: Request) => {
           /* O valor das entregas conferidas que mudou pelo rateio (revisão da
              onda acabamento, D1): a gravação vale; a linha do diário fica para
              todos, e o aviso com R$ só para a gestão. */
-          const mv = eraLapide ? null : mudancaValorConferido(existing, gravar);
+          /* A mesma base da comissão (baixa da verificação da v172): o valor do
+             ERP quando o painel tem um só para o número (valorConferencia). */
+          let erpMv: any[] = [];
+          if (!eraLapide && existing && Array.isArray(existing.conferenciasEntrega) && existing.conferenciasEntrega.length && String(gravar.numero || "")) {
+            const { data: linhasErp, error: erroErp } = await sb.from("painel_ordens").select("numero,valor").eq("numero", String(gravar.numero)).limit(2);
+            if (!erroErp) erpMv = linhasErp || [];
+          }
+          const mv = eraLapide ? null : mudancaValorConferido(existing, gravar, erpMv);
           if (mv) {
             await auditar(String(os.id), "valor-conferido", mv.diario, gravar.numero);
             if (!ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(String(cracha?.papel ?? ""))) avisosToque.push(mv.aviso);
+            /* Quem não é gestão (baixa da verificação da v172): o item novo sem
+               valor deixou o valor das entregas conferidas sem base. A gravação
+               vale (nunca 422); o aviso, sem R$, diz que a gestão completa, e a
+               gestão vê a pendência na ficha e na Fila diária. */
+            else if (!ehMaquina && mv.depois === null && mv.antes !== null) avisosToque.push("Item sem valor: o valor das entregas conferidas desta O.S. ficou a conferir até a gestão do PCP pôr o valor do item. A gravação valeu.");
           }
         }
         /* `descartado`: o aparelho volta à divisão (e à lista) da resposta e

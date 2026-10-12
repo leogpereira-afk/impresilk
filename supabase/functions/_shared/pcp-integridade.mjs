@@ -2358,11 +2358,25 @@ const reaisDoTotal = v => {
   if (typeof v !== 'number') { const t = String(v).replace(/R\$/g, '').replace(/\s+/g, ''); n = t ? Number(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t) : NaN; }
   return Number.isFinite(n) && n >= 0 ? n : null;
 };
-export function valorDasConferidas(os) {
+/* A BASE DA COMISSÃO (baixa da verificação da v172): a mesma régua que a
+   conferência e a apuração usam (valorConferencia, no pcp-sync): o valor do
+   ERP quando o painel tem um só valor para o número e o valor total não foi
+   mudado pelo ERP depois; senão o valor total da O.S. O líquido ausente não é
+   trocado pela soma dos itens. `erp`: as linhas do painel daquele número. */
+// A leitura é a mesma do valorConferencia da v172, letra por letra (o selo recalcula igual).
+export function valorDaComissao(os, erp = []) {
+  const numero = v => v == null || v === '' ? NaN : Number(typeof v === 'string' && v.includes(',') ? v.replace(/\./g, '').replace(',', '.') : v);
+  let valor = numero(os?.valorTotal);
+  const mudou = Array.isArray(os?.erpAlteracoes) && os.erpAlteracoes.some(h => Array.isArray(h?.campos) && h.campos.some(x => x?.campo === 'valorTotal'));
+  const linhas = Array.isArray(erp) ? erp : [];
+  if (!mudou && linhas.length === 1 && Number.isFinite(numero(linhas[0]?.valor))) valor = numero(linhas[0].valor);
+  return Number.isFinite(valor) && valor >= 0 ? valor : null;
+}
+export function valorDasConferidas(os, erp) {
   const regs = Array.isArray(os?.conferenciasEntrega) ? os.conferenciasEntrega : [];
   if (!objeto(os) || !regs.length) return null;
   let ap;
-  try { ap = CONF_VOLTA.apurar(os, reaisDoTotal(os.valorTotal)); } catch { return null; }
+  try { ap = CONF_VOLTA.apurar(os, erp === undefined ? reaisDoTotal(os.valorTotal) : valorDaComissao(os, erp)); } catch { return null; }
   if (!ap || ap.erro || !ap.entregas.length || ap.entregas.some(e => !Number.isInteger(e.valor))) return null;
   return ap.entregas.reduce((s, e) => s + e.valor, 0);
 }
@@ -2371,10 +2385,13 @@ export const reaisDeCentavos = c => {
   const n = Math.abs(c), inteiro = String(Math.floor(n / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   return `${c < 0 ? '-' : ''}R$ ${inteiro},${String(n % 100).padStart(2, '0')}`;
 };
-export function mudancaValorConferido(antes, depois) {
+/* `erp` (baixa da verificação da v172): as linhas do painel do número da O.S.
+   O aviso usa a mesma base da comissão (valorDaComissao): com o valor do ERP
+   valendo, mudar o valor total da ficha não muda a comissão e não dá aviso. */
+export function mudancaValorConferido(antes, depois, erp = []) {
   const ids = o => (Array.isArray(o?.conferenciasEntrega) ? o.conferenciasEntrega : []).map(e => String(e?.id ?? '')).join('|');
   if (!ids(antes) || ids(antes) !== ids(depois)) return null;
-  const a = valorDasConferidas(antes), d = valorDasConferidas(depois);
+  const a = valorDasConferidas(antes, erp), d = valorDasConferidas(depois, erp);
   if (a === d) return null;
   const n = (Array.isArray(antes.conferenciasEntrega) ? antes.conferenciasEntrega : []).length;
   const aviso = `O valor ${n === 1 ? 'da entrega conferida' : `das ${n} entregas conferidas`} desta O.S. mudou de ${reaisDeCentavos(a)} para ${reaisDeCentavos(d)}: o rateio usa o valor de cada item e o valor total da O.S. A gravação valeu; se não era isso, corrija o valor.`;
