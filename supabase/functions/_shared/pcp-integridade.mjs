@@ -3097,16 +3097,20 @@ export const ALOCACAO_LOG_MAX = 40;
    do plano). Tirar alguém da equipe e tocar Desfazer gravava duas linhas
    ('desatualizar' e 'reatualizar'): 20 voltas enchiam o teto de 40 e
    expulsavam a linha 'criar', a de quem fez a divisão e com que percentuais.
-   Agora 'desatualizar' e 'reatualizar' do MESMO autor (o ID do RH, ou o nome
-   quando não há ID), a menos de 10 minutos da última linha, se anulam: a
-   linha anterior sai em vez de entrar mais uma (a divisão voltou a ser o que
-   era). O diário da O.S. (F03) continua com o rastro inteiro. Linha de
-   outro autor, de outra ação (criar, alterar, limpar, conferir) ou de mais
-   de 10 minutos atrás não se junta. */
+   Agora 'desatualizar' seguido de 'reatualizar' do MESMO autor (o ID do RH,
+   ou o nome quando não há ID), a menos de 10 minutos da última linha, se
+   anulam: a linha anterior sai em vez de entrar mais uma (a divisão voltou a
+   ser o que era). SÓ ESSA ORDEM (item 33 da fila de 11/10/2026, onda
+   acabamento; a correção que ficou sem commit no worktree impresilk-f22s,
+   refeita à mão): é o caso do Desfazer. O par inverso ('voltou a valer' e
+   depois 'ficou desatualizada') é uma mudança nova da equipe, não uma volta:
+   as duas linhas ficam, senão o histórico apagava o 'voltou a valer' e
+   mostrava a divisão como se nunca tivesse voltado. O diário da O.S. (F03)
+   continua com o rastro inteiro. Linha de outro autor, de outra ação (criar,
+   alterar, limpar, conferir) ou de mais de 10 minutos atrás não se junta. */
 export const ALOCACAO_LOG_JANELA_MS = 10 * 60 * 1000;
-const PAR_DESATUALIZAR = new Set(['desatualizar', 'reatualizar']);
 function anulaUltimaDoLog(ult, entrada, carimbo) {
-  if (!objeto(ult) || !objeto(entrada) || !PAR_DESATUALIZAR.has(ult.acao) || !PAR_DESATUALIZAR.has(entrada.acao) || ult.acao === entrada.acao) return false;
+  if (!objeto(ult) || !objeto(entrada) || ult.acao !== 'desatualizar' || entrada.acao !== 'reatualizar') return false;
   const mesmoAutor = carimbo.porId && ult.porId ? String(ult.porId) === String(carimbo.porId)
     : !carimbo.porId && !ult.porId && !!carimbo.por && String(ult.por ?? '') === String(carimbo.por);
   if (!mesmoAutor) return false;
