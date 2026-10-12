@@ -73,8 +73,9 @@ test('fechamento: a lista mostra as O.S. com pessoa a cadastrar, na Base e fecha
     b.ctx.__f = f;
     assert.deepEqual(B.js(b.run('perfACadastrar(__f)')), [{numero:'7z1', nomes:['Zé Novo']}]);
     const html = b.run('perfACadastrarHTML(__f)');
-    assert.match(html, /<strong>👤 1 O\.S\. com pessoa a cadastrar no RH\.<\/strong> Sem ficha ou contrato de freelancer no RH, a pessoa fica fora do ranking e da comissão deste período\./);
-    assert.match(html, /<li>O\.S\. 7z1: Zé Novo<\/li>/);
+    // Por pessoa, com as O.S. dela (U7 da revisão da onda pessoas, tests/onda-pessoas-revisao.test.cjs).
+    assert.match(html, /<strong>👤 1 pessoa a cadastrar no RH, em 1 O\.S\.<\/strong> Sem ficha ou contrato de freelancer no RH, a pessoa fica fora do ranking e da comissão deste período\./);
+    assert.match(html, /<li><strong>Zé Novo<\/strong>: O\.S\. 7z1<\/li>/);
     assert.equal(b.run(`perfACadastrarHTML({registros:[]})`), '');
     // A Base e fechamento e o diálogo do Fechar chamam a lista.
     const perf = ler('performance.js');

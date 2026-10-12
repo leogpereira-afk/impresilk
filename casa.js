@@ -3644,6 +3644,21 @@ function sugestaoParecidaCasa(apelido, ativos) {
   }
   return melhor && !empate ? melhor.p : null;
 }
+/* OS PARECIDOS DE UM NOME SEM FICHA (U4 da revisão da onda pessoas): o nome
+   digitado errado aparecia como "pessoa a cadastrar". Sem uma sugestão só
+   (sugestaoParecidaCasa empata ou não acha), Conferir nomes mostra até três
+   fichas parecidas, pela grafia tolerante ou por uma palavra parecida. Só
+   mostra: quem liga é a gestão, no Ligar. */
+function sugestoesParecidasCasa(apelido, ativos, max = 3) {
+  const achados = [];
+  for (const p of ativos) {
+    if (!OPERACAO.ehIdPessoa(p.id) || p.idRepetido) continue;
+    const r = OPERACAO.buscaTolerante(apelido, { textos: [p.nome, p.apelido] });
+    const dist = r.tipo ? r.dist : (palavrasParecidasCasa(apelido, p.nome) || (p.apelido && palavrasParecidasCasa(apelido, p.apelido))) ? 9 : -1;
+    if (dist >= 0) achados.push({ p, dist });
+  }
+  return achados.sort((a, b) => a.dist - b.dist || String(a.p.nome).localeCompare(String(b.p.nome))).slice(0, max).map(x => x.p);
+}
 function palavrasParecidasCasa(a, b) {
   const pa = normCasa(a).split(/\s+/).filter(t => t.length >= 3), pb = normCasa(b).split(/\s+/).filter(t => t.length >= 3);
   const perto = (x, y) => {
@@ -3693,8 +3708,12 @@ function wireBuscaDocumentoCasa(el) {
     if (ev && ev.preventDefault) ev.preventDefault();
     const campo = form.querySelector('input[name="documento"]'), saida = form.querySelector('.busca-doc-res'), botao = form.querySelector('button[type="submit"]');
     const doc = String((campo && campo.value) || '').replace(/\D/g, '');
+    /* O TAMANHO ANTES DE LIMPAR (U6 da revisão da onda pessoas): o dígito a
+       menos apagava o que foi digitado e a pessoa redigitava tudo. Incompleto
+       fica no campo para corrigir (e diz quantos dígitos tem); o documento
+       inteiro sai do campo na hora e vai ao servidor. */
+    if (doc.length !== 11 && doc.length !== 14) { if (saida) saida.textContent = `Digite o CPF (11 dígitos) ou o CNPJ (14 dígitos) inteiro. Há ${doc.length} ${doc.length === 1 ? 'dígito' : 'dígitos'} no campo.`; if (campo && campo.focus) campo.focus(); return; }
     if (campo) campo.value = '';
-    if (doc.length !== 11 && doc.length !== 14) { if (saida) saida.textContent = 'Digite o CPF (11 dígitos) ou o CNPJ (14 dígitos) inteiro.'; return; }
     if (saida) saida.textContent = 'Buscando…';
     if (botao) botao.disabled = true;
     try { const r = await STORE.api({ action: 'pessoaPorDocumento', documento: doc }); if (saida) saida.textContent = buscaDocumentoResultadoTxt(r); }
@@ -3719,6 +3738,7 @@ function ligacaoRHHTML() {
   for (const l of linhas) {
     l.conf = f12 ? OPERACAO.confirmarNome(l.apelido, dados) : { id: '', motivo: '' };
     l.sugestao = !l.pessoa && l.como !== 'ambiguo' && l.como !== 'terceiro' && l.conf.motivo !== 'terceiro' ? sugestaoParecidaCasa(l.apelido, ativos) : null;
+    l.parecidos = !l.pessoa && !l.sugestao && l.como !== 'ambiguo' && l.como !== 'terceiro' && l.conf.motivo !== 'terceiro' ? sugestoesParecidasCasa(l.apelido, ativos) : [];
   }
   /* Cadastro que não separa a pessoa não vira vínculo (F07): ID que ficha e
      contrato de freelancer dividem, ou contrato ainda sem ID. Aparece
@@ -3739,7 +3759,8 @@ function ligacaoRHHTML() {
     return `<span class="badge">${como}</span>${l.inativa ? ' <span class="badge sem-valor">Fora da ativa no RH</span>' : ''}${l.conf.id ? '' : `<small class="bloco">Não vira ID: ${esc(MOTIVO_NOME[l.conf.motivo] || 'sem vínculo')}.</small>`}${l.juntos.length ? `<small class="bloco">Mesma pessoa que: ${esc(l.juntos.join(', '))}. Se forem pessoas diferentes, troque.</small>` : ''}`;
   };
   const ficha = l => l.pessoa ? `<strong>${esc(l.pessoa.nome)}</strong>${l.pessoa.cargo || l.pessoa.area ? `<small class="bloco">${esc([l.pessoa.cargo, l.pessoa.area].filter(Boolean).join(' · '))}</small>` : ''}`
-    : l.sugestao ? `<span class="text-muted">Nenhuma</span><small class="bloco">Sugestão, grafia parecida: <strong>${esc(l.sugestao.nome)}</strong>. Confira e ligue.</small>` : '<span class="text-muted">Nenhuma</span>';
+    : l.sugestao ? `<span class="text-muted">Nenhuma</span><small class="bloco">Sugestão, grafia parecida: <strong>${esc(l.sugestao.nome)}</strong>. Confira e ligue.</small>`
+    : l.parecidos && l.parecidos.length ? `<span class="text-muted">Nenhuma</span><small class="bloco">Parecidos com este nome: ${l.parecidos.map(p => `<strong>${esc(p.nome)}</strong>`).join(', ')}. Se for um deles, escolha e ligue; nada se liga sozinho.</small>` : '<span class="text-muted">Nenhuma</span>';
   // Em quantas O.S. o nome vira ID (as com divisão ficam como estão).
   const viraId = l => {
     const u = uso.get(normCasa(l.apelido)) || { semDivisao: 0, comDivisao: 0 };

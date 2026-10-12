@@ -4511,3 +4511,36 @@ img.perf-logo{object-fit:cover}
 .busca-doc input { min-width:0; width:14rem; max-width:100%; }
 .busca-doc .busca-doc-res { flex-basis:100%; margin:0; font-size:.85rem; }
 .busca-doc small { flex-basis:100%; }
+
+/* QUEM APROVA A COMISSÃO em Configurações (U2 da revisão da onda pessoas):
+   titular, substituto e encerrar em blocos separados, cada um com título, a
+   frase do que é, o rótulo em cima de cada campo, o botão e o retorno dele
+   (o erro e o aviso do servidor) dentro do próprio bloco. 1280, 768 e 375. */
+#cfg-aprovador .aprov-quem { margin: 4px 0 2px; line-height: 1.45; }
+#cfg-aprovador > .text-muted { line-height: 1.5; }
+.aprov-blocos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px; margin: 14px 0; align-items: start; }
+.aprov-form { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: #f8fafc; }
+.aprov-form h4 { margin: 0; font-size: 1rem; font-weight: 700; color: var(--text); }
+.aprov-desc { margin: 0; font-size: .84rem; line-height: 1.5; color: var(--muted); }
+.aprov-campo { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: .8rem; font-weight: 600; color: var(--muted); }
+.aprov-campo select, .aprov-campo input { width: 100%; min-width: 0; min-height: 40px; border: 1px solid var(--border); border-radius: var(--radius-s); padding: 8px 10px; background: #fff; color: var(--text); font: inherit; font-size: .88rem; font-weight: 400; }
+.aprov-campo select:focus, .aprov-campo input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(24,119,242,.15); }
+.aprov-datas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.aprov-acoes { display: flex; }
+.aprov-acoes .btn-sm { min-height: 40px; }
+.aprov-erro { margin: 0; color: #9b2c2c; font-size: .84rem; font-weight: 600; line-height: 1.45; }
+.aprov-erro:empty { display: none; }
+.aprov-retorno { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-left: 4px solid var(--green); border-radius: 8px; background: #ecfdf3; }
+.aprov-retorno .aprov-ok { margin: 0; font-weight: 600; color: #166534; font-size: .88rem; }
+.aprov-retorno .perf-aviso { margin: 0; }
+.aprov-retorno:has(.perf-aviso) { border-left-color: var(--amber); background: #fffaf0; }
+@media (max-width: 420px) { .aprov-datas { grid-template-columns: 1fr; } .aprov-form { padding: 14px 12px; } }
+
+/* A ETIQUETA "FREELANCER" NÃO QUEBRA (U3 da revisão da onda pessoas): no
+   pódio (.perf-podio-nome é flex em linha) ela encolhia até virar "Fre/
+   elan/cer"; na TV (.tv-nome é coluna) esticava na largura da linha. Fica
+   inteira, do tamanho do texto, e na TV com letra que se lê de longe. */
+.perf-podio-nome .tag-freelancer, .tv-nome .tag-freelancer { flex-shrink: 0; white-space: nowrap; align-self: flex-start; }
+.perf-podio-nome .tag-freelancer { align-self: center; margin-left: 6px; }
+.tv-nome .tag-freelancer { margin: .25em 0 0; }
+.tv-corpo .tag-freelancer { font-size: clamp(.8rem, 1.15vw, 1.15rem); padding: .15em .65em; letter-spacing: .03em; }

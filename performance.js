@@ -917,10 +917,19 @@ function perfACadastrar(f){
  }
  return [...porOS.values()].map(x=>({numero:x.numero,nomes:[...x.nomes]}));
 }
+/* POR PESSOA, COM AS O.S. DE CADA UMA (U7 da revisão da onda pessoas): a
+   gestão cadastra (ou liga) uma pessoa de cada vez; uma linha por O.S.
+   repetia o mesmo nome em várias linhas. */
+function perfACadastrarPorPessoa(l){
+ const m=new Map();
+ for(const x of l)for(const n of x.nomes){const k=String(n).trim().toLowerCase();if(!m.has(k))m.set(k,{nome:String(n).trim(),os:[]});const p=m.get(k);if(!p.os.includes(x.numero))p.os.push(x.numero);}
+ return [...m.values()].sort((a,b)=>b.os.length-a.os.length||a.nome.localeCompare(b.nome));
+}
 function perfACadastrarHTML(f){
  const l=perfACadastrar(f);
  if(!l.length)return '';
- return `<div class="perf-aviso perf-a-cadastrar" role="note"><p><strong>👤 ${l.length} ${l.length===1?'O.S. com pessoa a cadastrar':'O.S. com pessoas a cadastrar'} no RH.</strong> Sem ficha ou contrato de freelancer no RH, a pessoa fica fora do ranking e da comissão${f&&f.fechadoEm?' desta revisão':' deste período'}.</p><ul>${l.slice(0,30).map(x=>`<li>O.S. ${esc(x.numero)}: ${esc(x.nomes.join(', '))}</li>`).join('')}</ul>${l.length>30?`<p>E mais ${l.length-30} O.S.</p>`:''}</div>`;
+ const ps=perfACadastrarPorPessoa(l);
+ return `<div class="perf-aviso perf-a-cadastrar" role="note"><p><strong>👤 ${ps.length} ${ps.length===1?'pessoa a cadastrar':'pessoas a cadastrar'} no RH, em ${l.length} O.S.</strong> Sem ficha ou contrato de freelancer no RH, a pessoa fica fora do ranking e da comissão${f&&f.fechadoEm?' desta revisão':' deste período'}. Cadastre no RH, ou, se a pessoa já tem ficha (o nome pode estar digitado diferente), ligue o nome em Conferir nomes.</p><ul>${ps.slice(0,30).map(p=>`<li><strong>${esc(p.nome)}</strong>: O.S. ${esc(p.os.join(', '))}</li>`).join('')}</ul>${ps.length>30?`<p>E mais ${ps.length-30} ${ps.length-30===1?'pessoa':'pessoas'}.</p>`:''}</div>`;
 }
 function perfFonteHTML(){
  const f=perfFonteAtual(),pendentes=STORE.getQueue?.().length || 0;

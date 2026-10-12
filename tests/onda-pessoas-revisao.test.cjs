@@ -177,3 +177,174 @@ test('revisão pessoas: designar quem não tem acesso pcp com senha ligado à fi
   const l = await e.call({action:'comissaoAprovadorLer'}, TITULAR);
   assert.deepEqual(l.aprovamPelaTela, ['700001']); assert.equal(l.gravado, undefined);
 });
+
+/* ═══════════════ U1: o grupo "Aprovação da comissão" fica aberto ═══════════════ */
+function fatia(arquivo, de, ate) {
+  const src = ler(arquivo), i = src.indexOf(de), j = src.indexOf(ate, i);
+  assert.ok(i >= 0 && j > i, `${arquivo}: ${de}`);
+  return src.slice(i, j);
+}
+test('revisão pessoas: gravar em Configurações não fecha o grupo aberto, mesmo com outro cfg-grupo aparecendo antes dele', () => {
+  const ctx = {STATE:{}};
+  vm.createContext(ctx); vm.runInContext(fatia('app.js', '/* OS GRUPOS ABERTOS DE CONFIGURAÇÕES', 'function renderControle() {'), ctx);
+  const det = (grupo, open) => ({dataset:{grupo}, open, ouvintes:[], addEventListener(t, f) { this.ouvintes.push(f); }});
+  const painel = lista => ({querySelectorAll:sel => { assert.equal(sel, ':scope > details.cfg-grupo[data-grupo]'); return lista; }});
+  // 1ª pintura: só Conexões aberta (o padrão do HTML); a pessoa abre "Aprovação da comissão".
+  let grupos = [det('conexoes', true), det('equipe', false), det('aprovacao', false)];
+  ctx.cfgGruposRestaurar(painel(grupos));
+  grupos[2].open = true; grupos[2].ouvintes.forEach(f => f());
+  grupos[0].open = false; grupos[0].ouvintes.forEach(f => f());
+  // Grava: a aba se refaz com o HTML padrão. Caso ruim: pela posição, um cfg-grupo novo do painel
+  // de saúde (aninhado) deslocava a conta, e "Aprovação" voltava fechada.
+  ctx.cfgGruposGuardar(painel(grupos));
+  grupos = [det('conexoes', true), det('equipe', false), det('aprovacao', false)];
+  ctx.cfgGruposRestaurar(painel(grupos));
+  assert.equal(grupos[2].open, true, 'a Aprovação da comissão continua aberta');
+  assert.equal(grupos[0].open, false, 'Conexões continua como a pessoa deixou');
+  // O renderControle usa os dois, e todo grupo de primeiro nível tem nome.
+  const rc = fatia('app.js', 'function renderControle() {', '// Handlers de níveis (admin)');
+  assert.match(rc, /cfgGruposGuardar\(el\);[\s\S]*el\.innerHTML =[\s\S]*cfgGruposRestaurar\(el\);/);
+  assert.doesNotMatch(rc, /gruposAbertos\[i\]/, 'nada pela posição');
+  for (const g of ['conexoes', 'equipe', 'regras', 'mensagens', 'aprovacao']) assert.match(rc, new RegExp(`<details class="cfg-grupo" data-grupo="${g}"`));
+});
+
+/* ═══════════════ U1, U2 e P2 na tela: os blocos de titular e substituto ═══════════════ */
+function telaAprovador(papel, dados) {
+  const ctx = {STATE:{user:{papel}}, esc:s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;'}[c])),
+    pessoasRH:() => [{id:'700001', nome:'Titular Fictício'}, {id:'700002', nome:'Sem Acesso Fictício'}], STORE:{api:async () => ({})}, toast() {}};
+  vm.createContext(ctx); vm.runInContext(ler('comissao-ui.js'), ctx);
+  ctx.__d = dados; vm.runInContext('comissaoAprovadorDados={carregando:false,dados:__d,erro:""}', ctx);
+  return ctx;
+}
+const LEITURA = {hoje:'2026-12-02', avisos:[], config:{titularId:'700001', titularNome:'Titular Fictício', substituto:null}, vigente:{modo:'titular', id:'700001', nome:'Titular Fictício'}, diario:[], aprovamPelaTela:['700001']};
+test('revisão pessoas: titular e substituto em blocos com título, frase, rótulo em cima, botão e retorno no próprio bloco', () => {
+  const html = telaAprovador('admin', LEITURA).comissaoAprovadorSecaoHTML();
+  const bloco = op => (new RegExp(`<form class="aprov-form" data-aprov-op="${op}">([\\s\\S]*?)</form>`).exec(html) || [])[1] || '';
+  const t = bloco('titular'), s = bloco('substituto');
+  assert.match(t, /^<h4>Titular<\/h4><p class="aprov-desc">Quem aprova a comissão todo mês\./);
+  assert.match(s, /^<h4>Substituto<\/h4><p class="aprov-desc">Aprova no lugar do titular entre o início e o fim/);
+  for (const b of [t, s]) {
+    assert.match(b, /<label class="aprov-campo"><span>Pessoa<\/span><select name="pessoa">/, 'o rótulo em cima do campo');
+    assert.match(b, /<label class="aprov-campo"><span>Motivo da mudança<\/span><input name="motivo"/, 'o motivo dentro do bloco do botão');
+    assert.match(b, /<button class="btn-primary btn-sm" type="submit">Designar (titular|substituto)<\/button><\/div><p role="alert" class="aprov-erro"><\/p>/);
+  }
+  assert.match(s, /<div class="aprov-datas"><label class="aprov-campo"><span>Início<\/span><input type="date" name="de" value="2026-12-02"><\/label><label class="aprov-campo"><span>Fim \(opcional\)<\/span>/);
+  assert.doesNotMatch(html, /data-aprov-op="encerrar"/, 'sem substituto, sem o bloco de encerrar');
+  // P2: a lista marca quem aprova pela tela.
+  assert.match(t, /<option value="700001" selected>Titular Fictício · 700001 · aprova pela tela<\/option>/);
+  assert.match(t, /<option value="700002">Sem Acesso Fictício · 700002 · sem acesso pcp ligado<\/option>/);
+  // O CSS existe para as peças (antes não havia regra nenhuma) e cabe em 375.
+  const css = ler('styles.css');
+  for (const r of ['.aprov-blocos {', '.aprov-form {', '.aprov-campo {', '.aprov-datas {', '.aprov-erro {', '.aprov-retorno {']) assert.ok(css.includes(r), r);
+  assert.match(css, /\.aprov-blocos \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 300px\), 1fr\)\)/);
+  assert.match(css, /@media \(max-width: 420px\) \{ \.aprov-datas \{ grid-template-columns: 1fr; \}/);
+});
+
+test('revisão pessoas: depois de gravar, o aviso do servidor aparece no bloco gravado (não só no toast) e vem para a vista', async () => {
+  const avisos = ['Sem Acesso Fictício não consegue aprovar pela tela: precisa de acesso pcp com senha ligado à ficha do RH.'];
+  const resposta = {...LEITURA, avisos, gravado:{operacao:'titular', id:'700002', nome:'Sem Acesso Fictício'}, config:{titularId:'700002', titularNome:'Sem Acesso Fictício', substituto:null}};
+  const ctx = telaAprovador('admin', LEITURA);
+  ctx.STORE.api = async () => resposta;
+  const toasts = []; ctx.toast = (m, t) => toasts.push([m, t]);
+  ctx.crypto = {randomUUID:() => 'pedido-ficticio-0001'}; ctx.document = {activeElement:null};
+  // Um formulário falso com os campos do titular.
+  const campos = {pessoa:{value:'700002'}, motivo:{value:'Motivo fictício com mais de quinze letras'}};
+  const erro = {textContent:''}, botao = {disabled:false};
+  const form = {dataset:{aprovOp:'titular'}, onsubmit:null, querySelector:sel => sel === '.aprov-erro' ? erro : sel === 'button' ? botao : campos[(/name="(\w+)"/.exec(sel) || [])[1]]};
+  let rolou = null, pintou = 0;
+  const sec = {querySelector:sel => sel === '[data-aprov-retorno]' ? {scrollIntoView:o => { rolou = o; }} : null, querySelectorAll:() => [form]};
+  ctx.comissaoAprovadorWire({querySelector:() => sec}, () => { pintou++; });
+  await form.onsubmit({preventDefault() {}});
+  assert.equal(pintou, 1);
+  assert.deepEqual(toasts, [['Quem aprova a comissão: gravado, com aviso (veja ao lado do bloco).', 'warn']]);
+  const html = ctx.comissaoAprovadorSecaoHTML();
+  const t = /<form class="aprov-form" data-aprov-op="titular">([\s\S]*?)<\/form>/.exec(html)[1];
+  assert.match(t, /<div class="aprov-retorno" role="status" data-aprov-retorno><p class="aprov-ok">Titular designado: Sem Acesso Fictício \(cadastro 700002\)\.<\/p><p class="perf-aviso">Sem Acesso Fictício não consegue aprovar pela tela/);
+  assert.equal(html.split('não consegue aprovar pela tela').length - 1, 1, 'o aviso aparece uma vez, no bloco');
+  // A repintura seguinte traz o retorno para a vista uma vez só.
+  ctx.comissaoAprovadorWire({querySelector:() => sec}, () => {});
+  assert.equal(JSON.stringify(rolou), JSON.stringify({block:'center'}));
+  rolou = null; ctx.comissaoAprovadorWire({querySelector:() => sec}, () => {});
+  assert.equal(rolou, null);
+});
+
+/* ═══════════════ U5: o titular com login sem ID ligado ═══════════════ */
+test('revisão pessoas: o acesso sem ID ligado não lê "é o titular designado" e o admin não aparece duas vezes', async () => {
+  const {COMISSAO:S} = await import('../supabase/functions/_shared/pcp-comissao.mjs');
+  const C = require('../comissao.js');
+  for (const X of [C, S]) {
+    const q = X.quemAprova({papel:'pcp', porId:''}, {titularId:'700001'}, '2026-12-02');
+    assert.equal(q.ok, false);
+    assert.match(q.erro, /^Seu acesso não está ligado a uma ficha do RH, então a porta não reconhece você pelo ID\. Para aprovar, o admin liga a conta à ficha/);
+    assert.doesNotMatch(q.erro, /titular designado|admin também aprova|ou o admin/);
+    assert.match(X.quemAprova({papel:'pcp', porId:'700003'}, {titularId:'700001'}, '2026-12-02').erro, /^Você não aprova: quem aprova a comissão é o titular designado pela gestão\.$/);
+    const sub = {titularId:'700001', substituto:{id:'700002', de:'2026-12-01'}};
+    assert.doesNotMatch(X.quemAprova({papel:'pcp', porId:'700001'}, sub, '2026-12-02').erro, /admin/);
+  }
+  const ctx = telaAprovador('pcp', LEITURA);
+  const linha = ctx.comissaoAprovadorLinhaHTML({modo:'titular', id:'700001', nome:'Titular Fictício', podeAprovar:false, motivo:C.quemAprova({papel:'pcp', porId:''}, {titularId:'700001'}, '2026-12-02').erro});
+  assert.equal(linha.split('admin também aprova').length - 1, 1, linha);
+  assert.match(linha, /<strong>Seu acesso não está ligado a uma ficha do RH/);
+});
+
+/* ═══════════════ U3: a etiqueta "Freelancer" não quebra ═══════════════ */
+test('revisão pessoas: a etiqueta Freelancer fica inteira no pódio (flex em linha) e na TV (coluna), com letra de TV', () => {
+  const css = ler('styles.css');
+  // Caso ruim: dentro de .perf-podio-nome (flex) a etiqueta encolhia até "Fre/elan/cer"; na .tv-nome (coluna) esticava na linha.
+  assert.match(css, /\.perf-podio-nome \.tag-freelancer, \.tv-nome \.tag-freelancer \{ flex-shrink: 0; white-space: nowrap; align-self: flex-start; \}/);
+  assert.match(css, /\.tv-corpo \.tag-freelancer \{ font-size: clamp\(\.8rem, 1\.15vw, 1\.15rem\);/);
+  assert.match(ler('performance.js'), /<h4 class="perf-podio-nome">[^\n]*\$\{x\.etiqueta \|\| ''\}<\/h4>/);
+  assert.match(ler('casa.js'), /<span class="tv-nome">\$\{esc\(p\.nome\)\}\$\{etiqueta\(p, rosto\)\}<\/span>/);
+});
+
+/* ═══════════════ U4: "pessoa a cadastrar" com nome digitado errado ═══════════════ */
+test('revisão pessoas: a marca diz "cadastre no RH, ou ligue o nome em Conferir nomes"; Conferir nomes mostra os parecidos sem ligar', () => {
+  const app = ler('app.js');
+  assert.match(app, /Cadastre no RH \(ficha ou contrato de freelancer\), ou, se a pessoa já tem ficha, ligue o nome em Performance › Conferência › Conferir nomes\./);
+  assert.match(app, /Cadastre no RH, ou, se a pessoa já tem ficha \(o nome pode estar digitado diferente\), ligue o nome em Performance › Conferência › Conferir nomes\./);
+  const O = require('../operacao.js');
+  const ctx = {OPERACAO:O, normCasa:s => O.normPessoa ? O.normPessoa(s) : String(s).toLowerCase()};
+  vm.createContext(ctx);
+  vm.runInContext(fatia('casa.js', 'function sugestaoParecidaCasa(', 'function gruposDeGrafiasCasa('), ctx);
+  const ativos = [{id:'710001', nome:'Raimundo Nonato Ferreira'}, {id:'710002', nome:'Raimunda Souza'}, {id:'710003', nome:'Bruno Dias'}, {id:'710004', nome:'Raimundo Melo', idRepetido:true}];
+  // Caso ruim: "Raimundu" (digitado errado) empatava na sugestão única e saía só "Nenhuma", com a marca mandando cadastrar.
+  assert.equal(ctx.sugestaoParecidaCasa('Raimundu', ativos), null, 'a sugestão única empata');
+  const ps = ctx.sugestoesParecidasCasa('Raimundu', ativos).map(p => p.id);
+  assert.equal(JSON.stringify(ps), JSON.stringify(['710002', '710001']), 'os parecidos (empate pelo nome), sem o ID repetido e sem quem não parece');
+  assert.equal(ctx.sugestoesParecidasCasa('Zé Novo', ativos).length, 0);
+  const casa = ler('casa.js');
+  assert.match(casa, /Parecidos com este nome: \$\{l\.parecidos\.map\(p => `<strong>\$\{esc\(p\.nome\)\}<\/strong>`\)\.join\(', '\)\}\. Se for um deles, escolha e ligue; nada se liga sozinho\./);
+});
+
+/* ═══════════════ U6: a busca por documento confere o tamanho antes de limpar ═══════════════ */
+test('revisão pessoas: o documento incompleto fica no campo para corrigir; o inteiro sai do campo e vai ao servidor', async () => {
+  const casa = ler('casa.js');
+  const i = casa.indexOf('/* BUSCA DE PESSOA POR CPF OU CNPJ'), j = casa.indexOf('function ligacaoRHHTML(', i);
+  const chamadas = [], campos = {input:{value:'', focus() { this.focado = true; }}, saida:{textContent:''}, botao:{disabled:false}};
+  const form = {onsubmit:null, querySelector:sel => sel.startsWith('input') ? campos.input : sel === '.busca-doc-res' ? campos.saida : campos.botao};
+  const ctx = {STATE:{user:{papel:'pcp'}}, STORE:{api:async c => { chamadas.push(c); return {pessoas:[]}; }}};
+  vm.createContext(ctx); vm.runInContext(casa.slice(i, j), ctx);
+  ctx.wireBuscaDocumentoCasa({querySelector:() => form});
+  // Caso ruim: um dígito a menos apagava tudo o que foi digitado.
+  campos.input.value = '630.001.111-1';
+  await form.onsubmit({preventDefault() {}});
+  assert.equal(campos.input.value, '630.001.111-1'); assert.equal(campos.input.focado, true);
+  assert.equal(campos.saida.textContent, 'Digite o CPF (11 dígitos) ou o CNPJ (14 dígitos) inteiro. Há 10 dígitos no campo.');
+  assert.equal(chamadas.length, 0);
+  campos.input.value = '630.001.111-11';
+  await form.onsubmit({preventDefault() {}});
+  assert.equal(campos.input.value, ''); assert.equal(chamadas.length, 1);
+});
+
+/* ═══════════════ U7: a lista do fechamento por pessoa ═══════════════ */
+test('revisão pessoas: a lista "a cadastrar" do fechamento agrupa por pessoa, com as O.S. de cada uma', () => {
+  const ctx = {esc:s => String(s ?? ''), perfACadastrar:null};
+  vm.createContext(ctx);
+  vm.runInContext(fatia('performance.js', '/* POR PESSOA, COM AS O.S. DE CADA UMA', 'function perfFonteHTML('), ctx);
+  ctx.perfACadastrar = () => [{numero:'7001', nomes:['Zé Novo', 'Ana Nova']}, {numero:'7002', nomes:['Zé Novo']}, {numero:'7003', nomes:['zé novo']}];
+  const html = ctx.perfACadastrarHTML({});
+  // Caso ruim: uma linha por O.S., com o mesmo nome repetido em várias.
+  assert.match(html, /<strong>👤 2 pessoas a cadastrar no RH, em 3 O\.S\.<\/strong>/);
+  assert.match(html, /<ul><li><strong>Zé Novo<\/strong>: O\.S\. 7001, 7002, 7003<\/li><li><strong>Ana Nova<\/strong>: O\.S\. 7001<\/li><\/ul>/);
+  assert.match(html, /ligue o nome em Conferir nomes\./);
+});

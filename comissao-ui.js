@@ -157,17 +157,34 @@ function comissaoAprovadorSecaoHTML(){
   if(!d)return '<div class="cfg-section" id="cfg-aprovador"><h3>✅ Quem aprova a comissão</h3><p class="text-muted">Consultando…</p></div>';
   const c=d.config,s=c&&c.substituto,v=d.vigente||{};
   const quem=comissaoAprovadorQuemTxt({...v,titularNome:c&&c.titularNome});
-  const opcoes=(sel)=>{const ps=(typeof pessoasRH==='function'?pessoasRH():[]).filter(p=>p&&p.ativo!==false&&/^\d{6}$/.test(String(p.id||''))&&!p.idRepetido);return '<option value="">Escolha a pessoa</option>'+ps.map(p=>`<option value="${esc(p.id)}"${p.id===sel?' selected':''}>${esc(p.nome)} · ${esc(p.id)}</option>`).join('');};
+  /* QUEM APROVA PELA TELA (P2 da revisão da onda pessoas): o servidor diz
+     quais IDs têm acesso pcp com senha ligado à ficha; a lista marca, para o
+     admin não escolher em silêncio quem não consegue aprovar. */
+  const sabe=Array.isArray(d.aprovamPelaTela),aprovam=new Set(sabe?d.aprovamPelaTela:[]);
+  const opcoes=(sel)=>{const ps=(typeof pessoasRH==='function'?pessoasRH():[]).filter(p=>p&&p.ativo!==false&&/^\d{6}$/.test(String(p.id||''))&&!p.idRepetido);return '<option value="">Escolha a pessoa</option>'+ps.map(p=>`<option value="${esc(p.id)}"${p.id===sel?' selected':''}>${esc(p.nome)} · ${esc(p.id)}${sabe?(aprovam.has(p.id)?' · aprova pela tela':' · sem acesso pcp ligado'):''}</option>`).join('');};
   const subTxt=s?`Substituto: ${esc(s.nome||'cadastro '+s.id)} (cadastro ${esc(s.id)}), de ${esc(comissaoDiaBR(s.de))}${s.ate?' até '+esc(comissaoDiaBR(s.ate)):', sem data de fim'}${s.vigente?'':' (fora do prazo agora)'}. Motivo: ${esc(s.motivo||'')}`:'Sem substituto.';
   const diario=(d.diario||[]).slice(0,10).map(e=>`<li>${esc(comissaoData(e.em))} · ${esc(e.por)}${e.porId?' ('+esc(e.porId)+')':''} · ${esc({titular:'titular designado',substituto:'substituto designado',encerrar:'substituto encerrado'}[e.operacao]||e.operacao)}: ${esc(e.operacao==='titular'?(e.titularNome||e.titularId):e.operacao==='substituto'?(e.substitutoNome||e.substitutoId)+' de '+comissaoDiaBR(e.de)+(e.ate?' até '+comissaoDiaBR(e.ate):''):'')} · ${esc(e.motivo)}</li>`).join('');
+  /* O RETORNO DA GRAVAÇÃO FICA NO BLOCO QUE FOI GRAVADO (U1 da revisão da
+     onda pessoas): o aviso do servidor ("não consegue aprovar pela tela")
+     aparece ali, à vista, e não só no toast. */
+  const g=d.gravado&&typeof d.gravado==='object'?d.gravado:null,avisos=(d.avisos||[]).map(a=>`<p class="perf-aviso">${esc(a)}</p>`).join('');
+  const feito={titular:'Titular designado',substituto:'Substituto designado',encerrar:'Substituto encerrado'};
+  const retorno=op=>g&&g.operacao===op?`<div class="aprov-retorno" role="status" data-aprov-retorno><p class="aprov-ok">${esc(feito[op]||'Gravado')}${g.nome||g.id?': '+esc(g.nome||'cadastro '+g.id)+(g.id?' (cadastro '+esc(g.id)+')':''):''}.</p>${avisos}</div>`:'';
+  const motivo=`<label class="aprov-campo"><span>Motivo da mudança</span><input name="motivo" minlength="15" maxlength="500" required placeholder="15 letras ou mais"></label>`;
+  const rodape=(op,rotulo)=>`<div class="aprov-acoes"><button class="btn-primary btn-sm" type="submit">${rotulo}</button></div><p role="alert" class="aprov-erro"></p>${retorno(op)}`;
+  const blocos=admin?`<div class="aprov-blocos">
+    <form class="aprov-form" data-aprov-op="titular"><h4>Titular</h4><p class="aprov-desc">Quem aprova a comissão todo mês. Troque só quando a função passar para outra pessoa.</p>
+      <label class="aprov-campo"><span>Pessoa</span><select name="pessoa">${opcoes(c&&c.titularId)}</select></label>${motivo}${rodape('titular','Designar titular')}</form>
+    <form class="aprov-form" data-aprov-op="substituto"><h4>Substituto</h4><p class="aprov-desc">Aprova no lugar do titular entre o início e o fim (férias, afastamento). Enquanto vale, o titular não aprova; sem fim, vale até ser encerrado.</p>
+      <label class="aprov-campo"><span>Pessoa</span><select name="pessoa">${opcoes('')}</select></label>
+      <div class="aprov-datas"><label class="aprov-campo"><span>Início</span><input type="date" name="de" value="${esc(d.hoje||'')}"></label><label class="aprov-campo"><span>Fim (opcional)</span><input type="date" name="ate"></label></div>${motivo}${rodape('substituto','Designar substituto')}</form>
+    ${s?`<form class="aprov-form" data-aprov-op="encerrar"><h4>Encerrar o substituto</h4><p class="aprov-desc">Devolve a aprovação ao titular a partir de agora. O substituto continua no diário.</p>${motivo}${rodape('encerrar','Encerrar o substituto')}</form>`:''}
+  </div>`:'<p class="text-muted">Só o admin designa o titular e o substituto.</p>';
   return `<div class="cfg-section" id="cfg-aprovador"><h3>✅ Quem aprova a comissão</h3>
-    <p><strong>${esc(quem)}</strong></p>
+    <p class="aprov-quem"><strong>${esc(quem)}</strong></p>
     <p class="text-muted">Titular: ${c?esc((c.titularNome||'cadastro '+c.titularId)+' (cadastro '+c.titularId+')'):'nenhum (vale a regra de sempre: pcp e admin aprovam)'}. ${subTxt}</p>
-    ${(d.avisos||[]).map(a=>`<p class="perf-aviso">${esc(a)}</p>`).join('')}
-    ${admin?`<form class="aprov-form" data-aprov-op="titular"><label>Titular <select name="pessoa">${opcoes(c&&c.titularId)}</select></label><label>Motivo <input name="motivo" minlength="15" maxlength="500" required></label><button class="btn-ghost btn-sm" type="submit">Designar titular</button></form>
-    <form class="aprov-form" data-aprov-op="substituto"><label>Substituto <select name="pessoa">${opcoes('')}</select></label><label>Início <input type="date" name="de" value="${esc(d.hoje||'')}"></label><label>Fim (opcional) <input type="date" name="ate"></label><label>Motivo <input name="motivo" minlength="15" maxlength="500" required></label><button class="btn-ghost btn-sm" type="submit">Designar substituto</button></form>
-    ${s?`<form class="aprov-form" data-aprov-op="encerrar"><label>Motivo <input name="motivo" minlength="15" maxlength="500" required></label><button class="btn-ghost btn-sm" type="submit">Encerrar o substituto</button></form>`:''}`:'<p class="text-muted">Só o admin designa o titular e o substituto.</p>'}
-    <p role="alert" class="aprov-erro"></p>
+    ${g&&admin?'':avisos}
+    ${blocos}
     ${diario?`<details><summary>Diário das mudanças</summary><ul>${diario}</ul></details>`:''}
   </div>`;
 }
@@ -183,14 +200,17 @@ function comissaoAprovadorWire(el,repintar){
   if(!sec)return;
   if(!comissaoAprovadorDados.dados&&!comissaoAprovadorDados.carregando&&!comissaoAprovadorDados.erro)comissaoAprovadorCarregar(repintar);
   const ler=sec.querySelector('[data-aprov-ler]');if(ler)ler.onclick=()=>{comissaoAprovadorDados={...comissaoAprovadorDados,erro:''};comissaoAprovadorCarregar(repintar);};
+  // Depois de gravar, o retorno (com o aviso do servidor) vem para a vista uma vez.
+  if(comissaoAprovadorDados.mostrar){comissaoAprovadorDados={...comissaoAprovadorDados,mostrar:false};const r=sec.querySelector('[data-aprov-retorno]');if(r&&r.scrollIntoView)r.scrollIntoView({block:'center'});}
   sec.querySelectorAll('form[data-aprov-op]').forEach(form=>{form.onsubmit=async ev=>{
     if(ev&&ev.preventDefault)ev.preventDefault();
-    const op=form.dataset.aprovOp,campo=n=>form.querySelector(`[name="${n}"]`),val=n=>String((campo(n)&&campo(n).value)||'').trim(),alerta=sec.querySelector('.aprov-erro');
+    const op=form.dataset.aprovOp,campo=n=>form.querySelector(`[name="${n}"]`),val=n=>String((campo(n)&&campo(n).value)||'').trim(),alerta=form.querySelector('.aprov-erro');
+    if(alerta)alerta.textContent='';
     const corpo={action:'comissaoAprovadorGravar',operacao:op,motivo:val('motivo'),requestId:crypto.randomUUID()};
     if(op==='titular')corpo.titularId=val('pessoa');
     if(op==='substituto'){corpo.substitutoId=val('pessoa');corpo.de=val('de');if(val('ate'))corpo.ate=val('ate');}
     const botao=form.querySelector('button');if(botao)botao.disabled=true;
-    try{const r=await STORE.api(corpo);if(!r||!('vigente' in r))throw new Error((r&&r.error)||'Não foi possível gravar.');comissaoAprovadorDados={carregando:false,dados:r,erro:''};if(typeof toast==='function')toast('Quem aprova a comissão: gravado.','success');if(typeof repintar==='function')repintar();}
+    try{const r=await STORE.api(corpo);if(!r||!('vigente' in r))throw new Error((r&&r.error)||'Não foi possível gravar.');comissaoAprovadorDados={carregando:false,dados:{...r,gravado:r.gravado||{operacao:op}},erro:'',mostrar:true};if(typeof toast==='function')toast((r.avisos||[]).length?'Quem aprova a comissão: gravado, com aviso (veja ao lado do bloco).':'Quem aprova a comissão: gravado.',(r.avisos||[]).length?'warn':'success');if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();if(typeof repintar==='function')repintar();}
     catch(e){if(alerta)alerta.textContent=(e&&e.message)||'Não foi possível gravar.';}
     finally{if(botao)botao.disabled=false;}
   };});

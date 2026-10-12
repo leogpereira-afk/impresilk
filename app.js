@@ -5863,11 +5863,11 @@ function aCadastrarOS(os) {
 }
 function seloACadastrarHTML(os) {
   const n = aCadastrarOS(os);
-  return n.length ? ` <span class="tag-a-cadastrar" title="${esc('Sem cadastro no RH: ' + n.join(', ') + '. Cadastre a ficha ou o contrato de freelancer no RH para a pessoa entrar no ranking e na comissão.')}">👤 pessoa a cadastrar</span>` : '';
+  return n.length ? ` <span class="tag-a-cadastrar" title="${esc('Sem cadastro no RH: ' + n.join(', ') + '. Cadastre no RH (ficha ou contrato de freelancer), ou, se a pessoa já tem ficha, ligue o nome em Performance › Conferência › Conferir nomes.')}">👤 pessoa a cadastrar</span>` : '';
 }
 function notaACadastrarHTML(os) {
   const n = aCadastrarOS(os);
-  return n.length ? `<p class="aviso-a-cadastrar" role="note">👤 <strong>Pessoa a cadastrar no RH:</strong> ${esc(n.join(', '))}. Sem ficha ou contrato de freelancer no RH, ${n.length === 1 ? 'ela fica' : 'elas ficam'} fora do ranking e da comissão.</p>` : '';
+  return n.length ? `<p class="aviso-a-cadastrar" role="note">👤 <strong>Pessoa a cadastrar no RH:</strong> ${esc(n.join(', '))}. Sem ficha ou contrato de freelancer no RH, ${n.length === 1 ? 'ela fica' : 'elas ficam'} fora do ranking e da comissão. Cadastre no RH, ou, se a pessoa já tem ficha (o nome pode estar digitado diferente), ligue o nome em Performance › Conferência › Conferir nomes.</p>` : '';
 }
 function osCardHTML(os) {
   const st = calcStatus(os);
@@ -8434,6 +8434,25 @@ const CFG_LISTAS = [
   { key: 'causas_retrabalho', label: 'Causas de Retrabalho' }
 ];
 
+/* OS GRUPOS ABERTOS DE CONFIGURAÇÕES, PELO NOME DO GRUPO, NÃO PELA POSIÇÃO
+   (U1 da revisão da onda pessoas): o painel de saúde tem grupos `cfg-grupo`
+   próprios que aparecem e somem conforme a consulta, e a posição deslocava:
+   gravar "Quem aprova a comissão" fechava o grupo e escondia o aviso do
+   servidor. O estado mora no STATE e acompanha cada abrir e fechar. */
+const cfgGruposDe = el => el && el.querySelectorAll ? [...el.querySelectorAll(':scope > details.cfg-grupo[data-grupo]')] : [];
+function cfgGruposGuardar(el) {
+  const m = STATE._cfgGruposAbertos || (STATE._cfgGruposAbertos = {});
+  for (const d of cfgGruposDe(el)) m[d.dataset.grupo] = !!d.open;
+  return m;
+}
+function cfgGruposRestaurar(el) {
+  const m = STATE._cfgGruposAbertos || (STATE._cfgGruposAbertos = {});
+  for (const d of cfgGruposDe(el)) {
+    const k = d.dataset.grupo;
+    if (Object.prototype.hasOwnProperty.call(m, k)) d.open = m[k];
+    d.addEventListener('toggle', () => { m[k] = !!d.open; });
+  }
+}
 function renderControle() {
   const el = $('#panel-controle');
   const cfg = STORE.getCFG();
@@ -8593,19 +8612,19 @@ function renderControle() {
 
   // Cada gravação (e o eco do servidor) refaz a aba: sem guardar quais grupos
   // estavam abertos, o grupo em uso fechava a cada "+" e a cada campo salvo.
-  const gruposAbertos = $$('details.cfg-grupo', el).map(d => d.open);
+  cfgGruposGuardar(el);
   // Ordem: administração no topo (Usuários, Níveis, Integração), depois
   // contatos e por fim as listas do dia a dia em grid compacto.
   el.innerHTML =
     (roListas ? '<p class="text-muted" style="margin-bottom:12px">Listas, contatos e custo: só o admin edita.</p>' : '') +
     `<div class="casa-pagina-head"><div><h2>Configurações</h2><p>Conexão, pessoas e regras da operação, cada uma no seu lugar.</p></div></div>` +
-    `<details class="cfg-grupo" open><summary>🔌 Conexões e sincronização</summary>${saudeHTML}${mubisysHTML}</details>` +
-    `<details class="cfg-grupo"><summary>👥 Equipe e acesso</summary>${usuariosHTML}${niveisHTML}${contatosHTML}</details>` +
-    `<details class="cfg-grupo"><summary>🛠 Regras e recursos da operação</summary>${custoHTML}<div class="cfg-grid">${listasHTML}</div></details>` +
-    `<details class="cfg-grupo"><summary>💬 Mensagens da programação</summary>${mensagemHTML}</details>` +
+    `<details class="cfg-grupo" data-grupo="conexoes" open><summary>🔌 Conexões e sincronização</summary>${saudeHTML}${mubisysHTML}</details>` +
+    `<details class="cfg-grupo" data-grupo="equipe"><summary>👥 Equipe e acesso</summary>${usuariosHTML}${niveisHTML}${contatosHTML}</details>` +
+    `<details class="cfg-grupo" data-grupo="regras"><summary>🛠 Regras e recursos da operação</summary>${custoHTML}<div class="cfg-grid">${listasHTML}</div></details>` +
+    `<details class="cfg-grupo" data-grupo="mensagens"><summary>💬 Mensagens da programação</summary>${mensagemHTML}</details>` +
     // Quem aprova a comissão (D-013 e D-014): admin e pcp veem; só o admin designa.
-    (typeof comissaoAprovadorSecaoHTML === 'function' && ['admin','pcp'].includes(STATE.user.papel) ? `<details class="cfg-grupo"><summary>✅ Aprovação da comissão</summary>${comissaoAprovadorSecaoHTML()}</details>` : '');
-  if (gruposAbertos.length) $$('details.cfg-grupo', el).forEach((d, i) => { if (i < gruposAbertos.length) d.open = gruposAbertos[i]; });
+    (typeof comissaoAprovadorSecaoHTML === 'function' && ['admin','pcp'].includes(STATE.user.papel) ? `<details class="cfg-grupo" data-grupo="aprovacao"><summary>✅ Aprovação da comissão</summary>${comissaoAprovadorSecaoHTML()}</details>` : '');
+  cfgGruposRestaurar(el);
 
   // Handlers da Integração Mubisys e do painel de saúde (admin)
   if (isAdmin) wireMubisys(el);
