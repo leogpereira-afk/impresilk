@@ -246,3 +246,122 @@ test('revisão acabamento: quem não é gestão lê na O.S. aberta quem confere 
     assert.match(html, /<p class="ent-conferir" role="note">2 itens a entregar\. A entrega dos itens não se marca na ficha: quem confere é a gestão do PCP, em &quot;Conferir itens e equipe&quot; \(na ficha, em Conferência e acompanhamento\)\.<\/p>/, papel);
   }
 });
+
+/* U3: a classificação em lote da Conferência operacional. */
+const R = require('../operacao-revisao.js');
+function dialogoOp(lista, cfgInicial) {
+  const els = new Map(), salvas = [];
+  let cfg = cfgInicial, corpo = '';
+  const el = sel => { if (!els.has(sel)) els.set(sel, {sel, value: '', innerHTML: '', textContent: ''}); return els.get(sel); };
+  const ctx = vm.createContext({console, Date, structuredClone, STATE: {user: {nome: 'Gestor Teste', papel: 'pcp'}},
+    STORE: {getCFG: () => cfg, getAllOS: () => lista, getOS: () => null, saveCFG: c => { salvas.push(c); cfg = c; }, trySync: async () => {}, getQueue: () => []},
+    perfPodeEditar: () => true, veiculosRH: () => [], esc: s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'), perfErroTxt: e => String(e),
+    perfDialog: (_t, c) => { corpo = c; return {querySelector: el}; }, FormData: class { constructor(f) { this.v = f.valores; } get(k) { return k in this.v ? this.v[k] : null; } }});
+  for (const f of ['operacao.js', 'operacao-revisao.js']) vm.runInContext(ler(f), ctx, {filename: f});
+  vm.runInContext('abrirRevisaoOperacional()', ctx);
+  const enviar = async valores => { const form = el('form'); form.valores = valores; await form.onsubmit({preventDefault() {}, target: form}); return el('#op-revisao-status').textContent; };
+  return {el, salvas, enviar, corpo: () => corpo, cfg: () => cfg};
+}
+const DESCRICOES = ['Adesivagem de vitrine', 'adesivo', 'Fachada e comunicação visual', 'Fachada em ACM', 'Placa ADESIVADA fictícia'];
+
+test('revisão acabamento: o lote pega a palavra inteira ou o começo dela, nunca o meio (U3)', () => {
+  // Caso ruim (acfaae1): "ad" pegava as 5, inclusive "Fachada e comunicação visual" e "Fachada em ACM" (o "ad" de fachADa).
+  assert.deepEqual(R.paraLote(DESCRICOES, 'ad', {}), ['Adesivagem de vitrine', 'adesivo', 'Placa ADESIVADA fictícia']);
+  assert.deepEqual(R.paraLote(DESCRICOES, 'acm', {}), ['Fachada em ACM']);
+  assert.deepEqual(R.paraLote(DESCRICOES, 'comunicacao vis', {}), ['Fachada e comunicação visual'], 'sem acento, e a busca de duas palavras');
+  assert.deepEqual(R.paraLote(DESCRICOES, 'sivo', {}), [], 'o meio da palavra não vale');
+  assert.deepEqual(R.paraLote(['Placa (A) fictícia'], '(a', {}), ['Placa (A) fictícia'], 'o parêntese da busca não quebra');
+});
+
+test('revisão acabamento: a categoria do lote começa em "Selecione" e o lote sem categoria não salva (U3)', async () => {
+  const d = dialogoOp(DESCRICOES.map((s, i) => ({id: 'o' + i, servico: s})), {categoriasServico: []});
+  // Caso ruim (acfaae1): o select começava em "Adesivos", e quem não escolhia classificava em Adesivos.
+  assert.match(d.corpo(), /<select name="loteCategoria"><option value="">Selecione<\/option><option>Adesivos<\/option>/);
+  assert.match(d.corpo(), /<select name="categoria"><option value="">Selecione<\/option>/);
+  const base = {loteBusca: 'ad', loteCategoria: '', loteMotivo: 'Revisão fictícia dos adesivos de outubro', loteConfirma: 'on'};
+  assert.match(await d.enviar(base), /Escolha a categoria do lote/);
+  assert.equal(d.salvas.length, 0, 'nada salvo sem categoria');
+  assert.match(await d.enviar({descricao: 'adesivo', categoria: ''}), /Escolha a categoria da descrição/);
+  assert.equal(d.salvas.length, 0);
+});
+
+test('revisão acabamento: a prévia mostra TODAS as descrições, com caixa para tirar uma por uma, e só as marcadas entram (U3)', async () => {
+  const muitas = Array.from({length: 60}, (_, i) => `Adesivo fictício ${String(i + 1).padStart(2, '0')}`);
+  const d = dialogoOp(muitas.map((s, i) => ({id: 'm' + i, servico: s})), {categoriasServico: []});
+  d.el('[name=loteBusca]').value = 'adesivo';
+  d.el('[name=loteBusca]').oninput();
+  const previa = d.el('#op-lote-previa').innerHTML;
+  // Caso ruim (acfaae1): a prévia mostrava 50 e "e mais 10", sem caixa: a gestão não via nem tirava as outras.
+  assert.doesNotMatch(previa, /e mais/);
+  assert.equal((previa.match(/<input type="checkbox" data-lote-item value="[^"]+" checked>/g) || []).length, 60, 'as 60, marcadas');
+  assert.match(previa, /class="op-lote-lista"/);
+  assert.match(d.el('#op-lote-conta').textContent, /as 60 descrições marcadas/);
+  // Tira duas.
+  for (const v of ['Adesivo fictício 07', 'Adesivo fictício 60']) d.el('#op-lote-previa').onchange({target: {dataset: {loteItem: ''}, value: v, checked: false}});
+  assert.match(d.el('#op-lote-conta').textContent, /as 58 descrições marcadas/);
+  d.el('[name=loteBusca]').oninput();
+  assert.match(d.el('#op-lote-previa').innerHTML, /value="Adesivo fictício 07" >/, 'a desmarcada continua desmarcada ao repintar');
+  await d.enviar({loteBusca: 'adesivo', loteCategoria: 'Adesivos', loteMotivo: 'Revisão fictícia dos adesivos de outubro', loteConfirma: 'on'});
+  assert.equal(d.salvas.length, 1);
+  const cats = d.salvas[0].categoriasServico;
+  assert.equal(cats.length, 58);
+  assert.ok(!cats.some(x => ['Adesivo fictício 07', 'Adesivo fictício 60'].includes(x.descricao)), 'as tiradas não entram');
+  const lote = d.salvas[0].lotesCategoria[0];
+  assert.deepEqual([lote.busca, lote.categoria, lote.descricoes.length], ['adesivo', 'Adesivos', 58]);
+  assert.ok(cats.every(x => x.lote === lote.id), 'cada categoria leva o lote');
+});
+
+test('revisão acabamento: "Desfazer este lote" devolve as descrições à classificação de antes, com motivo, e a reclassificada depois fica (U3)', async () => {
+  const lista = DESCRICOES.map((s, i) => ({id: 'o' + i, servico: s}));
+  const d = dialogoOp(lista, {categoriasServico: [{descricao: 'Fachada em ACM', categoria: 'Fachadas'}]});
+  await d.enviar({loteBusca: 'ad', loteCategoria: 'Letreiros', loteMotivo: 'Lote fictício feito por engano na revisão', loteConfirma: 'on'});
+  const cfg1 = d.cfg();
+  assert.equal(cfg1.categoriasServico.filter(x => x.categoria === 'Letreiros').length, 3);
+  // A gestão reclassifica uma do lote, uma a uma, depois.
+  const cfg2 = structuredClone(cfg1);
+  cfg2.categoriasServico = cfg2.categoriasServico.filter(x => x.descricao !== 'adesivo').concat({descricao: 'adesivo', categoria: 'Adesivos', por: 'Gestor Teste', em: '2026-10-12T13:00:00Z'});
+  const d2 = dialogoOp(lista, cfg2);
+  const id = cfg2.lotesCategoria[0].id;
+  // Caso ruim (acfaae1): não havia registro do lote nem como desfazê-lo.
+  assert.match(d2.corpo(), new RegExp(`<button type="button" class="btn-ghost btn-sm" data-lote-desfazer="${id}">Desfazer este lote</button>`));
+  assert.match(d2.corpo(), /<strong>Letreiros<\/strong> · 3 descrições · palavra "ad"/);
+  const clicar = () => d2.el('#op-lotes').onclick({target: {closest: () => ({dataset: {loteDesfazer: id}})}});
+  d2.el(`[data-lote-motivo="${id}"]`).value = 'curto';
+  await clicar();
+  assert.match(d2.el('#op-revisao-status').textContent, /motivo para desfazer o lote, com 15 letras/);
+  assert.equal(d2.salvas.length, 0);
+  d2.el(`[data-lote-motivo="${id}"]`).value = 'Lote feito por engano: não são letreiros';
+  await clicar();
+  assert.equal(d2.salvas.length, 1);
+  const c = d2.salvas[0];
+  assert.deepEqual(c.categoriasServico.map(x => [x.descricao, x.categoria]).sort(), [['Fachada em ACM', 'Fachadas'], ['adesivo', 'Adesivos']], 'as do lote voltam a ficar sem categoria; a reclassificada e a de antes ficam');
+  assert.equal(c.lotesCategoria[0].desfeito.motivo, 'Lote feito por engano: não são letreiros');
+  assert.equal(c.lotesCategoria[0].descricoes.length, 3, 'o registro do lote fica');
+  assert.match(d2.el('#op-revisao-status').textContent, /Lote desfeito: 2 descrições voltaram a ficar sem categoria; 1 descrição já tinha outra classificação, feita depois, e ficou como está/);
+  assert.deepEqual(lista.map(o => o.servico), DESCRICOES, 'nenhuma O.S. muda');
+});
+
+test('revisão acabamento: o servidor assina o lote e o desfazer, guarda o lote de cada categoria, e não deixa o registro mudar (nunca 422) (U3)', async () => {
+  const e = await edge('pcp-sync', {pcp_registros: [], registros: structuredClone(FICHAS), pcp_config_global: [{id: true, config: {instaladores: []}, atualizado_em: '2026-10-01T10:00:00Z'}]});
+  const base = structuredClone(e.db.pcp_config_global[0].config);
+  const lote = {id: 'lote-ficticio-1', busca: 'ad', categoria: 'Adesivos', motivo: 'Revisão fictícia dos adesivos de outubro', descricoes: ['adesivo'], por: 'forjado', em: '2020-01-01'};
+  const r = await e.call({action: 'setCfg', baseCfg: base, cfg: {...base, categoriasServico: [{descricao: 'adesivo', categoria: 'Adesivos', motivo: lote.motivo, lote: lote.id}], lotesCategoria: [lote]}}, GESTOR);
+  assert.equal(r.status, 200, JSON.stringify(r));
+  // Caso ruim (acfaae1): a porta não conhecia o lote (o pcp nem gravava a chave) e tirava o lote de cada categoria.
+  assert.equal(r.cfg.categoriasServico[0].lote, 'lote-ficticio-1');
+  const g = r.cfg.lotesCategoria[0];
+  assert.deepEqual([g.id, g.categoria, g.descricoes, g.por], ['lote-ficticio-1', 'Adesivos', ['adesivo'], 'Gestor Teste']);
+  assert.notEqual(g.em, '2020-01-01');
+  // Mudar o registro (outra categoria) não passa: fica o gravado, com aviso, 200.
+  const r2 = await e.call({action: 'setCfg', baseCfg: r.cfg, cfg: {...r.cfg, lotesCategoria: [{...g, categoria: 'Fachadas'}]}}, GESTOR);
+  assert.equal(r2.status, 200, JSON.stringify(r2));
+  assert.equal(r2.cfg.lotesCategoria[0].categoria, 'Adesivos');
+  assert.ok((r2.avisos || []).some(a => /registro de lote de categorias não foi gravado/.test(a)), JSON.stringify(r2.avisos));
+  // O desfazer: tira as categorias do lote e acrescenta `desfeito`, assinado.
+  const base3 = e.db.pcp_config_global[0].config;
+  const r3 = await e.call({action: 'setCfg', baseCfg: base3, cfg: {...base3, categoriasServico: [], lotesCategoria: [{...g, desfeito: {motivo: 'Lote feito por engano na revisão fictícia', por: 'forjado', em: '2020-01-01'}}]}}, GESTOR);
+  assert.equal(r3.status, 200, JSON.stringify(r3));
+  assert.deepEqual(r3.cfg.categoriasServico, []);
+  assert.deepEqual([r3.cfg.lotesCategoria[0].desfeito.motivo, r3.cfg.lotesCategoria[0].desfeito.por], ['Lote feito por engano na revisão fictícia', 'Gestor Teste']);
+  assert.equal(r3.cfg.lotesCategoria[0].descricoes.length, 1, 'o registro fica');
+});

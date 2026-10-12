@@ -2697,6 +2697,18 @@ body.tv-ligada { overflow:hidden; }
 .perf-sugestao{display:block;margin-top:10px;text-align:left;white-space:normal}
 #perf-dialog{border:1px solid #d8e2e7;border-radius:22px;padding:26px;width:min(620px,calc(100vw - 32px));max-height:86vh;overflow:auto;color:var(--text,#193c50);background:var(--surface,#fff)}
 #perf-dialog::backdrop{background:rgba(11,36,51,.52)}
+/* A classificação em lote da Conferência operacional (revisão da onda acabamento, U3): a lista inteira com rolagem e uma caixa por descrição. */
+#op-revisao-form fieldset{border:1px solid #d8e2e7;border-radius:14px;padding:12px 14px;margin:14px 0;min-width:0}
+#op-revisao-form fieldset>label{display:grid;gap:6px;margin:10px 0}
+#op-revisao-form fieldset>label.op-lote-confirma,#op-revisao-form fieldset>label:has(>input[type=checkbox]){display:flex;align-items:flex-start;gap:8px}
+#op-revisao-form legend{font-weight:650;padding:0 6px}
+.op-lote-previa p{margin:8px 0 6px}
+.op-lote-lista{list-style:none;margin:0;padding:4px;max-height:240px;overflow:auto;border:1px solid #d8e2e7;border-radius:10px;background:#f8fafc}
+.op-lote-lista li label{display:flex;align-items:center;gap:10px;min-height:40px;padding:2px 8px;cursor:pointer;overflow-wrap:anywhere}
+.op-lote-lista input[type=checkbox],.op-lote-confirma input[type=checkbox]{width:20px;height:20px;flex:none;margin-top:2px}
+.op-lotes{margin-top:12px}.op-lotes>summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;align-items:center}
+.op-lote-feito{border-top:1px solid #e5ebef;padding:10px 0}.op-lote-feito p{margin:4px 0}.op-lote-feito label{display:grid;gap:6px;margin:8px 0}
+.op-lote-feito.desfeito{opacity:.75}.op-lote-desfeito{color:var(--muted,#5b6b78)}
 .perf-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.perf-dialog-head h2{margin:0 0 14px;font-size:1.35rem}
 #perf-dialog form>label{display:grid;gap:7px;margin:18px 0}.perf-members{max-height:230px;overflow:auto;border:1px solid #d8e2e7;border-radius:12px;margin:14px 0;padding:6px}
 .perf-member{display:flex;align-items:center;gap:10px;padding:12px;border-radius:8px}.perf-member:has(input:checked){background:#e7f3ef}.perf-member input{width:20px;height:20px;accent-color:#2d8075}.perf-member[hidden]{display:none}

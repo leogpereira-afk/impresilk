@@ -3899,7 +3899,7 @@ Deno.serve(async (req: Request) => {
           if (!body.baseCfg) return resp({conflitoCfg:true,servidorCfg:visivel(atual),campos:["Configuração salva por versão antiga; revise antes de reaplicar."]},409);
           const base = paraMescla(body.baseCfg), local = paraMescla(body.cfg), remoto = paraMescla(atual);
           if (cracha?.papel === "pcp" && !ehMaquina) {
-            const permitidas = new Set(["agendaPCP","bonusPCP","performancePCP","vinculosRH","mensagemDia","veiculosAliases","categoriasServico","medicoesRetrabalho","prioridadesPCP"]);
+            const permitidas = new Set(["agendaPCP","bonusPCP","performancePCP","vinculosRH","mensagemDia","veiculosAliases","categoriasServico","lotesCategoria","medicoesRetrabalho","prioridadesPCP"]);
             for (const k of new Set([...Object.keys(base),...Object.keys(local),...Object.keys(remoto)])) {
               if (!permitidas.has(k)) { delete base[k]; delete local[k]; delete remoto[k]; }
             }
@@ -3936,7 +3936,7 @@ Deno.serve(async (req: Request) => {
             }
           }
           // Novos cadastros operacionais usam a mesma mescla/CAS e autoria do servidor.
-          for(const k of ["veiculosAliases","categoriasServico","medicoesRetrabalho","prioridadesPCP"]){
+          for(const k of ["veiculosAliases","categoriasServico","lotesCategoria","medicoesRetrabalho","prioridadesPCP"]){
             if(k in base && !(k in local))local[k]=base[k]; // aba anterior não apaga campo desconhecido
           }
           const result = mesclarConfiguracao(base,local,remoto);
@@ -3984,7 +3984,7 @@ Deno.serve(async (req: Request) => {
               return JSON.stringify(antes)===JSON.stringify(p) ? p : {...p,por:cracha?.nome || 'Gestão',em:new Date().toISOString()};
             });
           }
-          const mudancaOperacional=["veiculosAliases","categoriasServico","medicoesRetrabalho","prioridadesPCP"].filter(k=>JSON.stringify(limpo[k])!==JSON.stringify(atual[k]));
+          const mudancaOperacional=["veiculosAliases","categoriasServico","lotesCategoria","medicoesRetrabalho","prioridadesPCP"].filter(k=>JSON.stringify(limpo[k])!==JSON.stringify(atual[k]));
           if(mudancaOperacional.length){
             if(ehMaquina || !["admin","pcp"].includes(String(cracha?.papel)))return resp({error:"Só a gestão confirma cadastros operacionais."},403);
             const autor=await autorAuditoria(),em=new Date().toISOString();
@@ -4005,7 +4005,40 @@ Deno.serve(async (req: Request) => {
             if(mudancaOperacional.includes("categoriasServico")){
               const permitidas=["Adesivos","Fachadas","Letreiros","Sinalização","Estruturas","Impressos","Outros"],vistos=new Set();
               if(!Array.isArray(limpo.categoriasServico)||limpo.categoriasServico.length>3000)return resp({error:"Categorias inválidas."},422);
-              const out=[];for(const x of limpo.categoriasServico){if(!x||typeof x.descricao!=="string"||!x.descricao.trim()||x.descricao.length>1000||!permitidas.includes(x.categoria)||vistos.has(x.descricao))return resp({error:"Categoria ou descrição inválida/repetida."},422);vistos.add(x.descricao);const antigo=(atual.categoriasServico||[]).find((v:any)=>v.descricao===x.descricao);/* O motivo da classificação em lote (M17, onda acabamento) fica junto, cortado em 300 letras; o autor e a hora são do servidor. */const motivo=typeof x.motivo==="string"?x.motivo.trim().slice(0,300):"";out.push(JSON.stringify(x)===JSON.stringify(antigo)?antigo:assinar({descricao:x.descricao,categoria:x.categoria,...(motivo?{motivo}:{})}));}limpo.categoriasServico=out;
+              const out=[];for(const x of limpo.categoriasServico){if(!x||typeof x.descricao!=="string"||!x.descricao.trim()||x.descricao.length>1000||!permitidas.includes(x.categoria)||vistos.has(x.descricao))return resp({error:"Categoria ou descrição inválida/repetida."},422);vistos.add(x.descricao);const antigo=(atual.categoriasServico||[]).find((v:any)=>v.descricao===x.descricao);/* O motivo da classificação em lote (M17, onda acabamento) fica junto, cortado em 300 letras; o autor e a hora são do servidor. */const motivo=typeof x.motivo==="string"?x.motivo.trim().slice(0,300):"";/* O lote que a classificou (revisão da onda acabamento, U3): o "Desfazer este lote" acha as descrições por ele. */const lote=typeof x.lote==="string"&&x.lote.trim()?x.lote.trim().slice(0,80):"";out.push(JSON.stringify(x)===JSON.stringify(antigo)?antigo:assinar({descricao:x.descricao,categoria:x.categoria,...(motivo?{motivo}:{}),...(lote?{lote}:{})}));}limpo.categoriasServico=out;
+            }
+            /* O REGISTRO DE CADA CLASSIFICAÇÃO EM LOTE (revisão da onda
+               acabamento, U3): a busca, a categoria, o motivo e as descrições
+               que entraram, com autor e hora do servidor, para o "Desfazer
+               este lote". O registro não se apaga nem muda: o desfazer só
+               acrescenta `desfeito` (motivo de 15 letras ou mais, assinado).
+               Lote inválido ou mudança fora disso fica de fora com aviso,
+               nunca 422 (a configuração passa pela fila do aparelho). */
+            if(mudancaOperacional.includes("lotesCategoria")){
+              const letras=(t:any)=>(String(t??"").match(/\p{L}/gu)||[]).length,cats=["Adesivos","Fachadas","Letreiros","Sinalização","Estruturas","Impressos","Outros"];
+              const lista=Array.isArray(limpo.lotesCategoria)?limpo.lotesCategoria.slice(0,1000):[];
+              const antigos=new Map(((Array.isArray(atual.lotesCategoria)?atual.lotesCategoria:[]) as any[]).filter((l:any)=>l&&typeof l.id==="string").map((l:any)=>[l.id,l]));
+              const out:any[]=[],vistos=new Set();let foraLote=0;
+              for(const l of lista){
+                if(!l||typeof l.id!=="string"||!l.id.trim()||l.id.length>80||vistos.has(l.id)){foraLote++;continue;}
+                vistos.add(l.id);
+                const antigo=antigos.get(l.id);
+                if(antigo){
+                  if(JSON.stringify(l)===JSON.stringify(antigo)){out.push(antigo);continue;}
+                  const motivoDesf=typeof l.desfeito?.motivo==="string"?l.desfeito.motivo.trim().slice(0,300):"";
+                  if(!antigo.desfeito&&l.desfeito&&letras(motivoDesf)>=15)out.push({...antigo,desfeito:{motivo:motivoDesf,por:autor.nome,porId:autor.porId,em}});
+                  else{out.push(antigo);foraLote++;}
+                  continue;
+                }
+                const descricoes=Array.isArray(l.descricoes)?[...new Set(l.descricoes.filter((d:any)=>typeof d==="string"&&d.trim()&&d.length<=1000))].slice(0,3000):[];
+                const motivo=typeof l.motivo==="string"?l.motivo.trim().slice(0,300):"";
+                if(!cats.includes(l.categoria)||!descricoes.length||letras(motivo)<15||l.desfeito){foraLote++;continue;}
+                out.push(assinar({id:l.id,busca:typeof l.busca==="string"?l.busca.trim().slice(0,100):"",categoria:l.categoria,motivo,descricoes}));
+              }
+              // O registro gravado que não veio (aba antiga) continua: lote não se apaga.
+              for(const [id,l] of antigos)if(!vistos.has(id))out.push(l);
+              limpo.lotesCategoria=out;
+              if(foraLote)avisosCfg.push(`${foraLote===1?"Um registro de lote de categorias não foi gravado":foraLote+" registros de lote de categorias não foram gravados"}: o registro do lote não muda depois de gravado, e o desfazer pede o motivo (15 letras ou mais).`);
             }
             if(mudancaOperacional.includes("medicoesRetrabalho")){
               if(!limpo.medicoesRetrabalho||typeof limpo.medicoesRetrabalho!=="object"||Array.isArray(limpo.medicoesRetrabalho)||Object.keys(limpo.medicoesRetrabalho).length>3000)return resp({error:"Medições inválidas."},422);
