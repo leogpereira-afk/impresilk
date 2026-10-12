@@ -1043,7 +1043,19 @@ async function perfCarregarMeses(){
 // Depois de fechar, aprovar ou exportar, a fita é lida de novo.
 function perfMesesInvalidar(){perfMeses={...perfMeses,tentado:false};}
 const PERF_MES_CURTO = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+/* "MUDOU DEPOIS DO ENVIO" (D1 da auditoria de 12/10/2026): o dinheiro de uma
+   O.S. do mês mudou depois da exportação (ou, sem envio, depois do
+   fechamento). O mês fechado não se recalcula: a fita avisa que falta uma nova
+   revisão. */
+function perfFitaMudouTxt(m){
+ const d=m&&m.mudouDepois;if(!d)return '';
+ return `${d.depoisDoEnvio?'mudou depois do envio':'mudou depois do fechamento'} (${d.os===1?'1 O.S.':(d.os||1)+' O.S.'}): falta uma nova revisão`;
+}
 function perfFitaEstadoTxt(m){
+ const base=perfFitaEstadoBaseTxt(m),mudou=perfFitaMudouTxt(m);
+ return base&&mudou?base+'; '+mudou:base||mudou;
+}
+function perfFitaEstadoBaseTxt(m){
  const teste=!!m.teste;
  if(m.estado==='em_andamento')return teste?'Mês de teste, em andamento':'Em andamento';
  if(m.estado==='aberto')return teste?'Mês de teste, sem fechamento':'Aberto: falta fechar';
@@ -1064,7 +1076,7 @@ function perfFitaMesesHTML(){
  const atual=periodoOuMes('_fPerf');
  return `<nav class="perf-fita-meses" aria-label="Meses do programa"><p class="metricas-nota">Meses do programa: o que falta fechar, aprovar ou enviar. Toque num mês para abri-lo.</p><ol>${perfMeses.lista.map(m=>{
    const [a,mm]=String(m.mes).split('-');const aqui=atual&&atual.de===m.de&&atual.ate===m.ate;
-   return `<li class="perf-fita-mes perf-fita-${esc(m.estado)}${m.teste?' perf-fita-teste':''}"><button type="button" class="btn-ghost btn-sm" data-perf-fita-mes="${esc(m.mes)}"${aqui?' aria-current="true"':''}><b><span class="perf-fita-marca" aria-hidden="true">${PERF_FITA_MARCA[m.teste?'teste':m.estado]||''}</span>${esc(PERF_MES_CURTO[Number(mm)-1]||mm)}/${esc(String(a).slice(2))}</b> <span>${esc(perfFitaEstadoTxt(m))}</span></button></li>`;}).join('')}</ol></nav>`;
+   return `<li class="perf-fita-mes perf-fita-${esc(m.estado)}${m.teste?' perf-fita-teste':''}${m.mudouDepois?' perf-fita-mudou':''}"><button type="button" class="btn-ghost btn-sm" data-perf-fita-mes="${esc(m.mes)}"${aqui?' aria-current="true"':''}><b><span class="perf-fita-marca" aria-hidden="true">${PERF_FITA_MARCA[m.teste?'teste':m.estado]||''}</span>${esc(PERF_MES_CURTO[Number(mm)-1]||mm)}/${esc(String(a).slice(2))}</b> <span>${esc(perfFitaEstadoTxt(m))}</span></button></li>`;}).join('')}</ol></nav>`;
 }
 /* O PDF OFICIAL DO MÊS FECHADO (item 8 da fila de 11/10/2026): só sai com o
    documento registrado no servidor (performanceDocumento), com o número do

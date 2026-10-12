@@ -2397,6 +2397,26 @@ export function mudancaValorConferido(antes, depois, erp = []) {
   const aviso = `O valor ${n === 1 ? 'da entrega conferida' : `das ${n} entregas conferidas`} desta O.S. mudou de ${reaisDeCentavos(a)} para ${reaisDeCentavos(d)}: o rateio usa o valor de cada item e o valor total da O.S. A gravação valeu; se não era isso, corrija o valor.`;
   return { antes: a, depois: d, aviso, diario: { campos: ['valorConferido'], antes: { valorConferido: a }, depois: { valorConferido: d } } };
 }
+/* O DINHEIRO DA O.S. MUDOU NESTA GRAVAÇÃO (D1 da auditoria de 12/10/2026): a
+   base da comissão (valorDaComissao, com o valor do ERP quando ele vale), o
+   valor das entregas conferidas ou o valor de um item (valorUnit, subtotal).
+   Serve ao aviso do mês fechado, com ou sem conferência por entrega (a O.S.
+   inteira também), e à marca "mudou depois do envio" da fita dos meses. */
+export function dinheiroDaOSMudou(antes, depois, erp = []) {
+  if (!objeto(antes) || !objeto(depois)) return false;
+  if (valorDaComissao(antes, erp) !== valorDaComissao(depois, erp)) return true;
+  if (valorDasConferidas(antes, erp) !== valorDasConferidas(depois, erp)) return true;
+  const itens = o => (Array.isArray(o.itens) ? o.itens : []).map(i => objeto(i) ? [String(i.uid ?? ''), ...CAMPOS_VALOR_ITEM_CONFERIDO.map(k => i[k] ?? null)] : null);
+  return canon(itens(antes)) !== canon(itens(depois));
+}
+/* A FRASE PARA A GESTÃO quando o dinheiro de uma O.S. de mês fechado muda
+   (D1): a gravação vale (nunca 422), e o aviso diz que o mês fechado não se
+   recalcula, que a mudança só entra com uma nova revisão e, se o mês já foi
+   exportado, com uma nova exportação. `p`: {de, ate, revisao, enviado}. */
+export function avisoDinheiroMesFechado(p) {
+  const br = d => String(d || '').split('-').reverse().join('/');
+  return `Este mês já foi ${p.enviado ? 'fechado e exportado' : 'fechado'} (${br(p.de)} a ${br(p.ate)}, revisão ${p.revisao || 1}): o valor desta O.S. mudou e a mudança foi gravada, mas o mês fechado não se recalcula. Ela só entra no pagamento com uma nova revisão do fechamento${p.enviado ? ' e uma nova exportação' : ''}.`;
+}
 /* A MARCA QUE O APARELHO MANDOU E NÃO FICOU GRAVADA. Para o reenvio da mesma
    gravação (a resposta se perdeu): o servidor responde sem gravar de novo, e
    diz de novo quais marcas caíram, para o aparelho tirá-las da cópia. */

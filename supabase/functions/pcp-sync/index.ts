@@ -1,7 +1,7 @@
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
-import { idDoCadastroRH, prazoParaConferir, protegerItensConferidos, mudancaValorConferido, valorDaComissao, guardarOsOriginalId, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, guardarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffEdicaoRecusada, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
+import { idDoCadastroRH, prazoParaConferir, protegerItensConferidos, mudancaValorConferido, dinheiroDaOSMudou, avisoDinheiroMesFechado, valorDaComissao, guardarOsOriginalId, pessoasPorDocumento, normPessoa, podarValoresPCP, preservarValoresPCP, guardarValoresPCP, CONFERENCIA_ENTREGA, mesclarConfiguracao, mesclarToqueNoNome, validarMomentos, carimbarExecucao, pertenceEquipe, validarConclusao, validarPerformance, preservarCamposEquipe, sanearEquipes, conferirEquipesAtivas, idDoMembro, sanearVoltaEquipe, PERGUNTAS_VOLTA, voltaConferida, registrarVoltas, comVoltaLegado, podarToque, acertarMomentosToque, canon, resolverPessoas, ehIdPessoa, idDoCracha, idDaGestao, idDaConta, diffAuditavel, diffEdicaoRecusada, diffCfgAuditavel, entradaAuditoria, temCampoGestao, preservarAusentes, carimbarEntregaLancada, entregaLancadaMudou, carimbarFinalizacaoCampo, finalizacaoMudou, carimbarIds, carimbosQueMudaram, carimbarRetornoPrevisto, carimbarPrazoCombinado, carimbarRetornoConferido, carimbarChegadas, guardarAgendaLog, podarCarimbosF15, guardarRetrabalho, preservarItens, guardarEntregasItens, entregasNaoGravadas, temEntregaItem, juntarFreelancers, sanearAlocacao, alocacaoMudou, diarioDescarteAlocacao, podarAlocacao, podarIdsAlocacao, alocacaoConfirmada, finaisAlocacao, participacaoVale, equipesDaDivisao, sugestaoApurada, guardarSaldoERP, guardarItensERP, MESCLA_ITENS_ERP } from "../_shared/pcp-integridade.mjs";
 import { COMISSAO } from "../_shared/pcp-comissao.mjs";
 import { REGRAS } from "../_shared/pcp-regras.mjs";
 import { cancelada, atrasoDaOS, carimbarCancelamento, cancelamentoMudou, cancelamentoParaMarcas, guardarOcorrencias, guardarAbonos, abonosPedidos, ocorrenciasDaOS, voltaDoRetorno, guardarOrigemRetrabalho } from "../_shared/pcp-status.mjs";
@@ -2314,9 +2314,11 @@ Deno.serve(async (req: Request) => {
           }
           throw new Error("Leitura dos meses excedeu o limite.");
         };
-        const [fechados,revisoesCom,exportacoes]=await Promise.all([perfPeriodosFechados(),
+        const [fechados,revisoesCom,exportacoes,mudancasFechado]=await Promise.all([perfPeriodosFechados(),
           lerLeve("performance_comissao","de:registro->>de, ate:registro->>ate, revisao:registro->revisao, tipo:registro->>tipo, em:registro->>em, modo:registro->apuracao->config->>modo, compensacaoDe:registro->apuracao->>compensacaoDe"),
-          lerLeve("performance_comissao_exportacoes","de:registro->>de, ate:registro->>ate, revisaoId:registro->>revisaoId, em:registro->>em")]);
+          lerLeve("performance_comissao_exportacoes","de:registro->>de, ate:registro->>ate, revisaoId:registro->>revisaoId, em:registro->>em"),
+          // A mudança de dinheiro em O.S. de mês fechado (D1 da auditoria de 12/10/2026).
+          lerLeve("performance_mudancas_fechado","de:registro->>de, ate:registro->>ate, em:registro->>em, numero:registro->>numero")]);
         const meses:any[]=[];
         for(let mes=PERF_MES_INICIO_PROGRAMA;mes<=hojeMes.slice(0,7)&&meses.length<240;mes=perfMesSeguinte(mes)){
           const de=mes+"-01",ate=perfUltimoDiaDoMes(mes);
@@ -2327,11 +2329,16 @@ Deno.serve(async (req: Request) => {
           const aprovada=ultima&&ultima.tipo==="aprovacao"?ultima:null;
           const envios=aprovada?exportacoes.filter((x:any)=>x.revisaoId===aprovada.id).sort((a:any,b:any)=>String(a.em).localeCompare(String(b.em))):[];
           const estado=ate>=hojeMes?"em_andamento":!f?"aberto":!aprovada?"fechado":envios.length?"enviado":"aprovado";
+          /* "MUDOU DEPOIS DO ENVIO" (D1): o dinheiro de uma O.S. deste mês mudou
+             depois da última exportação (ou, sem envio, depois do fechamento). */
+          const desde=envios.length?String(envios[envios.length-1].em||""):f?String(f.ultimoEm||""):"";
+          const mudou=f?mudancasFechado.filter((x:any)=>x.de===de&&x.ate===ate&&String(x.em||"")>desde):[];
           meses.push({mes,de,ate,estado,teste:mes===PERF_MES_TESTE,
             fechamento:f?{revisao:f.ultimaRevisao,em:f.ultimoEm}:null,
             ...(livre?{periodoLivre:{de:livre.de,ate:livre.ate,revisao:livre.ultimaRevisao}}:{}),
             comissao:ultima?{revisao:Number(ultima.revisao)||0,tipo:ultima.tipo==="aprovacao"?"aprovacao":"previa",modo:String(ultima.modo||""),compensacao:!!ultima.compensacaoDe,em:String(ultima.em||"")}:null,
-            enviado:envios.length?{vezes:envios.length,ultimaEm:String(envios[envios.length-1].em||"")}:null});
+            enviado:envios.length?{vezes:envios.length,ultimaEm:String(envios[envios.length-1].em||"")}:null,
+            ...(mudou.length?{mudouDepois:{os:new Set(mudou.map((x:any)=>x.numero||x.id)).size,ultimaEm:mudou.map((x:any)=>String(x.em||"")).sort().pop(),depoisDoEnvio:envios.length>0}}:{})});
         }
         return resp({meses,hoje:hojeMes});
       }
@@ -3379,6 +3386,37 @@ Deno.serve(async (req: Request) => {
             if (!erroErp) erpMv = linhasErp || [];
           }
           const mv = eraLapide ? null : mudancaValorConferido(existing, gravar, erpMv);
+          /* O DINHEIRO DE MÊS FECHADO (D1 da auditoria de 12/10/2026): mudar o
+             valor de uma O.S. cuja entrega (inteira ou por conferência) está
+             num período já fechado gravava calado, também na O.S. sem
+             conferência; o mês fechado não se recalcula e a reexportação
+             trava. Agora a gravação vale (nunca 422), a gestão recebe o aviso
+             e fica um registro só de inserção por período
+             (performance_mudancas_fechado) que a fita dos meses lê para
+             marcar "mudou depois do envio". */
+          if (!eraLapide && existing && dinheiroDaOSMudou(existing, gravar, erpMv)) {
+            try {
+              const fechadosD1 = await perfPeriodosFechados();
+              if (fechadosD1.length) {
+                const periodos = new Map<string, any>();
+                const inteira = await perfInteiraFechada(String(os.id), fechadosD1);
+                if (inteira) periodos.set(inteira.de + ":" + inteira.ate, { de: inteira.de, ate: inteira.ate, revisao: inteira.ultimaRevisao });
+                for (const e of [...(Array.isArray(existing.conferenciasEntrega) ? existing.conferenciasEntrega : []), ...(Array.isArray(gravar.conferenciasEntrega) ? gravar.conferenciasEntrega : [])]) {
+                  const f = perfPeriodoDoDia(fechadosD1, String(e?.dia || ""));
+                  if (f) periodos.set(f.de + ":" + f.ate, { de: f.de, ate: f.ate, revisao: f.ultimaRevisao });
+                }
+                const autorD1 = await autorAuditoria(), emD1 = new Date().toISOString();
+                for (const p of periodos.values()) {
+                  const { data: envios } = await sb.from("pcp_registros").select("id").eq("colecao", "performance_comissao_exportacoes").eq("apagado", false).eq("registro->>de", p.de).eq("registro->>ate", p.ate).limit(1);
+                  const enviado = !!(envios && envios.length);
+                  const reg = { id: emD1 + "-" + crypto.randomUUID().slice(0, 8), de: p.de, ate: p.ate, revisao: p.revisao, osId: String(os.id), numero: String(gravar.numero || ""), enviado, em: emD1,
+                    por: { nome: autorD1.nome, login: autorD1.login, porId: autorD1.porId || "" } };
+                  await sb.from("pcp_registros").insert({ colecao: "performance_mudancas_fechado", id: reg.id, registro: reg, apagado: false, atualizado_em: emD1 });
+                  if (!ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(String(cracha?.papel ?? ""))) avisosToque.push(avisoDinheiroMesFechado({ ...p, enviado }));
+                }
+              }
+            } catch (e) { await falhaAuditoria("Aviso do mês fechado: " + String((e as Error)?.message ?? e), String(os.id)).catch(() => {}); }
+          }
           if (mv) {
             await auditar(String(os.id), "valor-conferido", mv.diario, gravar.numero);
             if (!ehMaquina && !ehToqueNoNome && ["admin", "pcp"].includes(String(cracha?.papel ?? ""))) avisosToque.push(mv.aviso);

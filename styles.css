@@ -3422,6 +3422,8 @@ img.perf-logo{object-fit:cover}
 .perf-fita-aprovado .btn-sm{border-left-color:#1d4ed8;background:#eff6ff}.perf-fita-aprovado .perf-fita-marca{color:#1d4ed8}
 .perf-fita-enviado .btn-sm{border-left-color:#15803d;background:#f0fdf4}.perf-fita-enviado .perf-fita-marca{color:#15803d}
 .perf-fita-teste .btn-sm{border-style:dashed;border-left-color:#94a3b8;background:#f8fafc}.perf-fita-teste .perf-fita-marca{color:#64748b}
+/* D1 da auditoria de 12/10/2026: o dinheiro mudou depois do envio (ou do fechamento). */
+.perf-fita-mudou .btn-sm{border-left-color:#b91c1c;background:#fef2f2}.perf-fita-mudou .btn-sm span{color:#991b1b}
 .perf-base{scroll-margin-top:72px}
 /* O trecho curto da impressão digital, na tela e no PDF; o completo só no rodapé técnico, em letra pequena. */
 .perf-digital{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.95em;letter-spacing:.04em;background:#eef2f7;border-radius:4px;padding:0 4px;white-space:nowrap}
