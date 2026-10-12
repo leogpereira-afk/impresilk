@@ -305,7 +305,8 @@ const OPERACAO = (() => {
   // Em instalação de vários dias, a conclusão prevista é o último dia.
   const prazo = o => dia(o?.instalacao?.data) ? somarDias(dia(o.instalacao.data),interno(o)?0:duracao(o)-1) : dia(o?.previsaoEntrega);
   // A O.S. cancelada (F16) não está atrasada: ela não vai mais ser entregue.
-  const atrasada = (o, hoje = dia(new Date())) => !!(o && !o.finalizadaEm && prazo(o) && prazo(o) < hoje && !STATUS_ENTREGA.cancelada(o));
+  // A conferida inteira pela gestão (M16, onda operação) também não: foi entregue no último dia de conferência.
+  const atrasada = (o, hoje = dia(new Date())) => !!(o && !o.finalizadaEm && prazo(o) && prazo(o) < hoje && !STATUS_ENTREGA.cancelada(o) && !STATUS_ENTREGA.conferidaInteira(o));
   function agendaCompleta(o) {
     const i = o?.instalacao || {};
     return !!(dia(i.data) && i.periodo && equipe(o).length && (i.periodo !== 'Horário' || /^([01]\d|2[0-3]):[0-5]\d$/.test(i.hora || '')));
@@ -1391,22 +1392,24 @@ function conferidaSt(o) {
   const saldo = (Array.isArray(ap.saldoItens) ? ap.saldoItens : []).reduce((t, it) => t + (Number(it.saldo) || 0), 0);
   return {ultimo, completa:saldo === 0, unidades, total:unidades + saldo};
 }
-function entregaDaOS(o, M, r, canc) {
+function entregaDaOS(o, M, r, canc, cfDado) {
   const fim = o.finalizadaEm ? diaSt(o.finalizadaEm) : '';
   const erp = encerradaNoERPSt(o);
   const l = o.entregaLancada;
   const lancada = diaSt(l && typeof l === 'object' ? l.data : l);
   /* Com conferência (M3): a cancelada fica com o que foi conferido; a
-     conferida inteira e encerrada (finalizada ou lançada) fica no ÚLTIMO dia
-     de conferência; com saldo a conferir, a encerrada no PCP fica no dia
+     conferida inteira fica no ÚLTIMO dia de conferência, mesmo sem ter sido
+     finalizada (M16); com saldo a conferir, a encerrada no PCP fica no dia
      mais tarde entre a última conferência e o encerramento, e a baixa do ERP
      sem lançamento fica entregue sem dia (o prazo é julgado quando a
      conferência terminar). Aberta com saldo: ainda não foi entregue. */
-  const cf = conferidaSt(o);
+  const cf = cfDado === undefined ? conferidaSt(o) : cfDado;
   if (cf) {
     if (canc) return {dia:cf.ultimo, fonte:'conferencia', semProva:false};
     const encerrou = lancada || (fim && !erp ? fim : '');
-    if (cf.completa && (fim || lancada)) return {dia:cf.ultimo, fonte:'conferencia', semProva:false};
+    /* M16: a conferida inteira é entregue no último dia de conferência,
+       finalizada ou não; ela não fica "atrasada" nem "sem entrega registrada". */
+    if (cf.completa) return {dia:cf.ultimo, fonte:'conferencia', semProva:false};
     if (encerrou) return {dia:encerrou > cf.ultimo ? encerrou : cf.ultimo, fonte:'conferenciaParcial', semProva:false};
     if (fim) return {dia:'', fonte:'saldoAConferir', semProva:true};
     return null;
@@ -1436,7 +1439,9 @@ const FONTE_TXT_ST = Object.freeze({itens:'última entrega por item', lancada:'l
    entregues de itens que valem (o cancelado não conta), ou unidades quando é
    um item só ("6 de 10"). Parte entregue só de item cancelado depois não é
    entrega parcial. Item com problema entra no motivo. */
-function parcialDe(o, M, r) {
+function parcialDe(o, M, r, cf) {
+  // A conferência da gestão vale antes das marcas antigas (D-016): a parcial conferida diz as unidades.
+  if (cf && !cf.completa && !o.finalizadaEm) return {entregues:0, total:cf.total, parciais:0, problema:0, unidades:cf.unidades, conferida:true, texto:`entrega parcial conferida: ${cf.unidades} de ${cf.total} unidade${cf.total === 1 ? '' : 's'}`};
   if (!r || !r.marcas || o.finalizadaEm) return null;
   const itens = (Array.isArray(o.itens) ? o.itens : []).filter(it => objSt(it) && !M.ehServico(it));
   const vivos = itens.map(it => ({it, s:M.situacaoItem(it, o)})).filter(x => x.s.situacao !== 'cancelado');
@@ -1802,7 +1807,8 @@ function apurarSt(os, hoje) {
   const r = M && temMarca ? M.resumoOS(os) : null;
   const canc = cancelamentoDe(os);
   const prazo = prazoDaEntrega(os);
-  const entrega = entregaDaOS(os, M, r, canc);
+  const cf = conferidaSt(os);
+  const entrega = entregaDaOS(os, M, r, canc, cf);
   let atraso = null;
   if (!canc && entrega && entrega.dia && prazo && entrega.dia > prazo.fim) {
     const dias = diasEntreSt(prazo.fim, entrega.dia);
@@ -1812,7 +1818,7 @@ function apurarSt(os, hoje) {
     const dias = diasEntreSt(prazo.fim, dHoje);
     atraso = {dias, entregue:false, medida:{prazo:prazo.fim, entrega:''}, motivo:`prazo (${prazoTxtSt(prazo)}) vencido há ${diasTxtSt(dias)}, sem entrega registrada`};
   }
-  return {dHoje, M, temMarca, r, canc, prazo, entrega, atraso};
+  return {dHoje, M, temMarca, r, canc, prazo, entrega, atraso, cf};
 }
 /* O motivo do retrabalho diz a etapa de origem gravada (D-010: "isso tem
    que ficar claro"): "retrabalho de instalação marcado", "retrabalho de
@@ -1872,8 +1878,8 @@ function ocorrenciasDaOS(o, regra, volta, hoje) {
 function statusEntrega(o, hoje, regra, volta) {
   const os = objSt(o) ? o : {};
   const ap = apurarSt(os, hoje);
-  const {dHoje, M, temMarca, r, canc, prazo, entrega} = ap;
-  const parcial = !canc && !entrega ? parcialDe(os, M, r) : null;
+  const {dHoje, M, temMarca, r, canc, prazo, entrega, cf} = ap;
+  const parcial = !canc && !entrega ? parcialDe(os, M, r, cf) : null;
   const ret = retornoAntecipado(os, regra, volta);
   const ocorrencias = [...derivadasDe(os, ap, ret, regra), ...ocorrenciasManuais(os)];
   const abAtraso = ap.atraso ? abonoDaOcorrencia(os, txtSt(os.id) + ':atraso', ap.atraso.medida) : {vigente:null, outra:null};
@@ -1963,8 +1969,17 @@ function atrasoDaOS(o, hoje) {
   if (!entrega) return {...base, situacao:'nao_medido', motivo:fonte === 'aLancar' ? 'baixa do ERP a lançar' : fonte === 'saldoAConferir' ? 'saldo a conferir' : 'baixa do ERP sem o dia da entrega'};
   return ap.atraso ? {...base, situacao:'atraso', dias:ap.atraso.dias} : {...base, situacao:'no_prazo'};
 }
+/* A O.S. CONFERIDA INTEIRA (M16): todo item que vale foi conferido pela
+   gestão, e ela não está cancelada. O dia é o último de conferência. Quem
+   olha a agenda (OPERACAO.atrasada) não a chama de atrasada. */
+function conferidaInteira(o) {
+  const os = objSt(o) ? o : {};
+  if (cancelamentoDe(os)) return null;
+  const cf = conferidaSt(os);
+  return cf && cf.completa ? {dia:cf.ultimo, unidades:cf.unidades} : null;
+}
 /* ==== FIM DO STATUS ==== */
-    return {ESTADOS_ENTREGA, ROTULOS_ENTREGA, MOTIVO_CANCELAMENTO_MIN, MOTIVO_CANCELAMENTO_MAX, motivoCancelamentoInvalido, cancelamentoDe, cancelada, prazoDaEntrega, statusEntrega, atrasoDaOS, TIPOS_OCORRENCIA, TIPOS_OCORRENCIA_MANUAL, ROTULOS_OCORRENCIA, OCORRENCIAS_ABONAVEIS, MOTIVO_ABONO_MIN, MOTIVO_ABONO_MAX, TOLERANCIA_RETORNO_PADRAO, motivoAbonoInvalido, toleranciaRetorno, chegadaConferida, chegadasConferidas, chegadaDoDia, pareceDiaSeguinte, abonosDe, abonoVigente, abonoDaOcorrencia, ocorrenciasManuais, voltaDoRetorno, indiceDasVoltas, voltaNoIndice, retornoAntecipado, ocorrenciasDerivadas, ocorrenciasDaOS, letrasMotivoSt};
+    return {ESTADOS_ENTREGA, ROTULOS_ENTREGA, MOTIVO_CANCELAMENTO_MIN, MOTIVO_CANCELAMENTO_MAX, motivoCancelamentoInvalido, cancelamentoDe, cancelada, prazoDaEntrega, statusEntrega, atrasoDaOS, conferidaInteira, TIPOS_OCORRENCIA, TIPOS_OCORRENCIA_MANUAL, ROTULOS_OCORRENCIA, OCORRENCIAS_ABONAVEIS, MOTIVO_ABONO_MIN, MOTIVO_ABONO_MAX, TOLERANCIA_RETORNO_PADRAO, motivoAbonoInvalido, toleranciaRetorno, chegadaConferida, chegadasConferidas, chegadaDoDia, pareceDiaSeguinte, abonosDe, abonoVigente, abonoDaOcorrencia, ocorrenciasManuais, voltaDoRetorno, indiceDasVoltas, voltaNoIndice, retornoAntecipado, ocorrenciasDerivadas, ocorrenciasDaOS, letrasMotivoSt};
   })(prazoCombinadoDe, () => motorDaEntrega
     || (typeof module !== 'undefined' && module.exports && typeof require === 'function' ? require('./entrega-item.js') : null), retornosPrevistos,
   () => reguaDasPerdas

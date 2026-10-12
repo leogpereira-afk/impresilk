@@ -41,7 +41,7 @@ test('as duas cópias exportam o mesmo status, e o operacao.js não chama o moto
      régua das letras do motivo. */
   assert.deepEqual(nomes, ['ESTADOS_ENTREGA', 'MOTIVO_ABONO_MAX', 'MOTIVO_ABONO_MIN', 'MOTIVO_CANCELAMENTO_MAX', 'MOTIVO_CANCELAMENTO_MIN', 'OCORRENCIAS_ABONAVEIS',
     'ROTULOS_ENTREGA', 'ROTULOS_OCORRENCIA', 'TIPOS_OCORRENCIA', 'TIPOS_OCORRENCIA_MANUAL', 'TOLERANCIA_RETORNO_PADRAO', 'abonoDaOcorrencia', 'abonoVigente', 'abonosDe', 'atrasoDaOS', 'cancelada', 'cancelamentoDe',
-    'chegadaConferida', 'chegadaDoDia', 'chegadasConferidas', 'indiceDasVoltas', 'letrasMotivoSt', 'motivoAbonoInvalido', 'motivoCancelamentoInvalido', 'ocorrenciasDaOS', 'ocorrenciasDerivadas', 'ocorrenciasManuais',
+    'chegadaConferida', 'chegadaDoDia', 'chegadasConferidas', 'conferidaInteira', 'indiceDasVoltas', 'letrasMotivoSt', 'motivoAbonoInvalido', 'motivoCancelamentoInvalido', 'ocorrenciasDaOS', 'ocorrenciasDerivadas', 'ocorrenciasManuais',
     'pareceDiaSeguinte', 'prazoDaEntrega', 'retornoAntecipado', 'statusEntrega', 'toleranciaRetorno', 'voltaDoRetorno', 'voltaNoIndice']);
   for (const k of nomes) assert.equal(typeof O[k], typeof S.STATUS_ENTREGA[k], k);
   assert.deepEqual(O.ESTADOS_ENTREGA, S.ESTADOS_ENTREGA);assert.deepEqual(O.ROTULOS_ENTREGA, S.ROTULOS_ENTREGA);
@@ -138,6 +138,7 @@ test('600 O.S. geradas dão o mesmo status no aparelho e no servidor; o cancelam
     if (a.fonteEntrega === 'itens') comItens++;
     if (/^conferencia/.test(a.fonteEntrega)) comConferencia++;
     assert.deepEqual(js(S.atrasoDaOS(o, hoje)), js(O.atrasoDaOS(o, hoje)), `caso ${i}: régua do atraso`);
+    assert.deepEqual(js(S.conferidaInteira(o)), js(O.conferidaInteira(o)), `caso ${i}: conferida inteira`);
   }
   // Os casos exercitam todos os estados (menos o retorno antecipado: estas O.S. não têm chegada conferida; a paridade dele está em tests/ocorrencias-f17.test.cjs).
   assert.deepEqual([...vistos].sort(), ['agendado', 'atraso', 'cancelado', 'entregue', 'execucao', 'no_prazo', 'retrabalho']);
