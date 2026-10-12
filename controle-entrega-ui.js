@@ -9,26 +9,66 @@ const controlePendente = id => STORE.getQueue().some(x=>x.os?.id===id || x.id===
    vale (nunca 422); a gestão vê a pendência na ficha (Conferência e
    acompanhamento) e na Fila diária, e põe o valor do item. Com um item só, o
    rateio não precisa do valor dele (CONFERENCIA_ENTREGA.apurar). */
-function itensSemValorConferida(os) {
+/* A posição de cada item sem valor em os.itens (a ficha abre no campo dele). */
+function indicesSemValorConferida(os) {
   if (!os || !Array.isArray(os.conferenciasEntrega) || !os.conferenciasEntrega.length) return [];
-  const itens = Array.isArray(os.itens) ? os.itens.filter(it => it && typeof it === 'object') : [];
-  if (itens.length < 2) return [];
+  const itens = Array.isArray(os.itens) ? os.itens : [];
+  if (itens.filter(it => it && typeof it === 'object').length < 2) return [];
   const numero = v => v == null || v === '' ? NaN : Number(typeof v === 'string' && v.includes(',') ? v.replace(/\./g,'').replace(',','.') : v);
-  return itens.filter(it => { const v = numero(it.subtotal); return !(Number.isFinite(v) && v >= 0); }).map(it => String(it.descricao || it.item || 'item sem descrição'));
+  const out = [];
+  itens.forEach((it, i) => { if (it && typeof it === 'object') { const v = numero(it.subtotal); if (!(Number.isFinite(v) && v >= 0)) out.push(i); } });
+  return out;
+}
+function itensSemValorConferida(os) {
+  return indicesSemValorConferida(os).map(i => String(os.itens[i].descricao || os.itens[i].item || 'item sem descrição'));
 }
 function pendenciaValorItemHTML(os) {
   const xs = itensSemValorConferida(os);
   if (!xs.length) return '';
   return `<p class="aloc-aviso conf-item-sem-valor" role="note"><strong>Pendência de valor:</strong> ${xs.length === 1 ? 'o item' : 'os itens'} ${esc(xs.join(', '))} ${xs.length === 1 ? 'está' : 'estão'} sem valor, e o valor das entregas conferidas desta O.S. ficou a conferir (a comissão delas espera). Ponha o valor ${xs.length === 1 ? 'do item' : 'dos itens'} na ficha.</p>`;
 }
+/* A PENDÊNCIA À VISTA (revisão da onda acabamento B, 12/10/2026): ela morava
+   dentro do grupo "Conferência e acompanhamento", fechado, no fim da ficha e
+   em cada O.S. da Fila diária, e ninguém a via sem abrir. Agora o topo da
+   ficha a anuncia com o botão que leva ao campo do valor, o grupo abre
+   sozinho e diz no título que há pendência, e a Fila diária tem o botão para
+   abrir a ficha nesse ponto. Só para a gestão, que é quem põe o valor. */
+function pendenciaValorItemTopoHTML(os) {
+  if (!controleGestao()) return '';
+  const n = itensSemValorConferida(os).length;
+  if (!n) return '';
+  const fin = os.finalizadaEm ? ' A O.S. está finalizada: reabra para pôr o valor.' : '';
+  return `<div class="aloc-aviso conf-item-sem-valor conf-item-sem-valor-topo lock-allow" role="note"><strong>Pendência de valor:</strong> ${n === 1 ? '1 item está' : n + ' itens estão'} sem valor, e as entregas conferidas desta O.S. ficaram com o valor a conferir (a comissão delas espera).${fin} <button type="button" class="btn-ghost btn-sm" data-controle="valorItem" data-controle-os="${esc(os.id)}">Pôr o valor ${n === 1 ? 'do item' : 'dos itens'}</button></div>`;
+}
+/* Abre a ficha (ou usa a que já está aberta nesta O.S., sem perder o que foi
+   digitado) na etapa dos itens, com o campo do valor do primeiro item sem
+   valor à vista. */
+function abrirFichaNoValorItem(osId) {
+  const aberta = typeof _modalDraft !== 'undefined' && _modalDraft && STATE.modalOSId === osId;
+  const os = aberta ? _modalDraft : (STORE.getOS(osId) || (STORE.historico?.() || []).find(o => o.id === osId));
+  if (!os) { toast('O.S não encontrada.', 'error'); return false; }
+  if (aberta) { if (typeof irParaEtapaFicha === 'function') irParaEtapaFicha((typeof ETAPA_DO_BLOCO !== 'undefined' && ETAPA_DO_BLOCO.itens) || 'dados', {bloco: 'itens'}); }
+  else if (typeof openModal === 'function') openModal(os, 'itens');
+  else return false;
+  const i = indicesSemValorConferida(os)[0];
+  setTimeout(() => {
+    const m = document.getElementById('modal-os');
+    const alvo = m && (m.querySelector(`[data-valor-item="${i}"]`) || m.querySelector(`[data-item-row="${i}"]`) || m.querySelector('[data-bloco="itens"]'));
+    if (!alvo) return;
+    try { alvo.scrollIntoView({block: 'center'}); } catch {}
+    if (typeof alvo.focus === 'function') try { alvo.focus({preventScroll: true}); } catch {}
+  }, 60);
+  return true;
+}
 function controleEntregaHTML(os) {
   const botao=(tipo,texto)=>`<button type="button" class="btn-ghost btn-sm" data-controle="${tipo}" data-controle-os="${esc(os.id)}">${texto}</button>`;
   const gestao=controleGestao(), erp=os.conferenciaERP, saida=os.regularizacaoSaida;
-  return `<details class="cfg-grupo lock-allow"><summary>Conferência e acompanhamento</summary><p>${esc(resumoEntregaFichaTexto(os) || 'Sem conferência de itens registrada. A ausência de conferência não prova falta de entrega física.')}</p>
+  const pendValor=gestao?pendenciaValorItemHTML(os):'';
+  return `<details class="cfg-grupo lock-allow"${pendValor?' open data-pendencia-valor':''}><summary>Conferência e acompanhamento${pendValor?' · <strong class="conf-pend-titulo">pendência de valor</strong>':''}</summary><p>${esc(resumoEntregaFichaTexto(os) || 'Sem conferência de itens registrada. A ausência de conferência não prova falta de entrega física.')}</p>
     ${erp?`<p>${esc(CONTROLE_CLASSIFICACOES[erp.classificacao] || erp.classificacao)} · ${esc(erp.responsavelNome)} · revisar até ${esc(erp.prazo)}<br>${esc(erp.evidencia)}<br>Motivo: ${esc(erp.motivo)} · ${esc(erp.por)} · ${esc(erp.em)}</p>`:''}
     ${saida?`<p>Saída ${saida.situacao==='regularizada'?'regularizada':'em conferência'} · ${esc(saida.responsavelNome)} · prazo ${esc(saida.prazo)}<br>${esc(saida.evidencia)}<br>Motivo: ${esc(saida.motivo)} · ${esc(saida.por)} · ${esc(saida.em)}</p>`:''}
     ${(os.revisaoSolicitada || []).map(r=>`<p>Revisão solicitada: ${esc(r.motivo)} · ${esc(r.por)} · ${esc(r.em)}</p>`).join('')}
-    ${gestao?pendenciaValorItemHTML(os):''}
+    ${pendValor}
     ${gestao&&typeof confRevisoesHTML==='function'?confRevisoesHTML(os):''}
     ${gestao?`<button type="button" class="btn-ghost btn-sm" data-controle="itens" data-controle-secao="acompanhamento" data-controle-os="${esc(os.id)}">Conferir itens e equipe</button>${os.baixaAutoERP || os.erpComSaldo || os.erpSaiuDaCarteiraEm || os.conferenciaERP?botao('erp','Classificar baixa ERP'):''}${os.saidaEm || os.horaSaida?botao('saida','Regularizar saída antiga'):''}`:botao('solicitarRevisao','Solicitar revisão à gestão')}
     ${botao('fotos','Horários das fotos')}
@@ -147,7 +187,7 @@ function filaDiariaHTML(fila) {
   const dias = n => n === 1 ? '1 dia parada' : `${n} dias parada`;
   return `<p>A mesma régua da faixa "a lançar" de Entregas, mais o ERP que fechou a O.S. aberta, o saldo a conferir, as saídas sem retorno e os pedidos de revisão. Sem internas, canceladas e já classificadas; a mais antiga primeiro. Cada O.S. exige conferência individual. Ausência de evidência não prova ausência de entrega.</p>
     ${fila.length ? `<p class="metricas-nota" data-fila-resumo>${fila.length} O.S. · ${esc(resumo)}</p>` : ''}
-    ${fila.map(x => `<article data-fila-os="${esc(x.os.id)}"><h3>O.S. ${esc(x.os.numero)} · ${esc(x.os.cliente)} <small>${esc(dias(x.diasParados))}</small></h3><p>${x.motivos.map(m => esc(m.rotulo)).join(' · ')}</p>${x.motivos.some(m => m.tipo === 'aLancar') ? `<button type="button" class="btn-primary btn-sm" data-controle="lancar" data-controle-os="${esc(x.os.id)}">Lançar entrega</button>` : ''}${controleEntregaHTML(x.os)}</article>`).join('') || '<p>Nenhuma pendência nesta cópia do aparelho.</p>'}
+    ${fila.map(x => `<article data-fila-os="${esc(x.os.id)}"><h3>O.S. ${esc(x.os.numero)} · ${esc(x.os.cliente)} <small>${esc(dias(x.diasParados))}</small></h3><p>${x.motivos.map(m => esc(m.rotulo)).join(' · ')}</p>${x.motivos.some(m => m.tipo === 'aLancar') ? `<button type="button" class="btn-primary btn-sm" data-controle="lancar" data-controle-os="${esc(x.os.id)}">Lançar entrega</button>` : ''}${x.motivos.some(m => m.tipo === 'valorItem') ? `<button type="button" class="btn-primary btn-sm" data-controle="valorItem" data-controle-os="${esc(x.os.id)}">Abrir a ficha no item sem valor</button>` : ''}${controleEntregaHTML(x.os)}</article>`).join('') || '<p>Nenhuma pendência nesta cópia do aparelho.</p>'}
     <p>Fonte: cópia local e histórico carregado. Consulte o período completo em Entregas para conferir a cobertura.</p>`;
 }
 function controleFila() {
@@ -158,6 +198,8 @@ if(typeof document!=='undefined')document.addEventListener('click',e=>{
   const b=e.target.closest?.('[data-controle]');if(!b)return;
   e.preventDefault(); const tipo=b.dataset.controle;
   // Lançar a partir da Fila diária (M15): fecha a fila e abre o Lançar de Entregas (a mesma porta, com a régua da conferência, M14).
+  // O item sem valor (revisão da onda acabamento B): fecha a fila, se veio dela, e abre a ficha no campo do valor.
+  if(tipo==='valorItem'){b.closest?.('dialog')?.close?.();abrirFichaNoValorItem(b.dataset.controleOs);return;}
   if(tipo==='lancar'){b.closest?.('dialog')?.close?.();if(typeof lancarEntregaManual==='function')lancarEntregaManual(b.dataset.controleOs);return;}
   Promise.resolve().then(()=>tipo==='recuperar'?controleRecuperar():tipo==='fila'?controleFila():controleEditar(b.dataset.controleOs,tipo)).catch(err=>toast(perfErroTxt(err),'error'));
 });

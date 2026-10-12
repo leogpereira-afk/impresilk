@@ -3638,6 +3638,9 @@ img.perf-logo{object-fit:cover}
 .aloc-trava-aviso ul{padding-left:18px}
 .aloc-aviso-acoes{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .aloc-aviso-acoes button{min-height:40px}
+.conf-item-sem-valor-topo{margin:10px 16px 0}
+.conf-item-sem-valor-topo button{min-height:40px;margin-left:6px}
+.conf-pend-titulo{color:#b45309}
 .aloc-rapidas{display:grid;gap:6px}
 .aloc-rotulo{font-size:.75rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#5c6e78}
 .aloc-rapidas-lista{display:flex;flex-wrap:wrap;gap:8px}

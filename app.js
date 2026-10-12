@@ -2372,6 +2372,7 @@ function renderModal() {
       <button class="btn-ghost btn-sm" id="btn-reabrir-os">↩ Reabrir / voltar status</button>
     </div>` : ''}
     ${canceladaAvisoFichaHTML(os)}
+    ${typeof pendenciaValorItemTopoHTML === 'function' ? pendenciaValorItemTopoHTML(os) : ''}
 
     <div class="ficha-resumo">
       <div class="ficha-funil" role="img" aria-label="Situação no funil: ${esc(statusLabelDe(os, st))}">${stepperHTML(os, true)}</div>

@@ -94,3 +94,86 @@ test('revisão acabamento B: no histórico sem nenhum ponto, a lista diz que nã
   assert.doesNotMatch(html, /data-ponto=/);
   assert.match(html, /Nenhuma O\.S\. com ponto neste filtro\./);
 });
+
+/* ═══════════ 4. A pendência do item sem valor à vista ═══════════ */
+
+const OS_PEND = () => ({id: 'v1', numero: '90801', rev: 1, tipo: 'externo', cliente: 'Cliente fictício', valorTotal: 1000,
+  itens: [{uid: 'a', item: '1', descricao: 'Painel fictício A', qtde: '1', subtotal: '600'}, {uid: 'b', item: '2', descricao: 'Placa fictícia B', qtde: '1', subtotal: '400'},
+    {uid: 'm-v100000003', item: '3', descricao: 'Item fictício novo', qtde: '1', manual: true}],
+  conferenciasEntrega: [{id: 'e1', dia: '2026-10-05', itens: [], por: 'Gestor Fictício', em: '2026-10-05T20:00:00.000Z'}]});
+function controle(papel = 'pcp', extra = {}) {
+  const ouvintes = [];
+  const chamadas = {openModal: [], ir: [], rolou: [], focou: [], fechou: 0};
+  const campo = {scrollIntoView: o => chamadas.rolou.push(o), focus: o => chamadas.focou.push(o)};
+  const modal = {querySelector: q => (q === '[data-valor-item="2"]' ? campo : null)};
+  const ctx = vm.createContext({console, OPERACAO: O, STATE: {user: {papel}}, toast() {},
+    STORE: {getQueue: () => [], getOS: id => (id === 'v1' ? OS_PEND() : null), getAllOS: () => [OS_PEND()]},
+    esc: s => String(s ?? '').replace(/[&<>"]/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[ch])),
+    resumoEntregaFichaTexto: () => '', setTimeout: fn => fn(),
+    openModal: (os, bloco) => chamadas.openModal.push([os.id, bloco]),
+    irParaEtapaFicha: (k, opt) => chamadas.ir.push([k, opt && opt.bloco]),
+    document: {addEventListener: (tipo, fn) => ouvintes.push(fn), getElementById: id => (id === 'modal-os' ? modal : null)},
+    ...extra});
+  vm.runInContext(ler('controle-entrega-ui.js'), ctx);
+  const clicar = (controleTipo, osId, naDialog = true) => {
+    const dialog = {close: () => { chamadas.fechou++; }};
+    const b = {dataset: {controle: controleTipo, controleOs: osId}, closest: q => (q === 'dialog' ? (naDialog ? dialog : null) : null)};
+    for (const fn of ouvintes) fn({target: {closest: q => (q === '[data-controle]' ? b : null)}, preventDefault() {}});
+  };
+  return {ctx, chamadas, clicar, run: code => vm.runInContext(code, ctx)};
+}
+
+test('revisão acabamento B: o grupo "Conferência e acompanhamento" abre sozinho e diz no título que há pendência de valor', () => {
+  const c = controle();
+  c.ctx.__os = OS_PEND();
+  const html = c.run('controleEntregaHTML(__os)');
+  // Caso ruim (5124974): o grupo vinha fechado, com o título de sempre, e a pendência ficava escondida dentro dele.
+  assert.match(html, /^<details class="cfg-grupo lock-allow" open data-pendencia-valor><summary>Conferência e acompanhamento · <strong class="conf-pend-titulo">pendência de valor<\/strong><\/summary>/);
+  assert.match(html, /Pendência de valor:<\/strong> o item Item fictício novo está sem valor/);
+  // Sem pendência: fechado, título de sempre.
+  c.ctx.__os = {...OS_PEND(), itens: OS_PEND().itens.map(it => ({...it, subtotal: it.subtotal || '100'}))};
+  assert.match(c.run('controleEntregaHTML(__os)'), /^<details class="cfg-grupo lock-allow"><summary>Conferência e acompanhamento<\/summary>/);
+  // Quem não é gestão não vê a pendência nem o grupo aberto por ela.
+  const op = controle('operacao');
+  op.ctx.__os = OS_PEND();
+  assert.match(op.run('controleEntregaHTML(__os)'), /^<details class="cfg-grupo lock-allow"><summary>Conferência e acompanhamento<\/summary>/);
+});
+
+test('revisão acabamento B: o topo da ficha anuncia a pendência de valor com o botão para o campo do item', () => {
+  const c = controle();
+  c.ctx.__os = OS_PEND();
+  // Caso ruim (5124974): a ficha não tinha nada no topo; a função nem existia.
+  assert.equal(c.run('typeof pendenciaValorItemTopoHTML'), 'function');
+  const topo = c.run('pendenciaValorItemTopoHTML(__os)');
+  assert.match(topo, /class="aloc-aviso conf-item-sem-valor conf-item-sem-valor-topo lock-allow"/);
+  assert.match(topo, /Pendência de valor:<\/strong> 1 item está sem valor/);
+  assert.match(topo, /<button type="button" class="btn-ghost btn-sm" data-controle="valorItem" data-controle-os="v1">Pôr o valor do item<\/button>/);
+  assert.doesNotMatch(topo, /R\$/);
+  c.ctx.__os = {...OS_PEND(), finalizadaEm: '2026-10-06T12:00:00'};
+  assert.match(c.run('pendenciaValorItemTopoHTML(__os)'), /A O\.S\. está finalizada: reabra para pôr o valor\./);
+  assert.equal(controle('operacao').run(`pendenciaValorItemTopoHTML(${JSON.stringify(OS_PEND())})`), '');
+  // A ficha pinta o aviso logo no topo, junto do aviso da cancelada.
+  assert.match(ler('app.js'), /\$\{canceladaAvisoFichaHTML\(os\)\}\n {4}\$\{typeof pendenciaValorItemTopoHTML === 'function' \? pendenciaValorItemTopoHTML\(os\) : ''\}/);
+});
+
+test('revisão acabamento B: a Fila diária tem o botão que abre a ficha no item sem valor, e o botão leva ao campo', () => {
+  const c = controle();
+  c.ctx.__os = OS_PEND();
+  const html = c.run('filaDiariaHTML(filaDiaria([__os], "2026-10-12"))');
+  // Caso ruim (5124974): a fila só dizia "Item sem valor" e escondia a pendência no grupo fechado; nenhum botão levava à ficha.
+  assert.match(html, /<button type="button" class="btn-primary btn-sm" data-controle="valorItem" data-controle-os="v1">Abrir a ficha no item sem valor<\/button>/);
+  assert.match(html, /<details class="cfg-grupo lock-allow" open data-pendencia-valor>/);
+  // O toque fecha a fila e abre a ficha nos itens, com o campo do valor do item 3 (posição 2) à vista.
+  c.clicar('valorItem', 'v1');
+  assert.equal(c.chamadas.fechou, 1);
+  assert.deepEqual(c.chamadas.openModal, [['v1', 'itens']]);
+  assert.equal(c.chamadas.rolou.length, 1);
+  assert.equal(c.chamadas.focou.length, 1);
+  // Com a ficha dessa O.S. já aberta (o botão do topo), não reabre (o que foi digitado fica): vai à etapa dos itens.
+  const d = controle('pcp');
+  d.run('var _modalDraft = ' + JSON.stringify(OS_PEND()) + '; STATE.modalOSId = "v1";');
+  d.clicar('valorItem', 'v1', false);
+  assert.deepEqual(d.chamadas.openModal, []);
+  assert.deepEqual(d.chamadas.ir, [['dados', 'itens']]);
+  assert.equal(d.chamadas.rolou.length, 1);
+});
