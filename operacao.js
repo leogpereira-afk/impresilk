@@ -784,7 +784,7 @@ const OPERACAO = (() => {
      (pcp-sync, perfFonte) monta a mesma chave; um teste confere as duas.
      O CARRO PELO ID DO ATIVOS (item 16 da fila de 11/10/2026): com o id
      gravado na O.S. (veiculoId), a chave é o id; sem ele, o nome, como
-     sempre. "Fiat Uno" e "UNO - 10" só viram o mesmo carro pelo id, nunca
+     sempre. Dois apelidos do mesmo carro só viram um carro pelo id, nunca
      por semelhança do nome. A mesma régua de CONFERENCIA_ENTREGA.chaveVeiculo
      e do carroSt do status (as quatro cópias da chave, com teste). */
   const chaveVeiculoVolta = o => String(o?.veiculoId ?? '').trim() ? 'id:' + String(o.veiculoId).trim() : normal(o?.veiculo);

@@ -142,7 +142,7 @@ const CONFERENCIA_ENTREGA = (() => {
   }
   /* O CARRO DA VOLTA PELO ID DO ATIVOS (item 16 da fila de 11/10/2026): com o
      id gravado na O.S., a chave é o id; sem ele, o nome, como sempre. Nomes
-     parecidos ("Fiat Uno" e "UNO - 10") não se juntam aqui: só o id casa. */
+     parecidos (dois apelidos do mesmo carro) não se juntam aqui: só o id casa. */
   const chaveVeiculo = x => textoV(x && x.veiculoId) ? 'id:' + textoV(x.veiculoId) : normalV(x && x.veiculo);
   const semCarroV = x => normalV(x && x.veiculo) === 'instalacao interna';
   // A conferência da gestão, só o que a nota lê: as quatro respostas, quem conferiu e quando.

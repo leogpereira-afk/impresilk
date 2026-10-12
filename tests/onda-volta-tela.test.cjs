@@ -99,11 +99,11 @@ test('M11: o diálogo da conferência por item propõe o dia da volta, não o da
 /* ─────────────────────────────── item 16 na tela ─────────────────────────────── */
 test('item 16: o carro escolhido na lista do Ativos leva o id; nome repetido na lista ou fora dela fica sem id', ()=>{
   const s=ler('casa.js');
-  const ativos=[{id:'7',nome:'UNO - 10',placa:'AAA0A00'},{id:'8',nome:'Strada'},{id:'9',nome:'Strada'}];
+  const ativos=[{id:'7',nome:'CARRO A - 1 fictício',placa:'AAA0A00'},{id:'8',nome:'Strada'},{id:'9',nome:'Strada'}];
   const ctx={elencoRH:()=>({veiculos:ativos})};vm.createContext(ctx);
   vm.runInContext(s.slice(s.indexOf('function veiculosRH()'),s.indexOf('function',s.indexOf('function definirVeiculoId(')+10)),ctx);
-  assert.equal(ctx.definirVeiculoId({veiculo:'UNO - 10'}).veiculoId,'7');
-  assert.equal(ctx.definirVeiculoId({veiculo:'Fiat Uno',veiculoId:'7'}).veiculoId,undefined,'nada de semelhança: outro nome, sem id');
+  assert.equal(ctx.definirVeiculoId({veiculo:'CARRO A - 1 fictício'}).veiculoId,'7');
+  assert.equal(ctx.definirVeiculoId({veiculo:'Carro fictício A',veiculoId:'7'}).veiculoId,undefined,'nada de semelhança: outro nome, sem id');
   assert.equal(ctx.definirVeiculoId({veiculo:'Strada'}).veiculoId,undefined,'dois carros com o mesmo nome: sem id');
   assert.equal(ctx.definirVeiculoId({veiculo:'Instalação interna',veiculoId:'8'}).veiculoId,undefined);
   // A ficha e o formulário da agenda chamam a mesma função.
@@ -113,11 +113,11 @@ test('item 16: o carro escolhido na lista do Ativos leva o id; nome repetido na 
 
 test('item 16: as quatro cópias da chave da volta usam o id do carro, e o nome como reserva', async()=>{
   const S=await import('../supabase/functions/_shared/pcp-status.mjs');
-  const a={id:'a',tipo:'externo',equipe:['Ana'],veiculo:'Fiat Uno',veiculoId:'ativo-7',retornoEm:'2026-11-05T18:00:00',retornoConferido:{dia:'2026-11-05',hora:'18:00',em:'x'}};
-  const b={...a,id:'b',veiculo:'UNO - 10'}, c={...a,id:'c',veiculo:'UNO - 10',veiculoId:undefined};
+  const a={id:'a',tipo:'externo',equipe:['Ana'],veiculo:'Carro fictício A',veiculoId:'ativo-7',retornoEm:'2026-11-05T18:00:00',retornoConferido:{dia:'2026-11-05',hora:'18:00',em:'x'}};
+  const b={...a,id:'b',veiculo:'CARRO A - 1 fictício'}, c={...a,id:'c',veiculo:'CARRO A - 1 fictício',veiculoId:undefined};
   // 1. OPERACAO.chaveDaVolta (a fila e a prévia do aparelho).
   assert.equal(O.chaveDaVolta(a),O.chaveDaVolta(b));assert.notEqual(O.chaveDaVolta(b),O.chaveDaVolta(c));
-  assert.equal(O.chaveDaVolta(c),'2026-11-05|uno - 10|nome:ana');
+  assert.equal(O.chaveDaVolta(c),'2026-11-05|carro a - 1 ficticio|nome:ana');
   // 2. O agrupamento do Fechar o dia (lote).
   assert.equal(O.agruparPorVolta([a,b,c]).length,2);
   // 3. O status (retorno antecipado), nas duas cópias.

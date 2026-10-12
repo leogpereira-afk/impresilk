@@ -200,7 +200,7 @@ test('item 17: a conferência da volta grava o ID de 6 dígitos em porId (e o lo
 });
 
 test('item 16: a chave da volta pelo id do carro no Ativos; o nome é a reserva; nomes parecidos não se juntam; o id do carro anterior não fica', async()=>{
-  const oss=[osItens('v1','90401',{veiculo:'Fiat Uno',veiculoId:'ativo-7'}),osItens('v2','90402',{veiculo:'UNO - 10',veiculoId:'ativo-7'}),osItens('v3','90403',{veiculo:'UNO - 10'})];
+  const oss=[osItens('v1','90401',{veiculo:'Carro fictício A',veiculoId:'ativo-7'}),osItens('v2','90402',{veiculo:'CARRO A - 1 fictício',veiculoId:'ativo-7'}),osItens('v3','90403',{veiculo:'CARRO A - 1 fictício'})];
   const e=await edge('pcp-sync',banco(oss));
   for(const o of oss){
     relogio(e,'2026-11-05T21:00:00Z');
@@ -211,7 +211,7 @@ test('item 16: a chave da volta pelo id do carro no Ativos; o nome é a reserva;
   const de=id=>nov.registros.find(r=>r.id===id);
   assert.equal(de('v1').volta,'2026-11-05|id:ativo-7|100001');
   assert.equal(de('v1').volta,de('v2').volta,'o mesmo carro pelo id: uma volta só');
-  assert.equal(de('v3').volta,'2026-11-05|uno - 10|100001','sem id, o nome (e nada de juntar por semelhança)');
+  assert.equal(de('v3').volta,'2026-11-05|carro a - 1 ficticio|100001','sem id, o nome (e nada de juntar por semelhança)');
   // Uma aba que não conhece o id troca o carro: o id do carro anterior não fica.
   await gravar(e,'v1',{veiculo:'Carro fictício novo'});
   assert.equal(reg(e,'v1').veiculoId,undefined);
