@@ -926,6 +926,8 @@ function perfFechamentoBloqueio(f,pendentes){
  if(!regs.length)return 'Nenhuma entrega no período para fechar.';
  const conflitos=regs.filter(r=>r.avisoValor);
  if(conflitos.length)return `Confira os valores conflitantes no ERP antes de fechar (O.S. ${[...new Set(conflitos.map(r=>r.numero||'s/n'))].slice(0,6).join(', ')}). Veja as pendências da auditoria.`;
+ // O mesmo "a conferir" do selo da aba e da linha de cobertura (U3), quando a base é a da tela.
+ // A mesma conta do selo da aba e da linha de cobertura (U3): as entregas da base sem confirmação.
  const pend=regs.filter(r=>!r.confirmado).length,semValor=regs.filter(r=>r.valor==null);
  if(!pend && !semValor.length)return '';
  return 'Para fechar, falta: '+[pend?`${pend} ${pend===1?'entrega sem participação confirmada':'entregas sem participação confirmada'}`:'',semValor.length?`${semValor.length} sem valor (O.S. ${semValor.slice(0,6).map(r=>r.numero || 's/n').join(', ')}${semValor.length>6?' e outras':''})`:''].filter(Boolean).join('; ')+`. Veja na aba Conferência (filtro ${pend?'A conferir':'Sem valor'}).`;
@@ -1856,7 +1858,10 @@ function perfSituacao(regs) {
   return {tipo:'ok', texto:'Participações confirmadas'};
 }
 // O selo do mês aberto (item 1) vem antes da situação: com tudo confirmado, o verde não parece resultado do mês.
-function perfSituacaoHTML(s) { const a = typeof perfSeloAberto === 'function' ? perfSeloAberto() : null; return (a ? `<span class="perf-situacao ${a.tipo}">${esc(a.texto)}</span>` : '') + (s ? `<span class="perf-situacao ${s.tipo}">${esc(s.texto)}</span>` : ''); }
+/* A cobertura (parcial, em conferência) mora na linha única do topo (U3 da
+   auditoria de 12/10/2026): ao lado do título fica só o selo do mês e o do
+   fechamento (ou da revisão substituída). */
+function perfSituacaoHTML(s) { const a = typeof perfSeloAberto === 'function' ? perfSeloAberto() : null; const f = typeof perfFonteAtual === 'function' ? perfFonteAtual() : null, so = s && f && f.fechadoEm ? s : null; return (a ? `<span class="perf-situacao ${a.tipo}">${esc(a.texto)}</span>` : '') + (so ? `<span class="perf-situacao ${so.tipo}">${esc(so.texto)}</span>` : ''); }
 /* O CONTROLE SEGMENTADO (Nota | Produção | Valor): botões de alternância com
    aria-pressed, para o leitor de tela dizer qual está ligado. */
 function perfSegHTML(atual, opcoes, attr, rotulo) {
@@ -1984,6 +1989,41 @@ function perfAvisoPodioHTML(regs, podio) {
 function perfTopoMesHTML(regs) {
   const linha = perfCoberturaMesHTML(regs), fechado = perfConsultaServidor() ? perfAvisoFechadoHTML(perfFonteAtual(), true) : '';
   return linha || fechado ? `<div class="perf-topo-mes">${linha}${fechado}</div>` : '';
+}
+/* OS AVISOS DO TOPO JUNTOS, E UMA CONTA SÓ (U3 da auditoria de 12/10/2026).
+   A Performance dizia a cobertura do mês de quatro jeitos que não batiam
+   ("Cobertura do mês: 14% do valor · 12 de 90", "Parcial: 90% das entregas
+   com participantes", "11 de 13 confirmadas com todos os grupos", "13
+   confirmadas, 39% do valor") e empilhava quatro faixas antes do pódio, que
+   desceu para baixo da primeira tela no celular. Agora uma caixa só, em
+   linhas curtas: o ponto de atenção das perdas (o mesmo texto e os mesmos
+   botões das outras abas), a cobertura em UMA linha ("X de Y entregas conferidas, Z% do
+   valor"), com o mesmo "a conferir" do selo da aba e da Base, as baixas do
+   ERP a lançar, o mês sem fechamento e o mês fechado. */
+function perfCoberturaLinhaHTML(regs){
+  const k=perfCoberturaConta(regs),m=perfCoberturaMes(regs),falta=perfConferenciaPendentes(),total=k.total,conferidas=Math.max(0,total-falta);
+  const fechada=!!(perfFonteAtual()&&perfFonteAtual().fechadoEm),pode=perfPodeEditar()&&!fechada;
+  if(!total&&!(m&&m.aLancar))return '<p class="perf-aviso-linha perf-cob-mes">Nenhuma entrega finalizada neste período.</p>';
+  const valor=m?`, <strong>${m.pct}% do valor</strong>`:'';
+  const aConferir=falta&&!fechada?` · <strong>${falta} a conferir</strong> (as notas só valem depois da conferência)`:'';
+  const lancar=m&&m.aLancar?` · ${m.aLancar===1?'1 baixa do ERP a lançar':m.aLancar+' baixas do ERP a lançar'} (${esc(dinheiroCasa(m.aLancarCentavos/100))}), fora da conta`:'';
+  const botoes=(falta&&!fechada?`<button type="button" class="btn-primary btn-sm" data-perf-filtrar="pendente">${pode?'Conferir agora':'Ver na Conferência'}</button>`:'')+(m&&m.aLancar?'<button type="button" class="btn-ghost btn-sm" data-perf-lancar>Abrir o lançamento</button>':'');
+  return `<p class="perf-aviso-linha perf-cob-mes${m&&m.baixa?' baixa':''}" title="Conferidas: as entregas com a participação confirmada. O valor conta as confirmadas e com valor contra o do mês inteiro, com as baixas a lançar."><span>Cobertura do mês: <strong>${conferidas} de ${total} ${total===1?'entrega conferida':'entregas conferidas'}</strong>${valor}${aConferir}${lancar}</span>${botoes}</p>`;
+}
+/* No celular a caixa vem fechada, com o resumo numa linha (o pódio volta para
+   perto do topo); na tela larga ela abre sempre e o resumo some (CSS). */
+function perfAvisosTopoHTML(regs){
+  const fechado=perfConsultaServidor()?perfAvisoFechadoHTML(perfFonteAtual(),true):'';
+  // O ponto de atenção das perdas, com o texto e os botões de sempre (o pedido do dono de 11/10/2026), agora dentro da caixa.
+  const dP=typeof perdasPode==='function'&&perdasPode()&&typeof perdasDados==='function'?perdasDados():null;
+  const perda=dP&&typeof perdasPontoHTML==='function'?perdasPontoHTML(dP):'',mes=perfAvisoMesSemFechamentoHTML();
+  const linhas=[perda,perfCoberturaLinhaHTML(regs),mes,fechado].filter(Boolean).join('');
+  if(!linhas)return '';
+  const falta=perfConferenciaPendentes(),m=perfCoberturaMes(regs);
+  const resumo=[perda?'perdas por retrabalho':'',falta?falta+' a conferir':'',m?m.pct+'% do valor conferido':'',mes?'mês sem fechamento':'',fechado?'mês fechado':''].filter(Boolean).join(' · ');
+  const largo=typeof window==='undefined'||typeof window.matchMedia!=='function'||!window.matchMedia('(max-width: 600px)').matches;
+  const aberto=STATE._perfAvisosAbertos!==undefined?!!STATE._perfAvisosAbertos:largo;
+  return `<details class="perf-avisos-topo" data-perf-avisos${aberto?' open':''}><summary><span aria-hidden="true">⚠</span> Avisos do período: ${esc(resumo||'ver')}</summary>${linhas}</details>`;
 }
 function perfCoberturaHTML(regs, f) {
   const k = perfCoberturaConta(regs);
@@ -2426,13 +2466,13 @@ function perfRankingEquipesHTML(regs, c, vista = 'todas') {
         ${pode && !composicoes ? '<button type="button" class="btn-ghost btn-sm" id="perf-nova-equipe">+ Nova equipe</button>' : ''}
       </div></details>
     </header>
-    ${vista!=='todas'?perfIdentidadeEquipesHTML(origem,composicoes):''}
     ${medida==='producao'&&!linhas.length?'<p class="perf-rank-vazio">A corrida começa com a primeira entrega conferida. Confira os itens e a equipe para aparecer aqui.</p>':''}
 
     ${vazio}
     ${perfAvisoPodioHTML(regs, podioHTML)}
     ${podioHTML}
     ${cartoes}
+    ${vista!=='todas'?perfIdentidadeEquipesHTML(origem,composicoes):''}
     <p class="perf-ranking-lead">${composicoes?'Cada serviço entra inteiro na composição que o executou, incluindo equipes juntas e pessoas avulsas. Não some estes valores aos da aba Equipes.':medida==='producao'?'O que a equipe realmente entregou, proporcional aos itens e à sua participação. Só entram divisões confirmadas.':medida==='valor'?'Maior valor entregue confirmado primeiro. Valor líquido, dividido entre as equipes; só há empate com o mesmo valor em centavos.':'Quantidade de registros de entrega, incluindo sugestões. Uma mesma O.S. pode ter várias parciais.'}</p>
     <details class="perf-method"><summary>Como funciona esta classificação</summary><p>${composicoes?'Cada combinação de equipes e participantes é uma composição. Ela recebe o valor inteiro das entregas realizadas por essa combinação, uma vez por registro. Mudar quem trabalhou ou quais equipes estavam vinculadas cria outra composição. O histórico não é reconstruído pelo cadastro atual.':'A classificação padrão vai do maior para o menor valor líquido entregue confirmado, respeitando o rateio entre equipes.'} Valores iguais até os centavos compartilham a posição. Na opção Produção, a medida usa O.S. equivalentes: duas parciais de 25% e 75% somam uma O.S., não duas. ${composicoes?'Na aba Equipes, cada equipe recebe somente sua parcela; as duas abas representam visões do mesmo serviço e não devem ser somadas.':'Se duas equipes dividem o serviço, cada uma leva sua parte, somada às suas outras entregas.'} Na conferência da entrega, selecione as equipes e seus percentuais (total de 100%). Pessoas avulsas não são transferidas automaticamente para uma equipe; confira a divisão para definir o destino. Valores ausentes não viram zero; sugestões aguardam confirmação. Este ranking operacional não define sozinho a comissão ou os prêmios. Empates recebem a mesma posição.</p></details>
     ${semValor.length ? `<p class="perf-rank-nota">${semValor.length} ${composicoes?(semValor.length===1?'composição':'composições'):'equipe'+(semValor.length===1?'':'s')} com entrega mas sem valor confirmado ficam fora deste ranking, e não como zero.</p>` : ''}
@@ -2679,14 +2719,13 @@ function performanceEquipesHTML() {
   return `<section class="perf-workspace"><div class="perf-controls">${perfPeriodoCompactoHTML(f)}
     <div class="perf-toolbar"><span class="perf-toolbar-rot" id="perf-vista-rot">Ranking de</span><div class="casa-vista" role="group" aria-labelledby="perf-vista-rot">${vista('equipes')}${vista('composicoes')}${vista('pessoas')}</div><details class="perf-pdf-principal"><summary>Exportar</summary><button type="button" class="btn-ghost btn-sm" id="perf-pdf-ranking">📄 PDF do ranking</button><button type="button" class="btn-ghost btn-sm" id="perf-pdf">PDF completo</button></details></div></div>
     ${perfAvisoDecisoesHTML()}
-    ${perfAvisoMesSemFechamentoHTML()}
-    ${perfTopoMesHTML(regs)}
+    ${perfAvisosTopoHTML(regs)}
     ${perfMudancasPorPessoaHTML()}
     ${modo==='pessoas' ? perfRankingPessoasHTML(regs, c) : perfRankingEquipesHTML(regs, c, modo)}
     <details class="perf-method"><summary>Jornada e cobertura</summary>${perfJornadaHTML(regs,c)}</details>
     ${typeof operacaoPrioridadesHTML==='function'?operacaoPrioridadesHTML():''}
     <details class="perf-method"><summary>Como interpretar os indicadores</summary><p>Entregas conta as O.S. em que a pessoa participou; não some essa coluna entre pessoas. O.S. equivalentes considera os percentuais e a parcela do valor líquido entregue. As parciais somam no máximo uma O.S.; sem valor dos itens, a parcela fica a conferir. Divisões sugeridas ainda não foram confirmadas. Valores rateados não são faturamento pessoal nem bônus. A entrega com retrabalho de instalação, ou com falha comprovada julgada no demonstrativo da comissão, conta como entrega, sem pontos: nem produção nem valor. Qualidade e complexidade precisam de revisão. ${esc(perfFonteTexto())}</p></details>
-    ${perfCoberturaHTML(regs, f)}
+    <details class="perf-method perf-cob-detalhe"><summary>Detalhe da cobertura: participantes, sugeridas e sem equipe</summary>${perfCoberturaHTML(regs, f)}</details>
     ${typeof perfCasaTemAbaConferencia==='function'?'':performanceConferenciaHTML({embutida:true})}</section>`;
 }
 /* A CONFERÊNCIA NA ABA PRÓPRIA, ou EMBUTIDA no fim dos Rankings (revisão da
@@ -2751,6 +2790,7 @@ function wirePerformanceEquipes(el) {
   el.querySelectorAll('[data-perf-audit-id]').forEach(b=>b.onclick=()=>perfEditarParticipacao(b.dataset.perfAuditId).catch(e=>toast(perfErroTxt(e),'error')));
   el.querySelectorAll('[data-perf-audit-volta]').forEach(b=>b.onclick=async()=>{try{const r=perfRegistro(perfOS(b.dataset.perfAuditVolta),perfConfig());await LOTE.abrir({modo:'dia',dia:diaEntrega(r.os)});STATE._loteModo='dia';STATE._entAba='lote';document.querySelector('.tab[data-tab="entregas"]:not([data-vista])')?.click();}catch(e){toast('Não foi possível abrir a volta: '+perfErroTxt(e),'error');}});
   el.querySelectorAll('[data-perf-rank-medida]').forEach(b=>b.onclick=()=>{STATE._perfRankMedida=b.dataset.perfRankMedida;renderPerformanceCasa();});
+  el.querySelectorAll('[data-perf-avisos]').forEach(d=>d.addEventListener('toggle',()=>{STATE._perfAvisosAbertos=d.open;}));
   el.querySelectorAll('[data-perf-rankfunc-tentar]').forEach(b=>b.onclick=()=>perfCarregarRankFunc());
   el.querySelectorAll('[data-perf-pessoa-medida]').forEach(b=>b.onclick=()=>{STATE._perfPessoaMedida=b.dataset.perfPessoaMedida;renderPerformanceCasa();});
   const crit=el.querySelector('#perf-criterios');if(crit)crit.onclick=perfEditarCriterios;

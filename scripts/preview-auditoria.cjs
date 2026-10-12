@@ -437,7 +437,7 @@ http.createServer(async(req,res)=>{
     }catch(e){res.writeHead(500);res.end(JSON.stringify({error:e.message}));}return;
   }
   if(['comissao-api','controle-api'].includes(name) && req.method==='POST'){
-    try{let json='';for await(const chunk of req){json+=chunk;if(json.length>300000)throw new Error('Pedido grande demais.');}const out=await (name==='controle-api'?controlePreview:comissaoPreview)(JSON.parse(json));res.setHeader('Content-Type','application/json');res.end(JSON.stringify(out));}catch(e){res.writeHead(500);res.end(JSON.stringify({error:e.message}));}return;
+    try{let json='';for await(const chunk of req){json+=chunk;if(json.length>(name==="controle-api"?5000000:300000))throw new Error('Pedido grande demais.');}const out=await (name==='controle-api'?controlePreview:comissaoPreview)(JSON.parse(json));res.setHeader('Content-Type','application/json');res.end(JSON.stringify(out));}catch(e){res.writeHead(500);res.end(JSON.stringify({error:e.message}));}return;
   }
   if(name==='fixture.js'){res.setHeader('Content-Type','text/javascript');res.end(fixture);return;}
   if(!permitidos.has(name)){res.writeHead(404);res.end();return;}

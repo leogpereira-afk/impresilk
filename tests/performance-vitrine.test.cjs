@@ -75,7 +75,8 @@ test('cobertura: UMA faixa com "30 de 163", a ação de completar e o selo de pa
   // Quem não edita vê as entregas, não é convidado a completar.
   assert.match(tela({papel:'montagem'}).perfCoberturaHTML(regs, {de:'', ate:''}), /Ver as sem participantes/);
   const rank = c.perfRankingPessoasHTML(regs, {equipes:[]});
-  assert.match(rank, /Parcial: 18% das entregas com participantes/);
+  // U3 da auditoria de 12/10/2026: a cobertura ("Parcial: 18%...") saiu do selo do ranking para a linha única do topo.
+  assert.doesNotMatch(rank, /Parcial: 18% das entregas com participantes/);
   assert.doesNotMatch(rank, /class="perf-podio /, 'sem valor confirmado não há pódio de nota');
   regs[0].confirmado=true;
   assert.match(c.perfRankingPessoasHTML(regs,{equipes:[]}), /perf-podio n1 perf-animar perf-podio-parcial|perf-podio n1 perf-podio-parcial/);

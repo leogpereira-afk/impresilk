@@ -256,10 +256,11 @@ test('Conferência: o selo da aba conta as entregas a conferir, o mesmo número 
 
 test('Rankings: faixa de atenção no topo quando há entrega a conferir, com o botão que leva à aba', () => {
   const html = tela({registros:[registro('C1'), registro('C2', {confirmado:false, fonte:'sugestao'}), registro('C3', {confirmado:false, fonte:'sugestao'})]}).render();
-  assert.match(texto(html), /2 entregas a conferir: as notas só valem depois da conferência/);
-  assert.match(html, /class="perf-faixa-conferir"[^]*?data-perf-filtrar="pendente"/);
-  assert.ok(html.indexOf('perf-faixa-conferir') < html.indexOf('perf-workspace'), 'a faixa vem antes do ranking');
-  assert.match(texto(tela({registros:[registro('C1'), registro('C2', {confirmado:false, fonte:'sugestao'})]}).render()), /1 entrega a conferir: as notas só valem depois da conferência/);
+  // U3 da auditoria de 12/10/2026: a faixa entra na caixa única dos avisos, na linha da cobertura, com o mesmo número do selo.
+  assert.match(texto(html), /1 de 3 entregas conferidas.* · 2 a conferir \(as notas só valem depois da conferência\)/);
+  assert.match(html, /class="perf-avisos-topo"[^]*?data-perf-filtrar="pendente"/);
+  assert.ok(html.indexOf('perf-avisos-topo') < html.indexOf('class="perf-ranking'), 'a caixa vem antes do ranking');
+  assert.match(texto(tela({registros:[registro('C1'), registro('C2', {confirmado:false, fonte:'sugestao'})]}).render()), / · 1 a conferir \(as notas só valem depois da conferência\)/);
   assert.doesNotMatch(tela({registros:[registro('C1')]}).render(), /perf-faixa-conferir/);
 });
 

@@ -61,7 +61,8 @@ const regsTela = c => c.perfRegsDoPeriodo();
 test('item 1: o mês sem fechamento leva o selo "Mês aberto, resultado provisório" e o PDF diz "Prévia"; a revisão fechada não', () => {
   const c = base(tela(), fonte([reg('a1', 300)]));
   const situacao = c.perfSituacaoHTML(c.perfSituacao(regsTela(c)));
-  assert.match(situacao, /<span class="perf-situacao provisorio">Mês aberto, resultado provisório<\/span><span class="perf-situacao ok">Participações confirmadas<\/span>/);
+  // U3 da auditoria de 12/10/2026: ao lado do título só o selo do mês; a cobertura ("Participações confirmadas") mora na linha única do topo.
+  assert.equal(situacao, '<span class="perf-situacao provisorio">Mês aberto, resultado provisório</span>');
   assert.match(c.perfRankingEquipesHTML(regsTela(c), c.perfConfig(), 'todas'), /Mês aberto, resultado provisório/);
   assert.match(c.perfFonteTexto(), /^Prévia: mês aberto, resultado provisório\. Base compartilhada do PCP/);
   // A Jornada e o Relatório também diziam só "Apuração em andamento".
@@ -182,10 +183,10 @@ test('item 29: a cobertura do mês vem acima do pódio; abaixo de 50% do valor o
   c.STATE._perfModo = 'pessoas';
   const html = c.performanceEquipesHTML();
   // U3 da revisão (12/10/2026): só a linha da cobertura do mês sobe; o quadro "Participantes nas entregas" voltou para baixo, como na v166.
-  const iCob = html.indexOf('class="perf-cob-extra perf-cob-mes'), iRank = html.indexOf('class="perf-ranking'), iPodio = html.indexOf('class="perf-podio');
+  const iCob = html.indexOf('class="perf-aviso-linha perf-cob-mes'), iRank = html.indexOf('class="perf-ranking'), iPodio = html.indexOf('class="perf-podio');
   assert.ok(iCob > 0 && iRank > 0 && iCob < iRank, 'a linha da cobertura do mês vem antes do ranking');
   assert.ok(iPodio > iRank, 'o pódio continua à vista');
-  assert.match(html, /Cobertura do mês: <strong>40% do valor<\/strong> no ranking · <strong>3 de 5 entregas<\/strong> do mês \(2 são baixas do ERP a lançar, R\$ 900\.00\) <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento<\/button>/);
+  assert.match(html, /Cobertura do mês: <strong>3 de 3 entregas conferidas<\/strong>, <strong>40% do valor<\/strong> · 2 baixas do ERP a lançar \(R\$ 900\.00\), fora da conta<\/span><button type="button" class="btn-ghost btn-sm" data-perf-lancar>Abrir o lançamento<\/button>/);
   assert.match(html, /<p class="perf-aviso perf-aviso-forte" role="note"><strong>Este pódio não representa o mês:<\/strong> só 40% do valor/);
   assert.ok(html.indexOf('perf-aviso-forte') < iPodio, 'o aviso vem antes do pódio');
   // Com metade ou mais do valor, sem o aviso forte.

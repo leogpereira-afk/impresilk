@@ -372,14 +372,16 @@ test('revisão fechamento: U3, U4 e U5, só a cobertura do mês sobe; as baixas 
   const cob = {entregas:3, entregasCentavos:60000, entregasSemValor:0, aLancar:2, aLancarCentavos:90000, aLancarSemValor:0, aLancarNumeros:['91000', '91001'], pctValor:40, baixa:true};
   const html = telaRanking(regs, cob).run('performanceEquipesHTML()');
   // U3. Caso ruim: o quadro inteiro "Participantes nas entregas" subiu para cima do pódio e o empurrou para baixo da dobra.
-  const iTopo = html.indexOf('class="perf-topo-mes"'), iRank = html.indexOf('class="perf-ranking'), iPodio = html.indexOf('class="perf-podio'), iComo = html.indexOf('Como interpretar os indicadores'), iQuadro = html.indexOf('class="perf-cobertura');
+  // U3 da auditoria de 12/10/2026: os avisos do topo numa caixa só (perf-avisos-topo), com a cobertura em uma linha.
+  const iTopo = html.indexOf('class="perf-avisos-topo"'), iRank = html.indexOf('class="perf-ranking'), iPodio = html.indexOf('class="perf-podio'), iComo = html.indexOf('Como interpretar os indicadores'), iQuadro = html.indexOf('class="perf-cobertura');
   assert.ok(iTopo > 0 && iTopo < iRank && iRank < iPodio, 'a linha da cobertura do mês vem antes do ranking e do pódio');
   assert.ok(iQuadro > iComo && iComo > iPodio, 'o quadro "Participantes nas entregas" voltou para depois de "Como interpretar", como na v166');
   // U4. Caso ruim: "N baixas do ERP" aparecia três vezes (linha do mês, aviso do pódio e linha do lançamento).
   assert.equal((html.match(/baixas? do ERP/g) || []).length, 1, 'uma menção só às baixas do ERP');
   // U4. Os rótulos dizem a diferença: o mês inteiro (com as baixas a lançar) lá em cima, só as lançadas no PCP no quadro.
-  assert.match(html, /<strong>2 de 5 entregas<\/strong> do mês \(2 são baixas do ERP a lançar, R\$ 900\.00\) <button type="button" class="inline-link" data-perf-lancar>Abrir o lançamento<\/button><\/p>/);
-  assert.match(html, /title="No ranking entram as entregas confirmadas e com valor\. O mês conta também as que ainda esperam lançamento\."/);
+  assert.match(html, /Cobertura do mês: <strong>2 de 3 entregas conferidas<\/strong>, <strong>33% do valor<\/strong> · <strong>1 a conferir<\/strong> \(as notas só valem depois da conferência\) · 2 baixas do ERP a lançar \(R\$ 900\.00\), fora da conta<\/span>/);
+  assert.match(html, /<button type="button" class="btn-ghost btn-sm" data-perf-lancar>Abrir o lançamento<\/button><\/p>/);
+  assert.match(html, /title="Conferidas: as entregas com a participação confirmada\. O valor conta as confirmadas e com valor contra o do mês inteiro, com as baixas a lançar\."/);
   assert.match(html, /das lançadas no PCP neste período|Todas as 3 entregas do período têm participantes/);
   assert.match(html, /<strong>3 de 3<\/strong> entregas com participantes|Todas as 3 entregas do período têm participantes/);
   // U5. Com pódio, o aviso forte vem antes dele.

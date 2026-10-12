@@ -4269,7 +4269,7 @@ function renderPerformanceCasa() {
           <button class="btn-ghost btn-sm" id="perf-tv" title="Ranking em tela cheia para a TV da fábrica">📺 Modo TV</button>
         </div>
       </header>
-      ${perdas && typeof perdasPontoHTML === 'function' ? perdasPontoHTML(perdas) : ''}
+      ${perdas && typeof perdasPontoHTML === 'function' && !(abaPerf === 'equipe' && typeof perfAvisosTopoHTML === 'function' && typeof perfConsultaServidor === 'function' && perfConsultaServidor()) ? perdasPontoHTML(perdas) : ''}
       <nav class="perf-page-tabs" aria-label="Áreas de Performance">
         ${botaoAba('equipe', 'Rankings')}
         ${temConferencia ? botaoAba('conferencia', 'Conferência', seloAba(pendConf, pendConf === 1 ? 'entrega a conferir' : 'entregas a conferir')) : ''}
@@ -4283,7 +4283,7 @@ function renderPerformanceCasa() {
         ${quadroRH()}
       ` : `
       ${abaPerf === 'equipe' ? `
-        ${typeof perfFaixaConferenciaHTML === 'function' ? perfFaixaConferenciaHTML(pendConf) : ''}
+        ${typeof perfFaixaConferenciaHTML === 'function' && typeof perfAvisosTopoHTML !== 'function' ? perfFaixaConferenciaHTML(pendConf) : ''}
         ${typeof performanceEquipesHTML === 'function' ? performanceEquipesHTML() : produtividadeHTML()}
         ${typeof perfFonteHTML === 'function' ? perfFonteHTML() : ''}
         ${temConferencia ? '' : quadroRH()}
