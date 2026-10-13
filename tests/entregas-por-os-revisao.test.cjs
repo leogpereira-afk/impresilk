@@ -184,29 +184,29 @@ test('revisão: uma O.S. muda e só ela e as da volta dela recalculam; com 1.500
      MELHOR DE 5 E TETO DE 900 ms (onda comissão, 12/10/2026): numa rodada
      inteira da suíte com o Mac carregado, a melhor de 3 deu 778 ms. A melhor
      de 5 tira o pico de carga; o O(N²) (1,7 s) continua quase o dobro do teto. */
-  /* RELATIVO, NÃO TETO FIXO (revisão da onda auditoria, 12/10/2026): com a
-     máquina carregada a melhor de 5 passou dos 900 ms em rodadas da suíte. O
-     que o teste segura é que o caminho frio não é O(N²): ele mede, no mesmo
-     processo e intercalados, as 1.502 O.S. e um quarto delas. Linear dá a
-     razão perto de 4; o O(N²) de antes (1,7 s contra ~85 ms) dava perto de
-     16. A razão abaixo de 9 separa os dois, com a mesma carga dos dois lados. */
-  const MEDIDAS = 5;
-  t.run('var __erp = _porOSDados.linhas.map(l => l.erp); var __perf = 0; var __pr = perfRegistro; perfRegistro = (...a) => { __perf++; return __pr(...a); };');
+  /* PASSOS, NÃO RELÓGIO (verificação da onda auditoria, 12/10/2026): a razão
+     de tempos entre as 1.502 O.S. e um quarto delas chegou a 12 com 12 cópias
+     da suíte em paralelo (teto 9). Agora o teste conta os PASSOS: cada vez
+     que a montagem lê uma O.S. da lista do aparelho ou uma linha do ERP (a
+     lista passa por um Proxy que conta as leituras por índice: for...of,
+     forEach, filter, o índice das voltas). Linear dá a razão perto de 4; o
+     O(N²) de antes (uma volta da lista por O.S.) dava perto de 16. A conta
+     não depende da carga da máquina. */
+  t.run(`var __erp = _porOSDados.linhas.map(l => l.erp); var __perf = 0; var __pr = perfRegistro; perfRegistro = (...a) => { __perf++; return __pr(...a); };
+    var __passos = 0; var __contar = l => new Proxy(l, {get(a, k, r) { if (typeof k === 'string' && /^\\d+$/.test(k)) __passos++; return Reflect.get(a, k, r); }});`);
   t.run('var __erpQ = __erp.slice(0, Math.ceil(__erp.length / 4)); var __numsQ = new Set(__erpQ.map(e => String(e.numero))); var __osQ = STORE.getAllOS().filter(o => __numsQ.has(String(o.numero)));');
   const nQ = t.run('__osQ.length');
-  let melhor = Infinity, melhorQ = Infinity;
-  const frio = (erp, lista) => { const ini = process.hrtime.bigint(); t.run(`porOSEsquecer(); porOSMontar(${erp}, ${lista}, "2026-10-20"); porOSSecaoHTML().length`); return Number(process.hrtime.bigint() - ini) / 1e6; };
-  for (let k = 0; k < MEDIDAS; k++) {
-    await tique();
-    melhor = Math.min(melhor, frio('__erp', 'STORE.getAllOS()'));
-    await tique();
-    melhorQ = Math.min(melhorQ, frio('__erpQ', '__osQ'));
-  }
-  assert.equal(t.run('__chamadas') - antes2, MEDIDAS * (n + nQ), 'com a memória vazia, um status por O.S.');
-  assert.equal(t.run('__perf'), MEDIDAS * 4, 'e uma conta da equipe por gente (900001 com 900002; 900004), nas duas medidas');
-  const razao = melhor / Math.max(melhorQ, 1);
-  if (process.env.F18_MEDIR) console.log('F18 revisão, memória vazia (ms): 1.502 O.S.', melhor.toFixed(1), '· um quarto', melhorQ.toFixed(1), '· razão', razao.toFixed(2));
-  assert.ok(razao < 9, `memória vazia: ${melhor.toFixed(1)} ms com ${n} O.S. contra ${melhorQ.toFixed(1)} ms com ${nQ} (razão ${razao.toFixed(2)})`);
+  const passos = (erp, lista) => t.run(`__passos = 0; porOSEsquecer(); porOSMontar(__contar(${erp}), __contar(${lista}), "2026-10-20"); porOSSecaoHTML().length; __passos`);
+  await tique();
+  const pTudo = passos('__erp', 'STORE.getAllOS()');
+  await tique();
+  const pQuarto = passos('__erpQ', '__osQ');
+  assert.equal(t.run('__chamadas') - antes2, n + nQ, 'com a memória vazia, um status por O.S.');
+  assert.equal(t.run('__perf'), 4, 'e uma conta da equipe por gente (900001 com 900002; 900004), nas duas medidas');
+  const razao = pTudo / Math.max(pQuarto, 1);
+  if (process.env.F18_MEDIR) console.log('F18 revisão, memória vazia (passos): 1.502 O.S.', pTudo, '· um quarto', pQuarto, '· razão', razao.toFixed(2));
+  assert.ok(pQuarto >= nQ, `a conta de passos leu as O.S. (${pQuarto} passos para ${nQ} O.S.)`);
+  assert.ok(razao < 9, `memória vazia: ${pTudo} passos com ${n} O.S. contra ${pQuarto} com ${nQ} (razão ${razao.toFixed(2)})`);
 });
 
 test('revisão: a O.S. sem ficha no aparelho ganha "Procurar no servidor"; "nunca passou pelo PCP" só depois de o servidor dizer que não tem', async () => {

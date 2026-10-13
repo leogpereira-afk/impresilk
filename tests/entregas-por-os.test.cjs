@@ -433,9 +433,9 @@ test('O.S. fora dos 60 dias do aparelho: aviso e carga sob demanda pelo buscarHi
 
 /* 500 O.S. FICTÍCIAS: a pintura completa calcula o status uma vez; cada toque
    (chip, equipe, busca letra a letra, mostrar mais, abrir a linha do tempo)
-   só filtra e repinta a vista, sem recalcular status. Mede o trabalho de
-   cada toque, com a meta de 100 ms (no aparelho, a prévia mediu com o DOM). */
-test('500 O.S.: cada filtro ou toque repinta em menos de 100 ms, sem recalcular o status', () => {
+   só filtra e repinta a vista, sem recalcular status. Conta o trabalho de
+   cada toque; a meta de 100 ms é do aparelho e a prévia a mede com o DOM. */
+test('500 O.S.: cada filtro ou toque só repinta os cartões que aparecem, sem recalcular o status nem remontar as linhas', () => {
   const lista = [], erp = [];
   for (let i = 0; i < 500; i++) {
     const dia = 1 + (i % 19), d = `2026-10-${String(dia).padStart(2, '0')}`;
@@ -456,46 +456,38 @@ test('500 O.S.: cada filtro ou toque repinta em menos de 100 ms, sem recalcular 
   t.tela('STATE._entVista = "poros"');
   assert.equal(t.run('__statusChamadas'), 500, 'a primeira pintura calcula cada status uma vez');
   assert.equal(t.run('_porOSDados.linhas.length'), 500);
-  /* MELHOR DE 5, NÃO O PIOR (revisão da onda fechamento, D5, 12/10/2026): com
-     a suíte inteira rodando os arquivos em paralelo, uma medida isolada pega a
-     coleta de lixo ou a CPU de outro arquivo (a do período deu 110,8 ms, e
-     sozinha leva 17 ms). A melhor de cinco mede o código, não a carga do
-     runner. Os tetos continuam pegando a volta do custo quadrático: sozinhos,
-     os toques levam de 1 a 3 ms e a troca de período 17 ms; recalcular o
-     status das 500 O.S. a cada toque (o que este teste segura, com a conta de
-     chamadas abaixo) passava de 100 ms por toque. */
-  const medir = codigo => {
-    let melhor = Infinity;
-    for (let k = 0; k < 5; k++) {
-      const ini = process.hrtime.bigint();
-      t.run(codigo);
-      melhor = Math.min(melhor, Number(process.hrtime.bigint() - ini) / 1e6);
-    }
-    return melhor;
-  };
+  /* CONTAGEM, NÃO RELÓGIO (verificação da onda auditoria, 12/10/2026): com
+     12 cópias da suíte em paralelo, os tempos relativos à linha de base ainda
+     caíam (o período mediu 69 ms contra 25 ms da base medida uma vez). O que o
+     teste segura não depende da carga: um toque não recalcula o status (a
+     conta de chamadas), não remonta as linhas (porOSMontar) e pinta só os
+     cartões que aparecem (um lote de 24 por pintura; o "mostrar mais", só
+     os 24 novos; a linha do tempo, nenhum), nunca os 500. Antes, cada toque recalculava o status das 500 O.S. */
+  t.run(`var __montar = 0, __cartoes = 0; var __m0 = porOSMontar, __c0 = porOSCardHTML;
+    porOSMontar = (...a) => { __montar++; return __m0(...a); }; porOSCardHTML = (...a) => { __cartoes++; return __c0(...a); };`);
+  const LOTE = t.run('POR_OS_LOTE');
+  assert.equal(LOTE, 24);
   const toques = {
-    'chip de status': 'STATE._porOS.status = STATE._porOS.status ? "" : "atraso"; STATE._porOS.limite = 24; pintarPorOS()',
-    'equipe': 'STATE._porOS.equipe = STATE._porOS.equipe ? "" : "eq-leao"; pintarPorOS()',
-    'busca, letra a letra': '["1", "10", "100", "1003", "10"].forEach(b => { STATE._porOS.busca = b; pintarPorOS(); }); STATE._porOS.busca = ""',
-    'mostrar mais': 'porOSMais()',
-    'abrir a linha do tempo': 'porOSLinhaHTML(_porOSDados.linhas[7])',
+    'chip de status': ['STATE._porOS.status = STATE._porOS.status ? "" : "atraso"; STATE._porOS.limite = 24; pintarPorOS()', LOTE],
+    'equipe': ['STATE._porOS.equipe = STATE._porOS.equipe ? "" : "eq-leao"; pintarPorOS()', LOTE],
+    'busca, letra a letra': ['["1", "10", "100", "1003", "10"].forEach(b => { STATE._porOS.busca = b; pintarPorOS(); }); STATE._porOS.busca = ""', 5 * LOTE],
+    'mostrar mais': ['porOSMais()', LOTE],
+    'abrir a linha do tempo': ['porOSLinhaHTML(_porOSDados.linhas[7])', 0],
   };
-  /* RELATIVO À LINHA DE BASE DO MESMO PROCESSO (revisão da onda auditoria,
-     12/10/2026): com a máquina carregada, 4 de 12 rodadas da suíte passaram
-     do teto fixo de 100 ms. O que o teste segura é que o toque não recalcula
-     o status das 500 O.S. (a conta de chamadas abaixo) e não volta a custar o
-     mesmo que recalcular: cada toque fica abaixo de metade do custo de
-     calcular o status das 500, medido agora, no mesmo processo e com a mesma
-     carga (melhor de 5 dos dois lados). Sozinhos: toques de 1 a 3 ms, o
-     status das 500 perto de 100 ms. O teto fixo antigo fica só como folga
-     para máquina muito rápida (a linha de base nunca abaixo de 20 ms). */
-  const base = Math.max(20, medir('STORE.getAllOS().forEach(o => __st(o))'));
-  const tempos = {};
-  for (const [nome, codigo] of Object.entries(toques)) tempos[nome] = medir(codigo);
-  // A busca acima são 5 repinturas; a meta vale para cada uma.
-  tempos['busca, letra a letra'] /= 5;
-  if (process.env.F18_MEDIR) console.log('F18, linha de base e toques (ms):', base.toFixed(1), JSON.stringify(Object.fromEntries(Object.entries(tempos).map(([k, v]) => [k, +v.toFixed(1)]))));
-  for (const [nome, ms] of Object.entries(tempos)) assert.ok(ms < base / 2, `${nome}: ${ms.toFixed(1)} ms (linha de base ${base.toFixed(1)} ms)`);
+  const contas = {};
+  for (const [nome, [codigo, teto]] of Object.entries(toques)) {
+    for (let k = 0; k < 2; k++) {
+      t.run('__montar = 0; __cartoes = 0;');
+      const st0 = t.run('__statusChamadas');
+      t.run(codigo);
+      const c = {montar: t.run('__montar'), cartoes: t.run('__cartoes'), status: t.run('__statusChamadas') - st0};
+      contas[nome] = c;
+      assert.equal(c.status, 0, `${nome}: recalculou ${c.status} status`);
+      assert.equal(c.montar, 0, `${nome}: remontou as linhas`);
+      assert.ok(c.cartoes <= teto, `${nome}: pintou ${c.cartoes} cartões (teto ${teto})`);
+    }
+  }
+  if (process.env.F18_MEDIR) console.log('F18, contas dos toques:', JSON.stringify(contas));
   assert.equal(t.run('__statusChamadas'), 500, 'nenhum toque recalcula o status');
   assert.ok(t.run('__pedacos["#poros-corpo"].innerHTML').includes('poros-card'), 'o toque pintou o corpo');
   // "Mostrar mais" acrescenta só os 24 novos: os que já estão na tela não são pintados de novo.
@@ -508,22 +500,17 @@ test('500 O.S.: cada filtro ou toque repinta em menos de 100 ms, sem recalcular 
   t.run('porOSMais()');
   assert.equal(cartoesNaGrade(), 48, 'o segundo lote também entra sozinho');
   assert.match(t.run('__pedacos[".poros-resumo"].outerHTML'), /Mostrando 72\./, 'o número da vista diz quantos aparecem');
-  /* Trocar o período é pintura completa, mas o status já calculado fica.
-     Melhor de cinco trocas (D5): ida e volta entre dois recortes, terminando
-     no de 05 a 12, que o resto do teste usa. Sozinha, a troca leva 17 ms; o
-     teto de 150 ms deixa folga para a carga da suíte e ainda pega o
-     recálculo das 500 O.S. a cada troca. */
-  let periodo = Infinity;
-  for (const [k, p] of [['05', '12'], ['01', '20'], ['05', '12'], ['01', '20'], ['05', '12']].entries()) {
-    const ini = process.hrtime.bigint();
+  /* Trocar o período é pintura completa (as linhas remontam uma vez), mas o
+     status já calculado fica e só os cartões do primeiro lote são pintados.
+     Ida e volta entre dois recortes, terminando no de 05 a 12, que o resto
+     do teste usa. Contagem, não relógio (como os toques acima). */
+  for (const p of [['05', '12'], ['01', '20'], ['05', '12'], ['01', '20'], ['05', '12']]) {
+    t.run('__montar = 0; __cartoes = 0;');
     t.tela(`STATE._fEnt = {de: "2026-10-${p[0]}", ate: "2026-10-${p[1]}"}`);
-    periodo = Math.min(periodo, Number(process.hrtime.bigint() - ini) / 1e6);
-    if (k === 0) assert.equal(t.run('__statusChamadas'), 500, 'trocar o período não recalcula');
+    assert.equal(t.run('__montar'), 1, 'a troca de período monta as linhas uma vez');
+    assert.ok(t.run('__cartoes') <= t.run('STATE._porOS.limite'), `período: pintou ${t.run('__cartoes')} cartões`);
   }
   assert.equal(t.run('__statusChamadas'), 500, 'trocar o período, cinco vezes, não recalcula');
-  // A troca de período é pintura completa sem recalcular: abaixo do custo de recalcular as 500 (a mesma linha de base).
-  if (process.env.F18_MEDIR) console.log('F18, troca de período (ms):', periodo.toFixed(1));
-  assert.ok(periodo < Math.max(base, 60), `período: ${periodo.toFixed(1)} ms (linha de base ${base.toFixed(1)} ms)`);
   /* Mudou uma O.S.: a próxima pintura completa recalcula ela e as da volta
      dela (o retorno é medido pela volta), não as outras (revisão da F18: a
      memória é por O.S.). A x3 deste teste ficou fora do período de 05 a 12 e
@@ -532,7 +519,6 @@ test('500 O.S.: cada filtro ou toque repinta em menos de 100 ms, sem recalcular 
   t.tela('');
   const depois = t.run('__statusChamadas');
   assert.ok(depois > 500 && depois < 520, `recalculou ${depois - 500}`);
-  if (process.env.F18_MEDIR) console.log('F18 tempos (ms):', JSON.stringify({...tempos, periodo}));
 });
 
 test('entregas-os.js entra no index.html (depois do lote) e no SHELL do sw.js, na versão atual; não no celular', () => {

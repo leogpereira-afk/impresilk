@@ -487,12 +487,17 @@ test('revisão fechamento: D3, o DECISOES.md avisa que o selo de antes da v167 c
   assert.match(nota, /Em 12\/10\/2026 a produção tinha 0 fechamentos/);
   assert.doesNotMatch(nota.split('\n')[0], /—/);
 });
-test('revisão fechamento: D5, os testes de tempo medem a melhor de várias, com o motivo', () => {
-  const t = ler('tests/entregas-por-os.test.cjs');
-  // Caso ruim: o pior de cinco toques e uma medida só da troca de período (110,8 ms com a suíte inteira, 17 ms sozinha).
-  assert.match(t, /MELHOR DE 5, NÃO O PIOR \(revisão da onda fechamento, D5/);
-  assert.match(t, /melhor = Math\.min\(melhor, Number\(process\.hrtime\.bigint\(\) - ini\) \/ 1e6\);/);
-  assert.match(t, /periodo = Math\.min\(periodo, Number\(process\.hrtime\.bigint\(\) - ini\) \/ 1e6\);/);
-  assert.doesNotMatch(t, /pior = Math\.max\(pior/);
-  assert.match(ler('tests/entregas-por-os-revisao.test.cjs'), /melhor = Math\.min\(melhor/);
+test('revisão fechamento: D5, os testes de tempo da vista Por O.S. contam o trabalho, sem relógio, com o motivo', () => {
+  /* D5 (onda fechamento) passou para a melhor de várias medidas; a verificação
+     final da onda auditoria (12/10/2026) tirou o relógio: com 12 cópias da
+     suíte em paralelo, até as medidas relativas caíam. Agora os dois testes
+     contam (status recalculados, linhas montadas, cartões pintados e leituras
+     da lista), o que não depende da carga da máquina. */
+  const t = ler('tests/entregas-por-os.test.cjs'), r = ler('tests/entregas-por-os-revisao.test.cjs');
+  assert.match(t, /CONTAGEM, NÃO RELÓGIO \(verificação da onda auditoria/);
+  assert.match(r, /PASSOS, NÃO RELÓGIO \(verificação da onda auditoria/);
+  for (const x of [t, r]) {
+    assert.doesNotMatch(x, /process\.hrtime/, 'nenhum relógio nesses testes');
+    assert.doesNotMatch(x, /pior = Math\.max\(pior/);
+  }
 });
