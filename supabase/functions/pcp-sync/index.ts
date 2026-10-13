@@ -4464,11 +4464,15 @@ Deno.serve(async (req: Request) => {
           if(!data?.length || data.length<500){concluiu=true;break;}
           cursor=data[data.length-1].id;
         }
-        /* Os dois 409 "não foi possível conferir" são passageiros: o aparelho
-           mantém o pedido na fila e tenta de novo. Só a foto preservada para
-           recuperar uma O.S. excluída é `definitivo` (revisão da onda
-           auditoria, item 11). */
-        if(!concluiu)return resp({error:"Não foi possível conferir todas as referências da foto. Arquivo preservado."},409);
+        /* A CONFERÊNCIA QUE PASSA DO TETO (verificação da onda auditoria,
+           12/10/2026): mais de 50.000 O.S. excluídas aqui, ou mais de 20.000
+           ativas em osComProvaDaFoto. A resposta seria sempre a mesma, e o
+           pedido parado na fila travaria o "Sair" e a troca de instalador do
+           celular: é `definitivo`, com o arquivo preservado e o aviso. A falha
+           passageira de verdade (o banco não respondeu) é o 500 do throw, e a
+           fila tenta de novo. */
+        const TETO_CONFERENCIA_FOTO = "Não foi possível conferir todas as referências da foto: o PCP tem O.S. demais para a conferência. Arquivo preservado.";
+        if(!concluiu)return resp({error:TETO_CONFERENCIA_FOTO,definitivo:true},409);
         /* A PROVA DA ENTREGA (A2, auditoria de 11/10/2026). A foto citada por
            O.S. finalizada (check-in, retorno, item, volta do carro) é o que
            mostra a entrega física; até aqui qualquer crachá com senha a
@@ -4482,7 +4486,7 @@ Deno.serve(async (req: Request) => {
            aparelho tira o item e diz a recusa (403 não prende a fila; 422
            prenderia). */
         const finalizadas = await osComProvaDaFoto(String(body.fileId));
-        if (finalizadas === null) return resp({error:"Não foi possível conferir todas as referências da foto. Arquivo preservado."},409);
+        if (finalizadas === null) return resp({error:TETO_CONFERENCIA_FOTO,definitivo:true},409);
         if (finalizadas.length) {
           if (!cracha || ehMaquina || ehToqueNoNome || !["admin","pcp"].includes(String(cracha.papel ?? "")))
             return resp({error:"Foto de O.S. que já foi finalizada é a prova da entrega: só a gestão do PCP (admin ou pcp) apaga, com motivo. A foto continua guardada."},403);
