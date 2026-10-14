@@ -179,3 +179,4 @@ ao dono. Cada nota diz o que mudou, onde e o teste.
 ## Pontualidade por classe ABC (14/10/2026)
 
 - D-018 · 14/10/2026 · Usar a curva ABC existente de Campanhas para filtrar a pontualidade do PCP em A+, A, B+, B e C. Seleção individual de clientes somente em A+: "Sim, clientes individuais só em A+". Fonte: conversa do dono em 14/10/2026 e confirmação explícita do recorte A+. Registrado pelo codex; aplicado em relatorios-entregas.js, na leitura relatorioEntregas e na RPC pcp_pontualidade_abc. Implementação local, publicação pendente de autorização. Não muda classificação na origem, comissão, valores ou registros.
+  - Publicação autorizada em 14/10/2026: "subir", após a entrega da revisão local. Escopo: consulta ABC, servidor e tela deste recurso; preservar o Painel e todos os registros.

@@ -1,6 +1,6 @@
 # Pontualidade com a curva ABC
 
-Implementação pronta para revisão local. Não publicada.
+Revisão local concluída. Publicação da v176 autorizada pelo dono com "subir" em 14/10/2026; preparação em andamento.
 
 ## Comportamento
 
@@ -39,7 +39,7 @@ Para interface, iniciar `PORT=49137 node scripts/preview-auditoria.cjs`, disponi
 
 ## Publicação pendente
 
-1. Autorização específica do dono, conforme AGENTS.md.
+1. Autorização específica do dono recebida, conforme AGENTS.md.
 2. Revalidar main/vez e versão disponível; usar subir-versao.cjs.
 3. Aplicar a migração 20261014170059_pcp_pontualidade_abc.sql.
 4. Publicar o pcp-sync do ramo aprovado antes da tela. Nenhuma alteração em _shared.

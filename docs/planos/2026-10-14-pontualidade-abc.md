@@ -1,6 +1,6 @@
 # Pontualidade por classe ABC
 
-Implementação local autorizada em 14/10/2026. Publicação pendente.
+Implementação local autorizada em 14/10/2026. Publicação autorizada pelo dono com "subir", após a revisão local, na mesma data.
 
 ## Escopo confirmado
 
@@ -21,4 +21,4 @@ Implementação local autorizada em 14/10/2026. Publicação pendente.
 
 ## Publicação
 
-Aguardar autorização específica. Ordem: migração, servidor, tela. Antes de publicar, atualizar main, reservar/subir a versão com os scripts oficiais e repetir as verificações pertinentes. Não aplicar migração nem publicar código nesta entrega de revisão.
+Autorização específica recebida. Ordem: migração, servidor, tela. Antes de publicar, atualizar main, reservar/subir a versão com os scripts oficiais e repetir as verificações pertinentes. Somente este recurso pertence à publicação.
