@@ -14,7 +14,7 @@ const REL_ENT = {
  /* Abre no mês atual. Valores parciais ficam identificados e fora da base estatística. */
  ano:new Date().getFullYear(), foco:String(new Date().getMonth()+1).padStart(2,'0'), selecionados:new Set(['entregue','vendido','recebido','funcionarios','retrabalho']), areasProducao:relEntAreasSalvas(), dados:null,equipe:null,erro:'',carregando:false,mes:null,metrica:'entregue',pedido:0,
  // Quadros recolhíveis abertos: o render recria o HTML e fechava o quadro a cada marca.
- abertos:{}, filtroPontualidade:'todas', limitePontualidade:50, intervalo:null, analises:{pontualidade:{previsao:false,tendencia:false},financeiro:{previsao:false,tendencia:false}},
+ abertos:{}, filtroPontualidade:'todas', limitePontualidade:50, classeABC:'',clienteABC:'',intervalo:null, analises:{pontualidade:{previsao:false,tendencia:false},financeiro:{previsao:false,tendencia:false}},
  indicadores:{entregue:{nome:'Entregue',cor:'#167a70',unidade:'R$'},vendido:{nome:'Vendido · O.S.',cor:'#3763cf',unidade:'R$'},recebido:{nome:'Dinheiro recebido',cor:'#9b51ba',unidade:'R$'},funcionarios:{nome:'Funcionários',cor:'#b47410',unidade:'pessoas'},retrabalho:{nome:'Índice de retrabalho',cor:'#cf493a',unidade:'%'}}
 };
 function relEntData(v){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || ''));return m?`${m[3]}/${m[2]}/${m[1]}`:'—';}
@@ -41,7 +41,7 @@ async function relEntCarregar() {
   const erro=relatorios.find(d=>d.error)?.error || h.error;if(erro)throw new Error(erro);
   if(relatorios.some(d=>!Array.isArray(d.meses)) || !Array.isArray(h.meses))throw new Error('Resposta incompleta das fontes.');
   const ultimoDia=new Date(Date.UTC(Number(fim.slice(0,4)),Number(fim.slice(5)),0)).toISOString().slice(0,10);
-  r.dados={...relatorios[0],corteFonte:hoje,de:inicio+'-01',ate:[ultimoDia,hoje].sort()[0],meses:relatorios.flatMap(d=>d.meses).sort((a,b)=>a.mes.localeCompare(b.mes)),consultadoEm:new Date().toISOString(),recebimentosEm:relatorios.map(d=>d.recebimentosEm).filter(Boolean).sort().at(-1)||null};r.equipe=h;
+  r.dados={...relatorios[0],abcPorAno:Object.fromEntries(relatorios.map(d=>[String(d.ano),d.abc||{disponivel:false}])),corteFonte:hoje,de:inicio+'-01',ate:[ultimoDia,hoje].sort()[0],meses:relatorios.flatMap(d=>d.meses).sort((a,b)=>a.mes.localeCompare(b.mes)),consultadoEm:new Date().toISOString(),recebimentosEm:relatorios.map(d=>d.recebimentosEm).filter(Boolean).sort().at(-1)||null};r.equipe=h;
   for(const m of r.dados.meses){const rh=h.meses.find(x=>x.mes===m.mes);m.funcionarios=m.futuro?null:rh?.total??null;m.rh=rh;}
  }catch(e){if(id===r.pedido)r.erro=relEntErroTxt(e);}
  finally{if(id===r.pedido){r.carregando=false;if(STATE._entAba==='relatorios')renderRelatoriosEntregas();}}
@@ -115,7 +115,7 @@ function relEntGrafico(chaves,titulo){
 function relEntGraficoPontualidade(){
  const ms=relEntMesesGrafico(),medidas=ms.map(m=>({m,p:relEntPontualidade([m])}));
  const series=[{chave:'noPrazo',nome:'No prazo',cor:'#167a70'},{chave:'atraso',nome:'Com atraso',cor:'#c54738'}].map(s=>({...s,unidade:'%',pontos:medidas.map(({m,p})=>({mes:m.mes,valor:s.chave==='noPrazo'?p.percentualNoPrazo:p.percentualAtraso,peso:p.comparaveis,elegivel:!p.semComparacao&&!p.mesesSemFonte.length,parcial:relEntParcial(m),futuro:m.futuro}))}));
- return relEntDesenharGrafico(series,ms,'Evolução da pontualidade · %',{analisar:true,pontualidade:true});
+ return `<p class="rel-ent-abc-contexto">${esc(relEntABCResumo())}</p>`+relEntDesenharGrafico(series,ms,'Evolução da pontualidade · %',{analisar:true,pontualidade:true});
 }
 function relEntDesenharGrafico(series,ms,titulo,{analisar=false,pontualidade=false}={}){
  const r=REL_ENT,W=1040,H=270,L=104,R=46,T=28,B=42,quadro=pontualidade?'pontualidade':'financeiro',opcoes=r.analises[quadro],previsao=analisar&&opcoes.previsao,tendencia=analisar&&opcoes.tendencia,referencia=relEntReferencia();
@@ -189,7 +189,36 @@ function relEntDiaValido(v){
  const dia=s.slice(0,10),t=Date.parse(dia+'T12:00:00Z');
  return Number.isFinite(t) && new Date(t).toISOString().slice(0,10)===dia?dia:'';
 }
-function relEntPontualidade(meses){
+const REL_ENT_CLASSES_ABC=['A+','A','B+','B','C'];
+function relEntClasseABC(o){return REL_ENT_CLASSES_ABC.includes(o.abc?.classe)?o.abc.classe:'';}
+function relEntCasaABC(o){return (!REL_ENT.classeABC || relEntClasseABC(o)===REL_ENT.classeABC) && (REL_ENT.classeABC!=='A+' || !REL_ENT.clienteABC || o.abc?.chave===REL_ENT.clienteABC);}
+function relEntABCFonte(){
+ const r=REL_ENT,anos=[...new Set(relEntMesesVisiveis().filter(m=>!m.futuro).map(m=>m.mes.slice(0,4)))];
+ return anos.map(ano=>({ano,...(r.dados?.abcPorAno?.[ano] || (r.dados?.abc?.ano===ano?r.dados.abc:null) || {disponivel:false})}));
+}
+function relEntABCSelo(classe){return classe?`<span class="rel-ent-abc-selo abc-${classe.replace('+','mais')}">${esc(classe)}</span>`:'<span class="text-muted">Sem classe</span>';}
+function relEntABCClientesAmais(){
+ const m=new Map();for(const f of relEntABCFonte().filter(f=>f.disponivel))for(const c of f.clientesAmais||[])if(c.chave&&!m.has(c.chave))m.set(c.chave,c);
+ return [...m.values()].sort((a,b)=>String(a.nome).localeCompare(String(b.nome),'pt-BR'));
+}
+function relEntValidarClienteABC(){
+ const r=REL_ENT;
+ if(r.dados&&r.clienteABC&&(r.classeABC!=='A+'||!relEntABCClientesAmais().some(c=>c.chave===r.clienteABC)))r.clienteABC='';
+}
+function relEntABCResumo(){
+ const r=REL_ENT,c=r.classeABC==='A+'&&r.clienteABC?relEntABCClientesAmais().find(c=>c.chave===r.clienteABC):null;
+ return (r.classeABC?'Classe '+r.classeABC:'Todas as classes')+(c?' · '+c.nome:'');
+}
+function relEntABCHTML(){
+ const r=REL_ENT,fontes=relEntABCFonte(),disponivel=fontes.some(f=>f.disponivel);
+ const linhas=relEntPontualidade(relEntMesesVisiveis(),{filtrarABC:false}).linhas,sem=linhas.filter(o=>!relEntClasseABC(o)).length;
+ return `<section class="rel-ent-abc" aria-label="Classificação da curva ABC"><div class="rel-ent-abc-topo"><strong>Curva ABC</strong><span>Classificação atual de Campanhas · ${fontes.map(f=>esc(f.ano)).join(', ')}</span></div>
+ <div class="rel-ent-abc-chips" role="group" aria-label="Filtrar pontualidade por classe ABC">${[['','Todos'],...REL_ENT_CLASSES_ABC.map(c=>[c,c])].map(([v,n])=>`<button type="button" class="btn-ghost abc-${v.replace('+','mais')} ${r.classeABC===v?'active':''}" data-rel-abc-classe="${v}" aria-pressed="${r.classeABC===v}" ${v&&!disponivel?'disabled':''}>${n}</button>`).join('')}</div>
+ ${r.classeABC==='A+'&&disponivel?`<label class="rel-ent-abc-cliente" for="rel-ent-abc-cliente">Cliente A+<select id="rel-ent-abc-cliente"><option value="">Todos os clientes A+</option>${relEntABCClientesAmais().map(c=>`<option value="${esc(c.chave)}" ${r.clienteABC===c.chave?'selected':''}>${esc(c.nome)}${c.grupo?' (grupo)':''}</option>`).join('')}</select></label>`:''}
+ ${fontes.some(f=>!f.disponivel)?`<p class="rel-ent-aviso" role="status">Curva ABC indisponível em ${fontes.filter(f=>!f.disponivel).map(f=>esc(f.ano)).join(', ')}. Use Atualizar fontes para tentar novamente. As entregas continuam disponíveis em Todos.</p>`:''}
+ <p class="rel-ent-abc-contexto">Filtra somente a pontualidade. A classe vem da curva anual e mantém os grupos vinculados.${sem?` ${sem} entrega(s) sem classe permanecem em Todos.`:''}</p></section>`;
+}
+function relEntPontualidade(meses,{filtrarABC=true}={}){
  const p={total:0,comparaveis:0,noPrazo:0,antecipadas:0,atrasadas:0,semComparacao:0,somaAtraso:0,mediaAtraso:null,maiorAtraso:null,percentualNoPrazo:null,percentualAtraso:null,cobertura:null,mesesSemFonte:[],linhas:[],
   /* A RÉGUA DO ATRASO DO PCP (M3, onda operação): a mesma da ficha e das
      ocorrências da comissão, que o servidor manda em cada linha (pcp). Não
@@ -199,6 +228,7 @@ function relEntPontualidade(meses){
  for(const m of meses.filter(x=>!x.futuro)){
   if(m.entregasCarregadas!==true){p.mesesSemFonte.push(m.mes);continue;}
   for(const o of m.entregas || []){
+   if(filtrarABC&&!relEntCasaABC(o))continue;
    const prevista=relEntDiaValido(o.previsao),realizada=relEntDiaValido(o.data);
    const diferenca=prevista && realizada?Math.round((Date.parse(realizada+'T12:00:00Z')-Date.parse(prevista+'T12:00:00Z'))/86400000):null;
    const situacao=diferenca===null?'semDados':diferenca>0?'atraso':'noPrazo';
@@ -223,6 +253,7 @@ function relEntPontualidadeHTML(){
  const filtro=r.filtroPontualidade || 'todas',linhas=p.linhas.filter(o=>filtro==='todas' || o.situacao===filtro).sort((a,b)=>(b.diferenca || 0)-(a.diferenca || 0) || String(a.numero).localeCompare(String(b.numero),'pt-BR',{numeric:true}));
  const limite=r.limitePontualidade || 50,exibidas=linhas.slice(0,limite);
  return `<details class="rel-ent-quadro rel-ent-pontualidade" data-rel-quadro="quadro-pontualidade" ${(r.abertos['quadro-pontualidade']??true)?'open':''}><summary aria-label="Pontualidade das entregas"><header><div><span class="perf-report-eyebrow">PRAZO PREVISTO × ENTREGA EFETIVA</span><h3 id="rel-ent-prazo-titulo">Pontualidade das entregas</h3><p>${esc(periodo)} · pela data em que a O.S. foi entregue.</p></div><span class="rel-ent-fonte">Mubisys</span></header><span class="rel-ent-recolher">Recolher</span><span class="rel-ent-expandir">Expandir</span></summary><div class="rel-ent-quadro-corpo">
+ ${relEntABCHTML()}
  ${p.mesesSemFonte.length?`<p class="rel-ent-aviso">Comparativo incompleto: sem fonte de entregas em ${p.mesesSemFonte.map(m=>esc(m.slice(5)+'/'+m.slice(0,4))).join(', ')}. Esses meses não entram no cálculo.</p>`:''}
  <section class="rel-ent-regua rel-ent-regua-erp" data-rel-regua-erp aria-labelledby="rel-ent-regua-erp-tit"><h4 class="rel-ent-regua-tit" id="rel-ent-regua-erp-tit">Régua do ERP <small>(documental: a previsão contra a entrega no Mubisys)</small></h4>
  <p class="rel-ent-regua-base">Base: ${p.comparaveis} O.S. comparáveis de ${p.total} entregues nos meses carregados${p.cobertura===null?'':' · cobertura de '+relEntPercentual(p.cobertura)}. Antecipadas e entregues na data contam como no prazo. Atraso em dias corridos, sem descontar fins de semana. Pedidos em aberto não entram.</p>
@@ -231,7 +262,7 @@ function relEntPontualidadeHTML(){
  ${relEntReguaPCPHTML(p)}
  ${relEntGraficoPontualidade()}
  ${!r.foco?`<details data-rel-quadro="tabela-pontualidade" ${r.abertos['tabela-pontualidade']?'open':''}><summary>Pontualidade mês a mês</summary><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>Mês</th><th>Comparáveis / entregues</th><th>No prazo</th><th>Com atraso</th><th>Atraso médio</th><th>Sem comparação</th></tr></thead><tbody>${meses.map(m=>{const v=relEntPontualidade([m]);return `<tr><th>${relEntMesTxt(m)}</th><td>${v.mesesSemFonte.length?'Sem fonte':v.comparaveis+' / '+v.total}</td><td>${relEntPercentual(v.percentualNoPrazo)}</td><td>${relEntPercentual(v.percentualAtraso)}</td><td>${relEntDias(v.mediaAtraso)}</td><td>${v.mesesSemFonte.length?'—':v.semComparacao}</td></tr>`;}).join('')}</tbody></table></div></details>`:''}
- <details class="rel-ent-prazo-detalhes" data-rel-quadro="pontualidade" ${r.abertos.pontualidade?'open':''}><summary>Conferir as datas por O.S. (${p.total})</summary><div class="rel-ent-prazo-filtro"><label for="rel-ent-prazo-filtro">Mostrar entregas</label><select id="rel-ent-prazo-filtro">${[['todas','Todas'],['atraso','Com atraso'],['noPrazo','No prazo'],['semDados','Sem comparação']].map(([v,n])=>`<option value="${v}" ${filtro===v?'selected':''}>${n}</option>`).join('')}</select><span>Exibindo ${exibidas.length} de ${linhas.length} O.S.${filtro==='todas'?'':' neste filtro'} · maiores atrasos primeiro.</span></div><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S.</th><th>Cliente</th><th>Prevista no Mubisys</th><th>Entrega efetiva</th><th>Resultado</th><th>Régua do PCP</th></tr></thead><tbody>${exibidas.map(o=>`<tr data-rel-prazo-linha><td>${esc(o.numero)}</td><td>${esc(o.cliente || '—')}</td><td>${relEntData(o.prevista)}</td><td>${relEntData(o.realizada)}</td><td><span class="rel-ent-prazo-status ${o.situacao==='atraso'?'prazo-atraso':o.situacao==='noPrazo'?'prazo-ok':''}">${o.situacao==='semDados'?'Sem comparação':o.diferenca>0?relEntDias(o.diferenca)+' de atraso':o.diferenca<0?'No prazo · '+relEntDias(-o.diferenca)+' antes':'No prazo · na data'}</span></td><td>${relEntPCPCelula(o.pcp)}</td></tr>`).join('') || '<tr><td colspan="6">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div>${exibidas.length<linhas.length?'<button class="btn-ghost" id="rel-ent-prazo-mais">Mostrar mais 50</button>':''}</details>
+ <details class="rel-ent-prazo-detalhes" data-rel-quadro="pontualidade" ${r.abertos.pontualidade?'open':''}><summary>Conferir as datas por O.S. (${p.total})</summary><div class="rel-ent-prazo-filtro"><label for="rel-ent-prazo-filtro">Mostrar entregas</label><select id="rel-ent-prazo-filtro">${[['todas','Todas'],['atraso','Com atraso'],['noPrazo','No prazo'],['semDados','Sem comparação']].map(([v,n])=>`<option value="${v}" ${filtro===v?'selected':''}>${n}</option>`).join('')}</select><span>Exibindo ${exibidas.length} de ${linhas.length} O.S.${filtro==='todas'?'':' neste filtro'} · maiores atrasos primeiro.</span></div><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>O.S.</th><th>Cliente</th><th>Prevista no Mubisys</th><th>Entrega efetiva</th><th>Resultado</th><th>Régua do PCP</th></tr></thead><tbody>${exibidas.map(o=>`<tr data-rel-prazo-linha><td>${esc(o.numero)}</td><td>${esc(o.cliente || '—')} ${relEntABCSelo(relEntClasseABC(o))}</td><td>${relEntData(o.prevista)}</td><td>${relEntData(o.realizada)}</td><td><span class="rel-ent-prazo-status ${o.situacao==='atraso'?'prazo-atraso':o.situacao==='noPrazo'?'prazo-ok':''}">${o.situacao==='semDados'?'Sem comparação':o.diferenca>0?relEntDias(o.diferenca)+' de atraso':o.diferenca<0?'No prazo · '+relEntDias(-o.diferenca)+' antes':'No prazo · na data'}</span></td><td>${relEntPCPCelula(o.pcp)}</td></tr>`).join('') || '<tr><td colspan="6">Nenhuma entrega neste filtro.</td></tr>'}</tbody></table></div>${exibidas.length<linhas.length?'<button class="btn-ghost" id="rel-ent-prazo-mais">Mostrar mais 50</button>':''}</details>
  <p class="metricas-nota">Previsão conforme a última carga do Mubisys (sem ela, a do cartão do PCP). Alterações posteriores no ERP podem mudar o comparativo. Esta é a régua documental do ERP; a do atraso, a mesma da ficha e da comissão, é a "Régua do PCP".</p></div></details>`;
 }
 /* A RÉGUA DO PCP no relatório (M3): o prazo combinado no PCP contra o dia da
@@ -254,6 +285,7 @@ function relEntPCPCelula(m){
 }
 function renderRelatoriosEntregas() {
  const el=document.getElementById('panel-entregas'),r=REL_ENT;if(!el)return;
+ relEntValidarClienteABC();
  const anoAtual=new Date().getFullYear(),anos=Array.from({length:anoAtual-2019},(_,i)=>anoAtual-i),ks=[...r.selecionados];
  el.innerHTML=`<div class="casa-pagina">${abasEntregasHTML('relatorios')}<div class="casa-pagina-head"><div><h2>Relatórios de entregas</h2><p>Compare produção, vendas, recebimentos, equipe e qualidade mês a mês.</p></div><button class="btn-ghost" id="rel-ent-pdf" ${!r.dados?'disabled':''}>📄 Salvar PDF</button></div>
  <details class="rel-ent-controles" data-rel-quadro="filtros" ${(r.abertos.filtros??true)?'open':''}><summary>Período e filtros <span>${esc(relEntPeriodoTxt())}</span></summary><div class="rel-ent-periodo"><div class="rel-ent-ano"><label for="rel-ent-ano">Ano (atalho)</label><select id="rel-ent-ano">${anos.map(a=>`<option ${a===r.ano?'selected':''}>${a}</option>`).join('')}</select></div><span class="rel-ent-atualizado">${r.dados?`Dados até ${relEntData(r.dados.ate)}`:'Selecione o período para comparar'}</span><button class="btn-ghost" id="rel-ent-refresh" ${r.carregando?'disabled':''}>${r.carregando?'Consultando…':'Atualizar fontes'}</button></div>${relEntChipsHTML()}<details class="rel-ent-filtros-avancados" data-rel-quadro="filtros-avancados" ${r.abertos['filtros-avancados']?'open':''}><summary>Personalizar período e indicadores</summary><fieldset class="rel-ent-series"><legend>Indicadores para comparar</legend><div class="rel-ent-series-opcoes">${Object.entries(r.indicadores).map(([k,i])=>`<label style="--serie-cor:${i.cor}"><input type="checkbox" data-rel-serie="${k}" ${r.selecionados.has(k)?'checked':''}><span>${i.nome}</span></label>`).join('')}</div><div class="rel-ent-series-acoes"><button class="btn-ghost btn-sm" id="rel-ent-todos">Ver todos</button><button class="btn-ghost btn-sm" id="rel-ent-limpar">Limpar seleção</button></div></fieldset>
@@ -265,10 +297,12 @@ function renderRelatoriosEntregas() {
  <details class="rel-ent-quadro" data-rel-quadro="conferencia" ${r.abertos.conferencia?'open':''}><summary><h3>Conferência mês a mês</h3></summary><div class="rel-ent-quadro-corpo"><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>Mês</th>${ks.map(k=>`<th>${r.indicadores[k].nome}</th>`).join('')}</tr></thead><tbody>${relEntMesesVisiveis().map(m=>`<tr><th>${relEntMesTxt(m)}</th>${ks.map(k=>`<td><button class="btn-ghost btn-sm" data-rel-ponto="${m.mes}" data-rel-metrica="${k}">${relEntValor(m[k],k)}${k==='funcionarios'&&m.rh?.piso?' (mínimo)':''}</button></td>`).join('')}</tr>`).join('')}</tbody></table></div></div></details>`:'<p>Marque pelo menos um indicador para mostrar os gráficos.</p>'}
  ${relEntDetalhe()}<details class="rel-ent-fontes" data-rel-quadro="fontes" ${r.abertos.fontes?'open':''}><summary>Como os indicadores são calculados</summary>${Object.entries(r.dados.notas).map(([k,v])=>`<p><strong>${r.indicadores[k]?.nome || k}:</strong> ${esc(v)}</p>`).join('')}<p>Funcionários: vínculos ativos em algum dia do mês, pelas admissões e desligamentos do RH. Histórico anterior a ${esc(r.equipe.desdeQuando || 'data não conhecida')} pode estar incompleto. Não inclui fichas sem data de admissão válida.</p><p>Consulta: ${esc(new Date(r.dados.consultadoEm).toLocaleString('pt-BR'))}. Carga do fluxo financeiro: ${esc(r.dados.recebimentosEm?new Date(r.dados.recebimentosEm).toLocaleString('pt-BR'):'indisponível')}.</p><ul>${relEntMesesVisiveis().map(m=>`<li>${m.mes}: entregas atualizadas em ${esc(m.entregasEm?new Date(m.entregasEm).toLocaleString('pt-BR'):'sem carga')}</li>`).join('')}</ul></details>`:''}</div></div>`;
  wireAbasEntregas(el);
- el.querySelector('#rel-ent-ano').onchange=e=>{r.ano=Number(e.target.value);r.intervalo=null;if(r.foco && `${r.ano}-${r.foco}`>OPERACAO.dia(new Date()).slice(0,7))r.foco=OPERACAO.dia(new Date()).slice(5,7);r.mes=null;r.limitePontualidade=50;relEntCarregar();};
+ el.querySelectorAll('[data-rel-abc-classe]').forEach(b=>b.onclick=()=>{r.classeABC=b.dataset.relAbcClasse;r.clienteABC='';r.limitePontualidade=50;renderRelatoriosEntregas();[...el.querySelectorAll('[data-rel-abc-classe]')].find(x=>x.dataset.relAbcClasse===r.classeABC)?.focus();});
+ const clienteABC=el.querySelector('#rel-ent-abc-cliente');if(clienteABC)clienteABC.onchange=()=>{r.clienteABC=clienteABC.value;r.limitePontualidade=50;renderRelatoriosEntregas();el.querySelector('#rel-ent-abc-cliente')?.focus();};
+ el.querySelector('#rel-ent-ano').onchange=e=>{r.ano=Number(e.target.value);r.intervalo=null;r.clienteABC='';if(r.foco && `${r.ano}-${r.foco}`>OPERACAO.dia(new Date()).slice(0,7))r.foco=OPERACAO.dia(new Date()).slice(5,7);r.mes=null;r.limitePontualidade=50;relEntCarregar();};
  el.querySelectorAll('[data-rel-mes]').forEach(b=>b.onclick=()=>{relEntSelecionarMes(b.dataset.relMes);renderRelatoriosEntregas();});
  el.querySelector('#rel-ent-refresh').onclick=relEntCarregar;
- el.querySelector('#rel-ent-intervalo').onsubmit=e=>{e.preventDefault();const v=relEntValidarIntervalo(el.querySelector('#rel-ent-inicio').value,el.querySelector('#rel-ent-fim').value);if(!v.ok){el.querySelector('#rel-ent-intervalo-erro').textContent=v.erro;return;}r.intervalo={inicio:v.inicio,fim:v.fim};r.ano=Number(v.inicio.slice(0,4));r.foco='';r.mes=null;r.limitePontualidade=50;relEntCarregar();};
+ el.querySelector('#rel-ent-intervalo').onsubmit=e=>{e.preventDefault();const v=relEntValidarIntervalo(el.querySelector('#rel-ent-inicio').value,el.querySelector('#rel-ent-fim').value);if(!v.ok){el.querySelector('#rel-ent-intervalo-erro').textContent=v.erro;return;}r.clienteABC='';r.intervalo={inicio:v.inicio,fim:v.fim};r.ano=Number(v.inicio.slice(0,4));r.foco='';r.mes=null;r.limitePontualidade=50;relEntCarregar();};
  el.querySelectorAll('[data-rel-analise-quadro]').forEach(c=>c.onchange=()=>{r.analises[c.dataset.relAnaliseQuadro][c.dataset.relAnaliseTipo]=c.checked;const id=c.id;renderRelatoriosEntregas();el.querySelector('#'+id)?.focus();});
  el.querySelectorAll('[data-rel-prazo-ponto]').forEach(b=>{const abrir=()=>{r.ano=Number(b.dataset.relPrazoPonto.slice(0,4));relEntSelecionarMes(b.dataset.relPrazoPonto.slice(5));r.filtroPontualidade=b.dataset.relPrazoTipo;r.abertos.pontualidade=true;r.limitePontualidade=50;renderRelatoriosEntregas();el.querySelector('#rel-ent-prazo-filtro')?.focus();};b.onclick=abrir;b.onkeydown=e=>{if(['Enter',' '].includes(e.key)){e.preventDefault();abrir();}};});
  const filtroPrazo=el.querySelector('#rel-ent-prazo-filtro');if(filtroPrazo)filtroPrazo.onchange=e=>{r.filtroPontualidade=e.target.value;r.limitePontualidade=50;r.abertos.pontualidade=true;renderRelatoriosEntregas();el.querySelector('#rel-ent-prazo-filtro')?.focus();};

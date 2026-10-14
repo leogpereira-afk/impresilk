@@ -4515,6 +4515,17 @@ img.perf-logo{object-fit:cover}
 .rel-ent-quadro:not([open])>summary .rel-ent-recolher,.rel-ent-quadro[open]>summary .rel-ent-expandir{display:none}
 .rel-ent-quadro-corpo{padding:0 12px 12px;min-width:0}
 .rel-ent-quadro-corpo>.rel-ent-grafico{border:0;border-radius:0;padding:0;margin:0}
+.rel-ent-abc{border-bottom:1px solid #e2e8f0;padding:0 0 10px;margin:0 0 12px;min-width:0}
+.rel-ent-abc-topo,.rel-ent-abc-chips{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.rel-ent-abc-topo span,.rel-ent-abc-contexto{font-size:12px;color:#536375}
+.rel-ent-abc-chips{margin:8px 0}.rel-ent-abc-chips button{min-height:40px;border-radius:999px;padding:6px 14px!important;font-size:13px!important}
+.rel-ent-abc-chips button.active{background:#243f91;color:#fff;border-color:#243f91;box-shadow:0 0 0 2px #243f9125}
+.rel-ent-abc-cliente{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;margin:6px 0}.rel-ent-abc-cliente select{width:min(100%,340px);min-width:0;min-height:40px;border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;font:inherit;background:white;color:#24374a}
+.rel-ent-abc-contexto{margin:6px 0;line-height:1.4}
+.rel-ent-abc-selo{display:inline-block;white-space:nowrap;padding:3px 7px;border-radius:5px;font-size:12px;font-weight:700;background:#e2e8f0;color:#334155}
+.rel-ent-abc-selo.abc-Amais,.rel-ent-abc-chips .abc-Amais.active{background:#4039a4;color:#fff}.rel-ent-abc-selo.abc-A,.rel-ent-abc-chips .abc-A.active{background:#e0e7ff;color:#363078}.rel-ent-abc-selo.abc-Bmais,.rel-ent-abc-chips .abc-Bmais.active{background:#885415;color:#fff}.rel-ent-abc-selo.abc-B,.rel-ent-abc-chips .abc-B.active{background:#fff0cb;color:#775015}.rel-ent-abc-chips .abc-C.active{background:#e2e8f0;color:#334155}
+@media(max-width:600px){.rel-ent-abc-topo{gap:4px}.rel-ent-abc-topo span{width:100%}.rel-ent-abc-chips{gap:5px}.rel-ent-abc-chips button{padding:6px 10px!important}}
+@media print{.rel-ent-abc-chips,.rel-ent-abc-cliente{display:none!important}}
 .rel-ent-quadro:not(.rel-ent-pontualidade)>.rel-ent-quadro-corpo>.rel-ent-grafico>h3{display:none}
 .rel-ent-resumo-grid{padding:0 12px 12px}
 #panel-entregas .rel-ent-prazo-cards{gap:8px}

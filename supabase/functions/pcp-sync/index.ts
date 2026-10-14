@@ -1880,6 +1880,14 @@ Deno.serve(async (req: Request) => {
            A previsão do ERP que falta no pacote vem do cartão do PCP (a mesma
            reserva do quadro de prazo de Entregas, casa.js slaEntregas). */
         const numerosPCP=[...new Set(meses.flatMap(mes=>{const pk:any=pacotes.get("entregues:"+mes);return (Array.isArray(pk?.os)?pk.os:[]).map((r:any)=>String(r.numero || "").trim()).filter(Boolean);}))];
+        // A indisponibilidade da ABC não apaga o relatório existente. Nenhum
+        // cliente sem vínculo vira classe C e nenhuma classe é recalculada aqui.
+        let abc:any={ano:String(ano),disponivel:false,clientesAmais:[],erro:"Curva ABC indisponível. Atualize as fontes para tentar novamente."};
+        try {
+          const {data,error}=await sb.rpc("pcp_pontualidade_abc",{p_ano:String(ano),p_numeros:numerosPCP});
+          if(!error && data?.disponivel===true && data.ano===String(ano) && Array.isArray(data.clientesAmais) && Array.isArray(data.ordens))abc=data;
+        }catch(_e){/* O relatório de entregas continua disponível sem a segmentação. */}
+        const abcOrdens=new Map((abc.ordens || []).map((o:any)=>[String(o.numero),{classe:o.classe,...(o.classe==='A+'?{chave:o.chave}:{})}]));
         const osPCP=new Map<string,any>();
         for(let i=0;i<numerosPCP.length;i+=200){
           const {data:regs,error:erroPCP}=await sb.from("pcp_registros").select("id,registro").eq("colecao","os").eq("apagado",false).in("registro->>numero",numerosPCP.slice(i,i+200));
@@ -1897,7 +1905,7 @@ Deno.serve(async (req: Request) => {
           }).map((r:any)=>{
             const n=String(r.numero || "").trim(),card=osPCP.get(n),prevCard=String(card?.previsaoEntrega || "").slice(0,10);
             const previsao=String(r.previsao || "") || (/^\d{4}-\d{2}-\d{2}$/.test(prevCard)?prevCard:"");
-            return {numero:r.numero,cliente:r.cliente,data:r.data,previsao,...(!String(r.previsao || "") && previsao?{previsaoFonte:"pcp"}:{}),valor:numero(r.valor),pcp:medidaPCP(n)};
+            return {numero:r.numero,cliente:r.cliente,data:r.data,previsao,...(!String(r.previsao || "") && previsao?{previsaoFonte:"pcp"}:{}),valor:numero(r.valor),pcp:medidaPCP(n),abc:abcOrdens.get(n)||null};
           });
           const vendas=ordens.filter(r=>String(r.data).startsWith(mes)).map(r=>({numero:r.numero,cliente:r.cliente,data:r.data,valor:numero(r.valor)}));
           /* O % DE RETRABALHO É POR O.S. (linha Baixa da auditoria de
@@ -1914,7 +1922,8 @@ Deno.serve(async (req: Request) => {
             retrabalho:instalacoes.length?100*retrabalhos.length/instalacoes.length:null,baseRetrabalho:instalacoes.length,
             entregasCarregadas:!!(pacote?.v>=2 && Array.isArray(pacote.os)),entregas,vendas,retrabalhos,entregasEm:pacote?.em || null};
         });
-        return resp({ano,de,ate,meses:linhas,consultadoEm:new Date().toISOString(),recebimentosEm:fluxo.data?.atualizado_em || null,
+        const {ordens:_abcOrdens,...abcPublica}=abc;
+        return resp({ano,de,ate,meses:linhas,abc:abcPublica,consultadoEm:new Date().toISOString(),recebimentosEm:fluxo.data?.atualizado_em || null,
           notas:{vendido:"O.S. por data de cadastro no Mubisys, valor líquido. Não equivale a faturamento fiscal. Histórico depende da carga do ERP; mês sem registros não confirma venda zero.",
           recebido:"Pagamentos de contas a receber pela data de pagamento/crédito, no fluxo mensal do Painel. Fonte agregada: não contém títulos individuais. Anos preservados podem ter atualização anterior à carga indicada.",
           retrabalho:"Instalações finalizadas no PCP no mês com marca de retrabalho ÷ instalações finalizadas registradas no mesmo mês. Histórico operacional pode ser incompleto; ausência de marca não comprova inspeção de qualidade.",
