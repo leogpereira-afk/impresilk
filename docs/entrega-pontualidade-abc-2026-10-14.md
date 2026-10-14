@@ -1,6 +1,6 @@
 # Pontualidade com a curva ABC
 
-Revisão local concluída. Publicação da v176 autorizada pelo dono com "subir" em 14/10/2026; preparação em andamento.
+Registro da revisão e da preparação da v176. Publicação autorizada pelo dono com "subir" em 14/10/2026. O resultado final da publicação e da conferência da tela fica na Passagem do VEZ.md (e em docs/passagens quando arquivada).
 
 ## Comportamento
 
@@ -37,7 +37,7 @@ Para SQL, disponibilizar `@electric-sql/pglite` fora do projeto e passar seu cam
 
 Para interface, iniciar `PORT=49137 node scripts/preview-auditoria.cjs`, disponibilizar Playwright e passar `CHROME_BIN` se necessário. O script de UI só aceita URL de localhost e usa dados fictícios. As imagens ficam fora do repositório.
 
-## Publicação pendente
+## Sequência de publicação autorizada
 
 1. Autorização específica do dono recebida, conforme AGENTS.md.
 2. Revalidar main/vez e versão disponível; usar subir-versao.cjs.
@@ -46,3 +46,11 @@ Para interface, iniciar `PORT=49137 node scripts/preview-auditoria.cjs`, disponi
 5. Publicar tela e verificar o fluxo autenticado em produção.
 
 Não aplicar a migração nem publicar a tela isoladamente. O deploy da nova interface antes do servidor mostraria o aviso de ABC indisponível.
+
+## Conferência anterior à liberação da tela
+
+- Suíte repetida na v176: 2.080 testes aprovados, nenhum ignorado; oito verificações SQL e seis fluxos de interface aprovados.
+- Migração aplicada via conector Supabase com versão remota `20261014173042`, nome `pcp_pontualidade_abc`; corresponde ao arquivo local `20261014170059_pcp_pontualidade_abc.sql`. Não reaplicar como uma migração diferente por causa do carimbo gerado pelo conector.
+- Consulta oficial respondeu disponível; privilégios de anon/authenticated recusados, service_role permitido e SECURITY INVOKER confirmado. Nenhum registro alterado.
+- Publicado somente pcp-sync v157 pelo conector Supabase, pois o workflow geral também republicaria o Painel, reservado a outro trabalho. Nenhuma mudança em _shared; os 11 arquivos publicados conferiram integralmente com o ramo aprovado. pcp-mubisys permaneceu v135.
+- Consulta protegida sem sessão recusada com HTTP 401. A publicação da tela e sua conferência autenticada seguem após este registro.
