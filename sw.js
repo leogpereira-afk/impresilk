@@ -8,6 +8,7 @@ const CACHE = 'impresilk-shell-v176';
 // CDN. Regra de deploy: CACHE aqui, APP_VERSAO no config.js e o ?v= no
 // index.html/equipe.html sobem JUNTOS.
 const SHELL = [
+  'silk-design.css?v=v176', 'silk-compacto.webp',
   './', 'index.html', 'equipe.html', 'ranking.html', 'ranking.js?v=v176', 'ranking.css?v=v176', 'performance-dashboards.js?v=v176', 'performance-dashboards.css?v=v176', 'styles.css?v=v176', 'performance-layout.css?v=v176',
   'config.js?v=v176', 'logo.js?v=v176', 'frases.js?v=v176', 'privacidade-valores.js?v=v176', 'store.js?v=v176', 'auth.js?v=v176', 'operacao.js?v=v176', 'operacao-revisao.js?v=v176', 'divisao.js?v=v176', 'regras.js?v=v176', 'entrega-item.js?v=v176', 'conferencia-entrega.js?v=v176', 'conferencia-entrega-ui.js?v=v176', 'controle-entrega-ui.js?v=v176', 'diagnostico-itens.js?v=v176', 'alertas-sync.js?v=v176', 'relatorios-pcp.js?v=v176', 'app.js?v=v176', 'casa.js?v=v176', 'demandas.js?v=v176', 'demandas.css?v=v176', 'comissao.js?v=v176', 'comissao-ui.js?v=v176', 'performance.js?v=v176', 'perdas.js?v=v176', 'alocacao-ui.js?v=v176', 'lote.js?v=v176', 'entregas-os.js?v=v176', 'relatorios-entregas.js?v=v176', 'equipe.js?v=v176',
   'manifest.json', 'icon.svg', 'favicon.svg',
