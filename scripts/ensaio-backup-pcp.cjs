@@ -47,6 +47,12 @@ const BUCKETS = ['pcp-arquivos', 'pcp-demandas'];
    auditoria de 12/10/2026) entrou do mesmo jeito. */
 const OBRIGATORIAS = ['os', 'auditoria', 'foto_evento', 'performance_fechamentos', 'performance_regras', 'performance_comissao', 'performance_comissao_os_versoes',
   'performance_comissao_exportacoes', 'performance_documentos', 'performance_retrato_logos', 'performance_comissao_pendencias'];
+/* AS QUE CHEGARAM DEPOIS (revisão do D2): a contagem de um pcp-sync mais
+   antigo não as traz. Ausente da contagem (no início e no fim) e sem linha
+   no pacote, a coleção conta como vazia, como o pcp_meta do arquivo antigo;
+   a recusa fica para o pacote que traz linhas dela sem a contagem. As de
+   sempre continuam obrigatórias na contagem. */
+const DEPOIS_DO_FORMATO = ['performance_comissao_exportacoes', 'performance_documentos', 'performance_retrato_logos', 'performance_comissao_pendencias'];
 const sha256 = b => crypto.createHash('sha256').update(b).digest('hex');
 const SHA = /^[a-f0-9]{64}$/;
 
@@ -159,7 +165,11 @@ function validarPacote(p) {
   // A contagem do pacote é a do que está nele; e o que está nele fica entre o antes e o depois do PCP.
   const real = contarLinhas(p.pcp_registros), ini = p.contagem?.inicio?.pcp_registros || {}, fim = p.contagem?.fim?.pcp_registros || {};
   assert.deepEqual(p.contagem?.exportado?.pcp_registros, real, 'A contagem do pacote não confere com as linhas dele.');
-  for (const c of OBRIGATORIAS) if (!fim[c]) throw new Error(`A contagem do PCP não traz a coleção ${c}.`);
+  for (const c of OBRIGATORIAS) {
+    if (fim[c]) continue;
+    const vazia = DEPOIS_DO_FORMATO.includes(c) && !ini[c] && !real[c];
+    if (!vazia) throw new Error(`A contagem do PCP não traz a coleção ${c}${real[c] ? `, e o pacote tem ${real[c].total} ${real[c].total === 1 ? 'linha' : 'linhas'} dela` : ''}.`);
+  }
   for (const c of new Set([...Object.keys(real), ...Object.keys(fim)])) {
     const n = real[c]?.total || 0, a = ini[c]?.total || 0, b = fim[c]?.total;
     if (typeof b !== 'number' || n < a || n > b) throw new Error(`A contagem não confere em ${c}: ${n} no pacote, esperadas de ${a} a ${b}.`);
@@ -463,4 +473,4 @@ if (require.main === module) {
   const tarefa = arg('--arquivo') ? conferirArquivoReal(arg('--arquivo'), arg('--copia')) : executar();
   tarefa.then(r => console.log(JSON.stringify(r, null, 2)), e => { console.error('Ensaio reprovado: ' + e.message); process.exit(1); });
 }
-module.exports = {OBRIGATORIAS, executar, conferirArquivoReal, validarPacote, restaurarPacote, exportarPeloServidor, copiarArquivos, montarPacote, storageMemoria, montarOriginal};
+module.exports = {OBRIGATORIAS, DEPOIS_DO_FORMATO, executar, conferirArquivoReal, validarPacote, restaurarPacote, exportarPeloServidor, copiarArquivos, montarPacote, storageMemoria, montarOriginal};

@@ -232,7 +232,9 @@ const PERDAS = (() => {
     };
     for (const r of lista(resposta && resposta.revisoes)) juntar(r, true);
     for (const r of lista(resposta && resposta.cobrem)) juntar(r, false);
-    return [...grupos.values()].map(g => ({de:g.de, ate:g.ate, exato:g.exato, ...escolherRevisao(g.revisoes)}))
+    // As compensações de pendência aprovadas sobre a revisão que decide (D2): a O.S. pendente que elas decidiram.
+    const comps = lista(resposta && resposta.compensacoesPendencia).filter(c => c && typeof c === 'object');
+    return [...grupos.values()].map(g => { const x = {de:g.de, ate:g.ate, exato:g.exato, ...escolherRevisao(g.revisoes)}; return {...x, compensacoesPendencia:x.revisao ? comps.filter(c => c.aprovacaoId === x.revisao.id) : []}; })
       .filter(x => x.revisao || x.compensacao)
       .sort((a, b) => Number(b.exato) - Number(a.exato) || b.ate.localeCompare(a.ate) || b.de.localeCompare(a.de));
   }
@@ -315,8 +317,26 @@ const PERDAS = (() => {
     const hoje = !r ? 'A ficha hoje não tem retrabalho marcado'
       : !etapa ? 'Na ficha, a origem do retrabalho hoje está a definir'
       : `Na ficha, a origem do retrabalho hoje é ${etapa}${efeito === 'tira' ? ' (tira os pontos e a comissão desta O.S.)' : efeito === 'acompanha' ? ' (não tira nada da instalação)' : ''}`;
-    if (aplicado === 'definir') return `${hoje}. No demonstrativo esta O.S. ficou pendente: ela só entra com nova revisão (feche o período de novo e gere nova prévia).`;
+    if (aplicado === 'definir') return `${hoje}. No demonstrativo esta O.S. ficou pendente: com o mês aprovado e exportado, pague só ela por compensação da pendência, no diálogo da comissão, ou ela entra numa nova revisão do mês.`;
     return `${hoje}. A troca só vale com nova revisão e compensação.`;
+  }
+
+  /* A PENDÊNCIA DECIDIDA POR COMPENSAÇÃO (D2): a compensação aprovada sobre a
+     revisão que decide paga (ou dá como perdida) a O.S. que ficou com a origem
+     a definir; a aba diz isso, e não "feche o período de novo". */
+  function compensacaoDaOS(osId, dem) {
+    const id = String(osId ?? '');
+    const c = lista(dem && dem.compensacoesPendencia).filter(x => lista(x.osIds).map(String).includes(id)).pop();
+    if (!c) return null;
+    const o = (c.origens && c.origens[id]) || {}, l = lista(c.linhas).find(y => String(y.osId) === id) || {};
+    return {id:txt(c.id), seq:c.seq ?? null, em:txt(c.em), perda:o.perda === 'retrabalho_instalacao' ? 'retrabalho_instalacao' : '', etapaOrigem:txt(o.etapaOrigem),
+      baseLiquidaCentavos:Number.isSafeInteger(l.baseLiquidaCentavos) ? l.baseLiquidaCentavos : null, comissaoCentavos:Number.isSafeInteger(l.comissaoCentavos) ? l.comissaoCentavos : null,
+      comissaoPerdidaCentavos:Number.isSafeInteger(l.comissaoPerdidaCentavos) ? l.comissaoPerdidaCentavos : null};
+  }
+  function textoDaCompensacao(c) {
+    if (!c) return '';
+    const quando = c.em ? ' em ' + dataBR(String(c.em).slice(0, 10)) : '', qual = c.seq != null ? ` (compensação ${c.seq})` : '';
+    return c.perda ? `Perdida por compensação${quando}: retrabalho de instalação${qual}.` : `Paga por compensação${quando}${qual}, com a origem ${c.etapaOrigem || 'definida'}.`;
   }
 
   /* A LISTA DO PERÍODO. registros: as entregas da apuração (a tela usa os
@@ -363,26 +383,33 @@ const PERDAS = (() => {
          vira aviso. A perda aplicada aparece mesmo com a ficha desmarcada. */
       const daFicha = antes ? 'antes' : oc.retrabalho ? (GRUPO_DO_EFEITO[oc.retrabalho.efeito] || 'outra') : oc.tipos.length ? 'ocorrencia' : '';
       const daLinha = !antes && decisao.linhas.length ? grupoDaLinha(decisao.linhas) : '';
-      const aplicado = antes || !decisao.linhas.length ? daFicha : daLinha || (daFicha === 'perda' || daFicha === 'definir' ? 'outra' : daFicha);
+      const compensacao = !antes && daLinha === 'definir' ? compensacaoDaOS(x.osId, dem) : null;
+      const aplicado = compensacao ? (compensacao.perda ? 'perda' : 'outra')
+        : antes || !decisao.linhas.length ? daFicha : daLinha || (daFicha === 'perda' || daFicha === 'definir' ? 'outra' : daFicha);
       if (!aplicado) continue;
-      const grupo = aplicado, avisoFicha = aplicado !== daFicha && (oc.retrabalho || daLinha) ? avisoDaFicha(aplicado, oc, RG) : '';
+      // A ficha que hoje diz outra origem que a da compensação: aviso, a gestão decide com nova revisão (D2).
+      const fichaOutra = compensacao && (!oc.retrabalho || (oc.retrabalho.etapa || '') !== compensacao.etapaOrigem);
+      const grupo = aplicado, avisoFicha = compensacao ? textoDaCompensacao(compensacao) + (fichaOutra ? ' A ficha hoje diz outra coisa: a compensação não muda e não paga de novo; a gestão decide com uma nova revisão do mês.' : '')
+        : aplicado !== daFicha && (oc.retrabalho || daLinha) ? avisoDaFicha(aplicado, oc, RG) : '';
       const pessoas = new Map(), equipes = new Set();
       for (const r of x.registros) {
         for (const m of lista(r.membros)) { const k = String(m && m.chave || '').trim(); if (k && !pessoas.has(k)) pessoas.set(k, {chave:k, nome:String(m.nome || k)}); }
         for (const g of lista(r.grupos)) if (g && g.equipeNome) equipes.add(String(g.equipeNome));
         if (r.equipeNome) equipes.add(String(r.equipeNome));
       }
-      const perda = antes ? null : grupo === 'perda' ? perdaAutomatica(x.registros, decisao, MT) : perdaDaOS(decisao, contrafactual, !dem || !!dem.exato);
+      const perda = antes ? null : compensacao ? (compensacao.perda ? {valorCentavos:compensacao.baseLiquidaCentavos, comissaoCentavos:compensacao.comissaoPerdidaCentavos, automatica:true, doDemonstrativo:true} : null)
+        : grupo === 'perda' ? perdaAutomatica(x.registros, decisao, MT) : perdaDaOS(decisao, contrafactual, !dem || !!dem.exato);
       const T = RG && RG.TEXTOS_PERDA ? RG.TEXTOS_PERDA : {};
       // O efeito é o do grupo que vale (o aplicado): a frase da régua, nunca a da ficha que mudou depois.
       const efeito = antes ? efeitoAntes(inicio)
         : grupo === 'perda' ? (daFicha === 'perda' ? oc.retrabalho.texto : T.retrabalhoInstalacao || 'Retrabalho de instalação: tira os pontos e a comissão desta O.S.')
         : grupo === 'definir' ? (daFicha === 'definir' ? oc.retrabalho.texto : T.retrabalhoDefinir || 'Retrabalho com origem a definir: defina a origem; até lá não tira nada e a comissão desta O.S. fica pendente')
         : decisao.codigo === 'falha_comprovada' ? EFEITO.falha_comprovada
+        : compensacao ? 'Paga por compensação: o retrabalho desta O.S. não tirou os pontos nem a comissão'
         : grupo === 'outra' ? (daFicha === 'outra' ? oc.retrabalho.texto : 'No demonstrativo, o retrabalho desta O.S. não tirou os pontos nem a comissão')
         : EFEITO[decisao.codigo] || EFEITO.pendente;
       linhas.push({osId:x.osId, numero:x.numero || txt(c && String(c.numero ?? '')), cliente:x.cliente || txt(c && c.cliente), dias, antes, grupo, daFicha, avisoFicha,
-        pessoas:[...pessoas.values()], equipes:[...equipes], ocorrencias:oc, decisao, perda, efeito});
+        pessoas:[...pessoas.values()], equipes:[...equipes], ocorrencias:oc, decisao, perda, efeito, ...(compensacao ? {compensacao} : {})});
     }
     const ordemGrupo = g => GRUPOS.indexOf(g);
     linhas.sort((a, b) => ordemGrupo(a.grupo) - ordemGrupo(b.grupo) || String(b.dias[b.dias.length - 1] || '').localeCompare(String(a.dias[a.dias.length - 1] || ''))
@@ -401,7 +428,7 @@ const PERDAS = (() => {
     const perdasInst = doGrupo('perda').filter(l => l.perda);
     return {linhas, resumo:{os:linhas.length, total:porOS.size, semFicha,
       grupos:Object.fromEntries(GRUPOS.map(g => [g, doGrupo(g).length])),
-      origemADefinir:aDefinir.length, origemDefinidaDepois:definidaDepois.length, pessoasPendentes:pendentes.size, decisaoIncompleta:incompletas.length,
+      origemADefinir:aDefinir.length, origemDefinidaDepois:definidaDepois.length, decididasPorCompensacao:linhas.filter(l => l.compensacao).length, pessoasPendentes:pendentes.size, decisaoIncompleta:incompletas.length,
       perdaInstalacao:doGrupo('perda').length, perdaInstalacaoComissaoCentavos:total('comissaoCentavos', perdasInst),
       comFalha:comPerda.filter(l => !l.perda.automatica).length, comPerda:comPerda.length,
       valorCentavos:total('valorCentavos'), comissaoCentavos:total('comissaoCentavos'), naoMedido,
@@ -409,7 +436,7 @@ const PERDAS = (() => {
   }
 
   return {EFEITO, FALHA_COMPROVADA, OCORRENCIA_REGISTRADA, ROTULO_DECISAO, ROTULO_TIPO, ROTULO_OCORRENCIA, ETAPAS_FORA, GRUPOS, ROTULO_GRUPO, INICIO_PROGRAMA, dataBR,
-    ocorrenciasDaOS, decisaoDaOS, escolherRevisao, demonstrativos, demonstrativoDaOS, decididas, semFalhas, perdaDaOS, perdaAutomatica, grupoDaLinha, avisoDaFicha, montar};
+    ocorrenciasDaOS, decisaoDaOS, escolherRevisao, demonstrativos, demonstrativoDaOS, decididas, semFalhas, perdaDaOS, perdaAutomatica, grupoDaLinha, avisoDaFicha, compensacaoDaOS, textoDaCompensacao, montar};
 })();
 if (typeof module !== 'undefined') module.exports = PERDAS;
 
@@ -442,7 +469,8 @@ function perdasFalhasDemos() {
   const m = perdasFalhasMemo;
   if (m.remoto === perdasRemoto && m.revisoes === perdasRemoto.revisoes && m.cobrem === perdasRemoto.cobrem && m.chave === chave) return m.demos;
   const f = periodoOuMes('_fPerf');
-  const demos = COMISSAO.demonstrativosVigentes([...perdasRemoto.revisoes, ...(Array.isArray(perdasRemoto.cobrem) ? perdasRemoto.cobrem : [])], f);
+  // A origem definida pela compensação da pendência aprovada (D2) também tira os pontos (retrabalho de instalação).
+  const demos = COMISSAO.demonstrativosVigentes([...perdasRemoto.revisoes, ...(Array.isArray(perdasRemoto.cobrem) ? perdasRemoto.cobrem : [])], f, perdasRemoto.compensacoes || []);
   perdasFalhasMemo = {remoto:perdasRemoto, revisoes:perdasRemoto.revisoes, cobrem:perdasRemoto.cobrem, chave, demos};
   return demos;
 }
@@ -463,7 +491,7 @@ function perdasFalhasDoPeriodo(f, aoChegar) {
   perdasFalhasPorPeriodo.set(k, pedido);
   Promise.resolve().then(() => STORE.api({action:'performanceComissaoListar', de:f.de, ate:f.ate})).then(r => {
     if (!r || !Array.isArray(r.revisoes)) throw new Error((r && r.error) || 'Resposta inesperada do servidor.');
-    pedido.demos = COMISSAO.demonstrativosVigentes([...r.revisoes, ...(Array.isArray(r.cobrem) ? r.cobrem : [])], {de:f.de, ate:f.ate});
+    pedido.demos = COMISSAO.demonstrativosVigentes([...r.revisoes, ...(Array.isArray(r.cobrem) ? r.cobrem : [])], {de:f.de, ate:f.ate}, Array.isArray(r.compensacoesPendencia) ? r.compensacoesPendencia : []);
   }).catch(e => { pedido.erro = String((e && e.message) || e); })
     .finally(() => { pedido.carregando = false; pedido.em = Date.now(); if (perdasFalhasPorPeriodo.get(k) === pedido && typeof aoChegar === 'function') aoChegar(); });
   return null;
@@ -479,14 +507,15 @@ async function perdasCarregar() {
   if (perdasRemoto.chave === chave && perdasRemoto.carregando) return;
   // A leitura anterior do mesmo período fica à vista enquanto a nova não chega: o ponto de atenção não pisca.
   const mesma = perdasRemoto.chave === chave;
-  const pedido = {chave, revisoes:mesma ? perdasRemoto.revisoes : null, cobrem:mesma ? perdasRemoto.cobrem : null, carregando:true, erro:'', tentado:true};
+  const pedido = {chave, revisoes:mesma ? perdasRemoto.revisoes : null, cobrem:mesma ? perdasRemoto.cobrem : null, compensacoes:mesma ? perdasRemoto.compensacoes : null, carregando:true, erro:'', tentado:true};
   perdasRemoto = pedido;
   try {
     const r = await STORE.api({action:'performanceComissaoListar', de:f.de, ate:f.ate});
     if (!r || !Array.isArray(r.revisoes)) throw new Error((r && r.error) || 'Resposta inesperada do servidor.');
     pedido.revisoes = r.revisoes;
     pedido.cobrem = Array.isArray(r.cobrem) ? r.cobrem : null;
-  } catch (e) { pedido.revisoes = null; pedido.cobrem = null; pedido.erro = typeof perfErroTxt === 'function' ? perfErroTxt(e) : String((e && e.message) || e); }
+    pedido.compensacoes = Array.isArray(r.compensacoesPendencia) ? r.compensacoesPendencia : [];
+  } catch (e) { pedido.revisoes = null; pedido.cobrem = null; pedido.compensacoes = null; pedido.erro = typeof perfErroTxt === 'function' ? perfErroTxt(e) : String((e && e.message) || e); }
   finally {
     pedido.carregando = false;
     if (perdasRemoto === pedido && perfChave() === chave && typeof renderPerformanceCasa === 'function') renderPerformanceCasa();
@@ -512,7 +541,7 @@ function perdasDados() {
     erro:minha ? perdasRemoto.erro : '', semCobertura:consultada && !Array.isArray(perdasRemoto.cobrem)};
   const fonte = typeof perfFonteAtual === 'function' ? perfFonteAtual() : null;
   if (!fonte) return {carregando:true, erro:(typeof perfRemoto === 'object' && perfRemoto && perfRemoto.erro) || '', decisoes};
-  const demonstrativos = consultada ? PERDAS.demonstrativos({revisoes:perdasRemoto.revisoes, cobrem:perdasRemoto.cobrem || []}, f) : [];
+  const demonstrativos = consultada ? PERDAS.demonstrativos({revisoes:perdasRemoto.revisoes, cobrem:perdasRemoto.cobrem || [], compensacoesPendencia:perdasRemoto.compensacoes || []}, f) : [];
   const exato = demonstrativos.find(x => x.exato && x.revisao) || null;
   const fechamento = exato && typeof perfRemoto === 'object' && perfRemoto && Array.isArray(perfRemoto.fechamentos) ? perfRemoto.fechamentos.find(x => x && x.id === exato.revisao.fechamentoId) || null : null;
   const contrafactual = exato && fechamento && typeof COMISSAO !== 'undefined' ? PERDAS.semFalhas(COMISSAO, fechamento, exato.revisao) : null;
@@ -611,8 +640,9 @@ function perdasDecisaoHTML(l) {
   const rev = dec.revisao != null && dec.linhas.length ? `<small class="bloco">Lida da revisão ${esc(String(dec.revisao))} da comissão, ${dec.tipoRevisao === 'aprovacao' ? 'aprovada' : 'prévia'}${dec.em ? ', de ' + esc(perdasQuando(dec.em)) : ''}${esc(onde)}.</small>` : '';
   const comp = dem && dem.compensacao ? `<small class="bloco">${esc(perdasCompensacaoTxt(dem.compensacao))}</small>` : '';
   // D-010: o retrabalho de instalação é perda automática (decidida); a origem a definir deixa só esta O.S. pendente.
+  if (l.compensacao) return `<strong>${l.compensacao.perda ? 'Perdida por compensação' : 'Paga por compensação'}</strong><small class="bloco">${esc(PERDAS.textoDaCompensacao(l.compensacao))} No demonstrativo do mês ela tinha ficado pendente (origem a definir).</small>${rev}${comp}`;
   if (l.grupo === 'perda') return `<strong>Perda automática</strong><small class="bloco">Retrabalho de instalação: não pede decisão no demonstrativo da comissão. ${esc(perdasPonto(perdasTextos().naoSeAbona))}</small>${rev}${comp}`;
-  if (l.grupo === 'definir') return `<strong>Pendente: a origem do retrabalho</strong><small class="bloco">Até a gestão definir a origem, a comissão desta O.S. fica pendente (não paga e não perde). O demonstrativo do mês pode ser aprovado sem ela; ela entra numa revisão seguinte quando a origem for definida.</small>${rev}${comp}`;
+  if (l.grupo === 'definir') return `<strong>Pendente: a origem do retrabalho</strong><small class="bloco">Até a gestão definir a origem, a comissão desta O.S. fica pendente (não paga e não perde). O demonstrativo do mês pode ser aprovado sem ela; definida a origem, ela se paga sozinha por compensação da pendência (com o mês aprovado e exportado) ou entra numa revisão seguinte.</small>${rev}${comp}`;
   if (dem && dem.semLinha) return `<strong>${esc(PERDAS.ROTULO_DECISAO.pendente)}</strong><small class="bloco">Esta O.S. não está no demonstrativo de ${esc(perdasPeriodoTxt(dem))}: entrou depois do fechamento.</small>`;
   if (dec.incompleta) return `<strong>${esc(PERDAS.ROTULO_DECISAO.pendente)}</strong><small class="bloco">Decisão registrada (${esc(PERDAS.ROTULO_DECISAO[dec.registrada] || dec.registrada)}), sem documento completo: falta ${esc(perdasJuntar(dec.falta))}. O demonstrativo só aceita a decisão documentada.</small>${rev}${comp}`;
   if (dec.recusada) return `<strong>${esc(PERDAS.ROTULO_DECISAO.pendente)}</strong><small class="bloco">Falha registrada como ${esc(dec.tipoRotulo || dec.tipo)}: o demonstrativo não aceita, porque não é falha da instalação.</small>${rev}${comp}`;
@@ -644,7 +674,8 @@ function perdasEfeitoHTML(l) {
 function perdasSeloDe(l) {
   if (l.grupo === 'antes') return {classe:'antes', texto:'Antes do programa'};
   // A ficha mudou depois do fechamento (revisão da onda a3): o selo diz o que o demonstrativo aplicou.
-  if (l.grupo === 'definir' && l.avisoFicha) return {classe:'pendente', texto:'Pendente no demonstrativo: falta nova revisão'};
+  if (l.compensacao) return l.compensacao.perda ? {classe:'falha', texto:'Perdida por compensação: retrabalho de instalação'} : {classe:'ok', texto:'Paga por compensação'};
+  if (l.grupo === 'definir' && l.avisoFicha) return {classe:'pendente', texto:'Pendente no demonstrativo: falta a compensação ou nova revisão'};
   if (l.grupo === 'outra' && l.avisoFicha) return {classe:'ok', texto:'Sem perda no demonstrativo'};
   if (l.grupo === 'definir') return {classe:'pendente', texto:'Origem a definir'};
   if (l.grupo === 'perda') return {classe:'falha', texto:'Perda: retrabalho de instalação'};
@@ -720,7 +751,7 @@ function perdasPontoHTML(d) {
     partes.push(`${p} O.S. ${p === 1 ? 'perdeu' : 'perderam'} pontos e comissão por retrabalho de instalação (${c == null ? 'comissão a apurar' : perdasDinheiro(c) + ' de comissão'}).`);
   }
   if (x) partes.push(`${x} O.S. com retrabalho de origem a definir: defina a origem no Status da entrega, no Fechamento da ficha. Até lá ${x === 1 ? 'ela não tira' : 'elas não tiram'} nada e a comissão ${y === 1 ? 'de 1 pessoa fica' : `de ${y} pessoas fica`} pendente (não paga e não perde); o demonstrativo do mês pode ser aprovado sem ${x === 1 ? 'ela' : 'elas'}, e ${x === 1 ? 'ela entra' : 'elas entram'} numa revisão seguinte quando a origem for definida.`);
-  if (xd) partes.push(`${xd} O.S. com a origem definida depois do fechamento: ${xd === 1 ? 'ela só entra' : 'elas só entram'} no demonstrativo com nova revisão (feche o período de novo e gere nova prévia).`);
+  if (xd) partes.push(`${xd} O.S. com a origem definida depois do fechamento: com o mês aprovado e exportado, ${xd === 1 ? 'pague só ela' : 'pague só elas'} por compensação da pendência, no diálogo da comissão, ou numa nova revisão do mês.`);
   if (z) partes.push(`${z} ${z === 1 ? 'decisão da comissão registrada' : 'decisões da comissão registradas'} sem documento completo: o demonstrativo só aceita a decisão documentada.`);
   const primeira = x === 1 ? d.linhas.find(l => l.grupo === 'definir' && !l.avisoFicha) : null;
   const passo = z && typeof perfChave === 'function' ? perdasPasso() : null;

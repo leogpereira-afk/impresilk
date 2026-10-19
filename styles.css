@@ -4312,7 +4312,10 @@ img.perf-logo{object-fit:cover}
 /* A compensação da pendência (D2): alvos de toque de 40 px nos botões e nas caixas de escolha. */
 .comissao-pendencias-bloco{margin:12px 0;padding:12px;border:1px solid #d8e2e7;border-radius:12px}
 .comissao-pendencias-bloco button,#perf-dialog.comissao-dialog [data-pend-gerar]{min-height:40px}
-#perf-dialog.comissao-dialog label:has(input[name=os]){min-height:40px;align-items:center}
+#perf-dialog.comissao-dialog label:has(input[type=checkbox]){min-height:40px;align-items:center}
+#perf-dialog.comissao-dialog label:has(input[type=checkbox]) input[type=checkbox]{width:24px;height:24px;min-height:24px;flex:0 0 auto}
+#perf-dialog.comissao-dialog summary,.comissao-pendencias-bloco summary{min-height:40px;box-sizing:border-box}
+.comissao-pendencias-bloco button:disabled,#perf-dialog.comissao-dialog [data-pend-gerar]:disabled{opacity:.5;cursor:not-allowed;filter:grayscale(1)}
 #perf-dialog.comissao-dialog [data-rateio-linha]{display:grid;grid-template-columns:minmax(0,2fr) minmax(100px,1fr) auto;gap:12px;align-items:center}
 @media(max-width:680px){#perf-dialog.comissao-dialog{padding:16px}#perf-dialog.comissao-dialog [data-rateio-linha]{grid-template-columns:1fr}#perf-dialog.comissao-dialog button{min-height:44px}}
 /* Auditoria de experiência: resultados e ações acessíveis antes das explicações. */

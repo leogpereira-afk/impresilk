@@ -54,8 +54,14 @@ const COMISSAO = (() => {
   const baseElegivel = l => l.baseElegivelCentavos??(l.decisao!=='falha_comprovada'&&l.comissaoCentavos!=null?l.baseLiquidaCentavos:0);
   // Revalida sem editar snapshots. Ordem fixa evita dependências circulares:
   // revisão anterior pode exigir conciliação posterior, nunca o inverso.
-  function divergencias(historico, modo) {
+  /* `compensacoes` (D2 da auditoria de 12/10/2026): as compensações de
+     pendência aprovadas. As que valem (a aprovação delas é a ativa do mês)
+     entram no saldo da O.S. logo depois das linhas daquele mês, como foram
+     pagas; não são conferidas aqui (a porta conferiu o saldo na aprovação
+     delas). Sem elas, a conta é a de sempre. */
+  function divergencias(historico, modo, compensacoes=[]) {
     const saldos=new Map(), erros=[];
+    const comps=compensacoesVigentes(compensacoes,historico,modo);
     for(const a of ativas(historico,modo).sort((a,b)=>chavePeriodo(a).localeCompare(chavePeriodo(b)))){
       for(const l of lista(a.apuracao.linhas).slice().sort((a,b)=>String(a.dia).localeCompare(String(b.dia))||String(a.id).localeCompare(String(b.id)))){
         const base=baseElegivel(l)||0, saldo=saldos.get(l.osId)||{base:0,comissao:0};
@@ -63,8 +69,30 @@ const COMISSAO = (() => {
         if(esperado!==l.comissaoCentavos)erros.push({id:a.id,periodo:chavePeriodo(a),osId:l.osId,esperado,registrado:l.comissaoCentavos});
         saldos.set(l.osId,{base:saldo.base+base,comissao:saldo.comissao+esperado});
       }
+      for(const c of comps.filter(c=>c.aprovacaoId===a.id))for(const l of lista(c.apuracao?.linhas)){
+        const saldo=saldos.get(l.osId)||{base:0,comissao:0};
+        saldos.set(l.osId,{base:saldo.base+(baseElegivel(l)||0),comissao:saldo.comissao+(Number.isSafeInteger(l.comissaoCentavos)?l.comissaoCentavos:0)});
+      }
     }
     return erros;
+  }
+  /* AS COMPENSAÇÕES DE PENDÊNCIA QUE VALEM: as aprovadas cuja aprovação do
+     mês ainda é a ativa (do mesmo regime). A revisão nova do mês absorve a
+     compensação da aprovação que ela substituiu (a compensação entra no
+     "antes" dela), e então ela deixa de contar no saldo. */
+  function compensacoesVigentes(compensacoes, aprovacoes, modo) {
+    const ids=new Set(ativas(aprovacoes,modo).map(a=>a.id));
+    return lista(compensacoes).filter(c=>c&&typeof c==='object'&&ids.has(c.aprovacaoId)&&c.apuracao?.config?.modo===modo)
+      .sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+  }
+  // O saldo das compensações que valem, dos meses ANTES de `periodo` (a prévia nova de um mês, D2).
+  function saldosDasCompensacoes(compensacoes, aprovacoes, modo, periodo) {
+    const chave=String(periodo?.de)+':'+String(periodo?.ate), saldos={};
+    for(const c of compensacoesVigentes(compensacoes,aprovacoes,modo)){
+      if(chavePeriodo(c)>=chave)continue;
+      for(const l of lista(c.apuracao?.linhas)){const os=String(l.osId),s=saldos[os]||(saldos[os]={base:0,comissao:0});s.base+=baseElegivel(l)||0;s.comissao+=Number.isSafeInteger(l.comissaoCentavos)?l.comissaoCentavos:0;}
+    }
+    return saldos;
   }
   // A comissão de uma base líquida em centavos (1%, a conta do motor), para mostrar o que uma perda tirou.
   const comissaoDaBase = c => Number.isSafeInteger(c) && c >= 0 ? percentual(c,100) : null;
@@ -77,7 +105,10 @@ const COMISSAO = (() => {
     return lista(bases).map(x=>{if(!Number.isSafeInteger(x)||x<0)return null;const v=Math.max(0,percentual(b+x,100)-c);b+=x;c+=v;return v;});
   }
   // A frase da O.S. com a origem do retrabalho a definir: a mesma na linha, no diálogo e na aba Perdas.
-  const TEXTO_ORIGEM_A_DEFINIR='Retrabalho com origem a definir: esta O.S. fica pendente (não paga e não perde) e não trava o demonstrativo. Defina a origem na ficha: ela entra numa revisão seguinte (feche o período de novo e gere nova prévia).';
+  /* D2 (19/10/2026): definida a origem, a pendência se paga sozinha por
+     compensação (com o mês aprovado e exportado); a revisão seguinte do mês
+     continua sendo o outro caminho. */
+  const TEXTO_ORIGEM_A_DEFINIR='Retrabalho com origem a definir: esta O.S. fica pendente (não paga e não perde) e não trava o demonstrativo. Defina a origem na ficha: com o mês aprovado e exportado, pague só ela por compensação da pendência (no diálogo da comissão), ou ela entra numa revisão seguinte do mês.';
   function apurar(fonte, entrada={}, contexto={}) {
     const config=entrada.config || {}, decisoes=entrada.decisoes || {}, entregas=entrada.entregas || {};
     const comRegua=typeof fonte?.regraPerdas==='string'&&fonte.regraPerdas!=='';
@@ -90,7 +121,7 @@ const COMISSAO = (() => {
     if(config.modo==='efetivo' && (!/^\d{4}-\d{2}-\d{2}$/.test(config.inicioEfetivo || '') || config.inicioEfetivo<'2026-11-01' || periodo.de<config.inicioEfetivo || !texto(config.decisaoGestao)))add('Início efetivo exige decisão da gestão, desde novembro, anterior ou igual ao período.');
     if(config.criteriosExtras!=='somente_falha_comprovada')add('Valide atraso e retorno antecipado: apenas falha comprovada pode cortar esta comissão.');
     const osDaFonte=new Set(lista(fonte?.registros).map(r=>String(r.osId||r.id)));
-    for(const d of divergencias(contexto.aprovacoes,config.modo))if(d.periodo<chavePeriodo(periodo)&&osDaFonte.has(d.osId))add('Concilie primeiro a aprovação do período '+d.periodo+' da O.S. '+d.osId+'. O acumulado de centavos mudou.');
+    for(const d of divergencias(contexto.aprovacoes,config.modo,contexto.compensacoes))if(d.periodo<chavePeriodo(periodo)&&osDaFonte.has(d.osId))add('Concilie primeiro a aprovação do período '+d.periodo+' da O.S. '+d.osId+'. O acumulado de centavos mudou.');
     const acumulados=new Map();
     const referencias=[];
     /* O LÍQUIDO MUDADO DEPOIS DA APROVAÇÃO (M4 da auditoria de 11/10/2026, a
@@ -274,7 +305,12 @@ const COMISSAO = (() => {
     if(pend.includes(SEM_DECISAO)||pend.includes(FALHA_FORA))return false;
     return ls.every(l=>l.decisao==='falha_comprovada');
   }
-  function demonstrativosVigentes(revisoes, periodo={}) {
+  /* `compensacoes` (D2 da auditoria de 12/10/2026): o resumo das compensações
+     de pendência aprovadas (resumoCompensacoes). A O.S. que a revisão que vale
+     deixou com a origem a definir e que uma compensação aprovada sobre ELA
+     decidiu leva a marca `compensacao` (o id, a hora e a perda: retrabalho de
+     instalação ou nada). Sem compensações, a saída é a de sempre. */
+  function demonstrativosVigentes(revisoes, periodo={}, compensacoes=[]) {
     const grupos=new Map();
     for(const r of lista(revisoes)){if(!r||typeof r!=='object'||typeof r.de!=='string'||typeof r.ate!=='string')continue;const k=r.de+':'+r.ate;grupos.set(k,[...(grupos.get(k)||[]),r]);}
     const out=[];
@@ -284,17 +320,28 @@ const COMISSAO = (() => {
       if(!r)continue;
       const decisoes=r.entrada&&typeof r.entrada==='object'&&r.entrada.decisoes&&typeof r.entrada.decisoes==='object'?r.entrada.decisoes:{};
       const ids=[...new Set(lista(r.apuracao?.linhas).map(l=>String(l?.osId??'')).filter(Boolean))];
-      out.push({de:r.de,ate:r.ate,exato:r.de===periodo?.de&&r.ate===periodo?.ate,revisao:r.revisao??null,tipo:r.tipo==='aprovacao'?'aprovacao':'previa',em:typeof r.em==='string'?r.em:'',
-        os:Object.fromEntries(ids.map(id=>[id,falhaAceita(id,r)?{falha:true,tipo:texto(decisoes[id]?.tipo)}:{falha:false}]))});
+      const os=Object.fromEntries(ids.map(id=>[id,falhaAceita(id,r)?{falha:true,tipo:texto(decisoes[id]?.tipo)}:{falha:false}]));
+      for(const c of lista(compensacoes)){
+        if(!c||typeof c!=='object'||c.aprovacaoId!==r.id)continue;
+        for(const id of lista(c.osIds).map(String)){
+          if(!Object.prototype.hasOwnProperty.call(os,id)||os[id].falha||!lista(r.apuracao?.linhas).some(l=>String(l?.osId)===id&&l.decisao==='origem_a_definir'))continue;
+          const o=c.origens&&typeof c.origens==='object'&&c.origens[id]||{};
+          os[id]={...os[id],compensacao:{id:String(c.id||''),seq:c.seq??null,em:typeof c.em==='string'?c.em:'',perda:o.perda==='retrabalho_instalacao'?'retrabalho_instalacao':'',etapaOrigem:texto(o.etapaOrigem)}};
+        }
+      }
+      out.push({de:r.de,ate:r.ate,exato:r.de===periodo?.de&&r.ate===periodo?.ate,revisao:r.revisao??null,tipo:r.tipo==='aprovacao'?'aprovacao':'previa',em:typeof r.em==='string'?r.em:'',os});
     }
     return out;
   }
   // A decisão para a entrega da O.S. no dia: o demonstrativo que cobre o dia e tem a O.S. (o do recorte exato primeiro, depois o de período mais recente).
-  function falhaComprovadaNoDia(demos, osId, dia) {
+  function demonstrativoNoDia(demos, osId, dia) {
     const id=String(osId??''),d=String(dia||'');
     if(!id||!/^\d{4}-\d{2}-\d{2}$/.test(d))return null;
-    const x=lista(demos).filter(z=>z&&z.os&&Object.prototype.hasOwnProperty.call(z.os,id)&&d>=z.de&&d<=z.ate)
-      .sort((a,b)=>Number(!!b.exato)-Number(!!a.exato)||String(b.ate).localeCompare(String(a.ate))||String(b.em).localeCompare(String(a.em)))[0];
+    return lista(demos).filter(z=>z&&z.os&&Object.prototype.hasOwnProperty.call(z.os,id)&&d>=z.de&&d<=z.ate)
+      .sort((a,b)=>Number(!!b.exato)-Number(!!a.exato)||String(b.ate).localeCompare(String(a.ate))||String(b.em).localeCompare(String(a.em)))[0]||null;
+  }
+  function falhaComprovadaNoDia(demos, osId, dia) {
+    const x=demonstrativoNoDia(demos,osId,dia),id=String(osId??'');
     return x&&x.os[id].falha?{de:x.de,ate:x.ate,revisao:x.revisao,tipo:x.tipo,em:x.em,tipoFalha:x.os[id].tipo||''}:null;
   }
   // As entregas com a falha comprovada que vale ficam sem pontos (perda:'falha_comprovada'), como o retrabalho de instalação. Devolve cópias; o registro de origem não muda.
@@ -303,8 +350,12 @@ const COMISSAO = (() => {
     if(!ds.length)return lista(registros);
     return lista(registros).map(r=>{
       if(!r||typeof r!=='object'||r.perda)return r;
-      const f=falhaComprovadaNoDia(ds,r.osId||r.id,typeof diaDe==='function'?diaDe(r):r.dia);
-      return f?{...r,perda:'falha_comprovada',falhaComprovada:f}:r;
+      const dia=typeof diaDe==='function'?diaDe(r):r.dia, f=falhaComprovadaNoDia(ds,r.osId||r.id,dia);
+      if(f)return {...r,perda:'falha_comprovada',falhaComprovada:f};
+      /* A ORIGEM DEFINIDA PELA COMPENSAÇÃO DA PENDÊNCIA (D2; D-010 e D-004):
+         retrabalho de instalação tira os pontos da O.S., como no selo. */
+      const x=demonstrativoNoDia(ds,r.osId||r.id,dia),c=x&&x.os[String(r.osId||r.id)].compensacao;
+      return c&&c.perda==='retrabalho_instalacao'?{...r,perda:'retrabalho_instalacao',etapaOrigem:c.etapaOrigem,compensacaoPendencia:{id:c.id,em:c.em}}:r;
     });
   }
   /* A DIFERENÇA CONTRA A ÚLTIMA EXPORTADA (M6 da auditoria de 11/10/2026): a
@@ -440,7 +491,8 @@ const COMISSAO = (() => {
     if(!ls.length)return [];
     const comRegua=!!reguaDoSelo(selo||atual);
     const agora=new Map(lista(atual?.registros).map(r=>[String(r?.id),r]));
-    const eventos=lista(compensacoes).filter(ehObj);
+    // Só as compensações desta aprovação: as de uma aprovação substituída já entraram no "antes" da revisão nova (D2, REV5).
+    const eventos=lista(compensacoes).filter(e=>ehObj(e)&&(e.evento!=='compensacao'||e.aprovacaoId===aprovacao.id));
     const aprovadas=new Map(eventos.filter(e=>e.evento==='aprovacao').map(e=>[String(e.compensacaoId),e]));
     const comps=eventos.filter(e=>e.evento==='compensacao').sort((a,b)=>String(a.id).localeCompare(String(b.id)));
     const porOS=new Map();
@@ -475,12 +527,12 @@ const COMISSAO = (() => {
     if(p.estado==='saiu')return n+' saiu da base do mês depois do fechamento: ela só entra numa nova revisão do mês (feche o período de novo).';
     return '';
   }
-  // O saldo que a O.S. já recebeu até o mês (inclusive): as aprovações ativas do regime e as compensações de pendência aprovadas.
+  // O saldo que a O.S. já recebeu até o mês (inclusive): as aprovações ativas do regime e as compensações de pendência que valem.
   function saldosAteOMes(osIds, periodo, modo, aprovacoes, compensacoesAprovadas) {
     const chave=periodo.de+':'+periodo.ate, quer=new Set(lista(osIds).map(String)), saldos={};
     const somar=l=>{const os=String(l?.osId);if(!quer.has(os))return;const s=saldos[os]||(saldos[os]={base:0,comissao:0});s.base+=baseElegivel(l)||0;s.comissao+=Number.isSafeInteger(l.comissaoCentavos)?l.comissaoCentavos:0;};
     for(const a of ativas(aprovacoes,modo))if(chavePeriodo(a)<=chave)lista(a.apuracao.linhas).forEach(somar);
-    for(const c of lista(compensacoesAprovadas))if(ehObj(c)&&c.apuracao?.config?.modo===modo&&chavePeriodo(c)<=chave)lista(c.apuracao.linhas).forEach(somar);
+    for(const c of compensacoesVigentes(compensacoesAprovadas,aprovacoes,modo))if(chavePeriodo(c)<=chave)lista(c.apuracao.linhas).forEach(somar);
     return saldos;
   }
   /* A APURAÇÃO DA COMPENSAÇÃO DA PENDÊNCIA. `selo` é o fechamento (já no ID
@@ -531,9 +583,26 @@ const COMISSAO = (() => {
     for(const p of listas.flat()){if(!ehObj(p))continue;const k=String(p.tipo||'')+':'+String(p.pessoaId??'');const x=mapa.get(k);const c=Number.isSafeInteger(p.centavos)?p.centavos:0;mapa.set(k,x?{...x,nome:x.nome||p.nome||'',centavos:x.centavos+c}:{...p,centavos:c});}
     return [...mapa.values()].sort((a,b)=>String(a.pessoaId).localeCompare(String(b.pessoaId))||String(a.tipo).localeCompare(String(b.tipo)));
   }
-  function comCompensacoes(anterior, compensacoesAprovadas) {
+  // `compensacoesNoAntes`: quem chama escolhe (a porta: as exportadas depois da última exportação do mês).
+  /* O RESUMO DAS COMPENSAÇÕES DE PENDÊNCIA APROVADAS: o que o demonstrativo,
+     o PDF, a aba Perdas e o ranking leem, sem a entrada nem os rateios (só a
+     gestão recebe, porque leva R$). */
+  function resumoCompensacoes(eventos) {
+    const evs=lista(eventos).filter(ehObj);
+    const aprov=new Map(evs.filter(e=>e.evento==='aprovacao').map(e=>[String(e.compensacaoId),e]));
+    const exps=new Map();for(const e of evs.filter(e=>e.evento==='exportacao')){const k=String(e.compensacaoId);exps.set(k,[...(exps.get(k)||[]),e]);}
+    return evs.filter(e=>e.evento==='compensacao'&&aprov.has(String(e.id))).map(c=>{
+      const a=aprov.get(String(c.id)),xs=(exps.get(String(c.id))||[]).sort((x,y)=>String(x.em).localeCompare(String(y.em)));
+      return {id:String(c.id),seq:c.seq??null,de:c.de,ate:c.ate,aprovacaoId:c.aprovacaoId,osIds:lista(c.osIds).map(String),origens:ehObj(c.origens)?c.origens:{},
+        em:String(a.em||''),autor:a.autor?{nome:texto(a.autor.nome),porId:String(a.autor.porId||''),como:String(a.autor.como||'')}:null,modo:String(c.apuracao?.config?.modo||''),
+        totalCentavos:Number.isSafeInteger(c.apuracao?.totalCentavos)?c.apuracao.totalCentavos:0,
+        linhas:lista(c.apuracao?.linhas).map(l=>({osId:String(l?.osId),numero:String(l?.numero||''),dia:String(l?.dia||''),baseLiquidaCentavos:l?.baseLiquidaCentavos??null,comissaoCentavos:l?.comissaoCentavos??null,comissaoPerdidaCentavos:l?.comissaoPerdidaCentavos??null,perda:l?.perda==='retrabalho_instalacao'?'retrabalho_instalacao':''})),
+        exportadas:xs.length,exportadaEm:xs.length?String(xs[0].em||''):''};
+    }).sort((a,b)=>a.id.localeCompare(b.id));
+  }
+  function comCompensacoes(anterior, compensacoesNoAntes) {
     if(!anterior)return anterior;
-    const cs=lista(compensacoesAprovadas).filter(c=>ehObj(c)&&c.aprovacaoId===anterior.id);
+    const cs=lista(compensacoesNoAntes).filter(ehObj);
     if(!cs.length)return anterior;
     return {...anterior,apuracao:{...anterior.apuracao,pessoas:somarTotais(lista(anterior.apuracao?.pessoas),...cs.map(c=>lista(c.apuracao?.pessoas)))}};
   }
@@ -597,7 +666,7 @@ const COMISSAO = (() => {
   }
   return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase,comissoesAcumuladas,TEXTO_ORIGEM_A_DEFINIR,demonstrativosVigentes,falhaComprovadaNoDia,comFalhasComprovadas,
     dinheiroDoRegistro,dinheiroDaFonte,mudancasDeDinheiro,textoMudancasDeDinheiro,totaisDaRevisao,diferencaContraExportada,
-    aprovadorVigente,substitutoVigente,quemAprova,
+    aprovadorVigente,substitutoVigente,quemAprova,compensacoesVigentes,saldosDasCompensacoes,resumoCompensacoes,
     origemDeHoje,pendenciasDaAprovacao,textoNaoPronta,saldosAteOMes,apurarPendencia,somarTotais,comCompensacoes,csvPendencia};
 })();
 

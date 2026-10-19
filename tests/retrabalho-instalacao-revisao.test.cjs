@@ -457,7 +457,8 @@ test('revisão a3: a origem a definir não trava o mês: o demonstrativo aprova,
   assert.equal(p2.apuracao.totalCentavos, 2000);
   assert.ok(p2.apuracao.ajustes.some(a => a.diferencaCentavos > 0), JSON.stringify(p2.apuracao.ajustes));
   // O diálogo da comissão diz isso (a frase do motor).
-  assert.equal(C.TEXTO_ORIGEM_A_DEFINIR, 'Retrabalho com origem a definir: esta O.S. fica pendente (não paga e não perde) e não trava o demonstrativo. Defina a origem na ficha: ela entra numa revisão seguinte (feche o período de novo e gere nova prévia).');
+  // TROCADO DE PROPÓSITO (D2, 19/10/2026): a frase aponta a compensação da pendência.
+  assert.equal(C.TEXTO_ORIGEM_A_DEFINIR, 'Retrabalho com origem a definir: esta O.S. fica pendente (não paga e não perde) e não trava o demonstrativo. Defina a origem na ficha: com o mês aprovado e exportado, pague só ela por compensação da pendência (no diálogo da comissão), ou ela entra numa revisão seguinte do mês.');
 });
 
 /* ═══════════════ (6): a régua de cada dia ═══════════════ */

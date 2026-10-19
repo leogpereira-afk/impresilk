@@ -109,7 +109,7 @@ async function previewApi(body){
   if(out.error)throw new Error(out.error);if(out.lista)lista=typeof pvPodar==='function'?pvPodar(out.lista):out.lista;if(out.cfg){Object.assign(cfg,out.cfg);if(typeof pvSoVe!=='undefined'&&pvSoVe&&cfg.performancePCP)delete cfg.performancePCP.participacoes;pvCfgBase=structuredClone(cfg);}return out;
  }
 
- if(new URLSearchParams(location.hash.slice(1)).has('comissao') && /^(performanceComissao|performancePeriodo|performanceFechamentos|performanceFechar|performanceMeses|performanceDocumento)/.test(body.action))return fetch('/comissao-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+ if(new URLSearchParams(location.hash.slice(1)).has('comissao') && /^(performanceComissao|performancePeriodo|performanceFechamentos|performanceFechar|performanceMeses|performanceDocumento|comissaoPendencia|comissaoAprovador)/.test(body.action))return fetch('/comissao-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,__papel:new URLSearchParams(location.hash.slice(1)).get('papel')||'admin'})}).then(r=>r.json());
  if(body.action==='conferenciaEntrega'){
   const os=lista.find(o=>o.id===body.osId);if(!os)throw new Error('O.S. de teste não encontrada');
   if(!body.entrega)return {os:structuredClone(os),valor:os.valorTotal};
@@ -421,7 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
  const b=document.querySelector('#modal-os [data-bloco="'+(pv.get('bloco')||'itens')+'"]'),m=document.querySelector('#modal-os'),h=document.querySelector('#modal-os .modal-header');
  if(b&&m){b.scrollIntoView({block:'start'});m.scrollTop+=Number(pv.get('desce')||0)-(h?h.offsetHeight:0)-8;}
 });`;
-const comissaoPreview=require('./preview-comissao-fixture.cjs');
+const comissaoPreview=process.env.PV_D2?require('./preview-d2-fixture.cjs'):require('./preview-comissao-fixture.cjs');
 const controlePreview=require('./preview-controle-fixture.cjs');
 const rankingPreview=require('./preview-ranking-fixture.cjs');
 const demandasPreview=require('./preview-demandas-fixture.cjs')();

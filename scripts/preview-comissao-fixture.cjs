@@ -4,6 +4,8 @@ const {edge}=require('../tests/helpers/edge.cjs');
 const bancos=new Map();
 const who={papel:'pcp',nome:'Gestor fictício da prévia',sub:'gestor-preview'};
 module.exports=async body=>{
+ // O papel da prévia (__papel) é da prévia do D2; aqui o gestor fictício é sempre o mesmo.
+ delete body.__papel;
  // A fita dos meses (performanceMeses) não tem período: usa o banco do último período aberto na prévia.
  if(!body.de&&!body.ate){const ultimo=[...bancos.keys()].pop();if(!ultimo)return {meses:[],hoje:''};const e=await bancos.get(ultimo);return e.call(body,who);}
  const chave=body.de+'|'+body.ate;

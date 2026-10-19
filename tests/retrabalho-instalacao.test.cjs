@@ -284,10 +284,11 @@ test('retrabalho sem origem não zera: fica a definir, pendente na comissão, ma
   const m2 = PERDAS.montar({registros:f.registros, card:id => noServidor(e, id), status:statusDe, revisao:rev});
   const l2 = m2.linhas.find(l => l.osId === 'osR');
   assert.equal(l2.grupo, 'definir', 'o mês fechado manda: no demonstrativo ela está pendente');
-  assert.match(l2.avisoFicha, /Na ficha, a origem do retrabalho hoje é Instalação \(tira os pontos e a comissão desta O\.S\.\)\. No demonstrativo esta O\.S\. ficou pendente: ela só entra com nova revisão/);
+  // TROCADO DE PROPÓSITO (D2, 19/10/2026): definida a origem, a pendência se paga sozinha por compensação; a revisão nova é o outro caminho.
+  assert.match(l2.avisoFicha, /Na ficha, a origem do retrabalho hoje é Instalação \(tira os pontos e a comissão desta O\.S\.\)\. No demonstrativo esta O\.S\. ficou pendente: com o mês aprovado e exportado, pague só ela por compensação da pendência, no diálogo da comissão, ou ela entra numa nova revisão do mês\./);
   assert.deepEqual([m2.resumo.origemADefinir, m2.resumo.origemDefinidaDepois, m2.resumo.pessoasPendentes], [0, 1, 0]);
   t.ctx.__d = {...m2, carregando:false, decisoes:{consultando:false}};
-  assert.match(t.run('perdasPontoHTML(__d)'), /1 O\.S\. com a origem definida depois do fechamento: ela só entra no demonstrativo com nova revisão/);
+  assert.match(t.run('perdasPontoHTML(__d)'), /1 O\.S\. com a origem definida depois do fechamento: com o mês aprovado e exportado, pague só ela por compensação da pendência, no diálogo da comissão, ou numa nova revisão do mês\./);
   // A gestão fecha de novo e gera a prévia nova: a perda passa a valer, e o ponto diz a perda (sempre que houver).
   const fonte2 = await e.call({action:'performancePeriodo', ...NOV, notaPorValor:true}, gestor);
   const fech2 = await e.call({action:'performanceFechar', ...NOV, hash:fonte2.hash, anterior:f.id, requestId:pedido('fechar-ri'), motivo:'Nova revisão fictícia', leGrupos:true, leEntregasItens:true, notaPorValor:true}, gestor);
@@ -495,7 +496,8 @@ test('o diálogo da comissão: a O.S. com retrabalho de instalação é perda au
   const blocoD = corpo.slice(corpo.indexOf('O.S. T-osD'), corpo.indexOf('</details>', corpo.indexOf('O.S. T-osD')));
   assert.match(blocoD, /origem a definir/);
   // TROCADO DE PROPÓSITO (revisão da onda a3): a origem a definir não trava o demonstrativo; a frase é a do motor.
-  assert.match(blocoD, /Retrabalho com origem a definir: esta O\.S\. fica pendente \(não paga e não perde\) e não trava o demonstrativo\. Defina a origem na ficha: ela entra numa revisão seguinte \(feche o período de novo e gere nova prévia\)\./);
+  // TROCADO DE PROPÓSITO (D2, 19/10/2026): a frase do motor aponta a compensação da pendência.
+  assert.match(blocoD, /Retrabalho com origem a definir: esta O\.S\. fica pendente \(não paga e não perde\) e não trava o demonstrativo\. Defina a origem na ficha: com o mês aprovado e exportado, pague só ela por compensação da pendência \(no diálogo da comissão\), ou ela entra numa revisão seguinte do mês\./);
   assert.match(blocoD, /name="os\d+decisao"/, 'a decisão geral da O.S. continua');
   // O atraso fica marcado, com a frase da régua, e a gestão pode julgá-lo falha comprovada aqui (D-011 e D-004).
   const blocoA = corpo.slice(corpo.indexOf('O.S. T-osA'), corpo.indexOf('</details>', corpo.indexOf('O.S. T-osA'))).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
