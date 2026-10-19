@@ -329,14 +329,15 @@ const PERDAS = (() => {
     const c = lista(dem && dem.compensacoesPendencia).filter(x => lista(x.osIds).map(String).includes(id)).pop();
     if (!c) return null;
     const o = (c.origens && c.origens[id]) || {}, l = lista(c.linhas).find(y => String(y.osId) === id) || {};
-    return {id:txt(c.id), seq:c.seq ?? null, em:txt(c.em), perda:o.perda === 'retrabalho_instalacao' ? 'retrabalho_instalacao' : '', etapaOrigem:txt(o.etapaOrigem),
+    const ls = lista(c.linhas).filter(y => String(y.osId) === id), falha = !!ls.length && ls.every(y => y.decisao === 'falha_comprovada');
+    return {id:txt(c.id), seq:c.seq ?? null, em:txt(c.em), perda:o.perda === 'retrabalho_instalacao' ? 'retrabalho_instalacao' : '', falha, etapaOrigem:txt(o.etapaOrigem),
       baseLiquidaCentavos:Number.isSafeInteger(l.baseLiquidaCentavos) ? l.baseLiquidaCentavos : null, comissaoCentavos:Number.isSafeInteger(l.comissaoCentavos) ? l.comissaoCentavos : null,
       comissaoPerdidaCentavos:Number.isSafeInteger(l.comissaoPerdidaCentavos) ? l.comissaoPerdidaCentavos : null};
   }
   function textoDaCompensacao(c) {
     if (!c) return '';
     const quando = c.em ? ' em ' + dataBR(String(c.em).slice(0, 10)) : '', qual = c.seq != null ? ` (compensação ${c.seq})` : '';
-    return c.perda ? `Perdida por compensação${quando}: retrabalho de instalação${qual}.` : `Paga por compensação${quando}${qual}, com a origem ${c.etapaOrigem || 'definida'}.`;
+    return c.perda ? `Perdida por compensação${quando}: retrabalho de instalação${qual}.` : c.falha ? `Perdida por compensação${quando}: falha comprovada da instalação${qual}.` : `Paga por compensação${quando}${qual}, com a origem ${c.etapaOrigem || 'definida'}.`;
   }
 
   /* A LISTA DO PERÍODO. registros: as entregas da apuração (a tela usa os
@@ -405,6 +406,7 @@ const PERDAS = (() => {
         : grupo === 'perda' ? (daFicha === 'perda' ? oc.retrabalho.texto : T.retrabalhoInstalacao || 'Retrabalho de instalação: tira os pontos e a comissão desta O.S.')
         : grupo === 'definir' ? (daFicha === 'definir' ? oc.retrabalho.texto : T.retrabalhoDefinir || 'Retrabalho com origem a definir: defina a origem; até lá não tira nada e a comissão desta O.S. fica pendente')
         : decisao.codigo === 'falha_comprovada' ? EFEITO.falha_comprovada
+        : compensacao && compensacao.falha ? 'Falha comprovada decidida na compensação: tira os pontos e a comissão desta O.S.'
         : compensacao ? 'Paga por compensação: o retrabalho desta O.S. não tirou os pontos nem a comissão'
         : grupo === 'outra' ? (daFicha === 'outra' ? oc.retrabalho.texto : 'No demonstrativo, o retrabalho desta O.S. não tirou os pontos nem a comissão')
         : EFEITO[decisao.codigo] || EFEITO.pendente;
@@ -500,6 +502,17 @@ function perdasFalhasDoPeriodo(f, aoChegar) {
 function perdasFalhaDaOS(osId, dia, f, aoChegar) {
   const demos = perdasFalhasDoPeriodo(f, aoChegar);
   return demos && demos.length && typeof COMISSAO.falhaComprovadaNoDia === 'function' ? COMISSAO.falhaComprovadaNoDia(demos, osId, dia) : null;
+}
+/* A COMPENSAÇÃO DA PENDÊNCIA NA FICHA (verificação do D2): a decisão que a
+   compensação aprovada deu à O.S. no dia da entrega (o demonstrativo do mês
+   do dia). Só a gestão; só leitura. Enquanto não chega, null; `aoChegar` repinta. */
+function perdasCompensacaoDaOS(osId, dia, aoChegar) {
+  const d = String(dia || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || typeof COMISSAO === 'undefined' || !COMISSAO || typeof COMISSAO.demonstrativoNoDia !== 'function') return null;
+  const [y, m] = d.split('-').map(Number), f = {de:d.slice(0, 8) + '01', ate:new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)};
+  const demos = perdasFalhasDoPeriodo(f, aoChegar);
+  const x = demos && demos.length ? COMISSAO.demonstrativoNoDia(demos, osId, d) : null;
+  return x && x.os[String(osId)] && x.os[String(osId)].compensacao || null;
 }
 async function perdasCarregar() {
   if (!perdasPode() || typeof STORE === 'undefined' || typeof STORE.api !== 'function') return;
@@ -640,7 +653,7 @@ function perdasDecisaoHTML(l) {
   const rev = dec.revisao != null && dec.linhas.length ? `<small class="bloco">Lida da revisão ${esc(String(dec.revisao))} da comissão, ${dec.tipoRevisao === 'aprovacao' ? 'aprovada' : 'prévia'}${dec.em ? ', de ' + esc(perdasQuando(dec.em)) : ''}${esc(onde)}.</small>` : '';
   const comp = dem && dem.compensacao ? `<small class="bloco">${esc(perdasCompensacaoTxt(dem.compensacao))}</small>` : '';
   // D-010: o retrabalho de instalação é perda automática (decidida); a origem a definir deixa só esta O.S. pendente.
-  if (l.compensacao) return `<strong>${l.compensacao.perda ? 'Perdida por compensação' : 'Paga por compensação'}</strong><small class="bloco">${esc(PERDAS.textoDaCompensacao(l.compensacao))} No demonstrativo do mês ela tinha ficado pendente (origem a definir).</small>${rev}${comp}`;
+  if (l.compensacao) return `<strong>${l.compensacao.perda || l.compensacao.falha ? 'Perdida por compensação' : 'Paga por compensação'}</strong><small class="bloco">${esc(PERDAS.textoDaCompensacao(l.compensacao))} No demonstrativo do mês ela tinha ficado pendente (origem a definir).</small>${rev}${comp}`;
   if (l.grupo === 'perda') return `<strong>Perda automática</strong><small class="bloco">Retrabalho de instalação: não pede decisão no demonstrativo da comissão. ${esc(perdasPonto(perdasTextos().naoSeAbona))}</small>${rev}${comp}`;
   if (l.grupo === 'definir') return `<strong>Pendente: a origem do retrabalho</strong><small class="bloco">Até a gestão definir a origem, a comissão desta O.S. fica pendente (não paga e não perde). O demonstrativo do mês pode ser aprovado sem ela; definida a origem, ela se paga sozinha por compensação da pendência (com o mês aprovado e exportado) ou entra numa revisão seguinte.</small>${rev}${comp}`;
   if (dem && dem.semLinha) return `<strong>${esc(PERDAS.ROTULO_DECISAO.pendente)}</strong><small class="bloco">Esta O.S. não está no demonstrativo de ${esc(perdasPeriodoTxt(dem))}: entrou depois do fechamento.</small>`;
@@ -674,7 +687,7 @@ function perdasEfeitoHTML(l) {
 function perdasSeloDe(l) {
   if (l.grupo === 'antes') return {classe:'antes', texto:'Antes do programa'};
   // A ficha mudou depois do fechamento (revisão da onda a3): o selo diz o que o demonstrativo aplicou.
-  if (l.compensacao) return l.compensacao.perda ? {classe:'falha', texto:'Perdida por compensação: retrabalho de instalação'} : {classe:'ok', texto:'Paga por compensação'};
+  if (l.compensacao) return l.compensacao.perda ? {classe:'falha', texto:'Perdida por compensação: retrabalho de instalação'} : l.compensacao.falha ? {classe:'falha', texto:'Perdida por compensação: falha comprovada'} : {classe:'ok', texto:'Paga por compensação'};
   if (l.grupo === 'definir' && l.avisoFicha) return {classe:'pendente', texto:'Pendente no demonstrativo: falta a compensação ou nova revisão'};
   if (l.grupo === 'outra' && l.avisoFicha) return {classe:'ok', texto:'Sem perda no demonstrativo'};
   if (l.grupo === 'definir') return {classe:'pendente', texto:'Origem a definir'};

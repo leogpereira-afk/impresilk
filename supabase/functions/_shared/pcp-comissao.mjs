@@ -325,7 +325,10 @@ const COMISSAO = (() => {
         for(const id of lista(c.osIds).map(String)){
           if(!Object.prototype.hasOwnProperty.call(os,id)||os[id].falha||!lista(r.apuracao?.linhas).some(l=>String(l?.osId)===id&&l.decisao==='origem_a_definir'))continue;
           const o=c.origens&&typeof c.origens==='object'&&c.origens[id]||{};
-          os[id]={...os[id],compensacao:{id:String(c.id||''),seq:c.seq??null,em:typeof c.em==='string'?c.em:'',perda:o.perda==='retrabalho_instalacao'?'retrabalho_instalacao':'',etapaOrigem:texto(o.etapaOrigem)}};
+          /* A FALHA COMPROVADA DECIDIDA NA COMPENSAÇÃO (verificação do D2; D-004):
+             zera a comissão e também os pontos, como a do demonstrativo. */
+          const ls=lista(c.linhas).filter(l=>String(l?.osId)===id), falha=!!ls.length&&ls.every(l=>l.decisao==='falha_comprovada');
+          os[id]={...(falha?{falha:true,tipo:texto(c.decisoes?.[id]?.tipo)}:os[id]),compensacao:{id:String(c.id||''),seq:c.seq??null,em:typeof c.em==='string'?c.em:'',perda:o.perda==='retrabalho_instalacao'?'retrabalho_instalacao':'',etapaOrigem:texto(o.etapaOrigem),...(falha?{falha:true}:{})}};
         }
       }
       out.push({de:r.de,ate:r.ate,exato:r.de===periodo?.de&&r.ate===periodo?.ate,revisao:r.revisao??null,tipo:r.tipo==='aprovacao'?'aprovacao':'previa',em:typeof r.em==='string'?r.em:'',os});
@@ -595,7 +598,8 @@ const COMISSAO = (() => {
       return {id:String(c.id),seq:c.seq??null,de:c.de,ate:c.ate,aprovacaoId:c.aprovacaoId,osIds:lista(c.osIds).map(String),origens:ehObj(c.origens)?c.origens:{},
         em:String(a.em||''),autor:a.autor?{nome:texto(a.autor.nome),porId:String(a.autor.porId||''),como:String(a.autor.como||'')}:null,modo:String(c.apuracao?.config?.modo||''),
         totalCentavos:Number.isSafeInteger(c.apuracao?.totalCentavos)?c.apuracao.totalCentavos:0,
-        linhas:lista(c.apuracao?.linhas).map(l=>({osId:String(l?.osId),numero:String(l?.numero||''),dia:String(l?.dia||''),baseLiquidaCentavos:l?.baseLiquidaCentavos??null,comissaoCentavos:l?.comissaoCentavos??null,comissaoPerdidaCentavos:l?.comissaoPerdidaCentavos??null,perda:l?.perda==='retrabalho_instalacao'?'retrabalho_instalacao':''})),
+        linhas:lista(c.apuracao?.linhas).map(l=>({osId:String(l?.osId),numero:String(l?.numero||''),dia:String(l?.dia||''),baseLiquidaCentavos:l?.baseLiquidaCentavos??null,comissaoCentavos:l?.comissaoCentavos??null,comissaoPerdidaCentavos:l?.comissaoPerdidaCentavos??null,perda:l?.perda==='retrabalho_instalacao'?'retrabalho_instalacao':'',decisao:String(l?.decisao||'')})),
+        decisoes:Object.fromEntries(lista(c.osIds).map(String).map(os=>[os,{tipo:texto(c.entrada?.decisoes?.[os]?.tipo)}])),
         exportadas:xs.length,exportadaEm:xs.length?String(xs[0].em||''):''};
     }).sort((a,b)=>a.id.localeCompare(b.id));
   }
@@ -663,7 +667,7 @@ const COMISSAO = (() => {
     if (vigente.modo === 'substituto') return {ok:false, vigente, erro:ehId6(id) ? 'Você não aprova: hoje quem aprova a comissão é o titular ou o substituto designados pela gestão.' : semLigacao};
     return {ok:false, vigente, erro:ehId6(id) ? 'Você não aprova: quem aprova a comissão é o titular designado pela gestão.' : semLigacao};
   }
-  return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase,comissoesAcumuladas,TEXTO_ORIGEM_A_DEFINIR,demonstrativosVigentes,falhaComprovadaNoDia,comFalhasComprovadas,
+  return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase,comissoesAcumuladas,TEXTO_ORIGEM_A_DEFINIR,demonstrativosVigentes,falhaComprovadaNoDia,demonstrativoNoDia,comFalhasComprovadas,
     dinheiroDoRegistro,dinheiroDaFonte,mudancasDeDinheiro,textoMudancasDeDinheiro,totaisDaRevisao,diferencaContraExportada,
     aprovadorVigente,substitutoVigente,quemAprova,compensacoesVigentes,saldosDasCompensacoes,resumoCompensacoes,
     origemDeHoje,pendenciasDaAprovacao,textoNaoPronta,saldosAteOMes,apurarPendencia,somarTotais,comCompensacoes,csvPendencia};

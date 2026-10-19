@@ -386,7 +386,7 @@ test('REV3: exportar a mesma compensação de novo diz quantas vezes e quando, e
   assert.equal(x2.jaExportada,true);assert.equal(x2.vezes,2);
   assert.match(x2.aviso,/^Esta compensação já foi exportada 1 vez, a última em \d{2}\/\d{2}\/\d{4} por Titular Fictício: confira se aquele CSV foi recebido; esta nova exportação não tem nada novo a pagar\./);
   const ui=ler('comissao-ui.js');
-  assert.match(ui,/if\(c&&out\.exportacao\)c\.exportacoes=\[\.\.\.\(c\.exportacoes\|\|\[\]\),out\.exportacao\];\s*comissaoPendenciasPintar\(caixa,ctx,r,/);
+  assert.match(ui,/if\(c&&out\.exportacao\)c\.exportacoes=\[\.\.\.\(c\.exportacoes\|\|\[\]\),out\.exportacao\];[\s\S]{0,300}?comissaoPendenciasPintar\(caixa,ctx,r,/);
 });
 
 test('REV4: a compensação entra na conta acumulada dos meses seguintes (motor e porta); o saldo mudado depois do Gerar é 409',async()=>{
@@ -507,7 +507,7 @@ test('item 5: Perdas, o ponto de atenção, o aviso e o demonstrativo dizem "pag
   assert.ok(!JSON.stringify(m.linhas).includes('feche o período de novo'));
   const src=ler('perdas.js');
   assert.ok(!/feche o período de novo e gere nova prévia/.test(src));
-  assert.match(src,/if \(l\.compensacao\) return l\.compensacao\.perda \? \{classe:'falha', texto:'Perdida por compensação: retrabalho de instalação'\} : \{classe:'ok', texto:'Paga por compensação'\};/);
+  assert.match(src,/if \(l\.compensacao\) return l\.compensacao\.perda \? \{classe:'falha', texto:'Perdida por compensação: retrabalho de instalação'\} : l\.compensacao\.falha \? \{classe:'falha', texto:'Perdida por compensação: falha comprovada'\} : \{classe:'ok', texto:'Paga por compensação'\};/);
   assert.match(C.TEXTO_ORIGEM_A_DEFINIR,/pague só ela por compensação da pendência/);
   // O demonstrativo e o PDF: a linha "a definir" diz como foi decidida, e as compensações do mês aparecem.
   const ctx=vm.createContext({esc:s=>String(s??''),dinheiroCasa:v=>'R$ '+v.toFixed(2).replace('.',','),console});
@@ -552,4 +552,146 @@ test('item 11: a prévia visual (preview-auditoria) leva as ações comissaoPend
   assert.match(pv,/performanceDocumento\|comissaoPendencia\|comissaoAprovador\)\/\.test\(body\.action\)/);
   assert.match(pv,/process\.env\.PV_D2\?require\('\.\/preview-d2-fixture\.cjs'\)/);
   assert.ok(fs.existsSync(path.join(RAIZ,'scripts/preview-d2-fixture.cjs')));
+});
+
+/* ======================= VERIFICAÇÃO FINAL DO D2 (19/10/2026) ======================= */
+const colunaCsv=(a,pessoa)=>(a.apuracao.ajustes||[]).filter(p=>p.pessoaId===pessoa).reduce((t,p)=>t+p.diferencaCentavos,0);
+
+test('V1: A1 exportada, compensação exportada, A2: coluna do CSV e diferença da exportação não pagam a os3 de novo',async()=>{
+  const {e,f,a}=await mesAprovado([osF('os1',1000),osF('os3',3000,aDefinir)]);
+  definir(e,'os3','Produção');
+  const g=ok(await gerar(e,a,['os3']),'gerar').compensacao;
+  ok(await aprovarComp(e,g),'aprovar');ok(await exportarComp(e,g),'exportar comp');
+  const {a2}=await refazerMes(e,f,a);
+  const x2=ok(await e.call({action:'performanceComissaoExportar',...NOV,id:a2.id},TITULAR),'exp A2').exportacao;
+  assert.deepEqual([colunaCsv(a2,'100001'),colunaCsv(a2,'100002'),somaDif(x2.diferencas,'100001'),somaDif(x2.diferencas,'100002')],[0,0,0,0]);
+});
+
+test('V2: compensação exportada e depois o MÊS reexportado (resposta perdida): a revisão nova não paga a os3 de novo (o "antes" é pela aprovação, nunca pela hora)',async()=>{
+  const {e,f,a}=await mesAprovado([osF('os1',1000),osF('os3',3000,aDefinir)]);
+  definir(e,'os3','Produção');
+  const g=ok(await gerar(e,a,['os3']),'gerar').compensacao;
+  ok(await aprovarComp(e,g),'aprovar');ok(await exportarComp(e,g),'exportar comp');
+  // O caso ruim: a reexportação empurrava a hora da última exportação e a compensação saía do "antes" (1800 e 1200 a pagar de novo).
+  ok(await e.call({action:'performanceComissaoExportar',...NOV,id:a.id},TITULAR),'reexportar o mês A1');
+  const {a2}=await refazerMes(e,f,a);
+  assert.deepEqual(a2.apuracao.compensacoesPendencia,[g.id]);
+  const x2=ok(await e.call({action:'performanceComissaoExportar',...NOV,id:a2.id},TITULAR),'exp A2').exportacao;
+  assert.deepEqual([colunaCsv(a2,'100001'),colunaCsv(a2,'100002'),somaDif(x2.diferencas,'100001'),somaDif(x2.diferencas,'100002')],[0,0,0,0]);
+  // A compensação integral usa a mesma regra: a aprovação compensada mais a compensação feita sobre ela.
+  const {e:e2,a:b}=await mesAprovado([osF('os1',1000),osF('os3',3000,aDefinir)]);
+  definir(e2,'os3','Produção');
+  const h=ok(await gerar(e2,b,['os3']),'gerar').compensacao;
+  ok(await aprovarComp(e2,h),'aprovar');ok(await exportarComp(e2,h),'exportar comp');
+  ok(await e2.call({action:'performanceComissaoExportar',...NOV,id:b.id},TITULAR),'reexportar');
+  const ci=ok(await e2.call({action:'performanceComissaoNova',...NOV,anterior:b.id,compensarId:b.id,motivo:'Compensação integral fictícia',requestId:rq('integral')},TITULAR),'integral').revisao;
+  assert.deepEqual(ci.apuracao.compensacoesPendencia,[h.id]);
+  // Zera a os1 (600 e 400) e a os3 que a compensação pagou (1800 e 1200).
+  assert.deepEqual([colunaCsv(ci,'100001'),colunaCsv(ci,'100002')],[-2400,-1600]);
+});
+
+test('V3: recompensar depois da revisão que tirou: a soma do que saiu é o que a O.S. paga uma vez',async()=>{
+  const {e,f,a}=await mesAprovado([osF('os1',1000),osF('os3',3000,aDefinir)]);
+  definir(e,'os3','Produção');
+  const g=ok(await gerar(e,a,['os3']),'gerar').compensacao;
+  ok(await aprovarComp(e,g),'aprovar');const c1=ok(await exportarComp(e,g),'exportar comp');
+  reg(e,'os3').etapaOrigem='';
+  const {a2}=await refazerMes(e,f,a);
+  const x2=ok(await e.call({action:'performanceComissaoExportar',...NOV,id:a2.id},TITULAR),'exp A2').exportacao;
+  definir(e,'os3','Produção');
+  const g2=ok(await gerar(e,a2,['os3']),'gerar 2').compensacao;
+  ok(await aprovarComp(e,g2),'aprovar 2');const c2=ok(await exportarComp(e,g2),'exportar 2');
+  const val=csv=>csv.replace(/^﻿/,'').split('\r\n').slice(1).reduce((t,l)=>t+Math.round(Number(l.split(';')[7].replace(/"/g,'').replace(',','.'))*100),0);
+  const total=val(c1.csv)+somaDif(x2.diferencas,'100001')+somaDif(x2.diferencas,'100002')+val(c2.csv);
+  assert.equal(total,3000);
+  const fech=e.db.pcp_registros.filter(r=>r.colecao==='performance_fechamentos').map(r=>r.registro).sort((x,y)=>String(y.id).localeCompare(String(x.id)))[0];
+  const {a2:a3}=await refazerMes(e,fech,a2);
+  const x3=ok(await e.call({action:'performanceComissaoExportar',...NOV,id:a3.id},TITULAR),'exp A3').exportacao;
+  assert.deepEqual([colunaCsv(a3,'100001')+colunaCsv(a3,'100002'),somaDif(x3.diferencas,'100001')+somaDif(x3.diferencas,'100002')],[0,0]);
+});
+
+test('V4: motor, mês seguinte depois da compensação: 1% do acumulado, sem pendência',()=>{
+  const reg=(id,dia,valor,extra={})=>({id,osId:'os9',entregaId:id,fracaoOS:0.5,numero:'90009',dia,valor,confirmado:true,membros:[{chave:'100001'},{chave:'100002'}],...extra});
+  const DEZ={de:'2026-12-01',ate:'2026-12-31'};
+  const seloN={id:'n1',fechadoEm:'2026-12-01T00:00:00Z',periodo:NOV,regra:'performance-3',regraPerdas:'perdas-1',registros:[reg('e1','2026-11-10',1.5,{retrabalho:true,etapaOrigem:''})]};
+  const entN=entrada(seloN.registros);
+  const aN={tipo:'aprovacao',id:'aN',revisao:2,de:NOV.de,ate:NOV.ate,fechamentoId:'n1',entrada:entN,apuracao:C.apurar(seloN,entN)};
+  const p=C.pendenciasDaAprovacao(aN,{...seloN,registros:[reg('e1','2026-11-10',1.5,{retrabalho:true,etapaOrigem:'Produção'})]},[],seloN)[0];
+  const ap=C.apurarPendencia(seloN,aN,{osIds:['os9'],origens:p.origens},{aprovacoes:[aN]}).apuracao;
+  const comp={evento:'compensacao',id:NOV.de+':'+NOV.ate+':c000001',de:NOV.de,ate:NOV.ate,aprovacaoId:'aN',apuracao:ap};
+  const seloD={id:'d1',fechadoEm:'2027-01-01T00:00:00Z',periodo:DEZ,regra:'performance-3',regraPerdas:'perdas-1',registros:[reg('e2','2026-12-10',1.5,{retrabalho:true,etapaOrigem:'Produção'})]};
+  const entD=entrada(seloD.registros);
+  const dez=C.apurar(seloD,entD,{aprovacoes:[aN],compensacoes:[comp],saldos:C.saldosDasCompensacoes([comp],[aN],'efetivo',DEZ)});
+  assert.deepEqual(dez.pendencias,[]);
+  assert.equal(ap.totalCentavos+dez.totalCentavos,3);
+});
+
+test('verificação 2: a falha comprovada decidida na entrada da compensação zera a comissão E os pontos (D-004), nas duas cópias, só leitura',async()=>{
+  const {e,f,a}=await mesAprovado([osF('os1',1000),osF('os3',2000,aDefinir)]);
+  const eq={id:'eq-f',nome:'Equipe fictícia',ativo:true,membros:membros.map(m=>({chave:m.chave,nome:m.nome}))};
+  e.db.pcp_config_global[0].config.performancePCP.equipes=[eq];
+  const M=conta('montagem','montagem-ficticia','Montagem Fictícia');
+  const rk=async()=>ok(await e.call({action:'performanceRankingEquipe',...NOV},M),'ranking').equipes.reduce((t,x)=>t+(x.equivalentes||0),0);
+  const antes=await rk();
+  definir(e,'os3','Produção');
+  const falha={decisoes:{os3:{...doc,decisao:'falha_comprovada',tipo:'incompleto'}}};
+  const g=ok(await gerar(e,a,['os3'],TITULAR,{entrada:falha}),'gerar').compensacao;
+  assert.equal(g.apuracao.linhas[0].decisao,'falha_comprovada');assert.equal(g.apuracao.totalCentavos,0);
+  ok(await aprovarComp(e,g),'aprovar');
+  relogio(e,'2026-12-02T13:00:00Z');
+  // O caso ruim: a comissão zerava e os pontos continuavam.
+  assert.ok(antes-(await rk())>0.99,'a os3 deixou de pontuar');
+  const {COMISSAO:S}=await import('../supabase/functions/_shared/pcp-comissao.mjs');
+  const resumo=C.resumoCompensacoes(pend(e).map(x=>x.registro));
+  for(const X of [C,S]){
+    const demos=X.demonstrativosVigentes([a],NOV,resumo);
+    assert.equal(demos[0].os.os3.falha,true);assert.equal(demos[0].os.os3.tipo,'incompleto');assert.equal(demos[0].os.os3.compensacao.falha,true);
+    assert.equal(X.comFalhasComprovadas([{id:'os3',osId:'os3',dia:'2026-11-10'}],demos)[0].perda,'falha_comprovada');
+  }
+  assert.equal(e.db.pcp_registros.find(r=>r.colecao==='performance_fechamentos').registro.hash,f.hash);
+  // A aba Perdas diz "perdida por compensação: falha comprovada".
+  const P=require('../perdas.js');
+  const l=ok(await e.call({action:'performanceComissaoListar',...NOV},TITULAR),'listar');
+  const fech=e.db.pcp_registros.find(r=>r.colecao==='performance_fechamentos').registro;
+  const m=P.montar({registros:fech.registros,demonstrativos:P.demonstrativos({revisoes:l.revisoes,cobrem:[],compensacoesPendencia:l.compensacoesPendencia},NOV),periodo:NOV,regras:require('../regras.js'),motor:C});
+  assert.match(m.linhas.find(x=>x.osId==='os3').avisoFicha,/^Perdida por compensação em \d{2}\/\d{2}\/\d{4}: falha comprovada da instalação \(compensação 1\)\./);
+});
+
+test('verificação 3, 4 e 5: o motivo sem pendência aparece, o demonstrativo sabe da exportação sem reabrir, e a ficha diz paga ou perdida por compensação',async()=>{
+  const ctx=vm.createContext({esc:s=>String(s??''),dinheiroCasa:v=>'R$ '+v.toFixed(2).replace('.',','),console});
+  vm.runInContext(ler('comissao-ui.js'),ctx);
+  // 3: mês aprovado e não exportado, sem pendência listada: o bloco diz o motivo (antes sumia calado).
+  const html=vm.runInContext(`comissaoPendenciasHTML({ok:true,disponivel:false,motivo:'Exporte o mês antes de compensar: fictício.',pendencias:[],compensacoes:[]})`,ctx);
+  assert.match(html,/<p class="perf-aviso neutro" role="note">Exporte o mês antes de compensar: fictício\.<\/p>/);
+  // 4: depois de exportar a compensação, o resumo é repintado com a contagem nova.
+  const ui=ler('comissao-ui.js');
+  assert.match(ui,/aoExportarComp:id=>\{const c=comps\.find\(x=>x&&x\.id===id\);if\(c\)c\.exportadas=\(Number\(c\.exportadas\)\|\|0\)\+1;conteudo\.querySelector\('#comissao-resumo'\)\.innerHTML=comissaoResumoHTML\(/);
+  assert.match(ui,/if\(typeof ctx\.aoExportarComp==='function'\)ctx\.aoExportarComp\(b\.dataset\.pendExportar\);/);
+  ctx.__r={id:'A',de:NOV.de,ate:NOV.ate};
+  const comps=[{id:'c1',seq:1,de:NOV.de,ate:NOV.ate,aprovacaoId:'A',em:'2026-12-02T12:00:00Z',totalCentavos:3000,linhas:[{osId:'os3',numero:'90003'}],exportadas:0}];
+  ctx.__c=comps;
+  assert.match(vm.runInContext('comissaoCompsDoMesHTML(__r,__c)',ctx),/ainda não exportada/);
+  comps[0].exportadas=1;
+  assert.match(vm.runInContext('comissaoCompsDoMesHTML(__r,__c)',ctx),/ · exportada<\/li>/);
+  // 5: a ficha (só a gestão), com a decisão que chega do servidor.
+  const {e,a}=await mesAprovado([osF('os1',1000),osF('os3',3000,aDefinir)]);
+  definir(e,'os3','Instalação');
+  const g=ok(await gerar(e,a,['os3']),'gerar').compensacao;ok(await aprovarComp(e,g),'aprovar');
+  const pctx=vm.createContext({console,COMISSAO:C,STATE:{user:{papel:'pcp'}},perfChave:()=>'',
+    STORE:{api:b=>e.call(b,TITULAR)}});
+  vm.runInContext(ler('perdas.js'),pctx);
+  let chegou=0;
+  assert.equal(vm.runInContext(`perdasCompensacaoDaOS('os3','2026-11-10',()=>{globalThis.__chegou=(globalThis.__chegou||0)+1;})`,pctx),null,'enquanto não chega');
+  for(let i=0;i<50&&!pctx.__chegou;i++)await new Promise(r=>setTimeout(r,5));
+  chegou=pctx.__chegou;assert.equal(chegou,1,'a ficha repinta quando chega');
+  const c=vm.runInContext(`perdasCompensacaoDaOS('os3','2026-11-10')`,pctx);
+  assert.equal(c.perda,'retrabalho_instalacao');assert.equal(c.id,g.id);
+  const app=ler('app.js');
+  const fn=new Function('perdasPode','perdasCompensacaoDaOS','esc','fmtDataBR','diaEntrega','_modalDraft','pintarHostFicha','statusEntregaFichaHTML','ligarStatusEntregaDaFicha',
+    app.match(/function compensacaoFichaHTML\(os\) \{[\s\S]*?\n\}/)[0]+';return compensacaoFichaHTML;');
+  const ficha=(pode,comp)=>fn(()=>pode,()=>comp,s=>String(s??''),()=>'02/12/2026',()=>'2026-11-10',null,()=>{},()=>'',()=>{})({id:'os3'});
+  assert.equal(ficha(false,c),'','quem não é da gestão não vê');
+  assert.match(ficha(true,c),/<strong>Perdida por compensação em 02\/12\/2026:<\/strong> retrabalho de instalação \(compensação 1\)\./);
+  assert.match(ficha(true,{...c,perda:'',etapaOrigem:'Produção'}),/<strong>Paga por compensação em 02\/12\/2026<\/strong> \(compensação 1\), com a origem Produção\./);
+  assert.match(app,/\$\{erp\}\$\{desfeito\}\$\{trabalhoCancelada\}\$\{typeof compensacaoFichaHTML === 'function' \? compensacaoFichaHTML\(os\) : ''\}/);
 });

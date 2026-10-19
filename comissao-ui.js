@@ -90,6 +90,8 @@ function comissaoCompDaLinha(r, l, comps) {
   const c=(Array.isArray(comps)?comps:[]).filter(x=>x&&x.aprovacaoId===r.id&&(x.osIds||[]).map(String).includes(String(l.osId))).pop();
   if(!c)return '';
   const o=(c.origens||{})[String(l.osId)]||{},quando=comissaoData(c.em);
+  const ls=(c.linhas||[]).filter(x=>String(x.osId)===String(l.osId)),falha=!!ls.length&&ls.every(x=>x.decisao==='falha_comprovada');
+  if(falha)return `Perdida por compensação em ${quando}: falha comprovada da instalação (compensação ${c.seq})`;
   return o.perda==='retrabalho_instalacao'?`Perdida por compensação em ${quando}: retrabalho de instalação (compensação ${c.seq})`:`Paga por compensação em ${quando} (compensação ${c.seq}, origem ${o.etapaOrigem||'definida'})`;
 }
 function comissaoCompsDoMesHTML(r, comps) {
@@ -189,7 +191,8 @@ function comissaoPendenciaCompHTML(c) {
 function comissaoPendenciasHTML(r) {
   if(!r)return '';
   const ps=Array.isArray(r.pendencias)?r.pendencias:[], cs=Array.isArray(r.compensacoes)?r.compensacoes:[];
-  if(!ps.length&&!cs.length)return '';
+  // Mês aprovado e não exportado (ou sem a aprovação): o motivo aparece, em vez de o bloco sumir calado (verificação do D2).
+  if(!ps.length&&!cs.length)return r.disponivel===false&&r.motivo?`<section class="comissao-pendencias-bloco"><h4>Pendências: origem do retrabalho a definir</h4><p class="perf-aviso neutro" role="note">${esc(r.motivo)}</p></section>`:'';
   const prontas=ps.filter(p=>p.estado==='pronta');
   const lista=ps.length?`<ul>${ps.map(p=>`<li>O.S. ${esc(p.numero||p.osId)} · ${esc(comissaoPendenciaEstadoTxt(p))}${p.estado==='pronta'?' · '+esc(comissaoPendenciaEfeitoTxt(p))+(p.previaId?' · já há uma compensação a aprovar':''):''}</li>`).join('')}</ul>`:'';
   const avisos=Array.isArray(r.avisos)&&r.avisos.length?`<div class="perf-aviso" role="note"><ul>${r.avisos.map(a=>`<li>${esc(a)}</li>`).join('')}</ul></div>`:'';
@@ -220,6 +223,8 @@ function comissaoPendenciasPintar(caixa, ctx, r, mensagem) {
     try{erro.textContent='';const out=await STORE.api({action:'comissaoPendenciaExportar',...ctx.periodo,id:b.dataset.pendExportar});if(!out.ok)throw new Error(out.error);
       const url=URL.createObjectURL(new Blob([out.csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=out.arquivo;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
       const c=(r.compensacoes||[]).find(x=>x.id===b.dataset.pendExportar);if(c&&out.exportacao)c.exportacoes=[...(c.exportacoes||[]),out.exportacao];
+      // O demonstrativo (e o PDF) também sabem da exportação, sem reabrir (verificação do D2).
+      if(typeof ctx.aoExportarComp==='function')ctx.aoExportarComp(b.dataset.pendExportar);
       comissaoPendenciasPintar(caixa,ctx,r,'CSV baixado: '+out.arquivo+'. '+(out.jaExportada?String(out.aviso||'').split('Exportação para conferência')[0]:'')+'Exportação para conferência: não realiza pagamento. Impressão digital do CSV: '+comissaoDigitalCurta(out.csvSha256)+'.');
     }catch(e){erro.textContent=e.message;}
   });
@@ -384,7 +389,8 @@ async function perfComissaoAbrir() {
       dialogo.querySelector('form').onsubmit=async ev=>{ev.preventDefault();const form=ev.currentTarget,btn=form.querySelector('button');btn.disabled=true;try{const out=await STORE.api({action:'performanceComissaoNova',...periodo,anterior:ultima.id,compensarId:r.id,motivo:form.elements.motivo.value,requestId:crypto.randomUUID()});if(!out.ok)throw new Error(out.error);if(typeof perdasInvalidar==='function')perdasInvalidar();if(typeof perfMesesInvalidar==='function')perfMesesInvalidar();dialogo.close();await perfComissaoAbrir();}catch(e){form.querySelector('[role="alert"]').textContent=e.message;}finally{btn.disabled=false;}};
     };
     // A compensação da pendência (D2): só quando alguma revisão do mês deixou O.S. com a origem a definir.
-    if(revisoes.some(r=>(r?.apuracao?.linhas||[]).some(l=>l&&l.decisao==='origem_a_definir')))comissaoPendenciasCarregar(conteudo.querySelector('#comissao-pendencias'),{periodo,fonte,pessoas:resposta.pessoas||[],revisoes,ultima,aprovador:resposta.aprovador||null});
+    if(revisoes.some(r=>(r?.apuracao?.linhas||[]).some(l=>l&&l.decisao==='origem_a_definir')))comissaoPendenciasCarregar(conteudo.querySelector('#comissao-pendencias'),{periodo,fonte,pessoas:resposta.pessoas||[],revisoes,ultima,aprovador:resposta.aprovador||null,
+      aoExportarComp:id=>{const c=comps.find(x=>x&&x.id===id);if(c)c.exportadas=(Number(c.exportadas)||0)+1;conteudo.querySelector('#comissao-resumo').innerHTML=comissaoResumoHTML(escolhida(),revisoes,exportacoes,{compensacoes:comps});}});
     conteudo.querySelector('#comissao-pdf').onclick=async()=>{try{erro.textContent='';await comissaoPdf(escolhida(),revisoes,exportacoes,periodo,comps);}catch(e){erro.textContent=e.message;}};
     conteudo.querySelector('#comissao-exportar').onclick=async()=>{try{const r=escolhida();const out=await STORE.api({action:'performanceComissaoExportar',...periodo,id:r?.id});if(!out.ok)throw new Error(out.error);const url=URL.createObjectURL(new Blob([out.csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=out.arquivo;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);erro.textContent='';const antes=exportacoes.slice();if(out.exportacao){if(typeof perfMesesInvalidar==='function')perfMesesInvalidar();exportacoes.push(out.exportacao);conteudo.querySelector('#comissao-resumo').innerHTML=comissaoResumoHTML(escolhida(),revisoes,exportacoes,{noBloco:out.exportacao.id,compensacoes:comps});}const caixa=conteudo.querySelector('#comissao-exportado');caixa.innerHTML=comissaoExportadoHTML(out,antes);caixa.hidden=false;if(typeof caixa.scrollIntoView==='function')caixa.scrollIntoView({block:'nearest'});}catch(e){erro.textContent=e.message;}};
   }catch(e){d.appendChild(Object.assign(document.createElement('p'),{textContent:e.message}));}

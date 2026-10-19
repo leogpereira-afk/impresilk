@@ -5775,6 +5775,21 @@ const podeCancelarOS = () => ['admin', 'pcp'].includes(String((STATE.user || {})
    antecipado "sem dado" (entra com a F17) e, para a gestão, "Cancelar O.S."
    ou "Desfazer cancelamento". Vale também na O.S. finalizada (lock-allow): a
    baixa do ERP fora da carteira é justamente a que a gestão cancela. */
+/* A PENDÊNCIA DECIDIDA POR COMPENSAÇÃO NA FICHA (verificação do D2): só a
+   gestão (perdas.js, perdasPode), só leitura. "Paga por compensação" ou
+   "Perdida por compensação", com a data; a ficha repinta quando a decisão chega. */
+function compensacaoFichaHTML(os) {
+  if (!os || !os.id || typeof perdasPode !== 'function' || !perdasPode() || typeof perdasCompensacaoDaOS !== 'function') return '';
+  const dia = typeof diaEntrega === 'function' ? diaEntrega(os) : String(os.finalizadaEm || '').slice(0, 10);
+  let c = null;
+  try { c = perdasCompensacaoDaOS(os.id, dia, () => { if (_modalDraft && _modalDraft.id === os.id) pintarHostFicha('fe-status', () => statusEntregaFichaHTML(_modalDraft), ligarStatusEntregaDaFicha); }); } catch { c = null; }
+  if (!c) return '';
+  const quando = c.em ? ' em ' + esc(fmtDataBR(c.em)) : '', qual = c.seq != null ? ` (compensação ${esc(c.seq)})` : '';
+  const texto = c.perda ? `<strong>Perdida por compensação${quando}:</strong> retrabalho de instalação${qual}.`
+    : c.falha ? `<strong>Perdida por compensação${quando}:</strong> falha comprovada da instalação${qual}.`
+    : `<strong>Paga por compensação${quando}</strong>${qual}, com a origem ${esc(c.etapaOrigem || 'definida')}.`;
+  return `<p class="st-ent-hist st-ent-compensacao" role="note">${texto} No demonstrativo do mês ela tinha ficado com a origem a definir.</p>`;
+}
 function statusEntregaFichaHTML(os) {
   const st = statusEntregaDe(os);
   if (!st) return '';
@@ -5800,7 +5815,7 @@ function statusEntregaFichaHTML(os) {
       <p class="st-ent-motivo">${esc(motivoExibido.charAt(0).toUpperCase() + motivoExibido.slice(1))}.</p>
       ${outros ? `<ul class="st-ent-outros" aria-label="Também vale">${outros}</ul>` : ''}
       ${retornoFichaHTML(st.retornoAntecipado, st.motivo, st.perdas, !foraDoProgramaFicha(os))}
-      ${erp}${desfeito}${trabalhoCancelada}
+      ${erp}${desfeito}${trabalhoCancelada}${typeof compensacaoFichaHTML === 'function' ? compensacaoFichaHTML(os) : ''}
       ${acao ? `<div class="st-ent-acoes">${acao}</div>` : ''}
       ${ocorrenciasFichaHTML(os, st)}
     </section>`;

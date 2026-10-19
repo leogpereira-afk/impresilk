@@ -1379,11 +1379,18 @@ function perfCompensacoesAprovadas(eventos:any[]) {
    exportadas depois dela. A compensação só nasce sobre a aprovação ativa já
    exportada e precisa ser exportada antes de uma prévia nova do mês, então
    o que saiu por CSV é exatamente isto. */
-function perfCompsNoAntes(exportadasDoMes:any[], eventos:any[], periodo:{de:string,ate:string}) {
-  const ultima=(exportadasDoMes||[])[(exportadasDoMes||[]).length-1]||null, desde=String(ultima?.em||"");
-  const primeira=new Map<string,string>();
-  for(const e of eventos||[])if(e?.evento==="exportacao"&&e.de===periodo.de&&e.ate===periodo.ate){const k=String(e.compensacaoId),em=String(e.em||"");if(!primeira.has(k)||em<primeira.get(k)!)primeira.set(k,em);}
-  return perfCompensacoesAprovadas(eventos).filter((c:any)=>c.de===periodo.de&&c.ate===periodo.ate&&primeira.has(String(c.id))&&primeira.get(String(c.id))!>desde)
+/* PELA APROVAÇÃO, NUNCA PELA HORA (verificação do D2, V2): a reexportação do
+   mês (resposta perdida) empurrava a hora da última exportação e a compensação
+   exportada antes dela saía do "antes", e a revisão nova pagava a O.S. de
+   novo. Contam as compensações exportadas sobre a aprovação da última
+   exportação e sobre as aprovações do mês posteriores a ela. */
+function perfCompsNoAntes(exportadasDoMes:any[], eventos:any[], periodo:{de:string,ate:string}, revisoesDoMes:any[]) {
+  const ultima=(exportadasDoMes||[])[(exportadasDoMes||[]).length-1]||null;
+  if(!ultima)return [];
+  const base=(revisoesDoMes||[]).find((r:any)=>r?.id===ultima.revisaoId), desde=Number(base?.revisao??ultima.revisao)||0;
+  const aprovacoes=new Set((revisoesDoMes||[]).filter((r:any)=>r?.tipo==="aprovacao"&&(Number(r.revisao)||0)>=desde).map((r:any)=>String(r.id)));
+  const exportadas=new Set((eventos||[]).filter((e:any)=>e?.evento==="exportacao"&&e.de===periodo.de&&e.ate===periodo.ate).map((e:any)=>String(e.compensacaoId)));
+  return perfCompensacoesAprovadas(eventos).filter((c:any)=>c.de===periodo.de&&c.ate===periodo.ate&&aprovacoes.has(String(c.aprovacaoId))&&exportadas.has(String(c.id)))
     .sort((a:any,b:any)=>String(a.id).localeCompare(String(b.id)));
 }
 // As compensações do mês aprovadas e ainda não exportadas: travam a prévia nova do mês (exporte a compensação primeiro).
@@ -2285,7 +2292,9 @@ Deno.serve(async (req: Request) => {
         const ultima=revisoes[0], chave=periodo.de+":"+periodo.ate;
         // Os eventos de exportação deste período (M6), na ordem em que foram gravados.
         const exportacoesDoPeriodo=(rows:any[])=>(rows||[]).map((r:any)=>r.registro).filter((r:any)=>r&&r.de===periodo.de&&r.ate===periodo.ate).sort((a:any,b:any)=>String(a.id).localeCompare(String(b.id)));
-        const compsNoAntes=perfCompsNoAntes(exportacoesDoPeriodo(exportacoesLidas),eventosPend,periodo);
+        const compsNoAntes=perfCompsNoAntes(exportacoesDoPeriodo(exportacoesLidas),eventosPend,periodo,revisoes);
+        /* Na prévia nova (a coluna do CSV), só as que a aprovação comparada ainda não absorveu: as feitas sobre ela. */
+        const compsSobre=(ap:any)=>ap?compsNoAntes.filter((c:any)=>c.aprovacaoId===ap.id):[];
         const compsSemExportar=perfCompsSemExportar(eventosPend,periodo);
         if(acao==="performanceComissaoListar"){
           const fichas=await fichasRH(), regua=resolverPessoas({pessoas:fichas});
@@ -2375,8 +2384,8 @@ Deno.serve(async (req: Request) => {
           const ativa=alvo&&COMISSAO.ativas(todas,alvo.apuracao.config.modo).find((r:any)=>r.de===periodo.de&&r.ate===periodo.ate);
           if(!alvo||ativa?.id!==alvo.id||alvo.apuracao.compensacaoDe)return resp({error:"Selecione a aprovação ativa para preparar compensação integral."},409);
           if(compsSemExportar.length)return resp({error:PERF_FRASE_EXPORTE_COMPENSACAO},409);
-          apuracao=COMISSAO.compensar(COMISSAO.comCompensacoes(alvo,compsNoAntes));entrada={compensarId:alvo.id};fechamentoId=alvo.fechamentoId;
-          if(compsNoAntes.length)apuracao.compensacoesPendencia=compsNoAntes.map((c:any)=>String(c.id));
+          apuracao=COMISSAO.compensar(COMISSAO.comCompensacoes(alvo,compsSobre(alvo)));entrada={compensarId:alvo.id};fechamentoId=alvo.fechamentoId;
+          if(compsSobre(alvo).length)apuracao.compensacoesPendencia=compsSobre(alvo).map((c:any)=>String(c.id));
         }else if(acao==="performanceComissaoNova"){
           fechamentoId=String(body.fechamentoId||"");
           const fechamentos=await perfFechamentos(periodo), fonte=fechamentos.find((f:any)=>f.id===fechamentoId);
@@ -2394,8 +2403,8 @@ Deno.serve(async (req: Request) => {
           for(const p of apuracao.pessoas){const ficha=pessoas.pessoa(p.pessoaId);if(!ficha||ficha.semFicha){apuracao.pendencias.push(pessoas.repetido(p.pessoaId)?"O ID "+p.pessoaId+" está em dois cadastros do RH, de pessoas diferentes: não paga ninguém até o RH corrigir.":"Cadastro inexistente ou ambíguo: "+p.pessoaId);}else p.nome=ficha.nome;}
           for(const l of apuracao.linhas)for(const p of l.pagamentos)p.nome=apuracao.pessoas.find((x:any)=>x.pessoaId===p.pessoaId)?.nome||p.pessoaId;
           const anteriorAp=revisoes.find((r:any)=>r.tipo==="aprovacao"&&r.apuracao.config.modo===apuracao.config.modo);
-          apuracao=COMISSAO.conciliar(apuracao,COMISSAO.comCompensacoes(anteriorAp,compsNoAntes));
-          if(compsNoAntes.length)apuracao.compensacoesPendencia=compsNoAntes.map((c:any)=>String(c.id));
+          apuracao=COMISSAO.conciliar(apuracao,COMISSAO.comCompensacoes(anteriorAp,compsSobre(anteriorAp)));
+          if(compsSobre(anteriorAp).length)apuracao.compensacoesPendencia=compsSobre(anteriorAp).map((c:any)=>String(c.id));
           apuracao.aprovavel=apuracao.pendencias.length===0;
         }else{
           const erro=COMISSAO.erroAprovacao(ultima,body.hash,body.confirmacao);
@@ -2410,7 +2419,8 @@ Deno.serve(async (req: Request) => {
           for(const [osId,versao] of Object.entries(ultima.versoesOS))if((versoesOS.get(osId)||0)!==versao)return resp({error:"Outra aprovação alterou o saldo desta O.S. Gere uma nova prévia e confira os centavos."},409);
           // A compensação de pendência aprovada (ou exportada) depois desta prévia não está no "antes" dela (D2).
           if(compsSemExportar.length)return resp({error:PERF_FRASE_EXPORTE_COMPENSACAO},409);
-          const nelaAgora=compsNoAntes.map((c:any)=>String(c.id));
+          const antAp=ultima.apuracao?.compensacaoDe?revisoes.find((r:any)=>r.id===ultima.apuracao.compensacaoDe):revisoes.find((r:any)=>r.tipo==="aprovacao"&&r.apuracao?.config?.modo===ultima.apuracao?.config?.modo);
+          const nelaAgora=compsSobre(antAp).map((c:any)=>String(c.id));
           if(JSON.stringify(nelaAgora)!==JSON.stringify(Array.isArray(ultima.apuracao?.compensacoesPendencia)?ultima.apuracao.compensacoesPendencia:[]))return resp({error:"Uma compensação de pendência foi aprovada depois desta prévia e não está no que já foi pago. Gere uma nova prévia e confira as diferenças."},409);
           apuracao=ultima.apuracao;entrada=ultima.entrada;fechamentoId=ultima.fechamentoId;tipo="aprovacao";
         }
