@@ -1053,9 +1053,14 @@ function perfFitaMudouTxt(m){
  const d=m&&m.mudouDepois;if(!d)return '';
  return `${d.depoisDoEnvio?'mudou depois do envio':'mudou depois do fechamento'} (${d.os===1?'1 O.S.':(d.os||1)+' O.S.'}): falta uma nova revisão`;
 }
+// A pendência (origem a definir) paga por compensação, sem refazer o mês (D2 da auditoria de 12/10/2026).
+function perfFitaPendenciaTxt(m){
+ const p=m&&m.pendenciaPaga;if(!p)return '';
+ return `pendência paga por compensação (${p.os===1?'1 O.S.':(p.os||1)+' O.S.'})`;
+}
 function perfFitaEstadoTxt(m){
- const base=perfFitaEstadoBaseTxt(m),mudou=perfFitaMudouTxt(m);
- return base&&mudou?base+'; '+mudou:base||mudou;
+ const partes=[perfFitaEstadoBaseTxt(m),perfFitaMudouTxt(m),perfFitaPendenciaTxt(m)].filter(Boolean);
+ return partes.join('; ');
 }
 function perfFitaEstadoBaseTxt(m){
  const teste=!!m.teste;

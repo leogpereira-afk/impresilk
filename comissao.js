@@ -114,6 +114,12 @@ const COMISSAO = (() => {
         if(inteiro!==null)liquidosAprovados.set(l.osId,[...(liquidosAprovados.get(l.osId)||[]),{aprovacaoId:a.id,periodo:{de:a.de,ate:a.ate},liquidoCentavos:inteiro}]);
       }
     }
+    /* O SALDO DE FORA (D2 da auditoria de 12/10/2026): a compensação da
+       pendência paga a O.S. depois da aprovação do próprio mês; o que a O.S.
+       já recebeu (no mês e antes dele) chega aqui pronto, para a mesma conta
+       acumulada de centavos. Sem `saldos`, nada muda. */
+    const saldosDeFora=contexto&&contexto.saldos&&typeof contexto.saldos==='object'?contexto.saldos:{};
+    for(const os of Object.keys(saldosDeFora).sort()){const s=saldosDeFora[os];if(!Number.isSafeInteger(s?.base)||!Number.isSafeInteger(s?.comissao))continue;const x=acumulados.get(os)||{base:0,comissao:0};x.base+=s.base;x.comissao+=s.comissao;acumulados.set(os,x);}
     const liquidoMudou=(osId,numero,liquido,fracao)=>{
       const agora=liquidoInteiro(liquido,fracao);if(agora===null)return null;
       const x=lista(liquidosAprovados.get(osId)).find(y=>y.liquidoCentavos!==agora);if(!x)return null;
@@ -397,6 +403,158 @@ const COMISSAO = (() => {
     const um=m=>m.numero?'O.S. '+m.numero+(m.texto?': '+m.texto:''):m.texto||'';
     return xs.slice(0,max).map(um).join('; ')+(xs.length>max?'; e mais '+(xs.length-max):'');
   }
+  /* A COMPENSAÇÃO DA PENDÊNCIA (D2 da auditoria de 12/10/2026). A O.S. com a
+     origem do retrabalho a definir no selo de um mês fechado não paga e não
+     perde; definida a origem depois, pagá-la exigia refazer o mês inteiro
+     (fechar de novo e nova prévia), que arrastava todas as outras mudanças.
+     Agora a gestão paga (ou dá como perdida) SÓ essa O.S., numa compensação
+     própria, sem recalcular o resto do mês:
+     - a linha sai do REGISTRO DO SELO (o líquido, quem recebe, o dia e a
+       fração como foram fechados: mês fechado não se recalcula), com a régua
+       e os parâmetros do selo; só a origem é a de hoje (o recálculo do selo
+       com a régua dele, que lê a origem gravada na O.S.);
+     - retrabalho de instalação definido: a O.S. perde (zero, com a comissão
+       perdida registrada); outra origem, ou o retrabalho desmarcado: paga o
+       que pagaria, pela mesma conta acumulada de centavos do motor (o saldo é
+       o que a O.S. já recebeu no mês e antes dele, nas aprovações ativas e
+       nas compensações de pendência aprovadas);
+     - a entrada (decisão, entrega física, rateios, montagem interna) é a da
+       aprovação do mês, e a gestão pode completar só a dessas O.S.
+     Nenhuma outra O.S. do mês muda; o hash do fechamento não muda. */
+  const ehObj=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
+  // A origem de hoje de um registro recalculado com a régua do selo: o que a compensação aplica sobre o registro do selo.
+  function origemDeHoje(r) {
+    return {retrabalho:r?.retrabalho===true,etapaOrigem:typeof r?.etapaOrigem==='string'?r.etapaOrigem:'',perda:r?.perda==='retrabalho_instalacao'?'retrabalho_instalacao':''};
+  }
+  /* AS PENDÊNCIAS DA APROVAÇÃO: as O.S. que a aprovação ativa deixou com a
+     origem a definir e o estado de cada uma hoje. `atual` é o recálculo do
+     selo com a régua dele; `compensacoes` são os eventos do mês (compensação
+     e aprovação dela). Estados: a_definir (a origem ainda não foi definida),
+     saiu (saiu da base do mês: só uma nova revisão do mês resolve), pronta
+     (a origem foi definida e ninguém pagou), compensada (paga por
+     compensação aprovada) e mudou (paga por compensação, e a origem mudou de
+     novo depois: aviso, sem pagar em dobro e sem sumir; a gestão decide com
+     nova revisão do mês). */
+  function pendenciasDaAprovacao(aprovacao, atual, compensacoes, selo) {
+    const ls=lista(aprovacao?.apuracao?.linhas).filter(l=>l&&l.decisao==='origem_a_definir');
+    if(!ls.length)return [];
+    const comRegua=!!reguaDoSelo(selo||atual);
+    const agora=new Map(lista(atual?.registros).map(r=>[String(r?.id),r]));
+    const eventos=lista(compensacoes).filter(ehObj);
+    const aprovadas=new Map(eventos.filter(e=>e.evento==='aprovacao').map(e=>[String(e.compensacaoId),e]));
+    const comps=eventos.filter(e=>e.evento==='compensacao').sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+    const porOS=new Map();
+    for(const l of ls){const os=String(l.osId);porOS.set(os,[...(porOS.get(os)||[]),l]);}
+    const out=[];
+    for(const [osId,linhas] of [...porOS.entries()].sort((a,b)=>a[0].localeCompare(b[0]))){
+      const regs=linhas.map(l=>agora.get(String(l.id)));
+      const efeitos=regs.map(r=>r?efeitoNaComissao(r,comRegua):null);
+      const paga=comps.filter(c=>lista(c.osIds).map(String).includes(osId)&&aprovadas.has(String(c.id))).pop()||null;
+      const emPrevia=comps.filter(c=>lista(c.osIds).map(String).includes(osId)&&!aprovadas.has(String(c.id))).pop()||null;
+      const x={osId,numero:String(linhas[0].numero||''),entregas:linhas.map(l=>String(l.id)),baseLiquidaCentavos:linhas.reduce((t,l)=>t+(Number.isSafeInteger(l.baseLiquidaCentavos)?l.baseLiquidaCentavos:0),0)};
+      if(regs.some(r=>!r))x.estado='saiu';
+      else if(efeitos.some(e=>e==='origem_a_definir'))x.estado='a_definir';
+      else {x.estado='pronta';x.efeitoAgora=efeitos.includes('retrabalho_instalacao')?'retrabalho_instalacao':'';x.etapaOrigemAgora=String(regs.find(r=>r.etapaOrigem)?.etapaOrigem||'');x.origens=Object.fromEntries(regs.map(r=>[String(r.id),origemDeHoje(r)]));}
+      if(paga){
+        const ap=aprovadas.get(String(paga.id)),o=(ehObj(paga.origens)?paga.origens:paga.apuracao?.origens||{})[osId]||{};
+        x.compensacao={id:paga.id,em:String(ap.em||''),autor:ap.autor||null,efeito:String(o.perda||''),etapaOrigem:String(o.etapaOrigem||'')};
+        const mesma=x.estado==='pronta'&&x.efeitoAgora===x.compensacao.efeito&&x.etapaOrigemAgora===x.compensacao.etapaOrigem;
+        if(mesma)x.estado='compensada';
+        else {x.estado='mudou';x.aviso='O.S. '+(x.numero||osId)+' · A origem do retrabalho mudou depois da compensação que a pagou: a compensação não muda e não paga de novo. A gestão decide com uma nova revisão do mês (feche o período de novo e gere nova prévia).';}
+      } else if(emPrevia&&x.estado==='pronta')x.previaId=emPrevia.id;
+      out.push(x);
+    }
+    return out;
+  }
+  // A frase da recusa de compensar uma O.S. que não está pronta: a mesma na porta e na tela.
+  function textoNaoPronta(p) {
+    const n='A O.S. '+(p?.numero||p?.osId||'');
+    if(!p)return 'Esta O.S. não está pendente (origem a definir) na aprovação ativa do mês.';
+    if(p.estado==='compensada'||p.estado==='mudou')return n+' já foi paga por compensação: a mesma O.S. não se compensa duas vezes. Se a origem mudou de novo, a gestão decide com uma nova revisão do mês.';
+    if(p.estado==='a_definir')return n+' ainda está com a origem do retrabalho a definir: defina a origem na ficha antes de pagar a pendência.';
+    if(p.estado==='saiu')return n+' saiu da base do mês depois do fechamento: ela só entra numa nova revisão do mês (feche o período de novo).';
+    return '';
+  }
+  // O saldo que a O.S. já recebeu até o mês (inclusive): as aprovações ativas do regime e as compensações de pendência aprovadas.
+  function saldosAteOMes(osIds, periodo, modo, aprovacoes, compensacoesAprovadas) {
+    const chave=periodo.de+':'+periodo.ate, quer=new Set(lista(osIds).map(String)), saldos={};
+    const somar=l=>{const os=String(l?.osId);if(!quer.has(os))return;const s=saldos[os]||(saldos[os]={base:0,comissao:0});s.base+=baseElegivel(l)||0;s.comissao+=Number.isSafeInteger(l.comissaoCentavos)?l.comissaoCentavos:0;};
+    for(const a of ativas(aprovacoes,modo))if(chavePeriodo(a)<=chave)lista(a.apuracao.linhas).forEach(somar);
+    for(const c of lista(compensacoesAprovadas))if(ehObj(c)&&c.apuracao?.config?.modo===modo&&chavePeriodo(c)<=chave)lista(c.apuracao.linhas).forEach(somar);
+    return saldos;
+  }
+  /* A APURAÇÃO DA COMPENSAÇÃO DA PENDÊNCIA. `selo` é o fechamento (já no ID
+     de hoje, quem chama faz isso); `aprovacao` é a aprovação ativa do mês
+     (dela vêm a configuração e a entrada); `escolha` traz osIds, `origens`
+     (por entrega, de origemDeHoje) e, opcional, `entrada` com as decisões e as
+     entregas dessas O.S. que a gestão completou; `contexto` traz as
+     aprovações (todas) e as compensações de pendência já aprovadas. Devolve a
+     apuração (só as linhas dessas O.S.) e a entrada usada. */
+  function apurarPendencia(selo, aprovacao, escolha={}, contexto={}) {
+    const ap=aprovacao?.apuracao;
+    if(aprovacao?.tipo!=='aprovacao'||!ehObj(ap)||ap.compensacaoDe)throw new Error('A compensação da pendência parte da aprovação ativa do mês.');
+    if(!selo?.id||aprovacao.fechamentoId!==selo.id)throw new Error('A aprovação do mês não é deste fechamento. Atualize o demonstrativo.');
+    const periodo=selo.periodo||{de:selo.de,ate:selo.ate};
+    const osIds=[...new Set(lista(escolha.osIds).map(String))].filter(Boolean).sort();
+    if(!osIds.length)throw new Error('Escolha ao menos uma O.S. pendente para pagar.');
+    const origens=ehObj(escolha.origens)?escolha.origens:{};
+    const ids=new Set();
+    for(const os of osIds){
+      const ls=lista(ap.linhas).filter(l=>String(l?.osId)===os);
+      if(!ls.length||ls.some(l=>l.decisao!=='origem_a_definir'))throw new Error('A O.S. '+os+' não está pendente (origem a definir) na aprovação ativa do mês.');
+      for(const l of ls){if(!ehObj(origens[String(l.id)]))throw new Error('A origem da O.S. '+(l.numero||os)+' ainda não foi definida.');ids.add(String(l.id));}
+    }
+    const registros=lista(selo.registros).filter(r=>ids.has(String(r?.id))).map(r=>{
+      const o=origens[String(r.id)], x={...r,retrabalho:o.retrabalho===true,etapaOrigem:typeof o.etapaOrigem==='string'?o.etapaOrigem:''};
+      delete x.perda;if(o.perda==='retrabalho_instalacao')x.perda='retrabalho_instalacao';
+      return x;
+    });
+    if(registros.length!==ids.size)throw new Error('A entrega pendente não está no fechamento. Atualize o demonstrativo.');
+    const base=ehObj(aprovacao.entrada)?aprovacao.entrada:{}, extra=ehObj(escolha.entrada)?escolha.entrada:{};
+    const entrada={config:ehObj(base.config)?base.config:{},decisoes:{},entregas:{}};
+    for(const os of osIds){const d=ehObj(extra.decisoes)&&ehObj(extra.decisoes[os])?extra.decisoes[os]:base.decisoes?.[os];if(ehObj(d))entrada.decisoes[os]=d;}
+    for(const id of [...ids].sort()){const e=ehObj(extra.entregas)&&ehObj(extra.entregas[id])?extra.entregas[id]:base.entregas?.[id];if(ehObj(e))entrada.entregas[id]=e;}
+    const modo=ap.config?.modo;
+    const saldos=saldosAteOMes(osIds,periodo,modo,contexto.aprovacoes,contexto.compensacoesAprovadas);
+    const r=apurar({...selo,registros},entrada,{saldos});
+    const apuracao={motor:'comissao-pendencia-1',periodo:r.periodo,fechamentoId:selo.id,aprovacaoId:aprovacao.id,aprovacaoRevisao:aprovacao.revisao??null,osIds,
+      origens:Object.fromEntries(osIds.map(os=>{const l=lista(ap.linhas).find(y=>String(y?.osId)===os);const o=origens[String(l.id)];return [os,{retrabalho:o.retrabalho===true,etapaOrigem:typeof o.etapaOrigem==='string'?o.etapaOrigem:'',perda:o.perda==='retrabalho_instalacao'?'retrabalho_instalacao':''}];})),
+      config:r.config,saldos,linhas:r.linhas,pessoas:r.pessoas,totalCentavos:r.totalCentavos,pendencias:r.pendencias,aprovavel:r.pendencias.length===0};
+    return {apuracao,entrada};
+  }
+  /* O "ANTES" DA REVISÃO NOVA DO MÊS: a aprovação ativa mais as compensações
+     de pendência aprovadas em cima dela. A revisão nova que paga a O.S. que a
+     compensação já pagou não paga de novo (a diferença dela é zero), e a que
+     a dá como perdida mostra a diferença negativa para conciliar. */
+  function somarTotais(...listas) {
+    const mapa=new Map();
+    for(const p of listas.flat()){if(!ehObj(p))continue;const k=String(p.tipo||'')+':'+String(p.pessoaId??'');const x=mapa.get(k);const c=Number.isSafeInteger(p.centavos)?p.centavos:0;mapa.set(k,x?{...x,nome:x.nome||p.nome||'',centavos:x.centavos+c}:{...p,centavos:c});}
+    return [...mapa.values()].sort((a,b)=>String(a.pessoaId).localeCompare(String(b.pessoaId))||String(a.tipo).localeCompare(String(b.tipo)));
+  }
+  function comCompensacoes(anterior, compensacoesAprovadas) {
+    if(!anterior)return anterior;
+    const cs=lista(compensacoesAprovadas).filter(c=>ehObj(c)&&c.aprovacaoId===anterior.id);
+    if(!cs.length)return anterior;
+    return {...anterior,apuracao:{...anterior.apuracao,pessoas:somarTotais(lista(anterior.apuracao?.pessoas),...cs.map(c=>lista(c.apuracao?.pessoas)))}};
+  }
+  /* O CSV DA COMPENSAÇÃO DA PENDÊNCIA: próprio, com o ID de 6 dígitos e o mês
+     como texto para o Excel e a mesma proteção contra fórmula; uma linha por
+     pessoa e parte, com o valor a pagar e as O.S. compensadas (o número, sem
+     cliente nem valor da O.S.). Só a compensação aprovada, sem pendência e do
+     programa efetivo. */
+  function csvPendencia(comp) {
+    if(!ehObj(comp)||comp.evento!=='compensacao')throw new Error('Selecione a compensação da pendência.');
+    if(!comp.apuracao?.aprovavel)throw new Error('Esta compensação tem pendências e não exporta: gere outra com a entrada completa.');
+    if(comp.apuracao.config?.modo!=='efetivo')throw new Error('Esta compensação é de teste e não exporta para pagamento.');
+    const cel=v=>{let s=String(v??'');if(/^[=+@\-\t\r]/.test(s)&&!/^-[0-9]+,[0-9]{2}$/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
+    const textoExcel=(v,re)=>re.test(String(v??''))?'"=""'+String(v)+'"""':cel(v);
+    const ID=/^\d{6}$/,MES=/^\d{4}-\d{2}$/,mes=String(comp.de||'').slice(0,7);
+    const osDe=new Map();
+    for(const l of lista(comp.apuracao.linhas))for(const p of lista(l.pagamentos)){const k=p.tipo+':'+p.pessoaId;osDe.set(k,[...new Set([...(osDe.get(k)||[]),String(l.numero||l.osId)])]);}
+    const rows=[['Compensação','Mês','Fechamento','Aprovação do mês','Pessoa ID','Nome','Tipo','Valor a pagar (R$)','O.S. compensadas'].map(cel)];
+    for(const p of somarTotais(lista(comp.apuracao.pessoas)))rows.push([cel(comp.id),textoExcel(mes,MES),cel(comp.fechamentoId),cel(comp.aprovacaoId),textoExcel(p.pessoaId,ID),cel(p.nome||''),cel(p.tipo),cel((p.centavos/100).toFixed(2).replace('.',',')),cel((osDe.get(p.tipo+':'+p.pessoaId)||[]).join(' '))]);
+    return '﻿'+rows.map(r=>r.join(';')).join('\r\n');
+  }
   /* QUEM APROVA A COMISSÃO (D-013, D-014 e D-017, 12/10/2026). A configuração
      (gravada só pelo admin, na ação comissaoAprovadorGravar) diz o TITULAR pelo
      ID de 6 dígitos e, opcional, um SUBSTITUTO com início, fim opcional e
@@ -439,7 +597,8 @@ const COMISSAO = (() => {
   }
   return {apurar,ativas,divergencias,ratear,erroAprovacao,conciliar,compensar,csv,comissaoDaBase,comissoesAcumuladas,TEXTO_ORIGEM_A_DEFINIR,demonstrativosVigentes,falhaComprovadaNoDia,comFalhasComprovadas,
     dinheiroDoRegistro,dinheiroDaFonte,mudancasDeDinheiro,textoMudancasDeDinheiro,totaisDaRevisao,diferencaContraExportada,
-    aprovadorVigente,substitutoVigente,quemAprova};
+    aprovadorVigente,substitutoVigente,quemAprova,
+    origemDeHoje,pendenciasDaAprovacao,textoNaoPronta,saldosAteOMes,apurarPendencia,somarTotais,comCompensacoes,csvPendencia};
 })();
 
 if (typeof module !== 'undefined') module.exports = COMISSAO;

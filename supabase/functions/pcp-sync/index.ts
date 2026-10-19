@@ -253,7 +253,7 @@ async function contarRegs(colecao: string): Promise<number> {
    faltando, o Hub marca a copia como falha. */
 const COLECOES_EXPORTACAO = ["os", "auditoria", "foto_evento", "performance_fechamentos",
   "performance_regras", "performance_comissao", "performance_comissao_os_versoes", "performance_comissao_exportacoes",
-  "performance_documentos", "performance_retrato_logos"];
+  "performance_documentos", "performance_retrato_logos", "performance_comissao_pendencias"];
 const EXPORTACAO_PAGINA = 500; // abaixo do max_rows de 1000 do PostgREST
 /* pcp_META TAMBÉM VAI (revisão da onda-w1-backup, R4, 11/10/2026). Lá mora a
    "cópia recuperável antes da primeira alteração" que o robô do ERP grava
@@ -1345,6 +1345,34 @@ function perfRespostaFonteMudou(c:any, oQueFazer:string) {
   if(c.regua)return {error:"A régua deste fechamento não existe neste servidor. Atualize o servidor antes de aprovar ou exportar; nada foi gravado.",reguaDesconhecida:true};
   return {error:"A fonte mudou depois do fechamento no que decide a comissão ("+COMISSAO.textoMudancasDeDinheiro(c.mudancas)+"). "+oQueFazer,mudancasDinheiro:c.mudancas.slice(0,200),pendentes:c.pendentes.slice(0,200)};
 }
+/* A COMPENSAÇÃO DA PENDÊNCIA (D2 da auditoria de 12/10/2026): a coleção só
+   de inserção onde moram a compensação (a prévia, com as linhas só das O.S.
+   pendentes), a aprovação dela, a trava de cada O.S. paga (o id é o mês e a
+   O.S.: a mesma O.S. não se compensa duas vezes no mesmo mês, o banco recusa
+   a segunda) e cada exportação do CSV dela. Só admin e pcp leem; entra no
+   backup (COLECOES_EXPORTACAO). A regra mora em COMISSAO.apurarPendencia. */
+const COLECAO_PENDENCIAS = "performance_comissao_pendencias";
+async function perfLerTudo(colecao:string) {
+  const todos:any[]=[];let cursor="";
+  for(let pagina=0;pagina<400;pagina++){
+    let q=sb.from("pcp_registros").select("id,registro").eq("colecao",colecao).eq("apagado",false).order("id").limit(500);
+    if(cursor)q=q.gt("id",cursor);
+    const {data,error}=await q;
+    if(error)throw new Error(error.message);
+    if(!Array.isArray(data))throw new Error("Página financeira ausente. Consulta incompleta; ação bloqueada.");
+    if(!data.length)return todos;
+    for(const row of data as any[]){
+      if(typeof row?.id!=="string"||!row.id||row.id<=cursor||!row.registro||typeof row.registro!=="object")throw new Error("Cursor financeiro inconsistente. Consulta incompleta; ação bloqueada.");
+      cursor=row.id;todos.push(row.registro);
+    }
+  }
+  throw new Error("Leitura financeira excedeu o limite. Consulta incompleta; ação bloqueada.");
+}
+// As compensações de pendência que já foram aprovadas (o registro da compensação), de todos os meses.
+function perfCompensacoesAprovadas(eventos:any[]) {
+  const aprovadas=new Set((eventos||[]).filter((e:any)=>e?.evento==="aprovacao").map((e:any)=>String(e.compensacaoId)));
+  return (eventos||[]).filter((e:any)=>e?.evento==="compensacao"&&aprovadas.has(String(e.id)));
+}
 /* A APURAÇÃO ATUAL DE UM MÊS FECHADO (onda cancelamento, M8): os dados de
    agora, como sempre, e, quando há mudança gravada depois do último
    fechamento (marca de item do mês; cancelar, desfazer ou cancelar de novo
@@ -2218,6 +2246,11 @@ Deno.serve(async (req: Request) => {
         for(const row of versoes||[]){const r=row.registro;versoesOS.set(String(r.osId),Math.max(versoesOS.get(String(r.osId))||0,r.versao));}
         const historico=await lerFinanceiro("performance_comissao");
         const todas=(historico||[]).map((r:any)=>r.registro);
+        /* As compensações de pendência (D2 da auditoria de 12/10/2026) entram no
+           "antes" da revisão nova do mês e da exportação: o que elas pagaram
+           não se paga de novo. Lidas só onde decidem (nova, aprovar, exportar). */
+        const eventosPend=acao==="performanceComissaoListar"?[]:await perfLerTudo(COLECAO_PENDENCIAS);
+        const compsAprovadas=perfCompensacoesAprovadas(eventosPend);
         const revisoes=todas.filter((r:any)=>r.de===periodo.de&&r.ate===periodo.ate).sort((a:any,b:any)=>b.revisao-a.revisao);
         const ultima=revisoes[0], chave=periodo.de+":"+periodo.ate;
         // Os eventos de exportação deste período (M6), na ordem em que foram gravados.
@@ -2277,11 +2310,19 @@ Deno.serve(async (req: Request) => {
           const ultimaExportada=exportadas[exportadas.length-1]||null;
           const autorExp=await autorAuditoria(), emExp=new Date().toISOString();
           const totais=COMISSAO.totaisDaRevisao(ultima);
+          /* O que a última exportada já levou, com as compensações de pendência
+             EXPORTADAS em cima daquela aprovação (D2): a revisão nova que paga
+             a O.S. que a compensação pagou não paga de novo. Na nova exportação
+             da mesma aprovação (resposta perdida), fica como era. */
+          const exportadasPend=new Set(eventosPend.filter((x:any)=>x?.evento==="exportacao").map((x:any)=>String(x.compensacaoId)));
+          const compsNoAntes=ultimaExportada&&ultimaExportada.revisaoId!==ultima.id?compsAprovadas.filter((c:any)=>c.aprovacaoId===ultimaExportada.revisaoId&&exportadasPend.has(String(c.id))):[];
+          const totaisAntes=compsNoAntes.length?COMISSAO.somarTotais(ultimaExportada.totais||[],...compsNoAntes.map((c:any)=>COMISSAO.totaisDaRevisao(c))):ultimaExportada?.totais;
           const evento:any={...periodo,id:chave+":"+String(exportadas.length+1).padStart(6,"0"),revisaoId:ultima.id,revisao:ultima.revisao,fechamentoId:ultima.fechamentoId||null,
             modo:ultima.apuracao?.config?.modo||"",compensacaoDe:ultima.apuracao?.compensacaoDe||null,arquivo,csvSha256:sha,em:emExp,
             autor:{login:autorExp.login,nome:autorExp.nome,porId:autorExp.porId||""},totais,
             anterior:ultimaExportada?{id:ultimaExportada.id,revisaoId:ultimaExportada.revisaoId,revisao:ultimaExportada.revisao,em:ultimaExportada.em,csvSha256:ultimaExportada.csvSha256,autor:ultimaExportada.autor||null}:null,
-            diferencas:COMISSAO.diferencaContraExportada(totais,ultimaExportada?.totais),
+            diferencas:COMISSAO.diferencaContraExportada(totais,totaisAntes),
+            ...(compsNoAntes.length?{compensacoesNoAntes:compsNoAntes.map((c:any)=>String(c.id)).sort()}:{}),
             /* A aprovação anterior deste período que nunca foi exportada: pagar pela coluna do CSV deixaria a pessoa sem receber. */
             anteriorNaoExportada:!!ultima.apuracao?.anteriorAprovacao&&!exportadas.some((x:any)=>x.revisaoId===ultima.apuracao.anteriorAprovacao),
             ...(conferida?{conferencia:resumoConferida()}:{})};
@@ -2300,7 +2341,9 @@ Deno.serve(async (req: Request) => {
           const alvo=revisoes.find((r:any)=>r.id===body.compensarId&&r.tipo==="aprovacao");
           const ativa=alvo&&COMISSAO.ativas(todas,alvo.apuracao.config.modo).find((r:any)=>r.de===periodo.de&&r.ate===periodo.ate);
           if(!alvo||ativa?.id!==alvo.id||alvo.apuracao.compensacaoDe)return resp({error:"Selecione a aprovação ativa para preparar compensação integral."},409);
-          apuracao=COMISSAO.compensar(alvo);entrada={compensarId:alvo.id};fechamentoId=alvo.fechamentoId;
+          apuracao=COMISSAO.compensar(COMISSAO.comCompensacoes(alvo,compsAprovadas));entrada={compensarId:alvo.id};fechamentoId=alvo.fechamentoId;
+          const nela=compsAprovadas.filter((c:any)=>c.aprovacaoId===alvo.id).map((c:any)=>String(c.id)).sort();
+          if(nela.length)apuracao.compensacoesPendencia=nela;
         }else if(acao==="performanceComissaoNova"){
           fechamentoId=String(body.fechamentoId||"");
           const fechamentos=await perfFechamentos(periodo), fonte=fechamentos.find((f:any)=>f.id===fechamentoId);
@@ -2313,7 +2356,10 @@ Deno.serve(async (req: Request) => {
           apuracao=COMISSAO.apurar(noIdDeHoje.fonte,noIdDeHoje.entrada,{aprovacoes:todas});
           for(const p of apuracao.pessoas){const ficha=pessoas.pessoa(p.pessoaId);if(!ficha||ficha.semFicha){apuracao.pendencias.push(pessoas.repetido(p.pessoaId)?"O ID "+p.pessoaId+" está em dois cadastros do RH, de pessoas diferentes: não paga ninguém até o RH corrigir.":"Cadastro inexistente ou ambíguo: "+p.pessoaId);}else p.nome=ficha.nome;}
           for(const l of apuracao.linhas)for(const p of l.pagamentos)p.nome=apuracao.pessoas.find((x:any)=>x.pessoaId===p.pessoaId)?.nome||p.pessoaId;
-          apuracao=COMISSAO.conciliar(apuracao,revisoes.find((r:any)=>r.tipo==="aprovacao"&&r.apuracao.config.modo===apuracao.config.modo));
+          const anteriorAp=revisoes.find((r:any)=>r.tipo==="aprovacao"&&r.apuracao.config.modo===apuracao.config.modo);
+          apuracao=COMISSAO.conciliar(apuracao,COMISSAO.comCompensacoes(anteriorAp,compsAprovadas));
+          const nela=anteriorAp?compsAprovadas.filter((c:any)=>c.aprovacaoId===anteriorAp.id).map((c:any)=>String(c.id)).sort():[];
+          if(nela.length)apuracao.compensacoesPendencia=nela;
           apuracao.aprovavel=apuracao.pendencias.length===0;
         }else{
           const erro=COMISSAO.erroAprovacao(ultima,body.hash,body.confirmacao);
@@ -2326,6 +2372,10 @@ Deno.serve(async (req: Request) => {
           }
           if(!ultima.versoesOS)return resp({error:"Prévia anterior ao controle de versões por O.S. Gere uma nova prévia."},409);
           for(const [osId,versao] of Object.entries(ultima.versoesOS))if((versoesOS.get(osId)||0)!==versao)return resp({error:"Outra aprovação alterou o saldo desta O.S. Gere uma nova prévia e confira os centavos."},409);
+          // A compensação de pendência aprovada depois desta prévia não está no "antes" dela (D2).
+          const antAp=revisoes.find((r:any)=>r.tipo==="aprovacao"&&r.apuracao?.config?.modo===ultima.apuracao?.config?.modo);
+          const nelaAgora=antAp?compsAprovadas.filter((c:any)=>c.aprovacaoId===antAp.id).map((c:any)=>String(c.id)).sort():[];
+          if(JSON.stringify(nelaAgora)!==JSON.stringify(Array.isArray(ultima.apuracao?.compensacoesPendencia)?ultima.apuracao.compensacoesPendencia:[]))return resp({error:"Uma compensação de pendência foi aprovada depois desta prévia e não está no que já foi pago. Gere uma nova prévia e confira as diferenças."},409);
           apuracao=ultima.apuracao;entrada=ultima.entrada;fechamentoId=ultima.fechamentoId;tipo="aprovacao";
         }
         const anteriorAprovada=COMISSAO.ativas(todas,apuracao.config.modo).find((r:any)=>r.de===periodo.de&&r.ate===periodo.ate);
@@ -2376,6 +2426,160 @@ Deno.serve(async (req: Request) => {
         return resp({ok:true,revisao:registro});
       }
 
+      /* A COMPENSAÇÃO DA PENDÊNCIA (D2 da auditoria de 12/10/2026). A O.S. com
+         a origem do retrabalho a definir no selo de um mês fechado e aprovado
+         não paga e não perde; definida a origem, a gestão paga (ou dá como
+         perdida) SÓ essa O.S., sem refazer o mês: Listar (as pendências e o
+         estado de cada uma, as compensações do mês), Calcular (a prévia do
+         valor por pessoa, sem gravar), Gerar (a compensação, só de inserção,
+         com motivo), Aprovar (quem aprova a comissão: D-013, D-014 e D-017;
+         grava a aprovação e a trava de cada O.S., e a segunda compensação da
+         mesma O.S. é 409) e Exportar (o CSV próprio, com o sha256 guardado). A
+         linha usa o registro do selo, a régua do selo e a origem de hoje
+         (COMISSAO.apurarPendencia), as pessoas pelo ID de hoje e a mesma conta
+         de centavos do motor. Só admin e pcp com senha; montagem, operação,
+         comercial, a máquina e o crachá de toque recebem 403. Ações chamadas
+         na hora, fora da fila do aparelho: a recusa (409, 422) não prende
+         nada. O mês fechado e a aprovação dele não mudam. */
+      case "comissaoPendenciaListar":
+      case "comissaoPendenciaCalcular":
+      case "comissaoPendenciaGerar":
+      case "comissaoPendenciaAprovar":
+      case "comissaoPendenciaExportar": {
+        const gestaoPend = !!cracha && !ehMaquina && !ehToqueNoNome && ["admin","pcp"].includes(String(cracha.papel));
+        if(!gestaoPend)return resp({error:"A compensação da pendência é da gestão autenticada do PCP (admin ou pcp com senha)."},403);
+        let quemPend:any=null;
+        if(acao==="comissaoPendenciaAprovar"){
+          let cfgAp:any=null;
+          try{cfgAp=await comissaoAprovadorAtual();}
+          catch{return resp({error:"Não foi possível ler quem aprova a comissão agora. Tente de novo."},503);}
+          quemPend=COMISSAO.quemAprova({papel:String(cracha.papel||""),porId:(await autorAuditoria()).porId||""},cfgAp,perfDia(new Date().toISOString()));
+          if(!quemPend.ok)return resp({error:quemPend.erro||"Aprovação recusada."},403);
+        }
+        let periodo;try{periodo=perfPeriodo(body);}catch(e){return resp({error:(e as Error).message},422);}
+        const chave=periodo.de+":"+periodo.ate;
+        const eventos=await perfLerTudo(COLECAO_PENDENCIAS);
+        const todas=await perfLerTudo("performance_comissao");
+        const revisoes=todas.filter((r:any)=>r.de===periodo.de&&r.ate===periodo.ate).sort((a:any,b:any)=>(Number(b.revisao)||0)-(Number(a.revisao)||0));
+        const ultima=revisoes[0]||null;
+        const doMes=eventos.filter((e:any)=>e.de===periodo.de&&e.ate===periodo.ate).sort((a:any,b:any)=>String(a.id).localeCompare(String(b.id)));
+        const fechamentos=await perfFechamentos(periodo), selo=fechamentos[0]||null;
+        // A aprovação e a exportação descem sem o texto do CSV (fica a impressão digital).
+        const semCsv=(x:any)=>{if(!x)return x;const {csv:_csv,...resto}=x;return resto;};
+        const compsDoMes=doMes.filter((e:any)=>e.evento==="compensacao").map((c:any)=>({...c,
+          aprovacao:semCsv(doMes.find((e:any)=>e.evento==="aprovacao"&&e.compensacaoId===c.id)||null),
+          exportacoes:doMes.filter((e:any)=>e.evento==="exportacao"&&e.compensacaoId===c.id)}));
+        // O mês fechado com a comissão aprovada: a última revisão é a aprovação, e é do último fechamento.
+        let indisponivel="";
+        if(!selo)indisponivel="O mês não está fechado: a compensação da pendência é de mês fechado e com a comissão aprovada.";
+        else if(!ultima||ultima.tipo!=="aprovacao"||ultima.apuracao?.compensacaoDe)indisponivel="A última revisão da comissão deste mês não é uma aprovação: a pendência entra na próxima prévia do mês (ou aprove antes a prévia).";
+        else if(ultima.fechamentoId!==selo.id)indisponivel="O mês recebeu outro fechamento depois da aprovação: a pendência entra na nova prévia do mês.";
+        else if(perfReguaDesconhecida(selo))indisponivel="A régua deste fechamento não existe neste servidor. Atualize o servidor antes de pagar a pendência; nada foi gravado.";
+        if(acao==="comissaoPendenciaListar"&&indisponivel)return resp({ok:true,disponivel:false,motivo:indisponivel,pendencias:[],compensacoes:compsDoMes,avisos:[]});
+        if(indisponivel)return resp({error:indisponivel},409);
+        const comp=doMes.find((e:any)=>e.evento==="compensacao"&&e.id===String(body.id||""))||null;
+        const aprovacaoDe=(c:any)=>doMes.find((e:any)=>e.evento==="aprovacao"&&e.compensacaoId===c?.id)||null;
+        if(acao==="comissaoPendenciaExportar"){
+          if(!comp)return resp({error:"Esta compensação não existe neste mês. Atualize o demonstrativo."},409);
+          const ap=aprovacaoDe(comp);
+          if(!ap)return resp({error:"Aprove a compensação antes de exportar."},409);
+          if(comp.aprovacaoId!==ultima.id)return resp({error:"A aprovação do mês foi substituída depois desta compensação: o valor dela entra na diferença da revisão nova. Nada foi exportado."},409);
+          let csv="",sha="";
+          if(typeof ap.csv==="string"){
+            sha=String(ap.csvSha256||"");
+            if(!/^[a-f0-9]{64}$/.test(sha)||await sha256Texto(ap.csv)!==sha)return resp({error:"O CSV guardado na aprovação da compensação não confere com a impressão digital dele. Nada foi exportado; avise a gestão."},409);
+            csv=ap.csv;
+          }else{
+            try{csv=COMISSAO.csvPendencia(comp);}catch(e){return resp({error:(e as Error).message},422);}
+            sha=await sha256Texto(csv);
+          }
+          const exps=doMes.filter((e:any)=>e.evento==="exportacao"&&e.compensacaoId===comp.id);
+          const ultimaExp=exps[exps.length-1]||null;
+          const autorExp=await autorAuditoria(), emExp=new Date().toISOString();
+          const arquivo="comissao-pendencia-"+periodo.de+"-c"+String(comp.seq||exps.length+1)+".csv";
+          const evento:any={evento:"exportacao",...periodo,id:comp.id+":exportacao:"+String(exps.length+1).padStart(6,"0"),compensacaoId:comp.id,aprovacaoId:comp.aprovacaoId,
+            arquivo,csvSha256:sha,em:emExp,autor:{login:autorExp.login,nome:autorExp.nome,porId:autorExp.porId||""},totais:COMISSAO.totaisDaRevisao(comp),
+            anterior:ultimaExp?{id:ultimaExp.id,em:ultimaExp.em,csvSha256:ultimaExp.csvSha256,autor:ultimaExp.autor||null}:null};
+          const {error:erroExp}=await sb.from("pcp_registros").insert({colecao:COLECAO_PENDENCIAS,id:evento.id,registro:evento,apagado:false,atualizado_em:emExp});
+          if(erroExp){if(erroExp.code==="23505")return resp({error:"Outra exportação desta compensação foi registrada ao mesmo tempo. Nada foi exportado; tente de novo."},409);throw new Error(erroExp.message);}
+          return resp({ok:true,csv,csvSha256:sha,arquivo,exportacao:evento,
+            aviso:"Exportação para conferência; não realiza pagamento. Não importar novamente sem conciliação. Impressão digital (sha256) do CSV: "+sha+"."});
+        }
+        // O recálculo do selo com a régua dele: a origem que vale hoje de cada entrega pendente.
+        const atual=await perfFonte(perfParametrosDoSelo(selo,periodo),perfOpcoesDoSelo(selo));
+        const pendencias=COMISSAO.pendenciasDaAprovacao(ultima,atual,doMes,selo);
+        if(acao==="comissaoPendenciaListar")return resp({ok:true,disponivel:true,aprovacao:{id:ultima.id,revisao:ultima.revisao,em:ultima.em,modo:String(ultima.apuracao?.config?.modo||"")},
+          pendencias,compensacoes:compsDoMes,avisos:pendencias.filter((p:any)=>p.aviso).map((p:any)=>p.aviso)});
+        if(acao==="comissaoPendenciaAprovar"){
+          if(!comp)return resp({error:"Esta compensação não existe neste mês. Atualize o demonstrativo."},409);
+          const requestId=String(body.requestId||""), motivo=String(body.motivo||"").trim();
+          if(!/^[a-zA-Z0-9-]{10,80}$/.test(requestId)||motivo.length<5||motivo.length>500)return resp({error:"Informe a justificativa da aprovação (5 a 500 letras) e a identificação do pedido."},422);
+          const assinatura=await perfHash({acao,id:comp.id,hash:body.hash||null,motivo,confirmacao:body.confirmacao===true});
+          const ja=aprovacaoDe(comp);
+          if(ja)return ja.requestId===requestId&&ja.assinatura===assinatura?resp({ok:true,aprovacao:semCsv(ja),compensacao:comp,repetida:true})
+            :resp({error:"Esta compensação já foi aprovada em "+perfDiaBR(perfDia(ja.em))+(ja.autor?.nome?" por "+ja.autor.nome:"")+". Nada foi gravado."},409);
+          if(comp.hash!==body.hash)return resp({error:"A compensação mudou. Atualize e confira de novo antes de aprovar."},409);
+          if(body.confirmacao!==true)return resp({error:"Confirme que revisou a origem, a entrega física, os cadastros e os centavos da compensação."},422);
+          if(!comp.apuracao?.aprovavel)return resp({error:"Esta compensação tem pendências e não se aprova: gere outra com a entrada completa."},422);
+          if(comp.aprovacaoId!==ultima.id||comp.fechamentoId!==selo.id)return resp({error:"A aprovação ou o fechamento do mês mudaram depois desta compensação: gere outra."},409);
+          const maisNova=doMes.find((e:any)=>e.evento==="compensacao"&&String(e.id)>String(comp.id)&&(e.osIds||[]).some((o:any)=>(comp.osIds||[]).includes(o)));
+          if(maisNova)return resp({error:"Há uma compensação mais nova da mesma O.S. (compensação "+String(maisNova.seq||"")+"): aprove a mais nova."},409);
+          for(const os of comp.osIds||[]){
+            const p=pendencias.find((x:any)=>x.osId===os);
+            if(!p||p.estado!=="pronta")return resp({error:COMISSAO.textoNaoPronta(p),osId:os,estado:p?.estado||""},409);
+            const o=comp.origens?.[os]||{};
+            if(p.efeitoAgora!==String(o.perda||"")||p.etapaOrigemAgora!==String(o.etapaOrigem||""))return resp({error:"A origem do retrabalho da O.S. "+(p.numero||os)+" mudou depois desta compensação: gere outra, com a origem de agora."},409);
+          }
+          const autorAp=await autorAuditoria(), em=new Date().toISOString();
+          const evento:any={evento:"aprovacao",...periodo,id:comp.id+":aprovacao",compensacaoId:comp.id,hash:comp.hash,requestId,assinatura,motivo,em,
+            autor:{login:String(cracha.sub||""),nome:String(cracha.nome||""),porId:autorAp.porId||"",como:quemPend.como,...(quemPend.como==="substituto"?{titularId:quemPend.vigente.titularId}:{})}};
+          if(comp.apuracao?.config?.modo==="efetivo"){try{const csv=COMISSAO.csvPendencia(comp);evento.csv=csv;evento.csvSha256=await sha256Texto(csv);}catch{/* sem CSV de pagamento: a exportação diz o motivo */}}
+          const numeroDe=(os:string)=>String(pendencias.find((x:any)=>x.osId===os)?.numero||"");
+          const travas=(comp.osIds||[]).map((os:string)=>{const id=chave+":os:"+os;return {colecao:COLECAO_PENDENCIAS,id,registro:{evento:"trava",...periodo,id,osId:os,numero:numeroDe(os),compensacaoId:comp.id,em,porId:autorAp.porId||""},apagado:false,atualizado_em:em};});
+          const {error:erroAp}=await sb.from("pcp_registros").insert([{colecao:COLECAO_PENDENCIAS,id:evento.id,registro:evento,apagado:false,atualizado_em:em},...travas]);
+          if(erroAp){if(erroAp.code==="23505")return resp({error:"Esta O.S. já foi paga por compensação neste mês (outra aprovação chegou ao mesmo tempo): a mesma O.S. não se compensa duas vezes. Nada foi gravado."},409);throw new Error(erroAp.message);}
+          return resp({ok:true,aprovacao:semCsv(evento),compensacao:comp});
+        }
+        // Calcular (a prévia, sem gravar) e Gerar (grava a compensação, só de inserção).
+        let requestId="",motivo="",assinatura="";
+        if(acao==="comissaoPendenciaGerar"){
+          requestId=String(body.requestId||"");motivo=String(body.motivo||"").trim();
+          if(!/^[a-zA-Z0-9-]{10,80}$/.test(requestId)||motivo.length<5||motivo.length>500)return resp({error:"Informe o motivo da compensação (5 a 500 letras) e a identificação do pedido."},422);
+          assinatura=await perfHash({acao,aprovacaoId:String(body.aprovacaoId||""),osIds:body.osIds||null,entrada:body.entrada||null,motivo});
+          const repetida=doMes.find((e:any)=>e.evento==="compensacao"&&e.requestId===requestId);
+          if(repetida)return repetida.assinatura===assinatura?resp({ok:true,compensacao:repetida,repetida:true}):resp({error:"Pedido já utilizado com conteúdo diferente."},409);
+        }
+        if(String(body.aprovacaoId||"")!==ultima.id)return resp({error:"A aprovação do mês mudou. Atualize o demonstrativo antes de pagar a pendência."},409);
+        const osIds=[...new Set((Array.isArray(body.osIds)?body.osIds:[]).map((x:any)=>String(x)))].filter(Boolean).sort();
+        if(!osIds.length||osIds.length>200)return resp({error:"Escolha de 1 a 200 O.S. pendentes para pagar."},422);
+        for(const os of osIds){
+          const p=pendencias.find((x:any)=>x.osId===os);
+          if(!p||p.estado!=="pronta")return resp({error:COMISSAO.textoNaoPronta(p),osId:os,estado:p?.estado||""},409);
+        }
+        const extra=body.entrada&&typeof body.entrada==="object"&&!Array.isArray(body.entrada)?body.entrada:{};
+        if(JSON.stringify(extra).length>250000)return resp({error:"A entrada da compensação excede o tamanho permitido."},422);
+        // Nenhum nome inferido: o ID precisa existir no RH e não ser ambíguo (como na prévia do mês).
+        const pessoas=await pessoasDoPCP();
+        const hojeSelo=comissaoNoIdDeHoje(selo,ultima.entrada,pessoas), hojeExtra=comissaoNoIdDeHoje({registros:[]},extra,pessoas);
+        const origens:any={};for(const p of pendencias)if(osIds.includes(p.osId))Object.assign(origens,p.origens||{});
+        let calc:any;
+        try{calc=COMISSAO.apurarPendencia(hojeSelo.fonte,{...ultima,entrada:hojeSelo.entrada},{osIds,origens,entrada:hojeExtra.entrada},{aprovacoes:todas,compensacoesAprovadas:perfCompensacoesAprovadas(eventos)});}
+        catch(e){return resp({error:(e as Error).message},409);}
+        const apuracao=calc.apuracao;
+        for(const p of apuracao.pessoas){const ficha=pessoas.pessoa(p.pessoaId);if(!ficha||ficha.semFicha){apuracao.pendencias.push(pessoas.repetido(p.pessoaId)?"O ID "+p.pessoaId+" está em dois cadastros do RH, de pessoas diferentes: não paga ninguém até o RH corrigir.":"Cadastro inexistente ou ambíguo: "+p.pessoaId);}else p.nome=ficha.nome;}
+        for(const l of apuracao.linhas)for(const p of l.pagamentos)p.nome=apuracao.pessoas.find((x:any)=>x.pessoaId===p.pessoaId)?.nome||p.pessoaId;
+        apuracao.aprovavel=apuracao.pendencias.length===0;
+        if(acao==="comissaoPendenciaCalcular")return resp({ok:true,apuracao,entrada:calc.entrada});
+        const seq=doMes.filter((e:any)=>e.evento==="compensacao").length+1, id=chave+":c"+String(seq).padStart(6,"0"), em=new Date().toISOString();
+        const autorG=await autorAuditoria();
+        const hash=await perfHash({apuracao,entrada:calc.entrada,fechamentoId:selo.id,aprovacaoId:ultima.id});
+        const registro:any={evento:"compensacao",...periodo,id,seq,requestId,assinatura,motivo,aprovacaoId:ultima.id,aprovacaoRevisao:ultima.revisao,fechamentoId:selo.id,fechamentoHash:selo.hash||"",
+          osIds,origens:apuracao.origens,entrada:calc.entrada,apuracao,hash,em,autor:{login:String(cracha.sub||""),nome:String(cracha.nome||""),porId:autorG.porId||""}};
+        const {error:erroG}=await sb.from("pcp_registros").insert({colecao:COLECAO_PENDENCIAS,id,registro,apagado:false,atualizado_em:em});
+        if(erroG){if(erroG.code==="23505")return resp({error:"Outra compensação deste mês foi gravada ao mesmo tempo. Atualize e tente de novo."},409);throw new Error(erroG.message);}
+        return resp({ok:true,compensacao:registro});
+      }
+
       /* A FITA DOS MESES DO PROGRAMA (item 10 da fila de 11/10/2026): de
          outubro de 2026 (o primeiro mês, de teste: D-005) até o mês de hoje,
          o estado de cada um, para a gestão ver de uma vez o que falta fechar,
@@ -2399,11 +2603,13 @@ Deno.serve(async (req: Request) => {
           }
           throw new Error("Leitura dos meses excedeu o limite.");
         };
-        const [fechados,revisoesCom,exportacoes,mudancasFechado]=await Promise.all([perfPeriodosFechados(),
+        const [fechados,revisoesCom,exportacoes,mudancasFechado,eventosPend]=await Promise.all([perfPeriodosFechados(),
           lerLeve("performance_comissao","de:registro->>de, ate:registro->>ate, revisao:registro->revisao, tipo:registro->>tipo, em:registro->>em, modo:registro->apuracao->config->>modo, compensacaoDe:registro->apuracao->>compensacaoDe"),
           lerLeve("performance_comissao_exportacoes","de:registro->>de, ate:registro->>ate, revisaoId:registro->>revisaoId, em:registro->>em"),
           // A mudança de dinheiro em O.S. de mês fechado (D1 da auditoria de 12/10/2026).
-          lerLeve("performance_mudancas_fechado","de:registro->>de, ate:registro->>ate, em:registro->>em, numero:registro->>numero")]);
+          lerLeve("performance_mudancas_fechado","de:registro->>de, ate:registro->>ate, em:registro->>em, numero:registro->>numero"),
+          // A pendência paga por compensação (D2 da auditoria de 12/10/2026): a trava de cada O.S. paga.
+          lerLeve(COLECAO_PENDENCIAS,"de:registro->>de, ate:registro->>ate, evento:registro->>evento, em:registro->>em, osId:registro->>osId")]);
         const meses:any[]=[];
         for(let mes=PERF_MES_INICIO_PROGRAMA;mes<=hojeMes.slice(0,7)&&meses.length<240;mes=perfMesSeguinte(mes)){
           const de=mes+"-01",ate=perfUltimoDiaDoMes(mes);
@@ -2418,7 +2624,9 @@ Deno.serve(async (req: Request) => {
              depois da última exportação (ou, sem envio, depois do fechamento). */
           const desde=envios.length?String(envios[envios.length-1].em||""):f?String(f.ultimoEm||""):"";
           const mudou=f?mudancasFechado.filter((x:any)=>x.de===de&&x.ate===ate&&String(x.em||"")>desde):[];
+          const pagas=eventosPend.filter((x:any)=>x.evento==="trava"&&x.de===de&&x.ate===ate);
           meses.push({mes,de,ate,estado,teste:mes===PERF_MES_TESTE,
+            ...(pagas.length?{pendenciaPaga:{os:new Set(pagas.map((x:any)=>x.osId)).size,ultimaEm:pagas.map((x:any)=>String(x.em||"")).sort().pop()}}:{}),
             fechamento:f?{revisao:f.ultimaRevisao,em:f.ultimoEm}:null,
             ...(livre?{periodoLivre:{de:livre.de,ate:livre.ate,revisao:livre.ultimaRevisao}}:{}),
             comissao:ultima?{revisao:Number(ultima.revisao)||0,tipo:ultima.tipo==="aprovacao"?"aprovacao":"previa",modo:String(ultima.modo||""),compensacao:!!ultima.compensacaoDe,em:String(ultima.em||"")}:null,

@@ -43,9 +43,10 @@ const BUCKETS = ['pcp-arquivos', 'pcp-demandas'];
 /* As coleções que a contagem do PCP tem de trazer (mesmo com zero linhas). As
    três da onda comissão (o rastro da exportação, o documento oficial e as
    logos do retrato) entraram na revisão de 12/10/2026: hoje vazias, mas a
-   cópia que não as conta não serve. */
+   cópia que não as conta não serve. A da compensação da pendência (D2 da
+   auditoria de 12/10/2026) entrou do mesmo jeito. */
 const OBRIGATORIAS = ['os', 'auditoria', 'foto_evento', 'performance_fechamentos', 'performance_regras', 'performance_comissao', 'performance_comissao_os_versoes',
-  'performance_comissao_exportacoes', 'performance_documentos', 'performance_retrato_logos'];
+  'performance_comissao_exportacoes', 'performance_documentos', 'performance_retrato_logos', 'performance_comissao_pendencias'];
 const sha256 = b => crypto.createHash('sha256').update(b).digest('hex');
 const SHA = /^[a-f0-9]{64}$/;
 
@@ -262,8 +263,10 @@ async function servidorVazio(storage) {
 async function montarOriginal() {
   const storage = storageMemoria(), e = await servidorVazio(storage);
   e.db.pcp_config_global = [{id: true, atualizado_em: '2026-11-01T00:00:00Z', config: {instaladores: ['Ana'],
-    performancePCP: {equipes: [], participacoes: [{id: 'os1', membros, por: 'Gestor', em: '2026-11-10'}]}}}];
+    performancePCP: {equipes: [], participacoes: [{id: 'os1', membros, por: 'Gestor', em: '2026-11-10'}, {id: 'os-pend', membros, por: 'Gestor', em: '2026-11-10'}]}}}];
   e.db.pcp_registros.push(osFicticia('os1', {finalizadaEm: '2026-11-10T15:00:00Z', valorTotal: 120000}));
+  // A O.S. com a origem do retrabalho a definir no fechamento: depois, paga só ela por compensação (D2).
+  e.db.pcp_registros.push(osFicticia('os-pend', {finalizadaEm: '2026-11-12T15:00:00Z', valorTotal: 3000, retrabalho: true, etapaOrigem: ''}));
   e.db.pcp_registros.push(osFicticia('os-aberta', {}));
   e.db.pcp_registros.push(osFicticia('os-excluir', {}));
   const ok = (r, o) => { assert.equal(r.status, 200, o + ': ' + JSON.stringify(r)); return r; };
@@ -298,7 +301,12 @@ async function montarOriginal() {
   const previa = ok(await e.call({action: 'performanceComissaoNova', ...NOVEMBRO, fechamentoId: fech.id, anterior: '', entrada, motivo: 'Prévia fictícia', requestId: 'ensaio-previa-0001'}, GESTOR), 'prévia').revisao;
   const aprovada = ok(await e.call({action: 'performanceComissaoAprovar', ...NOVEMBRO, anterior: previa.id, hash: previa.hash, motivo: 'Aprovação fictícia', confirmacao: true, requestId: 'ensaio-aprovar-0001'}, GESTOR), 'aprovar').revisao;
   const csv = ok(await e.call({action: 'performanceComissaoExportar', ...NOVEMBRO, id: aprovada.id}, GESTOR), 'exportar').csv;
-  return {e, storage, fotos, fech, aprovada, csv};
+  // A origem definida depois na ficha e a pendência paga por compensação: gerar, aprovar e exportar (D2).
+  e.db.pcp_registros.find(r => r.id === 'os-pend').registro.etapaOrigem = 'Produção';
+  const comp = ok(await e.call({action: 'comissaoPendenciaGerar', ...NOVEMBRO, aprovacaoId: aprovada.id, osIds: ['os-pend'], motivo: 'Origem fictícia definida', requestId: 'ensaio-pendencia-0001'}, GESTOR), 'gerar compensação').compensacao;
+  ok(await e.call({action: 'comissaoPendenciaAprovar', ...NOVEMBRO, id: comp.id, hash: comp.hash, motivo: 'Aprovação fictícia', confirmacao: true, requestId: 'ensaio-pendencia-0002'}, GESTOR), 'aprovar compensação');
+  const csvPendencia = ok(await e.call({action: 'comissaoPendenciaExportar', ...NOVEMBRO, id: comp.id}, GESTOR), 'exportar compensação').csv;
+  return {e, storage, fotos, fech, aprovada, csv, comp, csvPendencia};
 }
 
 const ordenar = linhas => [...linhas].sort((a, b) => (a.colecao + '\u0000' + a.id < b.colecao + '\u0000' + b.id ? -1 : 1));
@@ -353,6 +361,14 @@ async function executar({gravar = true} = {}) {
     assert.equal(sha256(x.csv), sha256(orig.csv));
     // O CSV aprovado volta guardado na aprovação, com a impressão digital dele (M21).
     assert.equal(ap.csvSha256, sha256(orig.csv)); assert.equal(x.csvSha256, ap.csvSha256);
+  });
+  await provar('a pendência paga por compensação volta: continua paga, não se paga de novo, e o CSV dela é idêntico', async () => {
+    const l = await e2.call({action: 'comissaoPendenciaListar', ...NOVEMBRO}, GESTOR);
+    assert.deepEqual(l.pendencias.map(p => [p.osId, p.estado]), [['os-pend', 'compensada']]);
+    const de_novo = await e2.call({action: 'comissaoPendenciaGerar', ...NOVEMBRO, aprovacaoId: orig.aprovada.id, osIds: ['os-pend'], motivo: 'Tentativa fictícia', requestId: 'ensaio-pendencia-0003'}, GESTOR);
+    assert.equal(de_novo.status, 409);
+    const x = await e2.call({action: 'comissaoPendenciaExportar', ...NOVEMBRO, id: orig.comp.id}, GESTOR);
+    assert.equal(x.status, 200, JSON.stringify(x)); assert.equal(sha256(x.csv), sha256(orig.csvPendencia));
   });
   await provar('mês fechado continua fechado: regra nova com data dentro dele é recusada (409)', async () => {
     const R = require('../regras.js');

@@ -6,7 +6,7 @@
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const E = require('../scripts/ensaio-backup-pcp.cjs');
 
-test('ensaio do backup: ida pela porta nova e volta num PCP vazio, com as onze provas', async () => {
+test('ensaio do backup: ida pela porta nova e volta num PCP vazio, com as doze provas', async () => {
   const r = await E.executar({gravar: false});
   assert.deepEqual(r.checks, [
     'exportação pela porta nova: todas as linhas, sem repetir, com a contagem conferida',
@@ -14,6 +14,7 @@ test('ensaio do backup: ida pela porta nova e volta num PCP vazio, com as onze p
     'volta: as mesmas linhas, com o apagado e o atualizado_em de cada uma',
     'lápide continua lápide: fora da lista, na lista de excluídas, e o celular recebe "excluída"',
     'selo e comissão voltam: o servidor recalcula, o hash do selo confere e o CSV é idêntico',
+    'a pendência paga por compensação volta: continua paga, não se paga de novo, e o CSV dela é idêntico',
     'mês fechado continua fechado: regra nova com data dentro dele é recusada (409)',
     'fotos voltam pelo sha256 e o getPhoto devolve os mesmos bytes',
     'arquivo corrompido no destino: a volta recusa antes de gravar qualquer coisa',
@@ -24,7 +25,7 @@ test('ensaio do backup: ida pela porta nova e volta num PCP vazio, com as onze p
   assert.equal(r.lapides, 1);
   assert.equal(r.meta, 2, 'o pcp_meta voltou, sem a credencial do ERP');
   assert.ok(r.paginas > 1, 'a exportação passou por mais de uma página');
-  for (const c of ['os', 'auditoria', 'foto_evento', 'performance_fechamentos', 'performance_regras', 'performance_comissao', 'performance_comissao_os_versoes'])
+  for (const c of ['os', 'auditoria', 'foto_evento', 'performance_fechamentos', 'performance_regras', 'performance_comissao', 'performance_comissao_os_versoes', 'performance_comissao_pendencias'])
     assert.ok(r.contagem[c] >= 1, c);
   // As três da onda comissão entram na lista das que a contagem tem de trazer, mesmo vazias (hoje 0 linhas).
   for (const c of ['performance_comissao_exportacoes', 'performance_documentos', 'performance_retrato_logos'])
