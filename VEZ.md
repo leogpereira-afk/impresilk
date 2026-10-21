@@ -7,13 +7,13 @@ passar, liberar, aceitar), que monta o commit em cima da origin/main; nunca à
 mão num ramo de trabalho. Regra completa no AGENTS.md (igual ao CLAUDE.md),
 seções 0, 5 e 6.
 
-agente: ninguem
-desde: 2026-10-21T13:54:24.987Z
+agente: codex
+desde: 2026-10-21T14:48:39.334Z
 ramo: codex/pcp-rotas-silk-20261021
-tarefa: Cards do PCP, Silk e planejamento de rotas de entregas em previa
-sessao: -
-versao_reservada: -
-arquivos_em_uso: -
+tarefa: Publicar cards e Silk aprovados e planejamento de rotas sinalizado em teste
+sessao: codex:08a5b7bd (pcp-rotas-silk-20261021)
+versao_reservada: v179
+arquivos_em_uso: app.js casa.js index.html relatorios-entregas.js rotas.js rotas-ui.js rotas.css sw.js docs/planos
 passou_por: codex
 passou_em: 2026-10-21T14:16:13.149Z
 
@@ -26,12 +26,12 @@ alguém, os campos podem estar em "-" enquanto ele trabalha; com a vez livre
 (ninguem), têm de estar todos cheios. "sessao: -" quer dizer que nenhuma
 sessão se registrou ainda: o primeiro `pegar` do mesmo agente a adota.
 
-no_ar: main 9f313cb (somente vez), tela v178; Deploy 39612140766 verde. Servidores nao alterados; versoes nao revalidadas nesta etapa.
-ramos: codex/pcp-rotas-silk-20261021 local em /tmp/pcp-rotas-silk-20261021, 1 commit a frente e 0 atras da main antes desta passagem; dono revisa antes de publicar.
-feito: Previa local d0747fe: cards, Silk oficial e dirigindo, planejamento de rotas, calculos, sugestao com confirmacao e relatorio. Registro docs/planos/2026-10-21-pcp-rotas-silk.md no ramo local.
-pela_metade: rotas-ui.js: adaptador produtivo de mapas, geocodificacao, mapa-base e persistencia compartilhada pendentes; previa usa vias publicas de exemplo. PDF final e celular fisico ainda nao validados.
-decisoes: Nenhuma D nova; pedido do dono executado como previa, sem publicar codigo.
-perguntas_ao_dono: Revisar previa e definir servico de mapas antes de producao; dono informou que ainda nao tem provedor.
-nao_fazer: Nao publicar a previa como roteamento produtivo. Nao enviar dados reais para provedor nem concluir O.S. pelo acompanhamento local. Rascunhos em memoria da sessao.
-testes: node scripts/verificar.cjs: 2124 passaram, zero falhas ou pulados; navegador conferiu cards, Silk, calculo, ordem confirmada, invalidacao e previa do relatorio.
-dados: Nenhum dado real ou migration alterado; apenas dados ficticios e trajetos de locais publicos na previa.
+no_ar: -
+ramos: -
+feito: -
+pela_metade: -
+decisoes: -
+perguntas_ao_dono: -
+nao_fazer: -
+testes: -
+dados: -
