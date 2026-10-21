@@ -2,7 +2,7 @@
 
 ## Pedido e escopo
 
-Pedido do dono em 21/10/2026: modernizar Rotas, testar e facilitar a inclusão de O.S. Implementação local para revisão, sem autorização de publicação desta interface. Ramo `codex/rotas-usabilidade-20261021` em clone fora do iCloud.
+Pedido do dono em 21/10/2026: modernizar Rotas, testar e facilitar a inclusão de O.S. Implementação revisada na prévia local. Publicação autorizada pelo dono: "aprovado, pode subir essa melhoria das rotas". Ramo `codex/rotas-usabilidade-20261021` em clone fora do iCloud. A autorização cobre esta interface e seus testes; os limites de mapas e persistência abaixo permanecem.
 
 ## Organização implementada
 
@@ -32,4 +32,8 @@ Rascunhos permanecem apenas na sessão e se perdem ao sair. O provedor real de m
 
 ## Correção documental anterior à interface
 
-O Deploy anterior estava vermelho porque a guarda M27 confundiu dígitos de um hash abreviado com uma O.S. A referência foi substituída pelo link da execução no arquivo de passagem arquivado, sem mudar a guarda. A suíte base passou com todos os testes, e a publicação apenas documental ficou verde: https://github.com/leogpereira-afk/impresilk/actions/runs/39642815854 . A interface oficial permanece na v179.
+O Deploy anterior estava vermelho porque a guarda M27 confundiu dígitos de um hash abreviado com uma O.S. A referência foi substituída pelo link da execução no arquivo de passagem arquivado, sem mudar a guarda. A suíte base passou com todos os testes, e a publicação apenas documental ficou verde: https://github.com/leogpereira-afk/impresilk/actions/runs/39642815854 . Naquele momento, a interface oficial permanecia na v179.
+
+## Publicação autorizada
+
+Versão reservada: v180. Atualizar as referências pelo script oficial, repetir a verificação completa e conferir os arquivos servidos após o Deploy. O resultado final da publicação e da conferência fica na Passagem do VEZ.md.
