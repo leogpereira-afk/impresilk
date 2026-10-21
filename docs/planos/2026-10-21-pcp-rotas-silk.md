@@ -17,3 +17,7 @@ Verificar: testes do motor (combustível, espera, virada de dia, dados ausentes,
 - Relatório exibido dentro de diálogo: origem, equipe, motorista, veículo, data, percurso, três paradas, trechos, horários e combustível conferidos. Impressão abre diálogo nativo não acessível pela automação do navegador integrado; arquivo PDF final ainda não validado. Celular físico ainda não validado.
 - Prévia: `PORT=5381 PV_ROTAS=1 node scripts/preview-auditoria.cjs`, rota `/#aba=entregas&rotas=1`; nenhum cliente real, nenhuma escrita em produção.
 - Pendências para produção: provedor de rotas/geocodificação e mapa-base, persistência compartilhada, testes com serviço configurado e conferência final da impressão. Nenhuma contratação ou publicação de código realizada.
+
+## Publicação aprovada
+
+Em 21/10/2026, após a prévia e a explicação das limitações, o dono respondeu “Aprovado”. Publicar os cards, o Silk e a interface de planejamento em teste. O adaptador demonstrativo continua exclusivo do servidor local; não habilitar roteamento real nem sincronização sem integração. Ativo do Silk convertido para WebP para entrar na publicação existente e no cache offline. A conferência do PDF final continua pendente do provedor e de impressão fora do navegador integrado.
