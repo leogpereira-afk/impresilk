@@ -2,7 +2,7 @@
 
 ## Pedido e escopo
 
-Em 21/10/2026, o dono pediu para organizar melhor o topo da carteira e informou que vários controles perderam a leitura. Prévia local, sem autorização de publicação desta nova alteração.
+Em 21/10/2026, o dono pediu para organizar melhor o topo da carteira e informou que vários controles perderam a leitura. A prévia foi aprovada e a publicação autorizada na mesma data: "aprovado, pode subir essa organização e a correção da leitura dos cards". Preparação da versão v181, limitada às mudanças de interface verificadas.
 
 - Separar as vistas da carteira, a busca e os grupos Tipo e Etapa.
 - Ações de inclusão junto ao título; preservar todos os filtros, números, ordenação, PDF e legenda.
@@ -23,4 +23,4 @@ Reproduzido em Plantões com dados fictícios. O seletor compartilhado em silk-d
 - Larguras de 390, 1024 e 1440 px sem transbordamento horizontal da página. Em 390 px, filtros de 44 px, opção ao final da faixa visível após a seleção e foco preservado; Tab segue para o PDF.
 - Contraste medido antes da correção em Plantões: texto branco sobre fundo claro. Depois: pares opacos com razão acima de 9:1 nos controles dos cabeçalhos de Plantões, Performance, Calendário, Programação e Entregas. Estados ativos e inativos conferidos, inclusive após trocar os filtros de Plantões e Programação.
 - Rótulo do mês no cabeçalho do Calendário corrigido para texto claro; botão do cabeçalho simples do Painel com texto escuro mais legível.
-- Prévia somente local. Nenhum dado de produção consultado ou alterado, nenhuma regra ou servidor modificado.
+- Verificações de interação realizadas na prévia com dados fictícios. Nenhum dado de produção consultado ou alterado, nenhuma regra ou servidor modificado. A publicação da v181 terá conferência do Deploy e dos arquivos servidos antes de ser declarada concluída.
