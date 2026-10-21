@@ -2,7 +2,7 @@
 
 Pedido de 21/10/2026: conferir as outras abas e corrigir os cards com leitura ruim, mantendo tudo compacto e sem retirar informações.
 
-Base: v182, preservando a organização da carteira e o atalho de retrabalho já publicados. Correções locais para prévia, sem nova autorização de publicação.
+Base: v182, preservando a organização da carteira e o atalho de retrabalho já publicados. Correções inicialmente preparadas para prévia local e aprovadas pelo dono em 21/10/2026 para publicação.
 
 ## Revisão
 
@@ -34,4 +34,8 @@ Prévia isolada em `http://127.0.0.1:5398/`, com dados fictícios e sem acesso a
 - Suíte completa: `node scripts/verificar.cjs`, 2.143 testes aprovados, zero falhas. `git diff --check` sem erros.
 - Evidências locais: `/tmp/pcp-legibilidade-auditoria.json`, `/tmp/pcp-legibilidade-calendario-desktop.png` e `/tmp/pcp-legibilidade-card-mobile.png`. Não incluir prints ou dados operacionais no repositório público.
 
-Limite: a revisão usa os cenários fictícios disponíveis; não é uma certificação de todas as combinações de dados nem substitui uma auditoria integral de acessibilidade. O medidor de contraste não avalia gradientes, que foram inspecionados visualmente. A nova interface ainda não foi publicada e depende de aprovação para subir.
+Limite: a revisão usa os cenários fictícios disponíveis; não é uma certificação de todas as combinações de dados nem substitui uma auditoria integral de acessibilidade. O medidor de contraste não avalia gradientes, que foram inspecionados visualmente.
+
+## Publicação aprovada
+
+Em 21/10/2026, o dono autorizou: "aprovado, pode subir essas correções dos cards do PCP". Ramo atualizado com a main e versão v183 preparada pelo script oficial. A aprovação abrange as correções de legibilidade revisadas acima. Verificação do deploy e dos arquivos servidos será registrada na Passagem do VEZ.md ao encerrar.
