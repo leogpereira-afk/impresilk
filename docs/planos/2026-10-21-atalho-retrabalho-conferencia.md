@@ -21,3 +21,7 @@ Validação em 21/10/2026:
 - Produção não alterada por este ajuste. Falta aprovação específica para publicar, seguida de versão e verificação no site.
 
 O ambiente restrito bloqueou dois testes com servidor HTTP local; a suíte completa passou ao permitir esses servidores. A prévia não sincroniza O.S. automaticamente: o teste enviou explicitamente ao handler fictício local para verificar a reabertura após o registro.
+
+## Publicação autorizada
+
+Em 21/10/2026, após a prévia, o dono autorizou: "subir". Publicação preparada na v182, somente interface e atualização do cache. Sem alteração de servidor ou dados reais.
