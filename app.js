@@ -6200,7 +6200,7 @@ function osCardHTML(os) {
           <div class="card-numero">O.S ${esc(os.numero || '—')}${seloStatus}${tagAtraso}${tagRetrab}${seloParado}${seloVoltouERP}${seloACadastrarHTML(os)}${seloEntregaCardHTML(os)}${os.statusERP === 'CONCLUIDO' && !os.liberadoPCP && !os.finalizadaEm ? ` <span class="tag-erp-pronta" title="O ERP diz que a produção terminou${os.statusERPDesde ? ' em ' + esc(fmtDataBR(os.statusERPDesde)) : ''}; falta liberar no PCP">🏭 ERP: produção concluída</span>` : ''}${erpMudancasAConferir(os).length ? ' <span class="badge sem-valor">ERP mudou · conferir</span>' : ''}</div>
           <span class="badge st-${st}">${statusLabelDe(os, st)}</span>
         </div>
-        <div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div>
+        <div class="card-visual">${typeof rotaIcone==='function'?rotaIcone(interno?'caixa':'rota'):''}<div class="card-cliente">${esc(os.cliente || 'Sem cliente')}</div></div>
         ${os.servico ? `<div class="card-servico" title="${esc(os.servico)}">${esc(os.servico)}</div>` : ''}
       </div>
       ${erpFechouHTML(os)}
@@ -7142,7 +7142,7 @@ function renderPrioridades() {
   el.innerHTML = `<div class="pcp-missoes" role="group" aria-label="Prioridades da operação">${defs.map(([key,nome,dica,acao]) => {
     const n = resumo[key].length;
     const sel = key === STATE._prioridade;
-    return `<button type="button" class="pcp-missao ${sel ? 'selecionado' : ''} ${n === 0 ? 'zero' : ''}" aria-pressed="${sel}" data-prioridade="${key}" aria-label="${esc(nome)}: ${n}. ${esc(dica)}"><strong>${n}</strong><span class="pcp-missao-nome">${esc(nome)}</span>${sel ? `<span class="pcp-missao-acao">${esc(acao)}</span>` : ''}</button>`;
+    return `<button type="button" class="pcp-missao ${sel ? 'selecionado' : ''} ${n === 0 ? 'zero' : ''}" aria-pressed="${sel}" data-prioridade="${key}" aria-label="${esc(nome)}: ${n}. ${esc(dica)}">${typeof rotaIcone==='function'?rotaIcone(({hoje:'calendario',atrasadas:'relogio',semPrazo:'calendario',retirada:'caixa',semRetorno:'rota',retrabalho:'caixa'})[key]):''}<strong>${n}</strong><span class="pcp-missao-nome">${esc(nome)}</span>${sel ? `<span class="pcp-missao-acao">${esc(acao)}</span>` : ''}</button>`;
   }).join('')}</div>
     ${foco ? `<p class="pcp-missao-dica">${esc(foco[2])}. A carteira abaixo mostra só estas O.S. <button type="button" class="pcp-ver-carteira" data-fechar-prioridade>Ver carteira</button></p>` : '<p class="pcp-missao-dica">Carteira completa. Toque numa prioridade para recortar o trabalho.</p>'}`;
   $$('[data-prioridade]',el).forEach(b => b.onclick = () => {
@@ -7222,6 +7222,10 @@ function renderPCP() {
     <div class="cards-grid"></div>`;
 
   el.insertAdjacentHTML('afterbegin','<section id="pcp-prioridades" aria-label="Prioridades da operação"></section>');
+  if(typeof rotaSilkHTML==='function'){
+    el.insertAdjacentHTML('afterbegin', `<header class="pcp-silk-faixa">${rotaSilkHTML()}<div><span class="rota-eyebrow">SILK COM A EQUIPE</span><h2>Vamos organizar o próximo passo?</h2><p>Prioridades à vista, equipe alinhada e entregas no caminho.</p></div>${typeof rotasPode==='function'&&rotasPode()?'<button type="button" id="pcp-abrir-rotas">Planejar rotas ↗</button>':''}</header>`);
+    const atalho=el.querySelector('#pcp-abrir-rotas');if(atalho)atalho.onclick=()=>{STATE._entAba='rotas';document.querySelector('[data-tab="entregas"]').click();};
+  }
   renderPrioridades();
   pcpRenderCards(); // preenche a grade conforme os filtros atuais
 

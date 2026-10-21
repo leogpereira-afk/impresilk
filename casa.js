@@ -2294,6 +2294,7 @@ function acompanhamentoGraficosHTML(lista, per, f) {
 function renderEntregas() {
   const el = document.getElementById('panel-entregas');
   if (!el) return;
+  if(STATE._entAba==='rotas' && typeof renderRotasEntregas==='function')return renderRotasEntregas();
   if(STATE._entAba==='relatorios')return renderRelatoriosEntregas();
   // Fechar o dia (F14): o lote da gestão, em lote.js. Sem ele (cache misto), a lista de sempre.
   if (STATE._entAba === 'lote' && typeof renderLoteEntregas === 'function') return renderLoteEntregas();

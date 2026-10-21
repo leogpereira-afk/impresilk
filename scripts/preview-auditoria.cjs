@@ -3,7 +3,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const permitidos=new Set(['silk-design.css','silk-compacto.webp','demandas.js','demandas.css','performance-layout.css','performance-dashboards.js','performance-dashboards.css','ranking.html','ranking.js','ranking.css','privacidade-valores.js','diagnostico-itens.js','relatorios-pcp.js','alertas-sync.js','index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','perdas.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','operacao-revisao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
+const permitidos=new Set(['rotas.css','rotas.js','rotas-ui.js','silk-cenas.jpg','silk-design.css','silk-compacto.webp','demandas.js','demandas.css','performance-layout.css','performance-dashboards.js','performance-dashboards.css','ranking.html','ranking.js','ranking.css','privacidade-valores.js','diagnostico-itens.js','relatorios-pcp.js','alertas-sync.js','index.html','equipe.html','manifest.json','app.js','equipe.js','casa.js','performance.js','perdas.js','comissao.js','comissao-ui.js','relatorios-entregas.js','frases.js','operacao.js','operacao-revisao.js','logo.js','styles.css','favicon.svg','icon.svg','divisao.js','regras.js','entrega-item.js','alocacao-ui.js','conferencia-entrega.js','conferencia-entrega-ui.js','controle-entrega-ui.js','lote.js','entregas-os.js','equipe-aguia.webp','equipe-leao.webp','equipe-pantera.webp','equipe-lobo.webp','equipe-tigre.webp','equipe-falcao.webp','equipe-carcara.webp','equipe-onca.webp','equipe-lobo-guara.webp','equipe-touro.webp']);
 const fixture=`
 const hoje=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const deslocar=n=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
@@ -353,6 +353,7 @@ const boot=`
 document.addEventListener('DOMContentLoaded',async()=>{
  await previewApi({action:'previewEstado'});
  STATE.user={nome:'PRÉVIA LOCAL · dados fictícios',papel:new URLSearchParams(location.hash.slice(1)).get('papel')||'admin'};
+ if(typeof prepararRotasPrevia==='function')prepararRotasPrevia();
  document.querySelector('#login-screen').classList.add('hidden');document.querySelector('#app').classList.remove('hidden');
  document.querySelector('#user-badge').textContent=STATE.user.nome;
  document.querySelector('#topbar-logo').src=LOGO_IMPRESILK;
@@ -368,6 +369,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
  if(pv.get('ordem'))STATE._entFilaOrdem=pv.get('ordem');
  if(pv.get('todas'))STATE._entFilaTodas=true;
  // &lote=dia ou &lote=pendencias abre o Fechar o dia (F14) nesse modo.
+ if(pv.get('rotas'))STATE._entAba='rotas';
  if(pv.get('relatorios'))STATE._entAba='relatorios';
  if(pv.get('lote')){STATE._entAba='lote';STATE._loteModo=pv.get('lote');}
  // &intro=0 dá o quadro do primeiro uso por lido; &itens=LT4 abre os itens da linha; &rolar= desce até o seletor.
@@ -439,13 +441,15 @@ http.createServer(async(req,res)=>{
   if(['comissao-api','controle-api'].includes(name) && req.method==='POST'){
     try{let json='';for await(const chunk of req){json+=chunk;if(json.length>(name==="controle-api"?5000000:300000))throw new Error('Pedido grande demais.');}const out=await (name==='controle-api'?controlePreview:comissaoPreview)(JSON.parse(json));res.setHeader('Content-Type','application/json');res.end(JSON.stringify(out));}catch(e){res.writeHead(500);res.end(JSON.stringify({error:e.message}));}return;
   }
+  if(name==='rotas-fixture.js' && process.env.PV_ROTAS){res.setHeader('Content-Type','text/javascript');res.end(require('./preview-rotas-fixture.cjs')());return;}
   if(name==='fixture.js'){res.setHeader('Content-Type','text/javascript');res.end(fixture);return;}
   if(!permitidos.has(name)){res.writeHead(404);res.end();return;}
   let body=fs.readFileSync(path.join(root,name));
   if(name==='index.html') body=body.toString().replace(/<script src="(?:config|store|auth)\.js(?:\?[^\"]*)?"><\/script>/g,'').replace(/<script src="operacao.js(?:\?[^"]*)?">/,'<script src="fixture.js"></script><script src="operacao.js">').replace(/<script>(?:if\('serviceWorker'|\s*\/\*\s*Service worker)[^]*?<\/script>/,'');
+  if(name==='index.html' && process.env.PV_ROTAS)body=body.toString().replace('</body>','<script src="rotas-fixture.js"></script></body>');
   if(name==='ranking.html')body=body.toString().replace(/<script src="(?:config|auth)\.js(?:\?[^"]*)?"><\/script>/g,'').replace(/<script src="ranking.js/, '<script src="ranking-fixture.js"></script><script src="ranking.js');
   if(name==='app.js')body=body.toString().replace("document.addEventListener('DOMContentLoaded', initLogin);",boot);
   if(name==='equipe.html') body=body.toString().replace(/<script src="(?:config|store|auth)\.js(?:\?[^\"]*)?"><\/script>/g,'').replace(/<script src="operacao.js(?:\?[^"]*)?">/,'<script src="fixture.js"></script><script src="operacao.js">').replace(/<script>\s*\/\*\s*Service worker[^]*?<\/script>/,'');
   if(name==='equipe.js')body=body.toString().replace("document.addEventListener('DOMContentLoaded', initSelect);",bootEquipe);
-  const ext=path.extname(name);res.setHeader('Content-Type',({'.json':'application/manifest+json','.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.webp':'image/webp'})[ext]);res.end(body);
+  const ext=path.extname(name);res.setHeader('Content-Type',({'.json':'application/manifest+json','.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.webp':'image/webp','.jpg':'image/jpeg'})[ext]);res.end(body);
 }).listen(Number(process.env.PORT) || 4201,'127.0.0.1',()=>console.log('Prévia com dados fictícios: http://127.0.0.1:'+(Number(process.env.PORT)||4201)));
