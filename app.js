@@ -8224,13 +8224,13 @@ function renderRetrabalho() {
     </div>
     <p class="metricas-nota">Taxa calculada sobre entregas originais concluídas pela equipe no período, com retrabalho conhecido até agora. Cancelamentos e O.S. filhas não entram na base. Duas correções da mesma O.S. contam uma vez na taxa. Original = O.S marcada com o problema. Retrabalho = a O.S nova que o ERP emite (aponte a original na ficha dela, campo "🔁 retrabalho da O.S nº"). Sem filha apontada, o custo fica em branco.${semTaxonomia ? ` <strong>${semTaxonomia} sem etapa de origem/causa raiz</strong>: abra a ficha e complete.` : ''}</p>
     <div class="casa-tabela-wrap"><table class="casa-tabela">
-      <thead><tr><th>O.S original</th><th>O.S retrabalho</th><th>Cliente</th><th>Motivo</th><th>Técnico</th><th class="num">Custo</th><th>Data</th></tr></thead>
+      <thead><tr><th>O.S original</th><th>O.S retrabalho</th><th>Cliente</th><th>Motivo</th><th>Responsável da etapa</th><th>Técnico da correção</th><th class="num">Custo</th><th>Data</th></tr></thead>
       <tbody>${lista.map((p, i) => {
         const c = custos[i];
         const o = p.orig, fi = p.filha;
         const tec = fi && OPERACAO.equipe(fi).length ? OPERACAO.equipeTexto(fi, ', ') : (o && o.resolvidoPor && OPERACAO.nomePessoa(o.resolvidoPor)) || '—';
         const medicao=STORE.getCFG().medicoesRetrabalho?.[fi?.id];
-        const motivo = o ? [medicao?.causa,medicao?.prevencao&&('prevenção: '+medicao.prevencao),o.problema, o.etapaOrigem && ('origem: ' + o.etapaOrigem), o.causaRaiz || o.causa, o.responsavelEtapa && ('resp.: ' + o.responsavelEtapa)].filter(Boolean).join(' · ') || '—' : '—';
+        const motivo = o ? [medicao?.causa,medicao?.prevencao&&('prevenção: '+medicao.prevencao),o.problema, o.etapaOrigem && ('origem: ' + o.etapaOrigem), o.causaRaiz || o.causa].filter(Boolean).join(' · ') || '—' : '—';
         const custoTxt = c.reais != null ? brMoney(c.reais) : (c.horas != null || c.km != null ? `${fmtH(c.horas)}${c.km != null ? ' · ' + Math.round(c.km) + ' km' : ''}` : '<span class="badge sem-valor">sem viagem</span>');
         const d = dataPar(p);
         const pendente = !(fi ? fi.finalizadaEm : (o && o.dataResolvido));
@@ -8241,11 +8241,12 @@ function renderRetrabalho() {
           <td>${fi ? `<button type="button" class="btn-ghost btn-xs" data-abrir-os="${esc(fi.id)}">O.S ${esc(fi.numero || '—')}</button>${fi.finalizadaEm ? ' <span class="badge st-finalizada">feita</span>' : ' <span class="badge st-agendada">aberta</span>'}` : '<span class="badge st-aguardando_producao">sem O.S de retrabalho</span>'}</td>
           <td>${esc((o || fi || {}).cliente || '')}</td>
           <td>${esc(motivo)}</td>
+          <td>${esc(String(o?.responsavelEtapa || '').trim() || 'Não informado')}</td>
           <td>${esc(tec)}</td>
           <td class="num">${custoTxt}${c.rotulo?`<small class="bloco">${esc(c.rotulo)}</small>`:''}</td>
           <td>${d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'}</td>
         </tr>`;
-      }).join('') || `<tr><td colspan="7">${emptyState('✅', 'Nenhum retrabalho no período', 'Ajuste o filtro de datas ou comemore: nada voltou para correção.')}</td></tr>`}</tbody>
+      }).join('') || `<tr><td colspan="8">${emptyState('✅', 'Nenhum retrabalho no período', 'Ajuste o filtro de datas ou comemore: nada voltou para correção.')}</td></tr>`}</tbody>
     </table></div>
     <div class="casa-perf-grid" style="margin-top:14px">
       <section class="casa-prod-box"><h3>Retrabalho por técnico</h3><p>Participação na O.S de retrabalho (quem foi corrigir), ou quem resolveu quando não há O.S filha. Não diz quem causou.</p><div class="fin-colab-lista">${barras(porTecnico, lista.length)}</div></section>
