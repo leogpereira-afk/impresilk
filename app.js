@@ -7192,21 +7192,19 @@ function renderPCP() {
     <section class="pcp-controles" aria-labelledby="pcp-carteira-titulo">
       <div class="pcp-controles-topo">
         <div class="pcp-carteira-heading"><h2 id="pcp-carteira-titulo">Ordens de serviço</h2><span id="pcp-resultado" role="status" aria-live="polite"></span></div>
-        <div class="pcp-chips pcp-vistas" role="group" aria-label="Situação das ordens de serviço">${vistaBtns}</div>
+        ${podeEditar() ? '<div class="pcp-criar-acoes"><button class="btn-primary" id="pcp-nova-ext">+ O.S externa</button><button class="btn-ghost" id="pcp-nova-int">+ O.S retirada</button></div>' : ''}
       </div>
+      <div class="pcp-chips pcp-vistas" role="group" aria-label="Situação das ordens de serviço">${vistaBtns}</div>
       <div class="pcp-busca-linha">
         <label class="pcp-busca-campo">
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
           <input type="search" id="busca-pcp" aria-label="Buscar na carteira" placeholder="Buscar por O.S, cliente, endereço ou serviço" value="${esc(STATE.filtroBusca)}">
         </label>
         <label class="pcp-ordenacao" ${STATE.pcpVista === 'voltas' ? 'hidden' : ''}><span>Ordenar por</span><select id="pcp-sort">${sorts}</select></label>
-        ${podeEditar() ? '<div class="pcp-criar-acoes"><button class="btn-primary" id="pcp-nova-ext">+ O.S externa</button><button class="btn-ghost" id="pcp-nova-int">+ O.S retirada</button></div>' : ''}
       </div>
-      <div class="pcp-filtro-linha pcp-filtro-unica" role="group" aria-label="Tipo e etapa">
-        ${STATE.pcpVista === 'voltas' ? '' : `<div class="pcp-chips">${tipoChips}</div>`}
-        ${STATE.pcpVista === '' ? `<div class="pcp-chips">${chips}</div>` : ''}
-        ${STATE.pcpVista === 'arquivados' ? `<div id="arq-chips" class="pcp-arq-chips">${arqChipsHTML()}</div><span id="arq-nota" class="text-muted" style="font-size:.75rem">${esc(_arqNotaTxt)}</span>` : ''}
-      </div>
+      ${STATE.pcpVista === 'voltas' ? '' : `<div class="pcp-filtro-linha" role="group" aria-label="Tipo de serviço"><span class="pcp-filtro-label">Tipo</span><div class="pcp-chips">${tipoChips}</div></div>`}
+      ${STATE.pcpVista === '' ? `<div class="pcp-filtro-linha" role="group" aria-label="Etapa do serviço"><span class="pcp-filtro-label">Etapa</span><div class="pcp-chips">${chips}</div></div>` : ''}
+      ${STATE.pcpVista === 'arquivados' ? `<div class="pcp-filtro-linha" role="group" aria-label="Período arquivado"><span class="pcp-filtro-label">Período</span><div><div id="arq-chips" class="pcp-arq-chips">${arqChipsHTML()}</div><span id="arq-nota" class="text-muted" style="font-size:.75rem">${esc(_arqNotaTxt)}</span></div></div>` : ''}
       <div class="pcp-controles-rodape">
         <button class="btn-ghost btn-sm" id="pcp-pdf">PDF do recorte</button><button class="pcp-limpar" id="pcp-limpar-filtros" hidden>Limpar filtros</button>
       </div>
@@ -7242,6 +7240,12 @@ function renderPCP() {
     renderPCP();
     $('#busca-pcp').focus();
   };
+  // A faixa pode rolar no celular: o filtro escolhido continua visível e
+  // mantém o foco depois de reconstruir a carteira, inclusive pelo teclado.
+  const focarFiltro = (atributo, valor) => {
+    const botao = [...el.querySelectorAll(`[${atributo}]`)].find(b => b.getAttribute(atributo) === valor);
+    if (botao) { botao.focus({preventScroll:true}); botao.scrollIntoView({block:'nearest',inline:'nearest'}); }
+  };
   $$('[data-pcp-vista]', el).forEach(b => {
     b.onclick = () => {
       if (b.dataset.pcpVista === STATE.pcpVista && !STATE._prioridade) return; // clique redundante não reseta o status
@@ -7250,13 +7254,14 @@ function renderPCP() {
       STATE._prioridade = '';   // escolher uma vista fecha a prioridade (senão o toque parecia morto)
       renderPCP();
       marcarLateral();
+      focarFiltro('data-pcp-vista', b.dataset.pcpVista);
     };
   });
   $$('[data-pcp-status]', el).forEach(b => {
-    b.onclick = () => { STATE.pcpStatus = b.dataset.pcpStatus; renderPCP(); };
+    b.onclick = () => { STATE.pcpStatus = b.dataset.pcpStatus; renderPCP(); focarFiltro('data-pcp-status', b.dataset.pcpStatus); };
   });
   $$('[data-pcp-tipo]', el).forEach(b => {
-    b.onclick = () => { STATE.pcpTipo = b.dataset.pcpTipo; renderPCP(); };
+    b.onclick = () => { STATE.pcpTipo = b.dataset.pcpTipo; renderPCP(); focarFiltro('data-pcp-tipo', b.dataset.pcpTipo); };
   });
   if (STATE.pcpVista === 'arquivados') {
     const religar = () => {
