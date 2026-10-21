@@ -9,3 +9,6 @@
 @media(max-width:700px){.dm-page .dm-head{flex-direction:column;align-items:stretch}.dm-head>div:last-child{justify-content:flex-start}.dm-summary{gap:6px}.dm-page .dm-chip{min-height:44px;padding:7px 11px}.dm-search-row{flex-wrap:wrap}.dm-search{flex-basis:100%}.dm-filtros{grid-template-columns:1fr}.dm-list-meta{flex-direction:column}.dm-page button,.dm-page input,.dm-page select{min-height:44px}.dm-card{padding:14px}}
 
 .dm-list{grid-template-columns:repeat(auto-fill,minmax(min(310px,100%),1fr))}.dm-list .dm-card{transition:border-color .15s}.dm-list .dm-card:hover{border-color:#9db5bf}
+
+/* Títulos completos no calendário, sem alargar a grade no celular. */
+.dm-calendar button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
