@@ -61,6 +61,7 @@ async function conferirItensEntrega(osId, entregaId = '') {
   const virtual = {...os, alocacao:anterior?.alocacao || (primeira ? os.alocacao : null), equipe:anterior ? DIVISAO.derivarEquipe(anterior.alocacao) : primeira ? os.equipe || [] : []};
   ALOCUI.iniciar(chave, {os:virtual,equipes:perfConfig().equipes,papel:STATE.user.papel,valor:null,rotuloValor:'Valor dos itens desta entrega',dataEntrega:dia,versoes:perfRegrasFonte().versoes,semAntigo:true,reiniciar:true});
   const d = perfDialog('Itens e equipe · O.S. ' + (os.numero || ''), `<p class="aloc-os">${esc(os.cliente || '')}</p>
+    ${!soLeitura && typeof podeOrigemRetrabalho === 'function' && podeOrigemRetrabalho() ? `<div class="conf-retrabalho-atalho"><button type="button" class="btn-ghost" id="conf-retrabalho"><span aria-hidden="true">↻</span> ${os.retrabalho ? 'Editar retrabalho' : 'Apontar retrabalho'}</button><small>Registre um problema desta O.S.</small></div>` : ''}
     ${inconsistente&&!soLeitura?'<p class="aloc-aviso conf-inconsistente" role="note">Esta entrega conferida não se lê mais: um item mudou depois de conferido. Marque abaixo os itens e as quantidades de hoje e escreva o motivo (no fim, em "Revisar ou anular esta entrega") para salvar a revisão, ou anule a entrega. As outras entregas ficam como estão até a revisão delas.</p>':''}
     <p class="metricas-nota">Selecione somente o que esta equipe entregou nesta data. Os itens restantes poderão ser conferidos em outra entrega, com outra equipe.</p>
     ${registros.length?`<nav class="conf-entregas" aria-label="Entregas desta O.S.">${registros.map((e,n)=>`<button type="button" class="btn-ghost btn-sm" data-conf-abrir="${esc(e.id)}" ${e.id===entregaId?'disabled':''}>Entrega ${n+1} · ${esc(e.dia.split('-').reverse().join('/'))}</button>`).join('')}<button type="button" class="btn-ghost btn-sm" data-conf-abrir="" ${!entregaId?'disabled':''}>+ Nova entrega</button></nav>`:''}
@@ -119,6 +120,30 @@ async function conferirItensEntrega(osId, entregaId = '') {
   d.querySelectorAll('[data-conf-qtde]').forEach(el=>el.oninput=()=>{escolhidos.set(catalogo[+el.dataset.confQtde].chave,Number(el.value));atualizar();mexeu();});
   d.querySelector('#conf-todos').onclick=()=>{d.querySelectorAll('[data-conf-item]').forEach(el=>{if(el.disabled||catalogo[+el.dataset.confItem].cancelado)return;const n=+el.dataset.confItem,it=catalogo[n],q=d.querySelector(`[data-conf-qtde="${n}"]`);el.checked=true;q.disabled=false;q.value=it.qtde-(usados.get(it.chave)||0);escolhidos.set(it.chave,Number(q.value));});atualizar();mexeu();};
   d.querySelectorAll('[data-conf-abrir]').forEach(el=>el.onclick=()=>{d.close();void conferirItensEntrega(osId,el.dataset.confAbrir).catch(e=>toast(perfErroTxt(e),'error'));});
+  const apontar = d.querySelector('#conf-retrabalho');
+  if (apontar) apontar.onclick = () => {
+    if (enviando || !perfPodeEditar() || !podeOrigemRetrabalho()) return;
+    if (pendente()) { toast('Sincronize as alterações pendentes antes de apontar o retrabalho.', 'error'); return; }
+    // Outro dialog nativo mantém a conferência intacta e atrás do formulário.
+    const local = STORE.getOS(osId);
+    const base = JSON.parse(JSON.stringify(local && Number(local.rev) >= Number(os.rev) ? local : os));
+    const editor = document.createElement('dialog');
+    editor.className = 'conf-retrabalho-dialog';
+    editor.setAttribute('aria-label', 'Apontar retrabalho');
+    document.body.appendChild(editor);
+    const voltar = () => { editor.close(); editor.remove(); if (minhaTela()) apontar.focus(); };
+    editor.addEventListener('cancel', e => { e.preventDefault(); editor.querySelector('#retrab-voltar')?.click(); });
+    editor.showModal();
+    perguntarRetrabalho(JSON.parse(JSON.stringify(base)), () => {
+      voltar();
+      // O registro usa a fila normal da O.S.; uma próxima conferência carregará
+      // a revisão do servidor após sincronizar. O rascunho da entrega continua salvo.
+      if (minhaTela()) d.close();
+      toast('Retrabalho registrado. Acompanhe a sincronização no painel.', 'success');
+      renderActiveTab();
+    }, {apontar:true, container:editor, rotulo:'Voltar aos itens e equipe', aoVoltar:voltar,
+      antesDeRegistrar: alterada => confGravarRetrabalho(base, alterada)});
+  };
   d.querySelector('#conf-cancelar').onclick=()=>d.close();
   const campoRevMotivo=d.querySelector('#conf-rev-motivo');
   if(campoRevMotivo)campoRevMotivo.oninput=()=>{conferir();mexeu();};
@@ -247,4 +272,26 @@ function conferenciaRefletirNaFicha(confirmada) {
   const novo=doAcompanhamento();
   if(aberto && novo?.closest('details'))novo.closest('details').open=true;
   novo?.focus();
+}
+
+// O atalho altera apenas o retrabalho, nunca os itens/equipe da conferência.
+function confGravarRetrabalho(base, alterada) {
+  if (!perfPodeEditar() || !podeOrigemRetrabalho()) return 'Só a gestão do PCP pode registrar o retrabalho.';
+  if (STORE.getQueue().some(x => x.action === 'setCfg' || x.os?.id === base.id || x.id === base.id)) return 'Sincronize as alterações pendentes antes de confirmar o retrabalho.';
+  const local = STORE.getOS(base.id);
+  if (!local) return 'Esta O.S. não está mais disponível. Atualize o painel.';
+  const atual = Number(local.rev) >= Number(base.rev) ? local : base;
+  const campos = ['retrabalho','problema','etapaOrigem','causaRaiz','responsavelEtapa','dataRetrabalho','retrabalhoPerguntado','etapaOrigemMotivo'];
+  if (campos.some(k => JSON.stringify(atual[k]) !== JSON.stringify(base[k]))) return 'O retrabalho mudou enquanto você preenchia. Volte e abra novamente para conferir.';
+  const copia = JSON.parse(JSON.stringify(atual));
+  for (const k of campos) { if (alterada[k] === undefined) delete copia[k]; else copia[k] = alterada[k]; }
+  copia.atualizadoEm = nowISO(); copia.atualizadoPor = STATE.user.nome;
+  STORE.saveOS(copia);
+  // A ficha pode estar aberta por trás: preservar suas outras edições sem
+  // deixar um salvamento posterior apagar o retrabalho recém-apontado.
+  if (typeof _modalDraft !== 'undefined' && _modalDraft?.id === copia.id) {
+    for (const k of campos) { if (copia[k] === undefined) delete _modalDraft[k]; else _modalDraft[k] = copia[k]; }
+    reRenderModalKeepOpen();
+  }
+  return '';
 }

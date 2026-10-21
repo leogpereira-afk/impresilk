@@ -4642,3 +4642,17 @@ img.perf-logo{object-fit:cover}
 .op-prioridades .inline-link[data-os-id] { display: inline-flex; align-items: center; min-height: 40px; }
 #lt-menos, #lt-mais { min-width: 40px; min-height: 40px; }
 .btn-liberar { min-height: 40px; }
+
+/* Atalho de retrabalho na conferência, com a entrega preservada por baixo. */
+.conf-retrabalho-atalho{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0 18px}
+#perf-dialog .conf-retrabalho-atalho button{background:#fff1f2;color:#9f1239;border:1px solid #e8a7b5;min-height:44px;font-weight:700}
+.conf-retrabalho-atalho button:hover{background:#ffe4e6}
+.conf-retrabalho-atalho small{color:var(--muted)}
+.conf-retrabalho-dialog{border:0;padding:0;border-radius:16px;width:min(580px,calc(100vw - 32px));max-height:90dvh;background:var(--surface);color:var(--text)}
+.conf-retrabalho-dialog::backdrop{background:rgba(11,36,51,.55)}
+.conf-retrabalho-dialog .wpp-picker-overlay{position:static;padding:0;background:none}
+.conf-retrabalho-dialog .wpp-picker{max-width:none;box-shadow:none}
+.conf-retrabalho-dialog .wpp-picker-body{max-height:75dvh}
+.conf-retrabalho-dialog .wpp-acoes[hidden]{display:none}
+.conf-retrabalho-dialog button{min-height:44px}
+.conf-retrabalho-dialog :focus-visible{outline:3px solid #4f9cb6;outline-offset:2px}

@@ -5553,15 +5553,15 @@ function perguntarRetrabalho(os, aoResponder, volta = {}) {
   const opt = (lista, sel) => lista.map(v => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(v)}</option>`).join('');
   box.innerHTML = `
     <div class="wpp-picker retrab-box" role="dialog" aria-modal="true" aria-labelledby="retrab-tit">
-      <div class="wpp-picker-head"><strong id="retrab-tit">🔴 Este serviço gerou retrabalho?</strong></div>
+      <div class="wpp-picker-head"><strong id="retrab-tit">${volta.apontar ? 'Apontar retrabalho' : '🔴 Este serviço gerou retrabalho?'}</strong></div>
       <div class="wpp-picker-body">
-        <p class="text-muted" style="font-size:.8rem;margin-bottom:10px">O.S ${esc(os.numero || '—')} · ${esc(os.cliente || '')}. A pergunta é obrigatória em toda instalação.</p>
-        <div class="wpp-acoes">
-          <button class="btn-success" id="retrab-nao" ${jaSim ? '' : 'autofocus'}>Não</button>
+        <p class="text-muted" style="font-size:.8rem;margin-bottom:10px">O.S ${esc(os.numero || '—')} · ${esc(os.cliente || '')}. ${volta.apontar ? 'Informe o problema e confirme para registrar nesta O.S.' : 'A pergunta é obrigatória em toda instalação.'}</p>
+        <div class="wpp-acoes" ${volta.apontar ? 'hidden' : ''}>
+          <button class="btn-success" id="retrab-nao" ${jaSim || volta.apontar ? '' : 'autofocus'}>Não</button>
           <button class="btn-danger" id="retrab-sim">Sim, gerou</button>
         </div>
         <button type="button" class="btn-ghost w-100" id="retrab-voltar" style="margin-top:8px">${esc(volta.rotulo || 'Voltar sem finalizar')}</button>
-        <form id="retrab-form" class="retrab-form" ${jaSim ? '' : 'hidden'}>
+        <form id="retrab-form" class="retrab-form" ${jaSim || volta.apontar ? '' : 'hidden'}>
           <div class="field"><label>Descrição do problema <span class="req">*</span> <span class="text-muted">(o que precisou ser refeito)</span></label><textarea name="problema" rows="2" required>${esc(os.problema || '')}</textarea></div>
           <div class="field-row">
             ${origemNaPerguntaHTML(os, opt)}
@@ -5572,11 +5572,11 @@ function perguntarRetrabalho(os, aoResponder, volta = {}) {
             <div class="field"><label>Data do retrabalho <span class="req">*</span></label><input name="dataRetrabalho" type="date" required value="${esc(os.dataRetrabalho || hojeISO())}"></div>
           </div>
           ${origemReferenciaPergunta(os) ? `<div class="field" data-retrab-motivo hidden><label>Motivo da troca da origem <span class="req">*</span> <span class="text-muted">(a origem ${esc(origemGravadaPergunta(os) ? 'gravada' : 'anterior')} é ${esc(origemReferenciaPergunta(os))}; 15 letras ou mais)</span><textarea name="etapaOrigemMotivo" rows="2" maxlength="300"></textarea></label></div>` : ''}
-          <button class="btn-primary w-100" type="submit">Registrar retrabalho e continuar</button>
+          <button class="btn-primary w-100" type="submit">${volta.apontar ? 'Confirmar retrabalho' : 'Registrar retrabalho e continuar'}</button>
         </form>
       </div>
     </div>`;
-  document.body.appendChild(box);
+  (volta.container || document.body).appendChild(box);
   // Sem × e sem fechar no fundo: a regra diz "não pode ser pulado". Voltar
   // sem finalizar não pula a regra (não existe finalização sem resposta), e
   // quem tocou 🏁 por engano não é obrigado a finalizar para sair.
@@ -5641,9 +5641,14 @@ function perguntarRetrabalho(os, aoResponder, volta = {}) {
     if (troca) os.etapaOrigemMotivo = v('etapaOrigemMotivo'); else delete os.etapaOrigemMotivo;
     os.responsavelEtapa = v('responsavelEtapa'); os.dataRetrabalho = v('dataRetrabalho');
     os.retrabalhoPerguntado = carimbo('sim');
+    if (typeof volta.antesDeRegistrar === 'function') {
+      const erro = volta.antesDeRegistrar(os);
+      if (erro) { toast(erro, 'error'); return; }
+    }
     rasc.limpar();
     box.remove(); aoResponder();
   };
+  if (volta.apontar) form.querySelector('[name=problema]').focus();
 }
 
 function validarFinalizacao(os) {
