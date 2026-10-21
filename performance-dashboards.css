@@ -1,5 +1,5 @@
 /* Escopo próprio para os painéis de leitura de Performance. */
-.perf-dash{--pd-accent:#287f76;--pd-soft:#e6f3ee;--pd-muted:#627381;color:var(--text,#173b4b);min-width:0}
+.perf-dash{--pd-accent:#287f76;--pd-soft:#e6f3ee;--pd-muted:#526378;color:var(--text,#173b4b);min-width:0}
 .perf-dash *{box-sizing:border-box}
 .perf-dash h3,.perf-dash h4,.perf-dash p{margin:0}
 .pd-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
