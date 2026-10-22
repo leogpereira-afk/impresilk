@@ -112,7 +112,7 @@ function domFalso() {
   const painel = sel => {
     let h = '';
     const P = elementos(() => h, doc);
-    const p = {get innerHTML() { return h; }, set innerHTML(v) { h = v; }, querySelector: () => null, querySelectorAll: P.qsa, classList: classes()};
+    const p = {get innerHTML() { return h; }, set innerHTML(v) { h = v; }, querySelector: s => P.qsa(s)[0] || null, querySelectorAll: P.qsa, classList: classes()};
     paineis.set(sel, p);
     return p;
   };

@@ -4688,3 +4688,8 @@ img.perf-logo{object-fit:cover}
 .conf-retrabalho-dialog .wpp-acoes[hidden]{display:none}
 .conf-retrabalho-dialog button{min-height:44px}
 .conf-retrabalho-dialog :focus-visible{outline:3px solid #4f9cb6;outline-offset:2px}
+
+/* Retrabalho: filtros independentes, com nomes completos também no celular. */
+.retra-filtros-pessoas { align-items:flex-end; }
+.retra-filtros-pessoas label { display:flex; flex-direction:column; gap:6px; min-width:0; flex:1 1 220px; font-weight:600; }
+.retra-filtros-pessoas select { width:100%; min-width:0; max-width:100%; }

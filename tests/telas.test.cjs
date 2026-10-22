@@ -488,3 +488,53 @@ test('Retrabalho exibe horas/km efetivos e custo medido, inclusive zero',()=>{
   if(med.horas===2){assert.match(html,/2 h/);assert.match(html,/3 km/);assert.doesNotMatch(html,/8 h|20 km/);}
  }
 });
+
+// Dados fictícios: responsável pela etapa e técnico da correção são papéis diferentes.
+function retrabalhoComFiltros() {
+  return tela([
+    {id:'orig-a',numero:'TESTE-A',retrabalho:true,problema:'Falha fictícia A',responsavelEtapa:'Setor Alfa',dataRetrabalho:'2026-09-09'},
+    {id:'filha-a',numero:'COR-A',osOriginal:'TESTE-A',equipe:['Ana','Bia']},
+    {id:'orig-b',numero:'TESTE-B',retrabalho:true,problema:'Falha fictícia B',responsavelEtapa:'Setor Beta',resolvidoPor:'Bia',dataResolvido:'2026-09-09',dataRetrabalho:'2026-09-09'},
+    {id:'orig-c',numero:'TESTE-C',retrabalho:true,problema:'Falha fictícia C',dataRetrabalho:'2026-08-01'}
+  ]);
+}
+const linhasRetrabalho = t => t.node('#panel-retrabalho').innerHTML.match(/<tbody>([^]*?)<\/tbody>/)[1];
+test('filtros de retrabalho combinam responsável e membro da equipe da correção',()=>{
+  const t=retrabalhoComFiltros();
+  t.run("STATE._fRetraPessoas={responsavel:'r:setor alfa',tecnico:retrabalhoTecnicoChave('Bia')}; renderRetrabalho()");
+  const linhas=linhasRetrabalho(t);
+  assert.match(linhas,/Falha fictícia A/);assert.doesNotMatch(linhas,/Falha fictícia [BC]/);
+  assert.match(linhas,/<td>Setor Alfa<\/td>\s*<td>Ana, Bia<\/td>/);
+  assert.match(t.node('#panel-retrabalho').innerHTML,/1 de 3 retrabalhos/);
+  assert.match(t.node('#panel-retrabalho').innerHTML,/Taxa geral do período, sem filtro de pessoas/);
+});
+test('técnico inclui quem resolveu e não usa o responsável como técnico',()=>{
+  const t=retrabalhoComFiltros();
+  t.run("STATE._fRetraPessoas={tecnico:retrabalhoTecnicoChave('Bia')}; renderRetrabalho()");
+  assert.match(linhasRetrabalho(t),/Falha fictícia A/);assert.match(linhasRetrabalho(t),/Falha fictícia B/);assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia C/);
+  t.run("STATE._fRetraPessoas={tecnico:retrabalhoTecnicoChave('Setor Alfa')}; renderRetrabalho()");
+  assert.match(linhasRetrabalho(t),/Nenhum retrabalho neste recorte/);
+});
+test('não informado e período combinam; limpar pessoas preserva datas',()=>{
+  const t=retrabalhoComFiltros();
+  t.run("STATE._fRetraPessoas={responsavel:'__sem__',tecnico:'__sem__'}; renderRetrabalho()");
+  assert.match(linhasRetrabalho(t),/Falha fictícia C/);assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia [AB]/);
+  t.run("STATE._fRetra={de:'2026-09-01',ate:'2026-09-30'}; renderRetrabalho()");
+  assert.match(linhasRetrabalho(t),/Nenhum retrabalho neste recorte/);
+  t.node('#retra-limpar-pessoas').onclick();
+  assert.equal(t.run('STATE._fRetra.de'),'2026-09-01');assert.match(linhasRetrabalho(t),/Falha fictícia A/);assert.match(linhasRetrabalho(t),/Falha fictícia B/);assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia C/);
+});
+test('seletores repintam e preservam o outro filtro; opção ausente não vira Todos',()=>{
+  const t=retrabalhoComFiltros();t.run('renderRetrabalho()');
+  t.node('#retra-responsavel').value='r:setor alfa';t.node('#retra-responsavel').onchange();
+  t.node('#retra-tecnico').value=t.run("retrabalhoTecnicoChave('Bia')");t.node('#retra-tecnico').onchange();
+  assert.equal(t.run('STATE._fRetraPessoas.responsavel'),'r:setor alfa');assert.match(linhasRetrabalho(t),/Falha fictícia A/);
+  t.run("STATE._fRetraPessoas={responsavel:'r:ausente'}; renderRetrabalho()");
+  assert.match(t.node('#panel-retrabalho').innerHTML,/<option value="r:ausente" selected>Não disponível neste recorte/);
+});
+test('técnico mantém a chave RH mesmo se nomes forem iguais',()=>{
+  const t=retrabalhoComFiltros();
+  t.run("OPERACAO.usarPessoas({pessoas:[{id:'111111',nome:'Pessoa fictícia'},{id:'222222',nome:'Pessoa fictícia'}]})");
+  assert.notEqual(t.run("retrabalhoTecnicoChave('111111')"),t.run("retrabalhoTecnicoChave('222222')"));
+  assert.equal(t.run("retrabalhoFiltrarPessoas([{filha:{equipe:['111111']}},{filha:{equipe:['222222']}}],{tecnico:retrabalhoTecnicoChave('111111')}).length"),1);
+});

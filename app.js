@@ -8134,6 +8134,24 @@ function execItemHTML(os) {
 /* ══════════════════════════════════════════════════════════════════════════
    ABA: RETRABALHO
    ══════════════════════════════════════════════════════════════════════════ */
+// A chave do técnico usa a identidade existente do RH; o responsável pode ser nome ou setor.
+function retrabalhoTecnicos(p) {
+  const equipe = p.filha ? OPERACAO.equipe(p.filha) : [];
+  return equipe.length ? equipe : (p.orig?.resolvidoPor ? [p.orig.resolvidoPor] : []);
+}
+function retrabalhoResponsavelChave(p) {
+  const nome = String(p.orig?.responsavelEtapa || '').trim().replace(/\s+/g, ' ');
+  return nome ? 'r:' + nome.toLocaleLowerCase('pt-BR') : '__sem__';
+}
+function retrabalhoTecnicoChave(pessoa) {
+  return 't:' + OPERACAO.chavePessoa(pessoa);
+}
+function retrabalhoFiltrarPessoas(pares, filtro = {}) {
+  return pares.filter(p => (!filtro.responsavel || retrabalhoResponsavelChave(p) === filtro.responsavel)
+    && (!filtro.tecnico || (filtro.tecnico === '__sem__'
+      ? !retrabalhoTecnicos(p).length
+      : retrabalhoTecnicos(p).some(x => retrabalhoTecnicoChave(x) === filtro.tecnico))));
+}
 function renderRetrabalho() {
   const el = $('#panel-retrabalho');
   const todas = osAnalise();   // original finalizada há mais de 60 dias pode estar no histórico já buscado
@@ -8165,7 +8183,20 @@ function renderRetrabalho() {
   const dataPar = p => (p.orig && p.orig.dataRetrabalho) || (p.filha
     ? (OPERACAO.dia(p.filha.finalizadaEm) || OPERACAO.dia(p.filha.instalacao && p.filha.instalacao.data) || diaLocalISO(p.filha.criadoEm) || '')
     : (p.orig ? (p.orig.dataResolvido || diaLocalISO(p.orig.atualizadoEm) || '') : ''));
-  const lista = pares.filter(p => dentroPeriodo(dataPar(p), '_fRetra'))
+  const filtroPessoas = STATE._fRetraPessoas || {};
+  const responsaveis = new Map(), tecnicos = new Map();
+  for (const p of pares) {
+    const nome = String(p.orig?.responsavelEtapa || '').trim().replace(/\s+/g, ' ');
+    if (nome) responsaveis.set(retrabalhoResponsavelChave(p), nome);
+    for (const pessoa of retrabalhoTecnicos(p)) tecnicos.set(retrabalhoTecnicoChave(pessoa), OPERACAO.nomePessoa(pessoa));
+  }
+  const opcoes = (mapa, valor) => [...mapa, ...(valor && valor !== '__sem__' && !mapa.has(valor) ? [[valor, 'Não disponível neste recorte']] : [])].sort((a,b) => a[1].localeCompare(b[1], 'pt-BR'))
+    .map(([chave,nome]) => `<option value="${esc(chave)}" ${valor === chave ? 'selected' : ''}>${esc(nome)}</option>`).join('');
+  const filtroAtivo = !!(filtroPessoas.responsavel || filtroPessoas.tecnico);
+  const rotuloFiltro = (mapa, valor) => !valor ? 'Todos' : valor === '__sem__' ? 'Não informado' : mapa.get(valor) || 'Não disponível neste recorte';
+  const resumoFiltro = `Responsável da etapa: ${rotuloFiltro(responsaveis, filtroPessoas.responsavel)} · Técnico da correção: ${rotuloFiltro(tecnicos, filtroPessoas.tecnico)}`;
+  const noPeriodo = pares.filter(p => dentroPeriodo(dataPar(p), '_fRetra'));
+  const lista = retrabalhoFiltrarPessoas(noPeriodo, filtroPessoas)
     .sort((a, b) => String(dataPar(b)).localeCompare(String(dataPar(a))));
 
   // Custo: horas (saída→retorno) e km (retorno−saída) da O.S FILHA -- a
@@ -8202,7 +8233,7 @@ function renderRetrabalho() {
 
   // Barras: por técnico (equipe da filha, senão quem resolveu) e por serviço da original.
   const conta = (chaves) => { const m = new Map(); for (const k of chaves) if (k) m.set(k, (m.get(k) || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8); };
-  const porTecnico = conta(lista.flatMap(p => p.filha && OPERACAO.equipe(p.filha).length ? OPERACAO.equipeNomes(p.filha) : (p.orig && p.orig.resolvidoPor ? [OPERACAO.nomePessoa(p.orig.resolvidoPor)] : [])));
+  const porTecnico = conta(lista.flatMap(p => retrabalhoTecnicos(p).map(x => OPERACAO.nomePessoa(x))));
   const porEtapa = conta(lista.map(p => p.orig ? String(p.orig.etapaOrigem || '').trim() : ''));
   const porCausa = conta(lista.map(p => p.orig ? String(p.orig.causaRaiz || p.orig.causa || '').trim() : ''));
   const semTaxonomia = lista.filter(p => p.orig && !(p.orig.etapaOrigem && p.orig.causaRaiz)).length;
@@ -8217,10 +8248,16 @@ function renderRetrabalho() {
       <div><h2>Retrabalho</h2><p>O.S que voltaram e a correção emitida para cada uma. Quem refez, de onde veio e quanto custou.</p></div><button class="btn-ghost" id="retra-pdf">🖨 Salvar análise em PDF</button>
     </div>
     <div class="filter-bar">${filtroPeriodoHTML('_fRetra')}</div>
+    <div class="filter-bar retra-filtros-pessoas">
+      <label for="retra-responsavel">Responsável da etapa <select id="retra-responsavel"><option value="">Todos</option><option value="__sem__" ${filtroPessoas.responsavel === '__sem__' ? 'selected' : ''}>Não informado</option>${opcoes(responsaveis, filtroPessoas.responsavel)}</select></label>
+      <label for="retra-tecnico">Técnico da correção <select id="retra-tecnico"><option value="">Todos</option><option value="__sem__" ${filtroPessoas.tecnico === '__sem__' ? 'selected' : ''}>Não informado</option>${opcoes(tecnicos, filtroPessoas.tecnico)}</select></label>
+      <button class="btn-ghost btn-sm" id="retra-limpar-pessoas" ${filtroAtivo ? '' : 'disabled'}>Limpar responsável e técnico</button>
+    </div>
+    <p class="metricas-nota">${esc(resumoFiltro)} · ${lista.length} de ${noPeriodo.length} retrabalhos no período.</p>
     <div class="casa-kpi-cards">
       <div class="casa-kpi"><b>${lista.length}</b><small>retrabalhos no período${pendentes ? ` · <span class="badge st-retrabalho">${pendentes} pendente${pendentes === 1 ? '' : 's'}</span>` : ''}</small></div>
       <div class="casa-kpi ${semCusto ? 'alerta' : ''}"><b>${semCusto === custos.length ? 'Custo não medido' : custos.some(c=>c.reais!=null) ? brMoney(somaR) : `${custos.some(c => c.horas != null) ? fmtH(somaH) : 'tempo não apurado'} · ${custos.some(c => c.km != null) ? Math.round(somaKm) + ' km' : 'km não apurado'}`}</b><small>custo conhecido · ${custos.length - semCusto} de ${custos.length} intervenções com medição${somaR ? ` · ${fmtH(somaH)} · ${Math.round(somaKm)} km` : ''}${semCusto ? ` · ${semCusto} sem custo monetário medido` : ''}${!(rHora || rKm) ? ' · sem R$/h e R$/km em Configurações' : ''}</small></div>
-      <div class="casa-kpi"><b>${taxa == null ? '—' : taxa.toString().replace('.', ',') + '%'}</b><small>O.S. com retrabalho · ${indicador.afetadas} em ${entregues} entrega${entregues === 1 ? '' : 's'} no período</small></div>
+      <div class="casa-kpi"><b>${taxa == null ? '—' : taxa.toString().replace('.', ',') + '%'}</b><small>${filtroAtivo ? 'Taxa geral do período, sem filtro de pessoas · ' : ''}O.S. com retrabalho · ${indicador.afetadas} em ${entregues} entrega${entregues === 1 ? '' : 's'} no período</small></div>
     </div>
     <p class="metricas-nota">Taxa calculada sobre entregas originais concluídas pela equipe no período, com retrabalho conhecido até agora. Cancelamentos e O.S. filhas não entram na base. Duas correções da mesma O.S. contam uma vez na taxa. Original = O.S marcada com o problema. Retrabalho = a O.S nova que o ERP emite (aponte a original na ficha dela, campo "🔁 retrabalho da O.S nº"). Sem filha apontada, o custo fica em branco.${semTaxonomia ? ` <strong>${semTaxonomia} sem etapa de origem/causa raiz</strong>: abra a ficha e complete.` : ''}</p>
     <div class="casa-tabela-wrap"><table class="casa-tabela">
@@ -8228,7 +8265,7 @@ function renderRetrabalho() {
       <tbody>${lista.map((p, i) => {
         const c = custos[i];
         const o = p.orig, fi = p.filha;
-        const tec = fi && OPERACAO.equipe(fi).length ? OPERACAO.equipeTexto(fi, ', ') : (o && o.resolvidoPor && OPERACAO.nomePessoa(o.resolvidoPor)) || '—';
+        const tec = retrabalhoTecnicos(p).map(x => OPERACAO.nomePessoa(x)).join(', ') || '—';
         const medicao=STORE.getCFG().medicoesRetrabalho?.[fi?.id];
         const motivo = o ? [medicao?.causa,medicao?.prevencao&&('prevenção: '+medicao.prevencao),o.problema, o.etapaOrigem && ('origem: ' + o.etapaOrigem), o.causaRaiz || o.causa].filter(Boolean).join(' · ') || '—' : '—';
         const custoTxt = c.reais != null ? brMoney(c.reais) : (c.horas != null || c.km != null ? `${fmtH(c.horas)}${c.km != null ? ' · ' + Math.round(c.km) + ' km' : ''}` : '<span class="badge sem-valor">sem viagem</span>');
@@ -8246,13 +8283,22 @@ function renderRetrabalho() {
           <td class="num">${custoTxt}${c.rotulo?`<small class="bloco">${esc(c.rotulo)}</small>`:''}</td>
           <td>${d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'}</td>
         </tr>`;
-      }).join('') || `<tr><td colspan="8">${emptyState('✅', 'Nenhum retrabalho no período', 'Ajuste o filtro de datas ou comemore: nada voltou para correção.')}</td></tr>`}</tbody>
+      }).join('') || `<tr><td colspan="8">${emptyState('✅', 'Nenhum retrabalho neste recorte', 'Ajuste o período ou limpe os filtros de responsável e técnico.')}</td></tr>`}</tbody>
     </table></div>
     <div class="casa-perf-grid" style="margin-top:14px">
       <section class="casa-prod-box"><h3>Retrabalho por técnico</h3><p>Participação na O.S de retrabalho (quem foi corrigir), ou quem resolveu quando não há O.S filha. Não diz quem causou.</p><div class="fin-colab-lista">${barras(porTecnico, lista.length)}</div></section>
       <section class="casa-prod-box"><h3>Etapa de origem e causa raiz</h3><p>É a base para achar a causa recorrente: onde nasceu (Medição / Arte / Produção / Instalação) e por quê (Erro humano / Material / Comunicação / Especificação / Outro).</p><div class="fin-colab-lista">${barras(porEtapa, lista.length, '#0ea5e9')}</div><hr style="border:0;border-top:1px solid #eef2f7;margin:10px 0"><div class="fin-colab-lista">${barras(porCausa, lista.length, '#8b5cf6')}</div></section>
     </div>`;
   wireFiltroPeriodo(el, '_fRetra', () => renderRetrabalho());
+  for (const [id, campo] of [['retra-responsavel', 'responsavel'], ['retra-tecnico', 'tecnico']]) {
+    const seletor = $('#' + id, el);
+    seletor.onchange = () => {
+      STATE._fRetraPessoas = {...(STATE._fRetraPessoas || {}), [campo]: seletor.value};
+      renderRetrabalho();
+      $('#' + id, el)?.focus();
+    };
+  }
+  $('#retra-limpar-pessoas', el).onclick = () => { STATE._fRetraPessoas = {}; renderRetrabalho(); $('#retra-responsavel', el)?.focus(); };
   bindCardClicks(el);
   // A O.S de retrabalho abre pelo botão da célula, sem abrir a original junto.
   $$('[data-abrir-os]', el).forEach(b => b.onclick = ev => { ev.stopPropagation(); const os = STORE.getOS(b.dataset.abrirOs); if (os) openModal(os, os.finalizadaEm ? 'exec' : undefined); });
