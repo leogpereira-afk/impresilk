@@ -47,7 +47,26 @@ const ROTAS = (() => {
     return {ordem,economiaMin:(custo(paradas.map((_,i)=>i))-melhor)/60,motivo:'Sugestão por tempo de deslocamento, sem garantia de mínimo absoluto.'};
   }
   function elegivel(os){return !!os&&!os.finalizadaEm&&!os.arquivadaEm&&!os.canceladaEm&&os.tipo!=='interno'&&!os.baixaAutoERP&&os.statusERP!=='CANCELADO';}
-  function google(plano, parada){const alvo=parada||plano.paradas[0];if(!alvo)return '';const q=p=>ponto(p)?`${p.lat},${p.lng}`:p.endereco;return 'https://www.google.com/maps/dir/?api=1&origin='+encodeURIComponent(q(plano.origem))+'&destination='+encodeURIComponent(q(alvo))+'&travelmode=driving';}
-  return {numero,ponto,minutos,hora,validar,calcular,ordenar,elegivel,google};
+  const local = p => p && p.confirmado && ponto(p) ? `${p.lat},${p.lng}` : String(p?.endereco||'').trim();
+  function google(plano, parada){
+    const alvo=parada||plano.paradas[0];if(!alvo||!local(alvo))return '';
+    const i=plano.paradas.indexOf(alvo),origem=i>0?plano.paradas[i-1]:plano.origem;
+    return 'https://www.google.com/maps/dir/?api=1'+(local(origem)?'&origin='+encodeURIComponent(local(origem)):'')+'&destination='+encodeURIComponent(local(alvo))+'&travelmode=driving';
+  }
+  // Três pontos intermediários no máximo para compatibilidade com navegador móvel.
+  // As partes compartilham o último ponto, sem omitir nenhuma parada ou retorno.
+  function mapas(plano){
+    if(!local(plano.origem)||!plano.paradas?.length||plano.paradas.some(p=>!local(p)))return [];
+    const pontos=[plano.origem,...plano.paradas,...(plano.voltar?[plano.origem]:[])],partes=[];
+    let inicio=0;
+    while(inicio<pontos.length-1){
+      let fim=Math.min(inicio+4,pontos.length-1),url='';
+      do {const trecho=pontos.slice(inicio,fim+1);url='https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+encodeURIComponent(local(trecho[0]))+'&destination='+encodeURIComponent(local(trecho.at(-1)))+(trecho.length>2?'&waypoints='+encodeURIComponent(trecho.slice(1,-1).map(local).join('|')):'');if(url.length<=2048)break;fim--;}while(fim>inicio);
+      if(fim<=inicio)return [];
+      partes.push({url,inicio,fim,retorno:fim===pontos.length-1&&!!plano.voltar});inicio=fim;
+    }
+    return partes;
+  }
+  return {numero,ponto,minutos,hora,validar,calcular,ordenar,elegivel,google,mapas};
 })();
 if(typeof module!=='undefined')module.exports=ROTAS;
