@@ -1,3 +1,4 @@
+import { executarMapa } from "./rotas-provedor.mjs";
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
 import { podeVerRankingEquipe, rankingEquipeSeguro } from "../_shared/pcp-ranking-publico.mjs";
@@ -1609,6 +1610,14 @@ Deno.serve(async (req: Request) => {
          "acesso ao ranking". */
       return resp({error:acao === "demandas" ? "Não foi possível conferir seu acesso agora. Tente novamente." : "Não foi possível conferir seu acesso ao ranking. Tente novamente."},503);
     }
+  }
+
+  if (["rotasStatus", "rotasLocalizar", "rotasCalcular"].includes(acao)) {
+    // Exige crachá humano revogado/conferido acima; token de máquina não libera mapas.
+    if (!cracha || ehMaquina) return resp({error:"Entre com sua conta da gestão do PCP."},403);
+    try {
+      return resp(await executarMapa(body,{papel:String(cracha.papel),key:Deno.env.get("PCP_GEOAPIFY_KEY")||""}));
+    } catch(e) { return resp({error:e.message},e.status||502); }
   }
 
   // Um nome sozinho não autoriza aparelho novo. Gestão autentica e autoriza

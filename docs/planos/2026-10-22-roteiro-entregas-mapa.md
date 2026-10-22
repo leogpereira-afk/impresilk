@@ -18,3 +18,45 @@ Fonte técnica: https://developers.google.com/maps/documentation/urls/get-starte
 ## Verificação local
 
 Sete novos testes cobrem relatório sem cálculo, escape de conteúdo, persistência isolada, falha de armazenamento, sequência móvel de vinte paradas, retorno e coordenadas sem confirmação. Prévia conferida com dados fictícios: trocar equipe não apaga parada, PDF mostra integrantes e nome editado, recarga conserva nome e viewport móvel sem transbordamento da página. Impressão física e API real não verificadas. Ajustado diálogo de PDF para botões permanecerem visíveis em tela estreita.
+
+## Continuação aprovada: mapa, equipe e roteiro (22/10)
+
+O dono aprovou a proposta visual e preferiu provedor com plano gratuito.
+Implementado localmente: painel compacto, equipe por ID com nomes da configuração,
+paradas recolhíveis, mapa ao lado, perfil viário explícito, busca de endereços com
+escolha e confirmação manual, instruções por trecho no relatório, impressão A4.
+Nenhuma alteração de O.S.; rascunhos permanecem locais por usuário e navegador.
+
+### Provedor escolhido e ativação pendente
+
+Geoapify Free: a página oficial informa 3.000 créditos/dia, uso comercial permitido,
+sem cartão. Crédito não é necessariamente uma rota. Consulta de endereço, trajeto
+e imagem são chamadas distintas. Sem trânsito ao vivo; perfis não dispensam conferir
+restrições reais. Fontes conferidas em 22/10/2026:
+- https://www.geoapify.com/pricing/
+- https://apidocs.geoapify.com/docs/routing/
+- https://apidocs.geoapify.com/docs/geocoding/forward-geocoding/
+- https://apidocs.geoapify.com/docs/maps/static/
+
+A chave deve ser configurada como segredo `PCP_GEOAPIFY_KEY` no servidor Supabase,
+nunca em CFG, HTML, relatório ou repositório. Publicar pcp-sync antes da interface.
+Actions rotasStatus/rotasLocalizar/rotasCalcular exigem crachá humano admin/pcp;
+revogação é verificada antes. Só endereço ou coordenadas saem para Geoapify,
+sem O.S., clientes ou equipe. Tratamento de falha, timeout e limite sem expor chave.
+Mapa estático retorna PNG, com créditos Geoapify/OSM preservados na impressão.
+Sem imagem, o esquema é identificado como sem ruas; não usar tiles públicos OSM
+como dependência (bloqueados na conferência local). Matriz/ordenação automática
+não habilitada no adaptador Geoapify; setas preservam reordenação manual.
+
+Pendente: usuário abrir conta gratuita, configurar segredo, testar cálculo real,
+confirmar consumo e atribuição na imagem real e publicar após autorização.
+Testes simulados não são confirmação de serviço ativo. Nenhuma migração ou escrita
+produtiva foi feita. A versão de demonstração não chama API de rotas pública.
+
+### Verificação local desta continuação
+
+2.186 testes passaram (48 de rotas/provedor), Node 24, `scripts/verificar.cjs`.
+Prévia fictícia em localhost:5396: cálculo com fixture, equipe exibida, impressão
+com sequência e mapa esquemático, recarga sem duplicar três paradas. No celular,
+conteúdo e viewport medidos com 375 px; diálogo 370,5 px. Nenhuma impressão física
+ou chamada autenticada Geoapify realizada. Conta gratuita será aberta pelo dono.

@@ -19,7 +19,7 @@ module.exports=()=>{
  lista.push(base('ROTA-OUTRO-DIA',{numero:'DEMO-OUTRO-DIA',cliente:'Escola Exemplo · fictícia',equipe:['900001'],instalacao:{data:deslocar(1)},servico:'Entrega em outra data'}));
  lista.push(base('ROTA-SEM-AGENDA',{numero:'DEMO-SEM-AGENDA',cliente:'Café Exemplo · fictício',equipe:['900001'],instalacao:{},servico:'Letreiro sem data'}));
  const p=rotaEstado();p.nome='Rota Norte · demonstração';p.equipe='eq-aguia';p.motorista='Motorista de demonstração';p.veiculo='Utilitário de demonstração';p.origem={endereco:'Montes Claros · saída de exemplo',lng:ROTA_EXEMPLO.pontos[0][0],lat:ROTA_EXEMPLO.pontos[0][1],confirmado:true};p.consumo='10';p.preco='6,20';
- for(const id of ['ROTA-A','ROTA-B','ROTA-C']){const o=lista.find(x=>x.id===id);p.paradas.push({id,numero:o.numero,cliente:o.cliente,...PCP_ROTAS_LOCAIS[id],servicoMin:id==='ROTA-B'?'45':'20'});}
+ for(const id of ['ROTA-A','ROTA-B','ROTA-C']){if(p.paradas.some(a=>a.id===id))continue;const o=lista.find(x=>x.id===id);p.paradas.push({id,numero:o.numero,cliente:o.cliente,...PCP_ROTAS_LOCAIS[id],servicoMin:id==='ROTA-B'?'45':'20'});}
  }
  `;
 };

@@ -35,7 +35,7 @@ const ROTAS = (() => {
     const litros=positivo(plano.consumo)?km/numero(plano.consumo):null;
     const custo=litros!=null&&positivo(plano.preco)?litros*numero(plano.preco):null;
     const pedagio=numero(plano.pedagio);
-    return {paradas,km,viagem,visitas,espera,fim:t,total:t-minutos(plano.saida),litros,custo,pedagio:Number.isFinite(pedagio)&&pedagio>=0?pedagio:null,geometry:resposta.geometry,fonte:resposta.fonte||'Serviço de mapas',em:new Date().toISOString(),demonstracao:!!resposta.demonstracao};
+    return {paradas,km,viagem,visitas,espera,fim:t,total:t-minutos(plano.saida),litros,custo,pedagio:Number.isFinite(pedagio)&&pedagio>=0?pedagio:null,geometry:resposta.geometry,mapa:resposta.mapa||null,avisoMapa:resposta.avisoMapa||'',instrucoes:resposta.instrucoes||[],fonte:resposta.fonte||'Serviço de mapas',em:new Date().toISOString(),demonstracao:!!resposta.demonstracao};
   }
   function ordenar(paradas, matriz, voltar=false){
     const n=paradas.length;if(!Array.isArray(matriz)||matriz.length!==n+1||matriz.some(r=>r.length!==n+1||r.some(x=>!Number.isFinite(x)||x<0)))throw new Error('Não foi possível comparar todos os trechos.');
