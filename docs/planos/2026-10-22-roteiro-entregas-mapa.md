@@ -60,3 +60,12 @@ Prévia fictícia em localhost:5396: cálculo com fixture, equipe exibida, impre
 com sequência e mapa esquemático, recarga sem duplicar três paradas. No celular,
 conteúdo e viewport medidos com 375 px; diálogo 370,5 px. Nenhuma impressão física
 ou chamada autenticada Geoapify realizada. Conta gratuita será aberta pelo dono.
+
+## Ativação e publicação autorizadas em 22/10
+
+Projeto Geoapify criado no plano Free e segredo PCP_GEOAPIFY_KEY salvo no projeto
+Supabase do PCP, por autorização explícita. Teste real de demonstração: uma perna,
+21 pontos de geometria, sete instruções e PNG válido com ruas e atribuição.
+Nenhum cliente ou O.S. enviado no teste. Segredo temporário removido após conferir.
+Dono autorizou publicar integração e tela e conferir mapa/equipe/roteiro.
+Versão preparada v193; 2.186 testes passaram novamente antes da publicação.
