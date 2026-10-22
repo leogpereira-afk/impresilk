@@ -8263,7 +8263,7 @@ function renderRetrabalho() {
       <label for="retra-tecnico">Técnico da correção <select id="retra-tecnico"><option value="">Todos</option><option value="__sem__" ${filtroPessoas.tecnico === '__sem__' ? 'selected' : ''}>Não informado</option>${opcoes(tecnicos, filtroPessoas.tecnico)}</select></label>
       <button class="btn-ghost btn-sm" id="retra-limpar-pessoas" ${filtroAtivo ? '' : 'disabled'}>Limpar responsável e técnico</button>
     </div>
-    <p class="metricas-nota retra-contagens"><span class="badge st-retrabalho">${totalPendentes} pendente${totalPendentes === 1 ? '' : 's'}</span> · <span class="badge st-finalizada">${totalResolvidos} resolvido${totalResolvidos === 1 ? '' : 's'}</span> · totais do período e pessoas selecionados, antes do filtro de situação.</p>
+    <p class="metricas-nota retra-contagens"><button type="button" id="retra-contagem-pendentes" class="badge st-retrabalho retra-contagem" aria-pressed="${situacao === 'pendentes'}">${totalPendentes} pendente${totalPendentes === 1 ? '' : 's'}</button> · <button type="button" id="retra-contagem-resolvidos" class="badge st-finalizada retra-contagem" aria-pressed="${situacao === 'resolvidos'}">${totalResolvidos} resolvido${totalResolvidos === 1 ? '' : 's'}</button> · totais do período e pessoas selecionados, antes do filtro de situação.</p>
     <p class="metricas-nota">${esc(resumoFiltro)} · ${lista.length} de ${noPeriodo.length} retrabalhos no período.</p>
     <div class="casa-kpi-cards">
       <div class="casa-kpi"><b>${lista.length}</b><small>retrabalhos no período${pendentes ? ` · <span class="badge st-retrabalho">${pendentes} pendente${pendentes === 1 ? '' : 's'}</span>` : ''}</small></div>
@@ -8307,6 +8307,14 @@ function renderRetrabalho() {
     renderRetrabalho();
     $('#retra-situacao', el)?.focus();
   };
+  for (const estado of ['pendentes', 'resolvidos']) {
+    const id = '#retra-contagem-' + estado;
+    $(id, el).onclick = () => {
+      STATE._fRetraSituacao = estado;
+      renderRetrabalho();
+      $(id, el)?.focus();
+    };
+  }
   for (const [id, campo] of [['retra-responsavel', 'responsavel'], ['retra-tecnico', 'tecnico']]) {
     const seletor = $('#' + id, el);
     seletor.onchange = () => {
@@ -9172,7 +9180,7 @@ function imprimirAnalisePCP(titulo,elemento,periodo,fonteApuracao) {
   });
   if(typeof RELATORIOS_PCP!=='undefined')RELATORIOS_PCP.sanearCopia(copia,{completo,valores:podeVerValores()});
   copia.querySelectorAll('.rel-ent-indicador').forEach(n=>{const d=document.createElement('div');d.className=n.className;d.style.cssText=n.style.cssText;d.innerHTML=n.innerHTML;n.replaceWith(d);});
-  copia.querySelectorAll('button,input,select,.filter-bar,.perf-toolbar').forEach(n => { if(n.matches('button.perf-equipe-chip')) { const s=document.createElement('span');s.className=n.className;s.textContent=n.textContent;n.replaceWith(s); } else if(n.matches('button[data-os-id],button[data-perf-os],button[data-rel-ponto]')) n.replaceWith(document.createTextNode(n.textContent)); else n.remove(); });
+  copia.querySelectorAll('button,input,select,.filter-bar,.perf-toolbar').forEach(n => { if(n.matches('button.perf-equipe-chip,button.retra-contagem')) { const s=document.createElement('span');s.className=n.className;s.textContent=n.textContent;n.replaceWith(s); } else if(n.matches('button[data-os-id],button[data-perf-os],button[data-rel-ponto]')) n.replaceWith(document.createTextNode(n.textContent)); else n.remove(); });
 
   const fonte = STORE.getLastSync?.();
   const em = typeof fonte === 'string' && Number.isFinite(Date.parse(fonte)) ? new Date(fonte).toLocaleString('pt-BR') : 'consulte a conexão do aparelho';

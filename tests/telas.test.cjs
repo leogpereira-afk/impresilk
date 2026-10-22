@@ -609,3 +609,22 @@ test('contagens mostram ambas situações respeitando período e pessoas, inclus
   assert.match(t.run('pdfContagens'),/>1 pendente<[^]*>0 resolvidos<[^]*antes do filtro de situação/);
   assert.doesNotMatch(t.run('pdfContagens'),/Falha fictícia [ABC]/);
 });
+
+test('clicar nas contagens filtra a lista, sincroniza o seletor e mantém período e pessoas',()=>{
+  const t=retrabalhoComFiltros();
+  t.run("STATE._fRetra={de:'2026-09-01',ate:'2026-09-30'}; STATE._fRetraPessoas={tecnico:retrabalhoTecnicoChave('Bia')}; renderRetrabalho()");
+  t.node('#retra-contagem-resolvidos').onclick();
+  assert.equal(t.run('STATE._fRetraSituacao'),'resolvidos');
+  assert.match(linhasRetrabalho(t),/Falha fictícia B/);assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia [AC]/);
+  assert.match(t.node('#panel-retrabalho').innerHTML,/<option value="resolvidos" selected>/);
+  assert.match(t.node('#panel-retrabalho').innerHTML,/id="retra-contagem-resolvidos"[^>]*aria-pressed="true"/);
+  t.node('#retra-contagem-pendentes').onclick();
+  assert.match(linhasRetrabalho(t),/Falha fictícia A/);assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia [BC]/);
+  assert.match(t.node('#panel-retrabalho').innerHTML,/id="retra-contagem-resolvidos"[^>]*aria-pressed="false"/);
+  assert.equal(t.run('STATE._fRetra.de'),'2026-09-01');
+  assert.equal(t.run('STATE._fRetraPessoas.tecnico'),t.run("retrabalhoTecnicoChave('Bia')"));
+  t.run("STATE._fRetraPessoas.responsavel='r:setor alfa'; renderRetrabalho()");
+  t.node('#retra-contagem-resolvidos').onclick();
+  assert.match(linhasRetrabalho(t),/Nenhum retrabalho neste recorte/);
+  assert.match(t.node('#panel-retrabalho').innerHTML,/aria-pressed="true">0 resolvidos<\/button>/);
+});

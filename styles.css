@@ -4693,3 +4693,9 @@ img.perf-logo{object-fit:cover}
 .retra-filtros-pessoas { align-items:flex-end; }
 .retra-filtros-pessoas label { display:flex; flex-direction:column; gap:6px; min-width:0; flex:1 1 220px; font-weight:600; }
 .retra-filtros-pessoas select { width:100%; min-width:0; max-width:100%; }
+
+.retra-contagens { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+button.retra-contagem { min-height:44px; padding:8px 14px; border:2px solid transparent; border-radius:10px; font:inherit; font-weight:700; cursor:pointer; }
+button.retra-contagem:hover { filter:brightness(.96); }
+button.retra-contagem[aria-pressed="true"] { border-color:currentColor; box-shadow:0 0 0 1px currentColor; }
+button.retra-contagem:focus-visible { outline:3px solid #2563eb; outline-offset:3px; }
