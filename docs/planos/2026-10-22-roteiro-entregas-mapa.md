@@ -79,3 +79,7 @@ Versão preparada v193; 2.186 testes passaram novamente antes da publicação.
 - Identificada falha por limite do armazenamento ao incluir PNG do mapa. v194 acrescenta segunda tentativa de persistir somente os dados do roteiro, cálculo e instruções, mantendo o mapa em memória e indicando recálculo ao reabrir. Nenhum registro de O.S. é apagado. Regressão reproduzida antes da correção e aprovada depois.
 - Mapa impresso passa a respeitar a largura disponível da página.
 - Perfil e equipe usados na conferência são simulação; a definição operacional depende do responsável. Rotas continuam locais ao navegador/usuário; otimização automática de ordem ainda indisponível.
+
+## Ajuste de veículos solicitado pelo dono
+
+Em 22/10, o dono pediu usar somente os carros vinculados. A rota passa a selecionar a ficha do elenco de veículos do Patrimônio por ID, mostrando nome e placa. Nome legado permanece pendente, sem associação automática. Trocar o veículo invalida o cálculo e o perfil viário. O elenco atual não informa altura/peso; esses dados não são inventados, e o perfil continua exigindo conferência explícita. Sem veículo válido, o cálculo real e a confirmação ficam bloqueados. Nenhuma ficha de veículo ou O.S. é alterada.

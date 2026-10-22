@@ -183,3 +183,9 @@ ao dono. Cada nota diz o que mudou, onde e o teste.
 
 - D-018 · 14/10/2026 · Usar a curva ABC existente de Campanhas para filtrar a pontualidade do PCP em A+, A, B+, B e C. Seleção individual de clientes somente em A+: "Sim, clientes individuais só em A+". Fonte: conversa do dono em 14/10/2026 e confirmação explícita do recorte A+. Registrado pelo codex; aplicado em relatorios-entregas.js, na leitura relatorioEntregas e na RPC pcp_pontualidade_abc. Implementação local, publicação pendente de autorização. Não muda classificação na origem, comissão, valores ou registros.
   - Publicação autorizada em 14/10/2026: "subir", após a entrega da revisão local. Escopo: consulta ABC, servidor e tela deste recurso; preservar o Painel e todos os registros.
+
+## D-019 · 22/10/2026 · Veículos cadastrados no roteiro
+
+- Decisão do dono no chat: "vamos colocar so os carros vinculados".
+- A seleção do veículo no planejamento de entregas usa somente fichas do elenco de veículos por ID. Nome e placa são rótulos; nomes iguais não criam vínculo. Valores antigos sem ID permanecem identificados como pendência até seleção explícita. Não alterar a O.S. nem a ficha do Patrimônio ao preparar uma rota.
+- Aplicado por codex em rotas-ui.js; testes em tests/rotas-ui.test.cjs. Peso e altura ausentes não são inferidos a partir do nome do carro.
