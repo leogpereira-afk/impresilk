@@ -7,13 +7,13 @@ passar, liberar, aceitar), que monta o commit em cima da origin/main; nunca à
 mão num ramo de trabalho. Regra completa no AGENTS.md (igual ao CLAUDE.md),
 seções 0, 5 e 6.
 
-agente: ninguem
-desde: 2026-10-22T14:35:05.225Z
-ramo: codex/kaizen-pcp-extremos-20261022
-tarefa: Publicar rodada Kaizen autorizada e conferir producao
-sessao: -
+agente: codex
+desde: 2026-10-22T19:53:20.259Z
+ramo: codex/entregas-mapa-20261022
+tarefa: Completar mapa e roteiro impresso das entregas com nome e equipe
+sessao: codex:1004fee3 (pcp-entregas-mapa-20261022)
 versao_reservada: -
-arquivos_em_uso: -
+arquivos_em_uso: rotas.js rotas.css tests docs/planos
 passou_por: codex
 passou_em: 2026-10-22T14:42:20.444Z
 
@@ -26,12 +26,12 @@ alguém, os campos podem estar em "-" enquanto ele trabalha; com a vez livre
 (ninguem), têm de estar todos cheios. "sessao: -" quer dizer que nenhuma
 sessão se registrou ainda: o primeiro `pegar` do mesmo agente a adota.
 
-no_ar: v192, main f50eda0; Deploy 39797381197 verde; sete arquivos servidos identicos aos locais. Servidor pcp-sync e pcp-mubisys nao alterado nem revalidado nesta publicacao.
-ramos: codex/kaizen-pcp-extremos-20261022 publicado, 0 a frente e 0 atras da main antes desta passagem.
-feito: Publicada v192: corridas da fila corrigidas, busca de retrabalho otimizada, testes Kaizen e relatorio docs/kaizen-pcp-2026-10-22.md. Autorizacao do dono: Subir.
-pela_metade: Conferencia interna autenticada indisponivel: aba oficial abriu no login; ensaio fisico multiaparelho permanece na fila do relatorio.
-decisoes: Nenhuma regra financeira ou de permissao alterada; limite de entregas preservado.
-perguntas_ao_dono: Nenhuma para esta publicacao; revisao autenticada depende de sessao aberta.
-nao_fazer: Nao tratar os testes simulados como prova de rede fisica nem alterar registros reais para conferir a publicacao.
-testes: 2170 testes passaram novamente na v192; CI verde; config.js app.js store.js sw.js index.html equipe.html ranking.html conferidos por igualdade de bytes. Site abre no login.
-dados: Nenhum banco ou registro operacional alterado; sem migrations ou mudanca de servidor.
+no_ar: -
+ramos: -
+feito: -
+pela_metade: -
+decisoes: -
+perguntas_ao_dono: -
+nao_fazer: -
+testes: -
+dados: -
