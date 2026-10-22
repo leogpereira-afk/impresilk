@@ -538,3 +538,41 @@ test('técnico mantém a chave RH mesmo se nomes forem iguais',()=>{
   assert.notEqual(t.run("retrabalhoTecnicoChave('111111')"),t.run("retrabalhoTecnicoChave('222222')"));
   assert.equal(t.run("retrabalhoFiltrarPessoas([{filha:{equipe:['111111']}},{filha:{equipe:['222222']}}],{tecnico:retrabalhoTecnicoChave('111111')}).length"),1);
 });
+
+test('situação separa pendentes e resolvidos pela mesma regra dos selos',()=>{
+  const t=retrabalhoComFiltros();
+  assert.equal(t.run("retrabalhoResolvido({orig:{dataResolvido:'2026-09-10'},filha:{}})"),false,'filha aberta prevalece sobre resolução antiga');
+  assert.equal(t.run("retrabalhoResolvido({orig:{},filha:{finalizadaEm:'2026-09-10'}})"),true);
+  assert.equal(t.run("retrabalhoResolvido({orig:{dataResolvido:'2026-09-10'}})"),true);
+  assert.equal(t.run("retrabalhoResolvido({filha:{status:'finalizado'}})"),false,'status ERP não prova resolução');
+  t.run("STATE._fRetraSituacao='pendentes'; renderRetrabalho()");
+  assert.match(linhasRetrabalho(t),/Falha fictícia A/);assert.match(linhasRetrabalho(t),/Falha fictícia C/);assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia B|>resolvido</);
+  assert.match(t.node('#panel-retrabalho').innerHTML,/Situação: Pendentes[^]*2 de 3 retrabalhos/);
+  t.run("STATE._fRetraSituacao='resolvidos'; renderRetrabalho()");
+  assert.match(linhasRetrabalho(t),/Falha fictícia B/);assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia [AC]|>pendente</);
+  assert.match(t.node('#panel-retrabalho').innerHTML,/Situação: Resolvidos[^]*1 de 3 retrabalhos/);
+});
+test('seletor de situação combina pessoas e datas, e limpar pessoas mantém situação',()=>{
+  const t=retrabalhoComFiltros();
+  t.run("STATE._fRetra={de:'2026-09-01',ate:'2026-09-30'}; STATE._fRetraPessoas={tecnico:retrabalhoTecnicoChave('Bia')}; renderRetrabalho()");
+  t.node('#retra-situacao').value='resolvidos';t.node('#retra-situacao').onchange();
+  assert.equal(t.run('STATE._fRetraSituacao'),'resolvidos');
+  assert.match(linhasRetrabalho(t),/Falha fictícia B/);assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia [AC]/);
+  assert.match(t.node('#panel-retrabalho').innerHTML,/1 de 2 retrabalhos/);
+  t.node('#retra-responsavel').value='r:setor alfa';t.node('#retra-responsavel').onchange();
+  assert.match(linhasRetrabalho(t),/Nenhum retrabalho neste recorte/);
+  t.node('#retra-limpar-pessoas').onclick();
+  assert.equal(t.run('STATE._fRetraSituacao'),'resolvidos');assert.equal(t.run('STATE._fRetra.de'),'2026-09-01');
+  assert.match(linhasRetrabalho(t),/Falha fictícia B/);
+  t.node('#retra-situacao').value='';t.node('#retra-situacao').onchange();
+  assert.match(linhasRetrabalho(t),/Falha fictícia A/);assert.match(linhasRetrabalho(t),/Falha fictícia B/);assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia C/);
+});
+test('PDF recebe somente o recorte da situação com descrição explícita',()=>{
+  const t=retrabalhoComFiltros();
+  t.run("STATE._fRetraSituacao='resolvidos'; renderRetrabalho(); imprimirAnalisePCP=(titulo,el,periodo)=>{globalThis.pdfConferido={titulo,html:el.innerHTML,periodo}};");
+  t.node('#retra-pdf').onclick();
+  const pdf=t.run('pdfConferido');
+  assert.equal(pdf.titulo,'Retrabalho');
+  assert.match(pdf.html,/<p class="metricas-nota">Situação: Resolvidos · Responsável da etapa: Todos · Técnico da correção: Todos · 1 de 3 retrabalhos no período\.<\/p>/);
+  assert.match(pdf.html,/Falha fictícia B/);assert.doesNotMatch(pdf.html,/Falha fictícia [AC]/);
+});

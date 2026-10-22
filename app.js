@@ -8146,6 +8146,9 @@ function retrabalhoResponsavelChave(p) {
 function retrabalhoTecnicoChave(pessoa) {
   return 't:' + OPERACAO.chavePessoa(pessoa);
 }
+function retrabalhoResolvido(p) {
+  return !!(p.filha ? p.filha.finalizadaEm : p.orig?.dataResolvido);
+}
 function retrabalhoFiltrarPessoas(pares, filtro = {}) {
   return pares.filter(p => (!filtro.responsavel || retrabalhoResponsavelChave(p) === filtro.responsavel)
     && (!filtro.tecnico || (filtro.tecnico === '__sem__'
@@ -8184,6 +8187,8 @@ function renderRetrabalho() {
     ? (OPERACAO.dia(p.filha.finalizadaEm) || OPERACAO.dia(p.filha.instalacao && p.filha.instalacao.data) || diaLocalISO(p.filha.criadoEm) || '')
     : (p.orig ? (p.orig.dataResolvido || diaLocalISO(p.orig.atualizadoEm) || '') : ''));
   const filtroPessoas = STATE._fRetraPessoas || {};
+  const situacao = ['pendentes', 'resolvidos'].includes(STATE._fRetraSituacao) ? STATE._fRetraSituacao : '';
+  const rotuloSituacao = situacao === 'pendentes' ? 'Pendentes' : situacao === 'resolvidos' ? 'Resolvidos' : 'Todos';
   const responsaveis = new Map(), tecnicos = new Map();
   for (const p of pares) {
     const nome = String(p.orig?.responsavelEtapa || '').trim().replace(/\s+/g, ' ');
@@ -8194,9 +8199,10 @@ function renderRetrabalho() {
     .map(([chave,nome]) => `<option value="${esc(chave)}" ${valor === chave ? 'selected' : ''}>${esc(nome)}</option>`).join('');
   const filtroAtivo = !!(filtroPessoas.responsavel || filtroPessoas.tecnico);
   const rotuloFiltro = (mapa, valor) => !valor ? 'Todos' : valor === '__sem__' ? 'Não informado' : mapa.get(valor) || 'Não disponível neste recorte';
-  const resumoFiltro = `Responsável da etapa: ${rotuloFiltro(responsaveis, filtroPessoas.responsavel)} · Técnico da correção: ${rotuloFiltro(tecnicos, filtroPessoas.tecnico)}`;
+  const resumoFiltro = `Situação: ${rotuloSituacao} · Responsável da etapa: ${rotuloFiltro(responsaveis, filtroPessoas.responsavel)} · Técnico da correção: ${rotuloFiltro(tecnicos, filtroPessoas.tecnico)}`;
   const noPeriodo = pares.filter(p => dentroPeriodo(dataPar(p), '_fRetra'));
   const lista = retrabalhoFiltrarPessoas(noPeriodo, filtroPessoas)
+    .filter(p => !situacao || retrabalhoResolvido(p) === (situacao === 'resolvidos'))
     .sort((a, b) => String(dataPar(b)).localeCompare(String(dataPar(a))));
 
   // Custo: horas (saída→retorno) e km (retorno−saída) da O.S FILHA -- a
@@ -8228,7 +8234,7 @@ function renderRetrabalho() {
   const f = STATE._fRetra || { de: '', ate: '' };
   const indicador = OPERACAO.taxaRetrabalho(todas, f.de, f.ate);
   const entregues = indicador.entregues, taxa = indicador.taxa;
-  const pendentes = lista.filter(p => !(p.filha ? p.filha.finalizadaEm : (p.orig && p.orig.dataResolvido))).length;
+  const pendentes = lista.filter(p => !retrabalhoResolvido(p)).length;
   const fmtH = h => h == null ? '—' : (h < 1 ? Math.round(h * 60) + ' min' : (Math.round(h * 10) / 10).toString().replace('.', ',') + ' h');
 
   // Barras: por técnico (equipe da filha, senão quem resolveu) e por serviço da original.
@@ -8249,6 +8255,7 @@ function renderRetrabalho() {
     </div>
     <div class="filter-bar">${filtroPeriodoHTML('_fRetra')}</div>
     <div class="filter-bar retra-filtros-pessoas">
+      <label for="retra-situacao">Situação <select id="retra-situacao"><option value="">Todos</option><option value="pendentes" ${situacao === 'pendentes' ? 'selected' : ''}>Pendentes</option><option value="resolvidos" ${situacao === 'resolvidos' ? 'selected' : ''}>Resolvidos</option></select></label>
       <label for="retra-responsavel">Responsável da etapa <select id="retra-responsavel"><option value="">Todos</option><option value="__sem__" ${filtroPessoas.responsavel === '__sem__' ? 'selected' : ''}>Não informado</option>${opcoes(responsaveis, filtroPessoas.responsavel)}</select></label>
       <label for="retra-tecnico">Técnico da correção <select id="retra-tecnico"><option value="">Todos</option><option value="__sem__" ${filtroPessoas.tecnico === '__sem__' ? 'selected' : ''}>Não informado</option>${opcoes(tecnicos, filtroPessoas.tecnico)}</select></label>
       <button class="btn-ghost btn-sm" id="retra-limpar-pessoas" ${filtroAtivo ? '' : 'disabled'}>Limpar responsável e técnico</button>
@@ -8257,7 +8264,7 @@ function renderRetrabalho() {
     <div class="casa-kpi-cards">
       <div class="casa-kpi"><b>${lista.length}</b><small>retrabalhos no período${pendentes ? ` · <span class="badge st-retrabalho">${pendentes} pendente${pendentes === 1 ? '' : 's'}</span>` : ''}</small></div>
       <div class="casa-kpi ${semCusto ? 'alerta' : ''}"><b>${semCusto === custos.length ? 'Custo não medido' : custos.some(c=>c.reais!=null) ? brMoney(somaR) : `${custos.some(c => c.horas != null) ? fmtH(somaH) : 'tempo não apurado'} · ${custos.some(c => c.km != null) ? Math.round(somaKm) + ' km' : 'km não apurado'}`}</b><small>custo conhecido · ${custos.length - semCusto} de ${custos.length} intervenções com medição${somaR ? ` · ${fmtH(somaH)} · ${Math.round(somaKm)} km` : ''}${semCusto ? ` · ${semCusto} sem custo monetário medido` : ''}${!(rHora || rKm) ? ' · sem R$/h e R$/km em Configurações' : ''}</small></div>
-      <div class="casa-kpi"><b>${taxa == null ? '—' : taxa.toString().replace('.', ',') + '%'}</b><small>${filtroAtivo ? 'Taxa geral do período, sem filtro de pessoas · ' : ''}O.S. com retrabalho · ${indicador.afetadas} em ${entregues} entrega${entregues === 1 ? '' : 's'} no período</small></div>
+      <div class="casa-kpi"><b>${taxa == null ? '—' : taxa.toString().replace('.', ',') + '%'}</b><small>${situacao ? (filtroAtivo ? 'Taxa geral do período, sem filtros de pessoas ou situação · ' : 'Taxa geral do período, sem filtro de situação · ') : filtroAtivo ? 'Taxa geral do período, sem filtro de pessoas · ' : ''}O.S. com retrabalho · ${indicador.afetadas} em ${entregues} entrega${entregues === 1 ? '' : 's'} no período</small></div>
     </div>
     <p class="metricas-nota">Taxa calculada sobre entregas originais concluídas pela equipe no período, com retrabalho conhecido até agora. Cancelamentos e O.S. filhas não entram na base. Duas correções da mesma O.S. contam uma vez na taxa. Original = O.S marcada com o problema. Retrabalho = a O.S nova que o ERP emite (aponte a original na ficha dela, campo "🔁 retrabalho da O.S nº"). Sem filha apontada, o custo fica em branco.${semTaxonomia ? ` <strong>${semTaxonomia} sem etapa de origem/causa raiz</strong>: abra a ficha e complete.` : ''}</p>
     <div class="casa-tabela-wrap"><table class="casa-tabela">
@@ -8270,7 +8277,7 @@ function renderRetrabalho() {
         const motivo = o ? [medicao?.causa,medicao?.prevencao&&('prevenção: '+medicao.prevencao),o.problema, o.etapaOrigem && ('origem: ' + o.etapaOrigem), o.causaRaiz || o.causa].filter(Boolean).join(' · ') || '—' : '—';
         const custoTxt = c.reais != null ? brMoney(c.reais) : (c.horas != null || c.km != null ? `${fmtH(c.horas)}${c.km != null ? ' · ' + Math.round(c.km) + ' km' : ''}` : '<span class="badge sem-valor">sem viagem</span>');
         const d = dataPar(p);
-        const pendente = !(fi ? fi.finalizadaEm : (o && o.dataResolvido));
+        const pendente = !retrabalhoResolvido(p);
         const abre = o || fi;
         // A ficha abre na Jornada, onde ficam etapa de origem e causa raiz (revisão da F23: a finalizada caía no Fechamento).
         return `<tr class="os-list-item st-${pendente ? 'retrabalho' : 'finalizada'}" data-os-id="${esc(abre.id)}" data-ficha-etapa="exec">
@@ -8283,13 +8290,19 @@ function renderRetrabalho() {
           <td class="num">${custoTxt}${c.rotulo?`<small class="bloco">${esc(c.rotulo)}</small>`:''}</td>
           <td>${d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(2, 4) : '—'}</td>
         </tr>`;
-      }).join('') || `<tr><td colspan="8">${emptyState('✅', 'Nenhum retrabalho neste recorte', 'Ajuste o período ou limpe os filtros de responsável e técnico.')}</td></tr>`}</tbody>
+      }).join('') || `<tr><td colspan="8">${emptyState('✅', 'Nenhum retrabalho neste recorte', 'Ajuste o período, a situação ou os filtros de responsável e técnico.')}</td></tr>`}</tbody>
     </table></div>
     <div class="casa-perf-grid" style="margin-top:14px">
       <section class="casa-prod-box"><h3>Retrabalho por técnico</h3><p>Participação na O.S de retrabalho (quem foi corrigir), ou quem resolveu quando não há O.S filha. Não diz quem causou.</p><div class="fin-colab-lista">${barras(porTecnico, lista.length)}</div></section>
       <section class="casa-prod-box"><h3>Etapa de origem e causa raiz</h3><p>É a base para achar a causa recorrente: onde nasceu (Medição / Arte / Produção / Instalação) e por quê (Erro humano / Material / Comunicação / Especificação / Outro).</p><div class="fin-colab-lista">${barras(porEtapa, lista.length, '#0ea5e9')}</div><hr style="border:0;border-top:1px solid #eef2f7;margin:10px 0"><div class="fin-colab-lista">${barras(porCausa, lista.length, '#8b5cf6')}</div></section>
     </div>`;
   wireFiltroPeriodo(el, '_fRetra', () => renderRetrabalho());
+  const seletorSituacao = $('#retra-situacao', el);
+  seletorSituacao.onchange = () => {
+    STATE._fRetraSituacao = seletorSituacao.value;
+    renderRetrabalho();
+    $('#retra-situacao', el)?.focus();
+  };
   for (const [id, campo] of [['retra-responsavel', 'responsavel'], ['retra-tecnico', 'tecnico']]) {
     const seletor = $('#' + id, el);
     seletor.onchange = () => {
