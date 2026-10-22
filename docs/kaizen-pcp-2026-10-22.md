@@ -1,6 +1,6 @@
 # Kaizen PCP: confiabilidade, carga e manutenção
 
-Data: 22/10/2026. Base: v191. Situação: implementado e verificado localmente, aguardando autorização de publicação desta rodada.
+Data: 22/10/2026. Base: v191. Situação: implementação verificada; publicação da v192 autorizada pelo dono em 22/10/2026 ("Subir"). Conferência da publicação será registrada na passagem da vez.
 
 ## Resultado para quem usa
 
@@ -89,4 +89,4 @@ Não são defeitos confirmados: arquivos grandes, ausência de paginação em um
 
 A suíte completa percorre várias frentes do PCP; isso não equivale a auditoria exaustiva de todos os estados, segurança externa ou certificação da operação. Sem teste de volume no ERP, sem medição de latência de produção e sem ensaio físico offline nesta rodada. O PDF foi coberto pelo conteúdo preparado para impressão nos testes; não foi feita nova auditoria visual de todas as páginas impressas.
 
-Código pronto em ramo local `codex/kaizen-pcp-extremos-20261022`. A publicação desta rodada depende do dono, conforme AGENTS.md. Sem mudanças no banco, dados operacionais reais, regras financeiras ou servidor. Nenhum agendamento recorrente foi criado.
+Código pronto em ramo local `codex/kaizen-pcp-extremos-20261022`. Publicação da v192 autorizada pelo dono em 22/10/2026. Sem mudanças no banco, dados operacionais reais, regras financeiras ou servidor. Nenhum agendamento recorrente foi criado.

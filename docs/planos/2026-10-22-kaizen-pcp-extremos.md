@@ -21,3 +21,7 @@ Auditar os fluxos existentes, simular operacoes extremas e conflitos e melhorar 
 - Corrigida a busca repetida de vínculos de retrabalho.
 - Verificação final: 2.170 testes passaram; 324 compõem a rodada direcionada.
 - Relatório, evidências e próximos passos: `docs/kaizen-pcp-2026-10-22.md`.
+
+## Publicação autorizada
+
+Em 22/10/2026, após o relatório e a verificação, o dono autorizou: "Subir". Publicar a v192, conferir o deploy, os arquivos servidos e a interface sem alterar registros operacionais.
