@@ -8187,7 +8187,7 @@ function renderRetrabalho() {
     ? (OPERACAO.dia(p.filha.finalizadaEm) || OPERACAO.dia(p.filha.instalacao && p.filha.instalacao.data) || diaLocalISO(p.filha.criadoEm) || '')
     : (p.orig ? (p.orig.dataResolvido || diaLocalISO(p.orig.atualizadoEm) || '') : ''));
   const filtroPessoas = STATE._fRetraPessoas || {};
-  const situacao = ['pendentes', 'resolvidos'].includes(STATE._fRetraSituacao) ? STATE._fRetraSituacao : '';
+  const situacao = ['', 'pendentes', 'resolvidos'].includes(STATE._fRetraSituacao) ? STATE._fRetraSituacao : 'pendentes';
   const rotuloSituacao = situacao === 'pendentes' ? 'Pendentes' : situacao === 'resolvidos' ? 'Resolvidos' : 'Todos';
   const responsaveis = new Map(), tecnicos = new Map();
   for (const p of pares) {
@@ -8201,7 +8201,10 @@ function renderRetrabalho() {
   const rotuloFiltro = (mapa, valor) => !valor ? 'Todos' : valor === '__sem__' ? 'Não informado' : mapa.get(valor) || 'Não disponível neste recorte';
   const resumoFiltro = `Situação: ${rotuloSituacao} · Responsável da etapa: ${rotuloFiltro(responsaveis, filtroPessoas.responsavel)} · Técnico da correção: ${rotuloFiltro(tecnicos, filtroPessoas.tecnico)}`;
   const noPeriodo = pares.filter(p => dentroPeriodo(dataPar(p), '_fRetra'));
-  const lista = retrabalhoFiltrarPessoas(noPeriodo, filtroPessoas)
+  const porPessoas = retrabalhoFiltrarPessoas(noPeriodo, filtroPessoas);
+  const totalResolvidos = porPessoas.filter(retrabalhoResolvido).length;
+  const totalPendentes = porPessoas.length - totalResolvidos;
+  const lista = porPessoas
     .filter(p => !situacao || retrabalhoResolvido(p) === (situacao === 'resolvidos'))
     .sort((a, b) => String(dataPar(b)).localeCompare(String(dataPar(a))));
 
@@ -8260,6 +8263,7 @@ function renderRetrabalho() {
       <label for="retra-tecnico">Técnico da correção <select id="retra-tecnico"><option value="">Todos</option><option value="__sem__" ${filtroPessoas.tecnico === '__sem__' ? 'selected' : ''}>Não informado</option>${opcoes(tecnicos, filtroPessoas.tecnico)}</select></label>
       <button class="btn-ghost btn-sm" id="retra-limpar-pessoas" ${filtroAtivo ? '' : 'disabled'}>Limpar responsável e técnico</button>
     </div>
+    <p class="metricas-nota retra-contagens"><span class="badge st-retrabalho">${totalPendentes} pendente${totalPendentes === 1 ? '' : 's'}</span> · <span class="badge st-finalizada">${totalResolvidos} resolvido${totalResolvidos === 1 ? '' : 's'}</span> · totais do período e pessoas selecionados, antes do filtro de situação.</p>
     <p class="metricas-nota">${esc(resumoFiltro)} · ${lista.length} de ${noPeriodo.length} retrabalhos no período.</p>
     <div class="casa-kpi-cards">
       <div class="casa-kpi"><b>${lista.length}</b><small>retrabalhos no período${pendentes ? ` · <span class="badge st-retrabalho">${pendentes} pendente${pendentes === 1 ? '' : 's'}</span>` : ''}</small></div>
