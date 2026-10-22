@@ -69,3 +69,13 @@ Supabase do PCP, por autorização explícita. Teste real de demonstração: uma
 Nenhum cliente ou O.S. enviado no teste. Segredo temporário removido após conferir.
 Dono autorizou publicar integração e tela e conferir mapa/equipe/roteiro.
 Versão preparada v193; 2.186 testes passaram novamente antes da publicação.
+
+## Publicação e conferência em 22/10/2026
+
+- v193 publicada no commit 35dd9e3; servidor pelo workflow 39849835579, Pages pelo 39850238441, ambos verdes.
+- pcp-sync v164 e pcp-mubisys v142 ativos; código servido inclui as ações de mapas e o adaptador Geoapify.
+- Chrome autenticado: conexão ativa, geocodificação de origem e três destinos, cálculo viário com retorno, imagem de ruas e instruções recebidas. Seleção de equipe exibe integrantes. Não houve gravação de O.S.
+- Impressão abriu a prévia nativa do Chrome com as três paradas. Impressora física não testada.
+- Identificada falha por limite do armazenamento ao incluir PNG do mapa. v194 acrescenta segunda tentativa de persistir somente os dados do roteiro, cálculo e instruções, mantendo o mapa em memória e indicando recálculo ao reabrir. Nenhum registro de O.S. é apagado. Regressão reproduzida antes da correção e aprovada depois.
+- Mapa impresso passa a respeitar a largura disponível da página.
+- Perfil e equipe usados na conferência são simulação; a definição operacional depende do responsável. Rotas continuam locais ao navegador/usuário; otimização automática de ordem ainda indisponível.
