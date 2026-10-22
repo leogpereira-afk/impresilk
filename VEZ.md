@@ -7,15 +7,15 @@ passar, liberar, aceitar), que monta o commit em cima da origin/main; nunca à
 mão num ramo de trabalho. Regra completa no AGENTS.md (igual ao CLAUDE.md),
 seções 0, 5 e 6.
 
-agente: codex
+agente: ninguem
 desde: 2026-10-22T20:07:06.795Z
 ramo: codex/entregas-mapa-20261022
 tarefa: Implementar visual aprovado do roteiro e integracao real de mapas
-sessao: codex:1004fee3 (pcp-entregas-mapa-20261022)
+sessao: -
 versao_reservada: -
-arquivos_em_uso: rotas.js rotas-ui.js rotas.css supabase/functions/pcp-sync tests docs/planos
+arquivos_em_uso: -
 passou_por: codex
-passou_em: 2026-10-22T20:00:26.573Z
+passou_em: 2026-10-22T20:19:29.392Z
 
 ## Passagem (o que o último agente deixou para o próximo)
 
@@ -26,12 +26,12 @@ alguém, os campos podem estar em "-" enquanto ele trabalha; com a vez livre
 (ninguem), têm de estar todos cheios. "sessao: -" quer dizer que nenhuma
 sessão se registrou ainda: o primeiro `pegar` do mesmo agente a adota.
 
-no_ar: -
-ramos: -
-feito: -
-pela_metade: -
-decisoes: -
-perguntas_ao_dono: -
-nao_fazer: -
-testes: -
-dados: -
+no_ar: v192; nenhuma publicacao funcional nesta tarefa.
+ramos: codex/entregas-mapa-20261022 em /tmp/pcp-entregas-mapa-20261022; commit local 0384f7a.
+feito: Roteiro compacto, equipe, impressao e adaptador Geoapify; ver docs/planos/2026-10-22-roteiro-entregas-mapa.md.
+pela_metade: Ativacao de conta Geoapify e segredo PCP_GEOAPIFY_KEY; consulta real e mapa estatico ainda nao validados.
+decisoes: Dono aprovou visual e pediu alternativa com plano gratuito; Geoapify preparada.
+perguntas_ao_dono: Dono informou que vai abrir conta gratuita; aguardar acesso sem pedir chave no chat.
+nao_fazer: Nao publicar sem autorizacao; nao afirmar calculo real ativo; nao modificar O.S.; nao usar tile publico bloqueado.
+testes: 2186 testes passaram; previa ficticia desktop e celular; impressao e recarga sem duplicar.
+dados: Nenhum dado produtivo alterado; apenas fixtures ficticias; segredo nao configurado.
