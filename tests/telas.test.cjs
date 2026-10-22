@@ -658,3 +658,37 @@ test('Limpar todos restaura Pendentes, remove datas e pessoas e atualiza relató
   const pdf=t.run('pdfLimpo');assert.equal(pdf.periodo.de,'');assert.equal(pdf.periodo.ate,'');assert.match(pdf.html,/Falha fictícia C/);assert.doesNotMatch(pdf.html,/Falha fictícia B/);
   t.node('#retra-limpar-todos').onclick();assert.match(linhasRetrabalho(t),/Falha fictícia C/);
 });
+
+test('Kaizen: carteira grande de retrabalho cresce sem varredura quadrática dos vínculos',t=>{
+  const medir=n=>{
+    let leituras=0;
+    const lista=Array.from({length:n},(_,i)=>[
+      {id:'orig-ficticia-'+i,numero:'DEMO-'+i,retrabalho:true,dataRetrabalho:hoje,cliente:'Cliente fictício '+i},
+      {id:'filha-ficticia-'+i,numero:'FILHA-'+i,osOriginal:'DEMO-'+i,criadoEm:hoje,equipe:[]}
+    ]).flat().map(o=>new Proxy(o,{get(alvo,k){if(k==='numero')leituras++;return alvo[k];}}));
+    const t=tela(lista);
+    t.run('var leiturasCfg=0; var cfgOriginal=STORE.getCFG; STORE.getCFG=()=>{leiturasCfg++;return cfgOriginal();}; renderRetrabalho()');
+    assert.match(t.node('#panel-retrabalho').innerHTML,new RegExp('Todos · '+n+'<'));
+    return {leituras,cfg:t.run('leiturasCfg')};
+  };
+  const pequena=medir(150),grande=medir(600);
+  t.diagnostic(`Leituras para 300/1200 registros: ${pequena.leituras}/${grande.leituras}; configurações: ${pequena.cfg}/${grande.cfg}`);
+  assert.ok(grande.leituras<pequena.leituras*6,`4x registros não devem exigir 16x leituras: ${pequena.leituras} -> ${grande.leituras}`);
+  assert.ok(grande.cfg<10,`configuração foi lida ${grande.cfg} vezes para o mesmo desenho`);
+});
+
+
+test('Kaizen: números repetidos não associam correção à original errada',()=>{
+ const lista=[
+  {id:'orig-a',numero:'DEMO',retrabalho:true},
+  {id:'orig-b',numero:'DEMO',retrabalho:true},
+  {id:'filha-vinculada',numero:'CORRECAO-A',osOriginal:'DEMO'},
+  {id:'filha-ambigua',numero:'CORRECAO-B',osOriginal:'DEMO'},
+  {id:'filha-sem-original',numero:'CORRECAO-C',osOriginal:'AUSENTE'}
+ ];
+ const t=tela(lista,{medicoesRetrabalho:{'filha-vinculada':{originalId:'orig-b'}}});
+ const pares=t.run('retrabalhoPares(STORE.getAllOS(), STORE.getCFG()).map(p=>[p.orig?.id||null,p.filha?.id||null])');
+ assert.deepEqual(JSON.parse(JSON.stringify(pares)),[
+  ['orig-a',null],['orig-b','filha-vinculada'],[null,'filha-ambigua'],[null,'filha-sem-original']
+ ]);
+});

@@ -8155,34 +8155,47 @@ function retrabalhoFiltrarPessoas(pares, filtro = {}) {
       ? !retrabalhoTecnicos(p).length
       : retrabalhoTecnicos(p).some(x => retrabalhoTecnicoChave(x) === filtro.tecnico))));
 }
-function renderRetrabalho() {
-  const el = $('#panel-retrabalho');
-  const todas = osAnalise();   // original finalizada há mais de 60 dias pode estar no histórico já buscado
-  const porNumero = new Map(todas.map(o => [String(o.numero || '').trim(), o]));
-  // Pares original ↔ filha. Filha = O.S com osOriginal apontado (o ERP emite
-  // uma O.S nova para o retrabalho). Original marcada sem filha também entra:
-  // é retrabalho registrado que ainda não virou O.S -- ou que ninguém apontou.
-  const filhaDe = new Map();
-  for (const f of todas) {
-    const k = String(f.osOriginal || '').trim();
-    if (!k) continue;
-    if (!filhaDe.has(k)) filhaDe.set(k, []);
-    filhaDe.get(k).push(f);
+// Índices por número e ID evitam procurar a carteira inteira para cada filha.
+// Número duplicado só vincula com originalId explícito; nunca escolhe por acaso.
+function retrabalhoPares(todas, cfg) {
+  const porNumero = new Map(), porId = new Map(), filhaDe = new Map();
+  for (const o of todas) {
+    const numero = String(o.numero || '').trim();
+    if (!porNumero.has(numero)) porNumero.set(numero, []);
+    porNumero.get(numero).push(o);
+    if (!porId.has(o.id)) porId.set(o.id, o);
+    const original = String(o.osOriginal || '').trim();
+    if (original) {
+      if (!filhaDe.has(original)) filhaDe.set(original, []);
+      filhaDe.get(original).push(o);
+    }
   }
-  // Pareia pelo OBJETO da original (não pelo número): dois registros com o
-  // mesmo número não podem virar um só na tela.
-  const pares = [];
-  const filhasVistas = new Set();
+  const originalDe = (f, numero) => {
+    const id = cfg.medicoesRetrabalho?.[f.id]?.originalId;
+    if (id) return porId.get(id) || null;
+    const candidatas = porNumero.get(numero) || [];
+    return candidatas.length === 1 ? candidatas[0] : null;
+  };
+  const pares = [], filhasVistas = new Set();
   for (const o of todas.filter(x => x.retrabalho)) {
     const num = String(o.numero || '').trim();
-    const fs = num ? (filhaDe.get(num) || []).filter(f=>{const id=STORE.getCFG().medicoesRetrabalho?.[f.id]?.originalId;return id?id===o.id:todas.filter(x=>String(x.numero||'').trim()===num).length===1;}) : [];
-    if (fs.length) for (const f of fs) { pares.push({ num, orig: o, filha: f }); filhasVistas.add(f.id); }
-    else pares.push({ num, orig: o, filha: null });
+    const filhas = num ? (filhaDe.get(num) || []).filter(f => originalDe(f, num) === o) : [];
+    if (filhas.length) for (const filha of filhas) {
+      pares.push({num, orig:o, filha}); filhasVistas.add(filha.id);
+    }
+    else pares.push({num, orig:o, filha:null});
   }
-  for (const f of todas) {
-    const num = String(f.osOriginal || '').trim();
-    if (num && !filhasVistas.has(f.id)) pares.push({ num, orig: STORE.getCFG().medicoesRetrabalho?.[f.id]?.originalId?todas.find(o=>o.id===STORE.getCFG().medicoesRetrabalho[f.id].originalId)||null:todas.filter(o=>String(o.numero||'').trim()===num).length===1?porNumero.get(num)||null:null, filha: f });
+  for (const filha of todas) {
+    const num = String(filha.osOriginal || '').trim();
+    if (num && !filhasVistas.has(filha.id)) pares.push({num, orig:originalDe(filha, num), filha});
   }
+  return pares;
+}
+function renderRetrabalho() {
+  const el = $('#panel-retrabalho');
+  const todas = osAnalise(); // Inclui o histórico já buscado.
+  const cfg = STORE.getCFG();
+  const pares = retrabalhoPares(todas, cfg);
   const dataPar = p => (p.orig && p.orig.dataRetrabalho) || (p.filha
     ? (OPERACAO.dia(p.filha.finalizadaEm) || OPERACAO.dia(p.filha.instalacao && p.filha.instalacao.data) || diaLocalISO(p.filha.criadoEm) || '')
     : (p.orig ? (p.orig.dataResolvido || diaLocalISO(p.orig.atualizadoEm) || '') : ''));
@@ -8211,7 +8224,7 @@ function renderRetrabalho() {
   // Custo: horas (saída→retorno) e km (retorno−saída) da O.S FILHA -- a
   // viagem da correção, não a original. Em reais só se a casa cadastrou
   // R$/hora e R$/km em Configurações; senão mostra horas e km crus.
-  const cc = STORE.getCFG().custoRetrabalho || {};
+  const cc = cfg.custoRetrabalho || {};
   const rHora = Number(cc.hora) || 0, rKm = Number(cc.km) || 0;
   const custoDe = f => {
     if (!f) return { horas: null, km: null, reais: null };
@@ -8227,7 +8240,7 @@ function renderRetrabalho() {
       return {horas:null, km:null, reais:null, rotulo:'Correção já contabilizada'};
     if (p.filha?.id) custosVistos.add(p.filha.id);
     if (typeof OPREV === 'undefined') return custoDe(p.filha);
-    const medido = OPREV.custoCorrecao(p.filha, STORE.getCFG(), OPERACAO);
+    const medido = OPREV.custoCorrecao(p.filha, cfg, OPERACAO);
     return {...medido, reais:medido.centavos == null ? null : medido.centavos / 100};
   });
   const somaH = custos.reduce((s, c) => s + (c.horas || 0), 0);
@@ -8277,7 +8290,7 @@ function renderRetrabalho() {
         const c = custos[i];
         const o = p.orig, fi = p.filha;
         const tec = retrabalhoTecnicos(p).map(x => OPERACAO.nomePessoa(x)).join(', ') || '—';
-        const medicao=STORE.getCFG().medicoesRetrabalho?.[fi?.id];
+        const medicao=cfg.medicoesRetrabalho?.[fi?.id];
         const motivo = o ? [medicao?.causa,medicao?.prevencao&&('prevenção: '+medicao.prevencao),o.problema, o.etapaOrigem && ('origem: ' + o.etapaOrigem), o.causaRaiz || o.causa].filter(Boolean).join(' · ') || '—' : '—';
         const custoTxt = c.reais != null ? brMoney(c.reais) : (c.horas != null || c.km != null ? `${fmtH(c.horas)}${c.km != null ? ' · ' + Math.round(c.km) + ' km' : ''}` : '<span class="badge sem-valor">sem viagem</span>');
         const d = dataPar(p);

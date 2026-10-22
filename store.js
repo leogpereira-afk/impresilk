@@ -806,8 +806,12 @@ const STORE = (() => {
        ordem se mantém (o sort é estável). A gestão vê a referência da foto
        uns minutos antes do arquivo, o que é melhor do que não ver a O.S. */
     const ordem = [...q].sort((a, b) => (a.action === 'putPhoto') - (b.action === 'putPhoto'));
-    for (const item of ordem) {
-      const sig = _sigFila(item);
+    for (const agendado of ordem) {
+      const sig = _sigFila(agendado);
+      // A espera da requisição anterior pode ter trocado ou removido a ação.
+      // Envie a versão que ainda está na fila, não o retrato do início do ciclo.
+      const item = getQueue().find(x => _sigFila(x) === sig);
+      if (!item) continue;
       // Pula itens em conflito até o usuário resolver.
       if (_flagged.has(sig)) continue;
       try {
@@ -870,6 +874,9 @@ const STORE = (() => {
             }
           }
           if (item.action === 'upsert' && res && res.os) {
+            // O timestamp pode empatar entre dois cliques. A fila já removeu
+            // apenas o envio aceito; se resta outro, a edição local é mais nova.
+            const edicaoPendente = getQueue().some(x => x.action === 'upsert' && x.os?.id === res.os.id);
             const all = getAllOS();
             const idx = all.findIndex(o => o.id === res.os.id);
             if (idx >= 0) {
@@ -881,7 +888,7 @@ const STORE = (() => {
                  próxima gravação manda de novo mesmo depois de a lista virar
                  res.os. A ficha da gestão pode ser um clone: a tela limpa o dela. */
               if (_tirarMarcas(all[idx], _idsRecusados(res)) > 0) mudou = true;
-              if (all[idx].atualizadoEm === item.os.atualizadoEm) {
+              if (!edicaoPendente && all[idx].atualizadoEm === item.os.atualizadoEm) {
                 /* O REV NOVO VAI PARA O OBJETO QUE SAI DA LISTA. O saveOS guarda
                    na lista o PRÓPRIO rascunho da ficha aberta (_draft do espelho,
                    _modalDraft da gestão). Trocar o objeto sem isto deixava o
@@ -904,7 +911,7 @@ const STORE = (() => {
               // Já o timestamp só é sincronizado se NÃO houve edição local
               // durante o envio — senão o pull deixaria de enxergar a
               // divergência e a edição nova ficaria só neste aparelho.
-              if (all[idx].atualizadoEm === item.os.atualizadoEm &&
+              if (!edicaoPendente && all[idx].atualizadoEm === item.os.atualizadoEm &&
                   all[idx].atualizadoEm !== res.os.atualizadoEm) {
                 all[idx].atualizadoEm = res.os.atualizadoEm;
                 mudou = true;
