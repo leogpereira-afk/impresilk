@@ -643,3 +643,18 @@ test('atalho Todos reúne pendentes e resolvidos sem limpar período e pessoas',
   t.node('#retra-contagem-pendentes').onclick();assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia B/);
   t.node('#retra-contagem-todos').onclick();assert.match(linhasRetrabalho(t),/Falha fictícia B/);
 });
+
+test('Limpar todos restaura Pendentes, remove datas e pessoas e atualiza relatório',()=>{
+  const t=retrabalhoComFiltros();
+  t.run("STATE._fRetra={de:'2026-09-01',ate:'2026-09-30',rapido:'mes'}; STATE._fRetraPessoas={responsavel:'r:setor beta',tecnico:retrabalhoTecnicoChave('Bia')}; STATE._fRetraSituacao='resolvidos'; renderRetrabalho()");
+  assert.match(linhasRetrabalho(t),/Falha fictícia B/);assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia [AC]/);
+  t.node('#retra-limpar-todos').onclick();
+  assert.equal(t.run('STATE._fRetraSituacao'),'pendentes');
+  assert.equal(t.run('STATE._fRetra.de'),'');assert.equal(t.run('STATE._fRetra.ate'),'');assert.equal(t.run('STATE._fRetra.rapido'),'todos');
+  assert.equal(t.run('Object.keys(STATE._fRetraPessoas).length'),0);
+  assert.match(linhasRetrabalho(t),/Falha fictícia A/);assert.match(linhasRetrabalho(t),/Falha fictícia C/);assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia B/);
+  assert.match(t.node('#panel-retrabalho').innerHTML,/Situação: Pendentes · Responsável da etapa: Todos · Técnico da correção: Todos · 2 de 3/);
+  t.run("imprimirAnalisePCP=(titulo,el,periodo)=>{globalThis.pdfLimpo={html:el.innerHTML,periodo}};");t.node('#retra-pdf').onclick();
+  const pdf=t.run('pdfLimpo');assert.equal(pdf.periodo.de,'');assert.equal(pdf.periodo.ate,'');assert.match(pdf.html,/Falha fictícia C/);assert.doesNotMatch(pdf.html,/Falha fictícia B/);
+  t.node('#retra-limpar-todos').onclick();assert.match(linhasRetrabalho(t),/Falha fictícia C/);
+});
