@@ -2,7 +2,7 @@
 
 Pedido de 21/10/2026: conferir todas as abas no celular, mantendo os cards compactos e todas as informações.
 
-Base inicial: v183 publicada; atualizada ao final com a v184 e as novas colunas de Retrabalho, preservadas integralmente. Revisão da tela oficial em modo responsivo, com leitura apenas; ajustes em prévia local isolada com dados fictícios. Nenhuma publicação de produto autorizada neste pedido.
+Base inicial: v183 publicada; atualizada ao final com a v184 e as novas colunas de Retrabalho, preservadas integralmente. Revisão da tela oficial em modo responsivo, com leitura apenas; ajustes em prévia local isolada com dados fictícios. O pedido inicial foi somente de revisão. Depois da entrega da prévia, o dono autorizou a publicação com "Su bir"; a versão reservada para estes ajustes é a v185.
 
 ## Escopo e reprodução
 
@@ -38,6 +38,6 @@ Limite: emulação de largura de celular no navegador, sem teste em aparelho fí
 
 ## Testes e entrega
 
-`node scripts/verificar.cjs`: 2.143 testes passaram, zero falhas, cancelados ou pulados; `git diff --check` passou. A primeira tentativa sob restrição de portas locais falhou no ambiente; a execução com os servidores de teste permitidos e a repetição após o último ajuste passaram integralmente. Alterações limitadas a CSS e a este registro; a v184 continua sendo a versão publicada. Publicação destes novos ajustes depende da aprovação do dono.
+`node scripts/verificar.cjs`: 2.143 testes passaram, zero falhas, cancelados ou pulados; `git diff --check` passou. A primeira tentativa sob restrição de portas locais falhou no ambiente; a execução com os servidores de teste permitidos e a repetição após o último ajuste passaram integralmente. Alterações de comportamento visual limitadas a CSS e a este registro. A publicação aprovada usa o script oficial de versão para atualizar os identificadores e o cache da v185.
 
 Compatibilidade final: ramo atualizado com a main da v184; as oito colunas de Retrabalho continuam acessíveis por rolagem interna em 360 e 390 px, sem alargar a página. Suíte completa repetida nessa base: 2.143 testes passaram.
