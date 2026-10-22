@@ -92,8 +92,8 @@ function renderRotasEntregas(){
  rotaSalvar();
  if(!ROTAS_MAPAS.consultado&&typeof STORE.apiFn==='function'&&typeof PCP_ROTAS_PROVEDOR==='undefined'){ROTAS_MAPAS.consultado=true;rotaConectar();}
  el.innerHTML=`<div class="casa-pagina rotas-pagina">${abasEntregasHTML('rotas')}<header class="rota-hero">${rotaSilkHTML(true)}<div><span class="rota-eyebrow">SILK NA ESTRADA</span><h2>Entregas da equipe</h2><p>Planeje, confira e leve o roteiro com a equipe.</p></div><span class="rota-estado">${rotaEsc(p.estado)}</span></header>
- <div class="rota-toolbar"><label>Rotas neste navegador<select id="rota-escolher">${ROTAS_UI.planos.map(x=>`<option value="${x.id}" ${x.id===p.id?'selected':''}>${rotaEsc(x.nome)} · ${x.data.split('-').reverse().join('/')}</option>`).join('')}</select></label><button class="btn-ghost" id="rota-nova">+ Nova rota</button><button class="btn-ghost" id="rota-visao">${ROTAS_UI.visao?'Ver rota atual':'Visão geral do dia'}</button><button class="btn-primary" id="rota-pdf" ${!p.paradas.length?'disabled':''}>Imprimir roteiro / PDF</button></div>
- <p class="rota-aviso"><b>Roteiros:</b> salvos neste navegador e usuário, sem sincronização entre aparelhos. Exporte o PDF para levar com a equipe. ${rotaProvedor()?.demonstracao?'Trajetos de exemplo para testar o fluxo.':ROTAS_MAPAS.ativo?'Geoapify conectado.':'Cálculo de trajeto aguardando ativação.'} <button class="btn-ghost" id="rota-conectar">Conferir conexão dos mapas</button> ${rotaEsc(ROTAS_MAPAS.erro)}</p>
+ <div class="rota-toolbar"><label>Rotas salvas e rascunhos<select id="rota-escolher">${ROTAS_UI.planos.map(x=>`<option value="${x.id}" ${x.id===p.id?'selected':''}>${rotaEsc(x.nome)} · ${x.data.split('-').reverse().join('/')}</option>`).join('')}</select></label><button class="btn-ghost" id="rota-nova">+ Nova rota</button><button class="btn-ghost" id="rota-visao">${ROTAS_UI.visao?'Ver rota atual':'Visão geral do dia'}</button><button class="btn-primary" id="rota-pdf" ${!p.paradas.length?'disabled':''}>Imprimir roteiro / PDF</button></div>
+ ${typeof ROTAS_SYNC!=='undefined'?ROTAS_SYNC.html(p):''}<p class="rota-aviso"><b>Mapa:</b> ${rotaProvedor()?.demonstracao?'Trajetos de exemplo para testar o fluxo.':ROTAS_MAPAS.ativo?'Geoapify conectado.':'Cálculo de trajeto aguardando ativação.'} <button class="btn-ghost" id="rota-conectar">Conferir conexão dos mapas</button> ${rotaEsc(ROTAS_MAPAS.erro)}</p>
  ${ROTAS_UI.erro?`<div class="rota-erro" role="alert" tabindex="-1">${rotaEsc(ROTAS_UI.erro)}</div>`:''}
  ${ROTAS_UI.visao?`<section class="rota-painel"><h3>Rotas de ${p.data.split('-').reverse().join('/')}</h3>${rotaMapaHTML(ROTAS_UI.planos.filter(x=>x.data===p.data))}</section>`:''}
  <section class="rota-painel rota-config"><h3><span class="rota-passo">1</span> Dados da rota</h3><fieldset ${ocupado||travado?'disabled':''}><div class="rota-form rota-dados-principais">${rotaInput('nome','Nome da rota',p.nome)}${rotaInput('data','Dia da rota',p.data,'date')}<label>Equipe<select data-rota="equipe"><option value="">Selecionar equipe responsável</option>${equipes.map(e=>`<option value="${rotaEsc(e.id)}" ${p.equipe===e.id?'selected':''}>${rotaEsc(e.nome)}</option>`).join('')}</select></label>${rotaInput('saida','Saída',p.saida,'time')}</div>${rotaEquipeHTML(p)}
@@ -119,6 +119,7 @@ function renderRotasEntregas(){
  if(ROTAS_UI.erro&&ROTAS_UI.erro!==erroAnterior)el.querySelector('.rota-erro')?.focus();
 }
 function rotaWire(el,p){
+ if(typeof ROTAS_SYNC!=='undefined')ROTAS_SYNC.wire(el);
  const pintar=()=>renderRotasEntregas();
  el.querySelector('#rota-conectar').onclick=rotaConectar;
  el.querySelectorAll('[data-local-buscar]').forEach(e=>e.onclick=()=>rotaLocalizar(+e.dataset.localBuscar));
@@ -137,7 +138,7 @@ function rotaWire(el,p){
  el.querySelectorAll('[data-remover]').forEach(e=>e.onclick=()=>{rotaRemover(e.dataset.remover);pintar();el.querySelector('#rota-busca').focus({preventScroll:true});});
  for(const [attr,delta] of [['subir',-1],['descer',1]])el.querySelectorAll('[data-'+attr+']').forEach(e=>e.onclick=()=>{const i=+e.dataset[attr],j=i+delta;if(j<0||j>=p.paradas.length)return;rotaAlterada();[p.paradas[i],p.paradas[j]]=[p.paradas[j],p.paradas[i]];pintar();});
  el.querySelector('#rota-nova').onclick=()=>{ROTAS_UI.atual=rotaNovo();ROTAS_UI.planos.push(ROTAS_UI.atual);ROTAS_UI.visao=false;ROTAS_UI.filtros=rotaFiltrosNovos();ROTAS_UI.erro='';ROTAS_UI.sugestao=null;ROTAS_UI.pedido++;pintar();};
- el.querySelector('#rota-escolher').onchange=e=>{ROTAS_UI.atual=ROTAS_UI.planos.find(x=>x.id===e.target.value);ROTAS_UI.filtros=rotaFiltrosNovos();ROTAS_UI.erro='';ROTAS_UI.sugestao=null;ROTAS_UI.pedido++;pintar();};
+ el.querySelector('#rota-escolher').onchange=e=>{ROTAS_UI.atual=ROTAS_UI.planos.find(x=>x.id===e.target.value);ROTAS_UI.filtros=rotaFiltrosNovos();ROTAS_UI.erro='';ROTAS_UI.sugestao=null;ROTAS_UI.pedido++;pintar();if(typeof ROTAS_SYNC!=='undefined')ROTAS_SYNC.atualizar();};
  el.querySelector('#rota-visao').onclick=()=>{ROTAS_UI.visao=!ROTAS_UI.visao;pintar();};
  el.querySelector('#rota-calcular').onclick=()=>rotaCalcular(false);
  el.querySelector('#rota-otimizar').onclick=()=>rotaCalcular(true);

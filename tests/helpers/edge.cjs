@@ -71,7 +71,8 @@ async function edge(tipo,initial={},opcoes={}) {
  const status=await import(sh('pcp-status.mjs'));
  const fotos=await import(sh('foto-freelancer.mjs'));
  const ranking=await import(sh('pcp-ranking-publico.mjs'));
- const ctx=vm.createContext({console,URL,URLSearchParams,Request,Response,TextEncoder,TextDecoder,atob,btoa,crypto:webcrypto,setTimeout,clearTimeout,
+ const rotasDados=await import('../../supabase/functions/pcp-sync/rotas-dados.mjs');
+ const ctx=vm.createContext({...rotasDados,console,URL,URLSearchParams,Request,Response,TextEncoder,TextDecoder,atob,btoa,crypto:webcrypto,setTimeout,clearTimeout,
   Deno:{env:{get:k=>({PCP_TOKEN:'machine-test',EQUIPE_JWT_SECRET:'test-secret',SUPABASE_URL:'https://example.invalid',SUPABASE_SERVICE_ROLE_KEY:'test'}[k]||'')},serve:fn=>handler=fn},
   createClient:()=>cliente,...regras,...status,...fotos,...ranking,REGRAS,COMISSAO});
  const file=path.join(__dirname,'../../supabase/functions',tipo,'index.ts');

@@ -189,3 +189,7 @@ ao dono. Cada nota diz o que mudou, onde e o teste.
 - Decisão do dono no chat: "vamos colocar so os carros vinculados".
 - A seleção do veículo no planejamento de entregas usa somente fichas do elenco de veículos por ID. Nome e placa são rótulos; nomes iguais não criam vínculo. Valores antigos sem ID permanecem identificados como pendência até seleção explícita. Não alterar a O.S. nem a ficha do Patrimônio ao preparar uma rota.
 - Aplicado por codex em rotas-ui.js; testes em tests/rotas-ui.test.cjs. Peso e altura ausentes não são inferidos a partir do nome do carro.
+
+## D-020 · 22/10/2026 · Rotas no servidor e leitura da equipe
+
+Pedido: “as rotas fiquem salvas no sistema e sincronizem entre os aparelhos pra equipe abrir no celular com o mapa e o roteiro, testa e sobe”. Gestão salva a rota pelo ID no servidor, com revisão para impedir sobrescrita concorrente. Rascunhos locais pendentes são preservados. A equipe atual, identificada pelo ID do RH no crachá, lê apenas rotas liberadas para ela; custos não são enviados. Mapa e instruções acompanham o registro. O acompanhamento de rota não conclui O.S. Fonte: conversa do dono em 22/10/2026. Registrado pelo codex; aplicado em rotas-sync.js, rotas-equipe.js e pcp-sync/rotas-dados.mjs.

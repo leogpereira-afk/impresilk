@@ -181,10 +181,10 @@ test('celular: o equipe.js está na casca do sw.js e no equipe.html com a mesma 
   assert.match(ler('.github/workflows/deploy.yml'), /for f in \$\(grep -o "'\[a-z0-9\.-\]\*\\\.\\\(js\\\|css/);
   /* O CONTEÚDO DO ARQUIVO DO CELULAR. Se uma onda mudar o equipe.js de
      propósito, este número muda junto, no mesmo commit, com o motivo na
-     mensagem. Base: onda acabamento B (o aviso "Foto anexada" só quando a
-     foto entrou). */
+     mensagem. Base v196: renderList consulta as rotas autorizadas da equipe;
+     a ficha e as ações de execução permanecem iguais. */
   const hash = crypto.createHash('sha256').update(ler('equipe.js')).digest('hex');
-  assert.equal(hash, '4a1787a99a19ee6b4d3753bb79aa87f7089642f9f4d86c865a0a22a53180b430', 'o equipe.js mudou: confira se foi de propósito e troque o número');
+  assert.equal(hash, '96731a05c687782aa3d17aa18943a891f613174e458ddcb3389f3b7060d8f68c', 'o equipe.js mudou: confira se foi de propósito e troque o número');
 });
 
 /* ═══════════ 8. F25: o bônus manual antigo é só leitura no PCP ═══════════ */

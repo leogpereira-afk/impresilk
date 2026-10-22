@@ -856,6 +856,7 @@ function textoListaVazia() {
 }
 
 function renderList() {
+  if(typeof ROTAS_EQ!=='undefined')ROTAS_EQ.atualizar();
   const el = $('#eq-list');
   const list = minhasOS();
   // Cartão grande: na rua > hoje > próxima data. Vencida nunca (OPERACAO.destaqueDoDia).

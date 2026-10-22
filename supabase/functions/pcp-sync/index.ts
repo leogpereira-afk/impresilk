@@ -1,3 +1,4 @@
+import { executarRotas } from "./rotas-dados.mjs";
 import { executarMapa } from "./rotas-provedor.mjs";
 import { demandasPCP } from "../_shared/pcp-demandas.mjs";
 import { fotoFreelancerRH } from "../_shared/foto-freelancer.mjs";
@@ -1601,7 +1602,7 @@ Deno.serve(async (req: Request) => {
   // preserva a fila e pede para entrar de novo em vez de descartar trabalho.
   if (cracha && (!ehMaquina || acao === "performanceRankingEquipe")) {
     try {
-      if (await crachaRevogado(cracha, acao === "performanceRankingEquipe" || acao === "demandas")) {
+      if (await crachaRevogado(cracha, acao === "performanceRankingEquipe" || acao === "demandas" || acao.startsWith("rotas"))) {
         return resp({ error: "Seu acesso ao PCP foi encerrado. Fale com a gestão.", semSessao: true }, 401);
       }
     } catch {
@@ -1610,6 +1611,12 @@ Deno.serve(async (req: Request) => {
          "acesso ao ranking". */
       return resp({error:acao === "demandas" ? "Não foi possível conferir seu acesso agora. Tente novamente." : "Não foi possível conferir seu acesso ao ranking. Tente novamente."},503);
     }
+  }
+
+  if (["rotasListar", "rotasObter", "rotasSalvar"].includes(acao)) {
+    if (!cracha || ehMaquina) return resp({error:"Entre com sua conta do PCP."},403);
+    try { return resp(await executarRotas(body,{sb,cracha,cfg:(await getCfg())||{}})); }
+    catch(e) { return resp({error:e.message,conflito:e.status===409},e.status||503); }
   }
 
   if (["rotasStatus", "rotasLocalizar", "rotasCalcular"].includes(acao)) {
