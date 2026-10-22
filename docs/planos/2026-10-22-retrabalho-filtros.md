@@ -15,3 +15,7 @@ Pedido do dono em 22/10/2026: filtro por responsável e por técnico da correç�
 - A simulação antiga de DOM da ficha devolvia null para qualquer querySelector de painel; corrigida para buscar nos elementos do HTML já simulado, como querySelectorAll fazia.
 - Prévia local: http://127.0.0.1:5427/#aba=retrabalho. Evidência fora do repositório público: /tmp/retrabalho-filtros-previa.png.
 - Verificação final com Node 24, scripts/verificar.cjs: 2148 testes passaram, zero falhas, cancelados ou pulados. git diff --check passou.
+
+## Publicação autorizada em 22/10/2026
+
+O dono autorizou: "pode subir os filtros por responsável e técnico da correção e conferir no site se ficou certo e se o PDF respeita os filtros". Versão preparada: v186, preservando v185. Conferência de produção será registrada na Passagem.
