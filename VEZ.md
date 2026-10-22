@@ -7,15 +7,15 @@ passar, liberar, aceitar), que monta o commit em cima da origin/main; nunca à
 mão num ramo de trabalho. Regra completa no AGENTS.md (igual ao CLAUDE.md),
 seções 0, 5 e 6.
 
-agente: codex
+agente: ninguem
 desde: 2026-10-22T12:28:17.983Z
 ramo: codex/retrabalho-contagens-clicaveis-20261022
 tarefa: Atalho Todos com total no retrabalho, publicar e conferir
-sessao: codex:cc01aad5 (pcp-retrabalho-20261021)
-versao_reservada: v190
-arquivos_em_uso: app.js styles.css tests/telas.test.cjs
+sessao: -
+versao_reservada: -
+arquivos_em_uso: -
 passou_por: codex
-passou_em: 2026-10-22T12:24:27.633Z
+passou_em: 2026-10-22T12:35:52.568Z
 
 ## Passagem (o que o último agente deixou para o próximo)
 
@@ -26,12 +26,12 @@ alguém, os campos podem estar em "-" enquanto ele trabalha; com a vez livre
 (ninguem), têm de estar todos cheios. "sessao: -" quer dizer que nenhuma
 sessão se registrou ainda: o primeiro `pegar` do mesmo agente a adota.
 
-no_ar: -
-ramos: -
-feito: -
-pela_metade: -
-decisoes: -
-perguntas_ao_dono: -
-nao_fazer: -
-testes: -
-dados: -
+no_ar: v190, main e39effc, Deploy 39778906233 verde; oito arquivos publicos iguais.
+ramos: codex/retrabalho-todos-20261022 publicado na main.
+feito: Atalho Todos com quantidade total e destaque ao lado das situacoes; mantido no PDF.
+pela_metade: nenhum.
+decisoes: Todos limpa apenas situacao e preserva periodo e pessoas; Pendentes continua padrao inicial.
+perguntas_ao_dono: nenhuma.
+nao_fazer: Nao alterar registros reais durante testes.
+testes: 2156 passaram em scripts/verificar.cjs; Resolvidos para Todos conferido no site; previa PDF v190 com total e recorte.
+dados: Nenhum registro produtivo alterado; fixtures ficticias.
