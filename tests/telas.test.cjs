@@ -628,3 +628,18 @@ test('clicar nas contagens filtra a lista, sincroniza o seletor e mantém perío
   assert.match(linhasRetrabalho(t),/Nenhum retrabalho neste recorte/);
   assert.match(t.node('#panel-retrabalho').innerHTML,/aria-pressed="true">0 resolvidos<\/button>/);
 });
+
+test('atalho Todos reúne pendentes e resolvidos sem limpar período e pessoas',()=>{
+  const t=retrabalhoComFiltros();
+  t.run("STATE._fRetra={de:'2026-09-01',ate:'2026-09-30'}; STATE._fRetraPessoas={tecnico:retrabalhoTecnicoChave('Bia')}; STATE._fRetraSituacao='resolvidos'; renderRetrabalho()");
+  assert.match(t.node('#panel-retrabalho').innerHTML,/id="retra-contagem-todos"[^>]*aria-pressed="false">Todos · 2<\/button>/);
+  t.node('#retra-contagem-todos').onclick();
+  assert.equal(t.run('STATE._fRetraSituacao'),'');
+  assert.match(linhasRetrabalho(t),/Falha fictícia A/);assert.match(linhasRetrabalho(t),/Falha fictícia B/);assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia C/);
+  assert.match(t.node('#panel-retrabalho').innerHTML,/id="retra-contagem-todos"[^>]*aria-pressed="true">Todos · 2<\/button>/);
+  assert.match(t.node('#panel-retrabalho').innerHTML,/Situação: Todos/);
+  assert.equal(t.run('STATE._fRetra.de'),'2026-09-01');assert.equal(t.run('STATE._fRetraPessoas.tecnico'),t.run("retrabalhoTecnicoChave('Bia')"));
+  t.run('renderRetrabalho()');assert.equal(t.run('STATE._fRetraSituacao'),'');
+  t.node('#retra-contagem-pendentes').onclick();assert.doesNotMatch(linhasRetrabalho(t),/Falha fictícia B/);
+  t.node('#retra-contagem-todos').onclick();assert.match(linhasRetrabalho(t),/Falha fictícia B/);
+});

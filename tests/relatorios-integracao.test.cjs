@@ -151,7 +151,7 @@ test('permissão financeira é global e chega ao PDF real conforme o papel atual
 test('PDF real mantém contagens clicáveis como texto, retirando os controles',()=>{
  const fs=require('node:fs'),vm=require('node:vm'),source=fs.readFileSync('app.js','utf8');
  const saidas=[];
- const botoes=[['badge st-retrabalho retra-contagem','2 pendentes'],['badge st-finalizada retra-contagem','1 resolvido']].map(([className,textContent])=>({
+ const botoes=[['badge retra-todos retra-contagem','Todos · 3'],['badge st-retrabalho retra-contagem','2 pendentes'],['badge st-finalizada retra-contagem','1 resolvido']].map(([className,textContent])=>({
   className,textContent,matches:sel=>sel.split(',').includes('button.retra-contagem'),
   replaceWith(n){saidas.push(n);},remove(){throw Error('A contagem não pode sumir do PDF');}
  }));
@@ -160,6 +160,6 @@ test('PDF real mantém contagens clicáveis como texto, retirando os controles',
  const ctx=vm.createContext({document:{createElement:tagName=>({tagName}),getElementById:()=>box},STORE:{getLastSync:()=>null,getQueue:()=>[]},esc:x=>String(x??''),$:()=>botao,origem:{dataset:{},querySelectorAll:()=>[],cloneNode:()=>copia}});
  vm.runInContext(source.slice(source.indexOf('function imprimirAnalisePCP('),source.indexOf('function wirePDFsEntregaPerformance(')),ctx);
  vm.runInContext("imprimirAnalisePCP('Retrabalho',origem,{})",ctx);
- assert.equal(saidas.length,2);assert.ok(saidas.every(n=>n.tagName==='span'));
+ assert.equal(saidas.length,3);assert.match(box.innerHTML,/<span[^>]*>Todos · 3<\/span>/);assert.ok(saidas.every(n=>n.tagName==='span'));
  assert.match(box.innerHTML,/<span[^>]*>2 pendentes<\/span>/);assert.match(box.innerHTML,/<span[^>]*>1 resolvido<\/span>/);
 });

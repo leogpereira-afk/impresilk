@@ -4699,3 +4699,5 @@ button.retra-contagem { min-height:44px; padding:8px 14px; border:2px solid tran
 button.retra-contagem:hover { filter:brightness(.96); }
 button.retra-contagem[aria-pressed="true"] { border-color:currentColor; box-shadow:0 0 0 1px currentColor; }
 button.retra-contagem:focus-visible { outline:3px solid #2563eb; outline-offset:3px; }
+
+.badge.retra-todos { background:#e2e8f0; color:#334155; }

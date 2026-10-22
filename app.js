@@ -8263,7 +8263,7 @@ function renderRetrabalho() {
       <label for="retra-tecnico">Técnico da correção <select id="retra-tecnico"><option value="">Todos</option><option value="__sem__" ${filtroPessoas.tecnico === '__sem__' ? 'selected' : ''}>Não informado</option>${opcoes(tecnicos, filtroPessoas.tecnico)}</select></label>
       <button class="btn-ghost btn-sm" id="retra-limpar-pessoas" ${filtroAtivo ? '' : 'disabled'}>Limpar responsável e técnico</button>
     </div>
-    <p class="metricas-nota retra-contagens"><button type="button" id="retra-contagem-pendentes" class="badge st-retrabalho retra-contagem" aria-pressed="${situacao === 'pendentes'}">${totalPendentes} pendente${totalPendentes === 1 ? '' : 's'}</button> · <button type="button" id="retra-contagem-resolvidos" class="badge st-finalizada retra-contagem" aria-pressed="${situacao === 'resolvidos'}">${totalResolvidos} resolvido${totalResolvidos === 1 ? '' : 's'}</button> · totais do período e pessoas selecionados, antes do filtro de situação.</p>
+    <p class="metricas-nota retra-contagens"><button type="button" id="retra-contagem-todos" class="badge retra-todos retra-contagem" aria-pressed="${situacao === ''}">Todos · ${porPessoas.length}</button> · <button type="button" id="retra-contagem-pendentes" class="badge st-retrabalho retra-contagem" aria-pressed="${situacao === 'pendentes'}">${totalPendentes} pendente${totalPendentes === 1 ? '' : 's'}</button> · <button type="button" id="retra-contagem-resolvidos" class="badge st-finalizada retra-contagem" aria-pressed="${situacao === 'resolvidos'}">${totalResolvidos} resolvido${totalResolvidos === 1 ? '' : 's'}</button> · totais do período e pessoas selecionados, antes do filtro de situação.</p>
     <p class="metricas-nota">${esc(resumoFiltro)} · ${lista.length} de ${noPeriodo.length} retrabalhos no período.</p>
     <div class="casa-kpi-cards">
       <div class="casa-kpi"><b>${lista.length}</b><small>retrabalhos no período${pendentes ? ` · <span class="badge st-retrabalho">${pendentes} pendente${pendentes === 1 ? '' : 's'}</span>` : ''}</small></div>
@@ -8307,8 +8307,8 @@ function renderRetrabalho() {
     renderRetrabalho();
     $('#retra-situacao', el)?.focus();
   };
-  for (const estado of ['pendentes', 'resolvidos']) {
-    const id = '#retra-contagem-' + estado;
+  for (const [nome, estado] of [['todos', ''], ['pendentes', 'pendentes'], ['resolvidos', 'resolvidos']]) {
+    const id = '#retra-contagem-' + nome;
     $(id, el).onclick = () => {
       STATE._fRetraSituacao = estado;
       renderRetrabalho();
