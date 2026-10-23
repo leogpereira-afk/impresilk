@@ -140,3 +140,7 @@
 .rota-perfil{display:flex;flex-direction:column;gap:5px;margin:10px 0;font-size:12px;font-weight:600}.rota-perfil select{width:100%;min-height:40px;padding:8px;border:1px solid #d5dfe8;border-radius:9px;background:#f8fafc;font:inherit;color:inherit}.rota-perfil small{font-weight:400;color:#607280}.rota-locais{display:grid;gap:7px;margin-top:8px}.rota-locais button{white-space:normal;text-align:left}.rota-locais small{display:block}.rota-mapa-figura{margin:10px 0}.rota-mapa-figura figcaption{display:flex;flex-wrap:wrap;gap:5px 12px;font-size:11px;justify-content:space-between}
 
 .rota-nuvem{padding:12px;border:1px solid #b8d9ce;background:#f0faf6;border-radius:12px;margin:12px 0}.rota-nuvem .rota-acoes{margin:8px 0}.rota-nuvem small{display:block;color:#526575}
+
+/* Dados operacionais sempre visíveis, sem abrir os custos. */
+.rota-dados-principais{grid-template-columns:repeat(3,minmax(0,1fr))}.rota-dados-principais>label{min-width:0}.rota-dados-principais input,.rota-dados-principais select{width:100%;box-sizing:border-box}
+@media(max-width:600px){.rota-dados-principais{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.rota-dados-principais>label:has([data-rota="equipe"]),.rota-dados-principais>label:has([data-rota="veiculoId"]),.rota-dados-principais>label:has([data-rota="motorista"]){grid-column:1/-1}}
