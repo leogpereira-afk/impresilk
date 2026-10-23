@@ -7,15 +7,15 @@ passar, liberar, aceitar), que monta o commit em cima da origin/main; nunca à
 mão num ramo de trabalho. Regra completa no AGENTS.md (igual ao CLAUDE.md),
 seções 0, 5 e 6.
 
-agente: codex
+agente: ninguem
 desde: 2026-10-23T12:53:36.704Z
 ramo: codex/rota-campos-mobile
 tarefa: Motorista vinculado ao RH nas rotas
-sessao: codex:1004fee3 (pcp-entregas-mapa-20261022)
-versao_reservada: v198
-arquivos_em_uso: rotas-ui.js supabase/functions/pcp-sync/rotas-dados.mjs
+sessao: -
+versao_reservada: -
+arquivos_em_uso: -
 passou_por: codex
-passou_em: 2026-10-23T12:47:27.300Z
+passou_em: 2026-10-23T13:03:57.872Z
 
 ## Passagem (o que o último agente deixou para o próximo)
 
@@ -26,12 +26,12 @@ alguém, os campos podem estar em "-" enquanto ele trabalha; com a vez livre
 (ninguem), têm de estar todos cheios. "sessao: -" quer dizer que nenhuma
 sessão se registrou ainda: o primeiro `pegar` do mesmo agente a adota.
 
-no_ar: -
-ramos: -
-feito: -
-pela_metade: -
-decisoes: -
-perguntas_ao_dono: -
-nao_fazer: -
-testes: -
-dados: -
+no_ar: e5f9013 PCP v198. Deploy 39957627569 e servidor 39957268548 verdes. pcp-sync v166, modulo rotas-dados igual ao testado.
+ramos: codex/rota-motorista-rh incorporado na main; demais preservados.
+feito: Seletor RH por motoristaId, equipe primeiro, nome canonico validado no servidor. docs/planos/2026-10-23-motorista-rh.md.
+pela_metade: Nenhum codigo pendente. Rota real sem atribuicao presumida.
+decisoes: D-021: motorista pelo cadastro do RH e membros da equipe primeiro.
+perguntas_ao_dono: Nenhuma desta entrega.
+nao_fazer: Nao criar vinculo por nome legado. Rascunho antigo exige selecao por ID antes de confirmar.
+testes: 2208 aprovados; zero falhas/pulados. Mobile 375px, grupos, selecao por ID e ausencia de overflow. Servidor valida inexistente/inativo/desligado/bloqueado e nome canonico.
+dados: Nenhum dado real alterado; nenhuma migration.
