@@ -10,8 +10,8 @@ const metricas='km viagem visitas espera fim total litros custo pedagio';
 export function limparRota(p){
  if(!p||!id(p.id)||!texto(p.nome).trim()||!/^\d{4}-\d{2}-\d{2}$/.test(p.data||'')||!Array.isArray(p.paradas)||p.paradas.length>20)falha('Confira nome, data e paradas da rota.');
  if(new Set(p.paradas.map(a=>a.id)).size!==p.paradas.length||p.paradas.some(a=>!id(a.id)))falha('Paradas inválidas ou repetidas.');
- const r={...selecionar(p,'id nome data saida equipe motorista veiculoId modo estado combustivel'),veiculo:texto(p.veiculo),origem:ponto(p.origem),voltar:p.voltar===true,paradas:p.paradas.map(parada),consumo:numero(p.consumo),preco:numero(p.preco),pedagio:numero(p.pedagio),resultado:null};
- for(const k of 'id nome data saida equipe motorista veiculoId modo estado combustivel'.split(' '))r[k]=texto(r[k]);
+ const r={...selecionar(p,'id nome data saida equipe motorista motoristaId veiculoId modo estado combustivel'),veiculo:texto(p.veiculo),origem:ponto(p.origem),voltar:p.voltar===true,paradas:p.paradas.map(parada),consumo:numero(p.consumo),preco:numero(p.preco),pedagio:numero(p.pedagio),resultado:null};
+ for(const k of 'id nome data saida equipe motorista motoristaId veiculoId modo estado combustivel'.split(' '))r[k]=texto(r[k]);
  if(!['Rascunho','Confirmada','Em andamento','Concluída'].includes(r.estado))falha('Situação inválida.');
  if(p.resultado){const q=p.resultado;if(q.demonstracao)falha('Resultados de demonstração não podem ser salvos no sistema.');
  const geometry=q.geometry;if(!Array.isArray(geometry)||geometry.length>50000||geometry.some(c=>!Array.isArray(c)||c.length!==2||!c.every(Number.isFinite)||Math.abs(c[0])>180||Math.abs(c[1])>90))falha('Trajeto inválido.');
@@ -19,7 +19,7 @@ export function limparRota(p){
  if(!Array.isArray(q.instrucoes)||q.instrucoes.length>21||q.instrucoes.some(a=>!Array.isArray(a)||a.length>1000))falha('Instruções inválidas.');
  r.resultado={...Object.fromEntries(metricas.split(' ').map(k=>[k,Number.isFinite(q[k])?q[k]:null])),geometry,mapa,avisoMapa:texto(q.avisoMapa),fonte:texto(q.fonte),em:texto(q.em,50),instrucoes:q.instrucoes.map(a=>a.map(s=>({texto:texto(s.texto,1000),metros:numero(s.metros)}))),paradas:r.paradas.map((a,i)=>({...a,...Object.fromEntries('trechoKm trechoMin chegada atendimento partida espera'.split(' ').map(k=>[k,Number.isFinite(q.paradas?.[i]?.[k])?q.paradas[i][k]:null])),atraso:q.paradas?.[i]?.atraso===true}))};
  }
- if(r.estado!=='Rascunho'&&(!r.equipe||!r.veiculoId||!r.motorista.trim()||!r.resultado||!r.paradas.length))falha('Confirme equipe, veículo, motorista e cálculo antes de liberar a rota.');
+ if(r.estado!=='Rascunho'&&(!r.equipe||!r.veiculoId||!/^\d{6}$/.test(r.motoristaId)||!r.resultado||!r.paradas.length))falha('Confirme equipe, veículo, motorista e cálculo antes de liberar a rota.');
  return r;
 }
 export function podeLerRota(p,c,cfg){if(['admin','pcp'].includes(c?.papel))return true;
@@ -27,7 +27,7 @@ export function podeLerRota(p,c,cfg){if(['admin','pcp'].includes(c?.papel))retur
  return (cfg.performancePCP?.equipes||[]).some(e=>e.ativo!==false&&e.id===p.equipe&&(e.membros||[]).some(m=>String(m.pessoaId||m.chave)===String(c.id)));
 }
 export function rotaParaEquipe(p){const r=selecionar(p,'id nome data saida equipe equipeNome motorista veiculo veiculoId origem voltar paradas estado');if(p.resultado){r.resultado=selecionar(p.resultado,'km viagem visitas espera fim total geometry mapa avisoMapa fonte em instrucoes paradas');}return r;}
-export async function executarRotas(body,{sb,cracha,cfg,agora=()=>new Date().toISOString()}){
+export async function executarRotas(body,{sb,cracha,cfg,lerPessoas,agora=()=>new Date().toISOString()}){
  if(!cracha)falha('Entre no PCP.',403);const gestao=['admin','pcp'].includes(cracha.papel);
  if(!gestao&&!['montagem','operacao','instalador'].includes(cracha.papel))falha('Acesso às rotas não autorizado.',403);
  const ler=async key=>{const r=await sb.from('pcp_rotas').select('*').eq('id',key).maybeSingle();if(r.error)falha('Não foi possível consultar as rotas.',503);return r.data;};
@@ -47,6 +47,14 @@ export async function executarRotas(body,{sb,cracha,cfg,agora=()=>new Date().toI
  const equipe=(cfg.performancePCP?.equipes||[]).find(e=>e.id===registro.equipe&&e.ativo!==false);
  if(registro.equipe&&!equipe)falha('Equipe não está ativa.');registro.equipeNome=texto(equipe?.nome);
  if(registro.veiculoId){const {data:v,error}=await sb.from('painel_registros').select('id,registro').eq('colecao','ativo').eq('id',registro.veiculoId).maybeSingle();if(error)falha('Não foi possível conferir o veículo.',503);if(!v||v.registro?.tipo!=='veiculo')falha('Selecione um veículo cadastrado.');registro.veiculo=[v.registro.nome,v.registro.especificacao?.placa||v.registro.identificacao].filter(Boolean).join(' · ');}
+ if(registro.motoristaId){
+ if(!/^\d{6}$/.test(registro.motoristaId))falha('Selecione o motorista pelo cadastro do RH.');
+ let pessoas;try{pessoas=await lerPessoas();}catch{falha('Não foi possível conferir o motorista no RH. Tente novamente.',503);}
+ const matches=pessoas.filter(p=>String(p.id)===registro.motoristaId);
+ const pessoa=matches.length===1?matches[0]:null;
+ if(!pessoa||pessoa.ativo===false||pessoa.desligado||pessoa.idBloqueado||pessoa.idRepetido)falha('Motorista indisponível no RH. Selecione uma pessoa ativa.');
+ registro.motorista=texto(pessoa.nome);
+ }
  if(registro.resultado&&!registro.resultado.mapa&&atual?.registro.resultado?.em===registro.resultado.em&&JSON.stringify(atual.registro.resultado.geometry)===JSON.stringify(registro.resultado.geometry)){registro.resultado.mapa=atual.registro.resultado.mapa;}
  registro.atualizadoPor=texto(cracha.id||cracha.sub,100);
  const row={id:key,registro,revision:body.revision+1,mutation_id:body.mutationId,atualizado_em:agora()};

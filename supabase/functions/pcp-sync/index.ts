@@ -1615,7 +1615,7 @@ Deno.serve(async (req: Request) => {
 
   if (["rotasListar", "rotasObter", "rotasSalvar"].includes(acao)) {
     if (!cracha || ehMaquina) return resp({error:"Entre com sua conta do PCP."},403);
-    try { return resp(await executarRotas(body,{sb,cracha,cfg:(await getCfg())||{}})); }
+    try { return resp(await executarRotas(body,{sb,cracha,cfg:(await getCfg())||{},lerPessoas:async()=>{_fichasRH=null;return await fichasRH();}})); }
     catch(e) { return resp({error:e.message,conflito:e.status===409},e.status||503); }
   }
 

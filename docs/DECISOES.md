@@ -193,3 +193,7 @@ ao dono. Cada nota diz o que mudou, onde e o teste.
 ## D-020 · 22/10/2026 · Rotas no servidor e leitura da equipe
 
 Pedido: “as rotas fiquem salvas no sistema e sincronizem entre os aparelhos pra equipe abrir no celular com o mapa e o roteiro, testa e sobe”. Gestão salva a rota pelo ID no servidor, com revisão para impedir sobrescrita concorrente. Rascunhos locais pendentes são preservados. A equipe atual, identificada pelo ID do RH no crachá, lê apenas rotas liberadas para ela; custos não são enviados. Mapa e instruções acompanham o registro. O acompanhamento de rota não conclui O.S. Fonte: conversa do dono em 22/10/2026. Registrado pelo codex; aplicado em rotas-sync.js, rotas-equipe.js e pcp-sync/rotas-dados.mjs.
+
+## D-021 · 23/10/2026 · Motorista pelo RH
+
+Dono: "o motorista também tem que ser selecionado pelo cadastro do RH, sem digitar o nome, e mostrar primeiro os integrantes da equipe escolhida". Fonte: chat, implementado por Codex em rotas-ui.js e pcp-sync/rotas-dados.mjs. Persistir motoristaId de seis dígitos e conferir o nome no servidor; nenhuma associação automática por nome.

@@ -143,4 +143,4 @@
 
 /* Dados operacionais sempre visíveis, sem abrir os custos. */
 .rota-dados-principais{grid-template-columns:repeat(3,minmax(0,1fr))}.rota-dados-principais>label{min-width:0}.rota-dados-principais input,.rota-dados-principais select{width:100%;box-sizing:border-box}
-@media(max-width:600px){.rota-dados-principais{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.rota-dados-principais>label:has([data-rota="equipe"]),.rota-dados-principais>label:has([data-rota="veiculoId"]),.rota-dados-principais>label:has([data-rota="motorista"]){grid-column:1/-1}}
+@media(max-width:600px){.rota-dados-principais{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.rota-dados-principais>label:has([data-rota="equipe"]),.rota-dados-principais>label:has([data-rota="veiculoId"]),.rota-dados-principais>label:has([data-rota="motoristaId"]){grid-column:1/-1}}
