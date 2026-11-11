@@ -4447,6 +4447,24 @@ img.perf-logo{object-fit:cover}
 .rel-ent-total-periodo h3{margin:0;font-size:1rem}
 .rel-ent-total-periodo strong{font-size:clamp(1.2rem,2vw,1.6rem);min-width:0;overflow-wrap:anywhere}
 .rel-ent-total-periodo small{flex-basis:100%;color:var(--muted)}
+.rel-ent-produtos{min-width:0}
+.rel-ent-produtos-contexto{font-size:12px;color:var(--muted);margin:0 0 10px}
+.rel-ent-produtos-resumo{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:10px 12px;border-radius:9px;background:var(--bg);font-size:13px}
+.rel-ent-produtos-resumo>strong{color:var(--teal,#167a70);font-size:18px}
+.rel-ent-produtos-barras{padding:0;margin:8px 0;list-style:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:28px}
+.rel-ent-produtos-barras li{padding:10px 0;min-width:0}
+.rel-ent-produto-linha{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px}
+.rel-ent-produto-linha>span{min-width:0;overflow-wrap:anywhere}
+.rel-ent-produto-linha>span>small{color:var(--muted);margin-right:3px;font-variant-numeric:tabular-nums}
+.rel-ent-produto-linha>strong{flex-shrink:0;font-variant-numeric:tabular-nums;text-align:right}
+.rel-ent-produto-linha>strong>small{display:block;font-weight:400;color:var(--muted);margin-top:2px}
+.rel-ent-produto-trilho{height:5px;margin-top:5px;border-radius:6px;background:var(--bg);overflow:hidden}
+.rel-ent-produto-trilho>span{display:block;height:100%;border-radius:inherit;background:var(--teal,#167a70)}
+.rel-ent-produtos-pendente{display:flex;flex-wrap:wrap;justify-content:space-between;gap:5px 12px;padding:10px 12px;border-radius:8px;background:#fff7e6;font-size:12px;color:#785313}
+.rel-ent-produtos details>summary{cursor:pointer;font-size:12px;font-weight:600;padding:8px 0}
+.rel-ent-produtos .casa-tabela th:first-child{white-space:normal;min-width:150px}
+@media(max-width:760px){.rel-ent-produtos-barras{grid-template-columns:1fr}.rel-ent-produto-linha{font-size:12px}.rel-ent-produtos-resumo{gap:5px 10px}}
+@media print{.rel-ent-produtos-barras li{break-inside:avoid}.rel-ent-produto-trilho>span{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
 .rel-ent-periodo{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
 .rel-ent-ano{display:grid;gap:5px;min-width:110px}
 .rel-ent-ano label{font-size:13px;font-weight:650;color:#526378}

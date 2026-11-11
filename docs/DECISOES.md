@@ -197,3 +197,7 @@ Pedido: “as rotas fiquem salvas no sistema e sincronizem entre os aparelhos pr
 ## D-021 · 23/10/2026 · Motorista pelo RH
 
 Dono: "o motorista também tem que ser selecionado pelo cadastro do RH, sem digitar o nome, e mostrar primeiro os integrantes da equipe escolhida". Fonte: chat, implementado por Codex em rotas-ui.js e pcp-sync/rotas-dados.mjs. Persistir motoristaId de seis dígitos e conferir o nome no servidor; nenhuma associação automática por nome.
+
+## D-022 · 11/11/2026 · Produtos entregues no período
+
+Dono: "Só o produto, juntando os modelos". Fonte: chat, ao pedir um dashboard dos tipos de produtos entregues. Agrupar os itens pelo produto, reunindo seus modelos, no mesmo período selecionado no relatório de Entregas. Não agrupar pela categoria nem pelo título livre da O.S. Preparado por Codex em relatorios-entregas.js e pcp-sync/index.ts; publicação pendente do dono.

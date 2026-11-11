@@ -195,6 +195,43 @@ function relEntTotalPeriodoHTML(){
  if(comValor.some(relEntParcial))notas.push(`Dados até ${relEntData(r.dados.corteFonte || r.dados.ate)}`);
  return `<section class="rel-ent-total-periodo" aria-labelledby="rel-ent-total-titulo"><h3 id="rel-ent-total-titulo">Total entregue no período</h3><strong>${relEntValor(total,'entregue')}</strong><small>${esc(notas.join(' · '))}</small></section>`;
 }
+function relEntProdutosPeriodo(){
+ const meses=relEntMesesVisiveis(),validos=meses.filter(m=>Number.isFinite(m.entregue)),grupos=new Map();
+ let total=0,semClassificacao=0,osSemClassificacao=0;
+ const chave=s=>s.normalize('NFC').toLocaleLowerCase('pt-BR');
+ for(const m of validos){
+  const valorMes=Math.round(m.entregue*100);total+=valorMes;
+  const entregas=Array.isArray(m.entregas)?m.entregas:[];
+  if(entregas.some(o=>!Number.isFinite(o.valor))||entregas.reduce((s,o)=>s+Math.round(o.valor*100),0)!==valorMes){semClassificacao+=valorMes;osSemClassificacao+=entregas.length;continue;}
+  for(const o of entregas){
+   const valor=Math.round(o.valor*100),itens=o.produtos;
+   if(!Array.isArray(itens)||!itens.length||itens.some(it=>!Number.isFinite(it.valor)||it.valor<0)||itens.reduce((s,it)=>s+Math.round(it.valor*100),0)!==valor){semClassificacao+=valor;osSemClassificacao++;continue;}
+   let semTipo=false;
+   for(const it of itens){
+    const produto=typeof it.produto==='string'?it.produto.trim():'',v=Math.round(it.valor*100);
+    if(!produto){semClassificacao+=v;semTipo=true;continue;}
+    const k=chave(produto),g=grupos.get(k)||{produto,valor:0,ordens:new Set()};
+    g.valor+=v;g.ordens.add(String(o.numero));grupos.set(k,g);
+   }
+   if(semTipo)osSemClassificacao++;
+  }
+ }
+ return {total:validos.length?total:null,semClassificacao,osSemClassificacao,meses:meses.length,mesesComValor:validos.length,
+  fonteIndisponivel:validos.some(m=>m.produtosDisponiveis!==true),
+  tipos:[...grupos.values()].map(g=>({...g,rotulo:g.produto,os:g.ordens.size})).sort((a,b)=>b.valor-a.valor||a.rotulo.localeCompare(b.rotulo,'pt-BR'))};
+}
+function relEntProdutosHTML(){
+ if(!relEntPodeVer()||!REL_ENT.selecionados.has('entregue'))return '';
+ const p=relEntProdutosPeriodo(),dinheiro=v=>relEntValor(v===null?null:v/100,'entregue'),percentual=v=>p.total>0?relEntPercentual(v/p.total*100):'—';
+ const parcial=p.mesesComValor<p.meses;
+ const cabecalho=`<p class="rel-ent-produtos-contexto">${esc(relEntPeriodoTxt())} · modelos reunidos por produto${parcial?' · período com dados parciais':''}</p>`;
+ if(p.total===null)return relEntQuadroHTML('quadro-produtos','Tipos de produtos entregues',cabecalho+'<p class="text-muted">Sem informação de entregas neste período.</p>');
+ const max=p.tipos[0]?.valor||1;
+ const barras=p.tipos.slice(0,10).map((t,i)=>`<li><div class="rel-ent-produto-linha"><span><small>${i+1}</small> ${esc(t.rotulo)}</span><strong>${dinheiro(t.valor)} <small>${percentual(t.valor)}</small></strong></div><div class="rel-ent-produto-trilho" aria-hidden="true"><span style="width:${Math.max(0,t.valor/max*100).toFixed(2)}%"></span></div></li>`).join('');
+ const tabela=p.tipos.length?`<details data-rel-quadro="produtos-lista" ${REL_ENT.abertos['produtos-lista']?'open':''}><summary>Conferir os ${p.tipos.length} tipos do período</summary><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>Tipo de produto</th><th>O.S.</th><th>Valor entregue</th><th>Do período</th></tr></thead><tbody>${p.tipos.map(t=>`<tr><th>${esc(t.rotulo)}</th><td>${t.os}</td><td>${dinheiro(t.valor)}</td><td>${percentual(t.valor)}</td></tr>`).join('')}</tbody></table></div><p class="metricas-nota">Uma O.S. com tipos diferentes aparece em mais de uma linha. O valor de cada item entra uma vez.</p></details>`:'';
+ const pendente=p.semClassificacao||p.osSemClassificacao?`<p class="rel-ent-produtos-pendente"><strong>Sem classificação · ${dinheiro(p.semClassificacao)}</strong><span>${percentual(p.semClassificacao)} do período${p.osSemClassificacao?' · '+p.osSemClassificacao+' O.S. com itens incompletos':''}</span></p>`:'';
+ return relEntQuadroHTML('quadro-produtos','Tipos de produtos entregues',`<div class="rel-ent-produtos">${cabecalho}<div class="rel-ent-produtos-resumo"><strong>${p.tipos.length} tipos</strong><span>${dinheiro(p.total-p.semClassificacao)} classificados${p.total>0?' · '+percentual(p.total-p.semClassificacao):''}</span></div>${barras?`<ol class="rel-ent-produtos-barras" aria-label="Tipos por valor entregue">${barras}</ol>${p.tipos.length>10?'<p class="metricas-nota">Os 10 maiores tipos por valor. A lista completa está abaixo.</p>':''}`:'<p class="text-muted">'+(p.total===0&&!p.osSemClassificacao?'Nenhuma entrega com valor neste período.':'A classificação dos produtos não está disponível neste período.')+'</p>'}${pendente}${p.fonteIndisponivel?'<p class="metricas-nota">A fonte de tipos está indisponível em parte do período. Use “Atualizar fontes” para consultar novamente.</p>':''}${tabela}<p class="metricas-nota">Valor líquido distribuído proporcionalmente entre os itens da O.S. pela data da entrega. Classificação do cadastro atual.</p></div>`);
+}
 function relEntResumoHTML(){
  const r=REL_ENT,m=relEntMesesVisiveis().at(-1);if(!m)return '';
  return `<details class="rel-ent-resumo rel-ent-quadro" data-rel-quadro="resumo" ${(r.abertos.resumo??true)?'open':''}><summary aria-label="Indicadores do mês"><header><div><span class="perf-report-eyebrow">${r.foco?'MÊS SELECIONADO':'ÚLTIMO MÊS DO INTERVALO'}${relEntParcial(m)?' · MÊS EM ANDAMENTO':''}</span><h3>${MES_CURTO[Number(m.mes.slice(5))-1]} / ${m.mes.slice(0,4)}</h3></div><span>Até ${relEntData([new Date(Number(m.mes.slice(0,4)),Number(m.mes.slice(5)),0,12).toISOString().slice(0,10),r.dados.ate].sort()[0])} · clique para conferir</span></header><span class="rel-ent-recolher">Recolher</span><span class="rel-ent-expandir">Expandir</span></summary><div class="rel-ent-resumo-grid">${[...r.selecionados].map(k=>`<button class="rel-ent-indicador" data-rel-ponto="${m.mes}" data-rel-metrica="${k}" style="--indicador-cor:${r.indicadores[k].cor}"><span>${r.indicadores[k].nome}</span><strong>${relEntValor(m[k],k)}</strong><small>${k==='entregue'?`${m.entregas?.length || 0} O.S. na fonte`:k==='vendido'?`${m.vendas?.length || 0} O.S. por cadastro`:k==='retrabalho'?`${m.baseRetrabalho || 0} instalações na base`:k==='funcionarios'?(m.rh?.piso?'Histórico mínimo':'Ativos em algum dia do mês'):'Pagamentos registrados no ERP'}</small></button>`).join('')}</div></details>`;
@@ -309,7 +346,7 @@ function renderRelatoriosEntregas() {
  <form id="rel-ent-intervalo" class="rel-ent-intervalo-form"><label>Do mês<input type="month" id="rel-ent-inicio" min="2020-01" max="${anoAtual}-12" value="${r.intervalo?.inicio || r.ano+'-01'}" required></label><label>Até o mês<input type="month" id="rel-ent-fim" min="2020-01" max="${anoAtual}-12" value="${r.intervalo?.fim || r.ano+'-12'}" required></label><button class="btn-ghost" type="submit" ${r.carregando?'disabled':''}>Aplicar período</button><span>Selecione meses do mesmo ano ou entre anos.</span><p id="rel-ent-intervalo-erro" role="alert"></p></form>
  </details></details>
  <div id="rel-ent-imprimir">${r.erro?`<p role="alert" class="rel-ent-aviso">${esc(r.erro)} Use “Atualizar fontes” para tentar de novo.</p>`:''}${r.carregando?'<p role="status">Consultando histórico do servidor e do RH…</p>':''}${r.dados?`${relEntTotalPeriodoHTML()}<p class="metricas-nota">${esc(relEntPeriodoTxt())} · dados até ${relEntData(r.dados.ate)}. ${r.foco?'Resumo e tabelas: '+MES_CURTO[Number(r.foco)-1]+'. ':''}Gráficos: período indicado em cada título. Clique nos pontos ou nos valores da tabela para conferir o mês. Lacunas significam informação indisponível, nunca zero.</p>
- ${relEntPontualidadeHTML()}
+ ${relEntProdutosHTML()}${relEntPontualidadeHTML()}
  ${ks.length?`${relEntResumoHTML()}${ks.some(k=>r.indicadores[k].unidade==='R$')?relEntGrafico(ks.filter(k=>r.indicadores[k].unidade==='R$'),'Produção e dinheiro · R$'):''}${ks.includes('entregue')?relEntQuadroHTML('quadro-media','Entregue por pessoa da produção',relEntMediasHTML(),false):''}${ks.includes('funcionarios')?relEntGrafico(['funcionarios'],'Tamanho da equipe · pessoas'):''}${ks.includes('retrabalho')?relEntGrafico(['retrabalho'],'Qualidade · índice de retrabalho'):''}
  <details class="rel-ent-quadro" data-rel-quadro="conferencia" ${r.abertos.conferencia?'open':''}><summary><h3>Conferência mês a mês</h3></summary><div class="rel-ent-quadro-corpo"><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>Mês</th>${ks.map(k=>`<th>${r.indicadores[k].nome}</th>`).join('')}</tr></thead><tbody>${relEntMesesVisiveis().map(m=>`<tr><th>${relEntMesTxt(m)}</th>${ks.map(k=>`<td><button class="btn-ghost btn-sm" data-rel-ponto="${m.mes}" data-rel-metrica="${k}">${relEntValor(m[k],k)}${k==='funcionarios'&&m.rh?.piso?' (mínimo)':''}</button></td>`).join('')}</tr>`).join('')}</tbody></table></div></div></details>`:'<p>Marque pelo menos um indicador para mostrar os gráficos.</p>'}
  ${relEntDetalhe()}<details class="rel-ent-fontes" data-rel-quadro="fontes" ${r.abertos.fontes?'open':''}><summary>Como os indicadores são calculados</summary>${Object.entries(r.dados.notas).map(([k,v])=>`<p><strong>${r.indicadores[k]?.nome || k}:</strong> ${esc(v)}</p>`).join('')}<p>Funcionários: vínculos ativos em algum dia do mês, pelas admissões e desligamentos do RH. Histórico anterior a ${esc(r.equipe.desdeQuando || 'data não conhecida')} pode estar incompleto. Não inclui fichas sem data de admissão válida.</p><p>Consulta: ${esc(new Date(r.dados.consultadoEm).toLocaleString('pt-BR'))}. Carga do fluxo financeiro: ${esc(r.dados.recebimentosEm?new Date(r.dados.recebimentosEm).toLocaleString('pt-BR'):'indisponível')}.</p><ul>${relEntMesesVisiveis().map(m=>`<li>${m.mes}: entregas atualizadas em ${esc(m.entregasEm?new Date(m.entregasEm).toLocaleString('pt-BR'):'sem carga')}</li>`).join('')}</ul></details>`:''}</div></div>`;

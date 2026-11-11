@@ -1960,6 +1960,46 @@ Deno.serve(async (req: Request) => {
            A previsão do ERP que falta no pacote vem do cartão do PCP (a mesma
            reserva do quadro de prazo de Entregas, casa.js slaEntregas). */
         const numerosPCP=[...new Set(meses.flatMap(mes=>{const pk:any=pacotes.get("entregues:"+mes);return (Array.isArray(pk?.os)?pk.os:[]).map((r:any)=>String(r.numero || "").trim()).filter(Boolean);}))];
+        // A classificação vem dos itens da O.S., nunca do título livre do serviço.
+        // Buscar pelo número inclui ordens cadastradas antes do ano da entrega.
+        const produtosPorOS=new Map<string,any>();let produtosDisponiveis=true;
+        try {
+          for(let i=0;i<numerosPCP.length;i+=100){
+            let after="";
+            for(let pagina=0;;pagina++){
+              if(pagina>=100)throw new Error("Limite da consulta de produtos.");
+              let q=sb.from("painel_ordens").select("id,numero,itens").in("numero",numerosPCP.slice(i,i+100)).order("id").limit(500);
+              if(after)q=q.gt("id",after);
+              const {data,error}=await q;if(error)throw new Error(error.message);
+              const rows=data || [];
+              for(const o of rows){const n=String(o.numero).trim();produtosPorOS.set(n,produtosPorOS.has(n)?null:o.itens);}
+              if(rows.length<500)break;
+              const next=String(rows.at(-1).id);if(next<=after)throw new Error("Paginação de produtos inconsistente.");after=next;
+            }
+          }
+        }catch(_e){produtosDisponiveis=false;produtosPorOS.clear();}
+        const produtosDaEntrega=(n:string,valor:number|null)=>{
+          const itens=produtosPorOS.get(n),centavos=valor===null?null:Math.round(valor*100);
+          if(!Array.isArray(itens)||!itens.length||centavos===null||!Number.isSafeInteger(centavos)||centavos<0)return null;
+          const texto=(s:any)=>typeof s==='string'?s.trim().replace(/\s+/g,' '):'';
+          const linhas=itens.map((it:any)=>{
+            const v=it?.valorTotal,peso=(typeof v==='number'||typeof v==='string'&&v.trim())?Math.round(Number(v)*100):NaN;
+            return {produto:texto(it?.produto),peso};
+          });
+          if(linhas.some(it=>!Number.isSafeInteger(it.peso)||it.peso<0))return null;
+          const soma=linhas.reduce((s,it)=>s+it.peso,0);
+          if(!Number.isSafeInteger(soma)||soma===0&&centavos>0)return null;
+          // Rateio descritivo do líquido do pacote, com resto em centavos.
+          // Não modifica itens, descontos, entregas ou fechamentos.
+          const partes=linhas.map((it,i)=>{
+            const numerador=BigInt(centavos)*BigInt(it.peso),denominador=BigInt(soma||1);
+            return {...it,i,centavos:Number(numerador/denominador),resto:numerador%denominador};
+          });
+          const sobra=centavos-partes.reduce((s,it)=>s+it.centavos,0);
+          const ordem=[...partes].sort((a,b)=>a.resto===b.resto?a.i-b.i:a.resto>b.resto?-1:1);
+          for(let i=0;i<sobra;i++)ordem[i].centavos++;
+          return partes.map(it=>({produto:it.produto,valor:it.centavos/100}));
+        };
         // A indisponibilidade da ABC não apaga o relatório existente. Nenhum
         // cliente sem vínculo vira classe C e nenhuma classe é recalculada aqui.
         let abc:any={ano:String(ano),disponivel:false,clientesAmais:[],erro:"Curva ABC indisponível. Atualize as fontes para tentar novamente."};
@@ -1985,7 +2025,7 @@ Deno.serve(async (req: Request) => {
           }).map((r:any)=>{
             const n=String(r.numero || "").trim(),card=osPCP.get(n),prevCard=String(card?.previsaoEntrega || "").slice(0,10);
             const previsao=String(r.previsao || "") || (/^\d{4}-\d{2}-\d{2}$/.test(prevCard)?prevCard:"");
-            return {numero:r.numero,cliente:r.cliente,data:r.data,previsao,...(!String(r.previsao || "") && previsao?{previsaoFonte:"pcp"}:{}),valor:numero(r.valor),pcp:medidaPCP(n),abc:abcOrdens.get(n)||null};
+            return {numero:r.numero,cliente:r.cliente,data:r.data,previsao,...(!String(r.previsao || "") && previsao?{previsaoFonte:"pcp"}:{}),valor:numero(r.valor),produtos:produtosDaEntrega(n,numero(r.valor)),pcp:medidaPCP(n),abc:abcOrdens.get(n)||null};
           });
           const vendas=ordens.filter(r=>String(r.data).startsWith(mes)).map(r=>({numero:r.numero,cliente:r.cliente,data:r.data,valor:numero(r.valor)}));
           /* O % DE RETRABALHO É POR O.S. (linha Baixa da auditoria de
@@ -2000,7 +2040,7 @@ Deno.serve(async (req: Request) => {
           return {mes,entregue:pacote?.v>=2 && Array.isArray(pacote.os)?soma(entregas):null,
             vendido:vendas.length?soma(vendas):null,recebido:entradas && Object.prototype.hasOwnProperty.call(entradas,mes)?numero(entradas[mes]):null,
             retrabalho:instalacoes.length?100*retrabalhos.length/instalacoes.length:null,baseRetrabalho:instalacoes.length,
-            entregasCarregadas:!!(pacote?.v>=2 && Array.isArray(pacote.os)),entregas,vendas,retrabalhos,entregasEm:pacote?.em || null};
+            entregasCarregadas:!!(pacote?.v>=2 && Array.isArray(pacote.os)),produtosDisponiveis,entregas,vendas,retrabalhos,entregasEm:pacote?.em || null};
         });
         const {ordens:_abcOrdens,...abcPublica}=abc;
         return resp({ano,de,ate,meses:linhas,abc:abcPublica,consultadoEm:new Date().toISOString(),recebimentosEm:fluxo.data?.atualizado_em || null,
@@ -2008,6 +2048,7 @@ Deno.serve(async (req: Request) => {
           recebido:"Pagamentos de contas a receber pela data de pagamento/crédito, no fluxo mensal do Painel. Fonte agregada: não contém títulos individuais. Anos preservados podem ter atualização anterior à carga indicada.",
           retrabalho:"Instalações finalizadas no PCP no mês com marca de retrabalho ÷ instalações finalizadas registradas no mesmo mês. Histórico operacional pode ser incompleto; ausência de marca não comprova inspeção de qualidade.",
           entregue:"O.S. com status entregue no Mubisys pela data de entrega, incluindo retiradas. Valores líquidos; alterações posteriores dependem de nova sincronização.",
+          produtos:"Produtos dos itens do cadastro carregado no Painel, reunindo todos os modelos do mesmo produto. O líquido de cada O.S. entregue é distribuído proporcionalmente ao valor dos itens, com ajuste de centavos. É um rateio descritivo, não faturamento por produto. Sem itens válidos ou sem produto, o valor aparece sem classificação. A classificação atual pode diferir da existente na data da entrega.",
           pontualidadePCP:"A régua do atraso do PCP, a mesma da ficha e das ocorrências da comissão (D-011): o prazo combinado no PCP (a primeira agenda congelada, ou a corrigida pela gestão com motivo) contra o dia da entrega (a conferência da gestão, senão o lançamento, senão a finalização). É ocorrência e não tira nada sozinha. Sem prazo combinado, ou com a entrega ainda sem o dia (baixa a lançar, saldo a conferir), a O.S. fica como não medida, nunca zero; a O.S. que não passou pelo PCP não tem essa medida.",
           pontualidade:"Previsão do Mubisys comparada à entrega efetiva, por O.S., incluindo retiradas. Entrega antecipada ou na data conta como no prazo; atraso em dias corridos. Percentuais usam somente O.S. com as duas datas válidas. Previsão conforme a última carga do ERP (pode incluir previsão calculada a partir do prazo cadastrado); sem ela no pacote, a previsão do ERP guardada no cartão do PCP. É a régua documental do ERP, não a do atraso do PCP. Não mede pedidos ainda em aberto nem altera abonos ou comissões."}});
       }
