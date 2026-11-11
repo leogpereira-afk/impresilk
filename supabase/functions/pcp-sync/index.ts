@@ -1960,15 +1960,24 @@ Deno.serve(async (req: Request) => {
            A previsão do ERP que falta no pacote vem do cartão do PCP (a mesma
            reserva do quadro de prazo de Entregas, casa.js slaEntregas). */
         const numerosPCP=[...new Set(meses.flatMap(mes=>{const pk:any=pacotes.get("entregues:"+mes);return (Array.isArray(pk?.os)?pk.os:[]).map((r:any)=>String(r.numero || "").trim()).filter(Boolean);}))];
+        // Lotes independentes não precisam somar a latência de rede do ano.
+        // Esperar todos os workers evita resultados tardios após uma falha.
+        async function lerLotes(tamanho:number,ler:(numeros:string[])=>Promise<void>){
+          let proximo=0;
+          const resultados=await Promise.allSettled(Array.from({length:Math.min(4,Math.ceil(numerosPCP.length/tamanho))},async()=>{
+            while(proximo<numerosPCP.length){const inicio=proximo;proximo+=tamanho;await ler(numerosPCP.slice(inicio,inicio+tamanho));}
+          }));
+          const falha=resultados.find(r=>r.status==='rejected');if(falha?.status==='rejected')throw falha.reason;
+        }
         // A classificação vem dos itens da O.S., nunca do título livre do serviço.
         // Buscar pelo número inclui ordens cadastradas antes do ano da entrega.
         const produtosPorOS=new Map<string,any>();let produtosDisponiveis=true;
         try {
-          for(let i=0;i<numerosPCP.length;i+=100){
+          await lerLotes(100,async numeros=>{
             let after="";
             for(let pagina=0;;pagina++){
               if(pagina>=100)throw new Error("Limite da consulta de produtos.");
-              let q=sb.from("painel_ordens").select("id,numero,itens").in("numero",numerosPCP.slice(i,i+100)).order("id").limit(500);
+              let q=sb.from("painel_ordens").select("id,numero,itens").in("numero",numeros).order("id").limit(500);
               if(after)q=q.gt("id",after);
               const {data,error}=await q;if(error)throw new Error(error.message);
               const rows=data || [];
@@ -1976,7 +1985,7 @@ Deno.serve(async (req: Request) => {
               if(rows.length<500)break;
               const next=String(rows.at(-1).id);if(next<=after)throw new Error("Paginação de produtos inconsistente.");after=next;
             }
-          }
+          });
         }catch(_e){produtosDisponiveis=false;produtosPorOS.clear();}
         const produtosDaEntrega=(n:string,valor:number|null)=>{
           const itens=produtosPorOS.get(n),centavos=valor===null?null:Math.round(valor*100);
@@ -2009,11 +2018,11 @@ Deno.serve(async (req: Request) => {
         }catch(_e){/* O relatório de entregas continua disponível sem a segmentação. */}
         const abcOrdens=new Map((abc.ordens || []).map((o:any)=>[String(o.numero),{classe:o.classe,...(o.classe==='A+'?{chave:o.chave}:{})}]));
         const osPCP=new Map<string,any>();
-        for(let i=0;i<numerosPCP.length;i+=200){
-          const {data:regs,error:erroPCP}=await sb.from("pcp_registros").select("id,registro").eq("colecao","os").eq("apagado",false).in("registro->>numero",numerosPCP.slice(i,i+200));
+        await lerLotes(200,async numeros=>{
+          const {data:regs,error:erroPCP}=await sb.from("pcp_registros").select("id,registro").eq("colecao","os").eq("apagado",false).in("registro->>numero",numeros);
           if(erroPCP)throw new Error(erroPCP.message);
           for(const x of regs || []){const n=String(x.registro?.numero || "").trim();if(n && !osPCP.has(n))osPCP.set(n,{...x.registro,id:x.id});}
-        }
+        });
         const medidaPCP=(n:string)=>{const o=osPCP.get(n);if(!o)return null;const a:any=atrasoDaOS(o,hoje);const alerta=prazoParaConferir(o);return {...a,...(alerta?{alerta:{tipo:alerta.tipo,motivo:alerta.motivo}}:{})};};
         const linhas=meses.map(mes=>{
           if(mes>ate.slice(0,7))return {mes,futuro:true};

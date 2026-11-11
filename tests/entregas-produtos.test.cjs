@@ -33,6 +33,25 @@ test('leitura por número percorre lotes de produtos e não mistura cadastros fo
  f.pcp_meta[0].valor.os=f.painel_ordens.map(o=>({numero:o.numero,data:'2025-02-10',valor:90}));
  const m=await rel(f);assert.equal(m.entregas.length,105);assert.ok(m.entregas.every(o=>o.produtos?.length===2));assert.equal(m.entregue,9450);
 });
+test('consulta anual lê lotes independentes com concorrência limitada, sem somar a latência de cada lote',async()=>{
+ const f=fonte();f.painel_ordens=Array.from({length:1050},(_,i)=>({id:'ficticio-'+i,numero:'EXEMPLO-'+i,data:'2024-01-01',itens:itens()}));
+ f.pcp_meta[0].valor.os=f.painel_ordens.map(o=>({numero:o.numero,data:'2025-02-10',valor:90}));
+ const e=await edge('pcp-sync',f),from=e.cliente.from,ativos={produtos:0,pcp:0},maximos={produtos:0,pcp:0};
+ e.cliente.from=function(t){const q=from.call(this,t),select=q.select,filtrar=q.in;let colunas='',tipo='';
+  q.select=function(c){colunas=c;return select.call(q,c);};
+  q.in=function(k,v){if(t==='painel_ordens'&&colunas==='id,numero,itens')tipo='produtos';if(t==='pcp_registros'&&k==='registro->>numero')tipo='pcp';return filtrar.call(q,k,v);};
+  const then=q.then;q.then=function(resolve,reject){if(!tipo)return then.call(q,resolve,reject);ativos[tipo]++;maximos[tipo]=Math.max(maximos[tipo],ativos[tipo]);setImmediate(()=>{ativos[tipo]--;then.call(q,resolve,reject);});};return q;
+ };
+ const r=await e.call({action:'relatorioEntregas',ano:2025});assert.equal(r.status,200);assert.equal(r.meses[1].entregue,94500);assert.equal(r.meses[1].entregas.length,1050);assert.ok(r.meses[1].entregas.every(o=>o.produtos?.length===2));
+ for(const tipo of ['produtos','pcp']){assert.ok(maximos[tipo]>1,`${tipo}: lotes não devem esperar uns pelos outros`);assert.ok(maximos[tipo]<=4,`${tipo}: no máximo quatro consultas simultâneas`);assert.equal(ativos[tipo],0);}
+});
+test('falha em um lote aguarda as leituras em curso antes de descartar a classificação parcial',async()=>{
+ const f=fonte();f.painel_ordens=Array.from({length:205},(_,i)=>({id:'ficticio-'+i,numero:'EXEMPLO-'+i,data:'2024-01-01',itens:itens()}));
+ f.pcp_meta[0].valor.os=f.painel_ordens.map(o=>({numero:o.numero,data:'2025-02-10',valor:90}));
+ const e=await edge('pcp-sync',f),from=e.cliente.from;let consultas=0,pendentes=0;
+ e.cliente.from=function(t){const q=from.call(this,t),select=q.select;q.select=function(c){select.call(q,c);if(t==='painel_ordens'&&c==='id,numero,itens'){const then=q.then,n=++consultas;q.then=function(resolve,reject){if(n===1)return resolve({data:null,error:{message:'Falha fictícia'}});pendentes++;setImmediate(()=>{pendentes--;then.call(q,resolve,reject);});};}return q;};return q;};
+ const r=await e.call({action:'relatorioEntregas',ano:2025});assert.equal(r.status,200);assert.equal(pendentes,0);assert.equal(r.meses[1].entregue,18450);assert.equal(r.meses[1].produtosDisponiveis,false);assert.ok(r.meses[1].entregas.every(o=>o.produtos===null));
+});
 test('tipos de produtos continuam restritos à gestão',async()=>{
  const e=await edge('pcp-sync',fonte());for(const papel of ['montagem','operacao','comercial'])assert.equal((await e.call({action:'relatorioEntregas',ano:2025},{papel})).status,403);
 });

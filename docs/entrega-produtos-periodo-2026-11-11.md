@@ -12,3 +12,5 @@ Preparado na v199, junto do cartão de total entregue desta frente. Publicação
 Verificação final: node scripts/verificar.cjs, 2220 testes passaram, zero falhas ou pulados. Interface conferida no computador e a 390 px, sem rolagem horizontal no celular. Prévia com dados fictícios, incluindo modelos diferentes do mesmo produto e itens sem classificação.
 
 Preparação da publicação: correção isolada do calendário do teste de acumulado em tests/casa.test.cjs publicada na main em 884e56a. O ramo da v199 foi rebaseado sobre essa base. A ordem de liberação é servidor e tela, após Deploy verde, verificação completa e conferência da vez. pcp-mubisys e módulos compartilhados não mudaram; não há migração.
+
+Na conferência em produção, a consulta anual excedeu a espera da tela: os lotes de produtos e fichas somavam a latência de rede em sequência. As consultas individuais terminaram sem erro, mas depois do limite do navegador. Correção no servidor: até quatro lotes independentes simultâneos, aguardando todos antes de descartar uma fonte parcial. Testes com dados fictícios cobrem a concorrência limitada e a falha com leituras ainda em curso.
