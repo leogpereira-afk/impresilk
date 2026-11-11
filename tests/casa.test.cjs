@@ -791,7 +791,7 @@ test('tela: ano sem nenhum mês carregado aparece com botão, não sumido', () =
 });
 
 test('tela: acumulado de ano sem mês no período não vira R$ 0,00', () => {
-  const t = casa([], { _anosERP: [2026, 2025] });
+  const t = casa([], { _anosERP: [2026, 2025] }, null, '2026-10-15T12:00:00-03:00');
   const html = t.run(`
     STORE.resumoEntregues = () => (${JSON.stringify({
       meses: [mesR('2025-10', 411123), mesR('2026-09', 410879)], faltando: [],
