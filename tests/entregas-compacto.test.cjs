@@ -1,7 +1,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-function tela(dia='2026-10-06'){
+function tela(dia='2026-10-06',globais={}){
  const D=class extends Date{constructor(...a){super(...(a.length?a:[dia+'T12:00:00Z']));}};
- const c=vm.createContext({console,Date:D,Set,Map,Number,Object,Intl,MES_CURTO:['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'],esc:s=>String(s),OPERACAO:{dia:()=>dia}});
+ const c=vm.createContext({console,Date:D,Set,Map,Number,Object,Intl,MES_CURTO:['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'],esc:s=>String(s),OPERACAO:{dia:()=>dia},...globais});
  vm.runInContext(fs.readFileSync('relatorios-entregas.js','utf8'),c);return s=>vm.runInContext(s,c);
 }
 test('abertura mostra o mês corrente e seus valores parciais, inclusive em janeiro',()=>{
@@ -36,4 +36,23 @@ test('quadro fechado continua fechado quando o relatório é redesenhado',()=>{
 test('atalho de outubro depois de um recorte passado recupera o corte atual e as O.S. do mês',()=>{
  const run=tela();run("REL_ENT.ano=2026;REL_ENT.intervalo={inicio:'2026-01',fim:'2026-02'};REL_ENT.dados={de:'2026-01-01',ate:'2026-02-28',corteFonte:'2026-10-06',meses:[{mes:'2026-02',entregue:1},{mes:'2026-10',entregue:2}]}" );
  run("relEntSelecionarMes('10')");assert.equal(run('REL_ENT.intervalo'),null);assert.equal(run('REL_ENT.dados.ate'),'2026-10-06');assert.equal(run('relEntMesesVisiveis()[0].entregue'),2);
+});
+
+test('total soma o intervalo, indica lacunas e volta a um só ano no atalho mensal',()=>{
+ const painel={innerHTML:'',querySelector:()=>({}),querySelectorAll:()=>[]};
+ const run=tela('2026-10-06',{document:{getElementById:()=>painel},STATE:{user:{papel:'pcp'}}});
+ run(`REL_ENT.ano=2026;REL_ENT.foco='';REL_ENT.intervalo={inicio:'2025-12',fim:'2026-02'};
+  REL_ENT.selecionados=new Set(['entregue']);REL_ENT.equipe={};
+  REL_ENT.dados={ate:'2026-02-28',corteFonte:'2026-10-06',notas:{},meses:[
+   {mes:'2025-01',entregue:500},{mes:'2025-12',entregue:100.25},
+   {mes:'2026-01',entregue:200.25},{mes:'2026-02',entregue:null},{mes:'2026-03',entregue:900}
+  ]};`);
+ const cartao=()=>{
+  run('renderRelatoriosEntregas()');
+  return painel.innerHTML.match(/<section class="rel-ent-total-periodo"[^>]*>[\s\S]*?<\/section>/)?.[0] || '';
+ };
+ assert.match(cartao(),/Total entregue no período.*R\$\s*300,50.*Soma parcial.*2 de 3 meses com dados/);
+ run("relEntSelecionarMes('01')");
+ assert.match(cartao(),/R\$\s*200,25/);
+ assert.doesNotMatch(cartao(),/Soma parcial/);
 });

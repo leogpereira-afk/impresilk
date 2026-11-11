@@ -59,8 +59,12 @@ function relEntValidarIntervalo(inicio,fim){
  return {ok:true,inicio,fim};
 }
 function relEntSelecionarMes(mes){
- const r=REL_ENT;r.foco=mes;r.intervalo=null;r.mes=null;r.limitePontualidade=50;
- if(r.dados){r.dados.de=r.ano+'-01-01';r.dados.ate=[r.ano+'-12-31',r.dados.corteFonte||r.dados.ate].sort()[0];}
+ const r=REL_ENT, tinhaIntervalo=Boolean(r.intervalo);
+ r.foco=mes;r.intervalo=null;r.mes=null;r.limitePontualidade=50;
+ if(r.dados){
+  if(tinhaIntervalo)r.dados.meses=r.dados.meses.filter(m=>m.mes.startsWith(r.ano+'-'));
+  r.dados.de=r.ano+'-01-01';r.dados.ate=[r.ano+'-12-31',r.dados.corteFonte||r.dados.ate].sort()[0];
+ }
 }
 function relEntAtualizarCorte(){
  const r=REL_ENT;if(!r.dados||!r.intervalo)return;
@@ -178,6 +182,19 @@ function relEntChipsHTML(){
  const r=REL_ENT,hoje=OPERACAO.dia(new Date()).slice(0,7),anoInteiro=r.intervalo?r.intervalo.inicio===`${r.ano}-01`&&r.intervalo.fim===`${r.ano}-12`:!r.foco,mesAtivo=r.intervalo?(r.intervalo.inicio===r.intervalo.fim?r.intervalo.inicio.slice(5):''):r.foco;
  return `<nav class="rel-ent-meses" aria-label="Mês do relatório"><button class="btn-ghost ${anoInteiro?'active':''}" data-rel-mes="" aria-pressed="${anoInteiro}">Ano completo</button>${MES_CURTO.map((nome,i)=>{const mm=String(i+1).padStart(2,'0'),futuro=`${r.ano}-${mm}`>hoje;return `<button class="btn-ghost ${mesAtivo===mm?'active':''}" data-rel-mes="${mm}" aria-label="${nome} de ${r.ano}" aria-pressed="${mesAtivo===mm}" ${futuro?'disabled':''}>${nome}</button>`;}).join('')}</nav>`;
 }
+function relEntTotalPeriodoHTML(){
+ const r=REL_ENT;
+ if(!relEntPodeVer() || !r.selecionados.has('entregue'))return '';
+ const meses=relEntMesesVisiveis(), comValor=meses.filter(m=>Number.isFinite(m.entregue));
+ const total=comValor.length ? comValor.reduce((s,m)=>s+Math.round(m.entregue*100),0)/100 : null;
+ const notas=[relEntPeriodoTxt()];
+ if(comValor.length<meses.length){
+  if(comValor.length)notas.push('Soma parcial');
+  notas.push(`${comValor.length} de ${meses.length} meses com dados`);
+ }
+ if(comValor.some(relEntParcial))notas.push(`Dados até ${relEntData(r.dados.corteFonte || r.dados.ate)}`);
+ return `<section class="rel-ent-total-periodo" aria-labelledby="rel-ent-total-titulo"><h3 id="rel-ent-total-titulo">Total entregue no período</h3><strong>${relEntValor(total,'entregue')}</strong><small>${esc(notas.join(' · '))}</small></section>`;
+}
 function relEntResumoHTML(){
  const r=REL_ENT,m=relEntMesesVisiveis().at(-1);if(!m)return '';
  return `<details class="rel-ent-resumo rel-ent-quadro" data-rel-quadro="resumo" ${(r.abertos.resumo??true)?'open':''}><summary aria-label="Indicadores do mês"><header><div><span class="perf-report-eyebrow">${r.foco?'MÊS SELECIONADO':'ÚLTIMO MÊS DO INTERVALO'}${relEntParcial(m)?' · MÊS EM ANDAMENTO':''}</span><h3>${MES_CURTO[Number(m.mes.slice(5))-1]} / ${m.mes.slice(0,4)}</h3></div><span>Até ${relEntData([new Date(Number(m.mes.slice(0,4)),Number(m.mes.slice(5)),0,12).toISOString().slice(0,10),r.dados.ate].sort()[0])} · clique para conferir</span></header><span class="rel-ent-recolher">Recolher</span><span class="rel-ent-expandir">Expandir</span></summary><div class="rel-ent-resumo-grid">${[...r.selecionados].map(k=>`<button class="rel-ent-indicador" data-rel-ponto="${m.mes}" data-rel-metrica="${k}" style="--indicador-cor:${r.indicadores[k].cor}"><span>${r.indicadores[k].nome}</span><strong>${relEntValor(m[k],k)}</strong><small>${k==='entregue'?`${m.entregas?.length || 0} O.S. na fonte`:k==='vendido'?`${m.vendas?.length || 0} O.S. por cadastro`:k==='retrabalho'?`${m.baseRetrabalho || 0} instalações na base`:k==='funcionarios'?(m.rh?.piso?'Histórico mínimo':'Ativos em algum dia do mês'):'Pagamentos registrados no ERP'}</small></button>`).join('')}</div></details>`;
@@ -291,7 +308,7 @@ function renderRelatoriosEntregas() {
  <details class="rel-ent-controles" data-rel-quadro="filtros" ${(r.abertos.filtros??true)?'open':''}><summary>Período e filtros <span>${esc(relEntPeriodoTxt())}</span></summary><div class="rel-ent-periodo"><div class="rel-ent-ano"><label for="rel-ent-ano">Ano (atalho)</label><select id="rel-ent-ano">${anos.map(a=>`<option ${a===r.ano?'selected':''}>${a}</option>`).join('')}</select></div><span class="rel-ent-atualizado">${r.dados?`Dados até ${relEntData(r.dados.ate)}`:'Selecione o período para comparar'}</span><button class="btn-ghost" id="rel-ent-refresh" ${r.carregando?'disabled':''}>${r.carregando?'Consultando…':'Atualizar fontes'}</button></div>${relEntChipsHTML()}<details class="rel-ent-filtros-avancados" data-rel-quadro="filtros-avancados" ${r.abertos['filtros-avancados']?'open':''}><summary>Personalizar período e indicadores</summary><fieldset class="rel-ent-series"><legend>Indicadores para comparar</legend><div class="rel-ent-series-opcoes">${Object.entries(r.indicadores).map(([k,i])=>`<label style="--serie-cor:${i.cor}"><input type="checkbox" data-rel-serie="${k}" ${r.selecionados.has(k)?'checked':''}><span>${i.nome}</span></label>`).join('')}</div><div class="rel-ent-series-acoes"><button class="btn-ghost btn-sm" id="rel-ent-todos">Ver todos</button><button class="btn-ghost btn-sm" id="rel-ent-limpar">Limpar seleção</button></div></fieldset>
  <form id="rel-ent-intervalo" class="rel-ent-intervalo-form"><label>Do mês<input type="month" id="rel-ent-inicio" min="2020-01" max="${anoAtual}-12" value="${r.intervalo?.inicio || r.ano+'-01'}" required></label><label>Até o mês<input type="month" id="rel-ent-fim" min="2020-01" max="${anoAtual}-12" value="${r.intervalo?.fim || r.ano+'-12'}" required></label><button class="btn-ghost" type="submit" ${r.carregando?'disabled':''}>Aplicar período</button><span>Selecione meses do mesmo ano ou entre anos.</span><p id="rel-ent-intervalo-erro" role="alert"></p></form>
  </details></details>
- <div id="rel-ent-imprimir">${r.erro?`<p role="alert" class="rel-ent-aviso">${esc(r.erro)} Use “Atualizar fontes” para tentar de novo.</p>`:''}${r.carregando?'<p role="status">Consultando histórico do servidor e do RH…</p>':''}${r.dados?`<p class="metricas-nota">${esc(relEntPeriodoTxt())} · dados até ${relEntData(r.dados.ate)}. ${r.foco?'Resumo e tabelas: '+MES_CURTO[Number(r.foco)-1]+'. ':''}Gráficos: período indicado em cada título. Clique nos pontos ou nos valores da tabela para conferir o mês. Lacunas significam informação indisponível, nunca zero.</p>
+ <div id="rel-ent-imprimir">${r.erro?`<p role="alert" class="rel-ent-aviso">${esc(r.erro)} Use “Atualizar fontes” para tentar de novo.</p>`:''}${r.carregando?'<p role="status">Consultando histórico do servidor e do RH…</p>':''}${r.dados?`${relEntTotalPeriodoHTML()}<p class="metricas-nota">${esc(relEntPeriodoTxt())} · dados até ${relEntData(r.dados.ate)}. ${r.foco?'Resumo e tabelas: '+MES_CURTO[Number(r.foco)-1]+'. ':''}Gráficos: período indicado em cada título. Clique nos pontos ou nos valores da tabela para conferir o mês. Lacunas significam informação indisponível, nunca zero.</p>
  ${relEntPontualidadeHTML()}
  ${ks.length?`${relEntResumoHTML()}${ks.some(k=>r.indicadores[k].unidade==='R$')?relEntGrafico(ks.filter(k=>r.indicadores[k].unidade==='R$'),'Produção e dinheiro · R$'):''}${ks.includes('entregue')?relEntQuadroHTML('quadro-media','Entregue por pessoa da produção',relEntMediasHTML(),false):''}${ks.includes('funcionarios')?relEntGrafico(['funcionarios'],'Tamanho da equipe · pessoas'):''}${ks.includes('retrabalho')?relEntGrafico(['retrabalho'],'Qualidade · índice de retrabalho'):''}
  <details class="rel-ent-quadro" data-rel-quadro="conferencia" ${r.abertos.conferencia?'open':''}><summary><h3>Conferência mês a mês</h3></summary><div class="rel-ent-quadro-corpo"><div class="casa-tabela-wrap"><table class="casa-tabela"><thead><tr><th>Mês</th>${ks.map(k=>`<th>${r.indicadores[k].nome}</th>`).join('')}</tr></thead><tbody>${relEntMesesVisiveis().map(m=>`<tr><th>${relEntMesTxt(m)}</th>${ks.map(k=>`<td><button class="btn-ghost btn-sm" data-rel-ponto="${m.mes}" data-rel-metrica="${k}">${relEntValor(m[k],k)}${k==='funcionarios'&&m.rh?.piso?' (mínimo)':''}</button></td>`).join('')}</tr>`).join('')}</tbody></table></div></div></details>`:'<p>Marque pelo menos um indicador para mostrar os gráficos.</p>'}

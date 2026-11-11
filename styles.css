@@ -4439,6 +4439,14 @@ img.perf-logo{object-fit:cover}
 /* Relatórios têm grupos próprios: não recebem a grade de sete colunas da
    lista de Entregas. O fieldset alto deslocava o ano e os meses até o rodapé. */
 .rel-ent-controles{background:#fff;border:1px solid #dfe6ee;border-radius:16px;padding:18px 20px;margin-bottom:20px;min-width:0}
+.rel-ent-total-periodo{
+  display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 16px;
+  padding:12px 16px;border:1px solid var(--border);border-inline-start:4px solid var(--teal);
+  border-radius:12px;background:var(--surface);color:var(--text);break-inside:avoid;
+}
+.rel-ent-total-periodo h3{margin:0;font-size:1rem}
+.rel-ent-total-periodo strong{font-size:clamp(1.2rem,2vw,1.6rem);min-width:0;overflow-wrap:anywhere}
+.rel-ent-total-periodo small{flex-basis:100%;color:var(--muted)}
 .rel-ent-periodo{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
 .rel-ent-ano{display:grid;gap:5px;min-width:110px}
 .rel-ent-ano label{font-size:13px;font-weight:650;color:#526378}
