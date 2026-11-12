@@ -201,3 +201,5 @@ Dono: "o motorista também tem que ser selecionado pelo cadastro do RH, sem digi
 ## D-022 · 11/11/2026 · Produtos entregues no período
 
 Dono: "Só o produto, juntando os modelos". Fonte: chat, ao pedir um dashboard dos tipos de produtos entregues. Agrupar os itens pelo produto, reunindo seus modelos, no mesmo período selecionado no relatório de Entregas. Não agrupar pela categoria nem pelo título livre da O.S. Preparado por Codex em relatorios-entregas.js e pcp-sync/index.ts; publicação pendente do dono.
+
+Publicação autorizada no chat em 11/11/2026: "pode publicar o total do período e o dash por produto". Publicado na v199 e conferido em produção, incluindo a correção da latência das consultas anuais. Registro em docs/entrega-produtos-periodo-2026-11-11.md.

@@ -66,3 +66,7 @@ do f22t, o semEquipe.valorBruto e o range() do f22s.
   poda-valores-operacao (repor o item com valor em vez de 422; não descartar
   calado o valor de item novo) foram refeitos em
   tests/onda-acabamento-m19.test.cjs, commit f7d43ba. O ramo não foi juntado.
+
+## Concluído em 11/11/2026
+
+- codex/total-entregue-periodo: integrado à main na v199, incluindo e5b7e5e (consulta anual em lotes concorrentes limitados). Publicação autorizada e conferida; sem código pendente neste ramo. Preservar o ramo até decisão do dono sobre exclusão. Registro: docs/entrega-produtos-periodo-2026-11-11.md.
